@@ -619,6 +619,12 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd("key:Alt-s", "Radio silence", Communication, &["Alt-s"]),
     cmd(
+        "key:Alt-n",
+        "Monitor the battle net (the other flights' contact reports and attack calls)",
+        Communication,
+        &["Alt-n"],
+    ),
+    cmd(
         "key:Alt-0",
         "Address whole flight",
         Communication,
@@ -948,16 +954,18 @@ mod tests {
             assert_eq!(entry.keys, [key], "{action}");
             assert!(entry.bindable() && entry.parsed().is_some(), "{action}");
         }
-        // Alt+A is the data link's sort (slice G3c); the rest of stage G's keys
-        // stay free for their own slices.
-        assert_eq!(
-            ENTRIES
-                .iter()
-                .find(|entry| entry.action == "key:Alt-a")
-                .map(|entry| entry.keys),
-            Some(&["Alt-a"][..])
-        );
-        for key in ["Alt-n", "Alt-Shift-a", "Alt-Shift-n"] {
+        // Alt+A is the data link's sort (slice G3c) and Alt+N monitors the
+        // battle net (slice G8); the rest of stage G's keys stay free.
+        for (action, key) in [("key:Alt-a", "Alt-a"), ("key:Alt-n", "Alt-n")] {
+            assert_eq!(
+                ENTRIES
+                    .iter()
+                    .find(|entry| entry.action == action)
+                    .map(|entry| entry.keys),
+                Some(&[key][..])
+            );
+        }
+        for key in ["Alt-Shift-a", "Alt-Shift-n"] {
             assert!(
                 ENTRIES.iter().all(|entry| !entry.keys.contains(&key)),
                 "{key} is taken"

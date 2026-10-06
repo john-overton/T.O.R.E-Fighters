@@ -13,7 +13,7 @@
 //! The cooldown keys are `&'static str`, so they are coded as an index into
 //! [`COOLDOWN_KEYS`] and an unknown key is an error, never a silent skip.
 
-use super::{Call, Channel, Comms, Kind, Pending, Route};
+use super::{Call, Channel, Comms, Kind, Net, Pending, Route};
 use crate::comms::journal::{Journal, Origin};
 use crate::seats::SeatId;
 use std::collections::{BTreeMap, VecDeque};
@@ -65,6 +65,11 @@ tore_sim::checkpoint_enum!(Route {
     Direct = 2,
 });
 
+tore_sim::checkpoint_enum!(Net {
+    Wing = 0,
+    Battle = 1,
+});
+
 tore_sim::checkpoint_struct!(Call {
     label,
     text,
@@ -72,6 +77,7 @@ tore_sim::checkpoint_struct!(Call {
     kind,
     route,
     delay,
+    net,
 } skip {
     // Why-record: who made the call and why. Delivery never reads it.
     origin = Origin::default(),
@@ -87,6 +93,7 @@ tore_sim::checkpoint_struct!(Pending {
 tore_sim::checkpoint_struct!(Channel {
     seat,
     radio_silence,
+    battle,
     busy_until,
     pending,
 } skip {
@@ -271,6 +278,42 @@ mod tests {
             copy.channels[0].pending.first().map(|p| p.call.clone()),
             "a pending call equals the original but for its origin"
         );
+    }
+
+    #[test]
+    fn the_battle_net_monitor_and_a_pending_calls_net_round_trip() {
+        let mut c = Comms::with_seats(1, [S0, S1]);
+        assert_eq!(c.toggle_battle(S1), "Monitoring battle net");
+        c.send(
+            0.,
+            say("Blue one", "Contact", Kind::Chatter).after(2.),
+            &[
+                Hearer::seat(S0),
+                Hearer::named(S1, "Net Blue one").on(Net::Battle),
+            ],
+        );
+        let mut copy = restored(&c);
+        assert_eq!(coded(&copy), coded(&c), "a restored radio codes the same");
+        assert!(copy.monitors_battle(S1) && !copy.monitors_battle(S0));
+        let due = copy.due(2.);
+        assert_eq!(
+            due.iter().map(|d| (d.seat, d.call.net)).collect::<Vec<_>>(),
+            [(S0, Net::Wing), (S1, Net::Battle)]
+        );
+        assert_eq!(due, c.due(2.), "both deliver the same");
+        // The monitor and the net change the coding: they are state.
+        let mut other = Comms::with_seats(1, [S0, S1]);
+        other.send(
+            0.,
+            say("Blue one", "Contact", Kind::Chatter).after(2.),
+            &[Hearer::seat(S0), Hearer::named(S1, "Net Blue one")],
+        );
+        assert_ne!(coded(&other), coded(&Comms::with_seats(1, [S0, S1])));
+        let wing_only = coded(&other);
+        other.toggle_battle(S1);
+        assert_ne!(coded(&other), wing_only, "the monitor is coded");
+        // The same radio but for the call's net differs as well.
+        assert_ne!(coded(&other), coded(&c), "a pending call's net is coded");
     }
 
     #[test]

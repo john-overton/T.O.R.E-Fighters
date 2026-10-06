@@ -50,6 +50,28 @@ pub fn crew(aircraft: &tore_formats::aircraft::Aircraft) -> Option<Crew> {
     })
 }
 
+/// The net a call is heard on (slice G8, docs/DATALINK.md "Frequencies").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Net {
+    /// The speaker's own flight: every call there is, and what a seat has
+    /// always heard.
+    #[default]
+    Wing,
+    /// The side's battle net: a flight lead's contact reports and assignment
+    /// calls, heard by the seats of other flights that monitor it.
+    Battle,
+}
+impl Net {
+    /// What a seat's HUD line puts before the speaker: nothing on the wing
+    /// net, `Net ` on the battle net.
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Net::Wing => "",
+            Net::Battle => "Net ",
+        }
+    }
+}
+
 /// Whether radio silence may drop a call when it is sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -83,6 +105,10 @@ pub struct Call {
     pub delay: f64,
     /// Who made the call and why, for the journal. Delivery never reads it.
     pub origin: Origin,
+    /// The net it was heard on. A call is made on the wing net; a seat that
+    /// hears it over the battle net gets its own copy marked [`Net::Battle`]
+    /// (see [`Hearer::on`]).
+    pub net: Net,
 }
 impl Call {
     pub fn new(label: impl Into<String>, phrase: Phrase, kind: Kind) -> Self {
@@ -94,6 +120,7 @@ impl Call {
             route: Route::Radio,
             delay: 0.,
             origin: Origin::default(),
+            net: Net::Wing,
         }
     }
     pub fn after(mut self, seconds: f64) -> Self {
@@ -271,6 +298,8 @@ pub struct Hearer {
     /// The words this seat hears, when they depend on where it is (a contact
     /// report's clock position); `None` keeps the call's own.
     pub words: Option<Phrase>,
+    /// The net this seat hears the call on; `None` keeps the call's own.
+    pub net: Option<Net>,
 }
 impl Hearer {
     /// A seat that hears the call under the call's own label.
@@ -279,6 +308,7 @@ impl Hearer {
             seat,
             label: None,
             words: None,
+            net: None,
         }
     }
     /// A seat that hears the call under `label`.
@@ -287,7 +317,13 @@ impl Hearer {
             seat,
             label: Some(label.into()),
             words: None,
+            net: None,
         }
+    }
+    /// The same seat hearing the call on `net` (slice G8).
+    pub fn on(mut self, net: Net) -> Self {
+        self.net = Some(net);
+        self
     }
     /// The same seat hearing `words` instead of the call's own.
     pub fn saying(mut self, words: Phrase) -> Self {
@@ -319,6 +355,8 @@ struct Pending {
 struct Channel {
     seat: SeatId,
     radio_silence: bool,
+    /// The seat monitors the side's battle net (Alt+N), off at the start.
+    battle: bool,
     busy_until: f64,
     pending: Vec<Pending>,
     /// Radio-route lines delivered in the last [`BUSY_SECONDS`], which the
@@ -330,11 +368,21 @@ impl Channel {
         Self {
             seat,
             radio_silence: false,
+            battle: false,
             busy_until: f64::NEG_INFINITY,
             pending: Vec::new(),
             recent: VecDeque::new(),
         }
     }
+}
+
+/// The copy of a call the journal's entry reads as: the wing net's where a
+/// seat hears it there, else the first.
+fn represent(heard: &[(SeatId, Call)]) -> Option<&(SeatId, Call)> {
+    heard
+        .iter()
+        .find(|(_, call)| call.net == Net::Wing)
+        .or(heard.first())
 }
 
 /// The radio: every call is made once, with one variant roll, one journal
@@ -398,12 +446,18 @@ impl Comms {
         self.channels.iter_mut().find(|c| c.seat == seat)
     }
     /// Clear everything tied to one flight, keeping the seats. Radio silence
-    /// is a player setting and survives.
+    /// and the battle net monitor are player settings and survive.
     pub fn restart(&mut self, seed: u64) {
         let silent: Vec<SeatId> = self
             .channels
             .iter()
             .filter(|c| c.radio_silence)
+            .map(|c| c.seat)
+            .collect();
+        let monitoring: Vec<SeatId> = self
+            .channels
+            .iter()
+            .filter(|c| c.battle)
             .map(|c| c.seat)
             .collect();
         *self = Self::with_seats(
@@ -412,6 +466,7 @@ impl Comms {
         );
         for channel in &mut self.channels {
             channel.radio_silence = silent.contains(&channel.seat);
+            channel.battle = monitoring.contains(&channel.seat);
         }
     }
     /// One roll from 0 to 99, as the original makes per call.
@@ -480,6 +535,23 @@ impl Comms {
     pub fn radio_silence(&self, seat: SeatId) -> bool {
         self.channel(seat).is_some_and(|c| c.radio_silence)
     }
+    /// Whether `seat` monitors the side's battle net.
+    pub fn monitors_battle(&self, seat: SeatId) -> bool {
+        self.channel(seat).is_some_and(|c| c.battle)
+    }
+    /// Alt-N for `seat`: start or stop monitoring the battle net. Returns the
+    /// HUD confirmation.
+    pub fn toggle_battle(&mut self, seat: SeatId) -> &'static str {
+        let Some(channel) = self.channel_mut(seat) else {
+            return "Battle net off";
+        };
+        channel.battle = !channel.battle;
+        if channel.battle {
+            "Monitoring battle net"
+        } else {
+            "Battle net off"
+        }
+    }
     /// Send a call to the seats in `hearers`. The call is one call: it takes
     /// one journal number, and every seat that hears it queues the same words
     /// under its own label. Radio silence drops chatter when it is sent, never
@@ -504,13 +576,16 @@ impl Comms {
                 heard.text.clone_from(&words.text);
                 heard.stems.clone_from(&words.stems);
             }
+            if let Some(net) = hearer.net {
+                heard.net = net;
+            }
             if channel.radio_silence && call.kind == Kind::Chatter {
                 silenced.push((hearer.seat, heard));
             } else {
                 queued.push((hearer.seat, heard));
             }
         }
-        if let Some((_, first)) = silenced.first() {
+        if let Some((_, first)) = represent(&silenced) {
             self.journal.push(
                 Entry::call(
                     now,
@@ -541,7 +616,7 @@ impl Comms {
                 );
             }
         }
-        if let Some((_, first)) = queued.first() {
+        if let Some((_, first)) = represent(&queued) {
             self.journal.push(
                 Entry::call(
                     now,
@@ -613,11 +688,17 @@ impl Comms {
                     .iter()
                     .filter(|(_, other)| other.serial == p.serial)
                     .map(|(seat, _)| *seat);
+                // The entry reads as the wing net's copy where there is one.
+                let shown = ready
+                    .iter()
+                    .map(|(_, other)| other)
+                    .find(|other| other.serial == p.serial && other.call.net == Net::Wing)
+                    .unwrap_or(p);
                 self.journal.push(
                     Entry::call(
                         now,
                         Some(p.serial),
-                        &p.call,
+                        &shown.call,
                         Outcome::Delivered {
                             waited: now - p.sent,
                         },
@@ -995,6 +1076,71 @@ mod tests {
         c.send_all(220., call(Kind::Important, 5.).airport());
         c.cancel_airport(S0);
         assert_eq!(c.due(225.).iter().map(|d| d.seat).collect::<Vec<_>>(), [S1]);
+    }
+
+    #[test]
+    fn the_battle_net_monitor_is_a_seat_setting_that_starts_off_and_survives_a_restart() {
+        let mut c = two_seats();
+        assert!(!c.monitors_battle(S0) && !c.monitors_battle(S1));
+        assert_eq!(c.toggle_battle(S1), "Monitoring battle net");
+        assert!(!c.monitors_battle(S0) && c.monitors_battle(S1));
+        c.restart(2);
+        assert!(c.monitors_battle(S1), "a player setting, like silence");
+        assert_eq!(c.toggle_battle(S1), "Battle net off");
+        assert!(!c.monitors_battle(S1));
+        // A seat that does not exist monitors nothing.
+        assert!(!c.monitors_battle(SeatId(9)));
+        assert_eq!(c.toggle_battle(SeatId(9)), "Battle net off");
+    }
+
+    #[test]
+    fn a_seat_hears_a_call_on_the_net_its_hearer_names_and_the_journal_reads_as_the_wing() {
+        let mut c = two_seats();
+        let hearers = [
+            Hearer::named(S0, "Red one"),
+            Hearer::named(S1, "Net Red one").on(Net::Battle),
+        ];
+        c.send(1., call(Kind::Chatter, 0.), &hearers);
+        let due = c.due(1.);
+        assert_eq!(due.len(), 2);
+        assert_eq!((due[0].call.net, due[1].call.net), (Net::Wing, Net::Battle));
+        assert_eq!(due[1].call.label, "Net Red one");
+        assert_eq!(Net::Battle.prefix(), "Net ");
+        assert_eq!(Net::Wing.prefix(), "");
+        let entries = c.take_journal();
+        assert_eq!(entries.len(), 2, "one queueing and one delivery");
+        for entry in &entries {
+            assert_eq!(entry.net, Net::Wing, "the wing's copy is the entry's");
+            assert_eq!(entry.label, "Red one");
+            assert_eq!(entry.heard_by, [S0, S1], "the battle seat is listed");
+        }
+        // Heard on the battle net alone, the entry says so.
+        c.send(
+            5.,
+            call(Kind::Chatter, 0.),
+            &[Hearer::seat(S1).on(Net::Battle)],
+        );
+        c.due(5.);
+        let entries = c.take_journal();
+        assert!(
+            entries
+                .iter()
+                .all(|e| e.net == Net::Battle && e.heard_by == [S1])
+        );
+        assert!(entries[0].describe().contains("on the battle net"));
+    }
+
+    #[test]
+    fn radio_silence_drops_battle_net_chatter_but_never_an_important_call() {
+        let mut c = two_seats();
+        c.toggle_silence(S1);
+        let net = [Hearer::seat(S1).on(Net::Battle)];
+        c.send(0., call(Kind::Chatter, 0.), &net);
+        c.send(0., call(Kind::Important, 0.), &net);
+        let kept = c.due(0.);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].call.kind, Kind::Important);
+        assert_eq!(kept[0].call.net, Net::Battle);
     }
 
     #[test]

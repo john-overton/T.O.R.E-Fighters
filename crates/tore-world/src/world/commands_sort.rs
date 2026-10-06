@@ -15,7 +15,7 @@
 use super::{Cue, TickOutput, World};
 use crate::{
     ai_wings,
-    comms::{Call, Hearer, journal},
+    comms::{Call, Hearer, Phrase, journal},
     datalink::{
         SortPlan,
         calls::{self, Addressee, Geometry},
@@ -125,6 +125,22 @@ impl World {
             if report.radio.is_empty() {
                 continue;
             }
+            let call = self.sort_call(&label, pick.member, pick.plane, pick.target);
+            let delay = CALL_SPACING_SECONDS * f64::from(calls);
+            let cause = journal::Cause::Order {
+                order: PlayerOrder::EngageMyTarget,
+                selected: Some(pick.target),
+                target: Some(pick.target),
+            };
+            // Every call of the sort is also on the battle net, with the
+            // same timing (slice G8).
+            if let Some(call) = &call {
+                let words = Phrase {
+                    text: call.text.clone(),
+                    stems: call.stems.clone(),
+                };
+                self.battle_net_call(plane, words, delay, cause.clone());
+            }
             if calls == 0 {
                 // The first call is the order voice: played at once, cuts off
                 // the wing lines still playing and holds the seat's channel.
@@ -134,14 +150,8 @@ impl World {
                     seat,
                     stems: report.radio,
                 });
-            } else if let Some(call) = self.sort_call(&label, pick.member, pick.plane, pick.target)
-            {
-                let cause = journal::Cause::Order {
-                    order: PlayerOrder::EngageMyTarget,
-                    selected: Some(pick.target),
-                    target: Some(pick.target),
-                };
-                let call = call.after(CALL_SPACING_SECONDS * f64::from(calls)).because(
+            } else if let Some(call) = call {
+                let call = call.after(delay).because(
                     journal::Origin::of(journal::Source::Order, cause).by(ai_wings::PLAYER_ID),
                 );
                 self.comms.send(now, call, &[Hearer::seat(seat)]);

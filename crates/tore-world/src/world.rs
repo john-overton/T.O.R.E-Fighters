@@ -20,6 +20,8 @@ use tore_sim::{attitude, flight};
 
 #[cfg(test)]
 mod ai_wings_checkpoint_tests;
+#[cfg(test)]
+mod battle_net_tests;
 mod build;
 #[cfg(test)]
 mod checkpoint_scenarios;

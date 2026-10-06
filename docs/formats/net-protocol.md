@@ -885,6 +885,9 @@ can show `Net` before a battle-net speaker.
 
 **Inputs.** The wing order coding gains Sort (code 13, after Land at selected
 airport) and the commands gain Battle net (toggle monitoring, no fields).
+Built in G3c and G8, with the protocol version left for G7 to bump: Sort is
+wing order code 13, and Battle net is command code 23 (five command bits, no
+fields), after the wing reply (22). The golden's samples do not list either yet.
 
 **Room.** Estimated at under 40 bytes a snapshot on average for a busy seat
 and about 1 KB/s at worst while 24 tracks move; G7 measures it on the 15

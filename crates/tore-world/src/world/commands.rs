@@ -176,6 +176,13 @@ impl World {
                     .space(down, repeat, blocked),
                 // The call to the flight is slice F2-R's.
                 SeatCommand::WingReply(_) => {}
+                SeatCommand::BattleNet => {
+                    let message = self.comms.toggle_battle(seat);
+                    out.cues.push(Cue::Message {
+                        seat,
+                        text: message.into(),
+                    });
+                }
             }
         }
     }
@@ -282,6 +289,71 @@ impl World {
         });
     }
 
+    /// Repeats a flight lead's assignment call over the battle net (slice G8):
+    /// every living seat of the lead's side, in another flight, that monitors
+    /// it hears `words` with the lead's flight colour in front, under the label
+    /// `Net Blue one`. The wing net's own hearing of the call is the caller's
+    /// (the order voice, or the radio). The call is important, so radio
+    /// silence never drops it. Nothing happens, and nothing is journaled, while
+    /// no seat monitors the net, so single player is unchanged.
+    pub(super) fn battle_net_call(
+        &mut self,
+        plane: PlaneId,
+        words: comms::Phrase,
+        delay: f64,
+        cause: comms::journal::Cause,
+    ) {
+        if !self
+            .comms
+            .seats()
+            .any(|seat| self.comms.monitors_battle(seat))
+        {
+            return;
+        }
+        let now = self.combat.state.tick() as f64 / 120.;
+        let members = crate::radio_calls::members(&self.roster, self.ai_wings.as_ref(), |plane| {
+            self.cockpits
+                .iter()
+                .position(|cockpit| cockpit.plane == plane)
+                .is_some_and(|cockpit| self.cockpit_alive(cockpit))
+        });
+        let listeners: Vec<crate::radio_calls::Listener> = self
+            .cockpits
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cockpit)| {
+                let seat = self.roster.seat(self.roster.seat_of(cockpit.plane)?)?;
+                let member = members.iter().find(|m| m.id == cockpit.plane.0)?;
+                Some(crate::radio_calls::Listener {
+                    seat: seat.id,
+                    plane: cockpit.plane.0,
+                    flight: member.flight,
+                    enemy: member.enemy,
+                    alive: self.cockpit_alive(index),
+                    position: cockpit.flight.position,
+                    crew: seat.crew,
+                })
+            })
+            .collect();
+        let leaders = crate::radio_calls::leaders(&self.roster, &members, self.ai_wings.as_ref());
+        let hearers = crate::radio_calls::battle_hearers(
+            &self.comms,
+            &members,
+            &leaders,
+            &listeners,
+            plane.0,
+            &|_| words.clone(),
+        );
+        let Some(first) = hearers.first() else {
+            return;
+        };
+        let label = first.label.clone().unwrap_or_default();
+        let call = crate::datalink::calls::assignment_call(label, words)
+            .after(delay)
+            .because(comms::journal::Origin::of(comms::journal::Source::Order, cause).by(plane.0));
+        self.comms.send(now, call, &hearers);
+    }
+
     /// An Alt-key order from the seat `seat`, flying `plane` from `cockpit`.
     /// It goes to the AI wings as that plane's order, to its own wing,
     /// addressed as the seat's recipient says, with the aircraft the seat has
@@ -374,6 +446,22 @@ impl World {
                     .cut_off(seat, now, comms::journal::Reason::OrderVoice);
                 if !report.radio.is_empty() {
                     self.comms.spoken(seat, now);
+                }
+                // A lead's assignment call is also on the battle net, for the
+                // seats of other flights that monitor it (slice G8).
+                if report.target.is_some() && !report.radio.is_empty() {
+                    let words = report
+                        .radio
+                        .iter()
+                        .fold(comms::Phrase::default(), |words, stem| {
+                            words.then(&self.phrases, stem)
+                        });
+                    let cause = comms::journal::Cause::Order {
+                        order,
+                        selected: report.target,
+                        target: report.target,
+                    };
+                    self.battle_net_call(plane, words, 0., cause);
                 }
                 out.cues.push(Cue::OrderVoice {
                     seat,

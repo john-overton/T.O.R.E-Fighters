@@ -19,7 +19,7 @@ use tore_sim::ai::{
     wing::{PlayerOrder, ReceiverOutcome},
 };
 
-use super::{Call, Kind, Route};
+use super::{Call, Kind, Net, Route};
 use crate::crew_voice::Situation;
 use crate::seats::SeatId;
 use crate::situation::{Inputs, Rank};
@@ -118,6 +118,10 @@ pub struct Entry {
     pub kind: Option<Kind>,
     pub origin: Origin,
     pub outcome: Outcome,
+    /// The net the line was heard on: the battle net only for a call that
+    /// no seat heard on the wing net (slice G8). A line the battle net's
+    /// monitors hear in addition to its flight reads as the flight heard it.
+    pub net: Net,
     /// The seats whose radio this entry is about: for a call, those that
     /// queued, heard, dropped or lost it. Empty for an entry that is not
     /// addressed to a seat.
@@ -137,6 +141,7 @@ impl Entry {
             kind: Some(call.kind),
             origin: call.origin.clone(),
             outcome,
+            net: call.net,
             heard_by: Vec::new(),
         }
     }
@@ -154,6 +159,7 @@ impl Entry {
             kind: None,
             origin,
             outcome,
+            net: Net::Wing,
             heard_by: Vec::new(),
         }
     }
@@ -253,6 +259,9 @@ impl Entry {
         }
         if !self.text.is_empty() {
             line.push_str(&format!(": '{}'", self.text));
+        }
+        if self.net == Net::Battle {
+            line.push_str(" on the battle net");
         }
         line.push_str(&format!(" {}", self.outcome));
         line.push_str(&format!("; why: {}", self.origin.cause));

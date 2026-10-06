@@ -516,6 +516,9 @@ const THROTTLE: u64 = 20;
 const ADJUST_THROTTLE: u64 = 21;
 /// Protocol 8 (stage F phase 2): a wingman's reply, then its kind in 2 bits.
 const WING_REPLY: u64 = 22;
+/// Stage G (slice G8): Alt+N, start or stop monitoring the battle net. No
+/// fields. The protocol version stays for the wire slice (G7) to bump.
+const BATTLE_NET: u64 = 23;
 const COMMAND_BITS: u32 = 5;
 
 /// Writes one command.
@@ -577,6 +580,7 @@ pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
                 code(WING_REPLY);
                 let _ = w.write_bits(reply_code(reply), 2);
             }
+            SeatCommand::BattleNet => code(BATTLE_NET),
         },
         Command::Pilot(pilot) => match quantize_command(pilot) {
             PilotCommand::Eject => code(EJECT),
@@ -642,6 +646,7 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
             blocked: r.read_bool()?,
         }),
         WING_REPLY => seat(SeatCommand::WingReply(Reply::ALL[r.read_bits(2)? as usize])),
+        BATTLE_NET => seat(SeatCommand::BattleNet),
         EJECT => Ok(Command::Pilot(PilotCommand::Eject)),
         TOGGLE => Ok(Command::Pilot(PilotCommand::Toggle(read_switch(r)?))),
         SET => {
@@ -937,6 +942,16 @@ mod tests {
         let mut w = BitWriter::new();
         write_order(&mut w, PlayerOrder::Sort);
         assert_eq!(w.finish(), [13]);
+    }
+
+    #[test]
+    fn the_battle_net_key_reads_back_and_is_command_23() {
+        let command = Command::Seat(SeatCommand::BattleNet);
+        let mut w = BitWriter::new();
+        write_command(&mut w, &command);
+        let bytes = w.finish();
+        assert_eq!(bytes, [23], "five bits, no fields");
+        assert_eq!(read_command(&mut BitReader::new(&bytes)).unwrap(), command);
     }
 
     #[test]

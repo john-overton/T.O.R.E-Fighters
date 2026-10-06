@@ -54,10 +54,13 @@ fn digest(out: &TickOutput) -> String {
                     kind,
                     route,
                     delay,
+                    net,
                     // Why the call was made: a why-record.
                     origin: _,
                 } = call;
-                format!("Radio {seat:?} {label:?} {text:?} {stems:?} {kind:?} {route:?} {delay:?}")
+                format!(
+                    "Radio {seat:?} {label:?} {text:?} {stems:?} {kind:?} {route:?} {delay:?} {net:?}"
+                )
             }
             other => format!("{other:?}"),
         })

@@ -234,6 +234,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Wing: stacking | Alt+V | - | - |
 | Wing: land at selected airport | Alt+L | - | - |
 | Radio silence | Alt+S | - | - |
+| Monitor the battle net (the other flights' contact reports and attack calls) | Alt+N | - | - |
 | Address whole flight | Alt+0 | - | - |
 | Address wingman 1 | Alt+Shift+1 | - | - |
 | Address wingman 2 | Alt+Shift+2 | - | - |
@@ -350,4 +351,4 @@ the tables above and remappable like any other key):
 | Networked flight, aircraft lost | Enter | Fly again, when the respawn rule, lives and delay allow (retail's key; slice F2-V) |
 | Networked flight, the AI flying for the player | Any flight control | Take the aircraft back (slice F2-A) |
 
-Alt+A and Alt+N stay free for stage G's data link sort and battle net.
+Stage G's keys are built: Alt+A sorts the flight's targets (slice G3c) and Alt+N monitors the battle net (slice G8; the [guide](DATALINK.md#frequencies)).

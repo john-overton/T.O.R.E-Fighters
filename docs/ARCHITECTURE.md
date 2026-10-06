@@ -1349,6 +1349,7 @@ today, because window events always arrive between frames.
 | `RangeReset` | A new target on the range; "Target reset is available only with --live-fire" otherwise. |
 | `ReleaseChaff`, `ReleaseFlare` | One cartridge or flare, with the retail messages ("Chaff launched, 11 left", "Out of flares"). Refused when the aircraft is destroyed, the pilot has ejected or it has no hit points. |
 | `RadioSilence` | Toggles radio silence and tells the pilot ("Radio silence", "Radio traffic OK"). |
+| `BattleNet` | Alt+N: toggles the seat's monitoring of the side's battle net and tells the pilot ("Monitoring battle net", "Battle net off"). Slice G8. |
 | `WingRecipient` | Chooses the wingman the seat's orders address, or the whole wing. It is state of the seat (`Seat::wing_recipient`). |
 | `WingOrder`, `WingFormationCycle` | An Alt-key order goes to the AI wings with the seat's recipient and its designated target. The formation cycle reads the wing's next formation first. The pilot's own order call comes back as `Cue::OrderVoice`, the wing's report and any refusal as `Cue::Message`, each naming the seat, and `TickOutput::orders` lists what became of each order, with its seat. |
 | `ReleaseTrigger` | `Combat::cancel`, which a menu opening, a pause, a modifier key or losing focus does. |
@@ -2333,16 +2334,36 @@ human sender's call replaces the `^ATTACK` order voice and keeps its channel
 hold and cut-off; an AI lead's call goes through the channel like wing chatter.
 A sort's calls are queued 3.5 seconds apart with `Call::after`.
 
-**Nets** (G8). `Call` gains `net: Net` (`Wing`, `Battle`); every call is
-`Wing` today. Each seat's `Channel` gains `battle: bool`, toggled by
-`SeatCommand::BattleNet` (Alt+N), off at start. When a flight's lead makes a
+**Nets** (G8, built). `Call` gains `net: Net` (`Wing`, `Battle`); every call is
+`Wing` unless a hearer says otherwise (`Hearer::on(Net::Battle)`). Each seat's
+`Channel` gains `battle: bool`, toggled by `SeatCommand::BattleNet` (Alt+N),
+off at start and kept across a restart as radio silence is
+(`Comms::{monitors_battle, toggle_battle}`). When a flight's lead makes a
 contact report or an assignment call, the call also gets a hearer for every
-seat of the same side, outside that flight, that monitors the battle net,
-with the speaker's flight colour put in front of its words and its label
+living seat of the same side, outside that flight, that monitors the battle
+net, with the speaker's flight colour put in front of its words and its label
 (`Net Blue one`). The journal's `heard_by` lists them; a call no monitoring
 seat hears is journaled exactly as today (`OtherFlight`), so recordings
 without a monitoring seat are unchanged. The Network link itself needs no
 call: every living aircraft of the side sees the published pictures of the side's other flights.
+
+`radio_calls::battle_hearers` is the one rule: the speaker must lead its
+flight, and a listener hears it when it is alive, on the speaker's side, in
+another flight and monitoring. It takes the words as a function of the
+listener, so a contact report is each monitor's own (its clock position, range
+and height from its own aircraft, as a flight mate's is) and an assignment
+call is the lead's, measured from the wingman it names. `battle_words` puts the
+flight colour first ("Blue, Contact, bandit, your two o'clock high, 12 miles"),
+unless the call already begins with it (an attack call to the whole flight).
+`Radio::chatter` repeats a lead's `Chatter::Contact` this way; `World::battle_net_call`
+(`world/commands.rs`) repeats a human lead's Engage my target, Engage from
+formation and every call of a sort, with the lead's own timing (the first at
+once, a sort's later ones 3.5 seconds apart). An AI lead's assignment calls are
+slice G4's: its call goes through the channel like wing chatter, and G4 builds
+its hearers with the same function. Radio silence drops the net's contact
+reports as it drops wing chatter; the assignment calls are important and come
+through. The `Net` prefix is `Net::prefix` ("Net "), part of the hearer's label
+so the HUD line reads `Net Blue one: 'Blue, Contact, ...'`.
 
 ### Cues and the readout
 

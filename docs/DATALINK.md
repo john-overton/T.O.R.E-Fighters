@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Stage G design of 2026-10-05, for the [multiplayer plan](multiplayer-plan.md#stages).
-Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a), the player's locked target in the AI's engagement table (G2), the cues (G6) and the sort order on Alt+A (G3c, 2026-10-05). Of this page a player today meets the assignment call, the sort, AI wingmen that spread away from the bandit the player has locked, and the cues (the radar markers, the target window tags, the HUD brackets and the sort warning); the rest waits for its slices. It is the guide for players and agents:
+Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a), the player's locked target in the AI's engagement table (G2), the cues (G6) and the sort order on Alt+A (G3c, 2026-10-05) and the battle net's voice with its monitor key, Alt+N (G8, 2026-10-05). Of this page a player today meets the assignment call, the sort, the battle net (once monitored), AI wingmen that spread away from the bandit the player has locked, and the cues (the radar markers, the target window tags, the HUD brackets and the sort warning); the rest waits for its slices. It is the guide for players and agents:
 what a flight shares, who can share it, what the player sees and
 hears, and how the AI uses it. The code design and the slices that build it
 are in the [architecture guide](ARCHITECTURE.md#flight-data-link); the bytes on
@@ -306,12 +306,28 @@ names that the **wing net** and adds the side's **battle net**.
 | Net | Who talks on it | Who hears it |
 | --- | --- | --- |
 | Wing net, one per flight | Everything a flight says today, and the assignment calls | The flight, as today |
-| Battle net, one per side | The leads of the side's flights repeat their contact reports and assignment calls; the data link between flights | Seats that monitor it, with **Alt+N** (new, proposed; off by default, so single player sounds as it does today); every aircraft of the side for the link |
+| Battle net, one per side | The leads of the side's flights repeat their contact reports and assignment calls; the data link between flights | Seats that monitor it, with **Alt+N** (built, G8; off by default, so single player sounds as it does today); every aircraft of the side for the link |
 
 A battle-net line is labelled by flight and position ("Blue one"), voiced with
 the flight colour where it has a recording, and shown with `Net` before the
-speaker on the HUD line. Radio silence drops battle-net chatter as it drops
-wing chatter. Retail's AWACS report (`^NOBADET`, `^NOTOREP`, `^BANSVIR` and
+speaker on the HUD line: `Net Blue one: 'Blue, Contact, bandit, your two
+o'clock high, 12 miles'`. Radio silence drops battle-net chatter as it drops
+wing chatter.
+
+**Built (slice G8).** Alt+N toggles a seat's monitoring ("Monitoring battle
+net", "Battle net off"), off at the start, and a restart of the flight keeps
+the choice. A seat hears a lead's call over the net when it is alive, on the
+lead's side, in another flight and monitoring: a lead's own flight hears it as
+it always did, the enemy side never hears it, and a seat that is not
+monitoring hears nothing new. Only a flight's lead is repeated: its contact
+reports (heard from the monitor's own aircraft, as a flight mate hears them;
+and the flight colour first), and its assignment calls (Engage my target,
+Engage from formation, every call of a sort, with the lead's own timing). A
+call to the whole flight already begins with the colour, so it is not named
+twice (agent decision). The assignment calls of an AI lead come with slice G4.
+The journal's entry of a call reads as the flight's, with the monitors in
+`heard_by`; a call only the net's monitors hear is that seat's, labelled `Net
+Blue one`. Retail's AWACS report (`^NOBADET`, `^NOTOREP`, `^BANSVIR` and
 the contact words) belongs on the battle net, but its trigger is unknown
 ([radio chatter](spec/radio-chatter.md#awacs-report)) and no ported aircraft is
 a sentry, so it waits.
@@ -361,8 +377,8 @@ before the merge. In order:
 5. The cues are drawn (built, G6): the flightmates' lock numbers, the tags and the sort warning show in a flight with AI wingmen; the assignment cues wait for the lead's assignments (G3a).
 6. Recordings gain the `datalink` events.
 
-The new keys (Alt+A, built; Alt+N) change nothing until pressed, and the battle net
-is silent until monitored.
+The new keys (Alt+A and Alt+N, both built) change nothing until pressed, and the
+battle net is silent until monitored.
 
 ## Numbers
 

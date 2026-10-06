@@ -197,7 +197,7 @@ compile without a section (see [keeping it complete](#keeping-it-complete)):
 | 3 | AI wings | `AiWings` and its `AiMission`: actors with flight, controller, memory, sensors and stores; leaders, opportunities; the bridge's maps and random streams | In place |
 | 4 | Cockpits | Every human-flown plane's `Cockpit`: flight, turbulence and its stream, airport service, NAV mode, message clocks, tower radio, crew voice, result tracker | New value |
 | 5 | Weather | The weather clock, its ticks, the fog random stream, the selection schedule, the active layers and each record's tint scalar (`Environment`'s mutable part) | In place |
-| 6 | Comms | Radio channels, cooldowns, the radio random stream | New value |
+| 6 | Comms | Radio channels (with each seat's battle net monitor), cooldowns, the radio random stream; a pending call's net | New value |
 | 7 | Wing status | The AI wingmen's airfield report memory | New value |
 | 8 | Radio | The radio call memory (hits by shooter and victim) | New value |
 | 9 | Data link | The flight data link's picture: members, each flight's published tracks and member status with their publish ticks, locks, engagements, assignments, the two warning tables, the planes already announced | New value |

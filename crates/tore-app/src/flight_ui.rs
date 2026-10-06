@@ -66,6 +66,8 @@ pub enum Command {
     InstrumentControl(usize),
     /// Alt-S: toggle radio silence.
     RadioSilence,
+    /// Alt+N: monitor the battle net, or stop (stage G).
+    BattleNet,
     /// Ctrl+V: the Valkyries situation score.
     Valkyries,
     /// Ctrl+B: mark this moment in the mission recording.
@@ -807,6 +809,7 @@ impl FlightUi {
                 "t" => return Command::WingFormationCycle,
                 "f" => return self.unavailable("Engage designated target"),
                 "s" => return Command::RadioSilence,
+                "n" => return Command::BattleNet,
                 "0" => return Command::WingRecipient(None),
                 _ => None,
             };
@@ -2068,12 +2071,12 @@ mod tests {
             ui.key("1", true, false, true, &[]),
             Command::WingRecipient(Some(1))
         );
-        // Alt+A is the data link's sort (slice G3c); Alt+Shift+A stays free,
-        // and so do Alt+N and Alt+Shift+N (the battle net) for stage G.
+        // Alt+A is the data link's sort (slice G3c) and Alt+N monitors the
+        // battle net (slice G8); Alt+Shift+A and Alt+Shift+N stay free.
         assert_eq!(ui.key("a", false, false, true, &[]), Command::Wing(O::Sort));
         assert_eq!(ui.key("a", true, false, true, &[]), Command::None);
         assert_eq!(ui.key("n", true, false, true, &[]), Command::None);
-        assert_eq!(ui.key("n", false, false, true, &[]), Command::None);
+        assert_eq!(ui.key("n", false, false, true, &[]), Command::BattleNet);
         assert_eq!(Reply::NeedHelp.words(), "Need help");
         assert_eq!(Reply::of_key("x"), None);
     }

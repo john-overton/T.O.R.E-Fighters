@@ -1139,7 +1139,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Who has the data link | Every friendly aircraft, whatever its type: the design's Voice, Flight and Network tiers are dropped. An aircraft with no radar is still linked, but its player sees no link cues on displays it does not have |
 | Single-player AI changes of the data link | Approved, each landing with its own baseline report: the AI counts the player's lock, linked wingmen take a target only a flightmate tracks, AI leads share and sort, linked AI yield |
 | Order voice | An assignment is called with its geometry ("Two, attack bandit, bearing 270, 15 miles, angels 20"); a blanket attack order to the wingmen is called "Attack bandits" |
-| Battle net | In v1: tracks and locks shared across flights of a side, flight leads' reports by voice to seats that monitor it (off by default); the AWACS report waits for sentry aircraft |
+| Battle net | In v1: tracks and locks shared across flights of a side, flight leads' reports by voice to seats that monitor it (off by default; the voice and Alt+N built in slice G8); the AWACS report waits for sentry aircraft |
 | Data link keys | Alt+A sorts the flight's targets; Alt+N monitors the battle net |
 | Where the master runs | John's own Linode at jroverton.com, `master.jroverton.com` (A and AAAA records), UDP 26901 and 26902; John opens the ports and deploys it |
 | Telemetry | On by default, with a switch and a one-time notice, sending only what [Replay and telemetry](#replay-and-telemetry) lists |

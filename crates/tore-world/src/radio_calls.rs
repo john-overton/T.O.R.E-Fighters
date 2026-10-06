@@ -159,6 +159,82 @@ pub fn label(member: &Member) -> String {
     }
 }
 
+/// The recordings of the flight colours (the first five flights; the others
+/// have the words only), as the assignment call has them.
+const COLOUR_STEMS: [&str; 5] = ["^RED", "^BLUE", "^GREEN", "^BLACK", "^WHITE"];
+
+/// What a battle net line puts first: the speaking flight's colour, "Blue, ".
+/// A flight past the eighth has no colour; it is named by number, as the radio
+/// labels do (fitted).
+fn battle_prefix(flight: u8) -> Phrase {
+    match FLIGHTS.get(usize::from(flight)) {
+        Some(colour) => Phrase::default().raw(
+            &format!("{colour}, "),
+            COLOUR_STEMS.get(usize::from(flight)).copied(),
+        ),
+        None => Phrase::default().raw(&format!("Flight {}, ", flight + 1), None),
+    }
+}
+
+/// The words a seat hears over the battle net: the speaking flight's colour,
+/// then what the flight heard (slice G8). A call that already begins with the
+/// colour, as an attack call to the whole flight does ("Red, attack bandit"),
+/// is not given it twice (agent decision).
+pub fn battle_words(flight: u8, words: Phrase) -> Phrase {
+    let prefix = battle_prefix(flight);
+    let named = match prefix.stems.first() {
+        Some(stem) => words.stems.first() == Some(stem),
+        None => words.text.starts_with(prefix.text.trim_end_matches(", ")),
+    };
+    if named { words } else { prefix.join(words) }
+}
+
+/// "Net Blue one": the label the battle net's HUD line is spoken under.
+pub fn battle_label(member: &Member) -> String {
+    format!("{}{}", comms::Net::Battle.prefix(), label(member))
+}
+
+/// The seats that hear `speaker` over the battle net (slice G8): when the
+/// speaker leads its flight, every living seat of its side, outside that flight,
+/// that monitors the net (Alt+N). Each hears the call as `words` gives it,
+/// under the colour of the speaking flight and the label `Net Blue one`. A
+/// speaker that does not lead a flight, or an enemy side's, reaches no one.
+/// The wing net's hearers are made as before; these are added to them.
+pub fn battle_hearers(
+    comms: &Comms,
+    members: &[Member],
+    leaders: &[(u8, u32)],
+    listeners: &[Listener],
+    speaker: u32,
+    words: &dyn Fn(&Listener) -> Phrase,
+) -> Vec<Hearer> {
+    let Some(member) = members.iter().find(|m| m.id == speaker) else {
+        return Vec::new();
+    };
+    if !leaders
+        .iter()
+        .any(|&(flight, plane)| flight == member.flight && plane == speaker)
+    {
+        return Vec::new();
+    }
+    let label = battle_label(member);
+    listeners
+        .iter()
+        .filter(|listener| {
+            listener.alive
+                && listener.plane != speaker
+                && listener.enemy == member.enemy
+                && listener.flight != member.flight
+                && comms.monitors_battle(listener.seat)
+        })
+        .map(|listener| {
+            Hearer::named(listener.seat, label.clone())
+                .saying(battle_words(member.flight, words(listener)))
+                .on(comms::Net::Battle)
+        })
+        .collect()
+}
+
 /// How a call is worded for one listener, when that depends on where it is.
 type SeatWords<'a> = dyn Fn(&Listener) -> Option<Phrase> + 'a;
 
@@ -259,6 +335,22 @@ impl Scene<'_> {
             }
         };
         heard.then(|| label(member))
+    }
+    /// The battle net's hearers of `speaker`'s call, as [`battle_hearers`].
+    fn battle_hearers(
+        &self,
+        comms: &Comms,
+        speaker: u32,
+        words: &dyn Fn(&Listener) -> Phrase,
+    ) -> Vec<Hearer> {
+        battle_hearers(
+            comms,
+            self.members,
+            self.leaders,
+            self.listeners,
+            speaker,
+            words,
+        )
     }
     /// Every seat that hears `speaker`'s call to `audience`, under the label
     /// that seat hears it by.
@@ -520,12 +612,13 @@ impl Radio {
         origin: Origin,
     ) {
         self.say_to(
-            comms, scene, speaker, audience, phrase, kind, delay, origin, None,
+            comms, scene, speaker, audience, phrase, kind, delay, origin, None, false,
         );
     }
 
     /// [`Self::say`], where `words` may give a seat its own wording of the
-    /// call, from where its plane is.
+    /// call, from where its plane is, and `battle` repeats the call over the
+    /// battle net when the speaker leads its flight (slice G8).
     #[allow(clippy::too_many_arguments)]
     fn say_to(
         &mut self,
@@ -538,6 +631,7 @@ impl Radio {
         delay: f64,
         origin: Origin,
         words: Option<&SeatWords>,
+        battle: bool,
     ) {
         self.made += 1;
         let origin = origin.by(speaker).to(audience.into());
@@ -550,6 +644,16 @@ impl Radio {
                     .find(|l| l.seat == hearer.seat)
                     .and_then(words);
             }
+        }
+        if battle {
+            // The monitors hear what the flight hears, in their own geometry
+            // where the call has one, with the flight's colour in front.
+            let own = |listener: &Listener| {
+                words
+                    .and_then(|words| words(listener))
+                    .unwrap_or_else(|| phrase.clone())
+            };
+            hearers.extend(scene.battle_hearers(comms, speaker, &own));
         }
         let Some(first) = hearers.first() else {
             comms.record(
@@ -1043,6 +1147,7 @@ impl Radio {
                     })
                     .rolls(rolls),
                     Some(&own_view),
+                    true,
                 );
             }
             Chatter::Leadership {
@@ -2005,6 +2110,253 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    // The battle net (stage G, slice G8).
+
+    /// A Blue flight of its own, with a human in Blue two (seat 1, plane 5)
+    /// and an enemy human (seat 2, plane 6), beside the Red player (seat 0).
+    fn net_world() -> World {
+        let mut w = World::new();
+        w.members.push(member(5, false, 1, 1));
+        w.members.push(member(6, true, 2, 1));
+        w.listeners.push(listener(1, 5, 1));
+        let mut enemy = listener(2, 6, 2);
+        enemy.enemy = true;
+        w.listeners.push(enemy);
+        w
+    }
+    fn net_contact() -> Contact {
+        use crate::ai_wings::ContactView;
+        let view = |plane, hour, miles| ContactView {
+            plane,
+            named: None,
+            hour,
+            elevation: Elevation::High,
+            miles,
+        };
+        Contact {
+            views: vec![view(0, 12, 20), view(5, 2, 12), view(6, 6, 9)],
+            count: 1,
+            named: None,
+            hour: 2,
+            elevation: Elevation::High,
+            miles: 12,
+            advise: false,
+        }
+    }
+    fn report(radio: &mut Radio, comms: &mut Comms, w: &World, speaker: u32) {
+        radio.chatter(
+            comms,
+            &w.scene(0.),
+            &Chatter::Contact {
+                speaker,
+                target: 3,
+                contact: net_contact(),
+            },
+        );
+    }
+    const SEATS: [SeatId; 3] = [SeatId(0), SeatId(1), SeatId(2)];
+
+    #[test]
+    fn a_leads_contact_report_reaches_the_monitors_of_its_side_in_other_flights() {
+        let w = net_world();
+        let mut comms = Comms::with_seats(1, SEATS);
+        let mut radio = Radio::default();
+        // Nobody monitors: the report is the flight's alone, as it always was.
+        report(&mut radio, &mut comms, &w, 2);
+        let due = comms.due(1.);
+        assert_eq!(
+            due.iter().map(|d| (d.seat, d.call.net)).collect::<Vec<_>>(),
+            [(SeatId(1), comms::Net::Wing)]
+        );
+        assert_eq!(
+            due[0].call.line(),
+            "Blue one: 'Contact, bandit, your two o'clock high, 12 miles'"
+        );
+        let plain = comms.take_journal();
+        assert!(plain.iter().all(|e| e.heard_by == [SeatId(1)]));
+        // Red one monitors, and so does the enemy human, who is on the other
+        // side and hears nothing of it.
+        assert_eq!(comms.toggle_battle(SeatId(0)), "Monitoring battle net");
+        comms.toggle_battle(SeatId(2));
+        report(&mut radio, &mut comms, &w, 2);
+        let due = comms.due(5.);
+        assert_eq!(
+            due.iter().map(|d| (d.seat, d.call.net)).collect::<Vec<_>>(),
+            [
+                (SeatId(0), comms::Net::Battle),
+                (SeatId(1), comms::Net::Wing)
+            ]
+        );
+        // The monitor hears the speaking flight's colour, then the report
+        // from where its own aircraft is, under the net label.
+        assert_eq!(
+            due[0].call.line(),
+            "Net Blue one: 'Blue, Contact, your twelve o'clock high, 20 miles'"
+        );
+        assert_eq!(due[0].call.stems[0], "^BLUE");
+        assert_eq!(due[0].call.kind, Kind::Chatter);
+        assert_eq!(
+            due[1].call.line(),
+            "Blue one: 'Contact, bandit, your two o'clock high, 12 miles'",
+            "the flight hears it as it always did"
+        );
+        // One call: one number, one entry per step, listing every seat, and
+        // it reads as the flight's.
+        let journal = comms.take_journal();
+        let entries: Vec<_> = journal.iter().filter(|e| e.call.is_some()).collect();
+        assert_eq!(entries.len(), 2);
+        for entry in entries {
+            assert_eq!(entry.net, comms::Net::Wing);
+            assert_eq!(entry.label, "Blue one");
+            let mut seats = entry.heard_by.clone();
+            seats.sort();
+            assert_eq!(seats, [SeatId(0), SeatId(1)]);
+        }
+        assert_eq!((radio.made, radio.heard), (2, 2));
+    }
+
+    #[test]
+    fn only_a_flights_lead_is_repeated_and_never_to_its_own_flight_or_the_dead() {
+        let mut w = net_world();
+        let mut comms = Comms::with_seats(1, SEATS);
+        let mut radio = Radio::default();
+        comms.toggle_battle(SeatId(0));
+        comms.toggle_battle(SeatId(1));
+        // Blue three is not Blue's lead: only its flight hears it, and a
+        // monitor in the flight hears it once, as the flight does.
+        w.members.push(member(7, false, 1, 2));
+        report(&mut radio, &mut comms, &w, 7);
+        let due = comms.due(1.);
+        assert_eq!(
+            due.iter().map(|d| (d.seat, d.call.net)).collect::<Vec<_>>(),
+            [(SeatId(1), comms::Net::Wing)],
+            "Red one monitors and does not hear a wingman"
+        );
+        // Blue one leads: Red one hears it over the net, Blue two (a
+        // monitor, in the flight) hears it as the flight does.
+        report(&mut radio, &mut comms, &w, 2);
+        let due = comms.due(3.);
+        assert_eq!(
+            due.iter().map(|d| (d.seat, d.call.net)).collect::<Vec<_>>(),
+            [
+                (SeatId(0), comms::Net::Battle),
+                (SeatId(1), comms::Net::Wing)
+            ]
+        );
+        // A dead monitor hears nothing of it.
+        w.listeners[0].alive = false;
+        report(&mut radio, &mut comms, &w, 2);
+        let due = comms.due(7.);
+        assert_eq!(due.iter().map(|d| d.seat).collect::<Vec<_>>(), [SeatId(1)]);
+    }
+
+    #[test]
+    fn a_call_only_the_battle_net_hears_is_that_nets_and_one_nobody_hears_is_as_before() {
+        // Red's player alone: Blue's lead is another flight.
+        let w = World::new();
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        report(&mut radio, &mut comms, &w, 2);
+        let journal = comms.take_journal();
+        assert_eq!(journal.len(), 1);
+        assert_eq!(journal[0].outcome, Outcome::Unheard(Reason::OtherFlight));
+        assert_eq!(journal[0].net, comms::Net::Wing, "journaled as it was");
+        assert_eq!((radio.made, radio.heard), (1, 0));
+        // Monitoring, Red one hears it.
+        comms.toggle_battle(SeatId(0));
+        report(&mut radio, &mut comms, &w, 2);
+        let due = comms.due(1.);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].call.label, "Net Blue one");
+        assert_eq!(due[0].call.net, comms::Net::Battle);
+        let journal = comms.take_journal();
+        assert!(!journal.is_empty());
+        for entry in &journal {
+            assert_eq!(entry.net, comms::Net::Battle);
+            assert_eq!(entry.label, "Net Blue one");
+            assert_eq!(entry.heard_by, [SeatId(0)]);
+        }
+        assert_eq!((radio.made, radio.heard), (2, 1));
+    }
+
+    #[test]
+    fn enemy_leads_reach_only_the_enemy_monitors() {
+        let w = net_world();
+        let mut comms = Comms::with_seats(1, SEATS);
+        let mut radio = Radio::default();
+        for seat in SEATS {
+            comms.toggle_battle(seat);
+        }
+        // Black one (plane 3, the enemy flight's lead) is heard by the enemy
+        // human in its own flight, as the flight; no friendly seat hears it.
+        report(&mut radio, &mut comms, &w, 3);
+        let due = comms.due(1.);
+        assert_eq!(due.iter().map(|d| d.seat).collect::<Vec<_>>(), [SeatId(2)]);
+        assert_eq!(due[0].call.net, comms::Net::Wing);
+    }
+
+    #[test]
+    fn radio_silence_drops_a_contact_report_on_the_net_and_an_attack_call_comes_through() {
+        let w = net_world();
+        let mut comms = Comms::with_seats(1, SEATS);
+        let mut radio = Radio::default();
+        comms.toggle_battle(SeatId(0));
+        comms.toggle_silence(SeatId(0));
+        report(&mut radio, &mut comms, &w, 2);
+        assert_eq!(
+            comms.due(1.).iter().map(|d| d.seat).collect::<Vec<_>>(),
+            [SeatId(1)]
+        );
+        // The assignment call is important: silence never drops it.
+        let words = Phrase::default().raw("Two, attack bandit", Some("^ATTACK"));
+        let hearers = battle_hearers(&comms, &w.members, &w.leaders, &w.listeners, 2, &|_| {
+            words.clone()
+        });
+        assert_eq!(hearers.len(), 1);
+        assert_eq!(hearers[0].seat, SeatId(0));
+        comms.send(2., Call::new("Blue one", words, Kind::Important), &hearers);
+        let due = comms.due(2.);
+        assert_eq!(due.len(), 1);
+        assert_eq!(
+            due[0].call.line(),
+            "Net Blue one: 'Blue, Two, attack bandit'"
+        );
+        assert_eq!(due[0].call.stems, ["^BLUE", "^ATTACK"]);
+    }
+
+    #[test]
+    fn the_battle_net_names_its_flight_by_colour_and_past_the_eighth_by_number() {
+        let words = || Phrase::default().raw("Contact", Some("^CONTACT"));
+        let red = battle_words(0, words());
+        assert_eq!(
+            (red.text.as_str(), red.stems.as_slice()),
+            (
+                "Red, Contact",
+                &["^RED".to_string(), "^CONTACT".to_string()][..]
+            )
+        );
+        // Orange has the word and no recording.
+        let orange = battle_words(5, words());
+        assert_eq!(orange.text, "Orange, Contact");
+        assert_eq!(orange.stems, ["^CONTACT"]);
+        let ninth = battle_words(8, words());
+        assert_eq!(ninth.text, "Flight 9, Contact");
+        // A call to the whole flight already begins with the colour.
+        let to_flight = Phrase::default()
+            .raw("Blue", Some("^BLUE"))
+            .raw(", attack bandit", Some("^ATTACK"));
+        assert_eq!(battle_words(1, to_flight.clone()), to_flight);
+        let to_ninth = Phrase::default().raw("Flight 9, attack bandit", Some("^ATTACK"));
+        assert_eq!(battle_words(8, to_ninth.clone()), to_ninth);
+        assert_eq!(
+            battle_words(0, to_flight.clone()).stems[0],
+            "^RED",
+            "another flight's name is not this flight's"
+        );
+        assert_eq!(battle_label(&member(2, false, 1, 0)), "Net Blue one");
+        assert_eq!(battle_label(&member(2, false, 8, 3)), "Net Flight 9 four");
     }
 }
 

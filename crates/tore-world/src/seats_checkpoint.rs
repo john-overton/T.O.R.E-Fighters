@@ -412,6 +412,7 @@ impl Checkpoint for SeatCommand {
                 put(s, 13);
                 save_reply(s, reply);
             }
+            SeatCommand::BattleNet => put(s, 14),
         }
         Ok(())
     }
@@ -438,6 +439,7 @@ impl Checkpoint for SeatCommand {
                 blocked: Checkpoint::load(l, None)?,
             },
             13 => SeatCommand::WingReply(load_reply(l)?),
+            14 => SeatCommand::BattleNet,
             other => return invalid(format!("a seat command has no variant {other}")),
         })
     }
@@ -609,6 +611,7 @@ mod tests {
             SeatCommand::WingRecipient(None),
             SeatCommand::WingRecipient(Some(3)),
             SeatCommand::WingFormationCycle,
+            SeatCommand::BattleNet,
         ];
         commands.extend(live.iter().map(|&c| SeatCommand::Combat(c)));
         commands.extend(live.iter().map(|&c| SeatCommand::Manual(c)));
@@ -719,7 +722,7 @@ mod tests {
         }
         // A variant number past the last is refused by name.
         let mut s = Saver::new();
-        s.writer().write_varint(14);
+        s.writer().write_varint(15);
         let body = s.finish_section();
         let mut l = Loader::new(&body, &[], &models);
         assert!(SeatCommand::load(&mut l, None).is_err());

@@ -1411,6 +1411,10 @@ impl App {
                 self.queue(seats::SeatCommand::RadioSilence);
                 Action::None
             }
+            Command::BattleNet => {
+                self.queue(seats::SeatCommand::BattleNet);
+                Action::None
+            }
             // Retail's IFF squawk: the answer comes from the flight's own copy
             // of the mission, so a networked flight answers as single player does.
             Command::Iff => {

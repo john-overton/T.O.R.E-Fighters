@@ -398,6 +398,10 @@ pub enum SeatCommand {
     /// stage F phase 2). The step does nothing with it until slice F2-R
     /// builds the call.
     WingReply(Reply),
+    /// Alt+N: start or stop monitoring the side's battle net, where the flight
+    /// leads of the other flights repeat their contact reports and assignment
+    /// calls (stage G, slice G8). Off at the start.
+    BattleNet,
 }
 
 #[cfg(test)]
