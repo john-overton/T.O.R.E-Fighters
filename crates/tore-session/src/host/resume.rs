@@ -330,6 +330,7 @@ impl Host {
             Part::Revivals,
             Part::Rejoin,
             Part::Candidates,
+            Part::Listing,
         ] {
             if let Some(stored) = parts.get(&kind) {
                 host.restore_part(kind, &stored.bytes, &mut ids, old_clock)

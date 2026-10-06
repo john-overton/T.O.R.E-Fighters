@@ -602,6 +602,9 @@ pub struct Host {
     rejoin: rejoin::Rejoin,
     /// Candidates, their measures and the succession (slice K6).
     succession: succession::Succession,
+    /// The listing part: the hosting thread's `HostListing` coded, opaque
+    /// here, journaled for the standbys (slice K7a).
+    listing: Option<Vec<u8>>,
     /// The host's content, the players' gaps and their words (stage L,
     /// `content`).
     compat: content::Compat,
@@ -892,6 +895,7 @@ impl Host {
             resuming: resume::Resuming::default(),
             rejoin: rejoin::Rejoin::new(config.entropy),
             succession: succession::Succession::default(),
+            listing: None,
             compat,
             court,
             settings,

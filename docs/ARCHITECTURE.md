@@ -9081,7 +9081,7 @@ never by calling `World::set_scoring` itself.
 | Revivals | State part *revivals* | Lives and losses by player; seats held for players whose plane is lost, and revivals asked for, both by player rather than connection; side starts; spawned planes |
 | Rejoin | State part *rejoin* | Tokens with their expiry, and reservations ([rejoin](#rejoin-tokens-and-reservations)) |
 | Host selection | State part *candidates* | Each player's report and measurements, the address the host sees it at, and the pinned host, so the new host punches every player and appoints standbys at once |
-| Listing | State part *listing*, opaque to `Host` | The master's address, the listing id and token, the relay channels and their keys. The hosting thread hands it to its `Host` whenever it changes; the new hosting thread resumes its listing from it ([reaching the new host](#reaching-the-new-host)) |
+| Listing | State part *listing*, opaque to `Host` | The master's address, the listing id and token, the relay channels and their keys. The hosting thread hands it to its `Host` whenever it changes; the new hosting thread resumes its listing from it ([reaching the new host](#reaching-the-new-host)). *Built (K7a):* `Host::set_listing_part` keeps the bytes opaque, the journal sends them as the eighth part (empty for a game not listed), and `Host::resume` restores them for `Host::listing_part` |
 
 **Not moved:** the observers' delay rings (8 MB at a minute's delay: a delayed
 observer's stream starts again and waits out its delay), the connections' wire

@@ -13,7 +13,8 @@
 //! Slice K5 codes the rejoin part (tokens and the reservation table, F2-A's
 //! away planes included), slice K6 the candidates part (each player's
 //! report and measures, `succession_state.rs`); the listing part is K8's,
-//! coded by the hosting thread's `HostListing` outside `Host`. The coders use the checkpoint trait and destructure
+//! coded by the hosting thread's `HostListing` outside `Host` and handed to
+//! it whole ([`Host::set_listing_part`], slice K7a), empty for none. The coders use the checkpoint trait and destructure
 //! every field, so a field added to the state a part codes fails to compile
 //! until it is coded or skipped with its class, as stage H's checkpoint
 //! coders do. A part's bytes are this build's own, as a checkpoint's are.
@@ -47,7 +48,7 @@ use tore_world::mission::MissionSpec;
 use tore_world::seats::SeatId;
 
 /// The parts the host journals, in the order they go into the stream.
-pub(super) const JOURNALED: [Part; 7] = [
+pub(super) const JOURNALED: [Part; 8] = [
     Part::Players,
     Part::Session,
     Part::Court,
@@ -55,6 +56,7 @@ pub(super) const JOURNALED: [Part; 7] = [
     Part::Revivals,
     Part::Rejoin,
     Part::Candidates,
+    Part::Listing,
 ];
 
 pub(super) type Result<T> = std::result::Result<T, CheckpointError>;
@@ -341,6 +343,21 @@ fn load_settings(l: &mut Loader<'_>, config: &HostConfig) -> Result<Store> {
 }
 
 impl Host {
+    /// The listing part (slice K8's `ListingPart`, coded by the hosting
+    /// thread's `HostListing`), which the hosting thread hands over whenever
+    /// it may have changed; `None` for a game not listed. The standbys get it
+    /// in the stream after the next tick, like every part, and a host that
+    /// takes over has it back from [`Host::listing_part`] (slice K7a).
+    pub fn set_listing_part(&mut self, part: Option<Vec<u8>>) {
+        self.listing = part.filter(|bytes| !bytes.is_empty());
+    }
+
+    /// The listing part this host holds: the hosting thread's last, or the
+    /// old host's when this host took the game over.
+    pub fn listing_part(&self) -> Option<&[u8]> {
+        self.listing.as_deref()
+    }
+
     /// The connections' join orders: the players' now, then those the
     /// journal remembers from this mission.
     fn orders(&self) -> impl Fn(ConnectionId) -> Option<u64> + '_ {
@@ -386,7 +403,8 @@ impl Host {
             }
             Part::Rejoin => to_bytes(|s| super::rejoin::save_rejoin(s, &self.rejoin)),
             Part::Candidates => self.candidates_part().encode(),
-            Part::Listing => tore_sim::checkpoint::not_covered("the listing part"),
+            // The hosting thread's coding, kept whole; empty for none.
+            Part::Listing => Ok(self.listing.clone().unwrap_or_default()),
         }
     }
 
@@ -472,7 +490,7 @@ impl Host {
                     super::succession::state::CandidatesPart::decode(bytes)?.restore()?;
                 self.restore_candidates(&restored);
             }
-            Part::Listing => return tore_sim::checkpoint::not_covered("the listing part"),
+            Part::Listing => self.listing = (!bytes.is_empty()).then(|| bytes.to_vec()),
         }
         for (id, order) in restoring.handed {
             self.journal.orders.insert(id, order);
@@ -510,6 +528,8 @@ impl Host {
             resuming: _,
             rejoin: _,
             succession: _,
+            // The listing part, opaque bytes of its own.
+            listing: _,
             journal: _,
             // The flying clock: the journal's tick is the mission's time,
             // and the takeover keeps the old host's pace (slice K4).
@@ -644,3 +664,7 @@ impl Session {
         host.gives = gives;
     }
 }
+
+#[cfg(test)]
+#[path = "listing_part_tests.rs"]
+mod listing_part_tests;

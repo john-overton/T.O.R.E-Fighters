@@ -474,6 +474,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-session/src/host/standby*", NET_FAMILIES, "the host's standby stream and its tests (stage K)"),
     _r("crates/tore-session/src/host/resume*", NET_FAMILIES, "takeover and resume on the host and their tests (stage K)"),
     _r(
+        "crates/tore-session/src/host/listing_part_tests.rs", NET_FAMILIES,
+        "the listing part through the standby stream to a host that takes over (stage K, slice K7a)",
+    ),
+    _r(
         "crates/tore-session/src/host/rejoin*", NET_FAMILIES,
         "rejoin tokens and reservations, the session part that carries them, a slot's reservation in every lobby state "
         "(stage K), and their tests",

@@ -503,7 +503,7 @@ fn crowd_fight(seconds: u64, eject: Duration, late: Duration, keep_at: Vec<u64>)
             _ => None,
         })
         .collect();
-    assert_eq!(parts.len(), 7, "every part went out: {parts:?}");
+    assert_eq!(parts.len(), 8, "every part went out: {parts:?}");
     assert!(
         rig.host.revival.players.values().any(|p| p.used == 1),
         "the revival counted"
@@ -647,7 +647,7 @@ fn a_host_keeps_no_records_unless_recording_and_never_more_than_its_bound() {
             .iter()
             .filter(|r| matches!(r, JournalRecord::State(_)))
             .count(),
-        7
+        8
     );
     // A stream that never drains: the queue is dropped at its bound.
     for _ in 0..=MAX_QUEUED {
