@@ -1130,6 +1130,19 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Checkpoints are not saves | John, 2026-10-05: a checkpoint is read only by the same build, is never a save file, and gives no quick save |
 | The order call's change in single player | John, 2026-10-05: approved the baseline of slice G3a: only the attack orders' recording stems change (an assignment's call with its geometry, "Attack bandits" for Attack on contact); no motion, kill or text changes |
 | Bearings in calls | John, 2026-10-05: real-world brevity, three digits spoken one by one ("bearing zero one six", "two seven zero", north "three six zero") |
+| The data link's cues in single player | John, 2026-10-05: approved slice G6's baseline (a sort warning's beep and HUD line when the player and a wingman lock one bandit) |
+| A radar-less aircraft's link cues | John, 2026-10-05: it keeps the target window's and the HUD's link cues and the sort warning; only the radar scope's marks are absent, since it has no radar |
+| The AI counts the player's lock | John, 2026-10-05: approved slice G2's baseline (a wingman choosing after the player locks a bandit takes another one; kills and results unchanged) |
+| Content not everyone has | John, 2026-10-05: dimmed in the King's creator and Load Ordnance, and choosing it says who lacks it; every connected player counts, the unable and the watching included; the King can kick |
+| Showing a player's Fighters Anthology build | John, 2026-10-05: in the lobby's hint for the selected player and one Messages line when it differs from the host's; no new mark in the Players list; imports made before stage L read it from the import report, with no re-import |
+| Warning before joining | John, 2026-10-05: the Internet Lobby does not warn in v1 that a game needs content the player lacks; the player joins and reads why in the lobby |
+| Standby hosts | John, 2026-10-05: up to two; warm standbys (same system and processor type) step their own copy and take over at once, others are cold and catch up from a checkpoint; a cold standby's stream is paced to at most 1 Mbit/s |
+| Checkpoint size | John, 2026-10-05: stage K measures the standby stream before any of the size levers is built |
+| A host lost | John, 2026-10-05: detected after 1.5 s of silence; players read "Lost contact with the host. Moving the game to Hawk..." then "The game moved to Hawk."; other aircraft hold still 2 to 3 s while the player's own keeps flying |
+| Rejoin tokens | John, 2026-10-05: 128-bit tokens from the standard library's randomly keyed hasher; no new dependency |
+| The calculated host in the lobby | John, 2026-10-05: stays where it is while that machine passes the tests, moves only when it fails and another passes; the King can pin a host |
+| Reservations | John, 2026-10-05: a dropped player's aircraft is reserved for its rejoin; End Mission releases it; an aircraft lost while its player was away brings the revival rules on return |
+| Taking over hosting | John, 2026-10-05: a "Let my game take over hosting" switch in Options, on by default; dedicated servers never migrate (they issue rejoin tokens and hold reservations) |
 
 ## Open questions
 
