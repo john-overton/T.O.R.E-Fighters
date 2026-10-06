@@ -42,6 +42,19 @@ const TIME_ROWS: [&str; 6] = ["Paused", "Slow-motion", "1x", "2x", "4x", "8x"];
 /// The bottom buttons, left to right.
 const BUTTONS: [&str; 2] = ["Resume replay", "Keyboard shortcuts"];
 
+/// The live view's bottom buttons: a mission being flown has no replay to
+/// resume.
+const LIVE_BUTTONS: [&str; 2] = ["Back to watching", "Keyboard shortcuts"];
+
+/// How the live view of a mission being flown presents the menu (slice
+/// F2-O4): an observer's, or an away player's own aircraft's. It is no
+/// replay, so neither the title nor the button says so.
+pub const LIVE_LOOK: Look = Look {
+    title: "MENU - THE MISSION GOES ON",
+    buttons: &LIVE_BUTTONS,
+    help: help_lines,
+};
+
 /// How the replay presents the shared menu.
 pub const LOOK: Look = Look {
     title: "REPLAY PAUSED",
@@ -287,6 +300,8 @@ pub struct Menu {
     /// The away player's rows, when this is the menu of its own aircraft's
     /// observer screen (slice F2-O4).
     away: Option<AwayRows>,
+    /// The menu of a live view ([`LIVE_LOOK`]).
+    live: bool,
     /// Leave Game was chosen once and waits for a second choice.
     confirming: bool,
 }
@@ -299,13 +314,20 @@ impl Menu {
             open: None,
             was_live: false,
             away: None,
+            live: false,
             confirming: false,
         }
+    }
+
+    /// How this menu presents itself: a live view's words or a replay's.
+    pub fn look(&self) -> &'static Look {
+        if self.live { &LIVE_LOOK } else { &LOOK }
     }
 
     /// The menu of a live view: End Replay reads Stop Watching.
     pub fn watching(imported: &[MenuNode]) -> Self {
         let mut menu = Self::new(imported);
+        menu.live = true;
         for node in menu.tree.iter_mut().flat_map(|tab| tab.children.iter_mut()) {
             if node.label == END_REPLAY {
                 node.label = STOP_WATCHING.into();
@@ -460,7 +482,7 @@ impl Menu {
 
     /// The left button went down or up at `point` in the 640x480 layer.
     pub fn pointer(&mut self, point: Option<(f64, f64)>, down: bool, clock: &mut Clock) -> Choice {
-        match self.widget.pointer(&self.tree, &LOOK, point, down) {
+        match self.widget.pointer(&self.tree, self.look(), point, down) {
             Event::None | Event::Switched(_) => Choice::None,
             Event::Click => Choice::Click,
             Event::Tab(index) if self.is_control(index) => Choice::Controls,
@@ -469,7 +491,7 @@ impl Menu {
                 Choice::Click
             }
             Event::Select(index) => self.select(index, clock),
-            Event::Button(index) => self.activate(BUTTONS[index], clock),
+            Event::Button(index) => self.activate(self.look().buttons[index], clock),
         }
     }
 
@@ -516,7 +538,7 @@ impl Menu {
             return Choice::Click;
         }
         match label {
-            "Resume replay" => {
+            "Resume replay" | "Back to watching" => {
                 self.close(clock);
                 Choice::Click
             }
@@ -842,6 +864,38 @@ mod tests {
         // Back to an observer's: Stop Watching returns.
         menu.set_away(None);
         assert_eq!(menu.tree[0].children[0].label, STOP_WATCHING);
+    }
+
+    /// The live view's menu (an observer's or an away player's) says nothing
+    /// of a replay: its title and first button are its own.
+    #[test]
+    fn the_live_menu_has_no_replay_words() {
+        let mut clock = Clock::new(0, 1_000);
+        let replay = Menu::new(&[]);
+        assert_eq!(replay.look().title, "REPLAY PAUSED");
+        assert_eq!(replay.look().buttons[0], "Resume replay");
+        let (mut live, _) = away_menu(AwayRows::default());
+        assert_eq!(live.look().title, "MENU - THE MISSION GOES ON");
+        assert_eq!(
+            live.look().buttons,
+            ["Back to watching", "Keyboard shortcuts"]
+        );
+        // The first button is still what Resume was: it closes the menu.
+        live.open(&mut clock);
+        assert_eq!(live.activate("Back to watching", &mut clock), Choice::Click);
+        assert!(!live.is_open());
+        // A click on it does the same.
+        live.open(&mut clock);
+        let point = live
+            .widget
+            .controls(&live.tree, live.look().buttons, &|_| None)
+            .into_iter()
+            .find(|(id, _, _)| *id == 200)
+            .map(|(_, (x, y, w, h), _)| (f64::from(x + w / 2), f64::from(y + h / 2)))
+            .unwrap();
+        live.pointer(Some(point), true, &mut clock);
+        live.pointer(Some(point), false, &mut clock);
+        assert!(!live.is_open());
     }
 
     #[test]

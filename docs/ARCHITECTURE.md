@@ -6905,6 +6905,10 @@ flowchart TD
   end it" beside the row, and the second leaves, which ends the game for
   everyone. The game learns whether a standby is ready from the hosting
   thread's report ([`Report::Standby`](../crates/tore-app/src/net/hosting.rs)).
+- **The live menu's words.** The menu of a live view (an away player's own
+  aircraft, or an observer's) no longer says "REPLAY PAUSED" or "Resume
+  replay": its title is "MENU - THE MISSION GOES ON" and its first button
+  "Back to watching" (`pause::LIVE_LOOK`). A recording's menu keeps its words.
 - **When the observer screen cannot open** (the recording cannot start, the
   viewer cannot open) there is no menu to come back from, so the game takes the
   aircraft back at once and says so, rather than keeping a picture nobody can

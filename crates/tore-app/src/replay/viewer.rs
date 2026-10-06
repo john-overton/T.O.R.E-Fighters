@@ -2999,7 +2999,7 @@ impl Viewer {
                 &mut self.layer,
                 &self.ownship.font,
                 &self.pause.tree,
-                &pause::LOOK,
+                self.pause.look(),
                 &|label| pause::state(&ui, label),
             );
             canvas.legacy_layer(&self.layer, 1.);
