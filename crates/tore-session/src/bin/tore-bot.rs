@@ -95,9 +95,9 @@
 //! Stage L (docs/ARCHITECTURE.md, "Compatibility"): each bot sends the
 //! content of its import when it joins, and prints the host's gaps whenever
 //! they change ("Bot: gaps: aircraft SU27.PT (Hawk lacks it)", or "gaps:
-//! none") and, once for each player whose build or items differ from the
-//! host's, the lobby's Messages line ("Bot: You imported Fighters Anthology
-//! 1.0; the host, 1.02F. Every aircraft, weapon and theater is the same.").
+//! none") and, once for each player whose items differ from the host's, the
+//! lobby's Messages line ("Bot: Hawk's game differs from the host's: no
+//! Su-27."). A Fighters Anthology build is not reported (John, 2026-10-06).
 //! `--drop-resource NAME` (a test aid, any number of times) removes a
 //! resource from the bot's loaded import before anything reads it, so a test
 //! can play a player whose import lacks an aircraft. `--content-report`
@@ -125,7 +125,7 @@ use tore_net::{
     CloseReason, Datagrams, DisconnectReason, Entropy, Listen, RealClock, ServerSocket, bind_udp,
 };
 use tore_session::bot::Bot;
-use tore_session::client::content::joined_line;
+use tore_session::client::content::differs_line;
 use tore_session::client::rejoin::FileStore;
 use tore_session::client::{Race, ended_text};
 use tore_session::host::content::{GameContent, gaps_line, report_lines};
@@ -684,8 +684,8 @@ struct Running {
     settings_sent: bool,
     /// The settings last printed.
     settings: Option<Vec<(u8, u32)>>,
-    /// Stage L: the gaps line last printed, the players whose build line
-    /// has been decided, and whether it was told it cannot fly the mission.
+    /// Stage L: the gaps line last printed, the players whose differs line
+    /// has been printed, and whether it was told it cannot fly the mission.
     gaps: Option<String>,
     told: std::collections::BTreeSet<u8>,
     unable: bool,
@@ -919,10 +919,9 @@ fn names_text(names: &[String]) -> String {
     }
 }
 
-/// Stage L: prints the gaps when they change and, once for each player,
-/// the Messages line about its build or items. A player's line is decided
-/// once its build is known or a gap names it; the bot's own once the gaps
-/// have come (it knows its own build).
+/// Stage L: prints the gaps when they change and, once for each player a gap
+/// names, the Messages line about how its items differ from the host's. (A
+/// player's Fighters Anthology build is no longer reported: John, 2026-10-06.)
 fn content_lines(
     name: &str,
     shown: &mut Option<String>,
@@ -944,20 +943,11 @@ fn content_lines(
     }
     for player in &lobby.players {
         let you = player.id == lobby.you;
-        let named = gaps
-            .gaps
-            .iter()
-            .any(|g| g.players.iter().any(|p| p.id == player.id));
-        let known = player.build != tore_session::wire::messages::Build::Unknown;
-        if told.contains(&player.id) || !(known || named || you) {
+        if told.contains(&player.id) {
             continue;
         }
-        if you && !known && client.content().build() != player.build {
-            // The host has not had this game's content yet.
-            continue;
-        }
-        told.insert(player.id);
-        if let Some(text) = joined_line(player, you, gaps) {
+        if let Some(text) = differs_line(player, you, gaps) {
+            told.insert(player.id);
             println!("{name}: {text}");
         }
     }

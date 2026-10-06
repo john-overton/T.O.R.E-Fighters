@@ -11,8 +11,8 @@ The scenario takes its own port, so it runs beside the others; it opens one wind
 
 A second windowed scenario, `net-window-gaps` (stage L, slice L4), has the game host and a `tore-bot` whose import
 lacks the Rafale join as an observer, and the script shows what the game's King and every player then see: the
-selected player's build line, the King's creator with the Rafale dimmed in its aircraft list, a choice of it refused
-with the host's words, and the build and gap lines in Messages.
+selected player's system line, the King's creator with the Rafale dimmed in its aircraft list, a choice of it refused
+with the host's words, and the gap line in Messages.
 """
 from __future__ import annotations
 
@@ -243,7 +243,7 @@ def drive_lobby(d: Drive) -> None:
 
 def drive_gaps(d: Drive) -> None:
     """The game hosts from Direct Connection's New; a bot lacking the Rafale joins as an observer. The window shows
-    the selected bot's build and system, the creator's dimmed Rafale and the refusal of choosing it, and the game's
+    the selected bot's system, the creator's dimmed Rafale and the refusal of choosing it, and the game's
     log holds the host's content and gaps lines and the lines its Messages show."""
     port = d.port()
     fresh_data(d)
@@ -308,7 +308,7 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-window-gaps", lane="net", args=[], driver=drive_gaps, uses=("bot",), window=True, timeout=300,
             notes="stage L's gaps in the window: a bot lacking the Rafale joins the King's lobby; the selected player's "
-            "build line, the creator's dimmed Rafale and the refusal of choosing it, Messages' difference line, the "
+            "system line, the creator's dimmed Rafale and the refusal of choosing it, Messages' difference line, the "
             "host's content and gaps lines in the game's log (slice L4)",
         ),
     ]

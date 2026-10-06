@@ -200,12 +200,10 @@ pub struct LobbyScreen {
     cheats: Option<Cheats>,
     state: Option<LobbyState>,
     unable: Option<String>,
-    /// The host's newest Content gaps (stage L), for the build lines.
+    /// The host's newest Content gaps (stage L), for the differs lines.
     gaps: Option<ContentGaps>,
-    /// Which players' builds Messages has said how they differ.
-    notes: facts::BuildNotes,
-    /// When the screen opened: the clock the build lines wait on.
-    opened: Instant,
+    /// Which players' items Messages has said how they differ.
+    notes: facts::GapNotes,
     facts: Facts,
     buttons: Buttons,
     default: Option<DefaultButton>,
@@ -335,7 +333,6 @@ impl LobbyScreen {
             unable: None,
             gaps: None,
             notes: Default::default(),
-            opened: Instant::now(),
             facts,
             buttons,
             default: None,
@@ -476,21 +473,14 @@ impl LobbyScreen {
     }
 
     /// The host's Content gaps as the client last had them (stage L): what
-    /// Messages says about a player's build and items, once for each player
-    /// (see [`facts::BuildNotes`]). Called each frame after
-    /// [`LobbyScreen::update`].
+    /// Messages says about a player's items, once for each player (see
+    /// [`facts::GapNotes`]). Called each frame after [`LobbyScreen::update`].
     pub fn set_gaps(&mut self, gaps: Option<&ContentGaps>) {
         if gaps != self.gaps.as_ref() {
             self.gaps = gaps.cloned();
         }
-        self.say_builds_at(self.opened.elapsed());
-    }
-
-    /// [`LobbyScreen::set_gaps`]'s turn at `now` on the screen's clock (a
-    /// preview or a test gives its own).
-    pub(crate) fn say_builds_at(&mut self, now: std::time::Duration) {
         let lines = match &self.state {
-            Some(state) => self.notes.lines(now, state, self.gaps.as_ref()),
+            Some(state) => self.notes.lines(state, self.gaps.as_ref()),
             None => return,
         };
         for line in lines {

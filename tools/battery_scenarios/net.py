@@ -1434,7 +1434,7 @@ def content_item_lines(text: str) -> list[str]:
 
 def drive_content_builds(d: Drive) -> None:
     """A server on the profile's 1.02F import and a bot on a 1.0 import made here: every item is the same, the bot
-    reads that it imported 1.0 and the host 1.02F, and flies."""
+    says nothing about the build (John, 2026-10-06: the audit found no difference a player sees), and flies."""
     if not (DISC_10 / "SETUP.ESA").exists():
         raise DriveError(f"the 1.0 disc is missing: {DISC_10} (net-content-builds needs it)")
     fa10 = d.work / "fa10"
@@ -1455,11 +1455,7 @@ def drive_content_builds(d: Drive) -> None:
     bot = start_bots(d, port, "bot", 30, "--callsign", "Old", "--data-dir", fa10)
     bot.finish(90, 0)
     server.finish(40, 0)
-    bot.expect(
-        r"^Old: You imported Fighters Anthology 1\.0; the host, 1\.02F\. Every aircraft, weapon and theater is the "
-        r"same\.$",
-        "the build line",
-    )
+    bot.forbid(r"imported Fighters Anthology|differs from the host's", "a build or difference line")
     bot.expect(r"^Old: gaps: none$", "no gaps")
     bot.expect(r"^Old: seat \d+, plane \d+, at tick \d+$", "a seating")
     bot.expect(r"^Old: debrief: ", "a debrief")
@@ -1623,7 +1619,7 @@ def scenarios() -> list[Scenario]:
             name="net-content-builds", lane="net", args=[], driver=drive_content_builds, uses=("server", "bot"),
             timeout=900,
             notes="a server on the profile's 1.02F import and a bot on a 1.0 import of gameassets' disc1 made in the "
-            "run: every content item is the same, the bot reads the build line and flies (slice L3)",
+            "run: every content item is the same, the bot says nothing about the build and flies (slices L3, L5)",
         ),
         Scenario(
             name="net-content-missing", lane="net", args=[], driver=drive_content_missing, uses=("server", "bot"),

@@ -4,8 +4,7 @@
 //! data in and out, so every rule is tested without a window, a kit or a
 //! session.
 use crate::widgets::{Cell, Icon, Row, tone};
-use std::collections::{BTreeMap, BTreeSet};
-use std::time::Duration;
+use std::collections::BTreeSet;
 use tore_session::client::content;
 use tore_session::settings::{self, number};
 use tore_session::wire::Path;
@@ -556,10 +555,10 @@ pub fn path_phrase(path: Path) -> &'static str {
 }
 
 /// The detail line for a player selected in Players: an unable player's
-/// reason as the host worded it, else the player's Fighters Anthology build
-/// and system, then how the player reached the host (slice J6; the house's
-/// own game says it runs this game, since it needs no path), as in "Hawk:
-/// Fighters Anthology 1.0, on Linux. Connected directly." (stage L).
+/// reason as the host worded it, else the player's system, then how the
+/// player reached the host (slice J6; the house's own game says it runs this
+/// game, since it needs no path), as in "Hawk: on Linux. Connected
+/// directly." (stage L; the build was dropped on John's word, 2026-10-06).
 pub fn player_detail(lobby: &LobbyState, id: u8) -> Option<String> {
     let p = lobby.player(id)?;
     if let Some(why) = &p.unable {
@@ -573,50 +572,33 @@ pub fn player_detail(lobby: &LobbyState, id: u8) -> Option<String> {
     Some(format!("{} {how}", content::hint_line(p)))
 }
 
-/// How long the lobby waits for a player's build and gaps to arrive before
-/// it decides whether to say how they differ from the host's (the host
-/// sends the build in the lobby state and the gaps as two messages).
-pub const BUILD_GRACE: Duration = Duration::from_secs(2);
-
-/// The Messages lines about each player's build and items (stage L): said
-/// once for each player, when a gap names it or [`BUILD_GRACE`] after the
-/// lobby first showed it, and only when they differ from the host's.
+/// The Messages lines about how a player's items differ from the host's
+/// (stage L): said once for each player, as soon as a gap names it. A
+/// player's Fighters Anthology build is not said (John, 2026-10-06: the build
+/// audit found no difference a player sees).
 #[derive(Debug, Default)]
-pub struct BuildNotes {
-    /// When each player was first seen, on the screen's clock.
-    seen: BTreeMap<u8, Duration>,
+pub struct GapNotes {
     said: BTreeSet<u8>,
 }
 
-impl BuildNotes {
-    /// The lines now due, at `now` on the screen's clock, given the lobby
-    /// and the host's newest gaps (none before they arrive).
-    pub fn lines(
-        &mut self,
-        now: Duration,
-        lobby: &LobbyState,
-        gaps: Option<&ContentGaps>,
-    ) -> Vec<String> {
-        self.seen.retain(|id, _| lobby.player(*id).is_some());
+impl GapNotes {
+    /// The lines now due, given the lobby and the host's newest gaps (none
+    /// before they arrive). A player who leaves is forgotten, so one who
+    /// returns is told about again.
+    pub fn lines(&mut self, lobby: &LobbyState, gaps: Option<&ContentGaps>) -> Vec<String> {
         self.said.retain(|id| lobby.player(*id).is_some());
+        let Some(gaps) = gaps else {
+            return Vec::new();
+        };
         let mut lines = Vec::new();
         for p in &lobby.players {
-            let first = *self.seen.entry(p.id).or_insert(now);
-            let Some(gaps) = gaps else {
-                continue;
-            };
             if self.said.contains(&p.id) {
                 continue;
             }
-            let named = gaps
-                .gaps
-                .iter()
-                .any(|gap| gap.players.iter().any(|named| named.id == p.id));
-            if !named && now < first + BUILD_GRACE {
-                continue;
+            if let Some(line) = content::differs_line(p, p.id == lobby.you, gaps) {
+                self.said.insert(p.id);
+                lines.push(line);
             }
-            self.said.insert(p.id);
-            lines.extend(content::joined_line(p, p.id == lobby.you, gaps));
         }
         lines
     }

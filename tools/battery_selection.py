@@ -201,7 +201,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-content-missing",),
     ),
     "net-builds": (
-        "a 1.0 import made in the run against the profile's 1.02F: the same items, the build line, a flight (slow: "
+        "a 1.0 import made in the run against the profile's 1.02F: the same items, no build or difference line, a flight (slow: "
         "it imports the disc)",
         ("net-content-builds",),
     ),

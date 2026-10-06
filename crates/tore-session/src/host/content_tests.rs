@@ -494,7 +494,7 @@ fn a_servers_own_mission_is_never_refused_and_a_player_who_cannot_fly_it_is_unab
 }
 
 #[test]
-fn players_of_two_builds_with_the_same_items_read_the_same_line_and_fly() {
+fn players_of_two_builds_with_the_same_items_have_no_difference_to_say_and_fly() {
     let import = resources();
     let mut rig = Rig::new(spec(2, 1), import.clone(), |config| {
         config.content = Some(content_of(&import, source::Build::V102F, "0.1.4"));
@@ -521,32 +521,23 @@ fn players_of_two_builds_with_the_same_items_read_the_same_line_and_fly() {
     assert_eq!(gaps.host_build, Build::V102F);
     let lobby = rig.players[old].client.lobby().unwrap().clone();
     let me = lobby.me().unwrap();
+    // The wire still carries each player's build (the host fills it); the
+    // lobby no longer shows it, and a different build is no difference.
     assert_eq!(me.build, Build::V10);
-    assert_eq!(
-        words::joined_line(me, true, &gaps).as_deref(),
-        Some(
-            "You imported Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and \
-             theater is the same."
-        )
-    );
+    assert_eq!(words::differs_line(me, true, &gaps), None);
     let viper_view = rig.players[new].client.lobby().unwrap().clone();
     let hawk = viper_view
         .players
         .iter()
         .find(|p| p.callsign == "Hawk")
         .unwrap();
+    assert_eq!(hawk.build, Build::V10);
+    assert_eq!(words::differs_line(hawk, false, &gaps), None);
     assert_eq!(
-        words::joined_line(hawk, false, &gaps).as_deref(),
-        Some(
-            "Hawk imported Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and \
-             theater is the same."
-        )
-    );
-    assert_eq!(
-        words::joined_line(viper_view.me().unwrap(), true, &gaps),
+        words::differs_line(viper_view.me().unwrap(), true, &gaps),
         None
     );
-    assert!(words::hint_line(hawk).starts_with("Hawk: Fighters Anthology 1.0, on "));
+    assert_eq!(words::hint_line(hawk), "Hawk: on Linux.");
     // Both fly.
     assert!(rig.run_until(Duration::from_secs(5), |r| {
         r.players[old].client.seat().is_some() && r.players[new].client.seat().is_some()
@@ -834,7 +825,7 @@ fn the_players_own_words_name_the_item_its_import_and_what_to_do() {
 }
 
 #[test]
-fn the_joined_line_names_the_difference_or_the_unknown_build() {
+fn the_differs_line_names_the_difference_and_never_the_build() {
     let player = |build: Build| crate::wire::messages::LobbyPlayer {
         id: 3,
         callsign: "Hawk".into(),
@@ -867,25 +858,21 @@ fn the_joined_line_names_the_difference_or_the_unknown_build() {
         gap(ItemKind::Weapon, "AIM9X.JT", "AIM-9X", true),
     ]);
     assert_eq!(
-        words::joined_line(&player(Build::V10), false, &both).as_deref(),
+        words::differs_line(&player(Build::V10), false, &both).as_deref(),
         Some("Hawk's game differs from the host's: no Su-27 and a different AIM-9X.")
     );
     assert_eq!(
-        words::joined_line(&player(Build::V10), true, &both).as_deref(),
+        words::differs_line(&player(Build::V10), true, &both).as_deref(),
         Some("Your game differs from the host's: no Su-27 and a different AIM-9X.")
     );
-    assert_eq!(
-        words::joined_line(&player(Build::Unknown), false, &gaps(vec![])).as_deref(),
-        Some("Hawk's import does not say which Fighters Anthology build it came from.")
-    );
-    assert_eq!(
-        words::joined_line(&player(Build::V102F), false, &gaps(vec![])),
-        None
-    );
-    assert_eq!(
-        words::hint_line(&player(Build::V10)),
-        "Hawk: Fighters Anthology 1.0, on Linux."
-    );
+    // No gap names the player: no line, whatever its build says.
+    for build in [Build::Unknown, Build::V10, Build::V102F] {
+        assert_eq!(
+            words::differs_line(&player(build), false, &gaps(vec![])),
+            None
+        );
+        assert_eq!(words::hint_line(&player(build)), "Hawk: on Linux.");
+    }
 }
 
 #[test]

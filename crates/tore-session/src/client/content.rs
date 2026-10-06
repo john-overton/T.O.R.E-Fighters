@@ -1,32 +1,25 @@
 //! Stage L on a player's game: its own words about what its import cannot
-//! play, and the lines about builds and gaps a lobby shows
-//! (docs/ARCHITECTURE.md, "Compatibility" and "The words").
+//! play, and the line about gaps a lobby shows (docs/ARCHITECTURE.md,
+//! "Compatibility" and "The words").
 //!
 //! The host's words, which every player reads about a player, are in
 //! `host::content`; the creator's refusal of a choice in a gap uses the same
 //! function as the host's ([`gap_refusal`]). Here are the second-person lines
-//! a player reads about its own game, and the lines a lobby prints when a
-//! player's build or items differ from the host's.
+//! a player reads about its own game, and the line a lobby prints when a
+//! player's items differ from the host's. A player's Fighters Anthology build
+//! is not shown anywhere (John, 2026-10-06: the build audit found no
+//! difference a player sees); the wire still carries it.
 
 use crate::host::content::{
     GameContent, ItemKey, Resources, files_phrase, gap_label, label_of, list, mission_items,
     not_everyone, shortfall, world_key, world_kind,
 };
-use crate::wire::messages::{Build, ContentGaps, Gap, Importer, ItemKind, LobbyPlayer, LobbyState};
+use crate::wire::messages::{ContentGaps, Gap, Importer, ItemKind, LobbyPlayer, LobbyState};
 use std::collections::{BTreeMap, BTreeSet};
 use tore_world::mission::MissionSpec;
 
 /// What to do about an item the import lacks.
 const REIMPORT: &str = "Re-import Fighters Anthology (Pref, Re-import) to add it.";
-
-/// The words for a build: "Fighters Anthology 1.0", or "an unknown Fighters
-/// Anthology build".
-pub fn build_words(build: Build) -> String {
-    match crate::host::content::build_version(build) {
-        Some(version) => format!("Fighters Anthology {version}"),
-        None => "an unknown Fighters Anthology build".to_owned(),
-    }
-}
 
 /// The numbers of a version's release part: `0.1.3` of `0.1.3-4-gabc`.
 fn version_numbers(version: &str) -> Option<Vec<u64>> {
@@ -179,19 +172,13 @@ pub fn gap_refusal(
     Some(not_everyone(gap, &gap_label(gap), &name, house.as_deref()))
 }
 
-/// The Messages line when a player's build or items differ from the host's,
-/// once, as the lobby learns them: "Hawk imported Fighters Anthology 1.0;
-/// the host, 1.02F. Every aircraft, weapon and theater is the same.",
-/// "Hawk's game differs from the host's: no Su-27, a different AIM-9X.",
-/// "Hawk's import does not say which Fighters Anthology build it came
-/// from."; for the player itself (`you`), "You imported ..." and "Your game
-/// ...". `None` when its build and items equal the host's.
-///
-/// A player's build reads as unknown in the lobby until the host has its
-/// Content, so a caller waits for the build to be known or a gap to name the
-/// player before it decides the line is due; the unknown-build line is for a
-/// player whose build stays unknown.
-pub fn joined_line(player: &LobbyPlayer, you: bool, gaps: &ContentGaps) -> Option<String> {
+/// The Messages line when a player's items differ from the host's, once, as
+/// the lobby learns them: "Hawk's game differs from the host's: no Su-27, a
+/// different AIM-9X."; for the player itself (`you`), "Your game differs
+/// ...". `None` when no gap names the player. The player's Fighters
+/// Anthology build is not part of it (agent decision with John's 2026-10-06
+/// removal: the retail builds read the same to a player).
+pub fn differs_line(player: &LobbyPlayer, you: bool, gaps: &ContentGaps) -> Option<String> {
     let mut lacks = Vec::new();
     let mut differs = Vec::new();
     for gap in &gaps.gaps {
@@ -204,48 +191,26 @@ pub fn joined_line(player: &LobbyPlayer, you: bool, gaps: &ContentGaps) -> Optio
             }
         }
     }
+    if lacks.is_empty() && differs.is_empty() {
+        return None;
+    }
     let whose = if you {
         "Your".to_owned()
     } else {
         format!("{}'s", player.callsign)
     };
-    if !lacks.is_empty() || !differs.is_empty() {
-        lacks.extend(differs);
-        return Some(format!(
-            "{whose} game differs from the host's: {}.",
-            list(&lacks)
-        ));
-    }
-    let Some(theirs) = crate::host::content::build_version(player.build) else {
-        return Some(format!(
-            "{whose} import does not say which Fighters Anthology build it came from."
-        ));
-    };
-    let ours = crate::host::content::build_version(gaps.host_build)?;
-    if theirs == ours {
-        return None;
-    }
-    let who = if you {
-        "You".to_owned()
-    } else {
-        player.callsign.clone()
-    };
+    lacks.extend(differs);
     Some(format!(
-        "{who} imported Fighters Anthology {theirs}; the host, {ours}. Every aircraft, weapon \
-         and theater is the same."
+        "{whose} game differs from the host's: {}.",
+        list(&lacks)
     ))
 }
 
-/// The hint for a player selected in the lobby: "Hawk: Fighters Anthology
-/// 1.0, on Linux."
+/// The hint for a player selected in the lobby: "Hawk: on Linux."
 pub fn hint_line(player: &LobbyPlayer) -> String {
     let system = match player.platform {
         crate::wire::Platform::Unknown => "an unknown system".to_owned(),
         platform => platform.name().to_owned(),
     };
-    format!(
-        "{}: {}, on {system}.",
-        player.callsign,
-        build_words(player.build)
-    )
+    format!("{}: on {system}.", player.callsign)
 }

@@ -26,8 +26,8 @@ NORMAL_STATES = [
     "lobby-locks", "lobby-watch", "lobby-pvp",
     # Slice J6: a relayed player selected, a player away from its aircraft.
     "lobby-relay", "lobby-away",
-    # Stage L (slice L4): a player on another Fighters Anthology build selected, and Messages saying how it differs.
-    "lobby-builds",
+    # Stage L (slice L4, L5): Messages saying how a player's game differs from the host's.
+    "lobby-gaps",
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [

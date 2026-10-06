@@ -43,9 +43,9 @@ pub const STATES: [&str; 23] = [
     // relay, selected; and a player away from its aircraft.
     "lobby-relay",
     "lobby-away",
-    // Stage L (slice L4): a player on another Fighters Anthology build
-    // selected, with Messages saying how its game differs from the host's.
-    "lobby-builds",
+    // Stage L (slice L4, renamed from lobby-builds by L5): Messages saying
+    // how a player's game differs from the host's, a player selected.
+    "lobby-gaps",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -246,9 +246,8 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         "lobby-away" => {
             lobby.players[1].away = true;
         }
-        "lobby-builds" => {
+        "lobby-gaps" => {
             lobby.players.push(player(3, "Hollywood", None));
-            lobby.players[2].build = Build::V10;
         }
         "lobby-locks" => {
             lobby.players.push(player(3, "Hollywood", None));
@@ -340,9 +339,9 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             screen.players.select(2);
             screen.refresh();
         }
-        // Goose (1.0) selected: the hint gives its build and system; Messages
-        // says how Goose's and Hollywood's games differ from the host's.
-        "lobby-builds" => {
+        // Goose selected: the hint gives its system; Messages says how
+        // Hollywood's game differs from the host's.
+        "lobby-gaps" => {
             let gaps = ContentGaps {
                 host_build: Build::V102F,
                 host_importer: None,
@@ -358,7 +357,6 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
                 }],
             };
             screen.set_gaps(Some(&gaps));
-            screen.say_builds_at(facts::BUILD_GRACE * 2);
             screen.players.select(1);
             screen.refresh();
         }
