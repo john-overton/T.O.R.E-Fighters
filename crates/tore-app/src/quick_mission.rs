@@ -8,6 +8,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, ui::creator::Options};
+use tore_session::wire::messages::ItemKind;
 use tore_sim::ai::{
     AiError,
     engagement::GroupObjective,
@@ -33,6 +34,8 @@ const GROUND_SECTION: usize = 92;
 const GROUND_NOTICE_OK: usize = 93;
 const GROUND_SECTION_RECT: Rect = (334, 294, 278, 49);
 const GROUND_NOTICE_RECT: Rect = (166, 202, 308, 88);
+/// The tint of a list row the lobby's creator dims: what not everyone has.
+const GAP_TEXT: [u8; 3] = [104, 110, 112];
 #[derive(Clone, Debug)]
 pub struct Draft {
     pub values: [usize; 35],
@@ -100,6 +103,10 @@ pub struct QuickMission {
     /// reads Accept and sends the mission to the game, Start is locked to
     /// Airborne, and only what a host supports can be accepted.
     pub lobby: bool,
+    /// The lobby's items not every player has (stage L, slice L4), each with
+    /// the host's words for why it cannot be chosen: aircraft by their
+    /// selection key, theaters by their code. Empty outside a lobby.
+    gaps: BTreeMap<(ItemKind, String), String>,
 }
 /// What the creator keeps for the lobby's Cancel to put back: the draft and
 /// everything beside it that Accept would send.
@@ -223,6 +230,7 @@ impl QuickMission {
             help: false,
             shift: false,
             lobby: false,
+            gaps: BTreeMap::new(),
         }
     }
     /// The ground-start airports of one theater layout (names and object ids),
@@ -707,6 +715,29 @@ impl QuickMission {
         }
         None
     }
+    /// A sample of gaps for the previews: the second and fourth aircraft and
+    /// the third theater, each as Hawk's game lacking it.
+    fn preview_gaps(&mut self) {
+        let mut gaps = BTreeMap::new();
+        for index in [1, 3] {
+            if let (Some(key), Some(label)) = (
+                self.aircraft_files.get(index),
+                self.aircraft_names.get(index),
+            ) {
+                gaps.insert(
+                    (ItemKind::Aircraft, key.clone()),
+                    format!("Not everyone can fly the {label}: Hawk's game has no {label}."),
+                );
+            }
+        }
+        if let Some(code) = self.theater_codes.get(2) {
+            gaps.insert(
+                (ItemKind::Theater, code.clone()),
+                format!("Not everyone has {code}: Hawk's game has no {code}."),
+            );
+        }
+        self.gaps = gaps;
+    }
     /// What the lobby's Cancel puts back.
     pub fn save(&self) -> Saved {
         Saved {
@@ -741,6 +772,66 @@ impl QuickMission {
         self.lobby = false;
         self.cancel();
         self.notice = None;
+        self.gaps.clear();
+    }
+    /// Takes the items not every player has (stage L, slice L4): `refusal`
+    /// gives the host's words for an item of a kind and key when it is in a
+    /// gap now (`Client::gap_refusal`). The creator asks it about each
+    /// aircraft and theater it offers; the list dims those and a choice of
+    /// one says why it cannot be made. Only the lobby's creator uses it.
+    pub fn set_gaps(&mut self, refusal: impl Fn(ItemKind, &str) -> Option<String>) {
+        let mut gaps = BTreeMap::new();
+        for key in &self.aircraft_files {
+            if let Some(words) = refusal(ItemKind::Aircraft, key) {
+                gaps.insert((ItemKind::Aircraft, key.clone()), words);
+            }
+        }
+        for code in self.theater_codes.iter().filter(|c| !c.starts_with('~')) {
+            if let Some(words) = refusal(ItemKind::Theater, code) {
+                gaps.insert((ItemKind::Theater, code.clone()), words);
+            }
+        }
+        self.gaps = gaps;
+    }
+    /// Why the choice of value `index` in `field` cannot be made, in the
+    /// host's words, when the creator is the lobby's and the aircraft or
+    /// theater is in a gap.
+    fn gap_in(&self, field: usize, index: usize) -> Option<&str> {
+        if !self.lobby {
+            return None;
+        }
+        let (kind, key) = if matches!(field, 6 | 9 | 12 | 23 | 26 | 29) {
+            (ItemKind::Aircraft, self.aircraft_files.get(index)?)
+        } else if field == 13 {
+            (ItemKind::Theater, self.theater_codes.get(index)?)
+        } else {
+            return None;
+        };
+        self.gaps.get(&(kind, key.clone())).map(String::as_str)
+    }
+    /// A choice in a gap leaves the draft as it was and puts the host's
+    /// words in the notice. True when it was refused.
+    fn refuse_gap(&mut self, field: usize, index: usize) -> bool {
+        let Some(words) = self.gap_in(field, index).map(str::to_owned) else {
+            return false;
+        };
+        self.notice = Some(words);
+        true
+    }
+    /// What the host would refuse in the draft for a gap: the first of the
+    /// player's aircraft, each populated wing's and the theater that is in
+    /// one, in the host's words.
+    fn gap_problem(&self) -> Option<String> {
+        let v = &self.draft.values;
+        let wings = [4, 7, 10, 21, 24, 27]
+            .into_iter()
+            .filter(|field| v[*field] > 0 || *field == 4)
+            .map(|field| (field + 2, v[field + 2]));
+        std::iter::once((6, v[6]))
+            .chain(wings)
+            .chain(std::iter::once((13, v[13])))
+            .find_map(|(field, index)| self.gap_in(field, index))
+            .map(str::to_owned)
     }
     /// What a host will not take from the creator, in words (EF8): what
     /// single player cannot fly either, and a developer theater layout,
@@ -759,7 +850,7 @@ impl QuickMission {
                     .into(),
             );
         }
-        None
+        self.gap_problem()
     }
     /// The mission a host takes from this draft: [`QuickMission::mission_spec`]
     /// starting airborne, with what the lobby refuses reported first.
@@ -836,7 +927,32 @@ impl QuickMission {
                         .into(),
                 );
             }
+            // The lobby's creator with items not every player has (stage L,
+            // slice L4): the aircraft list dimmed, and the notice a choice of
+            // one leaves.
+            "lobby-creator-gaps" | "lobby-creator-gap-notice" => {
+                self.enter_lobby();
+                self.preview_gaps();
+                self.open(6);
+                if name == "lobby-creator-gap-notice" {
+                    self.cursor = (0..self.aircraft_files.len())
+                        .find(|i| self.gap_in(6, *i).is_some())
+                        .unwrap_or(0);
+                    self.scroll = self.cursor / ROWS * ROWS;
+                    self.activate(POP_OK);
+                }
+            }
+            "lobby-creator-gap-theaters" => {
+                self.enter_lobby();
+                self.preview_gaps();
+                self.open(13);
+            }
             "lobby-ordnance" | "lobby-ordnance-refused" | "lobby-ordnance-cheat" => {}
+            "lobby-ordnance-gaps" => {
+                if let Some(ordnance) = &mut self.ordnance {
+                    ordnance.preview(name);
+                }
+            }
             "ordnance-empty" | "ordnance-drag" | "ordnance-message" | "ordnance-message-long" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
@@ -1008,7 +1124,9 @@ impl QuickMission {
             current - 1
         };
         self.focus = id;
-        self.apply(id, previous);
+        if !self.refuse_gap(id, previous) {
+            self.apply(id, previous);
+        }
         Action::Click
     }
     /// Leaves the debrief for the creator, keeping the mission just flown, or
@@ -1062,6 +1180,10 @@ impl QuickMission {
                         self.group_objectives[group] =
                             Self::objective_choices(group)[self.cursor].1;
                         self.notice = None;
+                    } else if self.gap_in(field, self.cursor).is_some() {
+                        // Not everyone has it (stage L): the choice stays as
+                        // it was and the notice says who lacks it.
+                        self.refuse_gap(field, self.cursor);
                     } else {
                         self.apply(field, self.cursor);
                     }
@@ -1119,7 +1241,10 @@ impl QuickMission {
                 } else {
                     let n = self.values(id).len();
                     if n > 0 {
-                        self.apply(id, (self.draft.values[id] + 1) % n);
+                        let next = (self.draft.values[id] + 1) % n;
+                        if !self.refuse_gap(id, next) {
+                            self.apply(id, next);
+                        }
                     }
                 }
             }
@@ -1442,7 +1567,9 @@ impl QuickMission {
                     (209, y + 1, 11, 12),
                     self.cursor == self.scroll + row,
                 );
-                c.text(font, &fit(font, text, 208), 223, y + 2, None);
+                // What not every player has is dimmed in the lobby's creator.
+                let dim = self.gap_in(field, self.scroll + row).map(|_| GAP_TEXT);
+                c.text(font, &fit(font, text, 208), 223, y + 2, dim);
             }
             for row in 0..ROWS.min(selector_values.len().saturating_sub(self.scroll)) {
                 self.controls
@@ -2036,6 +2163,147 @@ mod tests {
         assert_ne!(q.draft.values[4], 3);
         q.leave_lobby();
         assert!(!q.lobby && q.notice.is_none());
+    }
+    /// The words the host would give for the Rafale and for a theater.
+    fn some_gaps(q: &mut QuickMission) {
+        let theater = q.theater_codes[1].clone();
+        q.set_gaps(|kind, key| match (kind, key) {
+            (ItemKind::Aircraft, "RAFALE.PT") => {
+                Some("Not everyone can fly the Rafale: Hawk's game has no Rafale.".into())
+            }
+            (ItemKind::Theater, code) if code == theater => Some(format!(
+                "Not everyone has {code}: Hawk's game has no {code}."
+            )),
+            _ => None,
+        });
+    }
+    #[test]
+    fn the_lobbys_creator_refuses_a_choice_in_a_gap_and_keeps_the_old_one() {
+        let mut q = setup();
+        // Single player knows no gaps: the same list and clicks choose it.
+        some_gaps(&mut q);
+        assert!(q.gap_in(6, 1).is_none());
+        q.open(6);
+        q.cursor = 1;
+        q.activate(POP_OK);
+        assert_eq!(q.draft.values[6], 1);
+        assert!(q.notice.is_none());
+        q.apply(6, 0);
+
+        q.enter_lobby();
+        some_gaps(&mut q);
+        // Rafale is the second aircraft, in a gap, for every aircraft field
+        // and for the theater at its own index.
+        for field in [6, 9, 12, 23, 26, 29] {
+            assert!(q.gap_in(field, 1).is_some(), "{field}");
+            assert!(q.gap_in(field, 0).is_none() && q.gap_in(field, 2).is_none());
+        }
+        assert!(q.gap_in(13, 1).is_some() && q.gap_in(13, 0).is_none());
+        assert!(q.gap_in(15, 1).is_none(), "other fields have no gaps");
+        // Choosing it in the list leaves the choice as it was, closes the
+        // list and says who lacks it.
+        q.open(6);
+        q.cursor = 1;
+        q.activate(POP_OK);
+        assert_eq!(q.draft.values[6], 0);
+        assert_eq!(q.aircraft_selection, 0);
+        assert!(q.selector.is_none());
+        assert_eq!(
+            q.notice.as_deref(),
+            Some("Not everyone can fly the Rafale: Hawk's game has no Rafale.")
+        );
+        // What everyone has is chosen as before, and the notice clears.
+        q.open(6);
+        q.cursor = 2;
+        q.activate(POP_OK);
+        assert_eq!(q.draft.values[6], 2);
+        assert!(q.notice.is_none());
+        // The shifted click that steps to the next value, and the right
+        // click that steps back, refuse the same way.
+        q.apply(9, 0);
+        q.shift = true;
+        q.focus = 9;
+        q.activate(9);
+        assert_eq!(q.draft.values[9], 0);
+        assert!(q.notice.as_deref().unwrap().contains("Rafale"));
+        q.notice = None;
+        q.apply(9, 2);
+        right_click(&mut q, 9);
+        assert_eq!(q.draft.values[9], 2);
+        assert!(q.notice.as_deref().unwrap().contains("Rafale"));
+        // A theater in a gap is refused in its list too.
+        q.notice = None;
+        q.open(13);
+        q.cursor = 1;
+        q.activate(POP_OK);
+        assert_eq!(q.draft.values[13], 0);
+        assert!(q.notice.as_deref().unwrap().starts_with("Not everyone has"));
+        // Leaving the lobby's creator forgets them.
+        q.leave_lobby();
+        assert!(q.gaps.is_empty() && q.gap_in(6, 1).is_none());
+    }
+    #[test]
+    fn accept_checks_the_whole_mission_for_gaps_and_ignores_a_wing_nobody_flies() {
+        let mut q = setup();
+        q.enter_lobby();
+        some_gaps(&mut q);
+        assert!(q.lobby_problem().is_none());
+        // The player's own aircraft.
+        q.draft.values[6] = 1;
+        assert!(q.lobby_problem().unwrap().contains("Rafale"));
+        assert!(q.lobby_spec().is_err());
+        q.draft.values[6] = 0;
+        // A wing that flies, and a wing with no aircraft in it (count 0),
+        // which the host does not count either.
+        q.draft.values[9] = 1;
+        assert_eq!(q.draft.values[7], 0);
+        assert!(q.lobby_problem().is_none());
+        q.draft.values[23] = 1;
+        assert!(q.draft.values[21] > 0);
+        assert!(q.lobby_problem().unwrap().contains("Rafale"));
+        q.draft.values[23] = 0;
+        // The theater.
+        q.draft.values[13] = 1;
+        assert!(q.lobby_problem().unwrap().starts_with("Not everyone has"));
+        q.draft.values[13] = 0;
+        assert!(q.lobby_spec().is_ok());
+        // OK is Accept and reaches the lobby only with a clean draft; the
+        // refusal is the host's own line in the notice.
+        q.draft.values[6] = 1;
+        assert_eq!(q.activate(OK), Action::Mission);
+        assert!(q.lobby_spec().is_err());
+        // Single player's creator never asks.
+        q.leave_lobby();
+        assert!(q.lobby_problem().is_none());
+        assert!(q.lobby_spec().is_ok());
+    }
+    #[test]
+    fn the_creators_gap_words_come_from_the_clients_refusals_for_what_it_lists() {
+        let mut q = setup();
+        q.enter_lobby();
+        let mut asked = Vec::new();
+        let asked_cell = std::cell::RefCell::new(&mut asked);
+        q.set_gaps(|kind, key| {
+            asked_cell.borrow_mut().push((kind, key.to_owned()));
+            None
+        });
+        // Every aircraft and every base theater, nothing else.
+        assert_eq!(
+            asked
+                .iter()
+                .filter(|(kind, _)| *kind == ItemKind::Aircraft)
+                .count(),
+            q.aircraft_files.len()
+        );
+        assert_eq!(
+            asked
+                .iter()
+                .filter(|(kind, _)| *kind == ItemKind::Theater)
+                .count(),
+            q.theater_codes.len()
+        );
+        assert!(asked.iter().all(|(kind, _)| *kind != ItemKind::Weapon));
+        assert!(q.gaps.is_empty());
     }
     #[test]
     fn a_short_strip_is_no_ground_start() {

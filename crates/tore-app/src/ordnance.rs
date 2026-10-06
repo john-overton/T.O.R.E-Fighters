@@ -82,6 +82,10 @@ pub struct Ordnance {
     /// The King's loadout rule allows Cheat loading on a lobby page
     /// (`loadouts any`, slice F2-L); set through [`Ordnance::set_cheat_rule`].
     lobby_cheat: bool,
+    /// The weapons not every player has (stage L, slice L4), by record name
+    /// (`AIM9X.JT`), each with the host's words for why it cannot be
+    /// loaded. Used on a lobby page only; empty otherwise.
+    gaps: BTreeMap<String, String>,
 }
 impl Ordnance {
     pub fn new(mut loadout: Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
@@ -173,6 +177,7 @@ impl Ordnance {
             menu: false,
             lobby: false,
             lobby_cheat: false,
+            gaps: BTreeMap::new(),
         };
         ordnance.rebuild_catalog();
         Ok(ordnance)
@@ -193,6 +198,35 @@ impl Ordnance {
         self.message = Some(
             "The King turned Cheat loading off: your stations are unloaded. Choose again.".into(),
         );
+        true
+    }
+    /// Takes the weapons not every player has (stage L, slice L4):
+    /// `refusal` gives the host's words for a weapon record when it is in a
+    /// gap now (`Client::gap_refusal`). The page asks it about every weapon
+    /// it offers; the catalog dims those and loading one says why it cannot
+    /// be. Only the lobby's page uses it.
+    pub fn set_gaps(&mut self, refusal: impl Fn(&str) -> Option<String>) {
+        self.gaps = self
+            .weapons
+            .iter()
+            .filter_map(|weapon| Some((weapon.source.clone(), refusal(&weapon.source)?)))
+            .collect();
+    }
+    /// The host's words for a weapon the lobby's page cannot load, when it
+    /// is in a gap.
+    pub fn gap_words(&self, source: &str) -> Option<&str> {
+        if !self.lobby {
+            return None;
+        }
+        self.gaps.get(source).map(String::as_str)
+    }
+    /// A weapon in a gap leaves the loadout as it was and puts the host's
+    /// words on the page. True when it was refused.
+    fn refuse_gap(&mut self, source: &str) -> bool {
+        let Some(words) = self.gap_words(source).map(str::to_owned) else {
+            return false;
+        };
+        self.message = Some(words);
         true
     }
     /// Whether the lobby's page may use Cheat loading.
@@ -310,6 +344,9 @@ impl Ordnance {
                     DragSource::Catalog(index) => {
                         self.selected = Some(index);
                         let weapon = self.catalog[index].clone();
+                        if self.refuse_gap(&weapon.source) {
+                            return Action::None;
+                        }
                         self.edit_loadout(|load| load.select(station, weapon))
                     }
                     DragSource::Station(source) => {
@@ -483,7 +520,13 @@ impl Ordnance {
                 self.message =
                     Some("Airbase aircraft cycling is not available in this setup.".into())
             }
-            100..=107 => self.select_card(id),
+            100..=107 => {
+                self.select_card(id);
+                if let Some(index) = self.selected {
+                    let source = self.catalog[index].source.clone();
+                    self.refuse_gap(&source);
+                }
+            }
             200..=231 => {
                 self.station = id - 200;
                 let station = self.station;
@@ -499,6 +542,9 @@ impl Ordnance {
                     });
                 } else if let Some(w) = self.selected {
                     let weapon = self.catalog[w].clone();
+                    if self.refuse_gap(&weapon.source) {
+                        return Action::None;
+                    }
                     return self.edit_loadout(|load| load.select(station, weapon));
                 }
                 return Action::None;
@@ -551,6 +597,23 @@ impl Ordnance {
             "ordnance-message" => {
                 self.activate(13);
             }
+            "lobby-ordnance-gaps" => {
+                // The catalog's first and third weapons are in a gap, and
+                // the first is the one the player just tried.
+                let names: Vec<String> = self.catalog.iter().map(|w| w.name.clone()).collect();
+                let sources: Vec<String> = self.catalog.iter().map(|w| w.source.clone()).collect();
+                for index in [0, 2] {
+                    if let (Some(source), Some(name)) = (sources.get(index), names.get(index)) {
+                        self.gaps.insert(
+                            source.clone(),
+                            format!("Not everyone has the {name}: Hawk's game has no {name}."),
+                        );
+                    }
+                }
+                if let Some(words) = sources.first().and_then(|s| self.gap_words(s)) {
+                    self.message = Some(words.to_owned());
+                }
+            }
             "ordnance-message-long" => {
                 self.message = Some(
                     "This is a long ordnance message preview. It stays on one line, with a background sized to the displayed text and an ellipsis when the message reaches the available screen width."
@@ -602,6 +665,10 @@ impl Ordnance {
                 self.selected == Some(*index),
                 true,
             );
+            // What not every player has is dimmed on the lobby's page.
+            if self.gap_words(&self.catalog[*index].source).is_some() {
+                dim(&mut c, (x - 3, y - 5, 113, 66));
+            }
         }
         for (i, (s, n)) in self
             .loadout
@@ -799,6 +866,18 @@ fn notice(c: &mut Canvas, font: &Sprite, message: &str, lobby: bool) {
         [35, 44, 46, 255],
     );
     c.text(font, &line, 34, y + 2, Some([235, 225, 179]));
+}
+/// Darkens a block of the picture: a weapon the lobby's page cannot load.
+fn dim(c: &mut Canvas, (x, y, w, h): Rect) {
+    let (width, height) = (crate::menu::WIDTH as i32, crate::menu::HEIGHT as i32);
+    for yy in y.max(0)..(y + h).min(height) {
+        for xx in x.max(0)..(x + w).min(width) {
+            let at = (yy as usize * crate::menu::WIDTH + xx as usize) * 4;
+            for channel in &mut c.0[at..at + 3] {
+                *channel = (u16::from(*channel) * 2 / 5) as u8;
+            }
+        }
+    }
 }
 fn grouped(value: f64) -> String {
     let digits = format!("{value:.0}");
@@ -1495,6 +1574,7 @@ mod tests {
             menu: false,
             lobby: false,
             lobby_cheat: false,
+            gaps: BTreeMap::new(),
         };
         ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
         ui
@@ -1544,6 +1624,76 @@ mod tests {
         drag(&mut ui, (400., 145.), (100., 120.));
         assert_eq!(ui.loadout.quantities, [0, 0, 500]);
         assert!(ui.selected.is_none());
+    }
+    const AIM9M_WORDS: &str = "Not everyone has the AIM-9M: Hawk's game has no AIM-9M.";
+    #[test]
+    fn the_lobbys_page_refuses_a_weapon_in_a_gap_and_single_players_never_asks() {
+        // Single player: the same gaps change nothing.
+        let mut sp = fixture();
+        sp.set_gaps(|source| (source == "AIM9M.JT").then(|| AIM9M_WORDS.to_owned()));
+        assert_eq!(sp.gap_words("AIM9M.JT"), None);
+        drag(&mut sp, (100., 120.), (500., 145.));
+        assert_eq!(sp.loadout.quantities, [2, 4, 500]);
+        assert!(sp.message.is_none());
+
+        let mut ui = fixture();
+        ui.lobby = true;
+        let asked = std::cell::RefCell::new(Vec::new());
+        ui.set_gaps(|source| {
+            asked.borrow_mut().push(source.to_owned());
+            (source == "AIM9M.JT").then(|| AIM9M_WORDS.to_owned())
+        });
+        // It asked about every weapon the page holds.
+        assert!(asked.borrow().contains(&"AIM9M.JT".to_owned()));
+        assert_eq!(ui.gap_words("AIM9M.JT"), Some(AIM9M_WORDS));
+        // Dragging it onto a station is refused, with the host's words, and
+        // the loadout stays as it was.
+        drag(&mut ui, (100., 120.), (500., 145.));
+        assert_eq!(ui.loadout.quantities, [2, 0, 500]);
+        assert_eq!(ui.message.as_deref(), Some(AIM9M_WORDS));
+        // So is picking it and clicking a station, and picking it says so.
+        ui.message = None;
+        ui.activate(100);
+        assert_eq!(ui.message.as_deref(), Some(AIM9M_WORDS));
+        ui.activate(201);
+        assert_eq!(ui.loadout.quantities, [2, 0, 500]);
+        assert_eq!(ui.message.as_deref(), Some(AIM9M_WORDS));
+        // What everyone has loads as before.
+        ui.set_gaps(|_| None);
+        ui.activate(201);
+        assert_eq!(ui.loadout.quantities, [2, 4, 500]);
+        assert!(ui.message.is_none());
+    }
+    #[test]
+    fn the_lobbys_page_dims_a_weapon_in_a_gap_in_the_catalog_only() {
+        let mut plain = fixture();
+        plain.lobby = true;
+        let mut dimmed = fixture();
+        dimmed.lobby = true;
+        dimmed.set_gaps(|source| (source == "AIM9M.JT").then(|| AIM9M_WORDS.to_owned()));
+        let (mut before, mut after) =
+            (vec![0u8; WIDTH * HEIGHT * 4], vec![0u8; WIDTH * HEIGHT * 4]);
+        plain.render(&mut before);
+        dimmed.render(&mut after);
+        let changed: Vec<usize> = (0..WIDTH * HEIGHT)
+            .filter(|i| before[i * 4..i * 4 + 4] != after[i * 4..i * 4 + 4])
+            .collect();
+        // The card's pixels are darker, and nothing outside the catalog's
+        // first card changed (the stations on the right keep their picture).
+        assert!(!changed.is_empty());
+        for i in &changed {
+            let (x, y) = (i % WIDTH, i / WIDTH);
+            assert!(x < 190 && (100..180).contains(&y), "{x},{y}");
+            assert!(after[i * 4] <= before[i * 4]);
+        }
+        // Single player's page, given the same gaps, draws as it always did.
+        let mut sp = fixture();
+        sp.set_gaps(|source| (source == "AIM9M.JT").then(|| AIM9M_WORDS.to_owned()));
+        let mut single = vec![0u8; WIDTH * HEIGHT * 4];
+        sp.render(&mut single);
+        let mut untouched = vec![0u8; WIDTH * HEIGHT * 4];
+        fixture().render(&mut untouched);
+        assert!(single == untouched, "single player's page changed");
     }
     /// The pixels a notice changes, as the rows they span.
     fn notice_rows(lobby: bool) -> Option<(usize, usize)> {

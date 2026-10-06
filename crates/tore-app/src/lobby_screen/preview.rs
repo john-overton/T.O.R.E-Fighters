@@ -6,13 +6,16 @@ use crate::AppResult;
 use crate::widgets::KitSource;
 use tore_formats::aircraft::AircraftId;
 use tore_session::wire::chat::{ChatFrom, Receiver, Standing};
-use tore_session::wire::messages::{Build, LobbyPhase, LobbyPlayer, LobbySlot, Lock, StartRule};
+use tore_session::wire::messages::{
+    Build, ContentGaps, Gap, GapPlayer, ItemKind, LobbyPhase, LobbyPlayer, LobbySlot, Lock,
+    StartRule,
+};
 use tore_session::wire::{Path, Platform};
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 22] = [
+pub const STATES: [&str; 23] = [
     "lobby-king",
     "lobby-joiner",
     "lobby-unable",
@@ -40,6 +43,9 @@ pub const STATES: [&str; 22] = [
     // relay, selected; and a player away from its aircraft.
     "lobby-relay",
     "lobby-away",
+    // Stage L (slice L4): a player on another Fighters Anthology build
+    // selected, with Messages saying how its game differs from the host's.
+    "lobby-builds",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -190,8 +196,9 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         "lobby-unable" => {
             lobby = sample(1);
             lobby.players.push(player(3, "Viper", None));
+            // The host's words, as every player reads them (stage L).
             lobby.players[2].unable =
-                Some("Your game data differs from the host's in 2 file(s), such as F14.PT. Import the same version of the game.".into());
+                Some("Viper's game has no F-14D Tomcat, which this mission flies.".into());
         }
         "lobby-flying" => {
             lobby = sample(2);
@@ -238,6 +245,10 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         }
         "lobby-away" => {
             lobby.players[1].away = true;
+        }
+        "lobby-builds" => {
+            lobby.players.push(player(3, "Hollywood", None));
+            lobby.players[2].build = Build::V10;
         }
         "lobby-locks" => {
             lobby.players.push(player(3, "Hollywood", None));
@@ -327,6 +338,28 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         // The relayed player selected: the hint line says how it connected.
         "lobby-relay" => {
             screen.players.select(2);
+            screen.refresh();
+        }
+        // Goose (1.0) selected: the hint gives its build and system; Messages
+        // says how Goose's and Hollywood's games differ from the host's.
+        "lobby-builds" => {
+            let gaps = ContentGaps {
+                host_build: Build::V102F,
+                host_importer: None,
+                gaps: vec![Gap {
+                    kind: ItemKind::Aircraft,
+                    key: "SU27.PT".into(),
+                    label: "Su-27".into(),
+                    host_lacks: false,
+                    players: vec![GapPlayer {
+                        id: 3,
+                        differs: false,
+                    }],
+                }],
+            };
+            screen.set_gaps(Some(&gaps));
+            screen.say_builds_at(facts::BUILD_GRACE * 2);
+            screen.players.select(1);
             screen.refresh();
         }
         _ => {}

@@ -423,7 +423,7 @@ fn the_players_list_marks_the_crown_the_house_ready_and_unable() {
     assert!(rows[2].tint.is_some());
     assert_eq!(
         facts::player_detail(&state, 3).as_deref(),
-        Some("Viper cannot play this mission: data differs")
+        Some("data differs")
     );
 }
 
@@ -453,24 +453,32 @@ fn a_relayed_player_has_the_relay_mark_beside_its_platform_and_every_path_is_sai
         (
             Path::LocalNetwork,
             None,
-            "Viper connected over the local network.",
+            "Viper: an unknown Fighters Anthology build, on macOS. Connected over the local network.",
         ),
-        (Path::ByAddress, None, "Viper connected directly."),
+        (
+            Path::ByAddress,
+            None,
+            "Viper: an unknown Fighters Anthology build, on macOS. Connected directly.",
+        ),
         (
             Path::MappedPort,
             None,
-            "Viper connected directly (forwarded port).",
+            "Viper: an unknown Fighters Anthology build, on macOS. Connected directly (forwarded port).",
         ),
-        (Path::Ipv6, None, "Viper connected directly (IPv6)."),
+        (
+            Path::Ipv6,
+            None,
+            "Viper: an unknown Fighters Anthology build, on macOS. Connected directly (IPv6).",
+        ),
         (
             Path::Punched,
             None,
-            "Viper connected directly (punched through).",
+            "Viper: an unknown Fighters Anthology build, on macOS. Connected directly (punched through).",
         ),
         (
             Path::Relay,
             Some(Icon::Relay),
-            "Viper connected through the relay.",
+            "Viper: an unknown Fighters Anthology build, on macOS. Connected through the relay.",
         ),
     ] {
         state.players[2].path = path;
@@ -489,12 +497,12 @@ fn a_relayed_player_has_the_relay_mark_beside_its_platform_and_every_path_is_sai
     // reason comes before the path.
     assert_eq!(
         facts::player_detail(&state, 1).as_deref(),
-        Some("Maverick's game runs this game.")
+        Some("Maverick: Fighters Anthology 1.02F, on Linux. Runs this game.")
     );
     state.players[2].unable = Some("data differs".into());
     assert_eq!(
         facts::player_detail(&state, 3).as_deref(),
-        Some("Viper cannot play this mission: data differs")
+        Some("data differs")
     );
     assert_eq!(facts::player_detail(&state, 99), None);
 }
@@ -582,12 +590,13 @@ fn a_change_of_state_is_said_in_messages() {
     );
     assert!(facts::change_lines(Some(&old), &old).is_empty());
     // An unable player is named with the reason, once.
+    // The host's words start with the callsign, so they are said as they are.
     let mut unable = old.clone();
-    unable.players[1].unable = Some("data differs".into());
+    unable.players[1].unable = Some("Goose's game has no Su-27, which this mission flies.".into());
     assert!(
         facts::change_lines(Some(&old), &unable)
             .iter()
-            .any(|l| l == "Goose cannot play this mission: data differs")
+            .any(|l| l == "Goose's game has no Su-27, which this mission flies.")
     );
     assert!(facts::change_lines(Some(&unable), &unable).is_empty());
 }
@@ -596,16 +605,20 @@ fn a_change_of_state_is_said_in_messages() {
 fn the_screen_tells_a_player_whose_own_game_cannot_play_the_mission() {
     let state = sample(2);
     let mut screen = screen_of(&state, false);
-    screen.update(Some(&state), Some("Import the same version."));
-    assert!(
+    let words = "Your game has no Su-27, which this mission flies. Re-import Fighters Anthology (Pref, Re-import) to add it.";
+    screen.update(Some(&state), Some(words));
+    // The player's own words are said and shown as they are, once.
+    assert_eq!(
         screen
             .message_lines()
             .iter()
-            .any(|l| l.contains("Your game cannot play this mission: Import the same version."))
+            .filter(|l| *l == words)
+            .count(),
+        1
     );
     let b = screen.buttons();
     assert_eq!([b.loadout, b.ready], [Show::Disabled, Show::Disabled]);
-    assert!(facts::hint(screen.facts()).contains("cannot play this mission"));
+    assert_eq!(facts::hint(screen.facts()), words);
 }
 
 #[test]
@@ -709,4 +722,187 @@ fn time_lobby_frame() {
             times[runs - 1]
         );
     }
+}
+
+// ---- Stage L, slice L4: builds and gaps ----
+
+use tore_session::wire::messages::{Build, ContentGaps, Gap, GapPlayer, ItemKind};
+
+/// The gaps of a host on 1.02F with nobody lacking anything.
+fn no_gaps() -> ContentGaps {
+    ContentGaps {
+        host_build: Build::V102F,
+        host_importer: None,
+        gaps: Vec::new(),
+    }
+}
+
+/// A gap in the Su-27 for the players `ids`.
+fn su27_gap(ids: &[u8], differs: bool) -> Gap {
+    Gap {
+        kind: ItemKind::Aircraft,
+        key: "SU27.PT".into(),
+        label: "Su-27".into(),
+        host_lacks: false,
+        players: ids
+            .iter()
+            .map(|id| GapPlayer { id: *id, differs })
+            .collect(),
+    }
+}
+
+#[test]
+fn the_selected_players_line_says_its_build_and_system_then_how_it_connected() {
+    let mut state = king();
+    assert_eq!(
+        facts::player_detail(&state, 2).as_deref(),
+        Some("Goose: Fighters Anthology 1.0, on Windows. Connected directly (punched through).")
+    );
+    assert_eq!(
+        facts::player_detail(&state, 1).as_deref(),
+        Some("Maverick: Fighters Anthology 1.02F, on Linux. Runs this game.")
+    );
+    // An unable player's line is the host's reason, as it is: it starts with
+    // the callsign already.
+    state.players[1].unable = Some("Goose's game has no Su-27, which this mission flies.".into());
+    assert_eq!(
+        facts::player_detail(&state, 2).as_deref(),
+        Some("Goose's game has no Su-27, which this mission flies.")
+    );
+}
+
+#[test]
+fn messages_say_once_how_a_players_build_differs_from_the_hosts_and_nothing_when_it_does_not() {
+    let state = king();
+    let mut notes = facts::BuildNotes::default();
+    let none = Duration::from_secs(0);
+    // Nothing before the gaps arrive.
+    assert!(notes.lines(none, &state, None).is_empty());
+    // And nothing during the grace, while the gaps may still change.
+    assert!(notes.lines(none, &state, Some(&no_gaps())).is_empty());
+    let late = facts::BUILD_GRACE;
+    let lines = notes.lines(late, &state, Some(&no_gaps()));
+    // Maverick is the host's own build; Goose imported 1.0.
+    assert_eq!(
+        lines,
+        vec![
+            "Goose imported Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and \
+             theater is the same."
+        ]
+    );
+    // Once for each player.
+    assert!(notes.lines(late * 2, &state, Some(&no_gaps())).is_empty());
+    // The joiner is told in the second person.
+    let mut notes = facts::BuildNotes::default();
+    let joiner = sample(2);
+    notes.lines(none, &joiner, Some(&no_gaps()));
+    assert_eq!(
+        notes.lines(late, &joiner, Some(&no_gaps())),
+        vec![
+            "You imported Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and \
+             theater is the same."
+        ]
+    );
+}
+
+#[test]
+fn messages_say_what_a_player_lacks_at_once_and_when_a_build_is_unknown_after_the_grace() {
+    let mut state = king();
+    let mut notes = facts::BuildNotes::default();
+    let none = Duration::from_secs(0);
+    // A gap that names Goose is said without waiting.
+    let gaps = ContentGaps {
+        gaps: vec![su27_gap(&[2], false)],
+        ..no_gaps()
+    };
+    assert_eq!(
+        notes.lines(none, &state, Some(&gaps)),
+        vec!["Goose's game differs from the host's: no Su-27."]
+    );
+    // A different one, said the same way.
+    let mut notes = facts::BuildNotes::default();
+    let gaps = ContentGaps {
+        gaps: vec![su27_gap(&[2], true)],
+        ..no_gaps()
+    };
+    assert_eq!(
+        notes.lines(none, &state, Some(&gaps)),
+        vec!["Goose's game differs from the host's: a different Su-27."]
+    );
+    // A player whose build stays unknown is told so after the grace.
+    state.players[1].build = Build::Unknown;
+    let mut notes = facts::BuildNotes::default();
+    assert!(notes.lines(none, &state, Some(&no_gaps())).is_empty());
+    assert_eq!(
+        notes.lines(facts::BUILD_GRACE, &state, Some(&no_gaps())),
+        vec!["Goose's import does not say which Fighters Anthology build it came from."]
+    );
+    // A player who left, and comes back as another, is told about again.
+    state.players.truncate(1);
+    notes.lines(facts::BUILD_GRACE * 2, &state, Some(&no_gaps()));
+    let mut again = king();
+    again.players[1].id = 5;
+    again.players[1].build = Build::V10;
+    let lines = notes.lines(facts::BUILD_GRACE * 3, &again, Some(&no_gaps()));
+    assert!(lines.is_empty(), "the new player is waiting out the grace");
+    assert_eq!(
+        notes
+            .lines(facts::BUILD_GRACE * 6, &again, Some(&no_gaps()))
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn the_screen_puts_the_build_line_in_messages_once_and_shows_the_hosts_reason_as_it_is() {
+    let state = sample(1);
+    let mut screen = screen_of(&state, true);
+    screen.set_gaps(Some(&no_gaps()));
+    screen.say_builds_at(Duration::from_secs(0));
+    assert!(
+        !screen
+            .message_lines()
+            .iter()
+            .any(|l| l.contains("imported Fighters Anthology")),
+        "not before the grace"
+    );
+    screen.say_builds_at(facts::BUILD_GRACE);
+    screen.say_builds_at(facts::BUILD_GRACE * 3);
+    let said = screen
+        .message_lines()
+        .iter()
+        .filter(|l| l.starts_with("Goose imported Fighters Anthology 1.0; the host, 1.02F."))
+        .count();
+    assert_eq!(said, 1);
+    // The host's reason about another player is a line of its own, as it is,
+    // and its own player's reason (the second person) is the hint.
+    let mut unable = state.clone();
+    unable.players[1].unable = Some("Goose's game has no Su-27, which this mission flies.".into());
+    screen.update(Some(&unable), None);
+    assert_eq!(
+        screen
+            .message_lines()
+            .iter()
+            .filter(|l| *l == "Goose's game has no Su-27, which this mission flies.")
+            .count(),
+        1
+    );
+    let mut own = unable.clone();
+    own.you = 2;
+    own.players[1].unable = unable.players[1].unable.clone();
+    let mut goose = screen_of(&sample(2), false);
+    goose.update(Some(&own), None);
+    // Only the host has said so: its words are said once, as they are.
+    assert_eq!(
+        goose
+            .message_lines()
+            .iter()
+            .filter(|l| *l == "Goose's game has no Su-27, which this mission flies.")
+            .count(),
+        1
+    );
+    assert_eq!(
+        facts::hint(goose.facts()),
+        "Goose's game has no Su-27, which this mission flies."
+    );
 }

@@ -4,10 +4,13 @@
 //! data in and out, so every rule is tested without a window, a kit or a
 //! session.
 use crate::widgets::{Cell, Icon, Row, tone};
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
+use tore_session::client::content;
 use tore_session::settings::{self, number};
 use tore_session::wire::Path;
 use tore_session::wire::messages::{
-    LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, StartRule,
+    ContentGaps, LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, StartRule,
 };
 
 /// What a button does to the player: it is not there, there but cannot be
@@ -264,8 +267,10 @@ pub fn hint(facts: &Facts) -> String {
     if !facts.connected {
         return "Connecting to the game...".into();
     }
+    // The reason is the host's own words, or the game's own in the second
+    // person: it reads as it is (stage L).
     if let Some(reason) = &facts.unable {
-        return format!("Your game cannot play this mission: {reason}");
+        return reason.clone();
     }
     match facts.phase {
         LobbyPhase::Flying => match (facts.flying, facts.holds, facts.ready) {
@@ -470,16 +475,17 @@ pub fn change_lines(old: Option<&LobbyState>, new: &LobbyState) -> Vec<String> {
             Some(before) if before.callsign != p.callsign => {}
             _ => {}
         }
-        if let Some(why) = &p.unable
+        // The reason is the host's words, which start with the player's
+        // callsign ("Hawk's game has no Su-27, which this mission flies."),
+        // so it is said as it is. The player's own words are its game's, in
+        // the second person, and the screen says them itself (`take`).
+        if p.id != new.you
+            && let Some(why) = &p.unable
             && old
                 .player(p.id)
                 .is_none_or(|b| b.unable.as_ref() != Some(why))
         {
-            lines.push(if p.id == new.you {
-                format!("Your game cannot play this mission: {why}")
-            } else {
-                format!("{} cannot play this mission: {why}", p.callsign)
-            });
+            lines.push(why.clone());
         }
     }
     for p in &old.players {
@@ -550,17 +556,70 @@ pub fn path_phrase(path: Path) -> &'static str {
 }
 
 /// The detail line for a player selected in Players: an unable player's
-/// reason, else how the player reached the host (slice J6; the house's own
-/// game says it runs this game, since it needs no path).
+/// reason as the host worded it, else the player's Fighters Anthology build
+/// and system, then how the player reached the host (slice J6; the house's
+/// own game says it runs this game, since it needs no path), as in "Hawk:
+/// Fighters Anthology 1.0, on Linux. Connected directly." (stage L).
 pub fn player_detail(lobby: &LobbyState, id: u8) -> Option<String> {
     let p = lobby.player(id)?;
     if let Some(why) = &p.unable {
-        return Some(format!("{} cannot play this mission: {why}", p.callsign));
+        return Some(why.clone());
     }
-    if lobby.host == Some(id) {
-        return Some(format!("{}'s game runs this game.", p.callsign));
+    let how = if lobby.host == Some(id) {
+        "Runs this game.".to_owned()
+    } else {
+        format!("Connected {}.", path_phrase(p.path))
+    };
+    Some(format!("{} {how}", content::hint_line(p)))
+}
+
+/// How long the lobby waits for a player's build and gaps to arrive before
+/// it decides whether to say how they differ from the host's (the host
+/// sends the build in the lobby state and the gaps as two messages).
+pub const BUILD_GRACE: Duration = Duration::from_secs(2);
+
+/// The Messages lines about each player's build and items (stage L): said
+/// once for each player, when a gap names it or [`BUILD_GRACE`] after the
+/// lobby first showed it, and only when they differ from the host's.
+#[derive(Debug, Default)]
+pub struct BuildNotes {
+    /// When each player was first seen, on the screen's clock.
+    seen: BTreeMap<u8, Duration>,
+    said: BTreeSet<u8>,
+}
+
+impl BuildNotes {
+    /// The lines now due, at `now` on the screen's clock, given the lobby
+    /// and the host's newest gaps (none before they arrive).
+    pub fn lines(
+        &mut self,
+        now: Duration,
+        lobby: &LobbyState,
+        gaps: Option<&ContentGaps>,
+    ) -> Vec<String> {
+        self.seen.retain(|id, _| lobby.player(*id).is_some());
+        self.said.retain(|id| lobby.player(*id).is_some());
+        let mut lines = Vec::new();
+        for p in &lobby.players {
+            let first = *self.seen.entry(p.id).or_insert(now);
+            let Some(gaps) = gaps else {
+                continue;
+            };
+            if self.said.contains(&p.id) {
+                continue;
+            }
+            let named = gaps
+                .gaps
+                .iter()
+                .any(|gap| gap.players.iter().any(|named| named.id == p.id));
+            if !named && now < first + BUILD_GRACE {
+                continue;
+            }
+            self.said.insert(p.id);
+            lines.extend(content::joined_line(p, p.id == lobby.you, gaps));
+        }
+        lines
     }
-    Some(format!("{} connected {}.", p.callsign, path_phrase(p.path)))
 }
 
 /// Why a button that cannot be pressed cannot, in words, for Messages when
@@ -577,10 +636,7 @@ pub fn disabled_reason(facts: &Facts, id: super::Id, target: bool) -> Option<Str
         Id::Mission if lobby_only => Some("The mission can change only in the lobby.".into()),
         Id::Loadout if flying && facts.flying => Some("You are flying.".into()),
         Id::Loadout if flying => None,
-        Id::Loadout | Id::Ready if facts.unable.is_some() => facts
-            .unable
-            .as_ref()
-            .map(|why| format!("Your game cannot play this mission: {why}")),
+        Id::Loadout | Id::Ready if facts.unable.is_some() => facts.unable.clone(),
         Id::Loadout if lobby_only => {
             Some("Loadouts are chosen in the lobby, before the mission flies.".into())
         }

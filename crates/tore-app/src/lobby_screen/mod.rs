@@ -71,7 +71,7 @@ use settings_panel::{Context as SettingsContext, Edit, SettingsPanel};
 use std::sync::Arc;
 use std::time::Instant;
 use tore_session::wire::chat::ChatLine;
-use tore_session::wire::messages::{LobbyState, Lock, SettingsChange};
+use tore_session::wire::messages::{ContentGaps, LobbyState, Lock, SettingsChange};
 use tore_sim::cheats::Cheats;
 
 /// The screen's own frame lines: the colour measured on John's screenshot.
@@ -200,6 +200,12 @@ pub struct LobbyScreen {
     cheats: Option<Cheats>,
     state: Option<LobbyState>,
     unable: Option<String>,
+    /// The host's newest Content gaps (stage L), for the build lines.
+    gaps: Option<ContentGaps>,
+    /// Which players' builds Messages has said how they differ.
+    notes: facts::BuildNotes,
+    /// When the screen opened: the clock the build lines wait on.
+    opened: Instant,
     facts: Facts,
     buttons: Buttons,
     default: Option<DefaultButton>,
@@ -327,6 +333,9 @@ impl LobbyScreen {
             cheats: None,
             state: None,
             unable: None,
+            gaps: None,
+            notes: Default::default(),
+            opened: Instant::now(),
             facts,
             buttons,
             default: None,
@@ -466,6 +475,29 @@ impl LobbyScreen {
         }
     }
 
+    /// The host's Content gaps as the client last had them (stage L): what
+    /// Messages says about a player's build and items, once for each player
+    /// (see [`facts::BuildNotes`]). Called each frame after
+    /// [`LobbyScreen::update`].
+    pub fn set_gaps(&mut self, gaps: Option<&ContentGaps>) {
+        if gaps != self.gaps.as_ref() {
+            self.gaps = gaps.cloned();
+        }
+        self.say_builds_at(self.opened.elapsed());
+    }
+
+    /// [`LobbyScreen::set_gaps`]'s turn at `now` on the screen's clock (a
+    /// preview or a test gives its own).
+    pub(crate) fn say_builds_at(&mut self, now: std::time::Duration) {
+        let lines = match &self.state {
+            Some(state) => self.notes.lines(now, state, self.gaps.as_ref()),
+            None => return,
+        };
+        for line in lines {
+            self.say(&line);
+        }
+    }
+
     fn turn(&mut self, lobby: Option<&LobbyState>, unable: Option<&str>) {
         if lobby != self.state.as_ref() || unable != self.unable.as_deref() {
             self.take(lobby, unable);
@@ -481,12 +513,22 @@ impl LobbyScreen {
                 self.say(&line);
             }
         }
-        // A player whose own game cannot play it is told once.
-        if unable != self.unable.as_deref()
-            && let Some(why) = unable
-            && lobby.is_none_or(|l| l.me().is_none_or(|m| m.unable.is_none()))
+        // A player whose own game cannot play it is told once, in its own
+        // game's words (the second person); when only the host has said so,
+        // in the host's words. Both read as they are (stage L).
+        let host_said = |state: Option<&LobbyState>| {
+            state
+                .and_then(LobbyState::me)
+                .and_then(|me| me.unable.clone())
+        };
+        if let Some(why) = unable {
+            if unable != self.unable.as_deref() {
+                self.say(why);
+            }
+        } else if let Some(why) = host_said(lobby)
+            && host_said(self.state.as_ref()).as_ref() != Some(&why)
         {
-            self.say(&format!("Your game cannot play this mission: {why}"));
+            self.say(&why);
         }
         self.state = lobby.cloned();
         self.unable = unable.map(str::to_owned);

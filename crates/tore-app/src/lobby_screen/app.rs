@@ -35,7 +35,7 @@ use crate::quick_mission::Saved;
 use crate::{App, Screen};
 use std::time::{Duration, Instant};
 use tore_session::wire::chat::Receiver;
-use tore_session::wire::messages::{LobbyPhase, kind};
+use tore_session::wire::messages::{ItemKind, LobbyPhase, kind};
 use tore_sim::combat::loadout::Loadout;
 use tore_world::mission::LoadoutSpec;
 
@@ -139,7 +139,21 @@ impl App {
                 screen.say(note);
             }
             screen.update(client.lobby(), client.unable());
+            screen.set_gaps(client.content_gaps());
             screen.set_cheats(client.spec().map(|spec| spec.cheats));
+        }
+        // Stage L: what not every player has, on the page the King or the
+        // player is choosing from.
+        match &self.lobby.page {
+            Some(Page::Creator { .. }) => self
+                .quick
+                .set_gaps(|kind, key| client.gap_refusal(kind, key)),
+            Some(Page::Loadout { .. }) => {
+                if let Some(page) = self.quick.ordnance.as_mut() {
+                    page.set_gaps(|source| client.gap_refusal(ItemKind::Weapon, source));
+                }
+            }
+            None => {}
         }
         // The pages are the only reason to look further.
         if self.lobby.page.is_none() {
@@ -482,6 +496,21 @@ impl App {
         let Some(session) = &mut self.net else {
             return;
         };
+        // Stage L: a weapon not every player has is refused here, in the
+        // host's words, before anything is sent.
+        if let Some(reason) = spec
+            .stations
+            .iter()
+            .filter(|station| station.weapon.ends_with(".JT"))
+            .find_map(|station| {
+                session
+                    .client
+                    .gap_refusal(ItemKind::Weapon, &station.weapon)
+            })
+        {
+            page.message = Some(reason);
+            return;
+        }
         let mission = session.client.spec();
         let checked = AircraftType::load(&*self.theater_resources, aircraft)
             .map_err(|e| e.to_string())
