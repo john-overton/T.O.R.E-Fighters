@@ -538,7 +538,12 @@ closes on that aircraft on purpose. On the first conflict it takes up a heading
 when the other is within 20 degrees of its nose (head-on, as the rules of the
 air have both aircraft turn right). It keeps its pitch and speed, holds that
 heading until 3 s after the last predicted conflict, and never changes side
-while it holds, so it does not flap. Avoidance never overrides missile or gun
+while it holds, so it does not flap. The held heading belongs to the aircraft
+whose conflict set it: once that aircraft is no longer a conflict, a conflict
+with another aircraft sets a new heading, 30 degrees off the current one and
+away from the new aircraft (B4, 2026-10-06: two flightmates that turned right
+together for one head-on aircraft otherwise held that heading against each
+other for half a minute and collided). Avoidance never overrides missile or gun
 defense, an airfield sequence, or a formation procedure (station keeping, a
 join or a rejoin): wingmen in formation are kept apart by their slots.
 

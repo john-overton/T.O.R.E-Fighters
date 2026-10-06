@@ -829,3 +829,35 @@ fn the_sort_clock_and_the_yields_of_the_data_link_leads_round_trip() {
             .all(|y| y.announced)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Traffic avoidance: the held heading and the aircraft that set it.
+
+fn avoidance_host(mission: &mut AiMission) -> MissionOutput {
+    let world: Vec<WorldObject> = mission.actors().iter().map(|a| object(a, 1)).collect();
+    mission
+        .step_with_surface(&world, &|x, z| surface(x, z).height, &surface, TimeOfDay(0))
+        .expect("the mission steps")
+}
+
+#[test]
+fn a_held_avoidance_heading_restores_with_the_aircraft_that_set_it() {
+    // B4b (2026-10-06): `avoiding_from` is coded after `avoiding`. Two
+    // aircraft meeting head-on hold their headings; the twin restored while
+    // they hold must code the same and fly on identically through the pass.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., -6_000.], 0.));
+    let mut other = hornet(2, 0, [0., 6_000., 6_000.], std::f64::consts::PI);
+    other.identity.wing = 2;
+    mission.push(other);
+    let mut held = false;
+    for _ in 0..10 * 120 {
+        avoidance_host(&mut mission);
+        if mission.actor(1).unwrap().avoiding_heading_deg().is_some() {
+            held = true;
+            break;
+        }
+    }
+    assert!(held, "the head-on pair never took up an avoidance heading");
+    step_on(&mut mission.clone(), &mut avoidance_host, 15 * 120);
+}

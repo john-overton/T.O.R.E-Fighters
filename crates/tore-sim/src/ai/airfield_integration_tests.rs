@@ -742,6 +742,60 @@ fn aircraft_meeting_head_on_both_turn_right_and_pass_clear() {
 }
 
 #[test]
+fn a_new_conflict_after_the_first_has_cleared_turns_away_from_the_new_aircraft() {
+    // B4 (2026-10-06): two flightmates that both turned right for one
+    // head-on aircraft held that heading against each other for half a
+    // minute and collided, because a held heading was renewed by any
+    // conflict. The heading belongs to the aircraft that set it; once that
+    // one is clear, a conflict with another sets a new heading, away from it.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., -6_000.], 0.));
+    let speed = mission.actor(1).unwrap().flight().speed;
+    let held = |mission: &AiMission| mission.actor(1).unwrap().avoiding_heading_deg();
+    // A head-on aircraft: the AI turns right.
+    let mut started = false;
+    for tick in 0..10 * 120 {
+        let t = tick as f64 / 120.;
+        let template = mission.actor(1).unwrap();
+        let mut o = object(template, 1);
+        o.id = 20;
+        o.human_controlled = true;
+        o.position = [0., 6_000., 6_000. - speed * t];
+        o.velocity = [0., 0., -speed];
+        o.heading_deg = 180.;
+        step_with(&mut mission, &[o]);
+        if held(&mission).is_some() {
+            started = true;
+            break;
+        }
+    }
+    assert!(started);
+    assert_eq!(held(&mission).map(f64::round), Some(AVOID_TURN_DEG));
+    // That aircraft is gone; another closes from the right, the side the AI
+    // is turning to.
+    let template = mission.actor(1).unwrap();
+    let (position, velocity, yaw) = (
+        template.flight().position,
+        template.flight().velocity,
+        template.flight().yaw.to_degrees(),
+    );
+    let mut o = object(template, 1);
+    o.id = 21;
+    o.human_controlled = true;
+    let right = [yaw.to_radians().cos(), 0., -yaw.to_radians().sin()];
+    o.position = std::array::from_fn(|i| position[i] + 250. * right[i]);
+    o.velocity = std::array::from_fn(|i| velocity[i] - 80. * right[i]);
+    step_with(&mut mission, &[o]);
+    let heading = held(&mission).expect("still avoiding");
+    let away = (yaw - AVOID_TURN_DEG).rem_euclid(360.);
+    let off = ((heading - away + 180.).rem_euclid(360.) - 180.).abs();
+    assert!(
+        off < 2.,
+        "held {heading:.1}, want {away:.1} (away from the new aircraft)"
+    );
+}
+
+#[test]
 fn traffic_avoidance_sees_every_human_flown_aircraft() {
     // The bug bash's traffic avoidance (John, 2026-09-29) with several human
     // pilots: every human-flown aircraft is traffic. The first human flies

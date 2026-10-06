@@ -333,7 +333,8 @@ as such in the specs:
   apart at least; the derivation is in the AI spec.
 - **Traffic avoidance:** 6 s horizon, 300 ft plus half a second of closing
   speed, 150 ft against the aircraft it is attacking, a fixed 30 degree
-  heading change, head-on within 20 degrees, held 3 s after the conflict.
+  heading change, head-on within 20 degrees, held 3 s after the conflict and only while the
+  aircraft that set it is still a conflict (B4b, 2026-10-06).
   Formation wingmen are left to their slots, and missile defense always wins,
   so two aircraft defending at once can still collide (likely the 3 v 3 case
   above).

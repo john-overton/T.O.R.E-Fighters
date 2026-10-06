@@ -349,6 +349,8 @@ pub struct AiActor {
     /// Traffic avoidance in force: the tick it may end and the heading it
     /// holds, in degrees.
     avoiding: Option<(u64, f64)>,
+    /// The aircraft whose conflict set the held avoidance heading.
+    avoiding_from: Option<u32>,
     /// The running takeoff or landing sequence, if any.
     airfield: Option<super::airfield::Sequence>,
     /// Draws for the private return route, separate from decision draws.
@@ -419,6 +421,7 @@ impl AiActor {
             bugged_out: false,
             join_cancelled: false,
             avoiding: None,
+            avoiding_from: None,
             airfield: None,
             route_random: super::DecisionRandom::seeded(setup.seed ^ 0x6c61_6e64_696e_6721),
             pending_threats: Vec::new(),
@@ -568,11 +571,14 @@ impl AiActor {
             self.last_defense.is_some_and(|d| d.motion.is_some()) || self.fire_defending;
         if formation || defending || self.airfield.is_some() || !self.alive {
             self.avoiding = None;
+            self.avoiding_from = None;
             return intent;
         }
         let p = self.flight.position;
         let v = self.flight.velocity;
-        let mut conflict: Option<(f64, [f64; 3])> = None;
+        // Every predicted conflict, and the soonest.
+        let mut conflicts: Vec<(u32, [f64; 3])> = Vec::new();
+        let mut conflict: Option<(f64, u32, [f64; 3])> = None;
         for other in world.iter().filter(|o| {
             o.id != self.id() && o.is_aircraft && o.alive && !o.destroyed && !o.on_ground
         }) {
@@ -597,13 +603,26 @@ impl AiActor {
             } else {
                 AVOID_SEPARATION_FT + AVOID_CLOSURE_S * rv2.sqrt()
             };
-            if miss < safety && conflict.is_none_or(|(best, _)| t < best) {
-                conflict = Some((t, r));
+            if miss < safety {
+                conflicts.push((other.id, r));
+                if conflict.is_none_or(|(best, _, _)| t < best) {
+                    conflict = Some((t, other.id, r));
+                }
             }
         }
         let heading = self.flight.yaw;
-        if let Some((_, r)) = conflict {
-            let target = match self.avoiding {
+        // The heading is held while the aircraft that set it is still a
+        // conflict. Once it is not, a conflict with another aircraft sets a
+        // new heading, away from that one: two aircraft that took up the same
+        // heading to avoid a third must not hold each other on it.
+        let held = self
+            .avoiding_from
+            .and_then(|id| conflicts.iter().find(|(other, _)| *other == id).copied());
+        let pick = held.or(conflict.map(|(_, id, r)| (id, r)));
+        if let Some((from, r)) = pick {
+            let kept = self.avoiding.filter(|_| held.is_some());
+            self.avoiding_from = Some(from);
+            let target = match kept {
                 Some((_, target)) => target,
                 None => {
                     // Bearing of the other aircraft off our nose, positive right.
@@ -621,6 +640,7 @@ impl AiActor {
             self.avoiding = Some((tick + AVOID_HOLD_TICKS, target));
         } else if self.avoiding.is_some_and(|(until, _)| tick >= until) {
             self.avoiding = None;
+            self.avoiding_from = None;
         }
         if let Some((_, target)) = self.avoiding {
             intent.heading_deg = target;

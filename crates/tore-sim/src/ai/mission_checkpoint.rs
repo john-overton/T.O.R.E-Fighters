@@ -220,6 +220,7 @@ impl Checkpoint for AiActor {
             bugged_out,
             join_cancelled,
             avoiding,
+            avoiding_from,
             airfield,
             route_random,
             pending_threats,
@@ -267,6 +268,7 @@ impl Checkpoint for AiActor {
         bugged_out.save(s, None)?;
         join_cancelled.save(s, None)?;
         avoiding.save(s, None)?;
+        avoiding_from.save(s, None)?;
         airfield.save(s, None)?;
         route_random.save(s, None)?;
         pending_threats.save(s, None)?;
@@ -331,6 +333,7 @@ impl Checkpoint for AiActor {
             bugged_out: Checkpoint::load(l, None)?,
             join_cancelled: Checkpoint::load(l, None)?,
             avoiding: Checkpoint::load(l, None)?,
+            avoiding_from: Checkpoint::load(l, None)?,
             airfield: Checkpoint::load(l, None)?,
             route_random: Checkpoint::load(l, None)?,
             pending_threats: Checkpoint::load(l, None)?,
