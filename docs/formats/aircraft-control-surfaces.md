@@ -470,3 +470,39 @@ attachments. Preserve known static geometry/alignment repairs when constructing
 the reference body, while testing new movement independently. Source evidence
 is in `f14-geometry.json`, original atlas inspections and the shared ignored
 audit directory. Corrected motion is an [agent fit](../spec/aircraft-animation.md#f-14d-attachment-corrections).
+
+## A-4E source mechanisms and remaining gap
+
+Exact A4E.PT uses A4.SH, SHA-256
+`ee98333ab0fc419e0fb2abdd31e57ae24e672d6e4d919790c53b4bfb62d4053b`,
+with 24,506 CODE bytes and 237 neutral faces, at one-third foot per unit.
+Its original _A4.PIC atlas is 256x449. Pitch rear seams are diagonal; source
+rudder lower roots have distinct X=±1 positions while their upper root and
+trailing points coincide. Whole-panel rotation about a central line had moved
+those thick lower attachments.
+
+Each negative flap branch replaces two trailing skins while adding six
+forward-wing strips and six trailing/cap faces. The forward strips overlap
+unchanged broad wing skins with little exact vertex correspondence. Their
+continuous role remains unknown. Trailing down endpoints reach Y=-23,Z=-12;
+the lower front also shifts from Y=-18 to -17. Source UV changes are local
+one/two-pixel adjustments, not a jump across unrelated atlas regions. Moving
+caps and static sidewalls are distinct original groups. Their reconciliation
+and the explicit lower-front discrepancy belong in the
+[A-4E fit](../spec/aircraft-animation.md#a-4e-attachment-corrections).
+
+Gear art distinguishes complete main cards, nose wheel/shaft, crossed brace,
+camouflaged doors and plain doors. The original camouflaged door's front upper
+corner is 1.18254 units above the sampled neutral wing upper section; do not
+call it a newly detached animated hinge. Complete deployment reaches Z=-26 at
+the nose, mains -24, while neutral body reaches -10. Brake groups distinguish
+primary leaves, fixed cavity faces and actuator strips with asymmetric body
+ends. Source stowed hooks 0x573f/0x575f have deployed counterparts
+0x56eb/0x56ca with corresponding art; their front edges intersect but the
+source endpoint widths/lengths differ.
+
+Evidence is `a4e-geometry.json`, original atlas inspections and independent
+source-section sweeps in the ignored audit directory. Original continuous
+mechanisms/timing and the forward-strip consumers remain unknown. No original
+module is executed; additional drawing/state-consumer research is the next
+step for those strips.

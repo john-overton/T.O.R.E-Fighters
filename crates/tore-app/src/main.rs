@@ -4,6 +4,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod a10_animation;
 mod a310_animation;
+mod a4e_animation;
 mod a7_animation;
 mod ac130_animation;
 mod additional_animation;

@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, fmt::Write as _, fs, path::Path};
 use tore_formats::{aircraft::AircraftId, shape::Face};
 mod a10;
 mod a310;
+mod a4e;
 mod ac130;
 mod av8;
 mod awacs;
@@ -185,7 +186,8 @@ impl Control {
             Self::Brake
                 if matches!(
                     id,
-                    Id::Su25
+                    Id::A4E
+                        | Id::Su25
                         | Id::A7
                         | Id::F4B
                         | Id::F4J
@@ -311,6 +313,14 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         .get(&airframe.profile.shape)
         .ok_or_else(|| format!("missing {}", airframe.profile.shape))?;
     let raw = tore_formats::shape::Shape::parse(source_bytes)?;
+    let a4e_sources = if id == AircraftId::A4E {
+        Some(a4e::Sources::load(
+            source_bytes,
+            data.get("_A4.PIC").ok_or("missing A4E atlas")?,
+        )?)
+    } else {
+        None
+    };
     let f14_sources = if id == AircraftId::F14 {
         Some(f14::Sources::load(
             source_bytes,
@@ -422,7 +432,8 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     )?;
     let scope = if matches!(
         id,
-        AircraftId::A7
+        AircraftId::A4E
+            | AircraftId::A7
             | AircraftId::Av8
             | AircraftId::A10
             | AircraftId::A310
@@ -491,7 +502,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             values = vec![-1., -0.5, 0., 0.5, 1.];
         }
         if (scope == "reviewed-controls-and-attachments" && matches!(control, Control::Gear))
-            || (id == AircraftId::F14 && matches!(control, Control::Hook))
+            || (matches!(id, AircraftId::F14 | AircraftId::A4E) && matches!(control, Control::Hook))
         {
             values.insert(1, 1e-6);
         }
@@ -626,6 +637,18 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                     *value,
                     (&raw.faces, reference, pose),
                     scale,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &a4e_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                a4e::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
                     metric,
                 );
             }
@@ -966,6 +989,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     }
     if id == AircraftId::Su27 {
         failures.extend(su27::combinations(&airframe, &neutral, out)?);
+    }
+    if let Some(source) = &a4e_sources {
+        failures.extend(a4e::combinations(source, &airframe, &neutral, out)?);
     }
     if let Some(source) = &f14_sources {
         failures.extend(f14::combinations(source, &airframe, &neutral, out)?);

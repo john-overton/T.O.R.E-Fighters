@@ -477,7 +477,9 @@ mesh sweep. Multi-axis artifacts are required separately, including both V-22
 conversion/rotor and flaperon sweeps and all 125 Rafale control combinations.
 F-14 isolated controls use the existing unswept 400-knot threshold; separate
 coupled sweep/flap/roll and pitch/roll grids cover its operational interactions.
-Its hook also samples positive near-stow before hiding. Exact selection keys
+Its hook also samples positive near-stow before hiding. A-4E adds 202 samples
+each for gear, hook and brake, plus coupled flap/roll and pitch/roll checks.
+The original stowed A-4E hook stays visible at zero. Exact selection keys
 keep F/A-XX separate from the F22N source donor in reports and scenario matching.
 
 Run one repaired aircraft before expanding the audit:

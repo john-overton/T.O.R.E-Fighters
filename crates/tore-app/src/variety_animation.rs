@@ -211,7 +211,8 @@ pub fn supported(id: Id) -> bool {
     specification(id).is_some()
         || matches!(
             id,
-            Id::F14
+            Id::A4E
+                | Id::F14
                 | Id::X31
                 | Id::Mig23
                 | Id::F22
@@ -233,6 +234,7 @@ struct Group {
     closed: bool,
 }
 enum SpecificRig {
+    A4E(crate::a4e_animation::Rig),
     A7(crate::a7_animation::Rig),
     A10(crate::a10_animation::Rig),
     Av8(crate::av8_animation::Rig),
@@ -274,6 +276,10 @@ impl Rig {
         // while retaining their established source scale and simulation adapter.
         let scale = tore_sim::combat::debris::scale(id) as f32;
         match id {
+            Id::A4E => {
+                let (rig, shape) = crate::a4e_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(id, scale, SpecificRig::A4E(rig), shape));
+            }
             Id::F14 => {
                 let (rig, shape) = crate::f14_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(id, scale, SpecificRig::F14(rig), shape));
@@ -603,7 +609,8 @@ impl Rig {
                 SpecificRig::A7(_) => crate::a7_animation::flame(address),
                 SpecificRig::A10(_) => crate::a10_animation::flame(address),
                 SpecificRig::Av8(_) => crate::av8_animation::flame(address),
-                SpecificRig::Awacs(_)
+                SpecificRig::A4E(_)
+                | SpecificRig::Awacs(_)
                 | SpecificRig::Il76(_)
                 | SpecificRig::E2(_)
                 | SpecificRig::B747(_) => false,
@@ -656,6 +663,7 @@ impl Rig {
     fn animate_devices(&self, source: &Face, state: &State) -> Option<Face> {
         if let Some(rig) = &self.specific {
             return match rig {
+                SpecificRig::A4E(rig) => rig.animate(source, state),
                 SpecificRig::A7(rig) => rig.animate(source, state),
                 SpecificRig::A10(rig) => rig.animate(source, state),
                 SpecificRig::Av8(rig) => rig.animate(source, state),

@@ -8,7 +8,7 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in twelve aircraft (see the [roster guide](aircraft-import.md)) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
+The M0 environment supports the M1a menu slice, the M1b renderer across all 16 theaters, and M1c free flight in 37 selectable profiles (36 retail identities and the F/A-XX concept) (see the [roster guide](aircraft-import.md)) plus a development weapons range. M0's full title census, salvage inventory, parity specification, and AI VM decision remain open.
 
 | Component | Choice | Purpose |
 | --- | --- | --- |
@@ -4893,3 +4893,24 @@ and stays on `performance` for John's review before a merge.
 A separate render thread, parallel GPU encoding, mission-load workers and
 threaded projectiles are outside this pass. GPU-side work remains a separate
 decision; no pixel-changing shortcut is implied by a CPU speed-up.
+
+
+## Aircraft pose preparation and validation
+
+`Airframe::animation_faces` exposes the clean exterior geometry used before
+camera culling and material rendering. The specific-rig registry prepares each
+reviewed source shape once, then performs per-state face preparation and
+animation. Preparation can emit multiple faces for bay lining, rudder cuts or
+concept split leaves. Already posed leaves are not animated twice. Existing
+source scales and imported F-14 hook replacement stay in the shared loading path.
+Propeller, rotor and player-directed gun overlays follow the individual rig.
+This presentation dispatch is independent of flight-adapter selection.
+
+The CPU `--animation-probe` uses that same path with independent source/atlas
+witnesses, dense device travel and coupled-control grids. Source endpoint art,
+attachments, rigid assemblies and finite geometry have distinct gates. Its
+selection key keeps F/A-XX distinct from its F22N donor. Generated geometry and
+pictures remain local. The [aircraft import guide](aircraft-import.md) describes
+the workflow; the [fleet audit](baselines/aircraft-animations.md) records bounded
+acceptance and remaining source gaps. These probes do not replace GPU, human
+handling or retail-runtime comparison.

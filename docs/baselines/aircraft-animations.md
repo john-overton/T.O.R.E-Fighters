@@ -12,8 +12,8 @@ Implementation audit, 2026-10-05. John requested aircraft-by-aircraft headless
 animation checks after observing a detached A-7 rudder and missing control
 surfaces. This audit uses the actual clean drawing transforms through
 `Airframe::animation_faces`; it does not infer animation correctness from flight
-stability, imported branch counts, or creator launch tests. Full validation is
-on hold while this per-aircraft review is in progress.
+stability, imported branch counts, or creator launch tests. The individual CPU pose review is complete for all 37 profiles. Broader
+repository validation follows this review; results are recorded below.
 
 ## Method
 
@@ -379,6 +379,32 @@ The new runtime preserves source scale, existing sweep/vapor mapping and donated
 hook art. Body-section hulls are not full closed-volume collision proof, and
 GPU appearance and retail comparison remain unvalidated.
 
+## A-4E results
+
+Exact `a4e-checked` passes all seven required controls, 18 focused tests and
+all 202 gear, 202 hook and 202 brake samples, plus 25 flap/roll and 25 pitch/roll
+combinations. All 17 control/device sheets, 22 selected rows from each dense
+device sweep and both combined sheets were reviewed by the runtime and witness
+owners. All 734 OBJ/PPM outputs are byte-identical to the first reviewed
+geometry. The first pitch failure was a witness role-ordering mistake: it
+incorrectly treated a moving right-tail panel as fixed. Explicit role lists
+and a synthetic regression correct that mistake without changing valid geometry.
+
+Maximum single-control attachment error is 0.000000779 feet and paired-skin
+gap 0.000001006 feet. Minimum full main-card separation is 1.0010751 feet.
+There are no newly introduced planar crossings. Independent source review
+checks 642 opaque main texel centers per side and 4,488 complete nose assembly
+triangle samples. The existing 26/3-foot clearance includes the lowest nose
+wheel. Actual rigid wheel/brace assemblies, separate doors, brake linkages and
+original stowed/deployed hook endpoints remain coherent through the sweeps.
+
+Known limits remain explicit: forward flap-branch strips are unlocated as
+continuous devices, lower flap-front position differs from the source down
+endpoint by one source unit, and camouflaged door roots retain original
+clearance up to 1.18254 source units. Mechanisms/timing are fitted. This pass
+does not claim textured GPU, original-runtime or combined steering acceptance.
+Static unreviewed device rows do not establish original absence.
+
 ## Fixed rotorcraft gear state
 
 The actual loaded Apache and Chinook had visible fixed wheels but started with
@@ -391,47 +417,59 @@ The Apache/Chinook animation battery now checks loaded state and commands
 before selecting artificial mesh poses. The rule is explicitly fitted in the
 [variety flight contract](../spec/variety-flight.md).
 
-## Focused checkpoint checks
+## Final validation
 
-The thirty-six-profile set passed 234 Rust tests selected by `animation`, all eleven
-powered-flight tests, and an app-only build. App/simulation Clippy with warnings
-denied, formatting and documentation consistency passed. The shared dispatcher
-retains propeller, rotor and manually aimed gun overlays after specific rigs.
+All 37 `flight-animation-*` scenarios pass in
+`.local/animation-battery/20261005-204805-all-thirty-seven/summary.md`.
+The focused suite reached 234 animation tests at the 36-profile checkpoint;
+A-4E then added eighteen focused runtime/witness tests. The completed workspace
+run passed 3,181 Rust tests, with 42 ignored. All 239 Python tests passed.
+Workspace formatting, Clippy with warnings denied and build passed. Source and
+app/extractor binary asset checks and documentation consistency passed.
 
-All thirty-six `flight-animation-*` scenarios pass in
-`.local/animation-battery/20261005-202140-thirty-six-finite/summary.md`.
-Forty-one focused Python report/selection tests passed. The battery requires
-reviewed attachment scope and passing per-control gates, plus complete combined
-rotor, flaperon, nozzle and source-material artifacts where applicable. A
-motion-only report cannot pass as reviewed geometry. Combined-pose rejection
-also explicitly checks finite coordinates/normals; synthetic NaN/infinity
-regressions protect that gate. Stdout matching requires exact identity and
-literal zero failures, so a count of ten cannot match zero. Apache/Chinook scenarios
-also verify actual initialized fixed-gear state and ignored retraction demands.
+The full run initially rejected two old aircraft-vertex hashes in the synthetic
+combat scene. Reviewed Hornet/Rafale gear and surface changes explain those
+outputs, including retained Hornet gear art at stow. Their two reference hashes
+were refreshed; combat geometry, camera and ejection hashes remain unchanged.
+The targeted rendering regression and subsequent full workspace run pass.
 
-These checks do not accept queued profiles or replace the deferred full
-workspace, full battery, creator, GPU and retail-runtime validation.
+Combined-pose gates now explicitly reject nonfinite coordinates and normals;
+synthetic NaN/infinity regressions protect them. Scenario stdout requires exact
+identity and literal zero failures, so ten cannot match zero. Required combined
+artifacts and their complete sample counts are checked separately. Fixed Apache
+and Chinook gear state is verified before the diagnostic overrides mesh poses.
 
-## Remaining aircraft
+A wrapped A-4E GPU smoke run with half-deployed gear/flaps/brake/hook and mixed
+controls presented and captured successfully. The capture
+`.local/animation-audit/a4e-gpu-smoke.ppm` was inspected. It confirms presentation
+and readback for that scene, not full textured acceptance of every aircraft or
+pose. The optional Vulkan validation layer was unavailable on this host.
+All windowed execution used `tools/agent-run.sh` on an isolated workspace.
+
+These results are from Linux. Physical controller, human handling, LAN sessions,
+other-platform runs, full mission/creator batteries and retail-runtime comparison
+were not performed in this animation pass. Body-section containment is bounded
+source evidence, not a full volumetric collision test. Explicit device/source
+gaps in the per-aircraft contracts remain outside this acceptance.
+
+## Fleet coverage
 
 The code inventory covers all 37 playable profiles in the ignored local report
 `.local/animation-audit/mapping-inventory.md`. At the start of this pass all 23
-variety imports lacked pitch, roll and flap mappings. All 23 variety profiles and thirteen older profiles have bounded geometry acceptance
-in the table below, with
+variety imports lacked pitch, roll and flap mappings. All 37 profiles have bounded geometry acceptance in the table below, with
 explicit device gaps such as AC-130 hook geometry and helicopter blade feathering. Every profile has a baseline
-motion survey; the table below records which still needs individual attachment
-and pose acceptance. Existing transforms are not accepted merely because they
-are present.
+motion survey followed by individual attachment and pose acceptance. Existing
+transforms were not accepted merely because they were present.
 
 Review order: A-7; F-4B/J/E/G; F-15/F-16/F-104/MiG-17/A-10; transports, AWACS and
 airliners; VTOL/tiltrotor/helicopters; then the earlier fighter rigs. Shared shape
 families may share source analysis, while each exact aircraft keeps its own
-capability and result. Other aircraft remain in the queue below.
+capability and result. The completed per-aircraft coverage is recorded below.
 
 ## Per-aircraft progress
 
-This table is an audit queue, not a blanket animation pass. A motion-only probe
-does not accept unreviewed hinge geometry.
+This table records bounded geometry acceptance and its limits. It is not a
+claim of complete original animation behavior or textured GPU acceptance.
 
 | Aircraft | Measured baseline | Current status |
 | --- | --- | --- |
@@ -461,7 +499,7 @@ does not accept unreviewed hinge geometry.
 | `f18` | Motion survey captured | Controls, own attachments and gear separation reviewed; mechanics fitted |
 | `rafale` | Motion survey captured; hinges unreviewed | Controls, own attachments and gear separation reviewed; mechanics fitted |
 | `f14` | Wrong roll sign and detached nose brace/panel | Controls, rigid gear, opaque hook stow and 150 coupled poses reviewed |
-| `a4e` | Motion survey captured; hinges unreviewed | Queued |
+| `a4e` | Reversed roll, detached roots and shared device pivots | Controls, dense gear/hook/brake and coupled poses reviewed; forward-strip mapping unresolved |
 | `x31` | Missing upper skins, wrong roll and detached gear attachments | Controls, complete gear and 25 prototype-vector poses reviewed |
 | `mig29` | Motion survey captured; hinges unreviewed | Canted rudders, independent controls and separated aft-fold gear reviewed; mechanics fitted |
 | `su27` | Motion survey captured; hinges unreviewed | Flaperons/slats, canted rudders and anchored gear brace reviewed; mechanics fitted |

@@ -249,11 +249,20 @@ Attitude rotates as an orthonormal basis and is interpolated in that basis. The 
 
 ## Exterior animations
 
-The seven added aircraft now have fitted moving flaps, pitch/roll/yaw surfaces,
-rigid gear and continuous airbrakes. MiG-23 wings sweep visually with speed.
-F-22 main bays open with O or an armed guided-weapon designation; this does
-not delay firing. Its exterior canopy is amber and 75% opaque; cockpit rendering stays clear.
-See the [animation contract](spec/aircraft-animation.md) for fits and limits.
+All 37 playable profiles have bounded headless checks for their applicable
+control surfaces and devices. Gear wheels, braces and doors use separate
+reviewed attachments; retractable hooks, vector nozzles, nacelles and rotor
+cyclic motion have aircraft-specific fits. Remaining source gaps include the
+AC-130 hook, individual rotor feathering and A-4E forward flap-branch strips.
+See the [fleet audit](baselines/aircraft-animations.md) and
+[animation contract](spec/aircraft-animation.md) for coverage and limits.
+
+MiG-23 and F-14 wings sweep visually with speed and flap demand. F-22 bays open
+with O or automatically on a ready bay-weapon trigger. Automatic release waits
+for the doors, about one second, then they close one second after release;
+designating a target alone does not open them. Its exterior canopy remains
+amber and 75% opaque, with clear cockpit rendering. These are the existing
+[fitted bay and canopy rules](spec/aircraft-animation.md#f-22-main-weapon-bays).
 
 
 Use **6** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; the rudder keys move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).

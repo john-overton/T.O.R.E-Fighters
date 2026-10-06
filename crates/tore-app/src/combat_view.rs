@@ -708,15 +708,18 @@ pub(crate) mod render_hash_tests {
     /// Batches per model, fixture targets with the ownship, combat geometry
     /// beside loaded models, camera poses and ejected pilots.
     const HASHES: [u64; 5] = [
-        0x70a8_9dbd_8b33_c9ff,
-        0xdd1a_67a0_c439_7ced,
+        // Reviewed F/A-18D/Rafale attachment repairs change aircraft vertices,
+        // including the Hornet's retained main-gear art at full stow. Combat,
+        // camera and ejection outputs below are unchanged by that repair.
+        0x6031_e577_f39a_cffe,
+        0x87cb_4458_d06e_7fdc,
         0x2f6c_0a1c_b3b7_f4e5,
         0x7ddb_79bb_1315_bf69,
         0x7e3f_dcdd_a149_201d,
     ];
 
-    /// Where `HASHES` was recorded. The camera poses (`HASHES[3]`) are f64
-    /// angles from trigonometry, whose last bit differs between maths
+    /// Where the retained camera hash (`HASHES[3]`) was recorded. Those f64
+    /// angles come from trigonometry, whose last bit differs between maths
     /// libraries, so, as in tore-sim's golden tests, that hash is compared
     /// only here. The drawn vertices are f32 and match on every CI platform.
     const RECORDED_PLATFORM: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));

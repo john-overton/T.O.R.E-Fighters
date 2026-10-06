@@ -435,3 +435,60 @@ which left a source corner exposed at stow. Deployed source geometry remains
 exact. The donated hook retains its 0.6-radian upward closure around [0,-5,-2];
 flames retain repaired widths and length scaling from Y=-14. No flight forces,
 control bindings or compatibility adapter selection change.
+
+## A-4E attachment corrections
+
+Agent fits, 2026-10-05, exact A4E.PT/A4.SH at one-third foot per unit. Pitch
+uses each actual diagonal rear seam, right [0,-59,7] to [17,-54,7], left
+[-16,-54,7] to [0,-59,7], through -0.30 radians times elevator. Forward tail
+triangles remain fixed. This replaces the old horizontal cut that moved the
+centerline body attachment. Roll retains all front points at Y>=-18 and moves
+shared rear points by -side*0.20 radians around rightward mean axes through
+[side*21,-18,-7], direction [18,side*2,-side]. Rudder retains both lower roots
+[±1,-45,11] and upper [0,-55,27], with common trailing motion through
+0.35 radians around [0,-45,11] along [0,-10,16].
+
+Trailing flaps morph rear points to source Y=-23,Z=-12 and UVs to their own
+down artwork. Keep both original leading edges fixed. The original down lower
+edge moves Y=-18 to -17; keeping -18 is an explicit one-unit discrepancy chosen
+for attachment. Moving caps follow these reconciled endpoints. Separate fixed
+walls retain their neutral-side positions, including old rear corners. All
+eight cap/wall faces appear above zero flap. The additional forward strips in
+the source flap branch have no reviewed continuous mapping and remain omitted,
+not asserted absent. Review neighboring leading-wing drawing records and
+normal/UV ordering before assigning them a mechanism.
+
+Complete main wheel/shaft cards first close forward 90 degrees about X at
+painted pivots [±9,-8.5,-8], during the first half of retraction. In the second
+half, rotate the same rigid assemblies another 90.7422505532 degrees around
+right [-0.0573445974,0.6881783449,0.1720445862], with mirrored Y/Z on the left.
+The final orientation is 115 degrees about right [15,20,-12], mirrored on the
+left. This staged fit avoids the intermediate crossing of a direct fold.
+
+Nose wheel/shaft and crossed brace remain one rigid assembly, closing aft
+100 degrees around [0,27,-8]. Its other painted brace entry bands move within
+the body; they are not separately pinned hinges in this fit. Preserve original
+cross-card distances and nosewheel steering. Doors close only in the final
+quarter of retraction. Camouflaged main doors keep X=±11,Z=-6 edges and turn
+side*(pi-atan(7)); plain doors keep X=±11,Z=-7 and turn side*pi/2. Nose door
+keeps its sloped edge [-1,24,-8] to [-1,42,-9] and closes -pi/2 around that
+axis. Full gear deployment remains exact; hide added gear at zero. The original
+camouflaged door has an upper corner outside the source wing section, a retained
+source clearance rather than a claimed flush seal. Ground clearance remains
+26/3 feet from the complete deployed nose wheel.
+
+Brake leaves retain vertical front edges X=±5,Y=-30,Z=-6..0, closing
+-side*75 degrees. Cavity skins remain fixed while active. Separate actuator
+body ends at Y=-35 stay fixed, while distal ends at Y=-32 follow their leaf,
+retaining each original end-edge width and left-side asymmetry. This is fitted
+telescoping linkage. Full opening is exact; hide the twelve added faces at zero.
+
+The source stowed hook remains visible at zero and morphs toward the original
+deployed counterpart. Both front edges intersect at [0,-277/11,-83/11]. Add a
+collinear marker there for the fixed attachment. Rear corners turn 60 degrees
+times deployment around it, with small endpoint residuals to reach the exact
+original corners. Front endpoints interpolate their angles and radii around
+the marker, retaining a straight edge; marker UV follows its current edge
+coordinate. Both endpoint surfaces/art remain original. Intermediate blade
+shape changes are fitted because the source poses differ in width and length.
+No afterburner geometry or capability is added.

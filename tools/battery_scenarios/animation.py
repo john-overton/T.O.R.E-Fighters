@@ -12,7 +12,7 @@ from battery import Scenario
 # Expand only after independent source attachments and pose sheets are reviewed.
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
-                     "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14")
+                     "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14", "a4e")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -54,6 +54,8 @@ def check_report(work: Path, _output: str) -> list[str]:
         "SU27.PT": {"flaperon-combinations.csv": 26},
         "SU35.PT": {"flap-roll-combinations.csv": 26},
         "MIG21.PT": {"flap-roll-combinations.csv": 26},
+        "A4E.PT": {"dense-gear.csv": 203, "dense-hook.csv": 203, "dense-brake.csv": 203,
+                   "flap-roll-combinations.csv": 26, "pitch-roll-combinations.csv": 26},
         "F14.PT": {"sweep-flap-roll-combinations.csv": 126, "pitch-roll-combinations.csv": 26},
         "MIG23.PT": {"sweep-flap-roll-combinations.csv": 126, "rudder-material-correspondence.csv": 7},
         "F31.PT": {"prototype-vector-combinations.csv": 26},
