@@ -56,6 +56,9 @@ impl Reporting {
         }
         report.mapping = self.facts.mapping;
         report.relayed_kb = u32::try_from(self.facts.relayed_bytes / 1_000).unwrap_or(u32::MAX);
+        // Stage K: the migrations the session resumed through or was lost to.
+        report.migrations = self.facts.migrations;
+        report.failed_migrations = self.facts.failed_migrations;
         report
     }
 }

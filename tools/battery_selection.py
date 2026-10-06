@@ -597,6 +597,12 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/net/observe.rs", ("net-window", "replay-live"), "the observer screen's recording and watch; the window scenario watches a server", windowed=True),
     _r("crates/tore-app/src/net/hosting*", ("net-window",), "the game's host thread; the hosted-game scenario reaches it", windowed=True),
     _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only)"),
+    _r("crates/tore-app/src/net/standby_tests.rs", (), "the game's standby and takeover tests (real time on loopback, cargo test only)"),
+    _r(
+        "crates/tore-app/src/net/standby.rs", ("net-window",),
+        "a joined game's standby and the migration lines (stage K); a windowed game joins and stands by",
+        windowed=True,
+    ),
     _r("crates/tore-app/src/net/join_tests.rs", (), "the join through the master's tests (real time on loopback, cargo test only)"),
     _r("crates/tore-app/src/widgets/*", ("menus-screens", "net-window"), "the multiplayer widget kit; the Direct Connection and Internet Lobby screens draw it (menus-snap-direct*, menus-snap-internet*)", windowed=True),
     _r("crates/tore-app/src/direct_screen/*", ("menus-screens", "net-window"), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),

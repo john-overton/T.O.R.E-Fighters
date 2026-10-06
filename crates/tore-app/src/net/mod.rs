@@ -9,7 +9,8 @@
 //! off the screen's thread) and `settings` (what is remembered). Slice I4 adds
 //! `browse` (the Internet Lobby's list, from the master) and `telemetry` (the
 //! anonymous statistics a game that uses the master may send). Stage F
-//! phase 2 adds `away` (the AI flies an idle player's aircraft).
+//! phase 2 adds `away` (the AI flies an idle player's aircraft); stage K adds
+//! `standby` (a joined game's standby and the migration lines).
 pub mod away;
 pub mod browse;
 pub mod chat;
@@ -26,4 +27,5 @@ pub mod scoreboard;
 pub mod search;
 pub mod session;
 pub mod settings;
+pub mod standby;
 pub mod telemetry;

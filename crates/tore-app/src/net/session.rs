@@ -16,14 +16,27 @@
 //! addresses, the relay when none answers, the 15-second give-up and a line
 //! in Messages for each step ([`MasterTransport`]; `docs/ARCHITECTURE.md`,
 //! "Joining through the master").
+//!
+//! Stage K (slice K7a; docs/ARCHITECTURE.md, "Host migration and rejoin"):
+//! a game joined by address binds a dual-stack socket on the game port when
+//! it is free ([`Join::to`]), its future host socket. A peers router
+//! (`tore_net::peers::Peers`) sits in front of every joined socket: it
+//! answers the host's reach tests and passes the rest to the client. A
+//! joined game that may host runs a standby ([`crate::net::standby`]) and,
+//! when its client says so, takes the game over: the socket goes to a new
+//! hosting thread ([`HostThread::take_over`]), the client resumes with its
+//! own new host over the in-process link, and the keepalive thread stops. A
+//! hosting game whose thread steps down has its socket back and its client
+//! resumes with the game's new host like any other.
 use crate::{
     aircraft::Airframe,
     aircraft_type::AircraftType,
     net::{
         files::{self, DatedLog},
         guns::{self, Guns},
-        hosting::{HostThread, Report},
+        hosting::{self, End, HostThread, Report, Side, TakeoverSetup},
         options::ConnectOptions,
+        standby::{GameStandby, HeldSpec, note_line},
     },
     regen::{self, DeviceRelease, Effects, Motor},
     replay::library::Library,
@@ -35,20 +48,26 @@ use std::{
     net::{SocketAddr, UdpSocket},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
 use tore_formats::aircraft::AircraftId;
+use tore_net::master::candidate::canonical;
 use tore_net::master::join::{JoinEvent, Joiner, RelayState};
+use tore_net::master::local::{host_candidates, own_address_toward};
 use tore_net::master::{
     JOIN_GIVE_UP, MappingType, Path as JoinedPath, RACE_BEFORE_RELAY, is_relayed,
 };
+use tore_net::peers::{Peers, Route};
 use tore_net::{
-    CloseReason, Datagrams, Entropy, Keepalive, KeepaliveConfig, LinkEnd, RealClock, ServerSocket,
+    CloseReason, DEFAULT_PORT, Datagrams, Entropy, Keepalive, KeepaliveConfig, LINK_ADDRESS,
+    LinkEnd, Listen, RealClock, ServerSocket,
 };
 use tore_session::{
     BuildId, Client, ClientConfig, ClientEvent, ClientFrame, ClientPhase, Controls,
-    host::content::GameContent, wire::events::WireEvent,
+    client::candidate::CandidateSettings,
+    host::{Resumption, content::GameContent},
+    wire::events::WireEvent,
 };
 use tore_sim::attitude::{Basis, Vector};
 use tore_sim::combat::countermeasures::Release;
@@ -199,11 +218,33 @@ type Sink = Rc<RefCell<Option<WorldResult<Built>>>>;
 /// in-process link to the host this game runs itself, or the socket a join
 /// through the master was introduced on.
 pub enum Transport {
+    /// A plain socket of one family (before stage K a join by address; the
+    /// tests still join on one).
+    #[cfg_attr(not(test), allow(dead_code))]
     Udp(UdpSocket),
     Link(LinkEnd),
     /// A join through the Internet Lobby (slices I4 and J5, with J2's joiner
     /// and J3's relay).
     Internet(Box<MasterTransport>),
+    /// A join by address on a socket that can host the game later (stage
+    /// K): dual-stack, on the game port when it was free.
+    Joined(ServerSocket),
+    /// A game that took the game over (stage K): its own host over the
+    /// link, and the old host on the socket the hosting thread now reads.
+    Hosted(Box<Hosted>),
+    /// Nothing: a takeover could not keep the socket. Sends are dropped.
+    Gone,
+}
+
+/// The transport of a game that took the game over (stage K, slice K7a):
+/// its client joins its own new host over the link and keeps its old
+/// connection a while on the socket, which the hosting thread reads, the
+/// old host's datagrams coming to the [`Side`].
+pub struct Hosted {
+    link: LinkEnd,
+    /// Another handle to the socket, to send to the old host.
+    socket: ServerSocket,
+    side: Arc<Side>,
 }
 
 /// How a join through the Internet Lobby may reach the host, as `tore-bot
@@ -357,6 +398,7 @@ impl MasterTransport {
         ThroughFacts {
             mapping: self.joiner.mapping(),
             relayed_bytes: relay.bytes_in + relay.bytes_out,
+            ..ThroughFacts::default()
         }
     }
 }
@@ -368,6 +410,10 @@ pub struct ThroughFacts {
     pub mapping: MappingType,
     /// The game's bytes through the relay, both ways.
     pub relayed_bytes: u64,
+    /// Host migrations the session resumed through, and those it was lost
+    /// to (stage K).
+    pub migrations: u8,
+    pub failed_migrations: u8,
 }
 
 impl Default for ThroughFacts {
@@ -375,15 +421,26 @@ impl Default for ThroughFacts {
         Self {
             mapping: MappingType::Unknown,
             relayed_bytes: 0,
+            migrations: 0,
+            failed_migrations: 0,
         }
     }
 }
 
 impl Datagrams for Transport {
     fn send_datagram(&mut self, to: SocketAddr, datagram: &[u8]) -> io::Result<()> {
+        // A hosting game's own player, whose host steps down, still names
+        // the link for a moment: nothing goes there over a socket.
+        if to == LINK_ADDRESS && !matches!(self, Self::Link(_) | Self::Hosted(_)) {
+            return Ok(());
+        }
         match self {
             Self::Udp(socket) => socket.send_datagram(to, datagram),
             Self::Link(link) => link.send_datagram(to, datagram),
+            Self::Joined(socket) => socket.send_datagram(to, datagram),
+            Self::Hosted(hosted) if to == LINK_ADDRESS => hosted.link.send_datagram(to, datagram),
+            Self::Hosted(hosted) => hosted.socket.send_datagram(to, datagram),
+            Self::Gone => Ok(()),
             Self::Internet(t) => {
                 // The relay only: nothing goes to the host's own addresses,
                 // so the race cannot win on a machine where every path works.
@@ -405,6 +462,39 @@ impl Datagrams for Transport {
             Self::Internet(t) => {
                 let now = t.now;
                 t.joiner.over(&mut t.socket, now).recv_datagram(buf)
+            }
+            Self::Joined(socket) => Ok(socket
+                .recv_datagram(buf)?
+                .map(|(length, from)| (length, canonical(from)))),
+            Self::Hosted(hosted) => match hosted.link.recv_datagram(buf)? {
+                Some(received) => Ok(Some(received)),
+                None => Ok(hosted.side.pop(buf)),
+            },
+            Self::Gone => Ok(None),
+        }
+    }
+}
+
+/// A joined socket seen through its peers router: what the router takes
+/// (reach tests, what only a host receives) never reaches the client.
+struct ThroughPeers<'a> {
+    socket: &'a mut Transport,
+    peers: &'a mut Peers,
+    now: Duration,
+}
+
+impl Datagrams for ThroughPeers<'_> {
+    fn send_datagram(&mut self, to: SocketAddr, datagram: &[u8]) -> io::Result<()> {
+        self.socket.send_datagram(to, datagram)
+    }
+
+    fn recv_datagram(&mut self, buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+        loop {
+            let Some((length, from)) = self.socket.recv_datagram(buf)? else {
+                return Ok(None);
+            };
+            if self.peers.route(self.now, from, &buf[..length]) == Route::Client {
+                return Ok(Some((length, from)));
             }
         }
     }
@@ -463,8 +553,12 @@ impl KeptAlive {
     }
 
     fn start(&mut self, client: &Client, transport: &Transport) {
-        // Over the link (the hosting game's own connection) there is none.
-        if matches!(transport, Transport::Link(_)) {
+        // Over the link (the hosting game's own connection, a game that
+        // took over included) there is none.
+        if matches!(
+            transport,
+            Transport::Link(_) | Transport::Hosted(_) | Transport::Gone
+        ) {
             return;
         }
         let Some(datagram) = client.keepalive_datagram() else {
@@ -473,6 +567,9 @@ impl KeptAlive {
         let (host, config) = (client.server(), self.config);
         let started = match transport {
             Transport::Udp(socket) => socket
+                .try_clone()
+                .and_then(|socket| Keepalive::start(socket, host, datagram, config)),
+            Transport::Joined(socket) => socket
                 .try_clone()
                 .and_then(|socket| Keepalive::start(socket, host, datagram, config)),
             // A join through the master: a clone of its socket, and through
@@ -488,7 +585,7 @@ impl KeptAlive {
                     None => Err(io::Error::other("the relay's channel is not open")),
                 }
             }),
-            Transport::Link(_) => return,
+            Transport::Link(_) | Transport::Hosted(_) | Transport::Gone => return,
         };
         match started {
             Ok(thread) => {
@@ -546,23 +643,33 @@ impl Join {
 
     /// A join to an address already known (a game the Direct Connection
     /// screen found, or an address its lookup reached): a socket opened,
-    /// nothing looked up.
+    /// nothing looked up. Since stage K the socket is the game's future
+    /// host socket: dual-stack, on the game port when it is free (agent
+    /// decision: the default game port, 26900, which a game hosts on unless
+    /// told otherwise), on any port otherwise.
     pub fn to(
         server: SocketAddr,
         callsign: &str,
         password: &str,
         label: &str,
     ) -> Result<Self, String> {
-        let local: SocketAddr = if server.is_ipv4() {
-            ([0, 0, 0, 0], 0).into()
-        } else {
-            "[::]:0".parse().expect("an address")
-        };
-        let socket =
-            tore_net::bind_udp(local).map_err(|error| format!("Cannot open a socket: {error}"))?;
+        Self::to_from(server, callsign, password, label, DEFAULT_PORT)
+    }
+
+    /// [`Join::to`] from `port` when it is free (0 for any).
+    pub fn to_from(
+        server: SocketAddr,
+        callsign: &str,
+        password: &str,
+        label: &str,
+        port: u16,
+    ) -> Result<Self, String> {
+        let socket = ServerSocket::bind(Listen::Any, port)
+            .or_else(|_| ServerSocket::bind(Listen::Any, 0))
+            .map_err(|error| format!("Cannot open a socket: {error}"))?;
         Ok(Self {
             server,
-            transport: Transport::Udp(socket),
+            transport: Transport::Joined(socket),
             callsign: callsign.to_owned(),
             slot: None,
             password: password.to_owned(),
@@ -635,6 +742,24 @@ pub struct NetSession {
     /// the relay was refused or closed): the words the player reads instead
     /// of the client's.
     ending: Option<String>,
+    /// Stage K: the peers router in front of a joined socket.
+    peers: Peers,
+    /// The game's standby, while it is a player that may host.
+    standby: Option<GameStandby>,
+    /// The mission the client last built, which the standby builds.
+    held: HeldSpec,
+    /// The player's "Let my game take over hosting" switch (on by default;
+    /// its screen is slice K7b's).
+    may_host: bool,
+    /// The standby could not be started; the game carries on without one.
+    standby_failed: bool,
+    /// The client has been told its candidates for this socket.
+    candidate_set: bool,
+    /// The data folder, for the remembered port-mapping setting.
+    data: PathBuf,
+    /// A join through the master's facts, kept after a takeover took its
+    /// socket.
+    through_last: Option<ThroughFacts>,
 }
 
 /// What a session keeps to start its client again (slice J5).
@@ -680,6 +805,7 @@ fn equip(
     log: &Rc<RefCell<DatedLog>>,
     sink: &Sink,
     spec: &Rc<RefCell<Option<MissionSpec>>>,
+    held: &HeldSpec,
     resources: &Arc<BTreeMap<String, Vec<u8>>>,
 ) -> Option<PathBuf> {
     let mut capture = None;
@@ -694,8 +820,13 @@ fn equip(
     }
     client.set_diagnostics(Box::new(SharedLog(Rc::clone(log))));
     let (map, kept, spec_for_rebuild) = (Arc::clone(resources), Rc::clone(sink), Rc::clone(spec));
+    let held = Arc::clone(held);
     client.set_mission_builder(Box::new(move |spec, reads: &dyn ResourceSource| {
         *spec_for_rebuild.borrow_mut() = Some(spec.clone());
+        // The standby builds the flight the player holds (stage K).
+        *held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(spec.clone());
         // The game's own build for the screens, then the session's: a
         // failure of either is the mission's.
         *kept.borrow_mut() = Some(build_mission(spec, &map));
@@ -778,7 +909,16 @@ impl NetSession {
         let log = Rc::new(RefCell::new(DatedLog::new(data.join(files::LOG_FOLDER))));
         let sink: Sink = Rc::new(RefCell::new(None));
         let spec_kept: Rc<RefCell<Option<MissionSpec>>> = Rc::new(RefCell::new(None));
-        let capture = equip(&mut client, &again, &log, &sink, &spec_kept, &resources);
+        let held: HeldSpec = Arc::new(Mutex::new(None));
+        let capture = equip(
+            &mut client,
+            &again,
+            &log,
+            &sink,
+            &spec_kept,
+            &held,
+            &resources,
+        );
         Ok(Self {
             client,
             socket,
@@ -809,6 +949,14 @@ impl NetSession {
             log,
             connected_at: None,
             ending: None,
+            peers: Peers::new(tore_session::wire::PROTOCOL_VERSION, Entropy::System),
+            standby: None,
+            held,
+            may_host: true,
+            standby_failed: false,
+            candidate_set: false,
+            data: data.to_owned(),
+            through_last: None,
         })
     }
 
@@ -913,10 +1061,14 @@ impl NetSession {
     /// What a join through the Internet Lobby tells the player's Report;
     /// `None` for any other join.
     pub fn through_facts(&self) -> Option<ThroughFacts> {
-        match &self.socket {
-            Transport::Internet(t) => Some(t.facts()),
-            _ => None,
-        }
+        let mut facts = match &self.socket {
+            Transport::Internet(t) => t.facts(),
+            _ => self.through_last?,
+        };
+        let counts = self.client.migration_counts();
+        facts.migrations = u8::try_from(counts.resumed).unwrap_or(u8::MAX);
+        facts.failed_migrations = u8::try_from(counts.failed).unwrap_or(u8::MAX);
+        Some(facts)
     }
 
     /// From the session's start to the host accepting the join, once it has.
@@ -1051,8 +1203,10 @@ impl NetSession {
             &self.log,
             &self.sink,
             &self.spec,
+            &self.held,
             &self.resources,
         );
+        self.candidate_set = false;
         log::info!(
             "Network: the relay is open; joining {} through it at {address}",
             self.again.label
@@ -1068,7 +1222,7 @@ impl NetSession {
     /// to Messages ("Connected through the relay.").
     fn connected(&mut self, now: Duration) {
         self.connected_at = Some(now);
-        if matches!(self.socket, Transport::Link(_)) {
+        if matches!(self.socket, Transport::Link(_) | Transport::Hosted(_)) {
             return;
         }
         let path = self.client.path();
@@ -1092,22 +1246,25 @@ impl NetSession {
     /// Receives, runs what is due with `controls`, and sends. The session's
     /// events collect for [`NetSession::take_events`].
     pub fn pump(&mut self, controls: &Controls) {
-        if let Some(hosting) = &mut self.hosting {
-            for report in hosting.poll() {
-                if let Report::Ended(end) = report
-                    && let Some(text) = end.failure()
-                {
-                    self.host_failure.get_or_insert(text);
-                }
-            }
-        }
         let now = self.clock.now();
+        self.follow_hosting(now);
         if let Transport::Internet(t) = &mut self.socket {
             t.now = now;
+            self.through_last = Some(t.facts());
         }
         self.trigger = self.fire.turn(&controls.commands, controls.trigger);
-        let _ = self.client.receive_from(now, &mut self.socket);
+        if self.routed() {
+            let mut over = ThroughPeers {
+                socket: &mut self.socket,
+                peers: &mut self.peers,
+                now,
+            };
+            let _ = self.client.receive_from(now, &mut over);
+        } else {
+            let _ = self.client.receive_from(now, &mut self.socket);
+        }
         self.client.update(now, controls);
+        self.migrate(now);
         let _ = self.client.transmit(&mut self.socket);
         // A join through the master: the race, the relay, the give-up. It
         // may start the client again, before its events are read.
@@ -1129,6 +1286,293 @@ impl NetSession {
             .is_some_and(|at| now.saturating_sub(at) > LEAVE_GRACE)
         {
             self.client.disconnect(now);
+        }
+    }
+
+    /// The player's "Let my game take over hosting" switch (stage K; on by
+    /// default). Off, the game tells the host it may not host and runs no
+    /// standby. Its screen is slice K7b's.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn set_may_host(&mut self, on: bool) {
+        if self.may_host != on {
+            self.may_host = on;
+            self.candidate_set = false;
+            if !on {
+                self.standby = None;
+            }
+        }
+    }
+
+    /// Whether the game runs a standby now (stage K).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn standing_by(&self) -> bool {
+        self.standby.is_some()
+    }
+
+    /// Whether the transport is a joined socket, read through the peers
+    /// router.
+    fn routed(&self) -> bool {
+        matches!(
+            self.socket,
+            Transport::Udp(_) | Transport::Joined(_) | Transport::Internet(_)
+        )
+    }
+
+    /// Whether this game could take the game over: a socket that can host,
+    /// not reached through the relay (a relayed game is never a host, John,
+    /// 2026-09-28), and the player's switch on.
+    fn may_take_over(&self) -> bool {
+        self.may_host
+            && match &self.socket {
+                Transport::Joined(_) => true,
+                Transport::Internet(_) => !is_relayed(self.client.server()),
+                _ => false,
+            }
+    }
+
+    /// A line of the net log, as the client's own lines are.
+    fn net_line(&self, kind: &str, text: &str) {
+        let line = format!("{:.3}\t{kind}\t{text}\n", self.now().as_secs_f64());
+        let _ = io::Write::write_all(&mut *self.log.borrow_mut(), line.as_bytes());
+    }
+
+    /// The hosting thread's reports (stage K added the takeover and the
+    /// thread's ends that leave the game in the session): a failure for the
+    /// player; the takeover's tick, where the game's own player resumes; the
+    /// socket back after a step-down or a failed takeover.
+    fn follow_hosting(&mut self, now: Duration) {
+        let Some(hosting) = &mut self.hosting else {
+            return;
+        };
+        let mut ended = None;
+        let mut took = None;
+        let mut lines = Vec::new();
+        for report in hosting.poll() {
+            match report {
+                Report::Ended(end) => {
+                    if let Some(text) = end.failure() {
+                        self.host_failure.get_or_insert(text);
+                    }
+                    ended = Some(end);
+                }
+                Report::TookOver { tick } => took = Some(tick),
+                Report::Migration(line) => lines.push(line),
+                _ => {}
+            }
+        }
+        for line in lines {
+            self.net_line("host", &line);
+        }
+        if let Some(tick) = took {
+            self.client.host_here(now, LINK_ADDRESS, tick);
+            self.net_line("migrate", &format!("took-over\t{tick}"));
+        }
+        match ended {
+            Some(End::SteppedDown(to)) => {
+                log::info!("Network: another game hosts now, at {to}; resuming with it");
+                self.socket_back(now, Some(to));
+            }
+            Some(End::MovedOn(to)) => {
+                log::info!("Network: the game moved to a better machine; resuming with it");
+                self.socket_back(now, None);
+                if !to.is_empty() {
+                    self.client.move_to(now, &to);
+                }
+            }
+            Some(End::TakeoverFailed(why)) => {
+                log::warn!("Network: this game could not take the game over ({why})");
+                self.socket_back(now, None);
+            }
+            _ => {}
+        }
+    }
+
+    /// The hosting thread ended without ending the game: its socket is the
+    /// game's again, behind a new peers router, and the client resumes with
+    /// the game's new host at `to` (a step-down) or races on (a failed
+    /// takeover).
+    fn socket_back(&mut self, now: Duration, to: Option<SocketAddr>) {
+        let Some(thread) = self.hosting.take() else {
+            return;
+        };
+        let socket = thread.take_socket();
+        drop(thread);
+        match socket {
+            Some(socket) => {
+                self.socket = Transport::Joined(socket);
+                self.peers = Peers::new(tore_session::wire::PROTOCOL_VERSION, Entropy::System);
+                self.candidate_set = false;
+                self.kept = KeptAlive::new(KeepaliveConfig::default());
+            }
+            None => {
+                log::warn!("Network: the hosting thread kept its socket; the game cannot rejoin")
+            }
+        }
+        if let Some(to) = to {
+            self.client.move_to(now, &[to]);
+        }
+    }
+
+    /// Stage K's turn after the client's update: the standby, the
+    /// takeover, the old host's address for the hosting thread's router,
+    /// the candidates and the peers router's work.
+    fn migrate(&mut self, now: Duration) {
+        self.ensure_standby();
+        if let Some(standby) = &mut self.standby {
+            let notes = standby.turn(now, &mut self.client);
+            for note in notes {
+                let line = note_line(&note);
+                log::info!("Network: standby: {line}");
+                self.net_line("standby", &line);
+            }
+        }
+        self.maybe_take_over(now);
+        if let Transport::Hosted(hosted) = &self.socket {
+            hosted.side.set_old_host(self.client.old_host());
+        }
+        if self.routed() {
+            self.candidate();
+            self.client.drive_peers(now, &mut self.peers);
+            self.peers.update(now);
+            let _ = self.peers.transmit(&mut self.socket);
+        }
+    }
+
+    /// Starts the standby once the game is in the lobby and may take over.
+    fn ensure_standby(&mut self) {
+        if self.standby.is_some()
+            || self.standby_failed
+            || self.hosting.is_some()
+            || matches!(
+                self.client.phase(),
+                ClientPhase::Connecting | ClientPhase::Closed
+            )
+            || self.client.lobby().is_none()
+            || !self.may_take_over()
+        {
+            return;
+        }
+        match GameStandby::start(Arc::clone(&self.held), Arc::clone(&self.resources)) {
+            Ok(standby) => self.standby = Some(standby),
+            Err(error) => {
+                self.standby_failed = true;
+                log::warn!("Network: no standby thread ({error}); this game cannot take over");
+            }
+        }
+    }
+
+    /// Tells the client, once for each socket, what it reports to the host
+    /// as a candidate: the switch, the socket's own addresses toward the
+    /// host (Local IPv4, Global IPv6), the router's mapping type when a join
+    /// through the master tested it, and the CPU measure.
+    fn candidate(&mut self) {
+        if self.candidate_set
+            || matches!(
+                self.client.phase(),
+                ClientPhase::Connecting | ClientPhase::Closed
+            )
+        {
+            return;
+        }
+        self.candidate_set = true;
+        let (port, mapping) = match &self.socket {
+            Transport::Joined(socket) => (port_of(socket), MappingType::Unknown),
+            Transport::Internet(t) => (port_of(&t.socket), t.joiner.mapping()),
+            _ => (0, MappingType::Unknown),
+        };
+        let able = self.may_take_over() && port != 0;
+        let candidates = if able {
+            host_candidates(&[self.client.server()], port, own_address_toward)
+        } else {
+            Vec::new()
+        };
+        self.client.set_candidate(CandidateSettings {
+            may_host: able,
+            candidates,
+            mapping,
+            measure_cpu: able,
+        });
+    }
+
+    /// Takes the game over when the client says the standby is due to
+    /// (slice K4's rule): the socket goes to a new hosting thread, which
+    /// builds the host from the standby; the client joins it over the link
+    /// once it hosts ([`Report::TookOver`]).
+    fn maybe_take_over(&mut self, now: Duration) {
+        let Some(standby) = &self.standby else {
+            return;
+        };
+        if self.hosting.is_some()
+            || !self
+                .client
+                .takeover_due(standby.ready(), standby.handed_over())
+        {
+            return;
+        }
+        let Some(house) = self.client.lobby().map(|lobby| lobby.you) else {
+            return;
+        };
+        let socket = match std::mem::replace(&mut self.socket, Transport::Gone) {
+            Transport::Joined(socket) => socket,
+            Transport::Internet(t) => {
+                // A game that may host is not relayed: its joiner holds no
+                // channel, and the new host's listing is the old host's.
+                let MasterTransport { socket, .. } = *t;
+                socket
+            }
+            other => {
+                self.socket = other;
+                return;
+            }
+        };
+        let sends = match socket.try_clone() {
+            Ok(sends) => sends,
+            Err(error) => {
+                log::warn!("Network: cannot take the game over ({error}); joining whoever does");
+                self.socket = Transport::Joined(socket);
+                self.standby = None;
+                self.standby_failed = true;
+                return;
+            }
+        };
+        let standby = self.standby.take().expect("a standby");
+        let resumption = Resumption {
+            house,
+            now,
+            present: self.client.present(now),
+        };
+        let forward = hosting::forward::choose(
+            crate::net::settings::Remembered::load(&self.data).port_forward,
+        );
+        log::info!(
+            "Network: the host is lost or handed over; this game takes the game over on UDP {}",
+            port_of(&socket)
+        );
+        self.net_line("migrate", "taking-over");
+        match HostThread::take_over(TakeoverSetup {
+            standby: standby.into_thread(),
+            resources: Arc::clone(&self.resources),
+            config: hosting::takeover_config(&self.resources),
+            resumption,
+            socket,
+            clock: self.clock,
+            forward,
+        }) {
+            Ok((thread, link, side)) => {
+                self.socket = Transport::Hosted(Box::new(Hosted {
+                    link,
+                    socket: sends,
+                    side,
+                }));
+                self.hosting = Some(thread);
+                // The game hosts: no keepalive speaks for it any more.
+                self.kept = KeptAlive::new(KeepaliveConfig::default());
+            }
+            Err(error) => {
+                log::warn!("Network: cannot take the game over ({error}); joining whoever does");
+                self.socket = Transport::Joined(sends);
+                self.standby_failed = true;
+            }
         }
     }
 
@@ -1293,6 +1737,11 @@ impl NetSession {
             self.effects.step(picture, &surroundings, &releases);
         }
     }
+}
+
+/// The port a socket is bound on, 0 when it cannot say.
+fn port_of(socket: &ServerSocket) -> u16 {
+    socket.local_addresses().first().map_or(0, SocketAddr::port)
 }
 
 /// What the gun rounds need that the frame does not say.
