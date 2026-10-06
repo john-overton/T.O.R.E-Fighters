@@ -2329,7 +2329,7 @@ impl AiMission {
         // A lead that took a new target gives its wingmen targets (slice
         // G4), after the automatic releases above so a wing released this
         // tick can take them.
-        self.lead_commits(&commits, &link, &engagements, &mut output);
+        self.lead_commits(&commits, &link, &engagements, world, &mut output);
         // An aircraft lost or abandoned during the tick hands over lead on
         // the same tick.
         self.refresh_leaders(world, &mut output);

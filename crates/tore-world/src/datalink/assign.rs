@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use tore_sim::{
     ai::{
         launch::Side,
-        link::{MemberState, Pursuit, SideBandits},
+        link::{HumanWingman, MemberState, Pursuit, SideBandits},
         wing::PlayerOrder,
     },
     datalink::sort::{self, Bandit, Wingman},
@@ -41,6 +41,12 @@ use tore_sim::{
 
 /// Ticks in a second, to carry a track forward.
 const TICKS_PER_SECOND: f64 = 120.;
+
+/// How long an assignment counts as fresh for an AI lead's share to a human
+/// wingman (agent decision, slice G11): thirty seconds, the sort interval.
+/// An older assignment the human never acted on no longer keeps it from the
+/// next share.
+pub const FRESH_ASSIGNMENT_TICKS: u64 = tore_sim::ai::link::SORT_INTERVAL_TICKS;
 
 /// One wingman's share of a sort.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -277,6 +283,27 @@ impl DataLink {
             })
             .collect();
         (bandits, states)
+    }
+
+    /// What each living human holds, for an AI lead's shares and sorts (slice
+    /// G11), in plane id order: the aircraft it was assigned, and whether it is
+    /// idle (no radar lock and no assignment younger than
+    /// [`FRESH_ASSIGNMENT_TICKS`]).
+    pub fn human_wingmen(&self) -> Vec<HumanWingman> {
+        self.members
+            .iter()
+            .filter(|m| m.human && m.alive)
+            .map(|m| {
+                let assignment = self.assignments.get(&m.plane);
+                let fresh = assignment
+                    .is_some_and(|a| self.tick < a.tick.saturating_add(FRESH_ASSIGNMENT_TICKS));
+                HumanWingman {
+                    plane: m.plane,
+                    assigned: assignment.map(|a| a.target),
+                    idle: !fresh && !self.engaged.contains_key(&m.plane),
+                }
+            })
+            .collect()
     }
 
     /// The state `plane` last published to its flight's picture.
@@ -843,6 +870,65 @@ mod tests {
     }
 
     // Slice G3b: the picture's side of an assignment reaching the AI.
+
+    // Slice G11: what an AI lead reads of its human wingmen.
+
+    /// `link()` with planes 1 and 2 flown by humans.
+    fn with_humans() -> DataLink {
+        let mut link = link();
+        link.members
+            .iter_mut()
+            .find(|m| m.plane == 0)
+            .unwrap()
+            .human = false;
+        for human in [1, 2] {
+            link.members
+                .iter_mut()
+                .find(|m| m.plane == human)
+                .unwrap()
+                .human = true;
+        }
+        link
+    }
+
+    fn rows(link: &DataLink) -> Vec<(u32, Option<u32>, bool)> {
+        link.human_wingmen()
+            .into_iter()
+            .map(|w| (w.plane, w.assigned, w.idle))
+            .collect()
+    }
+
+    #[test]
+    fn an_idle_human_holds_no_lock_and_no_fresh_assignment() {
+        let mut link = with_humans();
+        // The lead (plane 0) is an AI here: only the living humans are rows.
+        assert_eq!(rows(&link), [(1, None, true), (2, None, true)]);
+        // A lock, on any aircraft, makes the human busy.
+        link.set_engagement(2, Some(10));
+        assert_eq!(rows(&link), [(1, None, true), (2, None, false)]);
+        // A fresh assignment does too, and says what it was.
+        link.set_engagement(2, None);
+        link.tick = 100;
+        engage(&mut link, 100, &[1], 10);
+        assert_eq!(rows(&link), [(1, Some(10), false), (2, None, true)]);
+        // It is fresh for thirty seconds and stale after: the human never acted
+        // on it, so the next share may reach it, while it still holds it.
+        link.tick = 100 + FRESH_ASSIGNMENT_TICKS - 1;
+        assert!(!link.human_wingmen()[0].idle);
+        link.tick = 100 + FRESH_ASSIGNMENT_TICKS;
+        assert_eq!(rows(&link)[0], (1, Some(10), true));
+    }
+
+    #[test]
+    fn a_dead_human_and_an_ai_member_are_no_rows() {
+        let mut link = with_humans();
+        link.members
+            .iter_mut()
+            .find(|m| m.plane == 2)
+            .unwrap()
+            .alive = false;
+        assert_eq!(rows(&link), [(1, None, true)]);
+    }
 
     fn track(reporter: u32, target: u32, observed: u64, position: [f64; 3]) -> Track {
         Track {

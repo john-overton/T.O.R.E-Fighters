@@ -1579,6 +1579,7 @@ impl AiWings {
             pursuits: link.pursuits(),
             bandits,
             states,
+            wingmen: link.human_wingmen(),
         });
     }
 

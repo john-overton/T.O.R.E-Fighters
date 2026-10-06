@@ -9,7 +9,8 @@
 
 use super::*;
 use crate::ai::link::{
-    LinkEvent, LinkInput, MemberState, SORT_INTERVAL_TICKS, SideBandits, YIELD_TICKS,
+    HumanEngagement, HumanWingman, LinkEvent, LinkInput, MemberState, SORT_INTERVAL_TICKS,
+    SideBandits, YIELD_TICKS,
 };
 use crate::ai::targeting::Side;
 use crate::ai::wing::PlayerOrder;
@@ -302,6 +303,268 @@ fn a_wing_led_by_a_human_gets_nothing_from_an_ai_wingman() {
     }
     assert_eq!(mission.wing_leader(Side(1), 0), Some(90));
     assert!(events.is_empty(), "{events:?}");
+}
+
+// A human wingman (slice G11).
+
+/// The human wingman's aircraft.
+const HUMAN: u32 = 90;
+
+/// What the world tells the mission of the human: `idle` and `assigned` are
+/// the picture's.
+fn held(idle: bool, assigned: Option<u32>) -> HumanWingman {
+    HumanWingman {
+        plane: HUMAN,
+        assigned,
+        idle,
+    }
+}
+
+/// An AI lead with a radar, one AI wingman at member `ai_place` and a human at
+/// `human_place`, in the lead's wing.
+fn wing_with_human(ai_place: u8, human_place: u8) -> AiMission {
+    let mut mission = AiMission::new();
+    mission.push(member(LEAD, 0, true));
+    mission.push(member(TWO, ai_place, false));
+    mission.set_humans(vec![HumanMember {
+        id: HUMAN,
+        side: Side(1),
+        wing: 0,
+        member: human_place,
+        pilot_alive: true,
+    }]);
+    mission
+}
+
+/// Steps the mission for `ticks` ticks with the human flying at member
+/// `place` of the line, handing the AI `input` before each step. The human's
+/// object is `on_ground` and `alive` as given.
+fn fly_human(
+    mission: &mut AiMission,
+    place: u8,
+    state: (bool, bool),
+    ticks: u64,
+    input: &dyn Fn() -> LinkInput,
+) -> Vec<(u64, LinkEvent)> {
+    let mut events = Vec::new();
+    for _ in 0..ticks {
+        let mut world = world_of(mission, &[NEAR]);
+        let mut human = object(&mission.actors[0], 1);
+        human.id = HUMAN;
+        human.human_controlled = true;
+        human.position = [f64::from(place) * 1_000., 20_000., 0.];
+        human.on_ground = state.0;
+        human.alive = state.1;
+        world.push(human);
+        mission.set_link(input());
+        let tick = mission.tick;
+        let out = mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
+        events.extend(out.link.into_iter().map(|event| (tick, event)));
+    }
+    events
+}
+
+fn picture_with_human(
+    known: &[(u32, [f64; 3])],
+    states: &[MemberState],
+    human: HumanWingman,
+) -> LinkInput {
+    LinkInput {
+        wingmen: vec![human],
+        ..picture(known, states)
+    }
+}
+
+#[test]
+fn a_sort_deals_a_human_wingman_a_bandit_as_it_deals_an_ai_wingman() {
+    let known = [NEAR, MIDDLE, FAR];
+    let mut mission = wing_with_human(1, 2);
+    let events = fly_human(&mut mission, 2, (false, true), 60, &|| {
+        picture_with_human(&known, &[], held(true, None))
+    });
+    let given = assigns(&events);
+    assert_eq!(given.len(), 2, "{events:?}");
+    // Member order: the AI wingman picks first, the human is dealt the other.
+    assert_eq!(given[0], (TWO, MIDDLE.0, PlayerOrder::Sort));
+    assert_eq!(given[1], (HUMAN, FAR.0, PlayerOrder::Sort));
+    assert!(mission.last_sort(Side(1), 0).is_some());
+    // The human flies its own aircraft: nothing was ordered of it.
+    assert!(mission.actor(HUMAN).is_none());
+}
+
+#[test]
+fn a_human_in_the_second_place_is_dealt_before_the_ai_wingman_behind_it() {
+    let known = [NEAR, MIDDLE, FAR];
+    let mut mission = wing_with_human(2, 1);
+    let events = fly_human(&mut mission, 1, (false, true), 60, &|| {
+        picture_with_human(&known, &[], held(true, None))
+    });
+    let given = assigns(&events);
+    assert_eq!(given[0], (HUMAN, MIDDLE.0, PlayerOrder::Sort));
+    assert_eq!(given[1], (TWO, FAR.0, PlayerOrder::Sort));
+}
+
+#[test]
+fn a_sort_counts_the_human_among_the_two_on_one_bandit() {
+    // One other bandit and two wingmen: both take it (the allowance is two),
+    // and the human is one of them.
+    let known = [NEAR, MIDDLE];
+    let mut mission = wing_with_human(2, 1);
+    let events = fly_human(&mut mission, 1, (false, true), 60, &|| {
+        picture_with_human(&known, &[], held(true, None))
+    });
+    assert_eq!(
+        assigns(&events),
+        [
+            (HUMAN, MIDDLE.0, PlayerOrder::Sort),
+            (TWO, MIDDLE.0, PlayerOrder::Sort)
+        ]
+    );
+}
+
+#[test]
+fn a_human_that_already_holds_or_attacks_the_dealt_bandit_is_not_told_again() {
+    let known = [NEAR, MIDDLE, FAR];
+    for (human, engaged) in [
+        (held(false, Some(MIDDLE.0)), None),
+        (
+            held(false, None),
+            Some(HumanEngagement {
+                plane: HUMAN,
+                target: MIDDLE.0,
+            }),
+        ),
+    ] {
+        let mut mission = wing_with_human(2, 1);
+        let events = fly_human(&mut mission, 1, (false, true), 60, &|| LinkInput {
+            humans: engaged.into_iter().collect(),
+            ..picture_with_human(&known, &[], human)
+        });
+        // The AI wingman is dealt as before and the human is dealt nothing new.
+        assert_eq!(
+            assigns(&events),
+            [(TWO, FAR.0, PlayerOrder::Sort)],
+            "{human:?}"
+        );
+    }
+}
+
+#[test]
+fn a_human_that_is_out_of_weapons_low_on_fuel_or_hurt_is_skipped_by_a_sort() {
+    let known = [NEAR, MIDDLE, FAR];
+    let skipped = MemberState {
+        plane: HUMAN,
+        winchester: true,
+        bingo: false,
+        heavy_damage: false,
+    };
+    let mut mission = wing_with_human(1, 2);
+    let events = fly_human(&mut mission, 2, (false, true), 60, &|| {
+        picture_with_human(&known, &[skipped], held(true, None))
+    });
+    assert_eq!(assigns(&events), [(TWO, MIDDLE.0, PlayerOrder::Sort)]);
+}
+
+#[test]
+fn a_human_on_the_ground_or_down_or_unknown_to_the_picture_is_given_nothing() {
+    let known = [NEAR, MIDDLE, FAR];
+    for (state, row) in [
+        ((true, true), true),
+        ((false, false), true),
+        ((false, true), false),
+    ] {
+        let mut mission = wing_with_human(1, 2);
+        let events = fly_human(&mut mission, 2, state, 60, &|| {
+            let mut input = picture(&known, &[]);
+            if row {
+                input.wingmen = vec![held(true, None)];
+            }
+            input
+        });
+        assert_eq!(
+            assigns(&events),
+            [(TWO, MIDDLE.0, PlayerOrder::Sort)],
+            "{state:?} {row}"
+        );
+    }
+}
+
+#[test]
+fn a_share_goes_to_an_idle_human_in_member_order_and_counts_as_a_wingman() {
+    // The picture knows no other bandit, so the lead shares; the human flies
+    // in the second place and takes it before the AI wingman behind.
+    let mut mission = wing_with_human(2, 1);
+    let events = fly_human(&mut mission, 1, (false, true), 60, &|| {
+        picture_with_human(&[], &[], held(true, None))
+    });
+    assert_eq!(
+        assigns(&events),
+        [(HUMAN, NEAR.0, PlayerOrder::EngageMyTarget)]
+    );
+    // The allowance is two, the lead one: the AI wingman gets nothing.
+    assert_eq!(target_of(&mission, TWO), None);
+}
+
+#[test]
+fn a_share_skips_a_human_that_is_busy_and_leaves_it_to_the_ai_wingman() {
+    let mut mission = wing_with_human(2, 1);
+    let events = fly_human(&mut mission, 1, (false, true), 60, &|| {
+        picture_with_human(&[], &[], held(false, None))
+    });
+    assert_eq!(
+        assigns(&events),
+        [(TWO, NEAR.0, PlayerOrder::EngageMyTarget)]
+    );
+}
+
+#[test]
+fn a_human_locked_on_the_leads_target_counts_as_an_attacker_in_the_share() {
+    // The lead and the human attack the bandit already: the allowance is full.
+    let mut mission = wing_with_human(2, 1);
+    let events = fly_human(&mut mission, 1, (false, true), 60, &|| LinkInput {
+        humans: vec![HumanEngagement {
+            plane: HUMAN,
+            target: NEAR.0,
+        }],
+        ..picture_with_human(&[], &[], held(false, None))
+    });
+    assert_eq!(target_of(&mission, LEAD), Some(NEAR.0));
+    assert!(assigns(&events).is_empty(), "{events:?}");
+}
+
+#[test]
+fn a_share_skips_a_human_that_is_out_of_weapons() {
+    let spent = MemberState {
+        plane: HUMAN,
+        winchester: true,
+        bingo: false,
+        heavy_damage: false,
+    };
+    let mut mission = wing_with_human(2, 1);
+    let events = fly_human(&mut mission, 1, (false, true), 60, &|| {
+        picture_with_human(&[], &[spent], held(true, None))
+    });
+    assert_eq!(
+        assigns(&events),
+        [(TWO, NEAR.0, PlayerOrder::EngageMyTarget)]
+    );
+}
+
+#[test]
+fn a_human_in_another_wing_is_not_given_the_leads_targets() {
+    let known = [NEAR, MIDDLE, FAR];
+    let mut mission = wing_with_human(1, 2);
+    mission.set_humans(vec![HumanMember {
+        id: HUMAN,
+        side: Side(1),
+        wing: 1,
+        member: 2,
+        pilot_alive: true,
+    }]);
+    let events = fly_human(&mut mission, 2, (false, true), 60, &|| {
+        picture_with_human(&known, &[], held(true, None))
+    });
+    assert_eq!(assigns(&events), [(TWO, MIDDLE.0, PlayerOrder::Sort)]);
 }
 
 // Yields.

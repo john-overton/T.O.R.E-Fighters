@@ -178,16 +178,33 @@ impl MemberState {
     }
 }
 
+/// What an AI lead knows of a human flying in its wing (slice G11): whether
+/// the human is free for a shared target, and what it was last told to
+/// attack. The human's side, wing and place come from the mission's own
+/// [`HumanMember`] list; its position and whether it is airborne from the
+/// world snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HumanWingman {
+    pub plane: u32,
+    /// The aircraft the human holds an assignment on, if it holds one.
+    pub assigned: Option<u32>,
+    /// A share may go to the human: it holds no radar lock and no assignment
+    /// younger than the sort interval (agent decision, slice G11).
+    pub idle: bool,
+}
+
 /// What the world hands the AI before a step: the humans' locked targets
 /// (slice G2), in plane id order, the pursuits of the assigned AI wingmen
 /// (slice G3b), in receiver order, and for the AI leads' shares and sorts
-/// (slice G4) the bandits each side knows and each member's state.
+/// (slice G4) the bandits each side knows and each member's state, and
+/// (slice G11) what each living human wingman holds.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LinkInput {
     pub humans: Vec<HumanEngagement>,
     pub pursuits: Vec<Pursuit>,
     pub bandits: Vec<SideBandits>,
     pub states: Vec<MemberState>,
+    pub wingmen: Vec<HumanWingman>,
 }
 
 impl LinkInput {
@@ -202,6 +219,12 @@ impl LinkInput {
             .iter()
             .find(|known| known.side == side)
             .map_or(&[], |known| known.bandits.as_slice())
+    }
+
+    /// What the picture holds of the human `plane` for its AI lead's shares
+    /// and sorts (slice G11).
+    pub fn wingman_of(&self, plane: u32) -> Option<&HumanWingman> {
+        self.wingmen.iter().find(|w| w.plane == plane)
     }
 
     /// The state of `plane` as its flight's picture last had it.

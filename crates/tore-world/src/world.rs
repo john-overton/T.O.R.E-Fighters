@@ -47,6 +47,8 @@ mod datalink_assign_tests;
 mod datalink_checkpoint_tests;
 #[cfg(test)]
 mod datalink_cues_tests;
+#[cfg(test)]
+mod datalink_human_leads_tests;
 mod datalink_leads;
 #[cfg(test)]
 mod datalink_leads_tests;

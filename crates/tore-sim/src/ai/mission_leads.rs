@@ -26,7 +26,7 @@
 //! member with the higher number, if an AI, leaves that aircraft alone for ten
 //! seconds when it has another target to take. A human is never moved.
 
-use super::{AiActor, AiMission, MissionOutput};
+use super::{AiActor, AiMission, MissionOutput, WorldObject};
 use crate::ai::engagement::{Role, Stance};
 use crate::ai::link::{
     Engagements, LinkEvent, LinkInput, MemberState, SORT_INTERVAL_TICKS, SortStamp, YIELD_TICKS,
@@ -35,6 +35,15 @@ use crate::ai::link::{
 use crate::ai::targeting::Side;
 use crate::ai::wing::{self, AttackerCap, PlayerOrder, TargetId, TargetOrder, WingRequest};
 use crate::datalink::sort::{self, Wingman};
+
+/// A wingman an AI lead may give a target (slice G11): an AI actor or a
+/// human flying in the lead's wing.
+struct LeadWingman {
+    id: u32,
+    member: u8,
+    position: [f64; 3],
+    human: bool,
+}
 
 impl AiActor {
     /// Whether this actor takes a target a lead shares or sorts to it: a
@@ -93,12 +102,14 @@ impl AiActor {
 impl AiMission {
     /// The AI leads that changed target this tick give their wingmen targets
     /// (see the module). `commits` are the actor indices of the leads, in
-    /// actor order; `engagements` is the decision-order table after the loop.
+    /// actor order; `engagements` is the decision-order table after the loop;
+    /// `world` is the tick's snapshot, which says where a human wingman is.
     pub(super) fn lead_commits(
         &mut self,
         commits: &[usize],
         link: &LinkInput,
         engagements: &Engagements,
+        world: &[WorldObject],
         output: &mut MissionOutput,
     ) {
         let tick = self.tick;
@@ -120,35 +131,22 @@ impl AiMission {
                 lead.identity.wing,
                 lead.flight.position,
             );
-            // The wingmen that take a target, in member order.
-            let mut wingmen: Vec<usize> = (0..self.actors.len())
-                .filter(|&i| {
-                    let a = &self.actors[i];
-                    i != index
-                        && a.identity.side == side
-                        && a.identity.wing == wing_index
-                        && a.accepts_shared()
-                })
-                .collect();
-            wingmen.sort_by_key(|&i| (self.actors[i].identity.member, self.actors[i].id()));
+            // The wingmen that take a target, in member order: the AI's, and
+            // the humans in the lead's wing (slice G11).
+            let wingmen = self.lead_wingmen(lead_id, side, wing_index, link, world);
             if wingmen.is_empty() {
                 continue;
             }
-            let fit = |actors: &[AiActor], i: usize| {
-                !link
-                    .state_of(actors[i].id())
-                    .is_some_and(MemberState::skipped)
-            };
+            let fit = |id: u32| !link.state_of(id).is_some_and(MemberState::skipped);
             if self.sort_due(side, wing_index, tick) {
                 let rows: Vec<Wingman> = wingmen
                     .iter()
-                    .map(|&i| {
-                        let actor = &self.actors[i];
-                        let state = link.state_of(actor.id());
+                    .map(|wingman| {
+                        let state = link.state_of(wingman.id);
                         Wingman {
-                            id: actor.id(),
-                            member: actor.identity.member,
-                            position: actor.flight.position,
+                            id: wingman.id,
+                            member: wingman.member,
+                            position: wingman.position,
                             winchester: state.is_some_and(|s| s.winchester),
                             bingo: state.is_some_and(|s| s.bingo),
                             heavy_damage: state.is_some_and(|s| s.heavy_damage),
@@ -159,6 +157,24 @@ impl AiMission {
                 if !sorted.given.is_empty() {
                     self.stamp_sort(side, wing_index, tick);
                     for (receiver, bandit) in sorted.given {
+                        let Some(wingman) = wingmen.iter().find(|w| w.id == receiver) else {
+                            continue;
+                        };
+                        if wingman.human {
+                            // A human takes the cues, not an order: nothing
+                            // is written when it already holds the bandit.
+                            let held = link.wingman_of(receiver).and_then(|w| w.assigned);
+                            if held != Some(bandit) && engagements.target(receiver) != Some(bandit)
+                            {
+                                output.link.push(LinkEvent::Assign {
+                                    lead: lead_id,
+                                    receiver,
+                                    target: bandit,
+                                    order: PlayerOrder::Sort,
+                                });
+                            }
+                            continue;
+                        }
                         let already = self
                             .actor(receiver)
                             .is_some_and(|a| a.controller.target() == Some(bandit));
@@ -175,7 +191,10 @@ impl AiMission {
                 }
             }
             // The share: the idle, fit wingmen take the lead's target, up to
-            // the allowance, the lead counted among the attackers.
+            // the allowance, the lead counted among the attackers. A human
+            // counts as a wingman does: its radar lock is an attack in the
+            // table, and it is idle when it holds no lock and no fresh
+            // assignment.
             let attacking = 1 + engagements
                 .wing_targets(lead_id, side, wing_index)
                 .iter()
@@ -183,12 +202,21 @@ impl AiMission {
                 .count() as u32;
             let idle: Vec<u32> = wingmen
                 .iter()
-                .filter(|&&i| self.actors[i].controller.target().is_none() && fit(&self.actors, i))
-                .map(|&i| self.actors[i].id())
+                .filter(|wingman| {
+                    fit(wingman.id)
+                        && if wingman.human {
+                            link.wingman_of(wingman.id).is_some_and(|w| w.idle)
+                        } else {
+                            self.actor(wingman.id)
+                                .is_some_and(|a| a.controller.target().is_none())
+                        }
+                })
+                .map(|wingman| wingman.id)
                 .collect();
             let shared = wing::share_targets(AttackerCap::Two, attacking, idle.len() as u32);
             for receiver in idle.into_iter().take(shared.assigned as usize) {
-                if self.give_target(receiver, target) {
+                let human = wingmen.iter().any(|w| w.id == receiver && w.human);
+                if human || self.give_target(receiver, target) {
                     output.link.push(LinkEvent::Assign {
                         lead: lead_id,
                         receiver,
@@ -198,6 +226,59 @@ impl AiMission {
                 }
             }
         }
+    }
+
+    /// The wingmen of the lead `lead_id` that can take a target now, in member
+    /// order: the AI actors that accept one, and the living, airborne humans
+    /// the world told the mission about (slice G11).
+    fn lead_wingmen(
+        &self,
+        lead_id: u32,
+        side: Side,
+        wing: u8,
+        link: &LinkInput,
+        world: &[WorldObject],
+    ) -> Vec<LeadWingman> {
+        let mut wingmen: Vec<LeadWingman> = self
+            .actors
+            .iter()
+            .filter(|a| {
+                a.id() != lead_id
+                    && a.identity.side == side
+                    && a.identity.wing == wing
+                    && a.accepts_shared()
+            })
+            .map(|a| LeadWingman {
+                id: a.id(),
+                member: a.identity.member,
+                position: a.flight.position,
+                human: false,
+            })
+            .collect();
+        wingmen.extend(
+            self.humans
+                .iter()
+                .filter(|h| {
+                    h.id != lead_id
+                        && h.side == side
+                        && h.wing == wing
+                        && self.actor(h.id).is_none()
+                })
+                .filter(|h| link.wingman_of(h.id).is_some())
+                .filter_map(|h| {
+                    let object = world.iter().find(|o| o.id == h.id)?;
+                    (object.alive && !object.destroyed && !object.on_ground).then_some(
+                        LeadWingman {
+                            id: h.id,
+                            member: h.member,
+                            position: object.position,
+                            human: true,
+                        },
+                    )
+                }),
+        );
+        wingmen.sort_by_key(|w| (w.member, w.id));
+        wingmen
     }
 
     /// Gives `receiver` `target` as a lead's order.
