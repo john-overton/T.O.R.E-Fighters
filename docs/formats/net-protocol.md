@@ -1742,7 +1742,7 @@ prefix it holds is consistent. Each record starts with its type (4 bits).
 | 2 | Flight | The mission's number (varint), the FNV-1a 64 of the flight's spec text (64) and the [mission identity](checkpoint.md#restoring) (64): build the world fresh from the spec the player holds; the journal starts at its tick 0 |
 | 3 | Checkpoint begin | Its tick (32), its length in bytes (32), its chunks (16) |
 | 4 | Checkpoint chunk | Its index (16), its bytes (a long byte string, at most 4,096) |
-| 5 | Ticks | The first tick (32) and a count (8, 1 to 60), then each tick: the changes before the step (a count; each 1 bit: 0 scoring, then on or off, 1 bit; 1 a store cut, then the plane, a varint, and the revival weapons, 2 bits); the mission commands (a count, each by the checkpoint trait's coder of `MissionCommand`); the seat inputs (a count; each: the seat, 8 bits, its `SeatInput` by the trait against that seat's previous input in the stream, and the last command applied, 16 bits) |
+| 5 | Ticks | The first tick (32) and a count (8, 1 to 60), then each tick: the changes before the step (a count; each 1 bit: 0 scoring, then on or off, 1 bit; 1 a store cut, then the plane, a varint, and the revival weapons, 2 bits); the mission commands (a count, each by the checkpoint trait's coder of `MissionCommand`); the seat inputs (a count; each: the seat, 8 bits, then against that seat's previous input in the stream: the last command applied, 1 bit when the previous one's and else 16 bits; the controls, a bit when they lie on the wire's grid and then the Inputs section's frame against the previous one's, else each control by the trait; the two command lists behind one presence bit; the view, 1 bit when the previous one's moved on, else 2 bits for none, as Inputs codes it (offset 8 bits, delay 6) or whole by the trait). Protocol 14 ([as built](#stage-k-as-built)) |
 | 6 | State | The part (8: 1 players, 2 session, 3 court, 4 scores, 5 revivals, 6 rejoin, 7 candidates, 8 listing), the tick after which it holds (32), its bytes (a long byte string) |
 | 7 | Check | The tick (32) and the FNV-1a 64 of the host's `World::checkpoint()` between that tick and the next (64) |
 | 8 | Ended | The end's reason (3 bits, as Mission ended): drop the world |
@@ -1851,22 +1851,29 @@ choice below is an agent decision.
   varints, at most 256, 256 and 64; each seat input's own tick must be its
   tick's. A seat's input codes against its last input in the stream moved
   on to this tick (its tick, and its view's by as many ticks, with no
-  commands), so an unchanged control costs a bit. An Appoint and a Flight
+  commands), so an unchanged control costs a bit. *Protocol 14 (slice
+  K3):* its controls go as the Inputs section codes them (the wire's
+  quantized frame against the last one's, `write_frame`) when every one of
+  them lies exactly on the wire's grid, as every input the host steps does,
+  and each by the trait otherwise (a -0.0 or a value between two steps), so
+  the stream stays exact; its two command lists go behind one presence bit;
+  its view, one bit when the last one's moved on, else none, its offset
+  (8 bits) and delay (6 bits) as Inputs codes them, or whole when the
+  offset passes 255, the delay 63 or the view is ahead of the tick; the
+  number of its last command applied, one bit when the last one's; its own
+  tick is the record's. Every field of a seat's input and of a pilot's is
+  named, so a field added fails to compile until the stream carries it. An
+  Appoint and a Flight
   start every baseline afresh; a record refused by the writer or the reader
   changes nothing. A record never uses the checkpoint's shared records.
-- **What it costs** (measured in the K0 tests, synthetic data): a seat that
-  changes nothing but its tick costs under 9 bytes a tick, 3 of them its
-  seat byte and its 16-bit command number; a stick that moves every tick
-  costs about 24 bytes a seat a tick, the floats coded by the checkpoint
-  trait against the last. Both are above the design's estimate of 2 to 5
-  bytes. *Measured (K3)* on the real stream: 15 to 23 bytes a seat a tick
-  with bots' sticks, 3 of them the seat byte and the command number, 8 the
-  three stick axes, 2 the two empty command lists; about 50 KB/s to a
-  standby with 30 humans. Slice K3 proposes, not built, coding the controls
-  as the Inputs section codes them, the command lists behind one presence
-  bit, the view as Inputs codes it and the command number as one bit when
-  unchanged: 4.3 bytes a seat a tick measured on the same stream
-  ([architecture](../ARCHITECTURE.md#how-stage-k-lands), row K3).
+- **What it costs.** Protocol 13 (measured in the K0 tests and slice K3's
+  runs): a steady seat under 9 bytes a tick, 3 of them its seat byte and
+  16-bit command number; 13 to 23 bytes a seat a tick with bots' sticks,
+  about 50 KB/s to a standby with 30 humans. Protocol 14 (slice K3): a
+  steady seat under 2 bytes; 3.4 to 5.6 bytes a seat a tick with bots'
+  sticks, about 12.4 KB/s of ticks with 30 humans and 2.3 KB/s with four
+  on the real 15 against 15 mission
+  ([baseline](../baselines/standby-stream-2026-10-05.md)).
 - **The lobby.** The standby mark follows the away bit: each appointed
   standby's role (slice K3). A slot's reservation is filled now from the idle
   aircraft (slice F2-A: an away player's plane), the seam where slice K5's
@@ -1919,7 +1926,8 @@ choice below is an agent decision.
   does not make the part go out again. Connections are named by their
   player's join order. The bytes are this build's own
   ([architecture](../ARCHITECTURE.md#what-moves-with-the-host)).
-- **The stream a host sends** (slice K3, no wire change). After the
+- **The stream a host sends** (slice K3; protocol 14 only for the seat
+  inputs' coding above). After the
   Appoint: a checkpoint when flying (no Flight record), then every state
   part, holding after the last tick stepped. Ticks records carry a
   snapshot interval of ticks (four at 30 snapshots a second); any other
@@ -2021,8 +2029,9 @@ again with an observer; the capture format did not change for it.
   J2, 10 since [stage L](#compatibility-stage-l)'s Content and Content gaps
   and each lobby player's Fighters Anthology build, L2, 12 since each lobby
   player's [connection path](#the-path-in-the-challenge-answer), J6, 13
-  since [stage K](#host-migration-and-rejoin-stage-k)'s wire, K0; 11 was
-  never used).
+  since [stage K](#host-migration-and-rejoin-stage-k)'s wire, K0, 14 since
+  the standby stream's seat inputs code their controls as the Inputs
+  section does, K3; 11 was never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

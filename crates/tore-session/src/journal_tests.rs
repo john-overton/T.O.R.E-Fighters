@@ -267,15 +267,14 @@ fn a_seats_unchanged_input_costs_a_few_bytes_against_its_last() {
         after.len(),
         cold.len()
     );
-    // A seat that changed nothing but the tick costs under 9 bytes, 3 of
-    // them its seat and its 16-bit command number (agent measure, K0: the
-    // design estimated 2 to 5 bytes a seat a tick; slice K3 measures it).
+    // A seat that changed nothing but the tick costs under 2 bytes, 1 of
+    // them its seat (protocol 14, slice K3; under 9 in protocol 13).
     let steady = |seats: u8| {
         let mut writer = StreamWriter::new();
         let tick_of = |number: u64| {
             let mut tick = Tick::new(number);
             for seat in 0..seats {
-                let mut input = pilot(seat, 10);
+                let mut input = quantized(pilot(seat, 10));
                 input.tick = number;
                 input.commands.clear();
                 input.view = Some(SeatView {
@@ -293,7 +292,153 @@ fn a_seats_unchanged_input_costs_a_few_bytes_against_its_last() {
         writer.encode(&tick_of(11)).unwrap().len()
     };
     let per_seat = (steady(11) - steady(1)) as f64 / 10.;
-    assert!(per_seat < 9., "{per_seat} bytes a seat");
+    assert!(per_seat < 2., "{per_seat} bytes a seat");
+}
+
+/// `input` as the host steps it: its controls on the wire's grid.
+fn quantized(mut input: SeatInput) -> SeatInput {
+    let commands = std::mem::take(&mut input.pilot.commands);
+    input.pilot =
+        crate::wire::inputs::InputFrame::of(&input.pilot, input.trigger, input.sensors).pilot();
+    input.pilot.commands = commands;
+    input
+}
+
+/// Codes `ticks` four ticks a record (a snapshot interval) and reads them
+/// back; the bytes in all.
+fn through(ticks: &[Tick]) -> (Vec<Tick>, usize) {
+    let mut writer = StreamWriter::new();
+    let mut reader = StreamReader::new();
+    let mut bytes = 0;
+    let mut out = Vec::new();
+    for chunk in ticks.chunks(4) {
+        let record = Record::Ticks(Ticks {
+            first: chunk[0].tick as u32,
+            ticks: chunk.to_vec(),
+        });
+        let coded = writer.encode(&record).unwrap();
+        bytes += coded.len();
+        let Record::Ticks(read) = reader.decode(&coded).unwrap() else {
+            panic!("a Ticks record")
+        };
+        out.extend(read.ticks);
+    }
+    (out, bytes)
+}
+
+/// Every field of every input, to the bit.
+fn same(a: &[Tick], b: &[Tick]) {
+    assert_eq!(a.len(), b.len());
+    for (a, b) in a.iter().zip(b) {
+        assert_eq!(a.applied, b.applied);
+        assert_eq!(a.inputs.len(), b.inputs.len());
+        for (x, y) in a.inputs.iter().zip(&b.inputs) {
+            assert_eq!(format!("{x:?}"), format!("{y:?}"));
+            for (p, q) in [
+                (x.pilot.pitch, y.pilot.pitch),
+                (x.pilot.roll, y.pilot.roll),
+                (x.pilot.yaw, y.pilot.yaw),
+                (x.pilot.throttle_rate, y.pilot.throttle_rate),
+            ] {
+                assert_eq!(p.to_bits(), q.to_bits());
+            }
+            assert_eq!(
+                x.pilot.throttle.map(f64::to_bits),
+                y.pilot.throttle.map(f64::to_bits)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_moving_stick_on_the_wires_grid_costs_a_few_bytes_a_seat_a_tick() {
+    // Protocol 14 (slice K3): the controls as the Inputs section codes
+    // them. Two seats weave for ten seconds, commands and all.
+    let fight = |seats: u8| -> Vec<Tick> {
+        (0..1_200)
+            .map(|n| {
+                let mut tick = Tick::new(n);
+                for seat in 0..seats {
+                    tick.push_input(quantized(pilot(seat, n)), (n / 240) as u16);
+                }
+                tick
+            })
+            .collect()
+    };
+    let ticks = fight(2);
+    let (read, bytes) = through(&ticks);
+    same(&ticks, &read);
+    // Over the records' own bytes, which nobody's inputs leave.
+    let (_, empty) = through(&fight(0));
+    let per_seat = (bytes - empty) as f64 / 2_400.;
+    assert!(per_seat < 5., "{per_seat:.2} bytes a seat a tick");
+}
+
+#[test]
+fn every_way_a_seat_input_is_coded_reads_back_to_the_bit() {
+    let base = quantized(pilot(0, 100));
+    let mut inputs = Vec::new();
+    // Off the wire's grid: a stick of -0.0 and one between two steps, a
+    // throttle that is not finite (none on the grid).
+    let mut off = base.clone();
+    off.pilot.pitch = -0.0;
+    off.pilot.roll = 0.123_456_789;
+    inputs.push(off);
+    let mut off = base.clone();
+    off.pilot.throttle = Some(0.5 + 1e-9);
+    inputs.push(off);
+    // Views: none, as Inputs codes it, a view ahead of the tick, an offset
+    // past 255, a delay past 63, and the baseline's moved on.
+    for view in [
+        None,
+        Some(SeatView {
+            tick: 90,
+            interpolation_delay: 63,
+        }),
+        Some(SeatView {
+            tick: 105,
+            interpolation_delay: 8,
+        }),
+        Some(SeatView {
+            tick: 0,
+            interpolation_delay: 8,
+        }),
+        Some(SeatView {
+            tick: 99,
+            interpolation_delay: 200,
+        }),
+    ] {
+        let mut input = base.clone();
+        input.view = view;
+        inputs.push(input);
+    }
+    // Commands of both lists, and a pilot's alone.
+    let mut input = quantized(pilot(0, 5));
+    input.pilot.commands = vec![tore_sim::flight::PilotCommand::Eject];
+    inputs.push(input);
+    let mut input = base.clone();
+    input.pilot.commands = vec![tore_sim::flight::PilotCommand::Eject];
+    inputs.push(input);
+    let ticks: Vec<Tick> = inputs
+        .into_iter()
+        .enumerate()
+        .flat_map(|(n, input)| {
+            // Each after its baseline, then again unchanged.
+            let number = 300 + 2 * n as u64;
+            [number, number + 1].map(|number| {
+                let mut tick = Tick::new(number);
+                let mut input = input.clone();
+                if let Some(view) = &mut input.view {
+                    view.tick = view.tick + number - 100;
+                }
+                input.tick = number;
+                tick.push_input(input, n as u16 * 7);
+                tick
+            })
+        })
+        .collect();
+    let (read, _) = through(&ticks);
+    same(&ticks, &read);
 }
 
 #[test]

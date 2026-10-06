@@ -109,8 +109,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// connection path (slice J6), 13 since stage K's host migration and rejoin:
 /// the transport's Reach and Reach answer packets, the Challenge answer's
 /// token, disconnect reason 8, the Filler section, messages 39 to 54, the
-/// lobby's standby marks and reserved slots, and setting 21 (slice K0).
-pub const PROTOCOL_VERSION: u16 = 13;
+/// lobby's standby marks and reserved slots, and setting 21 (slice K0), 14
+/// since the standby stream codes a seat's controls as the Inputs section
+/// does, its commands behind a presence bit, its view as Inputs does and its
+/// command number applied as a bit when unchanged (slice K3).
+pub const PROTOCOL_VERSION: u16 = 14;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

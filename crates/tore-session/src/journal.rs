@@ -26,6 +26,7 @@
 //! one added fails to compile until the journal codes it.
 
 use crate::wire::bits::{read_long_bytes, write_long_bytes};
+use crate::wire::inputs::{InputFrame, read_frame, write_frame};
 use crate::wire::messages::{EndReason, StandbyMark, read_end_reason, write_end_reason};
 use crate::wire::migration::limits::{CHUNK_BYTES, TICKS_PER_RECORD};
 use crate::wire::{WireError, WireResult, limits};
@@ -33,9 +34,10 @@ use std::collections::BTreeMap;
 use tore_codec::{BitReader, BitWriter};
 use tore_sim::checkpoint::{Checkpoint, Loader, Models, Saver};
 use tore_sim::combat::live::DeviceNote;
+use tore_sim::flight::PilotInput;
 use tore_world::WorldResult;
 use tore_world::score::Facts;
-use tore_world::seats::{PlaneId, SeatId, SeatInput};
+use tore_world::seats::{PlaneId, SeatId, SeatInput, SeatView};
 use tore_world::world::revive::RevivalWeapons;
 use tore_world::world::{MissionCommand, TickOutput, World};
 
@@ -301,15 +303,16 @@ impl Record {
 /// An Appoint and a Flight start it afresh.
 #[derive(Clone, Debug, Default)]
 struct Baselines {
-    inputs: BTreeMap<SeatId, SeatInput>,
+    /// Each seat's last input and the number of its last command applied.
+    inputs: BTreeMap<SeatId, (SeatInput, u16)>,
 }
 
 impl Baselines {
     /// What `seat`'s input at `tick` is coded against: its last, moved on to
     /// `tick` (its tick, and its view's by as many ticks) with no commands,
     /// so an unchanged control costs a bit.
-    fn baseline(&self, seat: SeatId, tick: u64) -> Option<SeatInput> {
-        let last = self.inputs.get(&seat)?;
+    fn baseline(&self, seat: SeatId, tick: u64) -> Option<(SeatInput, u16)> {
+        let (last, applied) = self.inputs.get(&seat)?;
         let moved = tick.wrapping_sub(last.tick);
         let mut base = last.clone();
         base.tick = tick;
@@ -318,8 +321,191 @@ impl Baselines {
         }
         base.pilot.commands.clear();
         base.commands.clear();
-        Some(base)
+        Some((base, *applied))
     }
+}
+
+/// The view's coding beside its baseline's (2 bits): none, as the Inputs
+/// section codes it (offset and delay), or whole.
+const VIEW_NONE: u64 = 0;
+const VIEW_COMPACT: u64 = 1;
+const VIEW_WHOLE: u64 = 2;
+
+/// Whether two floats are the same bits: the stream is exact.
+fn same_bits(a: f64, b: f64) -> bool {
+    a.to_bits() == b.to_bits()
+}
+
+/// Codes one seat's input at `tick` against its baseline (protocol 14,
+/// slice K3): the seat; the number of its last command applied, one bit
+/// when the baseline's; the controls as the Inputs section codes them (the
+/// wire's quantized frame against the baseline's), behind a bit that says
+/// every control lies on the wire's grid, or else each by the checkpoint
+/// trait; the two command lists behind one presence bit; the view, one bit
+/// when the baseline's moved on, else none, as Inputs codes it, or whole.
+/// The input's own tick is the record's. Every field is named, so a field
+/// added to a seat's input or a pilot's fails to compile here.
+fn write_seat_input(
+    s: &mut Saver,
+    input: &SeatInput,
+    applied: u16,
+    base: Option<&(SeatInput, u16)>,
+) -> WireResult<()> {
+    let SeatInput {
+        seat,
+        tick,
+        pilot,
+        trigger,
+        sensors,
+        commands,
+        view,
+    } = input;
+    let PilotInput {
+        pitch,
+        roll,
+        yaw,
+        throttle_rate,
+        throttle,
+        commands: pilot_commands,
+    } = pilot;
+    let base_input = base.map(|(b, _)| b);
+    let _ = s.writer().write_bits(u64::from(seat.0), 8);
+    // The command number applied.
+    if base.is_some_and(|(_, a)| *a == applied) {
+        s.writer().write_bool(true);
+    } else {
+        s.writer().write_bool(false);
+        let _ = s.writer().write_bits(u64::from(applied), 16);
+    }
+    // The controls.
+    let frame = InputFrame::of(pilot, *trigger, *sensors);
+    let back = frame.pilot();
+    let on_grid = same_bits(back.pitch, *pitch)
+        && same_bits(back.roll, *roll)
+        && same_bits(back.yaw, *yaw)
+        && same_bits(back.throttle_rate, *throttle_rate)
+        && match (back.throttle, throttle) {
+            (None, None) => true,
+            (Some(a), Some(b)) => same_bits(a, *b),
+            _ => false,
+        };
+    s.writer().write_bool(on_grid);
+    if on_grid {
+        let previous = base_input.map(|b| InputFrame::of(&b.pilot, b.trigger, b.sensors));
+        write_frame(s.writer(), &frame, previous.as_ref())?;
+    } else {
+        let b = base_input.map(|b| &b.pilot);
+        pitch.save(s, b.map(|b| &b.pitch))?;
+        roll.save(s, b.map(|b| &b.roll))?;
+        yaw.save(s, b.map(|b| &b.yaw))?;
+        throttle_rate.save(s, b.map(|b| &b.throttle_rate))?;
+        throttle.save(s, b.map(|b| &b.throttle))?;
+        trigger.save(s, base_input.map(|b| &b.trigger))?;
+        sensors.save(s, base_input.map(|b| &b.sensors))?;
+    }
+    // The commands.
+    let any = !pilot_commands.is_empty() || !commands.is_empty();
+    s.writer().write_bool(any);
+    if any {
+        pilot_commands.save(s, None)?;
+        commands.save(s, None)?;
+    }
+    // The view.
+    if base_input.is_some_and(|b| b.view == *view) {
+        s.writer().write_bool(true);
+    } else {
+        s.writer().write_bool(false);
+        match view {
+            None => {
+                let _ = s.writer().write_bits(VIEW_NONE, 2);
+            }
+            Some(v) if v.tick <= *tick && *tick - v.tick <= 255 && v.interpolation_delay <= 63 => {
+                let w = s.writer();
+                let _ = w.write_bits(VIEW_COMPACT, 2);
+                let _ = w.write_bits(*tick - v.tick, 8);
+                let _ = w.write_bits(u64::from(v.interpolation_delay), 6);
+            }
+            Some(v) => {
+                let _ = s.writer().write_bits(VIEW_WHOLE, 2);
+                v.save(s, None)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reads a seat's input at `tick` that [`write_seat_input`] wrote, and the
+/// number of its last command applied.
+fn read_seat_input(
+    l: &mut Loader<'_>,
+    tick: u64,
+    baselines: &Baselines,
+) -> WireResult<(SeatInput, u16)> {
+    let seat = SeatId(l.reader().read_bits(8)? as u8);
+    let base = baselines.baseline(seat, tick);
+    let base_input = base.as_ref().map(|(b, _)| b);
+    let applied = if l.reader().read_bool()? {
+        base.as_ref()
+            .ok_or(invalid("a command number with no baseline"))?
+            .1
+    } else {
+        l.reader().read_bits(16)? as u16
+    };
+    let (mut pilot, trigger, sensors) = if l.reader().read_bool()? {
+        let previous = base_input.map(|b| InputFrame::of(&b.pilot, b.trigger, b.sensors));
+        let frame = read_frame(l.reader(), previous.as_ref())?;
+        (frame.pilot(), frame.trigger, frame.sensors)
+    } else {
+        let b = base_input.map(|b| &b.pilot);
+        let pilot = PilotInput {
+            pitch: Checkpoint::load(l, b.map(|b| &b.pitch))?,
+            roll: Checkpoint::load(l, b.map(|b| &b.roll))?,
+            yaw: Checkpoint::load(l, b.map(|b| &b.yaw))?,
+            throttle_rate: Checkpoint::load(l, b.map(|b| &b.throttle_rate))?,
+            throttle: Checkpoint::load(l, b.map(|b| &b.throttle))?,
+            commands: Vec::new(),
+        };
+        let trigger = Checkpoint::load(l, base_input.map(|b| &b.trigger))?;
+        let sensors = Checkpoint::load(l, base_input.map(|b| &b.sensors))?;
+        (pilot, trigger, sensors)
+    };
+    let mut commands = Vec::new();
+    if l.reader().read_bool()? {
+        pilot.commands = Checkpoint::load(l, None)?;
+        commands = Checkpoint::load(l, None)?;
+        if pilot.commands.is_empty() && commands.is_empty() {
+            return Err(invalid("commands present but none"));
+        }
+    }
+    let view = if l.reader().read_bool()? {
+        base_input.ok_or(invalid("a view with no baseline"))?.view
+    } else {
+        match l.reader().read_bits(2)? {
+            VIEW_NONE => None,
+            VIEW_COMPACT => {
+                let offset = l.reader().read_bits(8)?;
+                let interpolation_delay = l.reader().read_bits(6)? as u8;
+                Some(SeatView {
+                    tick: tick
+                        .checked_sub(offset)
+                        .ok_or(invalid("a view before tick 0"))?,
+                    interpolation_delay,
+                })
+            }
+            VIEW_WHOLE => Some(SeatView::load(l, None)?),
+            _ => return Err(invalid("view coding")),
+        }
+    };
+    let input = SeatInput {
+        seat,
+        tick,
+        pilot,
+        trigger,
+        sensors,
+        commands,
+        view,
+    };
+    Ok((input, applied))
 }
 
 /// The host's side of one standby's stream: codes records in order.
@@ -521,11 +707,11 @@ fn write_ticks(s: &mut Saver, ticks: &Ticks, baselines: &mut Baselines) -> WireR
             if input.tick != *number {
                 return Err(invalid("a seat input for another tick"));
             }
-            let _ = s.writer().write_bits(u64::from(input.seat.0), 8);
             let base = baselines.baseline(input.seat, *number);
-            input.save(s, base.as_ref())?;
-            let _ = s.writer().write_bits(u64::from(*applied), 16);
-            baselines.inputs.insert(input.seat, input.clone());
+            write_seat_input(s, input, *applied, base.as_ref())?;
+            baselines
+                .inputs
+                .insert(input.seat, (input.clone(), *applied));
         }
     }
     Ok(())
@@ -635,14 +821,10 @@ fn read_ticks(l: &mut Loader<'_>, baselines: &mut Baselines) -> WireResult<Ticks
         }
         let inputs = read_count(l.reader(), MAX_SEAT_INPUTS, "seat inputs")?;
         for _ in 0..inputs {
-            let seat = SeatId(l.reader().read_bits(8)? as u8);
-            let base = baselines.baseline(seat, number);
-            let input = SeatInput::load(l, base.as_ref())?;
-            if input.seat != seat || input.tick != number {
-                return Err(invalid("a seat input for another seat or tick"));
-            }
-            let applied = l.reader().read_bits(16)? as u16;
-            baselines.inputs.insert(seat, input.clone());
+            let (input, applied) = read_seat_input(l, number, baselines)?;
+            baselines
+                .inputs
+                .insert(input.seat, (input.clone(), applied));
             tick.push_input(input, applied);
         }
         ticks.push(tick);
