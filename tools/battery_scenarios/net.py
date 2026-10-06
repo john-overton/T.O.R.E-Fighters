@@ -309,7 +309,7 @@ def drive_fight(d: Drive) -> None:
     log = server_log(d)
     log_must(
         # A bot shot down before the end leaves from the lobby, with no plane.
-        d, log, r"joined as Bot1", r"joined as Bot2", r"Bot1( \(plane \d+\))? left: left",
+        d, log, r"joined as Bot1 \(path: local network\)", r"joined as Bot2 \(path: local network\)", r"Bot1( \(plane \d+\))? left: left",
         r"Bot2( \(plane \d+\))? left: left", r"mission ended: everyone left", forbid=NET_BAD,
     )
     if len(re.findall(r"^Bot\d: .* bursts [1-9]\d*,", bots.text(), re.M)) == 0:
@@ -889,7 +889,7 @@ def drive_master_introduce(d: Drive) -> None:
     server.forbid(NET_BAD, "a network problem")
     master.expect(r"^status listings=\d+ sources=\d+ browse/s=[\d.]+ introductions/min=[1-9]\d* ", "an introduction counted")
     master.expect(r"^Stopped$", "the stop line")
-    log_must(d, server_log(d), r"joined as Bot", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
+    log_must(d, server_log(d), r"joined as Bot \(path: punched\)", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
 
 
 # The Internet Lobby driven by a script (a pointer needs a moment over a target before a click lands): the Multi
@@ -1067,7 +1067,7 @@ def drive_master_relay(d: Drive) -> None:
     figure = sorted((d.work / "state").glob("relay-*.txt"))
     if not figure or int(figure[-1].read_text().strip() or 0) < 100_000:
         d.problem(f"the month's relay figure was not written at the stop: {figure}")
-    log_must(d, server_log(d), r"joined as Bot", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
+    log_must(d, server_log(d), r"joined as Bot \(path: relay\)", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
 
 
 # The script of a relayed join from the Internet Lobby: open the screen, select the listed server, Join, take a

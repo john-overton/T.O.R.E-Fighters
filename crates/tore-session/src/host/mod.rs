@@ -67,7 +67,7 @@ use crate::wire::messages::{
 };
 use crate::wire::snapshot::SnapshotHeader;
 use crate::wire::{
-    PROTOCOL_VERSION, Platform, SECTION_INPUTS, SECTION_OWN_STATE, WireError, from_world,
+    PROTOCOL_VERSION, Path, Platform, SECTION_INPUTS, SECTION_OWN_STATE, WireError, from_world,
 };
 use inputs::InputBuffer;
 use lobby::Entry;
@@ -182,6 +182,8 @@ pub enum HostLog {
         tick: u64,
         address: SocketAddr,
         callsign: String,
+        /// How the player reached the host (slice J6).
+        path: Path,
     },
     /// A join was refused.
     Refused {
@@ -419,6 +421,9 @@ struct Peer {
     callsign: String,
     /// The operating system its game said it runs on when it joined.
     platform: Platform,
+    /// How it reached the host (protocol 9): its Challenge answer's path,
+    /// the relay for a relayed address whatever the answer says.
+    path: Path,
     stage: Stage,
     /// The seat and plane while seated (and leaving).
     seat: Option<SeatId>,
@@ -1321,6 +1326,7 @@ impl Host {
                 address: details.address,
                 callsign: callsign.clone(),
                 platform: details.platform,
+                path: details.path,
                 stage: Stage::Lobby,
                 seat: None,
                 plane: None,
@@ -1351,6 +1357,7 @@ impl Host {
             tick,
             address: details.address,
             callsign: callsign.clone(),
+            path: details.path,
         });
         if king {
             self.lobby_log(callsign, LobbyEvent::Crowned);
@@ -2460,6 +2467,7 @@ impl Host {
                     away: self.away_mark(peer.lobby.id),
                     unable: peer.lobby.unable.clone(),
                     platform: peer.platform,
+                    path: peer.path,
                     // Each player's build comes from its Content (slice L3).
                     build: messages::Build::Unknown,
                 })

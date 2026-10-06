@@ -21,13 +21,16 @@
 //! Protocol 10 (slice L2) adds stage L's: the player's Content (its
 //! Fighters Anthology build, its importer and its items' digests), the
 //! host's Content gaps, and each lobby player's build.
+//!
+//! Protocol 12 (slice J6) adds each lobby player's connection path
+//! ([`Path`]).
 
 use super::bits::{
     self, read_count, read_long_str, read_str, read_u32, write_count, write_long_str, write_str,
 };
 use super::chat::{ChatLine, ChatSend};
 use super::names::ReceivedNames;
-use super::{Platform, WireError, WireResult, limits};
+use super::{Path, Platform, WireError, WireResult, limits};
 use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
 use tore_codec::{BitReader, BitWriter};
 use tore_formats::aircraft::AircraftId;
@@ -281,6 +284,9 @@ pub struct LobbyPlayer {
     /// The operating system the player's game runs on, as its game said
     /// when it joined (protocol 7).
     pub platform: Platform,
+    /// How the player reached the host: the path of the address it joined
+    /// by, as the host kept it from the Challenge answer (protocol 12).
+    pub path: Path,
     /// The Fighters Anthology build the player's import came from, as its
     /// Content said; unknown until that arrives (protocol 10).
     pub build: Build,
@@ -1181,6 +1187,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
             away,
             unable,
             platform,
+            path,
             build,
         } = player;
         let _ = w.write_bits(u64::from(*id), 8);
@@ -1193,6 +1200,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_bool(*away);
         bits::write_option(w, unable.as_deref(), write_str);
         let _ = w.write_bits(u64::from(platform.code()), PLATFORM_BITS);
+        let _ = w.write_bits(u64::from(path.code()), Path::BITS);
         write_build(w, *build);
     }
     write_count(w, slots.len());
@@ -1220,6 +1228,12 @@ const PLATFORM_BITS: u32 = 3;
 
 fn read_platform(r: &mut BitReader<'_>) -> WireResult<Platform> {
     Platform::from_code(r.read_bits(PLATFORM_BITS)? as u8).ok_or(WireError::Invalid("platform"))
+}
+
+/// A lobby player's connection path: 3 bits, the master's codes 0 to 5 (a
+/// local network, an address, a mapped port, IPv6, punched, the relay).
+fn read_path(r: &mut BitReader<'_>) -> WireResult<Path> {
+    Path::from_code(r.read_bits(Path::BITS)?).ok_or(WireError::Invalid("path"))
 }
 
 fn read_id(r: &mut BitReader<'_>) -> WireResult<u8> {
@@ -1259,6 +1273,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
             away: r.read_bool()?,
             unable: bits::read_option(r, read_str)?,
             platform: read_platform(r)?,
+            path: read_path(r)?,
             build: read_build(r)?,
         });
     }

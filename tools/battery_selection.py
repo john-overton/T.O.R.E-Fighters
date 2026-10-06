@@ -424,6 +424,10 @@ RULES: tuple[Rule, ...] = (
         "the AI flying an idle player's aircraft on the host, and its tests (tore-bot --away)",
     ),
     _r(
+        "crates/tore-session/src/host/path_tests.rs", NET_FAMILIES,
+        "the lobby's player list carries each player's connection path, and the host's log says it (slice J6)",
+    ),
+    _r(
         "crates/tore-session/src/client/away*", NET_FAMILIES,
         "a game's Away and Back and the plane the AI flies for it, and their tests (tore-bot --away)",
     ),

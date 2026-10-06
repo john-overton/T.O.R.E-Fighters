@@ -1490,3 +1490,6 @@ mod results_tests;
 
 #[path = "away_tests.rs"]
 mod away_tests;
+
+#[path = "path_tests.rs"]
+mod path_tests;

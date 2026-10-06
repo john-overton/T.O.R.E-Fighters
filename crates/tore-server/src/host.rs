@@ -44,7 +44,12 @@ pub struct HostSetup {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// A connection was accepted.
-    Joined { address: String, callsign: String },
+    Joined {
+        address: String,
+        callsign: String,
+        /// How the player reached the server, in words ("relay", slice J6).
+        path: String,
+    },
     /// A connection was refused, with the reason its game was shown. The
     /// callsign is known once the challenge was answered.
     Refused {
@@ -87,7 +92,11 @@ impl Event {
     /// The log line.
     pub fn text(&self) -> String {
         match self {
-            Self::Joined { address, callsign } => format!("{address} joined as {callsign}"),
+            Self::Joined {
+                address,
+                callsign,
+                path,
+            } => format!("{address} joined as {callsign} (path: {path})"),
             Self::Refused {
                 address,
                 callsign: Some(callsign),

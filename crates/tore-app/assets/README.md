@@ -66,7 +66,8 @@ python3 tools/build_ui_text_atlas.py /path/to/NotoSans-Medium.ttf
 `icons/*.svg` are the marks a list row can carry: `lock` (a game with a
 password), `crown` (the King), `ready` (a tick), `house` (the player whose
 machine hosts), `you` (the player's own slot), `unable` (a cross) and the
-platforms `windows`, `macos` and `linux`. They are hand drawn for this project
+platforms `windows`, `macos` and `linux`, and `relay` (a player whose game
+reaches the host through the master's relay: two dots joined through a hub, slice J6). They are hand drawn for this project
 by an agent at John's request (2026-10-05): minimalist solid shapes on a 16 by
 16 grid, all one colour, and covered by the repository `LICENSE` like the rest
 of the source. They hold no retail art. The three platform marks are our own

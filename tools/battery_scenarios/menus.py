@@ -24,6 +24,8 @@ NORMAL_STATES = [
     "lobby-settings", "lobby-settings-revival", "lobby-settings-scoring", "lobby-settings-realism",
     "lobby-settings-joiner", "lobby-settings-pvp", "lobby-settings-flying", "lobby-players", "lobby-players-house",
     "lobby-locks", "lobby-watch", "lobby-pvp",
+    # Slice J6: a relayed player selected, a player away from its aircraft.
+    "lobby-relay", "lobby-away",
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [

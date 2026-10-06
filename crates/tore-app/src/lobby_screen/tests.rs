@@ -411,13 +411,13 @@ fn the_players_list_marks_the_crown_the_house_ready_and_unable() {
     assert_eq!(rows[0].cells[1], Cell::Icon(Icon::House));
     assert_eq!(rows[1].cells[2], Cell::Icon(Icon::Ready));
     assert_eq!(rows[2].cells[2], Cell::Icon(Icon::Unable));
-    assert_eq!(rows[2].cells[5], Cell::Text("Unable".into()));
+    assert_eq!(rows[2].cells[6], Cell::Text("Unable".into()));
     // The platform sits beside the name: the sample players are on Linux
     // (id 1), Windows (2) and macOS (3), and an unnamed platform has no mark.
     assert_eq!(rows[0].cells[3], Cell::Icon(Icon::Linux));
     assert_eq!(rows[1].cells[3], Cell::Icon(Icon::Windows));
     assert_eq!(rows[2].cells[3], Cell::Icon(Icon::MacOs));
-    assert_eq!(rows[0].cells[4], Cell::Text("Maverick".into()));
+    assert_eq!(rows[0].cells[5], Cell::Text("Maverick".into()));
     state.players[0].platform = tore_session::wire::Platform::Unknown;
     assert_eq!(facts::player_rows(&state)[0].cells[3], Cell::Empty);
     assert!(rows[2].tint.is_some());
@@ -441,6 +441,119 @@ fn the_slots_list_shows_who_holds_what_with_the_players_own_marked() {
     assert_eq!(rows[2].cells[1], Cell::Text("Wing 1 #3".into()));
     assert_eq!(rows[4].cells[2], Cell::Text("F/A-18D Hornet".into()));
     assert_eq!(rows[4].cells[1], Cell::Text("Wing 2 #1".into()));
+}
+
+#[test]
+fn a_relayed_player_has_the_relay_mark_beside_its_platform_and_every_path_is_said() {
+    use crate::widgets::{Cell, Icon};
+    use tore_session::wire::Path;
+    let mut state = king();
+    state.players.push(player(3, "Viper", None));
+    for (path, mark, line) in [
+        (
+            Path::LocalNetwork,
+            None,
+            "Viper connected over the local network.",
+        ),
+        (Path::ByAddress, None, "Viper connected directly."),
+        (
+            Path::MappedPort,
+            None,
+            "Viper connected directly (forwarded port).",
+        ),
+        (Path::Ipv6, None, "Viper connected directly (IPv6)."),
+        (
+            Path::Punched,
+            None,
+            "Viper connected directly (punched through).",
+        ),
+        (
+            Path::Relay,
+            Some(Icon::Relay),
+            "Viper connected through the relay.",
+        ),
+    ] {
+        state.players[2].path = path;
+        let rows = facts::player_rows(&state);
+        assert_eq!(
+            rows[2].cells[4],
+            mark.map_or(Cell::Empty, Cell::Icon),
+            "{path:?}"
+        );
+        // The platform's mark and the name keep their cells.
+        assert_eq!(rows[2].cells[3], Cell::Icon(Icon::MacOs));
+        assert_eq!(rows[2].cells[5], Cell::Text("Viper".into()));
+        assert_eq!(facts::player_detail(&state, 3).as_deref(), Some(line));
+    }
+    // The house's own game has no path to say, and an unable player's
+    // reason comes before the path.
+    assert_eq!(
+        facts::player_detail(&state, 1).as_deref(),
+        Some("Maverick's game runs this game.")
+    );
+    state.players[2].unable = Some("data differs".into());
+    assert_eq!(
+        facts::player_detail(&state, 3).as_deref(),
+        Some("Viper cannot play this mission: data differs")
+    );
+    assert_eq!(facts::player_detail(&state, 99), None);
+}
+
+#[test]
+fn the_screen_draws_the_relay_mark_in_the_players_list_and_the_path_in_the_selected_line() {
+    let kit = Arc::new(test_kit::kit());
+    let mut state = king();
+    state.players.push(player(3, "Viper", None));
+    let draw = |state: &LobbyState, select: Option<usize>| {
+        let mut screen = LobbyScreen::sample(Arc::clone(&kit), state.clone(), true);
+        if let Some(row) = select {
+            screen.players.select(row);
+            screen.refresh();
+        }
+        let mut pixels = test_kit::blank();
+        screen.draw(&mut Canvas(&mut pixels));
+        pixels
+    };
+    let before = draw(&state, None);
+    state.players[2].path = tore_session::wire::Path::Relay;
+    let after = draw(&state, None);
+    let changed: Vec<usize> = (0..before.len() / 4)
+        .filter(|i| before[i * 4..i * 4 + 4] != after[i * 4..i * 4 + 4])
+        .collect();
+    assert!(
+        changed.len() > 20,
+        "the relay mark drew {} pixels",
+        changed.len()
+    );
+    // Only the Players list changed: its third row, at the relay column.
+    for i in changed {
+        let (x, y) = ((i % 640) as i32, (i / 640) as i32);
+        assert!(
+            (404..590).contains(&x) && (168..268).contains(&y),
+            "a pixel changed outside the Players list at ({x}, {y})"
+        );
+    }
+    // Selecting the relayed player puts its path in the hint line.
+    let selected = draw(&state, Some(2));
+    assert_ne!(selected, after);
+}
+
+#[test]
+fn a_slot_whose_player_is_away_reads_ai_and_the_players_name() {
+    let mut state = sample(1);
+    let rows = facts::slot_rows(&state);
+    use crate::widgets::Cell;
+    assert_eq!(rows[1].cells[3], Cell::Text("Goose".into()));
+    state.players[1].away = true;
+    let rows = facts::slot_rows(&state);
+    assert_eq!(rows[1].cells[3], Cell::Text("AI (Goose away)".into()));
+    // Another slot, and a player who is back, read as before.
+    assert_eq!(rows[0].cells[3], Cell::Text("Maverick".into()));
+    state.players[1].away = false;
+    assert_eq!(
+        facts::slot_rows(&state)[1].cells[3],
+        Cell::Text("Goose".into())
+    );
 }
 
 #[test]

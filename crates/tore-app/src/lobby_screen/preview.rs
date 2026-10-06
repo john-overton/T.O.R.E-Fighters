@@ -5,14 +5,14 @@ use super::*;
 use crate::AppResult;
 use crate::widgets::KitSource;
 use tore_formats::aircraft::AircraftId;
-use tore_session::wire::Platform;
 use tore_session::wire::chat::{ChatFrom, Receiver, Standing};
 use tore_session::wire::messages::{Build, LobbyPhase, LobbyPlayer, LobbySlot, Lock, StartRule};
+use tore_session::wire::{Path, Platform};
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 20] = [
+pub const STATES: [&str; 22] = [
     "lobby-king",
     "lobby-joiner",
     "lobby-unable",
@@ -36,6 +36,10 @@ pub const STATES: [&str; 20] = [
     "lobby-locks",
     "lobby-watch",
     "lobby-pvp",
+    // Stage J's last slice (J6): a player reaching the host through the
+    // relay, selected; and a player away from its aircraft.
+    "lobby-relay",
+    "lobby-away",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -56,6 +60,13 @@ pub(crate) fn player(id: u8, name: &str, slot: Option<u32>) -> LobbyPlayer {
             1 => Platform::Linux,
             2 => Platform::Windows,
             _ => Platform::MacOs,
+        },
+        // The house is on the host's own machine; the rest reached it
+        // directly.
+        path: if id == 1 {
+            Path::LocalNetwork
+        } else {
+            Path::Punched
         },
         build: match id % 3 {
             1 => Build::V102F,
@@ -218,6 +229,14 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         "lobby-players" | "lobby-players-house" => {
             lobby.players.push(player(3, "Hollywood", None));
         }
+        "lobby-relay" => {
+            lobby.players.push(player(3, "Hollywood", Some(2)));
+            lobby.players[2].path = Path::Relay;
+            lobby.slots = slots(&[(0, 1), (1, 2), (2, 3)]);
+        }
+        "lobby-away" => {
+            lobby.players[1].away = true;
+        }
         "lobby-locks" => {
             lobby.players.push(player(3, "Hollywood", None));
             lobby.slots[2].lock = Lock::Closed;
@@ -302,6 +321,11 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         }
         "lobby-locks" => {
             screen.slots.select(2);
+        }
+        // The relayed player selected: the hint line says how it connected.
+        "lobby-relay" => {
+            screen.players.select(2);
+            screen.refresh();
         }
         _ => {}
     }

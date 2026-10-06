@@ -441,6 +441,47 @@ fn every_lobby_platform_round_trips_and_an_unknown_code_is_invalid() {
 }
 
 #[test]
+fn every_lobby_path_round_trips_and_an_unnamed_code_is_invalid() {
+    use super::{Path, WireError};
+    let with = |path: Path| {
+        let mut lobby = samples::lobby();
+        for player in &mut lobby.players {
+            player.path = path;
+        }
+        Message::Lobby(Box::new(lobby))
+    };
+    for path in Path::ALL.iter() {
+        let message = with(*path);
+        let bytes = message.encode().unwrap();
+        assert_eq!(Message::decode(message.kind(), &bytes).unwrap(), message);
+    }
+    // The first player's path field: the 3 bits where LocalNetwork (code 0)
+    // and Relay (code 5) differ are its own; the sample's other fields are
+    // the same in both, so the first differing bit is the field's lowest.
+    // Codes 6 and 7 are not named.
+    let local = with(Path::LocalNetwork).encode().unwrap();
+    let relay = with(Path::Relay).encode().unwrap();
+    assert_eq!(local.len(), relay.len());
+    let bit = (0..local.len() * 8)
+        .find(|&b| (local[b / 8] ^ relay[b / 8]) & (1 << (b % 8)) != 0)
+        .unwrap();
+    for code in 6u8..8 {
+        let mut bad = local.clone();
+        for i in 0..3 {
+            if code & (1 << i) != 0 {
+                let at = bit + i;
+                bad[at / 8] |= 1 << (at % 8);
+            }
+        }
+        assert_eq!(
+            Message::decode(super::messages::kind::LOBBY, &bad),
+            Err(WireError::Invalid("path")),
+            "code {code}"
+        );
+    }
+}
+
+#[test]
 fn full_records_round_trip() {
     let mut rng = SplitMix64::new(13);
     for _ in 0..300 {

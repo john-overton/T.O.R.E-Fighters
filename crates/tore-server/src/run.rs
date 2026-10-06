@@ -227,6 +227,7 @@ mod tests {
                 Event::Joined {
                     address: "127.0.0.1:5000".into(),
                     callsign: "Viper".into(),
+                    path: "relay".into(),
                 },
             ),
             (
@@ -254,7 +255,7 @@ mod tests {
         let file = rig.file();
         let lines: Vec<&str> = file.lines().collect();
         assert!(
-            lines[0].ends_with("127.0.0.1:5000 joined as Viper"),
+            lines[0].ends_with("127.0.0.1:5000 joined as Viper (path: relay)"),
             "{file}"
         );
         assert!(lines[1].ends_with("seat 1 Viper took plane 0"));

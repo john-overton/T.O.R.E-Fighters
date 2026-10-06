@@ -73,6 +73,23 @@ use tore_codec::CodecError;
 /// lobby's player list carries too (protocol 7).
 pub use tore_net::Platform;
 
+/// How a player reached the host: the master's path codes, which the
+/// Challenge answer and the lobby's player list carry too (protocol 9 and 12).
+pub use tore_net::master::Path;
+
+/// A path in the words the lobby, the logs and `tore-bot` use: "local
+/// network", "by address", "mapped port", "IPv6", "punched", "relay".
+pub fn path_words(path: Path) -> &'static str {
+    match path {
+        Path::LocalNetwork => "local network",
+        Path::ByAddress => "by address",
+        Path::MappedPort => "mapped port",
+        Path::Ipv6 => "IPv6",
+        Path::Punched => "punched",
+        Path::Relay => "relay",
+    }
+}
+
 /// The protocol version: one number for every byte of the protocol, the
 /// transport's included. Any change to the bytes raises it; the wire golden
 /// test fails until it is raised and the committed copy refreshed
@@ -84,8 +101,9 @@ pub use tore_net::Platform;
 /// slot locks and wing replies (F2-0), 9 since the transport's Punch packet
 /// and the path byte of the Challenge answer (stage J's slice J2), 10 since
 /// stage L's Content and Content gaps messages and each lobby player's
-/// Fighters Anthology build (slice L2).
-pub const PROTOCOL_VERSION: u16 = 10;
+/// Fighters Anthology build (slice L2), 12 since each lobby player's
+/// connection path (slice J6; 11 is stage K's).
+pub const PROTOCOL_VERSION: u16 = 12;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

@@ -20,7 +20,9 @@
 //!   to free it. A slot another player holds is dimmed and cannot be clicked.
 //! - **Players**: callsigns, the King's crown, the house of the player whose
 //!   machine runs the game, a tick when ready, a red mark and the reason
-//!   when a player's game cannot play the mission.
+//!   when a player's game cannot play the mission, the platform's mark and,
+//!   for a player reaching the host through the relay, the relay's mark; the
+//!   selected player's line says how it connected (slice J6).
 //! - **Messages and the chat line** (EF6's [`LobbyChat`]): the game's words
 //!   and chat; Enter in the line sends to All.
 //! - **Buttons**: Mission..., Players... and Fly (the King; Fly reads End
@@ -242,8 +244,9 @@ impl LobbyScreen {
                 align: Align::Centre,
             },
         ];
-        // The crown, the house, the ready tick and the platform, 12 pixels
-        // wide at a pitch of 13, then the name and the state.
+        // The crown, the house, the ready tick, the platform and the relay
+        // mark (slice J6), 12 pixels wide at a pitch of 13, then the name and
+        // the state.
         let player_columns = vec![
             Column {
                 x: 0,
@@ -266,13 +269,18 @@ impl LobbyScreen {
                 align: Align::Centre,
             },
             Column {
-                x: 53,
-                width: 62,
+                x: 52,
+                width: 12,
+                align: Align::Centre,
+            },
+            Column {
+                x: 66,
+                width: 60,
                 align: Align::Left,
             },
             Column {
-                x: 117,
-                width: 41,
+                x: 128,
+                width: 40,
                 align: Align::Left,
             },
         ];

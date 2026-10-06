@@ -977,6 +977,7 @@ fn the_log_names_the_hosting_players_own_connection() {
         tick: 0,
         address: LINK_ADDRESS,
         callsign: "Viper".into(),
+        path: tore_session::wire::Path::LocalNetwork,
     });
     assert_eq!(line, "tick 0: this game joined as Viper");
     let line = log_line(&HostLog::Left {

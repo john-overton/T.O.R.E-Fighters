@@ -284,10 +284,14 @@ impl SessionHost {
             }
             self.events.push_back(match entry {
                 HostLog::Connected {
-                    address, callsign, ..
+                    address,
+                    callsign,
+                    path,
+                    ..
                 } => Event::Joined {
                     address: address.to_string(),
                     callsign,
+                    path: tore_session::wire::path_words(path).to_owned(),
                 },
                 HostLog::Refused {
                     address,

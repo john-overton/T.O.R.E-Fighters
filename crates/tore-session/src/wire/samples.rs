@@ -1,7 +1,6 @@
 //! Fixed sample contents of every section and message, shared by the golden,
 //! round-trip and fuzz tests.
 
-use super::Platform;
 use super::chat::{ChatFrom, ChatLine, ChatSend, Quick, Receiver, Standing};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
@@ -21,6 +20,7 @@ use super::messages::{
 use super::names::NameIndex;
 use super::priority::Relevance;
 use super::snapshot::{EntitySender, SnapshotHeader};
+use super::{Path, Platform};
 use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
 use tore_formats::aircraft::AircraftId;
 use tore_sim::acoustics;
@@ -874,8 +874,9 @@ pub fn phase_two_messages() -> Vec<Message> {
 }
 
 /// A lobby with a King, a player flying, one unable, one more waiting, and
-/// three slots: the four players cover every platform and every Fighters
-/// Anthology build (protocol 10), the slots every lock, the players every
+/// three slots: the four players cover every platform, four of the six
+/// connection paths (protocol 12) and every Fighters Anthology build
+/// (protocol 10), the slots every lock, the players every
 /// observing and away mark, and the settings are PvP's defaults (protocol
 /// 8).
 pub fn lobby() -> LobbyState {
@@ -900,6 +901,7 @@ pub fn lobby() -> LobbyState {
                 away: false,
                 unable: None,
                 platform: Platform::Linux,
+                path: Path::LocalNetwork,
                 build: Build::V102F,
             },
             LobbyPlayer {
@@ -913,6 +915,7 @@ pub fn lobby() -> LobbyState {
                 away: false,
                 unable: None,
                 platform: Platform::Windows,
+                path: Path::Punched,
                 build: Build::V10,
             },
             LobbyPlayer {
@@ -926,6 +929,7 @@ pub fn lobby() -> LobbyState {
                 away: true,
                 unable: Some("Your game data differs".into()),
                 platform: Platform::MacOs,
+                path: Path::Relay,
                 build: Build::Unknown,
             },
             LobbyPlayer {
@@ -939,6 +943,7 @@ pub fn lobby() -> LobbyState {
                 away: true,
                 unable: None,
                 platform: Platform::Unknown,
+                path: Path::Ipv6,
                 build: Build::V102F,
             },
         ],

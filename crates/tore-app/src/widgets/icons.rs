@@ -1,5 +1,5 @@
 //! The small marks a list row can carry: the padlock, crown, ready tick, house,
-//! the player's own arrow, the unable cross and the three platform marks.
+//! the player's own arrow, the unable cross, the three platform marks and the relay mark.
 //! Retail has no art for them, so they are our own: minimalist solid shapes in
 //! one colour, hand drawn as SVG on a 16 by 16 grid
 //! (`crates/tore-app/assets/icons/`) and baked into the sharp text atlas by
@@ -34,6 +34,9 @@ pub enum Icon {
     MacOs,
     /// A player on Linux.
     Linux,
+    /// A player whose game reaches the host through the master's relay
+    /// (slice J6).
+    Relay,
 }
 
 /// The one colour of every icon, before a dimmed row's tint.
@@ -53,6 +56,16 @@ impl Icon {
             Platform::Unknown => None,
         }
     }
+    /// The mark for how a player reached the host: only the relay has one,
+    /// since a relayed player is the one the others may want to know about
+    /// (its path is a little slower and it is never the calculated host).
+    pub fn of_path(path: tore_session::wire::Path) -> Option<Icon> {
+        use tore_session::wire::Path;
+        match path {
+            Path::Relay => Some(Icon::Relay),
+            _ => None,
+        }
+    }
     /// The icon's name in the atlas, and its SVG's file name.
     pub fn name(self) -> &'static str {
         match self {
@@ -65,6 +78,7 @@ impl Icon {
             Icon::Windows => "windows",
             Icon::MacOs => "macos",
             Icon::Linux => "linux",
+            Icon::Relay => "relay",
         }
     }
     /// Width and height in pixels.
@@ -109,7 +123,7 @@ mod tests {
     use crate::ui_text;
     use crate::widgets::test_kit::blank;
 
-    const ALL: [Icon; 9] = [
+    const ALL: [Icon; 10] = [
         Icon::Lock,
         Icon::Crown,
         Icon::Ready,
@@ -119,6 +133,7 @@ mod tests {
         Icon::Windows,
         Icon::MacOs,
         Icon::Linux,
+        Icon::Relay,
     ];
 
     #[test]
@@ -161,6 +176,17 @@ mod tests {
                 Some(Icon::MacOs),
                 Some(Icon::Linux)
             ]
+        );
+    }
+
+    #[test]
+    fn only_a_relayed_path_has_a_mark() {
+        use tore_session::wire::Path;
+        let marks: Vec<Option<Icon>> = Path::ALL.iter().map(|p| Icon::of_path(*p)).collect();
+        assert_eq!(
+            marks,
+            [None, None, None, None, None, Some(Icon::Relay)],
+            "local network, by address, mapped port, IPv6, punched, relay"
         );
     }
 

@@ -5,6 +5,7 @@
 //! session.
 use crate::widgets::{Cell, Icon, Row, tone};
 use tore_session::settings::{self, number};
+use tore_session::wire::Path;
 use tore_session::wire::messages::{
     LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, StartRule,
 };
@@ -317,7 +318,7 @@ pub fn status_word(player: &LobbyPlayer) -> &'static str {
 }
 
 /// The Players list's rows: the crown, the house, the ready tick, the
-/// platform, the name and the state. Unable players are red and the player's own row green.
+/// platform, the relay mark (slice J6), the name and the state. Unable players are red and the player's own row green.
 pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
     lobby
         .players
@@ -344,6 +345,7 @@ pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
                         Cell::Empty
                     },
                     Icon::of_platform(p.platform).map_or(Cell::Empty, Cell::Icon),
+                    Icon::of_path(p.path).map_or(Cell::Empty, Cell::Icon),
                     Cell::Text(p.callsign.clone()),
                     Cell::Text(status_word(p).to_owned()),
                 ],
@@ -534,13 +536,31 @@ pub fn change_lines(old: Option<&LobbyState>, new: &LobbyState) -> Vec<String> {
     lines
 }
 
+/// How a player reached the host, as the detail line says it (slice J6),
+/// after the player's callsign.
+pub fn path_phrase(path: Path) -> &'static str {
+    match path {
+        Path::LocalNetwork => "over the local network",
+        Path::ByAddress => "directly",
+        Path::MappedPort => "directly (forwarded port)",
+        Path::Ipv6 => "directly (IPv6)",
+        Path::Punched => "directly (punched through)",
+        Path::Relay => "through the relay",
+    }
+}
+
 /// The detail line for a player selected in Players: an unable player's
-/// reason, else nothing.
+/// reason, else how the player reached the host (slice J6; the house's own
+/// game says it runs this game, since it needs no path).
 pub fn player_detail(lobby: &LobbyState, id: u8) -> Option<String> {
     let p = lobby.player(id)?;
-    p.unable
-        .as_ref()
-        .map(|why| format!("{} cannot play this mission: {why}", p.callsign))
+    if let Some(why) = &p.unable {
+        return Some(format!("{} cannot play this mission: {why}", p.callsign));
+    }
+    if lobby.host == Some(id) {
+        return Some(format!("{}'s game runs this game.", p.callsign));
+    }
+    Some(format!("{} connected {}.", p.callsign, path_phrase(p.path)))
 }
 
 /// Why a button that cannot be pressed cannot, in words, for Messages when
@@ -578,6 +598,8 @@ pub fn disabled_reason(facts: &Facts, id: super::Id, target: bool) -> Option<Str
 /// lock on it.
 pub fn slot_holder_text(slot: &LobbySlot, holder: Option<&LobbyPlayer>) -> String {
     match (&slot.lock, holder) {
+        // The AI flies the plane while its player is away, kept for it.
+        (_, Some(p)) if p.away => format!("AI ({} away)", p.callsign),
         (_, Some(p)) => p.callsign.clone(),
         (Lock::Closed, None) => "Closed (AI)".to_owned(),
         (Lock::Reserved(callsign), None) => format!("Reserved: {callsign}"),
