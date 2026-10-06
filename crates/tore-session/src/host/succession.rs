@@ -200,7 +200,6 @@ pub(super) struct Succession {
     /// over); by join order.
     move_to: Option<u64>,
     /// The last Succession sent.
-    #[allow(dead_code)] // Read by `send_succession`, slice K3's.
     sent: Option<SuccessionMessage>,
 }
 
@@ -422,7 +421,6 @@ impl Host {
 
     /// The Succession message for `ready` standbys (in order, each warm or
     /// cold): each with the address the host sees it at and its candidates.
-    #[allow(dead_code)] // Slices K3 and K4 call it; until then the tests do.
     pub(crate) fn succession_message(&self, ready: &[(ConnectionId, bool)]) -> SuccessionMessage {
         let standbys = ready
             .iter()
@@ -446,7 +444,6 @@ impl Host {
 
     /// Sends every player the Succession for `ready` when it changed (slice
     /// K3 calls it as standbys become ready or leave).
-    #[allow(dead_code)] // Slices K3 and K4 call it; until then the tests do.
     pub(crate) fn send_succession(&mut self, ready: &[(ConnectionId, bool)]) {
         let message = self.succession_message(ready);
         if self.succession.sent.as_ref() == Some(&message) {
@@ -889,6 +886,31 @@ impl Host {
             })
     }
 
+    /// Whether a standby already appointed (slice K3) may stay one: as
+    /// [`Host::may_take_over`], but a player not yet in a reach test does not
+    /// count against it, only one whose test found it unreachable. A player
+    /// joining does not dismiss the standbys until the next reach test.
+    pub(super) fn may_stay_standby(&self, order: u64) -> bool {
+        let Some((_, peer)) = self.peer_of_order(order) else {
+            return false;
+        };
+        if self.config.house.is_none() || peer.path == Path::Relay || peer.house {
+            return false;
+        }
+        if !self.candidate_of(order).is_some_and(|r| r.may_host) {
+            return false;
+        }
+        let reached_by = self.succession.measures.get(&order).map(|m| &m.reached_by);
+        self.reach_testers()
+            .map(|(_, p)| p.lobby.order)
+            .filter(|&tester| tester != order)
+            .all(|tester| {
+                reached_by
+                    .and_then(|r| r.get(&tester))
+                    .is_none_or(Option::is_some)
+            })
+    }
+
     /// Whether `order` passes for `players`: eligible, its upload passed for
     /// at least that many (the house: unless its flights say otherwise), and
     /// its CPU measure within the budget (or not measured).
@@ -969,7 +991,7 @@ impl Host {
             .filter(|&micros| micros > 0)
     }
 
-    fn candidate_of(&self, order: u64) -> Option<&CandidateReport> {
+    pub(super) fn candidate_of(&self, order: u64) -> Option<&CandidateReport> {
         self.succession.measures.get(&order)?.report.as_ref()
     }
 

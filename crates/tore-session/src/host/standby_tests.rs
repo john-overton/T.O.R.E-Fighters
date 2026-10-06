@@ -10,6 +10,7 @@
 
 use super::super::*;
 use super::{MAX_RATE, MIN_RATE, PACE_SECONDS, StandbyFigures};
+use crate::client::candidate::CandidateSettings;
 use crate::client::{Client, ClientConfig, ClientPhase, Controls};
 use crate::journal::check_hash;
 use crate::settings::{Mode, number};
@@ -18,6 +19,8 @@ use crate::wire::migration::{CheckResult, StandbyState};
 use std::sync::Mutex;
 use tore_formats::aircraft::AircraftId;
 use tore_net::Entropy;
+use tore_net::master::candidate::{Candidate, CandidateKind};
+use tore_net::peers::{Peers, Route};
 use tore_net::sim::{LinkConfig, SimNetwork, SimSocket};
 use tore_world::mission::{Skill, Start};
 use tore_world::snapshot::RenderSnapshot;
@@ -84,6 +87,9 @@ fn other_platform() -> Platform {
 /// its standby run in process as the game's worker thread would run it.
 struct Player {
     socket: SimSocket,
+    /// The game's peers router in front of its joined socket (slice K6),
+    /// which answers the host's reach tests.
+    peers: Peers,
     client: Client,
     pilot: crate::bot::ScriptedPilot,
     picture: Option<RenderSnapshot>,
@@ -243,9 +249,17 @@ impl Rig {
             ..ClientConfig::new(host_address(), callsign, build())
         };
         self.next_port += 1;
-        let client = Client::connect(config, Arc::clone(&self.resources), self.net.now()).unwrap();
+        let mut client =
+            Client::connect(config, Arc::clone(&self.resources), self.net.now()).unwrap();
+        // Its Candidate report: it may host, at its own address.
+        client.set_candidate(CandidateSettings {
+            candidates: vec![Candidate::new(CandidateKind::Local, address)],
+            ..CandidateSettings::default()
+        });
+        let seed = u64::from(self.next_port);
         self.players.push(Player {
             socket,
+            peers: Peers::new(crate::wire::PROTOCOL_VERSION, Entropy::Seeded(seed)),
             client,
             pilot: crate::bot::ScriptedPilot::new(),
             picture: None,
@@ -309,7 +323,12 @@ impl Rig {
             self.wire.push(wire);
         }
         for player in &mut self.players {
-            player.client.receive_from(now, &mut player.socket).unwrap();
+            let mut buf = [0u8; 2_048];
+            while let Ok(Some((len, from))) = player.socket.recv_datagram(&mut buf) {
+                if player.peers.route(now, from, &buf[..len]) == Route::Client {
+                    player.client.receive(now, from, &buf[..len]);
+                }
+            }
             let controls = player.controls(now);
             player.client.update(now, &controls);
             if player
@@ -348,7 +367,12 @@ impl Rig {
                     .client
                     .request(now, messages::Message::StandbyStatus(status));
             }
-            player.client.transmit(&mut player.socket).unwrap();
+            player.client.drive_peers(now, &mut player.peers);
+            player.peers.update(now);
+            player.peers.transmit(&mut player.socket).unwrap();
+            while let Some(t) = player.client.poll_transmit() {
+                player.socket.send_datagram(t.to, &t.datagram).unwrap();
+            }
             while player.client.poll_event().is_some() {}
         }
     }
@@ -395,6 +419,7 @@ impl Rig {
     /// Every player joins, the console starts the mission, and every player
     /// flies.
     fn fly(&mut self) {
+        self.settle();
         assert!(
             self.run_until(Duration::from_secs(5), |r| {
                 r.host.peers.len() == r.players.len()
@@ -408,6 +433,31 @@ impl Rig {
                 .all(|p| r.flying(p))),
             "every player flies"
         );
+    }
+
+    /// In a game a player hosts, waits for slice K6's reach tests to make
+    /// three players (or every one, when fewer) eligible to stand by.
+    fn settle(&mut self) {
+        if self.host.config.house.is_none() {
+            return;
+        }
+        // Each reach test tries the three best candidates.
+        let wanted = self.players.len().min(3);
+        assert!(
+            self.run_until(Duration::from_secs(30), |r| r
+                .host
+                .ranked_candidates()
+                .len()
+                >= wanted),
+            "the reach tests make {wanted} eligible"
+        );
+    }
+
+    /// Flies on for `seconds`, keeping the host's hash of every tick in the
+    /// last four.
+    fn fly_for(&mut self, seconds: u64) {
+        self.hash_from = Some(self.host.world.tick() + seconds.saturating_sub(4) * 120);
+        self.run(Duration::from_secs(seconds));
     }
 
     /// The host's figures for the standby that is `player`'s game.
@@ -488,7 +538,8 @@ fn pace(length: usize) -> Duration {
 }
 
 /// Prints a standby's stream figures, for the slice's measurements.
-fn report(what: &str, figures: &StandbyFigures, seconds: f64) {
+fn report(what: &str, figures: &StandbyFigures) {
+    let seconds = figures.appointed_for.as_secs_f64();
     let b = figures.bytes;
     let per_seat_tick = b.ticks as f64 / b.seat_inputs.max(1) as f64;
     eprintln!(
@@ -520,6 +571,7 @@ fn warm_and_cold(seconds: u64) {
     rig.join("Cobra", 1, other_platform());
     rig.join("Hawk", 2, Platform::current());
     // Appointed in the lobby: the two longest-connected, warm by class.
+    rig.settle();
     assert!(
         rig.run_until(Duration::from_secs(3), |r| r.host.standby_figures().len()
             == 2)
@@ -547,8 +599,7 @@ fn warm_and_cold(seconds: u64) {
             .any(|(_, n)| matches!(n, Note::Flight { .. })))),
         "the Flight record built each standby's world"
     );
-    rig.hash_from = Some(seconds * 120 - 6 * 120);
-    rig.run(Duration::from_secs(seconds).saturating_sub(rig.net.now()));
+    rig.fly_for(seconds);
 
     // The warm standby matched every Check.
     let warm = rig.figures(0).unwrap();
@@ -607,9 +658,8 @@ fn warm_and_cold(seconds: u64) {
     rig.holds_the_hosts_world(0);
     rig.holds_the_hosts_world(1);
     // The stream's bytes, recorded.
-    let flown = rig.net.now().as_secs_f64();
-    report("crowd fight, 3 humans", &warm, flown);
-    report("crowd fight, 3 humans", &cold, flown);
+    report("crowd fight, 3 humans", &warm);
+    report("crowd fight, 3 humans", &cold);
     eprintln!(
         "both standbys over the last 10 s: {:.0} B/s",
         rig.bytes_per_second(10)
@@ -787,15 +837,31 @@ fn a_leaving_standby_is_replaced_and_one_behind_is_dismissed() {
     rig.join("Mako", 3, Platform::current());
     assert!(rig.run_until(Duration::from_secs(10), |r| r.flying(3)));
     assert!(
-        rig.run_until(Duration::from_secs(10), |r| r
+        rig.run_until(Duration::from_secs(30), |r| r
             .figures(3)
             .is_some_and(|f| f.role == messages::StandbyMark::First && f.ready())),
-        "Mako stands by first"
+        "Mako stands by first: ranked {:?}, figures {:?}, players {:?}",
+        rig.host.ranked_candidates(),
+        rig.host.standby_figures(),
+        rig.host
+            .peers
+            .values()
+            .map(|p| (p.callsign.clone(), p.lobby.order))
+            .collect::<Vec<_>>()
     );
     let ready = rig.host.ready_standbys();
     assert_eq!(ready.len(), 2);
-    assert!(rig.host.take_standbys_changed());
-    assert!(!rig.host.take_standbys_changed(), "until the next change");
+    // Every player heard the ready standbys, Mako first.
+    let mako = rig
+        .host
+        .peers
+        .iter()
+        .find(|(_, p)| p.callsign == "Mako")
+        .map(|(id, _)| *id)
+        .unwrap();
+    let last = rig.host.standbys.successions.last().unwrap();
+    assert_eq!(last, &ready);
+    assert_eq!(last[0].0, mako);
 }
 
 #[test]
@@ -823,6 +889,7 @@ fn a_dedicated_server_and_a_relayed_player_stand_by_for_nobody() {
     rig.join("Viper", 0, Platform::current());
     rig.join("Hawk", 1, Platform::current());
     assert!(rig.run_until(Duration::from_secs(3), |r| r.host.peers.len() == 2));
+    rig.settle();
     rig.host.set_standbys_enabled(false);
     rig.step();
     for peer in rig.host.peers.values_mut() {
@@ -869,12 +936,10 @@ fn the_stream_of_thirty_humans_is_measured() {
     }
     rig.fly();
     let seconds = 60;
-    rig.hash_from = Some(seconds * 120 - 4 * 120);
-    rig.run(Duration::from_secs(seconds).saturating_sub(rig.net.now()));
-    let flown = rig.net.now().as_secs_f64();
+    rig.fly_for(seconds);
     for player in 0..2 {
         let figures = rig.figures(player).unwrap();
-        report("30 humans", &figures, flown);
+        report("30 humans", &figures);
         assert_eq!(figures.mismatches, 0);
     }
     eprintln!(
@@ -921,11 +986,12 @@ fn real_data_15_against_15_with_a_warm_and_a_cold_standby() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300);
-    rig.hash_from = Some(seconds * 120 - 4 * 120);
+    rig.hash_from = Some(rig.host.world.tick() + (seconds - 4) * 120);
+    let start = rig.net.now();
     let mut minute = 1;
-    while rig.net.now() < Duration::from_secs(seconds) {
+    while rig.net.now() < start + Duration::from_secs(seconds) {
         rig.run(Duration::from_secs(10));
-        if rig.net.now() >= Duration::from_secs(60 * minute) {
+        if rig.net.now() >= start + Duration::from_secs(60 * minute) {
             eprintln!(
                 "minute {minute}: both standbys {:.0} B/s over the last 60 s",
                 rig.bytes_per_second(60)
@@ -933,11 +999,10 @@ fn real_data_15_against_15_with_a_warm_and_a_cold_standby() {
             minute += 1;
         }
     }
-    let flown = rig.net.now().as_secs_f64();
     let warm = rig.figures(0).unwrap();
     let cold = rig.figures(1).unwrap();
-    report("real 15 v 15, 4 humans", &warm, flown);
-    report("real 15 v 15, 4 humans", &cold, flown);
+    report("real 15 v 15, 4 humans", &warm);
+    report("real 15 v 15, 4 humans", &cold);
     let cobra = rig.lobby_id(1);
     let arrived = rig.players[1].checkpoints();
     for b in rig.begun.iter().filter(|b| b.player == cobra) {

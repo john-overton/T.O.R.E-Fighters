@@ -30,18 +30,22 @@
 //! - **Off until asked.** A host appoints no standby until its caller
 //!   switches them on ([`Host::set_standbys_enabled`]): a game that cannot
 //!   run a standby yet would keep the stream unread.
-//! - **Who.** Until slice K6's ranking lands, the standbys are the
-//!   longest-connected eligible players: in a game a player hosts (a
-//!   dedicated server appoints none), not the house, not relayed, not
-//!   leaving, and not dismissed as behind in this flight. A standby is kept
-//!   while it stays eligible; a free role is filled from the ranking. A
+//! - **Who.** The standbys are slice K6's best candidates
+//!   (`Host::ranked_candidates`: in a game a player hosts, not the house,
+//!   not relayed, its switch on, reached by every other direct player), less
+//!   any leaving or dismissed as behind in this flight. A standby is kept
+//!   while it may stay (`Host::may_stay_standby`: as eligible, but a player
+//!   not yet in a reach test does not count against it, so a join does not
+//!   dismiss the standbys); a free role is filled from the ranking. A
 //!   remaining standby keeps the role it was appointed with: appointing it
 //!   again would cost it a checkpoint and leave it not ready meanwhile.
-//! - **Warm or cold.** Until K6's Candidate report gives each game's
-//!   processor, a standby is warm when its platform is the host's, the
-//!   processor taken to be the host's own; the checks find any difference
+//! - **Warm or cold.** A standby is warm when its Candidate report's class
+//!   (platform and processor) is the host's; the checks find any difference
 //!   within 5 seconds, and after [`MISMATCHES_TO_COLD`] failed checks the
 //!   standby is appointed again, cold.
+//! - **Succession.** Whenever the standbys or their readiness change, the
+//!   ready ones go to K6's `send_succession`, which sends every player the
+//!   Succession when it differs from the last.
 //! - **Pacing.** The rate is the checkpoint's bytes over 8 seconds, at least
 //!   32,000 and at most [`MAX_RATE`] bytes a second less the rest of the
 //!   stream's bytes in the last second, so the whole stream with the
@@ -70,10 +74,10 @@ use crate::journal::{
     Appoint, CHECK_EVERY_TICKS, CHECKPOINT_EVERY_TICKS, Check, CheckpointBegin, CheckpointChunk,
     Record, StatePart, StreamWriter, Tick, Ticks, check_hash,
 };
+use crate::wire::Platform;
 use crate::wire::messages::{Message, StandbyMark};
 use crate::wire::migration::limits::{CHUNK_BYTES, STANDBYS, TICKS_PER_RECORD};
-use crate::wire::migration::{CheckResult, StandbyState, StandbyStatus};
-use crate::wire::{Path, Platform};
+use crate::wire::migration::{CheckResult, Processor, StandbyState, StandbyStatus};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -293,13 +297,15 @@ pub(super) struct Standbys {
     /// Join orders dismissed as behind: not appointed again until the next
     /// flight.
     excluded: BTreeSet<u64>,
-    /// The standbys or their readiness changed since the last
-    /// [`Host::take_standbys_changed`].
+    /// The standbys or their readiness changed since the last Succession.
     changed: bool,
     /// Tests: the next Check's hash is spoiled, as a standby whose machine
     /// computes differently would find it.
     #[cfg(test)]
     spoil_next_check: bool,
+    /// Tests: every Succession this module asked for, its ready standbys.
+    #[cfg(test)]
+    successions: Vec<Vec<(ConnectionId, bool)>>,
 }
 
 impl Host {
@@ -429,6 +435,14 @@ impl Host {
             self.pace(index);
             self.extra_packets(index);
         }
+        // Every player hears of the ready standbys when they change (slice
+        // K6's Succession).
+        if std::mem::take(&mut self.standbys.changed) {
+            let ready = self.ready_standbys();
+            #[cfg(test)]
+            self.standbys.successions.push(ready.clone());
+            self.send_succession(&ready);
+        }
     }
 
     /// One journal record to every standby, in order.
@@ -521,49 +535,75 @@ impl Host {
         self.send(connection, &Message::StandbyRecord(bytes));
     }
 
-    /// The games that may stand by, best first: until slice K6's ranking,
-    /// the longest-connected eligible players.
-    fn standby_ranking(&self) -> Vec<ConnectionId> {
-        let mut eligible: Vec<(u64, ConnectionId)> = self
-            .peers
+    /// The games that may stand by, best first: slice K6's ranking of the
+    /// candidates (by join order), less the ones this slice holds back.
+    fn standby_ranking(&self, ranked: &[u64]) -> Vec<ConnectionId> {
+        ranked
             .iter()
-            .filter(|(id, _)| self.may_stand_by(**id))
-            .map(|(id, peer)| (peer.lobby.order, *id))
-            .collect();
-        eligible.sort();
-        eligible.into_iter().map(|(_, id)| id).collect()
+            .filter_map(|&order| {
+                self.peers
+                    .iter()
+                    .find(|(_, p)| p.lobby.order == order)
+                    .map(|(id, _)| *id)
+            })
+            .filter(|&id| self.may_stand_by(id, ranked))
+            .collect()
     }
 
-    /// Whether `connection`'s game may be a standby: in a game a player
-    /// hosts, not the house, not relayed, not leaving, not dismissed as
-    /// behind this flight.
-    fn may_stand_by(&self, connection: ConnectionId) -> bool {
+    /// Whether `connection`'s game may be a standby: standbys switched on,
+    /// the game still running, an eligible candidate by slice K6's rules
+    /// (in a game a player hosts, not the house, not relayed, its switch on,
+    /// reached by every other direct player: it is in `ranked`), not
+    /// leaving, and not dismissed as behind this flight.
+    fn may_stand_by(&self, connection: ConnectionId, ranked: &[u64]) -> bool {
         let Some(peer) = self.peers.get(&connection) else {
             return false;
         };
         self.standbys.enabled
-            && self.config.house.is_some()
             && !matches!(self.life, Life::Stopped)
             && !peer.house
-            && peer.path != Path::Relay
             && !matches!(peer.stage, Stage::Closing { .. })
             && peer.goodbye.is_none()
             && !self.standbys.excluded.contains(&peer.lobby.order)
+            && ranked.contains(&peer.lobby.order)
+    }
+
+    /// Whether a standby already appointed stays one: standbys switched on,
+    /// the game still running, the player not leaving nor dismissed as
+    /// behind, and slice K6's eligibility but for reach tests not yet made
+    /// (a player who just joined does not dismiss it).
+    fn may_stay(&self, connection: ConnectionId) -> bool {
+        let Some(peer) = self.peers.get(&connection) else {
+            return false;
+        };
+        self.standbys.enabled
+            && !matches!(self.life, Life::Stopped)
+            && !matches!(peer.stage, Stage::Closing { .. })
+            && peer.goodbye.is_none()
+            && !self.standbys.excluded.contains(&peer.lobby.order)
+            && self.may_stay_standby(peer.lobby.order)
     }
 
     /// Whether `connection`'s game steps the mission alongside the host:
-    /// its platform is the host's (the processor taken to be the host's
-    /// until slice K6's Candidate report says it).
+    /// its class (the platform and processor of its Candidate report) is
+    /// the host's.
     fn standby_warm(&self, connection: ConnectionId) -> bool {
-        self.peers
-            .get(&connection)
-            .is_some_and(|peer| peer.platform == Platform::current())
+        self.peers.get(&connection).is_some_and(|peer| {
+            self.candidate_of(peer.lobby.order).is_some_and(|report| {
+                report.platform == Platform::current() && report.processor == Processor::current()
+            })
+        })
     }
 
     /// Drops standbys that left or stopped being eligible, and fills the
     /// free roles from the ranking. The journal records while any standby
     /// is appointed.
     fn appoint_standbys(&mut self) {
+        let ranked = if self.standbys.enabled {
+            self.ranked_candidates()
+        } else {
+            Vec::new()
+        };
         let mut index = 0;
         while index < self.standbys.streams.len() {
             let connection = self.standbys.streams[index].connection;
@@ -575,14 +615,14 @@ impl Host {
                 if self.standbys.streams.is_empty() {
                     self.record_journal(false);
                 }
-            } else if !self.may_stand_by(connection) {
+            } else if !self.may_stay(connection) {
                 self.dismiss(index);
             } else {
                 index += 1;
             }
         }
         if self.standbys.streams.len() < STANDBYS {
-            for connection in self.standby_ranking() {
+            for connection in self.standby_ranking(&ranked) {
                 if self.standbys.streams.len() >= STANDBYS {
                     break;
                 }
@@ -864,8 +904,7 @@ impl Host {
     }
 
     /// The ready standbys in their roles' order, each with whether it is
-    /// warm: what the Succession names (slice K6 sends it).
-    #[cfg_attr(not(test), allow(dead_code))] // Slice K6 sends the Succession.
+    /// warm: what the Succession names.
     pub(crate) fn ready_standbys(&self) -> Vec<(ConnectionId, bool)> {
         let mut ready: Vec<&Stream> = self.standbys.streams.iter().filter(|s| s.ready()).collect();
         ready.sort_by_key(|s| s.role.code());
@@ -876,12 +915,6 @@ impl Host {
                 (s.connection, warm)
             })
             .collect()
-    }
-
-    /// Whether the standbys or their readiness changed since the last call.
-    #[cfg_attr(not(test), allow(dead_code))] // Slice K6 sends the Succession.
-    pub(crate) fn take_standbys_changed(&mut self) -> bool {
-        std::mem::take(&mut self.standbys.changed)
     }
 
     /// Each standby's figures, for the host's log and status line.
