@@ -623,7 +623,13 @@ Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
 `lobby-settings-pvp`, `lobby-settings-flying`, `lobby-players`,
 `lobby-players-house`, `lobby-locks`, `lobby-watch` and `lobby-pvp`, and (J6)
 `lobby-relay` (a relayed player selected: the relay mark and the hint line's
-path) and `lobby-away` (a slot reading "AI (Goose away)"), and with `--quick-mission` `lobby-creator`,
-`lobby-creator-refused`, `lobby-ordnance`, `lobby-ordnance-refused` and
-`lobby-ordnance-cheat`, are in the lead's notes
+path) and `lobby-away` (a slot reading "AI (Goose away)"), and (L4) `lobby-builds` (a
+player on 1.0 selected, its build and system in the hint line, and the Messages
+lines about how its game and a second player's differ from the host's), and with
+`--quick-mission` `lobby-creator`, `lobby-creator-refused`, `lobby-ordnance`,
+`lobby-ordnance-refused` and `lobby-ordnance-cheat` (in the lead's notes) and, from L4,
+`lobby-creator-gaps` (the aircraft list with items not everyone has dimmed),
+`lobby-creator-gap-notice` (a choice of one refused, with the host's words in the
+notice), `lobby-creator-gap-theaters` and `lobby-ordnance-gaps` (weapon cards darkened, the
+first one refused)
 (`.local/mp-notes/stage-ef/ef8/`).

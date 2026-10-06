@@ -943,6 +943,19 @@ names.
   ([server guide](DEDICATED-SERVER.md)).
 - Single player does not change.
 
+*Built (L4, 2026-10-05):* the game shows all of it. It works out its content
+once, in the background, when Direct Connection or the Internet Lobby opens, so
+a join does not wait. In the lobby the King's Quick Mission creator dims an
+aircraft or a theater not everyone has, and choosing one leaves the choice as
+it was and says who lacks it ("Not everyone can fly the Rafale C: Hawk's game
+has no Rafale C."); Accept checks the whole mission the same way. Load Ordnance
+darkens a weapon not everyone has and refuses it in the same words. Selecting a
+player shows its Fighters Anthology build and system ("Hawk: Fighters Anthology
+1.0, on Linux. Connected directly."), an unable player's reason is shown as the
+host worded it, and Messages says once how a player's game differs from the
+host's. Nothing is said when they are equal. There is no new mark in the
+player list and no warning on the Internet Lobby (John, 2026-10-05).
+
 ## Replay and telemetry
 
 **Replay** stays separate from netcode and records on each local machine. A

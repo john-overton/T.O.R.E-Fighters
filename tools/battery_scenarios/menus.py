@@ -26,6 +26,8 @@ NORMAL_STATES = [
     "lobby-locks", "lobby-watch", "lobby-pvp",
     # Slice J6: a relayed player selected, a player away from its aircraft.
     "lobby-relay", "lobby-away",
+    # Stage L (slice L4): a player on another Fighters Anthology build selected, and Messages saying how it differs.
+    "lobby-builds",
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [
@@ -33,6 +35,8 @@ QUICK_STATES = [
     "ordnance-message", "ordnance-message-long", "debrief", "debrief-2", "debrief-3", "debrief-4",
     "debrief-5", "debrief-success", "objectives", "ground-start", "airports", "ground-targets-unavailable",
     "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
+    # Stage L (slice L4): the lobby's creator and Load Ordnance with items not every player has dimmed.
+    "lobby-creator-gaps", "lobby-creator-gap-notice", "lobby-creator-gap-theaters", "lobby-ordnance-gaps",
 ]
 THEATERS = ["BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU", "NSK", "WTA", "UKR", "VLA"]
 VARIANT_THEATERS = [f"~{code}{n}" for code in ("UKR", "VLA") for n in range(1, 9)] + ["~UKRF", "~VLAF", "~WTAF"]

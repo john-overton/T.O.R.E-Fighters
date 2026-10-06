@@ -8,6 +8,11 @@ bot leaves and the crown comes back. What the bot prints is what a second player
 sees; what the game logs is what its Messages show. The pictures the script writes are for a person to look at.
 
 The scenario takes its own port, so it runs beside the others; it opens one window (`--windows`).
+
+A second windowed scenario, `net-window-gaps` (stage L, slice L4), has the game host and a `tore-bot` whose import
+lacks the Rafale join as an observer, and the script shows what the game's King and every player then see: the
+selected player's build line, the King's creator with the Rafale dimmed in its aircraft list, a choice of it refused
+with the host's words, and the build and gap lines in Messages.
 """
 from __future__ import annotations
 
@@ -94,6 +99,54 @@ snapshot SHOTS/lobby-9-back.ppm
 exit
 """
 
+# Stage L (slice L4): the same way into the lobby, then the bot's row in Players (the hint), Mission..., the first
+# wing's aircraft field (the list, with the Rafale dimmed), the Rafale (the tenth row of the sorted list) and OK, which
+# the creator refuses, and Esc, which puts the creator away.
+GAPS_SCRIPT = """wait 10
+movemenu 150 48
+wait 0.6
+click
+wait 0.6
+movemenu 190 72
+wait 0.6
+click
+wait 4
+movemenu 140 432
+wait 0.6
+click
+wait 14
+snapshot SHOTS/gaps-1-lobby.ppm
+movemenu 450 194
+wait 0.6
+click
+wait 1.5
+snapshot SHOTS/gaps-2-hint.ppm
+movemenu 82 431
+wait 0.6
+click
+wait 2
+movemenu 185 157
+wait 0.6
+click
+wait 1.5
+snapshot SHOTS/gaps-3-list.ppm
+movemenu 300 285
+wait 0.6
+click
+wait 0.6
+movemenu 259 449
+wait 0.6
+click
+wait 1.5
+snapshot SHOTS/gaps-4-notice.ppm
+key Escape
+wait 1.5
+snapshot SHOTS/gaps-5-back.ppm
+exit
+"""
+
+GAPS_PICTURES = ("gaps-1-lobby", "gaps-2-hint", "gaps-3-list", "gaps-4-notice", "gaps-5-back")
+
 PICTURES = (
     "lobby-1-king", "lobby-2-settings", "lobby-3-game", "lobby-4-scoring", "lobby-5-realism", "lobby-6-closed",
     "lobby-7-players", "lobby-8-crowned", "lobby-9-back",
@@ -177,11 +230,68 @@ def drive_lobby(d: Drive) -> None:
     game.forbid(NET_BAD, "a network problem")
 
 
+def drive_gaps(d: Drive) -> None:
+    """The game hosts from Direct Connection's New; a bot lacking the Rafale joins as an observer. The window shows
+    the selected bot's build and system, the creator's dimmed Rafale and the refusal of choosing it, and the game's
+    log holds the host's content and gaps lines and the lines its Messages show."""
+    port = d.port()
+    fresh_data(d)
+    (d.data / "network-v1.conf").write_text(f"tore-network 1\ncallsign Viper\nport {port}\n")
+    shots = d.work / "shots"
+    shots.mkdir(exist_ok=True)
+    game = None
+    for attempt, start_wait in enumerate((20, 40), start=1):
+        for old in (d.data / "logs").glob("tore-*.log"):
+            old.unlink()
+        script = d.work / f"gaps{attempt}.txt"
+        script.write_text(GAPS_SCRIPT.replace("SHOTS", str(shots)).replace("wait 10\n", f"wait {start_wait}\n", 1))
+        game = d.start(f"game{attempt}", [d.app, *GAME_FLAGS, "--input-script", script], window=True)
+        end = time.time() + (start_wait + 45) * d.scale
+        while not re.search(r"Hosting Viper's game on UDP port", game_log(d)):
+            if not game.alive() or time.time() > end:
+                break
+            d.sleep(0.5)
+        else:
+            break
+        d.log(f"attempt {attempt}: the scripted clicks did not open the lobby")
+        game.stop()
+        shutil.copytree(d.data / "logs", d.work / f"attempt{attempt}-logs", dirs_exist_ok=True)
+    else:
+        raise DriveError("the game never hosted from Direct Connection's New")
+    # The bot watches from the lobby, with no slot, and stays past the end of the script.
+    bot = start_bots(d, port, "bot", 70, "--callsign", "Bot", "--observe", "none", "--drop-resource", "RAFALE.PT")
+    assert game is not None
+    game.finish(150, 0)
+    bot.finish(60, None)
+    log = game_log(d)
+    for pattern, what in (
+        (r"Lobby: Bot joined the game\.", "the bot joining"),
+        (r"Lobby: Bot's game differs from the host's: no Rafale C\.", "the line about the bot's game in Messages"),
+        (r"Host: tick \d+: content Bot: [^\n]*lacks aircraft RAFALE\.PT", "the host's content line for the bot"),
+        (r"Host: tick \d+: gaps: aircraft RAFALE\.PT \(Bot lacks it\)", "the host's gaps line"),
+    ):
+        if not re.search(pattern, log):
+            d.problem(f"the game's log lacks {what}: /{pattern}/")
+    bot.expect(r"^dropped RAFALE\.PT from the import$", "the dropped profile")
+    bot.expect(r"^Bot: gaps: aircraft RAFALE\.PT \(Bot lacks it\)$", "the gap")
+    bot.forbid(NET_BAD, "a network problem")
+    for name in GAPS_PICTURES:
+        if not (shots / f"{name}.ppm").exists():
+            d.problem(f"the script's {name}.ppm was not written")
+    game.forbid(NET_BAD, "a network problem")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
             name="net-window-lobby", lane="net", args=[], driver=drive_lobby, uses=("bot",), window=True, timeout=420,
             notes="the lobby's Settings and Players panels and slot locks in the window: the King turns settings, "
             "closes and opens a slot, gives the crown to a bot, which changes a setting, and takes it back when it leaves",
+        ),
+        Scenario(
+            name="net-window-gaps", lane="net", args=[], driver=drive_gaps, uses=("bot",), window=True, timeout=300,
+            notes="stage L's gaps in the window: a bot lacking the Rafale joins the King's lobby; the selected player's "
+            "build line, the creator's dimmed Rafale and the refusal of choosing it, Messages' difference line, the "
+            "host's content and gaps lines in the game's log (slice L4)",
         ),
     ]
