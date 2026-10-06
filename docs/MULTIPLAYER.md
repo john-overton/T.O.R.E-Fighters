@@ -1187,6 +1187,10 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | The calculated host in the lobby | John, 2026-10-05: stays where it is while that machine passes the tests, moves only when it fails and another passes; the King can pin a host |
 | Reservations | John, 2026-10-05: a dropped player's aircraft is reserved for its rejoin; End Mission releases it; an aircraft lost while its player was away brings the revival rules on return |
 | Taking over hosting | John, 2026-10-05: a "Let my game take over hosting" switch in Options, on by default; dedicated servers never migrate (they issue rejoin tokens and hold reservations) |
+| The data link in recordings | John, 2026-10-06: approved slice G9's baseline (single-player recordings gain the data link's events and nothing else; the viewer's Comms panel gains a Link chip and the summary a Data link section) |
+| AI leads share and sort | John, 2026-10-06: approved slice G4's baseline (AI leads on loose control share and sort targets and AI wingmen locked on one bandit spread out; every probe with an AI-led wing moves, the player's own wing does not) |
+| An away player's own plane | John, 2026-10-06: while the AI flies an away player's aircraft, the player watches it on the observer screen and takes it back at the first flight input (a follow-up to F2-A and F2-O2) |
+| Esc in the observer view | John, 2026-10-06: Esc opens the viewer's pause menu, whose first row is Stop Watching |
 
 ## Open questions
 
