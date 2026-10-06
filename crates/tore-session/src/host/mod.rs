@@ -81,8 +81,8 @@ use crate::wire::messages::{
 };
 use crate::wire::snapshot::SnapshotHeader;
 use crate::wire::{
-    PROTOCOL_VERSION, Path, Platform, SECTION_FILLER, SECTION_INPUTS, SECTION_OWN_STATE,
-    WireError, from_world,
+    PROTOCOL_VERSION, Path, Platform, SECTION_FILLER, SECTION_INPUTS, SECTION_OWN_STATE, WireError,
+    from_world,
 };
 use inputs::InputBuffer;
 use lobby::Entry;
