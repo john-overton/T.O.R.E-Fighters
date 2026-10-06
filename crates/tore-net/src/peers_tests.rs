@@ -7,8 +7,10 @@
 
 use super::*;
 use crate::packet::{ConnectRequest, Packet, Reach, ReachAnswer};
+use crate::server::{Server, ServerConfig};
 use crate::sim::nat::{Filtering, Forward, Mapping, Prefix, RouterConfig};
 use crate::sim::{LinkConfig, SimNetwork, SimSocket};
+use crate::{RATE_LIMIT_TOTAL, REACH_PER_IP};
 
 const VERSION: u16 = 13;
 const SESSION: u64 = 0x5e55;
@@ -553,4 +555,69 @@ fn the_median_is_the_lower_middle() {
     assert_eq!(median(&[ms(5)]), ms(5));
     assert_eq!(median(&[ms(9), ms(1), ms(5)]), ms(5));
     assert_eq!(median(&[ms(9), ms(1), ms(5), ms(7)]), ms(5));
+}
+
+/// The same LAN party against a candidate that already hosts: its transport's
+/// answerer keeps the same limits, so seven players behind one router, each
+/// sending ten Reaches in the first second, all reach it (slice KP).
+#[test]
+fn a_lan_party_behind_one_router_all_reach_a_hosting_candidate() {
+    let net = SimNetwork::new(29);
+    net.set_default_link(LinkConfig::one_way(Duration::from_millis(20)));
+    net.add_router(router(
+        "203.0.113.20",
+        "192.168.2.0/24",
+        EIM,
+        Filtering::EndpointIndependent,
+    ))
+    .unwrap();
+    let c_addr = a("198.51.100.10:26900");
+    let mut socket = net.bind(c_addr).unwrap();
+    let mut host = Server::new(ServerConfig {
+        entropy: Entropy::Seeded(5),
+        ..ServerConfig::new(VERSION)
+    });
+    host.set_reach_session(Some(SESSION));
+    let mut refuse = |_: &crate::server::ConnectDetails| crate::server::Decision::Refuse {
+        reason: crate::connection::RefuseReason::ShuttingDown,
+        text: String::new(),
+    };
+    let mut players: Vec<Game> = (0..7u8)
+        .map(|n| {
+            let mut game = Game::new(
+                &net,
+                a(&format!("192.168.2.{}:40000", 20 + n)),
+                2 + n,
+                40 + u64::from(n),
+            );
+            game.peers.test(
+                net.now(),
+                1,
+                &[TestTarget {
+                    player: 1,
+                    addresses: vec![c_addr, c_addr],
+                }],
+            );
+            game
+        })
+        .collect();
+    let end = net.now() + Duration::from_secs(3);
+    while net.now() < end {
+        net.advance(MS);
+        let now = net.now();
+        host.receive_from(&mut socket, now, &mut refuse).unwrap();
+        host.update(now);
+        host.transmit(&mut socket).unwrap();
+        for player in &mut players {
+            player.step(now);
+        }
+    }
+    for (n, player) in players.iter().enumerate() {
+        assert_eq!(player.finished.len(), 1, "player {n} finished its test");
+        assert!(
+            player.finished[0].results[0].reached.is_some(),
+            "player {n} reached the candidate"
+        );
+    }
+    assert_eq!(host.counters().rate_limited, 0);
 }

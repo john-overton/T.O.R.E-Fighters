@@ -18,7 +18,7 @@ use crate::packet::{
 use crate::platform::Platform;
 use crate::{
     COOKIE_SLOT, Counters, Datagrams, MAX_SECTION_KIND, RATE_LIMIT_PER_ADDRESS, RATE_LIMIT_TOTAL,
-    REACH_PER_ADDRESS, Transmit,
+    REACH_PER_ADDRESS, REACH_PER_IP, Transmit,
 };
 
 /// The host's settings.
@@ -183,12 +183,6 @@ struct RateLimiter {
 
 impl RateLimiter {
     fn allow(&mut self, now: Duration, address: IpAddr) -> bool {
-        self.allow_up_to(now, address, RATE_LIMIT_PER_ADDRESS)
-    }
-
-    /// As [`RateLimiter::allow`], with `per_address` a second from one
-    /// address instead of the joins' 20.
-    fn allow_up_to(&mut self, now: Duration, address: IpAddr, per_address: u32) -> bool {
         let second = now.as_secs();
         if second != self.second {
             self.second = second;
@@ -199,10 +193,52 @@ impl RateLimiter {
             return false;
         }
         let count = self.per_address.entry(address).or_insert(0);
-        if *count >= per_address {
+        if *count >= RATE_LIMIT_PER_ADDRESS {
             return false;
         }
         *count += 1;
+        self.total += 1;
+        true
+    }
+}
+
+/// The Reach answerer's rate limits, a whole second of the caller's clock at
+/// a time: each address and port ([`REACH_PER_ADDRESS`]), each IP address
+/// ([`REACH_PER_IP`]) and all together ([`RATE_LIMIT_TOTAL`]). A host's
+/// transport and the peers router keep one each (slice KP).
+#[derive(Debug, Default)]
+pub(crate) struct ReachLimiter {
+    second: u64,
+    total: u32,
+    per_address: HashMap<SocketAddr, u32>,
+    per_ip: HashMap<IpAddr, u32>,
+}
+
+impl ReachLimiter {
+    pub(crate) fn allow(&mut self, now: Duration, from: SocketAddr) -> bool {
+        let second = now.as_secs();
+        if second != self.second {
+            self.second = second;
+            self.total = 0;
+            self.per_address.clear();
+            self.per_ip.clear();
+        }
+        if self.total >= RATE_LIMIT_TOTAL {
+            return false;
+        }
+        if self
+            .per_address
+            .get(&from)
+            .is_some_and(|&n| n >= REACH_PER_ADDRESS)
+            || self
+                .per_ip
+                .get(&from.ip())
+                .is_some_and(|&n| n >= REACH_PER_IP)
+        {
+            return false;
+        }
+        *self.per_address.entry(from).or_insert(0) += 1;
+        *self.per_ip.entry(from.ip()).or_insert(0) += 1;
         self.total += 1;
         true
     }
@@ -226,8 +262,8 @@ pub struct Server {
     /// a flood of them cannot use up the joins' allowance (agent decision).
     discover_limiter: RateLimiter,
     /// Reach packets have a limiter of their own too: 10 a second from one
-    /// address (stage K).
-    reach_limiter: RateLimiter,
+    /// address and port, 160 from one IP address (stage K, slice KP).
+    reach_limiter: ReachLimiter,
     /// The session a Reach must name to be answered, as hosting it (role 1);
     /// `None` answers none (stage K, slice K0).
     reach_session: Option<u64>,
@@ -249,7 +285,7 @@ impl Server {
             ids: HashMap::new(),
             limiter: RateLimiter::default(),
             discover_limiter: RateLimiter::default(),
-            reach_limiter: RateLimiter::default(),
+            reach_limiter: ReachLimiter::default(),
             reach_session: None,
             out: VecDeque::new(),
             events: VecDeque::new(),
@@ -463,10 +499,7 @@ impl Server {
             self.counters.unexpected += 1;
             return;
         }
-        if !self
-            .reach_limiter
-            .allow_up_to(now, from.ip(), REACH_PER_ADDRESS)
-        {
+        if !self.reach_limiter.allow(now, from) {
             self.counters.rate_limited += 1;
             return;
         }
@@ -1073,6 +1106,37 @@ mod tests {
         // No connection, no event: a Reach leaves nothing behind.
         assert!(server.poll_event().is_none());
         assert_eq!(server.connections().count(), 0);
+    }
+
+    #[test]
+    fn reaches_from_one_ip_address_are_answered_up_to_its_cap() {
+        let mut server = host();
+        server.set_reach_session(Some(9));
+        let now = Duration::from_millis(3_500);
+        // 20 ports of one IP address, ten Reaches each: the IP address's 160.
+        for port in 0..20u16 {
+            let asker: SocketAddr = format!("203.0.113.9:{}", 40_000 + port).parse().unwrap();
+            for nonce in 0..10 {
+                server.receive(now, asker, &reach(9, nonce), &mut accept_all);
+            }
+        }
+        let answers = std::iter::from_fn(|| server.poll_transmit()).count();
+        assert_eq!(answers, REACH_PER_IP as usize);
+        assert_eq!(
+            server.counters().rate_limited,
+            200 - u64::from(REACH_PER_IP)
+        );
+        // Another IP address is still answered, and the next second starts
+        // afresh.
+        let other: SocketAddr = "203.0.113.10:40000".parse().unwrap();
+        server.receive(now, other, &reach(9, 1), &mut accept_all);
+        server.receive(
+            now + Duration::from_secs(1),
+            "203.0.113.9:40000".parse().unwrap(),
+            &reach(9, 2),
+            &mut accept_all,
+        );
+        assert_eq!(std::iter::from_fn(|| server.poll_transmit()).count(), 2);
     }
 
     #[test]

@@ -128,9 +128,14 @@ pub const COOKIE_SLOT: Duration = Duration::from_secs(10);
 pub const RATE_LIMIT_PER_ADDRESS: u32 = 20;
 /// Connect requests and answers answered per second in all.
 pub const RATE_LIMIT_TOTAL: u32 = 200;
-/// Reach packets a host answers a second from one IP address (stage K); 200
-/// a second in all, as joins.
+/// Reach packets a host answers a second from one address and port (stage
+/// K); 200 a second in all, as joins.
 pub const REACH_PER_ADDRESS: u32 = 10;
+/// Reach packets answered a second from one IP address, whatever their
+/// ports: a LAN party of 8 behind one router sends up to 7 players' five
+/// Reaches to each of four candidate addresses, 140 a second (slice KP, agent
+/// decision). Both the host's transport and the peers router keep it.
+pub const REACH_PER_IP: u32 = 160;
 /// Datagrams one `receive_from` call takes at most, so a flood cannot hold
 /// the caller's loop.
 pub const MAX_RECEIVE_BATCH: usize = 1024;
