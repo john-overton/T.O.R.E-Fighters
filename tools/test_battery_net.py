@@ -486,7 +486,9 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(any("Pilot3's snapshots came again after 9000" in p and "cost 4.7 ms a tick" in p
                             for p in net.migrate_problems(late, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS)))
         # The same lateness at a fast tick is a failure of the target.
-        fast = PILOTS.replace("Pilot3: migrate: snapshots again 2500", "Pilot3: migrate: snapshots again 4000")
+        fast = PILOTS.replace("2838 ms after the takeover, 521 ticks", "1900 ms after the takeover, 521 ticks").replace(
+            "Pilot3: migrate: snapshots again 2500", "Pilot3: migrate: snapshots again 4000"
+        )
         self.assertTrue(any("over 3500 ms" in p for p in net.migrate_problems(fast, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS)))
 
 
