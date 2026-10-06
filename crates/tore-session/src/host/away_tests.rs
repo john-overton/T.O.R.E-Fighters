@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::host::away::{LOST_WHILE_AWAY, NO_IDLE_AI, NOT_AWAY, WAITS};
-use crate::settings::number;
+use crate::settings::{Respawn, number};
 use crate::wire::messages::{Observe, Observing, Subject};
 
 /// Viper flying plane 0 and Cobra in the lobby, in co-op (no revival), the
@@ -322,4 +322,87 @@ fn a_mission_with_only_away_players_is_not_empty() {
     rig.run(Duration::from_secs(3));
     assert_eq!(rig.host.phase(), Phase::Flying);
     come_back(&mut rig, viper, before.flight);
+}
+
+/// Destroys plane 0 while the AI flies it for the away `viper` and runs until
+/// the host has told the player.
+fn lose_away_plane(rig: &mut Rig, viper: usize) {
+    rig.host
+        .world
+        .combat
+        .state
+        .targets
+        .iter_mut()
+        .find(|t| t.id == 0)
+        .unwrap()
+        .hp = 0;
+    assert!(rig.run_until(Duration::from_secs(2), |r| !away_mark(r, viper)));
+}
+
+/// Slice F2-X: a game a player hosts has no empty timeout, so the mission
+/// ended the moment the AI lost the plane of its only (away) player, before
+/// the observer menu's Spawn in Aircraft could be chosen. While the revival
+/// rules may still let the watching player fly again the mission waits for
+/// it; Spawn in Aircraft (Revive) then flies it again in a new plane.
+#[test]
+fn a_mission_waits_for_a_player_who_lost_its_plane_while_away_and_may_revive() {
+    let (mut rig, viper, _) = pair_with(HostConfig {
+        empty_timeout: Duration::ZERO,
+        ..config()
+    });
+    rig.host
+        .settings
+        .apply(&[(number::RESPAWN, Respawn::Revive.value())])
+        .unwrap();
+    go_away(&mut rig, viper);
+    lose_away_plane(&mut rig, viper);
+    assert!(rig.host.anyone_awaiting_spawn());
+    rig.run(Duration::from_secs(3));
+    assert_eq!(rig.host.phase(), Phase::Flying);
+    let mission = rig.clients[viper].number();
+    rig.clients[viper].send(&Message::Revive { mission });
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.clients[viper]
+            .seated
+            .as_ref()
+            .is_some_and(|s| s.plane != 0)
+    }));
+    assert!(!rig.host.anyone_awaiting_spawn());
+    assert!(rig.faults().is_empty());
+}
+
+/// The same loss under a rule that lets nobody fly again ends the mission
+/// at the empty timeout as before: nothing is left to wait for.
+#[test]
+fn a_mission_does_not_wait_for_a_player_no_rule_lets_fly_again() {
+    let (mut rig, viper, _) = pair_with(HostConfig {
+        empty_timeout: Duration::from_secs(1),
+        ..config()
+    });
+    go_away(&mut rig, viper);
+    lose_away_plane(&mut rig, viper);
+    assert!(!rig.host.anyone_awaiting_spawn());
+    rig.run(Duration::from_secs(3));
+    assert_ne!(rig.host.phase(), Phase::Flying);
+}
+
+/// A player who lost its plane while away and stops watching has left the
+/// flight: the mission does not wait for it.
+#[test]
+fn a_player_who_stops_watching_after_the_loss_no_longer_holds_the_mission() {
+    let (mut rig, viper, _) = pair_with(HostConfig {
+        empty_timeout: Duration::from_secs(1),
+        ..config()
+    });
+    rig.host
+        .settings
+        .apply(&[(number::RESPAWN, Respawn::Revive.value())])
+        .unwrap();
+    go_away(&mut rig, viper);
+    lose_away_plane(&mut rig, viper);
+    assert!(rig.host.anyone_awaiting_spawn());
+    rig.clients[viper].send(&Message::Observe(Observe::Stop));
+    rig.run(Duration::from_secs(3));
+    assert!(!rig.host.anyone_awaiting_spawn());
+    assert_ne!(rig.host.phase(), Phase::Flying);
 }

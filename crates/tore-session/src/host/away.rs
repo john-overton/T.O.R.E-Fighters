@@ -197,6 +197,28 @@ impl Host {
         self.rejoin.reserved.values().any(|r| r.away)
     }
 
+    /// Whether a player who lost its plane while away is watching and may
+    /// still fly again by the revival rules (slice F2-X): the mission is not
+    /// empty while one waits at the observer menu's Spawn in Aircraft. A game
+    /// a player hosts has no empty timeout, so without this the mission would
+    /// end the moment the AI lost the plane of its only player, and a
+    /// dedicated server's lone player would have only the timeout to choose.
+    /// A player who left the flight (no watch) or whom no rule lets revive
+    /// does not count.
+    pub(super) fn anyone_awaiting_spawn(&self) -> bool {
+        self.peers.iter().any(|(connection, peer)| {
+            matches!(peer.stage, Stage::Lobby)
+                && peer.watch.is_some()
+                && self.order_of(*connection).is_some_and(|order| {
+                    self.revival
+                        .players
+                        .get(&order)
+                        .is_some_and(|player| player.lost.is_some())
+                        && self.revival_message(order).why.is_none()
+                })
+        })
+    }
+
     /// The lobby state's away mark for the player with lobby id `id`.
     pub(super) fn away_mark(&self, id: u8) -> bool {
         self.rejoin

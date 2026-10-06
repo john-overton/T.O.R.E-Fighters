@@ -3394,12 +3394,14 @@ impl Host {
 
     /// The time limit and the empty timeout.
     fn check_lifecycle(&mut self, now: Duration) {
-        // A player the AI flies for while it is away still plays.
+        // A player the AI flies for while it is away still plays, and so
+        // does one who lost that plane and may still fly again.
         let seated = self
             .peers
             .values()
             .any(|p| matches!(p.stage, Stage::Seated | Stage::Taking { .. }))
             || self.anyone_away()
+            || self.anyone_awaiting_spawn()
             || self.seated_absent();
         if seated {
             self.empty_since = None;
