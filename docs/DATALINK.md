@@ -300,12 +300,32 @@ acknowledged: the cues stop blinking.
   order, but it keeps its own mission role, so when the target is gone it
   picks again by itself (your order leaves it idle until your next one). Only
   released AI wingmen on the free engagement take targets: escorts, patrols,
-  wingmen that are landing or going home hurt, and human wingmen are left
-  alone. Each target given is an assignment (a flightmate sees the lock
-  numbers and the brackets) and a radio call in the lead's voice, "Two, attack
-  bandit, bearing 270, 15 miles, angels 20", heard by the humans in the lead's
+  and wingmen that are landing or going home hurt are left alone. A human
+  flying in the lead's wing is dealt too (built, slice G11, 2026-10-06, John's
+  decision): see the next point. Each target given is an assignment (a
+  flightmate sees the lock numbers and the brackets) and a radio call in the
+  lead's voice, "Two, attack bandit, bearing 270, 15 miles, angels 20", heard by the humans in the lead's
   flight, 3.5 seconds apart when it gives several, and by the seats of the side's
   other flights that monitor the battle net, with the flight colour first.
+- **An AI lead assigns its human wingmen (built, slice G11, 2026-10-06).** If you
+  fly as a number Two, Three or Four behind an AI lead, its share and its sort
+  deal to you as they deal to its AI wingmen, by the same rules: in member
+  order, at most two on one bandit, you counted as an attacker like an AI
+  wingman, and you left out when you are out of missiles, low on fuel or badly
+  hurt (or on the ground, or down). You get what a human lead's order gives
+  you: the assignment (the brackets on the target, the numbers on the radar,
+  the target window's tag) and the call, "Two, attack bandit, bearing 270, 15
+  miles, angels 20", from your own place. Nothing is forced. Your aircraft is
+  never ordered, nothing the AI does waits for your reply, and you may fly
+  anywhere; the assignment ends by the same rules as any other (the target is
+  lost, you are lost, the lead changes, or a new assignment replaces it).
+  A **share** goes only to a human who is idle: no radar lock and no
+  assignment younger than 30 seconds. One who has a lock is already attacking
+  (and counts toward the allowance when it is on the lead's bandit), and one
+  who was assigned in the last half minute is not given another. A **sort**
+  deals every fit human in the wing as it re-deals every fit AI wingman, and
+  says nothing to one who already holds or has locked the bandit it would deal
+  him. The yield below is still for AI members only.
 - **The sort warning, and the yield (built, slice G4).** When two members of a
   flight lock the same bandit and the lead did not mean it, the AI member
   looks for another target and leaves that bandit alone for 10 seconds, if
