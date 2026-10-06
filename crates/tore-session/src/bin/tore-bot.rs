@@ -16,7 +16,10 @@
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
 //!          [--revive SECONDS] [--away SECONDS,FOR]
 //!          [--order SECONDS,NAME]... [--reply SECONDS,KIND]...
-//!          [--drop-resource NAME]... [--expect-unable]
+//!          [--drop-resource NAME]... [--expect-unable] [--standby on|off]
+//! tore-bot --host MISSION [--port N] [--name TEXT] [--password TEXT] [--standby on|off]
+//!          [--players N] [--wait-standbys N] [--callsign NAME] [--slot PLANE]
+//!          [--seconds S] [--king NAME=VALUE[,NAME=VALUE]...] [--capture FILE]
 //! tore-bot --content-report [--data-dir DIR] [--drop-resource NAME]...
 //! ```
 //!
@@ -116,12 +119,38 @@
 //! cannot play the mission: it is told why, takes no plane and leaves
 //! cleanly (agent decision, for the battery's `net-content-missing`).
 //!
+//! Host migration (stage K, slice K9; docs/ARCHITECTURE.md, "Host migration
+//! and rejoin"). `--host MISSION` makes the bot a game that hosts, as the
+//! game's hosting thread does and with no window: it hosts the mission file
+//! MISSION (the format of `tore-server --mission`) on UDP port N (26900
+//! unless given) as the house, joins its own host over the in-process link,
+//! flies the plane `--slot` names, wears the crown and starts the mission
+//! once everyone holding a slot is ready, at least `--players` players are in
+//! the lobby (the bot included; default 1) and `--wait-standbys` standbys are
+//! ready (default 0). `--standby on|off` (default on for a host) makes it
+//! appoint standbys. When its `--seconds` are up it hands the game over to a
+//! ready standby, or says the host left when there is none, and exits.
+//! `--standby on` on a joined bot (default off) makes it a game that may take
+//! over hosting: it reports its candidates, answers the host's reach tests,
+//! keeps a standby on a thread of its own, and when the host is lost and it
+//! is the first standby (or the second, three seconds later) it takes the
+//! game over, hosts it with the bot as the house, and carries on as a
+//! player. A bot that took the game over leaves only after its guests, at
+//! most 25 seconds past its `--seconds`. Every migration prints a line
+//! beginning "NAME: migrate:", "NAME: host:" or "NAME: standby:", and the
+//! client's own notices ("Lost contact with the host. Moving the game to
+//! Hawk...", "The game moved to Hawk.") print as the bot's other notices do.
+//!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
 //! every bot was seated, got a debrief and then left cleanly, or was told the
 //! host left the game.
 
-use std::net::{SocketAddr, UdpSocket};
+#[path = "tore-bot/hosting.rs"]
+mod hosting;
+
+use hosting::{Mig, Sock};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -135,6 +164,7 @@ use tore_net::{
 };
 use tore_session::bot::Bot;
 use tore_session::client::content::differs_line;
+use tore_session::client::migrate::MigrationState;
 use tore_session::client::rejoin::FileStore;
 use tore_session::client::{Race, ended_text};
 use tore_session::host::content::{GameContent, gaps_line, report_lines};
@@ -142,10 +172,12 @@ use tore_session::settings::{self, Mode, Store};
 use tore_session::wire::chat::Receiver;
 use tore_session::wire::messages::{Goodbye, LobbyState, Observing, SettingsChange, Subject};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
+use tore_world::mission::MissionSpec;
 use tore_world::seats::SeatCommand;
 
 const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
-[--path auto|direct|relay]) [--data-dir DIR] [--count N] \
+[--path auto|direct|relay] | --host MISSION [--port N] [--name TEXT] [--players N] \
+[--wait-standbys N]) [--standby on|off] [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE] \
 [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] \
@@ -170,6 +202,8 @@ enum JoinPath {
 /// Where the bots join: an address, or a listing through the master.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum JoinBy {
+    /// `--host`: the bot hosts the game itself.
+    Host,
     Connect(SocketAddr),
     Master {
         master: String,
@@ -215,6 +249,20 @@ struct Options {
     /// `--expect-unable`: succeed only as a player who cannot fly the
     /// mission.
     expect_unable: bool,
+    /// `--host`: the mission file the bot hosts.
+    host: Option<PathBuf>,
+    /// `--port`: the game port of a hosting bot.
+    port: u16,
+    /// `--name`: the hosted game's name.
+    game_name: String,
+    /// `--standby`: appoint standbys (a host) or stand by (a player).
+    standby: Option<bool>,
+    /// `--players`: the lobby's players, the house included, a hosting
+    /// bot's start waits for.
+    players: usize,
+    /// `--wait-standbys`: the ready standbys a hosting bot's start waits
+    /// for.
+    wait_standbys: usize,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -379,6 +427,12 @@ fn parse(args: &[String]) -> Result<Options, String> {
         drop: Vec::new(),
         content_report: false,
         expect_unable: false,
+        host: None,
+        port: tore_net::DEFAULT_PORT,
+        game_name: "T.O.R.E bot game".into(),
+        standby: None,
+        players: 1,
+        wait_standbys: 0,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -442,6 +496,36 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--drop-resource" => options.drop.push(value()?),
             "--content-report" => options.content_report = true,
             "--expect-unable" => options.expect_unable = true,
+            "--host" => options.host = Some(PathBuf::from(value()?)),
+            "--port" => {
+                options.port = value()?
+                    .parse()
+                    .ok()
+                    .filter(|port| *port != 0)
+                    .ok_or("--port is a number from 1 to 65535")?;
+            }
+            "--name" => options.game_name = value()?,
+            "--standby" => {
+                options.standby = Some(match value()?.as_str() {
+                    "on" => true,
+                    "off" => false,
+                    other => return Err(format!("--standby is on or off, not {other:?}")),
+                });
+            }
+            "--players" => {
+                options.players = value()?
+                    .parse()
+                    .ok()
+                    .filter(|n| (1..=64).contains(n))
+                    .ok_or("--players is 1 to 64")?;
+            }
+            "--wait-standbys" => {
+                options.wait_standbys = value()?
+                    .parse()
+                    .ok()
+                    .filter(|n| (0..=2).contains(n))
+                    .ok_or("--wait-standbys is 0 to 2")?;
+            }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
@@ -451,6 +535,21 @@ fn parse(args: &[String]) -> Result<Options, String> {
         if connect.is_some() || master.is_some() || listing.is_some() {
             return Err(format!("--content-report joins nothing\n{USAGE}"));
         }
+        return Ok(options);
+    }
+    if options.host.is_some() {
+        if connect.is_some() || master.is_some() || listing.is_some() {
+            return Err(format!(
+                "--host hosts the game itself: it joins nothing\n{USAGE}"
+            ));
+        }
+        if options.count != 1 {
+            return Err(format!("--host is one game: --count is 1\n{USAGE}"));
+        }
+        options.target = JoinBy::Host;
+        // The house wears the crown: it starts the mission with the
+        // settings as they are.
+        options.king.get_or_insert_with(Vec::new);
         return Ok(options);
     }
     options.target = match (connect, master, listing) {
@@ -656,8 +755,18 @@ struct Through {
 /// One bot and how it is doing.
 struct Running {
     name: String,
-    /// The socket of a join by address.
-    socket: Option<UdpSocket>,
+    /// The socket of a join by address, or of the game the bot hosts.
+    socket: Option<Sock>,
+    /// Host migration (stage K, slice K9): the bot hosts, or stands by.
+    mig: Option<Mig>,
+    /// The game was handed over to a standby and the bot is done.
+    handed: bool,
+    /// When the bot noticed it had lost its host, and the snapshots it had
+    /// then: the line saying when they came again.
+    lost: Option<(Duration, u64)>,
+    /// `--king` stands (or the host's own settings) and the settings went:
+    /// the King's start waits only for the lobby.
+    start_ok: bool,
     /// The join through the master.
     through: Option<Through>,
     /// The client's settings, kept until the master's introduction for a
@@ -869,6 +978,23 @@ impl Running {
         Ok(())
     }
 
+    /// A bot whose client has closed but which still hosts: the host goes on
+    /// until it has told its players, then goes (stage K, slice K9).
+    fn host_only(&mut self, now: Duration, end: Duration) {
+        let (Some(mig), Some(socket), Some(bot)) =
+            (self.mig.as_mut(), self.socket.as_mut(), self.bot.as_mut())
+        else {
+            return;
+        };
+        if !mig.hosts() {
+            return;
+        }
+        mig.receive(now, &self.name, bot, socket);
+        mig.end_hosting(now, &self.name, end, false);
+        mig.update_host(now, &self.name, bot, socket);
+        mig.finish_hosting(now, &self.name, bot, socket);
+    }
+
     /// Asks the master for the relay, once, with a line saying why.
     fn ask_relay(&mut self, now: Duration, why: &str) {
         let name = self.name.clone();
@@ -1000,7 +1126,7 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     // A join through the master finds its listing first.
     let found = match &options.target {
-        JoinBy::Connect(_) => None,
+        JoinBy::Host | JoinBy::Connect(_) => None,
         JoinBy::Master {
             master, listing, ..
         } => {
@@ -1033,6 +1159,7 @@ fn main() -> ExitCode {
             )
         };
         let server = match &options.target {
+            JoinBy::Host => tore_net::LINK_ADDRESS,
             JoinBy::Connect(address) => *address,
             JoinBy::Master { .. } => SocketAddr::from(([0, 0, 0, 0], 0)),
         };
@@ -1066,6 +1193,10 @@ fn main() -> ExitCode {
         let mut running = Running {
             name: name.clone(),
             socket: None,
+            mig: None,
+            handed: false,
+            lost: None,
+            start_ok: false,
             through: None,
             config,
             capture: options.capture.as_ref().map(|base| {
@@ -1108,6 +1239,56 @@ fn main() -> ExitCode {
             unable: false,
         };
         match (&options.target, &found) {
+            (JoinBy::Host, _) => {
+                let spec = match options
+                    .host
+                    .as_ref()
+                    .map(|file| {
+                        std::fs::read_to_string(file)
+                            .map_err(|e| format!("cannot read the mission {}: {e}", file.display()))
+                            .and_then(|text| {
+                                MissionSpec::from_text(&text)
+                                    .map_err(|e| format!("the mission {}: {e}", file.display()))
+                            })
+                    })
+                    .transpose()
+                {
+                    Ok(Some(spec)) => spec,
+                    Ok(None) => return ExitCode::from(2),
+                    Err(text) => {
+                        eprintln!("{text}");
+                        return ExitCode::from(2);
+                    }
+                };
+                let config = hosting::host_config(
+                    &options.game_name,
+                    &options.password,
+                    build(),
+                    Arc::clone(&content),
+                );
+                let setup = hosting::HostSetup {
+                    spec,
+                    port: options.port,
+                    standbys: options.standby.unwrap_or(true),
+                };
+                match Mig::hosting(setup, &resources, config) {
+                    Ok((mig, sock)) => {
+                        println!(
+                            "{name}: hosting {:?} on UDP port {}",
+                            options.game_name, options.port
+                        );
+                        running.mig = Some(mig);
+                        running.socket = Some(sock);
+                    }
+                    Err(text) => {
+                        eprintln!("{text}");
+                        return ExitCode::from(2);
+                    }
+                }
+                if let Err(code) = running.start(&options, &resources, &lines, clock.now()) {
+                    return code;
+                }
+            }
             (JoinBy::Master { path, .. }, Some((masters, listing_id))) => {
                 // One dual-stack socket: its IPv4 and IPv6 candidates and
                 // its Connect requests all leave from one port.
@@ -1149,7 +1330,7 @@ fn main() -> ExitCode {
                     "[::]:0".parse().expect("an address")
                 };
                 running.socket = match bind_udp(local) {
-                    Ok(socket) => Some(socket),
+                    Ok(socket) => Some(Sock::Udp(socket)),
                     Err(error) => {
                         eprintln!("cannot open a socket: {error}");
                         return ExitCode::from(2);
@@ -1157,6 +1338,29 @@ fn main() -> ExitCode {
                 };
                 if let Err(code) = running.start(&options, &resources, &lines, clock.now()) {
                     return code;
+                }
+                // A player that may take the game over: its standby and its
+                // candidates (stage K, slice K9).
+                if let Some(standby) = options.standby
+                    && let (Some(bot), Some(Sock::Udp(socket))) =
+                        (running.bot.as_mut(), running.socket.as_ref())
+                {
+                    let local = tore_net::master::local::own_address_toward(server)
+                        .zip(socket.local_addr().ok())
+                        .map(|(ip, bound)| SocketAddr::new(ip, bound.port()));
+                    let config = hosting::host_config(
+                        &options.game_name,
+                        &options.password,
+                        build(),
+                        Arc::clone(&content),
+                    );
+                    match Mig::joined(&resources, config, bot, local, standby) {
+                        Ok(mig) => running.mig = Some(mig),
+                        Err(text) => {
+                            eprintln!("{name}: cannot stand by: {text}");
+                            return ExitCode::from(2);
+                        }
+                    }
                 }
             }
         }
@@ -1168,6 +1372,7 @@ fn main() -> ExitCode {
         let now = clock.now();
         for r in &mut bots {
             if r.closed.is_some() || r.failed.is_some() {
+                r.host_only(now, end);
                 continue;
             }
             if let Err(code) = r.join_through(now, &options, &resources, &lines) {
@@ -1190,18 +1395,35 @@ fn main() -> ExitCode {
                         .client
                         .receive_from(now, &mut t.joiner.over(&mut t.socket, now));
                 }
-                (None, Some(socket)) => {
-                    let _ = bot.client.receive_from(now, socket);
-                }
+                (None, Some(socket)) => match r.mig.as_mut() {
+                    Some(mig) => mig.receive(now, &r.name, bot, socket),
+                    None => {
+                        let _ = bot.client.receive_from(now, socket);
+                    }
+                },
                 (None, None) => {}
             }
             if now >= end && r.left_at.is_none() {
-                r.left_at = Some(now);
-                if bot.client.phase() == ClientPhase::Connecting {
-                    bot.client.disconnect(now);
-                } else {
-                    bot.client.leave_game(now);
+                match (r.mig.as_mut(), r.socket.as_mut()) {
+                    // A host hands the game over, or says it left, and its own
+                    // client follows (stage K, slice K9).
+                    (Some(mig), Some(_)) if mig.hosts() => {
+                        if mig.end_hosting(now, &r.name, end, options.standby.unwrap_or(true)) {
+                            r.left_at = Some(now);
+                        }
+                    }
+                    _ => {
+                        r.left_at = Some(now);
+                        if bot.client.phase() == ClientPhase::Connecting {
+                            bot.client.disconnect(now);
+                        } else {
+                            bot.client.leave_game(now);
+                        }
+                    }
                 }
+            }
+            if let (Some(mig), Some(socket)) = (r.mig.as_mut(), r.socket.as_mut()) {
+                mig.update_host(now, &r.name, bot, socket);
             }
             if r.left_at
                 .is_some_and(|at| now.saturating_sub(at) > LEAVE_GRACE)
@@ -1209,6 +1431,27 @@ fn main() -> ExitCode {
                 bot.client.disconnect(now);
             }
             bot.update(now);
+            // A lost host: when the snapshots come again (slice K9's lines).
+            match bot.client.migration() {
+                MigrationState::Steady => {
+                    if let Some((since, seen)) = r.lost
+                        && bot.client.clone_stats().snapshots > seen
+                    {
+                        r.lost = None;
+                        println!(
+                            "{}: migrate: snapshots again {} ms after the loss was noticed",
+                            r.name,
+                            now.saturating_sub(since).as_millis()
+                        );
+                    }
+                }
+                _ => {
+                    if r.lost.is_none() {
+                        r.lost = Some((now, bot.client.clone_stats().snapshots));
+                        println!("{}: migrate: lost the host", r.name);
+                    }
+                }
+            }
             if bot.ejected && !r.ejection_told {
                 r.ejection_told = true;
                 println!("{}: ejected", r.name);
@@ -1228,9 +1471,23 @@ fn main() -> ExitCode {
                     let _ = bot.client.transmit(&mut t.joiner.over(&mut t.socket, now));
                     let _ = t.joiner.transmit(&mut t.socket);
                 }
-                (None, Some(socket)) => {
-                    let _ = bot.client.transmit(socket);
-                }
+                (None, Some(socket)) => match r.mig.as_mut() {
+                    Some(mig) => {
+                        mig.update_standby(now, &r.name, bot, &resources);
+                        mig.drive_peers(now, bot, socket);
+                        mig.send_client(now, bot, socket);
+                        if mig.finish_hosting(now, &r.name, bot, socket) && mig.handed_over {
+                            r.handed = true;
+                            r.closed = Some(CloseReason::Disconnected {
+                                reason: DisconnectReason::Left,
+                                by_peer: false,
+                            });
+                        }
+                    }
+                    None => {
+                        let _ = bot.client.transmit(socket);
+                    }
+                },
                 (None, None) => {}
             }
             for line in std::mem::take(&mut bot.radio_heard) {
@@ -1296,21 +1553,24 @@ fn main() -> ExitCode {
                                 && !r.settings_sent
                             {
                                 r.settings_sent = true;
-                                println!(
-                                    "{}: as the King, changing the settings: {}",
-                                    r.name,
-                                    settings::words(values)
-                                );
-                                bot.client.change_settings(SettingsChange {
-                                    values: values.clone(),
-                                    ..SettingsChange::default()
-                                });
+                                if !values.is_empty() {
+                                    println!(
+                                        "{}: as the King, changing the settings: {}",
+                                        r.name,
+                                        settings::words(values)
+                                    );
+                                    bot.client.change_settings(SettingsChange {
+                                        values: values.clone(),
+                                        ..SettingsChange::default()
+                                    });
+                                }
                             }
                             // The King's start once the settings stand and
                             // everyone holding a slot is ready (not before,
                             // so a change that clears the ready marks does
                             // not meet a start already on its way).
-                            bot.start_when_ready = r.settings_sent && stand;
+                            r.start_ok = r.settings_sent && stand;
+                            bot.start_when_ready = r.start_ok;
                         }
                     }
                     ClientEvent::Goodbye(_) => {}
@@ -1395,6 +1655,19 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // A hosting bot starts the mission once the lobby holds the players
+        // and the standbys the options ask for (stage K, slice K9).
+        if options.host.is_some() {
+            for r in &mut bots {
+                if let Some(bot) = r.bot.as_mut().filter(|_| r.closed.is_none()) {
+                    let players = bot.client.lobby().map_or(0, |l| l.players.len());
+                    let standbys = bot.client.succession().map_or(0, |s| s.standbys.len());
+                    bot.start_when_ready = r.start_ok
+                        && players >= options.players
+                        && standbys >= options.wait_standbys;
+                }
+            }
+        }
         if now >= next_report {
             next_report += Duration::from_secs(5);
             for r in &mut bots {
@@ -1425,12 +1698,14 @@ fn main() -> ExitCode {
                         r.name, bot.watched, bot.watched_aircraft
                     );
                 }
+                if let Some(line) = r.mig.as_ref().and_then(|m| m.counts_line(bot)) {
+                    println!("{}: migrate: {line}", r.name);
+                }
             }
         }
-        if bots
-            .iter()
-            .all(|r| r.closed.is_some() || r.failed.is_some())
-        {
+        if bots.iter().all(|r| {
+            (r.closed.is_some() || r.failed.is_some()) && r.mig.as_ref().is_none_or(|m| !m.hosts())
+        }) {
             break;
         }
         let wake = bots
@@ -1444,7 +1719,9 @@ fn main() -> ExitCode {
         std::thread::sleep(wake);
     }
     let clean = bots.iter().all(|r| {
-        let done = if options.expect_unable {
+        let done = if r.handed {
+            r.seated
+        } else if options.expect_unable {
             r.unable && !r.seated
         } else if options.observe.is_some() {
             r.observed && r.bot.as_ref().is_some_and(|bot| bot.watched > 0)
@@ -1463,7 +1740,8 @@ fn main() -> ExitCode {
             r.seated && r.debrief
         };
         done && r.failed.is_none()
-            && (r.host_left
+            && (r.handed
+                || r.host_left
                 || matches!(
                     r.closed,
                     Some(CloseReason::Disconnected {
@@ -1726,6 +2004,41 @@ mod tests {
                 parse(&args(&format!("--connect 127.0.0.1 {bad}"))).is_err(),
                 "{bad}"
             );
+        }
+    }
+
+    #[test]
+    fn host_and_standby_options_parse_and_refuse_what_cannot_go_together() {
+        let o = parse(&args(
+            "--host m.txt --port 27000 --name Friday --players 4 --wait-standbys 2 --standby off \
+             --slot 0 --seconds 90",
+        ))
+        .unwrap();
+        assert_eq!(o.target, JoinBy::Host);
+        assert_eq!(o.host, Some(PathBuf::from("m.txt")));
+        assert_eq!((o.port, o.players, o.wait_standbys), (27000, 4, 2));
+        assert_eq!((o.game_name.as_str(), o.standby), ("Friday", Some(false)));
+        // The house wears the crown and starts with the settings as they are.
+        assert_eq!(o.king, Some(Vec::new()));
+        let d = parse(&args("--host m.txt")).unwrap();
+        assert_eq!(
+            (d.port, d.players, d.wait_standbys, d.standby),
+            (26900, 1, 0, None)
+        );
+        let o = parse(&args("--connect 127.0.0.1 --standby on")).unwrap();
+        assert_eq!(o.standby, Some(true));
+        for bad in [
+            "--host m.txt --connect 127.0.0.1",
+            "--host m.txt --master 127.0.0.1 --listing x",
+            "--host m.txt --count 2",
+            "--host m.txt --port 0",
+            "--host m.txt --port x",
+            "--host m.txt --standby maybe",
+            "--host m.txt --players 0",
+            "--host m.txt --wait-standbys 3",
+            "--host",
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad}");
         }
     }
 }
