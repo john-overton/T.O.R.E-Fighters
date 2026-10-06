@@ -8462,6 +8462,9 @@ In short:
   simulation reads is byte for byte the same in both imports. What is missing
   is knowing it in advance. Today a difference shows up only once a mission is
   built, as a list of file names.
+  A full comparison of everything the two imports keep (4,157 entries; 50
+  differ only in a header timestamp the game never reads) is in
+  [the builds audit](baselines/fa-builds-2026-10-06.md).
 - Each game works out its **content**: one entry per aircraft, theater and
   weapon it can load, plus the shared data every mission reads, each with a
   hash of exactly the files that item reads. It also says which Fighters

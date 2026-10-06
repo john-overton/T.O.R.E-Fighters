@@ -935,6 +935,8 @@ Lobby. The content is checked once a mission loads: each game builds the
 mission from its own import and compares the files it read with the host's. A
 1.0 import and a 1.02F import pass it, since every file the simulation reads
 is the same in both (slice D3a, [the comparison](formats/esa-installer.md#the-import-pack-under-both-builds)).
+[The builds audit](baselines/fa-builds-2026-10-06.md) compared everything the two
+imports keep and found nothing a player sees or hears that differs.
 A game that fails it stays in the lobby, marked unable, with a list of file
 names.
 
