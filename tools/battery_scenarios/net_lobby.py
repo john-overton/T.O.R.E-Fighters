@@ -99,7 +99,8 @@ snapshot SHOTS/lobby-9-back.ppm
 exit
 """
 
-# Stage L (slice L4): the same way into the lobby, then the bot's row in Players (the hint), Mission..., the first
+# Stage L (slice L4): the same way into the lobby, the Game type turned to PvP (the default mission has room for the
+# hosting player alone, and a full game refuses the bot), then the bot's row in Players (the hint), Mission..., the first
 # wing's aircraft field (the list, with the Rafale dimmed), the Rafale (the tenth row of the sorted list) and OK, which
 # the creator refuses, and Esc, which puts the creator away.
 GAPS_SCRIPT = """wait 10
@@ -116,6 +117,16 @@ wait 0.6
 click
 wait 14
 snapshot SHOTS/gaps-1-lobby.ppm
+movemenu 160 431
+wait 0.6
+click
+wait 1.5
+movemenu 430 196
+wait 0.6
+click
+wait 3
+key Escape
+wait 14
 movemenu 450 194
 wait 0.6
 click
@@ -258,8 +269,14 @@ def drive_gaps(d: Drive) -> None:
         shutil.copytree(d.data / "logs", d.work / f"attempt{attempt}-logs", dirs_exist_ok=True)
     else:
         raise DriveError("the game never hosted from Direct Connection's New")
-    # The bot watches from the lobby, with no slot, and stays past the end of the script.
-    bot = start_bots(d, port, "bot", 70, "--callsign", "Bot", "--observe", "none", "--drop-resource", "RAFALE.PT")
+    # The default mission has room for the hosting player alone: the script turns the Game type to PvP, which opens
+    # the enemy planes, and the bot then joins to watch from the lobby with no slot, staying past the end of the script.
+    end = time.time() + 90 * d.scale
+    while not re.search(r"Lobby: Settings: mode pvp", game_log(d)):
+        if not game.alive() or time.time() > end:
+            raise DriveError("the script never turned the Game type to PvP")
+        d.sleep(0.5)
+    bot = start_bots(d, port, "bot", 60, "--callsign", "Bot", "--observe", "none", "--drop-resource", "RAFALE.PT")
     assert game is not None
     game.finish(150, 0)
     bot.finish(60, None)
