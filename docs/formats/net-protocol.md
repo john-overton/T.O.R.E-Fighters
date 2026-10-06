@@ -1859,9 +1859,16 @@ choice below is an agent decision.
   seat byte and its 16-bit command number; a stick that moves every tick
   costs about 24 bytes a seat a tick, the floats coded by the checkpoint
   trait against the last. Both are above the design's estimate of 2 to 5
-  bytes; slice K3 measures the real stream.
-- **The lobby.** The standby mark follows the away bit; the host sends
-  none until slice K3. A slot's reservation is filled now from the idle
+  bytes. *Measured (K3)* on the real stream: 15 to 23 bytes a seat a tick
+  with bots' sticks, 3 of them the seat byte and the command number, 8 the
+  three stick axes, 2 the two empty command lists; about 50 KB/s to a
+  standby with 30 humans. Slice K3 proposes, not built, coding the controls
+  as the Inputs section codes them, the command lists behind one presence
+  bit, the view as Inputs codes it and the command number as one bit when
+  unchanged: 4.3 bytes a seat a tick measured on the same stream
+  ([architecture](../ARCHITECTURE.md#how-stage-k-lands), row K3).
+- **The lobby.** The standby mark follows the away bit: each appointed
+  standby's role (slice K3). A slot's reservation is filled now from the idle
   aircraft (slice F2-A: an away player's plane), the seam where slice K5's
   table joins it (`Host::reserved_for`).
 - **Setting 21.** Its values are 0 to 256: 0 calculated, else 1 plus the
@@ -1880,8 +1887,9 @@ choice below is an agent decision.
   it sends can carry Filler (one from a host is ignored). A Reach report for
   a test that ended, and a Candidate from a dedicated server's player, are
   taken and do nothing.
-- **Until the later slices.** A host refuses Standby status, Resume,
-  Backlog and Taken over with a Refused "Not available yet."; Release and
+- **Until the later slices.** A host refuses Resume, Backlog and Taken
+  over with a Refused "Not available yet."; the Standby status is built
+  (slice K3: one from a game that is not a standby is ignored); Release and
   Rejoin are built (slice K5, below), and Candidate and Reach report (slice
   K6); Backlog and Standby status do not count against the 20 requests a
   second. A client keeps every Standby record for its standby, in order
@@ -1911,6 +1919,21 @@ choice below is an agent decision.
   does not make the part go out again. Connections are named by their
   player's join order. The bytes are this build's own
   ([architecture](../ARCHITECTURE.md#what-moves-with-the-host)).
+- **The stream a host sends** (slice K3, no wire change). After the
+  Appoint: a checkpoint when flying (no Flight record), then every state
+  part, holding after the last tick stepped. Ticks records carry a
+  snapshot interval of ticks (four at 30 snapshots a second); any other
+  record sends the waiting ticks first. A Check goes at the first update at
+  or after each 600th tick, to warm standbys only. A cold standby's next
+  checkpoint begins 1,200 ticks after its last began, or as soon as its last
+  has gone out. A checkpoint's chunks go at its bytes over 8 seconds, at
+  least 32,000 B/s, and with the rest of the stream within 1 Mbit/s
+  allowing 20 percent for the transport's framing and resends; at most four
+  are unacknowledged. A standby that reports itself behind gets Dismiss and
+  is not appointed again until the next Flight; one whose status asks for a
+  checkpoint gets one, at most once 2 seconds after the last went out; a
+  warm one that fails two checks gets a fresh Appoint, cold. A Standby
+  status from a game that is not a standby is ignored, not refused.
 
 ## Limits
 

@@ -470,7 +470,7 @@ RULES: tuple[Rule, ...] = (
         "crates/tore-session/src/host/journal*", NET_FAMILIES,
         "the host's journal, which every tick the host steps passes, and its tests (stage K)",
     ),
-    _r("crates/tore-session/src/host/standby.rs", NET_FAMILIES, "the host's standby stream (stage K)"),
+    _r("crates/tore-session/src/host/standby*", NET_FAMILIES, "the host's standby stream and its tests (stage K)"),
     _r("crates/tore-session/src/host/resume.rs", NET_FAMILIES, "takeover and resume on the host (stage K)"),
     _r(
         "crates/tore-session/src/host/rejoin*", NET_FAMILIES,

@@ -106,7 +106,10 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     );
     rig.run(Duration::from_millis(400));
     let refused = refusals(&rig, cobra);
-    for message in &asked {
+    // Slice K3 built the Standby status: from a game that is not a standby
+    // it is ignored, not refused.
+    assert!(!refused.iter().any(|(k, _)| *k == kind::STANDBY_STATUS));
+    for message in asked.iter().filter(|m| m.kind() != kind::STANDBY_STATUS) {
         assert!(
             refused
                 .iter()
@@ -156,10 +159,12 @@ fn a_backlog_and_a_standby_status_do_not_count_as_lobby_requests() {
     }
     rig.run(Duration::from_millis(400));
     let refused = refusals(&rig, cobra);
-    for request in [kind::STANDBY_STATUS, kind::BACKLOG] {
+    // Every Backlog answered; every status taken, unanswered since Cobra is
+    // no standby (slice K3).
+    for (request, answered) in [(kind::STANDBY_STATUS, 0), (kind::BACKLOG, 30)] {
         assert_eq!(
             refused.iter().filter(|(k, _)| *k == request).count(),
-            30,
+            answered,
             "{request}"
         );
     }

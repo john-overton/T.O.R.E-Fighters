@@ -75,6 +75,7 @@ mod succession;
 pub use config::{AfterEnd, BuildId, CrownRule, HostConfig, HostError, OpenPlanes, StartMode};
 pub use lobby::LobbyEvent;
 pub use sorting::{BURST_SLACK_TICKS, round_interval};
+pub use standby::{StandbyFigures, StreamBytes};
 
 use crate::journal::Tick;
 use crate::wire::chat::{RateLimit, Receiver};
@@ -950,6 +951,8 @@ impl Host {
             // Stage K: in the lobby the parts change with no tick.
             self.journal_parts();
         }
+        // Stage K: the journal's records out to the standbys (slice K3).
+        self.standby_update();
         self.send_lobby();
     }
 
@@ -2632,8 +2635,8 @@ impl Host {
                         .content
                         .as_ref()
                         .map_or(messages::Build::Unknown, |content| content.build),
-                    // The standbys are appointed by slice K3.
-                    standby: messages::StandbyMark::None,
+                    // The standbys slice K3 appoints.
+                    standby: self.standby_mark(peer.lobby.order),
                 })
                 .collect(),
             slots: self
