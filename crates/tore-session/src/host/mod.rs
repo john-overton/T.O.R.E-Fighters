@@ -67,13 +67,19 @@ mod tests;
 // docs/ARCHITECTURE.md, "How stage K lands", fills its own).
 mod journal;
 pub(crate) mod rejoin;
-mod resume;
+pub mod resume;
+#[cfg(test)]
+mod resume_tests;
 mod standby;
 mod state;
 mod succession;
 
 pub use config::{AfterEnd, BuildId, CrownRule, HostConfig, HostError, OpenPlanes, StartMode};
 pub use lobby::LobbyEvent;
+pub use resume::{
+    DROP_AFTER, FAST_FORWARD_TICKS, Present, RESUME_WINDOW, ResumeNote, Resumption, hosting_answer,
+    reach_packet,
+};
 pub use sorting::{BURST_SLACK_TICKS, round_interval};
 pub use standby::{StandbyFigures, StreamBytes};
 
@@ -927,8 +933,15 @@ impl Host {
         let now = self.now;
         self.server.update(now);
         self.pump();
+        // Stage K: a host that took the game over holds its flying clock
+        // while the players resume, then steps to the present (slice K4).
+        let held = self.resume_update(now);
         match self.life {
-            Life::Flying => self.fly(now),
+            Life::Flying => {
+                if !held {
+                    self.fly(now);
+                }
+            }
             Life::Ended { next_at, stop_at } => {
                 if let Some(next_at) = next_at {
                     if now >= next_at {
@@ -1317,9 +1330,12 @@ impl Host {
                     connection,
                     details,
                 } => {
-                    let token = details.token;
-                    self.connected(connection, details);
-                    self.rejoin_connected(connection, token);
+                    // Stage K: an absent player resumes its place (slice K4).
+                    if !self.resume_connected(connection, &details) {
+                        let token = details.token;
+                        self.connected(connection, details);
+                        self.rejoin_connected(connection, token);
+                    }
                 }
                 ServerEvent::Closed {
                     connection, reason, ..
@@ -1523,10 +1539,13 @@ impl Host {
             plane: plane.map(|p| p.0),
             reason,
         });
-        // The house's leaving ends a game a player hosts (until stage K
-        // migrates the host); a King who is not the house passes the crown
-        // to the longest-connected player.
-        if peer.house && !matches!(self.life, Life::Stopped | Life::Ended { next_at: None, .. }) {
+        // The house's leaving ends a game a player hosts, unless it handed
+        // the game over first (stage K, `Host::hand_over`); a King who is
+        // not the house passes the crown to the longest-connected player.
+        if peer.house
+            && !self.resume_handed()
+            && !matches!(self.life, Life::Stopped | Life::Ended { next_at: None, .. })
+        {
             self.host_left();
         } else if peer.king {
             self.crown_departed();
@@ -1861,6 +1880,10 @@ impl Host {
     }
 
     fn inputs(&mut self, connection: ConnectionId, body: &[u8]) {
+        // Stage K: a resumed seat's inputs wait with its backlog (K4).
+        if self.resume_inputs(connection, body) {
+            return;
+        }
         let next = self.world.tick();
         let Some(peer) = self.peers.get_mut(&connection) else {
             return;
@@ -2894,6 +2917,8 @@ impl Host {
         // last command applied for it.
         let mut journal = Tick::new(tick);
         journal.mission = commands;
+        // Stage K: resumed seats' kept inputs reach their buffers (K4).
+        self.resume_feed(tick);
         for peer in self.peers.values_mut() {
             if peer.stage != Stage::Seated {
                 continue;
@@ -2916,6 +2941,8 @@ impl Host {
                 journal.push_input(InputFrame::default().seat_input(seat, tick, &[], None), 0);
             }
         }
+        // Stage K: the seats of players not yet back fly on (slice K4).
+        self.resume_absent_inputs(tick, &mut journal);
 
         // One door into the world: the host steps through the journal's
         // driver, which adds the changes made since the last step and drains
@@ -3140,6 +3167,10 @@ impl Host {
     /// interval ([`wire::snapshot_phase`]), so the cost spreads over the
     /// interval's ticks instead of landing on one.
     fn snapshots(&mut self, tick: u64, now: Duration, out: &TickOutput) {
+        // Stage K: none while a host that took over resumes (slice K4).
+        if self.resume_quiet() {
+            return;
+        }
         #[cfg(test)]
         if let Some(executor) = self.snapshot_executor.clone() {
             return self.snapshots_with_executor(tick, now, out, &executor);

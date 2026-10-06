@@ -57,7 +57,9 @@ pub mod interpolation;
 mod lobby_tests;
 #[cfg(test)]
 mod matrix_tests;
-mod migrate;
+pub mod migrate;
+#[cfg(test)]
+mod migrate_tests;
 #[cfg(test)]
 mod migration_seams_tests;
 pub mod observe;
@@ -945,6 +947,11 @@ impl Client {
             capture.receive(now, from, datagram);
         }
         self.now = self.now.max(now);
+        // Stage K: the race to a new host and the old connection take their
+        // own datagrams (slice K4).
+        if self.migrate_receive(now, from, datagram) {
+            return;
+        }
         let wire = &self.wire;
         let early = &self.early;
         let seated = self.seat.is_some();
@@ -994,6 +1001,8 @@ impl Client {
         let now = self.now;
         self.net.update(now);
         self.pump();
+        // Stage K: detection, the race and the resume (slice K4).
+        self.migrate_update(now);
         self.pending.extend(sampled.commands);
         self.view_subject = sampled.view_subject;
         self.observe_update(now);
@@ -1002,6 +1011,8 @@ impl Client {
             self.apply_own_states();
             self.flush_observed();
         }
+        // Stage K: the predicted ticks kept for a backlog (slice K4).
+        self.migrate_note_flight();
         self.auto_ready();
         self.candidate_update(now);
         let margin = self.interpolation_margin(now);
@@ -1013,11 +1024,16 @@ impl Client {
 
     /// The next datagram to send, oldest first.
     pub fn poll_transmit(&mut self) -> Option<Transmit> {
-        self.net.poll_transmit()
+        // Stage K: the race's and the old connection's first (slice K4).
+        self.migrate_poll_transmit()
+            .or_else(|| self.net.poll_transmit())
     }
 
     /// Sends every queued datagram on `socket`.
     pub fn transmit<D: Datagrams + ?Sized>(&mut self, socket: &mut D) -> io::Result<()> {
+        while let Some(t) = self.migrate_poll_transmit() {
+            socket.send_datagram(t.to, &t.datagram)?;
+        }
         self.net.transmit(socket)
     }
 
@@ -1703,6 +1719,10 @@ impl Client {
                     });
                 }
                 tore_net::ClientEvent::Closed(reason) => {
+                    // Stage K: kept quiet while a migration races (K4).
+                    if self.migrate_closed(&reason) {
+                        continue;
+                    }
                     self.phase = ClientPhase::Closed;
                     self.rejoin_closed();
                     let kind = match reason {

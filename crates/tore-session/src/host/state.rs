@@ -353,7 +353,6 @@ impl Host {
     }
 
     /// The coding of `part` now.
-    #[cfg_attr(not(test), allow(dead_code))] // Slice K4 codes the parts.
     pub(super) fn encode_part(&self, part: Part) -> Result<Vec<u8>> {
         Ok(self.encode_part_hashed(part)?.0)
     }
@@ -393,7 +392,6 @@ impl Host {
 
     /// The old host's clock reading a session part ends with: what the
     /// times of every part are moved from when they are restored.
-    #[cfg_attr(not(test), allow(dead_code))] // Slice K4 restores the parts.
     pub(super) fn session_clock(&self, bytes: &[u8]) -> Result<Duration> {
         let unmoved = Clock {
             old: Duration::ZERO,
@@ -407,7 +405,6 @@ impl Host {
     /// the records slice K4 holds absent until each player resumes
     /// ([`super::lobby::state::PlayerState::into_peer`], which moves its
     /// times onto this host's clock).
-    #[cfg_attr(not(test), allow(dead_code))] // Slice K4 restores the parts.
     pub(super) fn restore_players(
         &mut self,
         bytes: &[u8],
@@ -430,7 +427,6 @@ impl Host {
     /// journal remembers each such order), each moment moved from the old
     /// host's clock reading `old_clock` ([`Self::session_clock`]) onto this
     /// host's. The players part restores with [`Self::restore_players`].
-    #[cfg_attr(not(test), allow(dead_code))] // Slice K4 restores the parts.
     pub(super) fn restore_part(
         &mut self,
         part: Part,
@@ -566,6 +562,19 @@ impl Host {
         next_id.save(s, None)?;
         gives.save(s, None)
     }
+}
+
+/// The flight's mission a session part names (its spec text, a flight's
+/// loadouts included): what a host that takes over is built from before the
+/// parts are restored into it (slice K4).
+pub(super) fn session_spec(bytes: &[u8], config: &HostConfig) -> Result<MissionSpec> {
+    let unmoved = Clock {
+        old: Duration::ZERO,
+        new: Duration::ZERO,
+    };
+    let session = from_bytes(bytes, |l| load_session(l, unmoved, config))?;
+    MissionSpec::from_text(&session.spec_text)
+        .map_err(|error| CheckpointError::Invalid(error.to_string()))
 }
 
 /// The session part as read, before it goes into a host.

@@ -563,7 +563,8 @@ ends." ([architecture](ARCHITECTURE.md#host-selection))
 
 *Built (slice K6, 2026-10-05):* the reports, the reach and upload tests, the
 ranking, the pin and its fallback and the King's warnings work on the host;
-the move in the lobby waits for the handover (slice K4), and the Options
+the move in the lobby needs only its call to the handover (built in slice
+K4, `Host::hand_over`), and the Options
 switch and the Host row for the screens (slice K7b). A game that hosts
 cannot test its own upload in the lobby, so it counts as passing until its
 flights show its players missing more than a tenth of its packets (agent
@@ -647,6 +648,14 @@ credited):*
   channels. A relayed player keeps its relay channel, which the master moves
   to the new host with the listing. An observer watching with a delay waits
   out the delay again.
+
+*Built in the sessions (slice K4, 2026-10-06), measured on the network
+simulator with a warm standby:* standby 1 takes over 1.5 seconds after the
+loss, and the players fly on with it 1.5 seconds later, when every seated
+player has resumed or the 1.5-second resume window is over (3.0 seconds
+after the loss when the old host's own player is lost with it); a handover
+takes 20 ms and the players have snapshots again within a quarter of a
+second. The game runs it from slice K7a.
 
 The [architecture](ARCHITECTURE.md#host-migration-and-rejoin) has the design
 and its slices, the [wire protocol](formats/net-protocol.md#host-migration-and-rejoin-stage-k)

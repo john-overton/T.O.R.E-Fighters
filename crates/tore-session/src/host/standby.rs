@@ -893,6 +893,21 @@ impl Host {
         }
     }
 
+    /// Slice K4's handover: the standby on `connection` gets the ticks
+    /// waiting in its stream, then Handover with the last tick the host
+    /// steps.
+    pub(super) fn standby_handover(&mut self, connection: ConnectionId, last_tick: u32) {
+        if let Some(index) = self
+            .standbys
+            .streams
+            .iter()
+            .position(|s| s.connection == connection)
+        {
+            self.flush_ticks(index);
+            self.stream_record(index, &Record::Handover { last_tick });
+        }
+    }
+
     /// The standby mark of the player with join order `order`, for the
     /// lobby.
     pub(super) fn standby_mark(&self, order: u64) -> StandbyMark {

@@ -1894,15 +1894,40 @@ choice below is an agent decision.
   it sends can carry Filler (one from a host is ignored). A Reach report for
   a test that ended, and a Candidate from a dedicated server's player, are
   taken and do nothing.
-- **Until the later slices.** A host refuses Resume, Backlog and Taken
-  over with a Refused "Not available yet."; the Standby status is built
-  (slice K3: one from a game that is not a standby is ignored); Release and
-  Rejoin are built (slice K5, below), and Candidate and Reach report (slice
-  K6); Backlog and Standby status do not count against the 20 requests a
-  second. A client keeps every Standby record for its standby, in order
-  (`Client::take_standby_records`), acts on Reach test, Reach peers and
-  Upload test (slice K6), and takes Token, Succession, Resumed and Host
-  moving without acting on them.
+- **The requests.** The Standby status is built (slice K3: one from a game
+  that is not a standby is ignored); Release and Rejoin (slice K5, below);
+  Candidate and Reach report (slice K6); Resume, Backlog and Taken over
+  (slice K4, below). Backlog and Standby status do not count against the 20
+  requests a second. A client keeps every Standby record for its standby, in
+  order (`Client::take_standby_records`), acts on Reach test, Reach peers and
+  Upload test (slice K6), and on Succession, Resumed and Host moving (slice
+  K4).
+- **Resuming** (slice K4, no wire change). T, in Resumed and Backlog, is the
+  tick the new host steps next; Resumed's exact state is the plane's as tick
+  T begins (a client's prediction labels it T - 1), and the Backlog's first
+  tick is T. A player who resumes after the new host has stepped past T is
+  resumed at the host's tick then. The new flight is the client's old flight
+  plus one (never 0), so it reads as later. Resumed goes to a player the host
+  is resuming who flies and said so (its newest tick not 0) and holds the
+  host's mission (number and the FNV-1a 64 of the spec text, the flight's
+  loadouts included); any other gets Resumed with flight 0, and the Mission
+  again when its own differs (a seated player whose game no longer flies the
+  plane sees it go back to the AI and takes one again from the lobby). A
+  second Resume or Backlog is refused "You have resumed already."; a
+  Backlog from a game the host is not resuming "Nothing is being resumed for
+  you here.", one for another flight "That backlog is for another flight.".
+  A Backlog's commands are the ones numbered above Resumed's last command,
+  each at its own tick or at T when that came earlier, renumbered from 1;
+  the Inputs that follow number on from there. Until the host is at the
+  present a resumed seat's Inputs are kept with its backlog and fed to it a
+  tick at a time; no snapshot goes out. A Taken over is taken only from a
+  standby naming its own lobby id, and refused otherwise "Only one of the
+  game's standbys can take it over.". An old host's game asks standby 1 with
+  a Reach from the host's socket (`host::reach_packet`) and stops when a
+  Reach answer says role 1 (`host::hosting_answer`). The client starts a
+  fresh wire (no baseline, name or event) on the new connection before
+  Resumed; a race reaches an address whose host gives another session's id
+  in Accepted no more.
 - **The standby's side** (slice K2, `tore_session::standby`). A Check's
   tick is the world's `tick()` when the host hashed it: the tick the next
   step runs, as a checkpoint's tick is. Appointed in flight, a standby gets

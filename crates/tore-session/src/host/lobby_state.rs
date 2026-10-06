@@ -169,7 +169,6 @@ impl PlayerState {
     /// The connection record of a player that resumes, its moments moved by
     /// `clock` onto the resuming host's, its connection state fresh as a
     /// join's; it watches again only when it asks again.
-    #[cfg_attr(not(test), allow(dead_code))] // Slice K4 restores the parts.
     pub(in crate::host) fn into_peer(self, clock: Clock, ticks_per_snapshot: u32) -> Peer {
         let PlayerState {
             address,

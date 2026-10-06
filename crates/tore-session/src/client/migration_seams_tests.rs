@@ -1,11 +1,11 @@
 //! Stage K's seams on the network simulator (slice K0's acceptance): the
 //! host steps its world through the journal, and a twin replaying the ticks
-//! it stepped codes to the same checkpoint; every new request a later slice
-//! builds is refused in words and nobody is disconnected; the lobby carries
+//! it stepped codes to the same checkpoint; every new request is answered or
+//! refused in words (slices K3 to K6 built them) and nobody is disconnected; the lobby carries
 //! setting 21, the standby marks and an away player's reserved slot; the
 //! host's transport answers a Reach for its own session; and the client
-//! passes the standby records on in order, keeping its connection, while the
-//! other new host messages wait for their slices. Synthetic resources.
+//! passes the standby records on in order, keeping its connection (slice K4
+//! acts on the other new host messages: `migrate_tests.rs`). Synthetic resources.
 
 use super::tests::{Rig, level_script, spec, weave};
 use super::*;
@@ -81,7 +81,7 @@ fn gathered() -> (Rig, usize, usize) {
 }
 
 #[test]
-fn every_new_request_is_refused_in_words_until_its_slice_lands() {
+fn every_new_request_is_answered_or_refused_in_words() {
     let (mut rig, king, cobra) = gathered();
     let now = rig.net.now();
     let messages = samples::migration_messages();
@@ -107,15 +107,23 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     rig.run(Duration::from_millis(400));
     let refused = refusals(&rig, cobra);
     // Slice K3 built the Standby status: from a game that is not a standby
-    // it is ignored, not refused.
+    // it is ignored, not refused. Slice K4 built the rest: a Resume from a
+    // player the host is not resuming is answered (not flying), a Backlog
+    // with nothing to resume and a Taken over from a game that stands by
+    // for nobody are refused in words.
     assert!(!refused.iter().any(|(k, _)| *k == kind::STANDBY_STATUS));
-    for message in asked.iter().filter(|m| m.kind() != kind::STANDBY_STATUS) {
+    assert!(!refused.iter().any(|(k, _)| *k == kind::RESUME));
+    assert!(
+        !refused.iter().any(|(_, r)| r == NOT_AVAILABLE),
+        "{refused:?}"
+    );
+    for (request, words) in [
+        (kind::BACKLOG, crate::host::resume::NOT_RESUMING),
+        (kind::TAKEN_OVER, crate::host::resume::NOT_A_STANDBY),
+    ] {
         assert!(
-            refused
-                .iter()
-                .any(|(k, r)| *k == message.kind() && r == NOT_AVAILABLE),
-            "{}: {refused:?}",
-            message.kind()
+            refused.iter().any(|(k, r)| *k == request && r == words),
+            "{request}: {refused:?}"
         );
     }
     assert!(
@@ -187,7 +195,7 @@ fn a_backlog_and_a_standby_status_do_not_count_as_lobby_requests() {
 }
 
 #[test]
-fn the_client_passes_standby_records_on_in_order_and_the_rest_wait_for_their_slices() {
+fn the_client_passes_standby_records_on_in_order_and_stays_connected() {
     let (mut rig, _, cobra) = gathered();
     let records: Vec<Vec<u8>> = samples::migration_messages()
         .into_iter()

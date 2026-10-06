@@ -45,6 +45,7 @@
 //!   checkpoint's mission identity checks the build.
 
 pub mod assemble;
+pub mod takeover;
 #[cfg(test)]
 mod tests;
 mod thread;

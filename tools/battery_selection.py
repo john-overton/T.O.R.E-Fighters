@@ -471,7 +471,7 @@ RULES: tuple[Rule, ...] = (
         "the host's journal, which every tick the host steps passes, and its tests (stage K)",
     ),
     _r("crates/tore-session/src/host/standby*", NET_FAMILIES, "the host's standby stream and its tests (stage K)"),
-    _r("crates/tore-session/src/host/resume.rs", NET_FAMILIES, "takeover and resume on the host (stage K)"),
+    _r("crates/tore-session/src/host/resume*", NET_FAMILIES, "takeover and resume on the host and their tests (stage K)"),
     _r(
         "crates/tore-session/src/host/rejoin*", NET_FAMILIES,
         "rejoin tokens and reservations, the session part that carries them, a slot's reservation in every lobby state "
@@ -485,7 +485,7 @@ RULES: tuple[Rule, ...] = (
         "crates/tore-session/src/host/*state.rs", NET_FAMILIES,
         "the session's state parts and their coders beside the state they code (stage K)",
     ),
-    _r("crates/tore-session/src/client/migrate.rs", NET_FAMILIES, "the client's side of host migration (stage K)"),
+    _r("crates/tore-session/src/client/migrate*", NET_FAMILIES, "the client's side of host migration and its tests (stage K)"),
     _r(
         "crates/tore-session/src/client/rejoin*", NET_FAMILIES,
         "the client's side of rejoin: the token it keeps, its store and the Rejoin (stage K; tore-bot --token-file)",
