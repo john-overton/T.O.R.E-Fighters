@@ -179,27 +179,60 @@ class ParsingTests(unittest.TestCase):
         self.assertIn("Blue's results list only 2 aircraft, none of them the AI's", net.results_problems(few, ["Blue", "Red"]))
 
     def test_the_pvp_end_follows_the_kills(self):
-        line = "{who}: scores: players ranked by kills: 1 Blue (friendly) {b}/0 0.00, 2 Red (enemy) 0/{l} 0.00; " \
-            "sides {b}/0 to 0/{l}; {left} left; ends at 1 kill in all{end}\n"
-        flying = line.format(who="Blue", b=0, l=0, left="1:30", end="")
-        draw = flying + line.format(who="Blue", b=0, l=0, left="0:00", end="; a draw") + \
-            "Blue: Mission ended: the time limit.\n"
-        self.assertEqual(net.pvp_end_problems(draw, ["Blue", "Red"]), [])
-        won = flying + line.format(who="Red", b=2, l=1, left="1:02", end="; the friendly side wins") + \
+        line = "{who}: scores: players ranked by kills: 1 Blue (friendly) {b}/{bl} 0.00, 2 Red (enemy) {r}/{rl} 0.00; " \
+            "sides {b}/{bl} to {r}/{rl}; {left} left; ends at 1 kill in all{end}\n"
+        flying = line.format(who="Blue", b=0, bl=0, r=0, rl=0, left="1:30", end="")
+        won = flying + line.format(who="Red", b=2, bl=0, r=0, rl=1, left="1:02", end="; the friendly side wins") + \
             "Red: Mission ended: the kill limit.\n"
         self.assertEqual(net.pvp_end_problems(won, ["Blue", "Red"]), [])
-        # A kill that the kill limit did not answer, and a time limit with no draw.
-        scored = flying + line.format(who="Blue", b=1, l=1, left="0:00", end="; a draw") + \
+        # Two bots that shot each other down on one pass finish level, a draw.
+        both = flying + line.format(who="Red", b=2, bl=1, r=2, rl=1, left="1:02", end="; a draw") + \
+            "Red: Mission ended: the kill limit.\n"
+        self.assertEqual(net.pvp_end_problems(both, ["Blue", "Red"]), [])
+        # A time limit with nobody shot down is no longer enough (the scripted pilot lands gun kills).
+        draw = flying + line.format(who="Blue", b=0, bl=0, r=0, rl=0, left="0:00", end="; a draw") + \
             "Blue: Mission ended: the time limit.\n"
-        self.assertIn("but the kill limit did not end the mission", net.pvp_end_problems(scored, ["Blue", "Red"])[0])
-        no_draw = flying + "Blue: Mission ended: the time limit.\n"
-        self.assertIn("not a draw", net.pvp_end_problems(no_draw, ["Blue", "Red"])[0])
-        co_op = draw.replace("(enemy)", "(friendly)").replace("ends at 1 kill in all", "")
+        problems = net.pvp_end_problems(draw, ["Blue", "Red"])
+        self.assertIn("nobody shot anyone down: the time limit ended the mission, not the kill limit", problems)
+        self.assertIn("no player scored a kill", problems)
+        # A draw with one scorer, a limit that ended it without a winner line and no end at all.
+        lone = flying + line.format(who="Blue", b=1, bl=0, r=0, rl=0, left="1:00", end="; a draw") + \
+            "Blue: Mission ended: the kill limit.\n"
+        self.assertIn("fewer than two players who scored", net.pvp_end_problems(lone, ["Blue", "Red"])[0])
+        bare = flying + line.format(who="Blue", b=1, bl=0, r=0, rl=0, left="1:00", end="") + \
+            "Blue: Mission ended: the kill limit.\n"
+        self.assertIn("name no winner", net.pvp_end_problems(bare, ["Blue", "Red"])[0])
+        self.assertEqual(net.pvp_end_problems(flying, ["Blue", "Red"])[0], "the kill limit did not end the mission")
+        co_op = won.replace("(enemy)", "(friendly)").replace("ends at 1 kill in all", "")
         self.assertEqual(
             net.pvp_end_problems(co_op, ["Blue", "Red"]),
             ["no scores line puts a player on the enemy side", "no scores line names the kill limit (1 kill in all)"],
         )
         self.assertEqual(net.pvp_end_problems("", ["Blue"]), ["no bot printed scores"])
+
+    def test_a_hunt_needs_the_bots_own_kill_and_its_sides_win(self):
+        line = "Hunter: scores: players ranked by kills: 1 Hunter (friendly) {k}/0 0.40; sides {k}/0 to 0/0; " \
+            "ends at 1 kill in all{end}\n"
+        good = line.format(k=0, end="") + line.format(k=1, end="; the friendly side wins") + \
+            "Hunter: Mission ended: the kill limit.\n"
+        self.assertEqual(net.hunt_problems(good, "Hunter"), [])
+        timed = line.format(k=0, end="; a draw") + "Hunter: Mission ended: the time limit.\n"
+        problems = net.hunt_problems(timed, "Hunter")
+        self.assertIn("the kill limit did not end the mission: the bot shot nothing down in time", problems)
+        self.assertTrue(any("has no kill" in p for p in problems), problems)
+        self.assertEqual(net.hunt_problems("", "Hunter"), ["Hunter printed no scores"])
+
+    def test_the_pvp_mission_can_be_made_peaceful_and_its_enemies_dummies(self):
+        mission = net.guide_mission(separation_nm=5)
+        peaceful = net.weapons_hold(mission)
+        self.assertIn("preset hold\n", peaceful)
+        self.assertNotIn("preset free", peaceful)
+        self.assertNotIn("objective ", peaceful)
+        self.assertIn("wing enemy 1 MIG29.PT 4 experienced", peaceful, "the wings themselves are as they were")
+        dummies = net.dummy_enemies(mission)
+        self.assertIn("wing enemy 1 MIG29.PT 4 dummy\n", dummies)
+        self.assertIn("wing enemy 2 SU27.PT 2 dummy\n", dummies)
+        self.assertIn("wing friendly 1 F18.PT 4 experienced\n", dummies, "the friendly wings keep their skill")
 
     def test_a_revival_is_read_from_the_bots_lines(self):
         good = (

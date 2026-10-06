@@ -2,11 +2,15 @@
 //! simulator matrix (D10) and the LAN smoke test (D11). See
 //! docs/ARCHITECTURE.md, "The client session".
 //!
-//! The pilot flies straight and level, then turns, in a 40-second cycle,
-//! holding its seating altitude; when an aircraft of the other side is within
-//! 3 nautical miles it turns towards it, and it fires short gun bursts at
-//! an aircraft of the other side within 5,000 feet and 6 degrees of where it
-//! is going.
+//! With nothing to pursue the pilot flies straight and level, then turns, in
+//! a 40-second cycle, holding its seating altitude. An aircraft of the other
+//! side within 12 nautical miles is pursued (slice BOT): an intercept course
+//! while it is far, then the gun's own lead point, tracked with pull and
+//! rudder; the gun fires while the line of fire passes within 40 feet of where
+//! the round will meet the target, and a pass head on is broken off to the
+//! right. The lead is the weapon's own ballistics ([`gunsight`]), aimed at
+//! the target where the shooter's screen has it, as the host judges a round.
+//! See docs/ARCHITECTURE.md, "The client session", for the whole of it.
 //! It reads only what a player's game has: its predicted flight and the
 //! frame's picture.
 //!
@@ -56,11 +60,14 @@ const GRAVITY: f64 = 32.17;
 /// The gun fires at an enemy this near (feet) and no nearer than
 /// [`GUN_CLOSE`], when the line of fire passes within [`FIRE_MISS_FEET`] of
 /// where the round will meet it (the aircraft's radius is 28), and keeps on
-/// firing while it passes within [`HOLD_MISS_FEET`].
+/// firing while it passes within [`HOLD_MISS_FEET`]. Inside [`SNAP_FEET`] a
+/// line of fire within [`SNAP_MISS_FEET`] is enough for a snap shot.
 const GUN_FEET: f64 = 6000.;
 const GUN_CLOSE: f64 = 450.;
 const FIRE_MISS_FEET: f64 = 40.;
 const HOLD_MISS_FEET: f64 = 55.;
+const SNAP_FEET: f64 = 7000.;
+const SNAP_MISS_FEET: f64 = 300.;
 /// The enemy's acceleration is taken over at least this many seconds.
 const ACCELERATION_WINDOW: f64 = 0.25;
 /// The gun's round is solved afresh this often.
@@ -532,7 +539,11 @@ impl ScriptedPilot {
         } else {
             FIRE_MISS_FEET
         };
-        let fire = !breaking && range < GUN_FEET && range > GUN_CLOSE && miss < limit;
+        // And, in a close fight with an enemy that turns, a snap shot at the
+        // lead point as the nose crosses it: the aim cannot hold with that,
+        // but the burst is the one chance.
+        let snap = range < SNAP_FEET && miss < SNAP_MISS_FEET;
+        let fire = !breaking && range > GUN_CLOSE && ((range < GUN_FEET && miss < limit) || snap);
         self.pursuing = Some(Pursuit {
             target: target.id,
             range,
@@ -1095,6 +1106,10 @@ mod tests {
         seconds: u64,
         seed: u64,
         link: LinkConfig,
+        /// Each bot starts to join this long after the host starts: the
+        /// mission flies from the start, so a late bot takes over a plane
+        /// the AI has been flying.
+        delays: Vec<Duration>,
         /// Print the bots' ranges and banks as they close.
         trace: bool,
     }
@@ -1109,6 +1124,7 @@ mod tests {
                 seconds: 60,
                 seed: 1,
                 link: LinkConfig::PERFECT,
+                delays: Vec::new(),
                 trace: false,
             }
         }
@@ -1180,17 +1196,16 @@ mod tests {
             host.receive_from(now, &mut host_socket).unwrap();
             host.update(now);
             host.transmit(&mut host_socket).unwrap();
-            for (socket, bot) in &mut players {
+            for (i, (socket, bot)) in players.iter_mut().enumerate() {
+                if setup.delays.get(i).is_some_and(|&delay| now < delay) {
+                    continue;
+                }
                 bot.client.receive_from(now, socket).unwrap();
                 bot.update(now);
                 bot.client.transmit(socket).unwrap();
                 while bot.client.poll_event().is_some() {}
             }
-            if seated_at.is_none()
-                && players
-                    .iter()
-                    .all(|(_, bot)| bot.client.phase() == ClientPhase::Flying)
-            {
+            if seated_at.is_none() && players[0].1.client.phase() == ClientPhase::Flying {
                 seated_at = Some(now);
             }
             let flown = seated_at.map_or(Duration::ZERO, |at| now.saturating_sub(at));
@@ -1258,6 +1273,15 @@ mod tests {
         let text = &guide[start..];
         let text = &text[..text.find("```").expect("the mission's end")];
         let text = text.replace("separation-nm 20", &format!("separation-nm {nm}"));
+        let text = if std::env::var("T_HOLD").is_ok() {
+            text.replace("preset free", "preset hold")
+                .lines()
+                .filter(|l| !l.starts_with("objective"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            text
+        };
         MissionSpec::from_text(&text).expect("the guide's mission parses")
     }
 
@@ -1346,13 +1370,80 @@ mod tests {
     /// The guide's mission as net-server-pvp flies it, two bots, the AI of
     /// both sides about: the kill limit ends it within a minute.
     #[test]
+    #[ignore = "reads a real import through TORE_DATA_DIR; study"]
+    fn real_fight() {
+        let directory = tore_import::data_directory().expect("TORE_DATA_DIR");
+        let resources = tore_import::load(&directory).expect("an imported pack");
+        for (ms, late) in [
+            (0, 0),
+            (20, 0),
+            (40, 1),
+            (80, 0),
+            (120, 2),
+            (0, 3),
+            (30, 0),
+            (60, 1),
+            (5, 0),
+            (10, 2),
+        ] {
+            let setup = Setup {
+                seconds: 75,
+                delays: vec![Duration::ZERO, Duration::from_secs(late)],
+                seed: ms + 1,
+                ..Setup::new(resources.clone(), guide_mission(5), &[0, 1])
+            };
+            let setup = if ms == 0 { setup } else { setup.slow(ms) };
+            let fight = fight(setup);
+            println!(
+                "fight {ms} ms late {late}: {:?} {}",
+                fight.bursts, fight.scores
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "reads a real import through TORE_DATA_DIR; study"]
+    fn real_furball() {
+        let directory = tore_import::data_directory().expect("TORE_DATA_DIR");
+        let resources = tore_import::load(&directory).expect("an imported pack");
+        let spec = MissionSpec::from_text(
+            "tore-mission 1\ntheater UKR\nstart airborne 20000\nseparation-nm 5\n\
+             wing friendly 1 F18.PT 1 average\nwing enemy 1 MIG29.PT 1 average\n\
+             cheats damage=invulnerable\n",
+        )
+        .unwrap();
+        let setup = Setup {
+            seconds: 100,
+            trace: true,
+            ..Setup::new(resources, spec, &[0, 1])
+        };
+        println!("{:?}", fight(setup));
+    }
+
+    #[test]
     #[ignore = "reads a real import through TORE_DATA_DIR; named for the full run"]
     fn real_guide_mission_pvp_ends_by_the_kill_limit() {
         let directory = tore_import::data_directory().expect("TORE_DATA_DIR");
         let resources = tore_import::load(&directory).expect("an imported pack");
-        for ms in [0, 20, 40, 80, 120] {
+        for (ms, late) in [
+            (0, 0),
+            (20, 0),
+            (40, 0),
+            (80, 0),
+            (120, 0),
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (0, 5),
+            (40, 4),
+        ] {
             let setup = Setup::new(resources.clone(), guide_mission(5), &[0, 6]);
+            let setup = Setup {
+                delays: vec![Duration::ZERO, Duration::from_secs(late)],
+                ..setup
+            };
             let fight = fight(if ms == 0 { setup } else { setup.slow(ms) });
+            println!("late {late} s, {ms} ms: {fight:?}");
             killed_by(&fight, 60.);
         }
     }

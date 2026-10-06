@@ -44,6 +44,20 @@ def guide_mission(separation_nm: int | None = None) -> str:
     return mission
 
 
+def weapons_hold(mission: str) -> str:
+    """The mission with every AI wing on weapons hold and the objective lines gone, so that nothing but the players
+    shoots: a PvP kill limit is then the players' to reach, not a race with the AI's missiles (which kill a bot
+    on the AI's side about 15 seconds in, before the players' pass)."""
+    mission = mission.replace("preset free", "preset hold")
+    return "".join(line for line in mission.splitlines(keepends=True) if not line.startswith("objective "))
+
+
+def dummy_enemies(mission: str) -> str:
+    """The mission with every enemy wing's skill set to `dummy`: straight, level aircraft at 400 knots that do not
+    evade or fire."""
+    return re.sub(r"(?m)^(wing enemy \d+ \S+ \d+) \w+$", r"\1 dummy", mission)
+
+
 def fresh_data(d: Drive) -> None:
     """Empties the scenario's copy of the logs, replays and remembered settings, so every file the checks find
     was written by this run (the copy is the scenario's own; the profile it came from is not touched)."""
@@ -246,9 +260,10 @@ def results_problems(text: str, callsigns: list[str]) -> list[str]:
 
 def pvp_end_problems(text: str, callsigns: list[str]) -> list[str]:
     """A PvP mission with a kill limit (slice F2-1's server keys, F2-S's scoring), from what the bots printed: the
-    scores name the enemy side and the limit, and the end follows the kills. A kill by any player must end the
-    mission by the kill limit with a winner; with no kill (the scripted pilot rarely lands a gun kill) the time limit
-    ends it in a draw, and the kill limit's own end is the simulator's test (host::score_tests)."""
+    scores name the enemy side and the limit, a kill ends the mission by the kill limit, and the last scores name
+    the winner. The scripted pilot lands gun kills (slice BOT), so the time limit's draw is a failure here: the
+    kill limit's end is covered end to end, not only by the simulator's `host::score_tests`. Two bots that shoot each
+    other down on one pass both have kills and finish level, a draw."""
     problems = []
     lines = re.findall(r"^\w+: scores: (players ranked by kills: .*)$", text, re.M)
     if not lines:
@@ -261,17 +276,37 @@ def pvp_end_problems(text: str, callsigns: list[str]) -> list[str]:
     for line in lines:
         for name, count in re.findall(r"\d+ (\w+)(?: \((?:friendly|enemy)\))? (\d+)/\d+", line):
             kills[name] = max(kills.get(name, 0), int(count))
-    by_kill = re.search(r"^\w+: Mission ended: the kill limit", text, re.M)
-    by_time = re.search(r"^\w+: Mission ended: the time limit", text, re.M)
-    if any(kills.values()):
-        if not by_kill:
-            problems.append(f"a player scored ({kills}) but the kill limit did not end the mission")
-        elif not re.search(r"; (the \w+ side|\w+) wins$", lines[-1]):
-            problems.append(f"the kill limit's last scores name no winner: {lines[-1]}")
-    elif not by_time:
-        problems.append("nobody scored and the time limit did not end the mission")
-    elif not lines[-1].endswith("; a draw"):
-        problems.append(f"the time limit's last scores are not a draw: {lines[-1]}")
+    if not re.search(r"^\w+: Mission ended: the kill limit", text, re.M):
+        if re.search(r"^\w+: Mission ended: the time limit", text, re.M):
+            problems.append("nobody shot anyone down: the time limit ended the mission, not the kill limit")
+        else:
+            problems.append("the kill limit did not end the mission")
+    if not any(kills.values()):
+        problems.append("no player scored a kill")
+    last = lines[-1]
+    if "; a draw" in last:
+        if sum(1 for count in kills.values() if count) < 2:
+            problems.append(f"the last scores are a draw with fewer than two players who scored: {last}")
+    elif not re.search(r"; (the \w+ side|\w+) wins$", last):
+        problems.append(f"the kill limit's last scores name no winner: {last}")
+    return problems
+
+
+def hunt_problems(text: str, name: str) -> list[str]:
+    """A lone bot against enemies that do not evade (slice BOT), from what it printed: the kill limit ended the mission,
+    the bot's own side won, and the bot's tally holds the kill that ended it."""
+    problems = []
+    lines = re.findall(rf"^{name}: scores: (players ranked by kills: .*)$", text, re.M)
+    if not lines:
+        return [f"{name} printed no scores"]
+    if not re.search(rf"^{name}: Mission ended: the kill limit", text, re.M):
+        problems.append("the kill limit did not end the mission: the bot shot nothing down in time")
+    last = lines[-1]
+    tally = re.search(rf"\d+ {name} \((?:friendly|enemy)\) (\d+)/(\d+)", last)
+    if not tally or int(tally.group(1)) < 1:
+        problems.append(f"the bot's tally has no kill: {last}")
+    if not last.endswith("; the friendly side wins"):
+        problems.append(f"the last scores do not give the bot's side the win: {last}")
     return problems
 
 
@@ -500,16 +535,20 @@ def drive_king(d: Drive) -> None:
 
 
 def drive_pvp(d: Drive) -> None:
-    """PvP from the server's file (slice F2-1's keys): `mode pvp`, a kill limit of one kill in all, two minutes at
-    most. One bot flies for each side; the scores name both sides and the limit, and the end follows the kills."""
+    """PvP from the server's file (slice F2-1's keys): `mode pvp`, a kill limit of one kill in all, four minutes at
+    most (the first pass kills in about 20 seconds; the bots merge again every 20 seconds or so, which leaves a
+    busy machine chances to spare). One bot flies for each side and shoots at the other (slice BOT's pursuit and gun aiming land a kill in
+    about 20 seconds on the guide's mission 5 nm apart, its AI on weapons hold so that the AI's missiles do not kill a
+    bot first); the scores name both sides and the limit, and the kill limit ends the mission."""
     port = d.port()
     server = start_server(
-        d, port, guide_mission(separation_nm=5), mode="pvp", kill_limit=1, kill_owner="total", time_limit=2,
+        d, port, weapons_hold(guide_mission(separation_nm=5)), mode="pvp", kill_limit=1, kill_owner="total",
+        time_limit=4,
     )
-    blue = start_bots(d, port, "blue", 170, "--callsign", "Blue", "--slot", "0")
-    red = start_bots(d, port, "red", 170, "--callsign", "Red", "--slot", "6")
-    if not server.wait_for(r"^mission ended: the (kill|time) limit$", 220):
-        d.problem("neither the kill limit nor the time limit ended the mission")
+    blue = start_bots(d, port, "blue", 250, "--callsign", "Blue", "--slot", "0")
+    red = start_bots(d, port, "red", 250, "--callsign", "Red", "--slot", "6")
+    if not server.wait_for(r"^mission ended: the kill limit$", 250):
+        d.problem("the kill limit did not end the mission (the time limit is four minutes)")
     blue.finish(60, None)
     red.finish(60, None)
     server.finish(40, 0)
@@ -519,6 +558,26 @@ def drive_pvp(d: Drive) -> None:
         d.problem(problem)
     for bot in (blue, red):
         bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
+def drive_hunt(d: Drive) -> None:
+    """A bot shoots down a target that does not evade (slice BOT, the pursuit and gun aiming the net lane needs to
+    end a PvP mission by its kill limit): the guide's mission 5 nm apart with every enemy a dummy (straight, level,
+    400 knots) and every AI wing on weapons hold, so that the kill is the bot's own. The bot flies for the friendly
+    side; its first kill ends the mission by the kill limit within about 20 seconds."""
+    port = d.port()
+    mission = weapons_hold(dummy_enemies(guide_mission(separation_nm=5)))
+    server = start_server(d, port, mission, mode="pvp", kill_limit=1, kill_owner="total", time_limit=2)
+    bot = start_bots(d, port, "hunter", 100, "--callsign", "Hunter", "--slot", "0")
+    if not server.wait_for(r"^mission ended: the kill limit$", 60):
+        d.problem("the kill limit did not end the mission within a minute")
+    bot.finish(60, None)
+    server.finish(40, 0)
+    bot.expect(r"^Hunter: seat \d+, plane 0, at tick \d+$", "a seating")
+    for problem in hunt_problems(bot.text(), "Hunter"):
+        d.problem(problem)
+    bot.forbid(NET_BAD, "a network problem")
     server.forbid(NET_BAD, "a network problem")
 
 
@@ -1380,7 +1439,11 @@ def scenarios() -> list[Scenario]:
             notes="`king first-player`: the King bot changes the settings to PvP and starts; a bot takes an enemy plane",
         ),
         Scenario(
-            name="net-server-pvp", lane="net", args=[], driver=drive_pvp, uses=("server", "bot"), timeout=360,
+            name="net-server-hunt", lane="net", args=[], driver=drive_hunt, uses=("server", "bot"), timeout=240,
+            notes="a bot shoots down dummy enemies on the guide's mission 5 nm apart: the kill limit ends the mission",
+        ),
+        Scenario(
+            name="net-server-pvp", lane="net", args=[], driver=drive_pvp, uses=("server", "bot"), timeout=420,
             notes="PvP from the server's file with a kill limit: a bot on each side, the scores, the end by the kills",
         ),
         Scenario(
