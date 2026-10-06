@@ -69,3 +69,13 @@ class SummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KilledProbeTests(unittest.TestCase):
+    def test_a_partial_length_is_accepted_at_any_speed(self):
+        from battery_scenarios import _replay_record as rr  # noqa: E402
+
+        for length in ("0:41.2", "3:07.0", "12:00.0"):
+            self.assertTrue(rr.has_length(f"State       INCOMPLETE\nLength      {length} (22440 frames)\n"), length)
+        self.assertFalse(rr.has_length("State       INCOMPLETE\nResult      unknown\n"))
+        self.assertFalse(rr.has_length("Length      none\n"))

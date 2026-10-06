@@ -435,6 +435,13 @@ def killed_probe_scenario() -> Scenario:
     )
 
 
+def has_length(info: str) -> bool:
+    """recording-info prints `Length      m:ss.s`. How much was written before the
+    kill depends on how fast the machine runs the probe (0:xx on a slow one,
+    minutes on a fast one), so only a printed length counts."""
+    return re.search(r"^Length +\d+:\d\d", info, re.M) is not None
+
+
 def check_killed(work: Path, output: str) -> list[str]:
     s = sections(output)
     problems = []
@@ -444,7 +451,7 @@ def check_killed(work: Path, output: str) -> list[str]:
         problems.append("a killed run left a finished-looking recording")
     if "INCOMPLETE" not in s.get(2, ""):
         problems.append("recording-info does not call it incomplete")
-    if "Length      0:" not in s.get(2, ""):
+    if not has_length(s.get(2, "")):
         problems.append("the partial recording has no length")
     problems += rc.file_problems(work, "log/log.jsonl", rc.check_jsonl)
     problems += rc.file_problems(work, "k.acmi", rc.check_acmi)
