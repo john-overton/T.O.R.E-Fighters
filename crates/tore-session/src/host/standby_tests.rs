@@ -9,7 +9,7 @@
 //! resources, but for the ignored real-data 15 against 15 run.
 
 use super::super::*;
-use super::{MAX_RATE, MIN_RATE, PACE_SECONDS, StandbyFigures};
+use super::{MAX_RATE, MIN_RATE, PACE_SECONDS, StandbyFigures, StreamBytes};
 use crate::client::candidate::CandidateSettings;
 use crate::client::{Client, ClientConfig, ClientPhase, Controls};
 use crate::journal::check_hash;
@@ -100,8 +100,6 @@ struct Player {
     status_at: Option<Duration>,
     notes: Vec<(Duration, Note)>,
     statuses: Vec<(Duration, crate::wire::migration::StandbyStatus)>,
-    /// The records received, kept when a measure asks for them.
-    tap: Option<Vec<Vec<u8>>>,
 }
 
 impl Player {
@@ -168,11 +166,12 @@ struct Rig {
     counts: BTreeMap<u8, u64>,
     /// The stream's bytes by second: (second, total bytes of every standby).
     seconds: Vec<(u64, u64)>,
-    /// Every player keeps the records it receives.
-    tap_all: bool,
     /// Each second, the bytes a second the host's transport sent each
     /// player, by callsign.
     wire: Vec<BTreeMap<String, u64>>,
+    /// When every player flew, and each standby's stream bytes then.
+    flying_at: Option<Duration>,
+    at_flight: BTreeMap<u8, StreamBytes>,
 }
 
 impl Rig {
@@ -195,8 +194,9 @@ impl Rig {
             begun: Vec::new(),
             counts: BTreeMap::new(),
             seconds: Vec::new(),
-            tap_all: false,
             wire: Vec::new(),
+            flying_at: None,
+            at_flight: BTreeMap::new(),
         }
     }
 
@@ -240,7 +240,13 @@ impl Rig {
         platform: Platform,
         builder: crate::standby::Builder,
     ) {
-        let address: SocketAddr = format!("10.0.0.2:{}", self.next_port).parse().unwrap();
+        let address: SocketAddr = format!(
+            "10.0.{}.{}:26900",
+            1 + (self.next_port - 42_000) / 200,
+            2 + (self.next_port - 42_000) % 200
+        )
+        .parse()
+        .unwrap();
         let socket = self.net.bind(address).unwrap();
         let config = ClientConfig {
             entropy: Entropy::Seeded(u64::from(self.next_port)),
@@ -269,7 +275,6 @@ impl Rig {
             status_at: None,
             notes: Vec::new(),
             statuses: Vec::new(),
-            tap: Some(Vec::new()).filter(|_| self.tap_all),
         });
         // One at a time, so the join order is the order joined.
         assert!(
@@ -289,7 +294,11 @@ impl Rig {
         self.host.receive_from(now, &mut self.socket).unwrap();
         self.host.update(now);
         self.host.transmit(&mut self.socket).unwrap();
-        while self.host.poll_log().is_some() {}
+        while let Some(log) = self.host.poll_log() {
+            if matches!(log, HostLog::MissionEnded { .. } | HostLog::Fault { .. }) {
+                eprintln!("{now:?}: {log:?}");
+            }
+        }
         let tick = self.host.world.tick();
         if matches!(self.host.life, Life::Flying) {
             let mut flight = self.flight.lock().unwrap();
@@ -303,7 +312,7 @@ impl Rig {
             }
         }
         self.note_checkpoints(now, tick);
-        if now.subsec_millis() == 0 {
+        if now.subsec_millis() == 0 && self.flying_at.is_some() {
             let total = self
                 .host
                 .standby_figures()
@@ -344,9 +353,6 @@ impl Rig {
             // budget, the spare built when idle, its status twice a second.
             for record in player.client.take_standby_records() {
                 let _ = player.standby.receive(&record);
-                if let Some(tap) = &mut player.tap {
-                    tap.push(record);
-                }
             }
             player.standby.step(Budget::Ticks(player.budget));
             if !player.standby.has_work() {
@@ -433,6 +439,13 @@ impl Rig {
                 .all(|p| r.flying(p))),
             "every player flies"
         );
+        self.flying_at = Some(self.net.now());
+        self.at_flight = self
+            .host
+            .standby_figures()
+            .into_iter()
+            .map(|f| (f.player, f.bytes))
+            .collect();
     }
 
     /// In a game a player hosts, waits for slice K6's reach tests to make
@@ -537,30 +550,53 @@ fn pace(length: usize) -> Duration {
     Duration::from_secs_f64(length as f64 / rate)
 }
 
-/// Prints a standby's stream figures, for the slice's measurements.
-fn report(what: &str, figures: &StandbyFigures) {
-    let seconds = figures.appointed_for.as_secs_f64();
-    let b = figures.bytes;
-    let per_seat_tick = b.ticks as f64 / b.seat_inputs.max(1) as f64;
-    eprintln!(
-        "{what}: {} ({}), {:.0} s: ticks {:.0} B/s ({} ticks, {:.1} B a seat a tick), \
-         states {:.0} B/s, checks {:.0} B/s, checkpoints {:.0} B/s ({}), other {} B; \
-         all {:.0} B/s; checks equal {}, different {}",
-        figures.callsign,
-        if figures.warm { "warm" } else { "cold" },
-        seconds,
-        b.ticks as f64 / seconds,
-        b.tick_count,
-        per_seat_tick,
-        b.states as f64 / seconds,
-        b.checks as f64 / seconds,
-        b.checkpoints as f64 / seconds,
-        b.checkpoint_count,
-        b.other,
-        b.total() as f64 / seconds,
-        figures.checks_equal,
-        figures.mismatches,
-    );
+/// A stream's bytes since `before`, field by field.
+fn since(now: StreamBytes, before: StreamBytes) -> StreamBytes {
+    StreamBytes {
+        ticks: now.ticks - before.ticks,
+        tick_count: now.tick_count - before.tick_count,
+        seat_inputs: now.seat_inputs - before.seat_inputs,
+        states: now.states - before.states,
+        checks: now.checks - before.checks,
+        checkpoints: now.checkpoints - before.checkpoints,
+        checkpoint_count: now.checkpoint_count - before.checkpoint_count,
+        other: now.other - before.other,
+    }
+}
+
+impl Rig {
+    /// Prints a standby's stream figures since every player flew, for the
+    /// slice's measurements.
+    fn report(&self, what: &str, figures: &StandbyFigures) {
+        let flying_at = self.flying_at.expect("flying");
+        let seconds = (self.net.now() - flying_at).as_secs_f64();
+        let before = self
+            .at_flight
+            .get(&figures.player)
+            .copied()
+            .unwrap_or_default();
+        let b = since(figures.bytes, before);
+        let per_seat_tick = b.ticks as f64 / b.seat_inputs.max(1) as f64;
+        eprintln!(
+            "{what}: {} ({}), {:.0} s of flight: ticks {:.0} B/s ({} ticks, {:.1} B a seat a \
+             tick), states {:.0} B/s, checks {:.0} B/s, checkpoints {:.0} B/s ({}), other {} \
+             B; all {:.0} B/s; checks equal {}, different {}",
+            figures.callsign,
+            if figures.warm { "warm" } else { "cold" },
+            seconds,
+            b.ticks as f64 / seconds,
+            b.tick_count,
+            per_seat_tick,
+            b.states as f64 / seconds,
+            b.checks as f64 / seconds,
+            b.checkpoints as f64 / seconds,
+            b.checkpoint_count,
+            b.other,
+            b.total() as f64 / seconds,
+            figures.checks_equal,
+            figures.mismatches,
+        );
+    }
 }
 
 /// The crowd fight with a warm and a cold standby for `seconds`: the
@@ -658,8 +694,8 @@ fn warm_and_cold(seconds: u64) {
     rig.holds_the_hosts_world(0);
     rig.holds_the_hosts_world(1);
     // The stream's bytes, recorded.
-    report("crowd fight, 3 humans", &warm);
-    report("crowd fight, 3 humans", &cold);
+    rig.report("crowd fight, 3 humans", &warm);
+    rig.report("crowd fight, 3 humans", &cold);
     eprintln!(
         "both standbys over the last 10 s: {:.0} B/s",
         rig.bytes_per_second(10)
@@ -921,7 +957,7 @@ fn the_stream_of_thirty_humans_is_measured() {
     };
     let config = HostConfig {
         max_players: 30,
-        settings: vec![(number::MODE, Mode::Pvp.value())],
+        settings: vec![(number::MODE, Mode::Pvp.value()), (number::KILL_LIMIT, 0)],
         ..config()
     };
     let mut rig = Rig::with(spec, resources(), config);
@@ -939,13 +975,14 @@ fn the_stream_of_thirty_humans_is_measured() {
     rig.fly_for(seconds);
     for player in 0..2 {
         let figures = rig.figures(player).unwrap();
-        report("30 humans", &figures);
+        rig.report("30 humans", &figures);
         assert_eq!(figures.mismatches, 0);
     }
     eprintln!(
         "both standbys over the last 20 s: {:.0} B/s",
         rig.bytes_per_second(20)
     );
+    rig.print_wire(&["Pilot0", "Pilot1"], "Pilot2");
     rig.holds_the_hosts_world(0);
     rig.holds_the_hosts_world(1);
 }
@@ -1001,8 +1038,8 @@ fn real_data_15_against_15_with_a_warm_and_a_cold_standby() {
     }
     let warm = rig.figures(0).unwrap();
     let cold = rig.figures(1).unwrap();
-    report("real 15 v 15, 4 humans", &warm);
-    report("real 15 v 15, 4 humans", &cold);
+    rig.report("real 15 v 15, 4 humans", &warm);
+    rig.report("real 15 v 15, 4 humans", &cold);
     let cobra = rig.lobby_id(1);
     let arrived = rig.players[1].checkpoints();
     for b in rig.begun.iter().filter(|b| b.player == cobra) {
@@ -1020,214 +1057,4 @@ fn real_data_15_against_15_with_a_warm_and_a_cold_standby() {
     assert_eq!(warm.mismatches, 0);
     rig.holds_the_hosts_world(0);
     rig.holds_the_hosts_world(1);
-}
-
-/// Where a seat input's bytes in the stream go, field by field, and what
-/// the Inputs section's coding of the controls would cost instead: the
-/// measure behind slice K3's proposal. Prints only.
-#[test]
-#[ignore = "a measure for the report, run by hand"]
-fn the_seat_inputs_coding_is_measured_field_by_field() {
-    use crate::journal::{Record, StreamReader};
-    use crate::wire::inputs::{InputFrame, write_frame};
-    use tore_codec::BitWriter;
-    use tore_sim::checkpoint::{Checkpoint, Saver};
-    use tore_world::seats::SeatInput;
-    let humans: u32 = std::env::var("K3_HUMANS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(3);
-    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
-    for wing in &mut spec.wings {
-        wing.count = 5;
-    }
-    spec.separation_nm = 2;
-    spec.start = Start::Airborne {
-        altitude_ft: 10_000,
-    };
-    let config = HostConfig {
-        max_players: 30,
-        settings: vec![(number::MODE, Mode::Pvp.value())],
-        ..config()
-    };
-    let mut rig = Rig::with(spec, resources(), config);
-    rig.host.set_standbys_enabled(true);
-    // Player 0's stream, copied as it arrives from its Appoint on.
-    rig.tap_all = true;
-    for plane in 0..humans {
-        rig.join(&format!("Pilot{plane}"), plane, Platform::current());
-    }
-    rig.fly();
-    let mut reader = StreamReader::new();
-    let mut ticks = Vec::new();
-    rig.run(Duration::from_secs(20));
-    // From its Appoint on: the stream reads only in order.
-    let tapped = rig.players[0].tap.take().unwrap();
-    let mut unread = 0;
-    let mut parts: BTreeMap<String, (usize, usize)> = BTreeMap::new();
-    for bytes in &tapped {
-        match reader.decode(bytes) {
-            Ok(Record::Ticks(t)) => ticks.extend(t.ticks),
-            Ok(Record::State(part)) => {
-                let entry = parts.entry(format!("{:?}", part.part)).or_insert((0, 0));
-                entry.0 += 1;
-                entry.1 += bytes.len();
-            }
-            Ok(_) => {}
-            Err(error) => {
-                if unread == 0 {
-                    eprintln!("unread: {error}");
-                }
-                unread += 1;
-            }
-        }
-    }
-    eprintln!(
-        "{} records, {unread} unread; standbys {:?}",
-        tapped.len(),
-        rig.host
-            .standby_figures()
-            .iter()
-            .map(|f| (f.callsign.clone(), f.status))
-            .collect::<Vec<_>>()
-    );
-    let bits = |f: &dyn Fn(&mut Saver)| {
-        let mut s = Saver::new();
-        f(&mut s);
-        s.writer().bit_len() as u64
-    };
-    let mut last: BTreeMap<u8, (SeatInput, u16)> = BTreeMap::new();
-    let mut sums: BTreeMap<&str, u64> = BTreeMap::new();
-    let mut inputs = 0u64;
-    for tick in &ticks {
-        for (input, applied) in tick.inputs.iter().zip(&tick.applied) {
-            inputs += 1;
-            let base = last.get(&input.seat.0).map(|(b, _)| {
-                let mut base = b.clone();
-                let moved = tick.tick.wrapping_sub(base.tick);
-                base.tick = tick.tick;
-                if let Some(view) = &mut base.view {
-                    view.tick = view.tick.wrapping_add(moved);
-                }
-                base.pilot.commands.clear();
-                base.commands.clear();
-                base
-            });
-            let b = base.as_ref();
-            let mut add = |name, n: u64| *sums.entry(name).or_default() += n;
-            add(
-                "now: whole input",
-                bits(&|s| input.save(s, b).unwrap()) + 8 + 16,
-            );
-            add("now: seat and applied", 24);
-            add(
-                "now: tick",
-                bits(&|s| input.tick.save(s, b.map(|b| &b.tick)).unwrap()),
-            );
-            let p = &input.pilot;
-            let bp = b.map(|b| &b.pilot);
-            add(
-                "now: pitch",
-                bits(&|s| p.pitch.save(s, bp.map(|b| &b.pitch)).unwrap()),
-            );
-            add(
-                "now: roll",
-                bits(&|s| p.roll.save(s, bp.map(|b| &b.roll)).unwrap()),
-            );
-            add(
-                "now: yaw",
-                bits(&|s| p.yaw.save(s, bp.map(|b| &b.yaw)).unwrap()),
-            );
-            add(
-                "now: throttle",
-                bits(&|s| {
-                    p.throttle_rate
-                        .save(s, bp.map(|b| &b.throttle_rate))
-                        .unwrap();
-                    p.throttle.save(s, bp.map(|b| &b.throttle)).unwrap();
-                }),
-            );
-            add(
-                "now: commands, trigger, sensors, view",
-                bits(&|s| {
-                    p.commands.save(s, bp.map(|b| &b.commands)).unwrap();
-                    input.trigger.save(s, b.map(|b| &b.trigger)).unwrap();
-                    input.sensors.save(s, b.map(|b| &b.sensors)).unwrap();
-                    input.commands.save(s, b.map(|b| &b.commands)).unwrap();
-                    input.view.save(s, b.map(|b| &b.view)).unwrap();
-                }),
-            );
-            // Proposed: the controls as the Inputs section codes them, the
-            // command number as a change flag, the rest as now.
-            let frame = InputFrame::of(p, input.trigger, input.sensors);
-            let on_grid = frame.pilot().pitch == p.pitch
-                && frame.pilot().roll == p.roll
-                && frame.pilot().yaw == p.yaw;
-            add("off the wire's grid", u64::from(!on_grid));
-            let previous = last
-                .get(&input.seat.0)
-                .map(|(b, _)| InputFrame::of(&b.pilot, b.trigger, b.sensors));
-            let mut w = BitWriter::new();
-            write_frame(&mut w, &frame, previous.as_ref()).unwrap();
-            let frame_bits = w.bit_len() as u64;
-            let rest = bits(&|s| {
-                p.commands.save(s, bp.map(|b| &b.commands)).unwrap();
-                input.commands.save(s, b.map(|b| &b.commands)).unwrap();
-                input.view.save(s, b.map(|b| &b.view)).unwrap();
-            });
-            let applied_bits = match last.get(&input.seat.0) {
-                Some((_, a)) if a == applied => 1,
-                _ => 17,
-            };
-            add(
-                "proposed: whole input",
-                8 + 1 + frame_bits + rest + applied_bits,
-            );
-            add("proposed: controls", frame_bits);
-            // And the view as Inputs codes it (its offset from the tick and
-            // the delay), one bit when the last's.
-            let offset = |i: &SeatInput| {
-                i.view
-                    .map(|v| (i.tick.saturating_sub(v.tick), v.interpolation_delay))
-            };
-            let view_bits = match last.get(&input.seat.0) {
-                Some((b, _)) if offset(b) == offset(input) => 1,
-                _ => 1 + 1 + if input.view.is_some() { 14 } else { 0 },
-            };
-            let commands_bits = bits(&|s| {
-                p.commands.save(s, bp.map(|b| &b.commands)).unwrap();
-                input.commands.save(s, b.map(|b| &b.commands)).unwrap();
-            });
-            add("proposed: commands", commands_bits);
-            let any = !p.commands.is_empty() || !input.commands.is_empty();
-            add(
-                "proposed, and commands behind a presence bit: whole input",
-                8 + 1
-                    + frame_bits
-                    + if any { 1 + commands_bits } else { 1 }
-                    + view_bits
-                    + applied_bits,
-            );
-            add(
-                "proposed with the view as Inputs codes it: whole input",
-                8 + 1 + frame_bits + commands_bits + view_bits + applied_bits,
-            );
-            last.insert(input.seat.0, (input.clone(), *applied));
-        }
-    }
-    eprintln!(
-        "{humans} humans, {} ticks, {inputs} seat inputs",
-        ticks.len()
-    );
-    eprintln!("state parts (records, bytes): {parts:?}");
-    for (name, sum) in sums {
-        if name == "off the wire's grid" {
-            eprintln!("{name}: {sum} inputs");
-        } else {
-            eprintln!(
-                "{name}: {:.2} bytes a seat a tick",
-                sum as f64 / 8. / inputs as f64
-            );
-        }
-    }
 }
