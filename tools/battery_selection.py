@@ -224,6 +224,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "pilots that stand by taking the game over, and host selection's reach and upload tests",
         ("net-migrate-kill", "net-migrate-handover", "net-reach-upload"),
     ),
+    "net-migrate-relay": (
+        "a listed hosting bot killed with a relayed bot in the game: the listing and the relay channel follow the new host",
+        ("net-migrate-relay",),
+    ),
     "net-window": (
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
@@ -275,7 +279,7 @@ MAIN_FAMILIES = (
 )
 NET_FAMILIES = ("net-fly", "net-window", "net-convert")
 # What a change to host migration reaches besides the rest of the net lane (slice K9).
-NET_MIGRATE = NET_FAMILIES + ("net-migrate",)
+NET_MIGRATE = NET_FAMILIES + ("net-migrate", "net-migrate-relay")
 RENDER_FAMILIES = ("windowed-menus", "flight-views", "instruments")
 MENU_FAMILIES = ("menus-screens", "menus-creator", "menus-validate")
 
@@ -429,7 +433,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
-    _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),
+    _r("crates/tore-net/src/master/*", ("net-master", "net-migrate-relay"), "the master server's wire and the browse client"),
     _r(
         "crates/tore-net/src/peers*", NET_MIGRATE,
         "the peers router in front of a joined socket, its reach answerer and reach tests (stage K, slice K6)",
@@ -529,7 +533,7 @@ RULES: tuple[Rule, ...] = (
         "crates/tore-server/*", ("net-check", "net-fly", "net-discovery", "net-listing", "net-content"),
         "dedicated server",
     ),
-    _r("crates/tore-master/*", ("net-master",), "the master server, its configuration and its flood tool"),
+    _r("crates/tore-master/*", ("net-master", "net-migrate-relay"), "the master server, its configuration and its flood tool"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),
     # tore-app: rendering (windowed).
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),

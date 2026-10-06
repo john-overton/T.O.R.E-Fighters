@@ -30,8 +30,10 @@ use std::collections::BTreeMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tore_net::master::rendezvous::ListingPart;
+use tore_net::master::{Build, HostListing, HostRendezvous};
 use tore_net::peers::{Peers, Route};
-use tore_net::{Datagrams, Entropy, LINK_ADDRESS, MAX_DATAGRAM, ServerSocket};
+use tore_net::{Datagrams, Entropy, LINK_ADDRESS, MAX_DATAGRAM, Platform, ServerSocket};
 use tore_session::bot::Bot;
 use tore_session::client::candidate::CandidateSettings;
 use tore_session::host::content::GameContent;
@@ -92,6 +94,25 @@ pub struct HostSetup {
     pub port: u16,
     /// Appoint standbys (`--standby on`, the default for a host).
     pub standbys: bool,
+    /// List the game on this master (`--master`, a loopback master in the
+    /// battery), as a hosting game does.
+    pub master: Option<String>,
+}
+
+/// What a listing of the game on a master says about its host.
+fn rendezvous(build: &BuildId) -> HostRendezvous {
+    HostRendezvous {
+        build: Build {
+            protocol_version: tore_session::wire::PROTOCOL_VERSION,
+            game_version: build.version.clone(),
+            game_commit: build.commit.clone(),
+            release: build.release,
+        },
+        dedicated: false,
+        install_id: None,
+        platform: Platform::current().code(),
+        entropy: Entropy::System,
+    }
 }
 
 /// The settings of a game a bot hosts, as the game's hosting thread has them
@@ -135,8 +156,10 @@ struct Asking {
 enum Ending {
     /// The host said it left; it stops when `by` comes.
     Stopping { by: Duration },
-    /// The host handed over; its records must go through by `by`.
-    Handing { by: Duration },
+    /// The host handed over; its records must go through by `by`. `leaving`:
+    /// the bot is leaving the game (its time is up); else the lobby moved to
+    /// a better host (slice KP) and the bot goes on as a player.
+    Handing { by: Duration, leaving: bool },
 }
 
 /// The game a bot hosts.
@@ -147,6 +170,11 @@ pub struct Hosted {
     ending: Option<Ending>,
     world_at: Duration,
     standby_at: Duration,
+    /// The game's listing on the master, when it is listed; its part goes to
+    /// the host whenever it changes (stage K, slice K8), so a standby holds
+    /// it.
+    listing: Option<HostListing>,
+    part_version: u64,
 }
 
 /// A bot's migration state.
@@ -202,8 +230,21 @@ impl Mig {
         let mut host = Host::new(setup.spec, Arc::clone(resources), config.clone())
             .map_err(|error| format!("The game could not be hosted: {error}"))?;
         host.set_standbys_enabled(setup.standbys);
+        let listing = match &setup.master {
+            Some(master) => {
+                let mut listing = HostListing::new(
+                    master,
+                    rendezvous(&config.build),
+                    setup.port,
+                    Duration::ZERO,
+                )?;
+                listing.set_listed(true, Duration::ZERO);
+                Some(listing)
+            }
+            None => None,
+        };
         let mut mig = Self::new(resources, config, setup.standbys);
-        mig.hosted = Some(Hosted::new(host, None));
+        mig.hosted = Some(Hosted::new(host, None, listing));
         Ok((mig, Sock::Server(socket)))
     }
 
@@ -282,12 +323,28 @@ impl Mig {
         })
     }
 
+    /// What the socket holds, through the listing when the bot's host has
+    /// one (the master's datagrams never reach the host).
+    fn drain(&mut self, now: Duration, sock: &mut Sock) -> Vec<(SocketAddr, Vec<u8>)> {
+        let mut buf = [0u8; MAX_DATAGRAM + 1];
+        let mut out = Vec::new();
+        let mut take = |net: &mut dyn Datagrams| {
+            while let Ok(Some((len, from))) = net.recv_datagram(&mut buf) {
+                out.push((from, buf[..len].to_vec()));
+            }
+        };
+        match self.hosted.as_mut().and_then(|h| h.listing.as_mut()) {
+            Some(listing) => take(&mut listing.over(sock, now)),
+            None => take(sock),
+        }
+        out
+    }
+
     /// Takes in what the socket holds: the host's, the router's and the
     /// client's.
     pub fn receive(&mut self, now: Duration, name: &str, bot: &mut Bot, sock: &mut Sock) {
-        let mut buf = [0u8; MAX_DATAGRAM + 1];
-        while let Ok(Some((len, from))) = sock.recv_datagram(&mut buf) {
-            let datagram = &buf[..len];
+        for (from, datagram) in self.drain(now, sock) {
+            let datagram = datagram.as_slice();
             if let Some(asking) = &self.asking
                 && hosting_answer(datagram, asking.session, asking.nonce)
             {
@@ -297,6 +354,11 @@ impl Mig {
                 if let Some(mut hosted) = self.hosted.take() {
                     hosted.host.step_down();
                     hosted.print_notes(name);
+                    // The listing goes on with the new host: no word to the
+                    // master.
+                    if let Some(listing) = hosted.listing.as_mut() {
+                        listing.release();
+                    }
                 }
                 self.asking = None;
                 self.stepped_down = true;
@@ -328,6 +390,7 @@ impl Mig {
             return;
         };
         hosted.host.update(now);
+        hosted.update_listing(now, name);
         hosted.flush(now, bot, sock);
         hosted.print(now, name);
         // An old host that lost every player, or heard it was taken over,
@@ -366,6 +429,7 @@ impl Mig {
         now: Duration,
         name: &str,
         bot: &mut Bot,
+        sock: &Sock,
         resources: &Arc<BTreeMap<String, Vec<u8>>>,
     ) {
         if now.saturating_sub(self.flight_at) >= Duration::from_millis(250) {
@@ -423,7 +487,25 @@ impl Mig {
             Ok(mut host) => {
                 let tick = host.world().tick();
                 host.set_standbys_enabled(self.standbys);
-                self.hosted = Some(Hosted::new(host, Some((now, tick))));
+                // The old host's listing goes on from this socket (K8).
+                let port = match sock {
+                    Sock::Udp(socket) => socket.local_addr().map_or(0, |a| a.port()),
+                    Sock::Server(socket) => {
+                        socket.local_addresses().first().map_or(0, SocketAddr::port)
+                    }
+                };
+                let listing = host
+                    .listing_part()
+                    .and_then(|bytes| ListingPart::decode(bytes).ok())
+                    .and_then(|part| {
+                        HostListing::resume(&part, rendezvous(&self.config.build), port, now)
+                            .map_err(|error| println!("{name}: listing: cannot resume: {error}"))
+                            .ok()
+                    });
+                if listing.is_some() {
+                    println!("{name}: listing: resumed from the old host's part");
+                }
+                self.hosted = Some(Hosted::new(host, Some((now, tick)), listing));
                 bot.client.host_here(now, LINK_ADDRESS, tick);
                 self.peers.set_hosting(true, bot.client.old_host());
             }
@@ -484,6 +566,7 @@ impl Mig {
                     println!("{name}: host: handing the game over to player {to}");
                     hosted.ending = Some(Ending::Handing {
                         by: now + HANDOVER_WAIT,
+                        leaving: true,
                     });
                     return true;
                 }
@@ -511,18 +594,32 @@ impl Mig {
             return false;
         };
         match hosted.ending {
-            Some(Ending::Handing { by }) => {
+            Some(Ending::Handing { by, leaving }) => {
                 if hosted.host.handed_over() || now >= by {
                     println!("{name}: host: the game was handed over");
+                    // The listing goes on with the new host: no word to the
+                    // master.
+                    if let Some(listing) = hosted.listing.as_mut() {
+                        listing.release();
+                    }
                     self.hosted = None;
-                    self.handed_over = true;
-                    return true;
+                    if leaving {
+                        self.handed_over = true;
+                        return true;
+                    }
+                    // A lobby that moved: the bot is a player of the new host
+                    // now, which its client races as any player's does.
+                    self.stepped_down = true;
+                    return false;
                 }
             }
             Some(Ending::Stopping { by }) => {
                 if now >= by || hosted.host.phase() == Phase::Stopped {
                     hosted.host.stop();
                     hosted.host.update(now);
+                    if let Some(listing) = hosted.listing.as_mut() {
+                        listing.stop(now);
+                    }
                     // The stop's disconnects go out before the host goes.
                     hosted.flush(now, bot, sock);
                     hosted.print(now, name);
@@ -548,14 +645,42 @@ impl Mig {
 }
 
 impl Hosted {
-    fn new(host: Host, took: Option<(Duration, u64)>) -> Self {
-        Self {
+    fn new(host: Host, took: Option<(Duration, u64)>, listing: Option<HostListing>) -> Self {
+        let mut hosted = Self {
             host,
             took,
             ending: None,
             world_at: Duration::ZERO,
             standby_at: Duration::ZERO,
+            listing,
+            part_version: u64::MAX,
+        };
+        hosted.sync_part();
+        hosted
+    }
+
+    /// The listing's part goes to the host whenever it may have changed.
+    fn sync_part(&mut self) {
+        if let Some(listing) = &self.listing
+            && listing.part_version() != self.part_version
+        {
+            self.part_version = listing.part_version();
+            self.host
+                .set_listing_part(listing.part().map(|part| part.encode()));
         }
+    }
+
+    /// The listing's timers, its part and its events.
+    fn update_listing(&mut self, now: Duration, name: &str) {
+        let Some(listing) = self.listing.as_mut() else {
+            return;
+        };
+        let host = &self.host;
+        listing.update(now, || host.discover_answer(0).into());
+        while let Some(event) = listing.poll_event() {
+            println!("{name}: listing: {event:?}");
+        }
+        self.sync_part();
     }
 
     /// Sends what the host queued: to the bot's own client over the link,
@@ -565,8 +690,16 @@ impl Hosted {
             if t.to == LINK_ADDRESS {
                 bot.client.receive(now, LINK_ADDRESS, &t.datagram);
             } else {
-                let _ = sock.send_datagram(t.to, &t.datagram);
+                // Through the listing: a relayed player's datagrams go to
+                // its channel.
+                let _ = match self.listing.as_mut() {
+                    Some(listing) => listing.over(sock, now).send_datagram(t.to, &t.datagram),
+                    None => sock.send_datagram(t.to, &t.datagram),
+                };
             }
+        }
+        if let Some(listing) = self.listing.as_mut() {
+            let _ = listing.transmit(sock);
         }
     }
 
@@ -577,7 +710,19 @@ impl Hosted {
                 println!("{name}: host: {line}");
             }
         }
-        self.print_notes(name);
+        for note in self.print_notes(name) {
+            // The lobby moved to a better host (the host's own succession
+            // update handed over): stop hosting once its records are
+            // through, as for a host that leaves.
+            if let ResumeNote::HandedOver { .. } = note
+                && self.ending.is_none()
+            {
+                self.ending = Some(Ending::Handing {
+                    by: now + HANDOVER_WAIT,
+                    leaving: false,
+                });
+            }
+        }
         if now.saturating_sub(self.world_at) >= WORLD_EVERY && self.host.phase() == Phase::Flying {
             self.world_at = now;
             let world = self.host.world();
@@ -619,10 +764,12 @@ impl Hosted {
         }
     }
 
-    fn print_notes(&mut self, name: &str) {
-        for note in self.host.take_resume_notes() {
-            println!("{name}: host: {}", resume_text(&note));
+    fn print_notes(&mut self, name: &str) -> Vec<ResumeNote> {
+        let notes = self.host.take_resume_notes();
+        for note in &notes {
+            println!("{name}: host: {}", resume_text(note));
         }
+        notes
     }
 }
 

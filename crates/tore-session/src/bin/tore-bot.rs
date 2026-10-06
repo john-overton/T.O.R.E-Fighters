@@ -263,6 +263,8 @@ struct Options {
     /// `--wait-standbys`: the ready standbys a hosting bot's start waits
     /// for.
     wait_standbys: usize,
+    /// `--master` with `--host`: the master the hosted game lists itself on.
+    listed_on: Option<String>,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -433,6 +435,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         standby: None,
         players: 1,
         wait_standbys: 0,
+        listed_on: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -538,7 +541,11 @@ fn parse(args: &[String]) -> Result<Options, String> {
         return Ok(options);
     }
     if options.host.is_some() {
-        if connect.is_some() || master.is_some() || listing.is_some() {
+        if let Some(master) = &master {
+            parse_master(master)?;
+            options.listed_on = Some(master.clone());
+        }
+        if connect.is_some() || listing.is_some() {
             return Err(format!(
                 "--host hosts the game itself: it joins nothing\n{USAGE}"
             ));
@@ -1270,6 +1277,7 @@ fn main() -> ExitCode {
                     spec,
                     port: options.port,
                     standbys: options.standby.unwrap_or(true),
+                    master: options.listed_on.clone(),
                 };
                 match Mig::hosting(setup, &resources, config) {
                     Ok((mig, sock)) => {
@@ -1473,7 +1481,7 @@ fn main() -> ExitCode {
                 }
                 (None, Some(socket)) => match r.mig.as_mut() {
                     Some(mig) => {
-                        mig.update_standby(now, &r.name, bot, &resources);
+                        mig.update_standby(now, &r.name, bot, socket, &resources);
                         mig.drive_peers(now, bot, socket);
                         mig.send_client(now, bot, socket);
                         if mig.finish_hosting(now, &r.name, bot, socket) && mig.handed_over {

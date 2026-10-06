@@ -1,4 +1,5 @@
 """Tests for the net lane's own helpers (tools/battery_scenarios/net.py)."""
+import re
 import socket
 import sys
 import tempfile
@@ -475,6 +476,18 @@ class MigrationTests(unittest.TestCase):
         stuck = PILOTS.replace("tick 6768", "tick 3100")
         self.assertTrue(any("did not carry on" in p for p in problems(stuck)))
         self.assertEqual(problems(PILOTS.replace("Pilot3 resumed", "x"), handover=True), [])
+
+    def test_a_slow_fast_forward_is_judged_by_how_closely_the_pilots_follow_the_host(self):
+        # 831 ticks at 4.7 ms: the 5 second target is not judged, but the pilots must follow the host going live.
+        slow = PILOTS.replace("live at tick 3547, 2838 ms after the takeover, 521 ticks", "live at tick 3547, 5426 ms after the takeover, 831 ticks")
+        slow = re.sub(r"snapshots again \d+ ms", "snapshots again 6018 ms", slow)
+        self.assertEqual(net.migrate_problems(slow, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS), [])
+        late = slow.replace("Pilot3: migrate: snapshots again 6018", "Pilot3: migrate: snapshots again 9000")
+        self.assertTrue(any("Pilot3's snapshots came again after 9000" in p and "cost 4.7 ms a tick" in p
+                            for p in net.migrate_problems(late, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS)))
+        # The same lateness at a fast tick is a failure of the target.
+        fast = PILOTS.replace("Pilot3: migrate: snapshots again 2500", "Pilot3: migrate: snapshots again 4000")
+        self.assertTrue(any("over 3500 ms" in p for p in net.migrate_problems(fast, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS)))
 
 
 class ScenarioListTests(unittest.TestCase):
