@@ -9,7 +9,11 @@
 //! side by side at each snapshot rate, 60 a second (the default since slice
 //! D12) and 30: a clean link and one losing 5 percent of its packets, both
 //! keeping 256 bytes of each packet for reliable messages as in flight, and a
-//! clean one keeping none; each is acknowledged 100 ms later.
+//! clean one keeping none; each is acknowledged 100 ms later. Two more
+//! clean connections at 60 a second are acknowledged 300 and 600 ms later
+//! (slice B2): their records and readout code against baselines 18 to 36
+//! snapshots old, which before protocol 16 (a window of 31) went in full or
+//! against the empty readout.
 //!
 //! The flight data link (slice G7) rides along: the readout carries the
 //! seat's share, the seat's Link events go with its events, and the player
@@ -79,6 +83,8 @@ struct Link {
     terms_dirty: bool,
     last_own_state: u64,
     loss: u64,
+    /// Ticks before a delivered packet is acknowledged.
+    ack: u64,
     /// Bytes kept for reliable messages in each snapshot packet.
     messages: usize,
     pending: VecDeque<(u64, u16, bool)>,
@@ -108,8 +114,18 @@ impl Link {
             host: Some(HostConnection::new(tps as u32)),
             tps,
             loss,
+            ack: ACK_DELAY,
             messages,
             ..Self::default()
+        }
+    }
+
+    /// A clean link keeping 256 bytes for messages, acknowledged `ack` ticks
+    /// after each packet.
+    fn slow(tps: u64, ack: u64) -> Self {
+        Self {
+            ack,
+            ..Self::new(tps, 0, 256)
         }
     }
 
@@ -118,14 +134,14 @@ impl Link {
     }
 
     /// Sends the staged packet of `bytes` at tick `k`; a lost one is
-    /// reported lost 44 ticks on, a delivered one after the round trip.
+    /// reported lost 44 ticks on, a delivered one after the link's round trip.
     fn send(&mut self, k: u64, bytes: usize, rng: &mut SplitMix64) {
         let sequence = self.sequence;
         self.sequence = self.sequence.wrapping_add(1);
         self.host().sent(sequence);
         self.total_bytes += bytes;
         let lost = rng.below(100) < self.loss;
-        let at = if lost { k + LOSS_DELAY } else { k + ACK_DELAY };
+        let at = if lost { k + LOSS_DELAY } else { k + self.ack };
         self.pending.push_back((at, sequence, !lost));
     }
 
@@ -191,6 +207,7 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
                 Link::new(tps, 0, 0),
             ]
         })
+        .chain([Link::slow(2, 36), Link::slow(2, 72)])
         .collect();
     let mut out = TickOutput::default();
     let mut known_projectiles: BTreeSet<u32> = BTreeSet::new();
@@ -510,8 +527,11 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     for link in &links {
         let rate = 120 / link.tps as usize;
         println!(
-            "--- {rate} snapshots a second, {} percent loss, {} bytes kept for messages ---",
-            link.loss, link.messages
+            "--- {rate} snapshots a second, {} percent loss, {} bytes kept for messages, \
+             acknowledged after {} ms ---",
+            link.loss,
+            link.messages,
+            link.ack * 1_000 / 120
         );
         for (name, stat) in [
             ("snapshot section bytes", &link.snapshot),

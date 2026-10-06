@@ -792,16 +792,19 @@ Each entity record:
 | Kind | Aircraft, projectile, debris or pilot. *Built (D6):* records come kind by kind, each kind's count first, so a record carries no kind bits |
 | Id | The plane id, projectile number, or the aircraft a debris piece or pilot came from; coded as the difference from the previous record's id of the same kind |
 | Removed | 1 bit: the entity is gone; nothing follows |
-| Baseline | Snapshots back to the acknowledged state this record is coded against (5 bits); 0 is a full record |
+| Baseline | Snapshots back to the acknowledged state this record is coded against (7 bits since protocol 16, 5 before); 0 is a full record |
 | Fields | Coded against the baseline, below |
 
 **Baselines are per entity.** For every connection the host remembers, for
-the last 32 packets it sent, the quantized state it sent for each entity. When
-a packet is acknowledged those states become that entity's acknowledged
-baseline. A record in a new packet codes against its entity's newest
-acknowledged baseline if it is at most 31 snapshots old, else in full. The client
-keeps every entity's received states for the last 64 snapshots, since a packet
-32 behind the newest can still arrive with records 31 further back. The host
+the last 128 snapshot packets it sent, the quantized state it sent for each
+entity. When a packet is acknowledged those states become that entity's
+acknowledged baseline. A record in a new packet codes against its entity's
+newest acknowledged baseline if it is at most 127 snapshots old (2.1 seconds
+at 60 a second), else in full. The client keeps every entity's received
+states for the last 160 snapshots, since a packet 32 behind the newest can
+still arrive with records 127 further back. *Built in protocol 16 (slice
+B2):* before it the window was 31 snapshots, the host remembered 64 packets
+and the client 64 snapshots ([why it grew](#the-cockpit-readout-as-built)). The host
 remembers the quantized values it sent, not the exact ones, so both sides hold
 the same baseline and rounding never builds up.
 
@@ -1040,7 +1043,7 @@ its records in id order.
 | --- | --- |
 | Id | The first record of a kind: its id; later ones: the id less the previous one less 1. Bucketed unsigned: 2 bits of index, then 0, 4 or 10 bits, or a varint |
 | Removed | 1 |
-| Baseline | 5: snapshots back, 1 to 31; 0 is a full record |
+| Baseline | 7: snapshots back, 1 to 127; 0 is a full record (5 bits, 1 to 31, before protocol 16) |
 | Full body | The identity fields; position and velocity as six signed varints; the angles, 16 bits each (aircraft and debris 3, projectiles 2, pilots 1); an aircraft's speed as a signed varint; every slow field |
 | Body against a baseline | 1 bit "moved"; if set, the position residuals after the prediction, the velocity, angle and speed differences, each bucketed (position and velocity 3, 6, 10, 14 or 20 bits; angles 3, 6, 9, 12 or 17; speed 3, 6, 10 or 16); then for each group of slow fields a changed bit, and in a changed group a bit per field and each new value |
 
@@ -1069,7 +1072,8 @@ a pilot's is its escape phase (3 bits).
   prediction divides the baseline's velocity steps by 240 per tick with
   integer arithmetic, rounding halves up, so both ends agree to the step. The
   host codes against an entity's newest acknowledged state when the gap is 1
-  to 31 whole snapshots and its identity fields match, else in full.
+  to 127 whole snapshots (31 before protocol 16) and its identity fields
+  match, else in full.
 - **Ids.** A debris piece's and an ejected pilot's id is the aircraft it came
   from: each aircraft breaks off at most one piece and ejects at most one
   pilot. The player's own pilot is not sent; its escape is part of its plane's
@@ -1098,8 +1102,9 @@ a pilot's is its escape phase (3 bits).
 
 ### The cockpit readout as built
 
-The readout's record is the baseline (5 bits: snapshots back to the readout
-the client acknowledged, 1 to 31, or 0 for none, against the empty readout),
+The readout's record is the baseline (7 bits since protocol 16, 5 before:
+snapshots back to the readout the client acknowledged, 1 to 127, or 0 for
+none, against the empty readout),
 then 30 parts (26 before protocol 15), each behind a changed bit, in this
 order, which is also their importance: header (plane and tick), link (protocol
 15), stores, countermeasures, damage, seeker, seeker observation, estimates,
@@ -1137,8 +1142,10 @@ built from the tick's flight, in every snapshot.
   the rest as the baseline predicts it, which the host's record of what the
   client holds does too, so the next packet catches up from there.
 - **Starting again from empty.** *Found in B1:* when the client's newest
-  acknowledgement is over 31 snapshots old (a stall of the game, or a round
-  trip over a second at 30 Hz), the record is against the empty readout, and
+  acknowledgement is over 127 snapshots old (31 before protocol 16: a stall
+  of the game, or a round trip over a second at 30 Hz or half a second at
+  60 Hz; now a stall or round trip of over 2.1 seconds at 60 Hz), the record
+  is against the empty readout, and
   in a busy fight what does not fit is empty on the client, not kept. The
   baseline stays so, as the host holds it, but the cockpit shows a scalar
   group that has not arrived since with what it last arrived with for the
@@ -1146,9 +1153,20 @@ built from the tick's flight, in every snapshot.
   always holds values, so an empty one has not arrived. Before this the
   radar page read the sensor flags of such a readout as `NOT INSTALLED`.
   The lists cannot be told apart from an empty list, so they show what came:
-  with acknowledgements always over 31 snapshots late, a busy fight's
+  with acknowledgements always over the window late, a busy fight's
   contacts, strobes, plots, trails, visual and map contacts and the link's
-  lists do not reach the client.
+  lists do not reach the client. *Built in protocol 16 (slice B2):* so the
+  window grew from 31 snapshots (0.52 s at 60 Hz) to 127 (2.1 s), for the
+  readout and the entity records alike, enough for a 600 ms round trip and
+  a stall of about a second and a half on top. The host keeps 128 sent
+  snapshot packets per connection and the client 160 snapshots of readouts
+  and entity states, as for the entities above. *Agent decision:* 7 bits,
+  the brief's suggestion: 6 (63 snapshots, 1.05 s) would not cover a 600 ms
+  round trip with a stall, and 8 (255, 4.25 s) doubles the memory for
+  stalls long enough that a full restart costs little next to them. The
+  field costs 2 bits more on every record, and a delta against an older
+  baseline is bigger than against a fresh one (the figures are in the
+  [architecture's B2 row](../ARCHITECTURE.md#how-stage-g-lands)).
 - **Steps.** Scope, visual, map, threat and inbound positions in whole feet
   and velocities in 1/4 ft/s; target rows and seeker observations in 1/32 ft
   and 1/64 ft/s, as the entities; plot and strobe angles 2^-12 of a turn;
@@ -2148,7 +2166,8 @@ again with an observer; the capture format did not change for it.
   since [stage K](#host-migration-and-rejoin-stage-k)'s wire, K0, 14 since
   the standby stream's seat inputs code their controls as the Inputs
   section does, K3, 15 since the [flight data link](#data-link-stage-g),
-  G7; 11 was never used).
+  G7, 16 since the baseline field of the readout and the entity records is
+  7 bits, a window of 127 snapshots, B2; 11 was never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

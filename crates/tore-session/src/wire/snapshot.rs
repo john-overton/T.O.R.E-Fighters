@@ -9,7 +9,8 @@
 //! remembers the quantized state it put in each packet; when the transport
 //! reports a packet delivered, those states become each entity's
 //! acknowledged baseline. A record codes against its entity's newest
-//! acknowledged state if that is at most 31 snapshots old, else in full.
+//! acknowledged state if that is at most [`MAX_BASELINE_BACK`] (127)
+//! snapshots old, else in full.
 //! [`EntityReceiver`] (the client) keeps every entity's received states,
 //! so it can decode each packet whatever happened to the others.
 //!
@@ -29,13 +30,22 @@ use super::{WireError, WireResult};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use tore_codec::{BitReader, BitWriter};
 
-/// The most snapshots back a record's baseline may be (5 bits).
-pub const MAX_BASELINE_BACK: u32 = 31;
-/// Snapshots of states the client keeps per entity: a packet 32 behind the
-/// newest can still arrive, and its records reach 31 further back.
-pub const HISTORY_SNAPSHOTS: u32 = 64;
-/// Packets the host remembers while it waits to hear of them.
-const PENDING_PACKETS: usize = 64;
+/// Bits of a record's (and the cockpit readout's) baseline field: snapshots
+/// back to the acknowledged state it codes against, 0 for none. 7 since
+/// protocol 16 (slice B2), 5 before.
+pub const BASELINE_BACK_BITS: u32 = 7;
+/// The most snapshots back a baseline may be: 127, 2.1 seconds at 60 a
+/// second (31 before protocol 16, half a second at 60 a second).
+pub const MAX_BASELINE_BACK: u32 = (1 << BASELINE_BACK_BITS) - 1;
+/// Snapshots behind the newest a packet may arrive and still be decoded.
+const LATE_SNAPSHOTS: u32 = 32;
+/// Snapshots of states the client keeps per entity, and of readouts: a
+/// packet 32 behind the newest can still arrive, and its records reach 127
+/// further back.
+pub const HISTORY_SNAPSHOTS: u32 = LATE_SNAPSHOTS + MAX_BASELINE_BACK + 1;
+/// Snapshot packets the host remembers per connection while it waits to hear
+/// of them: one acknowledged as late as the window allows is still of use.
+pub(crate) const PENDING_PACKETS: usize = MAX_BASELINE_BACK as usize + 1;
 /// Id differences between records of a kind: zero, 4 bits, 10 bits, or a
 /// varint.
 const ID_LADDER: [u32; 3] = [0, 4, 10];
@@ -136,7 +146,7 @@ fn write_body(w: &mut BitWriter, body: &Body<'_>) -> WireResult<()> {
         Body::Removed => w.write_bool(true),
         Body::Full(state) => {
             w.write_bool(false);
-            let _ = w.write_bits(0, 5);
+            let _ = w.write_bits(0, BASELINE_BACK_BITS);
             write_full(w, state)?;
         }
         Body::Delta {
@@ -146,7 +156,7 @@ fn write_body(w: &mut BitWriter, body: &Body<'_>) -> WireResult<()> {
             ticks,
         } => {
             w.write_bool(false);
-            let _ = w.write_bits(u64::from(*back), 5);
+            let _ = w.write_bits(u64::from(*back), BASELINE_BACK_BITS);
             write_delta(w, state, base, *ticks)?;
         }
     }
@@ -232,7 +242,7 @@ impl SnapshotSection {
                 let body = if r.read_bool()? {
                     RecordBody::Removed
                 } else {
-                    match r.read_bits(5)? as u8 {
+                    match r.read_bits(BASELINE_BACK_BITS)? as u8 {
                         0 => RecordBody::Full(read_full(&mut r, kind)?),
                         back => RecordBody::Delta {
                             back,
@@ -681,11 +691,9 @@ impl EntityReceiver {
     /// The state `key` had in the snapshot of `tick`, if one was received.
     pub fn state(&self, key: EntityKey, tick: u32) -> Option<&EntityState> {
         let track = self.tracks.get(&key)?;
-        track
-            .states
-            .iter()
-            .find(|(t, _)| *t == tick)
-            .map(|(_, state)| state)
+        // The states are in tick order and up to 160 deep (slice B2).
+        let index = track.states.binary_search_by_key(&tick, |(t, _)| *t).ok()?;
+        Some(&track.states[index].1)
     }
 
     /// The newest state received for `key`, with its tick, unless a newer

@@ -816,3 +816,59 @@ fn entities_keep_their_share_whatever_else_waits() {
         host.delivered(snapshot as u16);
     }
 }
+
+/// Slice B2: a record codes against its entity's acknowledged state up to
+/// 127 snapshots old (2.1 seconds at 60 a second), and the client still
+/// holds it; an older one goes in full. Every snapshot between is received
+/// and none acknowledged, as on a slow round trip or a stall.
+#[test]
+fn records_code_against_baselines_up_to_127_snapshots_back() {
+    const TICKS: u32 = 2;
+    for (gap, back) in [
+        (1, 1),
+        (31, 31),
+        (32, 32),
+        (126, 126),
+        (127, 127),
+        (128, 0),
+        (200, 0),
+    ] {
+        let mut rng = SplitMix64::new(16);
+        let mut host = EntitySender::new(TICKS);
+        let mut client = EntityReceiver::new(TICKS);
+        let mut world: Vec<Entity> = (0..8)
+            .map(|i| entity(&mut rng, EntityKind::ALL[i % 4], i as u32 * 5))
+            .collect();
+        for k in 0..=gap {
+            let tick = 1_000 + k * TICKS;
+            if k > 0 {
+                world = world.iter().map(|e| step(&mut rng, e, TICKS)).collect();
+            }
+            let entities: Vec<_> = world.iter().map(|e| (*e, Relevance::NEAR)).collect();
+            let (bytes, report) = host
+                .build(&samples::header(tick), &entities, 4_000)
+                .unwrap();
+            assert_eq!(report.waiting, 0);
+            host.sent(k as u16);
+            let section = SnapshotSection::decode(&bytes).unwrap();
+            let received = client.receive(&section);
+            assert!(received.unresolved.is_empty(), "gap {gap}, snapshot {k}");
+            for e in &world {
+                assert_eq!(client.state(e.key(), tick), Some(&e.state), "gap {gap}");
+            }
+            if k == 0 {
+                host.delivered(0);
+            } else if k == gap {
+                for record in &section.records {
+                    match (&record.body, back) {
+                        (RecordBody::Full(_), 0) => {}
+                        (RecordBody::Delta { back: got, .. }, _) => {
+                            assert_eq!(u32::from(*got), back, "gap {gap}")
+                        }
+                        (body, _) => panic!("gap {gap}: {body:?}"),
+                    }
+                }
+            }
+        }
+    }
+}

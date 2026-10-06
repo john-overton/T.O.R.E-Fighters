@@ -115,8 +115,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// command number applied as a bit when unchanged (slice K3), 15 since the
 /// flight data link (slice G7): the readout's Link group and its tracks,
 /// marks and mates, the Link event, the radio events' net, and the Sort order
-/// and Battle net command the golden now lists.
-pub const PROTOCOL_VERSION: u16 = 15;
+/// and Battle net command the golden now lists, 16 since the baseline field
+/// of the readout and the entity records is 7 bits, a window of 127
+/// snapshots (slice B2).
+pub const PROTOCOL_VERSION: u16 = 16;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

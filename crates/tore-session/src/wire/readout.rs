@@ -36,6 +36,7 @@
 
 use super::bits::{self, read_u32};
 use super::flat::{self, Kind, List, ListRaw, Schema, Slow};
+use super::snapshot::{BASELINE_BACK_BITS, HISTORY_SNAPSHOTS, MAX_BASELINE_BACK, PENDING_PACKETS};
 use super::{WireError, WireResult};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, VecDeque};
@@ -1792,7 +1793,7 @@ pub struct ReadoutRaw {
 
 /// Reads a readout record (after its presence bit).
 pub(crate) fn read_record(r: &mut BitReader<'_>) -> WireResult<ReadoutRaw> {
-    let back = r.read_bits(5)? as u8;
+    let back = r.read_bits(BASELINE_BACK_BITS)? as u8;
     let mut parts = Vec::with_capacity(PARTS.len());
     for part in PARTS {
         if !r.read_bool()? {
@@ -1869,10 +1870,10 @@ pub(crate) fn write_record(
     let base = base.advanced(ticks);
     let mut after = base.clone();
     let mut w = BitWriter::new();
-    let _ = w.write_bits(u64::from(back), 5);
+    let _ = w.write_bits(u64::from(back), BASELINE_BACK_BITS);
     let mut report = ReadoutReport::default();
     // A bit for every part is spent whatever happens.
-    let mut left = budget.saturating_sub(5 + PARTS.len());
+    let mut left = budget.saturating_sub(BASELINE_BACK_BITS as usize + PARTS.len());
     for (index, part) in PARTS.iter().enumerate() {
         let start = w.bit_len();
         match *part {
@@ -1955,8 +1956,9 @@ impl ReadoutSender {
     }
 
     /// The record of `readout` for the snapshot of `tick`, within `budget`
-    /// bits, against the newest acknowledged readout if it is 1 to 31 whole
-    /// snapshots old, else against the empty one. Staged like the entities.
+    /// bits, against the newest acknowledged readout if it is 1 to
+    /// [`MAX_BASELINE_BACK`] (127) whole snapshots old, else against the
+    /// empty one. Staged like the entities.
     pub fn build(
         &mut self,
         tick: u32,
@@ -1971,7 +1973,7 @@ impl ReadoutSender {
             .and_then(|(base_tick, base)| {
                 let ticks = tick.checked_sub(*base_tick)?;
                 let back = ticks / self.ticks_per_snapshot;
-                (ticks > 0 && ticks % self.ticks_per_snapshot == 0 && back <= 31)
+                (ticks > 0 && ticks % self.ticks_per_snapshot == 0 && back <= MAX_BASELINE_BACK)
                     .then_some((back as u8, base, ticks))
             })
             .unwrap_or((0, &empty, 0));
@@ -1998,7 +2000,7 @@ impl ReadoutSender {
         {
             packet.0 = Some(sequence);
         }
-        while self.packets.len() > 64 {
+        while self.packets.len() > PENDING_PACKETS {
             self.packets.pop_front();
         }
     }
@@ -2082,7 +2084,7 @@ impl ReadoutReceiver {
         }
         if self.newest.is_none_or(|n| tick > n) {
             self.newest = Some(tick);
-            let keep = tick.saturating_sub(64 * self.ticks_per_snapshot);
+            let keep = tick.saturating_sub(HISTORY_SNAPSHOTS * self.ticks_per_snapshot);
             self.readouts.retain(|(t, _)| *t >= keep);
             self.note_arrived(&readout);
         }
@@ -2116,8 +2118,8 @@ impl ReadoutReceiver {
 
     /// The newest readout as the cockpit shows it: a scalar group that has
     /// not arrived since the host last coded against the empty readout (its
-    /// baseline was over 31 snapshots old, after a stall or on a round trip
-    /// over a second) shows what it last arrived with for the same plane,
+    /// baseline was over 127 snapshots old, after a stall of over two seconds
+    /// at 60 a second; 31 before protocol 16) shows what it last arrived with for the same plane,
     /// as a group waiting for room against a held baseline does. Without
     /// this the radar page read the empty sensor flags as NOT INSTALLED
     /// (bug B1). The baselines stay as the host holds them.

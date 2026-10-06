@@ -399,8 +399,9 @@ fn latest_tick(client: &ClientConnection) -> u32 {
     client.readout.latest().unwrap().0
 }
 
-/// Bug B1: when the client's newest acknowledgement is over 31 snapshots old
-/// (a stall of the game, or a round trip over a second), the host codes the
+/// Bug B1: when the client's newest acknowledgement is over 127 snapshots old
+/// (31 before slice B2: a stall of the game, or a round trip over a second at
+/// 30 a second; now a stall of over 2 seconds at 60 a second), the host codes the
 /// readout against the empty readout, and in a tight share the sensor flags
 /// wait behind the parts before them. The client then held a readout whose
 /// sensor group had not arrived, and the radar page read its empty flags as
@@ -431,25 +432,25 @@ fn a_group_waiting_after_a_restart_from_the_empty_readout_shows_what_last_arrive
     receive(&mut client, &bits, 400);
     host.delivered(0);
     assert!(shown(&client).sensors.available(Channel::Radar));
-    // The game stalls: 40 snapshots go unacknowledged, so the next record
+    // The game stalls: 140 snapshots go unacknowledged, so the next record
     // is against the empty readout, in a share too small for the sensors.
-    for k in 1..=40u32 {
+    for k in 1..=140u32 {
         let tick = 400 + 4 * k;
         let (bits, report) = host.build(tick, &QReadout::of(&readout, tick), 8 * 1_000);
         host.sent(k as u16);
-        if k == 40 {
+        if k == 140 {
             assert_eq!(report.waiting, 0, "a full share sends it all");
         }
         let _ = bits;
     }
-    let tick = 400 + 4 * 41;
+    let tick = 400 + 4 * 141;
     let (bits, report) = host.build(tick, &QReadout::of(&readout, tick), 120);
     assert!(report.waiting > 0, "the tight share leaves parts waiting");
-    host.sent(41);
+    host.sent(141);
     let held = receive(&mut client, &bits, tick);
     assert_eq!(
         &held,
-        host.staged_for_tests(41),
+        host.staged_for_tests(141),
         "the baseline is the host's"
     );
     let raw = held.readout(tick, None, None).unwrap();
@@ -476,13 +477,13 @@ fn a_group_waiting_after_a_restart_from_the_empty_readout_shows_what_last_arrive
     );
     // Acknowledged, the next record has room: the flags arrive and the
     // cockpit shows the held readout itself.
-    host.delivered(41);
-    let tick = 400 + 4 * 42;
+    host.delivered(141);
+    let tick = 400 + 4 * 142;
     let mut changed = readout.clone();
     changed.sensors.operating[0] = false;
     let (bits, report) = host.build(tick, &QReadout::of(&changed, tick), 8 * 1_000);
     assert_eq!(report.waiting, 0);
-    host.sent(42);
+    host.sent(142);
     let held = receive(&mut client, &bits, tick);
     let (_, presented) = client.presented().unwrap();
     assert!(matches!(presented, std::borrow::Cow::Borrowed(_)));
@@ -492,9 +493,56 @@ fn a_group_waiting_after_a_restart_from_the_empty_readout_shows_what_last_arrive
     // shown for it.
     let mut other = readout.clone();
     other.plane = 4;
-    let tick = 400 + 4 * 43;
+    let tick = 400 + 4 * 143;
     let (bits, _) = ReadoutSender::new(4).build(tick, &QReadout::of(&other, tick), 120);
     receive(&mut client, &bits, tick);
     assert_eq!(shown(&client).plane, 4);
     assert!(!shown(&client).sensors.available(Channel::Radar));
+}
+
+/// Slice B2: the readout codes against an acknowledged readout up to 127
+/// snapshots old (2.1 seconds at 60 a second), and the client still holds
+/// it; one older starts again from the empty readout. Every snapshot between
+/// is received and none acknowledged, as on a slow round trip or a stall.
+#[test]
+fn a_readout_codes_against_a_baseline_up_to_127_snapshots_back() {
+    const TICKS: u32 = 2;
+    let readout = |k: u32| {
+        let mut r = samples::readout();
+        r.sensors.contacts[0].position[0] += 150. * f64::from(k);
+        r.stores.ammo[0] -= (k % 7) as u16;
+        QReadout::of(&r, 400 + TICKS * k)
+    };
+    for (gap, back) in [
+        (1, 1),
+        (31, 31),
+        (32, 32),
+        (126, 126),
+        (127, 127),
+        (128, 0),
+        (200, 0),
+    ] {
+        let mut host = ReadoutSender::new(TICKS);
+        let mut client = ReadoutReceiver::new(TICKS);
+        let mut send = |host: &mut ReadoutSender, k: u32| {
+            let tick = 400 + TICKS * k;
+            let (bits, report) = host.build(tick, &readout(k), 8 * 2_000);
+            assert_eq!(report.waiting, 0, "gap {gap}, snapshot {k}");
+            host.sent(k as u16);
+            let section =
+                super::snapshot::write_section(&samples::header(tick), Some(&bits), &[]).unwrap();
+            let section = SnapshotSection::decode(&section).unwrap();
+            let raw = section.readout.unwrap();
+            let held = client.receive(&raw, tick).unwrap();
+            assert_eq!(&held, host.staged_for_tests(k as u16), "gap {gap}");
+            assert_eq!(held, readout(k), "gap {gap}, snapshot {k}");
+            raw.back
+        };
+        assert_eq!(send(&mut host, 0), 0);
+        host.delivered(0);
+        for k in 1..gap {
+            send(&mut host, k);
+        }
+        assert_eq!(send(&mut host, gap), back, "gap {gap}");
+    }
 }
