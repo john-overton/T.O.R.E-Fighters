@@ -187,7 +187,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
             "net-server-king", "net-server-pvp", "net-server-hunt", "net-server-delay", "net-server-revive",
-            "net-server-results", "net-server-away",
+            "net-server-results", "net-server-away", "net-server-rejoin",
         ),
     ),
     "net-convert": (
@@ -469,8 +469,9 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-session/src/host/standby.rs", NET_FAMILIES, "the host's standby stream (stage K)"),
     _r("crates/tore-session/src/host/resume.rs", NET_FAMILIES, "takeover and resume on the host (stage K)"),
     _r(
-        "crates/tore-session/src/host/rejoin.rs", NET_FAMILIES,
-        "rejoin tokens and reservations, and a slot's reservation in every lobby state (stage K)",
+        "crates/tore-session/src/host/rejoin*", NET_FAMILIES,
+        "rejoin tokens and reservations, the session part that carries them, a slot's reservation in every lobby state "
+        "(stage K), and their tests",
     ),
     _r("crates/tore-session/src/host/succession.rs", NET_FAMILIES, "candidates and host selection (stage K)"),
     _r(
@@ -478,7 +479,10 @@ RULES: tuple[Rule, ...] = (
         "the session's state parts and their coders beside the state they code (stage K)",
     ),
     _r("crates/tore-session/src/client/migrate.rs", NET_FAMILIES, "the client's side of host migration (stage K)"),
-    _r("crates/tore-session/src/client/rejoin.rs", NET_FAMILIES, "the client's side of rejoin (stage K)"),
+    _r(
+        "crates/tore-session/src/client/rejoin*", NET_FAMILIES,
+        "the client's side of rejoin: the token it keeps, its store and the Rejoin (stage K; tore-bot --token-file)",
+    ),
     _r("crates/tore-session/src/client/candidate.rs", NET_FAMILIES, "the client's side of host selection (stage K)"),
     _r(
         "crates/tore-session/src/client/migration_seams_tests.rs", NET_FAMILIES,

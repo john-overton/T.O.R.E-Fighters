@@ -66,7 +66,9 @@ mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
-mod rejoin;
+pub mod rejoin;
+#[cfg(test)]
+mod rejoin_tests;
 #[cfg(test)]
 mod relay_tests;
 pub mod results;
@@ -192,6 +194,11 @@ pub struct ClientConfig {
     /// with the source the pack's entry gives; the game passes the one it
     /// computed on a worker, with the source read from the import report too.
     pub content: Option<Arc<crate::host::content::GameContent>>,
+    /// The rejoin token this game holds for the session it joins (stage K,
+    /// slice K5), sent in the Challenge answer: the host admits it whatever
+    /// the room and makes the connection that player again. `None` joins as
+    /// a new player.
+    pub token: Option<tore_net::Token>,
 }
 
 /// The host's addresses from the master's introduction, for a join that
@@ -221,6 +228,7 @@ impl ClientConfig {
             platform: Platform::current(),
             race: None,
             content: None,
+            token: None,
         }
     }
 }
@@ -731,6 +739,9 @@ pub struct Client {
     /// Stage K's migration: the standby records passed on, and what slice
     /// K4 adds.
     migration: migrate::Migration,
+    /// The rejoin token the host granted, and where it is kept (stage K,
+    /// slice K5).
+    rejoin: rejoin::Kept,
     /// This game's content, and the host's newest Content gaps (stage L).
     content: Arc<crate::host::content::GameContent>,
     gaps: Option<crate::wire::messages::ContentGaps>,
@@ -778,6 +789,7 @@ impl Client {
             game_commit: config.build.commit.clone(),
             password: config.password.clone(),
             platform: config.platform,
+            token: config.token,
             entropy: Entropy::Seeded(seed),
             ..tore_net::ClientConfig::new(PROTOCOL_VERSION, &config.callsign)
         };
@@ -859,6 +871,7 @@ impl Client {
             away: away::Away::default(),
             observed: None,
             migration: migrate::Migration::default(),
+            rejoin: rejoin::Kept::default(),
             now,
         })
         .map(|mut client| {
@@ -1666,6 +1679,7 @@ impl Client {
                     self.wire = Some(ClientConnection::new(self.ticks_per_snapshot));
                     self.interp = Interpolator::new(self.ticks_per_snapshot);
                     self.phase = ClientPhase::Loading;
+                    self.rejoin_session(welcome.session_id);
                     self.log(
                         "joined",
                         &[
@@ -1685,6 +1699,7 @@ impl Client {
                 }
                 tore_net::ClientEvent::Closed(reason) => {
                     self.phase = ClientPhase::Closed;
+                    self.rejoin_closed();
                     let kind = match reason {
                         CloseReason::Refused { .. } => "refused",
                         _ => "closed",

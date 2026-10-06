@@ -11,6 +11,7 @@
 //! tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME [--path auto|direct|relay])
 //!          [--data-dir DIR] [--count N] [--callsign NAME]
 //!          [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE]
+//!          [--token-file FILE]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
 //!          [--revive SECONDS] [--away SECONDS,FOR]
@@ -37,6 +38,13 @@
 //! given, docs/formats/net-protocol.md, "Captures") to FILE, or FILE-1,
 //! FILE-2 and so on with `--count`; the game's `--convert-capture` turns it
 //! into a replay.
+//!
+//! `--token-file FILE` makes each bot keep its rejoin token in FILE (FILE-1,
+//! FILE-2 and so on with `--count`; stage K, slice K5) as a game keeps its
+//! tokens, and join with the one already in it, if it has not expired: a bot
+//! killed in flight and started again with the same file is the same player
+//! again and takes back the aircraft kept for it. It prints "rejoining with
+//! its token" when it sends one, and the host's welcome back (a Notice).
 //!
 //! `--say` makes every bot send the text to the receiver (`all`,
 //! `friendlies`, `enemies`, `wing` or `target`) that many seconds after it
@@ -107,6 +115,7 @@ use tore_net::{
 };
 use tore_session::bot::Bot;
 use tore_session::client::content::joined_line;
+use tore_session::client::rejoin::FileStore;
 use tore_session::client::{Race, ended_text};
 use tore_session::host::content::{GameContent, gaps_line, report_lines};
 use tore_session::settings::{self, Mode, Store};
@@ -117,7 +126,7 @@ use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
 [--path auto|direct|relay]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE] \
-[--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
+[--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] \
 [--drop-resource NAME]... [--expect-unable]\n       tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
@@ -160,6 +169,8 @@ struct Options {
     password: String,
     /// `--capture`: where the capture of each bot goes.
     capture: Option<PathBuf>,
+    /// `--token-file`: where each bot keeps its rejoin token.
+    token_file: Option<PathBuf>,
     /// `--say`: when, to whom, what.
     say: Vec<(Duration, Receiver, String)>,
     /// `--quick`: when, which line.
@@ -286,6 +297,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         seconds: 60,
         password: String::new(),
         capture: None,
+        token_file: None,
         say: Vec::new(),
         quick: Vec::new(),
         observe: None,
@@ -336,6 +348,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--password" => options.password = value()?,
             "--capture" => options.capture = Some(PathBuf::from(value()?)),
+            "--token-file" => options.token_file = Some(PathBuf::from(value()?)),
             "--say" => options.say.push(say(&value()?)?),
             "--quick" => options.quick.push(quick(&value()?)?),
             "--observe" => {
@@ -578,6 +591,8 @@ struct Running {
     config: ClientConfig,
     /// Where this bot's capture goes (`--capture`).
     capture: Option<PathBuf>,
+    /// Where this bot keeps its rejoin token (`--token-file`).
+    token_file: Option<PathBuf>,
     /// The bot, once its client has started.
     bot: Option<Bot>,
     /// Why a join through the master ended before the race.
@@ -630,6 +645,9 @@ impl Running {
             }
         };
         let mut client = client;
+        if let Some(path) = &self.token_file {
+            client.set_token_store(Box::new(FileStore::new(path)));
+        }
         if let Some(path) = &self.capture {
             match std::fs::File::create(path) {
                 Ok(file) => client.set_capture(Box::new(std::io::BufWriter::new(file))),
@@ -951,7 +969,26 @@ fn main() -> ExitCode {
             JoinBy::Connect(address) => *address,
             JoinBy::Master { .. } => SocketAddr::from(([0, 0, 0, 0], 0)),
         };
+        // A token kept from an earlier run that has not expired is sent in
+        // the Challenge answer (stage K, slice K5).
+        let token_path = options.token_file.as_ref().map(|base| {
+            if options.count == 1 {
+                base.clone()
+            } else {
+                let mut name = base.clone().into_os_string();
+                name.push(format!("-{}", i + 1));
+                PathBuf::from(name)
+            }
+        });
+        let kept = token_path.as_deref().and_then(FileStore::load);
+        if let Some(kept) = &kept {
+            println!(
+                "{name}: rejoining with its token (session {:016x})",
+                kept.session_id
+            );
+        }
         let config = ClientConfig {
+            token: kept.map(|kept| kept.token),
             password: options.password.clone(),
             plane: options.slot.map(|slot| slot + i as u32),
             entropy: Entropy::System,
@@ -965,6 +1002,15 @@ fn main() -> ExitCode {
             through: None,
             config,
             capture: options.capture.as_ref().map(|base| {
+                if options.count == 1 {
+                    base.clone()
+                } else {
+                    let mut name = base.clone().into_os_string();
+                    name.push(format!("-{}", i + 1));
+                    PathBuf::from(name)
+                }
+            }),
+            token_file: options.token_file.as_ref().map(|base| {
                 if options.count == 1 {
                     base.clone()
                 } else {

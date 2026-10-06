@@ -87,11 +87,11 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     let messages = samples::migration_messages();
     let asked: Vec<Message> = messages
         .into_iter()
-        .filter(|m| m.from_player() && m.kind() != kind::RELEASE)
+        .filter(|m| m.from_player() && !matches!(m.kind(), kind::RELEASE | kind::REJOIN))
         .collect();
     assert_eq!(
         asked.len(),
-        9,
+        8,
         "two Candidate and two Standby status samples"
     );
     for message in asked.iter().cloned() {
@@ -100,6 +100,12 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     // Release is the King's: refused to anyone else in the King's words.
     rig.players[cobra].client.request(now, Message::Release(1));
     rig.players[king].client.request(now, Message::Release(1));
+    // Release and Rejoin are slice K5's: a token this game does not know is
+    // refused in words.
+    rig.players[cobra].client.request(
+        now,
+        Message::Rejoin(tore_net::Token(0x1234_5678_9abc_def0_u128)),
+    );
     // The King's pin (setting 21) is K6's.
     let cobra_id = rig.players[cobra].client.lobby().unwrap().you;
     rig.players[king].client.change_settings(SettingsChange {
@@ -124,14 +130,26 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
         "{refused:?}"
     );
     let refused = refusals(&rig, king);
-    for request in [kind::RELEASE, kind::SETTINGS] {
-        assert!(
-            refused
-                .iter()
-                .any(|(k, r)| *k == request && r == NOT_AVAILABLE),
-            "{request}: {refused:?}"
-        );
-    }
+    assert!(
+        refused
+            .iter()
+            .any(|(k, r)| *k == kind::SETTINGS && r == NOT_AVAILABLE),
+        "{refused:?}"
+    );
+    // No aircraft is kept for anyone on plane 1.
+    assert!(
+        refused
+            .iter()
+            .any(|(k, r)| *k == kind::RELEASE && r == crate::host::rejoin::NOT_RESERVED),
+        "{refused:?}"
+    );
+    let cobra_refused = refusals(&rig, cobra);
+    assert!(
+        cobra_refused
+            .iter()
+            .any(|(k, r)| *k == kind::REJOIN && r == crate::host::rejoin::TOKEN_UNKNOWN),
+        "{cobra_refused:?}"
+    );
     // Nobody was disconnected, and the host stays calculated.
     assert!(!rig.closed(king) && !rig.closed(cobra));
     let lobby = rig.players[cobra].client.lobby().unwrap();

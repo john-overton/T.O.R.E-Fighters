@@ -101,6 +101,14 @@ pub enum LobbyEvent {
     /// The away player's plane is no longer kept for it: the AI lost it
     /// (`lost`), or the player left it to the AI.
     AwayEnded { plane: u32, lost: bool },
+    /// The player's connection ended while it flew: the AI flies `plane`,
+    /// kept for it (slice K5).
+    Dropped { plane: u32 },
+    /// The player came back with its token; `plane` is the aircraft kept for
+    /// it, if one is.
+    Rejoined { plane: Option<u32> },
+    /// The King released the aircraft kept for the player.
+    Released { plane: u32 },
 }
 
 impl fmt::Display for LobbyEvent {
@@ -160,6 +168,16 @@ impl fmt::Display for LobbyEvent {
             }
             Self::AwayEnded { plane, lost: false } => {
                 write!(f, "left plane {plane} to the AI")
+            }
+            Self::Dropped { plane } => {
+                write!(f, "dropped out: the AI flies plane {plane}, kept for it")
+            }
+            Self::Rejoined { plane: Some(plane) } => {
+                write!(f, "rejoined with its token: plane {plane} is waiting")
+            }
+            Self::Rejoined { plane: None } => f.write_str("rejoined with its token"),
+            Self::Released { plane } => {
+                write!(f, "had plane {plane} released to the AI by the King")
             }
         }
     }

@@ -20,6 +20,12 @@
 //!   with the revival loadout, and every connection is sent **Spawned**
 //!   before the player's Seated. Lives count revivals per player per mission;
 //!   the delay counts from the loss.
+//! - **A plane nobody held** (slice K5): the AI lost the aircraft it flew for
+//!   a player who was away or dropped. The loss is noted for the player
+//!   ([`Host::revival_note_lost`]), and when the player comes back (or is
+//!   still here) the same rules apply with no seat holding the wreck: a free
+//!   seat is taken for the revival, which makes its new plane in the lost
+//!   one's wing ([`MissionCommand::ReviveLost`]).
 
 use super::{ConnectionId, Host, Life, Stage, TICKS_PER_SECOND, aircraft_of};
 use crate::settings::Respawn;
@@ -100,7 +106,21 @@ fn clock(seconds: u64) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+impl Pending {
+    fn seat(self) -> SeatId {
+        match self {
+            Pending::Revive { seat } | Pending::AiSlot { seat, .. } => seat,
+        }
+    }
+}
+
 impl Revivals {
+    /// The seats revivals asked for will take at the next tick: a seat that
+    /// flew no plane is taken for the revival (slice K5).
+    pub(super) fn pending_seats(&self) -> impl Iterator<Item = SeatId> + '_ {
+        self.pending.values().map(|pending| pending.seat())
+    }
+
     /// The seats the host holds for players in the lobby.
     pub(super) fn held_seats(&self) -> impl Iterator<Item = SeatId> + '_ {
         self.held.values().copied()
@@ -190,11 +210,13 @@ impl Host {
                 }
                 peer.seat.ok_or("")?
             }
-            Stage::Lobby => *self
-                .revival
-                .held
-                .get(&connection)
-                .ok_or("You have lost no aircraft; press Join to fly.")?,
+            Stage::Lobby => match self.revival.held.get(&connection) {
+                Some(seat) => *seat,
+                None if self.seatless_lost(connection) => {
+                    self.free_seat().ok_or("No seat is free.")?
+                }
+                None => return Err("You have lost no aircraft; press Join to fly.".into()),
+            },
             Stage::Taking { .. } | Stage::Leaving | Stage::Closing { .. } => {
                 return Err("You are taking or leaving a plane.".into());
             }
@@ -205,8 +227,60 @@ impl Host {
     /// Join (Take plane) from the lobby by a player whose plane is lost
     /// counts as flying again: `Some` with the outcome when it is one.
     pub(super) fn revive_join(&mut self, connection: ConnectionId) -> Option<Result<(), String>> {
-        let seat = *self.revival.held.get(&connection)?;
-        Some(self.revive_now(connection, seat))
+        if let Some(seat) = self.revival.held.get(&connection).copied() {
+            return Some(self.revive_now(connection, seat));
+        }
+        if self.seatless_lost(connection) {
+            return Some(match self.free_seat() {
+                Some(seat) => self.revive_now(connection, seat),
+                None => Err("No seat is free.".into()),
+            });
+        }
+        None
+    }
+
+    /// Whether the player `order` has a lost plane noted and no seat holds
+    /// it (the AI lost it while the player was away, or the player left the
+    /// game with it lost): its revival takes a free seat.
+    pub(super) fn revival_lost(&self, order: u64) -> bool {
+        self.revival
+            .players
+            .get(&order)
+            .is_some_and(|player| player.lost.is_some())
+    }
+
+    /// Whether `connection`, in the lobby, has a lost plane no seat holds.
+    fn seatless_lost(&self, connection: ConnectionId) -> bool {
+        self.peers
+            .get(&connection)
+            .is_some_and(|peer| peer.stage == Stage::Lobby)
+            && !self.revival.held.contains_key(&connection)
+            && self
+                .order_of(connection)
+                .is_some_and(|order| self.revival_lost(order))
+    }
+
+    /// The AI lost `plane`, which it flew for the player `order` who was
+    /// away or gone: the revival rules count from this tick.
+    pub(super) fn revival_note_lost(&mut self, order: u64, plane: PlaneId, tick: u64) {
+        self.revival.players.entry(order).or_default().lost = Some((plane, tick));
+    }
+
+    /// The lost plane `connection` would revive from: the one its seat
+    /// holds, or the one noted for it when no seat holds any.
+    fn lost_plane(&self, connection: ConnectionId, seat: SeatId) -> Option<PlaneId> {
+        self.world
+            .roster
+            .seat(seat)
+            .and_then(|s| s.plane)
+            .or_else(|| {
+                let order = self.order_of(connection)?;
+                self.revival
+                    .players
+                    .get(&order)?
+                    .lost
+                    .map(|(plane, _)| plane)
+            })
     }
 
     /// Why the revival rules refuse `connection` taking `plane` now, if they
@@ -218,14 +292,12 @@ impl Host {
         connection: ConnectionId,
         _plane: PlaneId,
     ) -> Option<String> {
-        self.revival
-            .held
-            .contains_key(&connection)
+        (self.revival.held.contains_key(&connection) || self.seatless_lost(connection))
             .then(|| "Fly again by the game's revival rules.".to_owned())
     }
 
     /// The player's revival record.
-    fn order_of(&self, connection: ConnectionId) -> Option<u64> {
+    pub(super) fn order_of(&self, connection: ConnectionId) -> Option<u64> {
         self.peers.get(&connection).map(|peer| peer.lobby.order)
     }
 
@@ -282,10 +354,7 @@ impl Host {
                 // The new plane flies in the lost one's wing: lock sides
                 // allows it whenever it allowed the lost plane.
                 let lost = self
-                    .world
-                    .roster
-                    .seat(seat)
-                    .and_then(|s| s.plane)
+                    .lost_plane(connection, seat)
                     .ok_or("You have lost no aircraft; press Join to fly.")?;
                 if let Some(why) = self.sides_refusal(connection, lost) {
                     return Err(why);
@@ -308,7 +377,7 @@ impl Host {
     /// in progress is not asked, as a revival is no new pilot), and that
     /// nobody else holds or takes.
     fn free_ai_plane(&self, connection: ConnectionId, seat: SeatId) -> Option<PlaneId> {
-        let lost = self.world.roster.seat(seat)?.plane?;
+        let lost = self.lost_plane(connection, seat)?;
         let wing = self.world.roster.plane(lost)?.slot.wing;
         let free = |plane: &&tore_world::seats::Plane| {
             plane.pilot == Pilot::Ai
@@ -366,7 +435,10 @@ impl Host {
                 continue;
             };
             let flying_lost = peer.stage == Stage::Seated;
-            if !(flying_lost || self.revival.held.contains_key(&connection)) {
+            if !(flying_lost
+                || self.revival.held.contains_key(&connection)
+                || self.seatless_lost(connection))
+            {
                 continue;
             }
             match wanted {
@@ -428,11 +500,35 @@ impl Host {
             }
             return;
         }
-        match self.world.revival_plane(seat, &spawn) {
-            Ok(new) => {
-                commands.push(MissionCommand::Revive {
-                    seat,
-                    spawn: Box::new(spawn),
+        // The seat holds its lost plane, or none does (slice K5).
+        let holds = self
+            .world
+            .roster
+            .seat(seat)
+            .is_some_and(|s| s.plane.is_some());
+        let lost = self.lost_plane(connection, seat);
+        let made = match (holds, lost) {
+            (false, Some(lost)) => self
+                .world
+                .revival_plane_from(lost, &spawn)
+                .map(|new| (new, Some(lost))),
+            _ => self
+                .world
+                .revival_plane(seat, &spawn)
+                .map(|new| (new, None)),
+        };
+        match made {
+            Ok((new, from)) => {
+                commands.push(match from {
+                    Some(plane) => MissionCommand::ReviveLost {
+                        seat,
+                        plane,
+                        spawn: Box::new(spawn),
+                    },
+                    None => MissionCommand::Revive {
+                        seat,
+                        spawn: Box::new(spawn),
+                    },
                 });
                 self.start_making(connection, seat);
                 self.revival.making.push(Made {
@@ -450,7 +546,7 @@ impl Host {
     /// the revival point from its side's start at the King's distance, with
     /// the loadout it chose in the lobby when that was for this aircraft.
     fn revival_spawn(&mut self, connection: ConnectionId, seat: SeatId) -> Option<Spawn> {
-        let lost = self.world.roster.seat(seat)?.plane?;
+        let lost = self.lost_plane(connection, seat)?;
         let side = self.world.roster.plane(lost)?.slot.wing.side;
         let aircraft = aircraft_of(&self.world, lost)?;
         let chosen = self.peers.get(&connection).and_then(|peer| {
@@ -472,12 +568,12 @@ impl Host {
         let weapons = self.settings.revive_weapons();
         let spawn = self
             .world
-            .revival_spawn(seat, start, distance, chosen.as_ref(), weapons)
+            .revival_spawn_from(lost, start, distance, chosen.as_ref(), weapons)
             // A lobby loadout that no longer fits gives way to the standard
             // load.
             .or_else(|_| {
                 self.world
-                    .revival_spawn(seat, start, distance, None, weapons)
+                    .revival_spawn_from(lost, start, distance, None, weapons)
             });
         match spawn {
             Ok(spawn) => Some(spawn),
@@ -505,16 +601,12 @@ impl Host {
     }
 
     /// The seats that need neutral input this tick from the host: held
-    /// seats, and the seats an `ai-slot` revival takes a plane for.
+    /// seats, and the seats a revival makes a plane for.
     pub(super) fn revive_inputs(&self) -> Vec<SeatId> {
         let mut seats: Vec<SeatId> = self.revival.held_seats().collect();
-        seats.extend(
-            self.revival
-                .making
-                .iter()
-                .filter(|made| made.taken.is_some())
-                .map(|made| made.seat),
-        );
+        // A revival from a plane nobody held seats a seat that flew none
+        // (slice K5): the others' inputs come from their players.
+        seats.extend(self.revival.making.iter().map(|made| made.seat));
         seats
     }
 
@@ -587,7 +679,7 @@ impl Host {
     }
 
     /// The Revival message for player `order` now.
-    fn revival_message(&self, order: u64) -> Revival {
+    pub(super) fn revival_message(&self, order: u64) -> Revival {
         let lives = self
             .lives_left(order)
             // The registry's lives go to 10, all the wire carries.

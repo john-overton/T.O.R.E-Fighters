@@ -18,12 +18,16 @@
 //!   plane (join in progress, slot locks, lock sides) do not apply: it is
 //!   the player's own plane.
 //! - **The reservation ends** when the player takes the plane back, stops
-//!   watching (it leaves the plane to the AI), leaves the game, or the
-//!   mission ends; and when the AI loses the plane (the player is told, and
-//!   under `respawn none` flies no other plane this mission).
+//!   watching (it leaves the plane to the AI), leaves the game on purpose, or
+//!   the mission ends; and when the AI loses the plane (the player is told,
+//!   and the revival rules have it from then on: its lives and the delay
+//!   count, and under `respawn none` it flies no other plane this mission).
+//!   A player whose connection drops while away keeps the reservation
+//!   (slice K5): the table is `host::rejoin`'s, one for away and dropped
+//!   players alike.
 
+use super::rejoin::Reserved;
 use super::{ConnectionId, Host, Life, LobbyEvent, Stage, TICKS_PER_SECOND};
-use crate::settings::Respawn;
 use crate::wire::messages::{Message, Subject};
 use std::collections::{BTreeMap, BTreeSet};
 use tore_world::seats::{Pilot, PlaneId};
@@ -48,46 +52,32 @@ pub(super) enum Cause {
     Stalled,
 }
 
-/// A plane the AI flies for an away player, kept for it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Reserved {
-    pub(super) plane: PlaneId,
-    /// The player's lobby id and callsign, for the lobby state and the
-    /// words of a refusal.
-    pub(super) lobby_id: u8,
-    pub(super) callsign: String,
-    /// Back was accepted: the take is on its way.
-    pub(super) returning: bool,
-}
-
 /// The host's idle aircraft for the flying mission: the session's, which
-/// stage K moves with the host. It starts afresh with each mission.
+/// stage K moves with the host. It starts afresh with each mission. The
+/// planes the AI flies for players are in `host::rejoin`'s table.
 #[derive(Debug, Default)]
 pub(super) struct Idle {
     /// Away asked for, handed to the AI at the next tick.
     asked: BTreeSet<ConnectionId>,
-    /// The planes the AI flies for away players, by connection.
-    pub(super) reserved: BTreeMap<ConnectionId, Reserved>,
     /// Each seated connection's flight and the tick the host first saw it
     /// flying: the stall's count starts there, not at an input never sent.
     flights: BTreeMap<ConnectionId, (u8, u64)>,
-    /// Players whose plane the AI lost while they were away.
-    lost: BTreeSet<ConnectionId>,
-}
-
-impl Idle {
-    /// Whether the AI flies `plane` for an away player.
-    pub(super) fn holds(&self, plane: PlaneId) -> bool {
-        self.reserved.values().any(|r| r.plane == plane)
-    }
-
-    /// Whether the player with lobby id `id` is away.
-    pub(super) fn marks(&self, id: u8) -> bool {
-        self.reserved.values().any(|r| r.lobby_id == id)
-    }
 }
 
 impl Host {
+    /// The reservation of `connection`'s player, if the AI flies a plane for
+    /// it.
+    fn reservation_of(&self, connection: ConnectionId) -> Option<&Reserved> {
+        let order = self.peers.get(&connection)?.lobby.order;
+        self.rejoin.reserved.get(&order)
+    }
+
+    /// The player is away: its game is connected and the AI flies its plane
+    /// (slice F2-A).
+    fn is_away(&self, connection: ConnectionId) -> bool {
+        self.reservation_of(connection).is_some_and(|r| r.away)
+    }
+
     /// The player's game has been away for the `idle-ai` setting's seconds
     /// (message 35): its plane goes to the AI at the next tick.
     pub(super) fn away_request(&mut self, connection: ConnectionId) -> Result<(), String> {
@@ -97,7 +87,7 @@ impl Host {
         if self.settings.idle_ai_seconds().is_none() {
             return Err(NO_IDLE_AI.into());
         }
-        if self.idle.reserved.contains_key(&connection) {
+        if self.is_away(connection) {
             return Ok(());
         }
         let peer = self.peers.get(&connection).ok_or("")?;
@@ -119,7 +109,18 @@ impl Host {
         if self.idle.asked.remove(&connection) {
             return Ok(());
         }
-        let Some(reserved) = self.idle.reserved.get(&connection).cloned() else {
+        self.take_reserved(connection)
+    }
+
+    /// The player takes the plane the AI flies for it: an away player's by
+    /// Back, a returned player's by Join (slice K5). Its stores and damage
+    /// are as the AI left them, and the King's rules on taking a plane (join
+    /// in progress, slot locks, lock sides) do not apply: it is the player's
+    /// own plane. A plane the AI lost meanwhile ends the reservation, with
+    /// the revival rules from then on.
+    pub(super) fn take_reserved(&mut self, connection: ConnectionId) -> Result<(), String> {
+        let order = self.order_of(connection).ok_or("")?;
+        let Some(reserved) = self.rejoin.reserved.get(&order).cloned() else {
             return Err(NOT_AWAY.into());
         };
         let peer = self.peers.get(&connection).ok_or("")?;
@@ -132,7 +133,7 @@ impl Host {
             return Err("No seat is free.".into());
         };
         if self.world.can_take(seat, reserved.plane).is_err() {
-            self.away_lost(connection);
+            self.away_lost(order);
             return Err(LOST_WHILE_AWAY.into());
         }
         if let Some(peer) = self.peers.get_mut(&connection) {
@@ -141,7 +142,7 @@ impl Host {
                 plane: reserved.plane,
             };
         }
-        if let Some(reserved) = self.idle.reserved.get_mut(&connection) {
+        if let Some(reserved) = self.rejoin.reserved.get_mut(&order) {
             reserved.returning = true;
         }
         self.lobby_dirty = true;
@@ -154,57 +155,77 @@ impl Host {
         Ok(())
     }
 
+    /// A returned player's Join (slice K5): it takes the plane kept for it
+    /// when it has one, whatever plane it asked for. `None` when nothing is
+    /// kept for it (or it is an away player, who uses Back).
+    pub(super) fn rejoin_take(&mut self, connection: ConnectionId) -> Option<Result<(), String>> {
+        let reserved = self.reservation_of(connection)?;
+        if reserved.away {
+            return None;
+        }
+        Some(self.take_reserved(connection))
+    }
+
     /// Why the idle rules refuse `connection` taking `plane`, if they do:
     /// an away player takes only its own plane back, by Back; another
-    /// player's away plane is kept for it; and a player whose plane the AI
-    /// lost flies no other under `respawn none`.
+    /// player's plane the AI flies for it is kept for it. (A player whose
+    /// plane the AI lost flies by the revival rules: `host::revive`.)
     pub(super) fn away_take_refusal(
         &self,
         connection: ConnectionId,
         plane: PlaneId,
     ) -> Option<String> {
-        if self.idle.reserved.contains_key(&connection) {
+        if self.is_away(connection) {
             return Some(WAITS.into());
         }
-        if self.idle.lost.contains(&connection) && self.settings.respawn() == Respawn::None {
-            return Some(super::revive::NO_REVIVAL.into());
-        }
-        self.idle
-            .reserved
-            .values()
-            .find(|r| r.plane == plane)
-            .map(|r| format!("Plane {} is kept for {}, who is away.", plane.0, r.callsign))
+        let own = self.order_of(connection);
+        self.rejoin
+            .reserved_plane(plane)
+            .filter(|(order, _)| Some(*order) != own)
+            .map(|(_, r)| format!("Plane {} is kept for {}, who is away.", plane.0, r.callsign))
     }
 
-    /// Whether the AI flies `plane` for an away player (another take of it
-    /// is refused, an `ai-slot` revival skips it).
+    /// Whether the AI flies `plane` for a player who is away (another take of
+    /// it is refused, an `ai-slot` revival skips it).
     pub(super) fn away_reserved(&self, plane: PlaneId) -> bool {
-        self.idle.holds(plane)
+        self.rejoin.reserved_plane(plane).is_some()
     }
 
-    /// Whether any player is away: the mission is not empty while one is.
+    /// Whether any player is away: the mission is not empty while one is. A
+    /// dropped player is not (its game is gone).
     pub(super) fn anyone_away(&self) -> bool {
-        !self.idle.reserved.is_empty()
+        self.rejoin.reserved.values().any(|r| r.away)
     }
 
     /// The lobby state's away mark for the player with lobby id `id`.
     pub(super) fn away_mark(&self, id: u8) -> bool {
-        self.idle.marks(id)
+        self.rejoin
+            .reserved
+            .values()
+            .any(|r| r.away && r.lobby_id == id)
     }
 
     /// The mission ended: every reservation and count ends with it.
     pub(super) fn away_end(&mut self) {
         self.idle = Idle::default();
+        self.rejoin.reserved.clear();
     }
 
-    /// The AI lost the plane it flew for `connection`: the reservation ends,
-    /// the player is told, and it watches on as any player without a plane.
-    fn away_lost(&mut self, connection: ConnectionId) {
-        let Some(reserved) = self.idle.reserved.remove(&connection) else {
+    /// The AI lost the plane it flew for the player `order`: the reservation
+    /// ends, and the player's plane counts as lost from now on, so the
+    /// revival rules (lives, the delay, `respawn`) have it when it comes
+    /// back or if it is here: it is told now.
+    pub(super) fn away_lost(&mut self, order: u64) {
+        let Some(reserved) = self.rejoin.reserved.remove(&order) else {
             return;
         };
-        self.idle.lost.insert(connection);
-        self.send(connection, &Message::Notice(LOST_WHILE_AWAY.into()));
+        let tick = self.world.tick();
+        self.revival_note_lost(order, reserved.plane, tick);
+        if let Some(connection) = self.connection_of(order) {
+            self.send(connection, &Message::Notice(LOST_WHILE_AWAY.into()));
+            let revival = self.revival_message(order);
+            self.send(connection, &Message::Revival(Box::new(revival)));
+        }
         self.lobby_log(
             reserved.callsign,
             LobbyEvent::AwayEnded {
@@ -226,8 +247,9 @@ impl Host {
         self.idle_handoffs(tick, commands);
     }
 
-    /// Players who left the game take their asks and reservations with
-    /// them; the plane stays the AI's.
+    /// Players who left the game take their asks with them; the plane stays
+    /// the AI's, and an away player whose connection has gone keeps the
+    /// plane as a dropped player's (`host::rejoin`).
     fn idle_departures(&mut self) {
         let peers = &self.peers;
         let here = |connection: &ConnectionId| {
@@ -235,13 +257,19 @@ impl Host {
                 .get(connection)
                 .is_some_and(|peer| !matches!(peer.stage, Stage::Closing { .. }))
         };
-        let before = self.idle.reserved.len();
         self.idle.asked.retain(here);
-        self.idle.reserved.retain(|connection, _| here(connection));
         self.idle.flights.retain(|connection, _| here(connection));
-        self.idle.lost.retain(here);
-        if self.idle.reserved.len() != before {
-            self.lobby_dirty = true;
+        let present: BTreeSet<u64> = self
+            .peers
+            .values()
+            .filter(|peer| !matches!(peer.stage, Stage::Closing { .. }))
+            .map(|peer| peer.lobby.order)
+            .collect();
+        for (order, reserved) in &mut self.rejoin.reserved {
+            if reserved.away && !present.contains(order) {
+                reserved.away = false;
+                self.lobby_dirty = true;
+            }
         }
     }
 
@@ -265,30 +293,37 @@ impl Host {
     }
 
     /// Reservations that ended: the player took the plane back, stopped
-    /// watching it (it leaves the plane to the AI), or the AI lost it.
+    /// watching it (it leaves the plane to the AI), or the AI lost it, even
+    /// while the player's game was gone.
     fn idle_reservations(&mut self) {
-        let ended: Vec<(ConnectionId, bool)> = self
-            .idle
+        let ended: Vec<(u64, bool)> = self
+            .rejoin
             .reserved
             .iter()
-            .filter_map(|(connection, reserved)| {
-                let peer = self.peers.get(connection)?;
-                match peer.stage {
+            .filter_map(|(order, reserved)| {
+                let peer = self.peers.values().find(|peer| peer.lobby.order == *order);
+                match peer.map(|peer| peer.stage) {
                     // Back in its plane (or in another: it flies).
-                    Stage::Seated => Some((*connection, false)),
-                    Stage::Taking { .. } => None,
-                    _ if !self.ai_can_fly(reserved.plane) => Some((*connection, true)),
-                    Stage::Lobby if peer.watch.is_none() => Some((*connection, false)),
+                    Some(Stage::Seated) => Some((*order, false)),
+                    Some(Stage::Taking { .. }) => None,
+                    _ if !self.plane_kept(reserved.plane) => Some((*order, true)),
+                    // An away player stopped watching: it leaves the plane to
+                    // the AI. A returned player in the lobby just waits.
+                    Some(Stage::Lobby)
+                        if reserved.away && peer.is_some_and(|p| p.watch.is_none()) =>
+                    {
+                        Some((*order, false))
+                    }
                     _ => None,
                 }
             })
             .collect();
-        for (connection, lost) in ended {
+        for (order, lost) in ended {
             if lost {
-                self.away_lost(connection);
+                self.away_lost(order);
                 continue;
             }
-            let Some(reserved) = self.idle.reserved.remove(&connection) else {
+            let Some(reserved) = self.rejoin.reserved.remove(&order) else {
                 continue;
             };
             self.lobby_dirty = true;
@@ -304,14 +339,14 @@ impl Host {
         }
     }
 
-    /// Whether the AI flies `plane` with its pilot aboard: a plane it could
-    /// hand over.
-    fn ai_can_fly(&self, plane: PlaneId) -> bool {
-        self.world
-            .roster
-            .plane(plane)
-            .is_some_and(|entry| entry.pilot == Pilot::Ai)
-            && self.world.can_take(NOBODY, plane).is_ok()
+    /// Whether the AI keeps `plane` for a player: it flies it with its pilot
+    /// aboard, or the hand-over to it is still on its way.
+    fn plane_kept(&self, plane: PlaneId) -> bool {
+        match self.world.roster.plane(plane).map(|entry| entry.pilot) {
+            Some(Pilot::Ai) => self.world.can_take(NOBODY, plane).is_ok(),
+            Some(Pilot::Human(_)) => true,
+            Some(Pilot::Lost) | None => false,
+        }
     }
 
     /// The players away now: those whose game asked, and, with the setting
@@ -361,19 +396,21 @@ impl Host {
         commands.push(MissionCommand::GiveBack { seat });
         let callsign = peer.callsign.clone();
         let lobby_id = peer.lobby.id;
+        let order = peer.lobby.order;
         if let Some(peer) = self.peers.get_mut(&connection) {
             peer.stage = Stage::Lobby;
             peer.seat = None;
             peer.plane = None;
         }
         self.idle.flights.remove(&connection);
-        self.idle.reserved.insert(
-            connection,
+        self.rejoin.reserved.insert(
+            order,
             Reserved {
                 plane,
                 lobby_id,
                 callsign: callsign.clone(),
                 returning: false,
+                away: true,
             },
         );
         // Its messages may fill its packets again, as back in the lobby.

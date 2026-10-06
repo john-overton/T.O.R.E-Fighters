@@ -132,6 +132,8 @@ struct TestClient {
     /// Every Observing message and Notice (phase 2, slice F2-A).
     observing: Vec<crate::wire::messages::Observing>,
     notices: Vec<String>,
+    /// Every Token message (stage K, slice K5).
+    tokens: Vec<crate::wire::migration::TokenGrant>,
 }
 
 impl TestClient {
@@ -180,6 +182,7 @@ impl TestClient {
             spawned: Vec::new(),
             observing: Vec::new(),
             notices: Vec::new(),
+            tokens: Vec::new(),
         }
     }
 
@@ -341,6 +344,7 @@ impl TestClient {
             }
             Message::MissionEnded(ended) => self.ended = Some(ended),
             Message::Notice(text) => self.notices.push(text),
+            Message::Token(grant) => self.tokens.push(grant),
             Message::Scores(scores) => self.scores.push(*scores),
             Message::Results(results) => self.results.push(*results),
             Message::Revival(revival) => self.revivals.push(*revival),
@@ -1493,3 +1497,6 @@ mod away_tests;
 
 #[path = "path_tests.rs"]
 mod path_tests;
+
+#[path = "rejoin_tests.rs"]
+mod rejoin_tests;

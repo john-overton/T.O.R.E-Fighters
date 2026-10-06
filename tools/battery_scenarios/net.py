@@ -706,6 +706,84 @@ def drive_away(d: Drive) -> None:
     )
 
 
+def rejoin_problems(text: str, name: str, plane: int) -> list[str]:
+    """What a `tore-bot --token-file` printed when it was started again after it was killed in flight (slice K5): it
+    sent its token, the host welcomed it back with its aircraft waiting, and it was seated in `plane` again, in
+    that order."""
+    problems = []
+    lines = text.splitlines()
+
+    def first(pattern: str, after: int = -1) -> int | None:
+        return next((i for i, line in enumerate(lines) if i > after and re.search(pattern, line)), None)
+
+    sent = first(rf"^{name}: rejoining with its token \(session [0-9a-f]{{16}}\)$")
+    welcome = first(rf"^{name}: Welcome back, {name}: your aircraft is waiting\.$")
+    seated = first(rf"^{name}: seat \d+, plane {plane}, at tick \d+$")
+    if sent is None:
+        problems.append(f"{name} never sent its token")
+    if welcome is None:
+        problems.append(f"{name} was not welcomed back with its aircraft waiting")
+    if seated is None:
+        problems.append(f"{name} was not seated in plane {plane} again")
+    order = [sent, welcome, seated]
+    if None not in order and order != sorted(order):
+        problems.append(f"{name}'s token, welcome and seating came out of order")
+    return problems
+
+
+def drive_rejoin(d: Drive) -> None:
+    """Rejoin (slice K5): a bot flies plane 0 and keeps its token in a file; it is killed in flight (SIGKILL); the
+    server drops it after 5 seconds and keeps plane 0 for it (the AI flies it, nobody else may take it); the bot
+    started again with the same file sends its token and is back in plane 0, welcomed back, and leaves cleanly. A
+    second bot keeps the mission going meanwhile."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(), empty_timeout=90)
+    token_file = d.work / "viper.token"
+    stay = start_bots(d, port, "stay", 75, "--callsign", "Stay", "--slot", "1")
+    first = start_bots(
+        d, port, "viper", 60, "--callsign", "Viper", "--slot", "0", "--token-file", str(token_file)
+    )
+    if not server.wait_for(r"seat \d+ Viper took plane 0", 90):
+        raise DriveError("Viper never took plane 0")
+    if not server.wait_for(r"seat \d+ Stay took plane 1", 30):
+        raise DriveError("Stay never took plane 1")
+    d.sleep(4)
+    if not token_file.exists():
+        raise DriveError("the bot kept no token file")
+    # Killed in flight: no Leave, no goodbye.
+    d.log("killing Viper (SIGKILL)")
+    first.stopped = True
+    first.popen.kill()
+    first.wait(10)
+    if not server.wait_for(r"Viper dropped out: the AI flies plane 0, kept for it$", 40):
+        d.problem("the server did not keep plane 0 for the dropped Viper")
+    d.sleep(1)
+    second = d.start(
+        "viper2",
+        [d.bot, "--connect", f"{LOCALHOST}:{port}", "--seconds", "20", "--callsign", "Viper", "--slot", "0",
+         "--token-file", str(token_file)],
+    )
+    second.finish(90, 0)
+    for problem in rejoin_problems(second.text(), "Viper", 0):
+        d.problem(problem)
+    second.expect(r"^Viper: debrief: ", "a debrief")
+    second.expect(r"^Viper: The connection ended: the player left\.$", "a clean leave")
+    second.forbid(r"a protocol error|too many bad packets|the game data differs|No answer from the server", "a network problem")
+    stay.finish(120, 0)
+    server.send("end")
+    server.finish(40, 0)
+    log_must(
+        d,
+        server_log(d),
+        r"Viper dropped out: the AI flies plane 0, kept for it$",
+        r"Viper rejoined with its token: plane 0 is waiting$",
+        r"Viper took plane 0\b.*(?:\n.*)*Viper took plane 0\b",
+        forbid=r"protocol error|bad packets|\bfault\b",
+    )
+    if re.search(r"Stay took plane 0\b", server_log(d)):
+        d.problem("another player took the plane kept for Viper")
+
+
 def drive_discovery(d: Drive) -> None:
     """`tore-app --find-games` lists a server on this machine, and says so when there is none."""
     port = d.port()
@@ -1458,6 +1536,11 @@ def scenarios() -> list[Scenario]:
             name="net-server-away", lane="net", args=[], driver=drive_away, uses=("server", "bot"), timeout=200,
             notes="a bot's game is away: the AI flies its plane, kept for it, until it is back and flies on in it "
             "(slice F2-A)",
+        ),
+        Scenario(
+            name="net-server-rejoin", lane="net", args=[], driver=drive_rejoin, uses=("server", "bot"), timeout=300,
+            notes="a bot killed in flight is dropped, its plane kept for it; started again with its token file it is "
+            "back in that plane (slice K5)",
         ),
         Scenario(
             name="net-convert-capture", lane="net", args=[], driver=drive_convert, uses=("server", "bot"), timeout=360,

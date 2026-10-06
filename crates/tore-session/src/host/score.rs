@@ -183,10 +183,14 @@ impl Host {
         for fact in facts.facts {
             self.tally(fact, &seats);
         }
+        // A player whose token still works (slice K5) keeps its tally: it
+        // may come back.
         let connected: Vec<u64> = self.peers.values().map(|p| p.lobby.order).collect();
+        let now = self.token_clock();
+        let rejoin = &self.rejoin;
         self.score
             .players
-            .retain(|order, _| connected.contains(order));
+            .retain(|order, _| connected.contains(order) || rejoin.keeps(*order, now));
         if self.kill_limit_reached() {
             let next = self.after_end();
             self.end_mission(EndReason::KillLimit, next);

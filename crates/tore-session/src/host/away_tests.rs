@@ -286,7 +286,7 @@ fn a_player_who_stops_watching_or_leaves_frees_its_plane() {
             lost: false
         }
     ));
-    assert!(rig.host.idle.reserved.is_empty());
+    assert!(rig.host.rejoin.reserved.is_empty());
     assert_eq!(pilot(&rig, 0), Pilot::Ai);
     let flight = rig.clients[viper].seated.as_ref().unwrap().flight;
     rig.clients[viper].take(Some(0));
@@ -301,7 +301,7 @@ fn a_player_who_stops_watching_or_leaves_frees_its_plane() {
     go_away(&mut rig, viper);
     rig.clients[viper].client.disconnect(DisconnectReason::Left);
     rig.run(Duration::from_millis(300));
-    assert!(rig.host.idle.reserved.is_empty());
+    assert!(rig.host.rejoin.reserved.is_empty());
     rig.clients[cobra].take(Some(0));
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(cobra)));
     assert_eq!(rig.clients[cobra].seated.as_ref().unwrap().plane, 0);

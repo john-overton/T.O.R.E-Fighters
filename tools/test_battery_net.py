@@ -285,6 +285,40 @@ class ParsingTests(unittest.TestCase):
             ],
         )
 
+    def test_a_rejoin_is_read_from_the_bots_lines(self):
+        good = (
+            "Viper: rejoining with its token (session 00000000deadbeef)\n"
+            "Viper: joined\n"
+            "Viper: Welcome back, Viper: your aircraft is waiting.\n"
+            "Viper: seat 0, plane 0, at tick 812\n"
+        )
+        self.assertEqual(net.rejoin_problems(good, "Viper", 0), [])
+        self.assertEqual(
+            net.rejoin_problems(good.replace("plane 0, at", "plane 2, at"), "Viper", 0),
+            ["Viper was not seated in plane 0 again"],
+        )
+        self.assertEqual(
+            net.rejoin_problems(good.replace("Viper: Welcome back, Viper: your aircraft is waiting.\n", ""), "Viper", 0),
+            ["Viper was not welcomed back with its aircraft waiting"],
+        )
+        swapped = (
+            "Viper: seat 0, plane 0, at tick 812\n"
+            "Viper: rejoining with its token (session 00000000deadbeef)\n"
+            "Viper: Welcome back, Viper: your aircraft is waiting.\n"
+        )
+        self.assertEqual(
+            net.rejoin_problems(swapped, "Viper", 0),
+            ["Viper's token, welcome and seating came out of order"],
+        )
+        self.assertEqual(
+            net.rejoin_problems("", "Viper", 0),
+            [
+                "Viper never sent its token",
+                "Viper was not welcomed back with its aircraft waiting",
+                "Viper was not seated in plane 0 again",
+            ],
+        )
+
     def test_bad_network_words_are_recognised(self):
         import re
 

@@ -66,7 +66,7 @@ mod tests;
 // Stage K's parts (slice K0 adds them as hooks; each slice in
 // docs/ARCHITECTURE.md, "How stage K lands", fills its own).
 mod journal;
-mod rejoin;
+pub(crate) mod rejoin;
 mod resume;
 mod standby;
 mod state;
@@ -102,7 +102,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tore_net::{
     AcceptInfo, CloseReason, ConnectDetails, ConnectionId, Datagrams, Decision, DisconnectReason,
-    Event, Gate, RefuseReason, Server, ServerConfig, ServerEvent, Transmit,
+    Event, Gate, RefuseReason, Server, ServerConfig, ServerEvent, Token, Transmit,
 };
 use tore_sim::ai::launch::Side;
 use tore_sim::combat::live;
@@ -737,6 +737,9 @@ struct HostGate {
     accept: AcceptInfo,
     tick: u64,
     logs: Vec<HostLog>,
+    /// The rejoin tokens that work now (stage K, slice K5): their holders
+    /// are admitted whatever the room.
+    tokens: Vec<Token>,
 }
 
 impl Gate for HostGate {
@@ -763,7 +766,11 @@ impl Gate for HostGate {
             .is_some_and(|password| *password != details.password)
         {
             Some((RefuseReason::WrongPassword, "Wrong password.".into()))
-        } else if self.players >= self.capacity {
+        } else if self.players >= self.capacity
+            && !details
+                .token
+                .is_some_and(|token| self.tokens.contains(&token))
+        {
             Some((
                 RefuseReason::ServerFull,
                 format!("The server is full ({} players).", self.capacity),
@@ -868,7 +875,7 @@ impl Host {
             journal: journal::Journal::default(),
             standbys: standby::Standbys::default(),
             resuming: resume::Resuming::default(),
-            rejoin: rejoin::Rejoin::default(),
+            rejoin: rejoin::Rejoin::new(config.entropy),
             succession: succession::Succession::default(),
             compat,
             court,
@@ -1280,6 +1287,7 @@ impl Host {
             },
             tick: self.world.tick(),
             logs: Vec::new(),
+            tokens: self.rejoin.valid_tokens(self.token_clock()),
         }
     }
 
@@ -1492,6 +1500,9 @@ impl Host {
                 }
             }
         };
+        // Stage K: its token's 24 hours start (a kick voids it) and a plane
+        // it flew is kept for it.
+        self.rejoin_left(&peer, reason);
         // A seated player's plane goes back to the AI at the next tick, with
         // no debrief; a leaving one's is on its way already.
         if peer.stage == Stage::Seated
@@ -1889,6 +1900,7 @@ impl Host {
                 _ => peer.seat,
             })
             .chain(self.revival.held_seats())
+            .chain(self.revival.pending_seats())
             .chain(self.gives.iter().map(|(seat, _)| *seat))
             .collect();
         SEAT_IDS.map(SeatId).find(|seat| !used.contains(seat))
@@ -2171,6 +2183,13 @@ impl Host {
             return;
         };
         if peer.stage != Stage::Lobby {
+            return;
+        }
+        // Stage K: a returned player's Join takes the plane kept for it.
+        if let Some(result) = self.rejoin_take(connection) {
+            if let Err(reason) = result {
+                self.refuse_seat(connection, reason);
+            }
             return;
         }
         // Stage F phase 2: Join after a loss flies again by the revival rules.

@@ -230,6 +230,9 @@ fn snapshot_workers_preserve_failed_send_discard_and_recovery() {
             compare_step(&mut actual, &mut expected);
         }
         for rig in [&mut actual, &mut expected] {
+            // The dropped player's plane is kept for it (stage K): the King
+            // frees it so the newcomer can fly it.
+            rig.host.rejoin.reserved.clear();
             rig.join(|client| client.callsign = "AfterFailure".into());
         }
         for _ in 0..700 {
