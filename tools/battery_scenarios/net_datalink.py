@@ -19,6 +19,12 @@ from battery import Drive, DriveError, Scenario
 
 from battery_scenarios.net import GAME_FLAGS, LOCALHOST, NET_BAD, guide_mission, log_must, server_log, start_server
 
+# The scope's range is saved in the player's preferences, so it starts wherever the profile left it. The battery's
+# default profile (`.local/bugbash-data`) was saved at 50 nm, where one `comma` gives 100 nm, not 25 (B3 found this
+# on 2026-10-06: not a stall or a repeated key, the range is a state the client sends each tick, never a command).
+# The driver pins the cloned profile's range to the 10 nm step first, so the one press always gives 25 nm.
+SCOPE_START_STEP = 1  # RANGE_LADDER_NMI = 5, 10, 25, 50, 100, 150
+
 # The script: join and fly. The lead's call comes at the start of the flight, so the first picture shows its line on
 # the HUD. The scope's range goes up one step (`comma`, 10 to 25 nm) so that the bandit, 20 nm out, is on it; the diamond blinks
 # (lit while the tick is in the first half of a second: 120 ticks a cycle), so there is a picture of each phase.
@@ -62,9 +68,19 @@ def capture_problems(events: list[dict], plane: int = 1, lead: int = 0) -> list[
     return problems
 
 
+def pin_scope_range(text: str, step: int = SCOPE_START_STEP) -> str:
+    """A preferences file's text with its `radar-range` line set to `step` (pure, unit tested in
+    tools/test_battery_net.py). A file with no such line is returned as it is: the game then starts at its default,
+    which is the same step."""
+    return re.sub(r"(?m)^radar-range .*$", f"radar-range {step}", text)
+
+
 def drive_cues(d: Drive) -> None:
     """The game flies as Two behind an AI lead and is dealt a bandit: the pictures of the cues, the capture's events."""
     port = d.port()
+    prefs = d.data / "preferences-v1.conf"  # the scenario's own clone of the profile
+    if prefs.exists():
+        prefs.write_text(pin_scope_range(prefs.read_text()))
     server = start_server(d, port, guide_mission())
     shots = d.work / "shots"
     shots.mkdir(exist_ok=True)

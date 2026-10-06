@@ -551,6 +551,15 @@ class DatalinkCuesTests(unittest.TestCase):
         wrong = [dict(self.EVENTS[1], object=2)]
         self.assertIn("plane 1", net_datalink.capture_problems(wrong + self.EVENTS[:1])[0])
 
+    def test_the_scope_range_starts_at_ten_miles_whatever_the_profile_saved(self):
+        # A profile saved at 50 nm made one `comma` give 100 nm, not 25 (B3, 2026-10-06).
+        saved = "tore-preferences 7\nzoom 1\nradar-range 3\nrcs-range 4\nfullscreen true\n"
+        pinned = net_datalink.pin_scope_range(saved)
+        self.assertIn("\nradar-range 1\n", pinned)
+        self.assertEqual(pinned.replace("radar-range 1", "radar-range 3"), saved)
+        self.assertEqual(net_datalink.pin_scope_range("tore-preferences 7\nzoom 1\n"), "tore-preferences 7\nzoom 1\n")
+        self.assertEqual(net_datalink.SCRIPT.count("key comma"), 1)
+
     def test_the_scenario_takes_the_pictures_it_looks_for(self):
         scenario = next(s for s in net_datalink.scenarios() if s.name == "net-window-datalink-cues")
         self.assertTrue(scenario.window and callable(scenario.driver))
