@@ -7009,7 +7009,9 @@ otherwise.
   the password as two text lines (the King's: type, press Enter; an empty
   password line with a password set takes it away), then game type, players,
   join in progress, who can find it, friendly fire, lock sides, loadouts, how
-  long before the AI flies an idle aircraft, and observer delay.
+  long before the AI flies an idle aircraft, the snapshot rate (slice R1:
+  read-only on a dedicated server) and the Host row (observer delay moved to
+  the Scoring page in R1, with the other PvP-only rows).
 - **Greying** (`settings_panel::row_state`, tested for every row): for anyone
   but the King every row is greyed ("Only the King may change the
   settings."); a lobby-only row while the mission flies ("Change it in the
