@@ -57,12 +57,23 @@ fn build() -> BuildId {
 /// after both are seated, over a link with a 150 ms round trip and 2 percent
 /// loss, and leave with their debriefs.
 pub fn bot_fight(seconds: u64) -> Fight {
-    bot_fight_at(seconds, 10_000)
+    bot_fight_with(seconds, 10_000, false)
 }
 
 /// [`bot_fight`] starting `altitude_ft` high: above about 35,000 feet every
 /// aircraft leaves contrails.
 pub fn bot_fight_at(seconds: u64, altitude_ft: u32) -> Fight {
+    bot_fight_with(seconds, altitude_ft, false)
+}
+
+/// [`bot_fight`], with Alpha, whose capture comes out, joining after Bravo
+/// when `second`: it then flies plane 1 and plane 0 is Bravo's, which a
+/// viewer that assumes the player is plane 0 gets wrong.
+pub fn bot_fight_as(seconds: u64, second: bool) -> Fight {
+    bot_fight_with(seconds, 10_000, second)
+}
+
+fn bot_fight_with(seconds: u64, altitude_ft: u32, second: bool) -> Fight {
     let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
     spec.wings[0].count = 2;
     spec.wings[3].count = 2;
@@ -91,7 +102,12 @@ pub fn bot_fight_at(seconds: u64, altitude_ft: u32) -> Fight {
     let capture = Shared::default();
     let log = Shared::default();
     let mut bots = Vec::new();
-    for (n, callsign) in ["Alpha", "Bravo"].into_iter().enumerate() {
+    let order = if second {
+        ["Bravo", "Alpha"]
+    } else {
+        ["Alpha", "Bravo"]
+    };
+    for (n, callsign) in order.into_iter().enumerate() {
         let port = 40_000 + n as u16;
         let socket = net
             .bind(format!("10.0.0.2:{port}").parse().expect("an address"))
@@ -102,7 +118,7 @@ pub fn bot_fight_at(seconds: u64, altitude_ft: u32) -> Fight {
         };
         let mut client =
             Client::connect(config, Arc::clone(&resources), net.now()).expect("a client");
-        if n == 0 {
+        if callsign == "Alpha" {
             client.set_capture(Box::new(capture.clone()));
             client.set_diagnostics(Box::new(log.clone()));
         }
@@ -132,7 +148,13 @@ pub fn bot_fight_at(seconds: u64, altitude_ft: u32) -> Fight {
         waited += 1;
     }
     assert!(seated(&bots), "both bots were seated");
-    let plane = bots[0].0.client.seat().expect("seated").1.0;
+    let plane = bots[usize::from(second)]
+        .0
+        .client
+        .seat()
+        .expect("seated")
+        .1
+        .0;
     for _ in 0..seconds * 1000 {
         step(&mut bots, &mut host);
     }
@@ -157,5 +179,105 @@ pub fn bot_fight_at(seconds: u64, altitude_ft: u32) -> Fight {
         log,
         resources,
         plane,
+    }
+}
+
+/// What an observer saw of a fight.
+pub struct Watched {
+    /// The observer's frames, taken every 16 ms of simulated time.
+    pub frames: Vec<crate::client::observe::ObserverFrame>,
+    /// The observer's game: its copy of the mission and its roster.
+    pub client: Client,
+    /// The synthetic import.
+    pub resources: Arc<BTreeMap<String, Vec<u8>>>,
+}
+
+/// A bot flies plane 0 of the 2 against 2 mission for `seconds` while a game
+/// with no plane (callsign Owl) watches it with its camera on no one, as the
+/// lobby's Watch button does; the game's observer frames come out. For the
+/// observer screen's tests, which feed them to its recording.
+pub fn observed_fight(seconds: u64) -> Watched {
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.wings[0].count = 2;
+    spec.wings[3].count = 2;
+    spec.wings[3].skill = Skill::Average;
+    spec.separation_nm = 2;
+    spec.start = Start::Airborne {
+        altitude_ft: 10_000,
+    };
+    let net = SimNetwork::new(23);
+    net.set_default_link(LinkConfig::for_round_trip(
+        Duration::from_millis(40),
+        0.,
+        0.,
+        0.,
+    ));
+    let resources = Arc::new(resources());
+    let host_address = "10.0.0.1:26900".parse().expect("an address");
+    let mut host_socket = net.bind(host_address).expect("a socket");
+    let mut host = Host::new(
+        spec,
+        Arc::clone(&resources),
+        HostConfig {
+            entropy: Entropy::Seeded(13),
+            ..HostConfig::new(build())
+        },
+    )
+    .expect("a host");
+    let join = |name: &str, port: u16, auto_ready: bool| {
+        let socket = net
+            .bind(format!("10.0.0.2:{port}").parse().expect("an address"))
+            .expect("a socket");
+        let config = ClientConfig {
+            entropy: Entropy::Seeded(u64::from(port)),
+            auto_ready,
+            ..ClientConfig::new(host_address, name, build())
+        };
+        let client = Client::connect(config, Arc::clone(&resources), net.now()).expect("a client");
+        (client, socket)
+    };
+    let (flyer, mut flyer_socket) = join("Alpha", 40_000, true);
+    let mut flyer = Bot::new(flyer);
+    let (mut owl, mut owl_socket) = join("Owl", 40_001, false);
+    let mut step = |flyer: &mut Bot, owl: &mut Client| {
+        net.advance(Duration::from_millis(1));
+        let now = net.now();
+        host.receive_from(now, &mut host_socket).expect("receive");
+        host.update(now);
+        host.transmit(&mut host_socket).expect("transmit");
+        while host.poll_log().is_some() {}
+        flyer
+            .client
+            .receive_from(now, &mut flyer_socket)
+            .expect("receive");
+        flyer.update(now);
+        flyer.client.transmit(&mut flyer_socket).expect("transmit");
+        while flyer.client.poll_event().is_some() {}
+        owl.receive_from(now, &mut owl_socket).expect("receive");
+        owl.update(now, &crate::Controls::default());
+        owl.transmit(&mut owl_socket).expect("transmit");
+        while owl.poll_event().is_some() {}
+    };
+    let mut waited = 0;
+    while flyer.client.phase() != ClientPhase::Flying && waited < 10_000 {
+        step(&mut flyer, &mut owl);
+        waited += 1;
+    }
+    assert_eq!(flyer.client.phase(), ClientPhase::Flying, "the bot flies");
+    owl.watch(crate::wire::messages::Subject::None);
+    let mut frames = Vec::new();
+    let mut last = net.now();
+    for _ in 0..seconds * 1000 {
+        step(&mut flyer, &mut owl);
+        let now = net.now();
+        if now - last >= Duration::from_millis(16) {
+            last = now;
+            frames.extend(owl.observer_frame(now));
+        }
+    }
+    Watched {
+        frames,
+        client: owl,
+        resources,
     }
 }

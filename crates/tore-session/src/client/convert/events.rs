@@ -2,7 +2,7 @@
 //! (docs/ARCHITECTURE.md, "Converting a capture into a replay"). Each is put
 //! on the tick the host gave; one outside the replay's ticks is left out.
 
-use super::{Ids, angles, basis, feet};
+use super::{angles, basis, feet};
 use crate::client::seen::FlightSeen;
 use crate::wire::entity::VELOCITY_STEP;
 use crate::wire::events::WireEvent;
@@ -39,9 +39,11 @@ pub(crate) struct Events {
 }
 
 impl Events {
+    /// The events of `seen`; `player` is the plane the seat flew, whom the
+    /// HUD lines, the order calls and the release sounds belong to.
     pub fn new(
         seen: &FlightSeen,
-        ids: Ids,
+        player: u32,
         weapons: &BTreeMap<String, u32>,
         first: u64,
         last: u64,
@@ -59,7 +61,7 @@ impl Events {
             let events = match &received.event.event {
                 WireEvent::Message { text } => vec![Put::Event(
                     replay::Event::new(kind::COMMS_HUD)
-                        .with_subject(0)
+                        .with_subject(player)
                         .with(field::SOURCE, source::HUD)
                         .with(field::OUTCOME, outcome::DELIVERED)
                         .with_text(text.as_str()),
@@ -109,7 +111,7 @@ impl Events {
                 )],
                 WireEvent::OrderVoice { stems: names } => vec![Put::Event(
                     replay::Event::new(kind::COMMS_ORDER)
-                        .with_subject(0)
+                        .with_subject(player)
                         .with(field::SOURCE, source::ORDER)
                         .with(field::ROUTE, route::RADIO)
                         .with(field::OUTCOME, outcome::APPLIED)
@@ -117,7 +119,7 @@ impl Events {
                 )],
                 WireEvent::Release { sound, .. } => vec![Put::Event(
                     replay::Event::new(kind::AUDIO_RELEASE)
-                        .with_subject(0)
+                        .with_subject(player)
                         .with(field::SOUND, name(*sound)),
                 )],
                 WireEvent::Launch {
@@ -126,7 +128,7 @@ impl Events {
                     weapon,
                 } => {
                     let mut event = replay::Event::new(kind::WEAPON_LAUNCH)
-                        .with_subject(ids.map(*shooter))
+                        .with_subject(*shooter)
                         .with(field::PROJECTILE, replay::Value::Id(*projectile));
                     if let Some(id) = weapons.get(&name(*weapon)) {
                         event = event.with(field::WEAPON, replay::Value::Id(*id));
@@ -138,7 +140,7 @@ impl Events {
                     message,
                     friendly,
                 } => {
-                    let aircraft = ids.map(*aircraft);
+                    let aircraft = *aircraft;
                     let mut out = vec![Put::Event(
                         replay::Event::new(kind::AIRCRAFT_EJECTED)
                             .with_subject(aircraft)
@@ -191,7 +193,7 @@ impl Events {
                 } => {
                     let decoy = if *flare { "flare" } else { "chaff" };
                     let mut event = replay::Event::new(kind::COMBAT_COUNTERMEASURE)
-                        .with_subject(ids.map(*aircraft))
+                        .with_subject(*aircraft)
                         .with(field::DECOY, decoy)
                         .with(field::NUMBER, *number as i64)
                         .with(field::AFTER_TICK, i64::from(received.event.tick));
@@ -220,7 +222,7 @@ impl Events {
                     length,
                 } => {
                     let mut event = replay::Event::new(kind::WEAPON_GUN_BURST)
-                        .with_subject(ids.map(*shooter))
+                        .with_subject(*shooter)
                         .with(field::STATION, i64::from(*station));
                     if let Some(length) = length {
                         event = event.with("length_ticks", i64::from(*length));

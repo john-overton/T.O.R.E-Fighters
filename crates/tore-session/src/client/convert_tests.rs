@@ -37,10 +37,17 @@ fn fight(seconds: u64) -> Fight {
 /// (a join through the master, slice J2) when `raced`: its capture then names
 /// the race right after the start.
 fn fight_through(seconds: u64, raced: bool) -> Fight {
+    fight_as(seconds, raced, false)
+}
+
+/// [`fight_through`], with the captured player (Alpha) joining after Bravo
+/// when `second`, so it flies another plane than plane 0.
+fn fight_as(seconds: u64, raced: bool, second: bool) -> Fight {
     let link = LinkConfig::for_round_trip(Duration::from_millis(150), 0.1, 0.02, 0.01);
     let mut rig = Rig::new(spec(2, 2, 2), link, 21);
     rig.watch = true;
     let capture = Shared::default();
+    let early = second.then(|| rig.join(|c| c.callsign = "Bravo".into(), bot_script()));
     let a = rig.join(
         |c| {
             c.callsign = "Alpha".into();
@@ -59,7 +66,7 @@ fn fight_through(seconds: u64, raced: bool) -> Fight {
     rig.players[a].client.set_capture(Box::new(capture.clone()));
     let log = Shared::default();
     rig.players[a].client.set_diagnostics(Box::new(log.clone()));
-    let b = rig.join(|c| c.callsign = "Bravo".into(), bot_script());
+    let b = early.unwrap_or_else(|| rig.join(|c| c.callsign = "Bravo".into(), bot_script()));
     assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(a) && r.seated(b)));
     rig.run(Duration::from_secs(seconds));
     let plane = rig.players[a].client.seat().expect("seated").1.0;
@@ -156,13 +163,8 @@ fn a_fight_capture_converts_into_a_smooth_replay_through_every_received_state() 
         if key.kind != EntityKind::Aircraft {
             continue;
         }
-        let id = if key.id == flight.plane {
-            0
-        } else if key.id == 0 {
-            flight.plane
-        } else {
-            key.id
-        };
+        // The replay keeps every plane's real id.
+        let id = key.id;
         // Through every received state, within the format's precision.
         for (tick, state) in states {
             let tick = u64::from(*tick);
@@ -252,7 +254,7 @@ fn the_own_aircraft_is_the_hosts_state_at_every_exact_state() {
         let own = frame
             .aircraft
             .iter()
-            .find(|a| a.id == 0)
+            .find(|a| a.id == flight.plane)
             .expect("the player");
         assert!(
             near(own.position, sample.pose.position, 1. / 64. + 1e-9),
@@ -277,9 +279,9 @@ fn the_own_aircraft_is_the_hosts_state_at_every_exact_state() {
         against_host >= 18,
         "{against_host} compared with the host's world"
     );
-    // The player is plane 0 in the replay, and the roster says so.
+    // The player keeps its plane's id in the replay, and the roster says so.
     let you = recording
-        .aircraft_info(0)
+        .aircraft_info(flight.plane)
         .expect("a roster entry for the player");
     assert_eq!(you.label, "You");
     assert!(you.human);
@@ -434,13 +436,40 @@ fn a_cut_capture_converts_to_its_last_whole_record_and_says_so() {
 }
 
 #[test]
-fn an_entity_is_not_drawn_across_a_long_silence_or_beyond_its_states() {
-    use crate::client::convert::Ids;
-    // The identity swap puts the player at 0 and plane 0 at the player's id.
-    let ids = Ids::new(3);
-    assert_eq!((ids.map(3), ids.map(0), ids.map(5)), (0, 3, 5));
-    let ids = Ids::new(0);
-    assert_eq!((ids.map(0), ids.map(7)), (0, 7));
+fn a_player_on_another_plane_than_zero_keeps_its_real_id() {
+    // Alpha joins second, so it flies plane 1 (plane 0 is Bravo's).
+    let fight = fight_as(12, false, true);
+    assert_ne!(fight.plane, 0, "the captured player is not on plane 0");
+    let conversion = convert::observe(&fight.capture, Arc::clone(&fight.resources)).unwrap();
+    let flight = conversion.flights().remove(0);
+    assert_eq!(flight.plane, fight.plane);
+    let dir = folder("seat");
+    let path = dir.join("seat.tore-replay");
+    write(&conversion, &flight, &path);
+    let recording = replay::Recording::open(&path).unwrap();
+    let header = recording.header();
+    let plane = flight.plane.to_string();
+    // The viewer follows draw.player, and net.player_plane says the same.
+    assert_eq!(header.extra("draw.player"), Some(plane.as_str()));
+    assert_eq!(
+        header.extra(convert::PLAYER_PLANE_KEY),
+        Some(plane.as_str())
+    );
+    assert_eq!(convert::DRAW_PLAYER_KEY, "draw.player");
+    // The roster names the seat's own plane `You` and plane 0 as another.
+    let you = recording.aircraft_info(flight.plane).expect("the player");
+    assert_eq!((you.label.as_str(), you.human), ("You", true));
+    let zero = recording.aircraft_info(0).expect("plane 0");
+    assert_ne!(zero.label, "You");
+    // Every frame lists both under their own ids.
+    let frames = frames_of(&recording);
+    let frame = frames.values().last().unwrap();
+    assert!(frame.aircraft.iter().any(|a| a.id == flight.plane));
+    assert!(frame.aircraft.iter().any(|a| a.id == 0));
+    // The slots reach the highest other plane, the player's aside.
+    let slots: u32 = header.extra("draw.slots").unwrap().parse().unwrap();
+    assert!(slots >= 3, "{slots}");
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[allow(dead_code)]
@@ -706,7 +735,6 @@ mod curves {
 
 mod events {
     use super::*;
-    use crate::client::convert::Ids;
     use crate::client::convert::events::Events;
     use crate::client::seen::SeenEvent;
     use crate::wire::events::{ReceivedEvent, WireEvent};
@@ -744,9 +772,9 @@ mod events {
         }
     }
 
-    fn run(seen: &FlightSeen, ids: Ids, first: u64, last: u64) -> Vec<replay::Frame> {
+    fn run(seen: &FlightSeen, player: u32, first: u64, last: u64) -> Vec<replay::Frame> {
         let weapons = BTreeMap::from([("AIM-120C".to_owned(), 5u32)]);
-        let mut events = Events::new(seen, ids, &weapons, first, last);
+        let mut events = Events::new(seen, player, &weapons, first, last);
         (first..=last)
             .map(|tick| {
                 let mut frame = replay::Frame {
@@ -844,14 +872,14 @@ mod events {
                 },
             ),
         ]);
-        // The player flew plane 3: it is plane 0 in the replay, and plane 0
-        // is 3.
-        let frames = run(&seen, Ids::new(3), 5, 40);
+        // The player flew plane 3: the seat's lines are plane 3's, and so
+        // is the launch of its own shooter.
+        let frames = run(&seen, 3, 5, 40);
         let at = |tick: u64| &frames[(tick - 5) as usize];
         let hud = &at(10).events[0];
         assert_eq!(hud.kind, kind::COMMS_HUD);
         assert_eq!(hud.text, "Radar on");
-        assert_eq!(hud.subject, Some(0));
+        assert_eq!(hud.subject, Some(3));
         let radio = &at(12).events[0];
         assert_eq!(radio.kind, kind::COMMS_RADIO);
         assert_eq!(radio.string(field::STEMS), Some("^CLRLAND"));
@@ -859,7 +887,7 @@ mod events {
         assert!(replay::vocab::heard(radio), "a line the player heard");
         let launch = &at(14).events[0];
         assert_eq!(launch.kind, kind::WEAPON_LAUNCH);
-        assert_eq!(launch.subject, Some(0), "the shooter is the player");
+        assert_eq!(launch.subject, Some(3), "the shooter is the player");
         assert_eq!(launch.get(field::WEAPON), Some(&replay::Value::Id(5)));
         let effect = &at(15).new_effects[0];
         assert_eq!(effect.kind, replay::EffectKind::Launch);
@@ -875,10 +903,10 @@ mod events {
         assert_eq!(flare.num("vx_fps"), Some(1.));
         assert_eq!(flare.num("x_ft"), Some(1.));
         assert_eq!(flare.num(field::LEFT), Some(29.));
-        assert_eq!(flare.subject, Some(0));
+        assert_eq!(flare.subject, Some(3));
         let burst = &at(19).events[0];
         assert_eq!(burst.kind, kind::WEAPON_GUN_BURST);
-        assert_eq!(burst.subject, Some(3), "plane 0 took the player's old id");
+        assert_eq!(burst.subject, Some(0), "plane 0 keeps its own id");
         assert_eq!(at(20).events[0].string(field::SOUND), Some("FLARE.WAV"));
         let all: usize = frames.iter().map(|f| f.events.len()).sum();
         assert_eq!(all, 7, "the early and the late event are left out");

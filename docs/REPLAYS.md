@@ -388,10 +388,13 @@ What the replay is:
   you heard (with their voices), launches, chaff and flares, explosions, hits,
   craters, crash-site fires, destroyed ground objects, wingmen ejecting and gun
   bursts, on the ticks the host gave.
-- **You are plane 0.** The viewer looks for the player under id 0, so the
-  replay gives your plane that id and plane 0 yours (the header's
-  `net.player_plane` names the plane you flew). With plane 0 as your plane
-  nothing differs.
+- **Every plane keeps its own id.** The header's `draw.player` (and
+  `net.player_plane`) names the plane you flew, and the viewer follows it as
+  the recording's player: its first selection, the weather's view, the
+  panels' `You` and the sounds are that plane's (agent decision, 2026-10-05:
+  the conversion used to swap your plane's id with plane 0's, until the
+  viewer followed `draw.player`). With plane 0 as your plane the header has
+  neither key and nothing differs from before.
 - **Smoke, contrails and gun rounds are made again.** The host sends none of
   them, so the game regenerates them as a live client does and writes them the
   way a single-player recording does: the smoke of missile motors, of aircraft

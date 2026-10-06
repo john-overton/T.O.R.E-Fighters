@@ -4055,14 +4055,18 @@ reached; nothing is shown beyond what the host said.
   other aircraft is written as the format's nominal values (1 G, no fuel, idle
   controls, the speed device or the ground speed for airspeed) and is not shown
   for them; the own aircraft's come from the predicted flight.
-- *Which plane is the player* (agent decision). The viewer, its sound and its
-  panels look for the player under id 0 (the replay guide's
-  [limit](REPLAYS.md#whose-flight-it-is)), so a converted replay gives the
-  player's plane the id 0 and plane 0 the player's id (a swap, so no id is lost;
-  ids of ground objects are not aircraft ids and are untouched). Every id a
-  frame, an event or the roster names goes through the same swap, and the header's
-  `net.player_plane` says which plane the player flew. For the player on plane 0,
-  the usual first seat, nothing changes.
+- *Which plane is the player* (John, 2026-10-05; slice F2-O2 built it). Every
+  plane keeps its real id in the frames, the events and the roster. The
+  header's `draw.player` and `net.player_plane` name the plane the seat flew
+  (neither is written for plane 0, the usual first seat, so those replays are
+  as they were), the roster's `You` is that plane, and the viewer follows
+  `draw.player` as it follows it in a single-player recording of another seat
+  (the replay guide's [limit](REPLAYS.md#whose-flight-it-is), now ended). The
+  conversion used to swap the player's id with plane 0's so that a viewer that
+  looked for the player under id 0 found it; the swap and its tests are gone
+  (the seat's HUD lines, order calls and release sounds are subject
+  `draw.player`, and `draw.slots` reaches the highest plane other than the
+  player's).
 - *Events, radio and effects.* They come from the host's events and effects
   only, each on the tick the host gave (an event outside the replay's ticks is
   left out): HUD lines (`comms.hud`), radio, crew and tower lines with their

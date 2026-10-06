@@ -42,9 +42,13 @@ use smooth::{Own, Track};
 /// between.
 pub const MAX_BRIDGE_TICKS: u32 = 240;
 
-/// The header key naming the plane the player flew when the conversion gave
-/// it the id 0 (the viewer looks for the player there).
+/// The header key naming the plane the player flew, when it was not plane 0.
+/// The replay keeps the plane's real id; the viewer follows `draw.player`.
 pub const PLAYER_PLANE_KEY: &str = "net.player_plane";
+
+/// The header key the replay viewer reads for the plane a recording is for
+/// (the app's `replay::convert::PLAYER_KEY`), written when it is not plane 0.
+pub const DRAW_PLAYER_KEY: &str = "draw.player";
 
 /// Why a capture did not convert.
 #[derive(Debug)]
@@ -458,7 +462,6 @@ impl Conversion {
         recorded_at: &str,
     ) -> replay::Header {
         let seen = &self.observed.flights[flight.index];
-        let ids = Ids::new(flight.plane);
         let mut extra: Vec<(String, String)> = vec![
             ("net.server".into(), self.start.server.to_string()),
             ("net.callsign".into(), self.start.callsign.clone()),
@@ -481,8 +484,13 @@ impl Conversion {
             ),
             ("net.flight".into(), seen.flight.to_string()),
         ];
+        // The viewer follows the plane the seat flew: `draw.player` is what
+        // it reads, and `net.player_plane` says the same for the Replays
+        // screen and the tools. Plane 0, the usual first seat, writes
+        // neither, so those replays are as they were.
         if flight.plane != 0 {
             extra.push((PLAYER_PLANE_KEY.into(), flight.plane.to_string()));
+            extra.push((DRAW_PLAYER_KEY.into(), flight.plane.to_string()));
         }
         if let Some(aircraft) = flight.aircraft {
             extra.push(("player.aircraft".into(), aircraft.selection_key().into()));
@@ -490,9 +498,9 @@ impl Conversion {
         // How the viewer draws the aircraft: the loaded models, and the
         // ids up to the highest other aircraft.
         let slots = self
-            .aircraft_ids(seen, &ids)
+            .aircraft_ids(seen)
             .into_iter()
-            .filter(|id| *id != 0)
+            .filter(|id| *id != flight.plane)
             .max()
             .unwrap_or(0);
         let models: Vec<&str> = self.models.iter().map(|id| id.selection_key()).collect();
@@ -515,19 +523,19 @@ impl Conversion {
 
     /// Every aircraft id the flight names: the roster's and every aircraft
     /// entity's, mapped.
-    fn aircraft_ids(&self, seen: &FlightSeen, ids: &Ids) -> BTreeSet<u32> {
+    fn aircraft_ids(&self, seen: &FlightSeen) -> BTreeSet<u32> {
         let mut out: BTreeSet<u32> = BTreeSet::new();
         if let Some(roster) = &seen.roster {
-            out.extend(roster.planes.iter().map(|p| ids.map(p.id)));
+            out.extend(roster.planes.iter().map(|p| p.id));
         }
         out.extend(
             seen.states
                 .keys()
                 .filter(|k| k.kind == EntityKind::Aircraft)
-                .map(|k| ids.map(k.id)),
+                .map(|k| k.id),
         );
         if let Some(seat) = seen.seat {
-            out.insert(ids.map(seat.plane));
+            out.insert(seat.plane);
         }
         out
     }
@@ -536,15 +544,11 @@ impl Conversion {
     /// player first as `You`.
     pub fn roster(&self, flight: &FlightInfo) -> Vec<replay::AircraftInfo> {
         let seen = &self.observed.flights[flight.index];
-        let ids = Ids::new(flight.plane);
         let world = self.client.mission();
         let mut infos: BTreeMap<u32, replay::AircraftInfo> = BTreeMap::new();
         if let Some(roster) = &seen.roster {
             for plane in &roster.planes {
-                infos.insert(
-                    ids.map(plane.id),
-                    roster_info(&ids, plane, flight.plane, world),
-                );
+                infos.insert(plane.id, roster_info(plane, flight.plane, world));
             }
         }
         for key in seen
@@ -552,7 +556,7 @@ impl Conversion {
             .keys()
             .filter(|k| k.kind == EntityKind::Aircraft)
         {
-            let id = ids.map(key.id);
+            let id = key.id;
             infos.entry(id).or_insert_with(|| {
                 let aircraft = first_aircraft_type(seen, *key);
                 replay::AircraftInfo {
@@ -566,14 +570,16 @@ impl Conversion {
                 }
             });
         }
-        infos.entry(0).or_insert_with(|| replay::AircraftInfo {
-            id: 0,
-            label: "You".into(),
-            human: true,
-            skill: "Human".into(),
-            side: replay::Side::Friendly,
-            ..replay::AircraftInfo::default()
-        });
+        infos
+            .entry(flight.plane)
+            .or_insert_with(|| replay::AircraftInfo {
+                id: flight.plane,
+                label: "You".into(),
+                human: true,
+                skill: "Human".into(),
+                side: replay::Side::Friendly,
+                ..replay::AircraftInfo::default()
+            });
         infos.into_values().collect()
     }
 
@@ -592,7 +598,6 @@ impl Conversion {
         sink: &mut dyn FnMut(replay::Frame) -> Result<(), E>,
     ) -> Result<(), E> {
         let seen = &self.observed.flights[flight.index];
-        let ids = Ids::new(flight.plane);
         let (first, last) = (flight.first_tick, flight.last_tick);
         let (weapon_ids, _) = weapon_registry(seen, self.client.mission());
         let own = Own::new(&seen.trace);
@@ -602,7 +607,7 @@ impl Conversion {
             .map(|(key, states)| Track::new(*key, states))
             .collect();
         let launches = events::launches(seen);
-        let mut events = events::Events::new(seen, ids, &weapon_ids, first, last);
+        let mut events = events::Events::new(seen, flight.plane, &weapon_ids, first, last);
         let net = self.net_events(flight);
         let mut net = net.into_iter().peekable();
         // The tick each aircraft's pilot was first seen out of it.
@@ -618,9 +623,7 @@ impl Conversion {
                 ..replay::Frame::default()
             };
             if let Some(sample) = own.at(tick) {
-                frame
-                    .aircraft
-                    .push(own_state(&sample, ids.map(sample.pose.id)));
+                frame.aircraft.push(own_state(&sample, sample.pose.id));
             }
             let mut others: Vec<replay::AircraftState> = Vec::new();
             for track in &mut tracks {
@@ -633,7 +636,7 @@ impl Conversion {
                         let ejected = pilot_from
                             .get(&key.id)
                             .is_some_and(|from| u64::from(*from) <= tick);
-                        others.push(aircraft_state(ids.map(key.id), pose, ejected));
+                        others.push(aircraft_state(key.id, pose, ejected));
                     }
                     (
                         EntityKind::Projectile,
@@ -652,12 +655,11 @@ impl Conversion {
                             seen,
                             &launches,
                             tick,
-                            ids,
                         ));
                     }
                     (EntityKind::Debris, Sample::Debris(_, position, attitude)) => {
                         frame.debris.push(replay::DebrisState {
-                            owner: ids.map(key.id),
+                            owner: key.id,
                             index: 0,
                             position,
                             attitude,
@@ -665,7 +667,7 @@ impl Conversion {
                     }
                     (EntityKind::Pilot, Sample::Pilot(p, position, heading)) => {
                         frame.escapees.push(replay::EscapeeState {
-                            owner: ids.map(key.id),
+                            owner: key.id,
                             position,
                             heading,
                             phase: escape_code(p.phase),
@@ -807,28 +809,6 @@ impl Regenerate for Nothing {
     }
 }
 
-/// The id the replay gives each plane: the player's is 0, the viewer's
-/// player, and plane 0 takes the player's id.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Ids {
-    own: u32,
-}
-
-impl Ids {
-    pub(crate) fn new(own: u32) -> Self {
-        Self { own }
-    }
-    pub(crate) fn map(self, id: u32) -> u32 {
-        if id == self.own {
-            0
-        } else if id == 0 {
-            self.own
-        } else {
-            id
-        }
-    }
-}
-
 fn first_aircraft_type(seen: &FlightSeen, key: EntityKey) -> Option<AircraftId> {
     seen.states
         .get(&key)?
@@ -839,8 +819,10 @@ fn first_aircraft_type(seen: &FlightSeen, key: EntityKey) -> Option<AircraftId> 
         })
 }
 
-fn roster_info(
-    ids: &Ids,
+/// The aircraft registry's entry for a roster plane: its type, its side and
+/// wing, and the callsign of the human or the AI's name. `own` is the plane
+/// the replay is for (it reads `You`); `world` gives an AI pilot's skill.
+pub fn roster_info(
     plane: &crate::wire::messages::RosterPlane,
     own: u32,
     world: Option<&World>,
@@ -872,7 +854,7 @@ fn roster_info(
         ),
     };
     replay::AircraftInfo {
-        id: ids.map(plane.id),
+        id: plane.id,
         pt: plane.aircraft.selection_key().to_owned(),
         name: plane.aircraft.label().to_owned(),
         label,
@@ -1108,7 +1090,6 @@ fn projectile_state(
     seen: &FlightSeen,
     launches: &BTreeMap<u32, u32>,
     tick: u64,
-    ids: Ids,
 ) -> replay::ProjectileState {
     let p = &at.state;
     let [azimuth, elevation] = at.direction;
@@ -1118,9 +1099,9 @@ fn projectile_state(
         .map_or(u64::from(at.first), |launch| u64::from(*launch));
     replay::ProjectileState {
         id,
-        owner: ids.map(p.owner),
+        owner: p.owner,
         weapon: weapon_ids.get(name).copied().unwrap_or(0),
-        target: p.target.map(|t| ids.map(t)),
+        target: p.target,
         position: at.position,
         previous: std::array::from_fn(|i| at.position[i] - at.velocity[i] * DT),
         direction: [
