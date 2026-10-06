@@ -887,8 +887,9 @@ def drive_rejoin(d: Drive) -> None:
 SNAPSHOTS_AGAIN_MS = 3500  # times the runner's --timeout-scale: a loaded machine steps the fast-forward slower
 # After a handover every client races the new host at once, so the gap is a round trip or two and the fast-forward.
 SNAPSHOTS_AGAIN_HANDOVER_MS = 2500
-# The resume window the new host holds the clock for (docs/ARCHITECTURE.md, "Losing the host"), and the cost of a
-# fast-forward tick above which a build or machine is too slow to judge the 5 second target by; then each pilot's
+# The resume window the new host holds the clock for at most (docs/ARCHITECTURE.md, "Losing the host"; since slice
+# K10 it ends once the last pilot it waits for has resumed, the old host's own player not waited for), and the cost of
+# a fast-forward tick above which a build or machine is too slow to judge the 5 second target by; then each pilot's
 # snapshots must come within FOLLOW_LIVE_MS of the new host going live.
 RESUME_WINDOW_MS = 1500
 SLOW_TICK_MS = 2.0
@@ -951,7 +952,9 @@ def migrate_problems(
     live_ms = int(live.group(1)) if live else None
     slow_note = ""
     if live and int(live.group(2)) > 0:
-        cost = (live_ms - RESUME_WINDOW_MS) / int(live.group(2))
+        resumed = [int(ms) for ms in re.findall(rf"^{new}: host: \w+ resumed (\d+) ms after the takeover", pilots, re.M)]
+        window = min(RESUME_WINDOW_MS, max(resumed)) if resumed else RESUME_WINDOW_MS
+        cost = (live_ms - window) / int(live.group(2))
         if cost > SLOW_TICK_MS:
             # The new host stepped its fast-forward at more than SLOW_TICK_MS a tick (a debug build on a busy machine,
             # not the plan's release build): the 5 second target cannot be judged here, so the pilots must follow the

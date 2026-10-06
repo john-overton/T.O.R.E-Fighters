@@ -15,7 +15,10 @@
 //! - **Backlog** (50) brings a seated player's inputs from that tick on, and
 //!   the commands not yet applied, numbered afresh.
 //! - **The resume window.** The clock holds at T until every seated player
-//!   has resumed and sent its backlog, at most [`RESUME_WINDOW`].
+//!   has resumed and sent its backlog, at most [`RESUME_WINDOW`]. *Agent
+//!   decision (K10):* the old house's player is not waited for when the host
+//!   was lost: its game was that host, so it is gone with it or comes back
+//!   only once its game learns of the takeover, after the window.
 //! - **The fast-forward.** Then the host steps from T to the **present**,
 //!   where the old host's clock would be now ([`Present`]), at most
 //!   [`FAST_FORWARD_TICKS`] an update, sending no snapshot meanwhile: each
@@ -213,6 +216,9 @@ struct Active {
     /// The old house that handed over in the lobby, by join order: expected
     /// back from the lobby's move, and left on purpose if it does not come.
     handed_house: Option<u64>,
+    /// The old house when the host was lost (no handover), by join order:
+    /// its game was the host, so the resume window does not wait for it.
+    lost_house: Option<u64>,
 }
 
 /// The migration's state on the host.
@@ -365,7 +371,11 @@ impl Host {
         let mut absent = BTreeMap::new();
         let mut handed = None;
         let mut handed_house = None;
+        let mut lost_house = None;
         for (_, mut player) in restored {
+            if player.house && handover.is_none() {
+                lost_house = Some(player.lobby.order);
+            }
             if player.house && handover.is_some() {
                 if flying {
                     // A house that handed over in flight left on purpose.
@@ -393,6 +403,7 @@ impl Host {
             last_inputs,
             clock,
             handed_house,
+            lost_house,
         });
         host.resuming.notes.push(ResumeNote::TookOver {
             tick,
@@ -940,11 +951,12 @@ impl Host {
             self.go_live(now);
             return false;
         }
-        let waiting = active
-            .absent
-            .values()
-            .any(|a| a.player.stage == StageState::Seated)
-            || active.back.values().any(|done| !done);
+        // The old house's player was lost with the host it ran: the window
+        // waits for it no longer than for anyone who resumes late (agent
+        // decision, K10: waiting cost every kill the full 1.5 seconds).
+        let waiting = active.absent.iter().any(|(order, a)| {
+            a.player.stage == StageState::Seated && Some(*order) != active.lost_house
+        }) || active.back.values().any(|done| !done);
         if waiting && now < active.window_until {
             return true;
         }

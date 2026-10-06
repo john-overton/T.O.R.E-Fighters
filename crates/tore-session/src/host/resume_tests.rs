@@ -833,14 +833,16 @@ fn a_host_cut_off_in_a_dogfight_is_taken_over_exactly() {
     assert!(own.contains(&words::lost(&to)), "{own:?}");
 
     // The old host keeps running privately with its own player.
+    // (Every player is back in under 2 seconds: the 1.5 seconds of silence
+    // alone are 180 ticks.)
     let private = rig.host().world.tick();
-    assert!(private > cut_tick + 300, "the old host flies on: {private}");
+    assert!(private > cut_tick + 180, "the old host flies on: {private}");
     assert!(rig.flying(0), "its own player flies on");
 
     // The old host's own player never resumes: dropped 5 seconds after the
     // takeover, its plane kept for it.
     assert!(
-        rig.run_until(Duration::from_secs(4), |r| r
+        rig.run_until(Duration::from_secs(6), |r| r
             .host_of(game)
             .absent_players()
             .is_empty()),
