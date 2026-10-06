@@ -14,8 +14,8 @@ use tore_sim::ai::wing::PlayerOrder;
 /// Entries kept between drains.
 pub const CAPACITY: usize = 1024;
 
-/// One change of the picture. Slice G3a adds the assignment entries; a later
-/// slice adds the warning.
+/// One change of the picture. Slice G3a added the assignment entries and slice
+/// G9 the sort warning, for the recorder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {
     /// A plane joined the picture, with whether its aircraft has a radar (the
@@ -43,6 +43,15 @@ pub enum Entry {
     },
     /// `plane` locked the target it was assigned (the first time).
     Acknowledge { tick: u64, plane: u32, target: u32 },
+    /// A human flying `plane` was told that its flightmate `other` holds a
+    /// lock on `target`, the aircraft it holds (the warning's HUD line and
+    /// beep are cues, so this entry is only for the recording).
+    SortWarning {
+        tick: u64,
+        plane: u32,
+        other: u32,
+        target: u32,
+    },
 }
 
 /// A bounded list of entries waiting for the host.

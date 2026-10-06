@@ -583,6 +583,7 @@ fn aircraft_properties(
 
 fn debug_event(kind_name: &str) -> bool {
     kind_name.starts_with("ai.")
+        || kind_name.starts_with("datalink.")
         || matches!(
             kind_name,
             kind::COMMS_ORDER

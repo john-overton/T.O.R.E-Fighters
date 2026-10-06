@@ -272,6 +272,12 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             .map(|id| format!(" {word} {}", names.who(id)))
             .unwrap_or_default()
     };
+    // The other party, for the data link's lines.
+    let object = || {
+        event
+            .object
+            .map_or_else(|| "an aircraft".into(), |id| names.who(id))
+    };
     let weapon = event.id(field::WEAPON).map(|id| names.weapon(id));
     let shot = event
         .id(field::PROJECTILE)
@@ -451,6 +457,37 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             because(event)
         ),
         k if k.starts_with("comms.") || k == kind::AUDIO_MUSIC => comms_text(event, names),
+        kind::DATALINK_MEMBER => format!(
+            "{s} joined the data link, {}",
+            if event.flag(field::RADAR) == Some(false) {
+                "with no radar"
+            } else {
+                "with a radar"
+            }
+        ),
+        kind::DATALINK_LOCK => format!("{s} locked {}", object()),
+        kind::DATALINK_UNLOCK => format!("{s} let go of its lock on {}", object()),
+        kind::DATALINK_ASSIGN => format!(
+            "{s} assigned {} to attack {}{}",
+            object(),
+            event
+                .id(field::TARGET)
+                .map_or_else(|| "a target".into(), |id| names.who(id)),
+            opt(event, field::ORDER)
+                .map(|order| format!(" ({order})"))
+                .unwrap_or_default()
+        ),
+        kind::DATALINK_CLEAR => format!("{s}'s assignment on {} ended{}", object(), because(event)),
+        kind::DATALINK_ACKNOWLEDGE => {
+            format!("{s} locked its assigned target {}", object())
+        }
+        kind::DATALINK_SORT_WARNING => format!(
+            "Sort warning to {s}: {} holds the same lock on {}",
+            event
+                .id(field::OTHER)
+                .map_or_else(|| "a flightmate".into(), |id| names.who(id)),
+            object()
+        ),
         kind::PLAYER_COMMAND => format!(
             "{s} command {}{}",
             opt(event, field::COMMAND).unwrap_or_default(),

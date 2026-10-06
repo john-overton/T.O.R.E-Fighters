@@ -30,7 +30,10 @@
 //! display trees, and [`journal`] turns the AI message journal and the
 //! communication journal into `comms.*` events. A third, [`devices`], turns
 //! combat's write-only notes of released chaff and flares and the player's
-//! decoy rolls into entries a replay flies the devices from.
+//! decoy rolls into entries a replay flies the devices from. A fourth,
+//! [`datalink`], turns the data link's write-only journal into `datalink.*`
+//! events.
+mod datalink;
 mod devices;
 mod journal;
 mod why;

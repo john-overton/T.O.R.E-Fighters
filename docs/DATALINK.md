@@ -354,10 +354,12 @@ change and sort warning as an event at once, the way radio calls arrive
 ([wire](formats/net-protocol.md#data-link-stage-g)). A human in slot 2 sees
 exactly what the AI in slot 2 would receive, which is John's rule.
 
-A replay records each member's radar flag at the start, every assignment (with its
-call's words), lock, acknowledgement, cleared assignment and sort warning, as
-`datalink` events beside the communication journal. The assignment calls land
-in the comms record as radio calls ([replays](REPLAYS.md)). The 4-times-a-second
+A replay records each member's radar flag at the start, every assignment,
+lock, acknowledgement, cleared assignment and sort warning, as `datalink.*`
+events beside the communication journal ([the events](REPLAYS.md#data-link-events);
+built, G9). The assignment call's words stay in the communication journal's
+entry for the order. A replay converted from a client's capture has these
+events once the wire carries them (slice G7). The 4-times-a-second
 tracks are not recorded: they are what each aircraft's sensors held, which the
 AI thinking record already shows for the AI.
 
@@ -377,7 +379,7 @@ before the merge. In order:
 4. AI leads share and sort, and AI members move off a bandit when the
    sort warning fires.
 5. The cues are drawn (built, G6): the flightmates' lock numbers, the tags and the sort warning show in a flight with AI wingmen; the assignment cues wait for the lead's assignments (G3a).
-6. Recordings gain the `datalink` events.
+6. Recordings gain the `datalink.*` events (built, G9).
 
 The new keys (Alt+A and Alt+N, both built) change nothing until pressed, and the
 battle net is silent until monitored.

@@ -335,8 +335,56 @@ def scenarios() -> list[Scenario]:
             )
         )
 
+    # The flight data link's events (slice G9): the probe's own `data link:` lines
+    # and the recording's `datalink.*` events say the same things.
+    out.append(
+        record_scenario(
+            "replay-rec-datalink",
+            [
+                "--ai-probe-ticks", "2400", "--probe-wing-size", "2", "--separation", "5", "--probe-player-lock", "600:4",
+                "--probe-wing-order", "700:engage-my-target@1", "--probe-wing-order", "900:attack-on-contact",
+            ],
+            expect=[r"data link: assign plane=1 target=4 by=0 order=EngageMyTarget"],
+            extra_check=datalink_event_problems,
+            notes="datalink.* events: every plane a member, the player's lock, the assignment and its clearing by order",
+        )
+    )
+
     out += failure_scenarios()
     return out
+
+
+def datalink_event_problems(work: Path, output: str) -> list[str]:
+    """The recorded `datalink.*` events of the data link probe: every plane joined
+    once, the player's lock, the lead's assignment to the first wingman and its
+    clearing by the later Attack on contact, and nothing out of order."""
+    log = work / "log" / "log.jsonl"
+    if not log.exists():
+        return []
+    events = [e for e in (json.loads(line) for line in log.read_text().splitlines()) if e["type"] == "event"]
+    link = [e for e in events if e["kind"].startswith("datalink.")]
+    problems: list[str] = []
+    members = [e["subject"] for e in link if e["kind"] == "datalink.member"]
+    if sorted(members) != sorted(set(members)) or sorted(members) != list(range(6)):
+        problems.append(f"datalink.member events for planes {sorted(members)}, expected each of 0..5 once")
+    if any(e["fields"].get("radar") is not True for e in link if e["kind"] == "datalink.member"):
+        problems.append("a datalink.member event says no radar")
+    if not any(e["kind"] == "datalink.lock" and e["subject"] == 0 and e["object"] == 4 for e in link):
+        problems.append("no datalink.lock for the player on aircraft 4")
+    assigns = [e for e in link if e["kind"] == "datalink.assign"]
+    if not any(
+        (e["subject"], e["object"], e["fields"].get("target"), e["fields"].get("order")) == (0, 1, 4, "EngageMyTarget")
+        for e in assigns
+    ):
+        problems.append(f"no datalink.assign from plane 0 to plane 1 for target 4: {assigns}")
+    clears = [e for e in link if e["kind"] == "datalink.clear" and e["subject"] == 1 and e["object"] == 4]
+    if not any(e["fields"].get("reason") == "order" for e in clears):
+        problems.append(f"plane 1's assignment was not cleared by an order: {clears}")
+    # The probe's own lines say the same: one assign line for each assign event.
+    lines = len(re.findall(r"^t=\d+ data link: assign ", sections(output)[0], re.M))
+    if lines != len(assigns):
+        problems.append(f"the probe printed {lines} assignments, the recording has {len(assigns)}")
+    return problems
 
 
 def check_rejected(output: str, message: str) -> list[str]:

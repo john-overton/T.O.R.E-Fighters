@@ -66,6 +66,8 @@ pub(super) struct Why {
     pub(super) news: BTreeMap<u32, Vec<String>>,
     /// Communication journal entries lost to its bound, as last reported.
     pub(super) comms_lost: u64,
+    /// Data link journal entries lost to its bound, as last reported.
+    pub(super) datalink_lost: u64,
 }
 
 impl Why {

@@ -1,5 +1,5 @@
 //! The plain-English mission summary: what happened, who did what, every
-//! shot, the comms transcript with reasons, a timeline, bookmarks with the
+//! shot, the comms transcript with reasons, the data link's changes, a timeline, bookmarks with the
 //! seconds around them, and anomaly flags.
 
 use super::anomaly::{self, Thresholds};
@@ -612,6 +612,52 @@ pub fn write_summary(
     }
     for e in comms {
         writeln!(o, "{}  {}", clock(e.tick), comms_line(&e.event, &names))?;
+    }
+
+    // The data link's changes, when the recording has any: a line of counts,
+    // then each assignment, its end and acknowledgement, and each sort
+    // warning. Locks are counted and left out of the list, which the
+    // events file and the viewer's Comms panel have in full.
+    let link: Vec<&TimedEvent> = recording
+        .events()
+        .iter()
+        .filter(|e| e.event.kind.starts_with("datalink."))
+        .collect();
+    if !link.is_empty() {
+        heading(o, "Data link")?;
+        let count = |wanted: &str| link.iter().filter(|e| e.event.kind == wanted).count();
+        let radars = link
+            .iter()
+            .filter(|e| e.event.kind == kind::DATALINK_MEMBER)
+            .filter(|e| e.event.flag(field::RADAR) != Some(false))
+            .count();
+        let many =
+            |n: usize, one: &str, more: &str| format!("{n} {}", if n == 1 { one } else { more });
+        writeln!(
+            o,
+            "{} ({radars} with a radar), {}, {}, {} acknowledged, {} cleared, {}",
+            many(count(kind::DATALINK_MEMBER), "member", "members"),
+            many(count(kind::DATALINK_LOCK), "lock", "locks"),
+            many(count(kind::DATALINK_ASSIGN), "assignment", "assignments"),
+            count(kind::DATALINK_ACKNOWLEDGE),
+            count(kind::DATALINK_CLEAR),
+            many(
+                count(kind::DATALINK_SORT_WARNING),
+                "sort warning",
+                "sort warnings"
+            ),
+        )?;
+        for e in link.iter().filter(|e| {
+            matches!(
+                e.event.kind.as_str(),
+                kind::DATALINK_ASSIGN
+                    | kind::DATALINK_CLEAR
+                    | kind::DATALINK_ACKNOWLEDGE
+                    | kind::DATALINK_SORT_WARNING
+            )
+        }) {
+            writeln!(o, "{}  {}", clock(e.tick), describe(&e.event, &names))?;
+        }
     }
 
     heading(o, "Timeline")?;

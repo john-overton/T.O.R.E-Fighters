@@ -29,6 +29,7 @@ chaff and flares: same (2 each)
 shot outcomes: same (2 each)
 AI decisions: same (2 each)
 comms: same (7 each)
+data link: same (8 each)
 flight and aircraft events: same (4 each)
 player and system events: same (2 each)
 

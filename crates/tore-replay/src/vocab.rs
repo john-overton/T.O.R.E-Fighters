@@ -239,6 +239,35 @@ pub mod kind {
     /// `kind` (Text: the line's kind). Text: the rest of the line.
     pub const NET_EVENT: &str = "net.event";
 
+    /// A plane joined its flight's data link, the first tick the link sees
+    /// it. Subject: the plane. Fields: `radar` (Bool: its aircraft has a
+    /// radar, so its scope marks the picture). Every aircraft of a side is a
+    /// member, so a recording has one at the start for each plane in play.
+    pub const DATALINK_MEMBER: &str = "datalink.member";
+    /// A member took a radar lock on an aircraft. Subject: the member.
+    /// Object: the target.
+    pub const DATALINK_LOCK: &str = "datalink.lock";
+    /// A member let go of its lock (the target, the member or the lock is
+    /// gone). Subject: the member. Object: the target it held.
+    pub const DATALINK_UNLOCK: &str = "datalink.unlock";
+    /// A flight's lead gave a wingman a target to attack. Subject: the lead.
+    /// Object: the wingman. Fields: `target` (Id), `order` (Text: the order
+    /// that gave it). The call that voiced it is the order's own
+    /// [`COMMS_ORDER`] and radio entries.
+    pub const DATALINK_ASSIGN: &str = "datalink.assign";
+    /// An assignment ended. Subject: the member that held it. Object: the
+    /// target. Fields: `reason` (Text: the order, the member or its target
+    /// lost, or the lead changed).
+    pub const DATALINK_CLEAR: &str = "datalink.clear";
+    /// A member locked the target it was assigned, the first time. Subject:
+    /// the member. Object: the target.
+    pub const DATALINK_ACKNOWLEDGE: &str = "datalink.acknowledge";
+    /// A human was told that a flightmate holds a lock on the same aircraft
+    /// the human holds, when the lead did not mean it (a HUD line and a
+    /// beep). Subject: the human's plane. Object: the aircraft both hold.
+    /// Fields: `other` (Id: the flightmate).
+    pub const DATALINK_SORT_WARNING: &str = "datalink.sort_warning";
+
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
         WEAPON_LAUNCH,
@@ -302,6 +331,13 @@ pub mod kind {
         WEAPON_GUN_BURST,
         NET_STATS,
         NET_EVENT,
+        DATALINK_MEMBER,
+        DATALINK_LOCK,
+        DATALINK_UNLOCK,
+        DATALINK_ASSIGN,
+        DATALINK_CLEAR,
+        DATALINK_ACKNOWLEDGE,
+        DATALINK_SORT_WARNING,
     ];
 }
 
@@ -398,6 +434,12 @@ pub mod field {
     pub const OWN: &str = "own";
     /// The views keep a target the sensors dropped, by sight.
     pub const HELD: &str = "held";
+    /// A plane's aircraft has a radar.
+    pub const RADAR: &str = "radar";
+    /// The aircraft an assignment names.
+    pub const TARGET: &str = "target";
+    /// The other member of a pair, such as the flightmate in a sort warning.
+    pub const OTHER: &str = "other";
     /// A position in feet, world axes.
     pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
     /// A velocity in feet per second, world axes.

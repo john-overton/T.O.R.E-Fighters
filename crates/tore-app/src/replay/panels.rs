@@ -162,14 +162,17 @@ pub enum Channel {
     Crew,
     /// Seeker tones, warnings, music and sound effects.
     Tones,
+    /// The data link: locks, assignments and sort warnings.
+    Link,
 }
 
-pub const CHANNELS: [Channel; 5] = [
+pub const CHANNELS: [Channel; 6] = [
     Channel::Radio,
     Channel::Orders,
     Channel::Tower,
     Channel::Crew,
     Channel::Tones,
+    Channel::Link,
 ];
 
 impl Channel {
@@ -183,6 +186,10 @@ impl Channel {
             k::COMMS_TOWER => Self::Tower,
             k::COMMS_CREW | k::COMMS_HUD => Self::Crew,
             _ if kind.starts_with("audio.") => Self::Tones,
+            // Joining the link is bookkeeping: the viewer's exports count it
+            // and the Comms panel leaves it out.
+            k::DATALINK_MEMBER => return None,
+            _ if kind.starts_with("datalink.") => Self::Link,
             // Comms kinds added later list with the radio.
             _ if kind.starts_with("comms.") => Self::Radio,
             _ => return None,
@@ -196,6 +203,7 @@ impl Channel {
             Self::Tower => "Tower",
             Self::Crew => "Crew",
             Self::Tones => "Tones",
+            Self::Link => "Link",
         }
     }
 
@@ -210,6 +218,7 @@ impl Channel {
             Self::Tower => GOOD,
             Self::Crew => WHITE,
             Self::Tones => [190, 170, 235, 255],
+            Self::Link => [120, 220, 200, 255],
         }
     }
 }
@@ -218,7 +227,7 @@ impl Channel {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommsPanel {
     /// Which channels show, in [`CHANNELS`] order.
-    pub shown: [bool; 5],
+    pub shown: [bool; 6],
     /// Only entries sent by, addressed to or about this aircraft.
     pub aircraft: Option<u32>,
     /// While scrolled back: the entry index just past the newest row shown.
@@ -229,7 +238,7 @@ pub struct CommsPanel {
 impl Default for CommsPanel {
     fn default() -> Self {
         Self {
-            shown: [true; 5],
+            shown: [true; 6],
             aircraft: None,
             anchor: None,
         }
@@ -1263,6 +1272,8 @@ pub fn kind_label(kind: &str) -> String {
         k::AUDIO_RELEASE => "RELEASE",
         k::AUDIO_EJECTION => "EJECT",
         k::AUDIO_DEVICE => "DEVICE",
+        k::DATALINK_ACKNOWLEDGE => "ACK",
+        k::DATALINK_SORT_WARNING => "SORT",
         other => {
             return other
                 .split_once('.')
@@ -1984,7 +1995,10 @@ pub(crate) mod tests {
         assert!(p.slot(Side::Left).unwrap().pinned);
         let comms = rects.comms.unwrap();
         click(&mut p, centre(chip_rect(comms, 4)));
-        assert_eq!(p.comms().unwrap().shown, [true, true, true, true, false]);
+        assert_eq!(
+            p.comms().unwrap().shown,
+            [true, true, true, true, false, true]
+        );
         click(&mut p, centre(aircraft_chip_rect(comms)));
         assert_eq!(p.comms().unwrap().aircraft, Some(0));
         click(&mut p, centre(aircraft_chip_rect(comms)));
@@ -2226,6 +2240,71 @@ pub(crate) mod tests {
         assert_eq!(rows.iter().map(Row::first).collect::<Vec<_>>(), [1, 2]);
         let rows = rows_since(&events, 1, 4, &filter);
         assert_eq!(rows.iter().map(Row::first).collect::<Vec<_>>(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn data_link_events_list_under_their_own_channel_and_read_in_words() {
+        use vocab::kind as k;
+        let events = vec![
+            timed(
+                0,
+                Event::new(k::DATALINK_MEMBER)
+                    .with_subject(1)
+                    .with("radar", true),
+            ),
+            timed(
+                10,
+                Event::new(k::DATALINK_LOCK)
+                    .with_subject(1)
+                    .with_object(3)
+                    .with_text("locked"),
+            ),
+            timed(
+                20,
+                Event::new(k::DATALINK_ASSIGN)
+                    .with_subject(0)
+                    .with_object(1)
+                    .with("target", Value::Id(3))
+                    .with("order", "EngageMyTarget"),
+            ),
+            timed(
+                30,
+                Event::new(k::DATALINK_CLEAR)
+                    .with_subject(1)
+                    .with_object(3)
+                    .with("reason", "target lost")
+                    .with_text("assignment ended"),
+            ),
+            timed(
+                40,
+                Event::new(k::DATALINK_SORT_WARNING)
+                    .with_subject(0)
+                    .with_object(3)
+                    .with("other", Value::Id(1))
+                    .with_text("told a flightmate holds the same lock"),
+            ),
+            radio(50, 1, "Contact"),
+        ];
+        assert_eq!(Channel::of(k::DATALINK_MEMBER), None, "bookkeeping");
+        assert_eq!(Channel::of(k::DATALINK_ASSIGN), Some(Channel::Link));
+        let mut filter = CommsPanel::default();
+        let rows = rows_before(&events, events.len(), &filter, 10);
+        assert_eq!(
+            rows.iter().map(Row::first).collect::<Vec<_>>(),
+            [1, 2, 3, 4, 5]
+        );
+        let name = |id: u32| format!("#{id}");
+        let assign = entry(&events, &rows[1], &name);
+        assert_eq!(assign.kind, "ASSIGN");
+        assert_eq!(assign.main, "#0 -> #1: EngageMyTarget");
+        assert_eq!(assign.details, "target #3");
+        let clear = entry(&events, &rows[2], &name);
+        assert_eq!(clear.main, "#1 -> #3: assignment ended");
+        assert_eq!(clear.details, "why: target lost");
+        assert_eq!(entry(&events, &rows[3], &name).kind, "SORT");
+        assert_eq!(entry(&events, &rows[3], &name).details, "other #1");
+        filter.shown[Channel::Link.index()] = false;
+        assert_eq!(rows_before(&events, events.len(), &filter, 10).len(), 1);
     }
 
     /// A radio call's journal entry: `outcome` for call `message`.

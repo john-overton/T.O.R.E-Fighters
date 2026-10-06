@@ -12,6 +12,8 @@ FileVersion=2.2
 10000000000,T=-0.0887468|-0.1060855|6096|60|0|0|256032|243840|0,Type=Air+FixedWing,Name=F/A-18D,Pilot=You,CallSign=You,Group=Friendly wing 1,Coalition=Allies,Color=Blue,TAS=243.8,HDG=0,Throttle=0.9,Afterburner=0,LandingGear=0,Flaps=0,AirBrakes=0,Tailhook=0,FuelWeight=4082,VerticalGForce=2,Mach=0.75,AOA=6.5,AOS=0.2,AGL=5715
 10000000002,T=-0.0211044|-0.0920381|5486.4|0|0|270|257860.8|244449.6|270,Type=Air+FixedWing,Name=MiG-29,Pilot=Enemy 2-1,CallSign=Enemy 2-1,Group=Enemy wing 2,Coalition=Enemies,Color=Red,TAS=182.9,HDG=270,Throttle=0.7,Afterburner=0,LandingGear=0,Flaps=0,AirBrakes=0,Tailhook=0,FuelWeight=2268,VerticalGForce=1
 0,Event=Debug|10000000002|Enemy 2-1 activity FORMATION -> ATTACKING because leader released wing
+0,Event=Debug|10000000000|You joined the data link\, with a radar
+0,Event=Debug|Friendly 1-2 joined the data link\, with a radar
 #0.1
 10000000000,T=-0.0887292|-0.1055238||||2.48|256032.48|243864.37|2.25,HDG=2.3
 10000000002,T=-0.0217808||||||257842.51||
@@ -43,6 +45,8 @@ FileVersion=2.2
 #0.9
 10000000000,T=-0.0873273|-0.1011331||||22.17|256070.38|244054.91|20.25,HDG=20.2
 10000000002,T=-0.0271922||||||257696.21||
+#0.983
+0,Event=Debug|Friendly 1-2 locked Enemy 2-1
 #1
 10000000000,T=-0.0869985|-0.1006098||||24.58|256079.27|244077.62|22.5,HDG=22.5
 10000000002,T=-0.0278687||||||257677.92||
@@ -52,10 +56,15 @@ FileVersion=2.2
 #1.083
 0,Event=Debug|10000000000|ORDER You -> Friendly 1-2: engage my target
 0,Event=Debug|ANSWER Friendly 1-2 -> You [rejected]; why: its sensors cannot see the target
+#1.092
+0,Event=Debug|10000000000|You assigned Friendly 1-2 to attack Enemy 2-1 (EngageMyTarget)
 #1.1
 10000000000,T=-0.0866371|-0.1000951||||26.98|256089.04|244099.96|24.75,HDG=24.8
 10000000002,T=-0.0285451||||||257659.63||
 20000000001,T=-0.0831017|-0.1000383|6055.36||-20.81|77.82|256184.62|244102.42|76.59,TAS=1144.1
+#1.167
+0,Event=Debug|Friendly 1-2 locked its assigned target Enemy 2-1
+0,Event=Debug|10000000000|Sort warning to You: Friendly 1-2 holds the same lock on Enemy 2-1
 #1.2
 10000000000,T=-0.0862436|-0.0995897||||29.37|256099.68|244121.89|27,HDG=27
 10000000002,T=-0.0292215||||||257641.34||
@@ -127,6 +136,9 @@ FileVersion=2.2
 10000000002,T=-0.038015||||||257403.6||
 -20000000001
 0,Event=Destroyed|10000000002|Enemy 2-1 was destroyed by You (AIM-120)
+#2.508
+0,Event=Debug|Friendly 1-2 let go of its lock on Enemy 2-1
+0,Event=Debug|Friendly 1-2's assignment on Enemy 2-1 ended because target lost
 #2.6
 10000000000,T=-0.07778|-0.0938855||||60.97|256328.5|244369.43|58.5,HDG=58.5
 10000000002,T=-0.0386914||5474.21||||257385.31||

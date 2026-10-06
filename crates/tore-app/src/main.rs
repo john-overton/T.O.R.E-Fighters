@@ -623,6 +623,7 @@ impl TickPresenter<'_> {
         // reason. Write-only.
         if let Some(recording) = &mut self.recorder {
             recording.drain_comms(&mut self.world.comms);
+            recording.drain_datalink(&mut self.world.datalink);
         }
         let frame = shared_tick_frame(self.world, input.seat, &out.cues, &shared);
         let (plane, flight) = (frame.plane.0, frame.flight);
@@ -6500,6 +6501,14 @@ fn data_link_line(entry: &tore_world::datalink::Entry) -> String {
         } => {
             format!("t={tick} data link: acknowledge plane={plane} target={target}")
         }
+        Entry::SortWarning {
+            tick,
+            plane,
+            other,
+            target,
+        } => {
+            format!("t={tick} data link: sort warning plane={plane} other={other} target={target}")
+        }
     }
 }
 
@@ -6990,9 +6999,16 @@ fn ai_probe_run(
         if let Some(wings) = &mission.ai_wings {
             print_opportunity_notes(tick, wings, &mut opportunity_notes);
         }
+        // The data link's journal is drained once: for the probe's lines,
+        // the recording, or both.
+        let link_entries = if script.data_link || recording.is_some() {
+            mission.datalink.take_journal()
+        } else {
+            Vec::new()
+        };
         if script.data_link {
-            for entry in mission.datalink.take_journal() {
-                println!("{}", data_link_line(&entry));
+            for entry in &link_entries {
+                println!("{}", data_link_line(entry));
             }
         }
         if let Some(error) = &output.fault {
@@ -7096,6 +7112,7 @@ fn ai_probe_run(
         if let Some(recording) = &mut recording {
             // Write-only: every communication decision of the tick.
             recording.drain_comms(&mut mission.comms);
+            recording.datalink_drained(mission.datalink.journal_lost(), &link_entries);
             let releases = seat_releases(&mission, SEAT, &output.releases);
             recording.sounds(&output.emissions, &releases);
             recording.end(None, &mut mission.combat);

@@ -492,6 +492,66 @@ fn golden_frames() -> Vec<Frame> {
                 .push(Event::new(kind::PLAYER_BOOKMARK).with_text("odd dip")),
             _ => {}
         }
+        // The data link (slice G9): both friendlies join with a radar, the
+        // wingman locks the enemy, the lead assigns it, the wingman
+        // acknowledges, a sort warning, and the assignment ends when the
+        // enemy is destroyed.
+        match tick {
+            0 => {
+                for plane in [0u32, 1] {
+                    frame.events.push(
+                        Event::new(kind::DATALINK_MEMBER)
+                            .with_subject(plane)
+                            .with(field::RADAR, true)
+                            .with_text("joined the data link, with a radar"),
+                    );
+                }
+            }
+            118 => frame.events.push(
+                Event::new(kind::DATALINK_LOCK)
+                    .with_subject(1)
+                    .with_object(2)
+                    .with_text("locked"),
+            ),
+            131 => frame.events.push(
+                Event::new(kind::DATALINK_ASSIGN)
+                    .with_subject(0)
+                    .with_object(1)
+                    .with(field::TARGET, Value::Id(2))
+                    .with(field::ORDER, "EngageMyTarget"),
+            ),
+            140 => {
+                frame.events.push(
+                    Event::new(kind::DATALINK_ACKNOWLEDGE)
+                        .with_subject(1)
+                        .with_object(2)
+                        .with_text("locked its assigned target"),
+                );
+                frame.events.push(
+                    Event::new(kind::DATALINK_SORT_WARNING)
+                        .with_subject(0)
+                        .with_object(2)
+                        .with(field::OTHER, Value::Id(1))
+                        .with_text("told a flightmate holds the same lock"),
+                );
+            }
+            301 => {
+                frame.events.push(
+                    Event::new(kind::DATALINK_UNLOCK)
+                        .with_subject(1)
+                        .with_object(2)
+                        .with_text("let go of its lock"),
+                );
+                frame.events.push(
+                    Event::new(kind::DATALINK_CLEAR)
+                        .with_subject(1)
+                        .with_object(2)
+                        .with(field::REASON, "target lost")
+                        .with_text("assignment ended"),
+                );
+            }
+            _ => {}
+        }
         if tick.is_multiple_of(30) {
             let p = &frame.aircraft[0];
             frame.trees.push(TreeSample {
@@ -688,6 +748,55 @@ fn the_summary_and_units_say_when_external_tanks_are_counted() {
         text.contains("(used 10 lb)") && !text.contains("external"),
         "{text}"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_summary_counts_the_data_link_and_leaves_the_section_out_without_it() {
+    let dir = temp_dir("summary-link");
+    let recording = golden_recording(&dir);
+    let mut out = Vec::new();
+    write_summary(&recording, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains(
+            "2 members (2 with a radar), 1 lock, 1 assignment, 1 acknowledged, 1 cleared, 1 sort warning"
+        ),
+        "{text}"
+    );
+    let section = text
+        .split("Data link\n")
+        .nth(1)
+        .and_then(|rest| rest.split("Timeline").next())
+        .unwrap();
+    assert!(
+        !section.contains("let go") && !section.contains("Friendly 1-2 locked Enemy"),
+        "locks are counted, not listed: {section}"
+    );
+    assert!(
+        text.contains("You assigned Friendly 1-2 to attack Enemy 2-1 (EngageMyTarget)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Friendly 1-2's assignment on Enemy 2-1 ended because target lost"),
+        "{text}"
+    );
+    // A recording from before the events has no such section.
+    let frames: Vec<Frame> = golden_frames()
+        .into_iter()
+        .map(|mut frame| {
+            frame
+                .events
+                .retain(|event| !event.kind.starts_with("datalink."));
+            frame
+        })
+        .collect();
+    let older =
+        Recording::open(write(&dir, "older.tore-replay", &frames, &golden_footer())).unwrap();
+    let mut out = Vec::new();
+    write_summary(&older, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(!text.contains("Data link"), "{text}");
     let _ = std::fs::remove_dir_all(dir);
 }
 

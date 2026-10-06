@@ -41,6 +41,14 @@ Communication
 0:01.0  ORDER   You -> Friendly 1-2: engage my target
 0:01.0  ANSWER  Friendly 1-2 -> You [rejected]; why: its sensors cannot see the target
 
+Data link
+---------
+2 members (2 with a radar), 1 lock, 1 assignment, 1 acknowledged, 1 cleared, 1 sort warning
+0:01.0  You assigned Friendly 1-2 to attack Enemy 2-1 (EngageMyTarget)
+0:01.1  Friendly 1-2 locked its assigned target Enemy 2-1
+0:01.1  Sort warning to You: Friendly 1-2 holds the same lock on Enemy 2-1
+0:02.5  Friendly 1-2's assignment on Enemy 2-1 ended because target lost
+
 Timeline
 --------
 0:01.0  You launched AIM-120 at Enemy 2-1 from 0.9 nm, aspect 35 deg
@@ -58,15 +66,21 @@ Bookmarks
 0:03.0 "odd dip"
   events from 0:00.0 to 0:08.0:
     0:00.0  Enemy 2-1 activity FORMATION -> ATTACKING because leader released wing
+    0:00.0  You joined the data link, with a radar
+    0:00.0  Friendly 1-2 joined the data link, with a radar
     0:00.5  RADIO You: "Fox three, one away" [queued], trigger: radar missile release at aircraft 2
     0:00.5  HUD cockpit: "Attacking" [suppressed], not heard; why: one line per 2 s, 1.5 s left
     0:00.5  RADIO Enemy 2-1 [suppressed], not heard, trigger: new target you; why: contact cooldown (15 s), 3.0 s left
     0:00.5  RADIO You: "Splash" [suppressed], not heard; why: unguided hits: one per shooter every 8 s
     0:00.5  MUSIC situation normal -> air; why: inputs ask for Air: designated enemy inside 40000 ft
+    0:00.9  Friendly 1-2 locked Enemy 2-1
     0:01.0  You launched AIM-120 at Enemy 2-1 from 0.9 nm, aspect 35 deg
     0:01.0  RADIO You: "Fox three, one away" [delivered], heard by you, waited 0.25 s, trigger: missile release
     0:01.0  ORDER You -> Friendly 1-2: engage my target
     0:01.0  ANSWER Friendly 1-2 -> You [rejected]; why: its sensors cannot see the target
+    0:01.0  You assigned Friendly 1-2 to attack Enemy 2-1 (EngageMyTarget)
+    0:01.1  Friendly 1-2 locked its assigned target Enemy 2-1
+    0:01.1  Sort warning to You: Friendly 1-2 holds the same lock on Enemy 2-1
     0:01.2  You: Low-speed G ceiling applied (limit 6.8 G) because speed near the stall speed, on the ramp from 142 kt to 250 kt
     0:01.2  You: Blast kick (strength 1.2) because a missile blast nearby
     0:01.2  You asked for 7.5 G against a limit of 6.8 G because low-speed ceiling, fuel and stores divide by 1.1
@@ -78,6 +92,8 @@ Bookmarks
     0:02.5  shot 1 from You at Enemy 2-1: hit, damage 800, hp after 0
     0:02.5  You hit Enemy 2-1 with AIM-120 for 800 damage, hp now 0
     0:02.5  Enemy 2-1 was destroyed by You (AIM-120)
+    0:02.5  Friendly 1-2 let go of its lock on Enemy 2-1
+    0:02.5  Friendly 1-2's assignment on Enemy 2-1 ended because target lost
   aircraft at 0:03.0:
     You  20,000 ft MSL, 474 kt, heading 068, G 2, alive, 1,000 of 1,000 hp
     Enemy 2-1  17,800 ft MSL, 355 kt, heading 270, G 1, destroyed, 0 of 800 hp

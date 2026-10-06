@@ -15,7 +15,7 @@
 //! 2026-10-05: only the radar scope's marks go without a radar; such an
 //! aircraft holds no lock, so in practice it is never in a pair).
 
-use super::DataLink;
+use super::{DataLink, Entry};
 use crate::{
     comms::{Call, Kind, Phrase},
     radio_calls::{FLIGHTS, POSITIONS},
@@ -155,6 +155,12 @@ impl DataLink {
             name_of(mate.flight.index, mate.member)
         );
         self.seat_warned.insert(seat, self.tick);
+        self.journal.push(Entry::SortWarning {
+            tick: self.tick,
+            plane,
+            other,
+            target,
+        });
         Some(SortWarning {
             seat,
             plane,
@@ -247,6 +253,25 @@ mod tests {
         );
         assert_eq!(warnings[0].target, 50);
         assert_eq!((warnings[0].plane, warnings[0].other), (0, 1));
+        // The journal keeps one entry for each warning a seat heard, for the
+        // recording (slice G9).
+        assert_eq!(
+            link.take_journal(),
+            [
+                Entry::SortWarning {
+                    tick: 1000,
+                    plane: 0,
+                    other: 1,
+                    target: 50
+                },
+                Entry::SortWarning {
+                    tick: 1000,
+                    plane: 1,
+                    other: 0,
+                    target: 50
+                },
+            ]
+        );
     }
 
     #[test]

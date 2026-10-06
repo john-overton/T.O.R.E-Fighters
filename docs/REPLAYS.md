@@ -164,6 +164,7 @@ player's ownship, and the first aircraft is the one watched.
 | Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off; `flight.effect` when a flight-model effect starts or stops, with what it applied and why ([below](#flight-model-effects)); `flight.g_limit` when the stick reaches its stop, with the G the envelope offers, the limit applied, the G delivered and what set the limit; `flight.structural_failure` with the section, the G and why |
 | AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
+| Data link | `datalink.member`, `datalink.lock`, `datalink.unlock`, `datalink.assign`, `datalink.clear`, `datalink.acknowledge` and `datalink.sort_warning`: what changed in each flight's shared picture, from the data link's journal ([below](#data-link-events)) |
 | Audio | `audio.effect` (impacts, explosions, and each chaff cartridge's and flare's release sound, marked `own` when the player's own aircraft released it), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
 | Player and system | `player.command` (combat commands and trigger releases), `player.view_target` (the target your target views follow, from the first frame and again whenever it changes, including when the sensors drop it and the views hold it by sight within visual range, and when it goes to none), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
 | Display trees | `ai.thought` for every AI aircraft, `flight.telemetry` for every aircraft that flies, `weapon.guidance` for every guided missile ([below](#display-trees)) |
@@ -352,6 +353,41 @@ weapon aims at surface targets, which changes the sound of an infrared
 lock. The music's inputs are journaled only when the flight has sound; a
 headless probe has none.
 
+### Data link events
+
+The [flight data link](DATALINK.md) keeps a write-only journal of what changes
+in each flight's picture, the way the communication journal does: bounded at
+1,024 entries between drains, and it draws no random number, so the picture
+is the same whether or not a recording drains it. The recorder drains it every
+tick, after the communication journal, and writes one event for each entry.
+The layout is an agent decision (slice G9, 2026-10-05); the names are in
+`tore_replay::vocab`.
+
+| Event | Who | What |
+| --- | --- | --- |
+| `datalink.member` | the plane | A plane joined the picture, the first tick the link saw it, with `radar` (true or false: its aircraft has a radar, so its scope marks the picture). Every plane in play has one, so a recording that has data link events lists each plane once near its start. |
+| `datalink.lock` | the member, then the target as object | A member took a radar lock. |
+| `datalink.unlock` | the member, then the target | A member let go of a lock: the target or the member is gone, or the lock was released. |
+| `datalink.assign` | the lead, then the wingman as object | A lead gave a wingman a target: `target` (the aircraft) and `order` (the order's name, such as `EngageMyTarget`, as `comms.order` names it). |
+| `datalink.clear` | the member whose assignment ended, then the target | `reason`: `order` (the lead ordered something else), `receiver lost`, `target lost` or `lead changed`. |
+| `datalink.acknowledge` | the member, then the target | The wingman locked the target it was assigned, the first time only. |
+| `datalink.sort_warning` | the human's plane, then the aircraft both hold | A human was told a flightmate (`other`) holds a lock on the same aircraft. The HUD line is its own `comms.hud` entry, and the beep is a cue. |
+
+The assignment call's words are not a second line: they stay in the
+communication journal's entry for the order (`comms.order`), so
+`datalink.assign` and the order that gave it match by tick, the lead and the
+wingman. The 4-times-a-second tracks and each
+member's state are not recorded: they are what each aircraft's sensors held,
+and the AI thinking record shows what an AI member did with them. A
+journal that overflowed leaves a `system.note` saying how many entries were
+lost, as the communication journal does.
+
+What reads them: the debug log and the Tacview file's `Debug` events carry
+every one in words; the summary has a **Data link** section (below); the
+Comms panel lists them under the **Link** chip, except `datalink.member`, which
+only the exports count; and `--recording-diff` compares them as a category.
+A recording from before them has none and reads as it always did.
+
 ## Network flights
 
 A networked flight is not recorded live: the game on a client does not run the
@@ -428,6 +464,11 @@ What is not in it, known limits:
   weapon record when the mission knows it.
 - The first moments before the first update are not in the replay; it starts at
   the first host tick a snapshot showed after you were seated.
+- No `datalink.*` events yet. The host's picture reaches a client as the
+  wire's `Link` events once slice G7 adds them
+  ([protocol](formats/net-protocol.md#data-link-stage-g)); the conversion
+  then writes the same events from them (the mapping is in
+  `tore-session/src/client/convert/events.rs`, as the other events' is).
 
 A capture that was cut short (the game crashed or was closed) converts up to
 its last whole record; the footer says `end=cut` and the byte it stopped at.
@@ -604,8 +645,8 @@ beyond them.
   events are new names, which a reader that does not know them ignores.
 - New kinds of data arrive as new entries, fields and flag bits within the
   version: released chaff and flares (`combat.countermeasure`), the
-  `flame` flag and the player's view target (`player.view_target`) came
-  this way. A reader ignores flag bits it does not know,
+  `flame` flag, the player's view target (`player.view_target`) and the
+  data link's events (`datalink.*`) came this way. A reader ignores flag bits it does not know,
   and a recording from before them has no releases and no lit flames: its
   chaff and flares were short effects, which the viewer does not draw, as
   flight no longer draws them.
@@ -648,7 +689,11 @@ level and above the ground (when telemetry records it), stalls, spins, fuel
 used, shots, hits, kills, chaff and flares released, final state and time in each AI activity; a table
 of every shot (launch geometry, time of flight, peak speed, closest approach
 to the intended target, outcome and why); the communication transcript
-with triggers, outcomes and reasons, including the music's changes; a
+with triggers, outcomes and reasons, including the music's changes; the
+data link's changes when the recording has any (a line of counts for members,
+locks, assignments, acknowledgements, cleared assignments and sort warnings,
+then each assignment, acknowledgement, clearing and sort warning; locks are
+counted and left to the log); a
 timeline of key events (G-limit hits, chaff and flare releases and decoys among them; AI decisions
 and effect changes stay in the log and the bookmarks); each bookmark with
 the events of the ten seconds around it and every aircraft's state at that
@@ -721,8 +766,8 @@ Events: `Destroyed` for kills, `Message` for each radio, crew or tower line
 the player heard, once, when it was delivered, `Bookmark` for the player's
 bookmarks, `TakenOff` and `Landed`, and `Debug` (shown with Tacview's
 `/Debug:on`) for AI decisions with their reasons, orders and answers, comms
-entries with an outcome or reason, flight-model effects starting and
-stopping, and G-limit hits. Commas in text are escaped as Tacview requires;
+entries with an outcome or reason, data link changes, flight-model effects
+starting and stopping, and G-limit hits. Commas in text are escaped as Tacview requires;
 line breaks become spaces.
 
 **Reference time.** The recording's date at the mission's local time of day,
@@ -746,8 +791,8 @@ Reports header differences, differences in registered aircraft and weapons,
 the **first second where the state checksums differ** (and the last that
 matched), the **first tick where any aircraft's state differs** and which
 aircraft, largest difference first, and, per category (kills, launches,
-hits, chaff and flares, shot outcomes, AI decisions, comms, flight events,
-player and system events), the counts and the first event that differs or, when the events
+hits, chaff and flares, shot outcomes, AI decisions, comms, data link, flight
+events, player and system events), the counts and the first event that differs or, when the events
 match, the first difference in timing.
 
 The checksum is FNV-1a 64 over every aircraft's exact state in id order,
@@ -1429,7 +1474,8 @@ off, or an order, request or report and each recipient's answer. A row
 sits where its newest entry is, so a line that waited in the queue appears
 when it was said, and before that moment it reads as queued. Each row
 gives the time, the kind (RADIO, CREW, TOWER, HUD, ORDER, REQUEST, REPORT,
-ANSWER, TONE, STALL, MUSIC, EFFECT, RELEASE, EJECT, DEVICE), who said what
+ANSWER, TONE, STALL, MUSIC, EFFECT, RELEASE, EJECT, DEVICE, and for the data
+link LOCK, UNLOCK, ASSIGN, CLEAR, ACK, SORT), who said what
 to whom, and the outcome in brackets: green when it went out or was acted
 on, amber while it waits or when some recipients took it and some did not,
 red when it was held back, dropped, refused or cut off, grey when there was
@@ -1443,7 +1489,8 @@ number, such as a cockpit message or a tone, is a row of its own.
 
 The chips filter by kind: **Radio**; **Orders** (orders, requests, reports
 and each recipient's answer); **Tower**; **Crew** (crew remarks and cockpit
-messages); **Tones** (seeker tones, warnings, music and sound effects). The
+messages); **Tones** (seeker tones, warnings, music and sound effects); **Link** (the
+data link's locks, assignments and sort warnings). The
 aircraft chip steps through the aircraft, keeping the entries it sent,
 received or is named in; "Comms for this aircraft" sets it. The filters are
 kept when the panel closes. The list follows the playhead in either

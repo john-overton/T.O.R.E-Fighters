@@ -402,6 +402,12 @@ impl DataLink {
     pub fn take_journal(&mut self) -> Vec<Entry> {
         self.journal.take()
     }
+
+    /// Journal entries dropped because nobody drained them (slice G9: the
+    /// recorder notes them).
+    pub fn journal_lost(&self) -> u64 {
+        self.journal.lost()
+    }
 }
 
 /// The squared distance between two points, feet.
