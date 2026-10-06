@@ -422,6 +422,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
     _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),
+    _r(
+        "crates/tore-net/src/peers*", NET_FAMILIES,
+        "the peers router in front of a joined socket, its reach answerer and reach tests (stage K, slice K6)",
+    ),
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay"), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/src/client/scores.rs", NET_FAMILIES, "the scores a game keeps and their words (tore-bot prints them)"),
@@ -473,7 +477,10 @@ RULES: tuple[Rule, ...] = (
         "rejoin tokens and reservations, the session part that carries them, a slot's reservation in every lobby state "
         "(stage K), and their tests",
     ),
-    _r("crates/tore-session/src/host/succession.rs", NET_FAMILIES, "candidates and host selection (stage K)"),
+    _r(
+        "crates/tore-session/src/host/succession*", NET_FAMILIES,
+        "candidates and host selection on the host, the candidates part, and their tests (stage K, slice K6)",
+    ),
     _r(
         "crates/tore-session/src/host/*state.rs", NET_FAMILIES,
         "the session's state parts and their coders beside the state they code (stage K)",
@@ -483,7 +490,10 @@ RULES: tuple[Rule, ...] = (
         "crates/tore-session/src/client/rejoin*", NET_FAMILIES,
         "the client's side of rejoin: the token it keeps, its store and the Rejoin (stage K; tore-bot --token-file)",
     ),
-    _r("crates/tore-session/src/client/candidate.rs", NET_FAMILIES, "the client's side of host selection (stage K)"),
+    _r(
+        "crates/tore-session/src/client/candidate*", NET_FAMILIES,
+        "the client's side of host selection: its report, CPU measure, reach work and upload burst (stage K, slice K6)",
+    ),
     _r(
         "crates/tore-session/src/client/migration_seams_tests.rs", NET_FAMILIES,
         "stage K's seams on the network simulator (slice K0's tests)",

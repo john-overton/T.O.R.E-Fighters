@@ -88,12 +88,10 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     let asked: Vec<Message> = messages
         .into_iter()
         .filter(|m| m.from_player() && !matches!(m.kind(), kind::RELEASE | kind::REJOIN))
+        // Slice K6 takes Candidate and Reach report.
+        .filter(|m| ![kind::CANDIDATE, kind::REACH_REPORT].contains(&m.kind()))
         .collect();
-    assert_eq!(
-        asked.len(),
-        8,
-        "two Candidate and two Standby status samples"
-    );
+    assert_eq!(asked.len(), 5, "two Standby status samples");
     for message in asked.iter().cloned() {
         rig.players[cobra].client.request(now, message);
     }
@@ -106,12 +104,6 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
         now,
         Message::Rejoin(tore_net::Token(0x1234_5678_9abc_def0_u128)),
     );
-    // The King's pin (setting 21) is K6's.
-    let cobra_id = rig.players[cobra].client.lobby().unwrap().you;
-    rig.players[king].client.change_settings(SettingsChange {
-        values: vec![(number::HOST, 1 + u32::from(cobra_id))],
-        ..SettingsChange::default()
-    });
     rig.run(Duration::from_millis(400));
     let refused = refusals(&rig, cobra);
     for message in &asked {
@@ -130,13 +122,6 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
         "{refused:?}"
     );
     let refused = refusals(&rig, king);
-    assert!(
-        refused
-            .iter()
-            .any(|(k, r)| *k == kind::SETTINGS && r == NOT_AVAILABLE),
-        "{refused:?}"
-    );
-    // No aircraft is kept for anyone on plane 1.
     assert!(
         refused
             .iter()

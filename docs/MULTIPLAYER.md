@@ -561,6 +561,16 @@ passes, the King reads why in Messages; when no other game can take over, the
 King reads "No other game can take over hosting: if you leave, the game
 ends." ([architecture](ARCHITECTURE.md#host-selection))
 
+*Built (slice K6, 2026-10-05):* the reports, the reach and upload tests, the
+ranking, the pin and its fallback and the King's warnings work on the host;
+the move in the lobby waits for the handover (slice K4), and the Options
+switch and the Host row for the screens (slice K7b). A game that hosts
+cannot test its own upload in the lobby, so it counts as passing until its
+flights show its players missing more than a tenth of its packets (agent
+decision). A machine passes the processor test while the busiest minute of
+the mission would take under half of one core
+([baseline](baselines/host-selection-2026-10-05.md)).
+
 ### Host migration
 
 When the host drops, the next-best candidate starts the server core from the

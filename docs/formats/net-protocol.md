@@ -1864,16 +1864,30 @@ choice below is an agent decision.
   none until slice K3. A slot's reservation is filled now from the idle
   aircraft (slice F2-A: an away player's plane), the seam where slice K5's
   table joins it (`Host::reserved_for`).
-- **Setting 21.** Its values are 0 to 256. Until slice K6 builds the pin
-  the registry refuses any but 0 (calculated) with "Not available yet."
-- **Until the later slices.** A host refuses Candidate, Reach report,
-  Standby status, Resume, Backlog and Taken over with a Refused "Not
-  available yet."; Release and Rejoin are built (slice K5, below); Backlog and
-  Standby status do not count against the 20 requests a second. A client
-  keeps every Standby record for its standby, in order
-  (`Client::take_standby_records`), and takes Token, Reach test, Reach
-  peers, Upload test, Succession, Resumed and Host moving without acting on
-  them.
+- **Setting 21.** Its values are 0 to 256: 0 calculated, else 1 plus the
+  pinned player's lobby id. *Built (K6):* the registry takes any; the host
+  refuses a relayed player, one who turned hosting off, a lobby id nobody
+  has and any pin on a dedicated server, in words.
+- **Host selection** (slice K6, no wire change). A game sends Candidate
+  once the lobby arrives and again whenever it changes. Reach peers names
+  every candidate a player reported beside the address the host sees it at,
+  not only its Local one, so a candidate's firewall opens to a player's
+  IPv6 address too. A Reach report's address index counts the test's
+  addresses, then any a candidate's own Reach taught the player (its router's
+  port towards that player). An Upload test's burst goes in Filler sections
+  of 1,100 bytes, whole packets as they fall due and the rest at the end;
+  the client's transport now takes section kinds up to 6, so the Payloads
+  it sends can carry Filler (one from a host is ignored). A Reach report for
+  a test that ended, and a Candidate from a dedicated server's player, are
+  taken and do nothing.
+- **Until the later slices.** A host refuses Standby status, Resume,
+  Backlog and Taken over with a Refused "Not available yet."; Release and
+  Rejoin are built (slice K5, below), and Candidate and Reach report (slice
+  K6); Backlog and Standby status do not count against the 20 requests a
+  second. A client keeps every Standby record for its standby, in order
+  (`Client::take_standby_records`), acts on Reach test, Reach peers and
+  Upload test (slice K6), and takes Token, Succession, Resumed and Host
+  moving without acting on them.
 - **The standby's side** (slice K2, `tore_session::standby`). A Check's
   tick is the world's `tick()` when the host hashed it: the tick the next
   step runs, as a checkpoint's tick is. Appointed in flight, a standby gets
