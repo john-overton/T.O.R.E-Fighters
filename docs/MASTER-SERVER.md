@@ -159,7 +159,7 @@ The start lines, and `--check-config`, say what the relay will do in one
 line, for example:
 
 ```text
-relay ACTIVE: up to 64 channels, 2 per player address, 64 KB/s each way per channel; 800 GB a month (new channels refused from 760 GB, open ones closed at 800 GB)
+relay ACTIVE: up to 64 channels, 2 per player address, 128 KB/s each way per channel; 800 GB a month (new channels refused from 760 GB, open ones closed at 800 GB)
 relay this month (2026-10): 12.7GB of 800 GB relayed
 ```
 
@@ -224,7 +224,7 @@ Numbers may be written with thousands commas (`100,000`).
 | `relay` | `on`, `off` | `on` | Whether to relay at all (John, 2026-10-05: on) |
 | `relay-channels` | 0 to 1,000 | 64 | Relayed pairs at once |
 | `relay-channels-per-source` | 1 to 30 | 2 | Relayed pairs one player's address may have |
-| `relay-rate` | 8 to 1,024 KB/s | 64 | Each channel's limit, each way, with bursts of twice as much (1 KB is 1,000 bytes) |
+| `relay-rate` | 8 to 1,024 KB/s | 128 | Each channel's limit, each way, with bursts of twice as much (1 KB is 1,000 bytes). 128 since 2026-10-06 (John, slice R1; 64 before): a relayed player's busiest second at 60 snapshots a second is 63 to 74 KB/s. A configuration file that sets `relay-rate` keeps its own value |
 | `relay-month-gb` | 0 to 100,000 | 800 | Relayed gigabytes sent out each calendar month (UTC): new channels are refused from 95 percent of it, open ones closed at 100 (John, 2026-10-05) |
 | `telemetry` | `on`, `off` | `on` | Whether to count the games' anonymous reports |
 | `status-interval` | 0 to 3,600 seconds | 60 | How often the status line is written; 0 for never |
@@ -403,9 +403,12 @@ month, UTC:
 - The figure survives restarts (`relay-YYYY-MM.txt`) and starts again at
   zero on the first of the month.
 - From the [plan's budget](multiplayer-plan.md#bandwidth-budget), a relayed
-  player in a full mission costs about 60 MB an hour leaving the master, so
-  800 GB is about 13,000 relayed player-hours a month, or 18 relayed
-  players around the clock.
+  player in a full mission costs about 180 MB an hour leaving the master at
+  60 snapshots a second (John's default since 2026-10-06), so 800 GB is
+  about 4,400 relayed player-hours a month, or 6 relayed players around the
+  clock. The plan's 1 TB gives about 5,500 player-hours. Raising
+  `relay-rate` to 128 changes none of this: it only caps a channel's busiest
+  seconds.
 - Set it to about 80 percent of the plan's monthly transfer, less anything
   else the machine serves, so the plan is never exceeded.
 

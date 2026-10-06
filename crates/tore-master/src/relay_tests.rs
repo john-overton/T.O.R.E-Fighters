@@ -368,8 +368,17 @@ fn a_request_needs_its_introduction_from_its_address_with_its_nonce() {
     assert_eq!(rig.master.relays().channels(), 0);
 }
 
+/// John, 2026-10-06 (Q55), slice R1: 128 KB/s each way per channel. D12
+/// measured a relayed player's busiest second at 63 to 74 KB/s at 60
+/// snapshots a second, so the old 64 cut it; 128 leaves room for twice that.
 #[test]
-fn a_channel_flooded_at_200_kb_a_second_passes_64() {
+fn the_default_rate_is_128_kb_a_second_each_way() {
+    assert_eq!(RelaySettings::default().rate_kb, 128);
+    assert_eq!(Settings::default().relay.rate_kb, 128);
+}
+
+#[test]
+fn a_channel_flooded_at_200_kb_a_second_passes_128() {
     let mut rig = Rig::new(Settings::default());
     let p = rig.join("192.0.2.50:40000");
     relayed(&rig.relay(p));
@@ -386,25 +395,26 @@ fn a_channel_flooded_at_200_kb_a_second_passes_64() {
     let total_frames = rig.host_got.len() as f64 * 1_015.0;
     let steady = (rig.host_got.len() - counted_from.unwrap()) as f64 * 1_015.0 / 8.0;
     assert!(
-        (62_000.0..=66_000.0).contains(&steady),
+        (126_000.0..=130_000.0).contains(&steady),
         "{steady} B/s after the burst"
     );
-    // The first seconds add the burst of 128 KB.
+    // The first seconds add the burst of 256 KB.
     assert!(
-        total_frames <= 64_000.0 * 12.0 + 128_000.0 + 2_000.0,
+        total_frames <= 128_000.0 * 12.0 + 256_000.0 + 2_000.0,
         "{total_frames}"
     );
-    assert!(rig.master.relays().counters.over_rate > 1_000);
+    assert!(rig.master.relays().counters.over_rate > 500);
     assert_eq!(rig.master.relays().channels(), 1, "still open after 12 s");
     // Over its rate in every second for 30 seconds closes it.
     while rig.now() < start + Duration::from_secs(45) && rig.players[p].joiner.relayed().is_some() {
         rig.player_sends(p, &[1u8; 1_000]);
         rig.step();
     }
-    // The first frame over the rate was about a second in (the burst).
+    // The first frame over the rate comes once the burst of 256 KB has
+    // drained at the 75 KB/s of excess, about 3.4 seconds in.
     let closed_at = rig.now() - start;
     assert!(
-        (Duration::from_secs(30)..=Duration::from_secs(33)).contains(&closed_at),
+        (Duration::from_secs(33)..=Duration::from_secs(35)).contains(&closed_at),
         "{closed_at:?}"
     );
     assert_eq!(rig.master.relays().channels(), 0);

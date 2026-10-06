@@ -7836,9 +7836,10 @@ and the player gets the channel and its key. From then on:
 - A relayed player's round trip is the player to the master to the host:
   where the master is matters, which is a question for John (the region).
 - Cost, from the [plan's budget](multiplayer-plan.md#bandwidth-budget): about
-  13 KB/s down and 2.6 KB/s up for a player in a full mission, about 60 MB
-  an hour leaving the master, so 800 GB a month is about 13,000 relayed
-  player-hours.
+  13 KB/s down and 2.6 KB/s up for a player in a full mission at 30
+  snapshots a second, about 60 MB an hour leaving the master, so 800 GB a
+  month was about 13,000 relayed player-hours; at 60 a second the plan puts
+  it at about 180 MB an hour and 4,400 player-hours.
 
 **Built (J3, 2026-10-05).** The master's side is `tore-master`'s
 `relay.rs`; both ends' side is `tore_net::master::relay` (`Channels`,
@@ -7891,10 +7892,11 @@ sequenceDiagram
   the third Relay open. Relay opens and offers are not answers fitted to a
   request: each goes to an address a listing or an introduction proves, as
   the Meets do.
-- **Rates.** 64 KB/s each way (1 KB is 1,000 bytes), bursts of twice that,
-  counted over the frames' bytes in integer time; over it a frame is
-  dropped. A channel over its rate in every second for 30 seconds is closed
-  (reason 2): a game never comes near it (38 KB/s at most in stage D), so
+- **Rates.** 128 KB/s each way (1 KB is 1,000 bytes; 64 until 2026-10-06,
+  slice R1), bursts of twice that, counted over the frames' bytes in integer
+  time; over it a frame is dropped. A channel over its rate in every second
+  for 30 seconds is closed (reason 2): a game never comes near it (38 KB/s
+  at most in stage D at 30 snapshots a second, 63 to 74 KB/s at 60), so
   that is a flood.
 - **The allowance** counts what the master sends in Relay frames with each
   datagram's IP and UDP headers (28 bytes over IPv4, 48 over IPv6), as the

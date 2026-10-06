@@ -381,12 +381,31 @@ mod tests {
         assert!(described.contains("telemetry off"));
     }
 
+    /// John, 2026-10-06 (Q55), slice R1: the default is 128 KB/s each way; a
+    /// file that sets `relay-rate` keeps its own value.
+    #[test]
+    fn the_relay_rate_defaults_to_128_and_a_files_own_value_stays() {
+        let config = Config::parse("", &base()).unwrap();
+        assert_eq!(config.settings.relay.rate_kb, 128);
+        let own = Config::parse("relay-rate 64\n", &base()).unwrap();
+        assert_eq!(own.settings.relay.rate_kb, 64);
+        assert!(own.relay_line().contains("64 KB/s each way"));
+        for (text, ok) in [
+            ("relay-rate 7\n", false),
+            ("relay-rate 8\n", true),
+            ("relay-rate 1024\n", true),
+            ("relay-rate 1025\n", false),
+        ] {
+            assert_eq!(Config::parse(text, &base()).is_ok(), ok, "{text}");
+        }
+    }
+
     #[test]
     fn the_relay_line_says_plainly_whether_it_is_active() {
         let config = Config::parse("", &base()).unwrap();
         assert_eq!(
             config.relay_line(),
-            "relay ACTIVE: up to 64 channels, 2 per player address, 64 KB/s each way per channel; \
+            "relay ACTIVE: up to 64 channels, 2 per player address, 128 KB/s each way per channel; \
              800 GB a month (new channels refused from 760 GB, open ones closed at 800 GB)"
         );
         assert!(config.describe().contains(&config.relay_line()));

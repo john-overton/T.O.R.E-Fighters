@@ -519,7 +519,7 @@ sends it to both ends when it closes a channel itself. Sent three times.
 
 | Rule | Value |
 | --- | --- |
-| Rate | 64 KB/s each way per channel, averaged over a second, with bursts to 128 KB; frames over it are dropped, not queued. A player's busiest second measured in stage D was 38 KB/s ([bandwidth](../multiplayer-plan.md#bandwidth-budget)) |
+| Rate | 128 KB/s each way per channel (64 before 2026-10-06, slice R1), averaged over a second, with bursts to 256 KB; frames over it are dropped, not queued. A player's busiest second measured in stage D was 38 KB/s at 30 snapshots a second, and 63 to 74 KB/s at 60 (D12; [bandwidth](../multiplayer-plan.md#bandwidth-budget)) |
 | Idle | A channel with no frame either way for 30 seconds is closed |
 | Channels | 64 at once in all, at most 2 per player address and 30 per listing |
 | Allowance | 800 GB of relayed traffic out of the master each calendar month (UTC), of the plan's 1 TB (John, 2026-09-28); at 95 percent new channels are refused, at 100 percent open ones are closed |

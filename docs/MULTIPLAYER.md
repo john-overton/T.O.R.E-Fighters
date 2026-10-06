@@ -761,7 +761,7 @@ the [master's wire](formats/master-protocol.md) and
   designed): a host proves its address before it is listed; every request
   is limited per IPv4 address or IPv6 /64 network; at most 8 listings from
   one; the master never answers an unproven sender with more bytes than it
-  sent; the relay carries only pairs it introduced, at most 64 KB/s each way
+  sent; the relay carries only pairs it introduced, at most 128 KB/s each way
   per pair and within a monthly allowance ([numbers](formats/master-protocol.md#limits)).
 - **When it is down,** the Internet Lobby is empty. Local games, Direct
   Connection and joining by address never use the master.
@@ -1243,6 +1243,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | The away player's observer menu | John, 2026-10-06: in place of Stop Watching, the menu offers Take Back Flight (back into the player's own reserved aircraft), Spawn in Aircraft (only when no reserved aircraft is left, under the revival rules) and Leave Game (built in F2-O4) |
 | Esc in the observer view | John, 2026-10-06: Esc opens the viewer's pause menu, whose first row is Stop Watching |
 | Snapshot rates | John, 2026-10-06: snapshots 60 a second by default, the near band's rate, and the far band 4 times a second, raised from 30 and twice a second; he accepts about double the bandwidth. The setting keeps 10 to 60 a second so a host on a weak uplink can go down (built in D12; [measured](baselines/net-rates-2026-10-06.md)) |
+| The relay's rate | John, 2026-10-06 (Q55): the master's `relay-rate` default goes from 64 to 128 KB/s each way per channel, since a relayed player's busiest second at 60 snapshots a second is 63 to 74 KB/s (D12). A master whose file sets `relay-rate` keeps its own value (built in R1; [the master's guide](MASTER-SERVER.md#the-configuration-file)) |
 
 ## Open questions
 

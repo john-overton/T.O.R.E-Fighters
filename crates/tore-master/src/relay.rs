@@ -97,7 +97,7 @@ impl Default for RelaySettings {
             on: true,
             channels: 64,
             channels_per_source: 2,
-            rate_kb: 64,
+            rate_kb: 128,
             month_gb: 800,
         }
     }
