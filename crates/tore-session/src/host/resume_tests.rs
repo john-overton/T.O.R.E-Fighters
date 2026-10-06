@@ -199,9 +199,13 @@ struct Rig {
 impl Rig {
     /// The original host with its own player on the link, standbys on.
     fn new(spec: MissionSpec) -> Self {
+        Self::with_resources(spec, Arc::new(resources()))
+    }
+
+    /// [`Rig::new`] over `resources` (a real import, say).
+    fn with_resources(spec: MissionSpec, resources: Arc<BTreeMap<String, Vec<u8>>>) -> Self {
         let net = SimNetwork::new(41);
         net.set_default_link(LinkConfig::for_round_trip(40 * MS, 0., 0., 0.));
-        let resources = Arc::new(resources());
         let socket = net.bind(host_address()).unwrap();
         let mut host = Host::new(spec, Arc::clone(&resources), config(31)).unwrap();
         host.set_standbys_enabled(true);
@@ -1311,4 +1315,157 @@ fn a_lobby_handed_over_keeps_the_old_house_and_its_crown() {
     // Still the King 5 seconds on: nobody is dropped.
     rig.run(DROP_AFTER);
     assert_eq!(king(rig.host_of(first)).as_deref(), Some("Lead"));
+}
+
+/// The real-data 15 against 15 mission, as `tests/host_load.rs` and slice
+/// K3's real-data test fly it: three wings of five F/A-18s against three of
+/// five MiG-29s, 10 nm apart at 10,000 feet.
+fn real_spec() -> MissionSpec {
+    let mut spec = MissionSpec::new("UKR", AircraftId::F18);
+    for (index, wing) in spec.wings.iter_mut().enumerate() {
+        wing.count = 5;
+        wing.skill = Skill::Average;
+        if index >= 3 {
+            wing.aircraft = AircraftId::Mig29;
+        }
+    }
+    spec.separation_nm = 10;
+    spec.start = Start::Airborne {
+        altitude_ft: 10_000,
+    };
+    spec
+}
+
+/// Slice K10's measurement: the takeover's times on the real-data 15
+/// against 15 mission with four humans (the house and three bots' games,
+/// two standing by), for a kill (the host cut off in the fight) and for a
+/// handover, with warm standbys and with cold ones (the bots' games on
+/// another system), at the default snapshot rates. Simulated time on a
+/// 40 ms round trip; the real time the takeover's replay took, and the
+/// real time from the loss until every player had snapshots again (every
+/// game's work on one thread), are printed beside it. Reads a real import
+/// through `TORE_DATA_DIR`; run it in release:
+///
+/// ```sh
+/// TORE_DATA_DIR=$PWD/.local/mpb-data-k10 cargo test --release --locked -p tore-session \
+///     --lib real_data_15_against_15_takeovers -- --ignored --nocapture
+/// ```
+///
+/// `K10_FIGHT_SECONDS` sets how long the fight runs before the loss (25 by
+/// default, so a cold standby replays up to 10 seconds of journal).
+#[test]
+#[ignore = "reads a real import through TORE_DATA_DIR; the full suite runs it in release"]
+fn real_data_15_against_15_takeovers_warm_and_cold() {
+    let directory = tore_import::data_directory().expect("TORE_DATA_DIR");
+    let import = Arc::new(tore_import::load(&directory).expect("an imported pack"));
+    let other = Platform::ALL
+        .into_iter()
+        .find(|p| *p != Platform::current() && *p != Platform::Unknown)
+        .unwrap();
+    let fight = Duration::from_secs(
+        std::env::var("K10_FIGHT_SECONDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(25),
+    );
+    for (label, platform) in [("warm", Platform::current()), ("cold", other)] {
+        for handover in [false, true] {
+            real_takeover(&import, label, platform, handover, fight);
+        }
+    }
+}
+
+fn real_takeover(
+    import: &Arc<BTreeMap<String, Vec<u8>>>,
+    label: &str,
+    platform: Platform,
+    handover: bool,
+    fight: Duration,
+) {
+    let kind = if handover { "handover" } else { "kill" };
+    let mut rig = Rig::with_resources(real_spec(), Arc::clone(import));
+    rig.platform = platform;
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 5)] {
+        rig.join(callsign, plane, false);
+    }
+    rig.fly();
+    rig.run(fight);
+    let kills: u32 = Rig::kills(&rig.host().world).values().sum();
+    let missiles = Rig::missiles(&rig.host().world).len();
+    let at = rig.net.now();
+    let real = std::time::Instant::now();
+    if handover {
+        rig.host_mut().hand_over().unwrap();
+        assert!(
+            rig.run_until(Duration::from_secs(1), |r| r.host().handed_over()),
+            "{label} {kind}: the handover's records through"
+        );
+        rig.games[0].gone = true;
+    } else {
+        rig.cut(0);
+    }
+    assert!(
+        rig.run_until(Duration::from_secs(8), |r| !r.takeovers.is_empty()),
+        "{label} {kind}: a standby takes over"
+    );
+    let (game, took_at, tick, _) = rig.takeovers[0].clone();
+    let players: Vec<usize> = (1..rig.games.len()).collect();
+    assert!(
+        rig.run_until(Duration::from_secs(10), |r| players
+            .iter()
+            .all(|&g| r.games[g].snapshot_after(took_at).is_some())),
+        "{label} {kind}: every player has snapshots again"
+    );
+    let real = real.elapsed();
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    eprintln!(
+        "{label} {kind}: {kills} kills, {missiles} guided missiles in flight at the loss; \
+         {} took over {:.0} ms after the loss at tick {tick}; real time to every player back {:.0} ms",
+        rig.games[game].callsign,
+        ms(took_at - at),
+        ms(real)
+    );
+    for note in rig.games[game].host.as_mut().unwrap().take_resume_notes() {
+        match note {
+            ResumeNote::TookOver { replayed, took, .. } => {
+                eprintln!("  replayed {replayed} ticks in {:.1} ms (real)", ms(took))
+            }
+            ResumeNote::Resumed {
+                callsign, after, ..
+            } => eprintln!(
+                "  {callsign} resumed {:.0} ms after the takeover",
+                ms(after)
+            ),
+            ResumeNote::Live {
+                after,
+                fast_forward,
+                ..
+            } => eprintln!(
+                "  live {:.0} ms after the takeover, {fast_forward} ticks fast-forwarded",
+                ms(after)
+            ),
+            _ => {}
+        }
+    }
+    for &g in &players {
+        let noticed = rig.games[g]
+            .events
+            .iter()
+            .find(|(t, e)| {
+                *t >= at && matches!(e, ClientEvent::Notice(n) if n.starts_with("Lost contact"))
+            })
+            .map(|(t, _)| *t);
+        let back = rig.games[g].snapshot_after(took_at).unwrap();
+        eprintln!(
+            "  {}: noticed {}, snapshots again {:.0} ms after the loss{}",
+            rig.games[g].callsign,
+            noticed.map_or_else(|| "-".to_owned(), |t| format!("{:.0} ms", ms(t - at))),
+            ms(back - at),
+            noticed.map_or_else(String::new, |t| format!(
+                " ({:.0} ms after noticing)",
+                ms(back.saturating_sub(t))
+            )),
+        );
+        assert!(back - at < Duration::from_secs(5), "{label} {kind}");
+    }
 }
