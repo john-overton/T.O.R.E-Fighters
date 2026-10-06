@@ -7,6 +7,9 @@
 //!
 //! - Engage my target and Engage from formation write one assignment for each
 //!   member reached, replacing the one it had;
+//! - Sort writes the same assignment for the one wingman it gives a bandit
+//!   to, with the order recorded as the sort ([`DataLink::sort_plan`] decides
+//!   who gets which bandit);
 //! - the orders that give a wingman something else to do (Disengage, Protect
 //!   me, Attack on contact, Bug out, Land, and an Approach, which sets its own
 //!   target) clear the assignments of the members reached;
@@ -24,9 +27,34 @@
 //! a flightmate reports of it ([`DataLink::pursuits`]), and an order is taken
 //! when the picture holds a track of its target ([`DataLink::tracked`]).
 
-use super::{Assignment, DataLink, Entry, Track};
+use super::{Assignment, Damage, DataLink, Entry, Fuel, MemberStatus, Track, Weapons};
 use crate::ai_wings::{AiWings, ENEMY_SIDE, FRIENDLY_SIDE};
-use tore_sim::ai::{launch::Side, link::Pursuit, wing::PlayerOrder};
+use std::collections::BTreeMap;
+use tore_sim::{
+    ai::{launch::Side, link::Pursuit, wing::PlayerOrder},
+    datalink::sort::{self, Bandit, Wingman},
+};
+
+/// Ticks in a second, to carry a track forward.
+const TICKS_PER_SECOND: f64 = 120.;
+
+/// One wingman's share of a sort.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SortPick {
+    pub plane: u32,
+    /// Its place in the flight from zero.
+    pub member: u8,
+    pub target: u32,
+}
+
+/// What a sort decided: who attacks which bandit, who was left out for their
+/// state and who had no bandit left to take. Planes, in member order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SortPlan {
+    pub given: Vec<SortPick>,
+    pub skipped: Vec<u32>,
+    pub left: Vec<u32>,
+}
 
 /// Why an assignment ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,7 +102,7 @@ impl DataLink {
         // taken as alive; one it knows to be dead gets nothing.
         let live = |link: &Self, plane: u32| link.member(plane).is_none_or(|m| m.alive);
         match order {
-            PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation => {
+            PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation | PlayerOrder::Sort => {
                 let Some(target) = target else {
                     return Vec::new();
                 };
@@ -119,6 +147,100 @@ impl DataLink {
             | PlayerOrder::Stacking
             | PlayerOrder::ControlToggle => Vec::new(),
         }
+    }
+
+    /// Every hostile aircraft the pictures of `side`'s flights hold, one for
+    /// each (the freshest report, as [`Self::track_on`] picks it), in target
+    /// id order.
+    pub fn side_tracks(&self, side: Side) -> Vec<Track> {
+        let mut best: BTreeMap<u32, Track> = BTreeMap::new();
+        for picture in self.pictures.iter().filter(|p| p.flight.side == side) {
+            for track in &picture.tracks {
+                if best
+                    .get(&track.target)
+                    .is_none_or(|old| track.observed > old.observed)
+                {
+                    best.insert(track.target, *track);
+                }
+            }
+        }
+        best.into_values().collect()
+    }
+
+    /// What a sort by `sender` hands out (slice G3c): the bandits the side's
+    /// pictures hold, carried forward to the tick of the last observation at
+    /// their own velocity and without any known to be dead, given to the
+    /// sender's living flightmates (the one `recipient` names, from zero, or
+    /// every one) by [`tore_sim::datalink::sort`]. `lead_target` is the
+    /// aircraft the sender keeps, which is left out. Nothing is written.
+    /// `None` when the picture does not know the sender.
+    pub fn sort_plan(
+        &self,
+        sender: u32,
+        recipient: Option<u8>,
+        lead_target: Option<u32>,
+    ) -> Option<SortPlan> {
+        let lead = self.member(sender)?;
+        let known: Vec<Bandit> = self
+            .side_tracks(lead.flight.side)
+            .into_iter()
+            .filter(|track| self.member(track.target).is_none_or(|m| m.alive))
+            .map(|track| {
+                let age = self.tick.saturating_sub(track.observed) as f64 / TICKS_PER_SECOND;
+                Bandit {
+                    id: track.target,
+                    position: std::array::from_fn(|axis| {
+                        track.position[axis] + track.velocity[axis] * age
+                    }),
+                }
+            })
+            .collect();
+        let wingmen: Vec<Wingman> = self
+            .members
+            .iter()
+            .filter(|m| {
+                m.flight == lead.flight
+                    && m.alive
+                    && m.plane != sender
+                    && recipient.is_none_or(|wanted| m.member == wanted)
+            })
+            .map(|m| {
+                let status = self.status_of(m.plane);
+                Wingman {
+                    id: m.plane,
+                    member: m.member,
+                    position: m.position,
+                    winchester: status.is_some_and(|s| s.weapons == Weapons::Winchester),
+                    bingo: status.is_some_and(|s| s.fuel >= Fuel::Bingo),
+                    heavy_damage: status.is_some_and(|s| s.damage == Damage::Heavy),
+                }
+            })
+            .collect();
+        let sorted = sort::sort(lead.position, lead_target, &known, &wingmen);
+        let member_of = |plane: u32| self.member(plane).map_or(0, |m| m.member);
+        Some(SortPlan {
+            given: sorted
+                .given
+                .into_iter()
+                .map(|(plane, target)| SortPick {
+                    plane,
+                    member: member_of(plane),
+                    target,
+                })
+                .collect(),
+            skipped: sorted.skipped,
+            left: sorted.left,
+        })
+    }
+
+    /// The state `plane` last published to its flight's picture.
+    fn status_of(&self, plane: u32) -> Option<MemberStatus> {
+        let flight = self.member(plane)?.flight;
+        self.picture(flight)?
+            .status
+            .iter()
+            .find(|status| status.plane == plane)
+            .copied()
     }
 
     /// The assignment `plane` holds.
@@ -498,6 +620,123 @@ mod tests {
         // A fresh assignment starts unacknowledged again.
         engage(&mut link, 6, &[1], 10);
         assert!(!link.assignment(1).unwrap().acknowledged);
+    }
+
+    // Slice G3c: the sort.
+
+    const NM: f64 = tore_sim::sensors::FEET_PER_NAUTICAL_MILE;
+
+    /// Lead 0 at the origin, wingmen 1 and 2 (member 1 and 2) 3 nm either side
+    /// of it, and three enemy aircraft the friendly picture tracks: 10 to the
+    /// east, 11 to the west, 12 far to the north.
+    fn sorting() -> DataLink {
+        let mut link = link();
+        link.members.push(member(12, ENEMY, true));
+        link.members[1].position = [3. * NM, 0., 0.];
+        link.members[2].position = [-3. * NM, 0., 0.];
+        let tracks = vec![
+            track(0, 10, 90, [15. * NM, 0., 10. * NM]),
+            track(0, 11, 90, [-15. * NM, 0., 10. * NM]),
+            track(0, 12, 90, [0., 0., 30. * NM]),
+        ];
+        link.pictures = vec![picture(FLIGHT, tracks)];
+        link.tick = 90;
+        link
+    }
+
+    fn picks(plan: &SortPlan) -> Vec<(u32, u32)> {
+        plan.given.iter().map(|p| (p.plane, p.target)).collect()
+    }
+
+    #[test]
+    fn a_sort_gives_each_wingman_the_bandit_nearest_it_in_member_order() {
+        let link = sorting();
+        let plan = link.sort_plan(0, None, None).unwrap();
+        // Wingman 1 is east of the lead and takes the eastern bandit; wingman
+        // 2 takes the western one.
+        assert_eq!(picks(&plan), [(1, 10), (2, 11)]);
+        assert_eq!(plan.given[0].member, 1);
+        assert!(plan.skipped.is_empty() && plan.left.is_empty());
+    }
+
+    #[test]
+    fn the_lead_keeps_its_designation_and_one_wingman_can_be_addressed() {
+        let link = sorting();
+        let plan = link.sort_plan(0, None, Some(10)).unwrap();
+        assert_eq!(picks(&plan), [(1, 11), (2, 12)]);
+        let plan = link.sort_plan(0, Some(2), None).unwrap();
+        assert_eq!(picks(&plan), [(2, 11)]);
+        // The picture does not know a plane that is not a member.
+        assert!(link.sort_plan(99, None, None).is_none());
+    }
+
+    #[test]
+    fn wingmen_known_to_be_spent_low_or_hurt_are_skipped_and_the_dead_are_not_dealt() {
+        let mut link = sorting();
+        let status = |plane, weapons, fuel, damage| MemberStatus {
+            plane,
+            weapons,
+            fuel,
+            damage,
+        };
+        link.pictures[0].status = vec![
+            status(1, Weapons::Winchester, Fuel::Normal, Damage::None),
+            status(2, Weapons::Missiles, Fuel::Normal, Damage::None),
+        ];
+        let plan = link.sort_plan(0, None, None).unwrap();
+        assert_eq!(plan.skipped, [1]);
+        assert_eq!(picks(&plan), [(2, 11)]);
+        for (fuel, damage) in [(Fuel::Bingo, Damage::None), (Fuel::Normal, Damage::Heavy)] {
+            link.pictures[0].status[0] = status(1, Weapons::Missiles, fuel, damage);
+            assert_eq!(link.sort_plan(0, None, None).unwrap().skipped, [1]);
+        }
+        // Joker fuel and light damage are fit to fight.
+        link.pictures[0].status[0] = status(1, Weapons::GunsOnly, Fuel::Joker, Damage::Light);
+        assert!(link.sort_plan(0, None, None).unwrap().skipped.is_empty());
+        // A bandit that has died since the picture was published is not dealt,
+        // and a dead wingman gets nothing.
+        link.members[3].alive = false;
+        link.members[2].alive = false;
+        let plan = link.sort_plan(0, None, None).unwrap();
+        assert_eq!(picks(&plan), [(1, 11)]);
+    }
+
+    #[test]
+    fn a_track_is_carried_forward_at_its_velocity_to_the_tick_of_the_sort() {
+        let mut link = sorting();
+        // Bandit 10 at 39 nm out, flying east at 1,000 ft/s: twenty seconds
+        // later it is more than 40 nm out and is left alone.
+        link.pictures[0].tracks[0] = Track {
+            velocity: [1_000., 0., 0.],
+            ..track(0, 10, 90, [30. * NM, 0., 25. * NM])
+        };
+        link.pictures[0].tracks.truncate(1);
+        link.tick = 90;
+        assert_eq!(picks(&link.sort_plan(0, None, None).unwrap()).len(), 2);
+        link.tick = 90 + 120 * 20;
+        assert!(link.sort_plan(0, None, None).unwrap().given.is_empty());
+    }
+
+    #[test]
+    fn a_sort_writes_one_assignment_for_each_wingman_that_names_the_sort() {
+        let mut link = sorting();
+        let plan = link.sort_plan(0, None, None).unwrap();
+        for pick in &plan.given {
+            let written = link.assign(95, 0, PlayerOrder::Sort, &[pick.plane], Some(pick.target));
+            assert_eq!(written.len(), 1);
+            assert_eq!(written[0].order, PlayerOrder::Sort);
+        }
+        assert_eq!(link.assignment(1).unwrap().target, 10);
+        assert_eq!(link.assignment(2).unwrap().target, 11);
+        assert_eq!(link.take_journal().len(), 2);
+        // A later Engage replaces a sort's assignment, and a Disengage clears it.
+        engage(&mut link, 99, &[1], 12);
+        assert_eq!(
+            link.assignment(1).unwrap().order,
+            PlayerOrder::EngageMyTarget
+        );
+        link.assign(100, 0, PlayerOrder::Disengage, &[2], None);
+        assert!(link.assignment(2).is_none());
     }
 
     // Slice G3b: the picture's side of an assignment reaching the AI.

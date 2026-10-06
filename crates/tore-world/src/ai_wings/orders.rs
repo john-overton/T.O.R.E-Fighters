@@ -295,7 +295,7 @@ impl AiWings {
     /// Whether human-flown aircraft `sender` leads its wing now, which is what
     /// lets it order the wing. Before the mission has stepped, the wing's
     /// first member leads.
-    fn leads_wing(&self, sender: u32) -> bool {
+    pub fn leads_wing(&self, sender: u32) -> bool {
         let Some(human) = self.humans.iter().find(|h| h.id == sender) else {
             return false;
         };
@@ -406,6 +406,12 @@ impl AiWings {
     ) -> WorldResult<OrderReport> {
         if matches!(order, PlayerOrder::BugOut | PlayerOrder::LandAtSelected) {
             return self.command_landing(sender, order, recipient, site);
+        }
+        // A sort gives each wingman its own target, which only the world can
+        // work out (it holds the picture): it orders each wingman to engage
+        // the bandit it was dealt (slice G3c, `World::sort_order`).
+        if order == PlayerOrder::Sort {
+            return Err("a sort is planned from the data link's picture".into());
         }
         let wing = self.wing_of(sender);
         let sender_side = wing.map_or(FRIENDLY_SIDE, |(side, _)| side);
@@ -520,6 +526,7 @@ impl AiWings {
                 PlayerOrder::BugOut | PlayerOrder::LandAtSelected => {
                     unreachable!("landing orders take command_landing")
                 }
+                PlayerOrder::Sort => unreachable!("a sort is sent as one Engage order each"),
                 PlayerOrder::Break(b) => b.request(),
                 PlayerOrder::Formation(f) => WingRequest::FormationSelection(f),
                 PlayerOrder::Spacing => WingRequest::Spacing {
@@ -1076,7 +1083,8 @@ fn mission_assignment(sender: u32, order: PlayerOrder, target: Option<u32>) -> O
         | PlayerOrder::Stacking
         | PlayerOrder::ControlToggle
         | PlayerOrder::BugOut
-        | PlayerOrder::LandAtSelected => None,
+        | PlayerOrder::LandAtSelected
+        | PlayerOrder::Sort => None,
     }
 }
 
@@ -1138,6 +1146,8 @@ fn sender_stem(
         | PlayerOrder::AttackOnContact => return None,
         // No reviewed sender recording for these orders.
         PlayerOrder::BugOut | PlayerOrder::LandAtSelected => return None,
+        // A sort's calls are the assignment calls, one for each wingman.
+        PlayerOrder::Sort => return None,
     })
 }
 
@@ -1172,6 +1182,7 @@ fn order_label(order: PlayerOrder) -> &'static str {
         PlayerOrder::EngageMyTarget => "Engage my target",
         PlayerOrder::AttackOnContact => "Attack on contact",
         PlayerOrder::EngageFromFormation => "Engage from formation",
+        PlayerOrder::Sort => "Sort",
     }
 }
 

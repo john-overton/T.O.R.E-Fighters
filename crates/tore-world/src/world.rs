@@ -45,6 +45,8 @@ mod datalink_checkpoint_tests;
 #[cfg(test)]
 mod datalink_cues_tests;
 #[cfg(test)]
+mod datalink_sort_tests;
+#[cfg(test)]
 mod datalink_tests;
 #[cfg(test)]
 mod engagement_tests;

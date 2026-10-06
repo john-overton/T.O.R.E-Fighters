@@ -15,6 +15,8 @@
 
 use tore_formats::aircraft::AircraftId;
 
+pub mod sort;
+
 /// Whether an aircraft type has a radar. The F-22N and the F/A-XX take the
 /// F-22A's row, as they take its sensors, because the match reads
 /// [`AircraftId::source`]. Every aircraft needs a row: the match has no

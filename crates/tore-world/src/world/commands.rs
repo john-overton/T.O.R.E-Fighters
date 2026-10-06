@@ -281,6 +281,9 @@ impl World {
         order: PlayerOrder,
         out: &mut TickOutput,
     ) {
+        if order == PlayerOrder::Sort {
+            return self.sort_order(plane, seat, cockpit, out);
+        }
         let now = self.combat.state.tick() as f64 / 120.;
         let recipient = self.roster.seat(seat).and_then(|s| s.wing_recipient);
         let selected = self
@@ -405,6 +408,10 @@ impl World {
         });
     }
 }
+
+// The sort order (stage G, slice G3c).
+#[path = "commands_sort.rs"]
+mod sort;
 
 // Exact coding for the host's journal (stage K, slice K0).
 #[path = "commands_checkpoint.rs"]

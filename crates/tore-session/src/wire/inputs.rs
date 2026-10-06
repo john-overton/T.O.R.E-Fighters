@@ -840,6 +840,7 @@ pub(crate) fn write_order(w: &mut BitWriter, order: PlayerOrder) {
         PlayerOrder::ControlToggle => code(10),
         PlayerOrder::BugOut => code(11),
         PlayerOrder::LandAtSelected => code(12),
+        PlayerOrder::Sort => code(13),
     }
 }
 
@@ -867,6 +868,7 @@ pub(crate) fn read_order(r: &mut BitReader<'_>) -> WireResult<PlayerOrder> {
         10 => PlayerOrder::ControlToggle,
         11 => PlayerOrder::BugOut,
         12 => PlayerOrder::LandAtSelected,
+        13 => PlayerOrder::Sort,
         _ => return Err(WireError::Invalid("wing order")),
     })
 }
@@ -906,6 +908,35 @@ mod tests {
             let back = read_command(&mut BitReader::new(&bytes)).unwrap();
             assert_eq!(back, Command::Pilot(quantize_command(*command)));
         }
+    }
+
+    #[test]
+    fn every_wing_order_reads_back_and_sort_is_code_13() {
+        let mut orders = vec![
+            PlayerOrder::EngageMyTarget,
+            PlayerOrder::ProtectMe,
+            PlayerOrder::AttackOnContact,
+            PlayerOrder::EngageFromFormation,
+            PlayerOrder::Disengage,
+            PlayerOrder::Spacing,
+            PlayerOrder::Stacking,
+            PlayerOrder::ControlToggle,
+            PlayerOrder::BugOut,
+            PlayerOrder::LandAtSelected,
+            PlayerOrder::Sort,
+        ];
+        orders.extend(BREAKS.map(PlayerOrder::Break));
+        orders.extend(APPROACHES.map(PlayerOrder::Approach));
+        orders.extend(FORMATIONS.map(PlayerOrder::Formation));
+        for order in orders {
+            let mut w = BitWriter::new();
+            write_order(&mut w, order);
+            let bytes = w.finish();
+            assert_eq!(read_order(&mut BitReader::new(&bytes)).unwrap(), order);
+        }
+        let mut w = BitWriter::new();
+        write_order(&mut w, PlayerOrder::Sort);
+        assert_eq!(w.finish(), [13]);
     }
 
     #[test]

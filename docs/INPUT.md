@@ -285,7 +285,8 @@ Default keys follow Fighters Anthology wherever the original has the command
 T.O.R.E additions on keys FA leaves free: E (engine), Shift+U (HUD), F11
 (help), Ctrl+1–6, Ctrl+Shift+1–4 and Ctrl+Tab (instruments), Shift+N and
 Shift+L (next airport, request landing), Ctrl+Shift+R and Ctrl+Shift+C (tower
-repeat and cancel), Alt+L (land at selected airport), Alt+0 with
+repeat and cancel), Alt+L (land at selected airport), Alt+A (sort: a
+different bandit for each wingman, [data link](DATALINK.md#giving-assignments)), Alt+0 with
 Alt+Shift+1–4 (address the flight or one wingman), and Ctrl+B (mark a
 [mission replay](REPLAYS.md#when) moment). With Pref → Debug panels? on, a
 right-click that does not drag opens the debug menu, which takes no key.
@@ -809,6 +810,7 @@ perceived attacks on their flight or protected aircraft.
 | Alt-6 / Alt-7 / Alt-8 / Alt-9 | Approach the designated target from left / right / low / high |
 | Alt-E | Engage the designated target |
 | Alt-R | Engage designated target from formation, medium control |
+| Alt-A | Sort: give each addressed wingman a different bandit from the flight's [data link picture](DATALINK.md#giving-assignments) (a T.O.R.E addition, John 2026-10-05) |
 | Alt-W | Attack on contact |
 | Alt-P | Protect me, maintain an escort duty |
 | Alt-D | Disengage and return to neutral formation |

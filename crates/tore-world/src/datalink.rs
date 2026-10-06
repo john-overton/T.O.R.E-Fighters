@@ -33,7 +33,7 @@ mod view;
 mod warning;
 
 pub use ai_input::{AiInput, FlightFeed};
-pub use assign::ClearReason;
+pub use assign::{ClearReason, SortPick, SortPlan};
 pub use journal::{CAPACITY as JOURNAL_CAPACITY, Entry, Journal};
 pub use picture::{
     Assignment, Damage, Engagement, FLIGHT_TRACKS, FlightId, FlightPicture, Fuel, Lock,

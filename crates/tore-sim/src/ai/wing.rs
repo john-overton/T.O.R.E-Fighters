@@ -257,6 +257,9 @@ pub enum PlayerOrder {
     BugOut,
     /// Land at the airport the player has selected for the tower.
     LandAtSelected,
+    /// Give each addressed wingman a different bandit from the flight data
+    /// link's picture (slice G3c, Alt+A; the rule is `datalink::sort`).
+    Sort,
 }
 
 /// B43: the player's horizontal spacing order toggles 512 and 2048 ft. Any
@@ -311,6 +314,7 @@ pub fn apply_control_side_effect(order: PlayerOrder, control: WingControl) -> Re
         PlayerOrder::EngageMyTarget
         | PlayerOrder::ProtectMe
         | PlayerOrder::AttackOnContact
+        | PlayerOrder::Sort
         | PlayerOrder::Approach(_) => control.min(WingControl::Loose),
         PlayerOrder::EngageFromFormation
         | PlayerOrder::Disengage
@@ -519,7 +523,8 @@ pub fn sender_phrase(
         | PlayerOrder::Approach(_)
         | PlayerOrder::Stacking
         | PlayerOrder::BugOut
-        | PlayerOrder::LandAtSelected => Err(AiError::UnspecifiedRule(
+        | PlayerOrder::LandAtSelected
+        | PlayerOrder::Sort => Err(AiError::UnspecifiedRule(
             "B46 sender phrase text for this order is not recorded",
         )),
     }

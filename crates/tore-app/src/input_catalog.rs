@@ -583,6 +583,12 @@ pub const ENTRIES: &[Entry] = &[
         &["Alt-r"],
     ),
     cmd(
+        "key:Alt-a",
+        "Wing: sort (a different bandit for each wingman)",
+        Communication,
+        &["Alt-a"],
+    ),
+    cmd(
         "key:Alt-w",
         "Wing: attack on contact",
         Communication,
@@ -942,8 +948,16 @@ mod tests {
             assert_eq!(entry.keys, [key], "{action}");
             assert!(entry.bindable() && entry.parsed().is_some(), "{action}");
         }
-        // Stage G's keys stay free for its own slices.
-        for key in ["Alt-a", "Alt-n", "Alt-Shift-a", "Alt-Shift-n"] {
+        // Alt+A is the data link's sort (slice G3c); the rest of stage G's keys
+        // stay free for their own slices.
+        assert_eq!(
+            ENTRIES
+                .iter()
+                .find(|entry| entry.action == "key:Alt-a")
+                .map(|entry| entry.keys),
+            Some(&["Alt-a"][..])
+        );
+        for key in ["Alt-n", "Alt-Shift-a", "Alt-Shift-n"] {
             assert!(
                 ENTRIES.iter().all(|entry| !entry.keys.contains(&key)),
                 "{key} is taken"

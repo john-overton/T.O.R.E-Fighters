@@ -780,8 +780,9 @@ impl FlightUi {
         }
         if alt && !ctrl && !shift {
             use tore_sim::ai::wing::{PlayerApproach as A, PlayerBreak as B, PlayerOrder as O};
-            // The FA wingman keys (docs/spec/keyboard.md). Alt+L and Alt+0 are
-            // T.O.R.E additions on keys FA leaves free.
+            // The FA wingman keys (docs/spec/keyboard.md). Alt+L, Alt+0 and
+            // Alt+A (the sort, John 2026-10-05) are T.O.R.E additions on keys
+            // FA leaves free.
             let order = match key {
                 "1" => Some(O::Break(B::Straight)),
                 "2" => Some(O::Break(B::Left)),
@@ -794,6 +795,7 @@ impl FlightUi {
                 "9" => Some(O::Approach(A::High)),
                 "e" => Some(O::EngageMyTarget),
                 "r" => Some(O::EngageFromFormation),
+                "a" => Some(O::Sort),
                 "w" => Some(O::AttackOnContact),
                 "p" => Some(O::ProtectMe),
                 "d" => Some(O::Disengage),
@@ -1390,9 +1392,13 @@ mod tests {
                 Command::Toggle(switch)
             );
         }
-        // Shift+A is FA's AWACS link; neither modifier reaches the autopilot.
+        // Shift+A is FA's AWACS link; Alt+A is the data link's sort (slice
+        // G3c); neither reaches the autopilot.
         assert_eq!(ui.key("a", true, false, false, &tree()), Command::Click);
-        assert_eq!(ui.key("a", false, false, true, &tree()), Command::None);
+        assert_eq!(
+            ui.key("a", false, false, true, &tree()),
+            Command::Wing(tore_sim::ai::wing::PlayerOrder::Sort)
+        );
         assert_eq!(
             ui.activate("Autopilot", "A"),
             Command::Toggle(Switch::Autopilot)
@@ -1930,6 +1936,7 @@ mod tests {
             ("9", O::Approach(A::High)),
             ("e", O::EngageMyTarget),
             ("r", O::EngageFromFormation),
+            ("a", O::Sort),
             ("w", O::AttackOnContact),
             ("p", O::ProtectMe),
             ("d", O::Disengage),
@@ -2061,12 +2068,12 @@ mod tests {
             ui.key("1", true, false, true, &[]),
             Command::WingRecipient(Some(1))
         );
-        // Alt+A (the data link's sort) and Alt+N (the battle net) stay free
-        // for stage G.
-        for key in ["a", "n"] {
-            assert_eq!(ui.key(key, true, false, true, &[]), Command::None, "{key}");
-            assert_eq!(ui.key(key, false, false, true, &[]), Command::None, "{key}");
-        }
+        // Alt+A is the data link's sort (slice G3c); Alt+Shift+A stays free,
+        // and so do Alt+N and Alt+Shift+N (the battle net) for stage G.
+        assert_eq!(ui.key("a", false, false, true, &[]), Command::Wing(O::Sort));
+        assert_eq!(ui.key("a", true, false, true, &[]), Command::None);
+        assert_eq!(ui.key("n", true, false, true, &[]), Command::None);
+        assert_eq!(ui.key("n", false, false, true, &[]), Command::None);
         assert_eq!(Reply::NeedHelp.words(), "Need help");
         assert_eq!(Reply::of_key("x"), None);
     }

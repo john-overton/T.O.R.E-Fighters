@@ -340,6 +340,39 @@ def datalink_order_link_check(wingman: int, target: int, lead: int) -> Callable[
     return check
 
 
+def order_sort_check(wingmen: list[int], enemies: list[int], lead: int) -> Callable[[str], list[str]]:
+    """The lead's Sort order (slice G3c, Alt+A): every wingman is assigned an
+    enemy aircraft by the lead with the order Sort, the first wingmen each take
+    a different one while there are enough, no enemy takes more than two, and
+    the pilot's line says how many were assigned."""
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output)
+        given: dict[int, int] = {}
+        for _, kind, who, aimed, by, order, _ in ASSIGNMENT_LINE.findall(output):
+            if kind != "assign":
+                continue
+            if order != "Sort" or int(by) != lead:
+                problems.append(f"plane {who} was assigned by plane {by} with order {order}, not by {lead} with Sort")
+            given[int(who)] = int(aimed)
+        if sorted(given) != sorted(wingmen):
+            problems.append(f"wingmen assigned: {sorted(given)}, expected {sorted(wingmen)}")
+        for who, aimed in given.items():
+            if aimed not in enemies:
+                problems.append(f"plane {who} was given {aimed}, which is not one of the enemy aircraft {enemies}")
+        counts = [list(given.values()).count(enemy) for enemy in enemies]
+        if max(counts, default=0) > 2:
+            problems.append(f"more than two wingmen on one bandit: {dict(zip(enemies, counts))}")
+        firsts = [given.get(who) for who in sorted(wingmen)[: len(enemies)]]
+        if len(set(firsts)) != len(firsts):
+            problems.append(f"the first {len(enemies)} wingmen did not each take a different bandit: {firsts}")
+        if not re.search(rf'order=Sort reply="Sort: {len(wingmen)} assigned', output):
+            problems.append("the pilot was not told how many wingmen were assigned")
+        return problems
+
+    return check
+
+
 def datalink_picture_check(planes: int, designated: int) -> Callable[[str], list[str]]:
     """The flight data link's picture, as the probe prints it (`data link:`
     lines, from `--probe-player-lock` and `--probe-data-link`): every plane is
@@ -653,6 +686,14 @@ def scenarios() -> list[Scenario]:
             out.append(probe(f"order-{order}-wing{size}", ["--probe-wing-size", str(size), "--probe-wing-order", f"{at}:{order}",
                                                            "--separation", "5", "--probe-attack", "600:10"], ticks=12000,
                              expect=[r"order=\S+ (reply|refused)"]))
+
+    # 9a. The sort order (stage G3c): the lead of four sorts its three wingmen
+    # onto the two enemy aircraft 20 nm out: the first two take one each, the
+    # third doubles up. The enemies are planes 6 and 7.
+    out.append(probe("order-sort-wing4", ["--probe-wing-size", "4", "--separation", "20", "--probe-data-link",
+                                          "--probe-wing-order", "400:sort"], ticks=2400,
+                     expect=[r"data link: assign plane=1 target=\d+ by=0 order=Sort", r'order=Sort reply="Sort: 3 assigned'],
+                     check=order_sort_check(wingmen=[1, 2, 3], enemies=[6, 7], lead=0)))
 
     # 9b. The flight data link's picture (stage G0): members and their radar flag, the
     # player's lock from its designation, AI engagements, and a wing order to

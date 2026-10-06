@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Stage G design of 2026-10-05, for the [multiplayer plan](multiplayer-plan.md#stages).
-Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a), the player's locked target in the AI's engagement table (G2) and the cues (G6, 2026-10-05). Of this page a player today meets the assignment call, AI wingmen that spread away from the bandit the player has locked, and the cues (the radar markers, the target window tags, the HUD brackets and the sort warning); the rest waits for its slices. It is the guide for players and agents:
+Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a), the player's locked target in the AI's engagement table (G2), the cues (G6) and the sort order on Alt+A (G3c, 2026-10-05). Of this page a player today meets the assignment call, the sort, AI wingmen that spread away from the bandit the player has locked, and the cues (the radar markers, the target window tags, the HUD brackets and the sort warning); the rest waits for its slices. It is the guide for players and agents:
 what a flight shares, who can share it, what the player sees and
 hears, and how the AI uses it. The code design and the slices that build it
 are in the [architecture guide](ARCHITECTURE.md#flight-data-link); the bytes on
@@ -215,20 +215,46 @@ orders today.
 | --- | --- | --- |
 | Engage my target | Alt+E (existing) | Assigns the lead's designated target to the addressed wingman, or to every wingman with Alt+0 |
 | Engage from formation | Alt+R (existing) | The same assignment; the wingman stays in formation as before |
-| **Sort** | **Alt+A** (new, proposed) | Gives each addressed wingman a different bandit from the lead's picture |
+| **Sort** | **Alt+A** (new, John 2026-10-05; built, G3c) | Gives each addressed wingman a different bandit from the lead's picture |
 | Disengage, protect me, attack on contact, bug out, land | existing keys | Clear the addressed wingmen's assignments |
 
 Address a wingman first with Alt+Shift+1 to 4, or the whole flight with Alt+0,
 as today ([controls](CONTROLS.md)).
 
-**Sort.** The lead's own target (its designation, or its AI target) stays
-the lead's. The other hostile aircraft the lead knows of within 40 nautical
-miles (its own contacts, plus the picture's tracks) are handed out to the addressed wingmen in member order, each taking
+**Sort (built, slice G3c, 2026-10-05).** The lead's own target (its designation,
+or its AI target) stays the lead's. The other hostile aircraft the side's
+picture holds that are within 40 nautical miles of the lead (in a straight
+line) are handed out to the addressed wingmen in member order, each taking
 the bandit nearest to itself that nobody has yet. When there are more
 wingmen than bandits, the spare wingmen take the bandit nearest to them, at
 most two to one bandit. A wingman known to be Winchester, at bingo fuel or
 worse, or heavily damaged is skipped. Each assignment is its own radio call,
-3.5 seconds apart.
+3.5 seconds apart. In the game:
+
+- Address the flight with Alt+0 or one wingman with Alt+Shift+1 to 4 first,
+  as for any order. A human wingman gets the assignment's cues; an AI
+  wingman takes the bandit as it takes Engage my target (its first wingman
+  answers "Engaging") and flies the bandit's track if its own sensors have
+  not found it yet.
+- The first call plays at once, as every order does. Each later call (one for
+  each AI wingman, in member order) follows 3.5 seconds after the one before
+  and is heard as a radio line from your own flight position ("Red one:
+  'Four, attack bandit, bearing 090, 12 miles, angels 20'"). A human
+  wingman gets no call yet: that is stage F's order call to human wingmen.
+- The HUD line reads "Sort: 3 assigned", with ", 1 skipped" for each wingman
+  left out for its state and ", 1 without a bandit" for each fit wingman that
+  found every bandit already taken by two. With no bandit in reach (or none
+  but your own target) it reads "Sort: no other bandit in reach".
+- The bandits are the picture's tracks, published four times a second, carried
+  forward at their velocity to the moment of the sort. They include your own
+  contacts, which your flight publishes with everyone else's; a bandit first
+  sensed in the last quarter second is not yet known to the sort.
+- *Agent decisions:* the range is measured in a straight line, not over the
+  ground. Distances and ties: the lower aircraft id wins a tie. Wingmen's
+  fuel, weapons and damage are as the picture last published them, so a
+  wingman not yet published is taken as fit. A sort assignment is recorded
+  with the order "Sort", and the AI wingman's order in the comms journal is an
+  "Engage my target" to that wingman alone (one line each).
 
 **Ends of an assignment.** An assignment lasts until the target is destroyed
 or lands, the wingman or the target is lost, the lead gives that wingman
@@ -335,7 +361,7 @@ before the merge. In order:
 5. The cues are drawn (built, G6): the flightmates' lock numbers, the tags and the sort warning show in a flight with AI wingmen; the assignment cues wait for the lead's assignments (G3a).
 6. Recordings gain the `datalink` events.
 
-The new keys (Alt+A, Alt+N) change nothing until pressed, and the battle net
+The new keys (Alt+A, built; Alt+N) change nothing until pressed, and the battle net
 is silent until monitored.
 
 ## Numbers

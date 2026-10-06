@@ -223,6 +223,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Wing: approach target high | Alt+9 | - | - |
 | Wing: engage my target | Alt+E | - | - |
 | Wing: engage from formation | Alt+R | - | - |
+| Wing: sort (a different bandit for each wingman) | Alt+A | - | - |
 | Wing: attack on contact | Alt+W | - | - |
 | Wing: protect me | Alt+P | - | - |
 | Wing: disengage | Alt+D | - | - |

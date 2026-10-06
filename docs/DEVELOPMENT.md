@@ -1259,8 +1259,8 @@ For ground operations, combine it with `--ground-start AIRPORT`,
 `--probe-wing-size 1..5` and `--maneuver takeoff`. Add `--probe-wing-only`
 to omit the other wings. Those two wing options also apply to
 `--launch-quick-mission` for matching creator captures. Schedule an order with
-`--probe-wing-order TICK:land-selected`, `TICK:bug-out`, `TICK:attack-on-contact`
-or `TICK:engage-my-target`, each with an optional `@MEMBER` (1 to 4, the first wingman is 1) to order one wingman; `--probe-player-lock TICK:ID` has the scripted leader designate aircraft `ID` at that tick, so the sensors lock it when they can; `--probe-data-link` and `--probe-player-lock` print a `t=T data link:` line for each plane's radar flag and each lock taken or dropped in the flight data link's picture; `--probe-blind-wing` takes the radar, infrared sensor and eyes from the player's wingmen, so only the data link can show them an enemy; `--probe-trace SECONDS`
+`--probe-wing-order TICK:land-selected`, `TICK:bug-out`, `TICK:attack-on-contact`,
+`TICK:engage-my-target` or `TICK:sort` (the lead deals each wingman a bandit from the data link's picture), each with an optional `@MEMBER` (1 to 4, the first wingman is 1) to order one wingman; `--probe-player-lock TICK:ID` has the scripted leader designate aircraft `ID` at that tick, so the sensors lock it when they can; `--probe-data-link` and `--probe-player-lock` print a `t=T data link:` line for each plane's radar flag and each lock taken or dropped in the flight data link's picture; `--probe-blind-wing` takes the radar, infrared sensor and eyes from the player's wingmen, so only the data link can show them an enemy; `--probe-trace SECONDS`
 prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
 `--probe-lose-player TICK` crashes the scripted leader's aircraft at that tick, so that a probe can test the wing's new lead (test harness only).
