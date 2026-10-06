@@ -54,7 +54,11 @@
 //! - **The crown** stays with its holder; a King who never resumes is
 //!   dropped and the crown passes as for any departing King.
 //! - **The house** is the new host's own player; the old house is a player
-//!   like any other, but one that handed over has left and is not expected.
+//!   like any other, but one that handed over in flight has left and is not
+//!   expected. *Agent decision (K10):* one that handed over in the lobby is
+//!   expected back, since the lobby's move to a better host hands over with
+//!   the house staying; if it does not come back (it left the lobby) it is
+//!   dropped at [`DROP_AFTER`] as having left, with no note.
 
 use super::journal::Driver;
 use super::lobby::state::{PlayerState, StageState};
@@ -206,6 +210,9 @@ struct Active {
     last_inputs: BTreeMap<SeatId, (SeatInput, u16)>,
     /// The old host's clock reading and this host's at the takeover.
     clock: Clock,
+    /// The old house that handed over in the lobby, by join order: expected
+    /// back from the lobby's move, and left on purpose if it does not come.
+    handed_house: Option<u64>,
 }
 
 /// The migration's state on the host.
@@ -357,11 +364,17 @@ impl Host {
         };
         let mut absent = BTreeMap::new();
         let mut handed = None;
+        let mut handed_house = None;
         for (_, mut player) in restored {
             if player.house && handover.is_some() {
-                // A house that handed over left on purpose.
-                handed = Some(player);
-                continue;
+                if flying {
+                    // A house that handed over in flight left on purpose.
+                    handed = Some(player);
+                    continue;
+                }
+                // In the lobby the handover may be the lobby's move: the old
+                // house's player comes back as itself, King included.
+                handed_house = Some(player.lobby.order);
             }
             player.house = player.lobby.id == resumption.house;
             absent.insert(player.lobby.order, Absent { player });
@@ -379,6 +392,7 @@ impl Host {
             stores: BTreeMap::new(),
             last_inputs,
             clock,
+            handed_house,
         });
         host.resuming.notes.push(ResumeNote::TookOver {
             tick,
@@ -1006,11 +1020,17 @@ impl Host {
             return;
         };
         let clock = active.clock;
+        let handed_house = active.handed_house;
         let absent = std::mem::take(&mut active.absent);
         let tps = self.config.ticks_per_snapshot();
-        for (_, Absent { player, .. }) in absent {
+        for (order, Absent { player, .. }) in absent {
             let callsign = player.callsign.clone();
             let peer = player.into_peer(clock, tps);
+            if Some(order) == handed_house {
+                // The old house left the lobby rather than moving with it.
+                self.drop_player(peer, LeaveReason::Left);
+                continue;
+            }
             self.drop_player(peer, LeaveReason::Silent);
             self.resuming.notes.push(ResumeNote::Dropped { callsign });
         }

@@ -1240,3 +1240,75 @@ fn a_late_joiner_follows_a_migration() {
         "nobody is left absent"
     );
 }
+
+/// The lobby moves to a better host (a handover in the lobby, as the host's
+/// own succession update makes one): the old house's player resumes with
+/// the new host as itself, the crown kept, rather than being dropped as
+/// having left and welcomed back by its token (slice K10).
+#[test]
+fn a_lobby_handed_over_keeps_the_old_house_and_its_crown() {
+    let mut rig = Rig::new(crowd_spec(20));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    assert!(
+        rig.run_until(Duration::from_secs(40), |r| r.host().ready_standbys().len()
+            == 2),
+        "two standbys ready in the lobby"
+    );
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.games
+            .iter()
+            .all(|g| g.client.succession().is_some_and(|s| s.standbys.len() == 2))
+    }));
+    let king = |host: &Host| {
+        host.peers
+            .values()
+            .find(|p| p.king)
+            .map(|p| p.callsign.clone())
+    };
+    assert_eq!(king(rig.host()).as_deref(), Some("Lead"));
+    let (first, _) = rig.standbys();
+    rig.host_mut().hand_over().unwrap();
+    assert!(
+        rig.run_until(Duration::from_secs(1), |r| r.host().handed_over()),
+        "the handover's records through"
+    );
+    // The old host stops hosting; its game is a player of the new host.
+    rig.games[0].host = None;
+    rig.games[0].stepped_down = true;
+    assert!(
+        rig.run_until(Duration::from_secs(1), |r| !r.takeovers.is_empty()),
+        "standby 1 takes over"
+    );
+    assert_eq!(rig.takeovers[0].0, first);
+    let house = rig.games[first].client.lobby().unwrap().you;
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| (0..r.games.len()).all(|g| {
+            let client = &r.games[g].client;
+            client.migration() == MigrationState::Steady
+                && client.lobby().is_some_and(|l| l.host == Some(house))
+        })),
+        "every player is in the new host's lobby"
+    );
+    let new = rig.host_of(first);
+    assert!(
+        new.absent_players().is_empty(),
+        "{:?}",
+        new.absent_players()
+    );
+    assert_eq!(
+        king(new).as_deref(),
+        Some("Lead"),
+        "the King keeps the crown"
+    );
+    assert_eq!(rig.games[0].client.migration_counts().resumed, 1);
+    let notices = rig.games[0].notices();
+    assert!(
+        !notices.iter().any(|n| n.starts_with("Welcome back")),
+        "{notices:?}"
+    );
+    // Still the King 5 seconds on: nobody is dropped.
+    rig.run(DROP_AFTER);
+    assert_eq!(king(rig.host_of(first)).as_deref(), Some("Lead"));
+}
