@@ -953,9 +953,10 @@ def migrate_problems(
             limit_ms = max(limit_ms, live_ms + FOLLOW_LIVE_MS)
             slow_note = f" (the fast-forward cost {cost:.1f} ms a tick)"
     for name in callsigns:
-        if not re.search(rf"^{name}: (Lost contact with the host\. Moving the game to \w+\.\.\.|The game moved to {new}\.)$", pilots, re.M):
-            problems.append(f"{name} printed no notice of the move")
-        # The game that took over hosts it: it is told nothing of a move to itself.
+        # The game that took over hosts it: it is told nothing of a move to itself (after a loss its own client
+        # still says "Lost contact"; after a handover it says nothing).
+        if name != new and not re.search(rf"^{name}: Lost contact with the host\. Moving the game to \w+\.\.\.$", pilots, re.M) and not handover:
+            problems.append(f"{name} printed no notice of the loss")
         if name != new and not re.search(rf"^{name}: The game moved to {new}\.$", pilots, re.M):
             problems.append(f"{name} was never told \"The game moved to {new}.\"")
         times = snapshots_again(pilots, name)

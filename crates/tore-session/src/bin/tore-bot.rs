@@ -771,6 +771,8 @@ struct Running {
     /// When the bot noticed it had lost its host, and the snapshots it had
     /// then: the line saying when they came again.
     lost: Option<(Duration, u64)>,
+    /// The migration counts line last printed.
+    counts: Option<String>,
     /// `--king` stands (or the host's own settings) and the settings went:
     /// the King's start waits only for the lobby.
     start_ok: bool,
@@ -1203,6 +1205,7 @@ fn main() -> ExitCode {
             mig: None,
             handed: false,
             lost: None,
+            counts: None,
             start_ok: false,
             through: None,
             config,
@@ -1706,8 +1709,11 @@ fn main() -> ExitCode {
                         r.name, bot.watched, bot.watched_aircraft
                     );
                 }
-                if let Some(line) = r.mig.as_ref().and_then(|m| m.counts_line(bot)) {
+                if let Some(line) = r.mig.as_ref().and_then(|m| m.counts_line(bot))
+                    && r.counts.as_deref() != Some(line.as_str())
+                {
                     println!("{}: migrate: {line}", r.name);
+                    r.counts = Some(line);
                 }
             }
         }
