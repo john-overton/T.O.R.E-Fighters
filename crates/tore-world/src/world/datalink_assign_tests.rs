@@ -333,3 +333,75 @@ fn the_assignments_are_the_same_in_two_runs() {
     };
     assert_eq!(run(), run());
 }
+
+// Slice G3b: an assignment reaches an AI wingman that cannot see the target.
+
+#[test]
+fn blind_wingmen_take_the_order_on_the_leads_track_and_pursue_without_locking() {
+    let mut world = mission();
+    let mut out = TickOutput::default();
+    // The first step registers the human; then the lead's AI wingmen lose
+    // their radar, infrared sensor and eyes.
+    step(&mut world, 0, &[], &mut out);
+    world.ai_wings.as_mut().unwrap().blind_wingmen(F_LEAD.0);
+    // The enemy wing starts 60 nm away, beyond what any wingman could see or
+    // sense for itself, and well inside the lead's radar.
+    let wings = world.ai_wings.as_mut().unwrap();
+    for id in 4..=7 {
+        wings
+            .mission_mut()
+            .actor_mut(id)
+            .unwrap()
+            .flight_mut()
+            .position[2] += 60. * 6_076.12;
+    }
+    wings.mirror_pose_out(&mut world.combat.state.targets);
+    for tick in 1..ENGAGE {
+        step(&mut world, tick, &[], &mut out);
+    }
+    let order = [(ENGAGE, SeatCommand::WingOrder(PlayerOrder::EngageMyTarget))];
+    out = TickOutput::default();
+    step(&mut world, ENGAGE, &order, &mut out);
+    // The wingmen see nothing, but the lead's track of the target is in the
+    // picture, so both AI wingmen took the order instead of refusing it.
+    assert!(
+        matches!(
+            &out.orders[..],
+            [OrderReply {
+                outcome: OrderOutcome::Given { message },
+                ..
+            }] if message.contains("0 rejected")
+        ),
+        "{:?}",
+        out.orders
+    );
+    for plane in F_AI {
+        assert_eq!(world.datalink.assignment(plane.0).unwrap().target, TARGET.0);
+    }
+    assert_eq!(
+        world
+            .datalink
+            .pursuits()
+            .iter()
+            .map(|p| (p.receiver, p.target))
+            .collect::<Vec<_>>(),
+        [(F_AI[0].0, TARGET.0), (F_AI[1].0, TARGET.0)]
+    );
+    // They keep the target, fly by the link's track, and never lock it.
+    let mut linked = [false; 2];
+    for tick in ENGAGE + 1..ENGAGE + 600 {
+        step(&mut world, tick, &[], &mut out);
+        let wings = world.ai_wings.as_ref().unwrap();
+        for (index, plane) in F_AI.iter().enumerate() {
+            let actor = wings.mission().actor(plane.0).unwrap();
+            assert_eq!(actor.controller().target(), Some(TARGET.0), "{plane:?}");
+            assert!(world.datalink.lock(plane.0).is_none(), "{plane:?}");
+            linked[index] |= actor
+                .trace()
+                .targets
+                .iter()
+                .any(|t| t.id == TARGET.0 && t.link_track);
+        }
+    }
+    assert_eq!(linked, [true, true], "each flew by a link view");
+}
