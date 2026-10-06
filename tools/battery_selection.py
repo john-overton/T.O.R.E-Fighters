@@ -219,6 +219,11 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "a bot joining a listed dedicated server through the relay of a master on this machine",
         ("net-master-relay",),
     ),
+    "net-migrate": (
+        "host migration on this machine (stage K, slice K9): a hosting bot killed in a fight or leaving on purpose, "
+        "pilots that stand by taking the game over, and host selection's reach and upload tests",
+        ("net-migrate-kill", "net-migrate-handover", "net-reach-upload"),
+    ),
     "net-window": (
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
@@ -269,6 +274,8 @@ MAIN_FAMILIES = (
     "ai-airfield", "ai-lead", "ai-orders", "ai-regression",
 )
 NET_FAMILIES = ("net-fly", "net-window", "net-convert")
+# What a change to host migration reaches besides the rest of the net lane (slice K9).
+NET_MIGRATE = NET_FAMILIES + ("net-migrate",)
 RENDER_FAMILIES = ("windowed-menus", "flight-views", "instruments")
 MENU_FAMILIES = ("menus-screens", "menus-creator", "menus-validate")
 
@@ -424,7 +431,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
     _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),
     _r(
-        "crates/tore-net/src/peers*", NET_FAMILIES,
+        "crates/tore-net/src/peers*", NET_MIGRATE,
         "the peers router in front of a joined socket, its reach answerer and reach tests (stage K, slice K6)",
     ),
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay"), "network transport"),
@@ -464,43 +471,43 @@ RULES: tuple[Rule, ...] = (
     ),
     # Stage K (slice K0): the host steps its world through the journal, so every flight a host
     # flies passes through it; the seams refuse their requests until their slices land.
-    _r("crates/tore-session/src/journal*", NET_FAMILIES, "the journal the host steps its world through (stage K)"),
-    _r("crates/tore-session/src/wire/migration*", NET_FAMILIES, "stage K's message bodies and their tests"),
-    _r("crates/tore-session/src/standby/*", NET_FAMILIES, "the standby's side of host migration (stage K)"),
+    _r("crates/tore-session/src/journal*", NET_MIGRATE, "the journal the host steps its world through (stage K)"),
+    _r("crates/tore-session/src/wire/migration*", NET_MIGRATE, "stage K's message bodies and their tests"),
+    _r("crates/tore-session/src/standby/*", NET_MIGRATE, "the standby's side of host migration (stage K)"),
     _r(
-        "crates/tore-session/src/host/journal*", NET_FAMILIES,
+        "crates/tore-session/src/host/journal*", NET_MIGRATE,
         "the host's journal, which every tick the host steps passes, and its tests (stage K)",
     ),
-    _r("crates/tore-session/src/host/standby*", NET_FAMILIES, "the host's standby stream and its tests (stage K)"),
-    _r("crates/tore-session/src/host/resume*", NET_FAMILIES, "takeover and resume on the host and their tests (stage K)"),
+    _r("crates/tore-session/src/host/standby*", NET_MIGRATE, "the host's standby stream and its tests (stage K)"),
+    _r("crates/tore-session/src/host/resume*", NET_MIGRATE, "takeover and resume on the host and their tests (stage K)"),
     _r(
-        "crates/tore-session/src/host/listing_part_tests.rs", NET_FAMILIES,
+        "crates/tore-session/src/host/listing_part_tests.rs", NET_MIGRATE,
         "the listing part through the standby stream to a host that takes over (stage K, slice K7a)",
     ),
     _r(
-        "crates/tore-session/src/host/rejoin*", NET_FAMILIES,
+        "crates/tore-session/src/host/rejoin*", NET_MIGRATE,
         "rejoin tokens and reservations, the session part that carries them, a slot's reservation in every lobby state "
         "(stage K), and their tests",
     ),
     _r(
-        "crates/tore-session/src/host/succession*", NET_FAMILIES,
+        "crates/tore-session/src/host/succession*", NET_MIGRATE,
         "candidates and host selection on the host, the candidates part, and their tests (stage K, slice K6)",
     ),
     _r(
-        "crates/tore-session/src/host/*state.rs", NET_FAMILIES,
+        "crates/tore-session/src/host/*state.rs", NET_MIGRATE,
         "the session's state parts and their coders beside the state they code (stage K)",
     ),
-    _r("crates/tore-session/src/client/migrate*", NET_FAMILIES, "the client's side of host migration and its tests (stage K)"),
+    _r("crates/tore-session/src/client/migrate*", NET_MIGRATE, "the client's side of host migration and its tests (stage K)"),
     _r(
-        "crates/tore-session/src/client/rejoin*", NET_FAMILIES,
+        "crates/tore-session/src/client/rejoin*", NET_MIGRATE,
         "the client's side of rejoin: the token it keeps, its store and the Rejoin (stage K; tore-bot --token-file)",
     ),
     _r(
-        "crates/tore-session/src/client/candidate*", NET_FAMILIES,
+        "crates/tore-session/src/client/candidate*", NET_MIGRATE,
         "the client's side of host selection: its report, CPU measure, reach work and upload burst (stage K, slice K6)",
     ),
     _r(
-        "crates/tore-session/src/client/migration_seams_tests.rs", NET_FAMILIES,
+        "crates/tore-session/src/client/migration_seams_tests.rs", NET_MIGRATE,
         "stage K's seams on the network simulator (slice K0's tests)",
     ),
     _r("crates/tore-session/src/client/convert*", ("net-convert",), "capture conversion"),
@@ -508,7 +515,11 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-session/src/client/capture.rs", ("net-convert",), "captures"),
     _r("crates/tore-session/src/client/prediction.rs", ("net-convert",), "the own plane's prediction, which the conversion traces"),
     _r("crates/tore-session/src/fixture.rs", ("net-convert",), "the synthetic fight other crates' tests convert"),
-    _r("crates/tore-session/src/bin/tore-bot.rs", NET_FAMILIES, "the bot, which keeps the capture the scenario converts"),
+    _r("crates/tore-session/src/bin/tore-bot.rs", NET_MIGRATE, "the bot, which keeps the capture the scenario converts and hosts and stands by in the migration scenarios"),
+    _r(
+        "crates/tore-session/src/bin/tore-bot/*", NET_MIGRATE,
+        "the bot's hosting and standby (slice K9): the migration scenarios run it",
+    ),
     _r(
         "crates/tore-session/*",
         NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay", "net-content"),

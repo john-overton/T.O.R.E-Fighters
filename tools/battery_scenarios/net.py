@@ -872,6 +872,226 @@ def drive_rejoin(d: Drive) -> None:
         d.problem("another player took the plane kept for Viper")
 
 
+# --------------------------------------------------------------------------
+# Host migration (stage K, slice K9): a hosting `tore-bot --host`, bots that stand by
+# --------------------------------------------------------------------------
+
+# How long after a bot noticed the loss its snapshots must come again: the plan's 5 seconds from the loss, less the
+# 1.5 seconds of silence a client waits before it notices (docs/ARCHITECTURE.md, "Losing the host").
+SNAPSHOTS_AGAIN_MS = 3500
+# After a handover every client races the new host at once, so the gap is a round trip or two and the fast-forward.
+SNAPSHOTS_AGAIN_HANDOVER_MS = 2500
+
+
+def write_mission(d: Drive, separation_nm: int = 5) -> Path:
+    """The guide's mission, with the enemy `separation_nm` away, in the scenario's work folder."""
+    path = d.work / "mission.txt"
+    path.write_text(guide_mission(separation_nm))
+    return path
+
+
+def world_lines(text: str, who: str | None = None) -> list[dict]:
+    """The `host: world:` lines a hosting bot prints once a second while the mission flies: the tick, the guided
+    missiles in flight, the aircraft kills in the world and the players."""
+    name = who or r"\w+"
+    found = []
+    for m in re.finditer(
+        rf"^({name}): host: world: tick (\d+), (\d+) missiles in flight, (\d+) aircraft kills, (\d+) players$", text, re.M
+    ):
+        found.append(
+            {"who": m.group(1), "tick": int(m.group(2)), "missiles": int(m.group(3)), "kills": int(m.group(4)),
+             "players": int(m.group(5))}
+        )
+    return found
+
+
+def results_kills(text: str, who: str) -> int | None:
+    """The aircraft kills the last `results:` line of `who` adds up (every plane's `Nk`), or None when it has none."""
+    lines = re.findall(rf"^{who}: results: (.*)$", text, re.M)
+    if not lines:
+        return None
+    return sum(int(k[:-1]) for k in re.findall(r"\d+k\b", lines[-1]))
+
+
+def snapshots_again(text: str, who: str) -> list[int]:
+    """The milliseconds after `who` noticed the loss of its host that its snapshots came again, one for each loss."""
+    return [int(ms) for ms in re.findall(rf"^{who}: migrate: snapshots again (\d+) ms after the loss was noticed$", text, re.M)]
+
+
+def migrate_problems(
+    pilots: str, callsigns: list[str], before: dict | None, limit_ms: int, handover: bool = False
+) -> list[str]:
+    """What the pilots (bots that stand by) printed of a migration: exactly one of them took the game over, and the
+    host's own lines say it replayed from the old host's last tick; the others resumed with it ("The game moved
+    to"); each one's snapshots came again within `limit_ms` of noticing the loss; the new host's world carries on
+    from the old host's last tick with at least the kills the old host had; and the new host's Results keep them."""
+    problems = []
+    took = re.findall(r"^(\w+): migrate: taking the game over$", pilots, re.M)
+    if len(took) != 1:
+        problems.append(f"{len(took)} games took the game over, expected exactly one: {took}")
+        return problems
+    new = took[0]
+    if not re.search(rf"^{new}: host: took the game over at tick \d+: replayed \d+ ticks in \d+ ms, \d+ players expected back$", pilots, re.M):
+        problems.append(f"{new} has no host line saying it took the game over")
+    if not re.search(rf"^{new}: host: live at tick \d+, \d+ ms after the takeover, \d+ ticks fast-forwarded$", pilots, re.M):
+        problems.append(f"{new}'s host never went live")
+    for name in callsigns:
+        if not re.search(rf"^{name}: (Lost contact with the host\. Moving the game to \w+\.\.\.|The game moved to {new}\.)$", pilots, re.M):
+            problems.append(f"{name} printed no notice of the move")
+        if not re.search(rf"^{name}: The game moved to {new}\.$", pilots, re.M):
+            problems.append(f"{name} was never told \"The game moved to {new}.\"")
+        times = snapshots_again(pilots, name)
+        if not times:
+            problems.append(f"{name}'s snapshots never came again")
+        elif min(times) > limit_ms:
+            problems.append(f"{name}'s snapshots came again after {min(times)} ms, over {limit_ms} ms")
+    if not handover:
+        for name in callsigns:
+            if name != new and not re.search(rf"^{new}: host: {name} resumed \d+ ms after the takeover", pilots, re.M):
+                problems.append(f"the new host never saw {name} resume")
+    if before is not None:
+        after = [w for w in world_lines(pilots, new)]
+        if not after:
+            problems.append(f"the new host {new} printed no world lines")
+        else:
+            if after[0]["tick"] < before["tick"]:
+                problems.append(f"the new host's world starts at tick {after[0]['tick']}, before the old host's {before['tick']}")
+            if after[0]["kills"] < before["kills"]:
+                problems.append(f"the new host's world holds {after[0]['kills']} kills, the old host's had {before['kills']}")
+            if after[-1]["tick"] <= before["tick"] + 120:
+                problems.append("the new host's world did not carry on past the old host's last tick")
+        kills = results_kills(pilots, new)
+        if kills is None:
+            problems.append(f"{new} printed no Results at the mission's end")
+        elif kills < before["kills"]:
+            problems.append(f"the Results hold {kills} aircraft kills, the old host's world had {before['kills']}")
+    return problems
+
+
+def wait_world(d: Drive, host: Proc, seconds: float, ok) -> dict | None:
+    """Polls the host's world lines until `ok(line)` holds for the newest; returns that line, or None on time out."""
+    end = time.time() + seconds * d.scale
+    while time.time() < end:
+        d._check_time()
+        lines = world_lines(host.text())
+        if lines and ok(lines[-1]):
+            return lines[-1]
+        if not host.alive():
+            return None
+        time.sleep(0.05)
+    return None
+
+
+def start_migration(d: Drive, host_seconds: int, pilot_seconds: int, standbys: int = 2):
+    """A hosting bot (Lead, plane 0) and three pilots that stand by (Pilot1 to Pilot3, planes 1 to 3); the host
+    starts the mission once all four are in the lobby and `standbys` standbys are ready."""
+    port = d.port()
+    mission = write_mission(d)
+    host = d.start(
+        "host",
+        [d.bot, "--host", mission, "--port", port, "--callsign", "Lead", "--slot", "0", "--seconds", host_seconds,
+         "--players", "4", "--wait-standbys", standbys],
+    )
+    if not host.wait_for(r"^Lead: hosting ", 60):
+        raise DriveError("the hosting bot never began to host")
+    pilots = d.start(
+        "pilots",
+        [d.bot, "--connect", f"{LOCALHOST}:{port}", "--callsign", "Pilot", "--count", "3", "--slot", "1",
+         "--seconds", pilot_seconds, "--standby", "on"],
+    )
+    if not host.wait_for(r"^Lead: host: mission started", 150):
+        raise DriveError("the hosting bot never started the mission (no two standbys ready?)")
+    return host, pilots, port
+
+
+def drive_migrate_kill(d: Drive) -> None:
+    """Host migration (slice K9): a hosting bot and three pilots that stand by fly the guide's mission 5 nm apart.
+    Once a kill is booked (and, when one flies, a guided missile) the hosting bot is killed with SIGKILL, in the
+    fight: the first standby takes the game over, every pilot's snapshots come again within 5 seconds of the loss, the
+    new host's world carries on from the old host's last tick with the kills the old host had, and its Results keep
+    them."""
+    fresh_data(d)
+    host, pilots, _ = start_migration(d, 400, 110)
+    first = wait_world(d, host, 90, lambda w: w["kills"] >= 1 and w["missiles"] >= 1)
+    if first is None:
+        d.log("no guided missile flew with a kill booked; killing the host with the kill alone")
+        first = wait_world(d, host, 90, lambda w: w["kills"] >= 1)
+    if first is None:
+        raise DriveError("the AI booked no kill in 3 minutes of flight")
+    before = world_lines(host.text())[-1]
+    d.log(f"killing the host (SIGKILL) at {before}")
+    host.stopped = True
+    host.popen.kill()
+    host.wait(10)
+    if not pilots.wait_for(r"^Pilot3: migrate: snapshots again \d+ ms", 30):
+        d.problem("a pilot's snapshots never came again after the host was killed")
+    pilots.finish(200, 0)
+    for problem in migrate_problems(pilots.text(), ["Pilot1", "Pilot2", "Pilot3"], before, SNAPSHOTS_AGAIN_MS):
+        d.problem(problem)
+    pilots.forbid(NET_BAD + r"|No other game could take over", "a network problem or a session given up")
+    pilots.forbid(r"migrations resumed \d+, failed [1-9]", "a failed migration")
+    pilots.forbid(r"corrected [1-9]", "a corrected plane at the resume")
+    pilots.expect(r"^Pilot\d: migrate: migrations resumed 1, failed 0, corrected 0$", "the migration's counts")
+
+
+def drive_migrate_handover(d: Drive) -> None:
+    """Host migration (slice K9): the hosting bot leaves on purpose when its time is up. It hands the game over to the
+    first standby (no kill, no wait for a timeout): that pilot takes the game over at once, the other pilots follow
+    it within about a second, the old host exits 0, and the world carries on from the old host's last tick."""
+    fresh_data(d)
+    host, pilots, _ = start_migration(d, 80, 120)
+    pilots.wait_for(r"^Pilot3: seat \d+, plane 3", 30)
+    host.finish(120, 0)
+    host.expect(r"^Lead: host: handing the game over to player \d+$", "the handover")
+    host.expect(r"^Lead: host: the game was handed over$", "the handover's end")
+    host.forbid(r"no handover|the host left the game", "a host that left instead of handing over")
+    before = world_lines(host.text())[-1] if world_lines(host.text()) else None
+    pilots.finish(200, 0)
+    for problem in migrate_problems(
+        pilots.text(), ["Pilot1", "Pilot2", "Pilot3"], before, SNAPSHOTS_AGAIN_HANDOVER_MS, handover=True
+    ):
+        d.problem(problem)
+    pilots.forbid(NET_BAD + r"|No other game could take over", "a network problem or a session given up")
+    pilots.forbid(r"migrations resumed \d+, failed [1-9]", "a failed migration")
+
+
+def drive_reach_upload(d: Drive) -> None:
+    """Host selection (slices K3 and K6) on loopback: a hosting bot waits for one ready standby before it starts the
+    mission. Aa stands by (`--standby on`), Bb does not (`--standby off`: its game says it may not host). The host
+    runs its reach tests and the upload test on Aa, appoints it first standby and streams it the mission; Bb is
+    never appointed; Aa's standby is warm and its checks come out equal."""
+    fresh_data(d)
+    port = d.port()
+    mission = write_mission(d)
+    host = d.start(
+        "host",
+        [d.bot, "--host", mission, "--port", port, "--callsign", "Lead", "--slot", "0", "--seconds", 70,
+         "--players", "3", "--wait-standbys", "1"],
+    )
+    if not host.wait_for(r"^Lead: hosting ", 60):
+        raise DriveError("the hosting bot never began to host")
+    aa = d.start(
+        "aa", [d.bot, "--connect", f"{LOCALHOST}:{port}", "--callsign", "Aa", "--slot", "1", "--seconds", 100, "--standby", "on"]
+    )
+    bb = d.start(
+        "bb", [d.bot, "--connect", f"{LOCALHOST}:{port}", "--callsign", "Bb", "--slot", "2", "--seconds", 100, "--standby", "off"]
+    )
+    if not host.wait_for(r"^Lead: host: mission started", 150):
+        raise DriveError("the hosting bot never started: no standby passed the reach and upload tests")
+    if not host.wait_for(r"^Lead: host: standby Aa First, warm, Warm, checks [1-9]\d* equal 0 differ", 90):
+        d.problem("Aa never showed as a warm first standby with equal checks")
+    host.finish(120, 0)
+    host.forbid(r"standby Bb", "Bb, whose game said it may not host, appointed")
+    host.forbid(r"standby Aa .* [1-9]\d* differ", "a check that differed")
+    aa.expect(r"^Aa: standby: appointed, warm$", "Aa's appointment")
+    bb.forbid(r"standby:", "a standby on Bb")
+    aa.finish(150, 0)
+    bb.finish(150, 0)
+    for text in (host.text(), aa.text(), bb.text()):
+        if re.search(NET_BAD, text):
+            d.problem("a network problem: " + re.search(NET_BAD, text).group(0))
+
+
 def drive_discovery(d: Drive) -> None:
     """`tore-app --find-games` lists a server on this machine, and says so when there is none."""
     port = d.port()
@@ -1642,6 +1862,22 @@ def scenarios() -> list[Scenario]:
             name="net-server-rejoin", lane="net", args=[], driver=drive_rejoin, uses=("server", "bot"), timeout=300,
             notes="a bot killed in flight is dropped, its plane kept for it; started again with its token file it is "
             "back in that plane (slice K5)",
+        ),
+        Scenario(
+            name="net-migrate-kill", lane="net", args=[], driver=drive_migrate_kill, uses=("bot",), timeout=420,
+            notes="a hosting bot and three pilots that stand by fly the guide's mission; the host is killed (SIGKILL) in the "
+            "fight once a kill is booked: the first standby takes the game over, every pilot flies on within 5 seconds, the "
+            "world carries on with the kills, and the Results keep them (slice K9)",
+        ),
+        Scenario(
+            name="net-migrate-handover", lane="net", args=[], driver=drive_migrate_handover, uses=("bot",), timeout=420,
+            notes="the hosting bot leaves on purpose and hands the game over: the first standby hosts at once, the other "
+            "pilots follow within about a second, the old host exits 0 (slice K9)",
+        ),
+        Scenario(
+            name="net-reach-upload", lane="net", args=[], driver=drive_reach_upload, uses=("bot",), timeout=420,
+            notes="host selection on loopback: the host's reach and upload tests pass the bot that may host, which is "
+            "appointed a warm first standby with equal checks; the bot that may not is never appointed (slices K3 and K6, K9)",
         ),
         Scenario(
             name="net-convert-capture", lane="net", args=[], driver=drive_convert, uses=("server", "bot"), timeout=360,

@@ -422,6 +422,61 @@ class ContentReportTests(unittest.TestCase):
         )
 
 
+PILOTS = """Pilot1: Lost contact with the host. Moving the game to Pilot2...
+Pilot2: Lost contact with the host. Moving the game to Pilot1...
+Pilot3: Lost contact with the host. Moving the game to Pilot1...
+Pilot1: migrate: lost the host
+Pilot1: migrate: taking the game over
+Pilot1: host: took the game over at tick 3026: replayed 0 ticks in 0 ms, 4 players expected back
+Pilot1: host: Pilot2 resumed 450 ms after the takeover, flying
+Pilot1: host: Pilot3 resumed 466 ms after the takeover, flying
+Pilot2: The game moved to Pilot1.
+Pilot3: The game moved to Pilot1.
+Pilot1: The game moved to Pilot1.
+Pilot1: host: live at tick 3547, 2838 ms after the takeover, 521 ticks fast-forwarded
+Pilot1: migrate: snapshots again 2900 ms after the loss was noticed
+Pilot2: migrate: snapshots again 2400 ms after the loss was noticed
+Pilot3: migrate: snapshots again 2500 ms after the loss was noticed
+Pilot1: host: world: tick 3026, 0 missiles in flight, 2 aircraft kills, 3 players
+Pilot1: host: world: tick 6768, 0 missiles in flight, 4 aircraft kills, 3 players
+Pilot1: results: 12 aircraft, 4 flown by players: 0 Lead dead 0k, 1 Pilot1 alive 0k, 4 AI ejected 0k, 5 AI alive 1k, 7 AI alive 1k, 10 AI alive 1k, 11 AI alive 1k
+"""
+BEFORE = {"who": "Lead", "tick": 3007, "missiles": 1, "kills": 2, "players": 4}
+PILOT_NAMES = ["Pilot1", "Pilot2", "Pilot3"]
+
+
+class MigrationTests(unittest.TestCase):
+    def test_world_lines_and_results_are_read(self):
+        text = "Lead: host: world: tick 120, 3 missiles in flight, 1 aircraft kills, 4 players\n" + PILOTS
+        self.assertEqual(net.world_lines(text, "Lead"), [{"who": "Lead", "tick": 120, "missiles": 3, "kills": 1, "players": 4}])
+        self.assertEqual([w["tick"] for w in net.world_lines(text)], [120, 3026, 6768])
+        self.assertEqual(net.results_kills(PILOTS, "Pilot1"), 4)
+        self.assertIsNone(net.results_kills(PILOTS, "Pilot2"))
+        self.assertEqual(net.snapshots_again(PILOTS, "Pilot2"), [2400])
+
+    def test_a_clean_migration_has_no_problems(self):
+        self.assertEqual(net.migrate_problems(PILOTS, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS), [])
+
+    def test_each_failure_is_named(self):
+        def problems(text, **kw):
+            return net.migrate_problems(text, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS, **kw)
+
+        self.assertTrue(any("0 games took" in p for p in problems(PILOTS.replace("migrate: taking the game over", "x"))))
+        twice = PILOTS + "Pilot2: migrate: taking the game over\n"
+        self.assertTrue(any("2 games took" in p for p in problems(twice)))
+        slow = PILOTS.replace("Pilot3: migrate: snapshots again 2500", "Pilot3: migrate: snapshots again 4900")
+        self.assertTrue(any("Pilot3's snapshots came again after 4900" in p for p in problems(slow)))
+        self.assertTrue(any("Pilot2 was never told" in p for p in problems(PILOTS.replace("Pilot2: The game moved", "x"))))
+        lost = PILOTS.replace("2 aircraft kills", "1 aircraft kills")
+        self.assertTrue(any("holds 1 kills" in p for p in problems(lost)))
+        short = PILOTS.replace("5 AI alive 1k, 7 AI alive 1k, 10 AI alive 1k, ", "")
+        self.assertTrue(any("Results hold 1 aircraft kills" in p for p in problems(short)))
+        self.assertTrue(any("never saw Pilot3 resume" in p for p in problems(PILOTS.replace("Pilot3 resumed", "x"))))
+        stuck = PILOTS.replace("tick 6768", "tick 3100")
+        self.assertTrue(any("did not carry on" in p for p in problems(stuck)))
+        self.assertEqual(problems(PILOTS.replace("Pilot3 resumed", "x"), handover=True), [])
+
+
 class ScenarioListTests(unittest.TestCase):
     def test_every_scenario_is_a_driver_in_the_net_lane(self):
         scenarios = net.scenarios()
@@ -431,7 +486,8 @@ class ScenarioListTests(unittest.TestCase):
             self.assertTrue(callable(s.driver), s.name)
             self.assertTrue(
                 s.name.startswith(
-                    ("net-server-", "net-discovery", "net-convert-", "net-window-", "net-master-", "net-content-")
+                    ("net-server-", "net-discovery", "net-convert-", "net-window-", "net-master-", "net-content-",
+                     "net-migrate-", "net-reach-")
                 ),
                 s.name,
             )
