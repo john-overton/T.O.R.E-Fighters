@@ -409,6 +409,18 @@ impl Host {
         self.resuming.active.as_ref().is_some_and(|a| !a.live)
     }
 
+    /// Whether a seated player is still expected back from a takeover: the
+    /// mission is not empty while one is, or a game a player hosts (whose
+    /// empty timeout is none) would end it before anyone resumed (slice
+    /// K7a).
+    pub(super) fn seated_absent(&self) -> bool {
+        self.resuming.active.as_ref().is_some_and(|a| {
+            a.absent
+                .values()
+                .any(|absent| absent.player.stage == StageState::Seated)
+        })
+    }
+
     /// The players still expected back, by callsign.
     pub fn absent_players(&self) -> Vec<String> {
         self.resuming.active.as_ref().map_or_else(Vec::new, |a| {

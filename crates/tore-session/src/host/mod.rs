@@ -3399,7 +3399,8 @@ impl Host {
             .peers
             .values()
             .any(|p| matches!(p.stage, Stage::Seated | Stage::Taking { .. }))
-            || self.anyone_away();
+            || self.anyone_away()
+            || self.seated_absent();
         if seated {
             self.empty_since = None;
         } else if self.ever_seated && self.empty_since.is_none() {
