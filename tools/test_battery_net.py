@@ -9,6 +9,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import battery  # noqa: E402
 from battery_scenarios import net  # noqa: E402
+from battery_scenarios import net_observe  # noqa: E402
 
 CHECK_REPORT = """Mission: UKR (clear), airborne at 20000 ft, enemy 20 nm away; friendly 4 F18.PT, 2 F14.PT; enemy 4 MIG29.PT, 2 SU27.PT; 12 aircraft
 Mission file: /tmp/mission.txt
@@ -342,6 +343,58 @@ class ParsingTests(unittest.TestCase):
             (data / "keep.pack").write_text("import")
             net.fresh_data(SimpleNamespace(data=data))
             self.assertEqual([p.name for p in data.iterdir()], ["keep.pack"])
+
+
+class AwayWatchTests(unittest.TestCase):
+    GAME = (
+        "Network: seated in plane 0\n"
+        "Network: away for the idle-ai seconds; the AI flies the plane\n"
+        "Observer screen: watching the mission\n"
+        "Observer screen: watching the player's own aircraft\n"
+        "Network: a flight input; taking the aircraft back from the AI\n"
+        "Observer screen: back to the flight\n"
+        "Network: seated in plane 0\n"
+        "Network: away for the idle-ai seconds; the AI flies the plane\n"
+        "Observer screen: watching the mission\n"
+        "Observer screen: watching the player's own aircraft\n"
+        "Network: Stop Watching; taking the aircraft back from the AI\n"
+        "Observer screen: back to the flight\n"
+        "Network: seated in plane 0\n"
+    )
+    SERVER = (
+        "seat 0 Viper: Viper is away: the AI flies plane 0\n"
+        "Viper is back: takes plane 0 from the AI\n"
+        "Viper is away: the AI flies plane 0\n"
+        "Viper is back: takes plane 0 from the AI\n"
+    )
+
+    def test_two_handoffs_and_two_returns_pass(self):
+        self.assertEqual(net_observe.away_watch_problems(self.GAME, self.SERVER), [])
+
+    def test_each_missing_step_is_named(self):
+        problems = net_observe.away_watch_problems(
+            self.GAME.replace("Network: a flight input; taking the aircraft back from the AI\n", ""), self.SERVER
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("a flight input taking the plane back", problems[0])
+        problems = net_observe.away_watch_problems(self.GAME + "Could not show the mission: x\n", self.SERVER)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("failing to open", problems[0])
+        problems = net_observe.away_watch_problems(self.GAME + "The AI lost your aircraft while you were away.\n", self.SERVER)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("lost the aircraft", problems[0])
+        self.assertEqual(len(net_observe.away_watch_problems("", "")), 8)
+        once = self.SERVER.split("Viper is away", 2)[0] + "Viper is away: the AI flies plane 0\n"
+        self.assertGreaterEqual(len(net_observe.away_watch_problems(self.GAME, once)), 1)
+
+    def test_the_scenario_is_listed_with_a_window(self):
+        scenario = next(s for s in net_observe.scenarios() if s.name == "net-window-away-watch")
+        self.assertTrue(scenario.window and callable(scenario.driver))
+        self.assertTrue(set(scenario.uses) <= {"server", "bot"})
+        # Every picture the script takes is one the driver looks for.
+        for name in net_observe.AWAY_PICTURES:
+            self.assertIn(f"SHOTS/{name}.ppm", net_observe.AWAY_SCRIPT)
+        self.assertEqual(net_observe.AWAY_SCRIPT.count("shot SHOTS/"), len(net_observe.AWAY_PICTURES))
 
 
 class ContentReportTests(unittest.TestCase):
