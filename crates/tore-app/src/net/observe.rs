@@ -681,7 +681,10 @@ impl App {
             replay.viewer.grow(read);
         } else if self.replay.is_none() && self.screen == Screen::Main {
             match Viewer::open_live(read, session.resources(), &Options::default()) {
-                Ok(viewer) => self.start_replay(viewer, None),
+                Ok(viewer) => {
+                    log::info!("Observer screen: watching the mission");
+                    self.start_replay(viewer, None);
+                }
                 Err(error) => {
                     log::warn!("Observer screen: {error}");
                     session.client.stop_watching();
@@ -698,6 +701,7 @@ impl App {
     pub(crate) fn end_observing(&mut self) {
         self.observing = None;
         if self.replay.as_ref().is_some_and(|r| r.viewer.live()) {
+            log::info!("Observer screen: back to the lobby");
             self.leave_live_replay();
         }
     }

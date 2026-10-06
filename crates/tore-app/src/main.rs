@@ -2658,11 +2658,9 @@ impl App {
             return Action::None;
         }
         // The replay viewer takes the window's keys itself (`replay_event`);
-        // a script's come here.
-        if self.screen == Screen::Replay
-            && self.script.is_some()
-            && !self.modifiers.alt_key()
-            && !self.modifiers.super_key()
+        // a script's come here (the rest it leaves to this function, with
+        // Alt or Command held, are the window's own: quitting).
+        if self.screen == Screen::Replay && !self.modifiers.alt_key() && !self.modifiers.super_key()
         {
             self.replay_script_key(
                 event_loop,
