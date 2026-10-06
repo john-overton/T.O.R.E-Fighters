@@ -2848,6 +2848,20 @@ the flight the seat's sensor controls as the command phase does. Single
 player keeps its results exactly: the functions are the old code in the old
 order, moved, and the tick fingerprint (`world/tick_tests.rs`) did not move.
 
+**One compiled copy (CI-fix).** "The same functions" has to mean the same
+machine code. `fly` was generic over the standing objects' iterator and
+`World::step_with` is generic over its callback, so the flight step was
+compiled again in each crate that instantiated them (the session's host,
+at that crate's optimisation level) apart from `OwnPlane::step`'s copy in
+`tore-world`. Rust keeps every add and multiply exact, but an optimiser may
+still swap library calls: on Apple silicon a sine and cosine pair becomes
+one combined call that can round differently. The host and the prediction
+then differed by a few units in the last place of the pitch (the network
+matrix on macos-14). `fly` now takes a `dyn` iterator and is
+`#[inline(never)]`, so one copy in `tore-world` serves both. A new shared
+step function should keep to the same rule: not generic over anything the
+caller chooses, or not inlined.
+
 What the step reads besides the plane's own state (the flight, the flight at
 the start of the tick, the turbulence state and random stream, and the two
 message clocks) is an argument:
@@ -4895,6 +4909,21 @@ in `network.yml` rather than `ci.yml`. **Open:** the 32-bit Windows runner's
 one mismatch with no late input and no correction after it is not
 explained; with one starved core on Linux every mismatch followed a late
 input.
+
+**CI-fix (2026-10-05).** `ci.yml` had failed on `multiplayer` since the net
+lane (eb60701b). Each failure and what was done:
+
+| Failure | Runner | Cause | Fix |
+| --- | --- | --- | --- |
+| `test_battery.DriverTests`, 5 errors | both Windows | The battery's driver ended processes with `os.killpg`, which Windows lacks | `battery.stop_group`: the process group on Linux and macOS, the process alone on Windows; the tests check a process is gone through its `Popen` |
+| tore-sim tests did not compile | windows i686 | A test wrote the count `1 << 40`, more than a 32-bit `usize` holds | The count is `1 << 30` |
+| `client::matrix_tests::rtt_50_loss_5`, one unexplained correction, every run | macos-14 | Not runner timing (the matrix runs on simulated time and failed identically each run) and not a defect of the slices: the host's flight step was a second compiled copy whose sine and cosine rounded the pitch differently ([one compiled copy](#one-step-for-a-humans-plane)). F2-S's score messages moved the simulator's packet losses, and the new flight found the case | `fly` compiled once; the matrix unchanged |
+| `a_joined_game_stalled_for_fifteen_seconds_is_kept_and_recovers` | macos-15-intel, once | Runner timing: the guest's starved thread sent late inputs for eight seconds after the stall, each a small correction | Normal and strict forms, as the hosting tests (table above) |
+| `an_eight_second_window_stall_drops_nobody_and_the_king_still_reigns` | macos-15-intel, once | Runner timing: 107.6 ticks a second against a floor of 108 | The lenient band is a fifth either side of 120 |
+
+The 32-bit Windows runner's unexplained mismatch (**Open**, above) may have
+the same cause as the macOS matrix failure, two compiled copies of the step;
+it was not seen again, and is not proven.
 
 ### The lobby
 
