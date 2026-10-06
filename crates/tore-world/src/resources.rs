@@ -22,8 +22,43 @@ pub trait ResourceSource {
     fn get(&self, name: &str) -> Option<&Vec<u8>>;
 
     /// The theater catalog: each base theater's name and every `~` layout
-    /// variant, as `tore_formats::theater::map_catalog` lists them.
+    /// variant, as `tore_formats::theater::map_catalog` lists them. It parses
+    /// every theater grid; a build that needs one theater's label asks
+    /// [`ResourceSource::theater_label`] instead.
     fn theater_catalog(&self) -> tore_formats::Result<Vec<(String, String)>>;
+
+    /// The label of one theater layout (`UKR`, or a `~` variant such as
+    /// `~UKR1`), the same one [`ResourceSource::theater_catalog`] gives it,
+    /// reading only the grid of that layout's base theater. `None` when the
+    /// import has no such theater.
+    fn theater_label(&self, code: &str) -> tore_formats::Result<Option<String>>;
+}
+
+/// The label of `code` in `map`, as `tore_formats::theater::map_catalog`
+/// words it: a base theater's label is its grid's name, a `~` variant's is
+/// its base's name and the variant. Only the base theater's grid is read.
+fn label_in(map: &BTreeMap<String, Vec<u8>>, code: &str) -> tore_formats::Result<Option<String>> {
+    let base_label = |base: &str| -> tore_formats::Result<Option<String>> {
+        map.get(&format!("{base}.T2"))
+            .map(|grid| tore_formats::theater::Theater::parse(grid).map(|theater| theater.name))
+            .transpose()
+    };
+    if tore_formats::theater::THEATERS
+        .iter()
+        .any(|(base, _)| *base == code)
+    {
+        return base_label(code);
+    }
+    let layout = format!("{code}.MM");
+    if code.starts_with('~')
+        && map.contains_key(&layout)
+        && let Some(base) = tore_formats::theater::base_theater(&layout)
+    {
+        return Ok(
+            base_label(base)?.map(|label| format!("{label} ({})", code.trim_start_matches('~')))
+        );
+    }
+    Ok(None)
 }
 
 impl ResourceSource for BTreeMap<String, Vec<u8>> {
@@ -33,6 +68,10 @@ impl ResourceSource for BTreeMap<String, Vec<u8>> {
 
     fn theater_catalog(&self) -> tore_formats::Result<Vec<(String, String)>> {
         tore_formats::theater::map_catalog(self)
+    }
+
+    fn theater_label(&self, code: &str) -> tore_formats::Result<Option<String>> {
+        label_in(self, code)
     }
 }
 
@@ -98,6 +137,16 @@ impl ResourceSource for ResourceReads<'_> {
             }
         }
         tore_formats::theater::map_catalog(self.map)
+    }
+
+    fn theater_label(&self, code: &str) -> tore_formats::Result<Option<String>> {
+        // A label reads one grid: the base theater's, the only bytes in it.
+        let base = tore_formats::theater::base_theater(&format!("{code}.MM")).unwrap_or(code);
+        let grid = format!("{base}.T2");
+        if self.map.contains_key(&grid) {
+            self.note(&grid);
+        }
+        label_in(self.map, code)
     }
 }
 

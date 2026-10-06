@@ -13,6 +13,7 @@ pub mod checkpoint;
 pub mod combat;
 pub mod combat_tape;
 pub mod comms;
+pub mod content;
 pub mod crew_voice;
 pub mod datalink;
 pub mod debrief;
@@ -32,6 +33,9 @@ pub mod world;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+
+#[cfg(test)]
+mod content_tests;
 
 /// A result whose error is any boxed error, as the mission code reports them.
 pub type WorldResult<T> = Result<T, Box<dyn std::error::Error>>;

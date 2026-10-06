@@ -29,6 +29,8 @@ pub struct Terrain {
     pub airfield_anchors: BTreeMap<u32, tore_sim::ai::airfield::AirfieldAnchors>,
     /// Every source placement, including definitions the bounded SH projector cannot draw.
     pub static_manifest: Vec<(u32, tore_formats::mission::SourceKey, String, bool)>,
+    /// The mission's own theater: its code and label (empty when the import
+    /// has no label for it). It no longer lists every theater of the import.
     pub catalog: Vec<(String, String)>,
     /// Authoritative environment. One instance per world, so every camera,
     /// mirror and panel resolves the same instant.
@@ -449,12 +451,14 @@ impl Terrain {
             .or_else(|| resources.get(&format!("{base}.T2")))
             .ok_or("missing base terrain grid")?;
         let mut theater = Theater::parse(grid)?;
-        let catalog = resources.theater_catalog()?;
-        if let Some((_, label)) = catalog
-            .iter()
-            .find(|(id, _)| *id == code.trim_end_matches(".MM"))
-        {
-            theater.name.clone_from(label);
+        // The label comes from this mission's own theater only, so a bad
+        // grid of another theater cannot fail this mission and a manifest
+        // holds one grid, not sixteen.
+        let id = code.trim_end_matches(".MM");
+        let mut catalog = Vec::new();
+        if let Some(label) = resources.theater_label(id)? {
+            theater.name.clone_from(&label);
+            catalog.push((id.to_owned(), label));
         }
         if theater.cols < 2 || theater.rows < 2 {
             return Err("unsupported theater dimensions".into());
