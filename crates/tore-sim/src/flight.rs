@@ -272,6 +272,7 @@ impl State {
             lift_controls.collective_actual = lift_controls.collective;
             lift_controls.thrust_lbf = capacity * lift_controls.collective * lapse;
         }
+        let fixed_gear = model.fixed_gear();
         Self {
             model,
             research: None,
@@ -304,14 +305,14 @@ impl State {
             rudder: 0.,
             elevator: 0.,
             aileron: 0.,
-            gear: 0.,
+            gear: if fixed_gear { 1. } else { 0. },
             flaps: 0.,
             brake: 0.,
             hook: 0.,
             bay: 0.,
             bay_open: false,
             bay_auto_open: false,
-            gear_down: false,
+            gear_down: fixed_gear,
             flaps_down: false,
             brake_out: false,
             hook_down: false,
@@ -614,6 +615,15 @@ impl State {
             PilotCommand::Toggle(switch) => (switch, None),
             PilotCommand::Set(switch, value) => (switch, Some(value)),
         };
+        if switch == Switch::Gear && self.model.fixed_gear() {
+            self.gear_down = true;
+            self.gear = 1.;
+            if setting.is_none() {
+                self.systems
+                    .notify("Landing gear is fixed on this aircraft");
+            }
+            return;
+        }
         if switch == Switch::Engine
             && setting.unwrap_or(!self.engine)
             && self.systems.power_available() <= 0.
@@ -1043,6 +1053,10 @@ impl State {
         ground: impl Fn(f64, f64) -> crate::research::Surface,
     ) {
         self.trace.0 = FlightTrace::default();
+        if self.model.fixed_gear() {
+            self.gear_down = true;
+            self.gear = 1.;
+        }
         self.step_once(input, ground);
         self.trace.0.tick = self.ticks;
     }

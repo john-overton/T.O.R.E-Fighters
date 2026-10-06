@@ -209,6 +209,7 @@ fn specification(id: Id) -> Option<Spec> {
 
 pub fn supported(id: Id) -> bool {
     specification(id).is_some()
+        || matches!(id, Id::Mig29 | Id::Su25 | Id::Su27 | Id::Su35 | Id::Mig21)
 }
 
 #[derive(Clone, Copy)]
@@ -223,6 +224,16 @@ enum SpecificRig {
     A10(crate::a10_animation::Rig),
     Av8(crate::av8_animation::Rig),
     Awacs(crate::awacs_animation::Rig),
+    B747(crate::b747_animation::Rig),
+    Yak141(crate::yak141_animation::Rig),
+    V22(crate::v22_animation::Rig),
+    Il76(crate::il76_animation::Rig),
+    E2(crate::e2_animation::Rig),
+    Mig29(crate::mig29_animation::Rig),
+    Mig21(crate::mig21_animation::Rig),
+    Su25(crate::su25_animation::Rig),
+    Su27(crate::su27_animation::Rig),
+    Su35(crate::su35_animation::Rig),
     A310(crate::a310_animation::Rig),
     C130(crate::c130_animation::Rig),
     Ac130(crate::ac130_animation::Rig),
@@ -241,9 +252,105 @@ pub struct Rig {
 }
 impl Rig {
     pub fn load(id: Id, bytes: &[u8]) -> AppResult<(Self, Shape)> {
-        let spec = specification(id).ok_or("unreviewed variety aircraft rig")?;
         let mut shape = Shape::parse(bytes)?;
+        // Individually reviewed older profiles share the specific-rig registry,
+        // while retaining their established source scale and simulation adapter.
+        let scale = tore_sim::combat::debris::scale(id) as f32;
         match id {
+            Id::Su25 => {
+                let (rig, shape) = crate::su25_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    scale,
+                    SpecificRig::Su25(rig),
+                    shape,
+                ));
+            }
+            Id::Mig21 => {
+                let (rig, shape) = crate::mig21_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    scale,
+                    SpecificRig::Mig21(rig),
+                    shape,
+                ));
+            }
+            Id::Mig29 => {
+                let (rig, shape) = crate::mig29_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    scale,
+                    SpecificRig::Mig29(rig),
+                    shape,
+                ));
+            }
+            Id::Su35 => {
+                let (rig, shape) = crate::su35_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    scale,
+                    SpecificRig::Su35(rig),
+                    shape,
+                ));
+            }
+            Id::Su27 => {
+                let (rig, shape) = crate::su27_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    scale,
+                    SpecificRig::Su27(rig),
+                    shape,
+                ));
+            }
+            _ => {}
+        }
+        let spec = specification(id).ok_or("unreviewed variety aircraft rig")?;
+        match id {
+            Id::B747 => {
+                let (rig, shape) = crate::b747_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::B747(rig),
+                    shape,
+                ));
+            }
+            Id::E2 => {
+                let (rig, shape) = crate::e2_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::E2(rig),
+                    shape,
+                ));
+            }
+            Id::Yak141 => {
+                let (rig, shape) = crate::yak141_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Yak141(rig),
+                    shape,
+                ));
+            }
+            Id::V22 => {
+                let (rig, shape) = crate::v22_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::V22(rig),
+                    shape,
+                ));
+            }
+            Id::Il76 => {
+                let (rig, shape) = crate::il76_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Il76(rig),
+                    shape,
+                ));
+            }
             Id::E3 => {
                 let (rig, shape) = crate::awacs_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -458,7 +565,17 @@ impl Rig {
                 SpecificRig::A7(_) => crate::a7_animation::flame(address),
                 SpecificRig::A10(_) => crate::a10_animation::flame(address),
                 SpecificRig::Av8(_) => crate::av8_animation::flame(address),
-                SpecificRig::Awacs(_) => false,
+                SpecificRig::Awacs(_)
+                | SpecificRig::Il76(_)
+                | SpecificRig::E2(_)
+                | SpecificRig::B747(_) => false,
+                SpecificRig::Mig29(_) => crate::mig29_animation::flame(address),
+                SpecificRig::Mig21(_) => crate::mig21_animation::flame(address),
+                SpecificRig::Su25(_) => crate::su25_animation::flame(address),
+                SpecificRig::Su27(_) => crate::su27_animation::flame(address),
+                SpecificRig::Su35(_) => crate::su35_animation::flame(address),
+                SpecificRig::Yak141(_) => crate::yak141_animation::flame(address),
+                SpecificRig::V22(_) => crate::v22_animation::flame(address),
                 SpecificRig::A310(_)
                 | SpecificRig::C130(_)
                 | SpecificRig::Ac130(_)
@@ -494,6 +611,16 @@ impl Rig {
                 SpecificRig::A10(rig) => rig.animate(source, state),
                 SpecificRig::Av8(rig) => rig.animate(source, state),
                 SpecificRig::Awacs(rig) => rig.animate(source, state),
+                SpecificRig::B747(rig) => rig.animate(source, state),
+                SpecificRig::Yak141(rig) => rig.animate(source, state),
+                SpecificRig::V22(rig) => rig.animate(source, state),
+                SpecificRig::Il76(rig) => rig.animate(source, state),
+                SpecificRig::E2(rig) => rig.animate(source, state),
+                SpecificRig::Mig29(rig) => rig.animate(source, state),
+                SpecificRig::Mig21(rig) => rig.animate(source, state),
+                SpecificRig::Su25(rig) => rig.animate(source, state),
+                SpecificRig::Su27(rig) => rig.animate(source, state),
+                SpecificRig::Su35(rig) => rig.animate(source, state),
                 SpecificRig::A310(rig) => rig.animate(source, state),
                 SpecificRig::C130(rig) => rig.animate(source, state),
                 SpecificRig::Ac130(rig) => rig.animate(source, state),

@@ -15,13 +15,38 @@ pub(crate) mod animation_tests {
         s.brake = 1.;
         s.hook = 1.;
         s.exhaust = 1.;
-        for address in [0x5059, 0x4a03, 0x4bfa, 0x4d33, 0x4f64, 0x5310] {
+        for address in [
+            0x5059, 0x4a03, 0x4bfa, 0x4d33, 0x4f64, 0x4ee1, 0x4b69, 0x4abe, 0x4e86, 0x5310,
+        ] {
+            let door = matches!(address, 0x4b69 | 0x4abe | 0x4e86);
+            let positions = if matches!(address, 0x4b69 | 0x4abe) {
+                let (lower, upper) = if address == 0x4b69 {
+                    (-5., -3.)
+                } else {
+                    (6., 4.)
+                };
+                // Synthetic untextured leaf with the fit's own attachment plane.
+                vec![
+                    [lower, -9., -15.],
+                    [lower, -1., -15.],
+                    [upper, -1., -6.],
+                    [upper, -9., -6.],
+                ]
+            } else {
+                vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]]
+            };
+            let count = positions.len();
+            let uv = if count == 4 {
+                vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]]
+            } else {
+                vec![[0., 0.], [1., 0.], [0., 1.]]
+            };
             let f = Face {
                 fog: tore_formats::shape::FogMode::Enabled,
                 address,
-                positions: vec![[1., 2., 3.], [5., 2., 3.], [1., 6., 3.]],
-                colors: vec![20; 3],
-                uv: vec![[0., 0.], [1., 0.], [0., 1.]],
+                positions,
+                colors: vec![20; count],
+                uv,
                 texture: "SYNTHETIC".into(),
                 subtype: 0x4c,
                 normal: Some([0., 1., 0.]),
@@ -30,7 +55,7 @@ pub(crate) mod animation_tests {
             assert_eq!(open.positions, f.positions);
             assert_eq!(open.uv, f.uv);
             let mut half = s.clone();
-            half.gear = 0.5;
+            half.gear = if door { 0.125 } else { 0.5 };
             half.brake = 0.5;
             half.hook = 0.5;
             half.exhaust = 0.5;
@@ -42,7 +67,41 @@ pub(crate) mod animation_tests {
             closed.brake = 0.;
             closed.hook = 0.;
             closed.exhaust = 0.;
-            assert!(animate(&f, &closed).is_none());
+            if matches!(address, 0x4bfa | 0x4d33) {
+                // The fitted closed main joints remain visible continuously.
+                let stowed = animate(&f, &closed).unwrap();
+                assert_ne!(stowed.positions, f.positions);
+                assert_eq!(stowed.uv, f.uv);
+                assert_eq!(stowed.colors, f.colors);
+                let distance = |a: [f32; 3], b: [f32; 3]| {
+                    a.iter()
+                        .zip(b)
+                        .map(|(a, b)| (a - b).powi(2))
+                        .sum::<f32>()
+                        .sqrt()
+                };
+                for i in 0..count {
+                    for j in i + 1..count {
+                        assert!(
+                            (distance(f.positions[i], f.positions[j])
+                                - distance(stowed.positions[i], stowed.positions[j]))
+                            .abs()
+                                < 1e-4
+                        );
+                    }
+                }
+                let mut near = closed.clone();
+                near.gear = 1e-6;
+                let near = animate(&f, &near).unwrap();
+                assert!(
+                    near.positions
+                        .iter()
+                        .zip(&stowed.positions)
+                        .all(|(a, b)| distance(*a, *b) < 1e-4)
+                );
+            } else {
+                assert!(animate(&f, &closed).is_none());
+            }
         }
     }
     #[test]

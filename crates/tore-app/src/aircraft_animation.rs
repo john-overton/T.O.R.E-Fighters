@@ -57,22 +57,24 @@ fn hinge(part: Part, s: &State) -> ([f32; 3], [f64; 3], f64) {
     match part {
         Brake => ([0., -28., 5.], x, (10f64 / 18.).atan() * (1. - s.brake)),
         Hook => ([0., -37.5, -3.], x, -(18f64 / 11.5).atan() * (1. - s.hook)),
-        GearRight => ([8., -7., -6.], y, 1.45 * (1. - s.gear)),
-        GearLeft => ([-7., -7., -6.], y, -1.45 * (1. - s.gear)),
-        GearNose => (
-            [0., 55., -6.],
-            x,
-            -std::f64::consts::FRAC_PI_2 * (1. - s.gear),
+        GearRight => (
+            [9., -7., -6.],
+            [1., 0.55, 0.],
+            140f64.to_radians() * (1. - s.gear),
         ),
-        DoorLeft => ([-3., 0., -6.], y, -1.35 * (1. - (s.gear * 4.).min(1.))),
-        DoorRight => ([4., 0., -6.], y, 1.35 * (1. - (s.gear * 4.).min(1.))),
+        GearLeft => (
+            [-8., -7., -6.],
+            [1., -0.46, 0.],
+            140f64.to_radians() * (1. - s.gear),
+        ),
+        GearNose => ([0., 55., -6.], x, 130f64.to_radians() * (1. - s.gear)),
         DoorNose => (
             [-1., 53., -6.],
             y,
             -std::f64::consts::FRAC_PI_2 * (1. - (s.gear * 4.).min(1.)),
         ),
-        FlapLeft => ([-13., -8., 4.], [25., 2., 2.], s.flaps * 0.52),
-        FlapRight => ([13., -7., 4.], [26., -3., -2.], s.flaps * 0.52),
+        FlapLeft => ([-13., -8., 3.5], [25., 2., 2.], s.flaps * 0.52),
+        FlapRight => ([13., -7., 3.5], [26., -3., -2.], s.flaps * 0.52),
         TailLeft => ([-11., -43., 0.], x, -s.elevator * 0.30 + s.aileron * 0.20),
         TailRight => ([11., -43., 0.], x, -s.elevator * 0.30 - s.aileron * 0.20),
         _ => ([0.; 3], x, 0.),
@@ -85,7 +87,8 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
         Flame => s.exhaust,
         Brake => s.brake,
         Hook => s.hook,
-        GearLeft | GearRight | GearNose | DoorLeft | DoorRight | DoorNose => s.gear,
+        GearLeft | GearRight => 1.,
+        GearNose | DoorLeft | DoorRight | DoorNose => s.gear,
         _ => 1.,
     };
     if fraction <= 0. {
@@ -96,6 +99,24 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
         for p in &mut result.positions {
             p[1] = -60. + (p[1] + 60.) * s.exhaust as f32;
         }
+        return Some(result);
+    }
+    if matches!(part, DoorLeft | DoorRight) {
+        let closing = 1. - (s.gear * 4.).clamp(0., 1.);
+        let original_x = if part == DoorLeft { -5. } else { 6. };
+        for p in &mut result.positions {
+            if p[2] == -15. {
+                p[0] = original_x + (0.5 - original_x) * closing as f32;
+                p[2] += 9. * closing as f32;
+            }
+        }
+        if closing != 0. {
+            update_normal(face, &mut result);
+        }
+        return Some(result);
+    }
+    if matches!(face.address, 0x4ee1 | 0x4f00) {
+        animate_nose_brace(face, &mut result, 1. - s.gear.clamp(0., 1.));
         return Some(result);
     }
     let (pivot, axis, angle) = hinge(part, s);
@@ -112,6 +133,29 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
             result.normal = Some([n[0], n[2], n[1]]);
         }
     }
+    if matches!(part, FlapLeft | FlapRight) && s.flaps != 0. {
+        let roots = if part == FlapLeft {
+            [
+                [-13., -8., 4.],
+                [-38., -10., 2.],
+                [-13., -8., 3.],
+                [-38., -10., 1.],
+            ]
+        } else {
+            [
+                [13., -7., 4.],
+                [39., -10., 2.],
+                [13., -7., 3.],
+                [39., -10., 1.],
+            ]
+        };
+        for (a, b) in face.positions.iter().zip(&mut result.positions) {
+            if roots.contains(a) {
+                *b = *a;
+            }
+        }
+        update_normal(face, &mut result);
+    }
     if part == GearNose
         && crate::additional_animation::steerable_nose(
             tore_formats::aircraft::AircraftId::F18,
@@ -126,6 +170,32 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
         );
     }
     Some(result)
+}
+
+fn animate_nose_brace(source: &Face, result: &mut Face, closing: f64) {
+    if closing == 0. {
+        return;
+    }
+    let root = [0., 44., -5.5];
+    let wheel_root = [0., 55., -6.];
+    let offset = rotate([0., -1., -5.], [1., 0., 0.], 130f64.to_radians() * closing);
+    let target = [
+        wheel_root[1] + offset[1] - root[1],
+        wheel_root[2] + offset[2] - root[2],
+    ];
+    let original = [10f32, -5.5];
+    let length = original.iter().map(|v| v * v).sum::<f32>().sqrt();
+    let actual_length = target.iter().map(|v| v * v).sum::<f32>().sqrt();
+    let axis = original.map(|v| v / length);
+    let actual_axis = target.map(|v| v / actual_length);
+    for p in &mut result.positions {
+        let delta = [p[1] - root[1], p[2] - root[2]];
+        let along = (delta[0] * axis[0] + delta[1] * axis[1]) * actual_length / length;
+        let across = -delta[0] * axis[1] + delta[1] * axis[0];
+        p[1] = root[1] + along * actual_axis[0] - across * actual_axis[1];
+        p[2] = root[2] + along * actual_axis[1] + across * actual_axis[0];
+    }
+    update_normal(source, result);
 }
 
 /// Marks the rear member of each double-sided panel for the smooth renderer.
@@ -249,6 +319,40 @@ pub(crate) fn split_surface(
     result
 }
 
+fn polygon_normal(points: &[[f32; 3]]) -> Option<[f32; 3]> {
+    let mut n = [0f64; 3];
+    for (a, b) in points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .take(points.len())
+    {
+        n[0] += f64::from(a[1] - b[1]) * f64::from(a[2] + b[2]);
+        n[1] += f64::from(a[2] - b[2]) * f64::from(a[0] + b[0]);
+        n[2] += f64::from(a[0] - b[0]) * f64::from(a[1] + b[1]);
+    }
+    let len = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+    (len > 1e-9).then(|| n.map(|v| (v / len) as f32))
+}
+pub(crate) fn update_normal(source: &Face, result: &mut Face) {
+    let (Some(old), Some(reference), Some(mut n)) = (
+        source.normal,
+        polygon_normal(&source.positions),
+        polygon_normal(&result.positions),
+    ) else {
+        return;
+    };
+    if [old[0], old[2], old[1]]
+        .iter()
+        .zip(reference)
+        .map(|(a, b)| a * b)
+        .sum::<f32>()
+        < 0.
+    {
+        n = n.map(|v| -v);
+    }
+    result.normal = Some([n[0], n[2], n[1]]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,6 +449,161 @@ mod tests {
             if angle > 0. {
                 assert!(v[2] < 0.);
             }
+        }
+    }
+    fn synthetic(address: usize, positions: Vec<[f32; 3]>) -> Face {
+        let n = positions.len();
+        Face {
+            address,
+            positions,
+            colors: vec![22; n],
+            fog: Default::default(),
+            uv: vec![[0., 0.]; n],
+            texture: "SYNTHETIC".into(),
+            subtype: 0xed,
+            normal: Some([1., 0., 0.]),
+        }
+    }
+    fn state() -> State {
+        State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap()
+    }
+    #[test]
+    fn main_gear_repair_keeps_joint_rigid_and_separated_for_401_positions() {
+        let mut s = state();
+        for (a, pivot, x) in [
+            (0x4bfa, [9., -7., -6.], 15.),
+            (0x4d33, [-8., -7., -6.], -13.),
+        ] {
+            let f = synthetic(
+                a,
+                vec![pivot, [x, -6., -12.], [x, -6., -17.], [x, -9., -17.]],
+            );
+            for i in 0..=400 {
+                s.gear = f64::from(i) / 400.;
+                let g = animate(&f, &s).unwrap();
+                assert_eq!(g.positions[0], pivot);
+                assert!(
+                    g.positions
+                        .iter()
+                        .all(|p| if x > 0. { p[0] > 0.45 } else { p[0] < -0.4 })
+                );
+                for j in 0..4 {
+                    for k in j + 1..4 {
+                        let dist = |a: [f32; 3], b: [f32; 3]| {
+                            a.iter()
+                                .zip(b)
+                                .map(|(a, b)| (a - b).powi(2))
+                                .sum::<f32>()
+                                .sqrt()
+                        };
+                        assert!(
+                            (dist(f.positions[j], f.positions[k])
+                                - dist(g.positions[j], g.positions[k]))
+                            .abs()
+                                < 1e-4
+                        );
+                    }
+                }
+                if i == 400 {
+                    assert_eq!(g.positions, f.positions);
+                }
+            }
+        }
+    }
+    #[test]
+    fn thick_flap_fronts_stay_fixed_and_shared_trailing_points_stay_joined() {
+        let mut s = state();
+        let roots = [
+            [-13., -8., 4.],
+            [-38., -10., 2.],
+            [-13., -8., 3.],
+            [-38., -10., 1.],
+        ];
+        let top = synthetic(
+            0x525b,
+            vec![roots[0], roots[1], [-30., -17., 2.], [-18., -17., 3.]],
+        );
+        let bottom = synthetic(
+            0x5282,
+            vec![roots[2], roots[3], top.positions[2], top.positions[3]],
+        );
+        for v in [0., 0.25, 0.5, 0.75, 1.] {
+            s.flaps = v;
+            let a = animate(&top, &s).unwrap();
+            let b = animate(&bottom, &s).unwrap();
+            for i in 0..2 {
+                assert_eq!(a.positions[i], top.positions[i]);
+                assert_eq!(b.positions[i], bottom.positions[i]);
+            }
+            for i in 2..4 {
+                assert_eq!(a.positions[i], b.positions[i]);
+            }
+        }
+    }
+    #[test]
+    fn telescoping_brace_has_fixed_painted_center_and_no_winding_flip_or_collapse() {
+        let f = synthetic(
+            0x4ee1,
+            vec![
+                [0., 44., -5.25],
+                [0., 44., -5.75],
+                [0., 54., -11.75],
+                [0., 54., -10.25],
+            ],
+        );
+        let area = |f: &Face| {
+            f.positions
+                .iter()
+                .zip(f.positions.iter().cycle().skip(1))
+                .take(f.positions.len())
+                .map(|(a, b)| a[1] * b[2] - b[1] * a[2])
+                .sum::<f32>()
+        };
+        let old = area(&f);
+        let mut s = state();
+        for i in 1..=401 {
+            s.gear = f64::from(i) / 401.;
+            let g = animate(&f, &s).unwrap();
+            assert!(area(&g) * old > 0.);
+            assert!(area(&g).abs() >= old.abs() - 1e-3);
+            assert!(((g.positions[0][1] + g.positions[1][1]) * 0.5 - 44.).abs() < 1e-4);
+            assert!(((g.positions[0][2] + g.positions[1][2]) * 0.5 + 5.5).abs() < 1e-4);
+            if i == 401 {
+                assert_eq!(g.positions, f.positions);
+            }
+        }
+    }
+    #[test]
+    fn paired_door_morph_keeps_source_upper_edges_and_never_crosses_the_center_seam() {
+        let f = synthetic(
+            0x4b69,
+            vec![
+                [-5., -8., -15.],
+                [-5., -2., -15.],
+                [-3., -2., -6.],
+                [-3., -8., -6.],
+            ],
+        );
+        let g = synthetic(
+            0x4abe,
+            vec![
+                [6., -8., -15.],
+                [6., -2., -15.],
+                [4., -2., -6.],
+                [4., -8., -6.],
+            ],
+        );
+        let mut s = state();
+        for i in 1..=400 {
+            s.gear = f64::from(i) / 1600.;
+            let a = animate(&f, &s).unwrap();
+            let b = animate(&g, &s).unwrap();
+            for j in 2..4 {
+                assert_eq!(a.positions[j], f.positions[j]);
+                assert_eq!(b.positions[j], g.positions[j]);
+            }
+            assert!(a.positions.iter().all(|p| p[0] <= 0.5));
+            assert!(b.positions.iter().all(|p| p[0] >= 0.5));
         }
     }
 }

@@ -58,3 +58,30 @@ class AnimationReportTests(unittest.TestCase):
         report = self.report()
         report["aircraft"] = "E3.PT"
         self.assertTrue(self.check(report))
+
+    def test_v22_requires_both_independent_combination_artifacts(self):
+        report = self.report()
+        report["aircraft"] = "V22.PT"
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            poses = work / "poses"
+            poses.mkdir()
+            (poses / "report.json").write_text(json.dumps(report))
+            (poses / "flaperon-combinations.csv").write_text("pose\n" * 26)
+            self.assertTrue(check_report(work, ""))
+            (poses / "conversion-rotor-combinations.csv").write_text("pose\n" * 26)
+            self.assertEqual(check_report(work, ""), [])
+
+    def test_rafale_requires_all_three_axis_combinations(self):
+        report = self.report()
+        report["aircraft"] = "RAFALE.PT"
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            poses = work / "poses"
+            poses.mkdir()
+            (poses / "report.json").write_text(json.dumps(report))
+            target = poses / "flap-pitch-roll-combinations.csv"
+            target.write_text("pose\n" * 26)
+            self.assertTrue(check_report(work, ""))
+            target.write_text("pose\n" * 126)
+            self.assertEqual(check_report(work, ""), [])

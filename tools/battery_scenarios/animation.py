@@ -9,7 +9,9 @@ from pathlib import Path
 from battery import Scenario
 
 # Expand only after independent source attachments and pose sheets are reviewed.
-REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47")
+REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
+                     "yak141", "v22", "il76", "e2", "b747",
+                     "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -36,12 +38,27 @@ def check_report(work: Path, _output: str) -> list[str]:
                 problems.append("combined rotor attachment/separation checks did not pass")
         except (OSError, ValueError) as error:
             problems.append(f"unreadable combined rotor report: {error}")
-    csv_name = ("flap-roll-combinations.csv" if aircraft in {"F16C.PT", "F104.PT", "E3.PT"}
-                else "nozzle-combinations.csv" if aircraft == "AV8.PT" else None)
-    if csv_name:
+    sweeps = {
+        "F16C.PT": {"flap-roll-combinations.csv": 26},
+        "F104.PT": {"flap-roll-combinations.csv": 26},
+        "E3.PT": {"flap-roll-combinations.csv": 26},
+        "AV8.PT": {"nozzle-combinations.csv": 26},
+        "YAK141.PT": {"nozzle-combinations.csv": 26},
+        "V22.PT": {"flaperon-combinations.csv": 26, "conversion-rotor-combinations.csv": 26},
+        "IL76.PT": {"flap-roll-combinations.csv": 26},
+        "E2.PT": {"flap-roll-combinations.csv": 26, "pitch-yaw-combinations.csv": 26},
+        "B747.PT": {"flap-roll-combinations.csv": 26},
+        "RAFALE.PT": {"flap-pitch-roll-combinations.csv": 126},
+        "MIG29.PT": {"flap-roll-combinations.csv": 26},
+        "SU27.PT": {"flaperon-combinations.csv": 26},
+        "SU35.PT": {"flap-roll-combinations.csv": 26},
+        "MIG21.PT": {"flap-roll-combinations.csv": 26},
+        "SU25.PT": {"flap-roll-combinations.csv": 26, "rudder-material-correspondence.csv": 6},
+    }.get(aircraft, {})
+    for csv_name, row_count in sweeps.items():
         try:
-            if len((work / "poses" / csv_name).read_text().splitlines()) != 26:
-                problems.append("combined control sweep omitted expected poses")
+            if len((work / "poses" / csv_name).read_text().splitlines()) != row_count:
+                problems.append(f"combined control sweep omitted expected poses: {csv_name}")
         except OSError as error:
             problems.append(f"missing combined control sweep: {error}")
     return problems

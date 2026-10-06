@@ -144,6 +144,11 @@ impl AircraftModel {
         }]
         .1
     }
+    /// Authored fixed-gear behavior for the reviewed always-present rotorcraft gear.
+    pub fn fixed_gear(&self) -> bool {
+        matches!(self, Self::Variety(m) if matches!(m.id,
+            tore_formats::aircraft::AircraftId::Ah64 | tore_formats::aircraft::AircraftId::Ch47))
+    }
     pub fn powered_lift(&self) -> Option<variety::PoweredLift> {
         match self {
             Self::Variety(m) => m.lift,

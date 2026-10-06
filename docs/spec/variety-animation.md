@@ -52,8 +52,8 @@ reviewed guard; it does not interpret arbitrary machine instructions.
 
 ## Initial generic motion
 
-Agent choices, explicitly fitted. The individually repaired aircraft use the specific rules
-below; other variety rigs retain these initial rules pending individual review.
+Agent choices, explicitly fitted. All 23 variety aircraft now use individually reviewed rules below. The shared
+initial device rules still apply only to explicitly retained device mappings.
 
 - Gear uses its original deployed branch. During retraction, the group moves
   upward by its source vertical extent times the remaining travel fraction;
@@ -74,9 +74,9 @@ below; other variety rigs retain these initial rules pending individual review.
   or afterburner effects from the existence of a source flame branch.
 
 [Propellers, rotors and tiltrotor nacelles](rotor-presentation.md) have their
-own reviewed groups and fitted motion. Outside individually repaired profiles, remaining flap/elevator/aileron groups,
-VTOL jet nozzle geometry, unlocated hook geometry and live mirror masks for new
-cockpit families are still incomplete. Static parts remain original geometry;
+own reviewed groups and fitted motion. Unlocated hook geometry, individual
+rotor blade feathering and live mirror masks for new cockpit families remain
+incomplete. Static parts remain original geometry;
 the import does not claim every surface is animated.
 
 ## A-7 surface repair and acceptance
@@ -454,3 +454,101 @@ The closest raw card margins are transparent; report their conservative gap
 separately from the indexed-art wheel/strut clearance. The source afterburner
 alias adds no flame, so it is not connected to exhaust demand. Radome animation
 and original timing remain unreviewed.
+
+## Yak-141 controls and nozzle
+
+Agent fits, 2026-10-05. Preserve the asymmetric source tail roots. Distal tail
+points use -0.30 radians times elevator around the lateral mid-root line.
+Twin rudders use rear cuts `Y=-74-(5/21)*(Z-6)` and rotate 0.35 radians times
+rudder around each actual diagonal cut. Outer roll strips begin at X=-29/+30,
+with outward axes [-25,-6,0]/[25,-6,0] at Y=-28.5,Z=3; rotate -0.20 radians
+times aileron while retaining the cut. Inboard flaps morph to their own exact
+down endpoints independently of roll.
+
+The nozzle's front ring at Y=-47 remains fixed. Its eight-point outlet moves
+rigidly around [0.5,-47,-3], first yawing -15 degrees times actual nozzle yaw
+around Z, then pitching +90 degrees times actual nozzle pitch around X.
+Original shell faces connect that moving outlet to the fixed ring. This is a
+flexible-neck fit, not recovered mechanics. No lift-fan or door art is invented.
+
+Keep painted wheel circles rigid. Split right main, left main and nose cards
+at Z=-13,-12,-14 respectively. The main lower pieces lift 16 units, moving
+inward 2 units during the second half of retraction; nose lower pieces lift
+15 units and move aft 6 units during that half. Upper attachment edges remain
+fixed while their lower boundaries follow the wheels. The always-present nose
+cards retract too. Hide all gear only at zero; deployment preserves source
+geometry. These deformable upper connectors and stow paths are authored fits.
+
+## V-22 controls and gear
+
+Agent fits, 2026-10-05. Pitch moves tail strips aft of Y=-123 by -0.30 radians
+times elevator. Rudders use `Y=-128-(4/29)*(Z-1)` and rotate 0.35 radians times
+rudder around their own diagonal cuts. Fixed fins and all cut points remain
+unchanged. Flaperons first morph to their own source flap endpoints, then move
+only their joined trailing vertices by -0.20 radians times aileron around
+outward mean axes [±75,9,0], rooted at [-20,-4,10.5]/[19,-4,10.5]. Keep both
+thick forward edges fixed. Original wingtip closures follow the same trailing
+point; do not overlap them with duplicate source down-cap triangles.
+
+All twelve shaft/wheel cards stay rigid. Mains close through opposite half-turns
+around source Y at their painted shaft centers [±23,-4,-29]. Nose gear closes
+aft 90 degrees around [0,82,-28]. Fully deployed positions are exact; gear zero
+hides all twelve cards. Nacelles and selected propeller cards retain the
+[shared rotor rules](rotor-presentation.md), including conversion around
+[±102,0,12] and propeller hubs [±102,51,16]. Blade feathering remains unknown.
+
+## Il-76 controls and gear
+
+Agent fits, 2026-10-05. Rudder rotates 0.35 radians times yaw around the source
+trailing-fin edge. Pitch moves aft of `Y=-113-0.30*(abs(X)-2)` through -0.30
+radians times elevator around rightward axes at Z=58, retaining actual roots.
+Separate outer trailing triangles carry -0.20 radians times aileron, with both
+thick forward edges and wingtip fixed. Inner flaps and their caps morph to
+exact source endpoints independently of roll; their source control clearance
+must not be mistaken for a torn shared skin.
+
+All five crossed strut/wheel assemblies stay rigid. Each main closes outward
+180 degrees about the forward axis at X=±7.5,Z=-17, retaining fore/aft spacing.
+Nose gear folds aft 180 degrees around [0,45,-15]. Hide only at zero deployment.
+These are authored attachment and stow fits, not measured original mechanisms.
+
+## E-2 controls, hook and gear
+
+Agent fits, 2026-10-05. Four rudder strips aft of Y=-42 turn 0.35 radians times
+yaw, retaining each canted cut edge. Pitch strips aft of
+`Y=-40-0.05*abs(X)` move -0.30 radians times elevator only in span corridors
+abs(X)=2..9 and 13..19, leaving body and fin attachments fixed. Flaperons morph
+to asymmetric source endpoints and add -0.20 radians times aileron around
+own outward mean hinges. Source closures appear when either demand is nonzero.
+Do not thicken the source-degenerate left cap to resemble the right.
+
+Main leg/wheel assemblies fold forward 115 degrees around left [-16,0,-7]
+and right [16,0,-6], preserving their one-unit leg/wheel lateral offset.
+Nose gear folds aft 90 degrees around [0,30,-7]. Hook folds aft 90 degrees
+around [0,-13,-8], lifting into its stowed envelope. Gear and hook disappear
+only at zero. Retain the shared phase-selected propeller overlay. Original
+radome motion and mechanical timing remain unknown.
+
+## Boeing 747 controls and gear
+
+Agent fits, 2026-10-05. Rudder rotates 0.35 radians times yaw around its source
+edge [0,-155,15] to [0,-186,58]; the adjacent upper fin remains fixed. Pitch
+strips lie aft of `Y=-166-0.5*(abs(X)-8)`, moving -0.30 radians times elevator
+about rising rightward axes [1,-side*0.5,side*4/43] through [side*8,-166,12].
+Retain actual body roots and cut edges. Independent roll strips occupy
+abs(X)=118..145 aft of `Y=-57-(abs(X)-113)*23/41`. Their outward mean axes
+[side*41,-23,4.5] pass through [side*113,-57,4.5]; travel is -0.20 radians
+times aileron. Engine attachment corridors and wingtips remain fixed.
+
+Flaps preserve their exact neutral and down surfaces, including triangle
+interiors. The right lower panel needs a four-triangle common subdivision to
+preserve both different source diagonals. Interpolate its center and corners.
+Use original neutral material at zero and original down material for positive
+flap, avoiding an interpolation across unrelated atlas regions. This material
+switch and continuous geometry are fitted timing choices.
+
+All 36 gear faces form five rigid assemblies. Main bogies close outward
+180 degrees around forward axes at X=±6.5,Z=-12.5, retaining fore/aft spacing.
+Nose gear closes aft 165 degrees around [0,100.5,-16], on its painted upper
+shaft. All source deployment positions remain exact; hide only at zero.
+Complete deployed gear retains the existing 20-foot ground clearance.

@@ -98,7 +98,7 @@ fn map_vector(v: V, before: [V; 3], after: [V; 3]) -> V {
             .sum()
     })
 }
-fn inspect_panel(
+pub(super) fn inspect_panel(
     before: &Face,
     after: &Face,
     hub: [f32; 3],

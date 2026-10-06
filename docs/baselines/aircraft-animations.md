@@ -203,20 +203,117 @@ painted lower wheel/strut regions. Complete stow cards and dense interior grids
 fit source body sections. Radome motion and other unreviewed devices remain
 outside this bounded acceptance.
 
+## Older F/A-18D and Rafale repairs
+
+Exact F18.PT passes `.local/animation-probes/f18-checked`. Its old inward
+main-wheel fold crossed the centerline; the new rooted oblique folds keep
+source tire assemblies rigid and separated. Thick flap fronts, separate
+nose-brace attachments and door boundaries were corrected. All eight moving
+sheets, static sheets, neutral overlay and all 22 gear details were reviewed.
+Maximum source-root error is 0.000005185 ft, skin/brace connection error
+0.000002716 ft, rigid-wheel error 0.000001907 ft and minimum sampled wheel gap
+0.939457 ft. All original tire samples fit source sections at stow. Twenty-eight
+upper-right strut samples remain outside the belly and are intentionally kept
+visible rather than disappearing; this is an explicit fitted retained joint.
+
+Exact RAFALE.PT passes `.local/animation-probes/rafale-checked`, including 125
+mixed flap/pitch/roll poses. Main wheel cards now fold aft around the painted
+forward brace point instead of crossing each other. Both thick flap fronts and
+the sloped nose-door hinge stay attached. All seven moving sheets, the neutral
+overlay and mixed-control extremes were reviewed. Main-card separation stays
+2.666667 ft; maximum root error is 0.000003331 ft and rigid-panel error
+0.000001590 ft, with zero reviewed skin gaps and new planar crossings. All
+2,908 inspected opaque main samples fit sampled body sections at stow; five
+of 578 raw-card grid points outside the hull are transparent margins.
+
+These checks include retained existing controls, not just repaired gear. The
+older initial presentation baselines did not establish these attachment and
+separation properties. Retail mechanical timing and GPU texture/culling remain
+outside this bounded CPU acceptance.
+
+## Further transport and powered-lift results
+
+Actual source probes `yak141-first`, `v22-first`, `il76-first`, `e2-first` and
+`b747-first` under `.local/animation-probes/` all pass required controls,
+attachment/skin checks, signed movement, 22 gear samples and new planar-crossing
+gates. All control/device sheets, neutral overlays and gear intermediates were
+reviewed. Combined sweeps cover 25 Yak nozzle poses, 25 V-22 flaperon plus
+25 conversion/rotor poses, 25 Il-76 flap/roll poses, 25 E-2 flap/roll plus
+25 pitch/yaw poses, and 25 Boeing flap/roll poses.
+
+| Aircraft | Maximum gear root error, feet | Maximum rigid-assembly error, feet | Minimum main-card gap, feet |
+| --- | ---: | ---: | ---: |
+| Il-76 | 0.000001311 | 0.000002543 | 4.6667004 |
+| E-2 | 0.000000318 | 0.000001113 | 20 |
+| Boeing 747 | 0.000005087 | 0.000005087 | 2.6666667 |
+
+All three have zero reviewed surface-root and skin gaps. Independent 201-pose
+source reviews preserve whole shaft/wheel assemblies and enclosed full-stow
+samples. E-2 body/nacelle sections are treated as separate intervals, not a
+single solid box. Boeing coverage includes 11,016 full-stow triangle samples
+and painted upper-shaft attachments throughout travel, plus exact source flap
+triangle interiors and materials. Its complete deployed ground plane confirms
+the existing 20-foot clearance. Yak nozzle ring/seams remain exact with outlet
+rigidity error below 0.000001 feet. V-22 nacelle/prop attachment and rigidity
+stay below the 0.0001-foot limit; shared rotor postprocessing remains active.
+
+These are fitted geometry acceptances. The Yak flexible nozzle neck, V-22
+blade feathering, E-2 radome movement and original mechanisms/timing retain
+the limitations in their contracts. Textured GPU and retail runtime comparisons
+were not performed.
+
+## Further older-fighter results
+
+Exact `mig29-first`, `su27-first`, `su35-checked` and `mig21-first` source probes
+pass required controls, 22 gear samples and 25 flap/roll combinations each.
+Every moving/static sheet, selected gear intermediate and combined-control
+extreme was inspected. The MiG-21 ventral brake also received an isolated
+actual-OBJ inspection. Reviewed cut points, paired skins and combined-control
+roots stay coherent, with no signed-motion failures or new planar crossings.
+
+The old MiG-29 right main gear crossed the centerline by 3.252184 source units
+at gear 0.05. Its corrected aft fold retains signed X>=13. Su-27 main cards
+retain X=±23. Su-35's existing inward fold was already separate, with measured
+minimum signed X=2.385374, and is retained while correcting the nose brace.
+MiG-21 corrects asymmetric source shafts instead of mirroring the left pivot.
+Su-35 and MiG-21 retain their distinct source root asymmetries. These checks
+accept specific fitted presentation, not original mechanics or flight dynamics.
+
+Su-25 passes `su25-checked`, seven focused tests and the app build. All moving
+and static sheets, intermediate/near-stow gear and 25 mixed poses were reviewed.
+Its old right main crossed the centerline by 3.599803 source units at gear 0.20;
+complete cards now retain source X positions. Independent witnesses preserve
+fixed fin/forward wing, source UV and shade order, sixteen rigid cards and a
+separately anchored nose brace. All five signed rudder samples have zero UV
+correspondence error. Combined cases have zero root, skin and material errors,
+new planar crossings and direction failures. No exhaust geometry is asserted.
+
+## Fixed rotorcraft gear state
+
+The actual loaded Apache and Chinook had visible fixed wheels but started with
+simulation gear retracted. The correction keeps their gear down on creation,
+commands and authoritative ticks. Focused tests passed for ignored toggle/set
+retraction, repairing an inconsistent old state before gentle contact, and
+continued Hind retraction/extension. The six-aircraft gentle vertical landing
+and departure test passes without forcibly deploying fixed rotorcraft gear.
+The Apache/Chinook animation battery now checks loaded state and commands
+before selecting artificial mesh poses. The rule is explicitly fitted in the
+[variety flight contract](../spec/variety-flight.md).
+
 ## Focused checkpoint checks
 
-The eighteen-profile set passed 127 Rust tests selected by `animation`, ten
-rotor-focused tests, the Harrier ground-contact test and an app-only build.
-App-only Clippy, formatting and documentation consistency passed. The shared
-dispatcher retains propeller, rotor and manually aimed gun overlays after
-specific control rigs.
+The thirty-profile set passed 188 Rust tests selected by `animation`, all eleven
+powered-flight tests, and an app-only build. App/simulation Clippy with warnings
+denied, formatting and documentation consistency passed. The shared dispatcher
+retains propeller, rotor and manually aimed gun overlays after specific rigs.
 
-All eighteen `flight-animation-*` scenarios pass in
-`.local/animation-battery/20261005-173532-eighteen-reviewed/summary.md`.
-Thirty-seven focused Python report/selection tests passed. The battery requires
+All thirty `flight-animation-*` scenarios pass in
+`.local/animation-battery/20261005-192437-thirty-reviewed/summary.md`.
+Thirty-nine focused Python report/selection tests passed. The battery requires
 reviewed attachment scope and passing per-control gates, plus complete combined
-rotor, flaperon and nozzle artifacts where applicable. A motion-only report
-cannot pass as reviewed geometry.
+rotor, flaperon, nozzle and source-material artifacts where applicable. A
+motion-only report cannot pass as reviewed geometry. Apache/Chinook scenarios
+also verify actual initialized fixed-gear state and ignored retraction demands.
 
 These checks do not accept queued profiles or replace the deferred full
 workspace, full battery, creator, GPU and retail-runtime validation.
@@ -225,7 +322,8 @@ workspace, full battery, creator, GPU and retail-runtime validation.
 
 The code inventory covers all 37 playable profiles in the ignored local report
 `.local/animation-audit/mapping-inventory.md`. At the start of this pass all 23
-variety imports lacked pitch, roll and flap mappings. Eighteen profiles have bounded geometry acceptance in the table below, with
+variety imports lacked pitch, roll and flap mappings. All 23 variety profiles and seven older profiles have bounded geometry acceptance
+in the table below, with
 explicit device gaps such as AC-130 hook geometry and helicopter blade feathering. Every profile has a baseline
 motion survey; the table below records which still needs individual attachment
 and pose acceptance. Existing transforms are not accepted merely because they
@@ -256,27 +354,27 @@ does not accept unreviewed hinge geometry.
 | `c130` | Missing elevator, rudder, aileron, flaps | Controls, rigid gear and propeller overlay reviewed |
 | `ac130` | Missing elevator, rudder, aileron, flaps, hook | Controls, gear, props and gun overlays reviewed; visual hook unresolved |
 | `e3` | Missing elevator, aileron, flaps | Controls, rigid gear and 25 flap/roll combinations reviewed |
-| `il76` | Missing elevator, rudder, aileron, flaps | Queued |
-| `e2` | Missing elevator, rudder, aileron, flaps | Queued |
-| `b747` | Missing elevator, aileron, flaps | Queued |
+| `il76` | Missing elevator, rudder, aileron, flaps | Independent flaps/roll and five rigid gear assemblies reviewed; mechanics fitted |
+| `e2` | Missing elevator, rudder, aileron, flaps | Controls, rigid gear, hook, props and 50 combined poses reviewed; mechanics fitted |
+| `b747` | Missing elevator, aileron, flaps | Controls, source flap topology/materials and five rigid gear assemblies reviewed; mechanics fitted |
 | `a310` | Missing elevator, aileron, flaps | Focused geometry and topology accepted; mechanics fitted |
 | `av8` | Missing elevator, rudder, aileron, flaps, vector-pitch | Controls, all central/outrigger gear and 25 nozzle combinations reviewed |
-| `yak141` | Missing elevator, rudder, aileron, flaps, vector-pitch | Queued |
-| `v22` | Missing elevator, rudder, aileron, flaps | Queued |
+| `yak141` | Missing elevator, rudder, aileron, flaps, vector-pitch | Controls, asymmetric gear and 25 nozzle combinations reviewed; mechanics fitted |
+| `v22` | Missing elevator, rudder, aileron, flaps | Controls, rigid gear and 50 flaperon/conversion combinations reviewed; mechanics fitted |
 | `ah64` | Motion survey captured | Cyclic and rotor geometry reviewed; blade feathering unresolved |
 | `mi24` | Motion survey captured | Cyclic, rotor and rigid gear reviewed; blade feathering unresolved |
 | `ch47` | Motion survey captured | Cyclic, differential yaw and tandem separation reviewed; blade feathering unresolved |
-| `f18` | Motion survey captured | Main-wheel crossing and attachment repairs in progress |
-| `rafale` | Motion survey captured; hinges unreviewed | Visual review found crossed main gear and detached thick flap fronts; repair pending |
+| `f18` | Motion survey captured | Controls, own attachments and gear separation reviewed; mechanics fitted |
+| `rafale` | Motion survey captured; hinges unreviewed | Controls, own attachments and gear separation reviewed; mechanics fitted |
 | `f14` | Motion survey captured; hinges unreviewed | Queued |
 | `a4e` | Motion survey captured; hinges unreviewed | Queued |
 | `x31` | Motion survey captured; hinges unreviewed | Queued |
-| `mig29` | Motion survey captured; hinges unreviewed | Queued |
-| `su27` | Motion survey captured; hinges unreviewed | Queued |
-| `mig21` | Motion survey captured; hinges unreviewed | Queued |
-| `su25` | Motion survey captured; hinges unreviewed | Queued |
+| `mig29` | Motion survey captured; hinges unreviewed | Canted rudders, independent controls and separated aft-fold gear reviewed; mechanics fitted |
+| `su27` | Motion survey captured; hinges unreviewed | Flaperons/slats, canted rudders and anchored gear brace reviewed; mechanics fitted |
+| `mig21` | Motion survey captured; hinges unreviewed | Asymmetric hinges, thick brake and rigid gear reviewed; mechanics fitted |
+| `su25` | Crossed gear, fixed fin moved, wrong rudder materials | Controls, exact signed materials and anchored rigid gear reviewed; mechanics fitted |
 | `mig23` | Motion survey captured; hinges unreviewed | Queued |
-| `su35` | Motion survey captured; hinges unreviewed | Queued |
+| `su35` | Motion survey captured; hinges unreviewed | Own asymmetric controls, canards and anchored gear brace reviewed; mechanics fitted |
 | `f22` | Motion survey captured; hinges unreviewed | Queued |
 | `f22n` | Motion survey captured; hinges unreviewed | Queued |
 | `faxx` | Motion survey captured; hinges unreviewed | Queued |

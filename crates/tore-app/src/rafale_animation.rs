@@ -76,6 +76,23 @@ pub fn validate(poses: &[Shape]) -> Result<(), String> {
             }
         }
     }
+    for face in poses.iter().flat_map(|pose| &pose.faces) {
+        let roots: Vec<[f32; 3]> = match part(face.address) {
+            GearLeft => vec![[-4., 5., -7.], [-4., 15., -7.]],
+            GearRight => vec![[4., 5., -7.], [4., 15., -7.]],
+            DoorNose => vec![[-1., 52., -6.], [-1., 68., -5.]],
+            FlapLeft | FlapRight => {
+                if face.positions.iter().filter(|p| p[1] == -23.).count() != 2 {
+                    return Err("unreviewed RAF flap attachment seams".into());
+                }
+                Vec::new()
+            }
+            _ => Vec::new(),
+        };
+        if !roots.iter().all(|p| face.positions.contains(p)) {
+            return Err(format!("unreviewed RAF attachment {:x}", face.address));
+        }
+    }
     Ok(())
 }
 
@@ -104,12 +121,20 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
     let (pivot, axis, angle) = match group {
         BrakeRight => ([2., -3., 4.], [6., 0., -2.], 0.85 * (1. - s.brake)),
         BrakeLeft => ([-2., -3., 4.], [6., 0., 2.], 0.85 * (1. - s.brake)),
-        GearLeft => ([-4., 10., -7.], y, -1.5 * (1. - s.gear)),
-        GearRight => ([4., 10., -7.], y, 1.5 * (1. - s.gear)),
+        GearLeft => (
+            [-4., 14.545455, -7.],
+            x,
+            -std::f64::consts::FRAC_PI_2 * (1. - s.gear),
+        ),
+        GearRight => (
+            [4., 14.545455, -7.],
+            x,
+            -std::f64::consts::FRAC_PI_2 * (1. - s.gear),
+        ),
         GearNose => ([0., 60., -6.], x, -1.57 * (1. - s.gear)),
         DoorLeft => ([-2., 7., -7.], y, 1.57 * door),
         DoorRight => ([2., 7., -7.], y, -1.57 * door),
-        DoorNose => ([-1., 52., -5.], y, -1.57 * door),
+        DoorNose => ([-1., 52., -6.], [0., 16., 1.], -1.57 * door),
         FlapLeft => (
             [-10., -23., -1.],
             x,
@@ -137,6 +162,14 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
             f.normal = Some([n[0], n[2], n[1]]);
         }
     }
+    if angle != 0. && matches!(group, FlapLeft | FlapRight) {
+        for (original, moved) in face.positions.iter().zip(&mut f.positions) {
+            if original[1] == -23. {
+                *moved = *original;
+            }
+        }
+        crate::aircraft_animation::update_normal(face, &mut f);
+    }
     if group == GearNose {
         crate::additional_animation::turn(
             &mut f,
@@ -146,4 +179,74 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
         );
     }
     Some(f)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn face(address: usize, positions: Vec<[f32; 3]>) -> Face {
+        let n = positions.len();
+        Face {
+            address,
+            positions,
+            colors: vec![12; n],
+            uv: vec![],
+            texture: String::new(),
+            subtype: 0,
+            normal: Some([0., 1., 0.]),
+            fog: Default::default(),
+        }
+    }
+    #[test]
+    fn main_cards_keep_their_side_and_painted_fore_attachment() {
+        let mut s = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        for (address, x) in [(0x3c50, -4.), (0x3be5, 4.)] {
+            let source = face(
+                address,
+                vec![
+                    [x, 14.545455, -7.],
+                    [x, 7., -7.],
+                    [x, 7., -16.],
+                    [x, 14.545455, -16.],
+                ],
+            );
+            for step in 1..=400 {
+                s.gear = step as f64 / 400.;
+                let moved = animate(&source, &s).unwrap();
+                assert_eq!(moved.positions[0], source.positions[0]);
+                assert!(moved.positions.iter().all(|p| p[0] == x));
+                assert!(!crate::aircraft_animation_probe::planar_crossing(
+                    &moved, 1.
+                ));
+            }
+        }
+    }
+    #[test]
+    fn thick_flap_fronts_stay_fixed_through_all_mixed_commands() {
+        let source = face(
+            0x40a9,
+            vec![
+                [11., -23., 0.],
+                [51., -23., -1.],
+                [51., -29., -2.],
+                [11., -30., -2.],
+            ],
+        );
+        let mut s = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        for flap in [0., 0.5, 1.] {
+            for pitch in [-1., 0., 1.] {
+                for roll in [-1., 0., 1.] {
+                    s.flaps = flap;
+                    s.elevator = pitch;
+                    s.aileron = roll;
+                    let moved = animate(&source, &s).unwrap();
+                    assert_eq!(&moved.positions[..2], &source.positions[..2]);
+                    assert!(!crate::aircraft_animation_probe::planar_crossing(
+                        &moved, 1.
+                    ));
+                    assert!(moved.normal.unwrap().iter().all(|v| v.is_finite()));
+                }
+            }
+        }
+    }
 }

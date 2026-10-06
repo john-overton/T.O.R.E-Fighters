@@ -116,6 +116,10 @@ controls together with ordinary attitude, engine, gear and brake keys. Pilot
 input tapes now write version 2 to retain lift controls; version 1 tapes remain
 readable.
 
+The Apache and Chinook keep their fixed landing gear down; G reports that the
+gear is fixed. The Hind retains retractable gear. This is an explicit
+[fitted equipment rule](spec/variety-flight.md), with no new binding.
+
 ## AC-130 directed gun groups
 
 Ctrl+7 selects the next gun candidate; Ctrl+8 links or unlinks it. Hold Select

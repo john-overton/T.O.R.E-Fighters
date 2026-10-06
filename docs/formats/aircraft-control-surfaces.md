@@ -269,3 +269,116 @@ and selected pivots are in the [E-3 fit](../spec/variety-animation.md#e-3-contro
 Source branches and atlas evidence are in the shared local transport review;
 `awacs-painted-wheel-gap.json` distinguishes 12,044 opaque lower-region samples
 from transparent card margins.
+
+
+## Rafale source attachment review
+
+Exact RAFALE.PT uses RAF.SH, 19,334 CODE bytes and 206 neutral faces. Existing
+source identities remain in the [Rafale import baseline](../baselines/rafale-quick-mission.md).
+Gear pairs 0x3c50/0x3c6f and 0x3be5/0x3c04 are opposite cutout views at
+X=-4/+4,Y=5..15,Z=-18..-7. Their original atlas top row V=128 contains a
+shaft band at U=214..218 and a forward brace band at U=235..239. UV [239,128]
+maps to Y=14.545455,Z=-7. This painted point supports the chosen fitted pivot;
+the fold direction and angle remain authored.
+
+The nose door's source upper edge is [-1,52,-6] to [-1,68,-5], which is
+sloped rather than horizontal. Upper and lower flap fronts both lie at Y=-23,
+but have different Z coordinates. Preserve both thick edges when applying the
+existing fitted mix. Canards remain separate rigid panels around fitted shaft
+points [+/-10,35,1], not control skins that should pin every root-chord corner.
+The original rudder shares edge [0,-36,5] to [0,-44,30].
+
+Local evidence: `rafale-neutral-source.json`, `rafale-devices-source.json`,
+`rafale-main-gear-atlas.png` and `rafale-painted-main-stow.json` under
+`.local/animation-audit/`. Nonzero source control branches include arithmetic
+outside the reviewed static grammar, so this pass retains explicitly fitted
+flap/canard travel rather than inventing recovered endpoints.
+
+## Additional individually reviewed sources
+
+These exact FA_2 shapes were inspected through bounded data readers and their
+own indexed atlases. No original runtime comparison was available. CODE lengths
+and hashes identify the evidence, not an alternate aircraft identity.
+
+| Shape | CODE bytes | Neutral faces | SHA-256 |
+| --- | ---: | ---: | --- |
+| Y141.SH | 21134 | 308 | `9b2fb3601090c85ab6a81cf17d6478941f01688310cbd4baf526bd6a890a330b` |
+| V22.SH | 17204 | 160 | `bfd5e34dd536d1c35f04237c8da120082fa55fd46edbb188077db1a4c35cc725` |
+| IL76.SH | 28644 | 309 | `c47f8738e5621c210009b3a42521a23451a3f68a9287686512ad13867edd4fd9` |
+| E2C.SH | 29258 | 345 | `b00bba4377071c6077f7c1f7d4397da7f19e9c4d248ded85c9fb2231863e39ca` |
+| B747.SH | 31108 | 373 | `422b894147068524d57cf3511b7c2847976142f4520e2e922714520f88ee930f` |
+| F18.SH | 26934 | 282 | `d6c876d63d10a05072c8afd8a53cedffdd9cdfbcff4c4576a90c1b6c064b8bb9` |
+| MIG29.SH | 29290 | 328 | `16435a8cb4ab6c5a1b9f3e6b5ee3ee5b3578ffffb42ee95fde78ca883c0c07d3` |
+| SU27.SH | 12838 | 146 | `eae9ac13f399b64e632fcacbca8207be6f0d654a6fddc4027087e389c0fa79f1` |
+| SU35.SH | 27114 | 329 | `431589b29f4531236a5ccb11242eda779bdc9fe76ccec8ee2c345d45a64c039b` |
+| MIG21.SH | 14952 | 159 | `1c38812a2b12f17fb886e630c6eecf393807166b5664017d25e50925251d6d36` |
+
+IL76, E2C and B747 use two-thirds foot per source unit; the others use one-third.
+
+Y141's nose gear is already present in neutral geometry; only its main gear is
+switched. Its left tail consists of one upper quad and two lower triangles with
+asymmetric roots. The nozzle contains eight shell faces between Y=-47 and -53
+and one eight-vertex outlet. V22 has thick flap fronts at different heights,
+source down trailing endpoints and original tip closures. Its twelve gear
+faces contain complete shaft/wheel views, not guessed independent doors. The
+vtAngle alias produces no changed bounded draw branch; original tilt timing
+remains unknown.
+
+IL76 has twenty cards forming five crossed strut/wheel assemblies. Its inner
+flap down endpoint separates from the neighboring outer trailing triangle by
+1.4907 feet, an original control clearance. No rudder alias was found. E2C has
+four geometric trailing-fin candidates, asymmetric flap endpoints and a
+source-degenerate left cap. Its main leg and wheel planes are offset by one
+unit. The original left contact matches its nacelle; the right side cannot be
+inferred by mirroring. Its selected propeller phase has four cards, with eight
+alternate-phase cards excluded.
+
+B747's right lower flap changes triangle diagonal between neutral and down.
+Both endpoints are nonplanar. Neutral material is subtype 0xed, palette 148;
+down material is subtype 0x64, palette 0, on a different atlas region. Checking
+outer corners alone misses both the topology and material difference. Its
+36 gear faces contain four bogies and a nose assembly; complete deployment
+reaches Z=-30, while neutral geometry reaches only Z=-18.
+
+F18 main gear atlases contain painted shaft/brace roots at left [-8,-7,-6]
+and right [9,-7,-6]. Its nose brace and untextured doors are separate from
+wheel cards. Thick flap fronts have distinct upper/lower positions. Refer to
+the [F/A-18D correction](../spec/aircraft-animation.md#fa-18d-attachment-corrections)
+for authored travel, including intentionally retained stow joint artwork.
+
+MIG29 and SU27 have canted, asymmetric fins; a generic vertical hinge does not
+retain their cut intersections. Both expose signed flap geometry. SU27 has
+original trailing heights -5 and +3 around neutral -1, plus asymmetric slat
+skins. Its hook branch is degenerate and PT capability is disabled. SU35's
+right down-flap branch adds skins without removing the broad neutral upper
+panel, unlike the left. Isolate the right inboard portion at X=49 rather than
+copying the left X=-50 boundary. MIG21 has no signed flap/rudder aliases;
+those control roles remain geometric fits. Its actual main shaft coordinates
+are X=+21/-20 and its nose upper edge is sloped.
+
+Branch snapshots, source atlases and source-section reviews remain local under
+`.local/animation-audit/`. Continuous control roles, angles and gear mechanisms
+are separately documented [variety fits](../spec/variety-animation.md) and
+[older-aircraft fits](../spec/aircraft-animation.md). Unlocated devices and
+original timing remain unknown; inspect additional source control consumers
+before asserting those behaviors.
+
+## Su-25 source materials and attachments
+
+SU25.SH SHA-256
+`196ed566d0b891241dbfb3f66cebee9fc0829204075f589338c6c18be986e137`
+has 29,626 CODE bytes and 334 neutral faces, at one-third foot per unit.
+Rudder skins 0x5e68/0x5e8f share a diagonal fixed edge; signed branches replace
+only those skins, leaving fin 0x572f/0x58ed static. Neutral UVs occupy atlas
+X=62; signed poses widen to X=64/65 or 60/58. Constant neutral UVs on deflected
+geometry therefore lose the original material correspondence. Flap down
+endpoints also change upper-tip UV by two pixels. All use subtype 0xed and
+_SU25.PIC; lower flap shade is 151, upper flap/rudder shade 153. Preserve
+facing-skin material order separately from shared geometry.
+
+Gear includes complete wheel cards, a separate narrow nose brace and untextured
+inner panels of unresolved original role. Source top edges differ from older
+fitted pivots; the nose front shaft is at Y=41,Z=-9. No afterburner alias or
+switched flame group was found. Evidence is `su25-materials.txt` and bounded
+`mig21-su25-mig23-geometry.json` under `.local/animation-audit/`. Continuous
+interpolation and retraction use the [documented fit](../spec/aircraft-animation.md#su-25-attachment-and-material-corrections).

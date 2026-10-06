@@ -66,9 +66,7 @@ aliases of available planes. The proposed Corsair here is the A-7E Corsair II.
 
 Source review and dependency closure are in the [inventory](../formats/aircraft-variety.md).
 Flight results and fits are in the [flight baseline](../baselines/variety-flight.md).
-"Initial rig" means source cockpit/art and the [reviewed device branches](variety-animation.md),
-including [propeller/rotor/nacelle motion](rotor-presentation.md); it does not
-claim every control surface or cockpit mirror is animated. "Rig reviewed"
+"Rig reviewed"
 means bounded CPU surface/device acceptance in the
 [per-aircraft animation audit](../baselines/aircraft-animations.md), with explicit
 fitted mechanics and unresolved devices. It does not add cockpit-mirror or GPU
@@ -87,11 +85,11 @@ Keep complete validation evidence in feature baselines rather than per-check fil
 | C130 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | AC130 | Reviewed | Passed | Rig reviewed; hook open | Source profiles | Integrated | Flight passed; poses reviewed |
 | E3 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
-| IL76 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
-| E2 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| IL76 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| E2 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | AV8 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
-| YAK141 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
-| V22 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| YAK141 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| V22 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | AH64 | Reviewed | Passed | Rotor/gear reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | MI24 | Reviewed | Passed | Rotor/gear reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | CH47 | Reviewed | Passed | Rotor/gear reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
@@ -105,7 +103,7 @@ Keep complete validation evidence in feature baselines rather than per-check fil
 | F16C | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | F104 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | A10 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
-| B747 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| B747 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 | A310 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 
 AC-130 linked fire and the tank side task have additional acceptance cases in

@@ -139,6 +139,12 @@ is accepted by merely reusing F18's numbers until it happens to fly.
   original art and raw data; no retail derivatives in committed assets.
 
 **Gate:** neutral/device and attachment captures plus numerical transform checks.
+Run the actual drawing-path animation probe across signed controls, intermediate
+and near-stowed gear, and combined controls. Validate complete wheel assemblies,
+painted attachment points, thick forward edges and exact source endpoint
+materials/triangle interiors. Transparent image corners are not mechanical
+roots. Register the aircraft in the focused animation battery only after its
+source and pose sheets are individually reviewed.
 A correctly attached vapor trail does not establish emission/material parity or
 validate store placement; each consumer needs its own evidence.
 
@@ -317,6 +323,12 @@ both for retraction ownership and the ground-contact low point.
 The [audit](baselines/aircraft-animations.md) and
 [A-7 worked contract](spec/variety-animation.md#a-7-surface-repair-and-acceptance)
 show the first per-aircraft repair and its limitations.
+
+The historical `variety_animation` module now also registers individually
+reviewed older profiles. `additional_animation` delegates those profiles once,
+preserving their existing source scale. Do not apply the older generic surface
+transform again. Aircraft-specific devices run before shared propeller/rotor
+and player-directed gun overlays. Flight adapters remain a separate concern.
 
 ## Commands and implementation entry points
 

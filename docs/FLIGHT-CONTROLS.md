@@ -50,6 +50,10 @@ lists gamepad defaults, axis calibration and modifier behaviour. Source evidence
 fitted rates and aircraft applicability belong in the
 [flight variety behaviour spec](spec/variety-flight.md).
 
+The Apache and Chinook keep their fixed landing gear down; G reports that the
+gear is fixed. The Hind retains retractable gear. This is an explicit
+[fitted equipment rule](spec/variety-flight.md), with no new binding.
+
 ## Working flight commands
 
 | Key | Action | Evidence/status |

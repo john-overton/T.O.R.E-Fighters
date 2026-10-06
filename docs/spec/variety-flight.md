@@ -43,6 +43,14 @@ These are reviewed geometry fits for the contact plane, rather than measurements
 of original flight behavior. Hook availability uses the reviewed configuration,
 independent of flight family.
 
+AH64 and CH47 use a fitted fixed-gear rule, agent decision 2026-10-05 from
+reviewed always-present gear geometry. Their state starts with gear down and
+keeps that position through commands and simulation ticks. A manual toggle
+reports `Landing gear is fixed on this aircraft`; explicit extension commands
+remain quiet. This prevents a normal landing being treated as gear-up while the
+original fixed wheels are visible. Mi24 remains retractable. This rule does not
+claim recovered retail actuator logic or add a new binding.
+
 | Aircraft | Ground clearance, feet |
 | --- | --- |
 | C130 | 14 |

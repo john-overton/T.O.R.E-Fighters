@@ -97,6 +97,8 @@ share algorithms while preserving their own source configuration. Conventional
 variety aircraft use the established hybrid solver. AV8 and YAK141 use fitted
 vector thrust, V22 uses fitted nacelle conversion, and AH64, MI24 and CH47 use
 fitted collective-controlled rotor lift. Ordinary throttle remains engine power.
+Apache and Chinook gear stays down from initialization through simulation and
+commands, matching their visible fixed wheels. Hind gear remains retractable.
 The fits, travel rates, initial clearance and known limits have one home in the
 linked contract. Ground contact uses the complete deployed gear, including
 AV8 central pieces already present in the neutral shape; counting only a switched

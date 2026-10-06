@@ -9,14 +9,26 @@ mod a310;
 mod ac130;
 mod av8;
 mod awacs;
+mod b747;
 mod c130;
+mod e2;
 mod f104;
 mod f15;
 mod f16;
+mod f18;
 mod f4;
+mod il76;
 mod mi24;
 mod mig17;
+mod mig21;
+mod mig29;
+mod rafale;
 mod rotorcraft;
+mod su25;
+mod su27;
+mod su35;
+mod v22;
+mod yak141;
 
 const EPSILON: f32 = 0.0001;
 const CELL_WIDTH: usize = 256;
@@ -147,10 +159,19 @@ impl Control {
             Self::Hook if id == Id::Ac130 => Expectation::Unknown,
             Self::Hook if state.hook_available() => Expectation::Required,
             Self::Hook => Expectation::Unsupported,
+            Self::Brake | Self::Exhaust
+                if matches!(
+                    id,
+                    Id::F18 | Id::Rafale | Id::Mig29 | Id::Su27 | Id::Su35 | Id::Mig21
+                ) =>
+            {
+                Expectation::Required
+            }
             Self::Brake
                 if matches!(
                     id,
-                    Id::A7
+                    Id::Su25
+                        | Id::A7
                         | Id::F4B
                         | Id::F4J
                         | Id::F4E
@@ -168,7 +189,7 @@ impl Control {
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorYaw if id == Id::Av8 => Expectation::Required,
-            Self::VectorYaw if id == Id::Yak141 => Expectation::Unknown,
+            Self::VectorYaw if id == Id::Yak141 => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw => Expectation::Unsupported,
             Self::Conversion if id == Id::V22 => Expectation::Required,
             Self::Conversion => Expectation::Unsupported,
@@ -231,6 +252,22 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     fs::create_dir_all(out)?;
     let airframe = Airframe::load(data, id)?;
     let mut neutral = State::new(&airframe.profile, [0.; 3])?;
+    // Inspect the actual loaded aircraft state before selecting mesh poses.
+    // Fixed visible wheels must also be down for authoritative contact.
+    if matches!(id, AircraftId::Ah64 | AircraftId::Ch47) {
+        let mut fixed = neutral.clone();
+        let initial_down = fixed.gear_down && fixed.gear == 1.;
+        fixed.command(tore_sim::flight::PilotCommand::Toggle(
+            tore_sim::flight::Switch::Gear,
+        ));
+        fixed.command(tore_sim::flight::PilotCommand::Set(
+            tore_sim::flight::Switch::Gear,
+            false,
+        ));
+        if !initial_down || !fixed.gear_down || fixed.gear != 1. {
+            return Err("fixed rotorcraft gear is inconsistent with the visible wheels".into());
+        }
+    }
     neutral.engine = false;
     neutral.exhaust = 0.;
     neutral.gear = 0.;
@@ -252,6 +289,39 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         .get(&airframe.profile.shape)
         .ok_or_else(|| format!("missing {}", airframe.profile.shape))?;
     let raw = tore_formats::shape::Shape::parse(source_bytes)?;
+    let su25_sources = if id == AircraftId::Su25 {
+        Some(su25::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let b747_sources = if id == AircraftId::B747 {
+        Some(b747::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let e2_sources = if id == AircraftId::E2 {
+        Some(e2::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let rafale_sources = if id == AircraftId::Rafale {
+        Some(rafale::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let f18_sources = if id == AircraftId::F18 {
+        Some(f18::Sources::load(
+            source_bytes,
+            data.get("_F18.PIC").ok_or("missing F18 source atlas")?,
+        )?)
+    } else {
+        None
+    };
+    let il76_sources = if id == AircraftId::Il76 {
+        Some(il76::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
     let awacs_sources = if id == AircraftId::E3 {
         Some(awacs::Sources::load(source_bytes)?)
     } else {
@@ -311,6 +381,18 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::C130
             | AircraftId::Ac130
             | AircraftId::E3
+            | AircraftId::F18
+            | AircraftId::Rafale
+            | AircraftId::Yak141
+            | AircraftId::V22
+            | AircraftId::Il76
+            | AircraftId::E2
+            | AircraftId::B747
+            | AircraftId::Mig29
+            | AircraftId::Mig21
+            | AircraftId::Su25
+            | AircraftId::Su27
+            | AircraftId::Su35
             | AircraftId::Ah64
             | AircraftId::Mi24
             | AircraftId::Ch47
@@ -401,6 +483,144 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                     *value,
                     (&raw.faces, reference, pose),
                     scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Yak141 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                yak141::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::V22 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                v22::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Mig21 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                mig21::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Mig29 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                mig29::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Su35 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                su35::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Su27 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                su27::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &su25_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                su25::check(
+                    source,
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &b747_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                b747::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &e2_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                e2::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &rafale_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                rafale::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &f18_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f18::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &il76_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                il76::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
                     metric,
                 );
             }
@@ -603,6 +823,39 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             reference,
             &poses,
         )?;
+    }
+    if id == AircraftId::Yak141 {
+        failures.extend(yak141::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::V22 {
+        failures.extend(v22::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Mig21 {
+        failures.extend(mig21::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Mig29 {
+        failures.extend(mig29::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Su35 {
+        failures.extend(su35::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::Su27 {
+        failures.extend(su27::combinations(&airframe, &neutral, out)?);
+    }
+    if let Some(source) = &su25_sources {
+        failures.extend(su25::combinations(source, &airframe, &neutral, out)?);
+    }
+    if let Some(source) = &b747_sources {
+        failures.extend(b747::combinations(&airframe, &neutral, out, source)?);
+    }
+    if let Some(source) = &e2_sources {
+        failures.extend(e2::combinations(&airframe, &neutral, out, source)?);
+    }
+    if let Some(source) = &rafale_sources {
+        failures.extend(rafale::combinations(&airframe, &neutral, out, source)?);
+    }
+    if let Some(source) = &il76_sources {
+        failures.extend(il76::combinations(&airframe, &neutral, out, source)?);
     }
     if let Some(source) = &awacs_sources {
         failures.extend(awacs::combinations(&airframe, &neutral, out, source)?);

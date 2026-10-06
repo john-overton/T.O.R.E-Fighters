@@ -581,11 +581,40 @@ mod tests {
     }
 
     #[test]
+    fn fixed_gear_rotorcraft_start_down_and_ignore_retraction_but_hind_does_not() {
+        use crate::flight::{PilotCommand, Switch};
+        for id in [AircraftId::Ah64, AircraftId::Ch47] {
+            let mut s = hover(id, 100.);
+            assert!(s.gear_down && s.gear == 1.);
+            s.command(PilotCommand::Toggle(Switch::Gear));
+            s.command(PilotCommand::Set(Switch::Gear, false));
+            run(&mut s, &Default::default(), 120);
+            assert!(s.gear_down && s.gear == 1. && !s.crashed);
+            // Old snapshots or direct inspection demands cannot create a
+            // retractable mechanism before the next authoritative contact step.
+            s.gear = 0.;
+            s.gear_down = false;
+            let clearance = s.model().configuration().equipment.ground_clearance_ft;
+            s.position[1] = clearance + 0.001;
+            s.velocity[1] = -2.;
+            run(&mut s, &Default::default(), 1);
+            assert!(s.weight_on_wheels() && !s.crashed && s.gear == 1.);
+        }
+        let mut hind = hover(AircraftId::Mi24, 100.);
+        assert!(!hind.model().fixed_gear() && !hind.gear_down && hind.gear == 0.);
+        hind.command(PilotCommand::Toggle(Switch::Gear));
+        run(&mut hind, &Default::default(), 360);
+        assert!(hind.gear_down && hind.gear > 0.99);
+    }
+
+    #[test]
     fn every_aircraft_accepts_a_gentle_vertical_landing_and_can_depart_again() {
         for id in IDS {
             let mut s = hover(id, 10.);
-            s.gear = 1.;
-            s.gear_down = true;
+            if !s.model().fixed_gear() {
+                s.gear = 1.;
+                s.gear_down = true;
+            }
             s.velocity[1] = -2.;
             let clearance = s.model().configuration().equipment.ground_clearance_ft;
             s.position[1] = clearance + 0.001;

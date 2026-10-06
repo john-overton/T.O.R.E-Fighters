@@ -471,7 +471,10 @@ nozzle sweeps are required where their aircraft contracts specify them. They req
 attachment scope and passing per-control gates, including signed motion,
 root/skin coherence, wheel rigidity/separation, intermediate topology and hook
 closing direction. They write user-owned OBJ and CPU contact-sheet evidence
-under the ignored battery output directory.
+under the ignored battery output directory. Apache and Chinook scenarios also
+check the loaded fixed-gear state and ignored retraction commands before the
+mesh sweep. Multi-axis artifacts are required separately, including both V-22
+conversion/rotor and flaperon sweeps and all 125 Rafale control combinations.
 
 Run one repaired aircraft before expanding the audit:
 
