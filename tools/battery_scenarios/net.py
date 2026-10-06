@@ -1152,7 +1152,9 @@ def drive_reach_upload(d: Drive) -> None:
     """Host selection (slices K3 and K6) on loopback: a hosting bot waits for one ready standby before it starts the
     mission. Aa stands by (`--standby on`), Bb does not (`--standby off`: its game says it may not host). The host
     runs its reach tests and the upload test on Aa, appoints it first standby and streams it the mission; Bb is
-    never appointed; Aa's standby is warm and its checks come out equal."""
+    never appointed; Aa's standby is warm and its checks come out equal. When its time is up the host hands over to Aa,
+    and Bb follows: it resumes with Aa however late it joined (slice K10: a player who joined after the host last sent
+    its Succession never heard of the standby and dropped)."""
     fresh_data(d)
     port = d.port()
     mission = write_mission(d)
@@ -1180,6 +1182,8 @@ def drive_reach_upload(d: Drive) -> None:
     bb.forbid(r"standby:", "a standby on Bb")
     aa.finish(150, 0)
     bb.finish(150, 0)
+    aa.expect(r"^Aa: host: Bb resumed \d+ ms after the takeover", "Bb resuming with Aa after the handover")
+    bb.expect(r"^Bb: migrate: migrations resumed 1, failed 0", "Bb following the handover")
     for text in (host.text(), aa.text(), bb.text()):
         if re.search(NET_BAD, text):
             d.problem("a network problem: " + re.search(NET_BAD, text).group(0))
