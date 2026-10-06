@@ -318,12 +318,15 @@ fn fifteen_second_stall(strict: bool) {
     eprintln!(
         "first frame back: {snapshots} snapshots, {repeated} ticks repeated ({per} a snapshot)"
     );
+    // The socket's receive buffer is the system's default (the game does not
+    // set it), so how many snapshots survive differs by platform: Linux
+    // keeps about 52; ask only for enough to judge the repeats by.
     assert!(
-        snapshots >= 30,
+        snapshots >= 10,
         "only {snapshots} snapshots kept through the stall: {stats:#?}"
     );
     assert!(
-        repeated + 30 >= snapshots * per,
+        repeated > 0 && repeated + 30 >= snapshots * per,
         "{repeated} ticks repeated in {snapshots} snapshots of {per} ticks"
     );
     // It takes the host's newest state rather than step 15 seconds of
