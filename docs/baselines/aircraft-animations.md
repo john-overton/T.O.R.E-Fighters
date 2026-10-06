@@ -288,6 +288,97 @@ separately anchored nose brace. All five signed rudder samples have zero UV
 correspondence error. Combined cases have zero root, skin and material errors,
 new planar crossings and direction failures. No exhaust geometry is asserted.
 
+## F-22 family results
+
+Exact `f22-checked`, `f22n-checked` and `faxx-checked` pass required source
+checks after the first runtime probes rejected a motionless rudder fit and a
+separated brake center seam. The revised fin cut includes actual free trailing
+vertices; joined brake deformation retains every front root and the common
+rear edge. A separate applicability correction skips the nonexistent F-22 hook.
+No synthetic-test pass was counted as actual-source acceptance.
+
+All actual control/device sheets, 66 gear rows, 75 combined pitch/roll poses and
+25 F/A-XX flap/yaw poses were inspected. The latter check measured leaf angles,
+not just leaf counts. Maximum attachment error is 0.000001272 feet, paired-skin
+gap zero and rigid-assembly error 0.000002226 feet. Minimum raw main-card gap
+is 1.225935 feet. The 175-degree nose fold is confirmed from the actual near-zero
+OBJ; dense source review encloses all 4,225 nose-card samples in both donors'
+vertical body sections.
+
+All fifteen before/after bay comparisons match exactly at 0, 0.25, 0.5, 0.75
+and 1. Closed bays retain exactly five original belly faces and no lining;
+open bay groups retain 39 faces on F-22 and 41 on F-22N/F/A-XX. The new dispatch
+also has a synthetic regression for split leaves and lining preservation.
+Source evidence and comparisons remain in the shared ignored audit directory.
+
+Limitations remain explicit: original door roots have source clearances, the
+F-22 nose has an incomplete side strip, and stock flap interiors follow fitted
+travel rather than exact original down-branch triangulations. Vertical-section
+containment is not a full watertight collision proof. Canopy/recolor and textured
+GPU presentation are not newly accepted by these CPU checks. Reports now include
+a separate selection key so F/A-XX cannot be mistaken for its F22N donor.
+
+## X-31 results
+
+Exact `x31-checked` passes required source controls and attachments, including
+explicit brake/exhaust requirements. All 17 control/device sheets, 22 gear
+poses and 25 full-exhaust combined prototype-vector poses were inspected.
+The combined inputs use signed achieved auxiliary rates, not powered-lift
+lever fields. Plume, paddle and source-nozzle witnesses agree within the fitted
+envelope. Maximum combined attachment error is 0.000001274 feet, skin gap
+0.000000040 feet and rigidity error 0.000003815 feet. Minimum sampled main
+tire-side gap is 0.7838332 feet at gear 0.10. There are no new planar crossings.
+
+Whole wheel cards retain their dimensions, the nose brace stays attached
+without inversion, and opaque source-art stow witnesses pass before hiding.
+Inner flaps reproduce source endpoints; outer flap-only panels deliberately
+stay fixed. The source-based prototype sheets show both signed directions
+without a visible break at the nozzle in these CPU views. Original mechanisms,
+textured GPU presentation and retail handling remain outside this acceptance.
+
+## MiG-23 results
+
+Exact `mig23-checked` passes required source checks, including explicit brake
+and exhaust requirements. Every moving/static sheet, all 22 gear poses and all
+125 sweep/flap/roll combinations were reviewed, including enlarged intermediate
+and extreme views. The independent sweep witness infers the observed rigid
+wing transform; it does not call the production animation formula.
+
+Maximum observed attachment error is 0.000020907 feet, below the 0.0001-foot
+limit. Skin/material errors, new planar crossings and signed-direction failures
+are zero. All six signed rudder/material samples, including tiny positive
+input, have zero UV error and correct original correspondence. Whole main cards
+retain source X positions, the separate nose brace stays attached and exact
+full deployment returns to source placement. These checks accept fitted
+presentation, not original gear bay volumes, timing or textured GPU appearance.
+
+## F-14D results
+
+Exact `f14-checked` passes 25 focused tests and the source probe. All 17
+control/device sheets, 22 gear samples, six hook samples including positive
+near-stow, 125 sweep/flap/roll poses and 25 pitch/roll poses were reviewed.
+Initial flap/sweep failures were diagnostic-reference errors: ordinary
+initialization starts at 450 knots, already swept, whereas draft witnesses
+assumed fully forward wings. Isolated F-14 controls now explicitly use the
+existing unswept 400-knot threshold. Combined tests cover the real coupled
+behavior using observed wing frames, not production sweep formulas.
+
+Maximum single-control attachment gap is 0.000000080 feet, paired-skin gap
+0.000005087 feet and rigid-panel error 0.000002544 feet. Minimum sampled main
+wheel gap is 3.095322 feet. Across coupled wing/flap/roll poses maximum root gap
+is 0.000001422 feet and rigid error 0.000003815 feet. Across pitch/roll poses
+maximum root gap is 0.000001273 feet. No introduced planar crossings, signed
+motion failures or endpoint/material failures occur.
+
+Direct original donor-atlas sampling against actual near-stow hook OBJ finds
+282 opaque points per skin, all 564 inside reviewed body-section hulls. A raw
+transparent card corner lies outside, so full-card containment is not claimed.
+The body/flame reference retains the existing static F-14 geometry repair;
+independent guards separately check alignment, tail correction and new motion.
+The new runtime preserves source scale, existing sweep/vapor mapping and donated
+hook art. Body-section hulls are not full closed-volume collision proof, and
+GPU appearance and retail comparison remain unvalidated.
+
 ## Fixed rotorcraft gear state
 
 The actual loaded Apache and Chinook had visible fixed wheels but started with
@@ -302,17 +393,20 @@ before selecting artificial mesh poses. The rule is explicitly fitted in the
 
 ## Focused checkpoint checks
 
-The thirty-profile set passed 188 Rust tests selected by `animation`, all eleven
+The thirty-six-profile set passed 234 Rust tests selected by `animation`, all eleven
 powered-flight tests, and an app-only build. App/simulation Clippy with warnings
 denied, formatting and documentation consistency passed. The shared dispatcher
 retains propeller, rotor and manually aimed gun overlays after specific rigs.
 
-All thirty `flight-animation-*` scenarios pass in
-`.local/animation-battery/20261005-192437-thirty-reviewed/summary.md`.
-Thirty-nine focused Python report/selection tests passed. The battery requires
+All thirty-six `flight-animation-*` scenarios pass in
+`.local/animation-battery/20261005-202140-thirty-six-finite/summary.md`.
+Forty-one focused Python report/selection tests passed. The battery requires
 reviewed attachment scope and passing per-control gates, plus complete combined
 rotor, flaperon, nozzle and source-material artifacts where applicable. A
-motion-only report cannot pass as reviewed geometry. Apache/Chinook scenarios
+motion-only report cannot pass as reviewed geometry. Combined-pose rejection
+also explicitly checks finite coordinates/normals; synthetic NaN/infinity
+regressions protect that gate. Stdout matching requires exact identity and
+literal zero failures, so a count of ten cannot match zero. Apache/Chinook scenarios
 also verify actual initialized fixed-gear state and ignored retraction demands.
 
 These checks do not accept queued profiles or replace the deferred full
@@ -322,7 +416,7 @@ workspace, full battery, creator, GPU and retail-runtime validation.
 
 The code inventory covers all 37 playable profiles in the ignored local report
 `.local/animation-audit/mapping-inventory.md`. At the start of this pass all 23
-variety imports lacked pitch, roll and flap mappings. All 23 variety profiles and seven older profiles have bounded geometry acceptance
+variety imports lacked pitch, roll and flap mappings. All 23 variety profiles and thirteen older profiles have bounded geometry acceptance
 in the table below, with
 explicit device gaps such as AC-130 hook geometry and helicopter blade feathering. Every profile has a baseline
 motion survey; the table below records which still needs individual attachment
@@ -366,15 +460,15 @@ does not accept unreviewed hinge geometry.
 | `ch47` | Motion survey captured | Cyclic, differential yaw and tandem separation reviewed; blade feathering unresolved |
 | `f18` | Motion survey captured | Controls, own attachments and gear separation reviewed; mechanics fitted |
 | `rafale` | Motion survey captured; hinges unreviewed | Controls, own attachments and gear separation reviewed; mechanics fitted |
-| `f14` | Motion survey captured; hinges unreviewed | Queued |
+| `f14` | Wrong roll sign and detached nose brace/panel | Controls, rigid gear, opaque hook stow and 150 coupled poses reviewed |
 | `a4e` | Motion survey captured; hinges unreviewed | Queued |
-| `x31` | Motion survey captured; hinges unreviewed | Queued |
+| `x31` | Missing upper skins, wrong roll and detached gear attachments | Controls, complete gear and 25 prototype-vector poses reviewed |
 | `mig29` | Motion survey captured; hinges unreviewed | Canted rudders, independent controls and separated aft-fold gear reviewed; mechanics fitted |
 | `su27` | Motion survey captured; hinges unreviewed | Flaperons/slats, canted rudders and anchored gear brace reviewed; mechanics fitted |
 | `mig21` | Motion survey captured; hinges unreviewed | Asymmetric hinges, thick brake and rigid gear reviewed; mechanics fitted |
 | `su25` | Crossed gear, fixed fin moved, wrong rudder materials | Controls, exact signed materials and anchored rigid gear reviewed; mechanics fitted |
-| `mig23` | Motion survey captured; hinges unreviewed | Queued |
+| `mig23` | Crossed gear and detached fitted surface roots | Controls, materials, rigid gear and 125 sweep/flap/roll poses reviewed |
 | `su35` | Motion survey captured; hinges unreviewed | Own asymmetric controls, canards and anchored gear brace reviewed; mechanics fitted |
-| `f22` | Motion survey captured; hinges unreviewed | Queued |
-| `f22n` | Motion survey captured; hinges unreviewed | Queued |
-| `faxx` | Motion survey captured; hinges unreviewed | Queued |
+| `f22` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
+| `f22n` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |
+| `faxx` | Detached source roots and gear doors | Controls, own rigid gear and coupled poses reviewed; bay geometry preserved |

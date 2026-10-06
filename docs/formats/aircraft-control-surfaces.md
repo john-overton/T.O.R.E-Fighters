@@ -382,3 +382,91 @@ fitted pivots; the nose front shaft is at Y=41,Z=-9. No afterburner alias or
 switched flame group was found. Evidence is `su25-materials.txt` and bounded
 `mig21-su25-mig23-geometry.json` under `.local/animation-audit/`. Continuous
 interpolation and retraction use the [documented fit](../spec/aircraft-animation.md#su-25-attachment-and-material-corrections).
+
+## F-22 donor attachment review
+
+F22.SH SHA-256 is
+`eba06b716e45431fa7401d99579eb0d4c8f1882eb80928c726186907c170f8b6`,
+with 20,012 CODE bytes and 245 neutral faces. F22N.SH SHA-256 is
+`736649d76b7e4aea059586f00d7c7474df777ab9ddedde14baa075a34a90d380`,
+with 20,146 CODE bytes and 248 neutral faces. Both use one-third foot per unit.
+F/A-XX remains a separately identified opinionated F22N donor variant.
+
+Original inner wing fronts run from Y=-28 to -22 and have separate thick skin
+heights. A single lateral hinge at Y=-22 moves their inner roots. Original
+neutral/down lower panels have different subdivisions; the left neutral lower
+panel is a pentagon. Both flap aliases replace inner and outer panels together
+at -1, while positive values omit them. These branches do not recover continuous
+control mixing. Tail roots include an intermediate right [18,-64,1] point;
+whole-tail rotation had moved the full source attachment chord.
+
+Each donor has twelve gear faces: three wheel/shaft pairs, two solid main-door
+pairs and one textured nose-door pair. Main cards contain painted V braces,
+with asymmetric upper planes X=-13,Z=-5 and X=12,Z=-6. Their atlas regions are
+identical despite different UV locations. Solid doors are separate, at X=-16
+and +18, with sloped upper edges. Original door roots already lie outside parts
+of the neutral fuselage, with reviewed side gap up to 3.15 source units; the
+nose door also extends beyond the tapering nose at its forward upper margin.
+That source discrepancy is distinct from a newly detached animated hinge.
+Complete deployment reaches Z=-23. F22N hook skins are 0x40a1/0x40c0.
+
+Evidence: bounded `f22-family-geometry.json`, original atlas close-ups and source
+section reviews under `.local/animation-audit/`. Continuous corrections are
+[agent fits](../spec/aircraft-animation.md#f-22-family-attachment-corrections),
+not recovered original mechanisms. Original timing remains unknown.
+
+## X-31 and MiG-23 source endpoints
+
+Exact F31.PT uses F31.SH, SHA-256
+`96f838de26b7e867bd46f9795f48f15d3399684254af7ed1fa00bf5b1ecd9201`,
+21,974 CODE bytes and 225 neutral faces. MIG23.SH SHA-256 is
+`849a0e48809fd2d8141b6e1e641a6b275b2dd5a5e64f3b0c9042bc1ec628abac`,
+with 23,312 CODE bytes and 219 neutral faces. Both use one-third foot per unit.
+Neither source is replaced by another variant.
+
+F31 flap aliases replace only the inner trailing skins and add separate outer
+closures. Both front thickness levels remain fixed; trailing points move from
+Y=-21,Z=-6 to Y=-20,Z=-8. Its outer panels stay unchanged in these branches.
+Left upper panels 0x30f2/0x31aa belong with lower 0x3af8 and were omitted by
+the older fitted roll mapping. Signed rudder branches retain their diagonal
+front and provide both original deflection endpoints. Original wheel atlases
+support separate complete main assemblies, nose wheel/strut, narrow brace and
+untextured panels. Prototype vector behavior and the lack of a VTOL lever
+capability are documented in the [existing flight contract](../spec/additional-aircraft.md).
+
+MiG23 signed rudder branches replace only 0x42f9/0x4318, leaving the fixed fin.
+Neutral front UV U=55/181 reverses to 181/55 in the positive branch; the negative
+branch retains its order. Halfway UV interpolation would collapse both to 118.
+The source skins retain subtype 0xed, shade 89 and _MIG23.PIC. Flaps have exact
+position/UV down endpoints with upper shade 89 and lower 151. The swing-wing
+alias produces no changed bounded draw branch, so the continuous sweep law
+remains fitted. Its complete crossed main cards have three collinear front-top
+vertices at absolute X=2/5/9; nose brace body and distal edges have length sqrt(5).
+
+Local evidence: `x31-geometry.json`, original atlas/root reviews,
+`mig21-su25-mig23-geometry.json` and `mig23-materials.txt` in the shared ignored
+audit directory. Endpoint facts do not establish original continuous timings.
+
+## F-14D source attachment review
+
+Exact F14.PT uses F14.SH, SHA-256
+`28be633d94fefdc286df4bc2cbe602749ebc91eb2cdbdf7c93cf50707f4a5441`,
+with 29,462 CODE bytes and 313 neutral faces, at four-thirds foot per unit.
+Neither F-14B nor SWPATCH geometry is substituted. Gear adds sixteen faces,
+brakes four, flame eight and source hook two collapsed untextured triangles.
+The existing imported F22N hook-art substitution is a separate documented
+opinionated component.
+
+Negative flap branches replace 0x540d/0x5434 and 0x4fe9/0x5010. Only inboard
+trailing Z=1 becomes 0; both fronts and outer trailing points stay unchanged.
+Positive branches omit the neutral skins without replacement. Original
+continuous response cannot be inferred from these discrete endpoints.
+
+Original gear art separates complete four-face assemblies per main and nose,
+a narrow diagonal nose brace and an untextured panel. Painted shaft roots
+support [±6,1,0] for mains and [0,17,-1] for nose. The brace and panel have
+their own upper attachments; assigning them the wheel pivot moves those body
+attachments. Preserve known static geometry/alignment repairs when constructing
+the reference body, while testing new movement independently. Source evidence
+is in `f14-geometry.json`, original atlas inspections and the shared ignored
+audit directory. Corrected motion is an [agent fit](../spec/aircraft-animation.md#f-14d-attachment-corrections).

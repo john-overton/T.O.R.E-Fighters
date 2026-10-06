@@ -293,7 +293,8 @@ pub(super) fn combinations(
                 "{pitch},{yaw},{},{},{}",
                 m.max_reviewed_anchor_gap, m.reviewed_wheel_rigidity_error, m.max_reviewed_skin_gap
             )?;
-            if m.reviewed_anchor_missing
+            if !m.finite
+                || m.reviewed_anchor_missing
                 || m.max_reviewed_anchor_gap > EPSILON
                 || m.reviewed_wheel_failed
                 || m.max_reviewed_skin_gap > EPSILON

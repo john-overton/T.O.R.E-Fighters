@@ -435,7 +435,8 @@ pub(super) fn combinations(
                     m.new_planar_crossings.len(),
                     m.reviewed_direction_failures
                 )?;
-                if m.reviewed_anchor_missing
+                if !m.finite
+                    || m.reviewed_anchor_missing
                     || m.max_reviewed_anchor_gap > EPSILON
                     || m.max_reviewed_skin_gap > EPSILON
                     || m.reviewed_rigid_panel_error > EPSILON

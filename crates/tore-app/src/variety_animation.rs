@@ -209,7 +209,20 @@ fn specification(id: Id) -> Option<Spec> {
 
 pub fn supported(id: Id) -> bool {
     specification(id).is_some()
-        || matches!(id, Id::Mig29 | Id::Su25 | Id::Su27 | Id::Su35 | Id::Mig21)
+        || matches!(
+            id,
+            Id::F14
+                | Id::X31
+                | Id::Mig23
+                | Id::F22
+                | Id::F22n
+                | Id::Faxx
+                | Id::Mig29
+                | Id::Su25
+                | Id::Su27
+                | Id::Su35
+                | Id::Mig21
+        )
 }
 
 #[derive(Clone, Copy)]
@@ -231,6 +244,8 @@ enum SpecificRig {
     E2(crate::e2_animation::Rig),
     Mig29(crate::mig29_animation::Rig),
     Mig21(crate::mig21_animation::Rig),
+    Mig23(crate::mig23_animation::Rig),
+    X31(crate::x31_animation::Rig),
     Su25(crate::su25_animation::Rig),
     Su27(crate::su27_animation::Rig),
     Su35(crate::su35_animation::Rig),
@@ -238,6 +253,8 @@ enum SpecificRig {
     C130(crate::c130_animation::Rig),
     Ac130(crate::ac130_animation::Rig),
     F4(Box<crate::f4_animation::Rig>),
+    F22(crate::f22_animation::Rig),
+    F14(crate::f14_animation::Rig),
     F15(crate::f15_animation::Rig),
     F16(crate::f16_animation::Rig),
     F104(crate::f104_animation::Rig),
@@ -257,6 +274,27 @@ impl Rig {
         // while retaining their established source scale and simulation adapter.
         let scale = tore_sim::combat::debris::scale(id) as f32;
         match id {
+            Id::F14 => {
+                let (rig, shape) = crate::f14_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(id, scale, SpecificRig::F14(rig), shape));
+            }
+            Id::Mig23 => {
+                let (rig, shape) = crate::mig23_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    scale,
+                    SpecificRig::Mig23(rig),
+                    shape,
+                ));
+            }
+            Id::X31 => {
+                let (rig, shape) = crate::x31_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(id, scale, SpecificRig::X31(rig), shape));
+            }
+            Id::F22 | Id::F22n | Id::Faxx => {
+                let (rig, shape) = crate::f22_animation::Rig::load(id, bytes, shape)?;
+                return Ok(Self::with_specific(id, scale, SpecificRig::F22(rig), shape));
+            }
             Id::Su25 => {
                 let (rig, shape) = crate::su25_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -570,6 +608,8 @@ impl Rig {
                 | SpecificRig::E2(_)
                 | SpecificRig::B747(_) => false,
                 SpecificRig::Mig29(_) => crate::mig29_animation::flame(address),
+                SpecificRig::Mig23(_) => crate::mig23_animation::flame(address),
+                SpecificRig::X31(_) => crate::x31_animation::flame(address),
                 SpecificRig::Mig21(_) => crate::mig21_animation::flame(address),
                 SpecificRig::Su25(_) => crate::su25_animation::flame(address),
                 SpecificRig::Su27(_) => crate::su27_animation::flame(address),
@@ -581,6 +621,8 @@ impl Rig {
                 | SpecificRig::Ac130(_)
                 | SpecificRig::Mi24(_) => false,
                 SpecificRig::F4(rig) => rig.flame(address),
+                SpecificRig::F22(rig) => rig.flame(address),
+                SpecificRig::F14(_) => crate::f14_animation::flame(address),
                 SpecificRig::F15(_) => crate::f15_animation::flame(address),
                 SpecificRig::F16(_) => crate::f16_animation::flame(address),
                 SpecificRig::F104(_) => crate::f104_animation::flame(address),
@@ -590,6 +632,13 @@ impl Rig {
         self.groups
             .get(&address)
             .is_some_and(|g| g.part == Part::Flame)
+    }
+    pub fn faces(&self, source: &Face, state: &State) -> Vec<Face> {
+        match &self.specific {
+            Some(SpecificRig::F22(rig)) => rig.faces(source, state),
+            Some(SpecificRig::F14(rig)) => rig.faces(source, state),
+            _ => vec![source.clone()],
+        }
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
         if !crate::variety_rotors::keep_face(self.id, source.address) {
@@ -617,6 +666,8 @@ impl Rig {
                 SpecificRig::Il76(rig) => rig.animate(source, state),
                 SpecificRig::E2(rig) => rig.animate(source, state),
                 SpecificRig::Mig29(rig) => rig.animate(source, state),
+                SpecificRig::Mig23(rig) => rig.animate(source, state),
+                SpecificRig::X31(rig) => rig.animate(source, state),
                 SpecificRig::Mig21(rig) => rig.animate(source, state),
                 SpecificRig::Su25(rig) => rig.animate(source, state),
                 SpecificRig::Su27(rig) => rig.animate(source, state),
@@ -625,6 +676,8 @@ impl Rig {
                 SpecificRig::C130(rig) => rig.animate(source, state),
                 SpecificRig::Ac130(rig) => rig.animate(source, state),
                 SpecificRig::F4(rig) => rig.animate(source, state),
+                SpecificRig::F22(rig) => rig.animate(source, state),
+                SpecificRig::F14(rig) => rig.animate(source, state),
                 SpecificRig::F15(rig) => rig.animate(source, state),
                 SpecificRig::F16(rig) => rig.animate(source, state),
                 SpecificRig::F104(rig) => rig.animate(source, state),

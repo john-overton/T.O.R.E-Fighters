@@ -307,14 +307,18 @@ pub(super) fn combinations(
             s.lift_controls.vector_pitch_actual = pitch;
             s.lift_controls.vector_yaw_actual = yaw;
             let faces = airframe.animation_faces(&s);
-            let mut m = Metrics::default();
+            let mut m = Metrics {
+                finite: finite(&faces),
+                ..Metrics::default()
+            };
             nozzles(&original, &faces, airframe.animation_scale(), &mut m);
             writeln!(
                 csv,
                 "{pitch},{yaw},{},{},{}",
                 m.max_reviewed_anchor_gap, m.reviewed_wheel_rigidity_error, m.max_reviewed_skin_gap
             )?;
-            if m.reviewed_anchor_missing
+            if !m.finite
+                || m.reviewed_anchor_missing
                 || m.max_reviewed_anchor_gap > EPSILON
                 || m.reviewed_wheel_failed
                 || m.max_reviewed_skin_gap > EPSILON

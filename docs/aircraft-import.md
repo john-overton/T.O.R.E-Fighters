@@ -326,7 +326,11 @@ show the first per-aircraft repair and its limitations.
 
 The historical `variety_animation` module now also registers individually
 reviewed older profiles. `additional_animation` delegates those profiles once,
-preserving their existing source scale. Do not apply the older generic surface
+preserving their existing source scale. Preserve both face preparation and
+per-face animation dispatch: bay recesses and concept split leaves may produce
+multiple faces before animation. Already posed split leaves must not rotate a
+second time. Check existing bay geometry at every opening fraction when moving
+a profile into this registry. Do not apply the older generic surface
 transform again. Aircraft-specific devices run before shared propeller/rotor
 and player-directed gun overlays. Flight adapters remain a separate concern.
 

@@ -4,6 +4,7 @@ This lane checks actual render-path geometry, without creating a window.
 Source artifacts stay in the battery's ignored per-scenario output directory.
 """
 import json
+import re
 from pathlib import Path
 
 from battery import Scenario
@@ -11,7 +12,7 @@ from battery import Scenario
 # Expand only after independent source attachments and pose sheets are reviewed.
 REVIEWED_AIRCRAFT = ("a7", "f4b", "f4j", "f4e", "f4g", "f15", "mig17", "f16c", "f104", "a310", "c130", "ac130", "e3", "a10", "av8", "ah64", "mi24", "ch47",
                      "yak141", "v22", "il76", "e2", "b747",
-                     "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25")
+                     "f18", "rafale", "mig29", "su27", "su35", "mig21", "su25", "f22", "f22n", "faxx", "x31", "mig23", "f14")
 
 
 def check_report(work: Path, _output: str) -> list[str]:
@@ -29,7 +30,7 @@ def check_report(work: Path, _output: str) -> list[str]:
     for control in controls:
         if not control.get("checks_passed"):
             problems.append(f"animation checks failed: {control.get('control')}")
-    aircraft = report.get("aircraft")
+    aircraft = report.get("selection_key", report.get("aircraft"))
     rotor_poses = {"AH64.PT": 1200, "MI24.PT": 1200, "CH47.PT": 6000}.get(aircraft)
     if rotor_poses:
         try:
@@ -53,6 +54,12 @@ def check_report(work: Path, _output: str) -> list[str]:
         "SU27.PT": {"flaperon-combinations.csv": 26},
         "SU35.PT": {"flap-roll-combinations.csv": 26},
         "MIG21.PT": {"flap-roll-combinations.csv": 26},
+        "F14.PT": {"sweep-flap-roll-combinations.csv": 126, "pitch-roll-combinations.csv": 26},
+        "MIG23.PT": {"sweep-flap-roll-combinations.csv": 126, "rudder-material-correspondence.csv": 7},
+        "F31.PT": {"prototype-vector-combinations.csv": 26},
+        "F22.PT": {"pitch-roll-combinations.csv": 26},
+        "F22N.PT": {"pitch-roll-combinations.csv": 26},
+        "faxx": {"pitch-roll-combinations.csv": 26, "flap-yaw-combinations.csv": 26},
         "SU25.PT": {"flap-roll-combinations.csv": 26, "rudder-material-correspondence.csv": 6},
     }.get(aircraft, {})
     for csv_name, row_count in sweeps.items():
@@ -64,12 +71,18 @@ def check_report(work: Path, _output: str) -> list[str]:
     return problems
 
 
+def selection_key(aircraft: str) -> str:
+    # Keep the concept identity separate from its F22N retail donor.
+    return {"f4g": "F4.PT", "mig17": "MIG17F.PT", "x31": "F31.PT", "faxx": "faxx"}.get(
+        aircraft, aircraft.upper() + ".PT")
+
+
 def scenarios() -> list[Scenario]:
     return [Scenario(
         name=f"flight-animation-{aircraft}", lane="flight",
         args=["--aircraft", aircraft, "--animation-probe", "{work}/poses",
               "--no-audio", "--no-controllers"],
-        expect=[r"0 required/check failures"],
+        expect=[rf"animation probe {re.escape(selection_key(aircraft))}: \d+ neutral faces, 0 required/check failures;"],
         outputs=["poses/report.json", "poses/index.txt", "poses/gear.ppm"],
         check_work=check_report, timeout=120,
     ) for aircraft in REVIEWED_AIRCRAFT]

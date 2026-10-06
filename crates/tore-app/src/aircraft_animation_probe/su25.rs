@@ -492,7 +492,8 @@ pub(super) fn combinations(
                 m.new_planar_crossings.len(),
                 m.reviewed_direction_failures
             )?;
-            if m.reviewed_anchor_missing
+            if !m.finite
+                || m.reviewed_anchor_missing
                 || m.max_reviewed_anchor_gap > EPSILON
                 || m.max_reviewed_skin_gap > EPSILON
                 || !m.new_planar_crossings.is_empty()
@@ -515,7 +516,7 @@ pub(super) fn combinations(
         let pose = airframe.animation_faces(&s);
         let mut m = Metrics::default();
         let error = materials(sources, Control::Rudder, value, &pose, scale, &mut m);
-        let passed = !m.reviewed_anchor_missing && !m.reviewed_neutral_mismatch;
+        let passed = finite(&pose) && !m.reviewed_anchor_missing && !m.reviewed_neutral_mismatch;
         writeln!(rows, "{value},{error},{passed}")?;
         if !passed {
             failures.push(format!(

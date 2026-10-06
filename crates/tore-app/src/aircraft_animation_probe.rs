@@ -13,14 +13,17 @@ mod b747;
 mod c130;
 mod e2;
 mod f104;
+mod f14;
 mod f15;
 mod f16;
 mod f18;
+mod f22;
 mod f4;
 mod il76;
 mod mi24;
 mod mig17;
 mod mig21;
+mod mig23;
 mod mig29;
 mod rafale;
 mod rotorcraft;
@@ -28,6 +31,7 @@ mod su25;
 mod su27;
 mod su35;
 mod v22;
+mod x31;
 mod yak141;
 
 const EPSILON: f32 = 0.0001;
@@ -162,7 +166,18 @@ impl Control {
             Self::Brake | Self::Exhaust
                 if matches!(
                     id,
-                    Id::F18 | Id::Rafale | Id::Mig29 | Id::Su27 | Id::Su35 | Id::Mig21
+                    Id::F14
+                        | Id::X31
+                        | Id::Mig23
+                        | Id::F22
+                        | Id::F22n
+                        | Id::Faxx
+                        | Id::F18
+                        | Id::Rafale
+                        | Id::Mig29
+                        | Id::Su27
+                        | Id::Su35
+                        | Id::Mig21
                 ) =>
             {
                 Expectation::Required
@@ -190,6 +205,7 @@ impl Control {
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
             Self::VectorYaw if id == Id::Av8 => Expectation::Required,
             Self::VectorYaw if id == Id::Yak141 => Expectation::Required,
+            Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw => Expectation::Unsupported,
             Self::Conversion if id == Id::V22 => Expectation::Required,
             Self::Conversion => Expectation::Unsupported,
@@ -268,6 +284,12 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             return Err("fixed rotorcraft gear is inconsistent with the visible wheels".into());
         }
     }
+    // Isolate F14 controls at the existing unswept threshold. Its ordinary
+    // 450-knot start is already swept, and flap demand also changes that sweep.
+    // The separate coupled sweep/flap grid covers that interaction explicitly.
+    if id == AircraftId::F14 {
+        neutral.speed = 400. * 1.68781;
+    }
     neutral.engine = false;
     neutral.exhaust = 0.;
     neutral.gear = 0.;
@@ -289,6 +311,32 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         .get(&airframe.profile.shape)
         .ok_or_else(|| format!("missing {}", airframe.profile.shape))?;
     let raw = tore_formats::shape::Shape::parse(source_bytes)?;
+    let f14_sources = if id == AircraftId::F14 {
+        Some(f14::Sources::load(
+            source_bytes,
+            data.get("_F14.PIC").ok_or("missing F14 atlas")?,
+        )?)
+    } else {
+        None
+    };
+    let mig23_sources = if id == AircraftId::Mig23 {
+        Some(mig23::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let x31_sources = if id == AircraftId::X31 {
+        Some(x31::Sources::load(
+            source_bytes,
+            data.get("_F31.PIC").ok_or("missing X31 atlas")?,
+        )?)
+    } else {
+        None
+    };
+    let f22_sources = if matches!(id, AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx) {
+        Some(f22::Sources::load(id, source_bytes)?)
+    } else {
+        None
+    };
     let su25_sources = if id == AircraftId::Su25 {
         Some(su25::Sources::load(source_bytes)?)
     } else {
@@ -382,6 +430,12 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             | AircraftId::Ac130
             | AircraftId::E3
             | AircraftId::F18
+            | AircraftId::F14
+            | AircraftId::X31
+            | AircraftId::Mig23
+            | AircraftId::F22
+            | AircraftId::F22n
+            | AircraftId::Faxx
             | AircraftId::Rafale
             | AircraftId::Yak141
             | AircraftId::V22
@@ -410,14 +464,15 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         "motion-survey"
     };
     let mut report = format!(
-        "{{\"aircraft\":\"{}\",\"shape\":\"{}\",\"source_units_to_feet\":{scale},\"validation_scope\":\"{scope}\",\"neutral_faces\":{},\"controls\":[",
+        "{{\"selection_key\":\"{}\",\"aircraft\":\"{}\",\"shape\":\"{}\",\"source_units_to_feet\":{scale},\"validation_scope\":\"{scope}\",\"neutral_faces\":{},\"controls\":[",
+        id.selection_key(),
         id.pt(),
         airframe.profile.shape,
         base.len()
     );
     let mut notes = format!(
         "{} headless animation sweep\nActual Airframe::animation_faces output; no camera, texture shading or renderer.\nRows: sample values in ascending order. Columns: top (X,Y), side (Y,Z), rear (X,Z).\nGrey: unchanged. Orange: moved or newly visible. Pale blue: reference outline.\nCandidate seam gaps are measured only among vertices coincident in the reference pose.\nThey include intentional moving/fixed boundaries and require source review.\nAll geometry distances in JSON are feet. OBJ vertices retain source coordinates.\n\ncontrol expectation status reversible intermediate_unique\n",
-        id.pt()
+        id.selection_key()
     );
     writeln!(
         notes,
@@ -432,7 +487,12 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     for (index, control) in Control::ALL.into_iter().enumerate() {
         let expectation = control.expectation(id, &neutral);
         let mut values = control.values();
-        if scope == "reviewed-controls-and-attachments" && matches!(control, Control::Gear) {
+        if id == AircraftId::X31 && matches!(control, Control::VectorPitch | Control::VectorYaw) {
+            values = vec![-1., -0.5, 0., 0.5, 1.];
+        }
+        if (scope == "reviewed-controls-and-attachments" && matches!(control, Control::Gear))
+            || (id == AircraftId::F14 && matches!(control, Control::Hook))
+        {
             values.insert(1, 1e-6);
         }
         if id == AircraftId::Mig17 && matches!(control, Control::Gear) {
@@ -444,7 +504,24 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             .iter()
             .map(|value| {
                 let mut state = neutral.clone();
-                control.apply(&mut state, *value);
+                if id == AircraftId::X31
+                    && matches!(control, Control::VectorPitch | Control::VectorYaw)
+                {
+                    // Prototype assistance uses signed angular-rate demand,
+                    // independently of powered-lift lever controls.
+                    state.auxiliary_rates[1] = if matches!(control, Control::VectorPitch) {
+                        value * std::f64::consts::FRAC_PI_2
+                    } else {
+                        0.
+                    };
+                    state.auxiliary_rates[2] = if matches!(control, Control::VectorYaw) {
+                        value * std::f64::consts::FRAC_PI_2
+                    } else {
+                        0.
+                    };
+                } else {
+                    control.apply(&mut state, *value);
+                }
                 airframe.animation_faces(&state)
             })
             .collect();
@@ -549,6 +626,54 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                     *value,
                     (&raw.faces, reference, pose),
                     scale,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &f14_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f14::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &x31_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                x31::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &mig23_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                mig23::check(
+                    source,
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &f22_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f22::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
                     metric,
                 );
             }
@@ -842,6 +967,20 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     if id == AircraftId::Su27 {
         failures.extend(su27::combinations(&airframe, &neutral, out)?);
     }
+    if let Some(source) = &f14_sources {
+        failures.extend(f14::combinations(source, &airframe, &neutral, out)?);
+    }
+    if let Some(source) = &x31_sources {
+        failures.extend(x31_combinations(
+            &airframe, &neutral, &raw.faces, out, source,
+        )?);
+    }
+    if let Some(source) = &mig23_sources {
+        failures.extend(mig23::combinations(source, &airframe, &neutral, out)?);
+    }
+    if let Some(source) = &f22_sources {
+        failures.extend(f22::combinations(&airframe, &neutral, out, source)?);
+    }
     if let Some(source) = &su25_sources {
         failures.extend(su25::combinations(source, &airframe, &neutral, out)?);
     }
@@ -875,7 +1014,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     fs::write(out.join("index.txt"), notes)?;
     println!(
         "animation probe {}: {} neutral faces, {} required/check failures; {}",
-        id.pt(),
+        id.selection_key(),
         base.len(),
         failures.len(),
         out.display()
@@ -1474,6 +1613,65 @@ impl Metrics {
         Ok(())
     }
 }
+fn x31_combinations(
+    airframe: &Airframe,
+    neutral: &State,
+    raw: &[Face],
+    out: &Path,
+    source: &x31::Sources,
+) -> AppResult<Vec<String>> {
+    let mut reference_state = neutral.clone();
+    reference_state.exhaust = 1.;
+    let reference = airframe.animation_faces(&reference_state);
+    let scale = airframe.animation_scale();
+    let mut failures = Vec::new();
+    let mut poses = Vec::new();
+    let mut rows =
+        String::from("pitch,yaw,anchor_gap_ft,skin_gap_ft,rigid_error_ft,checks_passed\n");
+    for pitch in [-1., -0.5, 0., 0.5, 1.] {
+        for yaw in [-1., -0.5, 0., 0.5, 1.] {
+            let mut state = reference_state.clone();
+            state.auxiliary_rates[1] = pitch * std::f64::consts::FRAC_PI_2;
+            state.auxiliary_rates[2] = yaw * std::f64::consts::FRAC_PI_2;
+            let pose = airframe.animation_faces(&state);
+            let mut metric = measure(&reference, &pose, scale);
+            x31::check_vector_combo((raw, &pose), scale, source, &mut metric);
+            let passed = metric.finite
+                && !metric.reviewed_anchor_missing
+                && metric.max_reviewed_anchor_gap <= EPSILON
+                && metric.max_reviewed_skin_gap <= EPSILON
+                && metric.reviewed_rigid_panel_error <= EPSILON
+                && metric.reviewed_direction_failures == 0
+                && !metric.reviewed_neutral_mismatch
+                && metric.new_planar_crossings.is_empty();
+            writeln!(
+                rows,
+                "{pitch},{yaw},{},{},{},{passed}",
+                metric.max_reviewed_anchor_gap,
+                metric.max_reviewed_skin_gap,
+                metric.reviewed_rigid_panel_error
+            )?;
+            if !passed {
+                failures.push(format!(
+                    "X31 combined prototype pitch{pitch}/yaw{yaw} attachments or plume aperture"
+                ));
+            }
+            write_obj(
+                &out.join(format!("prototype-vectors-{}.obj", poses.len())),
+                &pose,
+            )?;
+            poses.push(pose);
+        }
+    }
+    fs::write(out.join("prototype-vector-combinations.csv"), rows)?;
+    contact_sheet(
+        &out.join("prototype-vector-combinations.ppm"),
+        &reference,
+        &poses,
+    )?;
+    Ok(failures)
+}
+
 fn write_obj(path: &Path, faces: &[Face]) -> AppResult<()> {
     let mut text = String::from("# Actual clean Airframe animation faces, source coordinates\n");
     let mut index = 1;

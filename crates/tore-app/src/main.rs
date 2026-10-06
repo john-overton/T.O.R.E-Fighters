@@ -36,9 +36,11 @@ mod effect_renderer;
 mod ejection_art;
 mod engine_material;
 mod f104_animation;
+mod f14_animation;
 mod f14_geometry;
 mod f15_animation;
 mod f16_animation;
+mod f22_animation;
 mod f4_animation;
 mod flight;
 mod flight_canvas;
@@ -67,6 +69,7 @@ mod menu;
 mod mi24_animation;
 mod mig17_animation;
 mod mig21_animation;
+mod mig23_animation;
 mod mig29_animation;
 mod mirrors;
 mod missile_acceptance;
@@ -111,6 +114,7 @@ mod view_compass;
 mod weapon_hud;
 mod weather;
 mod widgets;
+mod x31_animation;
 mod yak141_animation;
 
 // The mission core lives in tore-world; these keep the app's module paths.

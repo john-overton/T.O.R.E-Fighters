@@ -475,6 +475,10 @@ under the ignored battery output directory. Apache and Chinook scenarios also
 check the loaded fixed-gear state and ignored retraction commands before the
 mesh sweep. Multi-axis artifacts are required separately, including both V-22
 conversion/rotor and flaperon sweeps and all 125 Rafale control combinations.
+F-14 isolated controls use the existing unswept 400-knot threshold; separate
+coupled sweep/flap/roll and pitch/roll grids cover its operational interactions.
+Its hook also samples positive near-stow before hiding. Exact selection keys
+keep F/A-XX separate from the F22N source donor in reports and scenario matching.
 
 Run one repaired aircraft before expanding the audit:
 

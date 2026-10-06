@@ -323,7 +323,10 @@ pub(super) fn combinations(
                     state.ticks = tick;
                     let actual = airframe.animation_faces(&state);
                     let after = keyed(&actual);
-                    let mut metric = Metrics::default();
+                    let mut metric = Metrics {
+                        finite: finite(&actual),
+                        ..Metrics::default()
+                    };
                     for group in definitions {
                         for address in group.faces {
                             let key = (*address, 0);
@@ -349,7 +352,8 @@ pub(super) fn combinations(
                         gap = clearance;
                         worst = Some(actual.clone());
                     }
-                    let failed = metric.reviewed_anchor_missing
+                    let failed = !metric.finite
+                        || metric.reviewed_anchor_missing
                         || metric.max_reviewed_anchor_gap > EPSILON
                         || metric.reviewed_rigid_panel_error > EPSILON
                         || clearance.is_none_or(|v| v <= 0.);

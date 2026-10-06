@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from battery_scenarios.animation import check_report
+from battery_scenarios.animation import check_report, scenarios
 
 
 class AnimationReportTests(unittest.TestCase):
@@ -85,3 +85,23 @@ class AnimationReportTests(unittest.TestCase):
             self.assertTrue(check_report(work, ""))
             target.write_text("pose\n" * 126)
             self.assertEqual(check_report(work, ""), [])
+
+    def test_concept_selection_requires_its_own_split_sweep(self):
+        report = self.report()
+        report["aircraft"] = "F22N.PT"
+        report["selection_key"] = "faxx"
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            poses = work / "poses"
+            poses.mkdir()
+            (poses / "report.json").write_text(json.dumps(report))
+            (poses / "pitch-roll-combinations.csv").write_text("pose\n" * 26)
+            self.assertTrue(check_report(work, ""))
+            (poses / "flap-yaw-combinations.csv").write_text("pose\n" * 26)
+            self.assertEqual(check_report(work, ""), [])
+
+    def test_scenario_output_requires_exact_identity_and_zero_failures(self):
+        pattern = scenarios()[0].expect[0]
+        self.assertRegex("animation probe A7.PT: 261 neutral faces, 0 required/check failures; poses", pattern)
+        self.assertNotRegex("animation probe A7.PT: 261 neutral faces, 10 required/check failures; poses", pattern)
+        self.assertNotRegex("animation probe F18.PT: 261 neutral faces, 0 required/check failures; poses", pattern)

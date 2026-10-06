@@ -23,26 +23,23 @@ panels across a hinge. Rotate normals with the polygons. Neutral controls and
 fully deployed gear must retain source geometry exactly.
 
 Retain 3-second gear/flap/brake travel. Gear uses aircraft-specific attachment paths below, hiding at full retraction
-unless a retained exposed joint is explicitly documented. No strut shrinking. Source brake panels rotate from a fitted
+unless a retained exposed joint is explicitly documented. Wheel/shaft cards
+remain rigid. Separately modeled fitted brace connectors may change length
+while keeping their body roots and distal pin edges attached, as specified per
+aircraft. Source brake panels rotate from a fitted
 closed pose to the original deployed endpoint; no instant popping during travel.
-New-aircraft trailing flaps droop up to 0.4 rad, outboard ailerons deflect up to
+The legacy defaults are overridden by the individual source-endpoint morphs
+and correction sections below. Default trailing flaps droop up to 0.4 rad, outboard ailerons deflect up to
 0.2 rad, pitch surfaces up to 0.3 rad and rudders up to 0.35 rad. Opposite wing
 roll deflections use opposite signs. Su-35 canards use 0.25 rad pitch. Existing
 rigs retain their documented values and applicable hooks; no hook is added to
 an aircraft without a reviewed carrier hook capability.
 
-Gear pivot coordinates below use each shape's source units, in right/forward/up
-order. The following legacy fits apply only to profiles still awaiting individual
-review. Individually reviewed profiles use their correction sections below.
+Gear pivots use each shape's source units, in right/forward/up order. The
+individual correction sections below define the current reviewed paths.
 
-| Aircraft | Main pivot | Nose pivot | Switched brake pivot / retraction angle |
-| --- | --- | --- | --- |
-| MiG-23 | (3, -1, -3) | (0, 27, -3) | Fitted aft side strips, below |
-| F-22 | (13, 0, -5) | (0, 63, -9) | (0,-17,5) / 0.7 rad about normalized (1,±2/3,±1/3) |
-| F-22N | as F-22 | as F-22 | as F-22, on its own shape addresses |
-
-F-22N (2026-09-22) reuses the F-22 pivots, flap, aileron, elevator, rudder,
-bay and canopy rules on its own reviewed face addresses. Its bay belly uses
+F-22N retains its own reviewed face addresses and the shared family behavior
+described in the [attachment corrections](#f-22-family-attachment-corrections). Its bay belly uses
 face 39dc in place of the F-22A's 3d03, a fitted agent choice since the belly
 is remodelled. Its native hook stows about the fitted root hinge (0,-9,-9)
 through 0.9 radians, per the [F/A-XX contract](fa-xx.md#retractable-hook).
@@ -53,13 +50,12 @@ strip at source y=-8..12, hinged at (0,12,-8) about x through 0.6 rad. MiG-23
 has fitted aft side strips at y=-24..-16, hinged at (±4,-16,0) about vertical
 through ±0.6 rad. These split their own source skin, retaining the surrounding
 fuselage and UVs; no switched brake identity or original linkage is claimed.
-F-14's existing switched brake panels now rotate continuously through 45 degrees
-about the normalized forward-edge direction (1, ±0.5, ∓0.5), at (±2,-11,1).
+F-14 brakes use the [current source-specific closure](#f-14d-attachment-corrections).
 
-MiG-23 visual sweep is 0..40 degrees linearly over 400..700 knots TAS, multiplied
-by (1 - flap fraction). Rotate the wing panels, their flaps and wingtip vapor
-attachments together. This is an agent-authored visual schedule, not a new
-sweep-dependent flight law.
+MiG-23 sweep and coupled flap attachments use the
+[current correction contract](#mig-23-attachment-and-material-corrections).
+Retain wingtip vapor attachment to the swept wing. This presentation does not
+add a sweep-dependent flight law.
 
 ## Rafale attachment corrections
 
@@ -300,3 +296,142 @@ fixes body edge Y=51 while its two-unit distal edge follows the nose rigidly.
 All eighteen gear faces hide at zero and reproduce source deployment at one.
 Wingtip clamshell brakes retain front Y=-8,Z=1, closing by upper atan(5/6)
 and lower -atan(4/6). No flame geometry or afterburner capability is added.
+
+## F-22 family attachment corrections
+
+Agent fits, 2026-10-05, preserving each exact donor. Inner flaps retain
+0.4-radian full travel but use their actual diagonal mean seams: right
+[16,-28,0] along [26,6,0.5], left [-17,-28,0] along [26,-6,-0.5]. Pin every
+thick source front point while moving shared trailing vertices coherently.
+Outer roll uses right [42,-22,0.5] along [17,-4,0.5] and left [-43,-22,0.5]
+along [17,4,-0.5], through -side*0.2 radians times aileron. These are continuous
+fits, not claims of original full-flap triangle interiors.
+
+Tail motion retains -0.3 radians times elevator and opposed 0.1-radian roll,
+now keeping every source body-root chord point fixed. Only distal points turn
+around lateral axes at Y=-48,Z=1. Stock fins split at Z=6 and
+`Y+35-0.25*Z=0`. Preserve both cuts and lower roots; trailing upper points move
+laterally by `tan(0.35*rudder)*aft_distance*clamp((Z-6)/6,0,1)`. This constrained
+deformation preserves each donor's cant and paired skins. F/A-XX retains its
+opinionated fin removal, grey recolor and 0.4-flap midpoint with +/-0.6-radian
+split leaves on these corrected seams. Positive yaw opens right leaves,
+negative yaw opens left. The coordinate repair is an agent choice, not a new
+user design request.
+
+Complete main shaft/wheel cards close 90 degrees about left [-13,2.25,-5]
+along [-12,-8,-1] and right [12,2.25,-6] along [-12,8,1]. These pivots lie on
+painted upper braces. Nose shaft/wheel closes aft 175 degrees about [0,63,-9].
+Preserve source steering and all card dimensions. Independent main doors close
+side*90 degrees around their own edges X=-16/+18,Y=-5..23,Z=-3..-1. Nose door
+closes -90 degrees around its own forward axis X=-2,Z=-8. Original door roots
+already stand outside parts of the source fuselage; retain that source
+clearance explicitly, rather than claim a flush seal. Hide gear only at zero.
+
+Preserve brake front roots [0,-17,5] and [±3,-15,6]. Close rear points
+together through 0.7*(1-brake) radians about the lateral axis at [0,-17,5],
+keeping the shared center seam joined. This is constrained skin deformation,
+not two independently rigid halves. Full extension matches source geometry.
+Retain flame root Y=-48,
+F-22N/F/A-XX 0.9-radian upward hook stow, bay belly clipping/doors/recess lining,
+canopy treatment and all control/weapon timing. F-22 gains no hook. Full source
+gear deployment still sets the existing 7 2/3-foot ground plane. GPU appearance
+and recovered original mechanical timing require separate evidence.
+
+## X-31 attachment corrections
+
+Agent fits, 2026-10-05, exact F31.PT. Inner trailing panels and their closures
+morph to the original flap down endpoint while retaining both thick front
+edges at Y=-17,Z=-5/-6. Add -0.30-radian pitch and corrected opposed
+0.20-radian roll about each mean front at Z=-5.5, retaining those front points.
+Outer trailing skins now include both previously omitted left upper panels.
+Use own outward axes from [±20,-17,-5.5] to [±31,-17,-6], with
+-side*0.30*elevator-0.20*aileron radians. Flap-only demand leaves outer panels
+static, as the bounded original branches do. This replaces the old whole-wing
+flap coupling; independent control clearances remain explicit.
+
+Canards retain +0.35-radian pitch at Y=54,Z=1. Rudder positions morph to their
+own exact signed source endpoints, retaining the diagonal front from
+[0,-35,8] to [0,-39,19]. Continuous travel and mixing remain fitted.
+
+Complete main wheel/strut assemblies fold forward 130 degrees about [±4,-12,-5]
+along [1,±0.55,0]. Nose wheel/strut folds forward 130 degrees around [0,33,-5].
+Keep all painted wheel dimensions and deployed positions exact; hide only at
+zero. The separate brace fixes painted upper center [0,23.5,-5], while lower
+center [0,32.5,-9.5] follows the nose through a noninverting telescoping fit
+with constant perpendicular thickness. Main untextured panels retain upper
+edges X=0/1,Z=-5, closing +90/-90 degrees around Y. Nose door retains X=-2,Z=-5
+and closes inward -90 degrees around Y.
+
+Side brakes retain their own forward edges at X=±6,Y=-12,Z=-2..4, closing
+-side*1.05 radians around Z. This corrects the old outward closing direction.
+Keep the [existing prototype vector law](additional-aircraft.md#aircraft-and-flight):
+actual auxiliary pitch/yaw rates, normalized by pi/2 radians per second and
+clamped to +/-1, drive the source paddles and plume through +/-15 degrees.
+No powered-lift lever alias is introduced. Full-exhaust combined geometry must
+keep the plume root [0,-41,0], complete cross rigidity, paddle attachments and
+fixed nozzle. The fitted plume-front envelope remains inside the projected
+source nozzle aperture and within 3 source units of its plane at Y=-40.
+
+## MiG-23 attachment and material corrections
+
+Agent fits, 2026-10-05. Rudder positions interpolate to their exact own signed
+source endpoints; keep the diagonal front [0,-24,5] to [0,-27,13] and fixed fin
+unchanged. At zero demand use exact neutral UVs. At nonzero demand select the
+original signed endpoint UVs directly. The positive endpoint reverses the front
+UV order, so linear interpolation would collapse the texture halfway through.
+This sign-based material switch is an authored timing choice.
+
+Retain -0.30*elevator-side*0.10*aileron radians on the tails, now keeping inner
+points abs(X)<=4 fixed about lateral pivots [±3.5,-26,1]. Corrected positive roll
+lowers left and raises right. No separate wing aileron is invented. Flaps morph
+positions and UVs to exact down endpoints before wing sweep. Retain actual
+wing pivots [±9,4,3] and the existing fitted 0..40-degree sweep over 400..700
+knots, multiplied by 1-flaps. The wing and its flaps must remain attached across
+combined demands. Original sweep timing remains unknown.
+
+Main wheel/shaft cards fold aft 90 degrees around [±3,-1,-3], retaining source
+X coordinates and the entire front top line. Nose cards retain their aft
+90-degree fold around [0,27,-3]. The separate brace pins both body endpoints
+at Y=29 while its sqrt(5)-unit distal edge follows the nose rigidly. Hide all
+eighteen gear faces only at zero; full deployment is exact.
+
+Fitted side brakes retain the 0.60-radian demand and Y=-24..-16 bands, now
+pinning every actual beveled forecut. Distal motion uses left midpoint
+[-3.909091,-16,0.227273] along [0,0,2.272727] and right
+[3.681818,-16,0.227273] along [-0.454545,0,2.272727], opening outward with
+opposed signs. Source surrounding skins remain fixed. Flame demand retains
+root Y=-29 and the aircraft's existing afterburner capability.
+
+## F-14D attachment corrections
+
+Agent fits, 2026-10-05, exact F14.PT at four-thirds foot per source unit.
+Preserve the [existing compatibility repairs](additional-aircraft.md#fitted-exterior-behavior):
+outlet/collar mirrors, seam triangles, right-tail front correction, left wing
+alignment and lift, sweep/vapor mapping, plume width and donated hook artwork.
+Those remain explicit repaired geometry, not unchanged original neutral art.
+
+Replace the older 0.4-radian flap droop with interpolation to each original
+negative branch. Only the inboard trailing point lowers from Z=1 to 0; fronts
+and outboard trailing points remain fixed. Apply the existing wing alignment,
+lift and sweep afterward. Paired skins share targets and preserve original UVs.
+This deliberately reduces outer travel relative to the prior fit; source
+endpoints are known but continuous timing remains authored. Tail pitch remains
+-0.30 radians, with corrected -side*0.20-radian roll around Y=-10,Z=0. Retain
+the existing 0.35-radian fin split from [side*4,-11,2] to [side*4,-13,9].
+
+Complete main wheel/strut assemblies fold 75 degrees about [side*6,1,0] along
+[1,side,0]. Nose wheel/strut folds forward 110 degrees around [0,17,-1].
+Preserve wheel dimensions and deployment positions. The separate brace pins
+[0,12,-1] while its lower center [0,16,-2.5] follows the wheel through a
+noninverting telescoping centerline fit, with constant transverse thickness.
+Its original top edge is collapsed to a point; do not invent a rectangle there.
+The separate panel pins upper edge [0,17,-1] to [0,21,-1], closing 90 degrees
+about Y. Preserve nosewheel steering and keep its brace connection attached.
+Hide gear only at zero after the fitted stow.
+
+Brakes retain diagonal hinges [side*2,-11,1] to [0,-12,2], now closing 75
+degrees around [1,side*0.5,-side*0.5]. This replaces the earlier 45-degree fit
+which left a source corner exposed at stow. Deployed source geometry remains
+exact. The donated hook retains its 0.6-radian upward closure around [0,-5,-2];
+flames retain repaired widths and length scaling from Y=-14. No flight forces,
+control bindings or compatibility adapter selection change.

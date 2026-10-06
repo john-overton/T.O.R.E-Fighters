@@ -245,8 +245,8 @@ impl Rig {
         }
     }
     pub fn faces(&self, f: &Face, s: &State) -> Vec<Face> {
-        if self.variety.is_some() {
-            return vec![f.clone()];
+        if let Some(rig) = &self.variety {
+            return rig.faces(f, s);
         }
         if self.parts.get(&f.address) == Some(&Part::Bay) {
             return crate::roster_animation::bay_lining(self.id.source(), f);

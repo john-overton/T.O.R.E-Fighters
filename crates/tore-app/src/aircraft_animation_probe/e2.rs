@@ -649,7 +649,8 @@ pub(super) fn combinations(
                 source,
                 &mut metric,
             );
-            let failed = metric.reviewed_anchor_missing
+            let failed = !metric.finite
+                || metric.reviewed_anchor_missing
                 || metric.max_reviewed_anchor_gap > EPSILON
                 || metric.max_reviewed_skin_gap > EPSILON
                 || metric.reviewed_direction_failures > 0
@@ -690,7 +691,8 @@ pub(super) fn combinations(
         source,
         &mut metric,
     );
-    if metric.reviewed_wheel_failed
+    if !metric.finite
+        || metric.reviewed_wheel_failed
         || metric.reviewed_anchor_missing
         || metric.max_reviewed_anchor_gap > EPSILON
         || metric.max_reviewed_skin_gap > EPSILON
