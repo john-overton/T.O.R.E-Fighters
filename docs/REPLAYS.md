@@ -464,11 +464,13 @@ What is not in it, known limits:
   weapon record when the mission knows it.
 - The first moments before the first update are not in the replay; it starts at
   the first host tick a snapshot showed after you were seated.
-- No `datalink.*` events yet. The host's picture reaches a client as the
-  wire's `Link` events once slice G7 adds them
-  ([protocol](formats/net-protocol.md#data-link-stage-g)); the conversion
-  then writes the same events from them (the mapping is in
-  `tore-session/src/client/convert/events.rs`, as the other events' is).
+- The `datalink.*` events are only those about the player's own flight: the
+  host sends a seat the wire's `Link` events for its flight's members
+  ([protocol](formats/net-protocol.md#data-link-stage-g)), and the conversion
+  writes each as the single-player recorder does (built, slice G7:
+  `datalink_event` in `tore-session/src/client/convert/events.rs`). A player
+  seated after the start has no `datalink.member` events, and the tracks are
+  not recorded, as in single player.
 
 A capture that was cut short (the game crashed or was closed) converts up to
 its last whole record; the footer says `end=cut` and the byte it stopped at.

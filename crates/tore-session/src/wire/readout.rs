@@ -22,6 +22,17 @@
 //! service travels as its selected airport, its clearance and the objects out
 //! of action, from which the client rebuilds a service that answers the ILS
 //! as the host's does.
+//!
+//! The flight data link's share (slice G7, protocol 15) is four parts: the
+//! Link scalar group right after the header (the radar flag and the
+//! assignment), and three lists after the contacts: the marks (who locked or
+//! was assigned each target), the flightmates' state and the tracks. *Agent
+//! decisions:* the marks and the mates come before the tracks, so a bulky
+//! track update never holds a lock or an assignment back; a track's position
+//! is not predicted from its velocity, because the host's track stays where
+//! it was observed until the next publishing tick, so between those ticks
+//! nothing is sent; and the client lists the tracks nearest its own plane
+//! first, as the host does.
 
 use super::bits::{self, read_u32};
 use super::flat::{self, Kind, List, ListRaw, Schema, Slow};
@@ -38,11 +49,15 @@ use tore_sim::combat::threats::{EvidenceSource, GuidanceClass, ThreatRecord};
 use tore_sim::sensors::detection::Sighting;
 use tore_sim::sensors::passive::{Emitter, Symbol};
 use tore_sim::sensors::{Channel, Contact, Plot, Strobe, Support};
+use tore_world::datalink::{
+    Damage as LinkDamage, Fuel, SEAT_TRACKS, TrackSource, Weapons as LinkWeapons,
+};
 use tore_world::readout::{
     self as world_readout, AirportReadout, CockpitReadout, Countermeasures, DamageReadout,
     Estimates, InboundMissile, MapRow, MusicReadout, RwrReadout, SeekerReadout, SensorReadout,
     Stores, TargetRow, Targets, Trail,
 };
+use tore_world::readout::{LinkAssigned, LinkMark, LinkMate, LinkReadout, LinkTrack, MemberRef};
 use tore_world::snapshot::Damage;
 use tore_world::target_window::{Pilot, TargetBrief, TargetObjective};
 
@@ -212,6 +227,25 @@ const OBSERVATION: Schema = &[
     D,
 ];
 const ENEMY: Schema = &[D, D, D];
+/// A link track: its source, then its position and velocity, each sent as a
+/// difference (the host's track does not move between publishing ticks).
+const LINK_TRACK: Schema = &[Kind::Slow(Slow::Bits(2, 2)), D, D, D, D, D, D];
+/// A link mark: the lockers' mask, the battle net's lock (present, flight,
+/// member) and the assigned mask.
+const LINK_MARK: Schema = &[
+    Kind::Slow(Slow::Int),
+    BIT,
+    Kind::Slow(Slow::Int),
+    Kind::Slow(Slow::Int),
+    Kind::Slow(Slow::Int),
+];
+/// A flightmate: member number, fuel, weapons, damage.
+const LINK_MATE: Schema = &[
+    Kind::Slow(Slow::Bits(3, 7)),
+    Kind::Slow(Slow::Bits(3, 4)),
+    Kind::Slow(Slow::Bits(2, 2)),
+    Kind::Slow(Slow::Bits(2, 2)),
+];
 
 /// The scalar groups.
 mod scalar {
@@ -227,7 +261,8 @@ mod scalar {
     pub const MUSIC: usize = 9;
     pub const LOCKS: usize = 10;
     pub const SENSORS: usize = 11;
-    pub const COUNT: usize = 12;
+    pub const LINK: usize = 12;
+    pub const COUNT: usize = 13;
 }
 
 /// The lists.
@@ -245,7 +280,10 @@ mod list {
     pub const PLOTS: usize = 10;
     pub const VISUAL: usize = 11;
     pub const MAP: usize = 12;
-    pub const COUNT: usize = 13;
+    pub const LINK_TRACKS: usize = 13;
+    pub const LINK_MARKS: usize = 14;
+    pub const LINK_MATES: usize = 15;
+    pub const COUNT: usize = 16;
 }
 
 /// The most values a scalar group holds.
@@ -261,10 +299,14 @@ pub enum Part {
     Trails,
 }
 
+/// How many parts a record has.
+pub const PART_COUNT: usize = 30;
+
 /// The parts in the order they are written, which is their importance:
 /// what is left out for room is what comes last.
-pub const PARTS: [Part; 26] = [
+pub const PARTS: [Part; PART_COUNT] = [
     Part::Scalar(scalar::HEADER),
+    Part::Scalar(scalar::LINK),
     Part::Scalar(scalar::STORES),
     Part::Scalar(scalar::COUNTERMEASURES),
     Part::Scalar(scalar::DAMAGE),
@@ -285,6 +327,9 @@ pub const PARTS: [Part; 26] = [
     Part::List(list::EMITTERS),
     Part::Scalar(scalar::SENSORS),
     Part::List(list::CONTACTS),
+    Part::List(list::LINK_MARKS),
+    Part::List(list::LINK_MATES),
+    Part::List(list::LINK_TRACKS),
     Part::List(list::STROBES),
     Part::List(list::PLOTS),
     Part::Trails,
@@ -307,6 +352,9 @@ fn schema(list: usize) -> Schema {
         PLOT,
         CONTACT,
         MAP,
+        LINK_TRACK,
+        LINK_MARK,
+        LINK_MATE,
     ][list]
 }
 
@@ -326,6 +374,9 @@ fn limit(list: usize) -> usize {
         MAX_PLOTS,
         MAX_VISUAL,
         MAX_MAP,
+        SEAT_TRACKS,
+        MAX_LINK_MARKS,
+        tore_sim::ai::launch::MAX_WING_MEMBERS,
     ][list]
 }
 
@@ -345,6 +396,7 @@ pub fn part_name(part: Part) -> &'static str {
             "music",
             "locks",
             "sensors",
+            "link",
         ][index],
         Part::List(index) => [
             "seeker observation",
@@ -360,6 +412,9 @@ pub fn part_name(part: Part) -> &'static str {
             "plots",
             "visual",
             "map",
+            "link tracks",
+            "link marks",
+            "link mates",
         ][index],
         Part::Trails => "trails",
     }
@@ -530,6 +585,68 @@ fn channel_code(c: Channel) -> i64 {
     }
 }
 const CHANNELS: [Channel; 3] = [Channel::Radar, Channel::Infrared, Channel::Visual];
+
+fn source_code(s: TrackSource) -> i64 {
+    match s {
+        TrackSource::Own => 0,
+        TrackSource::Flight => 1,
+        TrackSource::Network => 2,
+    }
+}
+const SOURCES: [TrackSource; 3] = [TrackSource::Own, TrackSource::Flight, TrackSource::Network];
+
+fn fuel_code(f: Fuel) -> i64 {
+    match f {
+        Fuel::Normal => 0,
+        Fuel::Joker => 1,
+        Fuel::Bingo => 2,
+        Fuel::Fumes => 3,
+        Fuel::Out => 4,
+    }
+}
+const FUELS: [Fuel; 5] = [
+    Fuel::Normal,
+    Fuel::Joker,
+    Fuel::Bingo,
+    Fuel::Fumes,
+    Fuel::Out,
+];
+
+fn weapons_code(w: LinkWeapons) -> i64 {
+    match w {
+        LinkWeapons::Missiles => 0,
+        LinkWeapons::GunsOnly => 1,
+        LinkWeapons::Winchester => 2,
+    }
+}
+const WEAPONS: [LinkWeapons; 3] = [
+    LinkWeapons::Missiles,
+    LinkWeapons::GunsOnly,
+    LinkWeapons::Winchester,
+];
+
+fn link_damage_code(d: LinkDamage) -> i64 {
+    match d {
+        LinkDamage::None => 0,
+        LinkDamage::Light => 1,
+        LinkDamage::Heavy => 2,
+    }
+}
+const LINK_DAMAGES: [LinkDamage; 3] = [LinkDamage::None, LinkDamage::Light, LinkDamage::Heavy];
+
+/// The Link scalar group: the radar flag, then the assignment's target plus
+/// one (0 for none), its assigner and whether it is acknowledged.
+fn link_scalars(link: &LinkReadout) -> Vec<i64> {
+    match &link.assigned {
+        None => vec![flag(link.radar), 0, 0, 0],
+        Some(a) => vec![
+            flag(link.radar),
+            i64::from(a.target) + 1,
+            i64::from(a.by),
+            flag(a.acknowledged),
+        ],
+    }
+}
 
 fn aircraft_code(id: Option<AircraftId>) -> i64 {
     id.and_then(|id| AircraftId::SELECTABLE.iter().position(|a| *a == id))
@@ -863,6 +980,36 @@ impl QReadout {
                 aircraft_code(row.aircraft),
             ]);
             l[list::MAP].insert(row.contact.id, values);
+        }
+        let link = &readout.link;
+        out.scalars[scalar::LINK] = link_scalars(link);
+        for t in &link.tracks {
+            let [x, y, z] = coarse(t.position);
+            let [vx, vy, vz] = t.velocity.map(|x| q(x, COARSE_FPS));
+            l[list::LINK_TRACKS].insert(t.target, vec![source_code(t.source), x, y, z, vx, vy, vz]);
+        }
+        for m in &link.marks {
+            l[list::LINK_MARKS].insert(
+                m.target,
+                vec![
+                    i64::from(m.lockers),
+                    flag(m.net_lock.is_some()),
+                    m.net_lock.map_or(0, |n| i64::from(n.flight)),
+                    m.net_lock.map_or(0, |n| i64::from(n.member)),
+                    i64::from(m.assigned_to),
+                ],
+            );
+        }
+        for m in &link.mates {
+            l[list::LINK_MATES].insert(
+                m.plane,
+                vec![
+                    i64::from(m.member),
+                    fuel_code(m.fuel),
+                    weapons_code(m.weapons),
+                    link_damage_code(m.damage),
+                ],
+            );
         }
         for trail in &se.trails {
             out.trails.insert(
@@ -1289,6 +1436,71 @@ impl QReadout {
             home: pick(mu, 1) != 0,
         };
 
+        let lk = get(scalar::LINK);
+        let mask = |x: i64| u16::try_from(x).map_err(|_| bad("link mask"));
+        let small = |x: i64| u8::try_from(x).map_err(|_| bad("link member"));
+        let mut tracks = self.lists[list::LINK_TRACKS]
+            .iter()
+            .map(|(id, x)| {
+                Ok(LinkTrack {
+                    target: *id,
+                    position: [v(x[1], COARSE_FT), v(x[2], COARSE_FT), v(x[3], COARSE_FT)],
+                    velocity: [
+                        v(x[4], COARSE_FPS),
+                        v(x[5], COARSE_FPS),
+                        v(x[6], COARSE_FPS),
+                    ],
+                    source: *SOURCES.get(x[0] as usize).ok_or(bad("track source"))?,
+                })
+            })
+            .collect::<WireResult<Vec<_>>>()?;
+        // Nearest the client's own plane first, as the host lists them;
+        // without a plane, in target order.
+        if let Some((at, _)) = observer {
+            let away = |t: &LinkTrack| (0..3).map(|i| (t.position[i] - at[i]).powi(2)).sum::<f64>();
+            tracks.sort_by(|a, b| away(a).total_cmp(&away(b)).then(a.target.cmp(&b.target)));
+        }
+        let link = LinkReadout {
+            radar: pick(lk, 0) != 0,
+            assigned: match pick(lk, 1) {
+                0 => None,
+                target => Some(LinkAssigned {
+                    target: u32_of(target - 1)?,
+                    by: u32_of(pick(lk, 2))?,
+                    acknowledged: pick(lk, 3) != 0,
+                }),
+            },
+            tracks,
+            marks: self.lists[list::LINK_MARKS]
+                .iter()
+                .map(|(id, x)| {
+                    Ok(LinkMark {
+                        target: *id,
+                        lockers: mask(x[0])?,
+                        net_lock: (x[1] != 0)
+                            .then(|| -> WireResult<_> {
+                                Ok(MemberRef {
+                                    flight: small(x[2])?,
+                                    member: small(x[3])?,
+                                })
+                            })
+                            .transpose()?,
+                        assigned_to: mask(x[4])?,
+                    })
+                })
+                .collect::<WireResult<_>>()?,
+            mates: self.lists[list::LINK_MATES]
+                .iter()
+                .map(|(id, x)| LinkMate {
+                    plane: *id,
+                    member: x[0] as u8,
+                    fuel: FUELS[x[1] as usize],
+                    weapons: WEAPONS[x[2] as usize],
+                    damage: LINK_DAMAGES[x[3] as usize],
+                })
+                .collect(),
+        };
+
         Ok(CockpitReadout {
             plane,
             tick: readout_tick,
@@ -1310,8 +1522,7 @@ impl QReadout {
             airport,
             target_window,
             music,
-            // The link's share is not on the wire yet (slice G7).
-            link: Default::default(),
+            link,
         })
     }
 
@@ -1405,10 +1616,12 @@ fn write_trails(
         }
         changes.push((*id, w));
     }
-    if removed.is_empty() && changes.is_empty() {
+    // Nothing changed, or no room even for the removals and the counts: the
+    // trails wait (slice G7 found the counts sent with no room left).
+    if (removed.is_empty() && changes.is_empty()) || budget < 48 + 40 * removed.len() {
         return (None, base.clone());
     }
-    let mut left = budget.saturating_sub(48 + 40 * removed.len());
+    let mut left = budget - (48 + 40 * removed.len());
     let mut after = base.clone();
     for id in &removed {
         after.remove(id);
@@ -1421,6 +1634,9 @@ fn write_trails(
             after.insert(id, now[&id].clone());
             chosen.push((id, w));
         }
+    }
+    if removed.is_empty() && chosen.is_empty() {
+        return (None, base.clone());
     }
     let mut w = BitWriter::new();
     bits::write_count(&mut w, removed.len());
@@ -1636,7 +1852,7 @@ pub struct ReadoutReport {
     pub sent: usize,
     pub waiting: usize,
     /// Bits each part took, in [`PARTS`] order.
-    pub part_bits: [usize; 26],
+    pub part_bits: [usize; PART_COUNT],
 }
 
 /// Writes the record of `now` against `base` (the readout it names, not yet

@@ -13,6 +13,7 @@ use tore_replay::vocab::{self, field, kind, outcome, route, source, trigger};
 use tore_sim::combat::blast::{self, MarkKind};
 use tore_sim::combat::live::EffectKind;
 use tore_world::comms::Route;
+use tore_world::datalink::Entry;
 
 /// The tick each projectile was launched at, from the host's launch events.
 pub(crate) fn launches(seen: &FlightSeen) -> BTreeMap<u32, u32> {
@@ -72,6 +73,8 @@ impl Events {
                     label,
                     text,
                     stems: names,
+                    // The battle net's label already says `Net `.
+                    ..
                 } => {
                     let (event_kind, producer, played) = match how {
                         Route::Radio => (kind::COMMS_RADIO, source::RADIO, route::RADIO),
@@ -229,6 +232,11 @@ impl Events {
                     }
                     vec![Put::Event(event)]
                 }
+                // The data link's changes about the seat's flight, as the
+                // single-player recorder writes them (slice G7).
+                WireEvent::Link(link) => vec![Put::Event(datalink_event(
+                    &link.entry(u64::from(received.event.tick)),
+                ))],
                 // Kept by the replay in other ways, or not at all: the rumble
                 // and the weapon page are the player's hands, the order's
                 // answer is its HUD line, the aircraft's end is in its state,
@@ -267,6 +275,64 @@ impl Events {
             .truncate(replay::limits::MAX_EFFECTS_PER_TICK);
         frame.events.truncate(replay::limits::MAX_EVENTS_PER_TICK);
         let _ = vocab::heard;
+    }
+}
+
+/// One data link journal entry as a replay's `datalink.*` event, exactly as
+/// the single-player recorder writes it (`tore-app`'s
+/// `replay/recorder/datalink.rs`, slice G9; docs/REPLAYS.md, "Data link
+/// events"): the subject is the member (the lead for an assignment), the
+/// object the target aircraft (the wingman for an assignment).
+pub fn datalink_event(entry: &Entry) -> replay::Event {
+    match *entry {
+        Entry::Member { plane, radar, .. } => replay::Event::new(kind::DATALINK_MEMBER)
+            .with_subject(plane)
+            .with(field::RADAR, radar)
+            .with_text(if radar {
+                "joined the data link, with a radar"
+            } else {
+                "joined the data link, with no radar"
+            }),
+        Entry::Lock { plane, target, .. } => replay::Event::new(kind::DATALINK_LOCK)
+            .with_subject(plane)
+            .with_object(target)
+            .with_text("locked"),
+        Entry::Unlock { plane, target, .. } => replay::Event::new(kind::DATALINK_UNLOCK)
+            .with_subject(plane)
+            .with_object(target)
+            .with_text("let go of its lock"),
+        Entry::Assign {
+            plane,
+            target,
+            by,
+            order,
+            ..
+        } => replay::Event::new(kind::DATALINK_ASSIGN)
+            .with_subject(by)
+            .with_object(plane)
+            .with(field::TARGET, replay::Value::Id(target))
+            .with(field::ORDER, format!("{order:?}")),
+        Entry::Clear {
+            plane, target, why, ..
+        } => replay::Event::new(kind::DATALINK_CLEAR)
+            .with_subject(plane)
+            .with_object(target)
+            .with(field::REASON, why.name())
+            .with_text("assignment ended"),
+        Entry::Acknowledge { plane, target, .. } => replay::Event::new(kind::DATALINK_ACKNOWLEDGE)
+            .with_subject(plane)
+            .with_object(target)
+            .with_text("locked its assigned target"),
+        Entry::SortWarning {
+            plane,
+            other,
+            target,
+            ..
+        } => replay::Event::new(kind::DATALINK_SORT_WARNING)
+            .with_subject(plane)
+            .with_object(target)
+            .with(field::OTHER, replay::Value::Id(other))
+            .with_text("told a flightmate holds the same lock"),
     }
 }
 

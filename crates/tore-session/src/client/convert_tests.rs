@@ -735,7 +735,7 @@ mod curves {
 
 mod events {
     use super::*;
-    use crate::client::convert::events::Events;
+    use crate::client::convert::events::{Events, datalink_event};
     use crate::client::seen::SeenEvent;
     use crate::wire::events::{ReceivedEvent, WireEvent};
     use crate::wire::messages::Names;
@@ -801,6 +801,7 @@ mod events {
                 WireEvent::Radio {
                     route: Route::Radio,
                     important: true,
+                    net: tore_world::comms::Net::Wing,
                     label: "Friendly 1-2".into(),
                     text: "Cleared to land".into(),
                     stems: vec![NameIndex(0)],
@@ -910,5 +911,81 @@ mod events {
         assert_eq!(at(20).events[0].string(field::SOUND), Some("FLARE.WAV"));
         let all: usize = frames.iter().map(|f| f.events.len()).sum();
         assert_eq!(all, 7, "the early and the late event are left out");
+    }
+
+    /// The host's Link events become the replay's `datalink.*` events, as
+    /// the single-player recorder writes them (slice G7).
+    #[test]
+    fn the_hosts_link_events_become_the_replays_datalink_events() {
+        use crate::wire::events::LinkEvent;
+        use tore_sim::ai::wing::PlayerOrder;
+        use tore_world::datalink::ClearReason;
+        let changes = [
+            LinkEvent::Member {
+                plane: 1,
+                radar: false,
+            },
+            LinkEvent::Lock {
+                plane: 1,
+                target: 9,
+            },
+            LinkEvent::Unlock {
+                plane: 1,
+                target: 9,
+            },
+            LinkEvent::Assign {
+                plane: 1,
+                target: 9,
+                by: 0,
+                order: PlayerOrder::Sort,
+            },
+            LinkEvent::Acknowledge {
+                plane: 1,
+                target: 9,
+            },
+            LinkEvent::Clear {
+                plane: 1,
+                target: 9,
+                why: ClearReason::TargetLost,
+            },
+            LinkEvent::SortWarning {
+                plane: 0,
+                other: 1,
+                target: 9,
+            },
+        ];
+        let seen = seen(
+            changes
+                .iter()
+                .enumerate()
+                .map(|(i, change)| (10 + i as u32, WireEvent::Link(*change)))
+                .collect(),
+        );
+        let frames = run(&seen, 0, 5, 40);
+        let at = |tick: u64| &frames[(tick - 5) as usize].events[0];
+        for (i, change) in changes.iter().enumerate() {
+            let tick = 10 + i as u64;
+            assert_eq!(*at(tick), datalink_event(&change.entry(tick)));
+        }
+        let member = at(10);
+        assert_eq!(member.kind, kind::DATALINK_MEMBER);
+        assert_eq!(
+            (member.subject, member.get(field::RADAR)),
+            (Some(1), Some(&replay::Value::Bool(false)))
+        );
+        let assign = at(13);
+        assert_eq!(assign.kind, kind::DATALINK_ASSIGN);
+        assert_eq!((assign.subject, assign.object), (Some(0), Some(1)));
+        assert_eq!(assign.get(field::TARGET), Some(&replay::Value::Id(9)));
+        assert_eq!(assign.string(field::ORDER), Some("Sort"));
+        let clear = at(15);
+        assert_eq!(clear.kind, kind::DATALINK_CLEAR);
+        assert_eq!(clear.string(field::REASON), Some("target lost"));
+        let warning = at(16);
+        assert_eq!(warning.kind, kind::DATALINK_SORT_WARNING);
+        assert_eq!(warning.get(field::OTHER), Some(&replay::Value::Id(1)));
+        assert_eq!(at(11).kind, kind::DATALINK_LOCK);
+        assert_eq!(at(12).kind, kind::DATALINK_UNLOCK);
+        assert_eq!(at(14).kind, kind::DATALINK_ACKNOWLEDGE);
     }
 }

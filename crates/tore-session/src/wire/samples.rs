@@ -6,7 +6,7 @@ use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
     EntityState, Motion, PilotState, ProjectileState, Status,
 };
-use super::events::{EventsSection, Rumble, SectionEvent, WireEvent};
+use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
 use super::messages::{
     Build, Content, ContentGaps, ContentItem, ContentRefused, Debrief, DebriefObjective,
@@ -40,7 +40,8 @@ use tore_sim::combat::live::{self, DamageSection, EffectKind};
 use tore_sim::flight::{PilotCommand, Switch};
 use tore_sim::sensors::{Channel, Controls};
 use tore_sim::{airport, ejection, wreck};
-use tore_world::comms::Route;
+use tore_world::comms::{Net, Route};
+use tore_world::datalink::ClearReason;
 use tore_world::mission::{LoadoutSpec, StationLoad};
 use tore_world::resources::{Manifest, ManifestEntry};
 use tore_world::seats::SeatCommand;
@@ -82,6 +83,9 @@ pub fn commands() -> Vec<Command> {
         Command::Seat(S::WingOrder(PlayerOrder::Break(PlayerBreak::High))),
         Command::Seat(S::WingOrder(PlayerOrder::Formation(Formation::LineAstern))),
         Command::Seat(S::WingOrder(PlayerOrder::LandAtSelected)),
+        // Protocol 15: the sort (wing order 13) and the battle net (23).
+        Command::Seat(S::WingOrder(PlayerOrder::Sort)),
+        Command::Seat(S::BattleNet),
         Command::Seat(S::WingFormationCycle),
         Command::Seat(S::TriggerKey {
             down: true,
@@ -324,9 +328,19 @@ pub fn events() -> EventsSection {
         WireEvent::Radio {
             route: Route::Radio,
             important: true,
+            net: Net::Wing,
             label: "VIPER 2".into(),
             text: "Fox two!".into(),
             stems: vec![NameIndex(1), NameIndex(4095)],
+        },
+        // Protocol 15: a call heard on the battle net.
+        WireEvent::Radio {
+            route: Route::Radio,
+            important: false,
+            net: Net::Battle,
+            label: "Net Blue one".into(),
+            text: "Blue, Contact, bandit".into(),
+            stems: vec![NameIndex(9)],
         },
         WireEvent::Tower {
             stem: Some(NameIndex(2)),
@@ -409,6 +423,39 @@ pub fn events() -> EventsSection {
             arrived: false,
             from: None,
         },
+        // Protocol 15: every data link change.
+        WireEvent::Link(LinkEvent::Member {
+            plane: 2,
+            radar: false,
+        }),
+        WireEvent::Link(LinkEvent::Lock {
+            plane: 1,
+            target: 9,
+        }),
+        WireEvent::Link(LinkEvent::Unlock {
+            plane: 1,
+            target: 9,
+        }),
+        WireEvent::Link(LinkEvent::Assign {
+            plane: 2,
+            target: 12,
+            by: 0,
+            order: PlayerOrder::Sort,
+        }),
+        WireEvent::Link(LinkEvent::Clear {
+            plane: 2,
+            target: 12,
+            why: ClearReason::TargetLost,
+        }),
+        WireEvent::Link(LinkEvent::Acknowledge {
+            plane: 2,
+            target: 12,
+        }),
+        WireEvent::Link(LinkEvent::SortWarning {
+            plane: 0,
+            other: 1,
+            target: 70_000,
+        }),
     ];
     EventsSection {
         events: list
@@ -1174,8 +1221,62 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             succeeded: false,
             home: false,
         },
-        // The link's share is not on the wire yet (slice G7).
-        link: Default::default(),
+        // Protocol 15: the data link's share (slice G7).
+        link: LinkReadout {
+            radar: true,
+            assigned: Some(LinkAssigned {
+                target: 7,
+                by: 0,
+                acknowledged: false,
+            }),
+            tracks: vec![
+                LinkTrack {
+                    target: 7,
+                    position: [1_000.4, 9_000., -2_000.],
+                    velocity: [800., 0., -12.25],
+                    source: tore_world::datalink::TrackSource::Own,
+                },
+                LinkTrack {
+                    target: 9,
+                    position: [40_000., 12_000., 60_000.],
+                    velocity: [-600., 4., 0.],
+                    source: tore_world::datalink::TrackSource::Network,
+                },
+            ],
+            marks: vec![
+                LinkMark {
+                    target: 7,
+                    lockers: 0b10,
+                    net_lock: None,
+                    assigned_to: 0b100,
+                },
+                LinkMark {
+                    target: 9,
+                    lockers: 0,
+                    net_lock: Some(MemberRef {
+                        flight: 1,
+                        member: 2,
+                    }),
+                    assigned_to: 0,
+                },
+            ],
+            mates: vec![
+                LinkMate {
+                    plane: 1,
+                    member: 1,
+                    fuel: tore_world::datalink::Fuel::Bingo,
+                    weapons: tore_world::datalink::Weapons::GunsOnly,
+                    damage: tore_world::datalink::Damage::Light,
+                },
+                LinkMate {
+                    plane: 2,
+                    member: 2,
+                    fuel: tore_world::datalink::Fuel::Normal,
+                    weapons: tore_world::datalink::Weapons::Missiles,
+                    damage: tore_world::datalink::Damage::None,
+                },
+            ],
+        },
     }
 }
 
@@ -1194,6 +1295,11 @@ pub fn readout_snapshots() -> (Vec<u8>, Vec<u8>) {
     second.sensors.contacts[0].position[0] += 3_210.;
     second.stores.ammo[0] -= 20;
     second.sensors.contacts.pop();
+    // The link: a track moved on its publishing tick, the assignment locked.
+    second.link.tracks[0].position[0] += 200.;
+    if let Some(assigned) = &mut second.link.assigned {
+        assigned.acknowledged = true;
+    }
     let later = host
         .snapshot_with_readout(&header(404), &[], Some(&second), 0)
         .unwrap();

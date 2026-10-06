@@ -50,6 +50,9 @@ pub(super) struct Driver {
     changes: Vec<Change>,
     /// The score facts the last step left, until scoring takes them.
     facts: Facts,
+    /// The data link journal's entries of the last step, until the seats
+    /// take them (slice G7).
+    link: Vec<tore_world::datalink::Entry>,
 }
 
 impl Deref for Driver {
@@ -77,6 +80,7 @@ impl Driver {
             world,
             changes: Vec::new(),
             facts: Facts::default(),
+            link: Vec::new(),
         }
     }
 
@@ -129,12 +133,18 @@ impl Driver {
         apply_tick(&mut self.world, &tick, out)?;
         let drained = drain(&mut self.world);
         self.facts = drained.facts;
+        self.link = drained.link;
         Ok((tick, drained.notes))
     }
 
     /// The score facts of the last step, leaving none.
     pub(super) fn take_facts(&mut self) -> Facts {
         std::mem::take(&mut self.facts)
+    }
+
+    /// The data link journal's entries of the last step, leaving none.
+    pub(super) fn take_link(&mut self) -> Vec<tore_world::datalink::Entry> {
+        std::mem::take(&mut self.link)
     }
 
     /// The changes waiting for the next step.

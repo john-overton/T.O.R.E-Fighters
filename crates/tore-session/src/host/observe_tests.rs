@@ -660,6 +660,7 @@ fn an_observer_sees_the_human_flown_planes_and_the_mission_wide_events() {
             | WireEvent::Release { .. }
             | WireEvent::Feedback { .. }
             | WireEvent::YourAircraftExploded { .. }
+            | WireEvent::Link(_)
     )));
 }
 

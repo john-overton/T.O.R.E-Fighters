@@ -2524,7 +2524,8 @@ impl Client {
             | WireEvent::WeaponCycled
             | WireEvent::Release { .. }
             | WireEvent::Feedback { .. }
-            | WireEvent::YourAircraftExploded { .. } => {
+            | WireEvent::YourAircraftExploded { .. }
+            | WireEvent::Link(_) => {
                 self.released.push(event);
                 if self.released.len() > MAX_EVENTS {
                     self.released.remove(0);

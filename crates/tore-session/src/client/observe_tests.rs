@@ -115,7 +115,10 @@ fn a_game_watches_the_mission_in_real_plane_ids_and_stops() {
         // Only the mission's events, never a seat's own.
         assert!(frame.events.iter().all(|e| !matches!(
             e.event,
-            WireEvent::Message { .. } | WireEvent::Radio { .. } | WireEvent::Release { .. }
+            WireEvent::Message { .. }
+                | WireEvent::Radio { .. }
+                | WireEvent::Release { .. }
+                | WireEvent::Link(_)
         )));
     }
     assert!(checked > 220);

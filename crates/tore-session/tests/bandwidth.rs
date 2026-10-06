@@ -10,6 +10,12 @@
 //! keeping 256 bytes of each packet for reliable messages as in flight, and a
 //! clean one keeping none; each is acknowledged 100 ms later.
 //!
+//! The flight data link (slice G7) rides along: the readout carries the
+//! seat's share, the seat's Link events go with its events, and the player
+//! sorts its wing (Alt+A) every 5 seconds while it leads, so its flight holds
+//! assignments.
+//! The link's own parts and events are counted apart.
+//!
 //! ```sh
 //! TORE_DATA_DIR=$PWD/.local/mpb-data-wire cargo test --release -p tore-session \
 //!     --test bandwidth -- --ignored --nocapture
@@ -80,7 +86,11 @@ struct Link {
     late_waits: usize,
     readout: Stat,
     readout_waiting: Stat,
-    part_bits: [usize; 26],
+    part_bits: [usize; tore_session::wire::readout::PART_COUNT],
+    /// The data link's four readout parts per snapshot, bytes.
+    link_parts: Stat,
+    /// The Link events' bytes per snapshot packet that carried any.
+    link_events: Stat,
 }
 
 impl Link {
@@ -175,11 +185,22 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     let mut plain = Stat::default();
     let mut busiest = 0;
     let mut previous_picture = from_world::seat_picture(&world, player).unwrap();
+    let mut link_kinds: BTreeMap<String, usize> = BTreeMap::new();
+    let mut sorts: BTreeMap<bool, usize> = BTreeMap::new();
     for _ in 0..ticks {
         let tick = world.tick();
+        // The lead sorts its wing every 5 seconds.
+        let commands = if tick >= 600 && tick.is_multiple_of(600) {
+            vec![tore_world::seats::SeatCommand::WingOrder(
+                tore_sim::ai::wing::PlayerOrder::Sort,
+            )]
+        } else {
+            Vec::new()
+        };
         let input = SeatInput {
             seat,
             tick,
+            commands,
             pilot: tore_sim::flight::PilotInput {
                 roll: if (tick / 1_200).is_multiple_of(2) {
                     0.1
@@ -213,12 +234,27 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             }
         }
         for reply in &out.orders {
+            if reply.seat == seat && reply.order == tore_sim::ai::wing::PlayerOrder::Sort {
+                let given = matches!(reply.outcome, tore_world::world::OrderOutcome::Given { .. });
+                *sorts.entry(given).or_insert(0usize) += 1;
+            }
             if reply.seat == seat {
                 events.push((from_world::order_event(reply), false));
             }
         }
         for emission in &out.emissions {
             events.push((from_world::sound_event(emission, None), false));
+        }
+        // The data link's changes about the player's flight, as the host
+        // drains them.
+        let journal = world.datalink.take_journal();
+        for event in from_world::link_events(&world.datalink, player.0, &journal) {
+            if let WireEvent::Link(change) = &event {
+                let name = format!("{change:?}");
+                let name = name.split([' ', '{']).next().unwrap_or_default().to_owned();
+                *link_kinds.entry(name).or_insert(0usize) += 1;
+            }
+            events.push((event, true));
         }
         for projectile in &picture.projectiles {
             if projectile.gun {
@@ -311,10 +347,19 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
                 }
                 event
             };
+            let mut link_event_bits = 0;
             for (event, _) in &events {
                 let host = link.host.as_mut().unwrap();
                 let event = remap(event, host);
+                if matches!(event, WireEvent::Link(_)) {
+                    let mut w = tore_codec::BitWriter::new();
+                    event.write(&mut w).unwrap();
+                    link_event_bits += w.bit_len();
+                }
                 host.event(tick32, &event).unwrap();
+            }
+            if link_event_bits > 0 {
+                link.link_events.push(link_event_bits.div_ceil(8));
             }
         }
 
@@ -377,9 +422,18 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             if let Some(report) = packet.readout {
                 link.readout.push(report.bits.div_ceil(8));
                 link.readout_waiting.push(report.waiting);
+                let mut link_bits = 0;
                 for (index, bits) in report.part_bits.iter().enumerate() {
                     link.part_bits[index] += bits;
+                    if tore_session::wire::readout::part_name(
+                        tore_session::wire::readout::PARTS[index],
+                    )
+                    .starts_with("link")
+                    {
+                        link_bits += bits;
+                    }
                 }
+                link.link_parts.push(link_bits.div_ceil(8));
             }
             let bytes = packet.bytes();
             assert!(
@@ -420,6 +474,12 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     }
 
     println!("peak entities per kind: {peak_entities:?}");
+    println!(
+        "sorts given {}, refused {} (the player's plane is lost about 20 s in)",
+        sorts.get(&true).unwrap_or(&0),
+        sorts.get(&false).unwrap_or(&0)
+    );
+    println!("data link events about the player's flight: {link_kinds:?}");
     println!("{}", plain.line("readout plain bytes"));
     println!("most scope, visual and map contacts at once: {busiest}");
     let seconds = (ticks as f64) / 120.;
@@ -457,6 +517,24 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             }
         }
         println!("readout mean bytes by part: {}", parts.join(", "));
+        println!("{}", link.link_parts.line("data link parts bytes"));
+        println!("{}", link.link_events.line("data link event bytes"));
+        let link_bytes = link.link_parts.values.iter().sum::<usize>()
+            + link.link_events.values.iter().sum::<usize>();
+        // After the first second, which brings the whole share across.
+        let settled = &link.link_parts.values[30.min(link.link_parts.values.len())..];
+        let busiest_second = settled
+            .windows(30)
+            .map(|w| w.iter().sum::<usize>())
+            .max()
+            .unwrap_or(0);
+        println!(
+            "data link: {:.0} bytes/s on average; after the first second the most in one snapshot {} \
+             bytes (of the readout's {}) and in one second {busiest_second} bytes",
+            link_bytes as f64 / seconds,
+            settled.iter().max().copied().unwrap_or(0),
+            tore_session::wire::space::READOUT_SHARE
+        );
         println!(
             "names messages {} bytes; download {:.1} KB/s ({:.0} kbit/s) without the transport's messages",
             link.names_bytes,

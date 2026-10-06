@@ -631,12 +631,20 @@ fn prepare_seat(world: &World, plane: PlaneId) -> Option<PreparedSeat> {
         .iter()
         .find(|cockpit| cockpit.plane == plane)?;
     let picture = from_world::seat_picture(world, plane)?;
-    let readout = world.combat.cockpit_readout(
-        plane.0,
-        tore_world::combat::launcher(&cockpit.flight),
-        world.ai_wings.as_ref(),
-        Some(cockpit),
-    );
+    // Combat's readout with the plane's share of the data link, as
+    // `World::cockpit_readout` builds it (slice G7).
+    let readout = world
+        .combat
+        .cockpit_readout(
+            plane.0,
+            tore_world::combat::launcher(&cockpit.flight),
+            world.ai_wings.as_ref(),
+            Some(cockpit),
+        )
+        .map(|mut readout| {
+            readout.link = world.datalink.readout(plane.0);
+            readout
+        });
     Some(PreparedSeat { picture, readout })
 }
 
@@ -3103,6 +3111,9 @@ impl Host {
     /// one's game could not foresee.
     fn sort_seats(&mut self, tick: u64, out: &TickOutput, wide: &[Timed]) {
         let mut behind = Vec::new();
+        // The data link's changes of the tick, each seat getting those about
+        // its own flight (slice G7).
+        let link = self.world.take_link();
         for (id, peer) in self.peers.iter_mut() {
             if peer.stage != Stage::Seated {
                 continue;
@@ -3136,6 +3147,11 @@ impl Host {
             for reply in out.orders.iter().filter(|r| r.seat == seat) {
                 events.push(from_world::order_event(reply));
             }
+            events.extend(from_world::link_events(
+                &self.world.datalink,
+                plane.0,
+                &link,
+            ));
             for event in &events {
                 failed |= peer.wire.event(tick as u32, event).is_err();
             }

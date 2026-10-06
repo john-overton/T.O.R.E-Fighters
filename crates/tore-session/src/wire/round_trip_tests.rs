@@ -5,7 +5,7 @@ use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
     EntityState, Motion, PilotState, ProjectileState, Status,
 };
-use super::events::{EventsSection, Rumble, SectionEvent, WireEvent};
+use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
 use super::messages::Message;
 use super::names::NameIndex;
@@ -20,7 +20,7 @@ use tore_sim::combat::blast::MarkKind;
 use tore_sim::combat::live::{DamageSection, EffectKind};
 use tore_sim::sensors::{Channel, Controls};
 use tore_sim::{ejection, wreck};
-use tore_world::comms::Route;
+use tore_world::comms::{Net, Route};
 use tore_world::world::OrderOutcome;
 
 pub(crate) fn pick<T: Copy>(rng: &mut SplitMix64, items: &[T]) -> T {
@@ -241,6 +241,63 @@ pub(crate) fn inputs(rng: &mut SplitMix64) -> InputsSection {
     }
 }
 
+/// A data link change of every kind (slice G7).
+pub(crate) fn link_event(rng: &mut SplitMix64) -> LinkEvent {
+    use tore_sim::ai::wing::PlayerOrder;
+    use tore_world::datalink::ClearReason;
+    let id = |rng: &mut SplitMix64| rng.below(1 << 32) as u32;
+    let plane = id(rng);
+    match rng.below(7) {
+        0 => LinkEvent::Member {
+            plane,
+            radar: chance(rng),
+        },
+        1 => LinkEvent::Lock {
+            plane,
+            target: id(rng),
+        },
+        2 => LinkEvent::Unlock {
+            plane,
+            target: id(rng),
+        },
+        3 => LinkEvent::Assign {
+            plane,
+            target: id(rng),
+            by: id(rng),
+            order: pick(
+                rng,
+                &[
+                    PlayerOrder::EngageMyTarget,
+                    PlayerOrder::EngageFromFormation,
+                    PlayerOrder::Sort,
+                ],
+            ),
+        },
+        4 => LinkEvent::Clear {
+            plane,
+            target: id(rng),
+            why: pick(
+                rng,
+                &[
+                    ClearReason::Order,
+                    ClearReason::ReceiverLost,
+                    ClearReason::TargetLost,
+                    ClearReason::LeadChanged,
+                ],
+            ),
+        },
+        5 => LinkEvent::Acknowledge {
+            plane,
+            target: id(rng),
+        },
+        _ => LinkEvent::SortWarning {
+            plane,
+            other: id(rng),
+            target: id(rng),
+        },
+    }
+}
+
 pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
     let text = |rng: &mut SplitMix64| "x".repeat(rng.below(256) as usize);
     let position = |rng: &mut SplitMix64| std::array::from_fn(|_| signed(rng, 1 << 40));
@@ -249,11 +306,12 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
             .map(|_| NameIndex(rng.below(4096) as u16))
             .collect()
     };
-    match rng.below(17) {
+    match rng.below(18) {
         0 => WireEvent::Message { text: text(rng) },
         1 => WireEvent::Radio {
             route: pick(rng, &[Route::Radio, Route::Airport, Route::Direct]),
             important: chance(rng),
+            net: pick(rng, &[Net::Wing, Net::Battle]),
             label: text(rng),
             text: text(rng),
             stems: names(rng),
@@ -329,6 +387,7 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
             station: rng.below(256) as u8,
             length: chance(rng).then(|| rng.below(1 << 31) as u32),
         },
+        16 => WireEvent::Link(link_event(rng)),
         _ => WireEvent::Sound {
             kind: pick(
                 rng,
@@ -692,6 +751,7 @@ fn entities_keep_their_share_whatever_else_waits() {
             &WireEvent::Radio {
                 route: Route::Radio,
                 important: false,
+                net: Net::Wing,
                 label: "VIPER 3".into(),
                 text: "y".repeat(200),
                 stems: Vec::new(),

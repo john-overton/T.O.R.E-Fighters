@@ -367,8 +367,9 @@ nets are for radio calls.
 
 The host computes the whole picture. Each player's game receives its own
 aircraft's share of it inside the cockpit readout, and each assignment, lock
-change and sort warning as an event at once, the way radio calls arrive
-([wire](formats/net-protocol.md#data-link-stage-g)). A human in slot 2 sees
+change and sort warning about its own flight as an event at once, the way
+radio calls arrive ([wire](formats/net-protocol.md#data-link-stage-g); built,
+slice G7, protocol 15). A human in slot 2 sees
 exactly what the AI in slot 2 would receive, which is John's rule.
 
 A replay records each member's radar flag at the start, every assignment,
@@ -376,7 +377,7 @@ lock, acknowledgement, cleared assignment and sort warning, as `datalink.*`
 events beside the communication journal ([the events](REPLAYS.md#data-link-events);
 built, G9). The assignment call's words stay in the communication journal's
 entry for the order. A replay converted from a client's capture has these
-events once the wire carries them (slice G7). The 4-times-a-second
+events for the player's own flight (built, slice G7). The 4-times-a-second
 tracks are not recorded: they are what each aircraft's sensors held, which the
 AI thinking record already shows for the AI.
 

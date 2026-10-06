@@ -999,6 +999,10 @@ impl TickPresenter<'_> {
                     arrived: *arrived,
                     own: *from == Some(plane),
                 }),
+                // The data link's changes: what they show is in the
+                // readout, and the sort warning's line and beep are Message
+                // and Radio events (slice G7).
+                WireEvent::Link(_) => {}
                 // Their effects are in the picture, the regenerated devices
                 // and the view rig, or arrive as the entities they make.
                 WireEvent::Effect { .. }

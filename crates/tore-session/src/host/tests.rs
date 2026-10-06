@@ -503,7 +503,7 @@ impl Rig {
                 .find(|(p, _)| p.0 == plane)
                 .map(|(_, t)| *t);
             let exact = ExactState::of(&OwnPlane::of(cockpit), terms.as_ref());
-            let readout = world
+            let mut readout = world
                 .combat
                 .cockpit_readout(
                     plane,
@@ -512,6 +512,8 @@ impl Rig {
                     Some(cockpit),
                 )
                 .unwrap();
+            // The seat's share of the data link (slice G7).
+            readout.link = world.datalink.readout(plane);
             self.expected.insert(
                 (tick, plane),
                 Expected {
@@ -737,6 +739,10 @@ fn a_seated_client_rebuilds_the_hosts_entities_and_own_state() {
         // first second has brought it across the client holds the host's
         // readout of that tick exactly.
         let mut readouts = 0;
+        // The data link's share is in it: the seat's link readout equals the
+        // host's at every snapshot from then on (slice G7).
+        let (mut linked, mut tracks_moved) = (0, 0);
+        let mut last_tracks = None;
         for (index, (header, received)) in c.snapshots.iter().enumerate() {
             assert!(!received.readout_unresolved);
             let readout = received.readout.as_ref().expect("a readout");
@@ -744,9 +750,23 @@ fn a_seated_client_rebuilds_the_hosts_entities_and_own_state() {
             if index >= 30 {
                 assert_eq!(*readout, expected.readout, "tick {}", header.tick);
                 readouts += 1;
+                let link = readout.readout(header.tick, None, None).unwrap().link;
+                if !link.tracks.is_empty() && !link.mates.is_empty() {
+                    linked += 1;
+                }
+                if last_tracks.as_ref().is_some_and(|t| *t != link.tracks) {
+                    tracks_moved += 1;
+                }
+                last_tracks = Some(link.tracks);
             }
         }
         assert!(readouts > 30, "{readouts} readouts checked");
+        assert!(linked > 30, "{linked} readouts with link tracks and mates");
+        // Tracks change on the publishing ticks only: four times a second.
+        assert!(
+            (4..=16).contains(&tracks_moved),
+            "{tracks_moved} track changes in about three seconds"
+        );
         // And it reads back as a cockpit readout for the client's frame.
         let scene = &rig.host.world().terrain.airport_scene;
         let own = &rig

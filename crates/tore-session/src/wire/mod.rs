@@ -112,8 +112,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// lobby's standby marks and reserved slots, and setting 21 (slice K0), 14
 /// since the standby stream codes a seat's controls as the Inputs section
 /// does, its commands behind a presence bit, its view as Inputs does and its
-/// command number applied as a bit when unchanged (slice K3).
-pub const PROTOCOL_VERSION: u16 = 14;
+/// command number applied as a bit when unchanged (slice K3), 15 since the
+/// flight data link (slice G7): the readout's Link group and its tracks,
+/// marks and mates, the Link event, the radio events' net, and the Sort order
+/// and Battle net command the golden now lists.
+pub const PROTOCOL_VERSION: u16 = 15;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

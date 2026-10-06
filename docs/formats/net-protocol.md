@@ -822,7 +822,7 @@ snapshot's tick.
 | Event | For | Fields |
 | --- | --- | --- |
 | Message | the seat | A HUD line |
-| Radio | the seat | Route (radio, airport, direct), speaker label, text, recording stems |
+| Radio | the seat | Route (radio, airport, direct), speaker label, text, recording stems; since protocol 15 the net it was heard on |
 | Tower | the seat | A tower recording stem, or cut the tower off |
 | Order voice | the seat | The seat's own order call stems |
 | Order reply | the seat | What became of a wing order |
@@ -838,6 +838,7 @@ snapshot's tick.
 | Countermeasure | everyone | Aircraft, chaff or flare, the release geometry the replay viewer flies it from, number left |
 | Gun burst | everyone | Shooter, gun station, first tick, last tick (0 while still firing). *Built (D7a):* sent when the burst starts, and again from its first tick with its length once the station has fired no round for its weapon's round interval plus 2 ticks. *Read by the client (D8c):* it makes the burst's rounds again from the first tick at the weapon's cadence ([the client session](../ARCHITECTURE.md#the-client-session)) |
 | Sound | everyone | Emission kind, position, the aircraft it came from |
+| Link | the seat, about members of its flight | A data link change: a member joined, a lock taken or dropped, an assignment given, cleared or acknowledged, a sort warning (protocol 15, [the data link](#data-link-stage-g)) |
 
 Recording stems, weapon and sound names are sent by their index in the
 connection's name table (the Names message), which the host fills before the
@@ -845,53 +846,95 @@ first use. Radio text is sent as it is: the client never composes calls.
 
 ## Data link (stage G)
 
-*Designed 2026-10-05, not built* ([architecture](../ARCHITECTURE.md#flight-data-link),
-[guide](../DATALINK.md)). What the flight data link adds to the wire, all in
-the next protocol version the lead hands out (slice G7). Every choice is an
-agent decision unless credited. Nothing of it reaches a client that a human
-in the same slot would not see: each part is the seat's own share, computed
-by the host.
+*Built in protocol 15 (slice G7, 2026-10-06)* ([architecture](../ARCHITECTURE.md#flight-data-link),
+[guide](../DATALINK.md)). What the flight data link adds to the wire. Every
+choice is an agent decision unless credited. Nothing of it reaches a client
+that a human in the same slot would not see: each part is the seat's own
+share, computed by the host (`DataLink::readout`, the same share single
+player draws).
 
-**Readout parts.** Two groups join the [cockpit readout](#cockpit-readout),
+**Readout parts.** Four parts join the [cockpit readout](#the-cockpit-readout-as-built),
 coded like the others (a changed bit each, against the acknowledged
-baseline):
+baseline). The record now has 30 parts.
 
 | Part | Place | Kind | Fields |
 | --- | --- | --- | --- |
-| Link | Right after the header, so an assignment is never the part that waits for room | Scalar (signed varints, as the other scalar groups) | The radar flag (built in G6 as `LinkReadout::radar`; it replaces the tier); the assignment by link: target id plus one (0 for none), the assigner's plane id, acknowledged; whether the seat monitors the battle net. The design's newest sort warning is not in the readout (G6 agent decision): the warning is the Message and Radio events |
-| Link tracks | After the contacts | List, keyed by target id, at most 24 | Position (whole feet) predicted from velocity (1/4 ft/s), as the contacts; slow field: source (own, flight, network: 2 bits) |
-| Link marks | After the link tracks | List, keyed by target id, at most 32 (agent decision, G6: the masks moved off the tracks so a lock shows the tick it is taken) | Slow fields only: lockers (a mask of the flight's member numbers), locked over the battle net (a presence bit, the flight and the member number), assigned to (a mask) |
-| Link mates | After the link tracks | List, keyed by plane id, at most 7 | Slow fields only: member number (3 bits), fuel (normal, joker, bingo, fumes, out: 3 bits), weapons (missiles, guns only, Winchester: 2 bits), damage (none, light, heavy: 2 bits) |
+| Link | Second, right after the header, so an assignment is never the part that waits for room | Scalar group of four signed varints | The radar flag; the assigned target plus one (0 for none); the plane that assigned it; acknowledged |
+| Link marks | After the contacts | List keyed by target id, at most 32 | Slow fields only: lockers (a mask of the flightmates' member numbers, signed varint), the battle net's lock (a presence bit, then the flight and the member number, signed varints), assigned to (a mask, signed varint) |
+| Link mates | After the marks | List keyed by plane id, at most 5 | Slow fields only: member number (3 bits), fuel (normal, joker, bingo, fumes, out: 3 bits), weapons (missiles, guns only, Winchester: 2 bits), damage (none, light, heavy: 2 bits) |
+| Link tracks | After the mates | List keyed by target id, at most 24 | Slow field: source (own, flight, network: 2 bits); then position in whole feet and velocity in 1/4 ft/s, each sent as its difference from the baseline's |
 
-Tracks and mates change only on the host's publishing ticks (every thirtieth),
-so between them the parts send nothing; locks and assignments change the
-marks and the Link scalar the tick they happen. A plane with no radar gets the
-parts all the same, with the radar flag down.
+*Settled by the build:*
 
-**Event.** One new event code, after Sound:
+- **Marks and mates before the tracks.** The design put the tracks first. The
+  marks carry the locks and the flight's assignments, which change the tick
+  they happen and are small; the tracks are the bulky part. Coming first, a
+  big track update never holds a lock back.
+- **Tracks are not predicted.** A track's position stays where its reporter
+  observed it until the next publishing tick (every thirtieth), so it is
+  sent as a plain difference: between publishing ticks nothing goes, and on
+  one each track costs its move (about 250 feet for a fast fighter) and any
+  velocity change. Predicting it from its velocity, as the contacts are,
+  would send a correction every snapshot.
+- **No battle net flag.** The design's Link group had whether the seat
+  monitors the battle net. The readout (`LinkReadout`) has no such field and
+  nothing draws it: the seat learns it from the "Monitoring battle net" and
+  "Battle net off" lines, which are Message events.
+- **Order on the client.** The tracks come back nearest the client's own
+  plane first, as the host lists them (in target order with no plane); the
+  marks and mates in id order, as the host's are.
+- A plane with no radar gets every part all the same, with the radar flag
+  down; only its radar scope leaves the marks out (John, 2026-10-05).
 
-| Event | For | Fields |
-| --- | --- | --- |
-| Link | the seat, about members of its flight | What (assigned, cleared, acknowledged, lock, unlock, sort warning: 3 bits), the plane (varint), the target (varint), and for assigned the assigner (varint) and the delivery (link or voice, 1 bit) |
+**Event.** One new event code, 17, after Sound: Link, a data link journal
+entry (`tore_world::datalink::Entry`) about a member of the seat's flight.
 
-Events repeat until acknowledged, so a lock or an assignment reaches the
-client in the next snapshot and is never lost; the readout carries the state
-it leaves. The sort warning's HUD line and beep are ordinary Message and
-Radio events. A captured `Link` event becomes a replay's `datalink` event when
-the capture converts.
+| Field | Bits |
+| --- | --- |
+| What | 3: member 0, lock 1, unlock 2, assigned 3, cleared 4, acknowledged 5, sort warning 6 |
+| Plane | varint: the member the change is about (the receiver for an assignment, the warned human for a sort warning) |
+| Member | its radar flag, 1 bit |
+| Lock, unlock, acknowledged | the target, varint |
+| Assigned | the target, the assigner (varints) and the order, coded as an Order reply's |
+| Cleared | the target (varint) and why (2 bits: order, receiver lost, target lost, lead changed) |
+| Sort warning | the flightmate holding the same lock, then the target (varints) |
 
-**Radio events** gain the call's net (1 bit: wing 0, battle 1), so the client
-can show `Net` before a battle-net speaker.
+*Settled by the build:* the design's delivery bit (link or voice) went with
+the tiers (John, 2026-10-05); the assignment carries its order instead, so a
+converted replay says it was a sort. Member is an addition, so a converted
+replay holds the flight's members as a recorded one does. The host drains
+the world's data link journal once a tick (`journal::drain`, beside the score
+facts and device notes, so a standby drains it too) and queues each entry
+for every seat whose plane is in the entry's flight, after the tick's other
+seat events. A seat seated later does not get the entries before its
+seating: the readout carries the state they left. Events repeat until
+acknowledged, so a lock or an assignment reaches the client in the next
+snapshot and is never lost. The sort warning's HUD line and beep are ordinary
+Message and Radio events. A captured `Link` event becomes the replay's
+`datalink.*` event when the capture converts, with the fields the
+single-player recorder writes ([network flights](../REPLAYS.md#network-flights)).
 
-**Inputs.** The wing order coding gains Sort (code 13, after Land at selected
-airport) and the commands gain Battle net (toggle monitoring, no fields).
-Built in G3c and G8, with the protocol version left for G7 to bump: Sort is
-wing order code 13, and Battle net is command code 23 (five command bits, no
-fields), after the wing reply (22). The golden's samples do not list either yet.
+**Radio events** gain the call's net, one bit after "important" (wing 0,
+battle 1). The label of a call heard on the battle net already starts with
+`Net `, so the client shows it as it is.
 
-**Room.** Estimated at under 40 bytes a snapshot on average for a busy seat
-and about 1 KB/s at worst while 24 tracks move; G7 measures it on the 15
-against 15 mission against the readout's 200-byte share.
+**Inputs.** Unchanged in layout: Sort is wing order code 13 (built in G3c)
+and Battle net is command code 23 (built in G8); protocol 15 is the version
+that carries them, and the golden lists both.
+
+**Room.** Measured on the 15 against 15 mission
+(`crates/tore-session/tests/bandwidth.rs`, three minutes, the player sorting
+its wing every 5 seconds while it leads, which gave 16 assignments, 12
+acknowledgements and 20 locks about its flight): the four parts take 9 bytes
+a snapshot on average (the tracks 8), 247 bytes in the first snapshot, which
+brings the whole share across, at most 146 bytes in any later snapshot, and at
+most 1.8 KB in any one second; the Link events add 8.5 bytes in the packets
+that carry any. In all about 280 bytes a second, inside the readout's
+200-byte share. Against protocol 14 on the same flight the snapshot packet's
+mean is the same (384 bytes) and the readout's record grows from 52 to 56
+bytes on average; the snapshots after the first second in which a far entity
+waited for room rise from 310 to 392 of 5,400 (from 2 to 10 with no room kept
+for messages), at the busy moments when the tracks move.
 
 ## Quantization
 
@@ -1029,12 +1072,14 @@ a pilot's is its escape phase (3 bits).
 
 The readout's record is the baseline (5 bits: snapshots back to the readout
 the client acknowledged, 1 to 31, or 0 for none, against the empty readout),
-then 26 parts, each behind a changed bit, in this order, which is also their
-importance: header (plane and tick), stores, countermeasures, damage, seeker,
-seeker observation, estimates, estimate observation, targets, displayed
-target, viewed target, airport, target window, music, designated enemy, AI
-locks, inbound missiles, threat records, emitters, sensor scalars, contacts,
-strobes, plots, trails, visual contacts, map. The client's `CockpitReadout`
+then 30 parts (26 before protocol 15), each behind a changed bit, in this
+order, which is also their importance: header (plane and tick), link (protocol
+15), stores, countermeasures, damage, seeker, seeker observation, estimates,
+estimate observation, targets, displayed target, viewed target, airport,
+target window, music, designated enemy, AI locks, inbound missiles, threat
+records, emitters, sensor scalars, contacts, link marks, link mates and link
+tracks (protocol 15, [the data link](#data-link-stage-g)), strobes, plots,
+trails, visual contacts, map. The client's `CockpitReadout`
 comes back from them (`QReadout::readout`; `ClientConnection::cockpit_readout`
 gives the newest one around the client's predicted plane, for its flight
 frame's `ReadoutSlot::ready`). The host puts each seated player's readout,
@@ -1054,7 +1099,9 @@ built from the tick's flight, in every snapshot.
   flying as predicted is not sent at all.
 - **Trails** go as the points each dropped from the front of the baseline's
   trail and the points it added, each a bucketed difference from the one
-  before.
+  before. *Corrected in G7:* when no trail fits the room left, the part
+  waits; it used to send its two counts with nothing in them, a few bits
+  past the record's room.
 - **Room.** The readout takes up to 200 bytes and leaves the rest to the
   entities; when it had more to say, it is coded again with whatever the
   entities left of their share. What still does not fit waits: removals
@@ -1089,14 +1136,14 @@ messages, 61 bytes on average.
 The section is the count (varint, 1 to 1,024), the first event's number (16
 bits), then each event: its number after the first as the difference from the
 one before less 1 (bucketed as the ids), its ticks before the snapshot
-(varint), a 5-bit code in the table's order (Message 0 to Sound 16) and its
-fields. Stem lists are a 6-bit count (at most 32) and 12-bit name indexes. A
+(varint), a 5-bit code in the table's order (Message 0 to Sound 16, and Link
+17 since protocol 15) and its fields. Stem lists are a 6-bit count (at most 32) and 12-bit name indexes. A
 rumble's turbulence is 1/255; a gun burst starts at the event's tick and
 carries its length as a varint, 0 while still firing; a countermeasure
 carries its release position, velocity and attitude, the device's number
 (which chose its look) and the owner's devices of that kind left; a radio
 call carries a bit for "important" (never silenced) beside its route, an
-addition. The client drops repeats by number (it remembers 4,096) and holds
+addition, and since protocol 15 a bit for the battle net after it. The client drops repeats by number (it remembers 4,096) and holds
 an event that names a table entry whose Names message has not arrived, with
 the events after it, until it does.
 
@@ -2059,7 +2106,8 @@ again with an observer; the capture format did not change for it.
   player's [connection path](#the-path-in-the-challenge-answer), J6, 13
   since [stage K](#host-migration-and-rejoin-stage-k)'s wire, K0, 14 since
   the standby stream's seat inputs code their controls as the Inputs
-  section does, K3; 11 was never used).
+  section does, K3, 15 since the [flight data link](#data-link-stage-g),
+  G7; 11 was never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

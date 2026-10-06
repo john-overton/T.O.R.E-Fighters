@@ -138,15 +138,20 @@ pub struct Drained {
     pub facts: Facts,
     /// Combat's chaff and flare notes.
     pub notes: Vec<DeviceNote>,
+    /// The data link journal's entries, for the seats' Link events (slice
+    /// G7).
+    pub link: Vec<tore_world::datalink::Entry>,
 }
 
-/// Takes what the tick just stepped left for its host: the score facts and
-/// combat's device notes, as the host's scoring and event tracker take them.
-/// A standby calls it after each replayed tick.
+/// Takes what the tick just stepped left for its host: the score facts,
+/// combat's device notes and the data link's journal, as the host's scoring,
+/// event tracker and seats take them. A standby calls it after each replayed
+/// tick.
 pub fn drain(world: &mut World) -> Drained {
     Drained {
         facts: world.take_score_facts(),
         notes: world.combat.state.take_device_notes(),
+        link: world.datalink.take_journal(),
     }
 }
 

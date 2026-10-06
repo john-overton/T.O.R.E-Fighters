@@ -42,6 +42,43 @@ fn the_numbers_stand_for_the_readout() {
     assert_eq!(contact.position, readout.sensors.contacts[0].position);
     assert_eq!(contact.velocity, readout.sensors.contacts[0].velocity);
     assert_eq!(back.map[0].aircraft, Some(AircraftId::Mig29));
+    // The data link's share (slice G7): the scalars, marks and mates
+    // exactly, the tracks in whole feet and quarter feet a second.
+    let link = &readout.link;
+    assert_eq!(back.link.radar, link.radar);
+    assert_eq!(back.link.assigned, link.assigned);
+    assert_eq!(back.link.marks, link.marks);
+    assert_eq!(back.link.mates, link.mates);
+    assert_eq!(back.link.tracks.len(), link.tracks.len());
+    for (got, sent) in back.link.tracks.iter().zip(&link.tracks) {
+        assert_eq!((got.target, got.source), (sent.target, sent.source));
+        assert!((0..3).all(|i| (got.position[i] - sent.position[i]).abs() <= 0.5));
+        assert!((0..3).all(|i| (got.velocity[i] - sent.velocity[i]).abs() <= 0.125));
+    }
+    // No assignment reads back as none; a plane with no radar keeps its link.
+    let mut bare = readout.clone();
+    bare.link.assigned = None;
+    bare.link.radar = false;
+    let again = QReadout::of(&bare, 400).readout(400, None, None).unwrap();
+    assert_eq!((again.link.assigned, again.link.radar), (None, false));
+    assert_eq!(again.link.marks, link.marks);
+}
+
+#[test]
+fn a_client_lists_link_tracks_nearest_its_own_plane_first() {
+    let readout = samples::readout();
+    let q = QReadout::of(&readout, 400);
+    let basis = tore_sim::attitude::Basis::new(0., 0., 0.);
+    // Near track 9 (at 40,000, 12,000, 60,000): it comes first.
+    let near_nine = q
+        .readout(400, Some(([39_000., 12_000., 59_000.], &basis)), None)
+        .unwrap();
+    let order: Vec<u32> = near_nine.link.tracks.iter().map(|t| t.target).collect();
+    assert_eq!(order, [9, 7]);
+    // Without a plane, in target order.
+    let plain = q.readout(400, None, None).unwrap();
+    let order: Vec<u32> = plain.link.tracks.iter().map(|t| t.target).collect();
+    assert_eq!(order, [7, 9]);
 }
 
 #[test]
@@ -90,40 +127,25 @@ fn readout_of(world: &World) -> CockpitReadout {
         .unwrap()
 }
 
-#[test]
-fn readouts_rebuild_what_the_host_says_whatever_was_lost() {
-    let mut world = fight();
-    let scene = world.terrain.airport_scene.clone();
-    let mut rng = SplitMix64::new(16);
+/// Sends `snapshots` readouts, the `k`th made by `next` for the snapshot of
+/// tick `400 + 4k`, through a host and a client losing, duplicating and
+/// reordering packets and their acknowledgements, and checks after every
+/// arrival that the client holds what the host says it holds.
+fn lossy(
+    seed: u64,
+    snapshots: u32,
+    scene: Option<&tore_sim::airport::Scene>,
+    mut next: impl FnMut(u32, &mut SplitMix64) -> CockpitReadout,
+) {
+    let mut rng = SplitMix64::new(seed);
     let mut host = ReadoutSender::new(4);
     let mut client = ReadoutReceiver::new(4);
-    let mut out = TickOutput::default();
     let mut held: HashMap<u32, QReadout> = HashMap::new();
     let mut flights: Vec<(u32, u16, Vec<u8>, u32)> = Vec::new();
     let mut notices: Vec<(u32, u16, bool)> = Vec::new();
-    let mut seen_lists = 0;
-    for k in 0..900u32 {
-        for _ in 0..4 {
-            let input = SeatInput {
-                tick: world.tick(),
-                pilot: tore_sim::flight::PilotInput {
-                    roll: if (world.tick() / 600).is_multiple_of(2) {
-                        0.3
-                    } else {
-                        -0.3
-                    },
-                    pitch: 0.1,
-                    ..Default::default()
-                },
-                trigger: world.tick() % 300 < 60,
-                ..SeatInput::default()
-            };
-            world.step(&[input], &mut out).unwrap();
-        }
+    for k in 0..snapshots {
         let tick = 400 + 4 * k;
-        let readout = readout_of(&world);
-        seen_lists = seen_lists
-            .max(readout.sensors.contacts.len() + readout.visual.len() + readout.map.len());
+        let readout = next(k, &mut rng);
         let q = QReadout::of(&readout, tick);
         // The share is sometimes tight.
         let budget = if rng.below(5) == 0 { 400 } else { 8 * 1_000 };
@@ -162,7 +184,7 @@ fn readouts_rebuild_what_the_host_says_whatever_was_lost() {
                 rebuilt, held[&tick],
                 "tick {tick}: the client holds what the host says"
             );
-            let full = rebuilt.readout(tick, None, Some(&scene)).unwrap();
+            let full = rebuilt.readout(tick, None, scene).unwrap();
             if rebuilt.complete() {
                 assert_eq!(QReadout::of(&full, tick), rebuilt);
             }
@@ -187,7 +209,122 @@ fn readouts_rebuild_what_the_host_says_whatever_was_lost() {
             }
         }
     }
+}
+
+#[test]
+fn readouts_rebuild_what_the_host_says_whatever_was_lost() {
+    let mut world = fight();
+    let scene = world.terrain.airport_scene.clone();
+    let mut out = TickOutput::default();
+    let mut seen_lists = 0;
+    let mut seen_link = 0;
+    lossy(16, 900, Some(&scene), |_, _| {
+        for _ in 0..4 {
+            let input = SeatInput {
+                tick: world.tick(),
+                pilot: tore_sim::flight::PilotInput {
+                    roll: if (world.tick() / 600).is_multiple_of(2) {
+                        0.3
+                    } else {
+                        -0.3
+                    },
+                    pitch: 0.1,
+                    ..Default::default()
+                },
+                trigger: world.tick() % 300 < 60,
+                ..SeatInput::default()
+            };
+            world.step(&[input], &mut out).unwrap();
+        }
+        let readout = readout_of(&world);
+        seen_lists = seen_lists
+            .max(readout.sensors.contacts.len() + readout.visual.len() + readout.map.len());
+        seen_link = seen_link.max(readout.link.tracks.len() + readout.link.mates.len());
+        readout
+    });
     assert!(seen_lists > 0, "the fight shows on the scope and the map");
+    assert!(seen_link > 1, "the fight's data link has tracks and a mate");
+}
+
+/// The data link's parts (slice G7): tracks that jump on publishing ticks,
+/// come and go; locks, net locks and assignments that change at any
+/// snapshot; flightmates whose state changes. Whatever is lost, the client
+/// holds what the host says, and each part reads back.
+#[test]
+fn the_links_parts_rebuild_what_the_host_says_whatever_was_lost() {
+    use tore_world::datalink::{Damage, Fuel, TrackSource, Weapons};
+    use tore_world::readout::{LinkAssigned, LinkMark, LinkMate, LinkTrack, MemberRef};
+    let base = samples::readout();
+    let mut tracks: Vec<LinkTrack> = (0..24)
+        .map(|i| LinkTrack {
+            target: 20 + 3 * i,
+            position: [f64::from(i) * 5_000., 15_000., 40_000.],
+            velocity: [f64::from(i) * 30. - 300., 2., -700.],
+            source: [TrackSource::Own, TrackSource::Flight, TrackSource::Network][i as usize % 3],
+        })
+        .collect();
+    let mut changed = 0;
+    lossy(31, 1_200, None, |k, rng| {
+        let tick = 400 + 4 * k;
+        let mut readout = base.clone();
+        readout.tick = u64::from(tick);
+        // Tracks move only on the host's publishing ticks.
+        if tick.is_multiple_of(30) {
+            for track in &mut tracks {
+                for axis in 0..3 {
+                    track.position[axis] += track.velocity[axis] * 0.25;
+                }
+                if rng.below(10) == 0 {
+                    track.velocity[0] += 25.;
+                }
+            }
+            if rng.below(3) == 0 {
+                let i = rng.below(24) as usize;
+                tracks[i].target = if tracks[i].target >= 1_000 {
+                    20 + 3 * i as u32
+                } else {
+                    1_000 + i as u32
+                };
+            }
+            changed += 1;
+        }
+        readout.link.tracks = tracks.clone();
+        readout.link.assigned = (rng.below(3) > 0).then(|| LinkAssigned {
+            target: 20 + 3 * rng.below(24) as u32,
+            by: rng.below(4) as u32,
+            acknowledged: rng.below(2) == 0,
+        });
+        readout.link.radar = k % 200 < 150;
+        readout.link.marks = (0..rng.below(33) as u32)
+            .map(|i| LinkMark {
+                target: 20 + 3 * i,
+                lockers: rng.below(32) as u16,
+                net_lock: (rng.below(4) == 0).then(|| MemberRef {
+                    flight: rng.below(3) as u8,
+                    member: rng.below(5) as u8,
+                }),
+                assigned_to: rng.below(32) as u16,
+            })
+            .collect();
+        readout.link.mates = (1..=rng.below(5) as u32)
+            .map(|plane| LinkMate {
+                plane,
+                member: plane as u8,
+                fuel: [
+                    Fuel::Normal,
+                    Fuel::Joker,
+                    Fuel::Bingo,
+                    Fuel::Fumes,
+                    Fuel::Out,
+                ][rng.below(5) as usize],
+                weapons: [Weapons::Missiles, Weapons::GunsOnly, Weapons::Winchester]
+                    [rng.below(3) as usize],
+                damage: [Damage::None, Damage::Light, Damage::Heavy][rng.below(3) as usize],
+            })
+            .collect();
+        readout
+    });
+    assert!(changed > 60, "{changed} publishing ticks");
 }
 
 #[test]

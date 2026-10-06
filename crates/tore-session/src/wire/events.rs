@@ -8,6 +8,10 @@
 //! acknowledges the events it carried. [`EventReceiver`] (the client) hands
 //! each event over once, and holds one that names a table entry whose Names
 //! message has not arrived yet.
+//!
+//! Protocol 15 (slice G7) adds the Link event (code 17), one data link
+//! journal entry about a member of the seat's flight, and the net a radio
+//! call was heard on (a bit after "important").
 
 use super::bits::{self, read_u32, read_uladder, write_uladder};
 use super::inputs::{read_order, write_order};
@@ -20,7 +24,8 @@ use tore_sim::acoustics;
 use tore_sim::ai::wing::PlayerOrder;
 use tore_sim::combat::blast::MarkKind;
 use tore_sim::combat::live::EffectKind;
-use tore_world::comms::Route;
+use tore_world::comms::{Net, Route};
+use tore_world::datalink::{ClearReason, Entry};
 use tore_world::world::OrderOutcome;
 
 /// A controller rumble, as the wire carries it: turbulence at 1/255.
@@ -93,6 +98,9 @@ pub enum WireEvent {
         route: Route,
         /// Never silenced (missile warnings, fuel, deaths, the result).
         important: bool,
+        /// The net the seat heard it on: the battle net's label already
+        /// starts with `Net ` (protocol 15).
+        net: Net,
         label: String,
         text: String,
         stems: Vec<NameIndex>,
@@ -165,6 +173,225 @@ pub enum WireEvent {
         /// The aircraft it came from, when one did.
         from: Option<u32>,
     },
+    /// A change of the flight data link's picture about a member of the
+    /// seat's flight (protocol 15, slice G7).
+    Link(LinkEvent),
+}
+
+/// One data link journal entry as the wire carries it: the entry without its
+/// tick, which the event carries (`tore_world::datalink::Entry`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkEvent {
+    /// `plane` joined the picture, with whether its aircraft has a radar.
+    Member { plane: u32, radar: bool },
+    /// `plane` took a lock on `target`.
+    Lock { plane: u32, target: u32 },
+    /// `plane` let go of its lock on `target`.
+    Unlock { plane: u32, target: u32 },
+    /// The lead `by` gave `plane` the target `target` with `order`.
+    Assign {
+        plane: u32,
+        target: u32,
+        by: u32,
+        order: PlayerOrder,
+    },
+    /// `plane`'s assignment of `target` ended, and why.
+    Clear {
+        plane: u32,
+        target: u32,
+        why: ClearReason,
+    },
+    /// `plane` locked its assigned target.
+    Acknowledge { plane: u32, target: u32 },
+    /// The human flying `plane` was told its flightmate `other` holds a lock
+    /// on `target`.
+    SortWarning { plane: u32, other: u32, target: u32 },
+}
+
+impl LinkEvent {
+    /// The wire's form of a journal entry.
+    pub fn of(entry: &Entry) -> Self {
+        match *entry {
+            Entry::Member { plane, radar, .. } => Self::Member { plane, radar },
+            Entry::Lock { plane, target, .. } => Self::Lock { plane, target },
+            Entry::Unlock { plane, target, .. } => Self::Unlock { plane, target },
+            Entry::Assign {
+                plane,
+                target,
+                by,
+                order,
+                ..
+            } => Self::Assign {
+                plane,
+                target,
+                by,
+                order,
+            },
+            Entry::Clear {
+                plane, target, why, ..
+            } => Self::Clear { plane, target, why },
+            Entry::Acknowledge { plane, target, .. } => Self::Acknowledge { plane, target },
+            Entry::SortWarning {
+                plane,
+                other,
+                target,
+                ..
+            } => Self::SortWarning {
+                plane,
+                other,
+                target,
+            },
+        }
+    }
+
+    /// The journal entry it stands for, at `tick`.
+    pub fn entry(self, tick: u64) -> Entry {
+        match self {
+            Self::Member { plane, radar } => Entry::Member { tick, plane, radar },
+            Self::Lock { plane, target } => Entry::Lock {
+                tick,
+                plane,
+                target,
+            },
+            Self::Unlock { plane, target } => Entry::Unlock {
+                tick,
+                plane,
+                target,
+            },
+            Self::Assign {
+                plane,
+                target,
+                by,
+                order,
+            } => Entry::Assign {
+                tick,
+                plane,
+                target,
+                by,
+                order,
+            },
+            Self::Clear { plane, target, why } => Entry::Clear {
+                tick,
+                plane,
+                target,
+                why,
+            },
+            Self::Acknowledge { plane, target } => Entry::Acknowledge {
+                tick,
+                plane,
+                target,
+            },
+            Self::SortWarning {
+                plane,
+                other,
+                target,
+            } => Entry::SortWarning {
+                tick,
+                plane,
+                other,
+                target,
+            },
+        }
+    }
+
+    /// The member the change is about.
+    pub fn plane(self) -> u32 {
+        match self {
+            Self::Member { plane, .. }
+            | Self::Lock { plane, .. }
+            | Self::Unlock { plane, .. }
+            | Self::Assign { plane, .. }
+            | Self::Clear { plane, .. }
+            | Self::Acknowledge { plane, .. }
+            | Self::SortWarning { plane, .. } => plane,
+        }
+    }
+
+    fn write(self, w: &mut BitWriter) {
+        let code = match self {
+            Self::Member { .. } => 0,
+            Self::Lock { .. } => 1,
+            Self::Unlock { .. } => 2,
+            Self::Assign { .. } => 3,
+            Self::Clear { .. } => 4,
+            Self::Acknowledge { .. } => 5,
+            Self::SortWarning { .. } => 6,
+        };
+        let _ = w.write_bits(code, 3);
+        w.write_varint(u64::from(self.plane()));
+        match self {
+            Self::Member { radar, .. } => w.write_bool(radar),
+            Self::Lock { target, .. }
+            | Self::Unlock { target, .. }
+            | Self::Acknowledge { target, .. } => w.write_varint(u64::from(target)),
+            Self::Assign {
+                target, by, order, ..
+            } => {
+                w.write_varint(u64::from(target));
+                w.write_varint(u64::from(by));
+                write_order(w, order);
+            }
+            Self::Clear { target, why, .. } => {
+                w.write_varint(u64::from(target));
+                let why = match why {
+                    ClearReason::Order => 0,
+                    ClearReason::ReceiverLost => 1,
+                    ClearReason::TargetLost => 2,
+                    ClearReason::LeadChanged => 3,
+                };
+                let _ = w.write_bits(why, 2);
+            }
+            Self::SortWarning { other, target, .. } => {
+                w.write_varint(u64::from(other));
+                w.write_varint(u64::from(target));
+            }
+        }
+    }
+
+    fn read(r: &mut BitReader<'_>) -> WireResult<Self> {
+        let code = r.read_bits(3)?;
+        let plane = read_u32(r)?;
+        Ok(match code {
+            0 => Self::Member {
+                plane,
+                radar: r.read_bool()?,
+            },
+            1 => Self::Lock {
+                plane,
+                target: read_u32(r)?,
+            },
+            2 => Self::Unlock {
+                plane,
+                target: read_u32(r)?,
+            },
+            3 => Self::Assign {
+                plane,
+                target: read_u32(r)?,
+                by: read_u32(r)?,
+                order: read_order(r)?,
+            },
+            4 => Self::Clear {
+                plane,
+                target: read_u32(r)?,
+                why: [
+                    ClearReason::Order,
+                    ClearReason::ReceiverLost,
+                    ClearReason::TargetLost,
+                    ClearReason::LeadChanged,
+                ][r.read_bits(2)? as usize],
+            },
+            5 => Self::Acknowledge {
+                plane,
+                target: read_u32(r)?,
+            },
+            6 => Self::SortWarning {
+                plane,
+                other: read_u32(r)?,
+                target: read_u32(r)?,
+            },
+            _ => return Err(WireError::Invalid("link event")),
+        })
+    }
 }
 
 const KIND_BITS: u32 = 5;
@@ -297,6 +524,7 @@ impl WireEvent {
             Self::Countermeasure { .. } => 14,
             Self::GunBurst { .. } => 15,
             Self::Sound { .. } => 16,
+            Self::Link(_) => 17,
         }
     }
 
@@ -319,6 +547,7 @@ impl WireEvent {
             Self::Radio {
                 route,
                 important,
+                net,
                 label,
                 text,
                 stems,
@@ -330,6 +559,7 @@ impl WireEvent {
                 };
                 let _ = w.write_bits(route, 2);
                 w.write_bool(*important);
+                w.write_bool(*net == Net::Battle);
                 bits::write_str(w, label);
                 bits::write_str(w, text);
                 write_names(w, stems)?;
@@ -442,6 +672,7 @@ impl WireEvent {
                 w.write_bool(*arrived);
                 bits::write_option(w, *from, |w, from| w.write_varint(u64::from(from)));
             }
+            Self::Link(link) => link.write(w),
         }
         Ok(())
     }
@@ -462,6 +693,11 @@ impl WireEvent {
                 Self::Radio {
                     route,
                     important: r.read_bool()?,
+                    net: if r.read_bool()? {
+                        Net::Battle
+                    } else {
+                        Net::Wing
+                    },
                     label: bits::read_str(r)?,
                     text: bits::read_str(r)?,
                     stems: read_names(r)?,
@@ -567,6 +803,7 @@ impl WireEvent {
                 arrived: r.read_bool()?,
                 from: bits::read_option(r, read_u32)?,
             },
+            17 => Self::Link(LinkEvent::read(r)?),
             _ => return Err(WireError::Invalid("event kind")),
         })
     }

@@ -11,13 +11,14 @@ use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKind, EntityState,
     Motion, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, SPEED_STEP, Status,
 };
-use super::events::{Rumble, WireEvent};
+use super::events::{LinkEvent, Rumble, WireEvent};
 use super::names::NameTable;
 use super::priority::Relevance;
 use tore_formats::aircraft::AircraftId;
 use tore_sim::acoustics::Emission;
 use tore_sim::combat::live::{DeviceRelease, EffectKind};
 use tore_world::comms;
+use tore_world::datalink::{DataLink, Entry};
 use tore_world::seats::{PlaneId, SeatId};
 use tore_world::snapshot::{
     AircraftPose, DebrisPose, Draw, EffectPose, MarkPose, PilotPose, ProjectilePose, RenderSnapshot,
@@ -419,6 +420,7 @@ pub fn cue_event(cue: &Cue, seat: SeatId, names: &mut NameTable) -> WireResult<O
         Cue::Radio { seat: s, call } if mine(s) => Some(WireEvent::Radio {
             route: call.route,
             important: call.kind == comms::Kind::Important,
+            net: call.net,
             label: call.label.clone(),
             text: call.text.clone(),
             stems: call
@@ -437,6 +439,24 @@ pub fn cue_event(cue: &Cue, seat: SeatId, names: &mut NameTable) -> WireResult<O
         }),
         _ => None,
     })
+}
+
+/// The data link's journal entries a seat flying `plane` is sent (slice G7):
+/// those about a member of its own flight, in the journal's order. A plane
+/// the picture does not know is sent none.
+pub fn link_events(link: &DataLink, plane: u32, entries: &[Entry]) -> Vec<WireEvent> {
+    let Some(flight) = link.member(plane).map(|m| m.flight) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .map(LinkEvent::of)
+        .filter(|event| {
+            link.member(event.plane())
+                .is_some_and(|member| member.flight == flight)
+        })
+        .map(WireEvent::Link)
+        .collect()
 }
 
 /// A weapon release sound for its seat.
