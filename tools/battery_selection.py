@@ -188,6 +188,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
             "net-server-king", "net-server-pvp", "net-server-hunt", "net-server-delay", "net-server-revive",
             "net-server-results", "net-server-away", "net-server-rejoin", "net-server-replies",
+            "net-server-datalink",
         ),
     ),
     "net-convert": (

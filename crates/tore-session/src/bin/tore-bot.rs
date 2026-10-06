@@ -92,6 +92,13 @@
 //! this flight."), so a test can follow an order and its reply from one bot to
 //! the other. Put the lead and the wingman in the same wing with `--slot`.
 //!
+//! `--order SECONDS,sort` (slice G7) is the lead's sort (Alt+A): each
+//! wingman, human or AI, is given a bandit of the side's picture by data
+//! link. Every bot prints the data link's changes about its flight that the
+//! host sent ("Bot: link: plane 0 assigned plane 1 bandit 7 (Sort)") and
+//! each change of its own assignment in its readout ("Bot: link: assigned:
+//! bandit 7 by plane 0").
+//!
 //! Stage L (docs/ARCHITECTURE.md, "Compatibility"): each bot sends the
 //! content of its import when it joins, and prints the host's gaps whenever
 //! they change ("Bot: gaps: aircraft SU27.PT (Hawk lacks it)", or "gaps:
@@ -301,10 +308,11 @@ fn order(value: &str) -> Result<(Duration, SeatCommand), String> {
         "protect-me" => PlayerOrder::ProtectMe,
         "disengage" => PlayerOrder::Disengage,
         "bug-out" => PlayerOrder::BugOut,
+        "sort" => PlayerOrder::Sort,
         other => {
             return Err(format!(
                 "--order {other:?} is break-left, break-right, break-high, break-low, steady, \
-                 attack-bandits, protect-me, disengage or bug-out"
+                 attack-bandits, protect-me, disengage, bug-out or sort"
             ));
         }
     };
@@ -1229,6 +1237,9 @@ fn main() -> ExitCode {
             for line in std::mem::take(&mut bot.lines_read) {
                 println!("{}: line: {line}", r.name);
             }
+            for line in std::mem::take(&mut bot.link_heard) {
+                println!("{}: link: {line}", r.name);
+            }
             while let Some(event) = bot.client.poll_event() {
                 match event {
                     ClientEvent::Connected { .. } if r.through.is_some() => println!(
@@ -1583,6 +1594,13 @@ mod tests {
                 (at(15.), SeatCommand::WingReply(Reply::Winchester)),
                 (at(30.), SeatCommand::WingReply(Reply::NeedHelp)),
             ]
+        );
+        // The lead's sort (slice G7).
+        assert_eq!(
+            parse(&args("--connect 127.0.0.1 --order 9,sort"))
+                .unwrap()
+                .commands,
+            [(at(9.), SeatCommand::WingOrder(PlayerOrder::Sort))]
         );
         assert!(
             parse(&args("--connect 127.0.0.1"))

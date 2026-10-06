@@ -34,7 +34,7 @@
 
 use crate::client::{Client, ClientFrame, Controls};
 use crate::wire::chat::{ChatSend, QuickMessage, Receiver, Refusal};
-use crate::wire::events::WireEvent;
+use crate::wire::events::{LinkEvent, WireEvent};
 use crate::wire::messages::{LobbyPhase, RosterPlane, Subject};
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};
@@ -706,6 +706,41 @@ pub struct Bot {
     /// lines it read, in order, for `tore-bot` to print.
     pub radio_heard: Vec<String>,
     pub lines_read: Vec<String>,
+    /// The data link as the bot saw it (slice G7): each Link event in words
+    /// ("plane 0 assigned plane 1 bandit 7 (Sort)") and each change of the
+    /// readout's assignment ("assigned: bandit 7 by plane 0"), in order.
+    pub link_heard: Vec<String>,
+    /// The readout's assignment last seen, for its changes.
+    link_assigned: Option<tore_world::readout::LinkAssigned>,
+}
+
+/// A data link change in words, for `tore-bot` to print (slice G7).
+pub fn link_words(link: &LinkEvent) -> String {
+    match *link {
+        LinkEvent::Member { plane, radar } => format!(
+            "plane {plane} joined{}",
+            if radar { "" } else { " with no radar" }
+        ),
+        LinkEvent::Lock { plane, target } => format!("plane {plane} locked {target}"),
+        LinkEvent::Unlock { plane, target } => format!("plane {plane} let go of {target}"),
+        LinkEvent::Assign {
+            plane,
+            target,
+            by,
+            order,
+        } => format!("plane {by} assigned plane {plane} bandit {target} ({order:?})"),
+        LinkEvent::Clear { plane, target, why } => {
+            format!("plane {plane} cleared of {target} ({})", why.name())
+        }
+        LinkEvent::Acknowledge { plane, target } => {
+            format!("plane {plane} acknowledged {target}")
+        }
+        LinkEvent::SortWarning {
+            plane,
+            other,
+            target,
+        } => format!("plane {plane} warned: plane {other} holds {target}"),
+    }
 }
 
 impl Bot {
@@ -743,6 +778,8 @@ impl Bot {
             scripted_seated: None,
             radio_heard: Vec::new(),
             lines_read: Vec::new(),
+            link_heard: Vec::new(),
+            link_assigned: None,
         }
     }
 
@@ -778,10 +815,28 @@ impl Bot {
                     self.radio_heard.push(format!("{label}: '{text}'"));
                 }
                 WireEvent::Message { text } => self.lines_read.push(text.clone()),
+                WireEvent::Link(link) => self.link_heard.push(link_words(link)),
                 _ => {}
             }
         }
-        for list in [&mut self.radio_heard, &mut self.lines_read] {
+        let assigned = frame.readout.as_ref().and_then(|r| r.link.assigned);
+        if assigned != self.link_assigned {
+            self.link_heard.push(match assigned {
+                Some(a) => format!(
+                    "assigned: bandit {} by plane {}{}",
+                    a.target,
+                    a.by,
+                    if a.acknowledged { ", locked" } else { "" }
+                ),
+                None => "assigned: none".into(),
+            });
+            self.link_assigned = assigned;
+        }
+        for list in [
+            &mut self.radio_heard,
+            &mut self.lines_read,
+            &mut self.link_heard,
+        ] {
             if list.len() > 256 {
                 list.drain(..list.len() - 256);
             }
@@ -1416,6 +1471,119 @@ mod tests {
         let wingman = players.pop().unwrap().1;
         let lead = players.pop().unwrap().1;
         (lead, wingman)
+    }
+
+    /// A lead bot sorts its flight (slice G7): the wingman bot, a human, is
+    /// given a bandit by data link. Both bots of the flight hear the
+    /// assignment as a Link event, and the wingman's readout carries it.
+    #[test]
+    fn a_wingman_bot_is_given_a_bandit_by_its_leads_sort_over_the_wire() {
+        use tore_sim::ai::wing::PlayerOrder;
+        let resources = Arc::new(tore_world::test_support::resources::resources());
+        let spec = MissionSpec::from_text(
+            "tore-mission 1\ntheater UKR\nstart airborne 20000\nseparation-nm 10\n\
+             wing friendly 1 F18.PT 3 average\nwing enemy 1 F18.PT 2 dummy\n",
+        )
+        .expect("the wings parse");
+        let net = SimNetwork::new(5);
+        net.set_default_link(LinkConfig::PERFECT);
+        let address = "10.0.0.1:26900".parse().unwrap();
+        let mut host_socket = net.bind(address).unwrap();
+        let mut host = Host::new(
+            spec,
+            Arc::clone(&resources),
+            HostConfig {
+                open_planes: OpenPlanes::All,
+                start: StartMode::Now,
+                entropy: Entropy::Seeded(17),
+                ..HostConfig::new(build())
+            },
+        )
+        .expect("the host starts");
+        let mut players: Vec<_> = [0u32, 1]
+            .into_iter()
+            .map(|plane| {
+                let socket = net
+                    .bind(format!("10.0.1.{}:40000", plane + 1).parse().unwrap())
+                    .unwrap();
+                let config = ClientConfig {
+                    entropy: Entropy::Seeded(600 + u64::from(plane)),
+                    plane: Some(plane),
+                    ..ClientConfig::new(address, &format!("Bot{}", plane + 1), build())
+                };
+                let client = Client::connect(config, Arc::clone(&resources), net.now()).unwrap();
+                (socket, Bot::new(client))
+            })
+            .collect();
+        players[0].1.send_at(
+            Duration::from_secs(6),
+            SeatCommand::WingOrder(PlayerOrder::Sort),
+        );
+        let mut readout_assigned = None;
+        for _ in 0..20_000 {
+            net.advance(Duration::from_millis(1));
+            let now = net.now();
+            host.receive_from(now, &mut host_socket).unwrap();
+            host.update(now);
+            host.transmit(&mut host_socket).unwrap();
+            for (index, (socket, bot)) in players.iter_mut().enumerate() {
+                bot.client.receive_from(now, socket).unwrap();
+                if let Some(frame) = bot.update(now)
+                    && index == 1
+                    && let Some(assigned) = frame.readout.and_then(|r| r.link.assigned)
+                {
+                    readout_assigned = Some(assigned);
+                }
+                bot.client.transmit(socket).unwrap();
+                while bot.client.poll_event().is_some() {}
+            }
+        }
+        let (lead, wingman) = (&players[0].1, &players[1].1);
+        let given = |bot: &Bot| {
+            bot.link_heard
+                .iter()
+                .find(|line| line.starts_with("plane 0 assigned plane 1 bandit "))
+                .cloned()
+        };
+        let line = given(wingman).unwrap_or_else(|| {
+            panic!(
+                "the wingman's link: {:?}; the lead's lines: {:?}",
+                wingman.link_heard, lead.lines_read
+            )
+        });
+        assert!(line.ends_with(" (Sort)"), "{line}");
+        assert_eq!(
+            given(lead),
+            Some(line.clone()),
+            "the lead hears its flight's change"
+        );
+        let assigned = readout_assigned.expect("the wingman's readout holds the assignment");
+        assert_eq!(assigned.by, 0);
+        assert_eq!(
+            line,
+            format!("plane 0 assigned plane 1 bandit {} (Sort)", assigned.target)
+        );
+        assert!(
+            wingman
+                .link_heard
+                .iter()
+                .any(|l| l.starts_with(&format!("assigned: bandit {} by plane 0", assigned.target))),
+            "{:?}",
+            wingman.link_heard
+        );
+        // Every Link event a bot heard was about its own flight (planes 0 to
+        // 2), never the enemy's.
+        for bot in [lead, wingman] {
+            for line in bot.link_heard.iter().filter(|l| l.starts_with("plane ")) {
+                let plane: u32 = line["plane ".len()..]
+                    .split(' ')
+                    .next()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert!(plane <= 2, "{line}");
+            }
+        }
     }
 
     #[test]

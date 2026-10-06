@@ -679,6 +679,37 @@ def drive_replies(d: Drive) -> None:
     server.forbid(NET_BAD, "a network problem")
 
 
+def drive_datalink(d: Drive) -> None:
+    """The flight data link on the wire (slice G7, protocol 15): two bots in the first friendly wing of the guide's
+    mission, the AI on weapons hold. The lead bot (plane 0) sorts its wing (Alt+A); the wingman bot (plane 1), a human,
+    is given a bandit by data link. Both bots hear the assignment as a Link event about their flight, the wingman's
+    readout carries it, and the wingman hears the lead's assignment call."""
+    port = d.port()
+    server = start_server(d, port, weapons_hold(guide_mission()))
+    lead = start_bots(d, port, "lead", 45, "--callsign", "Lead", "--slot", "0", "--order", "20,sort")
+    if not lead.wait_for(r"^Lead: seat \d+, plane 0, at tick \d+$", 90):
+        raise DriveError("the lead bot was never seated in plane 0")
+    wing = start_bots(d, port, "wing", 40, "--callsign", "Wing", "--slot", "1")
+    lead.finish(120, 0)
+    wing.finish(120, 0)
+    server.finish(40, 0)
+    wing.expect(r"^Wing: seat \d+, plane 1, at tick \d+$", "the wingman flies plane 1")
+    lead.expect(r"^Lead: line: Sort: \d+ assigned", "the lead's sort was given")
+    given = r"link: plane 0 assigned plane 1 bandit (\d+) \(Sort\)$"
+    wing.expect(r"^Wing: " + given, "the wingman's assignment as a Link event")
+    lead.expect(r"^Lead: " + given, "the assignment as a Link event about the lead's flight")
+    m = re.search(r"(?m)^Wing: " + given, wing.text())
+    if m:
+        wing.expect(
+            rf"^Wing: link: assigned: bandit {m.group(1)} by plane 0\b", "the wingman's readout holds the assignment"
+        )
+    wing.expect(r"^Wing: radio: Red one: '.*[Aa]ttack bandit", "the lead's assignment call")
+    for bot in (lead, wing):
+        bot.forbid(r"^\w+: link: plane ([4-9]|\d\d+) ", "a Link event about another flight")
+        bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
 def away_problems(text: str, name: str, plane: int) -> list[str]:
     """What a `tore-bot --away` printed (slice F2-A): seated in `plane`, the AI took it and kept it while the bot
     watched it, the bot asked for it back and was seated in it again, in that order."""
@@ -1561,6 +1592,12 @@ def scenarios() -> list[Scenario]:
             name="net-server-replies", lane="net", args=[], driver=drive_replies, uses=("server", "bot"), timeout=300,
             notes="a lead bot orders its wing and a wingman bot replies: the order is a radio call for the human "
             "wingman, the reply reaches the lead, and a lead's own reply is refused (slice F2-R)",
+        ),
+        Scenario(
+            name="net-server-datalink", lane="net", args=[], driver=drive_datalink, uses=("server", "bot"),
+            timeout=300,
+            notes="a lead bot sorts its wing and the wingman bot, a human, is given a bandit by data link: the Link "
+            "event, its readout's assignment and the call reach it over the wire (slice G7)",
         ),
         Scenario(
             name="net-server-away", lane="net", args=[], driver=drive_away, uses=("server", "bot"), timeout=200,
