@@ -4656,6 +4656,7 @@ impl ApplicationHandler for App {
                 }
             }
             if lost && self.screen == Screen::Flight {
+                self.net_controller_lost();
                 self.flight_ui.pause_for_focus();
                 self.flight_ui.message(if self.flight_ui.session {
                     "Active controller disconnected; controls are neutral"

@@ -8,7 +8,9 @@
 //! without a screen: `search` (the local network), `lookup` (a typed address,
 //! off the screen's thread) and `settings` (what is remembered). Slice I4 adds
 //! `browse` (the Internet Lobby's list, from the master) and `telemetry` (the
-//! anonymous statistics a game that uses the master may send).
+//! anonymous statistics a game that uses the master may send). Stage F
+//! phase 2 adds `away` (the AI flies an idle player's aircraft).
+pub mod away;
 pub mod browse;
 pub mod chat;
 pub mod debrief;

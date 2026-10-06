@@ -100,6 +100,8 @@ pub struct NetFlight {
     /// When the revival prompt was last said, and whether it said the
     /// player may fly again (stage F phase 2, slice F2-V).
     revival_said: Option<(Instant, bool)>,
+    /// The AI flies the plane while the player is away (slice F2-A).
+    pub(crate) idle: crate::net::away::Idle,
 }
 
 impl App {
@@ -205,6 +207,8 @@ impl App {
                 return;
             }
         }
+        // Stage F phase 2: the AI flies an idle player's aircraft (F2-A).
+        self.net_idle(&controls);
         // A game hosted from the command line starts each mission as soon as
         // everyone holding a slot is ready and its player has closed the
         // debrief.
@@ -345,7 +349,11 @@ impl App {
                 }
             }
             ClientEvent::Refused { request, reason } => {
-                if self.lobby.screen.is_some() {
+                // Away and Back are the flight's (slice F2-A).
+                use tore_session::wire::messages::kind;
+                if matches!(request, kind::AWAY | kind::BACK) {
+                    self.message(reason);
+                } else if self.lobby.screen.is_some() {
                     self.lobby_refused(request, &reason);
                 } else {
                     self.message(reason);
@@ -439,7 +447,7 @@ impl App {
     /// The flight is over but the session goes on (the mission ended, back
     /// in the lobby): the flight is put away and single player's state put
     /// back, as when a session ends.
-    fn end_net_flight(&mut self) {
+    pub(crate) fn end_net_flight(&mut self) {
         let Some(flight) = self.net_flight.take() else {
             return;
         };
@@ -589,6 +597,7 @@ impl App {
             was_burning: false,
             score_board: false,
             revival_said: None,
+            idle: Default::default(),
         });
         true
     }
@@ -774,6 +783,10 @@ impl App {
     /// End Mission: the hosting player ends the mission for everyone; any
     /// other leaves the game with its debrief.
     pub(crate) fn leave_session(&mut self) {
+        // While the AI flies the plane there is no flight to leave (F2-A).
+        if self.leave_away() {
+            return;
+        }
         let hosting = self.net.as_ref().is_some_and(NetSession::hosting);
         if let Some(session) = &mut self.net {
             session.leave();
