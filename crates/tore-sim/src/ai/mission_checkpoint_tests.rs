@@ -613,6 +613,7 @@ fn awareness_defense_and_assignment_values_round_trip() {
             wing_attackers: 9,
             terrain_blocked: true,
             sensor_supported: false,
+            link_track: false,
         },
         velocity: [-1., 0., f64::MIN_POSITIVE],
         first_observed_tick: 11,

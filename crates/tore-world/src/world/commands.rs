@@ -325,8 +325,19 @@ impl World {
             .iter()
             .find(|member| member.id == plane.0)
             .map(|member| member.flight);
+        // A wingman that cannot see the target itself still takes an Engage
+        // order when a flightmate's track of it is in the picture (G3b).
+        let datalink = &self.datalink;
         let result = self.ai_wings.as_mut().map(|wings| {
-            wings.command_called(plane.0, order, selected, recipient, site.as_ref(), flight)
+            wings.command_linked(
+                plane.0,
+                order,
+                selected,
+                recipient,
+                site.as_ref(),
+                flight,
+                &|target| datalink.tracked(plane.0, target),
+            )
         });
         let outcome = match result {
             Some(Ok(report)) => {

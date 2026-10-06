@@ -1624,6 +1624,7 @@ fn remember_hostile(mission: &mut AiMission, id: u32, position: [f64; 3]) {
         wing_attackers: 0,
         terrain_blocked: false,
         sensor_supported: true,
+        link_track: false,
     };
     actor.awareness.observe(
         tick,

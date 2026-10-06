@@ -634,6 +634,18 @@ impl AiActor {
         self.sensors.as_ref()
     }
 
+    /// Take away this actor's radar, infrared sensor and eyes, so that
+    /// nothing it observes for itself reaches its decisions: only what the
+    /// flight data link tells it does. A harness for the probe's
+    /// `--probe-blind-wing`; no mission calls it.
+    pub fn blind(&mut self) {
+        if let Some(sensors) = self.sensors.as_mut() {
+            sensors.profiles.radar = None;
+            sensors.profiles.infrared = None;
+            sensors.profiles.visual = None;
+        }
+    }
+
     /// The aircraft this actor is engaged with or searching for, which a
     /// human taking the aircraft over gets designated.
     pub fn current_target(&self) -> Option<u32> {
@@ -2118,6 +2130,7 @@ impl AiMission {
                 tick,
                 observed,
                 &engagements,
+                &link,
                 &mut output,
             )?;
             engagements.decided(index, &self.actors[index]);
@@ -2490,6 +2503,7 @@ impl AiMission {
         tick: u64,
         observed: Option<observation::Prepared>,
         engagements: &super::link::Engagements,
+        link: &super::link::LinkInput,
         output: &mut MissionOutput,
     ) -> Result<()> {
         // Researched aircraft stand on runways, so their ground is the full
@@ -2802,6 +2816,31 @@ impl AiMission {
                 event_id: Some(record.missile_id),
             });
         }
+        // Slice G3b: an aircraft a lead assigned this actor, that its own
+        // sensors do not hold, is flown toward on a flightmate's track. The
+        // view joins the targets the engagement policy and the controller
+        // choose from, flagged so the weapons never fire on it; everything
+        // that reads the actor's own sensors keeps the observed targets.
+        let observed_len = targets.len();
+        if !actor.neutral
+            && actor.damage_return.is_none()
+            && let Some(pursuit) = link.pursuit_of(actor_id)
+            && actor.controller.ordered_target() == Some(pursuit.target)
+            && !targets.iter().any(|t| t.id == pursuit.target)
+            && let Some(object) = world.iter().find(|o| o.id == pursuit.target)
+            && let Some(view) = pursuit.view(
+                tick,
+                identity.side,
+                object,
+                actor.seeker_eligible(true),
+                assignments
+                    .iter()
+                    .filter(|id| **id == pursuit.target)
+                    .count() as u32,
+            )
+        {
+            targets.push(view);
+        }
         let reports: Vec<_> = actor
             .observed_attacks
             .iter()
@@ -2995,8 +3034,10 @@ impl AiMission {
             })
             .collect();
         actor.controller.set_gun_views(gun_views);
-        let stations = actor.station_views(&targets, &own);
-        actor.trace.station_aim = actor.station_aim(&targets, &own).map(|t| t.id);
+        let stations = actor.station_views(&targets[..observed_len], &own);
+        actor.trace.station_aim = actor
+            .station_aim(&targets[..observed_len], &own)
+            .map(|t| t.id);
         let wing = WingView {
             control: self.wing_control,
             formation: self.formation,
@@ -3012,7 +3053,7 @@ impl AiMission {
             },
             leader,
             wingmen_in_formation: 0,
-            wing_combat: !targets.is_empty(),
+            wing_combat: observed_len > 0,
             wing_approach: false,
             // B12's wing-approach value has no recovered producer, so the
             // wing-split branch stays untried rather than being fed ordinary
@@ -4209,6 +4250,7 @@ impl AiActor {
             wing_attackers: 0,
             terrain_blocked: false,
             sensor_supported: self.sensors.as_ref().is_none_or(|s| s.supports(object.id)),
+            link_track: false,
         }
     }
 

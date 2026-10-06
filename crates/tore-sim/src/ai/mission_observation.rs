@@ -271,6 +271,7 @@ impl Context {
             wing_attackers: 0,
             terrain_blocked: false,
             sensor_supported: sensors.as_ref().is_none_or(|s| s.supports(object.id)),
+            link_track: false,
         }
     }
 }

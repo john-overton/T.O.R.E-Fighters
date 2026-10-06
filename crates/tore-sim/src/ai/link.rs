@@ -18,13 +18,26 @@
 //! locked bandit among the targets its wing attacks (B41), and ranks it with
 //! the same penalty as one a wingman attacks.
 //!
+//! Slice G3b lets an assignment reach the AI through the picture. The world
+//! hands the AI, for each AI wingman holding an assignment, the freshest track
+//! a flightmate reports of the assigned aircraft ([`Pursuit`]). While the
+//! wingman's own sensors do not hold that aircraft, the mission builds a target
+//! view from the track ([`Pursuit::view`], flagged `link_track`) and adds it to
+//! the actor's targets: the wingman keeps the order, flies toward the track,
+//! and fires only once its own sensors hold the aircraft.
+//!
 //! Neither the table nor the input is state: the table is rebuilt from the
 //! controllers every tick and the input is handed over again before every step
 //! (and consumed by it), so exact checkpoints need not code them.
 
-use super::mission::{AiActor, HumanMember};
+use super::ScalarSpeed;
+use super::controller::TargetView;
+use super::mission::{AiActor, HumanMember, WorldObject};
 use super::targeting::Side;
 use super::weapon_service::Phase;
+
+/// Simulation ticks per second, to age a track.
+const TICKS_PER_SECOND: f64 = 120.;
 
 /// The target `actor` attacks: its controller's target while it is alive. A
 /// dead actor attacks nothing. The engagement table, the picture's AI
@@ -54,11 +67,85 @@ pub struct HumanEngagement {
     pub target: u32,
 }
 
-/// What the world hands the AI before a step. In slice G2 it is the humans'
-/// locked targets, in plane id order.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// What a flightmate's report gives an AI wingman to fly toward: the freshest
+/// track in the picture of the aircraft the wingman was assigned (slice G3b).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pursuit {
+    /// The AI wingman holding the assignment.
+    pub receiver: u32,
+    /// The assigned aircraft.
+    pub target: u32,
+    /// Where the reporter saw it, world feet, at `observed`.
+    pub position: [f64; 3],
+    /// Its ground-relative velocity then, feet per second.
+    pub velocity: [f64; 3],
+    /// The tick the reporter saw it.
+    pub observed: u64,
+}
+
+impl Pursuit {
+    /// The target view a wingman flies by while its own sensors do not hold
+    /// the aircraft: the reported position carried forward at the reported
+    /// velocity to `tick`, the heading, pitch and speed that velocity gives,
+    /// and the aircraft's type from `object`. Flagged `link_track`, so the
+    /// weapons never see it. `None` when the aircraft is no living hostile
+    /// aircraft of `side` any more.
+    pub fn view(
+        &self,
+        tick: u64,
+        side: Side,
+        object: &WorldObject,
+        seeker_eligible: bool,
+        wing_attackers: u32,
+    ) -> Option<TargetView> {
+        if object.id != self.target
+            || object.side == side
+            || !object.is_aircraft
+            || !object.alive
+            || object.destroyed
+        {
+            return None;
+        }
+        let age = tick.saturating_sub(self.observed) as f64 / TICKS_PER_SECOND;
+        let position = std::array::from_fn(|axis| self.position[axis] + self.velocity[axis] * age);
+        let [vx, vy, vz] = self.velocity;
+        let level = vx.hypot(vz);
+        Some(TargetView {
+            id: self.target,
+            side: object.side,
+            position,
+            heading_deg: vx.atan2(vz).to_degrees().rem_euclid(360.),
+            pitch_deg: vy.atan2(level).to_degrees(),
+            speed: ScalarSpeed(level.hypot(vy)),
+            maximum_speed: object.maximum_speed,
+            is_aircraft: true,
+            is_fighter: object.is_fighter,
+            human_controlled: object.human_controlled,
+            valid: true,
+            type_allowed: true,
+            seeker_eligible,
+            wing_attackers,
+            terrain_blocked: false,
+            sensor_supported: false,
+            link_track: true,
+        })
+    }
+}
+
+/// What the world hands the AI before a step: the humans' locked targets
+/// (slice G2), in plane id order, and the pursuits of the assigned AI
+/// wingmen (slice G3b), in receiver order.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct LinkInput {
     pub humans: Vec<HumanEngagement>,
+    pub pursuits: Vec<Pursuit>,
+}
+
+impl LinkInput {
+    /// The pursuit of `receiver`, if the picture gives it one.
+    pub fn pursuit_of(&self, receiver: u32) -> Option<&Pursuit> {
+        self.pursuits.iter().find(|p| p.receiver == receiver)
+    }
 }
 
 /// One actor's row: who it is, its wing, and what it attacks.

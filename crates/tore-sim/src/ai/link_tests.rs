@@ -227,6 +227,7 @@ fn locks(pairs: &[(u32, u32)]) -> LinkInput {
             .iter()
             .map(|&(plane, target)| HumanEngagement { plane, target })
             .collect(),
+        ..LinkInput::default()
     }
 }
 
@@ -343,4 +344,253 @@ fn the_step_consumes_the_link_input() {
     ];
     mission.step(&world, &flat, TimeOfDay(0)).unwrap();
     assert_eq!(mission.link, LinkInput::default());
+}
+
+// Slice G3b: an assignment reaches the AI through the picture.
+
+use crate::ai::link::Pursuit;
+use crate::ai::wing::{TargetId, TargetOrder, WingRequest};
+
+const NM: f64 = crate::sensors::FEET_PER_NAUTICAL_MILE;
+
+/// 12 nm east and 20 nm north of the wingman: outside its radar.
+const AHEAD_FAR: [f64; 3] = [12. * NM, 20_000., 20. * NM];
+/// Dead ahead at 6,000 ft: well inside every weapon's envelope.
+const AHEAD_CLOSE: [f64; 3] = [0., 20_000., 6_000.];
+
+/// An aircraft of side 2 that no sensor of the mission can perceive.
+fn blind_bandit(actor: &AiActor, id: u32, position: [f64; 3]) -> WorldObject {
+    let mut bandit = tests::object(actor, 2);
+    bandit.id = id;
+    bandit.position = position;
+    bandit
+}
+
+fn pursuit(target: u32, position: [f64; 3], velocity: [f64; 3], observed: u64) -> Pursuit {
+    Pursuit {
+        receiver: 1,
+        target,
+        position,
+        velocity,
+        observed,
+    }
+}
+
+#[test]
+fn a_track_becomes_a_flagged_target_view_carried_forward_to_now() {
+    let actor = tests::perception_actor(crate::ai::Experience::Ace);
+    let bandit = blind_bandit(&actor, 2, [0.; 3]);
+    // Seen at tick 100 flying east at 600 ft/s, climbing 60 ft/s.
+    let track = pursuit(2, [1_000., 20_000., 5_000.], [600., 60., 0.], 100);
+    // Two seconds later (240 ticks at 120 Hz), the track has moved on.
+    let view = track.view(340, Side(1), &bandit, true, 1).unwrap();
+    assert_eq!(view.id, 2);
+    assert_eq!(view.side, Side(2));
+    assert_eq!(view.position, [2_200., 20_120., 5_000.]);
+    assert!((view.heading_deg - 90.).abs() < 1e-9, "{view:?}");
+    assert!(view.pitch_deg > 5. && view.pitch_deg < 6., "{view:?}");
+    assert!((view.speed.0 - 600.0f64.hypot(60.)).abs() < 1e-9);
+    assert!(view.link_track, "a link track is flagged");
+    assert!(view.valid && view.type_allowed && view.is_aircraft);
+    assert!(!view.sensor_supported && !view.terrain_blocked);
+    assert_eq!((view.seeker_eligible, view.wing_attackers), (true, 1));
+    // A report from the future is not carried backward.
+    let early = track.view(50, Side(1), &bandit, true, 0).unwrap();
+    assert_eq!(early.position, [1_000., 20_000., 5_000.]);
+}
+
+#[test]
+fn a_track_of_a_friend_a_wreck_or_another_aircraft_makes_no_view() {
+    let actor = tests::perception_actor(crate::ai::Experience::Ace);
+    let track = pursuit(2, [0.; 3], [0.; 3], 0);
+    let bandit = blind_bandit(&actor, 2, [0.; 3]);
+    assert!(track.view(0, Side(1), &bandit, true, 0).is_some());
+    // A friend of the receiver is no target.
+    assert!(track.view(0, Side(2), &bandit, true, 0).is_none());
+    // A different aircraft than the one assigned.
+    assert!(
+        track
+            .view(
+                0,
+                Side(1),
+                &WorldObject {
+                    id: 3,
+                    ..bandit.clone()
+                },
+                true,
+                0
+            )
+            .is_none()
+    );
+    // Destroyed, dead, or not an aircraft.
+    for broken in [
+        WorldObject {
+            destroyed: true,
+            ..bandit.clone()
+        },
+        WorldObject {
+            alive: false,
+            ..bandit.clone()
+        },
+        WorldObject {
+            is_aircraft: false,
+            ..bandit.clone()
+        },
+    ] {
+        assert!(track.view(0, Side(1), &broken, true, 0).is_none());
+    }
+}
+
+/// One ordered wingman (actor 1, ordered to attack aircraft 2) flown for
+/// `ticks` against a bandit at `bandit_at` that the mission's sensors never
+/// perceive, standing still. `track` says whether the
+/// picture reports it each tick. Returns the mission and what the last
+/// step's targets were, and whether it ever launched.
+fn flown_blind(
+    track: bool,
+    ticks: u64,
+    bandit_at: [f64; 3],
+) -> (AiMission, Vec<crate::ai::controller::TargetView>, bool) {
+    use tests::{enable_test_radar, flat, object, perception_actor};
+    let mut mission = AiMission::new();
+    let mut wingman = perception_actor(crate::ai::Experience::Ace);
+    enable_test_radar(&mut wingman);
+    mission.push(wingman);
+    let velocity = [0., 0., 0.];
+    let order = WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(2)));
+    mission.order(1, order).unwrap().unwrap();
+    let mut targets = Vec::new();
+    let mut launched = false;
+    for tick in 0..ticks {
+        let actor = mission.actor(1).unwrap();
+        let world = vec![object(actor, 1), blind_bandit(actor, 2, bandit_at)];
+        let mut input = LinkInput::default();
+        if track {
+            input.pursuits.push(pursuit(2, bandit_at, velocity, tick));
+        }
+        mission.set_link(input);
+        let out = mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
+        launched |= !out.launches.is_empty();
+        targets = mission.actor(1).unwrap().trace.targets.clone();
+    }
+    (mission, targets, launched)
+}
+
+#[test]
+fn an_assigned_wingman_flies_toward_a_track_it_cannot_see_and_does_not_fire() {
+    let (mission, targets, launched) = flown_blind(true, 3_000, AHEAD_FAR);
+    let actor = mission.actor(1).unwrap();
+    // It keeps the order's target, which its own sensors never held.
+    assert_eq!(actor.controller().target(), Some(2));
+    assert_eq!(actor.controller().ordered_target(), Some(2));
+    assert!(matches!(&targets[..], [view] if view.id == 2 && view.link_track));
+    // It turned from north toward the east-northeast track.
+    let position = actor.flight().position;
+    assert!(position[0] > 3_000., "flew toward the east: {position:?}");
+    assert!(position[2] > 10_000., "and closed: {position:?}");
+    // Nothing it holds locks or fires on a target only the link holds.
+    assert_eq!(link::lock_of(actor), None);
+    assert!(!launched, "it fired on a target only the link held");
+    // The link target is the actor's engagement, which the wing sees.
+    assert_eq!(link::engagement_of(actor), Some(2));
+}
+
+#[test]
+fn a_bandit_in_perfect_firing_position_is_never_fired_on_from_the_link_alone() {
+    // The control: the same bandit, seen by the wingman's radar, is fired on.
+    // Here the picture alone holds it, and the wingman holds the order's
+    // target, closes on it and never launches or locks.
+    let (mission, targets, launched) = flown_blind(true, 3_000, AHEAD_CLOSE);
+    let actor = mission.actor(1).unwrap();
+    assert!(!launched);
+    assert_eq!(link::lock_of(actor), None);
+    assert_eq!(actor.controller().target(), Some(2));
+    assert!(matches!(&targets[..], [view] if view.link_track));
+    assert!(
+        !matches!(
+            actor.controller().weapon_phase(),
+            crate::ai::weapon_service::Phase::Tracking | crate::ai::weapon_service::Phase::Fire
+        ),
+        "{:?}",
+        actor.controller().weapon_phase()
+    );
+}
+
+#[test]
+fn without_a_track_the_order_is_lost_as_it_was_before() {
+    let (mission, targets, launched) = flown_blind(false, 600, AHEAD_FAR);
+    assert!(!launched);
+    let actor = mission.actor(1).unwrap();
+    assert_eq!(actor.controller().target(), None);
+    assert!(targets.is_empty());
+    assert!(actor.flight().position[0].abs() < 3_000.);
+}
+
+#[test]
+fn a_track_for_an_aircraft_the_order_did_not_name_is_not_flown() {
+    use tests::{enable_test_radar, flat, object, perception_actor};
+    let mut mission = AiMission::new();
+    let mut wingman = perception_actor(crate::ai::Experience::Ace);
+    enable_test_radar(&mut wingman);
+    mission.push(wingman);
+    // No order at all: the picture's assignment alone moves nothing.
+    for tick in 0..60 {
+        let actor = mission.actor(1).unwrap();
+        let world = vec![
+            object(actor, 1),
+            blind_bandit(actor, 2, [12. * NM, 20_000., 20. * NM]),
+        ];
+        mission.set_link(LinkInput {
+            pursuits: vec![pursuit(2, [12. * NM, 20_000., 20. * NM], [0.; 3], tick)],
+            ..LinkInput::default()
+        });
+        mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
+    }
+    let actor = mission.actor(1).unwrap();
+    assert_eq!(actor.controller().target(), None);
+    assert!(actor.trace.targets.is_empty());
+}
+
+#[test]
+fn once_its_own_sensors_hold_the_target_the_wingman_fires_on_it_itself() {
+    use tests::{enable_test_radar, flat, object, perception_actor, visible_object};
+    let mut mission = AiMission::new();
+    let mut wingman = perception_actor(crate::ai::Experience::Ace);
+    enable_test_radar(&mut wingman);
+    mission.push(wingman);
+    let order = WingRequest::TargetAssignment(TargetOrder::ConcreteTarget(TargetId(2)));
+    mission.order(1, order).unwrap().unwrap();
+    let ahead = [0., 20_000., 6_000.];
+    let mut views = Vec::new();
+    let mut launched = false;
+    for tick in 0..3_000 {
+        let actor = mission.actor(1).unwrap();
+        // The bandit sits in the wingman's radar, and the picture reports it too.
+        let world = vec![object(actor, 1), visible_object(actor, 2, ahead)];
+        mission.set_link(LinkInput {
+            pursuits: vec![pursuit(2, ahead, [0.; 3], tick)],
+            ..LinkInput::default()
+        });
+        let out = mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
+        launched |= !out.launches.is_empty();
+        views.extend(
+            mission
+                .actor(1)
+                .unwrap()
+                .trace
+                .targets
+                .iter()
+                .filter(|t| t.id == 2)
+                .map(|t| t.link_track),
+        );
+    }
+    assert!(!views.is_empty(), "the wingman perceived the bandit");
+    assert!(
+        views.iter().all(|link| !link),
+        "its own observation replaces the link track"
+    );
+    assert!(
+        launched,
+        "and an aircraft that holds the target itself fires"
+    );
 }

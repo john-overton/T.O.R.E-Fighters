@@ -270,6 +270,20 @@ impl AiWings {
         self.mission.set_priority_landing(id, airport);
     }
 
+    /// Blind every AI member of the wing the human-flown aircraft `human`
+    /// flies in: no radar, infrared or eyes, so that only the flight data link
+    /// shows them an enemy. A harness for the probe's `--probe-blind-wing`.
+    pub fn blind_wingmen(&mut self, human: u32) {
+        let Some(wing) = self.wing_of(human) else {
+            return;
+        };
+        for actor in self.mission.actors_mut() {
+            if (actor.identity().side, actor.identity().wing) == wing {
+                actor.blind();
+            }
+        }
+    }
+
     /// The wing (side and index) a human-flown aircraft belongs to.
     fn wing_of(&self, human: u32) -> Option<(Side, u8)> {
         self.humans
@@ -369,6 +383,26 @@ impl AiWings {
         recipient: Option<u8>,
         site: Option<&LandingSite>,
         flight: Option<u8>,
+    ) -> WorldResult<OrderReport> {
+        self.command_linked(sender, order, selected, recipient, site, flight, &|_| false)
+    }
+
+    /// [`Self::command_called`] with what the flight data link knows (slice
+    /// G3b): `tracked` says whether a flightmate's track of an aircraft is in
+    /// the picture. An Engage order is then taken by a wingman whose own
+    /// sensors do not hold the target, which it flies toward on the track
+    /// until they do; with no track either, it still answers "cannot see the
+    /// target". Every other order that needs a target keeps that refusal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn command_linked(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+        flight: Option<u8>,
+        tracked: &dyn Fn(u32) -> bool,
     ) -> WorldResult<OrderReport> {
         if matches!(order, PlayerOrder::BugOut | PlayerOrder::LandAtSelected) {
             return self.command_landing(sender, order, recipient, site);
@@ -523,7 +557,12 @@ impl AiWings {
             if wing_sender.is_none() {
                 wing_sender = Some(sender_stem(order, horizontal, vertical, control));
             }
+            let by_link = matches!(
+                order,
+                PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation
+            ) && target.is_some_and(tracked);
             if needs_target
+                && !by_link
                 && actor.sensors().is_some_and(|s| {
                     !s.contacts().iter().any(|c| Some(c.id) == target)
                         && !s.visual().iter().any(|c| Some(c.id) == target)
@@ -1867,6 +1906,99 @@ mod landing_tests {
                 .to_string()
                 .contains("rejected: its sensors cannot see the target")
         );
+    }
+
+    /// A flight of two wingmen whose sensors perceive nothing, so no target is
+    /// ever seen by them.
+    fn blind_wings() -> AiWings {
+        let mut selections = super::super::tests::payload(None);
+        selections[0].wing.index = 0;
+        let blind = sensors::SensorProfiles {
+            aircraft: AircraftId::F18,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: sensors::SignatureProfile::default(),
+        };
+        AiWings::build_with(&selections, &super::super::tests::spawned(), 0, |_| {
+            Ok((super::super::tests::aircraft(), Some(blind.clone())))
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_wingman_that_cannot_see_the_target_takes_an_engage_order_a_flightmate_tracks() {
+        // Slice G3b: the picture holds a track of aircraft 3, so both blind
+        // wingmen take the order and are named as reached; the order sets
+        // their target as it does for any wingman.
+        for order in [
+            PlayerOrder::EngageMyTarget,
+            PlayerOrder::EngageFromFormation,
+        ] {
+            let mut wings = blind_wings();
+            let report = wings
+                .command_linked(PLAYER_ID, order, Some(3), None, None, None, &|id| id == 3)
+                .unwrap();
+            assert_eq!(report.reached, [1, 2], "{order:?}");
+            assert_eq!(report.target, Some(3));
+            for id in [1, 2] {
+                let controller = wings.mission().actor(id).unwrap().controller();
+                assert_eq!(controller.target(), Some(3));
+                assert_eq!(controller.ordered_target(), Some(3));
+            }
+            let entry = order_entry(&mut wings);
+            let (answers, reply) = answered(&entry);
+            assert_eq!(answers, [(1, 1, "applied"), (2, 2, "applied")]);
+            assert_eq!(
+                reply,
+                Reply::Replied {
+                    by: 1,
+                    reply: WingReply::Engage { aircraft: true }
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn a_track_of_another_aircraft_or_another_order_keeps_the_refusal() {
+        // The picture tracks aircraft 4, not the order's 3.
+        let mut wings = blind_wings();
+        let report = wings
+            .command_linked(
+                PLAYER_ID,
+                PlayerOrder::EngageMyTarget,
+                Some(3),
+                None,
+                None,
+                None,
+                &|id| id == 4,
+            )
+            .unwrap();
+        assert!(report.reached.is_empty());
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, .. } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert!(
+            answers
+                .iter()
+                .all(|a| a.result == Answered::CannotSeeTarget)
+        );
+        // An approach flies on its own target's observation: the track does
+        // not stand in for it.
+        let mut wings = blind_wings();
+        let approach = PlayerOrder::Approach(wing::PlayerApproach::Left);
+        let report = wings
+            .command_linked(PLAYER_ID, approach, Some(3), None, None, None, &|_| true)
+            .unwrap();
+        assert!(report.reached.is_empty());
+        // And `command_called`, which knows no picture, refuses as before.
+        let mut wings = blind_wings();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        assert!(report.reached.is_empty());
     }
 
     #[test]

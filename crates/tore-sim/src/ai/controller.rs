@@ -209,6 +209,11 @@ pub struct TargetView {
     /// Terrain blocks the firing path.
     pub terrain_blocked: bool,
     pub sensor_supported: bool,
+    /// The view is built from a flightmate's track in the flight data link,
+    /// not from this actor's own sensors (slice G3b). The actor may fly toward
+    /// it and keep it as its target, but never fires on it: a launch needs a
+    /// target the actor holds itself.
+    pub link_track: bool,
 }
 
 /// A frozen aircraft observation that may be investigated but never attacked.
@@ -1045,6 +1050,16 @@ impl Controller {
         self.target
     }
 
+    /// The aircraft a lead's order told this actor to attack, while that order
+    /// stands (the concrete target of its latest target order). The flight
+    /// data link's pursuit applies only to this target (slice G3b).
+    pub fn ordered_target(&self) -> Option<u32> {
+        match self.recipient.target_order {
+            Some(wing::TargetOrder::ConcreteTarget(id)) => Some(id.0),
+            _ => None,
+        }
+    }
+
     pub fn reason(&self) -> Option<ScriptReason> {
         self.reason
     }
@@ -1203,7 +1218,16 @@ impl Controller {
         self.trace.0.geometry = geometry;
 
         // 4. Weapons, on the service's own clock (B42, B45).
-        let has_firing_solution = self.weapons(frame, view, geometry.as_ref(), &mut batch)?;
+        // A target known only from the flight data link is flown toward and
+        // never fired on: the weapons see no target until this actor's own
+        // sensors hold it (slice G3b).
+        let own_view = view.filter(|t| !t.link_track);
+        let has_firing_solution = self.weapons(
+            frame,
+            own_view,
+            geometry.as_ref().filter(|_| own_view.is_some()),
+            &mut batch,
+        )?;
 
         // 5. Wing requests (B43).
         self.wing_requests(frame, &mut batch);
@@ -3601,6 +3625,7 @@ mod tests {
             wing_attackers: 0,
             terrain_blocked: false,
             sensor_supported: true,
+            link_track: false,
         }
     }
 

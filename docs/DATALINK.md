@@ -245,10 +245,18 @@ acknowledged: the cues stop blinking.
   (20,000 ft when two others already attack it), so it takes another bandit if
   one is nearly as close. A bandit the wingman already attacks and is within
   20,000 ft stays its target, as before.
-- **Taking an assignment.** The wingman gets the target itself. If its
-  own sensors do not hold the target, but a flightmate's track does, it
-  flies toward the track until its own radar or eyes find it. Today it refuses
-  such an order ("cannot see the target").
+- **Taking an assignment: built (slice G3b, 2026-10-05).** The wingman gets
+  the target itself. If its own sensors do not hold the target, but a
+  flightmate's track does, it takes the order anyway, keeps the target and
+  flies toward the track (carried forward at the track's velocity) until its
+  own radar or eyes find it. It never launches or locks on what only the link
+  holds: it fires only on a target it holds itself. The link covers the two
+  Engage orders; Approach still needs the wingman's own sensors. When neither
+  the wingman nor the picture holds the aircraft (the picture's tracks are
+  four a second, so an order in the first quarter second of a contact), it
+  answers "cannot see the target" as before. The track is the freshest one any
+  member of the side reports; if no member reports it any more, the wingman
+  falls back to choosing a target as it would without the order.
 - **An AI lead assigns.** Under loose control an AI lead shares its target
   with wingmen in formation, up to two attackers on one bandit. That is the
   retail rule ([wing control](spec/ai.md#b43-wing-commands-and-formation-variation)
@@ -320,8 +328,8 @@ before the merge. In order:
    away from the player's bandit.
 2. The player's Engage my target and Engage from formation say the
    assignment call instead of "Attack".
-3. Wingmen take assignments by link: they pursue a target only a
-   flightmate's track holds, where today they refuse it.
+3. Wingmen take assignments by link (built, G3b): they pursue a target only a
+   flightmate's track holds, where they used to refuse it.
 4. AI leads share and sort, and AI members move off a bandit when the
    sort warning fires.
 5. The cues are drawn (built, G6): the flightmates' lock numbers, the tags and the sort warning show in a flight with AI wingmen; the assignment cues wait for the lead's assignments (G3a).

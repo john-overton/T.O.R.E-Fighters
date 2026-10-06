@@ -1558,8 +1558,10 @@ impl AiWings {
     /// Hand the AI what the flight data link holds for the next step, as
     /// [`Self::step`]'s humans are handed over: the humans' locked targets
     /// (slice G2), which its engagement table counts as attacks on the wing's
-    /// behalf. The step consumes them, so the world sets them before every
-    /// step, after combat has read the sensors.
+    /// behalf, and the tracks assigned wingmen fly toward while their own
+    /// sensors do not hold the aircraft they were sent after (slice G3b). The
+    /// step consumes them, so the world sets them before every step, after
+    /// combat has read the sensors.
     pub fn set_link(&mut self, link: &crate::datalink::DataLink) {
         self.mission.set_link(tore_sim::ai::link::LinkInput {
             humans: link
@@ -1570,6 +1572,7 @@ impl AiWings {
                     target: e.target,
                 })
                 .collect(),
+            pursuits: link.pursuits(),
         });
     }
 
@@ -3654,6 +3657,7 @@ mod tests {
             wing_attackers: 0,
             terrain_blocked: false,
             sensor_supported: true,
+            link_track: false,
         };
         for candidate in [
             contact(3, [1000., 20000., 0.]),

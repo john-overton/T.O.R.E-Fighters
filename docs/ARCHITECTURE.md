@@ -2043,8 +2043,8 @@ combat, the AI bridge, the debrief and the recorder.
 Design for stage G of the [multiplayer plan](multiplayer-plan.md#stages),
 written on 2026-10-05. Slices G0 (the radar table and the picture), G1 (the
 engagement table), G3a (assignments and their calls), G2 (humans in the
-table) and G6 (the cues) are built; the AI reads the picture only for the humans' locked
-targets so far, and the rest is not built ([the slice table](#how-stage-g-lands) marks each slice that is). What the player sees and
+table), G6 (the cues) and G3b (assignments reach the AI) are built; the AI reads the picture only for the humans' locked
+targets and for the track of an assigned target so far, and the rest is not built ([the slice table](#how-stage-g-lands) marks each slice that is). What the player sees and
 hears, who shares what and the numbers are in the guide,
 [DATALINK.md](DATALINK.md); the bytes
 are in the [wire protocol](formats/net-protocol.md#data-link-stage-g). Every
@@ -2114,8 +2114,9 @@ Surveyed at `884f9916` on `multiplayer`. Line numbers are indicative.
 - **Orders.** `World::wing_order` (`world/commands.rs`, about line 255) calls
   `AiWings::command_at` (`ai_wings/orders.rs`, about line 342), which turns
   Engage my target and Engage from formation into
-  `TargetOrder::ConcreteTarget` and refuses a wingman whose own sensors lack
-  the target (`Answered::CannotSeeTarget`, about line 512). The sender's call
+  `TargetOrder::ConcreteTarget` and refused a wingman whose own sensors lack
+  the target (`Answered::CannotSeeTarget`, about line 512; since slice G3b it
+  takes the two Engage orders when the picture holds a track of the target). The sender's call
   was one stem, `^ATTACK` (`sender_stem`, about line 967), played at once as
   `Cue::OrderVoice`, which cuts off wing lines and holds the channel; since
   slice G3a it is the assignment call (below) and the order feeds
@@ -2261,7 +2262,7 @@ link, and it was built that way on John's decision of 2026-09-30.
 | Read | Today | After stage G | Slice |
 | --- | --- | --- | --- |
 | Who else attacks a candidate | Same-wing AI controllers, live | The engagement table, with the flight's humans' locked targets added at the start of the step | G1 (same result), G2 (humans, built) |
-| An assigned target the wingman cannot see | Refused, "cannot see the target" | Accepted, flown toward the freshest track in the picture until its own sensors hold it | G3b |
+| An assigned target the wingman cannot see | Refused, "cannot see the target" | Accepted, flown toward the freshest track in the picture until its own sensors hold it | G3b (built) |
 | A lead's share | Not connected | B43's loose-control share, through the picture, voiced | G4 |
 | Several bandits at the merge | Each wingman ranks on its own | An AI lead sorts; AI members yield on a sort warning | G4 |
 | Wingmen's state | Not read | An AI lead skips Winchester, bingo and heavily damaged wingmen | G4 |
@@ -2271,11 +2272,17 @@ wingmen: the spoken bearing, range and height turned back into a point to
 search, with a match radius, a 60-second deadline and a "Tally Ho" reply. With
 no tiers every wingman takes the target, so nothing needs it.
 
-**A track pursuit**: the controller's target is the assigned id, and
+**A track pursuit (built, G3b)**: the controller's target is the assigned id, and
 while its own awareness lacks that id the frame's target view is built from
 the freshest track in `LinkInput` (position, velocity, `observed`
 tick, flagged as a link track so weapons never fire on it: a launch still
-needs the actor's own lock).
+needs the actor's own lock). `LinkInput::pursuits` holds one `Pursuit` for each
+AI wingman whose assignment the picture holds a track for; `AiMission::step_actor`
+turns it into a `TargetView` with `link_track: true` (the track carried forward
+to the tick at its own velocity) and adds it to the targets the engagement
+policy and the controller choose from, so the order's target is kept like any
+seen target. The controller's weapons see no target for a link view, and
+everything that reads the actor's own sensors keeps the observed targets only.
 
 ### Assignments
 
@@ -2434,7 +2441,7 @@ by the slice that adds them, in the coder beside the owner:
 | `tore_world::datalink::DataLink` | `members` (with `alive`), `pictures` (each flight's publish tick, tracks and member status), `locks`, `engaged`, `assignments` (by receiver: target, giver, tick, the `PlayerOrder` and `acknowledged`), `warned`, `seat_warned`. The journal is write-only and local, like the communication journal: whatever H decides for that one applies |
 | `tore_world::comms` | Each seat's `Channel::battle`; `Call::net` on every queued call |
 | `tore_sim::ai::AiMission` | `sort_clock` (each flight's last sort tick); the link input set at the start of the step (rebuilt by `before_ai` each tick, so H may rebuild it rather than code it) |
-| `tore_sim::ai` actor and controller | The track pursuit flag; each actor's yield list (target, until tick) |
+| `tore_sim::ai` actor and controller | The track pursuit flag (built, G3b: `TargetView::link_track`, coded with the view; the pursuit itself is per-step scratch like the rest of `LinkInput`); each actor's yield list (target, until tick) |
 | Not state | The radar table (from the aircraft type); the engagement table (rebuilt from the controllers at the start of each decision loop, with the humans' locks from `AiMission::set_link`, which the step consumes: slice G2 skips it in the coder); the per-seat views and the readout |
 
 No new random stream exists, so H has none to add.

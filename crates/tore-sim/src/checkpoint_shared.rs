@@ -257,6 +257,7 @@ crate::checkpoint_struct!(TargetView {
     wing_attackers,
     terrain_blocked,
     sensor_supported,
+    link_track,
 });
 
 crate::checkpoint_struct!(ThreatReport {

@@ -303,6 +303,43 @@ def datalink_assign_check(plane: int, target: int, lead: int, cleared_by_order_a
     return check
 
 
+def datalink_order_link_check(wingman: int, target: int, lead: int) -> Callable[[str], list[str]]:
+    """An assignment reaches an AI wingman through the picture (slice G3b): the
+    wingman has no sensors of its own (`--probe-blind-wing`), the player's lock
+    puts the bandit in the flight's picture, and the lead's Engage my target is
+    taken (the assignment line) where it used to answer "cannot see the target".
+    The wingman then flies after the track, acquiring, and, never holding the
+    bandit itself, never locks it and never fires."""
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output)
+        assigned = [
+            (int(who), int(aimed), int(by))
+            for _, kind, who, aimed, by, order, _ in ASSIGNMENT_LINE.findall(output)
+            if kind == "assign" and order == "EngageMyTarget"
+        ]
+        if (wingman, target, lead) not in assigned:
+            problems.append(f"no assignment of target {target} to blind plane {wingman} by plane {lead}")
+        if re.search(r"order=\S+ reply=.*[1-9]\d* rejected", output):
+            problems.append("the order was rejected: " + (re.search(r"order=\S+ reply=.*", output).group(0)[:120]))
+        locks = [t for t, kind, plane, _, _ in DATALINK_LINE.findall(output) if kind == "lock" and int(plane) == wingman]
+        if locks:
+            problems.append(f"the blind wingman {wingman} locked something at t={locks[0]}")
+        shots = re.search(r"AI probe totals: .*?shots=(\d+)", output)
+        if not shots or shots.group(1) != "0":
+            problems.append(f"shots fired: {shots.group(1) if shots else 'unknown'}")
+        activity = None
+        for raw in output.splitlines():
+            m = ACTOR.match(raw)
+            if m and m.group(1) == str(wingman):
+                activity = m.group(4)
+        if activity not in ("Acquiring", "Pursuing"):
+            problems.append(f"blind wingman {wingman} ends '{activity}', not on the track")
+        return problems
+
+    return check
+
+
 def datalink_picture_check(planes: int, designated: int) -> Callable[[str], list[str]]:
     """The flight data link's picture, as the probe prints it (`data link:`
     lines, from `--probe-player-lock` and `--probe-data-link`): every plane is
@@ -634,6 +671,17 @@ def scenarios() -> list[Scenario]:
                      expect=[r"data link: assign plane=1 target=4 by=0 order=EngageMyTarget",
                              r"data link: clear plane=1 target=4 why=order"],
                      check=datalink_assign_check(plane=1, target=4, lead=0, cleared_by_order_at=900)))
+
+    # 9c2. Assignments reach the AI (stage G3b): the first wingman has no
+    # sensors of its own, so the player's lock puts the bandit in the picture
+    # and the wingman takes the order on a flightmate's track, flies after it
+    # and never fires on what only the link holds.
+    out.append(probe("datalink-order-link", ["--probe-wing-size", "2", "--separation", "50", "--probe-blind-wing",
+                                             "--probe-player-lock", "100:4",
+                                             "--probe-wing-order", "400:engage-my-target@1"], ticks=2400,
+                     expect=[r"data link: assign plane=1 target=4 by=0 order=EngageMyTarget",
+                             r'order=EngageMyTarget reply="Engage my target: 1 applied, 0 rejected'],
+                     check=datalink_order_link_check(wingman=1, target=4, lead=0)))
 
     # 9d. Humans in the engagement table (stage G2): the player locks one bandit of
     # a pair 20 nm out, and its wingman, ordered to attack once the lock is held,

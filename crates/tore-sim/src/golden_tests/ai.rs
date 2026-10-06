@@ -746,6 +746,7 @@ fn target_view(id: u32, side: u32, position: [f64; 3]) -> TargetView {
         wing_attackers: 0,
         terrain_blocked: false,
         sensor_supported: true,
+        link_track: false,
     }
 }
 

@@ -407,6 +407,7 @@ mod tests {
             wing_attackers: 0,
             terrain_blocked: false,
             sensor_supported: true,
+            link_track: false,
         }
     }
 

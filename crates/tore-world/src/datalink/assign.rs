@@ -18,12 +18,15 @@
 //! the assignment acknowledged.
 //!
 //! Delivery is not here: the AI still gets the target through
-//! `TargetOrder::ConcreteTarget` (slice G3b widens it), and the call is worded
-//! by [`calls`](super::calls).
+//! `TargetOrder::ConcreteTarget`, and the call is worded by
+//! [`calls`](super::calls). Slice G3b adds the picture's side of delivery: a
+//! wingman that cannot see its assigned aircraft is given the freshest track
+//! a flightmate reports of it ([`DataLink::pursuits`]), and an order is taken
+//! when the picture holds a track of its target ([`DataLink::tracked`]).
 
-use super::{Assignment, DataLink, Entry};
+use super::{Assignment, DataLink, Entry, Track};
 use crate::ai_wings::{AiWings, ENEMY_SIDE, FRIENDLY_SIDE};
-use tore_sim::ai::{launch::Side, wing::PlayerOrder};
+use tore_sim::ai::{launch::Side, link::Pursuit, wing::PlayerOrder};
 
 /// Why an assignment ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,6 +124,50 @@ impl DataLink {
     /// The assignment `plane` holds.
     pub fn assignment(&self, plane: u32) -> Option<Assignment> {
         self.assignments.get(&plane).copied()
+    }
+
+    /// The freshest track of `target` in the published pictures of `side`'s
+    /// flights: the latest observation wins, and a tie keeps the flight that
+    /// comes first (friendly flights by wing number).
+    pub fn track_on(&self, side: Side, target: u32) -> Option<Track> {
+        let mut best: Option<Track> = None;
+        for picture in self.pictures.iter().filter(|p| p.flight.side == side) {
+            for track in picture.tracks.iter().filter(|t| t.target == target) {
+                if best.is_none_or(|old| track.observed > old.observed) {
+                    best = Some(*track);
+                }
+            }
+        }
+        best
+    }
+
+    /// Whether the pictures of the side of the flight `sender` flies in hold
+    /// a track of `target`: a flightmate reports the aircraft, so a wingman
+    /// that cannot see it may still be sent after it (slice G3b).
+    pub fn tracked(&self, sender: u32, target: u32) -> bool {
+        self.member(sender)
+            .is_some_and(|m| self.track_on(m.flight.side, target).is_some())
+    }
+
+    /// What each assigned AI wingman flies toward while its own sensors do
+    /// not hold its assigned aircraft: the freshest track of the aircraft in
+    /// the pictures of the wingman's side, in receiver order. An assignment
+    /// the picture holds no track for gives its wingman nothing to fly by.
+    pub fn pursuits(&self) -> Vec<Pursuit> {
+        self.assignments
+            .iter()
+            .filter_map(|(&receiver, assignment)| {
+                let member = self.member(receiver).filter(|m| m.alive && !m.human)?;
+                let track = self.track_on(member.flight.side, assignment.target)?;
+                Some(Pursuit {
+                    receiver,
+                    target: assignment.target,
+                    position: track.position,
+                    velocity: track.velocity,
+                    observed: track.observed,
+                })
+            })
+            .collect()
     }
 
     /// Ends `plane`'s assignment, if it has one, and journals why.
@@ -451,5 +498,107 @@ mod tests {
         // A fresh assignment starts unacknowledged again.
         engage(&mut link, 6, &[1], 10);
         assert!(!link.assignment(1).unwrap().acknowledged);
+    }
+
+    // Slice G3b: the picture's side of an assignment reaching the AI.
+
+    fn track(reporter: u32, target: u32, observed: u64, position: [f64; 3]) -> Track {
+        Track {
+            reporter,
+            target,
+            position,
+            velocity: [10., 0., 0.],
+            channel: tore_sim::sensors::Channel::Radar,
+            observed,
+        }
+    }
+
+    fn picture(flight: WingId, tracks: Vec<Track>) -> crate::datalink::FlightPicture {
+        crate::datalink::FlightPicture {
+            flight,
+            tick: 90,
+            tracks,
+            status: Vec::new(),
+        }
+    }
+
+    /// The friendly flight's picture holds target 10, seen by plane 0 at tick
+    /// 60 and by plane 2 at tick 90 (the fresher report); the enemy flight's
+    /// picture holds a track of friendly plane 1.
+    fn pictured() -> DataLink {
+        let mut link = link();
+        link.pictures = vec![
+            picture(
+                FLIGHT,
+                vec![
+                    track(0, 10, 60, [1., 2., 3.]),
+                    track(2, 10, 90, [4., 5., 6.]),
+                ],
+            ),
+            picture(ENEMY, vec![track(10, 1, 90, [7., 8., 9.])]),
+        ];
+        link
+    }
+
+    #[test]
+    fn the_freshest_track_of_an_aircraft_in_the_sides_pictures_is_the_one_flown() {
+        let link = pictured();
+        let fresh = link.track_on(Side::Friendly, 10).unwrap();
+        assert_eq!((fresh.reporter, fresh.observed), (2, 90));
+        // Only the side's own pictures count: friendly plane 1 is the enemy's
+        // track, not the friendly flight's.
+        assert!(link.track_on(Side::Friendly, 1).is_none());
+        assert!(link.track_on(Side::Enemy, 1).is_some());
+        assert!(link.track_on(Side::Friendly, 11).is_none());
+    }
+
+    #[test]
+    fn an_order_is_taken_on_a_flightmates_track_of_its_target() {
+        let link = pictured();
+        assert!(link.tracked(0, 10), "the lead's side holds the track");
+        assert!(!link.tracked(0, 11), "nobody tracks 11");
+        assert!(!link.tracked(99, 10), "an unknown sender");
+        // The enemy lead is on the other side, and its picture does not hold 10.
+        assert!(!link.tracked(10, 10));
+    }
+
+    #[test]
+    fn an_assigned_ai_wingman_is_given_the_freshest_track_of_its_target() {
+        let mut link = pictured();
+        engage(&mut link, 91, &[1, 2], 10);
+        let pursuits = link.pursuits();
+        assert_eq!(pursuits.len(), 2);
+        for (pursuit, receiver) in pursuits.iter().zip([1, 2]) {
+            assert_eq!(pursuit.receiver, receiver);
+            assert_eq!(pursuit.target, 10);
+            assert_eq!(pursuit.position, [4., 5., 6.]);
+            assert_eq!(pursuit.velocity, [10., 0., 0.]);
+            assert_eq!(pursuit.observed, 90);
+        }
+    }
+
+    #[test]
+    fn no_track_dead_receivers_and_humans_get_no_pursuit() {
+        let mut link = pictured();
+        // Plane 11 is tracked by nobody: its assignment gives nothing to fly by.
+        engage(&mut link, 91, &[1], 11);
+        assert!(link.pursuits().is_empty());
+        // A human receiver gets the cues, not a pursuit.
+        engage(&mut link, 91, &[1], 10);
+        link.assignments.insert(
+            0,
+            Assignment {
+                target: 10,
+                by: 2,
+                tick: 91,
+                order: PlayerOrder::EngageMyTarget,
+                acknowledged: false,
+            },
+        );
+        let planes: Vec<u32> = link.pursuits().iter().map(|p| p.receiver).collect();
+        assert_eq!(planes, [1]);
+        // A dead receiver gets none.
+        link.members[1].alive = false;
+        assert!(link.pursuits().is_empty());
     }
 }
