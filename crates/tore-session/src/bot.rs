@@ -712,6 +712,9 @@ pub struct Bot {
     pub link_heard: Vec<String>,
     /// The readout's assignment last seen, for its changes.
     link_assigned: Option<tore_world::readout::LinkAssigned>,
+    /// The flightmates' assignments the readout's marks last showed, by
+    /// bandit (a mask of member numbers), for their changes.
+    link_marked: std::collections::BTreeMap<u32, u16>,
 }
 
 /// A data link change in words, for `tore-bot` to print (slice G7).
@@ -780,6 +783,7 @@ impl Bot {
             lines_read: Vec::new(),
             link_heard: Vec::new(),
             link_assigned: None,
+            link_marked: Default::default(),
         }
     }
 
@@ -831,6 +835,29 @@ impl Bot {
                 None => "assigned: none".into(),
             });
             self.link_assigned = assigned;
+        }
+        // The flightmates' assignments as the readout marks them.
+        if let Some(readout) = &frame.readout {
+            let marked: std::collections::BTreeMap<u32, u16> = readout
+                .link
+                .marks
+                .iter()
+                .filter(|mark| mark.assigned_to != 0)
+                .map(|mark| (mark.target, mark.assigned_to))
+                .collect();
+            for (target, mask) in &marked {
+                if self.link_marked.get(target) != Some(mask) {
+                    let numbers: Vec<String> = tore_world::readout::LinkMark::numbers(*mask)
+                        .iter()
+                        .map(u8::to_string)
+                        .collect();
+                    self.link_heard.push(format!(
+                        "marked: bandit {target} assigned to {}",
+                        numbers.join(", ")
+                    ));
+                }
+            }
+            self.link_marked = marked;
         }
         for list in [
             &mut self.radio_heard,

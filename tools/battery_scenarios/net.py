@@ -710,6 +710,34 @@ def drive_datalink(d: Drive) -> None:
     server.forbid(NET_BAD, "a network problem")
 
 
+def drive_datalink_lead(d: Drive) -> None:
+    """An AI lead's data link work reaching a human wingman over the wire (slices G4 and G7): one bot flies plane 1
+    of the guide's mission, weapons free, so the AI leads plane 0 and flies planes 2 and 3. Once the AI lead commits
+    it sorts or shares, giving its AI wingmen bandits (an AI lead never moves a human). The bot hears the assignment as
+    a Link event about its flight, its readout marks the bandit as that flightmate's, and it hears the lead's call."""
+    port = d.port()
+    server = start_server(d, port, guide_mission())
+    wing = start_bots(d, port, "wing", 45, "--callsign", "Wing", "--slot", "1")
+    wing.finish(120, 0)
+    server.finish(40, 0)
+    wing.expect(r"^Wing: seat \d+, plane 1, at tick \d+$", "the bot flies plane 1")
+    given = r"^Wing: link: plane 0 assigned plane ([23]) bandit (\d+) \((Sort|EngageMyTarget)\)$"
+    m = re.search(given, wing.text(), re.M)
+    if not m:
+        d.problem(f"wing: missing the AI lead's assignment as a Link event /{given}/")
+    else:
+        member = int(m.group(1)) + 1
+        wing.expect(
+            rf"^Wing: link: marked: bandit {m.group(2)} assigned to (\d+, )*{member}\b",
+            "the readout's mark for the flightmate's bandit",
+        )
+        wing.expect(rf"^Wing: radio: Red one: '{['Three', 'Four'][member - 3]}, attack bandit", "the AI lead's call")
+    wing.forbid(r"^Wing: link: assigned: bandit", "an AI lead's assignment to a human")
+    wing.forbid(r"^Wing: link: plane ([4-9]|\d\d+) ", "a Link event about another flight")
+    wing.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
 def away_problems(text: str, name: str, plane: int) -> list[str]:
     """What a `tore-bot --away` printed (slice F2-A): seated in `plane`, the AI took it and kept it while the bot
     watched it, the bot asked for it back and was seated in it again, in that order."""
@@ -1598,6 +1626,12 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             notes="a lead bot sorts its wing and the wingman bot, a human, is given a bandit by data link: the Link "
             "event, its readout's assignment and the call reach it over the wire (slice G7)",
+        ),
+        Scenario(
+            name="net-server-datalink-lead", lane="net", args=[], driver=drive_datalink_lead,
+            uses=("server", "bot"), timeout=200,
+            notes="a bot flies under an AI lead, weapons free: the lead's assignments to its AI wingmen reach the "
+            "bot as Link events, readout marks and the call (slices G4 and G7)",
         ),
         Scenario(
             name="net-server-away", lane="net", args=[], driver=drive_away, uses=("server", "bot"), timeout=200,

@@ -97,7 +97,9 @@
 //! link. Every bot prints the data link's changes about its flight that the
 //! host sent ("Bot: link: plane 0 assigned plane 1 bandit 7 (Sort)") and
 //! each change of its own assignment in its readout ("Bot: link: assigned:
-//! bandit 7 by plane 0").
+//! bandit 7 by plane 0") and of its flightmates' assignments in its readout's
+//! marks ("Bot: link: marked: bandit 7 assigned to 3", member numbers from
+//! one).
 //!
 //! Stage L (docs/ARCHITECTURE.md, "Compatibility"): each bot sends the
 //! content of its import when it joins, and prints the host's gaps whenever
