@@ -227,7 +227,7 @@ fn the_choices_match_their_values() {
 }
 
 #[test]
-fn setting_21_is_the_host_calculated_until_slice_k6_builds_the_pin() {
+fn setting_21_is_the_host_calculated_or_a_pinned_player() {
     let host = super::setting(number::HOST).unwrap();
     assert_eq!(host.name, "host");
     assert_eq!(host.text(0), "calculated");
@@ -236,15 +236,10 @@ fn setting_21_is_the_host_calculated_until_slice_k6_builds_the_pin() {
     let mut store = Store::defaults(Mode::Pvp);
     assert_eq!(store.pinned_host(), None);
     assert!(store.lobby_list().contains(&(number::HOST, 0)));
-    // A pin is refused in words until it is built; calculated is taken.
-    assert_eq!(
-        refusal(number::HOST, 4),
-        Some(crate::host::NOT_AVAILABLE.to_owned())
-    );
-    assert_eq!(
-        store.apply(&[(number::HOST, 4)]),
-        Err("Not available yet.".into())
-    );
+    // The registry takes a pin (the host checks the player, slice K6).
+    assert_eq!(refusal(number::HOST, 4), None);
+    assert_eq!(store.apply(&[(number::HOST, 4)]), Ok(()));
+    assert_eq!(store.pinned_host(), Some(3));
     assert_eq!(store.apply(&[(number::HOST, 0)]), Ok(()));
     assert!(refusal(number::HOST, 257).is_some_and(|why| why.starts_with("host is")));
 }

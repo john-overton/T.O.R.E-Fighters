@@ -941,6 +941,7 @@ impl Host {
         }
         // Stage F phase 2: a crowned server left empty goes back to its file.
         self.king_update(now);
+        self.succession_update(now);
         self.close_departed(now);
         self.pump();
         if matches!(self.life, Life::Flying) {

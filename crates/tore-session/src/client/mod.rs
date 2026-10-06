@@ -42,7 +42,7 @@ mod away;
 #[cfg(test)]
 mod away_tests;
 // Stage K's seams (slice K0): each later slice fills its own.
-mod candidate;
+pub mod candidate;
 pub mod capture;
 #[cfg(test)]
 mod chat_tests;
@@ -742,6 +742,8 @@ pub struct Client {
     /// The rejoin token the host granted, and where it is kept (stage K,
     /// slice K5).
     rejoin: rejoin::Kept,
+    /// Host selection: the Candidate report, the tests (slice K6).
+    candidacy: candidate::Candidacy,
     /// This game's content, and the host's newest Content gaps (stage L).
     content: Arc<crate::host::content::GameContent>,
     gaps: Option<crate::wire::messages::ContentGaps>,
@@ -791,6 +793,7 @@ impl Client {
             platform: config.platform,
             token: config.token,
             entropy: Entropy::Seeded(seed),
+            max_section_kind: crate::wire::SECTION_FILLER,
             ..tore_net::ClientConfig::new(PROTOCOL_VERSION, &config.callsign)
         };
         let net = match &config.race {
@@ -872,6 +875,7 @@ impl Client {
             observed: None,
             migration: migrate::Migration::default(),
             rejoin: rejoin::Kept::default(),
+            candidacy: candidate::Candidacy::default(),
             now,
         })
         .map(|mut client| {
@@ -999,6 +1003,7 @@ impl Client {
             self.flush_observed();
         }
         self.auto_ready();
+        self.candidate_update(now);
         let margin = self.interpolation_margin(now);
         self.render_clock.advance(now, margin);
         let lossy = self.downstream.loss(now) > HIGH_LOSS;

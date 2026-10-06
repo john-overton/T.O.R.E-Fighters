@@ -550,10 +550,6 @@ pub fn refusal(number: u8, value: u32) -> Option<String> {
     if number == number::PASSWORD {
         return Some("The password is set on its own, not by number.".into());
     }
-    // The pin is slice K6's: until it is built, the host stays calculated.
-    if number == number::HOST && setting.allows(value) && value != CALCULATED_HOST {
-        return Some(crate::host::NOT_AVAILABLE.into());
-    }
     setting.refusal(value)
 }
 

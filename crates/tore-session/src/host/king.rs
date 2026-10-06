@@ -393,6 +393,7 @@ impl Host {
                         ));
                     }
                 }
+                number::HOST => self.host_pin_refusal(value)?,
                 number::VISIBILITY
                     if value == settings::Visibility::Public.value() && !self.config.listable =>
                 {

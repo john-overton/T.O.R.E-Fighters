@@ -4,7 +4,9 @@
 //! warnings. Slice K0 places the seam; slice K6 builds it.
 
 use super::{ConnectionId, Host, NOT_AVAILABLE};
+use crate::settings::CALCULATED_HOST;
 use crate::wire::migration::{CandidateReport, ReachReport};
+use std::time::Duration;
 
 /// What the host knows of each candidate (slice K6 fills it).
 #[derive(Debug, Default)]
@@ -33,6 +35,21 @@ impl Host {
     ) -> Result<(), String> {
         let _ = (connection, report);
         Err(NOT_AVAILABLE.into())
+    }
+
+    /// The timers of host selection, from `Host::update` (slice K6).
+    pub(super) fn succession_update(&mut self, now: Duration) {
+        let _ = now;
+    }
+
+    /// Why the King's pin of setting 21 is refused: until slice K6, any
+    /// pin.
+    pub(super) fn host_pin_refusal(&self, value: u32) -> Result<(), String> {
+        if value == CALCULATED_HOST {
+            Ok(())
+        } else {
+            Err(NOT_AVAILABLE.into())
+        }
     }
 
     /// A Filler section from `connection`: counted, nothing more until the
