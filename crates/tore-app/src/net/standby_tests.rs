@@ -367,6 +367,37 @@ fn a_hosting_game_that_leaves_hands_the_game_over() {
     assert_eq!(host.end(), Some(&End::HandedOver));
 }
 
+/// Leave Game on an away player's menu (slice F2-O4): only the game that
+/// hosts the session asks to confirm, and only with no ready standby; a game
+/// that joined one (a dedicated server's, a friend's) just leaves; and a
+/// hosting game with a ready standby hands the game over as it leaves.
+#[test]
+fn only_a_hosting_game_with_no_ready_standby_ends_the_game_by_leaving() {
+    let mut rig = Rig::start();
+    // The joined games never end a game by leaving, standby or not.
+    for game in [VIPER, COBRA] {
+        assert!(!rig.games[game].session.hosting());
+        assert!(!rig.games[game].session.leaving_ends_game());
+    }
+    // The hosting game reports its standby ready once it is.
+    let ready = rig.run_until(Duration::from_secs(10), |r| {
+        !r.games[HOST].session.leaving_ends_game()
+    });
+    assert!(ready, "the host hears a ready standby: {}", rig.state());
+    // Before one is (or after it is lost) leaving would end the game.
+    rig.games[HOST].session.set_standby_ready_for_test(false);
+    assert!(rig.games[HOST].session.leaving_ends_game());
+    rig.games[HOST].session.set_standby_ready_for_test(true);
+    assert!(!rig.games[HOST].session.leaving_ends_game());
+    // Leaving with it hands the game over.
+    let left = Instant::now();
+    rig.games[HOST].session.hand_over_for_leave();
+    rig.games[HOST].gone = true;
+    let hosts = rig.run_until(Duration::from_secs(5), |r| r.games[VIPER].session.hosting());
+    assert!(hosts, "Viper takes the game over: {}", rig.state());
+    rig.back_after(left, Duration::from_secs(5));
+}
+
 #[test]
 fn an_old_host_that_comes_back_steps_down_and_flies_on_as_a_player() {
     let mut rig = Rig::start();

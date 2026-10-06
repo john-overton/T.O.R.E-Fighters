@@ -240,6 +240,10 @@ pub enum Report {
     /// A line about host migration for the player to read, in Messages (stage
     /// K, slice K7b): a player who came to the new host, or did not.
     Said(String),
+    /// Whether a standby is ready to take the game over now, when that
+    /// changes (slice F2-O4: the hosting player's Leave Game says whether it
+    /// hands the game over or ends it).
+    Standby { ready: bool },
     /// The thread has ended, and why. Nothing follows.
     Ended(End),
 }
@@ -1339,6 +1343,8 @@ struct Migration {
     part_version: Option<Option<u64>>,
     figures: Vec<(u8, tore_session::wire::messages::StandbyMark, bool, bool)>,
     figures_at: Option<Duration>,
+    /// Whether a ready standby was last reported ([`Report::Standby`]).
+    ready_sent: Option<bool>,
     /// Standby 1's addresses as last known, for a move in the lobby.
     standby_one: Vec<SocketAddr>,
 }
@@ -1376,6 +1382,11 @@ impl Migration {
             return;
         }
         self.figures_at = Some(now);
+        let ready = host.standby_figures().iter().any(|f| f.ready());
+        if self.ready_sent != Some(ready) {
+            self.ready_sent = Some(ready);
+            let _ = reports.send(Report::Standby { ready });
+        }
         let addresses = host.standby_addresses();
         if !addresses.is_empty() {
             self.standby_one = addresses;
@@ -1488,6 +1499,7 @@ fn log_report(report: &Report) {
         }
         Report::Migration(line) => log::info!("Host: {line}"),
         Report::Said(line) => log::info!("Host: said to the player: {line}"),
+        Report::Standby { ready } => log::info!("Host: a ready standby: {ready}"),
         Report::Ended(end) => match end {
             End::Stopped => log::info!("Host: stopped"),
             End::HandedOver => log::info!("Host: handed the game over; stopped"),

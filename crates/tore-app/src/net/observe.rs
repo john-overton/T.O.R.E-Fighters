@@ -713,11 +713,15 @@ impl App {
         }
         if let Some(failure) = observing.failure() {
             // Nothing can be shown: say so, and stop the watch. An away
-            // player's flight keeps its last picture and the banner, and the
-            // host keeps the aircraft (stopping would leave it to the AI).
-            let words = format!("Could not show the mission: {failure}");
+            // player has no menu to come back from, so it takes its aircraft
+            // back (stopping the watch would leave it to the AI).
+            let mut words = format!("Could not show the mission: {failure}");
             if self.net_flight.is_none() {
                 session.client.stop_watching();
+            } else {
+                // No menu to take the aircraft back from (slice F2-O4).
+                session.client.back();
+                words.push_str(" Taking your aircraft back from the AI.");
             }
             self.observing = None;
             self.message(words);
@@ -761,11 +765,17 @@ impl App {
                 }
                 Err(error) => {
                     log::warn!("Observer screen: {error}");
+                    let mut words = format!("Could not show the mission: {error}");
                     if plane.is_none() {
                         session.client.stop_watching();
+                    } else {
+                        // No menu to take the aircraft back from (slice
+                        // F2-O4).
+                        session.client.back();
+                        words.push_str(" Taking your aircraft back from the AI.");
                     }
                     self.observing = None;
-                    self.message(format!("Could not show the mission: {error}"));
+                    self.message(words);
                 }
             }
         }
@@ -802,8 +812,10 @@ impl App {
 
     /// The player chose Stop Watching: the host is told, and the lobby shows.
     pub(crate) fn stop_observing(&mut self) {
+        // An away player's menu has no Stop Watching row (slice F2-O4);
+        // should one answer, it is Take Back Flight.
         if self.away_watching() {
-            self.stop_away_watch();
+            self.away_take_back();
             return;
         }
         if let Some(session) = &mut self.net {

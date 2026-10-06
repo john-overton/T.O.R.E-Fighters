@@ -762,6 +762,9 @@ pub struct NetSession {
     rejoin_tried: bool,
     /// The standby could not be started; the game carries on without one.
     standby_failed: bool,
+    /// The game hosts and a standby is ready to take the game over (the
+    /// hosting thread's report): leaving hands the game over.
+    standby_ready: bool,
     /// The client has been told its candidates for this socket.
     candidate_set: bool,
     /// The data folder, for the remembered port-mapping setting.
@@ -995,6 +998,7 @@ impl NetSession {
             may_host: crate::net::settings::Remembered::load(data).may_host,
             rejoin_tried: token.is_some(),
             standby_failed: false,
+            standby_ready: false,
             candidate_set: false,
             data: data.to_owned(),
             through_last: None,
@@ -1004,6 +1008,32 @@ impl NetSession {
     /// Whether this game hosts the session: its player is the King.
     pub fn hosting(&self) -> bool {
         self.hosting.is_some()
+    }
+
+    /// Whether leaving now ends the game for everyone (slice F2-O4): this
+    /// game hosts it and no standby is ready to take it over. A game that
+    /// only joined one (a dedicated server's, a friend's) just leaves.
+    pub fn leaving_ends_game(&self) -> bool {
+        self.hosting() && !self.standby_ready
+    }
+
+    /// Leaving on purpose as the hosting player with a ready standby: the
+    /// hosting thread is stopped first, so it hands the game over (a stop
+    /// with a ready standby does) before this game's own connection says
+    /// goodbye, which would end the game. A game that does not host has
+    /// nothing to hand over.
+    pub fn hand_over_for_leave(&mut self) {
+        if self.standby_ready
+            && let Some(thread) = &mut self.hosting
+        {
+            thread.stop(hosting::JOIN_LIMIT);
+        }
+    }
+
+    /// A test's say that a standby is ready.
+    #[cfg(test)]
+    pub fn set_standby_ready_for_test(&mut self, ready: bool) {
+        self.standby_ready = ready;
     }
 
     /// The King's start for a game hosted from the command line (agent
@@ -1423,6 +1453,7 @@ impl NetSession {
                 Report::TookOver { tick } => took = Some(tick),
                 Report::Migration(line) => lines.push(line),
                 Report::Said(line) => said.push(line),
+                Report::Standby { ready } => self.standby_ready = ready,
                 _ => {}
             }
         }

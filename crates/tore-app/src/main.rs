@@ -4723,9 +4723,6 @@ impl ApplicationHandler for App {
                     }
                     let was_frozen = self.flight_ui.frozen();
                     if self.replay.is_some() && self.controls.is_none() {
-                        // The observer view of an away player's own plane
-                        // reads the flight's buttons (slice F2-O3).
-                        self.away_watch_action(action);
                         continue;
                     }
                     let result = self.input_action(action);

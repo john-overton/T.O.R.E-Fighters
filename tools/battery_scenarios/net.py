@@ -778,7 +778,7 @@ def away_problems(text: str, name: str, plane: int) -> list[str]:
 def drive_away(d: Drive) -> None:
     """The AI flies an idle player's aircraft (slice F2-A): a bot's game says it is away 8 seconds into its flight;
     the AI flies its plane, kept for it, while it watches; 6 seconds later it says it is back, flies on in the same
-    plane and leaves cleanly. The server's file leaves `idle-ai` at its default, 10 seconds."""
+    plane and leaves cleanly. The server's file leaves `idle-ai` at its default, 5 minutes (the bot says it is away itself, so the setting only has to allow it)."""
     port = d.port()
     server = start_server(d, port, guide_mission())
     bot = start_bots(d, port, "bot", 40, "--callsign", "Viper", "--slot", "0", "--away", "8,6")

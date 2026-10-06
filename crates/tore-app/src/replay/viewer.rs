@@ -222,6 +222,12 @@ pub enum Command {
     Controls,
     /// Save the frame as a PNG.
     Screenshot,
+    /// The away player takes its own aircraft back (slice F2-O4).
+    TakeBack,
+    /// The away player flies again in a new aircraft, by the revival rules.
+    Spawn,
+    /// The away player leaves the game.
+    LeaveGame,
 }
 
 /// Names of the flight views by `--flight-view` number, with their keys.
@@ -1092,10 +1098,11 @@ impl Viewer {
         }
     }
 
-    /// Whether the Escape menu or a right-click menu is open: the viewer
-    /// takes every key.
-    pub fn menu_open(&self) -> bool {
-        self.pause.is_open() || self.menu.is_some()
+    /// The menu of the observer screen of an away player's own aircraft
+    /// (slice F2-O4): what its first rows offer now, or `None` for an
+    /// observer's Stop Watching.
+    pub fn set_away_menu(&mut self, rows: Option<pause::AwayRows>) {
+        self.pause.set_away(rows);
     }
 
     /// Whether the view is of a mission being flown, a recording that grows
@@ -1560,6 +1567,15 @@ impl Viewer {
             Choice::Graphics => Command::Graphics,
             Choice::Sound => Command::Sound,
             Choice::Controls => Command::Controls,
+            Choice::TakeBack => Command::TakeBack,
+            Choice::Spawn => Command::Spawn,
+            Choice::LeaveGame => Command::LeaveGame,
+            Choice::SpawnBlocked => {
+                if let Some(why) = self.pause.away().and_then(|a| a.spawn_blocked.clone()) {
+                    self.message(why);
+                }
+                Command::Click
+            }
             Choice::Toggle(part) => {
                 match part {
                     Part::Labels => self.ui.labels = !self.ui.labels,

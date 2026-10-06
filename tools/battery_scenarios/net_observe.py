@@ -11,10 +11,11 @@ person to look at.
 The scenario takes its own port, so it runs beside the others; it opens one window (`--windows`).
 
 `net-window-away-watch` (slice F2-O3) is the other way in: the game flies plane 0 of a server's guide mission, the
-script opens the flight menu and waits out the King's `idle-ai` (10 seconds), the host gives the plane to the AI, and
-the game opens the observer screen on its own plane. The script looks at it, holds the Up arrow (the first flight
-input) and is seated in the plane again; then it does the same and leaves the observer screen by its Escape menu's
-Stop Watching row, which in a game with no lobby screen takes the plane back too.
+script opens the flight menu and waits out the server's `idle-ai` (the shortest, 1 minute), the host gives the plane
+to the AI, and the game opens the observer screen on its own plane. The script looks at it, holds the Up arrow (a
+flight input, which no longer takes the plane back: John, 2026-10-06) and is still watching; then its Escape menu's
+first row, Take Back Flight, seats it in the plane again. It goes away a second time and leaves by the menu's Leave
+Game row (slice F2-O4), which a game that only joined a server (never the host) does with no confirmation.
 """
 from __future__ import annotations
 
@@ -154,76 +155,92 @@ def drive_observe_window(d: Drive) -> None:
 
 
 # The script of the away watch: four seconds of flight, the flight menu (the controls are neutral behind it), the
-# time the King's idle-ai takes and the handoff and the first frames, then pictures of the observer screen, Up
-# held (the stick is a flight input) and the plane flown again; the same once more and Stop Watching (Escape opens
-# the viewer's menu, Enter its first row) before the last picture and the end. Waits are long: the machine is shared.
+# time the server's idle-ai takes (1 minute) and the handoff and the first frames, then pictures of the observer
+# screen, Up held (a flight input, which takes nothing back) and the viewer's menu: Enter on its first row, Take
+# Back Flight, flies the plane again; the same once more and Down, Enter: Leave Game, which ends the session.
+# Waits are long: the machine is shared.
 AWAY_SCRIPT = """wait 1
 waittick 480 60
 shot SHOTS/away-1-flying.ppm
 key Escape
 wait 2
 shot SHOTS/away-2-menu.ppm
-wait 16
+wait 72
 shot SHOTS/away-3-watching.ppm
 wait 3
 shot SHOTS/away-4-watching-later.ppm
 down Up
 wait 1
 up Up
-wait 8
-shot SHOTS/away-5-back.ppm
-key Escape
-wait 18
+wait 4
+shot SHOTS/away-5-still-watching.ppm
 key Escape
 wait 2
 shot SHOTS/away-6-menu.ppm
 key Enter
 wait 8
-shot SHOTS/away-7-back-again.ppm
+shot SHOTS/away-7-back.ppm
+key Escape
+wait 75
+key Escape
+wait 2
+shot SHOTS/away-8-menu.ppm
+key Down
+wait 1
+key Enter
+wait 8
+shot SHOTS/away-9-left.ppm
 exit
 """
 
 AWAY_PICTURES = (
-    "away-1-flying", "away-2-menu", "away-3-watching", "away-4-watching-later", "away-5-back", "away-6-menu",
-    "away-7-back-again",
+    "away-1-flying", "away-2-menu", "away-3-watching", "away-4-watching-later", "away-5-still-watching",
+    "away-6-menu", "away-7-back", "away-8-menu", "away-9-left",
 )
 
 
 def away_watch_problems(game: str, server: str) -> list[str]:
-    """What the game's log and the server's log must hold after two handoffs, the first ended by a flight input and
-    the second by Stop Watching (pure, unit tested in tools/test_battery_net.py)."""
+    """What the game's log and the server's log must hold after two handoffs, the first ended by the menu's Take Back
+    Flight and the second by its Leave Game (pure, unit tested in tools/test_battery_net.py)."""
     problems = []
     for pattern, count, what in (
-        (r"Network: away for the idle-ai seconds; the AI flies the plane", 2, "the game saying it is away"),
+        (r"Network: away for the idle-ai time; the AI flies the plane", 2, "the game saying it is away"),
         (r"Observer screen: watching the player's own aircraft", 2, "the observer screen opening on its own plane"),
-        (r"Network: a flight input; taking the aircraft back from the AI", 1, "a flight input taking the plane back"),
-        (r"Network: Stop Watching; taking the aircraft back from the AI", 1, "Stop Watching taking the plane back"),
-        (r"Observer screen: back to the flight", 2, "the observer screen closing onto the flight, once for each return"),
-        (r"Network: seated in plane 0", 3, "a seating in plane 0, and two more after the handoffs"),
+        (r"Network: Take Back Flight; taking the aircraft back from the AI", 1, "Take Back Flight taking the plane back"),
+        (r"Network: Leave Game \(not the host\)", 1, "Leave Game, with no handover or confirmation for a joined game"),
+        (r"Observer screen: back to the flight", 1, "the observer screen closing onto the flight, once for the return"),
+        (r"Network: seated in plane 0", 2, "a seating in plane 0, and one more after the handoff"),
     ):
         found = len(re.findall(pattern, game))
         if found < count:
             problems.append(f"the game's log holds {found} of {count} for {what}: /{pattern}/")
-    if re.search(r"Could not show the mission", game):
-        problems.append("the game's log holds the observer screen failing to open")
-    if re.search(r"The AI lost your aircraft", game):
-        problems.append("the game's log says the AI lost the aircraft")
     for pattern, what in (
-        (r"Viper is away: the AI flies plane 0$", "the handoffs"),
-        (r"Viper is back: takes plane 0 from the AI$", "the returns"),
+        (r"a flight input; taking the aircraft back", "a flight input taking the plane back (no input does)"),
+        (r"Could not show the mission", "the observer screen failing to open"),
+        (r"The AI lost your aircraft", "the AI losing the aircraft"),
+        (r"Leave Game \((handing|ending)", "a host's Leave Game on a game that only joined"),
+    ):
+        if re.search(pattern, game):
+            problems.append(f"the game's log holds {what}: /{pattern}/")
+    for pattern, count, what in (
+        (r"Viper is away: the AI flies plane 0$", 2, "the handoffs"),
+        (r"Viper is back: takes plane 0 from the AI$", 1, "the one return"),
+        (r"Viper (\(plane \d+\) )?left: left$", 1, "the leave"),
     ):
         found = len(re.findall(pattern, server, re.M))
-        if found != 2:
-            problems.append(f"the server's log holds {found} of 2 for {what}: /{pattern}/")
+        if found != count:
+            problems.append(f"the server's log holds {found} of {count} for {what}: /{pattern}/")
     return problems
 
 
 def drive_away_watch(d: Drive) -> None:
-    """The game flies plane 0, goes away behind its flight menu, watches the AI fly the plane on the observer screen
-    and takes it back by a flight input; then again, and takes it back by Stop Watching."""
+    """The game flies plane 0, goes away behind its flight menu, watches the AI fly the plane on the observer screen,
+    is not given the plane back by a flight input, takes it back by the menu's Take Back Flight; then again, and
+    leaves by Leave Game."""
     port = d.port()
     # Every AI wing on weapons hold: the AI flying the idle plane must not be shot down while the script watches.
-    server = start_server(d, port, weapons_hold(guide_mission()))
+    # The server's idle-ai is the shortest the lists allow, 1 minute (the file writes minutes).
+    server = start_server(d, port, weapons_hold(guide_mission()), idle_ai=1)
     shots = d.work / "shots"
     shots.mkdir(exist_ok=True)
     script = d.work / "away.txt"
@@ -232,7 +249,7 @@ def drive_away_watch(d: Drive) -> None:
         "game", [d.app, "--connect", f"{LOCALHOST}:{port}", "--callsign", "Viper", *GAME_FLAGS, "--input-script", script],
         window=True,
     )
-    game.finish(240, 0)
+    game.finish(330, 0)
     server.send("quit")
     server.finish(30, None)
     for problem in away_watch_problems(game_log(d), server_log(d)):
@@ -254,9 +271,10 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-window-away-watch", lane="net", args=[], driver=drive_away_watch, uses=("server",),
-            window=True, timeout=400,
+            window=True, timeout=600,
             notes="an away player watches its own plane: the game flies, opens its flight menu, goes away after the "
-            "King's idle-ai seconds, shows the AI flying its plane on the observer screen, and takes it back by "
-            "the Up arrow; then the same, taken back by Stop Watching (slice F2-O3)",
+            "server's idle-ai (1 minute), shows the AI flying its plane on the observer screen, is not given the plane "
+            "back by the Up arrow, takes it back by the menu's Take Back Flight; then the same, left by Leave Game "
+            "(slices F2-O3 and F2-O4)",
         ),
     ]

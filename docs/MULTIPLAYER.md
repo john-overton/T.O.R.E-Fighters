@@ -438,10 +438,15 @@ recording), the sort order (Alt+A), the battle net and its monitor key
 - No pause and no time compression.
 - Opening the in-flight menu, losing window focus or unplugging a controller
   does not pause the mission. The controls go neutral meanwhile (John,
-  2026-09-30). After the King's `idle-ai` time away, 10 seconds by default
-  (a stalled game counts too), the AI flies the aircraft, reserved for the
-  player, until the player touches the flight controls (John, 2026-10-05;
-  built in F2-A,
+  2026-09-30). After the King's `idle-ai` time away, 5 minutes by default
+  (never, 1, 2, 5 or 10 minutes; a stalled game counts too), the AI flies the
+  aircraft, reserved for the player (John, 2026-10-05; 10 seconds was too
+  short for someone on autopilot who steps away, so 5 minutes: John,
+  2026-10-06). No flight input takes it back: it is a flight sim and nobody
+  should fly AFK. The player watches the AI fly it and comes back on purpose
+  from the Escape menu: **Take Back Flight** while the reserved aircraft is
+  alive, **Spawn in Aircraft** when none is left (the revival rules), or
+  **Leave Game** (John, 2026-10-06; built in F2-A, F2-O3 and F2-O4,
   [architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
 - Game speed and realism settings are locked by the lobby for everyone.
 - If a flight lead is shot down, a human in the flight takes the lead if there
@@ -1290,8 +1295,9 @@ Raised while planning (2026-09-28):
   while the menu is open, and after 10 seconds without input the AI flies the
   aircraft until the player touches the controls again. John settled the first
   half on 2026-09-30 (neutral controls, [decisions](#decisions)) and the
-  second on 2026-10-05: the King's setting `idle-ai`, 10 seconds by default,
-  with `never` available, built in F2-A
+  second on 2026-10-05: the King's setting `idle-ai`, with `never` available,
+  built in F2-A. *Changed 2026-10-06 (F2-O4):* 5 minutes by default, and the
+  player comes back from the Escape menu, not by touching the controls
   ([architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
 - **Dedicated server King.** *Agent proposal:* the first human to join a
   dedicated server becomes King, unless its config file fixes the mission and

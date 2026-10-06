@@ -349,44 +349,57 @@ class ParsingTests(unittest.TestCase):
 class AwayWatchTests(unittest.TestCase):
     GAME = (
         "Network: seated in plane 0\n"
-        "Network: away for the idle-ai seconds; the AI flies the plane\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
         "Observer screen: watching the mission\n"
         "Observer screen: watching the player's own aircraft\n"
-        "Network: a flight input; taking the aircraft back from the AI\n"
+        "Network: Take Back Flight; taking the aircraft back from the AI\n"
         "Observer screen: back to the flight\n"
         "Network: seated in plane 0\n"
-        "Network: away for the idle-ai seconds; the AI flies the plane\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
         "Observer screen: watching the mission\n"
         "Observer screen: watching the player's own aircraft\n"
-        "Network: Stop Watching; taking the aircraft back from the AI\n"
-        "Observer screen: back to the flight\n"
-        "Network: seated in plane 0\n"
+        "Network: Leave Game (not the host)\n"
     )
     SERVER = (
         "seat 0 Viper: Viper is away: the AI flies plane 0\n"
         "Viper is back: takes plane 0 from the AI\n"
         "Viper is away: the AI flies plane 0\n"
-        "Viper is back: takes plane 0 from the AI\n"
+        "12:00:00 Viper left: left\n"
     )
 
-    def test_two_handoffs_and_two_returns_pass(self):
+    def test_two_handoffs_one_return_and_a_leave_pass(self):
         self.assertEqual(net_observe.away_watch_problems(self.GAME, self.SERVER), [])
 
     def test_each_missing_step_is_named(self):
         problems = net_observe.away_watch_problems(
-            self.GAME.replace("Network: a flight input; taking the aircraft back from the AI\n", ""), self.SERVER
+            self.GAME.replace("Network: Take Back Flight; taking the aircraft back from the AI\n", ""), self.SERVER
         )
         self.assertEqual(len(problems), 1)
-        self.assertIn("a flight input taking the plane back", problems[0])
+        self.assertIn("Take Back Flight taking the plane back", problems[0])
         problems = net_observe.away_watch_problems(self.GAME + "Could not show the mission: x\n", self.SERVER)
         self.assertEqual(len(problems), 1)
         self.assertIn("failing to open", problems[0])
         problems = net_observe.away_watch_problems(self.GAME + "The AI lost your aircraft while you were away.\n", self.SERVER)
         self.assertEqual(len(problems), 1)
-        self.assertIn("lost the aircraft", problems[0])
-        self.assertEqual(len(net_observe.away_watch_problems("", "")), 8)
+        self.assertIn("losing the aircraft", problems[0])
+        self.assertEqual(len(net_observe.away_watch_problems("", "")), 9)
         once = self.SERVER.split("Viper is away", 2)[0] + "Viper is away: the AI flies plane 0\n"
         self.assertGreaterEqual(len(net_observe.away_watch_problems(self.GAME, once)), 1)
+
+    def test_a_flight_input_that_takes_the_plane_back_is_a_problem(self):
+        problems = net_observe.away_watch_problems(
+            self.GAME + "Network: a flight input; taking the aircraft back from the AI\n", self.SERVER
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("no input does", problems[0])
+
+    def test_a_game_that_only_joined_never_hands_over_or_confirms(self):
+        # John, 2026-10-06: on a dedicated server the player is never the host.
+        for host_line in ("Leave Game (handing the game over)", "Leave Game (ending the game)"):
+            problems = net_observe.away_watch_problems(
+                self.GAME.replace("Leave Game (not the host)", host_line), self.SERVER
+            )
+            self.assertTrue(problems, host_line)
 
     def test_the_scenario_is_listed_with_a_window(self):
         scenario = next(s for s in net_observe.scenarios() if s.name == "net-window-away-watch")

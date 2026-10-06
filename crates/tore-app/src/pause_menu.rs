@@ -52,6 +52,10 @@ pub struct PauseMenu {
     pub(crate) focus: usize,
     pub(crate) pressed: Option<usize>,
     pub(crate) help_page: usize,
+    /// Row labels drawn dim: rows that cannot be chosen now, with their
+    /// reason beside them (the away player's Spawn in Aircraft). They still
+    /// answer a choice, with the reason.
+    pub dim: Vec<String>,
 }
 
 impl PauseMenu {
@@ -292,13 +296,20 @@ impl PauseMenu {
                     [201, 210, 222, 255]
                 },
             );
+            let dimmed = id < 100
+                && !self.help
+                && self
+                    .rows(tree)
+                    .get(id)
+                    .is_some_and(|n| self.dim.contains(&n.label));
             let mut p = Paint {
                 pixels,
                 clip: r,
-                color: if selected {
-                    [247, 250, 255, 255]
-                } else {
-                    [20, 39, 65, 255]
+                color: match (selected, dimmed) {
+                    (true, true) => [160, 172, 190, 255],
+                    (true, false) => [247, 250, 255, 255],
+                    (false, true) => [110, 124, 146, 255],
+                    (false, false) => [20, 39, 65, 255],
                 },
             };
             p.text(font, &label, r.0 + 5, r.1 + 6);

@@ -5772,7 +5772,7 @@ choices below are fitted to retail's ranges ([numbers](spec/multiplayer.md#numbe
 | 17 | `kill-limit` | none, 1, 2, 3, 5, 7 or 10 | none | 5 | In the lobby |
 | 18 | `kill-owner` | `total`, `side`, `player` | side | side | In the lobby |
 | 19 | `observer-delay` | 0, 10, 30 or 60 seconds; PvP only | 0 | 0 | In the lobby |
-| 20 | `idle-ai` | `never`, 10, 30 or 60 seconds away | 10 | 10 | Any time |
+| 20 | `idle-ai` | `never`, 1, 2, 5 or 10 minutes away (60, 120, 300 or 600 seconds on the wire) | 5 minutes | 5 minutes | Any time |
 
 - **Changing the mode** sets every other setting to the new mode's defaults,
   as the creator's own choices reset what depends on them; the King then
@@ -6622,8 +6622,12 @@ flowchart LR
 
 The open question since 2026-09-28 (the guide's agent proposal: after 10
 seconds without input the AI flies the aircraft until the player touches the
-controls). Designed as the King's setting `idle-ai` (default 10 seconds,
-question 4).
+controls). Designed as the King's setting `idle-ai` (question 4). *Changed by
+John, 2026-10-06 (slice F2-O4):* the default is 5 minutes (never, 1, 2, 5 or
+10 minutes), and no flight input takes the aircraft back: the player comes
+back on purpose from the observer screen's menu
+([below](#the-away-players-menu-f2-o4)). The bullets below say which words
+F2-O4 changed.
 
 - **Away** is not a centred stick, which a player cruising hands-off also
   sends. A game is away while its controls are neutral because of a menu (the
@@ -6636,13 +6640,14 @@ question 4).
   and **reserves** it for that player: nobody else takes it, and its slot reads
   "AI (Viper away)". The player's connection observes its own plane meanwhile
   (the observer stream, its subject the plane), and the screen says "The AI is
-  flying your aircraft. Move the stick or press any flight key to take it
-  back."
-- **Back** (message 36) at the first flight input with no menu up and the
-  window focused: the host takes the plane back for the player at the next tick
-  (a Take, a new flight), with its stores and damage as the AI left them. A
-  plane lost while the AI flew it is lost to the player as any other (revival
-  rules).
+  flying your aircraft. Press Esc, then Take Back Flight, to fly it again."
+  (*F2-O4; F2-A said "Move the stick or press any flight key to take it
+  back."*)
+- **Back** (message 36), from the menu's **Take Back Flight** (*F2-O4; F2-A
+  sent it at the first flight input with no menu up and the window focused*):
+  the host takes the plane back for the player at the next tick (a Take, a new
+  flight), with its stores and damage as the AI left them. A plane lost while
+  the AI flew it is lost to the player as any other (revival rules).
 
 *Built (F2-A, 2026-10-05).* John took the design on 2026-10-05 (the
 [decisions](MULTIPLAYER.md#decisions)). The host's part is `host/away.rs`, the
@@ -6655,7 +6660,8 @@ the design above says it.
 - **The game's count.** The game is away while its controls are neutral
   because a menu or a screen is over the flight, the window lacks focus, or
   the controller it flew with went (until any flight input). It reads the
-  setting from the lobby state and sends Away once, after that many seconds;
+  setting from the lobby state and sends Away once, after that many seconds
+  (5 minutes by default since F2-O4);
   never while its plane is lost (the revival rules have it). A **flight
   input** is a stick or rudder axis past 0.1, a throttle key, the throttle
   lever moved 0.05 from where it was while flying, the trigger, or any
@@ -6714,13 +6720,15 @@ the design above says it.
   once each.
 - **The game.** While the AI flies the plane the game shows it on the
   observer screen over the flight (slice F2-O3, [below](#the-observer-screen-for-an-away-players-own-plane-f2-o3)),
-  or, when that cannot open, keeps the flight's last picture, and says "The AI
-  is flying your aircraft. Move the stick or press any flight key to take it
-  back." every five seconds; Back's Seated starts the flight again as a
+  or, when that cannot open, takes the aircraft back at once (*F2-O4; F2-O3
+  kept the flight's last picture, with no menu to come back from*), and says
+  "The AI is flying your aircraft. Press Esc, then Take Back Flight, to fly it
+  again." every five seconds; Back's Seated starts the flight again as a
   revival's does. *As built in F2-A, before F2-O3:* the flight screen always
-  kept its last picture. A refusal of Away or Back is
-  said on the HUD. If the host stops keeping the plane and no Seated follows
-  within two seconds, the flight ends.
+  kept its last picture. A refusal of Away or Back is said on the HUD. If the
+  host stops keeping the plane and no Seated follows within two seconds, the
+  flight ends (*F2-O4:* unless the observer screen is up, which stays for the
+  menu's Spawn in Aircraft).
 - **The slot's words.** The lobby screen's "AI (Viper away)" is the screen's
   to draw from the away mark (slice F2-L's files); not drawn yet.
 - **Tests.** `host/away_tests.rs` (on the simulator: the handoff and the
@@ -6731,13 +6739,18 @@ the design above says it.
   `net::away` unit tests (the flight inputs, the count, a lost controller,
   the end), `tore-bot`'s option and the net lane's `net-server-away`. The
   EF-K and J3 tests that stall 15 seconds set the setting to never: the
-  keepalives are what they test.
+  keepalives are what they test. *F2-O4:* the lists start at a minute, so the
+  tests that wait out the setting in simulated time set 10 seconds through
+  `Store::set_for_test`.
 
 ##### The observer screen for an away player's own plane (F2-O3)
 
 *Built (F2-O3, 2026-10-06).* John asked for it on 2026-10-06: while the AI
 flies an away player's aircraft the player watches it on the observer screen
-and takes it back at the first flight input. No wire change. Each choice below
+and takes it back at the first flight input. No wire change. *Changed the
+same day, F2-O4:* no flight input takes it back; the Escape menu does
+([below](#the-away-players-menu-f2-o4)). The bullets that describe the
+hand-back are kept as built and marked. Each choice below
 is an agent decision unless it says otherwise.
 
 ```mermaid
@@ -6764,7 +6777,8 @@ flowchart LR
   recording cannot start or the viewer cannot open, the game says so, keeps
   the watch the host started and keeps the old picture and banner (stopping
   the watch would leave the plane to the AI).
-- **What counts as a flight input there.** The idle rule's own list
+- **What counts as a flight input there (removed in F2-O4: nothing counts, and
+  every key and the mouse are the viewer's).** The idle rule's own list
   (`net::away::touched`: a stick or rudder axis past 0.1, a throttle key, the
   lever moved 0.05, the trigger, a pilot command), read as before from the
   controls' profile, with the input paused only while a menu of the viewer's
@@ -6783,15 +6797,17 @@ flowchart LR
   take the plane back. A press with the viewer's menu open, with Alt or the
   system key held, or while the window lacks focus is not an input, as on the
   flight screen.
-- **Back.** As F2-A built it: the first input sends Back (the log says "a
+- **Back (F2-O4: from the menu's Take Back Flight, not an input).** As F2-A
+  built it: the first input sends Back (the log says "a
   flight input; taking the aircraft back from the AI" once for a handoff),
   the host ends the observer flight before it sends Seated, the viewer
   closes at the end of the observer flight and the flight screen shows
   again, and Seated starts the new flight as a revival's does. A mission
   that ends, the AI losing the plane and the session ending close the
   observer screen with the flight, as they ended the flight before.
-- **Stop Watching.** The Escape menu's first row keeps its words. For an
-  away player it means: leave the aircraft to the AI and go to the lobby
+- **Stop Watching (F2-O4: the row is gone from this menu; Take Back Flight,
+  Spawn in Aircraft and Leave Game take its place).** The Escape menu's first
+  row kept its words. For an away player it meant: leave the aircraft to the AI and go to the lobby
   (the host's rule for stopping a watch), when the game has a lobby screen
   and does not host; otherwise, taking the aircraft back (a game with no
   lobby screen has nowhere to go, and a hosted game ends when its player
@@ -6809,6 +6825,102 @@ flowchart LR
   opens its flight menu, goes away after 10 seconds, shows the AI flying its
   own plane on the observer screen, takes it back by the Up arrow, then again
   and takes it back by Stop Watching; the logs of the game and the server).
+
+##### The away player's menu (F2-O4)
+
+*Built (F2-O4, 2026-10-06).* John asked for it on 2026-10-06, in three parts:
+the idle time is longer (10 seconds was too short for someone on autopilot
+who steps away), no flight input takes the aircraft back (it is a flight sim
+and nobody should fly AFK), and the player comes back on purpose from the
+observer screen's Escape menu. No wire change and no new protocol version:
+the setting's value is the same 32-bit number of seconds, and the checkpoint
+and journal coders carry it as they carried 10: the session part codes every
+registry value and restores them through the registry's own checks, so the new
+values (60 to 600) restore, and a value off the lists would not (only a test
+sets one, with `Store::set_for_test`, and none of them takes a checkpoint). Each choice below is an agent decision unless it says John.
+
+```mermaid
+flowchart TD
+  esc["Esc on the observer screen<br/>of the player's own aircraft"] --> own{"reserved aircraft<br/>alive?"}
+  own -->|yes| take["Take Back Flight:<br/>Back, the plane returns"]
+  own -->|"no (the AI lost it,<br/>or the King released it)"| spawn["Spawn in Aircraft"]
+  spawn --> rules{"revival rules<br/>allow one?"}
+  rules -->|yes| revive["Revive (a lost aircraft)<br/>or any free aircraft (a release)"]
+  rules -->|no| dim["row dimmed, the reason<br/>beside it and on choosing it"]
+  esc --> leave["Leave Game"]
+  leave --> host{"this game hosts?"}
+  host -->|"no (a dedicated server's,<br/>or a friend's game)"| gone["leaves: nothing to hand over,<br/>no confirmation"]
+  host -->|yes| standby{"a standby is ready?"}
+  standby -->|yes| hand["the hosting thread hands the<br/>game over, then the game leaves"]
+  standby -->|no| confirm["asks twice: leaving ends<br/>the game for everyone"]
+```
+
+- **The idle time (John).** `idle-ai` is never, 1, 2, 5 or 10 minutes, 5 by
+  default in co-op and PvP (the list is an agent decision; John suggested
+  never, 1, 2, 5 and 10 minutes). The lobby's Settings row already prints
+  seconds that are whole minutes in minutes ("5 minutes"), and a dedicated
+  server's file writes it in minutes (`idle-ai 5`, `idle-ai never`), as
+  `time-limit` and `revive-delay` are. The wire sample for the lobby state
+  keeps its 10 seconds, so the golden file does not change.
+- **No flight input takes it back (John).** The idle rule counts only to send
+  Away now. The flight's keys, the controllers and the mouse are not read on
+  the observer screen: every key is the viewer's again (the arrows scrub, Space
+  pauses). `net::away`'s key table and the controller reading are gone.
+- **The menu.** The first tab's first rows replace Stop Watching, in the
+  retail look of the existing pause menu: **Take Back Flight** while the
+  player's own reserved aircraft is alive; **Spawn in Aircraft** when no
+  aircraft is reserved for the player (the AI lost it while the player was
+  away, or the King released it); and **Leave Game**. Graphics, Sound, Control
+  and Exit to Desktop stay. A row that does not apply is not shown (agent
+  decision), except Spawn in Aircraft, which is dimmed with its reason beside
+  it when the revival rules allow nothing now ("No revival in this game", "No
+  lives left", "You can fly again in 0:45", "Waiting for room for another
+  aircraft"); choosing it says the reason. The game rebuilds the rows each
+  frame from what it knows, so the row changes as the state does.
+- **Take Back Flight** sends Back (message 36), as the first input did; the
+  menu closes, the host takes the aircraft at the next tick with its stores
+  and damage as the AI left them, and the flight starts again as before.
+- **Spawn in Aircraft** is the revival rules' own, not new ones. After a loss
+  while away the host noted the loss for the player (slice K5), so the game
+  sends Revive (message 28): the respawn rule, lives and delay of
+  [death and revival](#death-revival-and-lives) apply, and its refusals read
+  in the rules' words. After the King's Release no loss is noted, so the game
+  takes any free aircraft with TakePlane, by the usual take rules (join in
+  progress, slot locks, lock sides), as a returning player who finds its
+  aircraft gone does. The observer screen now stays up when the host stops
+  keeping the aircraft (it used to end the flight after two seconds), so
+  the row is there to choose; it closes at the Seated message.
+- **Leave Game** leaves the session as End Mission's leave does (agent
+  decision, checked in `host/rejoin.rs`): the game says goodbye, and the host
+  frees an away player's reservation when its goodbye is a leave on purpose
+  (`LeaveReason::Left`), so the aircraft stays with the AI, free for others.
+  This is John's 2026-10-05 rule (End Mission releases; only a drop keeps the
+  aircraft) applied to leaving on purpose. **A game that only joined** (a
+  dedicated server's, a friend's) never hosts: it just leaves, with no
+  handover and no confirmation (John, 2026-10-06). **A hosting game** hands
+  the game over to a ready standby: the hosting thread is stopped first, which
+  hands over (`Host::hand_over`) before the game's own connection says
+  goodbye, since the house leaving ends a game that has not handed over. With
+  no ready standby the row asks twice: its first choice reads "Choose again to
+  end it" beside the row, and the second leaves, which ends the game for
+  everyone. The game learns whether a standby is ready from the hosting
+  thread's report ([`Report::Standby`](../crates/tore-app/src/net/hosting.rs)).
+- **When the observer screen cannot open** (the recording cannot start, the
+  viewer cannot open) there is no menu to come back from, so the game takes the
+  aircraft back at once and says so, rather than keeping a picture nobody can
+  leave.
+- **Tests.** `replay::pause` (the menu's rows in each state as text
+  snapshots: own aircraft alive, lost with a rule that allows a new one, lost
+  with the rules allowing nothing, a host with and without a standby; each
+  row's choice; the confirm), `net::away` (the idle rule with no hand-back, the
+  observer screen kept after a loss, the rows from the game's state and the
+  reasons), `net::standby` (only a hosting game with no ready standby ends the
+  game by leaving; one with a standby hands over; the joined games never end
+  it), `host::rejoin_tests` (Spawn after a loss, under no revival, after a
+  release), `settings` and `tore-server`'s `config` (the list, the default,
+  the words and the file's minutes), and the net lane's `net-window-away-watch`
+  (a `tore-server` with `idle-ai 1`: the Up arrow takes nothing back, Take Back
+  Flight does, Leave Game ends the session; two waits of about a minute).
 
 ##### The lobby's display
 
@@ -6995,6 +7107,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back. **Built (F2-A, 2026-10-05):** as [described above](#the-ai-flies-an-idle-players-aircraft): the host's Away and Back, its count of a game that sends nothing, the handoff with the player watching its plane, the reservation and its end (`host/away.rs`, hooks in `host/mod.rs`: the take refusal, `reserved`, the lobby's away mark, the empty timeout, the mission's end; three lobby log events in `host/lobby.rs`); the client's `ai_flies` and its once-only `away` and `back` (new `client/away.rs`, one hook in `client/mod.rs`); the game's count, flight inputs, banner and End Mission while away (new `net/away.rs`, short hunks in `net/play.rs` and `main.rs`); `tore-bot --away SECONDS,FOR`. Tests: `host/away_tests.rs` (7 on the simulator), `client/away_tests.rs` (4), the game's `net::away` (7), `tore-bot`'s option, the net lane's `net-server-away`. No wire change. Single player unchanged. **Closed (F2-O3, 2026-10-06):** the player who is away sees the AI fly its own plane on the observer screen, and takes it back at the first flight input there |
 | F2-O2 The observer screen | Sonnet | F2-O1, F2-L, stage E's replays | `tore-app` new `net/observe.rs`; the viewer's live mode in `replay/`; the routing in `main.rs` | The live recording, the viewer's live mode, Watch and Esc | Tests of the growing recording, live, pause, scrub and End; a headless render; a windowed run watching a server with bots. Single-player replays byte-identical (the replay lane's `--changed` scenarios). **Built (F2-O2, 2026-10-05):** as [described above](#the-observer-view): the live recording (`net/observe.rs`: the feeder, the store thread and the watch), the viewer's live mode (`Viewer::open_live` and `grow`, the clock's live edge, the growing playback, track pass and sound), the seat-aware viewer that ends the conversion's id swap, Watch opening the screen and Stop Watching in the Escape menu leaving it, the camera's subject to the host, and a script's keys and `shot` reaching the viewer. Tests: `net::observe` (six, and the ignored ten-minute measurement), `replay::clock`, `playback`, `tracks`, `viewer` and `net_convert` additions, `client::convert_tests` and the net lane's `net-window-observe` (a window joins a server flown by two bots, presses Watch, and looks, scrubs and returns to live). Single-player baseline SAME (the recorder and the simulation are untouched; see the slice's baseline report). Not built: smoke, contrails and gun rounds, and rotating the file to ten minutes (smoke, contrails and gun rounds from E2's `NetEffects` need the feeder to give it the mission's world and the bursts as replay events). The away player's own plane on this screen is F2-O3's |
 | F2-O3 An away player watches its own plane | Sonnet | F2-A, F2-O2 | `tore-app` `net/away.rs`, `net/observe.rs`, short hunks in `net/play.rs`, `main.rs` and `replay/host.rs`, and `Viewer::menu_open` in `replay/viewer.rs`; the net lane's `net-window-away-watch` | The observer screen opens on the player's own plane when the AI flies it, the flight's inputs are read there, the first one takes the plane back, Stop Watching | Unit tests of the keys and controllers read on the screen, the viewer's own keys left to it, who shows a watch, the idle rule's first Back; the net lane's windowed scenario: away behind the flight menu, the observer screen, taken back by the Up arrow, again, taken back by Stop Watching. Single player SAME (quick guard). **Built (F2-O3, 2026-10-06):** see [the observer screen for an away player's own plane](#the-observer-screen-for-an-away-players-own-plane-f2-o3) |
+| F2-O4 The away player's return on purpose | Sonnet | F2-A, F2-O3 | `tore-session` `settings.rs` (the idle list and default) with its tests, `wire/samples.rs` (the sample keeps 10 seconds); `tore-server` `config.rs` (`idle-ai` in minutes); `tore-app` `net/away.rs`, `net/observe.rs`, `net/hosting.rs` (`Report::Standby`), `net/session.rs` (`leaving_ends_game`, `hand_over_for_leave`), short hunks in `net/play.rs`, `main.rs`, `replay/host.rs`, `replay/pause.rs`, `replay/viewer.rs` and `pause_menu.rs` (a dimmed row); the net lane's `net-window-away-watch` | The idle time in minutes; no flight input takes the aircraft back; the observer menu's Take Back Flight, Spawn in Aircraft and Leave Game; the host's hand-over or confirm | Unit tests of the setting's default, list and words, of each menu row's enablement and snapshots of the menu in each state (alive, lost, lost with no revival, a host with and without a standby, a game that only joined), the idle rule with no hand-back, the host's Spawn after a loss, under no revival and after a release; the net lane's windowed scenario with `idle-ai 1`. Single player SAME (quick guard). **Built (F2-O4, 2026-10-06):** see [the away player's menu](#the-away-players-menu-f2-o4) |
 | F2-X Acceptance | lead, then John | all | | The lead's smoke test: a hosting game, a joining game and bots in PvP with a kill limit, revivals, an observer with a delay, the crown passed, the idle AI; then John on three machines | John plays a PvP and a co-op game from the menus |
 
 ```mermaid
@@ -7059,9 +7172,10 @@ change.
    missiles; by sides, total kills, kill limit 5 by one side, time limit 10
    minutes, sides locked. Co-op: no revival, no limits, friendly fire on.
    *Recommended as tabled.*
-4. **The AI flies an idle aircraft** after 10 seconds away (menu, focus, a
-   lost controller, a stall), in co-op and PvP, as the King's setting with
-   `never` available. *Recommended.*
+4. **The AI flies an idle aircraft** after 5 minutes away (menu, focus, a
+   lost controller, a stall; 10 seconds when first proposed, changed by John
+   on 2026-10-06), in co-op and PvP, as the King's setting with `never`
+   available. *Recommended.*
 5. **A dedicated server's King:** none by default (today's behaviour); a
    server's configuration may give the crown to the first player
    (`king first-player`) and may lock its mission. *Recommended.*

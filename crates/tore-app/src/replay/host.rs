@@ -151,9 +151,6 @@ impl App {
         repeat: bool,
     ) {
         let name = crate::flight_key(*physical, name);
-        if self.away_watch_key(&name, pressed, repeat) {
-            return;
-        }
         let modifiers = self.modifiers;
         let Some(replay) = self.replay.as_mut() else {
             return;
@@ -180,6 +177,16 @@ impl App {
                 }
                 self.action(event_loop, Action::Click);
             }
+            // The away player's menu (slice F2-O4).
+            Command::TakeBack => {
+                self.away_take_back();
+                self.action(event_loop, Action::Click);
+            }
+            Command::Spawn => {
+                self.away_spawn();
+                self.action(event_loop, Action::Click);
+            }
+            Command::LeaveGame => self.away_leave_game(event_loop),
             // Escape > ? > Exit to Desktop quits as flight's does.
             Command::Exit => self.action(event_loop, Action::Exit),
             // Escape > Pref: the screens open over the paused replay and
@@ -259,11 +266,6 @@ impl App {
                         || (command && name == "q"))
                 {
                     return Some(event);
-                }
-                // The flight's keys, while the AI flies the player's own
-                // plane and the view watches it (slice F2-O3).
-                if self.away_watch_key(&name, pressed, key.repeat) {
-                    return None;
                 }
                 if self.replay.as_mut().is_some_and(|replay| {
                     replay

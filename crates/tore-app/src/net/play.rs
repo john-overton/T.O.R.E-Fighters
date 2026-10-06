@@ -159,6 +159,12 @@ impl App {
         log::info!("Network: {text}");
         if self.screen == Screen::Flight {
             self.flight_ui.message(text);
+        } else if self.screen == Screen::Replay
+            && let Some(replay) = &mut self.replay
+        {
+            // The observer screen is where the player is looking (an away
+            // player's own aircraft, slice F2-O4, or a watch).
+            replay.viewer.message(text);
         } else if let Some(screen) = &mut self.lobby.screen {
             // The lobby is where the player is looking, over Direct
             // Connection (EF8).
@@ -210,14 +216,7 @@ impl App {
         // Stage F phase 2: the observer screen (F2-O2), and the AI flying an
         // idle player's aircraft (F2-A).
         self.observe_turn();
-        if self.away_watching() {
-            // The observer screen of the player's own aircraft (slice
-            // F2-O3) reads the flight's inputs for the idle rule.
-            let watch = self.watch_controls();
-            self.net_idle(&watch);
-        } else {
-            self.net_idle(&controls);
-        }
+        self.net_idle(&controls);
         // A game hosted from the command line starts each mission as soon as
         // everyone holding a slot is ready and its player has closed the
         // debrief.
