@@ -35,6 +35,11 @@
 //!    [`Joiner::keepalive_socket`]. [`Joiner::close_relay`] closes the
 //!    channel when the game connection ends.
 //!
+//! 5. Host migration (stage K, slice K8): when the host is lost the relayed
+//!    game keeps its channel and joins again on it
+//!    ([`Joiner::relay_target`]); once the game that took the mission over
+//!    has moved the listing, the master forwards the channel's frames there.
+//!
 //! The race itself is the transport client's. What a player's router does
 //! to the host's punches and the player's Connect requests is the
 //! simulator's ([`crate::sim`]) to show.
@@ -376,6 +381,18 @@ impl Joiner {
             RelayState::Open { channel } => Some(relayed_address(channel)),
             _ => None,
         }
+    }
+
+    /// The channel as the target of a migration's join (stage K, slice K8):
+    /// a relayed game whose host is lost keeps its channel (it does not call
+    /// [`Joiner::close_relay`]) and joins again at the same relayed address
+    /// from the same socket, through [`Joiner::over`]. The master forwards
+    /// the frames to whichever game the listing moved to, which holds the
+    /// channel's key from the old host's listing part. `None` without an
+    /// open channel.
+    pub fn relay_target(&self) -> Option<Target> {
+        self.relayed()
+            .map(|address| Target::new(address, Path::Relay))
     }
 
     /// What the relay's channel counted.

@@ -574,7 +574,8 @@ sections above:
 
 ## Moving a listing (stage K)
 
-*Designed 2026-10-05; agent proposals awaiting John's review.* When a game
+*Designed 2026-10-05; agent proposals awaiting John's review; built by slice
+K8 ([as built](#moving-a-listing-as-built)).* When a game
 that a player hosts loses its host, another player's game takes the mission
 over ([host migration](../ARCHITECTURE.md#host-migration-and-rejoin)). A
 listed game must stay one listing, at its new host's address, and its relayed
@@ -605,6 +606,41 @@ behaviour changes in one place.
   now the listing's.
 - **Reports.** A game's report counts the migrations it went through and those
   that failed, in the fields already there ([reports](#reports)).
+
+### Moving a listing as built
+
+*Built (K8, 2026-10-05):* the master's side in `tore-master`'s `relay.rs`
+(`Relays::move_host`) and `master.rs`, the games' side in
+`tore_net::master::rendezvous` (`ListingPart`, `Rendezvous::resume`,
+`release`). No packet changed and the master protocol is still version 1.
+Agent decisions beyond the section above:
+
+- **Every channel of the listing moves,** open or still opening: a Relay open
+  still due goes to the new address, and only an ack from there counts. The
+  master logs `relay moved` with the listing, both addresses and the count.
+- **A Relay request** after a move names the listing's address of the moment
+  as its host end, not the one the introduction saw.
+- **The new host's side.** A game resumed from a listing part never
+  registers: it sends a Heartbeat with the part's token at once, holds the
+  part's channels from the start, and reads as listing until the Heartbeat
+  ack. While the master has not acknowledged the move it asks again every 3
+  seconds, and counts the master as silent only after a listing's expiry (90
+  seconds), since the master drops a second move within the minute
+  unanswered: a second migration within the minute is listed at its new
+  host within 3 seconds of the minute's end. An Unknown listing makes it
+  register afresh, as any listing.
+- **The old host** that learns another game hosts now lets the listing go
+  without a word: no Unregister, no Relay close.
+- **The listing part's bytes** (the State record's part 8, read by the same
+  build only): its format (8, now 1), the master's name as the old host was
+  given it (a length, 8, and the bytes, so the new host looks up the same
+  master), the master's address, the listing id (64) and token (64), the
+  heartbeat and keep intervals in seconds (16 each), and the channels (a
+  count, 8; each its number and key, 32 each, and the master's address the
+  frames come from). An address is its family (8: 4 or 6), its octets and
+  its port (16); numbers are little-endian. 84 bytes with two channels.
+- **Known limit:** a Meet still being repeated for an introduction made just
+  before the move (at most two more, 250 ms apart) goes to the old address.
 
 ## Reports
 

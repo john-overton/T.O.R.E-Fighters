@@ -22,6 +22,11 @@
 //! channel, or with another key, is dropped and counted, and so is a send to
 //! a relayed address with no channel.
 //!
+//! A channel carried to another host in a listing part (stage K, slice K8)
+//! is routed the same way there: the new host's rendezvous opens it with
+//! its key from the part, so the relayed player's frames reach that host's
+//! transport from the same relayed address as before.
+//!
 //! The router reads into a buffer of its own, as long as the longest master
 //! datagram, so a Relay frame (up to 1,215 bytes) is never cut by the
 //! transport's buffer (1,201 bytes); what the transport gets is copied to

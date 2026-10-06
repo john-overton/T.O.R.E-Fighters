@@ -143,6 +143,27 @@ impl Channels {
         self.open.get(&channel).map(|c| (c.key, c.master))
     }
 
+    /// Every open channel as `(channel, key, master)`, by channel number:
+    /// what a host's listing part carries to the game that takes its mission
+    /// over (stage K, slice K8).
+    pub fn list(&self) -> Vec<(u32, u32, SocketAddr)> {
+        let mut channels: Vec<(u32, u32, SocketAddr)> = self
+            .open
+            .iter()
+            .map(|(&n, c)| (n, c.key, c.master))
+            .collect();
+        channels.sort_unstable_by_key(|(n, _, _)| *n);
+        channels
+    }
+
+    /// Forgets every channel without a word to the master: the channels now
+    /// belong to the game that took the mission over (stage K, slice K8).
+    /// Counted as closed.
+    pub fn forget_all(&mut self) {
+        self.counters.closed += self.open.len() as u64;
+        self.open.clear();
+    }
+
     /// The relayed addresses of the channels open.
     pub fn addresses(&self) -> Vec<SocketAddr> {
         let mut channels: Vec<u32> = self.open.keys().copied().collect();

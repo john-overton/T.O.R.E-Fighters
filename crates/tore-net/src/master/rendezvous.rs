@@ -38,6 +38,13 @@
 //!    the channel's frames reach the transport as datagrams from its relayed
 //!    address ([`relay`](super::relay)); the master's Relay close, or no
 //!    frame for a minute, closes it here.
+//! 8. A listing follows a migrated mission (stage K, slice K8): the host
+//!    exports its [`ListingPart`] (the master, the listing's id and token,
+//!    the relay channels and their keys) for its standbys, the game that
+//!    takes over resumes from it ([`Rendezvous::resume`]) and heartbeats
+//!    with the token from its own port, which moves the listing and its
+//!    channels there, and an old host that learns another hosts now lets
+//!    the listing go without a word ([`Rendezvous::release`]).
 //!
 //! The summary is the host's discovery answer without its nonce. The host's
 //! loop offers it through [`Rendezvous::wants_summary`] and
@@ -191,6 +198,208 @@ struct Listing {
     seen: SocketAddr,
 }
 
+/// One relay channel in a [`ListingPart`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartChannel {
+    /// The channel's number: its relayed address on both ends
+    /// ([`super::relayed_address`]).
+    pub channel: u32,
+    /// Its key.
+    pub key: u32,
+    /// The master's address its frames come from.
+    pub master: SocketAddr,
+}
+
+/// A host's listing as the game that takes its mission over carries it on
+/// (stage K, slice K8; the architecture guide's "Reaching the new host" and
+/// the master protocol's "Moving a listing"): the session's state part
+/// *listing*, which the standby stream carries as bytes
+/// ([`ListingPart::encode`]) that `Host` never reads. The hosting thread
+/// takes it from [`HostListing::part`] whenever [`HostListing::part_version`]
+/// changes, and the new host's thread resumes from it
+/// ([`HostListing::resume`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListingPart {
+    /// The master as the old host was given it (`HOST:PORT`), so the new
+    /// host looks up the same master whatever its own options say.
+    pub master_name: String,
+    /// The master's main address the listing is on.
+    pub master: SocketAddr,
+    /// The public id: browsers keep seeing the same game.
+    pub listing_id: u64,
+    /// The secret the new host proves itself with.
+    pub token: u64,
+    /// The heartbeat interval the master set, in seconds.
+    pub heartbeat_secs: u16,
+    /// The keep interval the master set, in seconds.
+    pub keep_secs: u16,
+    /// Every relay channel open to the host, with its key.
+    pub channels: Vec<PartChannel>,
+}
+
+/// A listing part's bytes that do not decode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BadListingPart;
+
+impl std::fmt::Display for BadListingPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the listing part does not decode")
+    }
+}
+
+impl std::error::Error for BadListingPart {}
+
+/// The listing part's coding's own version, its first byte.
+const PART_FORMAT: u8 = 1;
+/// The longest master name a part carries.
+const MAX_PART_NAME: usize = 255;
+
+impl ListingPart {
+    /// The part's bytes: its format (8), the master's name (a length, 8,
+    /// then the bytes), the master's address, the listing id (64) and token
+    /// (64), the two intervals (16 each), and the channels (a count, 8;
+    /// each its number and key, 32 each, and its master's address). An
+    /// address is its family (8: 4 or 6), its octets and its port (16);
+    /// numbers are little-endian. *Agent decision:* a plain byte coding of
+    /// its own, since `tore-net` has no checkpoint trait and the part is
+    /// read by the same build only, as every state part is. A name longer
+    /// than 255 bytes, or more than 255 channels, is cut.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(64 + self.channels.len() * 27);
+        out.push(PART_FORMAT);
+        let mut name = self.master_name.as_str();
+        while name.len() > MAX_PART_NAME {
+            let mut end = MAX_PART_NAME;
+            while !name.is_char_boundary(end) {
+                end -= 1;
+            }
+            name = &name[..end];
+        }
+        out.push(name.len() as u8);
+        out.extend_from_slice(name.as_bytes());
+        put_address(&mut out, self.master);
+        out.extend_from_slice(&self.listing_id.to_le_bytes());
+        out.extend_from_slice(&self.token.to_le_bytes());
+        out.extend_from_slice(&self.heartbeat_secs.to_le_bytes());
+        out.extend_from_slice(&self.keep_secs.to_le_bytes());
+        let channels = &self.channels[..self.channels.len().min(255)];
+        out.push(channels.len() as u8);
+        for channel in channels {
+            out.extend_from_slice(&channel.channel.to_le_bytes());
+            out.extend_from_slice(&channel.key.to_le_bytes());
+            put_address(&mut out, channel.master);
+        }
+        out
+    }
+
+    /// The part from its bytes; strict, so trailing bytes, an unknown
+    /// format or family, or a name that is not UTF-8 refuse it.
+    pub fn decode(bytes: &[u8]) -> Result<Self, BadListingPart> {
+        let mut reader = PartReader { bytes };
+        if reader.take(1)?[0] != PART_FORMAT {
+            return Err(BadListingPart);
+        }
+        let name_len = usize::from(reader.take(1)?[0]);
+        let master_name = std::str::from_utf8(reader.take(name_len)?)
+            .map_err(|_| BadListingPart)?
+            .to_owned();
+        let master = reader.address()?;
+        let listing_id = reader.u64()?;
+        let token = reader.u64()?;
+        let heartbeat_secs = reader.u16()?;
+        let keep_secs = reader.u16()?;
+        let count = usize::from(reader.take(1)?[0]);
+        let mut channels = Vec::with_capacity(count);
+        for _ in 0..count {
+            channels.push(PartChannel {
+                channel: reader.u32()?,
+                key: reader.u32()?,
+                master: reader.address()?,
+            });
+        }
+        if !reader.bytes.is_empty() {
+            return Err(BadListingPart);
+        }
+        Ok(Self {
+            master_name,
+            master,
+            listing_id,
+            token,
+            heartbeat_secs,
+            keep_secs,
+            channels,
+        })
+    }
+}
+
+fn put_address(out: &mut Vec<u8>, address: SocketAddr) {
+    match canonical(address) {
+        SocketAddr::V4(v4) => {
+            out.push(4);
+            out.extend_from_slice(&v4.ip().octets());
+        }
+        SocketAddr::V6(v6) => {
+            out.push(6);
+            out.extend_from_slice(&v6.ip().octets());
+        }
+    }
+    out.extend_from_slice(&address.port().to_le_bytes());
+}
+
+/// Reads a listing part's bytes in order.
+struct PartReader<'a> {
+    bytes: &'a [u8],
+}
+
+impl<'a> PartReader<'a> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8], BadListingPart> {
+        if self.bytes.len() < n {
+            return Err(BadListingPart);
+        }
+        let (head, rest) = self.bytes.split_at(n);
+        self.bytes = rest;
+        Ok(head)
+    }
+
+    fn u16(&mut self) -> Result<u16, BadListingPart> {
+        Ok(u16::from_le_bytes(
+            self.take(2)?.try_into().map_err(|_| BadListingPart)?,
+        ))
+    }
+
+    fn u32(&mut self) -> Result<u32, BadListingPart> {
+        Ok(u32::from_le_bytes(
+            self.take(4)?.try_into().map_err(|_| BadListingPart)?,
+        ))
+    }
+
+    fn u64(&mut self) -> Result<u64, BadListingPart> {
+        Ok(u64::from_le_bytes(
+            self.take(8)?.try_into().map_err(|_| BadListingPart)?,
+        ))
+    }
+
+    fn address(&mut self) -> Result<SocketAddr, BadListingPart> {
+        let ip = match self.take(1)?[0] {
+            4 => {
+                let octets: [u8; 4] = self.take(4)?.try_into().map_err(|_| BadListingPart)?;
+                IpAddr::from(octets)
+            }
+            6 => {
+                let octets: [u8; 16] = self.take(16)?.try_into().map_err(|_| BadListingPart)?;
+                let ip = std::net::Ipv6Addr::from(octets);
+                // An IPv4-mapped address is written as IPv4.
+                if ip.to_ipv4_mapped().is_some() {
+                    return Err(BadListingPart);
+                }
+                IpAddr::V6(ip)
+            }
+            _ => return Err(BadListingPart),
+        };
+        Ok(SocketAddr::new(ip, self.u16()?))
+    }
+}
+
 /// The mapping test under way or done.
 #[derive(Debug, Clone)]
 struct Mapping {
@@ -263,6 +472,12 @@ pub struct Rendezvous {
     meets: Meets,
     /// The relay's channels to this host (slice J3).
     pub(super) relays: HostRelays,
+    /// A listing resumed from another host's part whose move the master has
+    /// not yet acknowledged (slice K8).
+    moving: bool,
+    /// Raised whenever the listing part changes, but for its channels,
+    /// which the channels' own counts follow ([`Rendezvous::part_version`]).
+    part_changes: u64,
     out: VecDeque<Transmit>,
     events: VecDeque<RendezvousEvent>,
     /// What the rendezvous counted.
@@ -303,10 +518,128 @@ impl Rendezvous {
             mapping: Mapping::new(MappingType::Unknown, now),
             meets: Meets::default(),
             relays: HostRelays::default(),
+            moving: false,
+            part_changes: 0,
             out: VecDeque::new(),
             events: VecDeque::new(),
             counters: RendezvousCounters::default(),
         }
+    }
+
+    /// A host's rendezvous that carries on another host's listing (stage K,
+    /// slice K8): the game took a migrated mission over and was handed the
+    /// old host's [`ListingPart`]. It never registers. Its first update
+    /// sends a Heartbeat with the listing's token from this game's own port
+    /// to the master in the part, which moves the listing there (and, from
+    /// stage K, the listing's relay channels with it); the channels in the
+    /// part are open here from the start, so a relayed player's frames reach
+    /// this host as soon as the master forwards them. The state reads
+    /// [`ListingState::Registering`] until the master acknowledges, then
+    /// [`RendezvousEvent::Listed`] comes with the address the master saw.
+    ///
+    /// *Agent decisions:* while the move is unacknowledged the Heartbeat is
+    /// sent again every [`REQUEST_RETRY`], and the master counts as silent
+    /// only after a listing's expiry ([`super::LISTING_EXPIRY`], 90 seconds)
+    /// rather than 10 seconds, since a master moves a listing at most once a
+    /// minute and drops a second move within it unanswered: a second
+    /// migration within the minute is listed at the new host within 3
+    /// seconds of the minute's end. An Unknown listing (the master restarted,
+    /// or the listing expired) lists the game afresh, as for any listing.
+    /// The mapping test runs again from this port.
+    pub fn resume(
+        config: HostRendezvous,
+        part: &ListingPart,
+        candidates: Vec<Candidate>,
+        now: Duration,
+    ) -> Self {
+        let mut rendezvous = Self::host(config, now);
+        rendezvous.set_masters(vec![part.master], candidates, now);
+        rendezvous.wanted = true;
+        rendezvous.listing = Some(Listing {
+            listing_id: part.listing_id,
+            token: part.token,
+            // Until the master's acknowledgement says where it sees this
+            // game; nobody reads it before then (the state is Registering).
+            seen: canonical(part.master),
+        });
+        rendezvous.moving = true;
+        rendezvous.last_heartbeat = now;
+        let seconds = |secs: u16, default: Duration| match secs {
+            0 => default,
+            secs => Duration::from_secs(u64::from(secs)),
+        };
+        rendezvous.heartbeat_interval = seconds(part.heartbeat_secs, HEARTBEAT_INTERVAL);
+        rendezvous.keep_interval = seconds(part.keep_secs, KEEP_INTERVAL);
+        for channel in &part.channels {
+            rendezvous
+                .relays
+                .channels
+                .open(channel.channel, channel.key, channel.master, now);
+        }
+        rendezvous.part_changes += 1;
+        rendezvous
+    }
+
+    /// The listing as another game would carry it on if this one's mission
+    /// moved to it (stage K, slice K8): the master's address, the listing's
+    /// id and token, the intervals and every open relay channel with its
+    /// key. `None` while the game is not listed. The master's name is left
+    /// empty: [`HostListing::part`] fills it in.
+    pub fn listing_part(&self) -> Option<ListingPart> {
+        let listing = self
+            .listing
+            .filter(|_| self.wanted && self.refused.is_none())?;
+        let master = self.master()?;
+        let secs = |d: Duration| u16::try_from(d.as_secs()).unwrap_or(u16::MAX);
+        Some(ListingPart {
+            master_name: String::new(),
+            master,
+            listing_id: listing.listing_id,
+            token: listing.token,
+            heartbeat_secs: secs(self.heartbeat_interval),
+            keep_secs: secs(self.keep_interval),
+            channels: self
+                .relays
+                .channels
+                .list()
+                .into_iter()
+                .map(|(channel, key, master)| PartChannel {
+                    channel,
+                    key,
+                    master,
+                })
+                .collect(),
+        })
+    }
+
+    /// A number that changes whenever [`Rendezvous::listing_part`] may have:
+    /// the hosting loop hands its `Host` a new part when it differs from the
+    /// last one it saw, without building the part on every turn.
+    pub fn part_version(&self) -> u64 {
+        let counters = self.relays.channels.counters;
+        self.part_changes
+            .wrapping_add(counters.opened)
+            .wrapping_add(counters.closed)
+    }
+
+    /// Lets the listing go without a word (stage K, slice K8): another game
+    /// hosts the mission now and carries the listing on, so no Unregister
+    /// and no Relay close go out, nothing queued is sent, and the relay's
+    /// channels are forgotten. Returns the part as it stood. The game can be
+    /// listed again later with [`Rendezvous::set_listed`], as a new listing.
+    pub fn release(&mut self) -> Option<ListingPart> {
+        let part = self.listing_part();
+        self.wanted = false;
+        self.listing = None;
+        self.moving = false;
+        self.asked_since = None;
+        self.silent = false;
+        self.relays.channels.forget_all();
+        self.meets = Meets::default();
+        self.out.clear();
+        self.part_changes += 1;
+        self.events.push_back(RendezvousEvent::Unlisted);
+        part
     }
 
     /// The relayed addresses of the relay's channels open to this host: one
@@ -369,8 +702,10 @@ impl Rendezvous {
             .unwrap_or(0);
         if before.is_some() && before != self.masters.get(self.current).copied() {
             self.listing = None;
+            self.moving = false;
             self.asked_since = None;
             self.next_ask = now;
+            self.part_changes += 1;
         }
         if self.masters.is_empty() {
             return;
@@ -481,11 +816,13 @@ impl Rendezvous {
             return ListingState::Silent;
         }
         match self.listing {
-            Some(listing) => ListingState::Listed {
+            // A listing carried on from another host reads as registering
+            // until the master has moved it here (slice K8).
+            Some(listing) if !self.moving => ListingState::Listed {
                 listing_id: listing.listing_id,
                 seen: listing.seen,
             },
-            None => ListingState::Registering,
+            _ => ListingState::Registering,
         }
     }
 
@@ -575,8 +912,12 @@ impl Rendezvous {
                         Duration::from_secs(u64::from(secs))
                     }
                 };
+                let intervals = (self.heartbeat_interval, self.keep_interval);
                 self.heartbeat_interval = seconds(listed.heartbeat_secs, HEARTBEAT_INTERVAL);
                 self.keep_interval = seconds(listed.keep_secs, KEEP_INTERVAL);
+                if !again || intervals != (self.heartbeat_interval, self.keep_interval) {
+                    self.part_changes += 1;
+                }
                 if !again {
                     self.listing = Some(Listing {
                         listing_id: listed.listing_id,
@@ -599,7 +940,16 @@ impl Rendezvous {
                     self.counters.unexpected += 1;
                     return;
                 }
-                if ack.seen != listing.seen {
+                if self.moving {
+                    // The master moved the listing here (slice K8): it is
+                    // this game's from now on.
+                    self.moving = false;
+                    listing.seen = ack.seen;
+                    self.events.push_back(RendezvousEvent::Listed {
+                        listing_id: listing.listing_id,
+                        seen: ack.seen,
+                    });
+                } else if ack.seen != listing.seen {
                     listing.seen = ack.seen;
                     self.events
                         .push_back(RendezvousEvent::SeenChanged(ack.seen));
@@ -615,6 +965,8 @@ impl Rendezvous {
                 // at once.
                 self.heard(now, true);
                 self.listing = None;
+                self.moving = false;
+                self.part_changes += 1;
                 self.nonce = self.rng.next_u64();
                 self.next_ask = now;
             }
@@ -631,6 +983,8 @@ impl Rendezvous {
                     self.refused = Some(text);
                 }
                 self.listing = None;
+                self.moving = false;
+                self.part_changes += 1;
             }
             MasterPacket::ProbeAnswer(answer) => {
                 if answer.nonce != self.mapping.nonce {
@@ -716,14 +1070,25 @@ impl Rendezvous {
         if !self.wanted || self.refused.is_some() || self.masters.is_empty() {
             return;
         }
+        // A move the master has not acknowledged may only be waiting out
+        // its once-a-minute rule (slice K8).
+        let silent_after = if self.moving {
+            super::LISTING_EXPIRY
+        } else {
+            MASTER_SILENT
+        };
         if let Some(since) = self.asked_since
             && !self.silent
-            && now >= since + MASTER_SILENT
+            && now >= since + silent_after
         {
             self.silent = true;
             self.events.push_back(RendezvousEvent::MasterSilent);
             // The next try goes to the master's next address, if it has one.
+            let before = self.current;
             self.current = (self.current + 1) % self.masters.len();
+            if self.current != before {
+                self.part_changes += 1;
+            }
             if self.listing.is_none() {
                 self.nonce = self.rng.next_u64();
             }
@@ -737,12 +1102,15 @@ impl Rendezvous {
                     self.ask(now);
                 }
             }
-            Some(_) => {
+            Some(_) if self.summary.is_some() => {
                 let gap_ok = self
                     .last_listing_send
                     .is_none_or(|at| now >= at + LISTING_GAP);
+                // A listing carried on from another host heartbeats at once
+                // (slice K8).
                 let heartbeat_due = now >= self.last_heartbeat + self.heartbeat_interval
-                    || (self.changed && now >= self.last_heartbeat + CHANGE_HEARTBEAT_DELAY);
+                    || (self.changed && now >= self.last_heartbeat + CHANGE_HEARTBEAT_DELAY)
+                    || self.moving;
                 if gap_ok && (retry_due || (self.asked_since.is_none() && heartbeat_due)) {
                     self.ask(now);
                 } else if gap_ok
@@ -757,6 +1125,8 @@ impl Rendezvous {
                     self.send_keep(now);
                 }
             }
+            // A resumed listing waits for the hosting loop's first summary.
+            Some(_) => {}
         }
     }
 
@@ -861,6 +1231,8 @@ impl Rendezvous {
         let (Some(master), Some(listing)) = (self.master(), self.listing.take()) else {
             return;
         };
+        self.moving = false;
+        self.part_changes += 1;
         for _ in 0..GOODBYE_COPIES {
             self.send(
                 master,
@@ -1101,6 +1473,51 @@ impl HostListing {
         })
     }
 
+    /// A listing carried on from another host's `part` on `game_port`
+    /// (stage K, slice K8): see [`Rendezvous::resume`]. The master is the
+    /// part's, by its name; its address from the part is used at once, and
+    /// the name is looked up as for any listing. Fails only when the part's
+    /// master name does not parse.
+    pub fn resume(
+        part: &ListingPart,
+        config: HostRendezvous,
+        game_port: u16,
+        now: Duration,
+    ) -> Result<Self, String> {
+        let (host, port) = parse_master(&part.master_name)?;
+        let candidates = host_candidates(&[part.master], game_port, own_address_toward);
+        Ok(Self {
+            rendezvous: Rendezvous::resume(config, part, candidates, now),
+            host,
+            port,
+            game_port,
+            lookup: None,
+            next_lookup: now,
+            lookup_backoff: FIRST_BACKOFF,
+            was_silent: false,
+        })
+    }
+
+    /// The listing part another game would carry the listing on with, with
+    /// the master's name filled in: see [`Rendezvous::listing_part`].
+    pub fn part(&self) -> Option<ListingPart> {
+        let mut part = self.rendezvous.listing_part()?;
+        part.master_name = self.master_text();
+        Some(part)
+    }
+
+    /// See [`Rendezvous::part_version`].
+    pub fn part_version(&self) -> u64 {
+        self.rendezvous.part_version()
+    }
+
+    /// See [`Rendezvous::release`]; the part with the master's name.
+    pub fn release(&mut self) -> Option<ListingPart> {
+        let mut part = self.rendezvous.release()?;
+        part.master_name = self.master_text();
+        Some(part)
+    }
+
     /// The master as given, for messages: `HOST:PORT`.
     pub fn master_text(&self) -> String {
         if self.host.contains(':') {
@@ -1221,3 +1638,7 @@ pub fn state_text(state: &ListingState) -> String {
 #[cfg(test)]
 #[path = "rendezvous_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "listing_part_tests.rs"]
+mod listing_part_tests;
