@@ -7,9 +7,11 @@
 //! [`Peers::route`] first:
 //!
 //! - a **Reach** for this game's session is answered here, at most 10 a
-//!   second from one address and 200 a second in all, never with more bytes
-//!   than it brought; while the game hosts, the host's transport answers it
-//!   instead ([`Route::Host`]);
+//!   second from one address and port (one player's socket), 160 a second
+//!   from one IP address (a LAN party of 8 behind one router, each player
+//!   testing every address of up to three candidates) and 200 a second in
+//!   all, never with more bytes than it brought; while the game hosts, the
+//!   host's transport answers it instead ([`Route::Host`]);
 //! - a **Reach answer** to one of this game's own Reaches is taken here and
 //!   timed;
 //! - while the game is a player, what only a host receives (Connect
@@ -48,6 +50,12 @@ pub const REACH_GAP: Duration = Duration::from_millis(200);
 /// How long a test waits for answers after its last Reach (agent decision:
 /// a round trip of up to a second still counts).
 pub const REACH_WAIT: Duration = Duration::from_secs(1);
+/// Reaches answered a second from one IP address, whatever their ports: a
+/// LAN party of 8 behind one router sends up to 7 players' five Reaches to
+/// each of four candidate addresses, 140 a second, and each player's own
+/// socket is held to [`REACH_PER_ADDRESS`] besides (slice KP, agent
+/// decision; the transport's own answerer keeps one limit for the IP).
+pub const REACH_PER_IP: u32 = 160;
 /// Candidates in one test at most.
 pub const MAX_TARGETS: usize = 3;
 /// Addresses of one candidate a test tries at most, the learned ones
@@ -150,29 +158,41 @@ struct Sent {
     probe: Option<(u16, usize, usize)>,
 }
 
+/// The Reach answerer's rate limits: each address and port, each IP address,
+/// and all of them together, a second at a time.
 #[derive(Debug, Default)]
 struct Limiter {
     second: u64,
     total: u32,
-    per_address: HashMap<IpAddr, u32>,
+    per_address: HashMap<SocketAddr, u32>,
+    per_ip: HashMap<IpAddr, u32>,
 }
 
 impl Limiter {
-    fn allow(&mut self, now: Duration, address: IpAddr) -> bool {
+    fn allow(&mut self, now: Duration, from: SocketAddr) -> bool {
         let second = now.as_secs();
         if second != self.second {
             self.second = second;
             self.total = 0;
             self.per_address.clear();
+            self.per_ip.clear();
         }
         if self.total >= RATE_LIMIT_TOTAL {
             return false;
         }
-        let count = self.per_address.entry(address).or_insert(0);
-        if *count >= REACH_PER_ADDRESS {
+        if self
+            .per_address
+            .get(&from)
+            .is_some_and(|&n| n >= REACH_PER_ADDRESS)
+            || self
+                .per_ip
+                .get(&from.ip())
+                .is_some_and(|&n| n >= REACH_PER_IP)
+        {
             return false;
         }
-        *count += 1;
+        *self.per_address.entry(from).or_insert(0) += 1;
+        *self.per_ip.entry(from.ip()).or_insert(0) += 1;
         self.total += 1;
         true
     }
@@ -296,7 +316,7 @@ impl Peers {
         // A candidate's Reach teaches a test running against it the
         // address its router gave it towards this game.
         self.learn(now, reach.from, from);
-        if !self.limiter.allow(now, from.ip()) {
+        if !self.limiter.allow(now, from) {
             self.counters.rate_limited += 1;
             return;
         }

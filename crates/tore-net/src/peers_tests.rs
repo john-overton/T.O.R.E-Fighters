@@ -89,14 +89,120 @@ fn reaches_are_answered_ten_a_second_from_one_address() {
     let answered = std::iter::from_fn(|| p.poll_transmit()).count();
     assert_eq!(answered, 10);
     assert_eq!(p.counters().rate_limited, 5);
-    // Another address, and the next second, are answered.
+    // Another address, another port of the same IP address, and the next
+    // second, are answered.
     p.route(
         Duration::from_millis(200),
         a("10.0.0.8:5000"),
         &reach(SESSION, 1, 1),
     );
+    p.route(
+        Duration::from_millis(200),
+        a("10.0.0.9:5001"),
+        &reach(SESSION, 1, 1),
+    );
     p.route(Duration::from_millis(1_100), asker, &reach(SESSION, 2, 1));
-    assert_eq!(std::iter::from_fn(|| p.poll_transmit()).count(), 2);
+    assert_eq!(std::iter::from_fn(|| p.poll_transmit()).count(), 3);
+}
+
+/// Players' sockets behind one router share an IP address: each socket has
+/// its own ten a second, the IP address 160 in all, and the whole game 200.
+#[test]
+fn reaches_from_one_ip_address_are_answered_up_to_its_cap_and_the_total() {
+    let mut p = peers(1, 0);
+    // 20 sockets of one IP address send 10 each: 160 are answered.
+    let mut nonce = 0;
+    for port in 0..20u16 {
+        for _ in 0..10 {
+            nonce += 1;
+            p.route(
+                Duration::from_millis(100),
+                SocketAddr::new(a("203.0.113.20:0").ip(), 5000 + port),
+                &reach(SESSION, nonce, 1),
+            );
+        }
+    }
+    assert_eq!(
+        std::iter::from_fn(|| p.poll_transmit()).count(),
+        REACH_PER_IP as usize
+    );
+    assert_eq!(p.counters().rate_limited, 200 - u64::from(REACH_PER_IP));
+    // Other IP addresses are still answered, up to the whole game's 200.
+    for host in 1..=10u8 {
+        for _ in 0..10 {
+            nonce += 1;
+            p.route(
+                Duration::from_millis(200),
+                a(&format!("198.51.100.{host}:5000")),
+                &reach(SESSION, nonce, 1),
+            );
+        }
+    }
+    assert_eq!(
+        std::iter::from_fn(|| p.poll_transmit()).count(),
+        (RATE_LIMIT_TOTAL - REACH_PER_IP) as usize
+    );
+}
+
+/// A LAN party of 8: seven players behind one router (one public IP
+/// address) each test a candidate on the open network with ten Reaches in
+/// the first second (two of its addresses), and every one of them reaches it.
+/// Under the old limit, ten a second from the IP address, only two could.
+#[test]
+fn a_lan_party_behind_one_router_all_reach_a_candidate() {
+    let net = SimNetwork::new(23);
+    net.set_default_link(LinkConfig::one_way(Duration::from_millis(20)));
+    net.add_router(router(
+        "203.0.113.20",
+        "192.168.2.0/24",
+        EIM,
+        Filtering::EndpointIndependent,
+    ))
+    .unwrap();
+    let c_addr = a("198.51.100.10:26900");
+    let mut candidate = Game::new(&net, c_addr, 1, 31);
+    let mut players: Vec<Game> = (0..7u8)
+        .map(|n| {
+            let mut game = Game::new(
+                &net,
+                a(&format!("192.168.2.{}:40000", 20 + n)),
+                2 + n,
+                40 + u64::from(n),
+            );
+            // Two addresses of the candidate that are both its socket, as a
+            // candidate with several addresses has.
+            game.peers.test(
+                net.now(),
+                1,
+                &[TestTarget {
+                    player: 1,
+                    addresses: vec![c_addr, c_addr],
+                }],
+            );
+            game
+        })
+        .collect();
+    let end = net.now() + Duration::from_secs(3);
+    while net.now() < end {
+        net.advance(MS);
+        let now = net.now();
+        candidate.step(now);
+        for player in &mut players {
+            player.step(now);
+        }
+    }
+    for (n, player) in players.iter().enumerate() {
+        assert_eq!(player.finished.len(), 1, "player {n} finished its test");
+        assert!(
+            player.finished[0].results[0].reached.is_some(),
+            "player {n} reached the candidate"
+        );
+    }
+    assert_eq!(
+        candidate.peers.counters().rate_limited,
+        0,
+        "nothing of the party was limited"
+    );
 }
 
 #[test]
