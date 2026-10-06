@@ -210,6 +210,35 @@ class ParsingTests(unittest.TestCase):
         )
         self.assertIn("Phoenix was not told of plane 13", net.revive_problems(good, "Phoenix", 13))
 
+    def test_an_away_and_back_is_read_from_the_bots_lines(self):
+        good = (
+            "Viper: seat 0, plane 0, at tick 3\n"
+            "Viper: away: the AI flies plane 0\n"
+            "Viper: observing from tick 1210, 0 s behind\n"
+            "Viper: back at the controls\n"
+            "Viper: observing ended\n"
+            "Viper: seat 1, plane 0, at tick 1930\n"
+        )
+        self.assertEqual(net.away_problems(good, "Viper", 0), [])
+        self.assertEqual(
+            net.away_problems(good.replace("Viper: away: the AI flies plane 0\n", ""), "Viper", 0),
+            ["the AI never flew Viper's plane 0"],
+        )
+        never = good.replace("plane 0, at tick 1930", "plane 1, at tick 1930")
+        self.assertEqual(net.away_problems(never, "Viper", 0), ["Viper was not seated again in plane 0"])
+        unwatched = good.replace("Viper: observing from tick 1210, 0 s behind\n", "")
+        self.assertEqual(net.away_problems(unwatched, "Viper", 0), ["Viper never watched its plane while away"])
+        self.assertEqual(
+            net.away_problems("", "Viper", 0),
+            [
+                "Viper was never seated in plane 0",
+                "the AI never flew Viper's plane 0",
+                "Viper never watched its plane while away",
+                "Viper never asked for its plane back",
+                "Viper was not seated again in plane 0",
+            ],
+        )
+
     def test_bad_network_words_are_recognised(self):
         import re
 

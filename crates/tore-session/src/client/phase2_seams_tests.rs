@@ -7,7 +7,7 @@
 
 use super::tests::{Rig, spec, weave};
 use super::*;
-use crate::host::{AfterEnd, NOT_AVAILABLE, StartMode};
+use crate::host::{AfterEnd, StartMode};
 use crate::settings::{self, Mode, Store};
 use crate::wire::messages::{Lock, Observe, PasswordChange, Subject, kind};
 use crate::wire::samples;
@@ -141,20 +141,28 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
         Some(cobra_id)
     );
 
-    // Everyone's: not built yet.
+    // Everyone's.
     let player = &mut rig.players[cobra].client;
     player.revive();
     player.observe(Observe::Watch(Subject::Aircraft(1)));
-    player.away();
-    player.back();
+    // The game sends Away and Back only while flying or away (F2-A); sent
+    // anyway, they are refused in words.
+    let now = player.now;
+    player.request(now, Message::Away);
+    player.request(now, Message::Back);
     rig.run(Duration::from_millis(300));
-    for request in [kind::AWAY, kind::BACK] {
-        assert!(
-            refused(&rig, cobra, request, NOT_AVAILABLE),
-            "{request}: {:?}",
-            refusals(&rig, cobra)
-        );
-    }
+    assert!(refused(
+        &rig,
+        cobra,
+        kind::AWAY,
+        "The mission is not flying."
+    ));
+    assert!(refused(
+        &rig,
+        cobra,
+        kind::BACK,
+        "The AI is not flying your aircraft."
+    ));
     // Revival is built (F2-V): refused in words before the mission flies.
     assert!(refused(
         &rig,

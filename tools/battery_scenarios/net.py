@@ -582,6 +582,62 @@ def drive_revive(d: Drive) -> None:
     log_must(d, server_log(d), r"Phoenix took plane 0\b", r"Phoenix took plane 12\b", forbid=NET_BAD)
 
 
+def away_problems(text: str, name: str, plane: int) -> list[str]:
+    """What a `tore-bot --away` printed (slice F2-A): seated in `plane`, the AI took it and kept it while the bot
+    watched it, the bot asked for it back and was seated in it again, in that order."""
+    problems = []
+    lines = text.splitlines()
+
+    def first(pattern: str, after: int = -1) -> int | None:
+        return next((i for i, line in enumerate(lines) if i > after and re.search(pattern, line)), None)
+
+    seat = rf"^{name}: seat \d+, plane {plane}, at tick \d+$"
+    seated = first(seat)
+    away = first(rf"^{name}: away: the AI flies plane {plane}$")
+    watching = first(rf"^{name}: observing from tick \d+, 0 s behind$")
+    back = first(rf"^{name}: back at the controls$")
+    reseated = first(seat, back) if back is not None else None
+    if seated is None:
+        problems.append(f"{name} was never seated in plane {plane}")
+    if away is None:
+        problems.append(f"the AI never flew {name}'s plane {plane}")
+    if watching is None:
+        problems.append(f"{name} never watched its plane while away")
+    if back is None:
+        problems.append(f"{name} never asked for its plane back")
+    if reseated is None:
+        problems.append(f"{name} was not seated again in plane {plane}")
+    order = [seated, away, back, reseated]
+    if None not in order and order != sorted(order):
+        problems.append(f"{name}'s seating, away, back and seating again came out of order")
+    return problems
+
+
+def drive_away(d: Drive) -> None:
+    """The AI flies an idle player's aircraft (slice F2-A): a bot's game says it is away 8 seconds into its flight;
+    the AI flies its plane, kept for it, while it watches; 6 seconds later it says it is back, flies on in the same
+    plane and leaves cleanly. The server's file leaves `idle-ai` at its default, 10 seconds."""
+    port = d.port()
+    server = start_server(d, port, guide_mission())
+    bot = start_bots(d, port, "bot", 40, "--callsign", "Viper", "--slot", "0", "--away", "8,6")
+    bot.finish(90, 0)
+    server.finish(40, 0)
+    for problem in away_problems(bot.text(), "Viper", 0):
+        d.problem(problem)
+    bot.expect(r"^Viper: debrief: ", "a debrief")
+    bot.expect(r"^Viper: The connection ended: the player left\.$", "a clean leave")
+    bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+    log_must(
+        d,
+        server_log(d),
+        r"Viper is away: the AI flies plane 0$",
+        r"Viper is back: takes plane 0 from the AI$",
+        r"Viper took plane 0\b",
+        forbid=NET_BAD,
+    )
+
+
 def drive_discovery(d: Drive) -> None:
     """`tore-app --find-games` lists a server on this machine, and says so when there is none."""
     port = d.port()
@@ -1161,6 +1217,11 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-revive", lane="net", args=[], driver=drive_revive, uses=("server", "bot"), timeout=200,
             notes="retail's revival: a bot ejects, flies again in a new plane of its wing (slice F2-V) and leaves",
+        ),
+        Scenario(
+            name="net-server-away", lane="net", args=[], driver=drive_away, uses=("server", "bot"), timeout=200,
+            notes="a bot's game is away: the AI flies its plane, kept for it, until it is back and flies on in it "
+            "(slice F2-A)",
         ),
         Scenario(
             name="net-discovery", lane="net", args=[], driver=drive_discovery, uses=("server",), timeout=120,

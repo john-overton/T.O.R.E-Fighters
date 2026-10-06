@@ -35,6 +35,9 @@
 //!   flight, the picture, the newest cockpit readout and the events.
 //! - **Diagnostics and capture** ([`diagnostics`], [`capture`]).
 
+mod away;
+#[cfg(test)]
+mod away_tests;
 pub mod capture;
 #[cfg(test)]
 mod chat_tests;
@@ -698,6 +701,9 @@ pub struct Client {
     capture: Option<CaptureWriter>,
     /// Watching the flying mission (stage F phase 2, [`observe`]).
     watching: Option<observe::Watching>,
+    /// The AI flies the plane while the player is away (stage F phase 2,
+    /// [`away`]).
+    away: away::Away,
     now: Duration,
 }
 
@@ -814,6 +820,7 @@ impl Client {
             diagnostics: None,
             capture: None,
             watching: None,
+            away: away::Away::default(),
             now,
         })
         .map(|mut client| {
@@ -1196,19 +1203,6 @@ impl Client {
             Observe::Watch(subject) => self.watch(subject),
             Observe::Stop => self.stop_watching(),
         }
-    }
-
-    /// The game has been away for the `idle-ai` setting's seconds.
-    pub fn away(&mut self) {
-        let now = self.now;
-        self.request(now, Message::Away);
-    }
-
-    /// The player is back at the controls: the answer is a
-    /// [`ClientEvent::Seated`] or a [`ClientEvent::Refused`].
-    pub fn back(&mut self) {
-        let now = self.now;
-        self.request(now, Message::Back);
     }
 
     /// Sends a lobby request (any message a player's game sends but Leave),
@@ -1631,6 +1625,8 @@ impl Client {
     }
 
     fn message(&mut self, message: Message) {
+        // Stage F phase 2: the idle rule reads what it needs first.
+        self.away_message(&message);
         match message {
             Message::Mission(mission) => {
                 self.scores = None;

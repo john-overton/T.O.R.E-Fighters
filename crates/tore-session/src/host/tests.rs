@@ -129,6 +129,9 @@ struct TestClient {
     /// Every Revival and Spawned message (phase 2, slice F2-V).
     revivals: Vec<crate::wire::messages::Revival>,
     spawned: Vec<crate::wire::messages::Spawned>,
+    /// Every Observing message and Notice (phase 2, slice F2-A).
+    observing: Vec<crate::wire::messages::Observing>,
+    notices: Vec<String>,
 }
 
 impl TestClient {
@@ -175,6 +178,8 @@ impl TestClient {
             results: Vec::new(),
             revivals: Vec::new(),
             spawned: Vec::new(),
+            observing: Vec::new(),
+            notices: Vec::new(),
         }
     }
 
@@ -335,11 +340,12 @@ impl TestClient {
                 }
             }
             Message::MissionEnded(ended) => self.ended = Some(ended),
-            Message::Notice(_) => {}
+            Message::Notice(text) => self.notices.push(text),
             Message::Scores(scores) => self.scores.push(*scores),
             Message::Results(results) => self.results.push(*results),
             Message::Revival(revival) => self.revivals.push(*revival),
             Message::Spawned(spawned) => self.spawned.push(*spawned),
+            Message::Observing(observing) => self.observing.push(*observing),
             other => self.errors.push(format!("unexpected {other:?}")),
         }
     }
@@ -1481,3 +1487,6 @@ mod revive_tests;
 
 #[path = "results_tests.rs"]
 mod results_tests;
+
+#[path = "away_tests.rs"]
+mod away_tests;

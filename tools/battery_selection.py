@@ -179,10 +179,11 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "net-check": ("the dedicated server's start-up and --check", ("net-server-check",)),
     "net-fly": (
         "a server and bots over UDP: join, fly, chat, console, observe, scores, the King, PvP, a delayed observer, "
-        "revival, debrief, clean exit",
+        "revival, the idle AI, debrief, clean exit",
         (
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
             "net-server-king", "net-server-pvp", "net-server-delay", "net-server-revive", "net-server-results",
+            "net-server-away",
         ),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
@@ -401,6 +402,14 @@ RULES: tuple[Rule, ...] = (
         "the revival a game keeps, its words and the spawned planes (tore-bot prints them)",
     ),
     _r("crates/tore-session/src/host/revive.rs", NET_FAMILIES, "death and revival on the host"),
+    _r(
+        "crates/tore-session/src/host/away*", NET_FAMILIES,
+        "the AI flying an idle player's aircraft on the host, and its tests (tore-bot --away)",
+    ),
+    _r(
+        "crates/tore-session/src/client/away*", NET_FAMILIES,
+        "a game's Away and Back and the plane the AI flies for it, and their tests (tore-bot --away)",
+    ),
     _r("crates/tore-session/src/client/results.rs", NET_FAMILIES, "the results a game keeps and their words (tore-bot prints them)"),
     _r("crates/tore-session/src/host/results*", NET_FAMILIES, "the results message at a mission's end, and its tests"),
     _r(
@@ -497,6 +506,11 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/lobby_screen/*", ("menus-screens", "net-window"), "the lobby screen; its snapshot states are menus-snap-lobby*", windowed=True),
     _r("crates/tore-app/src/net/lobby_chat.rs", ("menus-screens", "net-window"), "the lobby's chat box and line; the lobby screen draws it (menus-snap-lobby*)", windowed=True),
     _r("crates/tore-app/src/net/scoreboard.rs", ("net-window",), "K's score board in a networked flight", windowed=True),
+    _r(
+        "crates/tore-app/src/net/away.rs", ("net-window",),
+        "the game's away detection, Back at the first flight input and the banner (unit tests; a networked flight "
+        "reaches it)", windowed=True,
+    ),
     _r("crates/tore-app/src/net/search.rs", ("net-discovery",), "the local-network game search; --find-games, which net-discovery runs, and the Direct Connection screen use it"),
     _r("crates/tore-app/src/net/lookup.rs", ("net-window",), "the typed-address lookup thread; the Direct Connection screen reaches it", windowed=True),
     _r("crates/tore-app/src/net/browse.rs", ("net-listing", "menus-screens"), "the Internet Lobby's browse loop; `tore-app --browse`, which net-master-listing runs, and the Internet Lobby screen use it"),

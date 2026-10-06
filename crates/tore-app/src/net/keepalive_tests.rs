@@ -127,10 +127,16 @@ impl Game {
             slot: None,
             listing: None,
         };
+        // The keepalives are under test, not the AI's idle rule (slice
+        // F2-A), which would take a plane stalled for ten seconds.
+        let mut config = config(&options);
+        config
+            .settings
+            .push((tore_session::settings::number::IDLE_AI, 0));
         let (host, link) = HostThread::start(HostSetup {
             spec: spec(),
             resources: import(),
-            config: config(&options),
+            config,
             listen: Listen::Address("127.0.0.1".parse().unwrap()),
             port: 0,
         })

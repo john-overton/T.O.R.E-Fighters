@@ -92,6 +92,15 @@ pub enum LobbyEvent {
     /// A crowned dedicated server, empty for its empty timeout, went back
     /// to its file's mission and settings.
     BackToFile,
+    /// The player is away and the AI flies its plane, kept for it: its game
+    /// said so, or sent nothing for the `idle-ai` seconds (`stalled`; slice
+    /// F2-A).
+    Away { plane: u32, stalled: bool },
+    /// The away player is back: it takes its plane from the AI.
+    Back { plane: u32 },
+    /// The away player's plane is no longer kept for it: the AI lost it
+    /// (`lost`), or the player left it to the AI.
+    AwayEnded { plane: u32, lost: bool },
 }
 
 impl fmt::Display for LobbyEvent {
@@ -134,6 +143,24 @@ impl fmt::Display for LobbyEvent {
             Self::BackToFile => f.write_str(
                 "has been empty for its empty timeout: back to its file's mission and settings",
             ),
+            Self::Away {
+                plane,
+                stalled: false,
+            } => write!(f, "is away: the AI flies plane {plane}"),
+            Self::Away {
+                plane,
+                stalled: true,
+            } => write!(
+                f,
+                "is away (its game sends nothing): the AI flies plane {plane}"
+            ),
+            Self::Back { plane } => write!(f, "is back: takes plane {plane} from the AI"),
+            Self::AwayEnded { plane, lost: true } => {
+                write!(f, "lost plane {plane} while the AI flew it")
+            }
+            Self::AwayEnded { plane, lost: false } => {
+                write!(f, "left plane {plane} to the AI")
+            }
         }
     }
 }

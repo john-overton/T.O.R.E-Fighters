@@ -401,10 +401,11 @@ recording), the sort order (Alt+A), the battle net and its monitor key
 - No pause and no time compression.
 - Opening the in-flight menu, losing window focus or unplugging a controller
   does not pause the mission. The controls go neutral meanwhile (John,
-  2026-09-30). *Designed (phase 2, awaiting John):* after the King's
-  `idle-ai` time away, 10 seconds by default, the AI flies the aircraft,
-  reserved for the player, until the player touches the flight controls
-  ([architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
+  2026-09-30). After the King's `idle-ai` time away, 10 seconds by default
+  (a stalled game counts too), the AI flies the aircraft, reserved for the
+  player, until the player touches the flight controls (John, 2026-10-05;
+  built in F2-A,
+  [architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
 - Game speed and realism settings are locked by the lobby for everyone.
 - If a flight lead is shot down, a human in the flight takes the lead if there
   is one, otherwise the next AI member ([lead succession](#slots-ai-fill-and-handoff)).
@@ -1205,11 +1206,10 @@ Raised while planning (2026-09-28):
   the aircraft do? *Agent proposal:* the pilot's controls return to neutral
   while the menu is open, and after 10 seconds without input the AI flies the
   aircraft until the player touches the controls again. John settled the first
-  half on 2026-09-30 (neutral controls, [decisions](#decisions)); the AI
-  takeover is still open. *Designed in phase 2* as the King's setting
-  `idle-ai`, 10 seconds by default, with `never` available
-  ([architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)),
-  awaiting John.
+  half on 2026-09-30 (neutral controls, [decisions](#decisions)) and the
+  second on 2026-10-05: the King's setting `idle-ai`, 10 seconds by default,
+  with `never` available, built in F2-A
+  ([architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
 - **Dedicated server King.** *Agent proposal:* the first human to join a
   dedicated server becomes King, unless its config file fixes the mission and
   locks the settings. Stage D's server always takes its mission and settings

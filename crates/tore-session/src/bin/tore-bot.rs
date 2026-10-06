@@ -13,7 +13,7 @@
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
-//!          [--revive SECONDS]
+//!          [--revive SECONDS] [--away SECONDS,FOR]
 //! ```
 //!
 //! `--master` and `--listing` join through the Internet Lobby (stage J,
@@ -59,6 +59,13 @@
 //! plane and the new seating, and succeeds only if it was seated again
 //! after ejecting.
 //!
+//! `--away` makes every bot's game say it is away SECONDS after it is first
+//! seated, as a game left at its menu for the King's `idle-ai` seconds does
+//! (stage F phase 2, slice F2-A): the AI flies its plane, kept for it, while
+//! it watches; FOR seconds later it says it is back and flies on in the same
+//! plane. It prints when the AI takes the plane and when it asks for it
+//! back, and succeeds only if it was seated again in that plane.
+//!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
 //! every bot was seated, got a debrief and then left cleanly, or was told the
@@ -87,7 +94,7 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--path auto|direct|relay]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
 [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
-[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS]";
+[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR]";
 
 /// How long the bot looks for the listing on the master's list.
 const FIND_LISTING: Duration = Duration::from_secs(10);
@@ -135,6 +142,9 @@ struct Options {
     king: Option<Vec<(u8, u32)>>,
     /// `--revive`: eject this long after the first seating and fly again.
     revive: Option<Duration>,
+    /// `--away`: away this long after the first seating, back the second
+    /// span after the AI took the plane.
+    away: Option<(Duration, Duration)>,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -206,6 +216,14 @@ fn settings_line(values: &[(u8, u32)]) -> String {
     }
 }
 
+/// `--away SECONDS,FOR`.
+fn away(value: &str) -> Result<(Duration, Duration), String> {
+    let (at, span) = value
+        .split_once(',')
+        .ok_or_else(|| format!("--away takes SECONDS,FOR\n{USAGE}"))?;
+    Ok((seconds(at)?, seconds(span)?))
+}
+
 /// `--quick SECONDS,NUMBER`.
 fn quick(value: &str) -> Result<(Duration, u8), String> {
     let (at, number) = value
@@ -237,6 +255,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         observe: None,
         king: None,
         revive: None,
+        away: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -292,6 +311,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--king" => options.king = Some(king(&value()?)?),
             "--revive" => options.revive = Some(seconds(&value()?)?),
+            "--away" => options.away = Some(away(&value()?)?),
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
@@ -506,9 +526,14 @@ struct Running {
     host_left: bool,
     /// An observer's flight started.
     observed: bool,
-    /// Seatings, and the ejection printed (`--revive`).
+    /// Seatings, the plane of the last, and the ejection printed
+    /// (`--revive`).
     seatings: u32,
+    last_plane: Option<u32>,
     ejection_told: bool,
+    /// The plane the AI flew while it was away, and Back told (`--away`).
+    away_plane: Option<u32>,
+    back_told: bool,
     /// It wears the crown, and has sent `--king`'s settings.
     crowned: bool,
     settings_sent: bool,
@@ -545,6 +570,9 @@ impl Running {
         }
         if let Some(after) = options.revive {
             bot.revive_after(after);
+        }
+        if let Some((after, span)) = options.away {
+            bot.away_after(after, span);
         }
         self.bot = Some(bot);
         Ok(())
@@ -793,7 +821,10 @@ fn main() -> ExitCode {
             host_left: false,
             observed: false,
             seatings: 0,
+            last_plane: None,
             ejection_told: false,
+            away_plane: None,
+            back_told: false,
             crowned: false,
             settings_sent: false,
             settings: None,
@@ -904,6 +935,16 @@ fn main() -> ExitCode {
                 r.ejection_told = true;
                 println!("{}: ejected", r.name);
             }
+            if let Some(plane) = bot.client.ai_flies()
+                && r.away_plane.is_none()
+            {
+                r.away_plane = Some(plane);
+                println!("{}: away: the AI flies plane {plane}", r.name);
+            }
+            if bot.came_back && !r.back_told {
+                r.back_told = true;
+                println!("{}: back at the controls", r.name);
+            }
             match (&mut r.through, &mut r.socket) {
                 (Some(t), _) => {
                     let _ = bot.client.transmit(&mut t.joiner.over(&mut t.socket, now));
@@ -987,6 +1028,7 @@ fn main() -> ExitCode {
                     ClientEvent::Seated { seat, plane, tick } => {
                         r.seated = true;
                         r.seatings += 1;
+                        r.last_plane = Some(plane);
                         println!("{}: seat {seat}, plane {plane}, at tick {tick}", r.name);
                     }
                     ClientEvent::Notice(text) => println!("{}: {text}", r.name),
@@ -1115,6 +1157,12 @@ fn main() -> ExitCode {
     let clean = bots.iter().all(|r| {
         let done = if options.observe.is_some() {
             r.observed && r.bot.as_ref().is_some_and(|bot| bot.watched > 0)
+        } else if options.away.is_some() {
+            r.seated
+                && r.debrief
+                && r.seatings >= 2
+                && r.away_plane.is_some()
+                && r.last_plane == r.away_plane
         } else if options.revive.is_some() {
             r.seated
                 && r.debrief
@@ -1252,6 +1300,22 @@ mod tests {
         assert_eq!(parse(&args("--connect 127.0.0.1")).unwrap().revive, None);
         assert!(parse(&args("--connect 127.0.0.1 --revive")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --revive soon")).is_err());
+    }
+
+    #[test]
+    fn away_takes_two_spans_of_seconds() {
+        let o = parse(&args("--connect 127.0.0.1 --away 8,5.5")).unwrap();
+        assert_eq!(
+            o.away,
+            Some((Duration::from_secs(8), Duration::from_millis(5_500)))
+        );
+        assert_eq!(parse(&args("--connect 127.0.0.1")).unwrap().away, None);
+        for bad in ["--away", "--away 8", "--away soon,5", "--away 8,-1"] {
+            assert!(
+                parse(&args(&format!("--connect 127.0.0.1 {bad}"))).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

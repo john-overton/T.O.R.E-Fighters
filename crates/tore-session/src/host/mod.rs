@@ -519,6 +519,9 @@ pub struct Host {
     /// It replaces the departed players' orphans: a lost plane is held for
     /// its player while it stays, and abandoned to the mission when it goes.
     revival: revive::Revivals,
+    /// The AI flies idle players' aircraft (stage F phase 2, `away`): the
+    /// planes kept for away players and the stall's count.
+    idle: away::Idle,
     /// Seats whose plane goes back to the AI at the next tick.
     gives: Vec<(SeatId, String)>,
     tracker: Tracker,
@@ -775,6 +778,7 @@ impl Host {
             server,
             peers: BTreeMap::new(),
             revival: revive::Revivals::default(),
+            idle: away::Idle::default(),
             gives: Vec::new(),
             tracker,
             life: Life::Lobby,
@@ -1731,7 +1735,7 @@ impl Host {
         self.peers.values().any(|peer| {
             matches!(peer.stage, Stage::Taking { plane: p, .. } if p == plane)
                 || (peer.plane == Some(plane) && !matches!(peer.stage, Stage::Closing { .. }))
-        })
+        }) || self.away_reserved(plane)
     }
 
     /// The lowest seat id no connection, pending take or departed player's
@@ -1768,6 +1772,10 @@ impl Host {
                 "Plane {} is destroyed or has lost its pilot.",
                 plane.0
             ));
+        }
+        // Stage F phase 2: a plane the AI flies for an away player.
+        if let Some(why) = self.away_take_refusal(connection, plane) {
+            return Some(why);
         }
         if entry.pilot != Pilot::Ai || self.reserved(plane) {
             return Some(format!("Plane {} is flown by another player.", plane.0));
@@ -2449,8 +2457,7 @@ impl Host {
                     loadout: peer.lobby.loadout.is_some(),
                     flying: Self::in_flight(peer),
                     observing: peer.watch.as_ref().is_some_and(observe::Watch::started),
-                    // Away players are slice F2-A's.
-                    away: false,
+                    away: self.away_mark(peer.lobby.id),
                     unable: peer.lobby.unable.clone(),
                     platform: peer.platform,
                     // Each player's build comes from its Content (slice L3).
@@ -3145,10 +3152,12 @@ impl Host {
 
     /// The time limit and the empty timeout.
     fn check_lifecycle(&mut self, now: Duration) {
+        // A player the AI flies for while it is away still plays.
         let seated = self
             .peers
             .values()
-            .any(|p| matches!(p.stage, Stage::Seated | Stage::Taking { .. }));
+            .any(|p| matches!(p.stage, Stage::Seated | Stage::Taking { .. }))
+            || self.anyone_away();
         if seated {
             self.empty_since = None;
         } else if self.ever_seated && self.empty_since.is_none() {
@@ -3183,6 +3192,7 @@ impl Host {
         // and every plane's results go out, before Mission ended.
         self.score_end(reason);
         self.observe_end();
+        self.away_end();
         self.send_results(reason);
         let ended = Message::MissionEnded(MissionEnded {
             reason,

@@ -341,6 +341,12 @@ fn a_relayed_bot_stalled_15_seconds_stays_connected_through_framed_keepalives() 
         LinkConfig::for_round_trip(Duration::from_millis(20), 0., 0., 0.),
         23,
     );
+    // The keepalives are under test, not the AI's idle rule (slice F2-A),
+    // which would take a plane stalled for ten seconds.
+    rig.host
+        .settings_for_test()
+        .apply(&[(crate::settings::number::IDLE_AI, 0)])
+        .unwrap();
     let mut relay = Relay::new(&mut rig);
     let player = relay.join(&mut rig, "10.0.0.3:40000", "Viper", level_script());
     let end = rig.net.now() + Duration::from_secs(5);

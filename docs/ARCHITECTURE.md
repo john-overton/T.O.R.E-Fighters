@@ -5930,6 +5930,88 @@ question 4).
   plane lost while the AI flew it is lost to the player as any other (revival
   rules).
 
+*Built (F2-A, 2026-10-05).* John took the design on 2026-10-05 (the
+[decisions](MULTIPLAYER.md#decisions)). The host's part is `host/away.rs`, the
+client's `client/away.rs`, the game's `net/away.rs` (called from
+`net/play.rs`, with one line in `main.rs` for a lost controller), the bot's
+`tore-bot --away SECONDS,FOR`. No wire change: Away, Back and the lobby
+state's away mark are F2-0's. Each choice below is an agent decision unless
+the design above says it.
+
+- **The game's count.** The game is away while its controls are neutral
+  because a menu or a screen is over the flight, the window lacks focus, or
+  the controller it flew with went (until any flight input). It reads the
+  setting from the lobby state and sends Away once, after that many seconds;
+  never while its plane is lost (the revival rules have it). A **flight
+  input** is a stick or rudder axis past 0.1, a throttle key, the throttle
+  lever moved 0.05 from where it was while flying, the trigger, or any
+  pilot or seat command (`net::away::touched`); views and the mouse look are
+  not.
+- **The host's count.** A seated player whose game has sent no input for the
+  setting's seconds is away, counted from the newest input tick the host
+  holds, or from the tick it first saw the flight (a new flight starts
+  afresh). The EF-K stall rule flies the plane neutral from half a second,
+  then the AI flies it; the keepalive keeps the connection as before. The log
+  says which: "Viper is away: the AI flies plane 0", "Viper is away (its
+  game sends nothing): the AI flies plane 0".
+- **The handoff.** At the next tick (`away_commands`, before the step) the
+  seat's plane goes back by GiveBack and the player is in the lobby, its
+  seat freed, its slot, loadout and ready mark kept. Its connection watches
+  the plane at once (`start_watch` with the plane as the subject, the
+  observer flight starting at the same tick), with the PvP observer delay
+  as every observer has it, so a player away sees no more than an observer
+  does. The lobby state marks it away and observing.
+- **The reservation.** The plane is kept while the player is away: another
+  player's Join is refused "Plane 0 is kept for Viper, who is away.", an
+  `ai-slot` revival skips it (`Host::reserved`), and the away player's own
+  Join is refused "Your aircraft waits for you: move the stick or press any
+  flight key to take it back.": Back is the way back. A mission whose only
+  players are away is not empty, so the empty timeout does not end it.
+- **Back** takes the plane at the next tick by a Take for a free seat (the
+  seat may differ from the one before). The King's rules on taking a plane
+  (join in progress, slot locks, lock sides) do not apply: the plane is the
+  player's own. The observer flight ends before the Seated message, as for
+  any observer who takes a plane. Back from a player not away is refused
+  "The AI is not flying your aircraft.", Away with the setting at never "The
+  AI flies no idle aircraft in this game.", Away from a player not flying
+  "You are not flying.", and Away with a plane already lost "Your aircraft
+  is lost: the AI cannot fly it."
+- **The reservation ends** when the player takes the plane back, stops
+  watching (it leaves the plane to the AI: "Viper left plane 0 to the AI";
+  the game's End Mission does this in a lobby-screen game), leaves the game,
+  or the mission ends; and when the AI loses the plane. Then the player is
+  told "The AI lost your aircraft while you were away.", watches on as any
+  player without a plane, and under `respawn none` takes no other plane this
+  mission ("No revival in this game."). Under `ai-slot` and `revive` it may
+  Join a free plane by the King's rules, but the lives and the delay are not
+  counted: the world's revival needs the seat to hold its lost plane, and
+  the AI held this one. A loss while away is not the player's in the
+  scores either (F2-S credits the human flying at the tick).
+- **The client** (`Client::ai_flies`, `away_asked`) learns of the handoff from
+  the Observing message that reaches it while it flies (the host's count
+  gives no other word): its flight ends and it is in the lobby phase,
+  watching. Back's Seated, the observer flight's end, the mission's end or
+  a lobby state without the away mark clear it. `away()` and `back()` send
+  once each.
+- **The game.** While the AI flies the plane the flight screen keeps its last
+  picture (the live view of the plane flying on is the observer screen's,
+  slice F2-O2) and says "The AI is flying your aircraft. Move the stick or
+  press any flight key to take it back." every five seconds; Back's Seated
+  starts the flight again as a revival's does. A refusal of Away or Back is
+  said on the HUD. If the host stops keeping the plane and no Seated follows
+  within two seconds, the flight ends.
+- **The slot's words.** The lobby screen's "AI (Viper away)" is the screen's
+  to draw from the away mark (slice F2-L's files); not drawn yet.
+- **Tests.** `host/away_tests.rs` (on the simulator: the handoff and the
+  reservation, the stores and damage carried back, the host's count, never
+  and a longer setting, a plane the AI loses, stopping and leaving, the empty
+  timeout), `client/away_tests.rs` (the real client away and back, an 11
+  second stall with keepalives, a loss, an away game leaving), the game's
+  `net::away` unit tests (the flight inputs, the count, a lost controller,
+  the end), `tore-bot`'s option and the net lane's `net-server-away`. The
+  EF-K and J3 tests that stall 15 seconds set the setting to never: the
+  keepalives are what they test.
+
 ##### The lobby's display
 
 The lobby screen (EF8) gains the following; *built by F2-L*, see
@@ -6112,7 +6194,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard. **Built (F2-O1, 2026-10-05):** as [described above](#the-observer-view): the host's watches and stream (`host/observe.rs`, the hooks in `host/mod.rs`: the watch on each connection, the stream on the host, the stop before Seated and at the end, the lobby's observing mark), `from_world::observer_picture`, `HostConnection::observer_snapshot`, the client's `watch`, `stop_watching` and `observer_frame` (`client/observe.rs`), `Host::send_as_of` for the slices that send news at a tick, and `tore-bot --observe`. Delayed observers' snapshot ticks are the ring's (agent decision). Tests: `host/observe_tests.rs` (rates by the camera, a point and none, the camera's limit, refusals, human-flown planes and events, the delay for snapshots, events and held messages, the stops, measurements; the 60-second ring `#[ignore]`d for the full run), `client/observe_tests.rs`, `from_world`'s observer picture; the `net-server-observe` scenario. Measured: 8.4 MB at a 60-second delay for 30 aircraft; about 12 KB/s to an observer of 30 |
 | F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed. **Built (F2-L, 2026-10-05):** as [the lobby panels as built](#the-lobby-panels-as-built-f2-l); the seven buttons with Kick inside the Players panel, the Settings panel's four pages, the King's right click on a slot, Watch, the head's "Rules" line, Messages' lines for settings and locks, and Load Ordnance under the loadout rule. Tests: `lobby_screen/phase2_tests.rs`, `ordnance.rs`, twelve snapshot states, and the net lane's `net-window-lobby` (a window hosting with a bot: settings turned and seen by the bot, a slot closed and opened, the crown given and back). Single-player SAME |
 | F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard. **Built (F2-D, 2026-10-05):** as [described above](#the-multiplayer-debrief): `debrief::results` and its rows, `host/results.rs`, the client's kept Results (`client/results.rs`) and `tore-bot`'s results line, the SCORES and RESULTS pages (`net/debrief.rs`, the `.columns` directive in `debrief.rs`, two lines in `net/play.rs` to hand them over), the `net-server-results` scenario. Single-player debrief unchanged (the full baseline is in the run's notes) |
-| F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back |
+| F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back. **Built (F2-A, 2026-10-05):** as [described above](#the-ai-flies-an-idle-players-aircraft): the host's Away and Back, its count of a game that sends nothing, the handoff with the player watching its plane, the reservation and its end (`host/away.rs`, hooks in `host/mod.rs`: the take refusal, `reserved`, the lobby's away mark, the empty timeout, the mission's end; three lobby log events in `host/lobby.rs`); the client's `ai_flies` and its once-only `away` and `back` (new `client/away.rs`, one hook in `client/mod.rs`); the game's count, flight inputs, banner and End Mission while away (new `net/away.rs`, short hunks in `net/play.rs` and `main.rs`); `tore-bot --away SECONDS,FOR`. Tests: `host/away_tests.rs` (7 on the simulator), `client/away_tests.rs` (4), the game's `net::away` (7), `tore-bot`'s option, the net lane's `net-server-away`. No wire change. Single player unchanged |
 | F2-O2 The observer screen | Sonnet | F2-O1, F2-L, stage E's replays | `tore-app` new `net/observe.rs`; the viewer's live mode in `replay/`; the routing in `main.rs` | The live recording, the viewer's live mode, Watch and Esc | Tests of the growing recording, live, pause, scrub and End; a headless render; a windowed run watching a server with bots. Single-player replays byte-identical (the replay lane's `--changed` scenarios) |
 | F2-X Acceptance | lead, then John | all | | The lead's smoke test: a hosting game, a joining game and bots in PvP with a kill limit, revivals, an observer with a delay, the crown passed, the idle AI; then John on three machines | John plays a PvP and a co-op game from the menus |
 

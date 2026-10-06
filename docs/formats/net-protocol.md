@@ -1321,6 +1321,26 @@ refused "The mission has changed; choose again.", as the lobby's requests are.
 - **Observe.** A subject's code 3 is invalid; a point's coordinates are
   signed varints that must fit 32 bits.
 
+*Built (F2-A), each an agent decision:*
+
+- **Away** is taken from a seated player whose plane is not lost, while the
+  mission flies and the `idle-ai` setting is not never; the plane goes to
+  the AI at the next tick, and the connection's observer flight (Observing,
+  its own plane the subject) starts at that tick: a flying game learns from
+  that Observing message that the AI took its plane, whether it sent Away
+  or the host counted the setting's seconds with no input from it. Away
+  from a player already away is taken and does nothing. The refusals: "The
+  mission is not flying.", "The AI flies no idle aircraft in this game.",
+  "You are not flying." and "Your aircraft is lost: the AI cannot fly it."
+- **Back** from an away player is answered by Observing's end and then a
+  Seated message for the same plane (a new flight); Back before the tick
+  that would have handed the plane over cancels the Away. The refusals: "The
+  AI is not flying your aircraft." and "The AI lost your aircraft while you
+  were away." (also sent as a Notice when the loss comes first).
+- **The lobby state's away mark** is set while the AI flies a plane kept for
+  the player, from the handoff's tick to Back's tick, the reservation's end
+  or the mission's end ([how it works](../ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
+
 *Built (F2-D), each an agent decision:*
 
 - **Results** goes once at the mission's end to every connection that is not

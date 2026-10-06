@@ -234,6 +234,17 @@ pub struct Bot {
     revive_asked: bool,
     /// The plane it flies now.
     plane: Option<u32>,
+    /// Go away this long after the first seating and come back after the
+    /// second span ([`Bot::away_after`], stage F phase 2).
+    away_plan: Option<(Duration, Duration)>,
+    /// When the bot was first seated, for the away plan.
+    away_seated: Option<Duration>,
+    /// Away was sent, and when the AI took its plane.
+    away_sent: bool,
+    away_since: Option<Duration>,
+    /// The AI flew its plane while it was away, and it asked for it back.
+    pub went_away: bool,
+    pub came_back: bool,
 }
 
 impl Bot {
@@ -261,6 +272,43 @@ impl Bot {
             eject_pressed: None,
             revive_asked: false,
             plane: None,
+            away_plan: None,
+            away_seated: None,
+            away_sent: false,
+            away_since: None,
+            went_away: false,
+            came_back: false,
+        }
+    }
+
+    /// The bot's game says it is away `after` its first seating (as a game
+    /// left at its menu does), and once the AI flies its plane, says it is
+    /// back `away` later and flies on in it (stage F phase 2, slice F2-A's
+    /// `tore-bot --away`). Once.
+    pub fn away_after(&mut self, after: Duration, away: Duration) {
+        self.away_plan = Some((after, away));
+    }
+
+    /// Away when due, and Back once the AI has flown the plane long enough.
+    fn away(&mut self, now: Duration) {
+        let Some((after, away)) = self.away_plan else {
+            return;
+        };
+        if self.client.seat().is_some() {
+            let seated = *self.away_seated.get_or_insert(now);
+            if !self.away_sent && now.saturating_sub(seated) >= after {
+                self.away_sent = true;
+                self.client.away();
+            }
+            return;
+        }
+        if self.client.ai_flies().is_some() {
+            self.went_away = true;
+            let since = *self.away_since.get_or_insert(now);
+            if !self.came_back && now.saturating_sub(since) >= away {
+                self.came_back = true;
+                self.client.back();
+            }
         }
     }
 
@@ -428,6 +476,7 @@ impl Bot {
         };
         let mut controls = controls;
         self.revive(now, &mut controls);
+        self.away(now);
         self.client.update(now, &controls);
         self.watch_when_flying();
         self.start_if_ready();
