@@ -1853,6 +1853,17 @@ choice below is an agent decision.
   sets "needs a checkpoint" in the next Standby status, and another mission
   is state 3. A Ticks record that cannot be read, or that does not start
   where the last ended, is state 3 too, until an Appoint or a Flight.
+- **The records a host makes** (slice K1, no wire change). A Ticks
+  record's changes are those the host made since its last step, in order
+  (scoring is switched on in tick 0's). State records hold the players,
+  session, court, scores and revivals parts; a part is written when its
+  coding changes, after the tick that changed it in flight and at once in
+  the lobby, so the lobby's parts come before the Flight. A part's tick is
+  the last tick the host stepped (0 before any). Moments in a part are the
+  host's clock; the session part ends with the clock's reading, which alone
+  does not make the part go out again. Connections are named by their
+  player's join order. The bytes are this build's own
+  ([architecture](../ARCHITECTURE.md#what-moves-with-the-host)).
 
 ## Limits
 

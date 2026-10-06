@@ -606,3 +606,7 @@ impl Host {
         }
     }
 }
+
+// Stage K: the revivals part of the session's state (slice K1).
+#[path = "revive_state.rs"]
+pub(super) mod state;

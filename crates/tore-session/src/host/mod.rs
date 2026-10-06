@@ -76,7 +76,7 @@ pub use config::{AfterEnd, BuildId, CrownRule, HostConfig, HostError, OpenPlanes
 pub use lobby::LobbyEvent;
 pub use sorting::{BURST_SLACK_TICKS, round_interval};
 
-use crate::journal::{Tick, apply_tick};
+use crate::journal::Tick;
 use crate::wire::chat::{RateLimit, Receiver};
 use crate::wire::connection::HostConnection;
 use crate::wire::entity::{Entity, EntityKind};
@@ -541,7 +541,9 @@ pub struct Host {
     /// loadouts, under the same number.
     number: u32,
     resources: Arc<BTreeMap<String, Vec<u8>>>,
-    world: World,
+    /// The mission's world, behind the journal's door (stage K, slice K1):
+    /// read anywhere, changed only through the driver.
+    world: journal::Driver,
     manifest: Manifest,
     server: Server,
     session_id: u64,
@@ -643,14 +645,16 @@ pub(crate) enum Unforeseen {
     Event,
 }
 
+/// The mission `spec` built fresh from `resources`, behind the journal's
+/// door, and the resources it read.
 fn build_world(
     spec: &MissionSpec,
     resources: &BTreeMap<String, Vec<u8>>,
-) -> Result<(World, Manifest), HostError> {
+) -> Result<(journal::Driver, Manifest), HostError> {
     let reads = ResourceReads::new(resources);
     let world = World::new(spec, &reads, Seating::Open)
         .map_err(|error| HostError::Mission(error.to_string()))?;
-    Ok((world, reads.manifest()))
+    Ok((journal::Driver::new(world), reads.manifest()))
 }
 
 fn session_id(entropy: tore_net::Entropy) -> u64 {
@@ -934,6 +938,9 @@ impl Host {
         self.pump();
         if matches!(self.life, Life::Flying) {
             self.check_lifecycle(now);
+        } else {
+            // Stage K: in the lobby the parts change with no tick.
+            self.journal_parts();
         }
         self.send_lobby();
     }
@@ -2706,6 +2713,8 @@ impl Host {
         // The same mission, with the loadouts: its number stays, so a
         // request made just before the start still counts.
         self.spec_text = spec.to_text();
+        // Stage K: the journal starts from the flight's world at tick 0.
+        self.journal_flight();
         self.gives.clear();
         self.ever_seated = false;
         self.empty_since = None;
@@ -2885,15 +2894,21 @@ impl Host {
             }
         }
 
-        // One door into the world: the host steps through the journal, as a
-        // standby replays it.
+        // One door into the world: the host steps through the journal's
+        // driver, which adds the changes made since the last step and drains
+        // the world after it, as a standby replays it.
         let mut out = std::mem::take(&mut self.out);
-        if let Err(error) = apply_tick(&mut self.world, &journal, &mut out) {
-            self.out = out;
-            self.fault(format!("tick {tick}: {error}"));
-            return;
-        }
-        self.journal_ticked(journal);
+        let notes = match self.world.step(journal, &mut out) {
+            Ok((journal, notes)) => {
+                self.journal_ticked(journal);
+                notes
+            }
+            Err(error) => {
+                self.out = out;
+                self.fault(format!("tick {tick}: {error}"));
+                return;
+            }
+        };
 
         if !given.is_empty() || !takes.is_empty() {
             self.roster_dirty = true;
@@ -2917,7 +2932,7 @@ impl Host {
             self.lobby_dirty = true;
         }
         let _ = now;
-        let wide = self.tracker.sort(&mut self.world, &out, tick);
+        let wide = self.tracker.sort(&self.world, &out, notes, tick);
         for (connection, seat, plane) in takes {
             self.seated(connection, seat, plane, tick, &out);
         }
@@ -2932,6 +2947,8 @@ impl Host {
         self.snapshots(tick, now, &out);
         self.observe_tick(tick, now, &out, &wide);
         self.out = out;
+        // Stage K: the parts of the session's state this tick changed.
+        self.journal_parts();
         let cost = started.elapsed();
         self.costs.ticks += 1;
         self.costs.total += cost;
@@ -3394,6 +3411,7 @@ impl Host {
             next_at: next.map(|delay| now + delay),
             stop_at: now + CLOSE_GRACE,
         };
+        self.journal_ended(reason);
         let tick = self.world.tick();
         self.log(HostLog::MissionEnded { tick, reason });
     }

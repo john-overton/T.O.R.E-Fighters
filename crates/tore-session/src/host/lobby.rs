@@ -164,3 +164,7 @@ impl fmt::Display for LobbyEvent {
         }
     }
 }
+
+// Stage K: the players part of the session's state (slice K1).
+#[path = "lobby_state.rs"]
+pub(super) mod state;

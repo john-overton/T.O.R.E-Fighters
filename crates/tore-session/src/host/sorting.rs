@@ -94,9 +94,16 @@ impl Tracker {
     }
 
     /// The mission-wide events of the tick `world` just stepped (`tick`),
-    /// from its output `out`, oldest first. Drains combat's countermeasure
-    /// notes, which only recordings and hosts read.
-    pub fn sort(&mut self, world: &mut World, out: &TickOutput, tick: u64) -> Vec<Timed> {
+    /// from its output `out` and combat's countermeasure `notes`, which the
+    /// journal drained after the step (slice K1: the tracker only reads the
+    /// world), oldest first.
+    pub fn sort(
+        &mut self,
+        world: &World,
+        out: &TickOutput,
+        notes: Vec<DeviceNote>,
+        tick: u64,
+    ) -> Vec<Timed> {
         let mut events = Vec::new();
         let mut push = |tick: u64, event: Wide| events.push(Timed { tick, event });
 
@@ -199,7 +206,7 @@ impl Tracker {
         }
 
         // Chaff and flares.
-        for note in world.combat.state.take_device_notes() {
+        for note in notes {
             if let DeviceNote::Released(release) = note {
                 push(
                     tick,

@@ -462,8 +462,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-session/src/wire/migration*", NET_FAMILIES, "stage K's message bodies and their tests"),
     _r("crates/tore-session/src/standby/*", NET_FAMILIES, "the standby's side of host migration (stage K)"),
     _r(
-        "crates/tore-session/src/host/journal.rs", NET_FAMILIES,
-        "the host's journal, which every tick the host steps passes (stage K)",
+        "crates/tore-session/src/host/journal*", NET_FAMILIES,
+        "the host's journal, which every tick the host steps passes, and its tests (stage K)",
     ),
     _r("crates/tore-session/src/host/standby.rs", NET_FAMILIES, "the host's standby stream (stage K)"),
     _r("crates/tore-session/src/host/resume.rs", NET_FAMILIES, "takeover and resume on the host (stage K)"),
@@ -472,7 +472,10 @@ RULES: tuple[Rule, ...] = (
         "rejoin tokens and reservations, and a slot's reservation in every lobby state (stage K)",
     ),
     _r("crates/tore-session/src/host/succession.rs", NET_FAMILIES, "candidates and host selection (stage K)"),
-    _r("crates/tore-session/src/host/state.rs", NET_FAMILIES, "the session's state parts (stage K)"),
+    _r(
+        "crates/tore-session/src/host/*state.rs", NET_FAMILIES,
+        "the session's state parts and their coders beside the state they code (stage K)",
+    ),
     _r("crates/tore-session/src/client/migrate.rs", NET_FAMILIES, "the client's side of host migration (stage K)"),
     _r("crates/tore-session/src/client/rejoin.rs", NET_FAMILIES, "the client's side of rejoin (stage K)"),
     _r("crates/tore-session/src/client/candidate.rs", NET_FAMILIES, "the client's side of host selection (stage K)"),

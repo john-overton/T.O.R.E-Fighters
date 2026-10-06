@@ -166,7 +166,7 @@ impl Host {
     /// After the step: drains the tick's score facts into the tallies, ends
     /// the mission at a kill limit, and sends Scores when they change.
     pub(super) fn score_tick(&mut self, tick: u64, _out: &TickOutput) {
-        let facts = self.world.take_score_facts();
+        let facts = self.world.take_facts();
         // Who flies what now: each seat's connection, and each plane's last.
         let mut seats: BTreeMap<SeatId, u64> = BTreeMap::new();
         for peer in self.peers.values() {
@@ -473,3 +473,7 @@ impl Host {
         self.score.last_sent = Some(tick);
     }
 }
+
+// Stage K: the scores part of the session's state (slice K1).
+#[path = "score_state.rs"]
+pub(super) mod state;

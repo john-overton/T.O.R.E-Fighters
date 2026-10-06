@@ -676,3 +676,7 @@ impl Host {
         }
     }
 }
+
+// Stage K: the court part of the session's state (slice K1).
+#[path = "king_state.rs"]
+pub(super) mod state;
