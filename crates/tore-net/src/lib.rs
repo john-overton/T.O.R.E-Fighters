@@ -68,6 +68,7 @@ pub mod keepalive;
 pub mod link;
 pub mod master;
 pub mod packet;
+pub mod peers;
 pub mod platform;
 pub mod portmap;
 pub mod reach;
