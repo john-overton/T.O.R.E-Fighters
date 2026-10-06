@@ -823,6 +823,10 @@ fn a_host_cut_off_in_a_dogfight_is_taken_over_exactly() {
     let notices = rig.games[second].notices();
     assert!(notices.contains(&words::lost(&to)), "{notices:?}");
     assert!(notices.contains(&words::moved(&to)), "{notices:?}");
+    // The game that takes over names itself, not the other standby (slice
+    // K10: its own address is not in its race).
+    let own = rig.games[first].notices();
+    assert!(own.contains(&words::lost(&to)), "{own:?}");
 
     // The old host keeps running privately with its own player.
     let private = rig.host().world.tick();

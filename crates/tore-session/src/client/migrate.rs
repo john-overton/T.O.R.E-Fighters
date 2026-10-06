@@ -541,7 +541,21 @@ impl Client {
         if targets.is_empty() {
             return;
         }
-        let first = self.migration.moving.map(|m| m.standby).or(targets[0].1);
+        // The words name the standby expected to take over: the one the host
+        // hands over to, else the succession's first, which is this game
+        // when it stands by first (its own address is not in the race).
+        let first = self
+            .migration
+            .moving
+            .map(|m| m.standby)
+            .or_else(|| {
+                self.migration
+                    .succession
+                    .as_ref()
+                    .and_then(|s| s.standbys.first())
+                    .map(|s| s.player)
+            })
+            .or(targets[0].1);
         let to = first.map_or_else(|| "another game".to_owned(), |id| self.callsign_of(id));
         let fresh = self.migration.lost_at.is_none();
         self.migration.lost_at.get_or_insert(now);
