@@ -10,6 +10,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import battery  # noqa: E402
 from battery_scenarios import net  # noqa: E402
+from battery_scenarios import net_datalink  # noqa: E402
 from battery_scenarios import net_observe  # noqa: E402
 
 CHECK_REPORT = """Mission: UKR (clear), airborne at 20000 ft, enemy 20 nm away; friendly 4 F18.PT, 2 F14.PT; enemy 4 MIG29.PT, 2 SU27.PT; 12 aircraft
@@ -530,3 +531,29 @@ class ScenarioListTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DatalinkCuesTests(unittest.TestCase):
+    """The windowed data link scenario (stage G, slice G10): the capture's events and the script's pictures."""
+
+    EVENTS = [
+        {"kind": "comms.radio", "text": "Two, attack bandit, bearing 017, 20 miles, angels 20"},
+        {"kind": "datalink.assign", "subject": 0, "object": 1, "fields": {"target": 6}},
+    ]
+
+    def test_an_assignment_and_its_call_pass(self):
+        self.assertEqual(net_datalink.capture_problems(self.EVENTS), [])
+
+    def test_each_missing_event_is_named(self):
+        self.assertEqual(len(net_datalink.capture_problems(self.EVENTS[:1])), 1)
+        self.assertEqual(len(net_datalink.capture_problems(self.EVENTS[1:])), 1)
+        self.assertEqual(len(net_datalink.capture_problems([])), 2)
+        wrong = [dict(self.EVENTS[1], object=2)]
+        self.assertIn("plane 1", net_datalink.capture_problems(wrong + self.EVENTS[:1])[0])
+
+    def test_the_scenario_takes_the_pictures_it_looks_for(self):
+        scenario = next(s for s in net_datalink.scenarios() if s.name == "net-window-datalink-cues")
+        self.assertTrue(scenario.window and callable(scenario.driver))
+        for name in net_datalink.PICTURES:
+            self.assertIn(f"SHOTS/{name}.ppm", net_datalink.SCRIPT)
+        self.assertEqual(net_datalink.SCRIPT.count("shot SHOTS/"), len(net_datalink.PICTURES))

@@ -1,0 +1,18 @@
+# Quick Mission, a flight of four F/A-18Ds (player leads, three wingmen) and two bandits 10 nm
+# ahead on weapons hold: address the flight (Alt+0) and sort (Alt+A). Each wingman is dealt a bandit
+# and each assignment is a call, 3.5 s apart; frames at the order and at each later call.
+wait 1
+waittick 240
+shot sort-0-before.ppm
+key Alt+0
+key Alt+a
+waittick 260
+shot sort-1-order.ppm
+waittick 500
+shot sort-2-second-call.ppm
+waittick 900
+shot sort-3-third-call.ppm
+waittick 1400
+shot sort-4-after.ppm
+waittick 2000
+exit

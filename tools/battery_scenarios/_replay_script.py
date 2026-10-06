@@ -182,6 +182,36 @@ def link_assign_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def link_sort_check(work: Path, output: str) -> list[str]:
+    """Alt+0 then Alt+A (slice G3c, acceptance G10): each of the three wingmen is dealt a bandit (a
+    `datalink.assign` with the order Sort), the HUD says how many, and the three calls are said 3.5 s apart: the
+    first with the order, the others as radio lines of the lead, each a `comms.order` that is delivered."""
+    events, _ = load(work)
+    problems = []
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    if "Sort: 3 assigned" not in said:
+        problems.append(f"the HUD never said 'Sort: 3 assigned'; the flight said {said[:6]}")
+    assigns = [e for e in events if e["kind"] == "datalink.assign" and e["fields"].get("order") == "Sort"]
+    if sorted(e["object"] for e in assigns) != [1, 2, 3]:
+        problems.append(f"the sort assigned planes {sorted(e['object'] for e in assigns)}, expected 1, 2 and 3")
+    delivered = sorted(
+        e["t"]
+        for e in events
+        if e["kind"] == "comms.order"
+        and e["fields"].get("outcome") == "delivered"
+        and e["fields"].get("speaker") == "Red one"
+        and (e.get("text") or "").endswith(("angels 5", "angels 4", "angels 6"))
+    )
+    if len(delivered) != 2:
+        problems.append(f"{len(delivered)} sort calls were delivered as radio lines after the first, expected 2: {delivered}")
+    elif abs((delivered[1] - delivered[0]) - 3.5) > 0.1:
+        problems.append(f"the later calls were {delivered[1] - delivered[0]:.2f} s apart, expected 3.5")
+    for name in ("sort-0-before", "sort-1-order", "sort-2-second-call", "sort-3-third-call", "sort-4-after"):
+        if not (work / "shots" / f"{name}.ppm").is_file():
+            problems.append(f"no {name}.ppm frame")
+    return problems
+
+
 def gun_check(work: Path, output: str) -> list[str]:
     events, _ = load(work)
     rounds = count(events, "weapon.launch", 0, **{"class": "gun"})
@@ -518,6 +548,14 @@ def scenarios() -> list[Scenario]:
             "link-assign.txt",
             [*quick, "--separation", "10", "--ai-mission", "hold", "--probe-wing-size", "3"],
             link_assign_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
+        build(
+            "link-sort",
+            "link-sort.txt",
+            [*quick, "--separation", "10", "--ai-mission", "hold", "--probe-wing-size", "4"],
+            link_sort_check,
             ai=3,
             extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
         ),
