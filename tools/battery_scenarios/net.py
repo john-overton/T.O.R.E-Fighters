@@ -650,6 +650,35 @@ def drive_revive(d: Drive) -> None:
     log_must(d, server_log(d), r"Phoenix took plane 0\b", r"Phoenix took plane 12\b", forbid=NET_BAD)
 
 
+def drive_replies(d: Drive) -> None:
+    """Orders to human wingmen and their replies (slice F2-R): two bots in the first friendly wing of the guide's
+    mission, the AI on weapons hold. The lead bot (plane 0) orders "break left" and, later, presses a reply key, which
+    a lead has no one to answer; the wingman bot (plane 1) replies "Winchester". The wingman hears the lead's order as a
+    radio call, the lead hears the reply under the wingman's place, the wingman hears its own as itself, and the
+    lead's own reply is refused with its line and heard by no one."""
+    port = d.port()
+    server = start_server(d, port, weapons_hold(guide_mission()))
+    lead = start_bots(
+        d, port, "lead", 45, "--callsign", "Lead", "--slot", "0", "--order", "14,break-left", "--reply", "26,engaging",
+    )
+    if not lead.wait_for(r"^Lead: seat \d+, plane 0, at tick \d+$", 90):
+        raise DriveError("the lead bot was never seated in plane 0")
+    wing = start_bots(d, port, "wing", 40, "--callsign", "Wing", "--slot", "1", "--reply", "12,winchester")
+    lead.finish(120, 0)
+    wing.finish(120, 0)
+    server.finish(40, 0)
+    wing.expect(r"^Wing: seat \d+, plane 1, at tick \d+$", "the wingman flies plane 1")
+    wing.expect(r"^Wing: radio: Red one: '.+'$", "the lead's order as a radio call")
+    lead.expect(r"^Lead: radio: Red two: 'Winchester'$", "the wingman's reply, under its place")
+    wing.expect(r"^Wing: radio: YOU: 'Winchester'$", "the wingman's own reply, as itself")
+    lead.expect(r"^Lead: line: You lead this flight\.$", "the lead's refusal")
+    lead.forbid(r"^Lead: radio: YOU: '.*[Ee]ngag", "a call from a lead's reply")
+    wing.forbid(r"^Wing: radio: Red one: '.*[Ee]ngag", "a call from a lead's reply")
+    for bot in (lead, wing):
+        bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
 def away_problems(text: str, name: str, plane: int) -> list[str]:
     """What a `tore-bot --away` printed (slice F2-A): seated in `plane`, the AI took it and kept it while the bot
     watched it, the bot asked for it back and was seated in it again, in that order."""
@@ -1531,6 +1560,11 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-revive", lane="net", args=[], driver=drive_revive, uses=("server", "bot"), timeout=200,
             notes="retail's revival: a bot ejects, flies again in a new plane of its wing (slice F2-V) and leaves",
+        ),
+        Scenario(
+            name="net-server-replies", lane="net", args=[], driver=drive_replies, uses=("server", "bot"), timeout=300,
+            notes="a lead bot orders its wing and a wingman bot replies: the order is a radio call for the human "
+            "wingman, the reply reaches the lead, and a lead's own reply is refused (slice F2-R)",
         ),
         Scenario(
             name="net-server-away", lane="net", args=[], driver=drive_away, uses=("server", "bot"), timeout=200,

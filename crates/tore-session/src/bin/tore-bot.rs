@@ -15,6 +15,7 @@
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
 //!          [--revive SECONDS] [--away SECONDS,FOR]
+//!          [--order SECONDS,NAME]... [--reply SECONDS,KIND]...
 //!          [--drop-resource NAME]... [--expect-unable]
 //! tore-bot --content-report [--data-dir DIR] [--drop-resource NAME]...
 //! ```
@@ -81,6 +82,16 @@
 //! plane. It prints when the AI takes the plane and when it asks for it
 //! back, and succeeds only if it was seated again in that plane.
 //!
+//! `--order` and `--reply` (stage F phase 2, slice F2-R) give a seat command
+//! once, SECONDS after the bot is first seated: `--order` is a wing order from
+//! a bot that leads its flight (`break-left`, `break-right`, `break-high`,
+//! `break-low`, `steady`, `attack-bandits`, `protect-me`, `disengage` or
+//! `bug-out`), `--reply` a wingman's reply key (`engaging`, `winchester`,
+//! `bingo` or `help`). Every bot prints each radio line it hears ("Bot: radio:
+//! Red one: 'Break left'") and each HUD line it reads ("Bot: line: You lead
+//! this flight."), so a test can follow an order and its reply from one bot to
+//! the other. Put the lead and the wingman in the same wing with `--slot`.
+//!
 //! Stage L (docs/ARCHITECTURE.md, "Compatibility"): each bot sends the
 //! content of its import when it joins, and prints the host's gaps whenever
 //! they change ("Bot: gaps: aircraft SU27.PT (Hawk lacks it)", or "gaps:
@@ -122,12 +133,14 @@ use tore_session::settings::{self, Mode, Store};
 use tore_session::wire::chat::Receiver;
 use tore_session::wire::messages::{Goodbye, LobbyState, Observing, SettingsChange, Subject};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
+use tore_world::seats::SeatCommand;
 
 const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
 [--path auto|direct|relay]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE] \
 [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] \
+[--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
 [--drop-resource NAME]... [--expect-unable]\n       tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
 
@@ -184,6 +197,8 @@ struct Options {
     /// `--away`: away this long after the first seating, back the second
     /// span after the AI took the plane.
     away: Option<(Duration, Duration)>,
+    /// `--order` and `--reply`: when after the first seating, and what.
+    commands: Vec<(Duration, SeatCommand)>,
     /// `--drop-resource`: names removed from the loaded import.
     drop: Vec<String>,
     /// `--content-report`: print the content and exit.
@@ -270,6 +285,52 @@ fn away(value: &str) -> Result<(Duration, Duration), String> {
     Ok((seconds(at)?, seconds(span)?))
 }
 
+/// `--order SECONDS,NAME`: a wing order, given once.
+fn order(value: &str) -> Result<(Duration, SeatCommand), String> {
+    use tore_sim::ai::wing::{PlayerBreak, PlayerOrder};
+    let (at, name) = value
+        .split_once(',')
+        .ok_or_else(|| format!("--order takes SECONDS,NAME\n{USAGE}"))?;
+    let order = match name {
+        "break-left" => PlayerOrder::Break(PlayerBreak::Left),
+        "break-right" => PlayerOrder::Break(PlayerBreak::Right),
+        "break-high" => PlayerOrder::Break(PlayerBreak::High),
+        "break-low" => PlayerOrder::Break(PlayerBreak::Low),
+        "steady" => PlayerOrder::Break(PlayerBreak::Straight),
+        "attack-bandits" => PlayerOrder::AttackOnContact,
+        "protect-me" => PlayerOrder::ProtectMe,
+        "disengage" => PlayerOrder::Disengage,
+        "bug-out" => PlayerOrder::BugOut,
+        other => {
+            return Err(format!(
+                "--order {other:?} is break-left, break-right, break-high, break-low, steady, \
+                 attack-bandits, protect-me, disengage or bug-out"
+            ));
+        }
+    };
+    Ok((seconds(at)?, SeatCommand::WingOrder(order)))
+}
+
+/// `--reply SECONDS,KIND`: a wingman's reply key, pressed once.
+fn reply(value: &str) -> Result<(Duration, SeatCommand), String> {
+    use tore_world::world::replies::Reply;
+    let (at, kind) = value
+        .split_once(',')
+        .ok_or_else(|| format!("--reply takes SECONDS,KIND\n{USAGE}"))?;
+    let reply = match kind {
+        "engaging" => Reply::Engaging,
+        "winchester" => Reply::Winchester,
+        "bingo" => Reply::BingoFuel,
+        "help" => Reply::NeedHelp,
+        other => {
+            return Err(format!(
+                "--reply {other:?} is engaging, winchester, bingo or help"
+            ));
+        }
+    };
+    Ok((seconds(at)?, SeatCommand::WingReply(reply)))
+}
+
 /// `--quick SECONDS,NUMBER`.
 fn quick(value: &str) -> Result<(Duration, u8), String> {
     let (at, number) = value
@@ -304,6 +365,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         king: None,
         revive: None,
         away: None,
+        commands: Vec::new(),
         drop: Vec::new(),
         content_report: false,
         expect_unable: false,
@@ -365,6 +427,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--king" => options.king = Some(king(&value()?)?),
             "--revive" => options.revive = Some(seconds(&value()?)?),
             "--away" => options.away = Some(away(&value()?)?),
+            "--order" => options.commands.push(order(&value()?)?),
+            "--reply" => options.commands.push(reply(&value()?)?),
             "--drop-resource" => options.drop.push(value()?),
             "--content-report" => options.content_report = true,
             "--expect-unable" => options.expect_unable = true,
@@ -676,6 +740,9 @@ impl Running {
         }
         if let Some((after, span)) = options.away {
             bot.away_after(after, span);
+        }
+        for (after, command) in &options.commands {
+            bot.send_at(*after, *command);
         }
         self.bot = Some(bot);
         Ok(())
@@ -1166,6 +1233,12 @@ fn main() -> ExitCode {
                 }
                 (None, None) => {}
             }
+            for line in std::mem::take(&mut bot.radio_heard) {
+                println!("{}: radio: {line}", r.name);
+            }
+            for line in std::mem::take(&mut bot.lines_read) {
+                println!("{}: line: {line}", r.name);
+            }
             while let Some(event) = bot.client.poll_event() {
                 match event {
                     ClientEvent::Connected { .. } if r.through.is_some() => println!(
@@ -1493,6 +1566,52 @@ mod tests {
             "",
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn order_and_reply_give_a_seat_command_after_the_first_seating() {
+        use tore_sim::ai::wing::{PlayerBreak, PlayerOrder};
+        use tore_world::world::replies::Reply;
+        let o = parse(&args(
+            "--connect 127.0.0.1 --order 12,break-left --order 20.5,attack-bandits \
+             --reply 15,winchester --reply 30,help",
+        ))
+        .unwrap();
+        let at = |s: f64| Duration::from_secs_f64(s);
+        assert_eq!(
+            o.commands,
+            [
+                (
+                    at(12.),
+                    SeatCommand::WingOrder(PlayerOrder::Break(PlayerBreak::Left))
+                ),
+                (
+                    at(20.5),
+                    SeatCommand::WingOrder(PlayerOrder::AttackOnContact)
+                ),
+                (at(15.), SeatCommand::WingReply(Reply::Winchester)),
+                (at(30.), SeatCommand::WingReply(Reply::NeedHelp)),
+            ]
+        );
+        assert!(
+            parse(&args("--connect 127.0.0.1"))
+                .unwrap()
+                .commands
+                .is_empty()
+        );
+        for bad in [
+            "--order 5",
+            "--order 5,fly-away",
+            "--order x,break-left",
+            "--reply 5",
+            "--reply 5,hello",
+            "--reply -1,engaging",
+        ] {
+            assert!(
+                parse(&args(&format!("--connect 127.0.0.1 {bad}"))).is_err(),
+                "{bad}"
+            );
         }
     }
 

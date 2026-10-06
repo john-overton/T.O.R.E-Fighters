@@ -34,6 +34,7 @@
 
 use crate::client::{Client, ClientFrame, Controls};
 use crate::wire::chat::{ChatSend, QuickMessage, Receiver, Refusal};
+use crate::wire::events::WireEvent;
 use crate::wire::messages::{LobbyPhase, RosterPlane, Subject};
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};
@@ -44,6 +45,7 @@ use tore_sim::combat::gunsight::{self, TargetObservation};
 use tore_sim::combat::live::Configuration;
 use tore_sim::flight::{self, PilotInput};
 use tore_world::combat::launcher;
+use tore_world::seats::SeatCommand;
 use tore_world::snapshot::{AircraftPose, RenderSnapshot};
 
 /// The cycle: straight, a left turn, straight, a right turn, 10 s each.
@@ -695,6 +697,15 @@ pub struct Bot {
     /// The AI flew its plane while it was away, and it asked for it back.
     pub went_away: bool,
     pub came_back: bool,
+    /// Seat commands to give once each, this long after the first seating
+    /// ([`Bot::send_at`], stage F phase 2, slice F2-R).
+    scripted: Vec<(Duration, SeatCommand)>,
+    /// When the bot was first seated, for the scripted commands.
+    scripted_seated: Option<Duration>,
+    /// The radio lines the bot heard ("Red two: 'Winchester'") and the HUD
+    /// lines it read, in order, for `tore-bot` to print.
+    pub radio_heard: Vec<String>,
+    pub lines_read: Vec<String>,
 }
 
 impl Bot {
@@ -728,6 +739,52 @@ impl Bot {
             away_since: None,
             went_away: false,
             came_back: false,
+            scripted: Vec::new(),
+            scripted_seated: None,
+            radio_heard: Vec::new(),
+            lines_read: Vec::new(),
+        }
+    }
+
+    /// Gives the seat command `command` once, `after` the first seating: an
+    /// order from a lead, or a reply from a wingman (stage F phase 2, slice
+    /// F2-R's `tore-bot --order` and `--reply`).
+    pub fn send_at(&mut self, after: Duration, command: SeatCommand) {
+        self.scripted.push((after, command));
+    }
+
+    /// The scripted commands that are due.
+    fn scripted_commands(&mut self, now: Duration, controls: &mut Controls) {
+        if self.scripted.is_empty() || self.client.seat().is_none() {
+            return;
+        }
+        let seated = *self.scripted_seated.get_or_insert(now);
+        let due = now.saturating_sub(seated);
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.scripted)
+            .into_iter()
+            .partition(|(after, _)| due >= *after);
+        self.scripted = waiting;
+        controls
+            .commands
+            .extend(ready.into_iter().map(|(_, command)| command));
+    }
+
+    /// Keeps what a frame's events said to the player: radio lines and HUD
+    /// lines (bounded, as the client's own list of events is).
+    fn hear(&mut self, frame: &ClientFrame) {
+        for event in &frame.events {
+            match &event.event {
+                WireEvent::Radio { label, text, .. } => {
+                    self.radio_heard.push(format!("{label}: '{text}'"));
+                }
+                WireEvent::Message { text } => self.lines_read.push(text.clone()),
+                _ => {}
+            }
+        }
+        for list in [&mut self.radio_heard, &mut self.lines_read] {
+            if list.len() > 256 {
+                list.drain(..list.len() - 256);
+            }
         }
     }
 
@@ -901,6 +958,7 @@ impl Bot {
                 self.frames += 1;
                 self.pilot.arm(&frame.config);
                 self.picture = Some(frame.picture.clone());
+                self.hear(&frame);
                 drawn = Some(frame);
             } else if let Some(frame) = self.client.observer_frame(now) {
                 self.watched += 1;
@@ -927,6 +985,7 @@ impl Bot {
         };
         let mut controls = controls;
         self.revive(now, &mut controls);
+        self.scripted_commands(now, &mut controls);
         self.away(now);
         self.client.update(now, &controls);
         self.watch_when_flying();
@@ -1283,6 +1342,123 @@ mod tests {
             text
         };
         MissionSpec::from_text(&text).expect("the guide's mission parses")
+    }
+
+    /// Two bots in one friendly wing over the simulator, the lead giving an
+    /// order and the wingman a reply (slice F2-R): each hears the other's call,
+    /// as the game's radio line, through the host and the wire.
+    fn wing_exchange(order_at: u64, reply_at: u64, lead_replies: bool) -> (Bot, Bot) {
+        use tore_sim::ai::wing::{PlayerBreak, PlayerOrder};
+        use tore_world::world::replies::Reply;
+        let resources = Arc::new(tore_world::test_support::resources::resources());
+        let spec = MissionSpec::from_text(
+            "tore-mission 1\ntheater UKR\nstart airborne 20000\nseparation-nm 50\n\
+             wing friendly 1 F18.PT 3 average\nwing enemy 1 F18.PT 1 dummy\n",
+        )
+        .expect("the wing parses");
+        let net = SimNetwork::new(5);
+        net.set_default_link(LinkConfig::PERFECT);
+        let address = "10.0.0.1:26900".parse().unwrap();
+        let mut host_socket = net.bind(address).unwrap();
+        let mut host = Host::new(
+            spec,
+            Arc::clone(&resources),
+            HostConfig {
+                open_planes: OpenPlanes::All,
+                start: StartMode::Now,
+                entropy: Entropy::Seeded(16),
+                ..HostConfig::new(build())
+            },
+        )
+        .expect("the host starts");
+        let mut players: Vec<_> = [0u32, 1]
+            .into_iter()
+            .map(|plane| {
+                let socket = net
+                    .bind(format!("10.0.1.{}:40000", plane + 1).parse().unwrap())
+                    .unwrap();
+                let config = ClientConfig {
+                    entropy: Entropy::Seeded(500 + u64::from(plane)),
+                    plane: Some(plane),
+                    ..ClientConfig::new(address, &format!("Bot{}", plane + 1), build())
+                };
+                let client = Client::connect(config, Arc::clone(&resources), net.now()).unwrap();
+                (socket, Bot::new(client))
+            })
+            .collect();
+        let say = |bot: &mut Bot, at: u64, command: SeatCommand| {
+            bot.send_at(Duration::from_secs(at), command);
+        };
+        say(
+            &mut players[0].1,
+            order_at,
+            SeatCommand::WingOrder(PlayerOrder::Break(PlayerBreak::Left)),
+        );
+        let replier = usize::from(!lead_replies);
+        say(
+            &mut players[replier].1,
+            reply_at,
+            SeatCommand::WingReply(Reply::Winchester),
+        );
+        for _ in 0..30_000 {
+            net.advance(Duration::from_millis(1));
+            let now = net.now();
+            host.receive_from(now, &mut host_socket).unwrap();
+            host.update(now);
+            host.transmit(&mut host_socket).unwrap();
+            for (socket, bot) in &mut players {
+                bot.client.receive_from(now, socket).unwrap();
+                bot.update(now);
+                bot.client.transmit(socket).unwrap();
+                while bot.client.poll_event().is_some() {}
+            }
+        }
+        let wingman = players.pop().unwrap().1;
+        let lead = players.pop().unwrap().1;
+        (lead, wingman)
+    }
+
+    #[test]
+    fn a_lead_bots_order_and_a_wingman_bots_reply_reach_each_other_over_the_wire() {
+        let (lead, wingman) = wing_exchange(4, 12, false);
+        // The wingman heard the order as the lead's call, the lead the reply
+        // under the wingman's place; each hears its own reply or order never
+        // as another's.
+        assert!(
+            wingman
+                .radio_heard
+                .iter()
+                .any(|line| line.starts_with("Red one: '")),
+            "the wingman's radio: {:?}",
+            wingman.radio_heard
+        );
+        assert!(
+            lead.radio_heard
+                .contains(&"Red two: 'Winchester'".to_owned()),
+            "the lead's radio: {:?}",
+            lead.radio_heard
+        );
+        assert!(
+            wingman
+                .radio_heard
+                .contains(&"YOU: 'Winchester'".to_owned()),
+            "the wingman hears its own call: {:?}",
+            wingman.radio_heard
+        );
+        assert!(!lead.lines_read.iter().any(|l| l == "You lead this flight."));
+    }
+
+    #[test]
+    fn a_lead_bots_reply_is_refused_with_a_line_and_no_call() {
+        let (lead, wingman) = wing_exchange(4, 12, true);
+        assert!(lead.lines_read.iter().any(|l| l == "You lead this flight."));
+        assert!(
+            !lead.radio_heard.iter().any(|l| l.contains("Winchester"))
+                && !wingman.radio_heard.iter().any(|l| l.contains("Winchester")),
+            "nobody hears a lead's reply: {:?} {:?}",
+            lead.radio_heard,
+            wingman.radio_heard
+        );
     }
 
     fn killed_by(fight: &Fight, limit: f64) {
