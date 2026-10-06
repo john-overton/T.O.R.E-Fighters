@@ -268,12 +268,17 @@ fn fifteen_second_stall(strict: bool) {
     assert!(game.guest.kept.running(), "the guest's keepalive runs");
     assert!(!game.king.kept.running(), "the King over the link has none");
     let king_before = game.king.corrections();
-    let repeated_before = game.guest.bot.client.clone_stats().inputs_repeated;
 
     let stall = Instant::now();
     game.guest_stalled = true;
     game.run(Duration::from_secs(15));
     game.guest_stalled = false;
+    // The game's first frame back reads the snapshots the socket kept. The
+    // guest has sent no input since, so the host is still repeating its
+    // last controls in every one of them.
+    let backlog = game.guest.bot.client.clone_stats();
+    game.frame();
+    let read = game.guest.bot.client.clone_stats();
     let sent = game.guest.kept.sent();
     let king_during = game.king.corrections() - king_before;
     assert!(
@@ -299,10 +304,28 @@ fn fifteen_second_stall(strict: bool) {
     assert_eq!(game.guest.bot.client.phase(), ClientPhase::Flying);
     // The host flew the plane on with the held controls through the stall.
     // The client only learns that from the snapshots it read, and a socket
-    // buffer holds a few seconds of them (the system drops the rest), so the
-    // count it reports is well short of the stall's 1,800 ticks.
-    let repeated = stats.inputs_repeated - repeated_before;
-    assert!(repeated >= 120, "{repeated} ticks repeated");
+    // buffer holds a few seconds of them at most (the system drops the
+    // rest). How many it holds depends on the snapshots' size and the
+    // system, and what arrives while the game catches up depends on the
+    // machine's speed, so no fixed count is the property. It is this: each
+    // snapshot read on the first frame back says the host repeated the last
+    // input for every tick since the one before, all but the first few
+    // ticks, which the host's input buffer still held (a margin of a few
+    // ticks; a quarter second here allows for it).
+    let snapshots = read.snapshots - backlog.snapshots;
+    let repeated = read.inputs_repeated - backlog.inputs_repeated;
+    let per = u64::from(game.guest.bot.client.ticks_per_snapshot());
+    eprintln!(
+        "first frame back: {snapshots} snapshots, {repeated} ticks repeated ({per} a snapshot)"
+    );
+    assert!(
+        snapshots >= 30,
+        "only {snapshots} snapshots kept through the stall: {stats:#?}"
+    );
+    assert!(
+        repeated + 30 >= snapshots * per,
+        "{repeated} ticks repeated in {snapshots} snapshots of {per} ticks"
+    );
     // It takes the host's newest state rather than step 15 seconds of
     // backlog (a catch-up, not a correction) ...
     assert!(stats.catch_ups >= 1, "{stats:#?}");
