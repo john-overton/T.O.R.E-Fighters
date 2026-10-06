@@ -380,12 +380,23 @@ def _landing(output: str) -> tuple[dict, float]:
     return landing, float(start.group(1)) if start else 0.0
 
 
+SHORT_STRIP_FT = 2000.0  # the game's line: no tower, clearance or ILS below it
+
+
 def ils_problems(output: str) -> list[str]:
     """The player's ILS read along a scripted approach that flew its glide path:
     it must be active and stay near the bars (the pilot script is not perfect,
     and a crosswind lets it drift a little)."""
     m = re.search(r"ils_probe: samples=(\d+) active=(\d+)(?: max_abs_glide_deg=([\d.]+) max_abs_localizer_deg=([\d.]+))?", output)
     if not m:
+        return []
+    # Since f7d16d85 the tower gives no ILS to a runway under 2,000 ft (the 22
+    # airstrips of 1,074 ft): none must be offered there, and the rest of the
+    # landing's checks still apply.
+    start = re.search(r"runway_length_ft=(\d+)", output)
+    if start and float(start.group(1)) < SHORT_STRIP_FT:
+        if int(m.group(2)) != 0:
+            return ["the tower offered an ILS on a short strip"]
         return []
     if int(m.group(2)) == 0:
         return ["the ILS never became active on the approach"]

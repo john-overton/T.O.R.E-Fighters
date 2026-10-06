@@ -101,6 +101,19 @@ class TakeoffAndLandingTests(unittest.TestCase):
         text = LANDING.replace("runway_length_ft=5532", "runway_length_ft=1074").replace("runway_left_ft=669", "runway_left_ft=-900")
         self.assertEqual(flight.check_landing(text), [])
 
+    def test_a_short_strip_has_no_ils_and_a_long_runway_must(self):
+        probe = "ils_probe: samples=12818 active=0\n"
+        active = "ils_probe: samples=11213 active=10379 max_abs_glide_deg=0.314 max_abs_localizer_deg=0.000\n"
+        short = LANDING.replace("runway_length_ft=5532", "runway_length_ft=1074")
+        self.assertEqual(flight.ils_problems(short + probe), [])
+        self.assertEqual(flight.check_landing(short.replace("runway_left_ft=669", "runway_left_ft=-900") + probe), [])
+        self.assertTrue(any("short strip" in p for p in flight.ils_problems(short + active)))
+        self.assertTrue(any("never became active" in p for p in flight.ils_problems(LANDING + probe)))
+        self.assertEqual(flight.ils_problems(LANDING + active), [])
+        # The other checks still apply on a short strip.
+        gear = short.replace("unsafe=none", "unsafe=unsafe_gear_up=true")
+        self.assertTrue(any("gear-up" in p for p in flight.check_landing(gear + probe)))
+
     def test_unsafe_variants(self):
         gear = LANDING.replace("crashed=false", "crashed=true").replace("unsafe=none", "unsafe=unsafe_gear_up=true")
         self.assertEqual(flight.check_landing_gear_up(gear), [])
