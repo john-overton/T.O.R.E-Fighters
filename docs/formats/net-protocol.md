@@ -1540,7 +1540,37 @@ arrived yet reads 0 (unknown).
   unchanged: another T.O.R.E build is still refused with code 2, and a
   missing aircraft is never a refusal at the door.
 
-### Limits of stage L
+#### Rejoin as built (K5)
+
+*Built (K5, 2026-10-05), no wire change.* Every choice is an agent decision.
+
+- **Token (39)** goes to every connection right after its join, and again to
+  a game that rejoins (the same token). Its life is 86,400 seconds.
+- **A token in the Challenge answer** that works (kept, not voided, not past 24
+  hours since its player was last connected) is admitted whatever the room;
+  the password and the build are still checked. A token that does not work
+  does not refuse the join: the game is a new player and gets a Notice, for
+  example "Your rejoin token has expired: it lasts 24 hours after you were
+  last in the game. You join as a new player."
+- **Rejoin (54)** is answered with the Token and a Notice ("Welcome back,
+  Viper: your aircraft is waiting.") or a Refused in words: the token's own
+  words, or "You are already in the game." from a connection that flew, holds
+  a lobby slot or is not in the lobby. The player's own token again is
+  accepted and changes nothing.
+- **Release (53)** from the King frees the reservation on that plane: a
+  Notice to the player if connected; "No aircraft is kept for a player on
+  that plane." when none.
+- **Taking the plane back** is the player's TakePlane (Join) in flight, not a
+  host message: the host answers with Seated at the next tick. A connection
+  that has a reservation is seated in it whichever plane it asked for.
+- **A returning player whose plane was lost** gets a Notice and a Revival
+  message, so its game shows the revival prompt; Join then flies it again by
+  the King's rules, in a new plane of the lost one's wing.
+- **The journal** codes the command that revives a seat from a plane nobody
+  holds (`MissionCommand::ReviveLost`) as mission command variant 5, after
+  Revive's 4; no stream record, message or packet changed.
+
+## Limits of stage L
 
 Stage L's limits are in [Limits](#limits) (the "Stage L (protocol 10)" row).
 
@@ -1834,8 +1864,8 @@ choice below is an agent decision.
 - **Setting 21.** Its values are 0 to 256. Until slice K6 builds the pin
   the registry refuses any but 0 (calculated) with "Not available yet."
 - **Until the later slices.** A host refuses Candidate, Reach report,
-  Standby status, Resume, Backlog, Taken over, Release and Rejoin with a
-  Refused "Not available yet." (Release only from the King); Backlog and
+  Standby status, Resume, Backlog and Taken over with a Refused "Not
+  available yet."; Release and Rejoin are built (slice K5, below); Backlog and
   Standby status do not count against the 20 requests a second. A client
   keeps every Standby record for its standby, in order
   (`Client::take_standby_records`), and takes Token, Reach test, Reach

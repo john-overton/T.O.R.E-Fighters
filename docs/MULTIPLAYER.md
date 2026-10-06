@@ -325,6 +325,17 @@ credited):*
 - A dedicated server holds reservations and takes tokens the same way, for as
   long as it runs.
 
+*Built (K5, 2026-10-05):* the host's and the client's side of all of this, on
+the simulator and in the net lane: tokens, the gate, reservations, Release
+and the revival rules on return (the screens, the game's token file and the
+Rejoin marks are K7b's). `tore-bot --token-file FILE` keeps and sends a bot's
+token. The details, each an agent decision, are in the
+[architecture](ARCHITECTURE.md#rejoin-tokens-and-reservations-as-built-k5):
+the player takes the aircraft back with Join; a game restarted before the host
+noticed replaces its old connection; a token that does not work tells the
+player in words and it joins as a new one; an away player who quits on purpose
+frees its aircraft.
+
 ## Comms and chat
 
 When a human leads, their wing orders go to all wingmen, human or AI. Human
