@@ -945,6 +945,17 @@ ids, and the player has no plane of its own.
 - **Esc** opens the pause menu, whose first row is **Stop Watching**: it tells
   the host and returns to the lobby. A mission that ends, or a host that stops
   the watch, returns to the lobby too, and Messages says why.
+- **Your own aircraft.** When you go away in a flight (a menu open, the window
+  out of focus or no controller for the host's `idle-ai` seconds) and the AI
+  flies your aircraft, the game opens this view on it, over your flight, with
+  your aircraft selected. The first flight input takes it back: the stick,
+  rudder, throttle and trigger of a controller, the arrow keys (Shift makes
+  them look), Z, X, End, Page Down, Space, the keys 1 to 8 and any key your
+  controls bind. Those keys are the flight's here, so the arrows do not scrub
+  and Space does not pause; every other key and the mouse stay the viewer's.
+  **Stop Watching** leaves the aircraft to the AI and returns to the lobby, or,
+  in a game with no lobby screen or one you host, takes the aircraft back
+  ([the design](ARCHITECTURE.md#the-observer-screen-for-an-away-players-own-plane-f2-o3)).
 - Not there yet: smoke, contrails and gun rounds, radio and HUD lines, the AI's
   thinking, and each aircraft's fuel, G and controls (the observer stream does
   not carry them). The recording is a file in `observer/` in the data folder
