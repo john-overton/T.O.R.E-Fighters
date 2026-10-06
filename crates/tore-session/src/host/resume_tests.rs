@@ -1154,3 +1154,85 @@ fn a_host_lost_in_the_lobby_moves_the_lobby() {
         "the mission flies from the new host"
     );
 }
+
+/// A player who joins after the host last sent its Succession is sent it
+/// at once, and follows a migration like everyone else (slice K10: in
+/// `net-reach-upload` a bot that joined late never heard of the standby,
+/// so it dropped 5 seconds after the handover).
+#[test]
+fn a_late_joiner_follows_a_migration() {
+    let mut rig = Rig::new(crowd_spec(20));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2)] {
+        rig.join(callsign, plane, true);
+    }
+    rig.fly();
+    let (first, _) = rig.standbys();
+    rig.run(Duration::from_secs(1));
+    // Hawk joins in flight, after the last Succession went out.
+    let late = rig.join("Hawk", 3, true);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.flying(late)),
+        "the late joiner flies"
+    );
+    assert!(
+        rig.games[late]
+            .client
+            .succession()
+            .is_some_and(|s| s.standbys.len() == 2),
+        "the late joiner holds the succession: {:?}",
+        rig.games[late].client.succession()
+    );
+    // It holds everything else a migration needs: its rejoin token and the
+    // standby marks of the lobby.
+    assert!(rig.games[late].client.token().is_some(), "its rejoin token");
+    let marks = rig.games[late]
+        .client
+        .lobby()
+        .unwrap()
+        .players
+        .iter()
+        .filter(|p| p.standby != messages::StandbyMark::None)
+        .count();
+    assert_eq!(marks, 2, "the standby marks");
+
+    // The house leaves: the late joiner resumes with the new host.
+    rig.run(Duration::from_millis(500));
+    rig.host_mut().hand_over().unwrap();
+    assert!(
+        rig.run_until(Duration::from_secs(1), |r| r.host().handed_over()),
+        "the handover's records through"
+    );
+    rig.games[0].gone = true;
+    assert!(
+        rig.run_until(Duration::from_secs(1), |r| !r.takeovers.is_empty()),
+        "standby 1 takes over"
+    );
+    let (game, took_at, _, _) = rig.takeovers[0].clone();
+    assert_eq!(game, first);
+    let new_host = rig.games[first].address();
+    assert!(
+        rig.run_until(Duration::from_secs(2), |r| {
+            let client = &r.games[late].client;
+            client.migration_counts().resumed == 1
+                && client.migration() == MigrationState::Steady
+                && client.server() == new_host
+        }),
+        "the late joiner resumes with the new host: {:?}, {:?}",
+        rig.games[late].client.migration_counts(),
+        rig.games[late].client.migration()
+    );
+    assert!(
+        rig.run_until(Duration::from_secs(1), |r| r.games[late]
+            .snapshot_after(took_at)
+            .is_some()),
+        "the late joiner has snapshots again"
+    );
+    assert!(rig.flying(late));
+    assert!(
+        rig.run_until(Duration::from_secs(2), |r| r
+            .host_of(game)
+            .absent_players()
+            .is_empty()),
+        "nobody is left absent"
+    );
+}

@@ -1348,6 +1348,9 @@ impl Host {
                         self.connected(connection, details);
                         self.rejoin_connected(connection, token);
                     }
+                    // Stage K: the ready standbys, sent to the others when
+                    // they last changed (slice K10).
+                    self.succession_connected(connection);
                 }
                 ServerEvent::Closed {
                     connection, reason, ..

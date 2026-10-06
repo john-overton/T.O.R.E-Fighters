@@ -507,6 +507,25 @@ impl Host {
         }
     }
 
+    /// A player who joined or resumed after the last Succession went out is
+    /// sent it, or it could not follow a migration (slice K10: found in
+    /// `net-reach-upload`, where a late joiner dropped after a handover).
+    pub(super) fn succession_connected(&mut self, connection: ConnectionId) {
+        if !self.peers.contains_key(&connection) {
+            return;
+        }
+        let Some(sent) = self
+            .succession
+            .sent
+            .as_ref()
+            .filter(|s| !s.standbys.is_empty())
+        else {
+            return;
+        };
+        let message = Message::Succession(Box::new(sent.clone()));
+        self.send(connection, &message);
+    }
+
     // ----- The timers --------------------------------------------------
 
     /// What is due at `now`: players gone and joined, the pin's fallback,
