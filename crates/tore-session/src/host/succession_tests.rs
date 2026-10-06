@@ -883,9 +883,9 @@ fn the_need_the_router_and_the_cpu_share_follow_the_design() {
     assert_eq!(upload_need(12, 0), 28_000 * 11 + 2 * (3_000 + 12 * 520));
     // A cold standby adds its checkpoints; one other player has one standby
     // at most, and a third cold standby is not a role.
-    assert_eq!(upload_need(2, 1) - upload_need(2, 0), 70_000);
+    assert_eq!(upload_need(2, 1) - upload_need(2, 0), 80_000);
     assert_eq!(upload_need(2, 2), upload_need(2, 1));
-    assert_eq!(upload_need(12, 2) - upload_need(12, 0), 2 * 70_000);
+    assert_eq!(upload_need(12, 2) - upload_need(12, 0), 2 * 80_000);
     // The need follows the measured streams (docs/baselines/
     // standby-stream-2026-10-05.md): what the host's transport sent a
     // standby, protocol 14, on the simulator.

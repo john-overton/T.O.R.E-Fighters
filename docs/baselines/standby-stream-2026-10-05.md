@@ -28,10 +28,12 @@ the code is `tore_session::host::standby` and `tore_session::journal`.
   that grid), the command lists behind one presence bit, the view as Inputs
   does and the command number as one bit when unchanged. 3.4 to 5.6 bytes a
   seat a tick: 12.8 KB/s with 30 humans, 2.3 KB/s with four.
-- **Still over:** 30 humans pass the 10 KB/s a warm standby by about 28
-  percent, and a cold standby's checkpoints need up to 1 Mbit/s on the real
-  mission. Both are host selection's upload need to revisit (slice K6's
-  `NEED_PER_STANDBY`).
+- **Still over, now answered (slice KP, 2026-10-06):** 30 humans passed the 10
+  KB/s a warm standby that host selection first asked, and a cold standby's
+  checkpoints need up to 1 Mbit/s on the real mission. The upload test's need
+  now follows these figures
+  ([host selection](host-selection-2026-10-05.md#the-upload-need-follows-the-standby-streams-slice-kp)),
+  and `FRAMING` is 1.25 ([below](#kp-the-framing-margin-re-measured)).
 
 ## What was run
 
@@ -78,3 +80,29 @@ KB with 30 players, 0.3 to 3.3 KB/s in a 30-human fight depending on how
 often players die and come back. Coding it per player against the last one
 sent would cut it to the players that changed. Left as a follow-up: under
 protocol 14 it is a tenth of the warm stream with 30 humans.
+
+## KP: the framing margin re-measured
+
+Slice K3 measured the cold stream's busiest second on the real 15 against 15
+mission at 126 KB/s on the wire against the 125,000 B/s line, with `FRAMING`
+1.2 (chunks at up to 104 KB/s). Slice KP raised it to 1.25 (chunks at up to
+100 KB/s) and ran the real-data test again on 2026-10-06 (release, a fresh
+import, branch `mp/kp-polish`, the same command as above; a 150-second run
+with `K3_WIRE=1` for the seconds, and the 300-second one):
+
+| Run | Warm stream | Cold stream | Cold on the wire over Hawk (mean, busiest second) | Checkpoints |
+| --- | --- | --- | --- | --- |
+| 300 s | 2.0 KB/s | 70.6 KB/s (29 checkpoints) | 83.5 KB/s, 128.0 KB/s | 0.60 to 1.09 MB, each in its pace (7.97 s for the 0.6 to 0.67 MB ones, 11.3 s for the largest) |
+| 150 s | 2.2 KB/s | 74.2 KB/s (14 checkpoints) | 87.2 KB/s, 119.9 KB/s | |
+
+Every Check of the warm standby was equal (60 of 60 in the long run). Taking
+the warm standby's over-Hawk figure off the cold one's, second by second in the
+150-second run (both carry the two players' differing snapshots; only the cold
+one carries checkpoints), the cold stream was 100 KB/s on average in the 71
+seconds a checkpoint was going out and 115.5 KB/s at most, under the 125,000
+B/s line with the 1.25 margin. The raw busiest second is higher (128.0 KB/s in
+the long run) only because the two players' own snapshots differ: the warm
+standby's over-Hawk figure alone, its 2 KB/s stream with them, reached 25.8 KB/s
+in a furball second. The over-Hawk comparison therefore cannot say more than
+that. Not run again at 1.2 on this import, so 126 against 128 KB/s is not a
+before and after of the margin alone.

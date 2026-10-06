@@ -88,13 +88,12 @@ pub const WARM_STANDBY_BASE: u32 = 3_000;
 pub const WARM_STANDBY_PER_HUMAN: u32 = 520;
 /// What a cold standby's checkpoints need besides the journal, bytes a
 /// second: the real-data 15 against 15 mission's stream averaged 64 KB/s
-/// (72 KB/s on the wire, framing and resends in) on four humans, its
-/// checkpoints of 0.52 to 1.1 MB each taking 8 to 11 seconds; its busiest
-/// second was 126 KB/s, the 1 Mbit/s line the stream is held to. The need
-/// is the average on the wire, 70 KB/s, since the busy second comes only
-/// now and then and the transport queues across it (slice KP).
-/// *Fitted.*
-pub const COLD_STANDBY_CHECKPOINTS: u32 = 70_000;
+/// (slice K3) and 70.6 KB/s (slice KP, 83.5 KB/s on the wire, its first
+/// minutes 87 KB/s) on four humans, its checkpoints of 0.52 to 1.1 MB each
+/// taking 8 to 11 seconds. The need is the wire average with a little over,
+/// 80 KB/s: the stream's pace holds it under the 1 Mbit/s line, and the
+/// transport queues across the busy seconds (slice KP). *Fitted.*
+pub const COLD_STANDBY_CHECKPOINTS: u32 = 80_000;
 /// A candidate passes the upload test when this share of the burst arrives,
 /// per mille.
 pub const UPLOAD_PASS: u16 = 900;

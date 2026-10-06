@@ -52,12 +52,13 @@ Microseconds a tick. What that shows:
 `host::succession::tests::an_upload_test_on_a_link_at_half_the_need_fails_and_at_the_full_need_passes`:
 a game a player hosts and one other player on the network simulator, the
 player's sends through a token bucket (the simulator's links have no rate of
-their own). Two players need 38 KB/s: 28 KB/s for the other player and
-10 KB/s for one standby.
+their own). Two players need 32 KB/s: 28 KB/s for the other player and
+4 KB/s for one warm standby (slice KP's need, below; the first run of this
+test, under the 10 KB/s a standby of slice K6's first need, asked 38 KB/s).
 
 | The link's rate | Arrived | Result |
 | --- | --- | --- |
-| Half the need (19 KB/s of datagrams) | 53.6 percent | Fails |
+| Half the need (16 KB/s of datagrams) | 51.9 percent | Fails |
 | The need and the packets' headers (1.05 times) | 100 percent | Passes |
 
 The burst goes in packets of 1,100 bytes of Filler (1,123 bytes on the wire),
@@ -95,3 +96,39 @@ against one filtering by port, two symmetric routers, a carrier's router with
 no IPv6) are not. A symmetric candidate is reached at the port its own Reach
 came from, as a race reaches a symmetric host at the port its punch came
 from.
+
+## The upload need follows the standby streams (slice KP)
+
+Slice K6's first need gave each standby 10 KB/s. Slice K3's measurements
+([the standby stream](standby-stream-2026-10-05.md), protocol 14) showed that
+low for a warm standby with 30 humans (12.8 KB/s of stream, 16.2 KB/s on the
+wire) and far too low for a cold one, whose checkpoints took 64 KB/s on
+average on the real 15 against 15 mission (72 KB/s on the wire, 126 KB/s in the
+busiest second). The need is now, for a candidate hosting `players` players:
+
+- 28 KB/s for each other player, as before;
+- for each standby (up to two, and no more than the other players): a warm
+  one 3,000 B/s and 520 B/s for each human flying (`WARM_STANDBY_BASE`,
+  `WARM_STANDBY_PER_HUMAN`), a cold one that and 80,000 B/s of checkpoints
+  (`COLD_STANDBY_CHECKPOINTS`).
+
+| Humans | Measured on the wire, warm | Need, warm | Measured on the wire, cold | Need, cold |
+| --- | --- | --- | --- | --- |
+| 3 | 3.9 KB/s | 4.6 KB/s | 9.4 KB/s | 84.6 KB/s |
+| 4 (real 15 v 15) | 1.8 KB/s | 5.1 KB/s | 72 and 83.5 KB/s (K3, KP) | 85.1 KB/s |
+| 30 | 16.2 KB/s | 18.6 KB/s | 34.6 KB/s | 98.6 KB/s |
+
+The warm figures are a line through the two ends with 15 percent over. The cold
+figure does not scale with the humans: a checkpoint's size is the mission's, so
+the 80 KB/s is the real-data average on the wire (K3's run measured 72 KB/s, the
+KP re-run on a fresh import 83.5 KB/s, its stream 70.6 KB/s of it), which every
+cold standby is held to by the stream's pace anyway (the small missions' checkpoints are far
+smaller, so the need there is generous, and a cold standby at three humans is
+asked for 85 KB/s though the crowd fight's stream is 9 KB/s; agent decision, wanting one number
+until the mission's size is known in the lobby). Which of a candidate's players
+would stand by is only known when the game moves, so the test assumes the worst:
+a standby is cold when the other player's platform or processor is not the
+candidate's, for as many as there are standby roles (`cold_standbys_for`).
+A candidate is not tested again when a player of another class joins, only when
+more players join.
+

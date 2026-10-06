@@ -548,7 +548,8 @@ credited):* every player's game tells the host its addresses, its system and
 processor, and how long its machine takes to step the lobby's mission for two
 seconds. The host measures who can reach whom and the round trips between
 them, and in the lobby asks the three best candidates for a one-second burst
-at the upload the game needs (28 KB/s for each other player). A candidate
+at the upload the game needs (28 KB/s for each other player, and what each
+standby's stream needs). A candidate
 must not be relayed (John, 2026-09-28), must be reachable by every other
 player, and must not have turned off "Let my game take over hosting" in
 Options. Candidates rank by upload (passing the test first), then median
