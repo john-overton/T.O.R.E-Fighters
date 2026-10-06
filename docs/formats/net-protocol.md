@@ -152,9 +152,34 @@ sequenceDiagram
 | Connect request | protocol version (16), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
 | Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
-| Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 4 by default), host tick now (32); 31 bytes |
+| Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before), host tick now (32); 31 bytes |
 | Refuse | client nonce (64), reason (8), text (string, up to 200 bytes) |
 | Disconnect | connection id (32), reason (8); sent three times at once; 10 bytes |
+
+**The ticks per snapshot set both bands' intervals.** A near entity is
+sent every snapshot. A far entity is sent every *F* snapshots, where *F* is
+the snapshot rate (120 over the ticks per snapshot) divided by 4 and rounded
+up: at most 4 times a second (John, 2026-10-06; twice a second before slice
+D12). Both ends work *F* out from this byte, so no other field carries it:
+
+| Snapshot rate | Ticks per snapshot | *F*, snapshots | Far interval, ticks | Far updates a second |
+| --- | --- | --- | --- | --- |
+| 60 (default) | 2 | 15 | 30 | 4 |
+| 40 | 3 | 10 | 30 | 4 |
+| 30 | 4 | 8 | 32 | 3.75 |
+| 24 | 5 | 6 | 30 | 4 |
+| 20 | 6 | 5 | 30 | 4 |
+| 15 | 8 | 4 | 32 | 3.75 |
+| 12 | 10 | 3 | 30 | 4 |
+| 10 | 12 | 3 | 36 | 3.33 |
+
+The client draws a far entity its interval further in the past
+([guide](../MULTIPLAYER.md#netcode-numbers)). It takes an entity for far
+when the gap between two of its updates is at least 4 snapshots, or *F*
+when that is fewer, and never fewer than half of *F* (8 snapshots at 60 a
+second), and for near when the gap is 2 snapshots or fewer (*agent
+decision*, D12). The rule changed no byte, so the protocol version did not
+change (the lead, 2026-10-06: both ends are always the same build).
 
 A request or answer that is not exactly 1,000 bytes, or whose padding is not
 zero, is dropped. Accepted and Refuse carry the client's nonce, and the client
@@ -676,7 +701,8 @@ if that one is already stepped. A toggle therefore never toggles twice.
 
 ## Snapshots
 
-One Snapshot section per snapshot packet, 30 a second by default. The host
+One Snapshot section per snapshot packet, 60 a second by default (30
+before slice D12). The host
 shares the 1,200 bytes so that the entities always keep their place: after the
 headers (55 bytes: the payload header, three section headers and a snapshot
 header of at most 21), the cockpit readout takes up to 200 bytes, the events
@@ -797,11 +823,12 @@ are sent only when their group changed, behind one bit each.
 **Priority and relevance.** Each entity has a priority that grows every
 snapshot by its relevance weight and resets when it is sent. An entity is due
 when its priority reaches the snapshot rate: a near one every snapshot, a far
-one twice a second. The host picks due records in priority order until the
+one 4 times a second at most (twice before slice D12; [the far
+interval](#connecting)). The host picks due records in priority order until the
 entities' space is full, so what cannot fit waits and is sent first next time,
 then writes the chosen records in id order, which the id coding needs. The
 relevance bands are the [netcode numbers](../MULTIPLAYER.md#netcode-numbers)'
-(John, 2026-09-30). A missile aimed at the player is always sent. An entity
+(John, 2026-09-30; rates raised by John, 2026-10-06). A missile aimed at the player is always sent. An entity
 that leaves is sent as Removed until that is acknowledged.
 
 **The first snapshot** after Seated has no baselines, and the host queues
@@ -1052,14 +1079,15 @@ a pilot's is its escape phase (3 bits).
   delivered; one that comes back is sent in full. On the client the newest of
   a state and a removal wins, whatever order packets arrive in.
 - **Priority.** Priorities are whole numbers: a near entity adds the snapshot
-  rate each snapshot, a far one 2, and an entity is due at the snapshot rate,
-  so a far one is due twice a second at every rate (the table's weights, 1
-  and 1/15 at 30 a second). An entity the connection has never had is due at
-  once. Missiles aimed at the player go first, then removals, then due
+  rate each snapshot, a far one 4 (2 before slice D12), and an entity is due
+  at the snapshot rate and starts again from nothing when sent, so a far one
+  is due every *F* snapshots ([the table above](#connecting)), 4 times a
+  second at most at every rate (the table's weights, 1 and 1/15 at 60 a
+  second). An entity the connection has never had is due at once. Missiles aimed at the player go first, then removals, then due
   entities by priority; a record is sized with its id's whole value before it
   is chosen, so the written section is never larger. *Correction to the
   design*, which said a band waits only when the packet is full: a far entity
-  is sent only when due, so it costs its bytes twice a second whatever room
+  is sent only when due, so it costs its bytes at its own rate whatever room
   there is.
 - **Shares.** The snapshot header takes at most 21 bytes, so the entities'
   least share is 545 bytes. The host keeps the messages' room at the

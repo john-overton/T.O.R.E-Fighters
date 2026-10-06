@@ -409,7 +409,7 @@ fn side_planes(started: &ObserverFlight, friendly: bool) -> Vec<u32> {
 }
 
 #[test]
-fn an_observer_gets_entities_near_its_camera_every_snapshot_and_the_rest_twice_a_second() {
+fn an_observer_gets_entities_near_its_camera_every_snapshot_and_the_rest_4_times_a_second() {
     // The AI alone: the enemy 50 nm from the friendly wing the camera
     // follows.
     let mut rig = Rig::new(spec(2, 2, 50), |_| {});
@@ -428,15 +428,17 @@ fn an_observer_gets_entities_near_its_camera_every_snapshot_and_the_rest_twice_a
     let watcher = &rig.watchers[w];
     assert!(watcher.errors.is_empty(), "{:?}", watcher.errors);
     let seen: Vec<&Seen> = watcher.seen[from..].iter().collect();
-    // 30 snapshots a second, each with no own plane, no readout and no
+    // 60 snapshots a second, each with no own plane, no readout and no
     // input figures, on the observer's lobby id's phase.
+    let tps = rig.host.config().ticks_per_snapshot();
+    assert_eq!(tps, 2);
     assert!(
-        (110..=125).contains(&seen.len()),
+        (225..=245).contains(&seen.len()),
         "{} snapshots",
         seen.len()
     );
     let lobby = watcher.lobby.as_ref().unwrap();
-    let phase = crate::wire::snapshot_phase(lobby.you, 4);
+    let phase = crate::wire::snapshot_phase(lobby.you, tps);
     for s in &seen {
         assert_eq!(s.header.flight, started.flight);
         assert_eq!(s.header.own_hash, None);
@@ -450,7 +452,7 @@ fn an_observer_gets_entities_near_its_camera_every_snapshot_and_the_rest_twice_a
             ),
             (0, 0, 0, 0)
         );
-        assert_eq!(u64::from(s.header.tick) % 4, phase);
+        assert_eq!(u64::from(s.header.tick) % u64::from(tps), phase);
         assert!(s.snapshot.unresolved.is_empty());
     }
     let sent = |id: u32| {
@@ -476,7 +478,7 @@ fn an_observer_gets_entities_near_its_camera_every_snapshot_and_the_rest_twice_a
     }
     for id in side_planes(&started, false) {
         assert!(
-            (6..=10).contains(&sent(id)),
+            (14..=18).contains(&sent(id)),
             "enemy {id}, 50 nm away: {} in 4 s",
             sent(id)
         );
@@ -502,8 +504,8 @@ fn a_point_camera_and_none_choose_what_is_near() {
         .iter()
         .map(|s| s.snapshot.updated.len())
         .sum();
-    // Four aircraft twice a second for 3 seconds.
-    assert!((20..=28).contains(&records), "{records} records");
+    // Four aircraft 4 times a second for 3 seconds.
+    assert!((44..=52).contains(&records), "{records} records");
 
     // No subject: everything at the full rate.
     let id = rig.connection(w);
@@ -695,9 +697,10 @@ fn with_a_delay_nothing_newer_than_now_less_the_delay_leaves_the_host() {
     let seen: Vec<&Seen> = watcher.flight_seen(started.flight).collect();
     assert!(seen.len() > 200, "{} snapshots", seen.len());
     assert_eq!(seen[0].header.tick, started.tick);
+    let tps = u64::from(rig.host.config().ticks_per_snapshot());
     for s in &seen {
         let shown = u64::from(s.header.tick);
-        assert_eq!(shown % 4, 0, "the ring's ticks");
+        assert_eq!(shown % tps, 0, "the ring's ticks");
         // Sent at the host's tick `shown + delay`, and arrived after it.
         assert!(
             shown + delay <= s.arrived,
@@ -741,10 +744,11 @@ fn with_a_delay_nothing_newer_than_now_less_the_delay_leaves_the_host() {
     let notice = watcher.first(kind::NOTICE).expect("the notice arrived");
     assert!(watcher.kinds[notice].1 >= now_tick + delay);
 
-    // The ring holds the delay's frames: 30 a second.
+    // The ring holds the delay's frames: one each snapshot interval, 60 a
+    // second.
     let ring = rig.host.stream.ring().unwrap();
     assert!(
-        (295..=302).contains(&ring.frames()),
+        (595..=602).contains(&ring.frames()),
         "{} frames",
         ring.frames()
     );
@@ -850,14 +854,17 @@ fn the_crowds_bandwidth_and_the_rings_memory_are_measured() {
     rig.run(Duration::from_secs(14));
     let (up, bytes, frames) = figures(&mut rig, w);
     let per_frame = bytes / frames.max(1);
-    let at_60 = per_frame * 60 * 30;
+    let rate = rig.host.config().snapshot_rate as usize;
+    let at_60 = per_frame * 60 * rate;
     eprintln!(
         "observer: {up} B/s; ring: {frames} frames, {bytes} bytes, {per_frame} a frame, \
          {:.1} MB at a 60-second delay",
         at_60 as f64 / 1e6
     );
     assert!(up > 0 && up < 40_000, "{up} B/s");
-    assert!(at_60 < 16_000_000, "{at_60} bytes at 60 s");
+    // A frame each snapshot: 60 a second since slice D12, twice the memory
+    // of 30.
+    assert!(at_60 < 32_000_000, "{at_60} bytes at 60 s");
 }
 
 #[test]
@@ -869,7 +876,7 @@ fn the_ring_at_a_60_second_delay_for_30_aircraft() {
     rig.run(Duration::from_secs(64));
     let (up, bytes, frames) = figures(&mut rig, w);
     eprintln!("observer: {up} B/s; ring: {frames} frames, {bytes} bytes");
-    assert!((1795..=1802).contains(&frames), "{frames} frames");
-    assert!(bytes < 16_000_000, "{bytes} bytes");
+    assert!((3595..=3602).contains(&frames), "{frames} frames");
+    assert!(bytes < 32_000_000, "{bytes} bytes");
     assert!(rig.watchers[w].seen.len() > 60);
 }

@@ -770,10 +770,12 @@ fn an_upload_test_on_a_link_at_half_the_need_fails_and_at_the_full_need_passes()
         rig.join_at(HOUSE, "Viper");
         let delta = rig.join_at("198.51.100.21:40000", "Delta");
         rig.settle();
-        // 32 KB/s for two players: one other player and one warm standby.
-        // The full need is the filler's rate plus its packets' headers.
-        let need = upload_need(2, 0);
-        assert_eq!(need, 28_000 + 3_000 + 2 * 520);
+        // For two players at 60 snapshots a second: one other player and
+        // one warm standby. The full need is the filler's rate plus its
+        // packets' headers.
+        let need = upload_need(2, 0, rig.host.config().snapshot_rate);
+        assert_eq!(rig.host.config().snapshot_rate, 60);
+        assert_eq!(need, need_per_player(60) + 3_000 + 2 * 520);
         rig.games[delta].throttle = Some(Throttle::new((f64::from(need) * share) as u32));
         assert!(rig.run_until(Duration::from_secs(10), |r| {
             r.host.succession.measures[&r.order(delta)].upload.is_some()
@@ -877,15 +879,26 @@ fn the_cpu_and_pinned_host_warnings_read_as_designed() {
 
 #[test]
 fn the_need_the_router_and_the_cpu_share_follow_the_design() {
-    assert_eq!(upload_need(1, 0), 0);
-    assert_eq!(upload_need(1, 2), 0, "no other player, no standby");
-    assert_eq!(upload_need(2, 0), 28_000 + 3_000 + 2 * 520);
-    assert_eq!(upload_need(12, 0), 28_000 * 11 + 2 * (3_000 + 12 * 520));
+    assert_eq!(upload_need(1, 0, 60), 0);
+    assert_eq!(upload_need(1, 2, 60), 0, "no other player, no standby");
+    // Each other player: 28 KB/s at 30 snapshots a second, scaled by the
+    // rate (slice D12).
+    assert_eq!(need_per_player(30), 28_000);
+    assert_eq!(need_per_player(60), 56_000);
+    assert_eq!(need_per_player(15), 14_000);
+    assert_eq!(need_per_player(10), 9_333);
+    // At or above what a player was measured to take on average at the
+    // default rate (docs/baselines/net-rates-2026-10-06.md: 19.8 to 26.3 KB/s
+    // over 300 s with 2 to 30 players).
+    assert!(need_per_player(60) >= 2 * 26_300);
+    let player = need_per_player(60);
+    assert_eq!(upload_need(2, 0, 60), player + 3_000 + 2 * 520);
+    assert_eq!(upload_need(12, 0, 60), player * 11 + 2 * (3_000 + 12 * 520));
     // A cold standby adds its checkpoints; one other player has one standby
     // at most, and a third cold standby is not a role.
-    assert_eq!(upload_need(2, 1) - upload_need(2, 0), 80_000);
-    assert_eq!(upload_need(2, 2), upload_need(2, 1));
-    assert_eq!(upload_need(12, 2) - upload_need(12, 0), 2 * 80_000);
+    assert_eq!(upload_need(2, 1, 60) - upload_need(2, 0, 60), 80_000);
+    assert_eq!(upload_need(2, 2, 60), upload_need(2, 1, 60));
+    assert_eq!(upload_need(12, 2, 60) - upload_need(12, 0, 60), 2 * 80_000);
     // The need follows the measured streams (docs/baselines/
     // standby-stream-2026-10-05.md): what the host's transport sent a
     // standby, protocol 14, on the simulator.

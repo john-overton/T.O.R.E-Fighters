@@ -155,7 +155,7 @@ start, so a typo never passes silently.
 | `max-players` | `30` | 1 to 30 (John's default, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | `mission` | `mission.txt` | The [mission file](#the-mission-file), relative to the configuration file |
 | `open-planes` | `friendly` | Which planes humans may take: `friendly` (the mode's planes: the friendly ones in co-op, every plane with `mode pvp`), `all` or a list of plane numbers |
-| `snapshot-rate` | `30` | Snapshots a second to each player: 10, 12, 15, 20, 24, 30, 40 or 60 |
+| `snapshot-rate` | `60` | Snapshots a second to each player: 10, 12, 15, 20, 24, 30, 40 or 60 (John, 2026-10-06; 30 before). Aircraft far from a player update 4 times a second at most. Halving it roughly halves the server's upload ([performance](#performance)) |
 | `start` | `first-player` | `first-player`: the lobby waits, the mission not flying, until the first player holding a slot is ready; `now`: it flies from the start ([the lobby](#the-lobby)) |
 | `time-limit` | `0` | Minutes after which the mission ends; 0 for none. The King's own time limit (below) replaces it until the server goes back to its file |
 | `empty-timeout` | `60` | Seconds the mission keeps flying after the last player leaves, before it ends |
@@ -555,7 +555,7 @@ the same port and firewall as a server ([ports and
 firewalls](#ports-and-firewalls)).
 
 *Built (EF3, EF4). Agent decisions:* the server's defaults (`max-players
-30`, `snapshot-rate 30`, no time limit), except that the hosting player is the
+30`, `snapshot-rate 60`, no time limit), except that the hosting player is the
 King of the [lobby](ARCHITECTURE.md#the-lobby): the game takes its slot
 (`--slot`, or the first free one) and readies by itself, and starts each
 mission as soon as every player holding a slot is ready and the hosting player
@@ -880,31 +880,34 @@ for stage D.
 ## Performance
 
 Measured on the development machine (Ryzen 9 7900X, release build) with real
-data and the headless bot, on a 15 against 15 Quick Mission
-([the baseline](baselines/net-2026-09-30.md) has the method and every figure):
+data and the headless bot, on a 15 against 15 Quick Mission, at the default
+60 snapshots a second (slice D12, 2026-10-06; [the baseline](baselines/net-rates-2026-10-06.md)
+has the method, every figure and the same runs at 30 a second):
 
-| Humans | Host cost a tick, minutes 2 to 5 (the AI's opening fight costs 3.5 ms in the first minute) | Share of one core | Upload to each player | Upload in total |
+| Humans | Host cost a tick, whole run (busiest minute) | Share of one core | Upload to each player, mean (busiest second) | Upload in total, mean (busiest second) |
 | --- | --- | --- | --- | --- |
-| 0 | 1.3 ms | 15% (21% over 5 minutes) | | |
-| 2 | 1.5 ms | 18% | 10.5 KB/s | 21 KB/s |
-| 8 | 2.3 ms | 27% | 12.3 KB/s | 98 KB/s (0.79 Mbit/s) |
-| 15 | 2.8 ms | 33% | 12.8 KB/s | 192 KB/s (1.54 Mbit/s) |
-| 30 | 6.8 ms | 81% | 14.0 KB/s | 419 KB/s (3.35 Mbit/s) |
+| 2 | 0.8 ms (1.7) | 10% | 19.8 KB/s (66) | 40 KB/s, 0.32 Mbit/s (131 KB/s) |
+| 8 | 1.3 ms (2.7) | 15% | 23.5 KB/s (74) | 188 KB/s, 1.50 Mbit/s (520 KB/s) |
+| 15 | 2.1 ms (3.6) | 25% | 21.9 KB/s (74) | 329 KB/s, 2.63 Mbit/s (1,020 KB/s) |
+| 30 | 3.4 ms (4.6) | 41% | 26.3 KB/s (63) | 788 KB/s, 6.31 Mbit/s (1,777 KB/s) |
 
-Each human adds about 0.1 to 0.2 ms a tick, and about 2.6 KB/s comes back from
-each player. A tick is 8.3 ms, so one core carries 15 humans comfortably and 30
-at about four fifths of it. Each player's snapshots are built on their own
-tick of the four in each interval (seat number modulo 4), so with 30 players a
-tick builds at most 8 snapshots instead of 30: the 99th percentile of a tick
-fell from 13.9 to 10 ms and the longest from 21.8 to 18.5 ms. The few ticks
-over 8.3 ms are the AI's opening fight with a snapshot or two on top; the host
-runs them late and catches up, never skipping time. A server
-on a machine that is also busy with other work reports "overloaded" while it
-catches up; give a 30-player server a core of its own. The bytes are the
-transport's payload, without the 28 bytes of IP and UDP headers on each packet.
+About 2.7 KB/s comes back from each player. A tick is 8.3 ms, so one core
+carries 30 humans at about two fifths of it. Each player's snapshots are
+built on their own tick of each interval (seat number modulo the ticks per
+snapshot, two at 60 a second), so with 30 players a tick builds at most 15
+snapshots instead of 30; the 99th percentile tick with 30 is 7 ms and the
+longest 10 to 11 ms. The few ticks over 8.3 ms are run late and caught up,
+never skipping time. A server on a machine that is also busy with other work
+reports "overloaded" while it catches up; give a 30-player server a core of
+its own. The bytes are the transport's payload, without the 28 bytes of IP
+and UDP headers on each packet.
+
+**Upload.** At 60 snapshots a second the server sends about twice what it
+did at 30 (1.50 Mbit/s with 15 players and 3.58 with 30 at 30 a second, the
+same day). On a weaker uplink, lower `snapshot-rate`: 30, the
+rate until 2026-10-06, halves the snapshots' share.
 The plan's [bandwidth budget](multiplayer-plan.md#bandwidth-budget) compares
-them with its estimates: every row is within it, though a player's busiest second
-(38 KB/s) goes over the 22 KB/s estimate.
+the figures with its estimates.
 
 ## Security
 

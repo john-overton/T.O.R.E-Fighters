@@ -34,10 +34,12 @@ const EXPLAINED_TICKS: u64 = 120;
 const TOO_SMALL: f64 = 0.01;
 
 /// The plan's bandwidth budget per player, bytes a second
-/// (docs/multiplayer-plan.md): 22 KB/s down, 4 KB/s up. The table's limit is
-/// that the figures are measured and recorded against it, so the test only
-/// asserts twice the budget (agent decision) and prints the rest.
-const BUDGET_DOWN: f64 = 22_000.;
+/// (docs/multiplayer-plan.md): 44 KB/s down at 60 snapshots a second (22
+/// KB/s at 30, doubled with the rate by John's decision of 2026-10-06), 4
+/// KB/s up. The table's limit is that the figures are measured and recorded
+/// against it, so the test only asserts twice the budget (agent decision) and
+/// prints the rest.
+const BUDGET_DOWN: f64 = 44_000.;
 const BUDGET_UP: f64 = 4_000.;
 const BANDWIDTH_SLACK: f64 = 2.;
 

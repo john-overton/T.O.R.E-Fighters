@@ -416,7 +416,7 @@ What the replay is:
   ejected pilot follows a smooth curve through every update the client
   received, drawn between the two updates around each tick. What the player
   saw live had guesses ahead of the newest update and, for aircraft far away
-  (sent twice a second), a whole interval of delay; the replay has neither.
+  (sent 4 times a second, twice before slice D12), a whole interval of delay; the replay has neither.
   It never shows anything past the last update of an entity, and does not draw
   across a silence of more than two seconds, so an aircraft can appear a
   moment after the player first saw it live.
@@ -943,7 +943,7 @@ ids, and the player has no plane of its own.
   that many seconds behind the host.
 - The view asks the host to send what is near its camera at the full rate:
   the selected aircraft (Tab chooses another), or where the free drone is.
-  Aircraft far from the camera move twice a second, as for any observer.
+  Aircraft far from the camera move 4 times a second, as for any observer.
 - **Esc** opens the pause menu, whose first row is **Stop Watching**: it tells
   the host and returns to the lobby. A mission that ends, or a host that stops
   the watch, returns to the lobby too, and Messages says why.

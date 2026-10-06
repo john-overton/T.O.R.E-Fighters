@@ -3112,12 +3112,13 @@ Each tick the host:
    player's game cannot foresee: a repeated input, a command applied at
    another tick, a hit, a blast, a release, a change of ownship terms.
 
-Every fourth tick (30 a second, John 2026-09-28) it builds one snapshot packet
-per connection, each seat on its own tick of the four so that a full server
+Every second tick (60 a second, John 2026-10-06; every fourth, 30 a second,
+from 2026-09-28) it builds one snapshot packet
+per connection, each seat on its own tick of the interval so that a full server
 never builds every snapshot at once (*agent decision, D10 follow-up:* the
 seat's phase is its seat number modulo the ticks per snapshot, kept for the
 connection, and the client keeps its own-state hashes at those ticks; with 30
-players the busiest tick builds 8 snapshots, not 30): a hash of that player's own plane state; that player's
+players the busiest tick builds 15 snapshots at 60 a second, 8 at 30, not 30): a hash of that player's own plane state; that player's
 [cockpit readout](#the-flight-screen-draws-a-frame); the player's
 unacknowledged events; and every other aircraft, missile, debris piece and
 ejected pilot, coded against what the player has acknowledged, with room kept
@@ -3238,7 +3239,8 @@ only the tick-cost figure reads the process's clock.
   positions and velocities, attitude turned the short way). The delay adapts
   to how steadily snapshots arrive. When one is late the client continues along
   the last motion for up to 250 ms, then holds. Far entities, which the host
-  sends only twice a second (John, 2026-09-30), are drawn further in the past,
+  sends only 4 times a second (John, 2026-10-06; twice a second from
+  2026-09-30), are drawn further in the past,
   their own update interval plus the normal delay, so they follow the same
   smooth curve and never need guessing ahead; whatever the player's view
   follows is always sent at the full rate. The HUD's target box, the
@@ -3843,7 +3845,7 @@ sequenceDiagram
   C->>H: Take plane (wanted plane, or any): slot and ready
   H->>H: Take the plane at the first tick of the flight
   H->>C: Seated (seat, plane, exact state, loadout, roster)
-  H->>C: Full snapshot, then snapshots 30 a second
+  H->>C: Full snapshot, then snapshots 60 a second
   C->>H: Inputs 60 a second
   Note over C,H: The player ends the mission
   C->>H: Leave
@@ -4161,7 +4163,7 @@ reached; nothing is shown beyond what the host said.
   velocities, as the live client draws between two snapshots, but with
   hindsight: the live client had no state after its newest and so went on
   along the last velocity for up to 250 ms, and drew an entity the host sends
-  twice a second a whole interval late. The replay never guesses ahead: it
+  4 times a second a whole interval late. The replay never guesses ahead: it
   draws such an entity exactly between its two updates, at the time they say.
   The code is the live interpolator's own (`Interpolator`'s `between`), so a
   state is turned into a pose the way live flight does: attitudes turn the
@@ -4411,6 +4413,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D9 Lag compensation | `mp/d-lagcomp` | Opus | D4 | The hit-volume history in combat, the view tick in `SeatInput`, rewound gun hit tests | Single-player baseline SAME; a burst aimed at the drawn position of a target crossing at 500 knots, with a 150 ms round trip and a 100 ms interpolation delay, hits with compensation and misses without; the cap holds. **Built (D9):** see [hits and lag compensation](#hits-and-lag-compensation); missiles fired by the same seat carry no rewind |
 | D10 Matrix and measurements | `mp/d-matrix` | Sonnet | D8, D9 | The simulator matrix as a test, a CI job with a host and two bots, load and bandwidth at 2, 8, 15 and 30 humans | The [matrix limits](MULTIPLAYER.md#netcode-numbers) hold; CI passes on all three platforms; `docs/baselines/net-<date>.md` records the matrix, bandwidth against the budget and host CPU per human. **Built (D10):** the matrix is `client/matrix_tests.rs` in `tore-session`: nine cells (50, 150 and 300 ms against 0, 2 and 5 percent loss each way, 1 percent duplicates, arrivals spread by 10 percent) of a host and two bots on the synthetic fixtures, each judged on every limit of the acceptance table for each bot, the short form (60 simulated seconds a cell) in the normal suite and the five minutes an ignored test; every limit holds in every cell. The CI job (`.github/workflows/network.yml`, on Linux, Windows and macOS runners; only the Linux run has been seen) runs `tests/loopback.rs`: the host in the test process and two real `tore-bot` processes over loopback UDP with a synthetic import. Host cost and bandwidth with real data come from `tests/host_players.rs` (host processor time with 0, 2, 8, 15 and 30 bots on a 15 against 15 mission) and are in the [baseline](baselines/net-2026-09-30.md); the host change is that exact states wait for the Seated message's acknowledgement ([host session](#the-host-session)) |
 | D11 LAN acceptance | lead, then John | Opus | all | Agents smoke-test a dedicated server with a windowed client and a bot on the development machine; then John flies it on three machines on his LAN, macOS, Linux and Windows (John, 2026-09-30); docs brought to built | The plan's stage D acceptance, with evidence from both **Smoke test done (lead, 2026-09-30):** a release `tore-server`, two `tore-bot`s and a windowed game on the development machine flew the guide's mission for five minutes with no fault or drop; the game fired guns and a missile, kept flying through the Esc menu, followed the outside and wing views, ended the mission and showed the server's five debrief pages ([evidence](baselines/net-2026-09-30.md#the-smoke-test)). John's three-machine test (macOS, Linux, Windows) is next. |
+| D12 Snapshot rates (briefed as D11 on 2026-10-06) | `mp/d11-rates` | Opus | D11 | John, 2026-10-06: snapshots 60 a second by default and the far band 4 times a second, about double the bandwidth. The host's default rate (`HostConfig`, `tore-server`'s `snapshot-rate`), the far band's weight (`wire/priority.rs`), the client's far interval (`client/interpolation.rs`), the upload need (`succession::need_per_player`), and every test and measurement that assumed 30 or 2 | The session tests at the new defaults; the bandwidth, host cost, matrix, standby and observer figures before and after, measured the same day; docs at the new rates **Built (D12, 2026-10-06):** no wire change; protocol 15 (the lead: no byte changes, and both ends are the same build). `HostConfig::new` and `tore-server` default to `DEFAULT_SNAPSHOT_RATE` 60; the setting keeps 10 to 60. The far band adds `FAR_RATE` 4 a snapshot, never more than the rate, and starts again from nothing when sent, so a far entity goes every `far_snapshots` snapshots, the rate over 4 rounded up: 4 a second at 60, 40, 24, 20 and 12, 3.75 at 30 and 15, 3.33 at 10, evenly spaced (*agent decision*: rounded up so it stays even and never over 4). Both ends work it out from the Accepted packet's ticks per snapshot ([the table](formats/net-protocol.md#connecting)). The client draws a far entity `far_interval_ticks` back before its gaps are known (30 ticks at 60, 60 before), and takes an entity for far when a gap is at least 4 snapshots, or the far interval when that is fewer (10 and 12 a second), and at least half the far interval (8 snapshots at 60), so a near one losing up to 6 snapshots in a row at 60 stays near (`far_gap_snapshots`, *agent decision*). Each other player's upload need is 28 KB/s scaled by the rate over 30, 56 KB/s at 60 (*agent decision*: scaled, not fitted). Found and left as they were, each checked: lag compensation's rewind uses the seat's own reported interpolation delay, so it follows the rate; the input margin and the inputs' 60 packets a second do not depend on it; the interpolation delay still adapts between 50 and 250 ms (at 60 a second it settles at the 50 ms floor, so a lower floor is a possible follow-up); a snapshot's 1,200 bytes and the 256 kept for messages are per packet and fit as before; baselines count snapshots back, at most 31, so at 60 a second a baseline older than about half a second (a round trip over about 500 ms) is sent in full; the standby stream's ticks still go once a snapshot interval, 6 to 9 percent more bytes (*agent decision*: kept); the observer delay's ring keeps a frame each snapshot interval, twice the memory (*agent decision*: kept); the matrix's download budget is 44 KB/s. Tests: `priority.rs` (the far interval at every rate as the accumulator spaces it), `interpolation.rs` (the far band at five rates, a near entity losing snapshots), `host/tests.rs` (each seat's phase at 60 and at 30), `observe_tests.rs`, `succession_tests.rs` (the need at four rates, the throttled-link test at the new need), the config defaults in both crates. Measured ([baseline](baselines/net-rates-2026-10-06.md)): a snapshot is the same size at both rates, so a player's download doubles (11.7 to 23.4 KB/s in the packet test); the host's upload with 15 players 1.50 to 2.63 Mbit/s (busiest second 4.4 to 8.2), with 30 players 3.58 to 6.31 Mbit/s (8.5 to 14.2); the host's cost with 30 players 2.5 to 3.4 ms a tick, 41 percent of one core; every matrix limit holds. `tests/bandwidth.rs` codes both rates side by side and `tests/host_players.rs` takes `TORE_MEASURE_RATE` |
 
 ```mermaid
 flowchart TD
@@ -4430,6 +4433,7 @@ flowchart TD
   D8 --> D10["D10 Matrix and measurements"]
   D9 --> D10
   D10 --> D11["D11 LAN acceptance"]
+  D11 --> D12["D12 Snapshot rates"]
 ```
 
 D1, D3a and D4 start together (D4 moves the shared step first and takes the
@@ -6435,7 +6439,7 @@ holds live positions.
   objects, the delay) and then sends the connection ordinary snapshots with no
   own plane: no own state hash, no readout, no exact state. Relevance follows
   the camera: the subject, everything within 20 nm of the camera's point and
-  any missile within 10 nm at the full rate, the rest twice a second. The
+  any missile within 10 nm at the full rate, the rest 4 times a second. The
   client sends Observe again when the subject changes, or the point moves more
   than 2 nm, at most twice a second.
 - **The delay.** With a delay D the host keeps, for D seconds, every
@@ -9514,8 +9518,10 @@ reports the mean cost of a tick.
 - **Upload**, in the lobby only: the host asks the three best candidates, one
   at a time, for a 1-second paced burst at the rate the game needs (Upload
   test: Payload packets with a Filler section, under 1,200 bytes each). The
-  need is 28 KB/s for every other player (the stage D peak per player,
-  [measured](baselines/net-2026-09-30.md)) and, for each standby, what its
+  need is 28 KB/s for every other player at 30 snapshots a second (the
+  stage D peak per player, [measured](baselines/net-2026-09-30.md)), scaled
+  by the game's snapshot rate: 56 KB/s at the default 60 (slice D12, an
+  agent decision; [measured](baselines/net-rates-2026-10-06.md)) and, for each standby, what its
   stream needs: a warm one 3 KB/s and 0.52 KB/s for each human flying, a cold
   one that and 80 KB/s of checkpoints
   ([fitted in slice KP](baselines/host-selection-2026-10-05.md#the-upload-need-follows-the-standby-streams-slice-kp)

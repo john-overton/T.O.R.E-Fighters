@@ -5,7 +5,8 @@
 //!
 //! Each entity keeps its received states by tick. It is drawn at the render
 //! time less its own extra delay: none for an entity the host sends every
-//! snapshot, its own update interval for one sent twice a second, sliding
+//! snapshot, its own update interval for one sent 4 times a second (the far
+//! band, [`far_interval_ticks`]), sliding
 //! between the two at a tenth of real time. Positions follow a cubic curve
 //! through two states' positions and velocities, attitudes turn the short
 //! way, devices blend; the rest is the earlier state's. Past its newest state
@@ -17,6 +18,7 @@ use crate::wire::entity::{
     RATE_STEP, SPEED_STEP, radians,
 };
 use crate::wire::names::NameIndex;
+use crate::wire::priority::{far_interval_ticks, far_snapshots};
 use crate::wire::snapshot::ReceivedSnapshot;
 use std::collections::{BTreeMap, VecDeque};
 use std::f64::consts::{PI, TAU};
@@ -31,9 +33,16 @@ use tore_world::snapshot::{
 pub const EXTRAPOLATE_TICKS: f64 = JUMP_TICKS;
 /// The longest extra delay (one second), however rarely an entity comes.
 pub const EXTRA_MAX: f64 = 120.;
-/// A far entity's interval before its gaps are known: the host's twice a
-/// second.
-pub const FAR_INTERVAL: f64 = 60.;
+/// Snapshots between an entity's states at which it is far: 4, or the far
+/// band's own interval when that is shorter (3 at 10 and 12 a second), and
+/// at least half the far band's interval (8 at 60 a second), so a near
+/// entity that loses a few packets in a row is not taken for a far one.
+/// Two or fewer is near; between the two the band stays as it was. *Agent
+/// decision* (D12).
+pub fn far_gap_snapshots(ticks_per_snapshot: u32) -> u32 {
+    let far = far_snapshots(ticks_per_snapshot);
+    far.div_ceil(2).max(4).min(far)
+}
 /// States kept per entity.
 const KEPT: usize = 64;
 
@@ -55,7 +64,7 @@ impl Track {
         self.states.back().map(|(t, _)| *t)
     }
 
-    fn insert(&mut self, tick: u32, state: EntityState, ticks_per_snapshot: u32) {
+    fn insert(&mut self, tick: u32, state: EntityState, ticks_per_snapshot: u32, far_gap: f64) {
         let newest = self.newest();
         match self.states.iter().position(|(t, _)| *t >= tick) {
             Some(i) if self.states[i].0 == tick => self.states[i].1 = state,
@@ -74,7 +83,7 @@ impl Track {
         if let Some(newest) = newest.filter(|n| tick > *n) {
             let gap = f64::from(tick - newest);
             let tps = f64::from(ticks_per_snapshot);
-            if gap >= 4. * tps {
+            if gap >= far_gap {
                 self.far = true;
                 self.gaps.push_back(gap);
                 while self.gaps.len() > 3 {
@@ -88,8 +97,9 @@ impl Track {
     }
 
     /// The extra delay the entity's band asks for: none for a near one, its
-    /// interval for a far one, two while loss is high.
-    fn target(&self, lossy: bool) -> f64 {
+    /// interval for a far one (`far_interval` before its gaps are known), two
+    /// while loss is high.
+    fn target(&self, lossy: bool, far_interval: f64) -> f64 {
         if !self.far {
             return 0.;
         }
@@ -98,7 +108,7 @@ impl Track {
             .iter()
             .copied()
             .reduce(f64::min)
-            .unwrap_or(FAR_INTERVAL);
+            .unwrap_or(far_interval);
         (interval * if lossy { 2. } else { 1. }).min(EXTRA_MAX)
     }
 }
@@ -123,6 +133,9 @@ pub struct Drawn {
 #[derive(Clone, Debug)]
 pub struct Interpolator {
     ticks_per_snapshot: u32,
+    /// The far band's interval and the gap that marks an entity far, ticks.
+    far_interval: f64,
+    far_gap: f64,
     tracks: BTreeMap<EntityKey, Track>,
     last: Option<Duration>,
 }
@@ -131,8 +144,11 @@ impl Interpolator {
     /// Nothing received, from a host that sends a snapshot every
     /// `ticks_per_snapshot` ticks.
     pub fn new(ticks_per_snapshot: u32) -> Self {
+        let ticks_per_snapshot = ticks_per_snapshot.clamp(1, 120);
         Self {
-            ticks_per_snapshot: ticks_per_snapshot.max(1),
+            ticks_per_snapshot,
+            far_interval: f64::from(far_interval_ticks(ticks_per_snapshot)),
+            far_gap: f64::from(far_gap_snapshots(ticks_per_snapshot) * ticks_per_snapshot),
             tracks: BTreeMap::new(),
             last: None,
         }
@@ -150,6 +166,7 @@ impl Interpolator {
                 snapshot.tick,
                 entity.state,
                 self.ticks_per_snapshot,
+                self.far_gap,
             );
         }
         for key in &snapshot.removed {
@@ -171,7 +188,7 @@ impl Interpolator {
         let dt = ticks_of(now.saturating_sub(last));
         self.last = Some(now.max(last));
         for track in self.tracks.values_mut() {
-            let target = track.target(lossy);
+            let target = track.target(lossy, self.far_interval);
             if track.drawn {
                 track.extra.slide(target, dt);
             } else {
@@ -190,6 +207,7 @@ impl Interpolator {
     /// with its own airframe.
     pub fn draw(&mut self, render: f64, own: u32, name: &dyn Fn(NameIndex) -> String) -> Drawn {
         let tps = f64::from(self.ticks_per_snapshot);
+        let (far_interval, far_gap) = (self.far_interval, self.far_gap);
         let mut drawn = Drawn::default();
         self.tracks.retain(|_, track| {
             let at = render - track.extra.ticks;
@@ -221,9 +239,9 @@ impl Interpolator {
             };
             // One state only and no second where a near entity would have
             // sent one: a far entity, drawn its interval back from the start.
-            if track.states.len() == 1 && !track.drawn && at > f64::from(first) + 4. * tps {
+            if track.states.len() == 1 && !track.drawn && at > f64::from(first) + far_gap {
                 track.far = true;
-                track.extra.ticks = track.extra.ticks.max(FAR_INTERVAL);
+                track.extra.ticks = track.extra.ticks.max(far_interval);
                 continue;
             }
             let at = render - track.extra.ticks;
@@ -619,6 +637,47 @@ mod tests {
         interp.receive(&snapshot(184, &[(7, aircraft([0.; 3], [0.; 3]))]));
         interp.advance(Duration::from_secs(11), false);
         assert!((interp.extra(key).unwrap() - 108.).abs() < 1e-9);
+    }
+
+    /// The far band at every rate: an entity sent at the host's far
+    /// interval is drawn that interval back, and one heard once is drawn the
+    /// far interval back once a near one would have come again; a near one
+    /// that loses two snapshots in a row stays near wherever the far band is
+    /// 4 snapshots or more apart.
+    #[test]
+    fn the_far_band_follows_the_rate() {
+        let key = EntityKey {
+            kind: EntityKind::Aircraft,
+            id: 7,
+        };
+        let still = || aircraft([0.; 3], [0.; 3]);
+        for (tps, far) in [(2u32, 30u32), (4, 32), (8, 32), (10, 30), (12, 36)] {
+            assert_eq!(far_interval_ticks(tps), far);
+            let mut interp = Interpolator::new(tps);
+            for k in 0..4 {
+                interp.receive(&snapshot(k * far, &[(7, still())]));
+            }
+            interp.advance(Duration::ZERO, false);
+            assert_eq!(interp.extra(key), Some(f64::from(far)), "tps {tps}");
+
+            let mut once = Interpolator::new(tps);
+            once.receive(&snapshot(0, &[(7, still())]));
+            let gap = f64::from(far_gap_snapshots(tps) * tps);
+            let _ = once.draw(gap + 1., 0, &no_names);
+            assert_eq!(once.extra(key), Some(f64::from(far)), "tps {tps}");
+
+            if far_gap_snapshots(tps) >= 4 {
+                let mut near = Interpolator::new(tps);
+                for tick in [0, tps, 2 * tps, 5 * tps] {
+                    near.receive(&snapshot(tick, &[(7, still())]));
+                }
+                near.advance(Duration::ZERO, false);
+                assert_eq!(near.extra(key), Some(0.), "tps {tps}");
+            }
+        }
+        // At 60 a second a near entity may lose 6 snapshots (50 ms) in a row
+        // and stay near.
+        assert_eq!(far_gap_snapshots(2), 8);
     }
 
     #[test]

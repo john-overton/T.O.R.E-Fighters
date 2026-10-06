@@ -17,9 +17,10 @@
 //!   report within [`REACH_ROUND_LIMIT`] reached nobody.
 //! - **Upload tests**, in the lobby only, one at a time: the best untested
 //!   eligible candidate of the three best is asked for a 1-second burst of
-//!   Filler at the rate the game needs ([`upload_need`]: 28 KB/s for every
-//!   other player and each standby's [`standby_need`], warm and cold
-//!   apart), and passes when 90 percent of it arrives.
+//!   Filler at the rate the game needs ([`upload_need`]: 56 KB/s for every
+//!   other player at the default 60 snapshots a second, [`need_per_player`],
+//!   and each standby's [`standby_need`], warm and cold apart), and passes
+//!   when 90 percent of it arrives.
 //! - **The house** (the game that hosts now) cannot test its own upload in
 //!   the lobby; it is judged from its flights instead: the share of its
 //!   packets its direct players' games acknowledge (agent decision).
@@ -72,9 +73,23 @@ pub const UPLOAD_LENGTH_MS: u16 = 1_000;
 pub const UPLOAD_GRACE: Duration = Duration::from_millis(500);
 /// The time between two upload tests (agent decision).
 pub const UPLOAD_GAP: Duration = Duration::from_secs(2);
-/// The upload need for every other player, bytes a second: the stage D
-/// peak per player (docs/baselines/net-2026-09-30.md).
+/// The upload need for every other player at 30 snapshots a second, bytes
+/// a second: the stage D peak per player (docs/baselines/net-2026-09-30.md).
 pub const NEED_PER_PLAYER: u32 = 28_000;
+
+/// The upload need for every other player at `snapshot_rate` snapshots a
+/// second, bytes a second: [`NEED_PER_PLAYER`] scaled by the rate over 30,
+/// 56 KB/s at the default 60 (slice D12). *Agent decision:* scaled by the
+/// rate, not fitted: a snapshot's bytes do not depend on the rate (the
+/// 15 against 15 mission's mean packet was 388 bytes at both), and the
+/// measured download per player grew 1.75 to 1.94 times from 30 and twice a
+/// second to 60 and 4, its busiest second 1.56 to 1.76 times
+/// (docs/baselines/net-rates-2026-10-06.md), so the doubled need keeps
+/// the old one's place between a player's average and its busiest second,
+/// at most about an eighth higher than a fit would put it.
+pub fn need_per_player(snapshot_rate: u32) -> u32 {
+    NEED_PER_PLAYER * snapshot_rate.clamp(1, 120) / 30
+}
 /// The upload a warm standby needs besides its humans' share, bytes a
 /// second: the state parts, the Checks and the transport's framing, at
 /// three humans (slice KP, from protocol 14's figures in
@@ -127,14 +142,15 @@ pub fn standby_need(humans: usize, cold: bool) -> u32 {
 }
 
 /// The upload a host needs, bytes a second, for `players` players (itself
-/// included): 28 KB/s for every other player, and for each standby, of
+/// included) at `snapshot_rate` snapshots a second: [`need_per_player`] for
+/// every other player, and for each standby, of
 /// which there are up to two, [`standby_need`]: `cold_standbys` of them
 /// cold (the others warm).
-pub fn upload_need(players: usize, cold_standbys: usize) -> u32 {
+pub fn upload_need(players: usize, cold_standbys: usize, snapshot_rate: u32) -> u32 {
     let others = players.saturating_sub(1);
     let standbys = others.min(limits::STANDBYS);
     let cold = cold_standbys.min(standbys);
-    NEED_PER_PLAYER * others as u32
+    need_per_player(snapshot_rate) * others as u32
         + (standbys - cold) as u32 * standby_need(players, false)
         + cold as u32 * standby_need(players, true)
 }
@@ -750,7 +766,11 @@ impl Host {
         let Some((connection, _)) = self.peer_of_order(order) else {
             return;
         };
-        let rate = upload_need(players, self.cold_standbys_for(order));
+        let rate = upload_need(
+            players,
+            self.cold_standbys_for(order),
+            self.config.snapshot_rate,
+        );
         let round_trip = self
             .server
             .stats(connection)

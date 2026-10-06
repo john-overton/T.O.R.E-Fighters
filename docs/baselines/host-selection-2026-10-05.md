@@ -132,3 +132,13 @@ candidate's, for as many as there are standby roles (`cold_standbys_for`).
 A candidate is not tested again when a player of another class joins, only when
 more players join.
 
+
+## The players' share follows the snapshot rate (slice D12)
+
+On 2026-10-06 the snapshots went from 30 to 60 a second at John's request.
+Each other player's share of the need is now 28 KB/s scaled by the game's
+snapshot rate over 30: 56 KB/s at the default 60, so two players with one
+warm standby need 60.0 KB/s, not 32. The throttled-link test above, run
+again at that need, carried 51.2 percent at half of it (a fail) and 100
+percent at 1.05 times (a pass). Why scaled and not fitted, and the
+measurements behind it, are in the [rates baseline](net-rates-2026-10-06.md#host-selection-the-upload-need).

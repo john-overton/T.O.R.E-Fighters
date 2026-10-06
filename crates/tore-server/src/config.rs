@@ -118,7 +118,7 @@ impl Config {
             max_players: MAX_PLAYERS,
             mission: base.join("mission.txt"),
             open_planes: OpenPlanes::Friendly,
-            snapshot_rate: 30,
+            snapshot_rate: tore_session::host::config::DEFAULT_SNAPSHOT_RATE,
             start: StartMode::FirstPlayer,
             time_limit_minutes: 0,
             empty_timeout_seconds: 60,
@@ -529,7 +529,7 @@ mod tests {
         assert_eq!(config.max_players, 30);
         assert_eq!(config.mission, base().join("mission.txt"));
         assert_eq!(config.open_planes, OpenPlanes::Friendly);
-        assert_eq!(config.snapshot_rate, 30);
+        assert_eq!(config.snapshot_rate, 60);
         assert_eq!(config.start, StartMode::FirstPlayer);
         assert_eq!(config.time_limit_minutes, 0);
         assert_eq!(config.empty_timeout_seconds, 60);

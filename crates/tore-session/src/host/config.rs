@@ -11,6 +11,9 @@ use tore_net::Entropy;
 pub const MAX_PLAYERS: usize = 30;
 /// The snapshot rates a host offers, a second.
 pub const SNAPSHOT_RATES: [u32; 8] = [10, 12, 15, 20, 24, 30, 40, 60];
+/// The default snapshot rate: every second tick (John, 2026-10-06; 30
+/// before). The lower rates stay for a weak uplink.
+pub const DEFAULT_SNAPSHOT_RATE: u32 = 60;
 
 /// Which planes humans may take.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,7 +188,7 @@ impl HostConfig {
             password: None,
             max_players: MAX_PLAYERS,
             open_planes: OpenPlanes::Friendly,
-            snapshot_rate: 30,
+            snapshot_rate: DEFAULT_SNAPSHOT_RATE,
             start: StartMode::FirstPlayer,
             time_limit: None,
             empty_timeout: Duration::from_secs(60),
@@ -351,8 +354,8 @@ mod tests {
     fn defaults_follow_the_server_guide_and_validate() {
         let config = HostConfig::new(build());
         assert_eq!(config.max_players, 30);
-        assert_eq!(config.snapshot_rate, 30);
-        assert_eq!(config.ticks_per_snapshot(), 4);
+        assert_eq!(config.snapshot_rate, 60);
+        assert_eq!(config.ticks_per_snapshot(), 2);
         assert_eq!(config.empty_timeout, Duration::from_secs(60));
         assert_eq!(config.restart_delay, Duration::from_secs(30));
         assert_eq!(config.start, StartMode::FirstPlayer);

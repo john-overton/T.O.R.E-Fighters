@@ -305,7 +305,7 @@ mod tests {
         // Telemetry is on by default: the id is drawn and kept.
         assert!(install.is_some());
         assert_eq!(install_id(&dir, true), install);
-        assert_eq!(config.snapshot_rate, 30);
+        assert_eq!(config.snapshot_rate, 60);
         assert_eq!(spec.theater, "UKR");
         assert_eq!(sockets.len(), 1);
         let file = fs::read_to_string(dir.join("logs/server-2026-09-30.log")).unwrap();

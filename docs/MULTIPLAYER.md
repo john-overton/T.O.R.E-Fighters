@@ -283,7 +283,7 @@ observer's machine never holds live positions.
 *Designed (phase 2; the decision above is John's, the rest agent proposals):*
 a connection with no plane while the mission flies can **Watch**: the host
 sends it snapshots with no plane of its own, near its camera at the full rate
-and the rest twice a second, delayed by the King's observer delay (0, 10, 30 or
+and the rest 4 times a second (twice before D12), delayed by the King's observer delay (0, 10, 30 or
 60 seconds, PvP only). The game shows them in the replay viewer in a **live
 mode**: the view follows the newest moment, and the player can pause, scrub
 back through the last 10 minutes and return to live, never past it. A player
@@ -571,7 +571,8 @@ credited):* every player's game tells the host its addresses, its system and
 processor, and how long its machine takes to step the lobby's mission for two
 seconds. The host measures who can reach whom and the round trips between
 them, and in the lobby asks the three best candidates for a one-second burst
-at the upload the game needs (28 KB/s for each other player, and what each
+at the upload the game needs (56 KB/s for each other player at the default
+60 snapshots a second, 28 KB/s at 30, and what each
 standby's stream needs). A candidate
 must not be relayed (John, 2026-09-28), must be reachable by every other
 player, and must not have turned off "Let my game take over hosting" in
@@ -625,7 +626,7 @@ sequenceDiagram
   loop While the mission runs
     H->>S: Checkpoint of the whole mission, about every 10 s
     H->>S: Every input the host applies, each tick
-    H->>C: Snapshots, 30 a second
+    H->>C: Snapshots, 60 a second
   end
   Note over H: The host drops
   S->>S: Restore the checkpoint, replay the logged inputs
@@ -710,7 +711,7 @@ flowchart TB
   b["Client B<br/>behind CGNAT"]
   host -->|"heartbeat every 30 s"| master
   a -->|"browse and join"| master
-  host <-->|"snapshots 30 a second,<br/>inputs 60 a second"| a
+  host <-->|"snapshots 60 a second,<br/>inputs 60 a second"| a
   b <-.->|"relayed, both ways"| master
   master <-.->|"relayed, both ways"| host
 ```
@@ -826,7 +827,9 @@ master.
 ### Netcode model
 
 Host-authoritative. The sim runs at 120 Hz. The host sends state snapshots at
-30 Hz by default, a setting to raise after testing. Each client predicts its own
+60 Hz by default (John, 2026-10-06, raised from 30 once John's three-machine
+test had passed), a dedicated server's setting that a weak uplink can lower
+(a game a player hosts has no such setting yet). Each client predicts its own
 aircraft and the host corrects it. Other aircraft are interpolated between
 snapshots. Snapshots are delta-compressed, with relevance filtering so distant
 contacts update less often.
@@ -849,7 +852,7 @@ estimates. How they are used is in the
 | Item | Value | Source |
 | --- | --- | --- |
 | Simulation | 120 ticks a second | John, 2026-09-28 |
-| Snapshots | 30 a second to each player (every fourth tick, each seat on its own tick of the four: seat number modulo 4, an agent decision so a full server does not build all at once); a server setting of 10, 12, 15, 20, 24, 30, 40 or 60, the rates that divide 120 | John, 2026-09-28; the other rates are an agent proposal |
+| Snapshots | 60 a second to each player (every second tick, each seat on its own tick of the two: seat number modulo the ticks per snapshot, an agent decision so a full server does not build all at once); a server setting of 10, 12, 15, 20, 24, 30, 40 or 60, the rates that divide 120 | John, 2026-10-06 (30 a second from 2026-09-28 to 2026-10-06); the other rates are an agent proposal |
 | Inputs | Up to 60 packets a second, each repeating every unacknowledged tick up to 24 ticks (200 ms) | Agent proposal |
 | Keepalive | At least 10 packets a second each way; a joined game whose loop is stalled sends a [Keepalive](formats/net-protocol.md#keepalive) once a second, for at most 60 seconds (EF-K) | Agent proposal |
 | Packet size | At most 1,200 bytes | Guide |
@@ -880,31 +883,37 @@ estimates. How they are used is in the
 | Own tracers | Drawn at once on the shooter's screen; a missile appears when the host launches it, one round trip after the trigger | Agent proposal |
 
 **Relevance.** How often each client hears about each entity (John,
-2026-09-30: 30 a second near, twice a second for the rest, smoothed):
+2026-09-30: every snapshot near, a slower rate for the rest, smoothed; John,
+2026-10-06: the near band at 60 a second and the rest 4 times a second,
+raised from 30 and twice a second, accepting about double the bandwidth):
 
 | Band | Rate | Priority weight |
 | --- | --- | --- |
-| The player's own flight, anything within 20 nm, anything a friendly sensor tracks, any missile aimed at the player, any missile within 10 nm, and whatever the player's view follows (the target, wing, external and fly-by views' subject) | Every snapshot (30 a second) | 1 |
-| Everything else | Twice a second | 1/15 |
+| The player's own flight, anything within 20 nm, anything a friendly sensor tracks, any missile aimed at the player, any missile within 10 nm, and whatever the player's view follows (the target, wing, external and fly-by views' subject) | Every snapshot (60 a second) | 1 |
+| Everything else | 4 times a second at most | 1/15 |
 
 A band sets how often an entity is due: a near one every snapshot, a far one
-twice a second. A due entity waits only when the packet is full, and then goes
+every fifteenth snapshot at 60 a second. At a lower snapshot rate the far band
+is the rate over 4, rounded up, so it stays evenly spaced and never above 4 a
+second: 3.75 a second at 30 and 15 a second, 3.33 at 10, 4 at the others
+(*agent decision*, D12; [the table](formats/net-protocol.md#connecting)). A due entity waits only when the packet is full, and then goes
 first next time. In a 30-aircraft LAN mission everything due is expected to fit
 every time (measured in D6: it does, but for a snapshot now and then in
 missile-heavy moments while 256 bytes are kept for messages). *Correction
 (D6):* the design called a band only a priority, which would have sent far
 entities at the full rate whenever there was room.
 The view rule is an *agent decision*, so that an aircraft the player watches is
-never a twice-a-second one.
+never a slow one.
 
 **Smoothing the slow ones** (John asked that they never jitter; the method is
-an *agent decision*). An entity sent twice a second is drawn further in the
+an *agent decision*). An entity sent 4 times a second is drawn further in the
 past than the others: its own update interval plus the normal delay, about
-600 ms, on the same curve through its updates, so the client never has to guess
-ahead of it and it moves as smoothly as a near one. When an entity changes band
-its delay slides to the new one at no more than a tenth of real time (half a
-second of delay over five seconds), so its speed never visibly jumps. At 20 nm
-and beyond, being half a second in the past is invisible; radar, RWR and the
+300 ms (about 600 ms while it was sent twice a second), on the same curve
+through its updates, so the client never has to guess ahead of it and it
+moves as smoothly as a near one. When an entity changes band its delay slides
+to the new one at no more than a tenth of real time (a quarter second of delay
+over two and a half seconds), so its speed never visibly jumps. At 20 nm and
+beyond, being a quarter second in the past is invisible; radar, RWR and the
 target window come from the host's own readout, not from the drawn aircraft.
 
 **Connections.**
@@ -1102,7 +1111,7 @@ Made by John on 2026-09-28:
 
 | Question | Decision |
 | --- | --- |
-| Tick rate | Sim at 120 Hz; netcode snapshots at 30 Hz, a setting to raise after testing |
+| Tick rate | Sim at 120 Hz; netcode snapshots at 30 Hz, a setting to raise after testing (raised to 60 Hz by John on 2026-10-06; the row Snapshot rates, last table) |
 | Replay and netcode | Separate; replay records locally and logs network diagnostics for troubleshooting |
 | Transport | Hand-rolled UDP on standard sockets with a thin reliability layer |
 | Hit authority | Missiles resolved by the host; guns resolved by the host rewinding to the shooter's view (lag compensation) |
@@ -1152,7 +1161,7 @@ Made by John on 2026-09-30 at the stage D design review
 | Question | Decision |
 | --- | --- |
 | Menus in a networked flight | Nothing pauses. While the pause or Esc menu is up the controls go neutral (stick centred, throttle held, trigger released); a window that loses focus counts as paused (agent reading). Whether the AI takes over after a while stays open for stage F. *The lead's application, 2026-10-01:* a joined game whose loop is stalled (a window held, a long frame) counts as paused too: once the host has had no input from it for half a second, or hears its keepalives, it flies the seat with the same neutral controls until the next input ([the stall rule](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k)) |
-| Relevance | 30 updates a second for what is near or tracked, twice a second for everything else, smoothed so those never jitter ([netcode numbers](#netcode-numbers)) |
+| Relevance | 30 updates a second for what is near or tracked, twice a second for everything else, smoothed so those never jitter ([netcode numbers](#netcode-numbers)); raised to 60 and 4 a second by John on 2026-10-06 |
 | Recordings of networked flights | In stage D each client keeps a capture of what the network brought, with a diagnostics log, instead of recording a replay live. A capture converts into a replay whose aircraft follow a smooth curve through every update received, using hindsight, rather than what the player saw live; the conversion is built (stage E, [network flights](REPLAYS.md#network-flights)): it runs when the flight ends and by `--convert-capture`. It replaces the 2026-09-28 rule that each machine records its own replay |
 | Stage D acceptance | Agents smoke-test a dedicated server with clients on the development machine; John then tests on three machines on his LAN, macOS, Linux and Windows |
 | Stage D agent proposals | Approved as designed: the five new crates, UDP port 26900, the server's mission lifecycle, the build match rule, a joining player keeps the plane's loadout, own tracers at once and own missiles when the host launches them, 1.0 and 1.02F imports together once verified, and the retail stall-speed switch refused in networked play |
@@ -1233,6 +1242,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | An away player's own plane | John, 2026-10-06: while the AI flies an away player's aircraft, the player watches it on the observer screen (built in F2-O3). No flight input takes it back: it is a flight sim and nobody should fly AFK, so the player comes back only from the observer menu, on purpose (John, 2026-10-06; built in F2-O4) |
 | The away player's observer menu | John, 2026-10-06: in place of Stop Watching, the menu offers Take Back Flight (back into the player's own reserved aircraft), Spawn in Aircraft (only when no reserved aircraft is left, under the revival rules) and Leave Game (built in F2-O4) |
 | Esc in the observer view | John, 2026-10-06: Esc opens the viewer's pause menu, whose first row is Stop Watching |
+| Snapshot rates | John, 2026-10-06: snapshots 60 a second by default, the near band's rate, and the far band 4 times a second, raised from 30 and twice a second; he accepts about double the bandwidth. The setting keeps 10 to 60 a second so a host on a weak uplink can go down (built in D12; [measured](baselines/net-rates-2026-10-06.md)) |
 
 ## Open questions
 
