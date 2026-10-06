@@ -6,12 +6,14 @@ use crate::AppResult;
 use crate::widgets::KitSource;
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 5] = [
+pub const STATES: [&str; 6] = [
     "internet",
     "internet-games",
     "internet-joining",
     "internet-options",
     "internet-unreachable",
+    // Stage K (slice K7b): a game the player holds a rejoin token for.
+    "internet-rejoin",
 ];
 
 /// What a sample game says about itself.
@@ -183,6 +185,25 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             screen.select_game(0);
             screen.focus.set(Id::Games);
         }
+        // Friday night is a game the player was in as Viper: it says Rejoin.
+        "internet-rejoin" => {
+            let mut store = crate::net::rejoin_store::Store::default();
+            store.keep(
+                tore_session::client::rejoin::KeptToken {
+                    token: tore_net::Token(1),
+                    session_id: 2,
+                    callsign: "Viper".into(),
+                    life_seconds: 86_400,
+                    last_seen_unix: tore_session::client::rejoin::unix_now(),
+                },
+                "",
+            );
+            screen.tokens = store;
+            screen.set_listed(sample_entries());
+            screen.say("7 games are listed on the Internet Lobby.");
+            screen.select_game(1);
+            screen.focus.set(Id::Games);
+        }
         "internet-joining" => {
             screen.set_listed(sample_entries());
             screen.select_game(1);
@@ -191,6 +212,7 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
                 name: "Friday night".into(),
                 asked: Duration::ZERO,
                 through: None,
+                token: None,
             });
         }
         "internet-unreachable" => {

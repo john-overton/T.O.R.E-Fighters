@@ -100,7 +100,7 @@ fn settings_is_for_everyone_and_players_for_the_king_with_a_target() {
             false
         )
         .as_deref(),
-        Some("Select another player in Players first.")
+        Some("Select another player in Players, or a reserved aircraft in Slots, first.")
     );
 }
 

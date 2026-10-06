@@ -29,6 +29,7 @@ use crate::menu::{Canvas, text_width};
 use crate::net::{
     lookup::{Lookup, Progress},
     options::{DEFAULT_CALLSIGN, callsign_problem},
+    rejoin_store::Store,
     search::{Compat, Game, Own, Search, SearchEvent},
     settings::Remembered,
 };
@@ -48,6 +49,8 @@ use tore_net::packet::DiscoverPhase;
 pub mod app;
 mod options;
 pub mod preview;
+#[cfg(test)]
+mod rejoin_tests;
 #[cfg(test)]
 mod tests;
 
@@ -89,6 +92,10 @@ pub struct JoinRequest {
     pub callsign: String,
     /// Empty for none.
     pub password: String,
+    /// The rejoin token the game holds for this game's session (stage K,
+    /// slice K7b), sent in the Challenge answer so the player comes back as
+    /// itself, even to a full game.
+    pub token: Option<tore_net::Token>,
 }
 
 /// A game the player asked to host. The game builds it from the Quick
@@ -135,6 +142,10 @@ pub struct DirectScreen {
     settings: Remembered,
     /// Where the settings are kept; `None` keeps nothing (tests, previews).
     data: Option<PathBuf>,
+    /// The rejoin tokens the game holds (stage K, slice K7b): a game whose
+    /// session one belongs to is marked "Rejoin". Read when the screen opens
+    /// and with each answer of the search.
+    tokens: Store,
     /// The password to send or host with, from Options. Never stored.
     password: String,
     quick: Vec<QuickMessage>,
@@ -258,6 +269,7 @@ impl DirectScreen {
             data,
             password: String::new(),
             quick,
+            tokens: Store::default(),
             panel: None,
             found: Vec::new(),
             search: None,
@@ -275,6 +287,7 @@ impl DirectScreen {
             timing: std::env::var_os("TORE_DIRECT_TIMING")
                 .map(|_| Timing::new("Direct Connection")),
         };
+        screen.load_tokens();
         if !screen.settings.addresses.is_empty() {
             screen.say("Up and Down in Connect to pick an address you joined before.");
         }
@@ -506,8 +519,25 @@ impl DirectScreen {
         }
     }
 
+    /// Reads the rejoin tokens the game keeps.
+    fn load_tokens(&mut self) {
+        self.tokens = self.data.as_deref().map_or_else(Store::default, |data| {
+            Store::load(data, tore_session::client::rejoin::unix_now())
+        });
+    }
+
+    /// The callsign the player held in `game` when its token still works:
+    /// the game's session is one the player was in.
+    fn rejoin_as(&self, game: &Game) -> Option<&str> {
+        (game.compat == Compat::Same)
+            .then(|| self.tokens.for_session(game.answer.session_id))
+            .flatten()
+            .map(|entry| entry.kept.callsign.as_str())
+    }
+
     /// The search's games now: the list follows them.
     fn hear(&mut self, games: Vec<Game>) {
+        self.load_tokens();
         self.found = games;
         // Once the game just left is gone from the search, or answers
         // something other than Closed, it is an ordinary game again.
@@ -537,6 +567,11 @@ impl DirectScreen {
                             label: self.looking_for.clone(),
                             callsign: self.callsign.text().to_owned(),
                             password: self.password.clone(),
+                            // A game joined at this address before.
+                            token: self
+                                .tokens
+                                .for_address(&address.to_string())
+                                .map(|entry| entry.kept.token),
                         });
                         done = true;
                     }
@@ -589,7 +624,7 @@ impl DirectScreen {
                         .left
                         .is_some_and(|address| same_game(address, game.address)))
             })
-            .map(game_row)
+            .map(|game| game_row(game, self.rejoin_as(game).is_some()))
             .collect();
         self.games.set_rows(rows);
         self.rebuild_players();
@@ -634,7 +669,12 @@ impl DirectScreen {
         let game = self.selected_game()?;
         let a = &game.answer;
         Some(match game.compat {
-            Compat::Same => format!("Mission: {}", a.summary),
+            Compat::Same => match self.rejoin_as(game) {
+                Some(callsign) => format!(
+                    "You were in this game as {callsign}. Join takes you back; your aircraft is kept for you while it flies."
+                ),
+                None => format!("Mission: {}", a.summary),
+            },
             _ => format!(
                 "{} runs another version ({} {}) and cannot be joined.",
                 a.name,
@@ -772,6 +812,10 @@ impl DirectScreen {
             return Outcome::None;
         };
         let (name, address) = (game.answer.name.clone(), game.address);
+        let token = self
+            .tokens
+            .for_session(game.answer.session_id)
+            .map(|entry| entry.kept.token);
         let problem = match (game.compat, game.answer.phase, game.answer.full) {
             (Compat::OtherBuild | Compat::OtherProtocol, ..) => Some(format!(
                 "{name} runs another version ({} {}); it cannot be joined.",
@@ -787,7 +831,12 @@ impl DirectScreen {
             return Outcome::None;
         }
         self.say(&format!(
-            "Attempting connection to '{name}' at {address}..."
+            "{} '{name}' at {address}...",
+            if token.is_some() {
+                "Rejoining"
+            } else {
+                "Attempting connection to"
+            }
         ));
         self.save();
         // The join takes over from the search.
@@ -798,6 +847,7 @@ impl DirectScreen {
             label: name,
             callsign,
             password: self.password.clone(),
+            token,
         })
     }
 
@@ -861,11 +911,9 @@ impl DirectScreen {
         );
         self.panel = Some(OptionsPanel::new(
             &self.kit,
-            self.settings.port,
+            &self.settings,
             &self.password,
-            self.settings.game_name.as_deref(),
             &default_name,
-            self.settings.port_forward,
             &self.quick,
         ));
     }
@@ -879,6 +927,7 @@ impl DirectScreen {
                 self.password = values.password;
                 self.settings.port = values.port;
                 self.settings.port_forward = values.port_forward;
+                self.settings.may_host = values.may_host;
                 match values.name {
                     Some(name) => self.settings.remember_game_name(&name),
                     None => self.settings.game_name = None,
@@ -1325,11 +1374,14 @@ fn same_game(a: SocketAddr, b: SocketAddr) -> bool {
 }
 
 /// One found game as a row of the Games list: the lock, the name, players and
-/// capacity, and lobby or flying (a game from another build shows its
-/// version instead and is dimmed, like a full or closing one).
-fn game_row(game: &Game) -> Row {
+/// capacity, and lobby or flying, or Rejoin for a game the player holds a
+/// token for (a game from another build shows its version instead and is
+/// dimmed, like a full or closing one).
+fn game_row(game: &Game, rejoin: bool) -> Row {
     let a = &game.answer;
     let state = match game.compat {
+        // A game the player holds a rejoin token for says so (stage K).
+        Compat::Same if rejoin && a.phase != DiscoverPhase::Closed => "Rejoin".to_owned(),
         Compat::Same => match a.phase {
             DiscoverPhase::Lobby => "Lobby".to_owned(),
             DiscoverPhase::Flying => "Flying".to_owned(),

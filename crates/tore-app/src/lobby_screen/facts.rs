@@ -9,7 +9,7 @@ use tore_session::client::content;
 use tore_session::settings::{self, number};
 use tore_session::wire::Path;
 use tore_session::wire::messages::{
-    ContentGaps, LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, StartRule,
+    ContentGaps, LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, StandbyMark, StartRule,
 };
 
 /// What a button does to the player: it is not there, there but cannot be
@@ -308,6 +308,9 @@ pub fn hint(facts: &Facts) -> String {
 pub fn status_word(player: &LobbyPlayer) -> &'static str {
     if player.unable.is_some() {
         "Unable"
+    } else if player.away {
+        // The AI flies the player's aircraft, kept for it (slice F2-A).
+        "Away"
     } else if player.flying {
         "Flying"
     } else if player.ready {
@@ -321,8 +324,10 @@ pub fn status_word(player: &LobbyPlayer) -> &'static str {
     }
 }
 
-/// The Players list's rows: the crown, the house, the ready tick, the
-/// platform, the relay mark (slice J6), the name and the state. Unable players are red and the player's own row green.
+/// The Players list's rows: the crown, the house (or, for a game that stands
+/// by to host, the standby mark; stage K), the ready tick, the platform, the
+/// relay mark (slice J6), the name and the state. Unable players are red and
+/// the player's own row green.
 pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
     lobby
         .players
@@ -338,6 +343,9 @@ pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
                     },
                     if lobby.host == Some(p.id) {
                         Cell::Icon(Icon::House)
+                    } else if p.standby != StandbyMark::None {
+                        // A game that stands by to host (stage K).
+                        Cell::Icon(Icon::Standby)
                     } else {
                         Cell::Empty
                     },
@@ -380,6 +388,10 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                 vec![
                     if mine {
                         Cell::Icon(Icon::You)
+                    } else if slot.holder.is_none() && slot.reserved.is_some() {
+                        // The AI flies it for a player who is not here; no
+                        // one else takes it (stage K).
+                        Cell::Icon(Icon::Lock)
                     } else {
                         Cell::Empty
                     },
@@ -400,6 +412,11 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
             match (holder, &slot.lock) {
                 (Some(_), _) if !mine => row.dimmed(),
                 (Some(_), _) => row.tinted(tone::OWN_SIDE),
+                // A plane kept for a player who dropped: only that player
+                // takes it (the host checks the callsign).
+                (None, _) if slot.reserved.as_ref().is_some_and(|c| !is_me(lobby, c)) => {
+                    row.dimmed()
+                }
                 // A slot the King closed, or keeps for another, cannot be
                 // taken: dimmed as one someone holds.
                 (None, Lock::Closed) => row.dimmed(),
@@ -438,6 +455,11 @@ pub fn slot_click(lobby: &LobbyState, facts: &Facts, plane: u32) -> SlotClick {
     }
     if slot.holder.is_some() {
         return SlotClick::Refused("Another player holds that slot.".into());
+    }
+    if let Some(callsign) = slot.reserved.as_ref().filter(|c| !is_me(lobby, c)) {
+        return SlotClick::Refused(format!(
+            "Plane {plane} is kept for {callsign}, who is away."
+        ));
     }
     if facts.flying {
         return SlotClick::Refused("Leave your aircraft before you change your slot.".into());
@@ -506,8 +528,24 @@ pub fn change_lines(old: Option<&LobbyState>, new: &LobbyState) -> Vec<String> {
         })
         .copied()
         .collect();
-    if !changed.is_empty() {
-        lines.push(format!("Settings: {}.", settings::words(&changed)));
+    // The pinned host is a player's id in the registry: said as the player
+    // (stage K). The King reads the host's own line.
+    let pinned = changed.iter().find(|(n, _)| *n == number::HOST).copied();
+    let others: Vec<(u8, u32)> = changed
+        .iter()
+        .filter(|(n, _)| *n != number::HOST)
+        .copied()
+        .collect();
+    if !others.is_empty() {
+        lines.push(format!("Settings: {}.", settings::words(&others)));
+    }
+    if let Some((_, value)) = pinned
+        && !new.is_king()
+    {
+        lines.push(match pinned_callsign(new, value) {
+            Some(callsign) => format!("The King pinned {callsign} as the host."),
+            None => "The King left the host to be calculated.".to_owned(),
+        });
     }
     for slot in &new.slots {
         if old
@@ -524,6 +562,21 @@ pub fn change_lines(old: Option<&LobbyState>, new: &LobbyState) -> Vec<String> {
     {
         lines.push(format!("{} is the King now.", king.callsign));
     }
+    // This game's own standing by, said when it begins (stage K).
+    let mark = |state: &LobbyState| state.me().map_or(StandbyMark::None, |me| me.standby);
+    if mark(old) != mark(new) {
+        match mark(new) {
+            StandbyMark::First => lines.push(
+                "Your game stands by to host, first in line: if the host is lost, it takes the game over."
+                    .into(),
+            ),
+            StandbyMark::Second => lines.push(
+                "Your game stands by to host, second in line: it takes the game over if the first cannot."
+                    .into(),
+            ),
+            StandbyMark::None => {}
+        }
+    }
     match (old.phase, new.phase) {
         (LobbyPhase::Lobby, LobbyPhase::Flying) => lines.push(
             if new.me().is_some_and(|m| m.flying) {
@@ -539,6 +592,13 @@ pub fn change_lines(old: Option<&LobbyState>, new: &LobbyState) -> Vec<String> {
         _ => {}
     }
     lines
+}
+
+/// The callsign of the player the King pinned (`value` of the host setting,
+/// a lobby id plus one); `None` for calculated, or a player who is not here.
+pub fn pinned_callsign(lobby: &LobbyState, value: u32) -> Option<String> {
+    let id = u8::try_from(value.checked_sub(1)?).ok()?;
+    lobby.player(id).map(|p| p.callsign.clone())
 }
 
 /// How a player reached the host, as the detail line says it (slice J6),
@@ -569,7 +629,12 @@ pub fn player_detail(lobby: &LobbyState, id: u8) -> Option<String> {
     } else {
         format!("Connected {}.", path_phrase(p.path))
     };
-    Some(format!("{} {how}", content::hint_line(p)))
+    let standby = match p.standby {
+        StandbyMark::None => "",
+        StandbyMark::First => " Stands by to host: first.",
+        StandbyMark::Second => " Stands by to host: second.",
+    };
+    Some(format!("{} {how}{standby}", content::hint_line(p)))
 }
 
 /// The Messages lines about how a player's items differ from the host's
@@ -624,7 +689,9 @@ pub fn disabled_reason(facts: &Facts, id: super::Id, target: bool) -> Option<Str
         }
         Id::Loadout | Id::Ready if facts.holds.is_none() => Some("Take a slot first.".into()),
         Id::Ready if facts.flying => Some("You are flying.".into()),
-        Id::PlayersPanel if !target => Some("Select another player in Players first.".into()),
+        Id::PlayersPanel if !target => {
+            Some("Select another player in Players, or a reserved aircraft in Slots, first.".into())
+        }
         Id::Fly => fly_block(facts),
         _ => None,
     }
@@ -639,6 +706,11 @@ pub fn slot_holder_text(slot: &LobbySlot, holder: Option<&LobbyPlayer>) -> Strin
         // The AI flies the plane while its player is away, kept for it.
         (_, Some(p)) if p.away => format!("AI ({} away)", p.callsign),
         (_, Some(p)) => p.callsign.clone(),
+        // A dropped player's plane: the AI flies it, kept for the player
+        // (stage K; the same words as an away player's).
+        (_, None) if slot.reserved.is_some() => {
+            format!("AI ({} away)", slot.reserved.as_deref().unwrap_or_default())
+        }
         (Lock::Closed, None) => "Closed (AI)".to_owned(),
         (Lock::Reserved(callsign), None) => format!("Reserved: {callsign}"),
         (Lock::Open, None) => "AI".to_owned(),

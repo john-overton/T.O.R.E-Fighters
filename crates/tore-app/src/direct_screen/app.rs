@@ -162,6 +162,7 @@ impl App {
             label,
             callsign,
             password,
+            token,
         } = request;
         match Join::to(address, &callsign, &password, &label) {
             Ok(join) => {
@@ -170,6 +171,7 @@ impl App {
                 // joining and a refusal ends it back here.
                 let mut join = join;
                 join.lobby = true;
+                join.token = token;
                 if self.start_join(join, &label) {
                     self.open_lobby(&label, false);
                 }

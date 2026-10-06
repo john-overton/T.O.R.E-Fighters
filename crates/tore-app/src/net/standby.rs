@@ -185,6 +185,30 @@ pub fn resume_line(note: &ResumeNote) -> String {
     }
 }
 
+/// What a host's migration note says to the player, in Messages (stage K,
+/// slice K7b; agent decision): only the players' own news. The takeover, the
+/// live tick and the hand over are the log's (the HUD and Messages already
+/// carry the client's "Lost contact" and "moved" lines).
+pub fn said_line(note: &ResumeNote) -> Option<String> {
+    match note {
+        ResumeNote::Resumed {
+            callsign, flying, ..
+        } => Some(if *flying {
+            format!("{callsign} is back in the air.")
+        } else {
+            format!("{callsign} is back.")
+        }),
+        ResumeNote::Dropped { callsign } => Some(format!(
+            "{callsign} did not come back to the game. {callsign} can still rejoin with the rejoin token."
+        )),
+        ResumeNote::TookOver { .. }
+        | ResumeNote::Live { .. }
+        | ResumeNote::TakenOver { .. }
+        | ResumeNote::HandedOver { .. }
+        | ResumeNote::SteppedDown => None,
+    }
+}
+
 /// The host's standbys as one line of the game's log.
 pub fn figures_line(figures: &[StandbyFigures]) -> String {
     if figures.is_empty() {

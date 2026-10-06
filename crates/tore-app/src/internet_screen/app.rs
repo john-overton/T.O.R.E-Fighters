@@ -84,6 +84,7 @@ pub(crate) fn session_join(request: &InternetJoin, through: MasterJoin) -> Join 
         password: request.join.password.clone(),
         label: request.join.label.clone(),
         lobby: true,
+        token: request.join.token,
     }
 }
 

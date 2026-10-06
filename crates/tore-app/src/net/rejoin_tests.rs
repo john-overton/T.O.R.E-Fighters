@@ -92,6 +92,7 @@ impl Game {
                 password: String::new(),
                 label: "rejoin test".into(),
                 lobby: true,
+                token: None,
             },
             import(),
             &data,

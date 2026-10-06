@@ -46,6 +46,11 @@ fn type_text(s: &mut DirectScreen, text: &str) {
     s.text_input(text);
 }
 
+/// The loopback host, for the rejoin tests.
+pub(super) fn host_for_tests() -> (SocketAddr, Arc<AtomicBool>, JoinHandle<()>) {
+    host()
+}
+
 /// A host on loopback that answers the lookup's first packet until stopped.
 fn host() -> (SocketAddr, Arc<AtomicBool>, JoinHandle<()>) {
     use tore_net::{ConnectDetails, Decision, Entropy, RefuseReason, Server, ServerConfig};
@@ -245,6 +250,7 @@ fn join_from_the_list_goes_to_the_game_by_address() {
             label: "Iceman's lobby".into(),
             callsign: "Maverick".into(),
             password: "secret".into(),
+            token: None,
         }
     );
     assert!(

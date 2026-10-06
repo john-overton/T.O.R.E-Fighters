@@ -619,6 +619,15 @@ RULES: tuple[Rule, ...] = (
         windowed=True,
     ),
     _r("crates/tore-app/src/net/join_tests.rs", (), "the join through the master's tests (real time on loopback, cargo test only)"),
+    _r(
+        "crates/tore-app/src/net/rejoin_game_tests.rs", (),
+        "the game's rejoin token kept and sent again (real time on loopback, cargo test only; stage K, slice K7b)",
+    ),
+    _r(
+        "crates/tore-app/src/net/rejoin_store.rs", ("net-window",),
+        "the game's rejoin tokens in rejoin-v1.conf (stage K, slice K7b); a windowed game that joins keeps its token in it",
+        windowed=True,
+    ),
     _r("crates/tore-app/src/widgets/*", ("menus-screens", "net-window"), "the multiplayer widget kit; the Direct Connection and Internet Lobby screens draw it (menus-snap-direct*, menus-snap-internet*)", windowed=True),
     _r("crates/tore-app/src/direct_screen/*", ("menus-screens", "net-window"), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
     _r("crates/tore-app/src/internet_screen/*", ("menus-screens", "net-window", "net-listing"), "the Internet Lobby screen; its snapshot states are menus-snap-internet*; `--browse` is judged by net-master-listing", windowed=True),

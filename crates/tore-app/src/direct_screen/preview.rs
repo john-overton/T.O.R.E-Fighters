@@ -7,12 +7,14 @@ use crate::widgets::KitSource;
 use tore_net::packet::DiscoverAnswer;
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 5] = [
+pub const STATES: [&str; 6] = [
     "direct",
     "direct-games",
     "direct-trying",
     "direct-refused",
     "direct-options",
+    // Stage K (slice K7b): a game the player holds a rejoin token for.
+    "direct-rejoin",
 ];
 
 fn game(
@@ -145,6 +147,25 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             screen.say("Found Goose and co at 192.168.1.23:26900.");
             // The second page holds the full game and the last one.
             screen.select_game(5);
+        }
+        // Goose and co is a game the player was in as Viper: it says Rejoin.
+        "direct-rejoin" => {
+            let mut store = crate::net::rejoin_store::Store::default();
+            store.keep(
+                tore_session::client::rejoin::KeptToken {
+                    token: tore_net::Token(1),
+                    session_id: 3,
+                    callsign: "Viper".into(),
+                    life_seconds: 86_400,
+                    last_seen_unix: tore_session::client::rejoin::unix_now(),
+                },
+                "192.168.1.23:26900",
+            );
+            screen.tokens = store;
+            screen.full.set_checked(true);
+            screen.set_found(sample_games());
+            screen.say("Found Goose and co at 192.168.1.23:26900.");
+            screen.select_game(2);
         }
         "direct-trying" => {
             screen.address.set_text("games.example.org");

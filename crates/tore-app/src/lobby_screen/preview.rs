@@ -8,14 +8,14 @@ use tore_formats::aircraft::AircraftId;
 use tore_session::wire::chat::{ChatFrom, Receiver, Standing};
 use tore_session::wire::messages::{
     Build, ContentGaps, Gap, GapPlayer, ItemKind, LobbyPhase, LobbyPlayer, LobbySlot, Lock,
-    StartRule,
+    StandbyMark, StartRule,
 };
 use tore_session::wire::{Path, Platform};
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 23] = [
+pub const STATES: [&str; 27] = [
     "lobby-king",
     "lobby-joiner",
     "lobby-unable",
@@ -46,6 +46,14 @@ pub const STATES: [&str; 23] = [
     // Stage L (slice L4, renamed from lobby-builds by L5): Messages saying
     // how a player's game differs from the host's, a player selected.
     "lobby-gaps",
+    // Stage K (slice K7b): the Settings panel's Host row with a pinned host and
+    // the standby marks; a game that stands by, selected; the Players panel's
+    // Release for a player who is away; and for a plane kept for a player who
+    // dropped, with the slot's lock mark.
+    "lobby-host-row",
+    "lobby-standby",
+    "lobby-release",
+    "lobby-reserved",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -249,6 +257,32 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         "lobby-gaps" => {
             lobby.players.push(player(3, "Hollywood", None));
         }
+        // Goose is first in line to host and Hollywood, who reached the host
+        // through the relay and cannot host, is not; the King pinned Goose.
+        "lobby-host-row" | "lobby-standby" => {
+            lobby.players.push(player(3, "Hollywood", None));
+            lobby.players[1].standby = StandbyMark::First;
+            lobby.players[2].standby = StandbyMark::Second;
+            if state == "lobby-host-row" {
+                lobby.players[2].path = Path::Relay;
+                lobby.players[2].standby = StandbyMark::None;
+                for entry in &mut lobby.settings {
+                    if entry.0 == tore_session::settings::number::HOST {
+                        entry.1 = 3;
+                    }
+                }
+            }
+        }
+        // Goose is away: the AI flies its plane, kept for it.
+        "lobby-release" => {
+            lobby.players[1].away = true;
+        }
+        // Viper dropped from plane 2, which the AI flies and nobody else may
+        // take, and Goose stands by.
+        "lobby-reserved" => {
+            lobby.players[1].standby = StandbyMark::First;
+            lobby.slots[2].reserved = Some("Viper".into());
+        }
         "lobby-locks" => {
             lobby.players.push(player(3, "Hollywood", None));
             lobby.slots[2].lock = Lock::Closed;
@@ -317,8 +351,24 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
                 });
             }
         }
-        "lobby-players" => {
+        "lobby-players" | "lobby-release" => {
             screen.players.select(1);
+            screen.refresh();
+            screen.press(Id::PlayersPanel);
+        }
+        // The Game page's last row is the Host row.
+        "lobby-host-row" => {
+            screen.press(Id::Settings);
+        }
+        // Goose selected: the hint line says it stands by to host.
+        "lobby-standby" => {
+            screen.players.select(1);
+            screen.refresh();
+        }
+        // The kept plane selected in Slots, and the panel for it open.
+        "lobby-reserved" => {
+            screen.slots.select(2);
+            screen.picked = Id::Slots;
             screen.refresh();
             screen.press(Id::PlayersPanel);
         }

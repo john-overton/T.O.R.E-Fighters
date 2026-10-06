@@ -6,7 +6,7 @@ window's own resolution on top of the 640 by 480 menu canvas instead of
 stretching the retail bitmap fonts with it. It also holds the screens' icons,
 rasterized at 64 by 64 from the hand drawn single colour SVGs in
 `crates/tore-app/assets/icons/` (crown, house, lock, ready, you, unable,
-windows, macos, linux, relay), as coverage only: the game tints them. The game lays each glyph out in the
+windows, macos, linux, relay, standby), as coverage only: the game tints them. The game lays each glyph out in the
 retail font's own cell, at the retail font's cap height, so text keeps its size
 and place; only the glyph shapes are sharper. See `docs/formats/menu.md`
 ("Sharp text") and `crates/tore-app/assets/README.md`.
@@ -55,7 +55,7 @@ ICON_SIZE = 64
 ICON_PAD = 4
 ICONS = ASSETS / 'icons'
 # The icons' order in the file; the game finds them by name.
-ICON_NAMES = ['crown', 'house', 'lock', 'ready', 'you', 'unable', 'windows', 'macos', 'linux', 'relay']
+ICON_NAMES = ['crown', 'house', 'lock', 'ready', 'you', 'unable', 'windows', 'macos', 'linux', 'relay', 'standby']
 
 GLYPH_CODES = list(range(33, 127)) + [c for c in range(0x80, 0xA9) if c != 0x9E] + [0xAD, 0xE1, 0xE6, 0xF8]
 

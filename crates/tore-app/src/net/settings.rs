@@ -21,6 +21,7 @@
 //! show-other yes
 //! master master.example.org:26901
 //! port-forward no
+//! may-host no
 //! telemetry no
 //! telemetry-notice yes
 //! address 192.168.1.20:26900
@@ -65,6 +66,10 @@ pub struct Remembered {
     /// A hosting game asks its router to forward the game port (stage J4b
     /// uses it; the switch is kept from I4). On by default.
     pub port_forward: bool,
+    /// "Let my game take over hosting" (stage K, slice K7b): this game may
+    /// stand by and become the host when the host is lost. On by default
+    /// (John, 2026-10-06).
+    pub may_host: bool,
     /// The game sends anonymous statistics to the master when it uses the
     /// Internet Lobby (I4). On by default (John, 2026-10-05).
     pub telemetry: bool,
@@ -83,6 +88,7 @@ impl Default for Remembered {
             show_other: false,
             master: None,
             port_forward: true,
+            may_host: true,
             telemetry: true,
             telemetry_notice: false,
         }
@@ -171,6 +177,9 @@ impl Remembered {
         if !self.port_forward {
             text += "port-forward no\n";
         }
+        if !self.may_host {
+            text += "may-host no\n";
+        }
         if !self.telemetry {
             text += "telemetry no\n";
         }
@@ -229,6 +238,7 @@ impl Remembered {
                 "show-full" => found.show_full = yes_or_no(key, value)?,
                 "show-other" => found.show_other = yes_or_no(key, value)?,
                 "port-forward" => found.port_forward = yes_or_no(key, value)?,
+                "may-host" => found.may_host = yes_or_no(key, value)?,
                 "telemetry" => found.telemetry = yes_or_no(key, value)?,
                 "telemetry-notice" => found.telemetry_notice = yes_or_no(key, value)?,
                 "master" => {
@@ -480,14 +490,22 @@ mod tests {
     fn the_internet_lobbys_choices_are_kept_and_the_defaults_are_not_written() {
         let plain = Remembered::default();
         assert!(plain.telemetry && plain.port_forward && !plain.telemetry_notice);
+        assert!(plain.may_host, "take over hosting is on by default");
         let text = plain.text();
-        for key in ["telemetry", "port-forward", "show-other", "master"] {
+        for key in [
+            "telemetry",
+            "port-forward",
+            "show-other",
+            "master",
+            "may-host",
+        ] {
             assert!(!text.contains(key), "{key} written by default");
         }
         let kept = Remembered {
             show_other: true,
             master: Some("master.example.org:26911".into()),
             port_forward: false,
+            may_host: false,
             telemetry: false,
             telemetry_notice: true,
             ..Remembered::default()
@@ -496,6 +514,8 @@ mod tests {
         assert_eq!(back, kept);
         for bad in [
             "tore-network 1\ntelemetry maybe\n",
+            "tore-network 1\nmay-host maybe\n",
+            "tore-network 1\nmay-host no\nmay-host yes\n",
             "tore-network 1\nmaster \n",
             "tore-network 1\nmaster host:0\n",
             "tore-network 1\nmaster two words:1\n",

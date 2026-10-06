@@ -1,5 +1,6 @@
 //! The small marks a list row can carry: the padlock, crown, ready tick, house,
-//! the player's own arrow, the unable cross, the three platform marks and the relay mark.
+//! the player's own arrow, the unable cross, the three platform marks, the relay
+//! mark and the standby host's outlined house.
 //! Retail has no art for them, so they are our own: minimalist solid shapes in
 //! one colour, hand drawn as SVG on a 16 by 16 grid
 //! (`crates/tore-app/assets/icons/`) and baked into the sharp text atlas by
@@ -37,6 +38,9 @@ pub enum Icon {
     /// A player whose game reaches the host through the master's relay
     /// (slice J6).
     Relay,
+    /// A player whose game stands by to take over hosting (stage K, slice
+    /// K7b): the house, outlined, where the house itself has the solid one.
+    Standby,
 }
 
 /// The one colour of every icon, before a dimmed row's tint.
@@ -79,6 +83,7 @@ impl Icon {
             Icon::MacOs => "macos",
             Icon::Linux => "linux",
             Icon::Relay => "relay",
+            Icon::Standby => "standby",
         }
     }
     /// Width and height in pixels.
@@ -123,7 +128,7 @@ mod tests {
     use crate::ui_text;
     use crate::widgets::test_kit::blank;
 
-    const ALL: [Icon; 10] = [
+    const ALL: [Icon; 11] = [
         Icon::Lock,
         Icon::Crown,
         Icon::Ready,
@@ -134,6 +139,7 @@ mod tests {
         Icon::MacOs,
         Icon::Linux,
         Icon::Relay,
+        Icon::Standby,
     ];
 
     #[test]

@@ -250,6 +250,7 @@ impl App {
         let Some(session) = &mut self.net else {
             return Action::None;
         };
+        let now = session.now();
         let client = &mut session.client;
         match request {
             Request::Take(plane) => client.take_slot(plane),
@@ -290,6 +291,9 @@ impl App {
                 client.pass_crown(player);
             }
             Request::Lock { plane, lock } => client.lock_slot(plane, lock),
+            Request::Release(plane) => {
+                client.request(now, tore_session::wire::messages::Message::Release(plane))
+            }
             Request::Watch => {
                 client.watch(tore_session::wire::messages::Subject::None);
                 self.say("Watching the mission. Stop Watch ends it; Join takes a plane.");

@@ -23,6 +23,7 @@ pub mod lookup;
 pub mod observe;
 pub mod options;
 pub mod play;
+pub mod rejoin_store;
 pub mod scoreboard;
 pub mod search;
 pub mod session;

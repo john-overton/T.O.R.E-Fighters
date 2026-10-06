@@ -18,6 +18,8 @@ NORMAL_STATES = [
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",
     "direct", "direct-games", "direct-trying", "direct-refused", "direct-options",
     "internet", "internet-games", "internet-joining", "internet-options", "internet-unreachable",
+    # Stage K (slice K7b): the Rejoin mark, the Host row, standby marks, Release and a reserved slot.
+    "direct-rejoin", "internet-rejoin", "lobby-host-row", "lobby-standby", "lobby-release", "lobby-reserved",
     "lobby-king", "lobby-joiner", "lobby-unable", "lobby-flying", "lobby-server", "lobby-kick",
     "lobby-leave", "lobby-ready",
     # Stage F phase 2 (slice F2-L): the Settings panel's pages, the Players panel, slot locks, Watch, PvP's head line.

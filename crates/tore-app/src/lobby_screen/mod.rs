@@ -48,6 +48,8 @@
 //! Ready); Esc is Leave. Every control also works by the mouse.
 pub mod app;
 pub mod facts;
+#[cfg(test)]
+mod k7b_tests;
 mod modal;
 #[cfg(test)]
 mod phase2_tests;
@@ -152,6 +154,9 @@ pub enum Request {
     Loadout,
     /// A chat line to All.
     Chat(String),
+    /// The King frees the aircraft kept for a player, this plane (stage K,
+    /// message 53).
+    Release(u32),
     /// Leave the game: back to Direct Connection. The King has been asked.
     Leave,
 }
@@ -161,6 +166,12 @@ const BUTTON_W: i32 = 75;
 /// The seven places of the button row: 75 wide on a 79 pitch across the
 /// 549 wide row.
 const SLOT_X: [i32; 7] = [45, 124, 203, 282, 361, 440, 519];
+
+/// What Players... is for (stage K).
+enum PanelTarget {
+    Player((u8, String)),
+    Slot((u32, String)),
+}
 
 /// The slots list's pager: its rocker, the PREV and NEXT labels and the page
 /// box, to the right of the list (the Players box starts at 399).
@@ -191,6 +202,9 @@ pub struct LobbyScreen {
     fly: Button,
     leave: Button,
     focus: Focus<Id>,
+    /// Which list the player last picked from, Slots or Players: what
+    /// Players... acts on when both have a selection (stage K).
+    picked: Id,
     modal: Option<Modal>,
     /// The Settings... panel, while open.
     settings_panel: Option<SettingsPanel>,
@@ -325,6 +339,7 @@ impl LobbyScreen {
             fly: button("Fly", 5),
             leave: button("Leave", 6),
             focus,
+            picked: Id::Players,
             modal: None,
             settings_panel: None,
             players_panel: None,
@@ -535,10 +550,19 @@ impl LobbyScreen {
         // King's.
         if let Some(panel) = &self.players_panel
             && (!self.facts.king
-                || self
-                    .state
-                    .as_ref()
-                    .is_none_or(|s| s.player(panel.player()).is_none()))
+                || self.state.as_ref().is_none_or(|s| {
+                    if panel.slot_only() {
+                        // A reserved plane stays until it is released, taken
+                        // by its player or the mission ends.
+                        !s.slots.iter().any(|slot| {
+                            slot.holder.is_none()
+                                && slot.reserved.is_some()
+                                && Some(slot.plane) == panel.release_plane()
+                        })
+                    } else {
+                        s.player(panel.player()).is_none()
+                    }
+                }))
         {
             self.players_panel = None;
         }
@@ -548,7 +572,7 @@ impl LobbyScreen {
     /// what the screen holds now.
     fn refresh(&mut self) {
         self.facts = Facts::of(self.state.as_ref(), self.unable.as_deref());
-        self.buttons = facts::buttons(&self.facts, self.player_target().is_some());
+        self.buttons = facts::buttons(&self.facts, self.panel_target().is_some());
         self.default = facts::default_button(&self.facts, &self.buttons);
         let b = self.buttons;
         self.mission.set_enabled(b.mission.is_enabled());
@@ -650,6 +674,32 @@ impl LobbyScreen {
         self.slots.selected_row()?.key.parse().ok()
     }
 
+    /// What Players... acts on (stage K): the reserved slot selected in Slots
+    /// when Slots has the focus or no other player is selected, else the
+    /// player selected in Players.
+    fn panel_target(&self) -> Option<PanelTarget> {
+        let slot = self.reserved_target();
+        let player = self.player_target();
+        match (player, slot) {
+            (Some(_), Some(slot)) if self.picked == Id::Slots => Some(PanelTarget::Slot(slot)),
+            (Some(player), _) => Some(PanelTarget::Player(player)),
+            (None, Some(slot)) => Some(PanelTarget::Slot(slot)),
+            (None, None) => None,
+        }
+    }
+
+    /// The slot selected in Slots when the AI flies it for a player who is
+    /// not in the game: its plane and the callsign it is kept for.
+    fn reserved_target(&self) -> Option<(u32, String)> {
+        let state = self.state.as_ref()?;
+        let plane = self.selected_plane()?;
+        let slot = state.slots.iter().find(|s| s.plane == plane)?;
+        match (&slot.holder, &slot.reserved) {
+            (None, Some(callsign)) => Some((plane, callsign.clone())),
+            _ => None,
+        }
+    }
+
     /// The player selected in Players that the King may act on with
     /// Players...: anyone but themself.
     fn player_target(&self) -> Option<(u8, String)> {
@@ -678,7 +728,7 @@ impl LobbyScreen {
         };
         if !enabled {
             if let Some(why) =
-                facts::disabled_reason(&self.facts, id, self.player_target().is_some())
+                facts::disabled_reason(&self.facts, id, self.panel_target().is_some())
             {
                 self.say(&why);
             }
@@ -693,9 +743,18 @@ impl LobbyScreen {
                 None
             }
             Id::PlayersPanel => {
-                let (player, callsign) = self.player_target()?;
-                let house = self.state.as_ref()?.host == Some(player);
-                self.players_panel = Some(PlayersPanel::new(player, &callsign, house));
+                let state = self.state.as_ref()?;
+                self.players_panel = Some(match self.panel_target()? {
+                    PanelTarget::Player((player, callsign)) => {
+                        // The aircraft the AI flies for a player who is away.
+                        let release = state.player(player).filter(|p| p.away).and_then(|p| p.slot);
+                        PlayersPanel::new(player, &callsign, state.host == Some(player))
+                            .with_release(release)
+                    }
+                    PanelTarget::Slot((plane, callsign)) => {
+                        PlayersPanel::for_slot(plane, &callsign)
+                    }
+                });
                 None
             }
             Id::Loadout => Some(match self.buttons.loadout_as {
@@ -799,6 +858,10 @@ impl LobbyScreen {
                 self.players_panel = None;
                 Some(Request::PassCrown(player))
             }
+            players_panel::Answer::Release(plane) => {
+                self.players_panel = None;
+                Some(Request::Release(plane))
+            }
             players_panel::Answer::Kick(player) => {
                 let callsign = self
                     .players_panel
@@ -842,6 +905,11 @@ impl LobbyScreen {
             }
             Route::Widget(id) => match id {
                 Id::Slots => match self.slots.key(name) {
+                    Wo::Changed => {
+                        self.picked = Id::Slots;
+                        self.refresh();
+                        None
+                    }
                     Wo::Activated => {
                         let plane = self.selected_plane()?;
                         self.slot_clicked(plane)
@@ -850,6 +918,7 @@ impl LobbyScreen {
                 },
                 Id::Players => {
                     if self.players.key(name) == Wo::Changed {
+                        self.picked = Id::Players;
                         self.refresh();
                     }
                     None
@@ -974,12 +1043,14 @@ impl LobbyScreen {
         }
         if self.slots.hit(p) {
             self.focus.set(Id::Slots);
+            self.picked = Id::Slots;
         }
         // The rocker is outside the rows' rectangle: the list sorts out what
         // it was pressed on. A row clicked is a slot clicked, once (a
         // double-click's second press is not another click).
         let row = self.slots.row_at(p);
         let outcome = self.slots.press(p, now);
+        self.refresh();
         if let Some(index) = row
             && outcome != Wo::Activated
             && let Some(plane) = self
@@ -992,6 +1063,7 @@ impl LobbyScreen {
         }
         if self.players.hit(p) {
             self.focus.set(Id::Players);
+            self.picked = Id::Players;
         }
         if self.players.press(p, now) == Wo::Changed {
             self.refresh();
@@ -1039,6 +1111,7 @@ impl LobbyScreen {
             }
         } else if self.slots.hit(p) {
             self.slots.wheel(notches);
+            self.refresh();
         }
     }
 
@@ -1070,6 +1143,7 @@ impl LobbyScreen {
             .map(|p| p.callsign.as_str());
         let lock = facts::lock_click(slot, selected);
         self.slots.select(index);
+        self.refresh();
         Some(Request::Lock { plane, lock })
     }
 

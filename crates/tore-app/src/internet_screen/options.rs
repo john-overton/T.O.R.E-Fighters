@@ -1,7 +1,7 @@
 //! The Internet Lobby screen's Options panel (slice I4): the port, the
 //! password and the game name (shared with Direct Connection), the master's
-//! address, "Forward the game port on my router" and "Send anonymous
-//! statistics". Built of the widget kit and drawn over the screen, which
+//! address, "Forward the game port on my router", "Let my game take over
+//! hosting" (stage K) and "Send anonymous statistics". Built of the widget kit and drawn over the screen, which
 //! stops asking the master while it is up.
 //!
 //! The password is never kept (as on Direct Connection). The two switches
@@ -34,6 +34,7 @@ enum Id {
     Name,
     Master,
     Forward,
+    MayHost,
     Statistics,
     Ok,
     Cancel,
@@ -50,6 +51,8 @@ pub struct Values {
     /// The master's address; `None` for the built-in one.
     pub master: Option<String>,
     pub port_forward: bool,
+    /// "Let my game take over hosting" (stage K).
+    pub may_host: bool,
     pub telemetry: bool,
 }
 
@@ -67,6 +70,7 @@ pub struct OptionsPanel {
     name: TextField,
     master: TextField,
     forward: CheckBox,
+    may_host: CheckBox,
     statistics: CheckBox,
     ok: Button,
     cancel: Button,
@@ -99,6 +103,7 @@ impl OptionsPanel {
                 Id::Name,
                 Id::Master,
                 Id::Forward,
+                Id::MayHost,
                 Id::Statistics,
                 Id::Ok,
                 Id::Cancel,
@@ -112,12 +117,17 @@ impl OptionsPanel {
             name: name_field,
             master: master_field,
             forward: CheckBox::new(
-                (LABEL_X, 258),
+                (LABEL_X, 252),
                 "Forward the game port on my router",
                 settings.port_forward,
             ),
+            may_host: CheckBox::new(
+                (LABEL_X, 278),
+                "Let my game take over hosting",
+                settings.may_host,
+            ),
             statistics: CheckBox::new(
-                (LABEL_X, 292),
+                (LABEL_X, 304),
                 "Send anonymous statistics",
                 settings.telemetry,
             ),
@@ -163,6 +173,7 @@ impl OptionsPanel {
             name: (!name.is_empty()).then(|| name.to_owned()),
             master: (!master.is_empty()).then(|| master.to_owned()),
             port_forward: self.forward.checked(),
+            may_host: self.may_host.checked(),
             telemetry: self.statistics.checked(),
         })
     }
@@ -204,6 +215,10 @@ impl OptionsPanel {
                     // Enter turns a check box; it does not accept the panel.
                     Id::Forward => {
                         let outcome = self.forward.key(name, now);
+                        return self.turned(outcome);
+                    }
+                    Id::MayHost => {
+                        let outcome = self.may_host.key(name, now);
                         return self.turned(outcome);
                     }
                     Id::Statistics => {
@@ -258,6 +273,7 @@ impl OptionsPanel {
                 self.ok.release((-1, -1));
                 self.cancel.release((-1, -1));
                 self.forward.release((-1, -1), now);
+                self.may_host.release((-1, -1), now);
                 self.statistics.release((-1, -1), now);
             }
             return Answer::None;
@@ -278,6 +294,10 @@ impl OptionsPanel {
                 self.focus.set(Id::Forward);
                 self.forward.press(point);
             }
+            if self.may_host.hit(point) {
+                self.focus.set(Id::MayHost);
+                self.may_host.press(point);
+            }
             if self.statistics.hit(point) {
                 self.focus.set(Id::Statistics);
                 self.statistics.press(point);
@@ -287,6 +307,7 @@ impl OptionsPanel {
             return Answer::None;
         }
         self.forward.release(point, now);
+        self.may_host.release(point, now);
         self.statistics.release(point, now);
         let ok = self.ok.release(point) == Outcome::Activated;
         let cancel = self.cancel.release(point) == Outcome::Activated;
@@ -303,6 +324,7 @@ impl OptionsPanel {
     pub fn advance(&mut self) {
         let now = Instant::now();
         self.forward.advance(now);
+        self.may_host.advance(now);
         self.statistics.advance(now);
     }
 
@@ -351,6 +373,7 @@ impl OptionsPanel {
         self.name.draw(canvas, kit, self.focus.is(Id::Name));
         self.master.draw(canvas, kit, self.focus.is(Id::Master));
         self.forward.draw(canvas, kit, marked(Id::Forward));
+        self.may_host.draw(canvas, kit, marked(Id::MayHost));
         self.statistics.draw(canvas, kit, marked(Id::Statistics));
         if let Some(error) = self.error {
             text(

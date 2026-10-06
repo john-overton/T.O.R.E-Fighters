@@ -37,11 +37,16 @@ pub const PANEL: Rect = (45, 100, 550, 362);
 /// Where a row starts, the pitch between rows, and a row's height.
 const ROWS_TOP: i32 = PANEL.1 + 66;
 const PITCH: i32 = 21;
+/// The Game page has twelve rows since the Host row (stage K), so its rows
+/// sit a little closer to leave the foot's line its place.
+const GAME_PITCH: i32 = 19;
 const ROW_HEIGHT: i32 = 18;
 /// The frame lines' colour and the selected row's.
 const LINE: [u8; 4] = [174, 174, 174, 255];
 const SELECTED: [u8; 4] = [235, 225, 179, 255];
 const BOX: [u8; 4] = [81, 81, 81, 255];
+/// What a pin made while the mission flies does (stage K).
+const PIN_IN_FLIGHT: &str = "A pin made in flight applies when the lobby returns.";
 /// The most bytes of a game's name (the host's rule).
 const NAME_BYTES: usize = 64;
 
@@ -168,6 +173,8 @@ pub enum Kind {
     /// The Enemy AI cheat: Unchanged or a level.
     EnemyAi,
     Cheat(Flag),
+    /// The host: calculated, or pinned to a player (setting 21; stage K).
+    Host,
 }
 
 /// The rows of a page, in order.
@@ -185,6 +192,7 @@ pub fn page_rows(page: Page) -> Vec<Kind> {
             Kind::Setting(number::LOADOUTS),
             Kind::Setting(number::IDLE_AI),
             Kind::Setting(number::OBSERVER_DELAY),
+            Kind::Host,
         ],
         Page::Revival => vec![
             Kind::Setting(number::RESPAWN),
@@ -215,6 +223,7 @@ pub fn row_label(kind: Kind) -> &'static str {
         Kind::Password => "Password",
         Kind::Damage => "Damage",
         Kind::EnemyAi => "Enemy AI",
+        Kind::Host => "Host",
         Kind::Cheat(flag) => flag.label(),
         Kind::Setting(n) => match n {
             number::MODE => "Game type",
@@ -253,6 +262,19 @@ pub struct Context {
     /// The lobby mission's cheats, when the mission has arrived.
     pub cheats: Option<Cheats>,
     pub name: String,
+    /// The players the King may pin as the host, in join order (stage K).
+    pub players: Vec<HostChoice>,
+}
+
+/// A player in the Host row's choices.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostChoice {
+    pub id: u8,
+    pub callsign: String,
+    /// The player reaches the host through the relay, so it cannot host.
+    pub relayed: bool,
+    /// The player's game runs the host now.
+    pub house: bool,
 }
 
 impl Context {
@@ -263,6 +285,52 @@ impl Context {
             settings: lobby.settings.clone(),
             cheats,
             name: lobby.name.clone(),
+            players: lobby
+                .players
+                .iter()
+                .map(|p| HostChoice {
+                    id: p.id,
+                    callsign: p.callsign.clone(),
+                    relayed: p.path == tore_session::wire::Path::Relay,
+                    house: lobby.host == Some(p.id),
+                })
+                .collect(),
+        }
+    }
+
+    /// The value of the host setting that pins `player` (a lobby id plus
+    /// one).
+    pub fn pin_value(player: u8) -> u32 {
+        u32::from(player) + 1
+    }
+
+    /// The values the Host row turns through: calculated, then each player
+    /// who can host (a relayed one never can; the host's own checks decide
+    /// the rest, in words).
+    pub fn host_choices(&self) -> Vec<u32> {
+        std::iter::once(settings::CALCULATED_HOST)
+            .chain(
+                self.players
+                    .iter()
+                    .filter(|p| !p.relayed)
+                    .map(|p| Self::pin_value(p.id)),
+            )
+            .collect()
+    }
+
+    /// The Host row's value in words: "Calculated (Maverick hosts)", or the
+    /// pinned player's callsign.
+    fn host_text(&self) -> String {
+        match self.value(number::HOST) {
+            None => "...".into(),
+            Some(settings::CALCULATED_HOST) => match self.players.iter().find(|p| p.house) {
+                Some(house) => format!("Calculated ({} hosts)", house.callsign),
+                None => "Calculated".into(),
+            },
+            Some(value) => match self.players.iter().find(|p| Self::pin_value(p.id) == value) {
+                Some(player) => player.callsign.clone(),
+                None => format!("Player {}", value - 1),
+            },
         }
     }
 
@@ -292,7 +360,7 @@ pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
     let in_lobby_only = match kind {
         Kind::Setting(n) => settings::setting(n).is_some_and(|s| s.change == Change::InLobby),
         Kind::Damage | Kind::EnemyAi | Kind::Cheat(_) => true,
-        Kind::Name | Kind::Password => false,
+        Kind::Name | Kind::Password | Kind::Host => false,
     };
     if in_lobby_only && ctx.phase != LobbyPhase::Lobby {
         return Err("Change it in the lobby, between missions.".into());
@@ -317,6 +385,7 @@ pub fn row_value(kind: Kind, ctx: &Context) -> String {
             _ => "...".into(),
         },
         Kind::Name => ctx.name.clone(),
+        Kind::Host => ctx.host_text(),
         Kind::Password => if ctx.password_set() { "set" } else { "none" }.into(),
         Kind::Damage => match ctx.cheats.map(|c| c.damage) {
             Some(Damage::Normal) => "Normal".into(),
@@ -417,6 +486,10 @@ pub fn click(kind: Kind, ctx: &Context, forward: bool) -> Option<Edit> {
             Some(setting_edit(n, next))
         }
         Kind::Name | Kind::Password => None,
+        Kind::Host => {
+            let next = turn(&ctx.host_choices(), ctx.value(number::HOST)?, forward)?;
+            Some(setting_edit(number::HOST, next))
+        }
         Kind::Damage => {
             let mut cheats = ctx.cheats?;
             cheats.damage = match (cheats.damage, forward) {
@@ -518,9 +591,14 @@ pub fn place(page: Page, index: usize) -> Place {
         }
     } else {
         let x = PANEL.0 + 24;
-        let y = ROWS_TOP + index as i32 * PITCH;
+        let (pitch, row_height) = if page == Page::Game {
+            (GAME_PITCH, GAME_PITCH)
+        } else {
+            (PITCH, ROW_HEIGHT + 2)
+        };
+        let y = ROWS_TOP + index as i32 * pitch;
         Place {
-            row: (x - 4, y - 1, 510, ROW_HEIGHT + 2),
+            row: (x - 4, y - 1, 510, row_height),
             label: (x, y + 3),
             label_width: 200,
             value: (x + 226, y, 270, ROW_HEIGHT),
@@ -660,7 +738,12 @@ impl SettingsPanel {
             Ok(()) => {
                 self.notice = None;
                 match click(kind, &self.ctx, forward) {
-                    Some(edit) => Answer::Edit(edit),
+                    Some(edit) => {
+                        if kind == Kind::Host && self.ctx.phase != LobbyPhase::Lobby {
+                            self.notice = Some(PIN_IN_FLIGHT.into());
+                        }
+                        Answer::Edit(edit)
+                    }
                     None => Answer::None,
                 }
             }

@@ -330,13 +330,29 @@ credited):*
 *Built (K5, 2026-10-05):* the host's and the client's side of all of this, on
 the simulator and in the net lane: tokens, the gate, reservations, Release
 and the revival rules on return (the screens, the game's token file and the
-Rejoin marks are K7b's). `tore-bot --token-file FILE` keeps and sends a bot's
-token. The details, each an agent decision, are in the
+Rejoin marks are K7b's, built 2026-10-06, below). `tore-bot --token-file FILE`
+keeps and sends a bot's token. The details, each an agent decision, are in the
 [architecture](ARCHITECTURE.md#rejoin-tokens-and-reservations-as-built-k5):
 the player takes the aircraft back with Join; a game restarted before the host
 noticed replaces its old connection; a token that does not work tells the
 player in words and it joins as a new one; an away player who quits on purpose
 frees its aircraft.
+
+*Built (K7b, 2026-10-06):* the screens. The game keeps its tokens in
+`rejoin-v1.conf` in its data folder (32 at most, each good for 24 hours after
+the player was last in the game) and sends the right one by itself when it joins
+a game it was in. Direct Connection and the Internet Lobby mark such a game
+**Rejoin** in the list (the Internet Lobby once the game is selected, since the
+master names a game's session only then); Messages says "Welcome back, Viper:
+your aircraft is waiting." Both Options panels have **Let my game take over
+hosting**, on by default. In the lobby the King's Settings has a **Host** row
+(calculated, or a player who is not relayed), a plane kept for a player who
+dropped reads "AI (Viper away)" with a lock mark, a game that stands by shows an
+outlined house beside the host's solid one, and the Players panel's **Release**
+frees a kept plane, for a player who is away or for one who dropped (select the
+slot in Slots, then Players...). During a migration the HUD says "Lost contact
+with the host. Moving the game to Hawk..." and then "The game moved to Hawk."
+([architecture](ARCHITECTURE.md#host-migration-and-rejoin), slice K7b).
 
 ## Comms and chat
 
@@ -568,7 +584,7 @@ ends." ([architecture](ARCHITECTURE.md#host-selection))
 ranking, the pin and its fallback and the King's warnings work on the host;
 the move in the lobby needs only its call to the handover (built in slice
 K4, `Host::hand_over`), and the Options
-switch and the Host row for the screens (slice K7b). A game that hosts
+switch and the Host row for the screens (slice K7b, built below). A game that hosts
 cannot test its own upload in the lobby, so it counts as passing until its
 flights show its players missing more than a tenth of its packets (agent
 decision). A machine passes the processor test while the busiest minute of

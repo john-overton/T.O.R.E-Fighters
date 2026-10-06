@@ -237,6 +237,9 @@ pub enum Report {
     /// A line about host migration for the game's log: the standbys, a
     /// takeover, players resuming, a handover, a step-down.
     Migration(String),
+    /// A line about host migration for the player to read, in Messages (stage
+    /// K, slice K7b): a player who came to the new host, or did not.
+    Said(String),
     /// The thread has ended, and why. Nothing follows.
     Ended(End),
 }
@@ -1362,6 +1365,9 @@ impl Migration {
     fn log(&mut self, host: &mut Host, now: Duration, reports: &Sender<Report>) {
         for note in host.take_resume_notes() {
             let _ = reports.send(Report::Migration(crate::net::standby::resume_line(&note)));
+            if let Some(line) = crate::net::standby::said_line(&note) {
+                let _ = reports.send(Report::Said(line));
+            }
         }
         if self
             .figures_at
@@ -1481,6 +1487,7 @@ fn log_report(report: &Report) {
             log::info!("Host: this game took the game over at tick {tick}");
         }
         Report::Migration(line) => log::info!("Host: {line}"),
+        Report::Said(line) => log::info!("Host: said to the player: {line}"),
         Report::Ended(end) => match end {
             End::Stopped => log::info!("Host: stopped"),
             End::HandedOver => log::info!("Host: handed the game over; stopped"),
@@ -1651,6 +1658,7 @@ impl crate::App {
             password: options.password.clone().unwrap_or_default(),
             label: "hosted".into(),
             lobby,
+            token: None,
         };
         // Dropping the thread, on an error, stops it.
         let mut session = NetSession::start(join, resources, &data, self.replay_library.as_ref())?;

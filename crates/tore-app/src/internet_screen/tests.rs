@@ -55,6 +55,7 @@ fn values(telemetry: bool) -> options::Values {
         name: None,
         master: Some(NOBODY.into()),
         port_forward: true,
+        may_host: true,
         telemetry,
     }
 }
@@ -625,7 +626,8 @@ fn an_empty_master_is_the_built_in_one_and_a_switch_turns_by_key() {
     let mut s = screen();
     s.open_options();
     // Three Tabs reach the master; clear it. One more reaches "Forward the
-    // game port", Space turns it off; two more reach OK.
+    // game port", Space turns it off; one more reaches "Let my game take
+    // over hosting", Space turns it off; two more reach OK.
     for _ in 0..3 {
         s.key("Tab", false);
     }
@@ -633,11 +635,15 @@ fn an_empty_master_is_the_built_in_one_and_a_switch_turns_by_key() {
     s.key("Tab", false);
     s.key("Space", false);
     s.key("Tab", false);
-    s.key("Tab", false);
+    s.key("Space", false);
+    for _ in 0..2 {
+        s.key("Tab", false);
+    }
     s.key("Enter", false);
     assert!(!s.options_open());
     assert_eq!(s.settings.master, None);
     assert!(!s.settings.port_forward);
+    assert!(!s.settings.may_host);
     assert!(s.settings.telemetry);
 }
 
@@ -790,6 +796,7 @@ fn drawing_every_state_does_not_panic_and_options_cover_the_screen() {
         name: "x".into(),
         asked: Duration::ZERO,
         through: None,
+        token: None,
     });
     s.panel = None;
     s.refresh_buttons();

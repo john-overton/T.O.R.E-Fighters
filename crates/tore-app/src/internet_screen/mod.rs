@@ -42,6 +42,7 @@ use crate::net::{
     browse::{Browse, MasterJoin, News},
     hosting::Listing,
     options::{DEFAULT_CALLSIGN, callsign_problem},
+    rejoin_store::Store,
     session::JoinPath,
     settings::Remembered,
     telemetry,
@@ -62,6 +63,8 @@ use tore_net::packet::DiscoverPhase;
 pub mod app;
 mod options;
 pub mod preview;
+#[cfg(test)]
+mod rejoin_tests;
 #[cfg(test)]
 mod tests;
 
@@ -140,6 +143,8 @@ struct Joining {
     asked: Duration,
     /// The socket and joiner the master's introduction runs on.
     through: Option<MasterJoin>,
+    /// The rejoin token for the game's session, when the player holds one.
+    token: Option<tore_net::Token>,
 }
 
 /// The screen.
@@ -168,6 +173,10 @@ pub struct InternetScreen {
     entries: Vec<PageEntry>,
     /// What the master said about the games asked about, by listing.
     details: BTreeMap<u64, ListingSummary>,
+    /// The rejoin tokens the game holds (stage K, slice K7b): a game whose
+    /// session one belongs to is marked "Rejoin" once the master has said
+    /// which session it is (the selected game's details).
+    tokens: Store,
     browse: Option<Browse>,
     /// The master the browse runs on, to tell when Options changed it.
     browsed: String,
@@ -294,6 +303,7 @@ impl InternetScreen {
             panel: None,
             entries: Vec::new(),
             details: BTreeMap::new(),
+            tokens: Store::default(),
             browse: None,
             browsed: String::new(),
             browse_failed: false,
@@ -310,7 +320,25 @@ impl InternetScreen {
             timing: std::env::var_os("TORE_DIRECT_TIMING").map(|_| Timing::new("Internet Lobby")),
         };
         screen.notice();
+        screen.load_tokens();
         screen
+    }
+
+    /// Reads the rejoin tokens the game keeps.
+    fn load_tokens(&mut self) {
+        self.tokens = self.data.as_deref().map_or_else(Store::default, |data| {
+            Store::load(data, tore_session::client::rejoin::unix_now())
+        });
+    }
+
+    /// The callsign the player held in the listed game when its token still
+    /// works: the master's details name the game's session, and the player
+    /// holds a token for it.
+    fn rejoin_as(&self, entry: &PageEntry) -> Option<&str> {
+        let summary = self.details.get(&entry.listing_id)?;
+        self.tokens
+            .for_session(summary.session_id)
+            .map(|found| found.kept.callsign.as_str())
     }
 
     /// The one-time line about the statistics, the first time the screen
@@ -573,7 +601,9 @@ impl InternetScreen {
                                 self.details.remove(&listing_id);
                             }
                         }
-                        self.rebuild_players();
+                        // The session is known now: the row may say Rejoin.
+                        self.load_tokens();
+                        self.rebuild_games();
                     }
                     BrowseEvent::Silent => {
                         if !self.said_trouble {
@@ -716,7 +746,12 @@ impl InternetScreen {
             .iter()
             .filter(|entry| show_full || !entry.full || entry.other_build.is_some())
             .filter(|entry| show_other || entry.other_build.is_none())
-            .map(|entry| (joinable(entry), game_row(entry)))
+            .map(|entry| {
+                (
+                    joinable(entry),
+                    game_row(entry, self.rejoin_as(entry).is_some()),
+                )
+            })
             .collect();
         // Stable: each group keeps the master's order.
         rows.sort_by_key(|(joinable, _)| !*joinable);
@@ -770,10 +805,14 @@ impl InternetScreen {
                 entry.name
             ));
         }
-        let mission = self
-            .details
-            .get(&entry.listing_id)
-            .map(|summary| format!("Mission: {}", summary.mission));
+        let mission = self.details.get(&entry.listing_id).map(|summary| {
+            match self.rejoin_as(entry) {
+                Some(callsign) => format!(
+                    "You were in this game as {callsign}. Join takes you back; your aircraft is kept for you while it flies."
+                ),
+                None => format!("Mission: {}", summary.mission),
+            }
+        });
         match (mission, entry.relay_likely) {
             (Some(mission), true) => Some(format!("{mission} (may need the relay)")),
             (Some(mission), false) => Some(mission),
@@ -925,6 +964,11 @@ impl InternetScreen {
             return Outcome::None;
         };
         let (name, listing_id) = (entry.name.clone(), entry.listing_id);
+        let token = self.details.get(&listing_id).and_then(|summary| {
+            self.tokens
+                .for_session(summary.session_id)
+                .map(|found| found.kept.token)
+        });
         let problem = if let Some(version) = &entry.other_build {
             Some(format!(
                 "{name} runs another version ({version}); it cannot be joined."
@@ -967,6 +1011,7 @@ impl InternetScreen {
             name,
             asked: now,
             through: Some(through),
+            token,
         });
         Outcome::None
     }
@@ -1008,6 +1053,7 @@ impl InternetScreen {
                 label: joining.name,
                 callsign,
                 password: self.password.clone(),
+                token: joining.token,
             },
             race: tore_session::client::Race {
                 targets: found.targets,
@@ -1068,6 +1114,7 @@ impl InternetScreen {
                 }
                 self.settings.master = values.master;
                 self.settings.port_forward = values.port_forward;
+                self.settings.may_host = values.may_host;
                 let was_on = self.settings.telemetry;
                 self.settings.telemetry = values.telemetry;
                 if !values.telemetry {
@@ -1440,8 +1487,10 @@ fn joinable(entry: &PageEntry) -> bool {
 /// and capacity, lobby or flying, and a mark when the master expects the
 /// relay (a game of another version shows its version instead and is dimmed,
 /// like a full or closing one).
-fn game_row(entry: &PageEntry) -> Row {
+fn game_row(entry: &PageEntry, rejoin: bool) -> Row {
     let state = match &entry.other_build {
+        // A game the player holds a rejoin token for says so (stage K).
+        None if rejoin && entry.phase != DiscoverPhase::Closed => "Rejoin".to_owned(),
         None => match entry.phase {
             DiscoverPhase::Lobby => "Lobby".to_owned(),
             DiscoverPhase::Flying => "Flying".to_owned(),

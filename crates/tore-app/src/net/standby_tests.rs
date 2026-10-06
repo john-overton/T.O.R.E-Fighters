@@ -179,6 +179,7 @@ impl Rig {
             password: String::new(),
             label: "hosted".into(),
             lobby: false,
+            token: None,
         };
         let mut host = NetSession::start(join, Arc::clone(&resources), &data.0, None).unwrap();
         host.hosting = Some(thread);

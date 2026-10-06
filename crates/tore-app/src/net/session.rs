@@ -36,6 +36,7 @@ use crate::{
         guns::{self, Guns},
         hosting::{self, End, HostThread, Report, Side, TakeoverSetup},
         options::ConnectOptions,
+        rejoin_store::{GameStore, Store},
         standby::{GameStandby, HeldSpec, note_line},
     },
     regen::{self, DeviceRelease, Effects, Motor},
@@ -629,6 +630,10 @@ pub struct Join {
     /// itself, and a joiner's End Mission returns it to the lobby instead of
     /// leaving the game. False for `--connect` and `--host`.
     pub lobby: bool,
+    /// The rejoin token the game holds for this host's session, sent in the
+    /// Challenge answer (stage K, slice K7b); `None` looks one up by the
+    /// host's address, then joins as a new player.
+    pub token: Option<tore_net::Token>,
 }
 
 impl Join {
@@ -675,6 +680,7 @@ impl Join {
             password: password.to_owned(),
             label: label.to_owned(),
             lobby: false,
+            token: None,
         })
     }
 }
@@ -749,8 +755,11 @@ pub struct NetSession {
     /// The mission the client last built, which the standby builds.
     held: HeldSpec,
     /// The player's "Let my game take over hosting" switch (on by default;
-    /// its screen is slice K7b's).
+    /// the Options panels' check box, kept in `network-v1.conf`).
     may_host: bool,
+    /// The game sent its rejoin token (in the Challenge answer, or after the
+    /// join in a Rejoin), or has no need to: it is done once for a session.
+    rejoin_tried: bool,
     /// The standby could not be started; the game carries on without one.
     standby_failed: bool,
     /// The client has been told its candidates for this socket.
@@ -768,6 +777,11 @@ struct Again {
     config: ClientConfig,
     replays: Option<Library>,
     label: String,
+    /// The data folder and the host's address as the game joined it (empty
+    /// for a game this game hosts), where the client's rejoin token is kept
+    /// (stage K, slice K7b).
+    data: PathBuf,
+    address: String,
 }
 
 /// Writes into the diagnostics log the client holds, so the game can add a
@@ -819,6 +833,8 @@ fn equip(
         }
     }
     client.set_diagnostics(Box::new(SharedLog(Rc::clone(log))));
+    // The token the host grants goes to the game's file (stage K).
+    client.set_token_store(Box::new(GameStore::new(&again.data, &again.address)));
     let (map, kept, spec_for_rebuild) = (Arc::clone(resources), Rc::clone(sink), Rc::clone(spec));
     let held = Arc::clone(held);
     client.set_mission_builder(Box::new(move |spec, reads: &dyn ResourceSource| {
@@ -864,7 +880,25 @@ impl NetSession {
             password,
             label,
             lobby,
+            token,
         } = join;
+        // The host's address as the game keeps it with the token; a game this
+        // game hosts has none.
+        let address = match &socket {
+            Transport::Link(_) => String::new(),
+            _ => server.to_string(),
+        };
+        // A token held for a game joined at this address before (a game the
+        // list found has its own, by session, from the screen).
+        let token = token.or_else(|| {
+            (!address.is_empty())
+                .then(|| {
+                    Store::load(data, tore_session::client::rejoin::unix_now())
+                        .for_address(&address)
+                        .map(|entry| entry.kept.token)
+                })
+                .flatten()
+        });
         let clock = RealClock::new();
         let now = clock.now();
         // A join through the master races the host's addresses.
@@ -884,6 +918,8 @@ impl NetSession {
             auto_ready: !lobby,
             // Stage L: the content the screens' worker worked out.
             content: Some(game_content(&resources)),
+            // Stage K: the player comes back as itself.
+            token,
             ..ClientConfig::new(server, &callsign, build_id())
         };
         let mut client = Client::connect(config.clone(), Arc::clone(&resources), now)
@@ -905,6 +941,8 @@ impl NetSession {
             config,
             replays: replays.cloned(),
             label,
+            data: data.to_owned(),
+            address,
         };
         let log = Rc::new(RefCell::new(DatedLog::new(data.join(files::LOG_FOLDER))));
         let sink: Sink = Rc::new(RefCell::new(None));
@@ -952,7 +990,10 @@ impl NetSession {
             peers: Peers::new(tore_session::wire::PROTOCOL_VERSION, Entropy::System),
             standby: None,
             held,
-            may_host: true,
+            // "Let my game take over hosting", as the player left it on the
+            // Options panels (on by default).
+            may_host: crate::net::settings::Remembered::load(data).may_host,
+            rejoin_tried: token.is_some(),
             standby_failed: false,
             candidate_set: false,
             data: data.to_owned(),
@@ -1238,6 +1279,22 @@ impl NetSession {
         }
     }
 
+    /// The host accepted the join, and the game holds a token for the
+    /// session it names that the join did not send (a game joined at an
+    /// address the token was not kept for): the Rejoin message brings the
+    /// player back as itself (stage K, slice K7b). Once for a session.
+    fn rejoin_known(&mut self, session_id: u64) {
+        if std::mem::replace(&mut self.rejoin_tried, true) {
+            return;
+        }
+        let store = Store::load(&self.data, tore_session::client::rejoin::unix_now());
+        if let Some(entry) = store.for_session(session_id) {
+            log::info!("Network: rejoining session {session_id:016x} with the token kept for it");
+            self.net_line("rejoin", &format!("{session_id:016x}"));
+            self.client.rejoin(entry.kept.token);
+        }
+    }
+
     /// The session clock now.
     pub fn now(&self) -> Duration {
         self.clock.now()
@@ -1275,9 +1332,16 @@ impl NetSession {
             if let ClientEvent::Debrief(debrief) = &event {
                 self.debrief = Some((**debrief).clone());
             }
+            let session = match &event {
+                ClientEvent::Connected { session_id, .. } => Some(*session_id),
+                _ => None,
+            };
             self.events.push(event);
             if connected {
                 self.connected(now);
+            }
+            if let Some(session_id) = session {
+                self.rejoin_known(session_id);
             }
         }
         // A player who left waits only so long for the host to answer.
@@ -1290,8 +1354,8 @@ impl NetSession {
     }
 
     /// The player's "Let my game take over hosting" switch (stage K; on by
-    /// default). Off, the game tells the host it may not host and runs no
-    /// standby. Its screen is slice K7b's.
+    /// default, read from `network-v1.conf` when the session starts). Off,
+    /// the game tells the host it may not host and runs no standby.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn set_may_host(&mut self, on: bool) {
         if self.may_host != on {
@@ -1347,6 +1411,7 @@ impl NetSession {
         let mut ended = None;
         let mut took = None;
         let mut lines = Vec::new();
+        let mut said = Vec::new();
         for report in hosting.poll() {
             match report {
                 Report::Ended(end) => {
@@ -1357,12 +1422,16 @@ impl NetSession {
                 }
                 Report::TookOver { tick } => took = Some(tick),
                 Report::Migration(line) => lines.push(line),
+                Report::Said(line) => said.push(line),
                 _ => {}
             }
         }
         for line in lines {
             self.net_line("host", &line);
         }
+        // What the host says about the migration, for the player's Messages.
+        self.events
+            .extend(said.into_iter().map(ClientEvent::Notice));
         if let Some(tick) = took {
             self.client.host_here(now, LINK_ADDRESS, tick);
             self.net_line("migrate", &format!("took-over\t{tick}"));
@@ -1893,3 +1962,7 @@ mod rejoin_tests;
 #[cfg(test)]
 #[path = "join_tests.rs"]
 mod join_tests;
+
+#[cfg(test)]
+#[path = "rejoin_game_tests.rs"]
+mod rejoin_game_tests;
