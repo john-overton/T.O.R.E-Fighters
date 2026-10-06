@@ -26,7 +26,8 @@ from battery_scenarios.net import GAME_FLAGS, LOCALHOST, NET_BAD, fresh_data, st
 
 # The script's clicks, in the 640 by 480 menu layer's pixels. The Multi menu, Direct Connection, New; then the
 # lobby: Settings... is the King's second button, Players... the third. The Settings panel's rows are at x 430,
-# 21 pixels apart from y 196 (Game type is the second row of the Game page); Realism's Damage is at the top left.
+# 19 pixels apart on the Game page (twelve rows since stage K's Host row) from y 175: Game type is the second row, at 194,
+# Friendly fire the seventh, at 289 (it was 301 at 21 pixels, which now lands on Lock sides); Realism's Damage is at the top left.
 LOBBY_SCRIPT = """wait 10
 movemenu 150 48
 wait 0.6
@@ -50,7 +51,7 @@ movemenu 430 196
 wait 0.6
 click
 wait 8
-movemenu 430 301
+movemenu 430 289
 wait 0.6
 click
 wait 2
