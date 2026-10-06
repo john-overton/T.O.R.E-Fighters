@@ -648,7 +648,8 @@ impl Master {
     }
 
     /// A Heartbeat or Keep with a known token from `from`: the per-listing
-    /// rate, and a move to a new address at most once a minute. Returns the
+    /// rate, and a move to a new address at most once a minute, which takes
+    /// the listing's relay channels with it (stage K, slice K8). Returns the
     /// listing's id when it may go on.
     fn beat(&mut self, now: Duration, from: SocketAddr, token: u64, len: usize) -> Option<u64> {
         let Some(id) = self.listings.id_of_token(token) else {
@@ -692,6 +693,9 @@ impl Master {
             })?;
             self.log
                 .push_back(format!("moved id={id:016x} from={old_address} to={from}"));
+            // Stage K (slice K8): the listing's relay channels follow it, so
+            // a migrated game's relayed players reach the new host.
+            self.relays.move_host(id, from);
         }
         self.listings
             .update(id, expiry, |listing| listing.heard = now);
@@ -831,7 +835,18 @@ impl Master {
         if self.limit(now, from, Limit::RelayRequest).is_none() {
             return;
         }
-        let ends = self.introductions.ends(request.introduction_id);
+        // The host end is the listing's address now: a listing that moved
+        // since the introduction (stage K, slice K8) is relayed to its new
+        // host.
+        let ends = self
+            .introductions
+            .ends(request.introduction_id)
+            .map(|mut ends| {
+                if let Some(listing) = self.listings.get(ends.listing_id) {
+                    ends.host = listing.address;
+                }
+                ends
+            });
         self.relays.request(now, from, &request, ends);
         self.send_relays();
     }

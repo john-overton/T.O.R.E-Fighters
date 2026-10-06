@@ -308,8 +308,9 @@ whenever the master falls silent.
   removed with why, a source over a limit (once a minute per source, with
   its address, or its /64 for IPv6, and the limit), each relay channel
   opened or closed (with the two ends' addresses and, on closing, why and
-  its bytes each way), each relay request refused, the allowance reaching 95
-  and 100 percent, and problems writing the state folder.
+  its bytes each way), a listing's relay channels moving with it to a new
+  host (stage K), each relay request refused, the allowance reaching 95 and
+  100 percent, and problems writing the state folder.
 
   ```text
   status listings=41 sources=318 browse/s=2.4 introductions/min=7 punched=5 relayed=2 channels=3 relay-month=12.7GB dropped(limit)=0 invalid=4 in=812.3KB out=95.1KB
@@ -319,6 +320,8 @@ whenever the master falls silent.
   limit source=198.51.100.7 over=browse (20 a second, bursts of 40)
   relay opened channel=d966e9a6 host=203.0.113.5:26900 player=198.51.100.20:40112 channels=3
   relay closed channel=d966e9a6 host=203.0.113.5:26900 player=198.51.100.20:40112 reason=closed by an end to-host=100384 to-player=378236 channels=2
+  moved id=4f1c2a9be07d3e11 from=203.0.113.5:31877 to=198.51.100.33:26900
+  relay moved listing=4f1c2a9be07d3e11 from=203.0.113.5:31877 to=198.51.100.33:26900 channels=1
   relay refused player=198.51.100.21:40007 result=too-many
   relay allowance: 95 percent of 800 GB relayed this month, so new channels are refused
   ```
@@ -340,7 +343,12 @@ whenever the master falls silent.
   bytes of the frames it forwarded each way. A listing's `reason` is `unregistered`,
   `expired`, `replaced by a new registration` (the game restarted on the
   same port) or `another listing moved to its address`. The name is quoted
-  with its quotes and control characters escaped.
+  with its quotes and control characters escaped. A `moved` line says a
+  listing's token arrived from a new address: its host's router gave the
+  port another outside address, or (stage K) another player's game took the
+  mission over when its host was lost or left. A `relay moved` line follows
+  it when the listing had relay channels: they now forward to the new
+  address.
 - **`state-dir/stats/YYYY-MM-DD.tsv`**: one line a minute with the same
   counts and a header line, for graphs. Kept 90 days, then deleted by the
   master.
@@ -427,6 +435,20 @@ no change to `master.conf`: the relay is on by default. The machine's
 firewall needs nothing new (the relay uses the main port, 26901). Watch the
 first `relay opened` and `relay closed` lines in the journal, and the
 `relay-month=` figure, which now grows.
+
+**The update for host migration (stage K, slice K8).** What changed: when
+a listing moves to a new address, its relay channels now move with it,
+keeping their numbers and keys, and the journal says so in a `relay moved`
+line after the `moved` line. A game that takes a migrated mission over
+heartbeats with the old host's listing token from its own port, and the
+master moves the listing there as it always has (at most once a minute per
+listing). Nothing else changed: the master protocol is still version 1, no
+packet changed, `master.conf` needs nothing new, and the firewall nothing
+new. Games from before stage K are served as before. Update the master
+before releasing a game with stage K's migration: an older master moves
+the listing but leaves its relay channels at the dead host's address, so a
+relayed player cannot follow the game to its new host and drops out until
+its rejoin.
 
 **Versions.** A master answers every master protocol version it knows, so
 one master serves old and new games at once

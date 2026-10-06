@@ -33,6 +33,12 @@
 //!   master closes a channel (idle, over its rate, the allowance, stopping),
 //!   and to the other end when one end closes it.
 //!
+//! - **Moving** (stage K, slice K8): when a listing moves to a new address
+//!   (its token arrives from there, at most once a minute), every channel of
+//!   the listing takes the new address as its host end, keeping its number
+//!   and key ([`Relays::move_host`]), so a migrated game's relayed players
+//!   reach its new host on the channels they already have.
+//!
 //! A Relay offer goes to a player whose address its introduction's cookie
 //! proved, and a Relay open to a host whose listing proves its address, so
 //! neither is fitted to a request or charged to the answer rate (agent
@@ -207,6 +213,9 @@ pub struct RelayCounters {
     pub bytes: u64,
     /// Frames dropped over a channel's rate.
     pub over_rate: u64,
+    /// Channels that followed their listing to a new host address (stage K,
+    /// slice K8).
+    pub moved: u64,
 }
 
 /// The relay's channels and the month's figure.
@@ -594,6 +603,33 @@ impl Relays {
         self.out.push_back((to, bytes.to_vec()));
     }
 
+    /// The listing `listing_id` moved to `to` (stage K, slice K8: a game that
+    /// took a migrated mission over heartbeats with the listing's token from
+    /// its own game port, or the host's router gave the port a new outside
+    /// address). Every channel of the listing, open or still opening, takes
+    /// `to` as its host end and keeps its number and key, so its relayed
+    /// player's frames reach the new host and nothing more goes to the old
+    /// address; a Relay open still due goes to `to`. Returns how many moved,
+    /// and logs a line when any did.
+    pub fn move_host(&mut self, listing_id: u64, to: SocketAddr) -> usize {
+        let to = canonical(to);
+        let mut moved: Vec<(u32, SocketAddr)> = Vec::new();
+        for (&number, channel) in &mut self.channels {
+            if channel.listing_id == listing_id && channel.host != to {
+                moved.push((number, channel.host));
+                channel.host = to;
+            }
+        }
+        if let Some(&(_, from)) = moved.first() {
+            self.counters.moved += moved.len() as u64;
+            self.log.push_back(format!(
+                "relay moved listing={listing_id:016x} from={from} to={to} channels={}",
+                moved.len()
+            ));
+        }
+        moved.len()
+    }
+
     /// A Relay close from an end: the channel goes, and the other end is
     /// told.
     pub fn close(&mut self, now: Duration, from: SocketAddr, close: &RelayClose) {
@@ -760,6 +796,85 @@ mod tests {
         );
         let steady = passed_after_3s as f64 / 7.0;
         assert!((63_000.0..=65_000.0).contains(&steady), "{steady}");
+    }
+
+    /// Slice K8: a channel still opening follows its listing too. Its next
+    /// Relay open goes to the new address, an ack from the old one no longer
+    /// counts, and one from the new one opens it.
+    #[test]
+    fn a_channel_still_opening_follows_its_listing_to_a_new_host() {
+        use crate::limits::Bucket;
+        use crate::listings::Listing;
+        use tore_net::master::{Build, ListingSummary, MappingType};
+
+        let a = |text: &str| text.parse::<SocketAddr>().unwrap();
+        let (old, new, player) = (
+            a("203.0.113.10:26900"),
+            a("203.0.113.30:26900"),
+            a("192.0.2.50:40000"),
+        );
+        let expiry = Duration::from_secs(90);
+        let mut listings = Listings::default();
+        listings.insert(
+            Listing {
+                id: 7,
+                token: 77,
+                nonce: 1,
+                address: old,
+                source: SourceKey::of(old),
+                build: Build::default(),
+                dedicated: false,
+                platform: 3,
+                candidates: Vec::new(),
+                summary: ListingSummary::default(),
+                change: 0,
+                mapping: MappingType::Unknown,
+                heard: Duration::ZERO,
+                moved: None,
+                beats: Bucket::default(),
+            },
+            expiry,
+        );
+        let mut relays = Relays::new(RelaySettings::default(), Entropy::Seeded(1));
+        let request = RelayRequest {
+            nonce: 5,
+            introduction_id: 9,
+        };
+        let ends = Ends {
+            listing_id: 7,
+            host: old,
+            player,
+            nonce: 5,
+        };
+        relays.request(Duration::ZERO, player, &request, Some(ends));
+        let open = relays.poll_send().expect("the first Relay open");
+        assert_eq!(open.0, old);
+        let MasterPacket::RelayOpen(RelayOpen { channel, .. }) =
+            MasterPacket::decode(&open.1).unwrap()
+        else {
+            panic!("not a Relay open");
+        };
+        // Another listing's move leaves it; its own takes it along.
+        assert_eq!(relays.move_host(8, new), 0);
+        assert_eq!(relays.move_host(7, new), 1);
+        assert_eq!(relays.move_host(7, new), 0, "already there");
+        assert_eq!(relays.counters.moved, 1);
+        assert!(
+            relays
+                .poll_log()
+                .is_some_and(|l| l.starts_with("relay moved listing=0000000000000007")
+                    && l.ends_with("from=203.0.113.10:26900 to=203.0.113.30:26900 channels=1"))
+        );
+        listings.update(7, expiry, |l| l.address = new);
+        relays.update(MEET_RETRY);
+        assert_eq!(relays.poll_send().map(|(to, _)| to), Some(new));
+        let ack = RelayOpenAck { token: 77, channel };
+        let dropped = relays.dropped;
+        relays.open_ack(MEET_RETRY, old, &ack, &listings);
+        assert_eq!(relays.dropped, dropped + 1, "the old address's ack");
+        relays.open_ack(MEET_RETRY, new, &ack, &listings);
+        assert_eq!(relays.counters.opened, 1);
+        assert_eq!(relays.poll_send().map(|(to, _)| to), Some(player));
     }
 
     #[test]
