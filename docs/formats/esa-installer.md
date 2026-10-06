@@ -93,7 +93,11 @@ Compared entry by entry after extracting both archive versions:
 - `FA_4B.LIB` and `FA_4D.LIB`: identical SHA-256 in both builds.
 - `FA_2.LIB`: same 5,405 resources. 168 of them differ by exactly four bytes at
   resource offset 136, the PE link timestamp of the DLG/MNU/HUD/MC module
-  resources. Their content is otherwise identical.
+  resources. Their content is otherwise identical. (Recounted on 2026-10-06:
+  170 modules differ only in that timestamp and one, the retail Armory menu
+  `AR_MENU.MNU`, has a real change that the import does not keep; the pack now
+  holds 4,157 names, 50 of them timestamp-only. See the
+  [build audit](../baselines/fa-builds-2026-10-06.md).)
 - `FA_1.LIB`: 1.02F adds five resources, `H3D_OFF.PIC`, `H3D_ON.PIC`,
   `HUI11.FNT`, `HUISYM11.FNT`, `WII11.FNT`. Nothing in the app or its profiles
   references them. The other 1,996 resources are identical.
