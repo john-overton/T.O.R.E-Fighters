@@ -3935,7 +3935,8 @@ flowchart LR
   capture["capture file"] --> observe["run the client session offline<br/>(capture::run) with an observer"]
   observe --> seen["what it was given:<br/>entity states by tick, exact own states,<br/>the own plane's predicted ticks, events,<br/>diagnostics lines"]
   seen --> smooth["one frame per host tick:<br/>curves through every received state"]
-  smooth --> writer["tore-replay writer"]
+  smooth --> again["the game makes again:<br/>smoke, contrails, gun rounds<br/>(replay/net_effects.rs)"]
+  again --> writer["tore-replay writer"]
   writer --> replay["NAME.tore-replay"]
 ```
 
@@ -4016,10 +4017,9 @@ reached; nothing is shown beyond what the host said.
   gun bursts (`weapon.gun_burst`, new). Rumble, the weapon page, an order's
   answer, the player's own explosion and sound emissions are not kept (the
   aircraft's state and the effects say the same). Smoke, contrails and
-  gun rounds are not invented: converted replays have none yet (a known limit;
-  the live client regenerates smoke from the drawn picture and draws gun rounds
-  from the bursts, and a replay can do the same later). The cockpit readout,
-  radar contacts and the HUD are not part of a replay.
+  gun rounds are not sent, so the game makes them again, as the live client
+  does ([below](#smoke-contrails-and-gun-rounds-in-a-converted-replay-slice-e2)).
+  The cockpit readout, radar contacts and the HUD are not part of a replay.
 
 **What carries the diagnostics.** The replay format does not change, and the
 version stays 1 (new data arrives as new events, header entries and result
@@ -4099,6 +4099,92 @@ session's mapping of an aircraft against the game recorder's. Battery (the `net`
 `net-convert-capture` flies a real `tore-server` with `tore-bot
 --capture`, converts, reads the replay back, converts twice for the same bytes
 and converts a cut copy.
+
+#### Smoke, contrails and gun rounds in a converted replay (slice E2)
+
+*Built (E2, 2026-10-05, `mp/e2-effects`). John asked on 2026-10-05 for a
+replay converted from a capture to show smoke, contrails and gun rounds,
+regenerated as the live client does; everything below that is not that
+sentence is an agent decision.* The host sends none of the three. A live
+client makes them again from the picture it draws ([the client
+session](#the-client-session)); the conversion does the same over the frames
+it builds, tick by tick, and writes the result the way a single-player
+recording carries it: puffs in the frame's spawns, gun rounds as projectiles of
+the gun's weapon. The viewer then rebuilds them from the recording like any
+other, with no new code and no new format (the version stays 1).
+
+**Where it runs.** The conversion (`tore-session`) cannot make them: it has
+no drawn aircraft model (the contrails start at each type's engine outlets,
+which come from the model) and no renderer's helpers. So it hands every frame,
+built and complete, to a `Regenerate` the caller gives
+(`Conversion::write_with`; `write` gives it nothing). The game's is
+`NetEffects` (`replay/net_effects.rs`), which `replay/net_convert.rs` builds
+for each flight. It is a pure function of the frames it is given, so
+converting twice gives the same bytes.
+
+```mermaid
+flowchart LR
+  frame["a converted frame<br/>(poses, missiles, events)"] --> picture["the picture it shows<br/>(the viewer's own decoder)"]
+  picture --> effects["regen::Effects<br/>smoke and contrails"]
+  frame --> bursts["the frame's weapon.gun_burst events"]
+  bursts --> guns["net::guns::Guns<br/>rounds from bursts"]
+  picture --> guns
+  effects --> puffs["frame.new_puffs"]
+  guns --> rounds["frame.projectiles<br/>(the gun's weapon)"]
+```
+
+- *Smoke and contrails* are `regen::Effects`, the live client's own, stepped
+  once per host tick over the picture the viewer's decoder
+  (`convert::snapshot`) makes of the frame: motor smoke while a missile's motor
+  burns (the motor read from the weapon record, dated from the tick the
+  missile first appears), damage smoke from an aircraft at half its hit
+  points or less, crash-site columns over the fires the host's marks started,
+  and contrails above each aircraft's onset altitude. The puffs released on a
+  tick are written as that frame's `new_puffs`, as the single-player recorder
+  lists them (oldest first, smoke then contrails).
+- *Engine outlets* come from the drawn model, which is loaded
+  (`Airframe::load`) the first time an aircraft of that type is high enough to
+  leave a contrail, so a flight that never climbs that high loads none. A model
+  that does not load leaves no contrails for that type, with a warning in the
+  log.
+- *Gun rounds* are `net::guns::Guns`, the live client's own, given the host's
+  gun burst events of each frame (the player's own too: a replay has no
+  trigger, so every burst, whoever fired it, makes its rounds, where the live
+  client draws its own from its trigger). A round is made and flown with the
+  simulation's rules, from the shooter's pose at the tick it left, on the
+  gun's cadence and with the tracer on every third. It is written as a
+  projectile of the gun's weapon (registered as a `Gun` when the first round
+  needs it), with a number that stays with the round for its whole flight (the
+  live client numbers rounds by their place in a list; a recording needs a
+  round to keep its identity so the viewer can blend it between ticks), owner
+  its shooter and age the ticks since it left. A closed burst is known whole
+  from its first tick, since the conversion has hindsight.
+- *Known differences from the host*, as in the live client: a round's line
+  differs from the host's within the gun's cone (the host's spread seed is
+  not sent), a missile's smoke can start a tick or two off the host's, and a
+  burst or a missile that began before the replay's first tick is not there.
+  A flight that fills the format's per-tick limits (4,096 puffs, 1,024
+  projectiles) drops the extras.
+- *The report.* `--convert-capture` and the game's log say what was made
+  ("Made again: N smoke puffs, M contrail puffs, K gun rounds").
+
+**Tests.** `replay/net_effects.rs`: a bot fight at 40,000 feet converts with
+contrails from the engines (60 to 85 puffs a second for four aircraft with two
+outlets each, which is combat's ten puffs a second per outlet), and the
+viewer's `Playback` rebuilds them; a low flight has none, and an import whose
+model cannot load still converts; the gun bursts of a fight become exactly the
+rounds the gun's cadence gives (every closed burst counted), each alive on
+every tick between its first and its last, with one shooter and a stable
+number, a third of them tracers, drawn by the viewer as gun rounds; hand-made
+frames give damage smoke, crash-site columns and missile smoke; converting
+twice gives the same bytes; a gun the weapon registry has not named gets its
+own id once. `replay/net_convert.rs`: the game's conversion carries rounds,
+says so in its report and gives the same bytes twice. Battery (`net` lane):
+`net-convert-capture` now flies the capture at 40,000 feet and checks that the
+conversion made contrails, motor smoke when the host sent launches, and gun
+rounds when it sent bursts (also in the Tacview export with `--guns`); the
+bots rarely fire the gun there, so the gun half of that check is the Rust
+tests' (see the ledger).
 
 ### How stage D lands
 

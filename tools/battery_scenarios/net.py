@@ -1183,9 +1183,14 @@ def drive_internet_relay(d: Drive) -> None:
 
 def drive_convert(d: Drive) -> None:
     """A bot's capture of a real flight converts into a replay (`--convert-capture`): the replay reads back through
-    the exports, converting twice gives the same bytes, and a copy cut short still converts and says so."""
+    the exports, carries the contrails, motor smoke and gun rounds the game makes again (slice E2), converting twice
+    gives the same bytes, and a copy cut short still converts and says so."""
     port = d.port()
-    server = start_server(d, port, guide_mission(separation_nm=5))
+    # At 40,000 feet, above every aircraft's contrail onset (30,000 to 35,000), so the conversion has contrails to make.
+    mission = guide_mission(separation_nm=5).replace("start airborne 20000", "start airborne 40000")
+    if "start airborne 40000" not in mission:
+        raise DriveError("the guide's example mission no longer starts airborne at 20000 feet")
+    server = start_server(d, port, mission)
     replays = d.work / "replays"
     replays.mkdir(exist_ok=True)
     capture = replays / "2026-10-05_1500_NET_127001.tore-capture"
@@ -1197,6 +1202,12 @@ def drive_convert(d: Drive) -> None:
         raise DriveError("the bot wrote no capture of a flight")
     run = d.run("convert", [d.app, "--convert-capture", capture], timeout=120)
     run.expect(r"^Replay: .*_UKR_F18\.tore-replay \(\d+ frames, \d+\.\d s, 12 aircraft\)$", "the replay's line")
+    made = re.search(r"^Made again: (\d+) smoke puffs, (\d+) contrail puffs, (\d+) gun rounds$", run.text(), re.M)
+    if not made:
+        d.problem("the conversion did not say what it made again (smoke, contrails, gun rounds)")
+        smoke = contrails = rounds = -1
+    else:
+        smoke, contrails, rounds = (int(n) for n in made.groups())
     replay = next(replays.glob("*_UKR_F18.tore-replay"), None)
     if replay is None:
         raise DriveError("the conversion wrote no replay beside the capture")
@@ -1208,13 +1219,24 @@ def drive_convert(d: Drive) -> None:
     info.expect(r"^\s+\d+ net\.stats$", "the network figures")
     info.expect(r"^Result +end=end flight, net\.seconds=", "the footer's figures")
     info.forbid(r"INCOMPLETE|^Problem", "damage")
+    # The host sent launches and gun bursts; the smoke of the motors, the contrails at that height and the rounds of
+    # every burst are made again, which only the game's conversion does (the host sends none of them).
+    count = lambda event: int((re.search(rf"^\s+(\d+) {re.escape(event)}$", info.text(), re.M) or [0, 0])[1])
+    if made and count("weapon.launch") and smoke < 1:
+        d.problem(f"{count('weapon.launch')} launches and no missile smoke")
+    if made and contrails < 1:
+        d.problem("a flight at 40,000 feet and no contrails")
+    if made and (count("weapon.gun_burst") > 0) != (rounds > 0):
+        d.problem(f"{count('weapon.gun_burst')} gun burst events and {rounds} gun rounds made")
     log = d.run("log", [d.app, "--recording-log", replay, "--out", d.work / "log"], timeout=60)
     log.expect(r"^Recording log: ", "the debug log")
-    acmi = d.run("acmi", [d.app, "--recording-acmi", replay, "--out", d.work / "net.txt.acmi"], timeout=60)
+    acmi = d.run("acmi", [d.app, "--recording-acmi", replay, "--out", d.work / "net.txt.acmi", "--guns"], timeout=60)
     acmi.expect(r"^Tacview file: ", "the Tacview file")
     for path in (d.work / "log" / "summary.txt", d.work / "log" / "log.jsonl", d.work / "net.txt.acmi"):
         if not path.exists() or path.stat().st_size == 0:
             d.problem(f"{path.name} was not written")
+    if rounds > 0 and "Projectile+Bullet" not in (d.work / "net.txt.acmi").read_text(errors="replace"):
+        d.problem("the Tacview file with --guns shows none of the gun rounds the conversion made")
     twice = []
     for name in ("a", "b"):
         out = d.work / f"{name}.tore-replay"
@@ -1376,7 +1398,8 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-convert-capture", lane="net", args=[], driver=drive_convert, uses=("server", "bot"), timeout=360,
-            notes="a bot's capture of a real flight converts into a replay: read back, the same bytes twice, a cut copy",
+            notes="a bot's capture of a flight at 40,000 ft converts into a replay: read back, with the contrails, motor smoke and "
+            "gun rounds the game makes again, the same bytes twice, a cut copy",
         ),
         Scenario(
             name="net-discovery", lane="net", args=[], driver=drive_discovery, uses=("server",), timeout=120,

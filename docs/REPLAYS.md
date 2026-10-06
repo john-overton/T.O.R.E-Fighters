@@ -367,8 +367,8 @@ tore-app --convert-capture CAPTURE --out MINE.tore-replay
 ```
 
 The command needs the import the capture was made with, since it runs the
-client again. It prints the replay's path, and says so when the capture is cut
-short.
+client again. It prints the replay's path and what it made again (smoke puffs, contrail
+puffs and gun rounds), and says so when the capture is cut short.
 
 What the replay is:
 
@@ -392,6 +392,15 @@ What the replay is:
   replay gives your plane that id and plane 0 yours (the header's
   `net.player_plane` names the plane you flew). With plane 0 as your plane
   nothing differs.
+- **Smoke, contrails and gun rounds are made again.** The host sends none of
+  them, so the game regenerates them as a live client does and writes them the
+  way a single-player recording does: the smoke of missile motors, of aircraft
+  at half their hit points or less and of burning crash sites, the contrails
+  above each aircraft's onset altitude, and the rounds of every gun burst the
+  host reported, the player's own included. The viewer shows them like any
+  other recording's. A gun round's line can differ from the host's within the
+  gun's cone, and a burst that began before the replay's first moment is not
+  there.
 - **Diagnostics.** The replay carries the network figures the client logged:
   a `net.stats` event every second (round trip, loss, snapshot loss and spread,
   input margin, interpolation delay, corrections, mismatches, bytes each way),
@@ -404,8 +413,6 @@ What the replay is:
 
 What is not in it, known limits:
 
-- No smoke trails, contrails or gun rounds: the host does not send them and the
-  conversion does not draw them yet.
 - No cockpit readout, radar or HUD, and no AI thinking trees, reasons or state
   checksums (the client does not have the host's AI).
 - Other aircraft carry no fuel, G or stick (they read 0 lb, 1 G and idle),

@@ -166,6 +166,9 @@ struct Burst {
 
 /// A round of another aircraft, and the burst and tick it was let go at.
 struct Other {
+    /// The round's own number, which stays with it as the rounds before it
+    /// leave the air (a recorded flight keeps a round's identity).
+    serial: u32,
     shooter: u32,
     station: usize,
     burst: u64,
@@ -194,6 +197,8 @@ pub struct Guns {
     /// The host tick other aircraft's rounds have been made to.
     others_tick: u64,
     next_id: u32,
+    /// The number the next round of another aircraft gets.
+    next_serial: u32,
 }
 
 impl Guns {
@@ -245,6 +250,53 @@ impl Guns {
             .enumerate()
             .map(|(i, other)| pose(OTHER_IDS + i as u32, other.shooter, &other.round));
         picture.projectiles.extend(own.chain(others));
+    }
+
+    /// A recorded flight's rounds (docs/ARCHITECTURE.md, "Converting a
+    /// capture into a replay"): every aircraft's bursts, the player's too,
+    /// made and flown to host tick `tick`, one tick at a time. `events` are
+    /// the gun burst events of the tick, `picture` holds every aircraft
+    /// drawn at it (the player's in its targets), and the rounds are read
+    /// with [`Guns::rounds`]. A replay has no trigger, so only bursts make
+    /// rounds.
+    pub fn step_recorded(
+        &mut self,
+        events: &[ReceivedEvent],
+        tick: u64,
+        around: &Around<'_>,
+        picture: &RenderSnapshot,
+    ) {
+        for received in events {
+            if let WireEvent::GunBurst {
+                shooter,
+                station,
+                length,
+            } = &received.event
+            {
+                self.note_burst(
+                    *shooter,
+                    usize::from(*station),
+                    u64::from(received.tick),
+                    *length,
+                );
+            }
+        }
+        self.step_others_to(tick, around, picture);
+    }
+
+    /// The rounds of other aircraft in the air as [`Guns::step_recorded`]
+    /// left them: a number that stays with the round, its shooter, how many
+    /// ticks ago it was let go (`tick` is the tick it was stepped to) and the
+    /// round.
+    pub fn rounds(&self, tick: u64) -> impl Iterator<Item = (u32, u32, u64, &Round)> {
+        self.others.iter().map(move |other| {
+            (
+                OTHER_IDS + other.serial,
+                other.shooter,
+                tick.saturating_sub(other.release),
+                &other.round,
+            )
+        })
     }
 
     /// A burst event of another aircraft: it opens a burst, or closes the open
@@ -361,7 +413,10 @@ impl Guns {
     /// Other aircraft's rounds, from their bursts, up to the host tick the
     /// picture shows.
     fn step_others(&mut self, input: &Inputs<'_>, around: &Around<'_>, picture: &RenderSnapshot) {
-        let now = input.render_tick.max(0.) as u64;
+        self.step_others_to(input.render_tick.max(0.) as u64, around, picture);
+    }
+
+    fn step_others_to(&mut self, now: u64, around: &Around<'_>, picture: &RenderSnapshot) {
         if self.others_tick == 0 || now < self.others_tick {
             self.others_tick = now;
         }
@@ -418,7 +473,9 @@ impl Guns {
                     around,
                     &mut self.next_id,
                 ) {
+                    self.next_serial = self.next_serial.wrapping_add(1);
                     self.others.push(Other {
+                        serial: self.next_serial,
                         shooter: burst.shooter,
                         station: burst.station,
                         burst: burst.first,

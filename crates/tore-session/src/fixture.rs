@@ -57,14 +57,18 @@ fn build() -> BuildId {
 /// after both are seated, over a link with a 150 ms round trip and 2 percent
 /// loss, and leave with their debriefs.
 pub fn bot_fight(seconds: u64) -> Fight {
+    bot_fight_at(seconds, 10_000)
+}
+
+/// [`bot_fight`] starting `altitude_ft` high: above about 35,000 feet every
+/// aircraft leaves contrails.
+pub fn bot_fight_at(seconds: u64, altitude_ft: u32) -> Fight {
     let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
     spec.wings[0].count = 2;
     spec.wings[3].count = 2;
     spec.wings[3].skill = Skill::Average;
     spec.separation_nm = 2;
-    spec.start = Start::Airborne {
-        altitude_ft: 10_000,
-    };
+    spec.start = Start::Airborne { altitude_ft };
     let net = SimNetwork::new(21);
     net.set_default_link(LinkConfig::for_round_trip(
         Duration::from_millis(150),

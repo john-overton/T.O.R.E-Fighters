@@ -1124,7 +1124,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | A dedicated server's King | None by default; `king first-player` makes the first player King, and the mission can be locked |
 | Realism in flight | Fixed for the flight: no in-flight Cheat menu changes, so every client's prediction stays exact |
 | Phase 2 keys | Replies Alt+Shift+E (Engaging), Alt+Shift+W (Winchester), Alt+Shift+B (Bingo fuel), Alt+Shift+H (Need help); K the score board; U and Ctrl+T as retail; Enter flies again after a loss |
-| Converted replays' effects | John, 2026-10-05: a replay converted from a capture shows smoke, contrails and gun rounds, regenerated as the live client does (a follow-up to the conversion) |
+| Converted replays' effects | John, 2026-10-05: a replay converted from a capture shows smoke, contrails and gun rounds, regenerated as the live client does (a follow-up to the conversion; built, slice E2) |
 | Whose plane a converted replay follows | John, 2026-10-05: the conversion swaps plane numbers so the player's plane is plane 0, as the viewer expects, and records the real plane in the header; the viewer learns to follow any seat with the observer screen, which needs it anyway |
 | A converted replay checked by ear and eye | John watches a converted replay of a real two-player flight, with sound, once the conversion is merged |
 | Checkpoints and presentation | John, 2026-10-05: smoke, contrail and flare puffs are coded exactly in a checkpoint; revisited only if the measured size is over the budget |

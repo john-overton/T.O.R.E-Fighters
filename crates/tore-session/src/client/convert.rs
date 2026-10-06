@@ -744,6 +744,18 @@ impl Conversion {
         header: &replay::Header,
         path: &Path,
     ) -> Result<Written, ConvertError> {
+        self.write_with(flight, header, path, &mut Nothing)
+    }
+
+    /// [`Conversion::write`] with `regenerate` adding to every frame before
+    /// it is written (the game's smoke, contrails and gun rounds).
+    pub fn write_with(
+        &self,
+        flight: &FlightInfo,
+        header: &replay::Header,
+        path: &Path,
+        regenerate: &mut dyn Regenerate,
+    ) -> Result<Written, ConvertError> {
         let mut writer = replay::Writer::create(path, header)?;
         for info in self.roster(flight) {
             writer.register_aircraft(&info)?;
@@ -752,8 +764,11 @@ impl Conversion {
             writer.register_weapon(&weapon)?;
         }
         let mut frames = 0u64;
-        self.frames(flight, &mut |frame| {
+        self.frames(flight, &mut |mut frame| {
             frames += 1;
+            for weapon in regenerate.frame(&mut frame) {
+                writer.register_weapon(&weapon)?;
+            }
             writer.push(&frame)
         })?;
         let finished = writer.finish(&self.footer(flight))?;
@@ -766,6 +781,29 @@ impl Conversion {
                 .cut
                 .filter(|_| flight.index + 1 == self.observed.flights.len()),
         })
+    }
+}
+
+/// What a caller adds to a flight's frames as they are written: the effects
+/// the host does not send and the client makes again from the picture (smoke,
+/// contrails and gun rounds, `replay/net_effects.rs` in the game). The
+/// conversion hands over every frame in tick order, built and complete, and
+/// writes what comes back. It must be a pure function of the frames it is
+/// given, so converting twice gives the same bytes.
+pub trait Regenerate {
+    /// Adds to `frame` (`new_puffs`, `projectiles`) and returns the weapons
+    /// its projectiles name that the conversion did not register, which the
+    /// writer registers before the frame (a weapon returned again is the same
+    /// weapon).
+    fn frame(&mut self, frame: &mut replay::Frame) -> Vec<replay::WeaponInfo>;
+}
+
+/// Adds nothing: a conversion without regenerated effects.
+struct Nothing;
+
+impl Regenerate for Nothing {
+    fn frame(&mut self, _: &mut replay::Frame) -> Vec<replay::WeaponInfo> {
+        Vec::new()
     }
 }
 

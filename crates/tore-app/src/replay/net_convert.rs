@@ -4,7 +4,10 @@
 //! docs/REPLAYS.md, "Network flights"). The conversion itself is
 //! `tore_session::client::convert`; this module names the files, builds the
 //! header's world from the mission and says what happened.
-use super::{identity, library};
+use super::{
+    identity, library,
+    net_effects::{self, NetEffects, Tally},
+};
 use crate::AppResult;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,6 +23,9 @@ pub type Resources = Arc<BTreeMap<String, Vec<u8>>>;
 pub struct Converted {
     /// A replay for each flight the capture holds, in flight order.
     pub written: Vec<Written>,
+    /// What the game added to each replay: the smoke, contrails and gun
+    /// rounds the host does not send.
+    pub effects: Vec<Tally>,
     /// The capture ended inside a record, or without an end, at this point.
     pub cut: Option<convert::Cut>,
 }
@@ -89,7 +95,7 @@ pub fn convert(
 ) -> Result<Converted, String> {
     let bytes = std::fs::read(capture)
         .map_err(|error| format!("{}: cannot read it: {error}", capture.display()))?;
-    let conversion = convert::observe(&bytes, resources)
+    let conversion = convert::observe(&bytes, Arc::clone(&resources))
         .map_err(|error| format!("{}: {error}", capture.display()))?;
     let flights = conversion.flights();
     if flights.is_empty() {
@@ -111,6 +117,7 @@ pub fn convert(
         .unwrap_or(UNIX_EPOCH);
     let recorded_at = named.map_or_else(String::new, library::utc_text);
     let mut written = Vec::new();
+    let mut tallies = Vec::new();
     for (n, flight) in flights.iter().enumerate() {
         let layout = world.layout.trim_end_matches(".MM").to_owned();
         let aircraft = flight
@@ -124,11 +131,13 @@ pub fn convert(
             crate::version::commit(),
             &recorded_at,
         );
-        let done = write_flight(&conversion, flight, &header, &path)?;
+        let (done, tally) = write_flight(&conversion, flight, &header, &path, &resources)?;
         written.push(done);
+        tallies.push(tally);
     }
     Ok(Converted {
         written,
+        effects: tallies,
         cut: conversion.cut,
     })
 }
@@ -138,16 +147,33 @@ fn write_flight(
     flight: &FlightInfo,
     header: &tore_replay::Header,
     path: &Path,
-) -> Result<Written, String> {
-    conversion
-        .write(flight, header, path)
+    resources: &Resources,
+) -> Result<(Written, Tally), String> {
+    // The smoke, contrails and gun rounds the host does not send, made again
+    // as a live client makes them (slice E2).
+    let mut effects = conversion.mission().map(|world| {
+        NetEffects::new(
+            world,
+            resources,
+            net_effects::model_outlets(resources),
+            header,
+            &conversion.roster(flight),
+            &conversion.weapons(flight),
+        )
+    });
+    let written = match effects.as_mut() {
+        Some(effects) => conversion.write_with(flight, header, path, effects),
+        None => conversion.write(flight, header, path),
+    };
+    written
+        .map(|done| (done, effects.map(|e| e.tally()).unwrap_or_default()))
         .map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// What a conversion says in words, a line each.
 pub fn report(capture: &Path, converted: &Converted) -> Vec<String> {
     let mut lines = Vec::new();
-    for done in &converted.written {
+    for (n, done) in converted.written.iter().enumerate() {
         lines.push(format!(
             "Replay: {} ({} frames, {:.1} s, {} aircraft)",
             done.path.display(),
@@ -155,6 +181,12 @@ pub fn report(capture: &Path, converted: &Converted) -> Vec<String> {
             done.seconds,
             done.aircraft
         ));
+        if let Some(tally) = converted.effects.get(n) {
+            lines.push(format!(
+                "Made again: {} smoke puffs, {} contrail puffs, {} gun rounds",
+                tally.smoke, tally.contrails, tally.rounds
+            ));
+        }
     }
     if let Some(cut) = converted.cut {
         lines.push(format!(
@@ -331,6 +363,44 @@ mod tests {
         std::fs::write(&bad, b"not a capture at all").unwrap();
         let error = convert(&bad, None, Arc::clone(&fight.resources)).unwrap_err();
         assert!(error.contains("not a capture"), "{error}");
+    }
+
+    #[test]
+    fn the_games_conversion_carries_gun_rounds_and_gives_the_same_bytes_twice() {
+        let fight = bot_fight(12);
+        let dir = TempDir::new("net-convert-twice");
+        let capture = capture_in(&dir, &fight);
+        let mut bytes = Vec::new();
+        let mut converted = Vec::new();
+        for name in ["a", "b"] {
+            let out = dir.path().join(format!("{name}.tore-replay"));
+            converted.push(convert(&capture, Some(&out), Arc::clone(&fight.resources)).unwrap());
+            bytes.push(std::fs::read(out).unwrap());
+        }
+        assert!(
+            bytes[0] == bytes[1],
+            "the same capture gave different bytes"
+        );
+        assert_eq!(converted[0].effects, converted[1].effects);
+        let recording = tore_replay::Recording::open(dir.path().join("a.tore-replay")).unwrap();
+        let mut ids = std::collections::BTreeSet::new();
+        for frame in recording.frames(0, u64::MAX) {
+            ids.extend(frame.unwrap().projectiles.iter().map(|p| p.id));
+        }
+        assert!(ids.len() > 5, "the host's bursts are drawn: {}", ids.len());
+        // The tally counts every round once and the report says so.
+        assert_eq!(converted[0].effects[0].rounds, ids.len() as u64);
+        let lines = report(&capture, &converted[0]);
+        assert!(
+            lines[1].starts_with("Made again: ")
+                && lines[1].ends_with(&format!("{} gun rounds", ids.len())),
+            "{lines:?}"
+        );
+        assert!(
+            recording
+                .weapons()
+                .any(|w| w.class == tore_replay::WeaponClass::Gun)
+        );
     }
 
     #[test]
