@@ -53,8 +53,8 @@ fn import() -> Arc<BTreeMap<String, Vec<u8>>> {
     Arc::new(resources())
 }
 
-/// The real master on 127.0.0.1, on ports of its own, with its relay on or
-/// off, turned by the test.
+/// The real master on 127.0.0.1, on two ports of its own (the probe port at
+/// the main port + 1), with its relay on or off, turned by the test.
 struct Master {
     running: Running,
     main: SocketAddr,
@@ -63,12 +63,9 @@ struct Master {
 impl Master {
     fn start(relay: bool) -> Self {
         let mut config = Config::defaults(std::path::Path::new("."));
-        config.listen = Listen::Address(Ipv4Addr::LOCALHOST.into());
-        config.port = 0;
-        config.probe_port = 0;
         config.status_interval = 0;
         config.settings.relay.on = relay;
-        let (running, _) = Running::bind(config, Entropy::System, false).expect("a master");
+        let running = crate::net::browse::testing::bind_on_loopback(config);
         let main = running.main_addresses()[0];
         Self { running, main }
     }

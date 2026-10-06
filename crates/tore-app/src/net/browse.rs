@@ -505,8 +505,33 @@ pub(crate) mod testing {
     use tore_net::master::{MasterPacket, Register};
     use tore_net::packet::DiscoverPhase;
 
-    /// The real master, `tore_master::run::Running`, on 127.0.0.1 and a
-    /// port of its own, turned by hand.
+    /// `config`'s master bound on 127.0.0.1 with its probe port at the main
+    /// port + 1, as the game takes it to be (`tore_net::master::probe_address`).
+    /// With no probe port, the next socket a test binds can take the main
+    /// port + 1 (Windows hands out ports in order), and the game then reads
+    /// that socket's datagrams as the master's and sends it the mapping
+    /// test's Probe (CI-fix).
+    pub fn bind_on_loopback(mut config: Config) -> Running {
+        config.listen = Listen::Address(std::net::Ipv4Addr::LOCALHOST.into());
+        for _ in 0..50 {
+            let free = UdpSocket::bind("127.0.0.1:0").and_then(|s| s.local_addr());
+            let Ok(port) = free.map(|address| address.port()) else {
+                continue;
+            };
+            let Some(probe) = port.checked_add(1) else {
+                continue;
+            };
+            config.port = port;
+            config.probe_port = probe;
+            if let Ok((running, _)) = Running::bind(config.clone(), Entropy::System, false) {
+                return running;
+            }
+        }
+        panic!("no two free ports in a row on 127.0.0.1");
+    }
+
+    /// The real master, `tore_master::run::Running`, on 127.0.0.1 with its
+    /// two ports, turned by hand.
     pub struct LoopbackMaster {
         running: Running,
         /// Where it listens.
@@ -515,11 +540,7 @@ pub(crate) mod testing {
 
     impl LoopbackMaster {
         pub fn start() -> Self {
-            let mut config = Config::defaults(Path::new("."));
-            config.listen = Listen::Address(std::net::Ipv4Addr::LOCALHOST.into());
-            config.port = 0;
-            config.probe_port = 0;
-            let (running, _) = Running::bind(config, Entropy::System, false).unwrap();
+            let running = bind_on_loopback(Config::defaults(Path::new(".")));
             let main = running.main_addresses()[0];
             Self { running, main }
         }
