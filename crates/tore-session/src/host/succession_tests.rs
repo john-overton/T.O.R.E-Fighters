@@ -769,8 +769,6 @@ fn the_candidates_part_round_trips_and_restores_into_a_fresh_host() {
     fresh.host.restore_candidates(&restored);
     assert_eq!(fresh.host.succession.measures, rig.host.succession.measures);
     assert_eq!(fresh.host.succession.house_upload, restored.house_upload);
-    assert!(fresh.host.take_candidates_changed());
-    assert!(!fresh.host.take_candidates_changed());
 }
 
 #[test]

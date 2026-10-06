@@ -11,8 +11,9 @@
 //!   **revivals** (`revive_state.rs`).
 //!
 //! Slice K5 codes the rejoin part (tokens and the reservation table, F2-A's
-//! away planes included); slices K6 (candidates) and K8
-//! (listing) code theirs. The coders use the checkpoint trait and destructure
+//! away planes included), slice K6 the candidates part (each player's
+//! report and measures, `succession_state.rs`); the listing part is K8's,
+//! coded by the hosting thread's `HostListing` outside `Host`. The coders use the checkpoint trait and destructure
 //! every field, so a field added to the state a part codes fails to compile
 //! until it is coded or skipped with its class, as stage H's checkpoint
 //! coders do. A part's bytes are this build's own, as a checkpoint's are.
@@ -45,14 +46,15 @@ use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Models, Saver, i
 use tore_world::mission::MissionSpec;
 use tore_world::seats::SeatId;
 
-/// The parts slice K1 codes, in the order they go into the stream.
-pub(super) const JOURNALED: [Part; 6] = [
+/// The parts the host journals, in the order they go into the stream.
+pub(super) const JOURNALED: [Part; 7] = [
     Part::Players,
     Part::Session,
     Part::Court,
     Part::Scores,
     Part::Revivals,
     Part::Rejoin,
+    Part::Candidates,
 ];
 
 pub(super) type Result<T> = std::result::Result<T, CheckpointError>;
@@ -384,9 +386,8 @@ impl Host {
                 to_bytes(|s| super::revive::state::save_revivals(s, &saving, &self.revival))
             }
             Part::Rejoin => to_bytes(|s| super::rejoin::save_rejoin(s, &self.rejoin)),
-            Part::Candidates | Part::Listing => {
-                tore_sim::checkpoint::not_covered("the candidates and listing parts")
-            }
+            Part::Candidates => self.candidates_part().encode(),
+            Part::Listing => tore_sim::checkpoint::not_covered("the listing part"),
         }
     }
 
@@ -469,9 +470,13 @@ impl Host {
                 rejoin.carry_clock(session_clock, self.now);
             }
             Part::Players => return invalid("the players part restores on its own"),
-            Part::Candidates | Part::Listing => {
-                return tore_sim::checkpoint::not_covered("the candidates and listing parts");
+            Part::Candidates => {
+                // By join order and with no moment in it: nothing to move.
+                let restored =
+                    super::succession::state::CandidatesPart::decode(bytes)?.restore()?;
+                self.restore_candidates(&restored);
             }
+            Part::Listing => return tore_sim::checkpoint::not_covered("the listing part"),
         }
         for (id, order) in restoring.handed {
             self.journal.orders.insert(id, order);

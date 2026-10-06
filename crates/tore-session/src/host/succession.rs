@@ -199,8 +199,6 @@ pub(super) struct Succession {
     /// The game should move to this player in the lobby (slice K4 hands
     /// over); by join order.
     move_to: Option<u64>,
-    /// The candidates state part changed since it was last taken.
-    changed: bool,
     /// The last Succession sent.
     #[allow(dead_code)] // Read by `send_succession`, slice K3's.
     sent: Option<SuccessionMessage>,
@@ -295,7 +293,6 @@ impl Host {
             }
             measure.report = Some(report.clone());
             self.succession.reach_due |= addresses || report.may_host;
-            self.succession.changed = true;
         }
         Ok(())
     }
@@ -337,7 +334,6 @@ impl Host {
                 measure.reached_by.insert(tester, reached);
             }
         }
-        self.succession.changed = true;
         Ok(())
     }
 
@@ -464,18 +460,14 @@ impl Host {
         }
     }
 
-    /// Whether the candidates state part changed since the last call.
-    #[allow(dead_code)] // Slices K3 and K4 call it; until then the tests do.
-    pub(crate) fn take_candidates_changed(&mut self) -> bool {
-        std::mem::take(&mut self.succession.changed)
-    }
-
     // ----- The timers --------------------------------------------------
 
     /// What is due at `now`: players gone and joined, the pin's fallback,
     /// the reach and upload tests, the house's flight figure, the lobby's
     /// move and the King's warnings. Called from [`Host::update`].
     pub(super) fn succession_update(&mut self, now: Duration) {
+        // A dedicated server only forgets the players who left.
+        self.note_candidates();
         if self.config.house.is_none() {
             return;
         }
@@ -483,7 +475,6 @@ impl Host {
         if !lobby && !matches!(self.life, Life::Flying) {
             return;
         }
-        self.note_candidates();
         self.pin_update();
         self.reach_update(now);
         if lobby {
@@ -535,7 +526,6 @@ impl Host {
             }
         }
         self.succession.reach_due |= joined;
-        self.succession.changed = true;
         self.succession.present = present;
     }
 
@@ -566,7 +556,6 @@ impl Host {
                     .is_ok()
                 {
                     self.lobby_dirty = true;
-                    self.succession.changed = true;
                     self.tell_king_line(words::pin_left(&callsign));
                 }
             }
@@ -587,7 +576,6 @@ impl Host {
                     }
                 }
             }
-            self.succession.changed = true;
         }
         if self.succession.reach.is_some()
             || !self.succession.reach_due
@@ -700,7 +688,6 @@ impl Host {
                 });
             }
             self.succession.last_upload = Some(now);
-            self.succession.changed = true;
         }
         if self
             .succession
@@ -791,7 +778,6 @@ impl Host {
                 players,
                 per_mille: (mean * 1_000.).round().clamp(0., 1_000.) as u16,
             });
-            self.succession.changed = true;
         }
     }
 

@@ -186,9 +186,6 @@ pub(in crate::host) struct Restored {
     pub(in crate::host) pinned: Option<String>,
 }
 
-// Slices K3 (the State record) and K4 (`Host::resume`) call these; until
-// they land only the tests do.
-#[allow(dead_code)]
 impl CandidatesPart {
     /// The part's bytes, as a State record carries them.
     pub(in crate::host) fn encode(&self) -> Result<Vec<u8>, CheckpointError> {
@@ -225,11 +222,10 @@ impl CandidatesPart {
     }
 }
 
-#[allow(dead_code)]
 impl Host {
     /// The candidates state part as it stands (stage K): every connected
-    /// player's report and measures by join order (slice K3 sends it after
-    /// the tick in which [`Host::take_candidates_changed`] says it changed).
+    /// player's report and measures by join order. The journal sends it
+    /// after the tick in which its coding changed (`state::JOURNALED`).
     pub(in crate::host) fn candidates_part(&self) -> CandidatesPart {
         let players = self
             .live_peers()
@@ -243,7 +239,10 @@ impl Host {
                     upload: measure.and_then(|m| m.upload).map(UploadPart::from),
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let mut players = players;
+        // In join order, whatever the connections' ids on this host.
+        players.sort_by_key(|p: &PlayerPart| p.order);
         CandidatesPart {
             players,
             house_upload: self.succession.house_upload.map(UploadPart::from),
@@ -260,6 +259,11 @@ impl Host {
             .map(|(order, (_, measure))| (*order, measure.clone()))
             .collect();
         self.succession.house_upload = restored.house_upload;
-        self.succession.changed = true;
+        // The pinned player's callsign, under the pin the session part
+        // restored.
+        self.succession.pinned = restored
+            .pinned
+            .clone()
+            .and_then(|callsign| Some((self.settings.pinned_host()?, callsign)));
     }
 }
