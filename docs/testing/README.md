@@ -37,6 +37,29 @@ The pre-push hook stays as it is. The full battery and the seeded fuzz games are
 part of any routine: run them when a release is near, or when you change something
 broad and want the whole picture.
 
+### Large projects: commit locally, push at the end
+
+John, 2026-10-06, for large project items (a milestone's remaining stages, a
+long run of slices): work locally until the whole project is finished, then
+test it as a whole and push once.
+
+1. **Commit locally, in logical order.** Each slice lands on the project's
+   integration branch as small commits that build, in the order the work
+   depends on. Nothing is pushed while the project runs, so CI does not queue
+   a run for every merge.
+2. **Micro tests per change.** Each change runs only the tests for what it
+   touched: the quick check, the touched crates' tests, the battery scenarios
+   the change can affect, and the single-player baseline when it touches
+   simulation code. Every new test is added to the suite and listed in the
+   project's test ledger, so the final run covers it.
+3. **When the project is finished, run the battery.** The whole battery with
+   `TORE_AI_FUZZ=all`, the network tests outside the battery and the ignored
+   tests the ledger lists, and the single-player baseline. Fix what it finds
+   locally.
+4. **Then push, and work through CI.** One push (the pre-push hook runs the
+   check list), then fix whatever CI finds on the other platforms, each fix a
+   further commit.
+
 ### Per change: the quick check
 
 ```sh
