@@ -10304,16 +10304,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 "ejection={:?} pilot_alive={} pilot_position={:?}",
                 pilot.phase, !state.systems.pilot.dead, pilot.position
             );
-        }
-        // A two-seater's second crew member comes down on his own chute.
-        if let Some(crew) = &state.crew_escape {
-            println!(
-                "crew_ejection={:?} crew_position={:?}",
-                crew.phase, crew.position
-            );
-        }
-        if state.model().configuration().multi_crew {
-            println!("two_seater=true");
+            // A two-seater's second crew member comes down on his own chute.
+            if let Some(crew) = &state.crew_escape {
+                println!(
+                    "crew_ejection={:?} crew_position={:?}",
+                    crew.phase, crew.position
+                );
+            }
+            if state.model().configuration().multi_crew {
+                println!("two_seater=true");
+            }
         }
         return Ok(Outcome::Done);
     }
