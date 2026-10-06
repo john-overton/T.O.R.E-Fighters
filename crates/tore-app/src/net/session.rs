@@ -760,6 +760,12 @@ pub struct NetSession {
     /// The game sent its rejoin token (in the Challenge answer, or after the
     /// join in a Rejoin), or has no need to: it is done once for a session.
     rejoin_tried: bool,
+    /// The tokens the game's file held when the session started. A Rejoin
+    /// by session reads this and not the file: the token the host grants a
+    /// newly joined player can reach the client with the Accepted, before
+    /// the game reads it, and replaces the session's old entry in the file
+    /// (slice B8).
+    earlier: Store,
     /// The standby could not be started; the game carries on without one.
     standby_failed: bool,
     /// The game hosts and a standby is ready to take the game over (the
@@ -891,17 +897,15 @@ impl NetSession {
             Transport::Link(_) => String::new(),
             _ => server.to_string(),
         };
-        // A token held for a game joined at this address before (a game the
-        // list found has its own, by session, from the screen).
-        let token = token.or_else(|| {
-            (!address.is_empty())
-                .then(|| {
-                    Store::load(data, tore_session::client::rejoin::unix_now())
-                        .for_address(&address)
-                        .map(|entry| entry.kept.token)
-                })
-                .flatten()
-        });
+        // The tokens the game holds now: the one kept for this address, and
+        // later the one kept for the host's session (a game the list found
+        // has its own, by session, from the screen).
+        let earlier = if address.is_empty() {
+            Store::default()
+        } else {
+            Store::load(data, tore_session::client::rejoin::unix_now())
+        };
+        let token = token.or_else(|| earlier.for_address(&address).map(|entry| entry.kept.token));
         let clock = RealClock::new();
         let now = clock.now();
         // A join through the master races the host's addresses.
@@ -997,6 +1001,7 @@ impl NetSession {
             // Options panels (on by default).
             may_host: crate::net::settings::Remembered::load(data).may_host,
             rejoin_tried: token.is_some(),
+            earlier,
             standby_failed: false,
             standby_ready: false,
             candidate_set: false,
@@ -1317,8 +1322,7 @@ impl NetSession {
         if std::mem::replace(&mut self.rejoin_tried, true) {
             return;
         }
-        let store = Store::load(&self.data, tore_session::client::rejoin::unix_now());
-        if let Some(entry) = store.for_session(session_id) {
+        if let Some(entry) = self.earlier.for_session(session_id) {
             log::info!("Network: rejoining session {session_id:016x} with the token kept for it");
             self.net_line("rejoin", &format!("{session_id:016x}"));
             self.client.rejoin(entry.kept.token);

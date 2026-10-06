@@ -227,6 +227,9 @@ fn a_token_found_only_by_session_is_sent_after_the_join() {
         "the host grants a token"
     );
     let granted: KeptToken = first.client.token().cloned().expect("a token");
+    // The game stops without a goodbye (nothing here sends one), so the
+    // host still lists the player as connected when the same game joins
+    // again: the new connection replaces the old.
     drop(first);
     hosted.run_until(&mut [], Duration::from_secs(1), |_, _| false);
     // The same token, kept for another address (the game was found another
@@ -242,6 +245,52 @@ fn a_token_found_only_by_session_is_sent_after_the_join() {
             welcomed(seen)
         }),
         "the player is welcomed back after the join"
+    );
+}
+
+/// The token the host grants a newly joined game can reach the client with
+/// the Accepted, before the game reads that the join was accepted, and the
+/// client's store then holds the new token for the host's session in place
+/// of the one the game came with. The Rejoin must still send the token the
+/// game held when it started (B8: a macOS CI run lost the player this way).
+/// Simulated exactly, with no timing: the file is rewritten as the grant
+/// rewrites it, before the session has read anything.
+#[test]
+fn a_token_the_host_grants_first_does_not_replace_the_one_to_send() {
+    let data = Data::new("granted-first");
+    let mut hosted = Hosted::start();
+    let mut first = hosted.join(&data, "Viper");
+    assert!(
+        hosted.run_until(&mut [&mut first], Duration::from_secs(10), |s, _| s[0]
+            .client
+            .token()
+            .is_some()),
+        "the host grants a token"
+    );
+    let granted: KeptToken = first.client.token().cloned().expect("a token");
+    drop(first);
+    hosted.run_until(&mut [], Duration::from_secs(1), |_, _| false);
+    let mut store = Store::default();
+    store.keep(granted.clone(), "203.0.113.9:26900");
+    store.save(&data.0).unwrap();
+
+    let mut second = hosted.join(&data, "Viper");
+    // The grant of the new connection, as the client's store keeps it: a
+    // token of the host's session that is not the player's own.
+    let mut file = Store::load(&data.0, unix_now());
+    file.keep(
+        KeptToken {
+            token: tore_net::Token(granted.token.0 ^ 0xffff),
+            ..granted.clone()
+        },
+        &hosted.server.to_string(),
+    );
+    file.save(&data.0).unwrap();
+    assert!(
+        hosted.run_until(&mut [&mut second], Duration::from_secs(10), |_, seen| {
+            welcomed(seen)
+        }),
+        "the player is welcomed back with the token it held at the start"
     );
 }
 

@@ -683,6 +683,51 @@ fn a_game_that_joined_without_its_token_sends_a_rejoin_and_is_the_player_again()
     no_errors(&rig);
 }
 
+/// A game that joined without its token (a typed address) and sends it in a
+/// Rejoin while the host still lists its old connection: the new connection
+/// replaces the old, same player and same plane (slice B8; the Challenge
+/// answer's case is the test above).
+#[test]
+fn a_late_rejoin_replaces_the_old_connection_the_host_still_lists() {
+    let (mut rig, _, viper, _) = trio();
+    let token = token_of(&rig, viper);
+    let order = peer(&rig, "Viper").lobby.order;
+    let back = rig.join(|c| {
+        c.callsign = "Viper".into();
+    });
+    rig.clients[back].ready = None;
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.clients[back].lobby.is_some()
+    }));
+    // The old connection has said nothing and is still listed.
+    assert!(!rig.closed(viper));
+    rig.clients[back].send(&Message::Rejoin(token));
+    assert!(rig.run_until(Duration::from_secs(4), |r| r.closed(viper)));
+    assert!(
+        rig.clients[back]
+            .notices
+            .iter()
+            .any(|n| n.starts_with("Welcome back, Viper")),
+        "{:?}",
+        rig.clients[back].notices
+    );
+    assert_eq!(peer(&rig, "Viper").lobby.order, order);
+    assert_eq!(
+        rig.host
+            .peers
+            .values()
+            .filter(|p| p.callsign == "Viper")
+            .count(),
+        1
+    );
+    // The old connection's plane is the player's: Join takes it again.
+    rig.clients[back].take(None);
+    assert!(reseated(&mut rig, back));
+    assert_eq!(rig.clients[back].seated.as_ref().unwrap().plane, 0);
+    assert!(refused(&rig, back, kind::REJOIN).is_empty());
+    no_errors_except_closed(&rig, viper);
+}
+
 #[test]
 fn scores_and_lives_follow_the_token_and_a_kick_clears_them() {
     let (mut rig, _, viper, _) = trio();
