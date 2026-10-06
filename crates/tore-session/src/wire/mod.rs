@@ -50,6 +50,8 @@ mod bits;
 mod flat;
 
 #[cfg(test)]
+mod compat_tests;
+#[cfg(test)]
 mod fuzz_tests;
 #[cfg(test)]
 mod golden_tests;
@@ -80,8 +82,10 @@ pub use tore_net::Platform;
 /// random stream, 7 since each player's platform (the Challenge answer and
 /// the lobby's player list), 8 since stage F phase 2's messages, settings,
 /// slot locks and wing replies (F2-0), 9 since the transport's Punch packet
-/// and the path byte of the Challenge answer (stage J's slice J2).
-pub const PROTOCOL_VERSION: u16 = 9;
+/// and the path byte of the Challenge answer (stage J's slice J2), 10 since
+/// stage L's Content and Content gaps messages and each lobby player's
+/// Fighters Anthology build (slice L2).
+pub const PROTOCOL_VERSION: u16 = 10;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

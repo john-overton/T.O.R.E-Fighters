@@ -49,10 +49,11 @@ fn every_new_kind_names_its_message_and_its_direction() {
             "kind {k}"
         );
     }
-    // Kinds 23, 24 and 27 to 36, with chat's between.
+    // Kinds 23, 24 and 27 to 36, with chat's between; 37 and 38 are
+    // stage L's (protocol 10).
     assert_eq!((kind::PASS_CROWN, kind::SETTINGS), (23, 24));
     assert_eq!((kind::SLOT_LOCK, kind::BACK), (27, 36));
-    assert!(invalid(37, &[]));
+    assert!(invalid(39, &[]));
 }
 
 #[test]

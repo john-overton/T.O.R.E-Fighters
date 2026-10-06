@@ -7,7 +7,7 @@ use crate::widgets::KitSource;
 use tore_formats::aircraft::AircraftId;
 use tore_session::wire::Platform;
 use tore_session::wire::chat::{ChatFrom, Receiver, Standing};
-use tore_session::wire::messages::{LobbyPhase, LobbyPlayer, LobbySlot, Lock, StartRule};
+use tore_session::wire::messages::{Build, LobbyPhase, LobbyPlayer, LobbySlot, Lock, StartRule};
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
@@ -56,6 +56,11 @@ pub(crate) fn player(id: u8, name: &str, slot: Option<u32>) -> LobbyPlayer {
             1 => Platform::Linux,
             2 => Platform::Windows,
             _ => Platform::MacOs,
+        },
+        build: match id % 3 {
+            1 => Build::V102F,
+            2 => Build::V10,
+            _ => Build::Unknown,
         },
     }
 }

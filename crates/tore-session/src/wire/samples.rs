@@ -10,7 +10,8 @@ use super::entity::{
 use super::events::{EventsSection, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
 use super::messages::{
-    ContentRefused, Debrief, DebriefObjective, DebriefPilot, EndReason, Goodbye, Kick, Loadout,
+    Build, Content, ContentGaps, ContentItem, ContentRefused, Debrief, DebriefObjective,
+    DebriefPilot, EndReason, Gap, GapPlayer, Goodbye, Importer, ItemKind, Kick, Loadout,
     LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, Message, Mission, MissionEnded, Names,
     Observe, ObserverFlight, Observing, PasswordChange, PilotStatus, PlayerScore, ResultRow,
     ResultStatus, Results, Revival, Roster, RosterPilot, RosterPlane, Scores, Seated, SetReady,
@@ -669,6 +670,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
     ]
     .into_iter()
     .chain(phase_two_messages())
+    .chain(compatibility_messages())
     .collect()
 }
 
@@ -872,9 +874,10 @@ pub fn phase_two_messages() -> Vec<Message> {
 }
 
 /// A lobby with a King, a player flying, one unable, one more waiting, and
-/// three slots: the four players cover every platform, the slots every lock,
-/// the players every observing and away mark, and the settings are PvP's
-/// defaults (protocol 8).
+/// three slots: the four players cover every platform and every Fighters
+/// Anthology build (protocol 10), the slots every lock, the players every
+/// observing and away mark, and the settings are PvP's defaults (protocol
+/// 8).
 pub fn lobby() -> LobbyState {
     LobbyState {
         name: "Viper's game".into(),
@@ -897,6 +900,7 @@ pub fn lobby() -> LobbyState {
                 away: false,
                 unable: None,
                 platform: Platform::Linux,
+                build: Build::V102F,
             },
             LobbyPlayer {
                 id: 1,
@@ -909,6 +913,7 @@ pub fn lobby() -> LobbyState {
                 away: false,
                 unable: None,
                 platform: Platform::Windows,
+                build: Build::V10,
             },
             LobbyPlayer {
                 id: 3,
@@ -921,6 +926,7 @@ pub fn lobby() -> LobbyState {
                 away: true,
                 unable: Some("Your game data differs".into()),
                 platform: Platform::MacOs,
+                build: Build::Unknown,
             },
             LobbyPlayer {
                 id: 4,
@@ -933,6 +939,7 @@ pub fn lobby() -> LobbyState {
                 away: true,
                 unable: None,
                 platform: Platform::Unknown,
+                build: Build::V102F,
             },
         ],
         slots: vec![
@@ -1167,4 +1174,108 @@ pub fn readout_snapshots() -> (Vec<u8>, Vec<u8>) {
         .snapshot_with_readout(&header(404), &[], Some(&second), 0)
         .unwrap();
     (packet.snapshot, later.snapshot)
+}
+
+/// A content of every item kind, sorted as the wire wants it, from a 1.02F
+/// import made by a known T.O.R.E (protocol 10).
+pub fn content() -> Content {
+    let item = |kind: ItemKind, key: &str, digest: u64| ContentItem {
+        kind,
+        key: key.into(),
+        digest,
+    };
+    Content {
+        build: Build::V102F,
+        importer: Some(Importer {
+            version: "0.1.4".into(),
+            commit: "48d62dac".into(),
+        }),
+        items: vec![
+            item(ItemKind::Aircraft, "F18.PT", 0x0123_4567_89AB_CDEF),
+            item(ItemKind::Aircraft, "SU27.PT", 0xFEDC_BA98_7654_3210),
+            item(ItemKind::Aircraft, "faxx", 1),
+            item(ItemKind::Theater, "UKR", 0x8000_0000_0000_0000),
+            item(ItemKind::Theater, "VIET", u64::MAX),
+            item(ItemKind::Weapon, "AGM65G.JT", 0),
+            item(ItemKind::Weapon, "AIM9X.JT", 0x1234_5678_9ABC_DEF0),
+            item(ItemKind::Shared, "", 0xCBF2_9CE4_8422_2325),
+        ],
+    }
+}
+
+/// Content gaps of each shape: a player lacking an aircraft, two players
+/// of whom one has a weapon with another digest, an item the host lacks
+/// that names nobody, and the shared item (protocol 10).
+pub fn content_gaps() -> ContentGaps {
+    let lacks = |id: u8| GapPlayer { id, differs: false };
+    ContentGaps {
+        host_build: Build::V10,
+        host_importer: Some(Importer {
+            version: "0.1.3".into(),
+            commit: "fb9c2ec".into(),
+        }),
+        gaps: vec![
+            Gap {
+                kind: ItemKind::Aircraft,
+                key: "SU27.PT".into(),
+                label: "Su-27 Flanker".into(),
+                host_lacks: false,
+                players: vec![lacks(3)],
+            },
+            Gap {
+                kind: ItemKind::Theater,
+                key: "VIET".into(),
+                label: String::new(),
+                host_lacks: true,
+                players: Vec::new(),
+            },
+            Gap {
+                kind: ItemKind::Weapon,
+                key: "AGM65G.JT".into(),
+                label: "AGM-65G".into(),
+                host_lacks: false,
+                players: vec![
+                    lacks(1),
+                    GapPlayer {
+                        id: 4,
+                        differs: true,
+                    },
+                ],
+            },
+            Gap {
+                kind: ItemKind::Shared,
+                key: String::new(),
+                label: "shared flight data".into(),
+                host_lacks: false,
+                players: vec![GapPlayer {
+                    id: 3,
+                    differs: true,
+                }],
+            },
+        ],
+    }
+}
+
+/// One message of every stage L kind (protocol 10): a full Content, one of
+/// an import that says nothing of itself, gaps of each shape, and the empty
+/// gaps a lobby with none is sent once.
+pub fn compatibility_messages() -> Vec<Message> {
+    vec![
+        Message::Content(Box::new(content())),
+        Message::Content(Box::new(Content {
+            build: Build::Unknown,
+            importer: None,
+            items: vec![ContentItem {
+                kind: ItemKind::Shared,
+                key: String::new(),
+                digest: 42,
+            }],
+        })),
+        Message::ContentGaps(Box::new(content_gaps())),
+        Message::ContentGaps(Box::new(ContentGaps {
+            host_build: Build::V102F,
+            host_importer: None,
+            gaps: Vec::new(),
+        })),
+    ]
 }

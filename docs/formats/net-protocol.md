@@ -40,7 +40,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Quantization](#quantization)
 - [What the game's sections settled](#what-the-games-sections-settled)
 - [Phase 2: the King's settings, revival, scores and observers](#phase-2-the-kings-settings-revival-scores-and-observers) (designed)
-- [Compatibility (stage L)](#compatibility-stage-l) (designed)
+- [Compatibility (stage L)](#compatibility-stage-l) (built under protocol 10)
 - [Host migration and rejoin (stage K)](#host-migration-and-rejoin-stage-k) (designed)
 - [Limits](#limits)
 - [Captures](#captures)
@@ -560,6 +560,13 @@ Chat's messages, protocol 4 ([chat](../ARCHITECTURE.md#chat)):
 | --- | --- | --- |
 | Chat send (25) | client to host | The receiver (All, Friendlies, Enemies, Wing or Target), the line's text and, for one of `CHAT.TXT`'s quick messages, its number (1 to 12) and sound |
 | Chat line (26) | host to client | A delivered line: the sender's callsign and where the sender stands to the reader (no side, the reader's side, the other side), whether it is the reader's own line sent back, the receiver, the text and a quick message's sound; or the host's words alone (a refusal, or that no one heard) |
+
+Stage L's messages, protocol 10 ([compatibility](#compatibility-stage-l)):
+
+| Kind | Direction | Body |
+| --- | --- | --- |
+| Content (37) | client to host | The player's Fighters Anthology build, the T.O.R.E that made its import, and each content item's kind, key and digest; its first message after Accepted |
+| Content gaps (38) | host to every player | The host's build and importer, and the items not every human can use, each with the players who cannot |
 
 ## What the transport settled
 
@@ -1167,7 +1174,9 @@ host left the game (4); the King's End mission is reason 3.
   callsign, a presence bit and the slot's plane, ready, armed with its own
   loadout, flying (one bit each), a presence bit and why its import cannot
   play the mission, and, since protocol 7, its platform in 3 bits with the
-  Challenge answer's codes, 4 to 7 invalid), the slots in plane order (a count, then each: plane
+  Challenge answer's codes, 4 to 7 invalid, and, since protocol 10, its
+  Fighters Anthology build in 2 bits, as [Content](#content) codes it), the
+  slots in plane order (a count, then each: plane
   varint, side 1 bit, wing 2, member 8, aircraft 4, a presence bit and the
   holder's id) and the King's settings (a count, then each a number of 8
   bits and a varint value; none in phase 1).
@@ -1435,15 +1444,16 @@ the setting's name and its values.
 
 ## Compatibility (stage L)
 
-*Designed 2026-10-05 for stage L; agent proposals awaiting John's review.*
-The bytes that let every player know, before a mission is built, which
-aircraft, theaters and weapons every human can use, and which Fighters
-Anthology build each imported. Why and how the game uses them is in the
+*Designed 2026-10-05 for stage L; agent proposals awaiting John's review.
+Built (L2, 2026-10-05) under **protocol 10**, kinds 37 and 38.* The bytes
+that let every player know, before a mission is built, which aircraft,
+theaters and weapons every human can use, and which Fighters Anthology build
+each imported. Why and how the game uses them is in the
 [architecture](../ARCHITECTURE.md#compatibility); the content items and their
-digests are defined there. Everything here comes in one new protocol version,
-the next after the current one, which the lead assigns at the merge of slice
-L2, with two new message kinds, numbered then too (37 and 38 if no other stage
-has taken them). Codings follow [what the game's sections
+digests are defined there. Everything here came in one protocol version, 10,
+with two new message kinds, 37 (Content) and 38 (Content gaps). The messages
+are `tore_session::wire::messages` (`Content`, `ContentGaps`, `Build`,
+`ItemKind`), their limits `messages::content_limits`. Codings follow [what the game's sections
 settled](#what-the-games-sections-settled): varints are `tore-codec`'s,
 strings a length byte and UTF-8, "a presence bit" a 1 then the value or a 0
 alone.
@@ -1506,16 +1516,35 @@ arrived yet reads 0 (unknown).
 
 ### Limits of stage L
 
-| Limit | Value |
-| --- | --- |
-| Items in a Content | 1,024 |
-| A key | 32 bytes of printable ASCII |
-| A label | 64 bytes |
-| Gaps in a Content gaps | 1,024 |
-| Players named in one gap | 64 |
-| Importer version and commit | 64 bytes each |
+Stage L's limits are in [Limits](#limits) (the "Stage L (protocol 10)" row).
 
-Slice L2 moves these rows into [Limits](#limits) when it builds them.
+### Stage L as built
+
+*Built (L2), each an agent decision:*
+
+- **Printable ASCII** in a key is a space to `~`, as chat's.
+- **Every bound is refused, never cut.** A key, a label or an importer
+  string over its length, a count over its limit, an item count of 0, a
+  build or kind code that names nothing, items or gaps out of order or
+  twice, and a shared item with a key (or another item without one) fail
+  the writer with the same error the reader gives. An importer's version or
+  commit may be empty.
+- **A gap's players** come by lobby id, ascending, each once, so equal gaps
+  code to equal bytes. A gap the host lacks has an empty label; a label
+  there is refused.
+- **Sizes.** The largest Content (1,024 items with 32-byte keys) is about
+  42 KB and fits a message. The largest Content gaps does not: 1,024 gaps
+  with the longest key and label naming 64 players each would be about 175
+  KB, and the writer refuses any body over 64 KB, as for every message. At
+  the usual sizes (a 12-byte key, a short label, one player) 1,024 gaps are
+  about 33 KB. The host keeps its gaps inside one message (slice L3).
+- **Until L3.** A host of protocol 10 reads a Content and ignores it (it
+  counts as one of the 20 requests a second), sends no Content gaps, and
+  sends every player's build as 0 (unknown). A client treats a Content gaps
+  it does not expect as it treats any host message it does not know: the
+  connection ends with a protocol error, so L3 builds the client's side
+  before the host sends one.
+
 ## Host migration and rejoin (stage K)
 
 *Designed 2026-10-05; agent proposals awaiting John's review.* The wire of
@@ -1715,6 +1744,7 @@ Decoders check every count and length against these before reading on.
 | Punch (protocol 9) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second; a race tries at most 12 addresses |
 | Phase 2 (protocol 8) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
 | Stage K (designed) | Standbys 2; addresses of a standby or a candidate 8; candidates in a reach test 3, five Reaches to each address, one test every 10 seconds; Reaches answered 10 a second from one address; checkpoint chunks 4,096 bytes, 4 unacknowledged; ticks in a Ticks record 60; a Backlog 1,200 ticks and 256 commands; an Upload test 2 seconds; tokens a game keeps 32 |
+| Stage L (protocol 10) | Items in a Content 1,024 (at least 1); a key 32 bytes of printable ASCII; a label 64 bytes; gaps in a Content gaps 1,024; players named in one gap 64; the importer's version and commit 64 bytes each |
 
 ## Captures
 
@@ -1765,7 +1795,8 @@ to a replay is stage E.
   [phase 2](#phase-2-the-kings-settings-revival-scores-and-observers), F2-0,
   9 since the transport's [Punch](#punch) and the
   [path byte](#the-path-in-the-challenge-answer) of the Challenge answer,
-  J2).
+  J2, 10 since [stage L](#compatibility-stage-l)'s Content and Content gaps
+  and each lobby player's Fighters Anthology build, L2).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

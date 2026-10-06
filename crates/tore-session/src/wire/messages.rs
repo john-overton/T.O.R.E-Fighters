@@ -17,6 +17,10 @@
 //! settings and slot locks, revival, scores, results, observers and the idle
 //! aircraft's Away and Back, and the lobby state's settings, locks and
 //! players' observing and away marks.
+//!
+//! Protocol 10 (slice L2) adds stage L's: the player's Content (its
+//! Fighters Anthology build, its importer and its items' digests), the
+//! host's Content gaps, and each lobby player's build.
 
 use super::bits::{
     self, read_count, read_long_str, read_str, read_u32, write_count, write_long_str, write_str,
@@ -81,6 +85,26 @@ pub mod kind {
     pub const OBSERVING: u8 = 34;
     pub const AWAY: u8 = 35;
     pub const BACK: u8 = 36;
+    // Protocol 10, stage L (L2): the player's content (player to host),
+    // then the items not every human can use (host to every player).
+    pub const CONTENT: u8 = 37;
+    pub const CONTENT_GAPS: u8 = 38;
+}
+
+/// The limits of stage L's messages (protocol 10; net-protocol.md, "Limits").
+pub mod content_limits {
+    /// Items in a Content message.
+    pub const ITEMS: usize = 1_024;
+    /// Gaps in a Content gaps message.
+    pub const GAPS: usize = 1_024;
+    /// Players named in one gap.
+    pub const GAP_PLAYERS: usize = 64;
+    /// An item's key, bytes of printable ASCII.
+    pub const KEY_BYTES: usize = 32;
+    /// A gap's label, bytes.
+    pub const LABEL_BYTES: usize = 64;
+    /// The importer's version, and its commit, bytes each.
+    pub const IMPORTER_BYTES: usize = 64;
 }
 
 /// Entries of a content manifest or a refusal's list.
@@ -257,6 +281,9 @@ pub struct LobbyPlayer {
     /// The operating system the player's game runs on, as its game said
     /// when it joined (protocol 7).
     pub platform: Platform,
+    /// The Fighters Anthology build the player's import came from, as its
+    /// Content said; unknown until that arrives (protocol 10).
+    pub build: Build,
 }
 
 /// One slot: a friendly plane of the co-op mission (or whatever the host's
@@ -479,6 +506,150 @@ pub struct ObserverFlight {
 pub enum Observing {
     Ended,
     Started(ObserverFlight),
+}
+
+/// The Fighters Anthology build an import came from (protocol 10): 2 bits,
+/// code 3 invalid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Build {
+    /// The import does not say (a pack made before stage L with no import
+    /// report), or the player's Content has not arrived yet.
+    #[default]
+    Unknown,
+    /// Fighters Anthology 1.0, the disc.
+    V10,
+    /// Fighters Anthology 1.02F.
+    V102F,
+}
+
+impl Build {
+    /// The wire's code.
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Unknown => 0,
+            Self::V10 => 1,
+            Self::V102F => 2,
+        }
+    }
+
+    /// The build of a wire code; `None` for code 3 and above.
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Unknown),
+            1 => Some(Self::V10),
+            2 => Some(Self::V102F),
+            _ => None,
+        }
+    }
+}
+
+/// The T.O.R.E that made an import: its version and commit, each at most
+/// [`content_limits::IMPORTER_BYTES`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Importer {
+    pub version: String,
+    pub commit: String,
+}
+
+/// What a content item is (protocol 10). The order is the wire's, which
+/// sorts items by kind first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ItemKind {
+    /// An aircraft, keyed by the creator's selection key (`F18.PT`, `faxx`).
+    Aircraft,
+    /// A theater, keyed by its code (`UKR`).
+    Theater,
+    /// A weapon, keyed by its record's name (`AIM9X.JT`).
+    Weapon,
+    /// The data every mission reads beyond its own items; its key is empty.
+    Shared,
+}
+
+impl ItemKind {
+    /// The wire's 2-bit code.
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Aircraft => 0,
+            Self::Theater => 1,
+            Self::Weapon => 2,
+            Self::Shared => 3,
+        }
+    }
+
+    /// The kind of a 2-bit code.
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Aircraft),
+            1 => Some(Self::Theater),
+            2 => Some(Self::Weapon),
+            3 => Some(Self::Shared),
+            _ => None,
+        }
+    }
+}
+
+/// One item of a player's content: its kind, key and digest. Items order
+/// by kind, then key (bytewise), as the wire wants them, so sorting a list
+/// of distinct items makes it ready to send.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContentItem {
+    pub kind: ItemKind,
+    /// At most [`content_limits::KEY_BYTES`] of printable ASCII; empty for
+    /// the shared item and only for it.
+    pub key: String,
+    /// FNV-1a 64 over the names the item reads and their hashes.
+    pub digest: u64,
+}
+
+/// The player's content (client to host, kind 37), its first message after
+/// Accepted.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Content {
+    /// The Fighters Anthology build the import came from.
+    pub build: Build,
+    /// The T.O.R.E that made the import, when the import says.
+    pub importer: Option<Importer>,
+    /// 1 to 1,024 items, sorted by kind and then key, no key twice in a
+    /// kind.
+    pub items: Vec<ContentItem>,
+}
+
+/// A player named in a gap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GapPlayer {
+    /// The player's lobby id.
+    pub id: u8,
+    /// The player has the item with another digest than the host's; `false`
+    /// when it lacks the item.
+    pub differs: bool,
+}
+
+/// An item not every human can use.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Gap {
+    pub kind: ItemKind,
+    /// As [`ContentItem::key`].
+    pub key: String,
+    /// The host's name for the item, at most
+    /// [`content_limits::LABEL_BYTES`]; empty when the host lacks it.
+    pub label: String,
+    /// The host's own import lacks the item.
+    pub host_lacks: bool,
+    /// The players who cannot use it, by lobby id ascending, at most 64;
+    /// at least one unless the host lacks the item.
+    pub players: Vec<GapPlayer>,
+}
+
+/// The items not every human can use (host to every player, kind 38); each
+/// replaces the last.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContentGaps {
+    /// The build the host's own import came from.
+    pub host_build: Build,
+    /// The T.O.R.E that made the host's import, when it says.
+    pub host_importer: Option<Importer>,
+    /// At most 1,024, in Content's order.
+    pub gaps: Vec<Gap>,
 }
 
 /// The lobby as the host has it (host to client, whenever it changes).
@@ -772,6 +943,12 @@ pub enum Message {
     /// The player touched the flight controls: take the plane back (client
     /// to host). Answered by a Seated message or a Refused.
     Back,
+    // Protocol 10, stage L (docs/formats/net-protocol.md, "Compatibility").
+    /// The player's content, its first message after Accepted (client to
+    /// host).
+    Content(Box<Content>),
+    /// The items not every human can use (host to every player).
+    ContentGaps(Box<ContentGaps>),
 }
 
 /// A flight's loadouts and what they add to the content check.
@@ -1004,6 +1181,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
             away,
             unable,
             platform,
+            build,
         } = player;
         let _ = w.write_bits(u64::from(*id), 8);
         write_str(w, callsign);
@@ -1015,6 +1193,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_bool(*away);
         bits::write_option(w, unable.as_deref(), write_str);
         let _ = w.write_bits(u64::from(platform.code()), PLATFORM_BITS);
+        write_build(w, *build);
     }
     write_count(w, slots.len());
     for slot in slots {
@@ -1080,6 +1259,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
             away: r.read_bool()?,
             unable: bits::read_option(r, read_str)?,
             platform: read_platform(r)?,
+            build: read_build(r)?,
         });
     }
     let count = read_count(r, SLOTS_LIMIT, "slots")?;
@@ -1731,6 +1911,267 @@ fn read_observing(r: &mut BitReader<'_>) -> WireResult<Observing> {
     }))
 }
 
+// ----- Protocol 10: stage L, compatibility ------------------------------
+
+fn write_build(w: &mut BitWriter, build: Build) {
+    let _ = w.write_bits(u64::from(build.code()), 2);
+}
+
+fn read_build(r: &mut BitReader<'_>) -> WireResult<Build> {
+    Build::from_code(r.read_bits(2)? as u8).ok_or(WireError::Invalid("build"))
+}
+
+/// A text field of at most `limit` bytes, refused by the writer and the
+/// reader alike when longer.
+fn check_len(text: &str, limit: usize, what: &'static str) -> WireResult<()> {
+    if text.len() > limit {
+        return Err(WireError::TooMany { what, limit });
+    }
+    Ok(())
+}
+
+fn check_importer(importer: &Importer) -> WireResult<()> {
+    check_len(
+        &importer.version,
+        content_limits::IMPORTER_BYTES,
+        "importer version bytes",
+    )?;
+    check_len(
+        &importer.commit,
+        content_limits::IMPORTER_BYTES,
+        "importer commit bytes",
+    )
+}
+
+fn write_importer(w: &mut BitWriter, importer: Option<&Importer>) -> WireResult<()> {
+    if let Some(importer) = importer {
+        check_importer(importer)?;
+    }
+    bits::write_option(w, importer, |w, importer| {
+        write_str(w, &importer.version);
+        write_str(w, &importer.commit);
+    });
+    Ok(())
+}
+
+fn read_importer(r: &mut BitReader<'_>) -> WireResult<Option<Importer>> {
+    bits::read_option(r, |r| {
+        let importer = Importer {
+            version: read_str(r)?,
+            commit: read_str(r)?,
+        };
+        check_importer(&importer)?;
+        Ok(importer)
+    })
+}
+
+/// An item's key: at most 32 bytes of printable ASCII, empty for the
+/// shared item and only for it.
+fn check_key(kind: ItemKind, key: &str) -> WireResult<()> {
+    check_len(key, content_limits::KEY_BYTES, "key bytes")?;
+    if !key.bytes().all(|b| (b' '..=b'~').contains(&b)) {
+        return Err(WireError::Invalid("content key"));
+    }
+    if (kind == ItemKind::Shared) != key.is_empty() {
+        return Err(WireError::Invalid("content key"));
+    }
+    Ok(())
+}
+
+/// Items and gaps come sorted by kind, then key, each once: `previous` is
+/// the last one's.
+fn check_order(previous: Option<(ItemKind, &str)>, kind: ItemKind, key: &str) -> WireResult<()> {
+    if previous.is_some_and(|previous| previous >= (kind, key)) {
+        return Err(WireError::Invalid("content order"));
+    }
+    Ok(())
+}
+
+fn write_item_key(w: &mut BitWriter, kind: ItemKind, key: &str) {
+    let _ = w.write_bits(u64::from(kind.code()), 2);
+    write_str(w, key);
+}
+
+fn read_item_key(r: &mut BitReader<'_>) -> WireResult<(ItemKind, String)> {
+    let kind = ItemKind::from_code(r.read_bits(2)? as u8).ok_or(WireError::Invalid("item kind"))?;
+    let key = read_str(r)?;
+    check_key(kind, &key)?;
+    Ok((kind, key))
+}
+
+/// The fewest bits an item takes: its kind, its key's length and its digest.
+const ITEM_BITS: usize = 2 + 8 + 64;
+/// The fewest bits a gap takes: its kind, its key's and label's lengths,
+/// the host's bit and the players' count.
+const GAP_BITS: usize = 2 + 8 + 8 + 1 + 8;
+
+fn write_content(w: &mut BitWriter, content: &Content) -> WireResult<()> {
+    let Content {
+        build,
+        importer,
+        items,
+    } = content;
+    if items.len() > content_limits::ITEMS {
+        return Err(WireError::TooMany {
+            what: "content items",
+            limit: content_limits::ITEMS,
+        });
+    }
+    if items.is_empty() {
+        return Err(WireError::Invalid("content items"));
+    }
+    let mut previous = None;
+    for item in items {
+        check_key(item.kind, &item.key)?;
+        check_order(previous, item.kind, &item.key)?;
+        previous = Some((item.kind, item.key.as_str()));
+    }
+    write_build(w, *build);
+    write_importer(w, importer.as_ref())?;
+    write_count(w, items.len());
+    for item in items {
+        write_item_key(w, item.kind, &item.key);
+        let _ = w.write_bits(item.digest, 64);
+    }
+    Ok(())
+}
+
+fn read_content(r: &mut BitReader<'_>) -> WireResult<Content> {
+    let build = read_build(r)?;
+    let importer = read_importer(r)?;
+    let count = read_count(r, content_limits::ITEMS, "content items")?;
+    if count == 0 {
+        return Err(WireError::Invalid("content items"));
+    }
+    if count > r.bits_remaining() / ITEM_BITS {
+        return Err(tore_codec::CodecError::UnexpectedEnd.into());
+    }
+    let mut items: Vec<ContentItem> = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (kind, key) = read_item_key(r)?;
+        check_order(
+            items.last().map(|item| (item.kind, item.key.as_str())),
+            kind,
+            &key,
+        )?;
+        items.push(ContentItem {
+            kind,
+            key,
+            digest: r.read_bits(64)?,
+        });
+    }
+    Ok(Content {
+        build,
+        importer,
+        items,
+    })
+}
+
+/// A gap's own rules: its key, its label's length (empty when the host
+/// lacks the item), its players (at most 64, by id ascending, at least one
+/// unless the host lacks the item).
+fn check_gap(gap: &Gap) -> WireResult<()> {
+    check_key(gap.kind, &gap.key)?;
+    check_len(&gap.label, content_limits::LABEL_BYTES, "label bytes")?;
+    if gap.host_lacks && !gap.label.is_empty() {
+        return Err(WireError::Invalid("gap label"));
+    }
+    check_gap_players(gap.host_lacks, &gap.players)
+}
+
+fn check_gap_players(host_lacks: bool, players: &[GapPlayer]) -> WireResult<()> {
+    if players.len() > content_limits::GAP_PLAYERS {
+        return Err(WireError::TooMany {
+            what: "gap players",
+            limit: content_limits::GAP_PLAYERS,
+        });
+    }
+    if players.is_empty() && !host_lacks {
+        return Err(WireError::Invalid("gap players"));
+    }
+    if players.windows(2).any(|pair| pair[0].id >= pair[1].id) {
+        return Err(WireError::Invalid("gap players"));
+    }
+    Ok(())
+}
+
+fn write_content_gaps(w: &mut BitWriter, gaps: &ContentGaps) -> WireResult<()> {
+    let ContentGaps {
+        host_build,
+        host_importer,
+        gaps,
+    } = gaps;
+    if gaps.len() > content_limits::GAPS {
+        return Err(WireError::TooMany {
+            what: "gaps",
+            limit: content_limits::GAPS,
+        });
+    }
+    let mut previous = None;
+    for gap in gaps {
+        check_gap(gap)?;
+        check_order(previous, gap.kind, &gap.key)?;
+        previous = Some((gap.kind, gap.key.as_str()));
+    }
+    write_build(w, *host_build);
+    write_importer(w, host_importer.as_ref())?;
+    write_count(w, gaps.len());
+    for gap in gaps {
+        write_item_key(w, gap.kind, &gap.key);
+        write_str(w, &gap.label);
+        w.write_bool(gap.host_lacks);
+        write_count(w, gap.players.len());
+        for player in &gap.players {
+            let _ = w.write_bits(u64::from(player.id), 8);
+            w.write_bool(player.differs);
+        }
+    }
+    Ok(())
+}
+
+fn read_content_gaps(r: &mut BitReader<'_>) -> WireResult<ContentGaps> {
+    let host_build = read_build(r)?;
+    let host_importer = read_importer(r)?;
+    let count = read_count(r, content_limits::GAPS, "gaps")?;
+    if count > r.bits_remaining() / GAP_BITS {
+        return Err(tore_codec::CodecError::UnexpectedEnd.into());
+    }
+    let mut gaps: Vec<Gap> = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (kind, key) = read_item_key(r)?;
+        check_order(
+            gaps.last().map(|gap| (gap.kind, gap.key.as_str())),
+            kind,
+            &key,
+        )?;
+        let label = read_str(r)?;
+        let host_lacks = r.read_bool()?;
+        let players = read_count(r, content_limits::GAP_PLAYERS, "gap players")?;
+        let players = (0..players)
+            .map(|_| {
+                Ok(GapPlayer {
+                    id: read_id(r)?,
+                    differs: r.read_bool()?,
+                })
+            })
+            .collect::<WireResult<Vec<_>>>()?;
+        let gap = Gap {
+            kind,
+            key,
+            label,
+            host_lacks,
+            players,
+        };
+        check_gap(&gap)?;
+        gaps.push(gap);
+    }
+    Ok(ContentGaps {
+        host_build,
+        host_importer,
+        gaps,
+    })
+}
+
 impl Message {
     /// The transport's kind byte.
     pub fn kind(&self) -> u8 {
@@ -1771,6 +2212,8 @@ impl Message {
             Self::Observing(_) => kind::OBSERVING,
             Self::Away => kind::AWAY,
             Self::Back => kind::BACK,
+            Self::Content(_) => kind::CONTENT,
+            Self::ContentGaps(_) => kind::CONTENT_GAPS,
         }
     }
 
@@ -1797,6 +2240,7 @@ impl Message {
                 | Self::Observe(_)
                 | Self::Away
                 | Self::Back
+                | Self::Content(_)
         )
     }
 
@@ -1958,6 +2402,8 @@ impl Message {
             Self::Observe(observe) => write_observe(&mut w, *observe),
             Self::Observing(observing) => write_observing(&mut w, observing)?,
             Self::Away | Self::Back => {}
+            Self::Content(content) => write_content(&mut w, content)?,
+            Self::ContentGaps(gaps) => write_content_gaps(&mut w, gaps)?,
         }
         let bytes = bits::finish(w);
         if bytes.len() > limits::MESSAGE {
@@ -2149,6 +2595,8 @@ impl Message {
             kind::OBSERVING => Self::Observing(Box::new(read_observing(r)?)),
             kind::AWAY => Self::Away,
             kind::BACK => Self::Back,
+            kind::CONTENT => Self::Content(Box::new(read_content(r)?)),
+            kind::CONTENT_GAPS => Self::ContentGaps(Box::new(read_content_gaps(r)?)),
             _ => return Err(WireError::Invalid("message kind")),
         };
         bits::end(r)?;

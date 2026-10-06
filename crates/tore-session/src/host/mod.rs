@@ -2453,6 +2453,8 @@ impl Host {
                     away: false,
                     unable: peer.lobby.unable.clone(),
                     platform: peer.platform,
+                    // Each player's build comes from its Content (slice L3).
+                    build: messages::Build::Unknown,
                 })
                 .collect(),
             slots: self
