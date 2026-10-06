@@ -188,7 +188,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
             "net-server-king", "net-server-pvp", "net-server-hunt", "net-server-delay", "net-server-revive",
             "net-server-results", "net-server-away", "net-server-rejoin", "net-server-replies",
-            "net-server-datalink", "net-server-datalink-lead",
+            "net-server-datalink", "net-server-datalink-lead", "net-server-smoke-pvp", "net-server-smoke-coop",
         ),
     ),
     "net-convert": (
@@ -678,6 +678,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/net_lobby.py", ("net-window",), "the lobby panels scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_observe.py", ("net-window",), "the observer screen scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_datalink.py", ("net-window", "link-cues"), "the data link's cues in a multiplayer flight (stage G, slice G10)", windowed=True, unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/net_accept.py", ("net-window",), "stage F phase 2's acceptance scenarios: the away menu's Spawn in Aircraft and a host's Leave Game (slice F2-X)", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_screens.py", ("net-window",), "the game's rejoin and its HUD through a host migration (stage K, slice K7b)", windowed=True),
     _r("tools/test_battery_net.py", (), "net scenario tests", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),

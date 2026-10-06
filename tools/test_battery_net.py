@@ -10,6 +10,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import battery  # noqa: E402
 from battery_scenarios import net  # noqa: E402
+from battery_scenarios import net_accept  # noqa: E402
 from battery_scenarios import net_datalink  # noqa: E402
 from battery_scenarios import net_observe  # noqa: E402
 
@@ -566,3 +567,212 @@ class DatalinkCuesTests(unittest.TestCase):
         for name in net_datalink.PICTURES:
             self.assertIn(f"SHOTS/{name}.ppm", net_datalink.SCRIPT)
         self.assertEqual(net_datalink.SCRIPT.count("shot SHOTS/"), len(net_datalink.PICTURES))
+
+
+class HostLeaveTests(unittest.TestCase):
+    """Slice F2-X: the hosting game's Leave Game on the observer menu, with and without a ready standby."""
+
+    COMMON = (
+        "Lobby: Settings: idle-ai 1 minute.\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
+        "Observer screen: watching the player's own aircraft\n"
+    )
+    HANDOVER_GAME = (
+        COMMON
+        + "Host: a ready standby: true\n"
+        + "Network: Leave Game (handing the game over)\n"
+        + "Host: handing the game over to player 1\n"
+        + "Host: handed the game over to player 1 after tick 11610\n"
+    )
+    HANDOVER_BOT = (
+        "Pilot: migrate: taking the game over\n"
+        "Pilot: host: took the game over at tick 11707: replayed 0 ticks in 0 ms, 1 players expected back\n"
+        "Pilot: host: live at tick 11728, 175 ms after the takeover, 21 ticks fast-forwarded\n"
+        + "".join(f"Pilot: host: world: tick {11847 + 120 * i}, 0 missiles in flight, 0 aircraft kills, 1 players\n" for i in range(6))
+    )
+    CONFIRM_GAME = (
+        COMMON
+        + "Host: a ready standby: false\n"
+        + "Network: Leave Game (ending the game)\n"
+        + "Host: tick 13289: mission ended: the host left the game\n"
+    )
+    CONFIRM_BOT = "Pilot: Mission ended: the host left the game.\nPilot: The host left the game.\n"
+
+    def test_a_hand_over_with_a_ready_standby_passes(self):
+        self.assertEqual(net_accept.host_leave_problems(self.HANDOVER_GAME, self.HANDOVER_BOT, True), [])
+
+    def test_a_leave_with_no_standby_ends_the_game_for_the_pilot(self):
+        self.assertEqual(net_accept.host_leave_problems(self.CONFIRM_GAME, self.CONFIRM_BOT, False), [])
+
+    def test_each_missing_step_of_the_hand_over_is_named(self):
+        for cut, word in (
+            ("Lobby: Settings: idle-ai 1 minute.\n", "turned to 1 minute"),
+            ("Network: away for the idle-ai time; the AI flies the plane\n", "saying it is away"),
+            ("Host: a ready standby: true\n", "ready standby"),
+            ("Host: handed the game over to player 1 after tick 11610\n", "hand-over done"),
+        ):
+            problems = net_accept.host_leave_problems(self.HANDOVER_GAME.replace(cut, ""), self.HANDOVER_BOT, True)
+            self.assertEqual(len(problems), 1, cut)
+            self.assertIn(word, problems[0])
+        problems = net_accept.host_leave_problems(
+            self.HANDOVER_GAME, self.HANDOVER_BOT.replace("Pilot: migrate: taking the game over\n", ""), True
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("taking the game over", problems[0])
+
+    def test_a_new_host_whose_world_stands_still_is_a_problem(self):
+        frozen = self.HANDOVER_BOT.replace("tick 11967", "tick 11847").replace("tick 12087", "tick 11847")
+        problems = net_accept.host_leave_problems(self.HANDOVER_GAME, frozen, True)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("did not carry on", problems[0])
+
+    def test_the_wrong_leave_for_the_state_is_a_problem(self):
+        # A hand-over with no standby, or a confirmation with one, is the menu choosing the wrong path.
+        problems = net_accept.host_leave_problems(
+            self.HANDOVER_GAME.replace("handing the game over)", "ending the game)"), self.HANDOVER_BOT, True
+        )
+        self.assertTrue(any("Leave Game lines" in p for p in problems))
+        problems = net_accept.host_leave_problems(
+            self.CONFIRM_GAME.replace("ending the game)", "handing the game over)"), self.CONFIRM_BOT, False
+        )
+        self.assertTrue(any("Leave Game lines" in p for p in problems))
+        # Two leaves (the first Enter must only ask) is a problem too.
+        twice = self.CONFIRM_GAME + "Network: Leave Game (ending the game)\n"
+        self.assertTrue(net_accept.host_leave_problems(twice, self.CONFIRM_BOT, False))
+
+    def test_a_standby_that_is_ready_when_none_stands_by_is_a_problem(self):
+        game = self.CONFIRM_GAME.replace("a ready standby: false", "a ready standby: true")
+        self.assertTrue(any("ready standby" in p for p in net_accept.host_leave_problems(game, self.CONFIRM_BOT, False)))
+
+    def test_the_pilot_must_hear_the_game_end_with_no_standby(self):
+        problems = net_accept.host_leave_problems(self.CONFIRM_GAME, "", False)
+        self.assertEqual(len(problems), 2)
+
+
+class AwayLostTests(unittest.TestCase):
+    """Slice F2-X: the observer menu's Spawn in Aircraft after the AI lost the away player's aircraft."""
+
+    GAME = (
+        "Network: seated in plane 0\n"
+        "Network: away for the idle-ai time; the AI flies the plane\n"
+        "Observer screen: watching the player's own aircraft\n"
+        "Network: Spawn in Aircraft\n"
+        "Network: seated in plane 12\n"
+    )
+    SERVER = (
+        "seat 0 Viper took plane 0\n"
+        "Viper is away: the AI flies plane 0\n"
+        "Viper lost plane 0 while the AI flew it\n"
+        "seat 1 Viper took plane 12\n"
+    )
+
+    def test_a_lost_plane_and_a_spawn_pass(self):
+        self.assertEqual(net_accept.away_lost_problems(self.GAME, self.SERVER), [])
+
+    def test_a_menu_that_offered_take_back_is_named(self):
+        problems = net_accept.away_lost_problems(self.GAME + "Network: Take Back Flight; taking it\n", self.SERVER)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Take Back Flight", problems[0])
+
+    def test_a_spawn_that_seated_nobody_is_named(self):
+        problems = net_accept.away_lost_problems(self.GAME.replace("Network: seated in plane 12\n", ""), self.SERVER)
+        self.assertTrue(any("seatings" in p for p in problems))
+        problems = net_accept.away_lost_problems(self.GAME, self.SERVER.replace("seat 1 Viper took plane 12\n", ""))
+        self.assertTrue(any("new plane by Revive" in p for p in problems))
+
+    def test_a_return_to_the_old_plane_is_named(self):
+        problems = net_accept.away_lost_problems(self.GAME, self.SERVER + "Viper is back: takes plane 0 from the AI\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("taking the old plane back", problems[0])
+
+
+class AcceptScenarioTests(unittest.TestCase):
+    def test_the_scenarios_are_listed_with_a_window_and_their_pictures(self):
+        scenarios = {s.name: s for s in net_accept.scenarios()}
+        self.assertEqual(
+            sorted(scenarios),
+            [
+                "net-server-smoke-coop", "net-server-smoke-pvp", "net-window-away-lost",
+                "net-window-host-leave-confirm", "net-window-host-leave-handover",
+            ],
+        )
+        for name, scenario in scenarios.items():
+            self.assertEqual(scenario.window, name.startswith("net-window-"))
+            self.assertTrue(callable(scenario.driver))
+            self.assertTrue(set(scenario.uses) <= {"server", "bot"})
+        for name in net_accept.HOST_LEAVE_PICTURES:
+            self.assertIn(f"{name}.ppm", net_accept.HOST_LEAVE_SCRIPT)
+        for name in net_accept.AWAY_LOST_PICTURES:
+            self.assertIn(f"{name}.ppm", net_accept.AWAY_LOST_SCRIPT)
+
+    def test_the_second_enter_is_in_the_script_only_with_no_standby(self):
+        with_standby = net_accept.host_leave_script("/s", True)
+        without = net_accept.host_leave_script("/s", False)
+        self.assertEqual(with_standby.count("key Enter"), 1)
+        self.assertEqual(without.count("key Enter"), 2)
+        self.assertNotIn("CONFIRM", without)
+        self.assertNotIn("JOINWAIT", without)
+
+
+class SmokeTests(unittest.TestCase):
+    """Slice F2-X: what the smoke test's bots must have printed."""
+
+    @staticmethod
+    def texts(mode):
+        pvp = mode == "pvp"
+        settings = "mode pvp, respawn revive, observer-delay 10 seconds, idle-ai 1 minute" if pvp else "respawn revive, idle-ai 1 minute"
+        behind = "10 s behind" if pvp else "0 s behind"
+        away_plane = 7 if pvp else 0
+        phoenix = (
+            f"Phoenix: settings: {settings}\nPhoenix: seat 0, plane 1, at tick 0\nPhoenix: ejected\n"
+            "Phoenix: revival: Press Enter to fly again\nPhoenix: spawned plane 12 in Friendly wing 1, member 5\n"
+            "Phoenix: seat 0, plane 12, at tick 1036\n"
+        )
+        viper = (
+            f"Viper: settings: {settings}\nViper: seat 0, plane {away_plane}, at tick 0\n"
+            f"Viper: away: the AI flies plane {away_plane}\nViper: observing from tick 36, {behind}\n"
+            f"Viper: back at the controls\nViper: seat 1, plane {away_plane}, at tick 1953\n"
+        )
+        owl = (
+            f"Owl: settings: {settings}\nOwl: observing from tick 0, {behind}\nOwl: watching: frames 12, aircraft 12\n"
+        )
+        texts = {"Phoenix": phoenix, "Viper": viper, "Owl": owl}
+        if pvp:
+            owl += "Owl: results: 13 aircraft, 5 flown by players\n"
+            texts["Owl"] = owl
+            end = "scores: players ranked by kills: 1 Blue 2/1; ends at 2 kills in all\nMission ended: the kill limit.\n"
+            texts["Blue"] = "Blue: settings: mode pvp, respawn revive\nBlue: " + end.replace("\nMission", "\nBlue: Mission")
+            texts["Red"] = "Red: settings: mode pvp, respawn revive\n"
+        return texts
+
+    def test_both_modes_pass(self):
+        for mode in ("coop", "pvp"):
+            self.assertEqual(net_accept.smoke_problems(self.texts(mode), mode), [], mode)
+
+    def test_a_pvp_observer_that_is_not_delayed_is_named(self):
+        texts = self.texts("pvp")
+        texts["Owl"] = texts["Owl"].replace("10 s behind", "0 s behind")
+        problems = net_accept.smoke_problems(texts, "pvp")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("10 seconds behind", problems[0])
+
+    def test_a_coop_observer_that_is_delayed_is_named(self):
+        texts = self.texts("coop")
+        texts["Owl"] = texts["Owl"].replace("0 s behind", "10 s behind")
+        self.assertTrue(any("not live" in p for p in net_accept.smoke_problems(texts, "coop")))
+
+    def test_a_missing_revival_away_or_kill_limit_is_named(self):
+        texts = self.texts("pvp")
+        texts["Phoenix"] = texts["Phoenix"].replace("Phoenix: ejected\n", "")
+        self.assertTrue(any("never ejected" in p for p in net_accept.smoke_problems(texts, "pvp")))
+        texts = self.texts("pvp")
+        texts["Viper"] = texts["Viper"].replace("Viper: away: the AI flies plane 7\n", "")
+        self.assertTrue(any("never flew" in p for p in net_accept.smoke_problems(texts, "pvp")))
+        texts = self.texts("pvp")
+        texts["Blue"] = texts["Blue"].replace("Mission ended: the kill limit.", "")
+        self.assertTrue(any("kill limit did not end" in p for p in net_accept.smoke_problems(texts, "pvp")))
+
+    def test_an_observer_with_a_plane_is_named(self):
+        texts = self.texts("coop")
+        texts["Owl"] += "Owl: seat 0, plane 3, at tick 4\n"
+        self.assertTrue(any("plane or a debrief" in p for p in net_accept.smoke_problems(texts, "coop")))
