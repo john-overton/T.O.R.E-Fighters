@@ -650,6 +650,26 @@ impl Observing {
     }
 }
 
+/// Whether an observer flight the host started is shown on the observer
+/// screen: in a game with a lobby screen and no flight, and (slice F2-O3)
+/// over the flight of a player whose aircraft the AI flies (`away`). Any
+/// other flight, a flying player's included, has no watch to show.
+pub fn shows_watch(flying: bool, away: bool, lobby_screen: bool) -> bool {
+    if flying { away } else { lobby_screen }
+}
+
+/// Whether the viewer may open now, with the first frames recorded: over
+/// the lobby on the main screen, or, for the player's own aircraft, over the
+/// flight screen once no screen of the controls, graphics or sound is open
+/// over it (`screens`).
+pub fn viewer_may_open(away: bool, screen: Screen, screens: bool) -> bool {
+    if away {
+        screen == Screen::Flight && !screens
+    } else {
+        screen == Screen::Main
+    }
+}
+
 impl App {
     /// The host started or ended the game's observer flight.
     pub(crate) fn observe_event(&mut self, started: bool) {
@@ -657,9 +677,15 @@ impl App {
             self.end_observing();
             return;
         }
-        // An away player's own flight keeps the flight screen and its last
-        // picture; a watch is the screen of a game in its lobby.
-        if self.net_flight.is_some() || self.lobby.screen.is_none() {
+        // A watch is the screen of a game in its lobby, and (slice F2-O3) of
+        // a flying player whose aircraft the AI flies, which the flight's
+        // screen waits under; any other flight has no watch to show.
+        let away = self.net_flight.is_some()
+            && self
+                .net
+                .as_ref()
+                .is_some_and(|s| s.client.ai_flies().is_some());
+        if !shows_watch(self.net_flight.is_some(), away, self.lobby.screen.is_some()) {
             return;
         }
         self.observing = Some(Observing::new(Observing::folder()));
@@ -686,9 +712,13 @@ impl App {
             );
         }
         if let Some(failure) = observing.failure() {
-            // Nothing can be shown: say so, and stop the watch.
+            // Nothing can be shown: say so, and stop the watch. An away
+            // player's flight keeps its last picture and the banner, and the
+            // host keeps the aircraft (stopping would leave it to the AI).
             let words = format!("Could not show the mission: {failure}");
-            session.client.stop_watching();
+            if self.net_flight.is_none() {
+                session.client.stop_watching();
+            }
             self.observing = None;
             self.message(words);
             return;
@@ -702,20 +732,57 @@ impl App {
         };
         if let Some(replay) = live {
             replay.viewer.grow(read);
-        } else if self.replay.is_none() && self.screen == Screen::Main {
-            match Viewer::open_live(read, session.resources(), &Options::default()) {
+        } else if self.replay.is_none() {
+            // An away player's own aircraft (slice F2-O3) is watched over
+            // the flight, once no screen of the controls, graphics or sound
+            // is open over it; any other watch over the lobby.
+            let plane = session
+                .client
+                .ai_flies()
+                .filter(|_| self.net_flight.is_some());
+            let screens = self.controls.is_some()
+                || self.graphics_screen.is_some()
+                || self.sound_screen.is_some();
+            if !viewer_may_open(plane.is_some(), self.screen, screens) {
+                return;
+            }
+            let options = Options {
+                aircraft: plane.filter(|plane| read.aircraft().any(|a| a.id == *plane)),
+                ..Options::default()
+            };
+            match Viewer::open_live(read, session.resources(), &options) {
                 Ok(viewer) => {
                     log::info!("Observer screen: watching the mission");
+                    if plane.is_some() {
+                        log::info!("Observer screen: watching the player's own aircraft");
+                        self.put_flight_aside();
+                    }
                     self.start_replay(viewer, None);
                 }
                 Err(error) => {
                     log::warn!("Observer screen: {error}");
-                    session.client.stop_watching();
+                    if plane.is_none() {
+                        session.client.stop_watching();
+                    }
                     self.observing = None;
                     self.message(format!("Could not show the mission: {error}"));
                 }
             }
         }
+    }
+
+    /// The flight's menu, map and held keys are put away as the observer
+    /// screen opens over it: its controls are neutral, and nothing of them
+    /// is left pressed or open for the flight that returns.
+    fn put_flight_aside(&mut self) {
+        self.flight_ui.menu = false;
+        self.flight_ui.map.open = false;
+        self.flight_ui.map.cancel_press();
+        self.flight_ui.cancel_press();
+        self.instruments.cancel_press();
+        self.camera.keys.clear();
+        self.release_trigger();
+        self.input.release_keys();
     }
 
     /// The watch is over (the host ended it, the mission ended, the session
@@ -724,13 +791,21 @@ impl App {
     pub(crate) fn end_observing(&mut self) {
         self.observing = None;
         if self.replay.as_ref().is_some_and(|r| r.viewer.live()) {
-            log::info!("Observer screen: back to the lobby");
+            if self.net_flight.is_some() {
+                log::info!("Observer screen: back to the flight");
+            } else {
+                log::info!("Observer screen: back to the lobby");
+            }
             self.leave_live_replay();
         }
     }
 
     /// The player chose Stop Watching: the host is told, and the lobby shows.
     pub(crate) fn stop_observing(&mut self) {
+        if self.away_watching() {
+            self.stop_away_watch();
+            return;
+        }
         if let Some(session) = &mut self.net {
             session.client.stop_watching();
         }
@@ -1231,6 +1306,29 @@ mod tests {
         assert!(read.problems().is_empty());
         assert!(size < 40 << 20, "{size} bytes");
         assert!(took < Duration::from_secs(5), "{took:?}");
+    }
+
+    /// Who shows a watch and when the viewer opens (slice F2-O3).
+    #[test]
+    fn a_watch_is_shown_in_the_lobby_and_over_an_away_players_flight() {
+        // A game in its lobby shows it, one with no lobby screen does not.
+        assert!(shows_watch(false, false, true));
+        assert!(!shows_watch(false, false, false));
+        // A flying player's own watch is shown only while the AI flies its
+        // aircraft, with or without a lobby screen.
+        assert!(!shows_watch(true, false, true));
+        assert!(!shows_watch(true, false, false));
+        assert!(shows_watch(true, true, true));
+        assert!(shows_watch(true, true, false));
+        // The viewer opens over the lobby on the main screen, over the
+        // flight for the away player's own aircraft, and waits while a
+        // screen of the controls, graphics or sound is open over the flight.
+        assert!(viewer_may_open(false, Screen::Main, false));
+        assert!(!viewer_may_open(false, Screen::Flight, false));
+        assert!(viewer_may_open(true, Screen::Flight, false));
+        assert!(!viewer_may_open(true, Screen::Flight, true));
+        assert!(!viewer_may_open(true, Screen::Main, false));
+        assert!(!viewer_may_open(true, Screen::Replay, false));
     }
 
     /// A recording that cannot start says why once and is not tried again

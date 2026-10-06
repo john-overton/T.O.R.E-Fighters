@@ -101,17 +101,30 @@ impl App {
     /// and shows the lobby it was opened from.
     pub(crate) fn leave_live_replay(&mut self) {
         self.close_viewer();
+        // An away player's own plane (slice F2-O3): the flight screen is
+        // where the player was, and its last picture waits there for the
+        // plane's return (or for the end the idle rule finds).
+        let flying = self.net_flight.is_some();
+        if flying {
+            self.screen = Screen::Flight;
+            self.frame_time = Instant::now();
+        }
         if let Some(renderer) = &self.renderer {
-            renderer
-                .window
-                .set_title("T.O.R.E-Fighters - Choose Activity");
+            renderer.window.set_title(&if flying {
+                format!(
+                    "T.O.R.E-Fighters - {} Multiplayer",
+                    self.hornet.profile.id.label()
+                )
+            } else {
+                "T.O.R.E-Fighters - Choose Activity".to_owned()
+            });
             renderer.window.request_redraw();
         }
     }
 
     /// Puts the viewer away and gives the renderer back the game's own world
     /// and aircraft.
-    fn close_viewer(&mut self) {
+    pub(crate) fn close_viewer(&mut self) {
         let entered = self.replay.take().is_some_and(|r| r.viewer.entered());
         if let Some(audio) = &self.audio {
             crate::replay::sound::stop(audio);
@@ -138,6 +151,9 @@ impl App {
         repeat: bool,
     ) {
         let name = crate::flight_key(*physical, name);
+        if self.away_watch_key(&name, pressed, repeat) {
+            return;
+        }
         let modifiers = self.modifiers;
         let Some(replay) = self.replay.as_mut() else {
             return;
@@ -243,6 +259,11 @@ impl App {
                         || (command && name == "q"))
                 {
                     return Some(event);
+                }
+                // The flight's keys, while the AI flies the player's own
+                // plane and the view watches it (slice F2-O3).
+                if self.away_watch_key(&name, pressed, key.repeat) {
+                    return None;
                 }
                 if self.replay.as_mut().is_some_and(|replay| {
                     replay

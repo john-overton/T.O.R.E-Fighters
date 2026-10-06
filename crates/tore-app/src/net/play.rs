@@ -210,7 +210,14 @@ impl App {
         // Stage F phase 2: the observer screen (F2-O2), and the AI flying an
         // idle player's aircraft (F2-A).
         self.observe_turn();
-        self.net_idle(&controls);
+        if self.away_watching() {
+            // The observer screen of the player's own aircraft (slice
+            // F2-O3) reads the flight's inputs for the idle rule.
+            let watch = self.watch_controls();
+            self.net_idle(&watch);
+        } else {
+            self.net_idle(&controls);
+        }
         // A game hosted from the command line starts each mission as soon as
         // everyone holding a slot is ready and its player has closed the
         // debrief.
@@ -458,6 +465,9 @@ impl App {
         let Some(flight) = self.net_flight.take() else {
             return;
         };
+        // An away player's observer screen goes with the flight it covers
+        // (slice F2-O3).
+        self.close_away_watch();
         if let Some(session) = &mut self.net {
             session.chat.flight_ended();
         }

@@ -297,8 +297,10 @@ be scrubbed, End returns to live and nothing goes past it; Esc opens the
 viewer's menu, whose Stop Watching returns to the lobby. Every aircraft is
 another's (the observer has no plane), the camera tells the host what to send
 at the full rate, and smoke, contrails and gun rounds are not drawn yet
-([how it works](ARCHITECTURE.md#the-observer-view)). An away player's own plane
-still shows on the flight screen.
+([how it works](ARCHITECTURE.md#the-observer-view)). *Built (F2-O3,
+2026-10-06):* an away player's own plane shows on this screen too, over its
+flight, and the first flight input takes the plane back
+([how it works](ARCHITECTURE.md#the-observer-screen-for-an-away-players-own-plane-f2-o3)).
 
 *Designed (stage K, 2026-10-05; agent proposals awaiting John unless
 credited):*
@@ -1206,7 +1208,8 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Taking over hosting | John, 2026-10-05: a "Let my game take over hosting" switch in Options, on by default; dedicated servers never migrate (they issue rejoin tokens and hold reservations) |
 | The data link in recordings | John, 2026-10-06: approved slice G9's baseline (single-player recordings gain the data link's events and nothing else; the viewer's Comms panel gains a Link chip and the summary a Data link section) |
 | AI leads share and sort | John, 2026-10-06: approved slice G4's baseline (AI leads on loose control share and sort targets and AI wingmen locked on one bandit spread out; every probe with an AI-led wing moves, the player's own wing does not) |
-| An away player's own plane | John, 2026-10-06: while the AI flies an away player's aircraft, the player watches it on the observer screen and takes it back at the first flight input (a follow-up to F2-A and F2-O2) |
+| An away player's own plane | John, 2026-10-06: while the AI flies an away player's aircraft, the player watches it on the observer screen and takes it back at the first flight input (a follow-up to F2-A and F2-O2; built in F2-O3) |
+| Stop Watching for an away player | Agent decision, 2026-10-06 (F2-O3): it leaves the aircraft to the AI and goes to the lobby when the game has a lobby screen and does not host; otherwise it takes the aircraft back. For John to confirm |
 | Esc in the observer view | John, 2026-10-06: Esc opens the viewer's pause menu, whose first row is Stop Watching |
 
 ## Open questions

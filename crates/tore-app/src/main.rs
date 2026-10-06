@@ -4598,10 +4598,8 @@ impl ApplicationHandler for App {
             _ => return,
         };
         self.action(event_loop, action);
-        self.input.context(
-            self.screen != Screen::Flight || self.flight_ui.frozen(),
-            self.focused,
-        );
+        let paused = self.input_paused();
+        self.input.context(paused, self.focused);
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         // A session ends politely when the game does; a hosted one stops its
@@ -4636,7 +4634,7 @@ impl ApplicationHandler for App {
         {
             screen.covered();
         }
-        let paused = self.screen != Screen::Flight || self.flight_ui.frozen();
+        let paused = self.input_paused();
         self.input.context(paused, self.focused);
         if Instant::now() >= self.input.next_poll {
             let (actions, lost, warnings) = self.input.poll();
@@ -4725,6 +4723,9 @@ impl ApplicationHandler for App {
                     }
                     let was_frozen = self.flight_ui.frozen();
                     if self.replay.is_some() && self.controls.is_none() {
+                        // The observer view of an away player's own plane
+                        // reads the flight's buttons (slice F2-O3).
+                        self.away_watch_action(action);
                         continue;
                     }
                     let result = self.input_action(action);

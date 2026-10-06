@@ -330,6 +330,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | Esc | The pause menu, over the view even with the interface hidden: pauses playback; Esc again or Resume replay plays on as before, ? > End Replay goes back to the Replays screen, and the Control tab opens the controls screen |
 | Replay viewer, pause menu open | Arrow keys, Tab, Enter / Space, Esc, left click | Move, choose and back out, as in the flight menu; every other key and click waits until it closes |
 | Watching a networked mission (slice F2-O2) | The replay viewer's keys | As in the viewer; the bar reads LIVE at the live edge, Space, J and the scrub keys leave it, End returns to it, and nothing goes past live. Esc opens the pause menu, whose first row, Stop Watching, returns to the lobby |
+| Watching your own aircraft while the AI flies it (slice F2-O3) | The stick, rudder, throttle and trigger | The controllers, the arrow keys (Shift makes them look), Z, X, End, Page Down, Space, 1 to 8 and any key your controls bind take the aircraft back and are not the viewer's keys on this screen (the arrows do not scrub, Space does not pause); every other key and the mouse are the viewer's. Stop Watching in the pause menu leaves the aircraft to the AI and goes to the lobby, or takes the aircraft back in a game with no lobby screen or one you host |
 
 ## Multiplayer phase 2
 

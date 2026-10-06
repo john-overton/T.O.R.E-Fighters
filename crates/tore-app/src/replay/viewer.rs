@@ -1092,6 +1092,12 @@ impl Viewer {
         }
     }
 
+    /// Whether the Escape menu or a right-click menu is open: the viewer
+    /// takes every key.
+    pub fn menu_open(&self) -> bool {
+        self.pause.is_open() || self.menu.is_some()
+    }
+
     /// Whether the view is of a mission being flown, a recording that grows
     /// as it plays.
     pub fn live(&self) -> bool {
