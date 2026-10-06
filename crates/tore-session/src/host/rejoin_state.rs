@@ -102,7 +102,6 @@ tore_sim::checkpoint_struct!(Reserved {
 const MAX_RECORDS: usize = 1_024;
 const MAX_RESERVED: usize = 64;
 
-#[allow(dead_code)] // the session state's glue calls it (slice K1)
 pub(in crate::host) fn save_rejoin(s: &mut Saver, rejoin: &Rejoin) -> Result<()> {
     let Rejoin {
         players,
@@ -122,7 +121,7 @@ pub(in crate::host) fn save_rejoin(s: &mut Saver, rejoin: &Rejoin) -> Result<()>
 
 /// Replaces `rejoin`'s tokens, reservations and clock offset with the part's
 /// (its draws stay the host's own).
-#[allow(dead_code)] // the session state's glue calls it (slice K1)
+#[cfg_attr(not(test), allow(dead_code))] // slice K4's takeover restores the part
 pub(in crate::host) fn load_rejoin(l: &mut Loader<'_>, rejoin: &mut Rejoin) -> Result<()> {
     let offset = load_moment(l)?;
     let count = l.count()?;
@@ -144,7 +143,7 @@ pub(in crate::host) fn load_rejoin(l: &mut Loader<'_>, rejoin: &mut Rejoin) -> R
     Ok(())
 }
 
-#[allow(dead_code)] // slice K4's takeover calls them
+#[cfg_attr(not(test), allow(dead_code))] // slice K4's takeover calls them
 impl Rejoin {
     /// The session's clock now, for a host whose own clock reads `now`.
     pub(in crate::host) fn session_clock(&self, now: Duration) -> Duration {

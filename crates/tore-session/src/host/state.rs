@@ -10,7 +10,8 @@
 //! - **court** (`king_state.rs`), **scores** (`score_state.rs`) and
 //!   **revivals** (`revive_state.rs`).
 //!
-//! Slices K5 (rejoin, with F2-A's away table), K6 (candidates) and K8
+//! Slice K5 codes the rejoin part (tokens and the reservation table, F2-A's
+//! away planes included); slices K6 (candidates) and K8
 //! (listing) code theirs. The coders use the checkpoint trait and destructure
 //! every field, so a field added to the state a part codes fails to compile
 //! until it is coded or skipped with its class, as stage H's checkpoint
@@ -45,12 +46,13 @@ use tore_world::mission::MissionSpec;
 use tore_world::seats::SeatId;
 
 /// The parts slice K1 codes, in the order they go into the stream.
-pub(super) const JOURNALED: [Part; 5] = [
+pub(super) const JOURNALED: [Part; 6] = [
     Part::Players,
     Part::Session,
     Part::Court,
     Part::Scores,
     Part::Revivals,
+    Part::Rejoin,
 ];
 
 pub(super) type Result<T> = std::result::Result<T, CheckpointError>;
@@ -381,8 +383,9 @@ impl Host {
             Part::Revivals => {
                 to_bytes(|s| super::revive::state::save_revivals(s, &saving, &self.revival))
             }
-            Part::Rejoin | Part::Candidates | Part::Listing => {
-                tore_sim::checkpoint::not_covered("the rejoin, candidates and listing parts")
+            Part::Rejoin => to_bytes(|s| super::rejoin::save_rejoin(s, &self.rejoin)),
+            Part::Candidates | Part::Listing => {
+                tore_sim::checkpoint::not_covered("the candidates and listing parts")
             }
         }
     }
@@ -456,11 +459,18 @@ impl Host {
                     super::revive::state::load_revivals(l, &mut restoring)
                 })?;
             }
+            Part::Rejoin => {
+                // Its moments are on the session's clock, the old host's
+                // plus the offset the part carries: this host's offset is
+                // set so the clock goes on from the old host's reading.
+                let rejoin = &mut self.rejoin;
+                from_bytes(bytes, |l| super::rejoin::load_rejoin(l, rejoin))?;
+                let session_clock = old_clock + rejoin.offset;
+                rejoin.carry_clock(session_clock, self.now);
+            }
             Part::Players => return invalid("the players part restores on its own"),
-            Part::Rejoin | Part::Candidates | Part::Listing => {
-                return tore_sim::checkpoint::not_covered(
-                    "the rejoin, candidates and listing parts",
-                );
+            Part::Candidates | Part::Listing => {
+                return tore_sim::checkpoint::not_covered("the candidates and listing parts");
             }
         }
         for (id, order) in restoring.handed {
@@ -489,11 +499,12 @@ impl Host {
             score: _,
             revival: _,
             court: _,
-            // F2-A's away table joins the rejoin part (slice K5).
+            // F2-A's asks and flight counts are per tick; its away table is
+            // the rejoin part's (slice K5).
             idle: _,
-            // Stage K's own: K3's standbys, K4's resume, K5's tokens (the
-            // rejoin part), K6's candidates (the candidates part), and the
-            // journal itself.
+            // Stage K's own: K3's standbys, K4's resume, K5's tokens and
+            // reservations (the rejoin part), K6's candidates (the
+            // candidates part), and the journal itself.
             standbys: _,
             resuming: _,
             rejoin: _,

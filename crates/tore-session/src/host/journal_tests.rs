@@ -76,6 +76,8 @@ struct Bot {
     eject_at: Option<Duration>,
     ejected: bool,
     revived: bool,
+    /// Its game has gone silent: nothing is stepped or sent (a drop).
+    silent: bool,
 }
 
 impl Bot {
@@ -151,11 +153,23 @@ impl Rig {
     }
 
     fn join(&mut self, callsign: &str, plane: u32, eject_at: Option<Duration>) {
+        self.join_with(callsign, plane, eject_at, None);
+    }
+
+    /// A join that may send the rejoin `token` (stage K, slice K5).
+    fn join_with(
+        &mut self,
+        callsign: &str,
+        plane: u32,
+        eject_at: Option<Duration>,
+        token: Option<tore_net::Token>,
+    ) {
         let address: SocketAddr = format!("10.0.0.2:{}", self.next_port).parse().unwrap();
         let socket = self.net.bind(address).unwrap();
         let config = ClientConfig {
             entropy: Entropy::Seeded(u64::from(self.next_port)),
             plane: Some(plane),
+            token,
             ..ClientConfig::new(host_address(), callsign, build())
         };
         self.next_port += 1;
@@ -169,6 +183,7 @@ impl Rig {
             eject_at,
             ejected: false,
             revived: false,
+            silent: false,
         });
     }
 
@@ -199,6 +214,9 @@ impl Rig {
             }
         }
         for bot in &mut self.bots {
+            if bot.silent {
+                continue;
+            }
             bot.client.receive_from(now, &mut bot.socket).unwrap();
             let controls = bot.controls(now);
             bot.client.update(now, &controls);
@@ -344,7 +362,13 @@ fn parts_restore(host: &Host) {
     let session = host.encode_part(Part::Session).unwrap();
     let old_clock = fresh.session_clock(&session).unwrap();
     assert_eq!(old_clock, host.now);
-    for part in [Part::Session, Part::Court, Part::Scores, Part::Revivals] {
+    for part in [
+        Part::Session,
+        Part::Court,
+        Part::Scores,
+        Part::Revivals,
+        Part::Rejoin,
+    ] {
         let bytes = host.encode_part(part).unwrap();
         fresh
             .restore_part(part, &bytes, &mut ids, old_clock)
@@ -403,10 +427,31 @@ fn crowd_fight(seconds: u64, eject: Duration, late: Duration, keep_at: Vec<u64>)
         rig.run_until(Duration::from_secs(5), |r| r.flying(3)),
         "the late joiner flies"
     );
+    // Mako's game goes silent: the host drops it and keeps its plane for it
+    // (the rejoin part holds the reservation), and its game comes back with
+    // its token and flies that plane again.
+    let token = rig.bots[3].client.token().expect("Mako's token").token;
+    let kept = rig.bots[3].client.seat().map(|(_, plane)| plane).unwrap();
+    rig.bots[3].silent = true;
+    assert!(
+        rig.run_until(Duration::from_secs(8), |r| {
+            r.host.rejoin.reserved.values().any(|r| r.plane == kept)
+        }),
+        "Mako's plane is kept for it"
+    );
+    rig.run(Duration::from_millis(300));
+    parts_restore(&rig.host);
+    rig.join_with("Mako", 4, None, Some(token));
+    assert!(
+        rig.run_until(Duration::from_secs(6), |r| r.flying(4)),
+        "Mako rejoins"
+    );
+    assert_eq!(rig.bots[4].client.seat().map(|(_, p)| p), Some(kept));
+    assert!(rig.host.rejoin.reserved.is_empty());
     parts_restore(&rig.host);
     let end = Duration::from_secs(seconds);
     rig.run(end.saturating_sub(rig.net.now()));
-    assert!((0..4).all(|b| rig.flying(b)));
+    assert!([0, 1, 2, 4].iter().all(|&b| rig.flying(b)));
     parts_restore(&rig.host);
 
     // What the journal recorded.
@@ -457,7 +502,7 @@ fn crowd_fight(seconds: u64, eject: Duration, late: Duration, keep_at: Vec<u64>)
             _ => None,
         })
         .collect();
-    assert_eq!(parts.len(), 5, "every part went out: {parts:?}");
+    assert_eq!(parts.len(), 6, "every part went out: {parts:?}");
     assert!(
         rig.host.revival.players.values().any(|p| p.used == 1),
         "the revival counted"
@@ -601,7 +646,7 @@ fn a_host_keeps_no_records_unless_recording_and_never_more_than_its_bound() {
             .iter()
             .filter(|r| matches!(r, JournalRecord::State(_)))
             .count(),
-        5
+        6
     );
     // A stream that never drains: the queue is dropped at its bound.
     for _ in 0..=MAX_QUEUED {

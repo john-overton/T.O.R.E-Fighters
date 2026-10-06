@@ -33,8 +33,8 @@
 
 #[path = "rejoin_state.rs"]
 mod state;
-// The part's coders: the session state's glue (slices K1 and K4) calls them.
-#[allow(unused_imports)]
+// The part's coders: `state.rs` encodes and restores the part with them.
+#[cfg_attr(not(test), allow(unused_imports))]
 pub(super) use state::{load_rejoin, save_rejoin};
 
 use super::lobby::LobbyEvent;

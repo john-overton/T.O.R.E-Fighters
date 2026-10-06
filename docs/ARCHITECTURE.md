@@ -9254,9 +9254,13 @@ decision unless the design above or John's decisions say it.
 - **Scores and lives follow the token.** A player's tally stays in the
   mission's scores while its token works; its lives are kept by join order as
   before.
-- **The part.** `rejoin_state.rs` codes the records, the table and the clock
-  offset with the checkpoint trait (every field named). Slice K1's glue calls
-  `save_rejoin` and `load_rejoin`; a record's token is two 64-bit halves.
+- **The part.** `rejoin_state.rs` codes the records, the table (F2-A's away
+  planes included) and the clock offset with the checkpoint trait (every field
+  named); a record's token is two 64-bit halves. `host/state.rs` journals it
+  as the sixth part (`Part::Rejoin`) and restores it with `load_rejoin`, then
+  sets the offset so the session's clock goes on from the old host's reading.
+  The journal's crowd fight drops and rejoins a bot, so the part, the
+  reservation and the take go through the replay check.
 - **The client** keeps the granted token with the session's id
   (`Client::token`, a `KeptToken`) and hands it to the game's `TokenStore` when
   granted and when the connection ends. `ClientConfig::token` is sent in the
