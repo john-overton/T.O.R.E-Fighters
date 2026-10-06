@@ -537,7 +537,11 @@ fn players_of_two_builds_with_the_same_items_have_no_difference_to_say_and_fly()
         words::differs_line(viper_view.me().unwrap(), true, &gaps),
         None
     );
-    assert_eq!(words::hint_line(hawk), "Hawk: on Linux.");
+    // Each game reports the system it runs on: the test's own.
+    assert_eq!(
+        words::hint_line(hawk),
+        format!("Hawk: on {}.", crate::wire::Platform::current().name())
+    );
     // Both fly.
     assert!(rig.run_until(Duration::from_secs(5), |r| {
         r.players[old].client.seat().is_some() && r.players[new].client.seat().is_some()
