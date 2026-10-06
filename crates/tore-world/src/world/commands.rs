@@ -394,3 +394,7 @@ impl World {
         });
     }
 }
+
+// Exact coding for the host's journal (stage K, slice K0).
+#[path = "commands_checkpoint.rs"]
+mod checkpoint;
