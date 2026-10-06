@@ -55,9 +55,11 @@ jobs:
       - name: Test
         # Small hosted runners otherwise select the serial fallback. Exercise
         # the production pool as well as explicit executor equivalence tests.
+        # --no-fail-fast: one failing crate must not hide the others (the
+        # macOS golden fingerprints run late).
         env:
           TORE_WORKERS: '2'
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       - name: Build
         run: cargo build --workspace --locked
       # Discovery includes test_build_resources.py, which executes the build.rs
