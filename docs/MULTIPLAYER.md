@@ -1181,7 +1181,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Respawn | Retail's revival (a new aircraft out of the battle, with the revival weapons), beside taking a free AI aircraft (`ai-slot`) and no respawn (`none`); pressing Join after a loss obeys the same rules |
 | Retail features in single player | U answers IFF, Show Target Info works (off by default), and the reply keys say "You lead this flight." when the player leads |
 | Phase 2 defaults | As designed, to start: PvP revives with unlimited lives, no delay, 10 nm, missiles, scored by sides on total kills, kill limit 5, 10 minutes, sides locked; co-op has no revival and friendly fire on |
-| Idle aircraft | The AI flies an aircraft whose player has been away 10 seconds (a menu, lost focus, a lost controller, a stall), reserved for the player; a King's setting that can be set to never |
+| Idle aircraft | The AI flies an aircraft whose player has been away 5 minutes by default (a menu, lost focus, a lost controller, a stall), reserved for the player; a King's setting that can be set to never (John, 2026-10-06: 10 seconds was too short for someone on autopilot who steps away; built in F2-O4) |
 | A dedicated server's King | None by default; `king first-player` makes the first player King, and the mission can be locked |
 | Realism in flight | Fixed for the flight: no in-flight Cheat menu changes, so every client's prediction stays exact |
 | Phase 2 keys | Replies Alt+Shift+E (Engaging), Alt+Shift+W (Winchester), Alt+Shift+B (Bingo fuel), Alt+Shift+H (Need help); K the score board; U and Ctrl+T as retail; Enter flies again after a loss |
@@ -1208,8 +1208,9 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Taking over hosting | John, 2026-10-05: a "Let my game take over hosting" switch in Options, on by default; dedicated servers never migrate (they issue rejoin tokens and hold reservations) |
 | The data link in recordings | John, 2026-10-06: approved slice G9's baseline (single-player recordings gain the data link's events and nothing else; the viewer's Comms panel gains a Link chip and the summary a Data link section) |
 | AI leads share and sort | John, 2026-10-06: approved slice G4's baseline (AI leads on loose control share and sort targets and AI wingmen locked on one bandit spread out; every probe with an AI-led wing moves, the player's own wing does not) |
-| An away player's own plane | John, 2026-10-06: while the AI flies an away player's aircraft, the player watches it on the observer screen and takes it back at the first flight input (a follow-up to F2-A and F2-O2; built in F2-O3) |
-| Stop Watching for an away player | Agent decision, 2026-10-06 (F2-O3): it leaves the aircraft to the AI and goes to the lobby when the game has a lobby screen and does not host; otherwise it takes the aircraft back. For John to confirm |
+| AI leads assign human wingmen | John, 2026-10-06: an AI lead's sort and share deal targets to its human wingmen too, with the cues and the call on that seat's channel; the human is free to ignore it (built in G11) |
+| An away player's own plane | John, 2026-10-06: while the AI flies an away player's aircraft, the player watches it on the observer screen (built in F2-O3). No flight input takes it back: it is a flight sim and nobody should fly AFK, so the player comes back only from the observer menu, on purpose (John, 2026-10-06; built in F2-O4) |
+| The away player's observer menu | John, 2026-10-06: in place of Stop Watching, the menu offers Take Back Flight (back into the player's own reserved aircraft), Spawn in Aircraft (only when no reserved aircraft is left, under the revival rules) and Leave Game (built in F2-O4) |
 | Esc in the observer view | John, 2026-10-06: Esc opens the viewer's pause menu, whose first row is Stop Watching |
 
 ## Open questions
