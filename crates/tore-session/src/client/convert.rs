@@ -34,6 +34,10 @@ use tore_world::world::World;
 pub(crate) mod events;
 pub(crate) mod smooth;
 
+/// A data link journal entry as a replay's `datalink.*` event: the one
+/// mapping both the single-player recorder and the capture conversion use.
+pub use events::datalink_event;
+
 use crate::client::interpolation::Sample;
 use smooth::{Own, Track};
 

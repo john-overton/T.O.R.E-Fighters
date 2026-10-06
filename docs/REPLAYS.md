@@ -467,8 +467,8 @@ What is not in it, known limits:
 - The `datalink.*` events are only those about the player's own flight: the
   host sends a seat the wire's `Link` events for its flight's members
   ([protocol](formats/net-protocol.md#data-link-stage-g)), and the conversion
-  writes each as the single-player recorder does (built, slice G7:
-  `datalink_event` in `tore-session/src/client/convert/events.rs`). A player
+  writes each with the function the single-player recorder calls too (built,
+  slice G7: `tore_session::client::convert::datalink_event`). A player
   seated after the start has no `datalink.member` events, and the tracks are
   not recorded, as in single player.
 

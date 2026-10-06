@@ -1,6 +1,7 @@
 //! The data link's journal as recorded events, from synthetic entries.
 use super::super::Recorder;
 use super::*;
+use tore_replay::vocab::field;
 use tore_replay::{AircraftInfo, Side};
 use tore_sim::ai::wing::PlayerOrder;
 use tore_world::datalink::ClearReason;

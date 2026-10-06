@@ -278,11 +278,12 @@ impl Events {
     }
 }
 
-/// One data link journal entry as a replay's `datalink.*` event, exactly as
-/// the single-player recorder writes it (`tore-app`'s
-/// `replay/recorder/datalink.rs`, slice G9; docs/REPLAYS.md, "Data link
-/// events"): the subject is the member (the lead for an assignment), the
-/// object the target aircraft (the wingman for an assignment).
+/// One data link journal entry as a replay's `datalink.*` event
+/// (docs/REPLAYS.md, "Data link events"; the layout is slice G9's): the
+/// subject is the member (the lead for an assignment), the object the target
+/// aircraft (the wingman for an assignment). The single-player recorder
+/// (`tore-app`'s `replay/recorder/datalink.rs`) and the capture conversion
+/// both call it, so a recorded and a converted flight write the same events.
 pub fn datalink_event(entry: &Entry) -> replay::Event {
     match *entry {
         Entry::Member { plane, radar, .. } => replay::Event::new(kind::DATALINK_MEMBER)

@@ -6,64 +6,14 @@
 //! 2026-10-05); see docs/REPLAYS.md ("Data link events").
 
 use super::Recorder;
-use tore_replay::{
-    Event, Value,
-    vocab::{field, kind},
-};
+use tore_replay::{Event, vocab::kind};
 use tore_world::datalink::{DataLink, Entry};
 
-/// One journal entry as the event it records.
+/// One journal entry as the event it records: the mapping the capture
+/// conversion uses too, so a recorded and a converted flight agree (slice G7
+/// moved it to `tore_session::client::convert::datalink_event`).
 pub(super) fn event(entry: &Entry) -> Event {
-    match *entry {
-        Entry::Member { plane, radar, .. } => Event::new(kind::DATALINK_MEMBER)
-            .with_subject(plane)
-            .with(field::RADAR, radar)
-            .with_text(if radar {
-                "joined the data link, with a radar"
-            } else {
-                "joined the data link, with no radar"
-            }),
-        Entry::Lock { plane, target, .. } => Event::new(kind::DATALINK_LOCK)
-            .with_subject(plane)
-            .with_object(target)
-            .with_text("locked"),
-        Entry::Unlock { plane, target, .. } => Event::new(kind::DATALINK_UNLOCK)
-            .with_subject(plane)
-            .with_object(target)
-            .with_text("let go of its lock"),
-        Entry::Assign {
-            plane,
-            target,
-            by,
-            order,
-            ..
-        } => Event::new(kind::DATALINK_ASSIGN)
-            .with_subject(by)
-            .with_object(plane)
-            .with(field::TARGET, Value::Id(target))
-            .with(field::ORDER, format!("{order:?}")),
-        Entry::Clear {
-            plane, target, why, ..
-        } => Event::new(kind::DATALINK_CLEAR)
-            .with_subject(plane)
-            .with_object(target)
-            .with(field::REASON, why.name())
-            .with_text("assignment ended"),
-        Entry::Acknowledge { plane, target, .. } => Event::new(kind::DATALINK_ACKNOWLEDGE)
-            .with_subject(plane)
-            .with_object(target)
-            .with_text("locked its assigned target"),
-        Entry::SortWarning {
-            plane,
-            other,
-            target,
-            ..
-        } => Event::new(kind::DATALINK_SORT_WARNING)
-            .with_subject(plane)
-            .with_object(target)
-            .with(field::OTHER, Value::Id(other))
-            .with_text("told a flightmate holds the same lock"),
-    }
+    tore_session::client::convert::datalink_event(entry)
 }
 
 impl Recorder {
