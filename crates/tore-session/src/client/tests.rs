@@ -392,8 +392,10 @@ fn a_different_import_is_refused_with_the_names_that_differ() {
     assert!(
         p.events.iter().any(|e| matches!(
             e,
+            // Stage L: worded by the item the file belongs to (the changed
+            // profile no longer loads, so the import lacks the aircraft).
             ClientEvent::ContentRefused { names, reason }
-                if names.contains(&name) && reason.contains("differs")
+                if names.contains(&name) && reason.contains("F/A-18D Hornet")
         )),
         "{:?}",
         p.events

@@ -3,6 +3,7 @@
 //! and the runway numbers are the ones `start ground` takes.
 
 use crate::prepare::Prepared;
+use tore_session::host::content::{GameContent, report_lines};
 use tore_world::mission::{MissionSpec, RUNWAY_OBJECT_BASE, Start};
 
 /// A one-line summary of the mission, for the start lines.
@@ -96,6 +97,12 @@ pub fn report(prepared: &Prepared) -> Vec<String> {
         prepared.manifest.entries.len(),
         prepared.manifest.digest()
     ));
+    // Stage L: the import's source and content, one line per item, so an
+    // operator can compare two imports (`tore-bot --content-report` prints
+    // the same lines).
+    lines.push(String::new());
+    let content = GameContent::read(&prepared.data_dir, &prepared.resources);
+    lines.extend(report_lines(&content));
     lines
 }
 
@@ -135,6 +142,19 @@ mod tests {
             text.contains(&format!("digest {:016x}", prepared.manifest.digest())),
             "{text}"
         );
+        // Stage L: the source and one line per item.
+        assert!(
+            text.contains(
+                "Content: an unknown Fighters Anthology build, imported by an unknown T.O.R.E"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("Content items: 1 aircraft, 1 theater, 2 weapons, the shared data"),
+            "{text}"
+        );
+        assert!(text.contains("\n  aircraft F18.PT "), "{text}");
+        assert!(text.contains("\n  shared data "), "{text}");
         let _ = fs::remove_dir_all(dir);
     }
 }

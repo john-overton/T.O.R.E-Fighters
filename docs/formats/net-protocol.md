@@ -1564,12 +1564,46 @@ Stage L's limits are in [Limits](#limits) (the "Stage L (protocol 10)" row).
   KB, and the writer refuses any body over 64 KB, as for every message. At
   the usual sizes (a 12-byte key, a short label, one player) 1,024 gaps are
   about 33 KB. The host keeps its gaps inside one message (slice L3).
-- **Until L3.** A host of protocol 10 reads a Content and ignores it (it
-  counts as one of the 20 requests a second), sends no Content gaps, and
-  sends every player's build as 0 (unknown). A client treats a Content gaps
-  it does not expect as it treats any host message it does not know: the
-  connection ends with a protocol error, so L3 builds the client's side
-  before the host sends one.
+- **The shared item** is, on a real import, the 299 radio phrase
+  recordings (`TORE_RADIO_*`) and nothing else: L1 measured it, and the
+  combat effects and creator and cloud tables the design first listed are
+  not read by a mission build ([content items](../ARCHITECTURE.md#content-items)).
+
+*Built (L3, 2026-10-05), the sessions, each an agent decision unless
+credited:*
+
+- **The client** sends its Content as its first message, at Accepted, before
+  the Mission arrives; an import with no item at all sends none (the wire
+  wants at least one item) and is never counted. A key the wire cannot
+  carry, or items past 1,024, are left out, and an importer's version or
+  commit is cut to 64 bytes; no real import has any of these.
+- **The host** keeps each player's Content (a second replaces the first)
+  and counts every connection whose Content has arrived and that is not
+  closing (John, 2026-10-05: every connected player counts). After each
+  receive or update it finds the gaps again when a Content arrived or a
+  player left; when they changed, every counted player is sent the new
+  Content gaps, and a player whose Content just arrived is sent the gaps
+  even if they did not change. A player whose Content has not arrived gets
+  none until it does.
+- **A gap the host lacks** names the players that lack it too; a player that
+  has it is not named, since there is nothing to compare its digest with.
+- **One message.** When every gap would not fit one reliable message (64 KB)
+  or the wire's 1,024, the host keeps the shared item, then the aircraft,
+  then the theaters and the weapons last, and cuts the list where it fits,
+  in Content's order. Its own refusals still see every gap; a gap left out
+  is only not dimmed in a player's creator, and the log says how many were
+  left out. At the sizes stage L expects (a dozen players, a few gaps) the
+  message is a few hundred bytes.
+- **The lobby's build** is each player's Content's build, unknown until it
+  arrives.
+- **Refused and Content refused** carry the words of the
+  [architecture](../ARCHITECTURE.md#the-words): a Change mission whose
+  aircraft or theater is in a gap and a Loadout whose weapon is in one are
+  refused with "Not everyone can fly the ...: ..." before the mission is
+  built; the host words a Content refused's `unable` text in the third
+  person from the player's Content and the mission's items, and the player's
+  own game keeps its second-person reason. The shared item restricts no
+  choice.
 
 ## Host migration and rejoin (stage K)
 

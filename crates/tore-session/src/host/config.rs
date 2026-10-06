@@ -169,6 +169,12 @@ pub struct HostConfig {
     /// Lobby: a game a player hosts, whose hosting thread lists it. A
     /// dedicated server's listing is its operator's `broadcast`.
     pub listable: bool,
+    /// The host's own content (stage L): what every player's is compared
+    /// with. `None` computes it from the resources the host is given when it
+    /// starts, with the source the pack's entry gives; a caller that knows
+    /// the data folder (the dedicated server, the hosting game) may pass one
+    /// it computed already, with the source read from the import report too.
+    pub content: Option<std::sync::Arc<super::content::GameContent>>,
 }
 
 impl HostConfig {
@@ -193,6 +199,7 @@ impl HostConfig {
             mission_locked: false,
             settings: Vec::new(),
             listable: false,
+            content: None,
         }
     }
 

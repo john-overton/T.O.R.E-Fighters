@@ -14,6 +14,8 @@
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
 //!          [--revive SECONDS] [--away SECONDS,FOR]
+//!          [--drop-resource NAME]... [--expect-unable]
+//! tore-bot --content-report [--data-dir DIR] [--drop-resource NAME]...
 //! ```
 //!
 //! `--master` and `--listing` join through the Internet Lobby (stage J,
@@ -71,6 +73,21 @@
 //! plane. It prints when the AI takes the plane and when it asks for it
 //! back, and succeeds only if it was seated again in that plane.
 //!
+//! Stage L (docs/ARCHITECTURE.md, "Compatibility"): each bot sends the
+//! content of its import when it joins, and prints the host's gaps whenever
+//! they change ("Bot: gaps: aircraft SU27.PT (Hawk lacks it)", or "gaps:
+//! none") and, once for each player whose build or items differ from the
+//! host's, the lobby's Messages line ("Bot: You imported Fighters Anthology
+//! 1.0; the host, 1.02F. Every aircraft, weapon and theater is the same.").
+//! `--drop-resource NAME` (a test aid, any number of times) removes a
+//! resource from the bot's loaded import before anything reads it, so a test
+//! can play a player whose import lacks an aircraft. `--content-report`
+//! prints the import's content (its source, its counts and one line per item
+//! with its digest, the same lines as `tore-server --check`) and exits
+//! without joining. `--expect-unable` makes a bot succeed only if its import
+//! cannot play the mission: it is told why, takes no plane and leaves
+//! cleanly (agent decision, for the battery's `net-content-missing`).
+//!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
 //! every bot was seated, got a debrief and then left cleanly, or was told the
@@ -89,7 +106,9 @@ use tore_net::{
     CloseReason, Datagrams, DisconnectReason, Entropy, Listen, RealClock, ServerSocket, bind_udp,
 };
 use tore_session::bot::Bot;
+use tore_session::client::content::joined_line;
 use tore_session::client::{Race, ended_text};
+use tore_session::host::content::{GameContent, gaps_line, report_lines};
 use tore_session::settings::{self, Mode, Store};
 use tore_session::wire::chat::Receiver;
 use tore_session::wire::messages::{Goodbye, LobbyState, Observing, SettingsChange, Subject};
@@ -99,7 +118,9 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--path auto|direct|relay]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE] \
 [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
-[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR]";
+[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] \
+[--drop-resource NAME]... [--expect-unable]\n       tore-bot --content-report [--data-dir DIR] \
+[--drop-resource NAME]...";
 
 /// How long the bot looks for the listing on the master's list.
 const FIND_LISTING: Duration = Duration::from_secs(10);
@@ -152,6 +173,13 @@ struct Options {
     /// `--away`: away this long after the first seating, back the second
     /// span after the AI took the plane.
     away: Option<(Duration, Duration)>,
+    /// `--drop-resource`: names removed from the loaded import.
+    drop: Vec<String>,
+    /// `--content-report`: print the content and exit.
+    content_report: bool,
+    /// `--expect-unable`: succeed only as a player who cannot fly the
+    /// mission.
+    expect_unable: bool,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -264,6 +292,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
         king: None,
         revive: None,
         away: None,
+        drop: Vec::new(),
+        content_report: false,
+        expect_unable: false,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -321,9 +352,19 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--king" => options.king = Some(king(&value()?)?),
             "--revive" => options.revive = Some(seconds(&value()?)?),
             "--away" => options.away = Some(away(&value()?)?),
+            "--drop-resource" => options.drop.push(value()?),
+            "--content-report" => options.content_report = true,
+            "--expect-unable" => options.expect_unable = true,
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
+    }
+    if options.content_report {
+        // A report joins nothing.
+        if connect.is_some() || master.is_some() || listing.is_some() {
+            return Err(format!("--content-report joins nothing\n{USAGE}"));
+        }
+        return Ok(options);
     }
     options.target = match (connect, master, listing) {
         (Some(connect), None, None) => JoinBy::Connect(reach(&connect)?),
@@ -383,19 +424,33 @@ fn reach(connect: &str) -> Result<SocketAddr, String> {
     Ok(first)
 }
 
-fn load(data_dir: Option<PathBuf>) -> Result<tore_import::Resources, String> {
+/// The import in the data folder, less the `--drop-resource` names, and
+/// its content (stage L), read with the import report beside the pack.
+fn load(
+    data_dir: Option<PathBuf>,
+    drop: &[String],
+) -> Result<(tore_import::Resources, GameContent), String> {
     let dir = match data_dir {
         Some(dir) => dir,
         None => tore_import::data_directory().map_err(|error| error.to_string())?,
     };
-    tore_import::load_with(&dir, &|resources| tore_import::check_markers(resources))
-        .map(|loaded| loaded.resources)
-        .map_err(|error| {
-            format!(
-                "There is no usable import in {} ({error}). Import Fighters Anthology with the game first, or point --data-dir at its data folder.",
-                dir.display()
-            )
-        })
+    let mut resources = tore_import::load_with(&dir, &|resources| {
+        tore_import::check_markers(resources)
+    })
+    .map(|loaded| loaded.resources)
+    .map_err(|error| {
+        format!(
+            "There is no usable import in {} ({error}). Import Fighters Anthology with the game first, or point --data-dir at its data folder.",
+            dir.display()
+        )
+    })?;
+    for name in drop {
+        if resources.remove(name).is_none() {
+            return Err(format!("--drop-resource: {name} is not in the import"));
+        }
+    }
+    let content = GameContent::read(&dir, &resources);
+    Ok((resources, content))
 }
 
 fn build() -> BuildId {
@@ -550,6 +605,11 @@ struct Running {
     settings_sent: bool,
     /// The settings last printed.
     settings: Option<Vec<(u8, u32)>>,
+    /// Stage L: the gaps line last printed, the players whose build line
+    /// has been decided, and whether it was told it cannot fly the mission.
+    gaps: Option<String>,
+    told: std::collections::BTreeSet<u8>,
+    unable: bool,
 }
 
 impl Running {
@@ -765,6 +825,59 @@ fn lobby_line(lobby: &LobbyState) -> String {
     )
 }
 
+/// Up to five names, then how many more.
+fn names_text(names: &[String]) -> String {
+    let shown: Vec<&str> = names.iter().take(5).map(String::as_str).collect();
+    match names.len().saturating_sub(5) {
+        0 => shown.join(", "),
+        more => format!("{} and {more} more", shown.join(", ")),
+    }
+}
+
+/// Stage L: prints the gaps when they change and, once for each player,
+/// the Messages line about its build or items. A player's line is decided
+/// once its build is known or a gap names it; the bot's own once the gaps
+/// have come (it knows its own build).
+fn content_lines(
+    name: &str,
+    shown: &mut Option<String>,
+    told: &mut std::collections::BTreeSet<u8>,
+    client: &Client,
+) {
+    let (Some(gaps), Some(lobby)) = (client.content_gaps(), client.lobby()) else {
+        return;
+    };
+    let callsign = |id: u8| {
+        lobby
+            .player(id)
+            .map_or_else(|| format!("player {id}"), |p| p.callsign.clone())
+    };
+    let line = gaps_line(&gaps.gaps, &callsign, 0);
+    if shown.as_deref() != Some(line.as_str()) {
+        println!("{name}: {line}");
+        *shown = Some(line);
+    }
+    for player in &lobby.players {
+        let you = player.id == lobby.you;
+        let named = gaps
+            .gaps
+            .iter()
+            .any(|g| g.players.iter().any(|p| p.id == player.id));
+        let known = player.build != tore_session::wire::messages::Build::Unknown;
+        if told.contains(&player.id) || !(known || named || you) {
+            continue;
+        }
+        if you && !known && client.content().build() != player.build {
+            // The host has not had this game's content yet.
+            continue;
+        }
+        told.insert(player.id);
+        if let Some(text) = joined_line(player, you, gaps) {
+            println!("{name}: {text}");
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let options = match parse(&args) {
@@ -774,13 +887,27 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let resources = match load(options.data_dir.clone()) {
-        Ok(resources) => Arc::new(resources),
+    let (resources, content) = match load(options.data_dir.clone(), &options.drop) {
+        Ok((resources, content)) => (Arc::new(resources), Arc::new(content)),
         Err(text) => {
             eprintln!("{text}");
             return ExitCode::from(2);
         }
     };
+    if options.content_report {
+        for line in report_lines(&content) {
+            println!("{line}");
+        }
+        return ExitCode::SUCCESS;
+    }
+    for name in &options.drop {
+        println!("dropped {name} from the import");
+    }
+    println!(
+        "content: {}, {} items",
+        content.source.describe(),
+        content.content.items().len()
+    );
     let clock = RealClock::new();
     let lines = resources
         .get(tore_import::selection::CHAT_RESOURCE)
@@ -829,6 +956,7 @@ fn main() -> ExitCode {
             plane: options.slot.map(|slot| slot + i as u32),
             entropy: Entropy::System,
             auto_ready: options.observe.is_none(),
+            content: Some(Arc::clone(&content)),
             ..ClientConfig::new(server, &name, build())
         };
         let mut running = Running {
@@ -862,6 +990,9 @@ fn main() -> ExitCode {
             crowned: false,
             settings_sent: false,
             settings: None,
+            gaps: None,
+            told: std::collections::BTreeSet::new(),
+            unable: false,
         };
         match (&options.target, &found) {
             (JoinBy::Master { path, .. }, Some((masters, listing_id))) => {
@@ -999,7 +1130,8 @@ fn main() -> ExitCode {
                     ClientEvent::Connected { .. } => println!("{}: joined", r.name),
                     ClientEvent::MissionLoaded => println!("{}: mission loaded", r.name),
                     ClientEvent::ContentRefused { names, reason } => {
-                        println!("{}: {reason} ({})", r.name, names.join(", "));
+                        r.unable = true;
+                        println!("{}: {reason} ({})", r.name, names_text(&names));
                     }
                     ClientEvent::MissionFailed(text) => println!("{}: {text}", r.name),
                     ClientEvent::SeatRefused(text) => {
@@ -1009,6 +1141,7 @@ fn main() -> ExitCode {
                         println!("{}: refused: {reason}", r.name);
                     }
                     ClientEvent::Lobby => {
+                        content_lines(&r.name, &mut r.gaps, &mut r.told, &bot.client);
                         if let Some(lobby) = bot.client.lobby() {
                             let line = lobby_line(lobby);
                             if r.lobby.as_deref() != Some(line.as_str()) {
@@ -1189,7 +1322,9 @@ fn main() -> ExitCode {
         std::thread::sleep(wake);
     }
     let clean = bots.iter().all(|r| {
-        let done = if options.observe.is_some() {
+        let done = if options.expect_unable {
+            r.unable && !r.seated
+        } else if options.observe.is_some() {
             r.observed && r.bot.as_ref().is_some_and(|bot| bot.watched > 0)
         } else if options.away.is_some() {
             r.seated
@@ -1248,6 +1383,32 @@ mod tests {
         assert!(parse(&args("--count 2")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --count 0")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --bogus")).is_err());
+    }
+
+    #[test]
+    fn content_options_parse_and_a_report_joins_nothing() {
+        let o = parse(&args(
+            "--connect 127.0.0.1 --drop-resource SU27.PT --drop-resource AIM9X.JT --expect-unable",
+        ))
+        .unwrap();
+        assert_eq!(o.drop, ["SU27.PT", "AIM9X.JT"]);
+        assert!(o.expect_unable && !o.content_report);
+        let o = parse(&args(
+            "--content-report --data-dir /tmp/x --drop-resource SU27.PT",
+        ))
+        .unwrap();
+        assert!(o.content_report);
+        assert_eq!(o.drop, ["SU27.PT"]);
+        assert!(
+            parse(&args("--content-report --connect 127.0.0.1"))
+                .err()
+                .unwrap()
+                .contains("joins nothing")
+        );
+        assert!(parse(&args("--connect 127.0.0.1 --drop-resource")).is_err());
+        assert_eq!(names_text(&["A".into(), "B".into()]), "A, B");
+        let many: Vec<String> = (0..8).map(|n| n.to_string()).collect();
+        assert_eq!(names_text(&many), "0, 1, 2, 3, 4 and 3 more");
     }
 
     #[test]

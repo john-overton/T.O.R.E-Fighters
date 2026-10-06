@@ -431,11 +431,14 @@ fn a_joiner_whose_import_lacks_the_content_is_told_and_stays() {
     assert!(rig.run_until(Duration::from_secs(1), |r| {
         lobby(r, king).is_some_and(|l| l.players.iter().any(|p| p.unable.is_some()))
     }));
+    // Stage L: without the weapon its import cannot load the aircraft, so
+    // it lacks the aircraft, and says so by name.
     let p = &rig.players[cobra];
     assert!(p.events.iter().any(|e| matches!(
         e,
         ClientEvent::ContentRefused { names, reason }
-            if names.contains(&"AIM9M.JT".to_string()) && reason.contains("differs")
+            if names.contains(&"AIM9M.JT".to_string())
+                && reason.starts_with("Your game has no F/A-18D Hornet, which this mission flies.")
     )));
     assert_eq!(p.client.phase(), ClientPhase::Lobby);
     // It may not take a slot; the King flies without it.
@@ -939,15 +942,7 @@ fn a_loadouts_other_weapon_is_checked_at_the_start_and_the_player_may_try_again(
         },
     );
     let king = manual(&mut rig, "Viper");
-    // Cobra's copy of the other missile differs; the lobby's mission does
-    // not read it.
-    let mut other = import.clone();
-    other.get_mut("AIM9X.JT").unwrap().push(0);
-    rig.resources = Arc::new(other);
-    let cobra = manual(&mut rig, "Cobra");
-    rig.resources = Arc::new(import.clone());
-    gathered(&mut rig, &[king, cobra]);
-    assert!(me(&rig, cobra).unwrap().unable.is_none());
+    gathered(&mut rig, &[king]);
     let mut load = standard();
     let kind = tore_world::aircraft_type::AircraftType::load(&import, AircraftId::F18).unwrap();
     let base = tore_sim::combat::loadout::Loadout::new(&kind.profile, |name| {
@@ -963,11 +958,28 @@ fn a_loadouts_other_weapon_is_checked_at_the_start_and_the_player_may_try_again(
     load.stations[1].count = capacity;
     load.stations[1].quantity = capacity;
     rig.players[king].client.take_slot(0);
-    rig.players[cobra].client.take_slot(1);
     assert!(rig.run_until(Duration::from_secs(1), |r| {
         me(r, king).is_some_and(|m| m.slot.is_some())
     }));
     rig.players[king].client.send_loadout(Some(load));
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        me(r, king).is_some_and(|m| m.loadout)
+    }));
+    // Cobra's copy of the other missile differs; the lobby's mission does
+    // not read it. It joins after the King's loadout was taken (stage L
+    // refuses a loadout whose weapon is in a gap once Cobra is there), so
+    // only the flight's exact check finds it.
+    let mut other = import.clone();
+    other.get_mut("AIM9X.JT").unwrap().push(0);
+    rig.resources = Arc::new(other);
+    let cobra = manual(&mut rig, "Cobra");
+    rig.resources = Arc::new(import.clone());
+    gathered(&mut rig, &[king, cobra]);
+    assert!(me(&rig, cobra).unwrap().unable.is_none());
+    rig.players[cobra].client.take_slot(1);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        me(r, cobra).is_some_and(|m| m.slot.is_some())
+    }));
     rig.players[king].client.set_ready(true);
     rig.players[cobra].client.set_ready(true);
     assert!(rig.run_until(Duration::from_secs(1), |r| {

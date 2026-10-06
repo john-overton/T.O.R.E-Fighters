@@ -94,7 +94,7 @@ tore-server --config server.conf
 | `--data-dir DIR` | The data folder holding the import and the logs |
 | `--import FOLDER` | Import the game, then exit |
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
-| `--check` | Load the import and the mission, print the mission's aircraft with their plane numbers, its runways and its content manifest, then exit without opening the port |
+| `--check` | Load the import and the mission, print the mission's aircraft with their plane numbers, its runways, its content manifest and the import's content, then exit without opening the port |
 | `--help`, `--version` | Print the options, or the version and commit, and exit |
 
 *Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the
@@ -110,6 +110,25 @@ wing, place in the wing and skill, each runway as its number, airport name and
 length (a short strip is marked: nobody starts there), and the manifest's
 resource count and 64-bit digest. A mission that cannot be built is refused
 with the builder's own words, for example "Selected runway is unavailable".
+
+*Built (L3, 2026-10-05).* `--check` then prints the import's content
+([compatibility](ARCHITECTURE.md#compatibility)): where the import came from,
+its counts and one line per item with its kind, key and digest, so an
+operator can compare two imports line by line (`tore-bot --content-report`
+prints the same lines for any data folder):
+
+```text
+Content: Fighters Anthology 1.02F, imported by T.O.R.E 0.1.4 (48d62dac)
+Content items: 14 aircraft, 16 theaters, 131 weapons, the shared data
+  aircraft A4E.PT 3f0c9a2e7d61b845
+  ...
+  shared data 9b17e2c04d5a6f38
+```
+
+An import made before stage L has no record of its source in the pack; the
+server reads its Fighters Anthology build from the `FA.EXE:` line of
+`import-report.txt` beside the pack, and the importer is unknown
+("imported by an unknown T.O.R.E"). No re-import is needed.
 
 At start it prints the version and commit, the data folder, a summary of the
 mission, the port it listens on, whether it broadcasts on the Internet Lobby
@@ -690,10 +709,38 @@ The log (`logs/server-<date>.log` in the data folder) records the start,
 every connection, refusal, seat change and departure with its reason, the
 mission's end, every chat line a player sends (*built, EF6*: `chat: Viper to
 friendlies (2 heard): Form up`, with the sender, the receiver and how many
-others heard it; a line the host refuses is a refusal line), and once a minute each player's figures: the same round trip,
+others heard it; a line the host refuses is a refusal line), what each
+player's import holds and what not everyone can use (*built, L3*: below),
+and once a minute each player's figures: the same round trip,
 loss, snapshot arrival spread, input margin, inputs repeated and bytes each
 way that a player's game writes to its own
 [diagnostics log](ARCHITECTURE.md#recordings-and-diagnostics).
+
+**Content and gaps** (*built, L3, 2026-10-05*;
+[compatibility](ARCHITECTURE.md#compatibility)). After the start lines the
+server says what its own import is (`Content: Fighters Anthology 1.02F,
+imported by T.O.R.E 0.1.4 (48d62dac), 162 items`). A `content` line follows
+each player's join: its Fighters Anthology build, the T.O.R.E that made its
+import, and the items it lacks, has differently or has that the server lacks
+(up to twelve named, then "and N more"):
+
+```text
+content Hawk: Fighters Anthology 1.0, imported by T.O.R.E 0.1.4 (48d62dac); the same items as the host
+content Ace: Fighters Anthology 1.02F, imported by T.O.R.E 0.1.3 (9a1b2c3d); lacks aircraft SU27.PT, aircraft MIG29.PT
+```
+
+A `gaps` line says what not every player can use whenever that changes: a
+join, a leave, or `gaps: none` once the last such player has gone.
+
+```text
+gaps: aircraft SU27.PT (Ace lacks it); weapon AIM9X.JT (Hawk differs)
+```
+
+The server's own mission is never refused for a gap: a player who cannot fly
+it stays in the lobby, unable, with the reason in the log as before, now
+about the item ("Ace's game has no Su-27, which this mission flies."). A King
+on the server cannot choose a mission or a loadout that uses an item in a
+gap. These lines go to the console and the log alike.
 
 *Built (D7b).* Every log line starts with a UTC date and time, and a new file
 starts at UTC midnight (the standard library has no time zones; agent

@@ -120,12 +120,20 @@ pub fn start_host_with(
     config.retail_stall_speeds = false;
     let host = tore_session::Host::new(spec, resources, config)
         .map_err(|error| format!("The host session cannot start: {error}"))?;
+    // Stage L: the server's own content, which every player's is compared
+    // with (`--check` lists its items).
+    let own = host.content();
+    let content_line = format!(
+        "Content: {}, {} items",
+        own.source.describe(),
+        own.content.items().len()
+    );
     // After the checks above: a start that is refused asks the router nothing.
     let keeper = mapping.map(|mapping| Keeper::start(mapping, port));
     Ok(Box::new(SessionHost {
         host,
         socket,
-        events: VecDeque::new(),
+        events: VecDeque::from([Event::Note(content_line)]),
         listing,
         tally: None,
         now: Duration::ZERO,
@@ -365,6 +373,11 @@ impl SessionHost {
                     heard,
                 },
             });
+        }
+        // Stage L: a `content` line for each player's Content and a `gaps`
+        // line when the gaps change (docs/DEDICATED-SERVER.md, "The log").
+        while let Some(line) = self.host.poll_content_log() {
+            self.events.push_back(Event::Note(line.text));
         }
     }
 }

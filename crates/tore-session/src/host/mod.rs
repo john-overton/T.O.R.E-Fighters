@@ -34,12 +34,20 @@
 //! world through the journal ([`crate::journal::apply_tick`]) and adds its
 //! own modules (`journal`, `standby`, `resume`, `rejoin`, `succession`,
 //! `state`), each a seam slice K0 placed for a later slice to fill.
+//!
+//! Stage L (docs/ARCHITECTURE.md, "Compatibility") adds each player's
+//! content, the gaps it leaves and the words about them (`content`): a
+//! mission or a loadout that uses an item in a gap is refused, and a player
+//! who cannot fly the mission is unable in words about the item.
 
 // Stage F phase 2's parts (slice F2-0 adds them as hooks; each slice in
 // docs/ARCHITECTURE.md, "Phase 2 slices", fills its own).
 mod away;
 mod chat;
 pub mod config;
+pub mod content;
+#[cfg(test)]
+mod content_tests;
 mod discover;
 pub mod inputs;
 mod king;
@@ -488,6 +496,10 @@ struct Peer {
     chat_rate: RateLimit,
     /// Watching the flying mission (stage F phase 2, slice F2-O1).
     watch: Option<observe::Watch>,
+    /// What its Content said (stage L); `None` until it arrives.
+    content: Option<content::PlayerContent>,
+    /// It has been sent the newest Content gaps.
+    gaps_sent: bool,
 }
 
 /// The lifecycle's own state.
@@ -581,6 +593,9 @@ pub struct Host {
     rejoin: rejoin::Rejoin,
     /// Candidates, their measures and the succession (slice K6).
     succession: succession::Succession,
+    /// The host's content, the players' gaps and their words (stage L,
+    /// `content`).
+    compat: content::Compat,
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
@@ -803,6 +818,13 @@ impl Host {
         // game that hosts it (stage K).
         server.set_reach_session(Some(session_id));
         let tracker = Tracker::new(&world);
+        // Stage L: the host's own content is what every player's is
+        // compared with; computed here when the caller gave none.
+        let own = config
+            .content
+            .clone()
+            .unwrap_or_else(|| content::GameContent::shared(&resources));
+        let compat = content::Compat::new(own, &resources);
         let mut host = Host {
             session_id,
             spec_text: spec.to_text(),
@@ -844,6 +866,7 @@ impl Host {
             resuming: resume::Resuming::default(),
             rejoin: rejoin::Rejoin::default(),
             succession: succession::Succession::default(),
+            compat,
             court,
             settings,
             config,
@@ -1394,6 +1417,8 @@ impl Host {
                 refusal_logged: None,
                 chat_rate: RateLimit::default(),
                 watch: None,
+                content: None,
+                gaps_sent: false,
             },
         );
         let tick = self.world.tick();
@@ -1440,6 +1465,8 @@ impl Host {
             return;
         };
         self.lobby_dirty = true;
+        // Stage L: the gaps no longer count it.
+        self.compat.touch();
         let reason = if peer.goodbye == Some(Goodbye::HostLeft) {
             LeaveReason::HostLeft
         } else if peer.ended {
@@ -1571,6 +1598,8 @@ impl Host {
             Message::TakePlane(take) => self.take_plane(connection, take.plane),
             Message::Leave => self.leave(connection),
             Message::ContentRefused(refused) => self.content_refused(connection, refused),
+            // Stage L: the player's content, its first message.
+            Message::Content(content) => self.content_arrived(connection, *content),
             Message::Slot(slot) => {
                 let result = self.slot(connection, slot.request);
                 self.answer(connection, kind::SLOT, "a slot", result);
@@ -1805,6 +1834,8 @@ impl Host {
             };
         }
         self.lobby_dirty = true;
+        // Stage L: a closing connection no longer counts for the gaps.
+        self.compat.touch();
     }
 
     fn inputs(&mut self, connection: ConnectionId, body: &[u8]) {
@@ -2023,6 +2054,10 @@ impl Host {
             // Under the King's loadout rule, which the mission carries.
             load.check_in(&kind.profile, &*self.resources, &self.spec)
                 .map_err(|error| error.to_string())?;
+            // Stage L: a weapon not everyone has.
+            if let Some(why) = self.loadout_gap_refusal(load) {
+                return Err(why);
+            }
         }
         let own = loadout.is_some();
         let peer = self.peers.get_mut(&connection).ok_or("")?;
@@ -2232,11 +2267,9 @@ impl Host {
         if refused.mission != self.number {
             return;
         }
-        let reason = if refused.reason.is_empty() {
-            format!("its game data differs in {}", refused.names.join(", "))
-        } else {
-            refused.reason
-        };
+        // Stage L: in the third person, about the item, for every player
+        // (the player's own game keeps its own words).
+        let reason = self.unable_text(connection, &refused.names, refused.flight);
         if stage == Stage::Seated
             && let Some(seat) = seat
         {
@@ -2274,6 +2307,10 @@ impl Host {
             return Err(
                 "A lobby's mission carries no loadouts: each player arms their own.".into(),
             );
+        }
+        // Stage L: an aircraft or a theater not everyone has.
+        if let Some(why) = self.mission_gap_refusal(&spec) {
+            return Err(why);
         }
         let (world, manifest) =
             build_world(&spec, &self.resources).map_err(|error| match error {
@@ -2563,8 +2600,11 @@ impl Host {
                     unable: peer.lobby.unable.clone(),
                     platform: peer.platform,
                     path: peer.path,
-                    // Each player's build comes from its Content (slice L3).
-                    build: messages::Build::Unknown,
+                    // Each player's build, as its Content said (stage L).
+                    build: peer
+                        .content
+                        .as_ref()
+                        .map_or(messages::Build::Unknown, |content| content.build),
                     // The standbys are appointed by slice K3.
                     standby: messages::StandbyMark::None,
                 })
@@ -2593,6 +2633,8 @@ impl Host {
     /// [`LOBBY_INTERVAL_FLYING`], since its messages share 256 bytes of each
     /// snapshot packet (agent decision, EF4 review).
     fn send_lobby(&mut self) {
+        // Stage L: the gaps, when they changed or a player's content came.
+        self.send_gaps();
         if std::mem::take(&mut self.lobby_dirty) {
             for peer in self.peers.values_mut() {
                 peer.lobby_stale = true;

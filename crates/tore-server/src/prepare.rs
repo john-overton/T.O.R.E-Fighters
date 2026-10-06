@@ -142,9 +142,28 @@ pub fn load_mission(path: &Path) -> Result<MissionSpec, String> {
 /// Loads everything and builds the mission once to prove it can be built.
 pub fn prepare(options: &Options, data_dir: &Path) -> Result<Prepared, String> {
     let config = load_config(options, data_dir)?;
-    let resources = load_resources(data_dir)?;
+    let mut resources = load_resources(data_dir)?;
+    add_source(data_dir, &mut resources);
     let spec = load_mission(&config.mission)?;
     build(config, data_dir, spec, resources)
+}
+
+/// Stage L: an import made before the import recorded its source has no
+/// `TORE_SOURCE_V1` entry; its build is then read from the import report
+/// beside the pack and added to the loaded resources as that entry, so the
+/// host, which reads the source from its resources, says the right build
+/// (agent decision: the host is given resources, not the data folder).
+/// Nothing a mission builds reads the entry. A pack with the entry, or a
+/// report that names no build, is left as it is.
+pub fn add_source(data_dir: &Path, resources: &mut Resources) {
+    use tore_import::source::{RESOURCE, Source};
+    if resources.contains_key(RESOURCE) {
+        return;
+    }
+    let source = Source::read(data_dir, resources);
+    if source.build.is_some() {
+        resources.insert(RESOURCE.to_owned(), source.encode());
+    }
 }
 
 /// The trial build and the checks that need the built mission.
@@ -353,6 +372,26 @@ pub mod tests {
             "{error}"
         );
         assert!(error.contains("SU27"), "{error}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_old_pack_takes_its_build_from_the_import_report() {
+        use tore_import::source::{Build, RESOURCE, Source};
+        let dir = data_folder("prep-source", true);
+        fs::write(dir.join("mission.txt"), MISSION).unwrap();
+        // No entry and no report: the source stays unknown.
+        let prepared = prepare(&Options::default(), &dir).unwrap();
+        assert!(!prepared.resources.contains_key(RESOURCE));
+        // The report names the build: the entry is added from it.
+        fs::write(
+            dir.join("import-report.txt"),
+            "T.O.R.E import report\n\nSource: disc\nFA.EXE: 1.0 (disc) SHA-256 c7d2; 1299968 bytes\n",
+        )
+        .unwrap();
+        let prepared = prepare(&Options::default(), &dir).unwrap();
+        let source = Source::parse(&prepared.resources[RESOURCE]).unwrap();
+        assert_eq!((source.build, source.importer), (Some(Build::Disc10), None));
         let _ = fs::remove_dir_all(dir);
     }
 

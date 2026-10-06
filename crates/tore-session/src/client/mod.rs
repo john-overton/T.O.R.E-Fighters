@@ -34,6 +34,9 @@
 //! - **The frame's data** ([`ClientFrame`]): the own plane's presented
 //!   flight, the picture, the newest cockpit readout and the events.
 //! - **Diagnostics and capture** ([`diagnostics`], [`capture`]).
+//! - **Content** (stage L, [`content`]): its first message after the join
+//!   is its content ([`ClientConfig::content`]); it keeps the host's Content
+//!   gaps ([`Client::content_gaps`]) and words its own refusal by item.
 
 mod away;
 #[cfg(test)]
@@ -44,6 +47,7 @@ pub mod capture;
 #[cfg(test)]
 mod chat_tests;
 pub mod clock;
+pub mod content;
 pub mod convert;
 #[cfg(test)]
 mod convert_tests;
@@ -183,6 +187,11 @@ pub struct ClientConfig {
     /// master gave for the host, raced at once, and the introduction whose
     /// punches add more. `None` joins `server` alone.
     pub race: Option<Race>,
+    /// This game's content (stage L), sent as its first message after the
+    /// join. `None` computes it from the resources at [`Client::connect`],
+    /// with the source the pack's entry gives; the game passes the one it
+    /// computed on a worker, with the source read from the import report too.
+    pub content: Option<Arc<crate::host::content::GameContent>>,
 }
 
 /// The host's addresses from the master's introduction, for a join that
@@ -211,6 +220,7 @@ impl ClientConfig {
             auto_ready: true,
             platform: Platform::current(),
             race: None,
+            content: None,
         }
     }
 }
@@ -721,6 +731,9 @@ pub struct Client {
     /// Stage K's migration: the standby records passed on, and what slice
     /// K4 adds.
     migration: migrate::Migration,
+    /// This game's content, and the host's newest Content gaps (stage L).
+    content: Arc<crate::host::content::GameContent>,
+    gaps: Option<crate::wire::messages::ContentGaps>,
     now: Duration,
 }
 
@@ -778,7 +791,13 @@ impl Client {
             None => tore_net::Client::connect(net_config, config.server, now),
         }
         .map_err(|error| ClientError::Config(error.to_string()))?;
+        let content = config
+            .content
+            .clone()
+            .unwrap_or_else(|| crate::host::content::GameContent::shared(&resources));
         Ok(Client {
+            content,
+            gaps: None,
             config,
             resources,
             seed,
@@ -1099,6 +1118,23 @@ impl Client {
     /// cannot (the King sees it in the lobby too).
     pub fn unable(&self) -> Option<&str> {
         self.unable.as_deref()
+    }
+
+    /// This game's content (stage L): what it sent the host.
+    pub fn content(&self) -> &crate::host::content::GameContent {
+        &self.content
+    }
+
+    /// The host's newest Content gaps (stage L): the items not every
+    /// player can use; `None` before the first arrives.
+    pub fn content_gaps(&self) -> Option<&crate::wire::messages::ContentGaps> {
+        self.gaps.as_ref()
+    }
+
+    /// Why a choice of the item of `kind` and `key` would be refused, in the
+    /// host's words, when it is in a gap now ([`content::gap_refusal`]).
+    pub fn gap_refusal(&self, kind: crate::wire::messages::ItemKind, key: &str) -> Option<String> {
+        content::gap_refusal(self.gaps.as_ref()?, self.lobby.as_ref(), kind, key)
     }
 
     /// Hold `plane`'s slot. The answer is the next lobby state, or a
@@ -1637,6 +1673,10 @@ impl Client {
                             &welcome.host_tick.to_string(),
                         ],
                     );
+                    // Stage L: the content first, before anything else.
+                    if let Some(content) = self.content.message() {
+                        self.send(&Message::Content(Box::new(content)));
+                    }
                     self.event(ClientEvent::Connected {
                         session_id: welcome.session_id,
                         ticks_per_snapshot: welcome.ticks_per_snapshot,
@@ -1801,6 +1841,15 @@ impl Client {
             | Message::StandbyRecord(_)
             | Message::Resumed(_)
             | Message::HostMoving(_)) => self.migrate_message(message),
+            // Stage L: what not everyone can use. Read with
+            // `content_gaps`; the lobby's lines change with it.
+            Message::ContentGaps(gaps) => {
+                self.log("content-gaps", &[&gaps.gaps.len().to_string()]);
+                self.gaps = Some(*gaps);
+                if self.lobby.is_some() {
+                    self.event(ClientEvent::Lobby);
+                }
+            }
             // Client-to-host messages from the host break the protocol.
             _ => self.net.disconnect(DisconnectReason::ProtocolError),
         }
@@ -1934,11 +1983,13 @@ impl Client {
         };
         let flight = matches!(check, Check::Added(_));
         let refusal = if !differences.is_empty() {
-            Some(format!(
-                "Your game data differs from the host's in {} file(s), such as {}. Import the \
-                 same version of the game.",
-                differences.len(),
-                differences[0]
+            // Stage L: worded by the item the differing files belong to.
+            Some(content::refusal(
+                &self.content,
+                &self.resources,
+                &spec,
+                &differences,
+                &self.config.build.version,
             ))
         } else {
             built
