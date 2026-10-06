@@ -95,8 +95,10 @@ pub const MIN_RATE: f64 = 32_000.;
 pub const LINE_RATE: f64 = 125_000.;
 /// The transport's framing of a stream's fragments, and its resends: about
 /// 12 percent of framing with one fragment a packet, as in flight, and the
-/// rest resends (measured, slice K3).
-pub const FRAMING: f64 = 1.2;
+/// rest resends (measured, slice K3). 1.2 let the real 15 against 15's busiest
+/// second reach 126 KB/s against the 125,000 B/s line, so it is 1.25 (slice
+/// KP).
+pub const FRAMING: f64 = 1.25;
 /// The fastest pace, bytes of chunks a second: the line less its framing.
 /// The rest of the stream in the last second comes off it, down to
 /// [`MIN_RATE`].
