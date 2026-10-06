@@ -968,11 +968,13 @@ names.
   marked unable and every player reads why: "Hawk's game has no Su-27, which
   this mission flies." The player's own screen says what to do: "Re-import
   Fighters Anthology (Pref, Re-import) to add it."
-- **Builds side by side.** Selecting a player in the lobby shows its build and
-  platform ("Hawk: Fighters Anthology 1.0, on Linux."). When a player's build
-  or content differs from the host's, Messages says how, once: "Hawk imported
-  Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and theater
-  is the same." Nothing is said when they are equal.
+- **Builds are not shown** (John, 2026-10-06: removed; the build audit found
+  no difference a player sees). Selecting a player in the lobby shows its
+  platform ("Hawk: on Linux."). When a player's content differs from the
+  host's, Messages says how, once: "Hawk's game differs from the host's: no
+  Su-27." Nothing is said when they are equal, and nothing about which
+  Fighters Anthology build a player imported. The build still travels on the
+  wire and in the server's log.
 - **Where differences come from.** Between 1.0 and 1.02F, none that a player
   can fly or fight with. In practice, an import made by an older T.O.R.E,
   which lacks aircraft added since; a damaged file; and, later, mods. A mod's
@@ -990,11 +992,14 @@ aircraft or a theater not everyone has, and choosing one leaves the choice as
 it was and says who lacks it ("Not everyone can fly the Rafale C: Hawk's game
 has no Rafale C."); Accept checks the whole mission the same way. Load Ordnance
 darkens a weapon not everyone has and refuses it in the same words. Selecting a
-player shows its Fighters Anthology build and system ("Hawk: Fighters Anthology
-1.0, on Linux. Connected directly."), an unable player's reason is shown as the
-host worded it, and Messages says once how a player's game differs from the
-host's. Nothing is said when they are equal. There is no new mark in the
-player list and no warning on the Internet Lobby (John, 2026-10-05).
+player shows its system and how it connected ("Hawk: on Linux. Connected
+directly."), an unable player's reason is shown as the host worded it, and
+Messages says once how a player's game differs from the host's. Nothing is said
+when they are equal. There is no new mark in the player list and no warning on
+the Internet Lobby (John, 2026-10-05). *Changed (L5, 2026-10-06):* the lobby no
+longer shows a player's Fighters Anthology build, in the hint or in Messages
+(the audit of the 1.0 and 1.02F builds found them identical in everything a
+player sees or the simulation reads).
 
 ## Replay and telemetry
 
@@ -1189,7 +1194,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | A radar-less aircraft's link cues | John, 2026-10-05: it keeps the target window's and the HUD's link cues and the sort warning; only the radar scope's marks are absent, since it has no radar |
 | The AI counts the player's lock | John, 2026-10-05: approved slice G2's baseline (a wingman choosing after the player locks a bandit takes another one; kills and results unchanged) |
 | Content not everyone has | John, 2026-10-05: dimmed in the King's creator and Load Ordnance, and choosing it says who lacks it; every connected player counts, the unable and the watching included; the King can kick |
-| Showing a player's Fighters Anthology build | John, 2026-10-05: in the lobby's hint for the selected player and one Messages line when it differs from the host's; no new mark in the Players list; imports made before stage L read it from the import report, with no re-import |
+| Showing a player's Fighters Anthology build | John, 2026-10-05: in the lobby's hint for the selected player and one Messages line when it differs from the host's; no new mark in the Players list; imports made before stage L read it from the import report, with no re-import. **John, 2026-10-06: removed: the audit found no difference a player sees** (the hint says the system and the path; the Messages line stays for items a player lacks or has differently; the wire and the server's log still carry the build) |
 | Warning before joining | John, 2026-10-05: the Internet Lobby does not warn in v1 that a game needs content the player lacks; the player joins and reads why in the lobby |
 | Standby hosts | John, 2026-10-05: up to two; warm standbys (same system and processor type) step their own copy and take over at once, others are cold and catch up from a checkpoint; a cold standby's stream is paced to at most 1 Mbit/s |
 | Checkpoint size | John, 2026-10-05: stage K measures the standby stream before any of the size levers is built |
@@ -1249,11 +1254,10 @@ design is built on ([compatibility](ARCHITECTURE.md#compatibility)):
 - **Who counts.** Whose content limits the King's choices? *Agent proposal:*
   every connected player, including one marked unable or watching, since each
   builds the mission; a King who wants the full list can kick.
-- **Showing the build.** *Agent proposal:* each player's Fighters Anthology
-  build appears in the lobby's hint when the player is selected, and once in
-  Messages when it differs from the host's; no new mark in the Players list.
-  An import made before stage L reads its build from its import report, and
-  no one is asked to re-import for it.
+- **Showing the build.** *Agent proposal, answered by John 2026-10-05, then
+  reversed 2026-10-06:* the build was to appear in the lobby's hint and in
+  Messages. John removed it after the build audit found nothing a player sees
+  (see the decisions table).
 - **Before joining.** Should the Internet Lobby warn that a listed game's
   mission uses something the player lacks? *Agent proposal:* not in v1; the
   player joins, stays in the lobby, and reads why there.

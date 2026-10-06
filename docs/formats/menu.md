@@ -623,9 +623,9 @@ Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
 `lobby-settings-pvp`, `lobby-settings-flying`, `lobby-players`,
 `lobby-players-house`, `lobby-locks`, `lobby-watch` and `lobby-pvp`, and (J6)
 `lobby-relay` (a relayed player selected: the relay mark and the hint line's
-path) and `lobby-away` (a slot reading "AI (Goose away)"), and (L4) `lobby-builds` (a
-player on 1.0 selected, its build and system in the hint line, and the Messages
-lines about how its game and a second player's differ from the host's), and with
+path) and `lobby-away` (a slot reading "AI (Goose away)"), and (L4, renamed `lobby-gaps` in L5) `lobby-gaps` (a
+player selected, its system in the hint line, and the Messages line about how a
+second player's game differs from the host's), and with
 `--quick-mission` `lobby-creator`, `lobby-creator-refused`, `lobby-ordnance`,
 `lobby-ordnance-refused` and `lobby-ordnance-cheat` (in the lead's notes) and, from L4,
 `lobby-creator-gaps` (the aircraft list with items not everyone has dimmed),

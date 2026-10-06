@@ -1530,7 +1530,10 @@ player joins or leaves); each message replaces the last.
 
 **Lobby** (kind 19): each player gains its Fighters Anthology build, 2 bits
 after the platform, coded as Content's build. A player whose Content has not
-arrived yet reads 0 (unknown).
+arrived yet reads 0 (unknown). *L5, 2026-10-06:* the game's screens no longer
+show the build (John: the audit found no difference a player sees). The field
+stays on the wire and `LobbyPlayer::build` stays filled, unused by the lobby;
+removing it would need a new protocol version, so it waits for one.
 
 ### What does not change
 
