@@ -10,7 +10,8 @@
 //! The call is the assignment call of a human lead ("Two, attack bandit,
 //! bearing 270, 15 miles, angels 20"), in the lead's label, said on the
 //! flight's net: the seats of the lead's flight hear it, worded from where
-//! the receiver flies, and a call nobody hears is journaled as unheard like
+//! the receiver flies, and every seat of the side's other flights that
+//! monitors the battle net (slice G8) hears it too; a call nobody hears is journaled as unheard like
 //! every other call of an AI flight. One lead's calls of a tick follow each
 //! other 3.5 seconds apart, as a sort's do.
 
@@ -43,6 +44,27 @@ impl World {
                 .position(|cockpit| cockpit.plane == plane)
                 .is_some_and(|cockpit| self.cockpit_alive(cockpit))
         });
+        // The battle net's hearers (slice G8) are worked out from the radio's
+        // own listener rule.
+        let listeners: Vec<radio_calls::Listener> = self
+            .cockpits
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cockpit)| {
+                let seat = self.roster.seat(self.roster.seat_of(cockpit.plane)?)?;
+                let member = members.iter().find(|m| m.id == cockpit.plane.0)?;
+                Some(radio_calls::Listener {
+                    seat: seat.id,
+                    plane: cockpit.plane.0,
+                    flight: member.flight,
+                    enemy: member.enemy,
+                    alive: self.cockpit_alive(index),
+                    position: cockpit.flight.position,
+                    crew: seat.crew,
+                })
+            })
+            .collect();
+        let leaders = radio_calls::leaders(&self.roster, &members, self.ai_wings.as_ref());
         let mut spoken: std::collections::BTreeMap<u32, u32> = Default::default();
         for assignment in given {
             let Some(lead) = members.iter().find(|m| m.id == assignment.lead) else {
@@ -92,6 +114,16 @@ impl World {
                     hearers.push(Hearer::named(seat, label.clone()));
                 }
             }
+            // The leads of the side's other flights that monitor the battle
+            // net hear it too, with the flight colour in front.
+            hearers.extend(radio_calls::battle_hearers(
+                &self.comms,
+                &members,
+                &leaders,
+                &listeners,
+                assignment.lead,
+                &|_| words.clone(),
+            ));
             if hearers.is_empty() {
                 self.comms.record(
                     Entry::note(

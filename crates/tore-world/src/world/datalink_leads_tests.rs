@@ -263,3 +263,83 @@ fn a_yield_reaches_the_ai_member_and_never_a_human() {
     assert_eq!(held[0].target, 6);
     assert!(wings.actor(2).unwrap().yields().is_empty());
 }
+
+// The battle net (slice G8).
+
+/// The mission with the second human, plane 1, on the roster as the lead of
+/// a second enemy flight, so it is a seat of the enemy side outside the
+/// enemy flight whose AI lead is plane 4.
+fn other_enemy_flight() -> World {
+    use crate::seats::{Pilot, Roster, Slot};
+    use tore_sim::ai::launch::{Side, WingId};
+    let mut world = mission();
+    let planes: Vec<_> = world.roster.planes().to_vec();
+    let crew = |seat: SeatId| world.roster.seat(seat).and_then(|seat| seat.crew);
+    let (mut humans, mut ai) = (Vec::new(), Vec::new());
+    for plane in planes {
+        let slot = if plane.id.0 == 1 {
+            Slot {
+                wing: WingId {
+                    side: Side::Enemy,
+                    index: 1,
+                },
+                member: 0,
+            }
+        } else {
+            plane.slot
+        };
+        match plane.pilot {
+            Pilot::Human(seat) => humans.push((plane.id, slot, seat, crew(seat))),
+            _ => ai.push((plane.id, slot)),
+        }
+    }
+    world.roster = Roster::with_humans(humans, ai);
+    world
+}
+
+fn heard_by_seat_one(monitoring: bool) -> Vec<comms::Call> {
+    let mut world = other_enemy_flight();
+    if monitoring {
+        world.comms.toggle_battle(SeatId(1));
+    }
+    run(&mut world, 0, 10);
+    world.voice_lead_assignments(&[LeadAssignment {
+        lead: 4,
+        receiver: 5,
+        target: 0,
+        order: PlayerOrder::EngageMyTarget,
+    }]);
+    let mut heard = Vec::new();
+    for tick in 10..40 {
+        let mut out = TickOutput::default();
+        step(&mut world, tick, &[], &mut out);
+        for cue in &out.cues {
+            if let Cue::Radio { seat, call } = cue
+                && *seat == SeatId(1)
+                && call.stems.contains(&"^ATTACK".into())
+            {
+                heard.push(call.clone());
+            }
+        }
+    }
+    heard
+}
+
+#[test]
+fn an_ai_leads_call_reaches_a_monitoring_seat_of_another_flight_with_the_colour() {
+    let heard = heard_by_seat_one(true);
+    assert_eq!(heard.len(), 1, "{heard:?}");
+    assert!(heard[0].label.starts_with("Net "), "{}", heard[0].label);
+    assert!(heard[0].text.contains("attack bandit"), "{}", heard[0].text);
+    assert_ne!(
+        heard[0].text.split(',').next(),
+        Some("Two"),
+        "the flight colour comes first: {}",
+        heard[0].text
+    );
+}
+
+#[test]
+fn a_seat_that_does_not_monitor_the_battle_net_hears_nothing_of_it() {
+    assert!(heard_by_seat_one(false).is_empty());
+}

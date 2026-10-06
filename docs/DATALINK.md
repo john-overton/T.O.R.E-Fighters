@@ -304,8 +304,8 @@ acknowledged: the cues stop blinking.
   alone. Each target given is an assignment (a flightmate sees the lock
   numbers and the brackets) and a radio call in the lead's voice, "Two, attack
   bandit, bearing 270, 15 miles, angels 20", heard by the humans in the lead's
-  flight, 3.5 seconds apart when it gives several. The battle net does not
-  carry an AI lead's calls yet.
+  flight, 3.5 seconds apart when it gives several, and by the seats of the side's
+  other flights that monitor the battle net, with the flight colour first.
 - **The sort warning, and the yield (built, slice G4).** When two members of a
   flight lock the same bandit and the lead did not mean it, the AI member
   looks for another target and leaves that bandit alone for 10 seconds, if
