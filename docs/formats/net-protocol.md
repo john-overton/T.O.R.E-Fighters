@@ -41,7 +41,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [What the game's sections settled](#what-the-games-sections-settled)
 - [Phase 2: the King's settings, revival, scores and observers](#phase-2-the-kings-settings-revival-scores-and-observers) (designed)
 - [Compatibility (stage L)](#compatibility-stage-l) (built under protocol 10)
-- [Host migration and rejoin (stage K)](#host-migration-and-rejoin-stage-k) (designed)
+- [Host migration and rejoin (stage K)](#host-migration-and-rejoin-stage-k) (built under protocol 13)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -96,8 +96,8 @@ version.
 | 9 | Discover answer | host to the asker | `TORE-HELLO` |
 | 10 | [Keepalive](#keepalive) (protocol 5) | client to host | versioned |
 | 11 | [Punch](#punch) (protocol 9) | host to client | versioned |
-| 12 | [Reach](#reach-and-reach-answer) (stage K, designed) | game to game | versioned |
-| 13 | [Reach answer](#reach-and-reach-answer) (stage K, designed) | game to game | versioned |
+| 12 | [Reach](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
+| 13 | [Reach answer](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -119,7 +119,7 @@ The payload header is 19 bytes with the checksum and kind. Section kinds:
 | [Snapshot](#snapshots) | 3 | host to client |
 | [Events](#events) | 4 | host to client |
 | [Own state](#the-own-aircraft) | 5 | host to client |
-| [Filler](#disconnect-reason-8-and-the-filler-section) (stage K, designed) | 6 | client to host |
+| [Filler](#disconnect-reason-8-and-the-filler-section) (stage K, protocol 13) | 6 | client to host |
 
 An empty Payload is a keepalive while a side's loop runs; a joined game
 whose loop is stalled sends the [Keepalive](#keepalive) packet instead. A section of an unknown kind, a second
@@ -218,7 +218,7 @@ connection, as a hosting game exempts its own player's over the in-process
 link, EF4), 3 too many bad packets,
 4 protocol error (a message ahead of its window, or fragments that do not fit
 together), 5 content mismatch, 6 server stopping, 7 kicked, and (stage K,
-designed) 8 [moved to the new host](#disconnect-reason-8-and-the-filler-section).
+protocol 13) 8 [moved to the new host](#disconnect-reason-8-and-the-filler-section).
 
 ## Keepalive
 
@@ -1573,12 +1573,13 @@ Stage L's limits are in [Limits](#limits) (the "Stage L (protocol 10)" row).
 
 ## Host migration and rejoin (stage K)
 
-*Designed 2026-10-05; agent proposals awaiting John's review.* The wire of
+*Designed 2026-10-05; agent proposals awaiting John's review. Built (K0,
+2026-10-05) under **protocol 13**, kinds 39 to 54
+([as built](#stage-k-as-built)).* The wire of
 stage K ([architecture](../ARCHITECTURE.md#host-migration-and-rejoin)): what
 lets a standby host follow the mission, a dropped player rejoin with a token,
 and every client resume with the game's new host. Slice K0 builds all of it at
-once under **the next protocol version** (the lead hands out the number), so
-the slices after it never change the bytes. Codings follow [what the game's
+once under protocol 13, so the slices after it never change the bytes. Codings follow [what the game's
 sections settled](#what-the-games-sections-settled): varints are
 `tore-codec`'s, strings a length byte and UTF-8, "a presence bit" a 1 then the
 value or a 0 alone. An address and a candidate are coded as the master's
@@ -1625,29 +1626,29 @@ sends it only to the session it was issued in
 
 ### New messages
 
-Kinds 37 to 52, or the next free ones when K0 builds them. Every request a
+Kinds 39 to 54 (stage L took 37 and 38). Every request a
 player sends counts against the 20 a second the host answers, Backlog and
 Standby status excepted, and every refusal is a Refused (kind 20) with its
 words.
 
 | Kind | Name | Direction | Body |
 | --- | --- | --- | --- |
-| 37 | Token | host to player | The token (128 bits); its life after the player was last connected, seconds (varint; 86,400) |
-| 38 | Candidate | player to host | May host (1 bit); its class: platform (3 bits, the Challenge answer's codes) and processor (3 bits: 0 unknown, 1 x86-64, 2 64-bit ARM, 3 32-bit x86, 4 other); its candidates for its joined socket (a count, 4 bits, at most 3: Local, Mapped, Global IPv6); its router's mapping type (2 bits, the master's codes, 0 unknown); the CPU measure in microseconds a tick (varint, 0 not measured) and the lobby mission's number it measured (varint) |
-| 39 | Reach test | host to player | Test id (16); the candidates to try (a count, 2 bits, at most 3; each: its lobby id, 8 bits, and its addresses: a count, 4 bits, at most 8, then each address) |
-| 40 | Reach peers | host to a candidate | Test id (16); the players to open its router to (a count, at most 64; each: lobby id, 8 bits, and its addresses as above: the address the host sees it at and its Local candidate) |
-| 41 | Reach report | player to host | Test id (16); per candidate (a count, 2 bits): lobby id (8), reached (1 bit) and, when reached, the answering address's index (4 bits) and the median round trip in milliseconds (16) |
-| 42 | Upload test | host to player | Test id (16), the rate in bytes a second (varint), the length in milliseconds (16, at most 2,000) |
-| 43 | Succession | host to every player | The ready standbys in order (a count, 2 bits, at most 2; each: lobby id, 8 bits; warm, 1 bit; its addresses: a count, 4 bits, at most 8, each a candidate with its kind). Sent on every change |
-| 44 | Standby record | host to a standby | One [standby record](#the-standby-stream) |
-| 45 | Standby status | standby to host | The newest tick it holds (32); its state (2 bits: 0 building, 1 ready and warm, 2 ready and cold, 3 behind); its mean step cost in microseconds (varint); the last Check's tick (32) and result (2 bits: 0 none, 1 equal, 2 different); needs a checkpoint (1 bit). At most twice a second |
-| 46 | Resume | player to new host | Its flight with the old host (8); its newest predicted tick (32, 0 when not flying); the number of the mission it holds (varint) and the FNV-1a 64 of that mission's text (64); watching (1 bit) |
-| 47 | Resumed | new host to player | The new [flight](#flights) (8; 0 for a player not flying, and nothing follows); seat (8); plane (varint); tick T (32); the number of the last command the old host applied for the seat (16); the plane's exact state at T (a long byte string, no baseline); the destroyed ground objects (a count and varints) |
-| 48 | Backlog | player to new host | The new flight (8); the first tick, T (32); a count of ticks (16, at most 1,200), then each tick's controls coded as the Inputs section codes its ticks, each against the one before, with each tick's view; then the commands not yet applied (a count, at most 256; each: its tick as an offset from T, a varint, and the command as Inputs codes it), numbered from 1 in that order |
-| 49 | Host moving | host to every player | The standby taking over (its lobby id, 8) and the last tick the host steps (32) |
-| 50 | Taken over | new host to old host | Sent by the new host's own client on its old connection: the new host's lobby id (8) and tick T (32) |
-| 51 | Release | the King to host | The plane (varint): its reservation ends |
-| 52 | Rejoin | player to host | The token (128): sent after Accepted by a game that joined without sending its token and holds one for this session |
+| 39 | Token | host to player | The token (128 bits); its life after the player was last connected, seconds (varint; 86,400) |
+| 40 | Candidate | player to host | May host (1 bit); its class: platform (3 bits, the Challenge answer's codes) and processor (3 bits: 0 unknown, 1 x86-64, 2 64-bit ARM, 3 32-bit x86, 4 other); its candidates for its joined socket (a count, 4 bits, at most 3: Local, Mapped, Global IPv6); its router's mapping type (2 bits, the master's codes, 0 unknown); the CPU measure in microseconds a tick (varint, 0 not measured) and the lobby mission's number it measured (varint) |
+| 41 | Reach test | host to player | Test id (16); the candidates to try (a count, 2 bits, at most 3; each: its lobby id, 8 bits, and its addresses: a count, 4 bits, at most 8, then each address) |
+| 42 | Reach peers | host to a candidate | Test id (16); the players to open its router to (a count, at most 64; each: lobby id, 8 bits, and its addresses as above: the address the host sees it at and its Local candidate) |
+| 43 | Reach report | player to host | Test id (16); per candidate (a count, 2 bits): lobby id (8), reached (1 bit) and, when reached, the answering address's index (4 bits) and the median round trip in milliseconds (16) |
+| 44 | Upload test | host to player | Test id (16), the rate in bytes a second (varint), the length in milliseconds (16, at most 2,000) |
+| 45 | Succession | host to every player | The ready standbys in order (a count, 2 bits, at most 2; each: lobby id, 8 bits; warm, 1 bit; its addresses: a count, 4 bits, at most 8, each a candidate with its kind). Sent on every change |
+| 46 | Standby record | host to a standby | One [standby record](#the-standby-stream) |
+| 47 | Standby status | standby to host | The newest tick it holds (32); its state (2 bits: 0 building, 1 ready and warm, 2 ready and cold, 3 behind); its mean step cost in microseconds (varint); the last Check's tick (32) and result (2 bits: 0 none, 1 equal, 2 different); needs a checkpoint (1 bit). At most twice a second |
+| 48 | Resume | player to new host | Its flight with the old host (8); its newest predicted tick (32, 0 when not flying); the number of the mission it holds (varint) and the FNV-1a 64 of that mission's text (64); watching (1 bit) |
+| 49 | Resumed | new host to player | The new [flight](#flights) (8; 0 for a player not flying, and nothing follows); seat (8); plane (varint); tick T (32); the number of the last command the old host applied for the seat (16); the plane's exact state at T (a long byte string, no baseline); the destroyed ground objects (a count and varints) |
+| 50 | Backlog | player to new host | The new flight (8); the first tick, T (32); a count of ticks (16, at most 1,200), then each tick's controls coded as the Inputs section codes its ticks, each against the one before, with each tick's view; then the commands not yet applied (a count, at most 256; each: its tick as an offset from T, a varint, and the command as Inputs codes it), numbered from 1 in that order |
+| 51 | Host moving | host to every player | The standby taking over (its lobby id, 8) and the last tick the host steps (32) |
+| 52 | Taken over | new host to old host | Sent by the new host's own client on its old connection: the new host's lobby id (8) and tick T (32) |
+| 53 | Release | the King to host | The plane (varint): its reservation ends |
+| 54 | Rejoin | player to host | The token (128): sent after Accepted by a game that joined without sending its token and holds one for this session |
 
 **Changed messages.**
 
@@ -1740,6 +1741,73 @@ sequenceDiagram
 - An observer that resumes sends Observe again; a player in the lobby gets
   the lobby.
 
+### Stage K as built
+
+*Built (K0, 2026-10-05) under **protocol 13**, kinds 39 to 54.* J6 took
+protocol 12 first and versions only go up, so 11 was never used. Every
+choice below is an agent decision.
+
+- **Where it is.** The packets are `tore_net::packet` (`Reach`,
+  `ReachAnswer`, `ReachRole`, the answer's `token`), the token
+  `tore_net::Token` (128 bits, its low 64 written first) and its draw
+  `tore_net::TokenSource` (two draws of the endpoint's generator), the
+  message bodies `tore_session::wire::migration` with their limits
+  (`migration::limits`), and the standby stream `tore_session::journal`.
+- **Reach.** The host's transport answers a Reach itself
+  (`Server::set_reach_session`, which every `Host` sets to its session).
+  One for another session, or to a transport that answers none, is counted
+  as unexpected; one past 10 a second from its address as rate limited,
+  with a limiter of its own (200 a second in all), so Reaches cannot use up
+  the joins' allowance. A host counts a Reach answer as unexpected, and a
+  client counts both kinds: the peers router (slice K6) takes them before
+  the client sees any.
+- **The token byte.** Any code but 0 and 1 makes the Challenge answer
+  malformed.
+- **Filler.** A host's transport takes section kinds up to 6; the section
+  must be all zero bytes, or the packet is bad. The host adds its bytes to a
+  count and does nothing else until the upload test.
+- **Addresses.** A Candidate's candidates are the master's candidate list
+  (a 4-bit count), refused above 3 and refused with a Seen one; a
+  Succession's may hold the host's Seen address. A reach target's
+  addresses are plain addresses (no kind); Reach peers' count is a varint.
+- **Backlog.** Each tick's view is its view offset (8 bits, ticks before
+  that tick) and interpolation delay (6 bits), as Inputs codes them. The
+  commands' count is a varint, and each command's offset must fall within
+  the ticks, so a Backlog of no ticks carries no command.
+- **Resumed.** Flight 0 is a player not flying; the writer refuses a
+  flying player's flight 0.
+- **Standby record.** The message holds the record's bytes whole. Its
+  reader checks only that the record's type names one (0 to 9); the
+  stream's reader (`journal::StreamReader`) checks the rest, in order.
+- **The stream's records.** Appoint's role must be 1 or 2. In a Ticks
+  record the counts of changes, mission commands and seat inputs are
+  varints, at most 256, 256 and 64; each seat input's own tick must be its
+  tick's. A seat's input codes against its last input in the stream moved
+  on to this tick (its tick, and its view's by as many ticks, with no
+  commands), so an unchanged control costs a bit. An Appoint and a Flight
+  start every baseline afresh; a record refused by the writer or the reader
+  changes nothing. A record never uses the checkpoint's shared records.
+- **What it costs** (measured in the K0 tests, synthetic data): a seat that
+  changes nothing but its tick costs under 9 bytes a tick, 3 of them its
+  seat byte and its 16-bit command number; a stick that moves every tick
+  costs about 24 bytes a seat a tick, the floats coded by the checkpoint
+  trait against the last. Both are above the design's estimate of 2 to 5
+  bytes; slice K3 measures the real stream.
+- **The lobby.** The standby mark follows the away bit; the host sends
+  none until slice K3. A slot's reservation is filled now from the idle
+  aircraft (slice F2-A: an away player's plane), the seam where slice K5's
+  table joins it (`Host::reserved_for`).
+- **Setting 21.** Its values are 0 to 256. Until slice K6 builds the pin
+  the registry refuses any but 0 (calculated) with "Not available yet."
+- **Until the later slices.** A host refuses Candidate, Reach report,
+  Standby status, Resume, Backlog, Taken over, Release and Rejoin with a
+  Refused "Not available yet." (Release only from the King); Backlog and
+  Standby status do not count against the 20 requests a second. A client
+  keeps every Standby record for its standby, in order
+  (`Client::take_standby_records`), and takes Token, Reach test, Reach
+  peers, Upload test, Succession, Resumed and Host moving without acting on
+  them.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -1769,7 +1837,7 @@ Decoders check every count and length against these before reading on.
 | Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall |
 | Punch (protocol 9) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second; a race tries at most 12 addresses |
 | Phase 2 (protocol 8) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
-| Stage K (designed) | Standbys 2; addresses of a standby or a candidate 8; candidates in a reach test 3, five Reaches to each address, one test every 10 seconds; Reaches answered 10 a second from one address; checkpoint chunks 4,096 bytes, 4 unacknowledged; ticks in a Ticks record 60; a Backlog 1,200 ticks and 256 commands; an Upload test 2 seconds; tokens a game keeps 32 |
+| Stage K (protocol 13) | Standbys 2; addresses of a standby or a candidate 8; candidates in a reach test 3, five Reaches to each address, one test every 10 seconds; Reaches answered 10 a second from one address; checkpoint chunks 4,096 bytes, 4 unacknowledged; ticks in a Ticks record 60; a Backlog 1,200 ticks and 256 commands; an Upload test 2 seconds; tokens a game keeps 32 |
 | Stage L (protocol 10) | Items in a Content 1,024 (at least 1); a key 32 bytes of printable ASCII; a label 64 bytes; gaps in a Content gaps 1,024; players named in one gap 64; the importer's version and commit 64 bytes each |
 
 ## Captures
@@ -1825,14 +1893,16 @@ again with an observer; the capture format did not change for it.
   [path byte](#the-path-in-the-challenge-answer) of the Challenge answer,
   J2, 10 since [stage L](#compatibility-stage-l)'s Content and Content gaps
   and each lobby player's Fighters Anthology build, L2, 12 since each lobby
-  player's [connection path](#the-path-in-the-challenge-answer), J6; 11 is
-  stage K's).
+  player's [connection path](#the-path-in-the-challenge-answer), J6, 13
+  since [stage K](#host-migration-and-rejoin-stage-k)'s wire, K0; 11 was
+  never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
   protocol 5 it holds one transport packet too, the Keepalive, sealed for the
   version; since protocol 7 also the Challenge answer's bytes before its
-  padding; since protocol 9 also a Punch); when
+  padding; since protocol 9 also a Punch; since protocol 13 also a Reach,
+  its answer and the Challenge answer's token); when
   they differ it fails and says to raise the version and refresh the copy
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
   wire_golden`), the way the controls list test works. The copy records the
@@ -1878,7 +1948,7 @@ watch the network can read it. What the protocol does guard against:
   five times each; a relayed address cannot be claimed from a real socket
   ([relayed addresses](#relayed-addresses)). The master's own guards are in
   [its protocol](master-protocol.md#security).
-- **Rejoin tokens** (stage K, designed) travel unencrypted, as the password
+- **Rejoin tokens** (stage K, protocol 13) travel unencrypted, as the password
   does: someone who can watch the traffic can take a dropped player's
   reserved aircraft with its token. Accepted for v1 with a trusted host; the
   token is 128 bits from the operating system's randomness, so it cannot be

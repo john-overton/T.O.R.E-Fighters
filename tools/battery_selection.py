@@ -438,6 +438,30 @@ RULES: tuple[Rule, ...] = (
         NET_FAMILIES + ("net-discovery",),
         "the King's lobby: the crown, settings, slot locks, visibility (tore-bot --king)",
     ),
+    # Stage K (slice K0): the host steps its world through the journal, so every flight a host
+    # flies passes through it; the seams refuse their requests until their slices land.
+    _r("crates/tore-session/src/journal*", NET_FAMILIES, "the journal the host steps its world through (stage K)"),
+    _r("crates/tore-session/src/wire/migration*", NET_FAMILIES, "stage K's message bodies and their tests"),
+    _r("crates/tore-session/src/standby/*", NET_FAMILIES, "the standby's side of host migration (stage K)"),
+    _r(
+        "crates/tore-session/src/host/journal.rs", NET_FAMILIES,
+        "the host's journal, which every tick the host steps passes (stage K)",
+    ),
+    _r("crates/tore-session/src/host/standby.rs", NET_FAMILIES, "the host's standby stream (stage K)"),
+    _r("crates/tore-session/src/host/resume.rs", NET_FAMILIES, "takeover and resume on the host (stage K)"),
+    _r(
+        "crates/tore-session/src/host/rejoin.rs", NET_FAMILIES,
+        "rejoin tokens and reservations, and a slot's reservation in every lobby state (stage K)",
+    ),
+    _r("crates/tore-session/src/host/succession.rs", NET_FAMILIES, "candidates and host selection (stage K)"),
+    _r("crates/tore-session/src/host/state.rs", NET_FAMILIES, "the session's state parts (stage K)"),
+    _r("crates/tore-session/src/client/migrate.rs", NET_FAMILIES, "the client's side of host migration (stage K)"),
+    _r("crates/tore-session/src/client/rejoin.rs", NET_FAMILIES, "the client's side of rejoin (stage K)"),
+    _r("crates/tore-session/src/client/candidate.rs", NET_FAMILIES, "the client's side of host selection (stage K)"),
+    _r(
+        "crates/tore-session/src/client/migration_seams_tests.rs", NET_FAMILIES,
+        "stage K's seams on the network simulator (slice K0's tests)",
+    ),
     _r("crates/tore-session/src/client/convert*", ("net-convert",), "capture conversion"),
     _r("crates/tore-session/src/client/seen.rs", ("net-convert",), "capture conversion"),
     _r("crates/tore-session/src/client/capture.rs", ("net-convert",), "captures"),
