@@ -423,6 +423,13 @@ impl CrewVoice {
     pub fn step(&mut self, input: &Input, comms: &mut Comms, phrases: &Phrases) {
         let now = input.now;
         let plane = self.plane;
+        if input.crashed || input.ejected || input.pilot_dead {
+            // Lost (John, 2026-10-06): no line of this cockpit's voice after
+            // this tick. What was already waiting for the seat is dropped
+            // before the death scream below is queued, so the scream is the
+            // last thing the crew says.
+            comms.cancel_cockpit_voice(self.seat, plane, Reason::AircraftLost);
+        }
         if input.crashed && !self.crashed && !input.ejected {
             let roll = comms.roll();
             let stem = Comms::pick(roll, SCREAM);
@@ -1760,6 +1767,63 @@ mod tests {
             counts[0] > 1800 && counts[1] > 800 && counts[2] > 800,
             "{counts:?}"
         );
+    }
+
+    /// John, 2026-10-06: once the aircraft is destroyed, the pilot ejects or
+    /// the pilot dies, the crew says nothing more: a call already waiting
+    /// for the seat is dropped, and the death scream is the last sound.
+    #[test]
+    fn the_crew_falls_silent_when_the_aircraft_is_lost_and_drops_what_was_waiting() {
+        let missile = [Incoming {
+            id: 1,
+            age: 1.,
+            signature: 2,
+        }];
+        for lost in ["destroyed", "ejected", "pilot dead"] {
+            let mut voice = rio();
+            let mut comms = Comms::new(1);
+            let mut i = input();
+            i.now = 0.1;
+            i.incoming = missile.to_vec();
+            assert!(
+                run(&mut voice, &mut comms, &i).is_empty(),
+                "queued, half a second late"
+            );
+            // Lost before the call is due.
+            i.now = 0.3;
+            match lost {
+                "destroyed" => i.crashed = true,
+                "ejected" => i.ejected = true,
+                _ => i.pilot_dead = true,
+            }
+            let heard = run(&mut voice, &mut comms, &i);
+            let screams: Vec<_> = heard
+                .iter()
+                .filter(|c| c.route == comms::Route::Direct)
+                .collect();
+            assert_eq!(
+                screams.len(),
+                usize::from(lost == "destroyed"),
+                "{lost}: only a destroyed aircraft screams"
+            );
+            assert_eq!(heard.len(), screams.len(), "{lost}: nothing else is said");
+            // Nothing is left for later, and nothing new is said.
+            i.now = 1.;
+            assert!(run(&mut voice, &mut comms, &i).is_empty(), "{lost}");
+            for second in 2..40 {
+                i.now = f64::from(second);
+                i.fuel = FuelState::OutOfFuel;
+                assert!(
+                    run(&mut voice, &mut comms, &i).is_empty(),
+                    "{lost} at {second}"
+                );
+            }
+            let dropped = comms.journal().entries().any(|e| {
+                e.outcome == Outcome::Cancelled(Reason::AircraftLost)
+                    && e.origin.source == Source::Crew
+            });
+            assert!(dropped, "{lost}: the waiting call is journaled as dropped");
+        }
     }
 
     #[test]

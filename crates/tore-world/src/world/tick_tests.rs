@@ -932,6 +932,99 @@ fn the_core_sends_the_mission_result_to_every_seat() {
     );
 }
 
+/// The two-seat mission of [`the_core_sends_the_mission_result_to_every_seat`]
+/// with seat 0's plane lost at `lost_at`: every `^MISSACC` call delivered, and
+/// the journal.
+fn mission_result_with_a_loss(
+    lost_at: usize,
+) -> (
+    Vec<(usize, SeatId, comms::Call)>,
+    Vec<comms::journal::Entry>,
+) {
+    let mut world = two_seat_mission();
+    world.setup.mission = Some((5000., 3000.));
+    for cockpit in &mut world.cockpits {
+        cockpit.result = ai_wings::outcome::Tracker::default();
+        cockpit.result.step(0., Some(|| false), [0.; 3], true);
+    }
+    let mut out = TickOutput::default();
+    let mut calls = Vec::new();
+    let mut journal = Vec::new();
+    for tick in 0..1500 {
+        if tick == lost_at {
+            world.cockpits[0].flight.crashed = true;
+        }
+        let inputs = [
+            SeatInput {
+                seat: SeatId(0),
+                tick: world.tick(),
+                ..SeatInput::default()
+            },
+            SeatInput {
+                seat: SeatId(1),
+                tick: world.tick(),
+                ..SeatInput::default()
+            },
+        ];
+        world.step(&inputs, &mut out).unwrap();
+        for cue in &out.cues {
+            if let Cue::Radio { seat, call } = cue
+                && call.stems.first().is_some_and(|stem| stem == "^MISSACC")
+            {
+                calls.push((tick, *seat, call.clone()));
+            }
+        }
+        journal.extend(world.comms.take_journal());
+    }
+    (calls, journal)
+}
+
+/// John, 2026-10-06: the player's own crew voice falls silent once the
+/// player's aircraft is destroyed. The wingmen finish the mission and the
+/// result is decided after the loss: nobody in the lost cockpit says "Mission
+/// accomplished", and the other seat still hears it.
+#[test]
+fn the_rio_does_not_announce_the_mission_after_the_aircraft_is_lost() {
+    use comms::journal::{Cause, Outcome, Reason};
+    // The enemies fall at tick 480, which the next check decides.
+    let (calls, journal) = mission_result_with_a_loss(400);
+    assert_eq!(
+        calls.iter().map(|(_, seat, _)| *seat).collect::<Vec<_>>(),
+        [SeatId(1)],
+        "only the seat that still flies hears the result: {calls:?}"
+    );
+    assert!(
+        journal
+            .iter()
+            .any(|e| e.origin.cause == Cause::MissionAccomplished
+                && e.outcome == Outcome::Suppressed(Reason::AircraftLost)
+                && e.heard_by == [SeatId(0)]),
+        "the dropped call is journaled with its reason"
+    );
+}
+
+/// A call already waiting when the aircraft is lost is dropped, not
+/// delivered.
+#[test]
+fn a_result_call_waiting_when_the_aircraft_is_lost_is_dropped() {
+    use comms::journal::{Cause, Outcome, Reason};
+    // Decided and queued at tick 480 with its two second delay, due at 720.
+    let (calls, journal) = mission_result_with_a_loss(600);
+    assert_eq!(
+        calls.iter().map(|(_, seat, _)| *seat).collect::<Vec<_>>(),
+        [SeatId(1)],
+        "{calls:?}"
+    );
+    assert!(
+        journal
+            .iter()
+            .any(|e| e.origin.cause == Cause::MissionAccomplished
+                && e.outcome == Outcome::Cancelled(Reason::AircraftLost)
+                && e.heard_by == [SeatId(0)]),
+        "the waiting call is cancelled with its reason"
+    );
+}
+
 /// A mission whose result is decided before the flight starts (the fixture's
 /// enemies are down at the first check), or a flight with no mission, never
 /// sends the calls.

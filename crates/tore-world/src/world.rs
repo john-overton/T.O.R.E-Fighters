@@ -1279,11 +1279,26 @@ impl World {
                     .results(clock, mission.then_some(succeeded), [x, y, z], airborne);
             let label = crew.map_or("YOU", comms::Crew::label);
             for result in results {
-                self.comms.send(
-                    now,
-                    result.call(plane, label, &self.phrases),
-                    &[comms::Hearer::seat(seat)],
-                );
+                let call = result.call(plane, label, &self.phrases);
+                if !alive {
+                    // The player's own voice is silent once the aircraft is
+                    // lost (John, 2026-10-06): the wingmen may finish the
+                    // mission, and the debrief says SUCCESS, but nobody in
+                    // this cockpit announces it.
+                    self.comms.record(
+                        comms::journal::Entry::call(
+                            now,
+                            None,
+                            &call,
+                            comms::journal::Outcome::Suppressed(
+                                comms::journal::Reason::AircraftLost,
+                            ),
+                        )
+                        .heard_by([seat]),
+                    );
+                    continue;
+                }
+                self.comms.send(now, call, &[comms::Hearer::seat(seat)]);
             }
         }
     }

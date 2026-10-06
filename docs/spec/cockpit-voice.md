@@ -384,6 +384,23 @@ as for the single player, and only an AI-flown one coaches. Until combat has an
 ownship for every human-flown plane, a plane after the first sees no
 designation, weapon selection or incoming missile.
 
+A lost aircraft's cockpit is silent (John, 2026-10-06; found by the full
+suite, where the AI wingmen finish a mission after the player was shot down and
+the RIO said "Mission accomplished!" 14 seconds in): once the player's aircraft
+is destroyed, the pilot ejects or the pilot dies, no line of that cockpit's
+voice plays after that tick. That is the crew's lines (the RIO, the co-pilot,
+or the wingman who coaches a single-seat player), the plane's own mission
+result calls ("mission accomplished", "almost home") and anything of these
+already waiting for the seat, which is dropped and journaled as cancelled
+("your aircraft is lost"). The death scream, queued on the tick of the loss,
+is the last sound. The debrief is untouched: it still reads SUCCESS when the
+wingmen finish the job. Radio from other aircraft is not the cockpit's voice
+and stays as it was: a player who is down hears no radio from the flight (the
+radio treats the plane as not listening), the wingmen refuse the player's
+orders and replies ("No reply: your aircraft is down"), and the tower's queue
+is cancelled when the aircraft is lost. A reply a wingman had already put on
+the air before the loss still plays out, as on a real radio (agent decision).
+
 Not implemented here: the radar link report (no supplemental radar key), the
 mission failure line (its trigger is unknown; "mission accomplished" and
 "almost home" are the mission core's, from `ai_wings/outcome.rs`, sent to every

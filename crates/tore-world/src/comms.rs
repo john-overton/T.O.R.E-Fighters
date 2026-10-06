@@ -10,7 +10,7 @@ use crate::{resources::ResourceSource, seats::SeatId};
 use std::collections::{BTreeMap, VecDeque};
 
 pub mod journal;
-use journal::{Entry, Journal, Origin, Outcome, Reason};
+use journal::{Cause, Entry, Journal, Origin, Outcome, Reason, Source};
 
 /// Seconds every delivered line holds the whole channel (native).
 pub const BUSY_SECONDS: f64 = 3.;
@@ -743,6 +743,44 @@ impl Comms {
         let mut kept = Vec::with_capacity(channel.pending.len());
         for p in channel.pending.drain(..) {
             if p.call.route == Route::Airport {
+                self.journal.push(
+                    Entry::call(
+                        clock,
+                        Some(p.serial),
+                        &p.call,
+                        Outcome::Cancelled(reason.clone()),
+                    )
+                    .heard_by([seat]),
+                );
+            } else {
+                kept.push(p);
+            }
+        }
+        channel.pending = kept;
+    }
+    /// The player of `seat`, flying `plane`, was lost: cancel every call of
+    /// that cockpit's own voice still waiting for the seat, recording
+    /// `reason`. That is the crew's lines, whoever speaks them (the RIO, the
+    /// co-pilot, a wingman coaching a single-seat player), and the plane's own
+    /// mission result calls ("mission accomplished", "almost home"). Calls
+    /// from other aircraft and the lines the wing answers with stay: they are
+    /// radio traffic, not the cockpit's voice.
+    pub fn cancel_cockpit_voice(&mut self, seat: SeatId, plane: u32, reason: Reason) {
+        let clock = self.clock;
+        let Some(channel) = self.channels.iter_mut().find(|c| c.seat == seat) else {
+            return;
+        };
+        let mut kept = Vec::with_capacity(channel.pending.len());
+        for p in channel.pending.drain(..) {
+            let origin = &p.call.origin;
+            let mine = origin.source == Source::Crew
+                || (origin.source == Source::Radio
+                    && origin.speaker == Some(plane)
+                    && matches!(
+                        origin.cause,
+                        Cause::MissionAccomplished | Cause::AlmostHome { .. }
+                    ));
+            if mine {
                 self.journal.push(
                     Entry::call(
                         clock,
