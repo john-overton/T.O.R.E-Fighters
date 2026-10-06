@@ -99,7 +99,7 @@ use tore_net::{
 use tore_realtime_native::{Activity, real_time_thread, summary};
 use tore_session::{
     AfterEnd, CrownRule, Host, HostConfig, HostLog, LeaveReason, OpenPlanes, Phase, StartMode,
-    host::TICKS_PER_SECOND,
+    host::{TICKS_PER_SECOND, content::ContentLog},
     settings::{Visibility, number},
     wire::messages::EndReason,
 };
@@ -180,6 +180,9 @@ pub enum Report {
     /// The host's log: joins, refusals, seats, departures, the mission's
     /// start and end, overloads and faults.
     Log(HostLog),
+    /// A line about a player's content or the gaps (stage L), with the host
+    /// tick, for the game's log as the dedicated server's has it.
+    Content(ContentLog),
     /// The host's phase changed.
     Phase(Phase),
     /// A socket error, noted and survived, as the dedicated server notes it.
@@ -833,6 +836,9 @@ fn forward(host: &mut Host, reports: &Sender<Report>, phase: &mut Option<Phase>)
         players_changed |= matches!(entry, HostLog::Connected { .. } | HostLog::Left { .. });
         let _ = reports.send(Report::Log(entry));
     }
+    while let Some(entry) = host.poll_content_log() {
+        let _ = reports.send(Report::Content(entry));
+    }
     let now = host.phase();
     // The seconds to the next mission count down; only the kind of phase is
     // news.
@@ -885,6 +891,7 @@ fn log_report(report: &Report) {
             "Host: the mission is built ({aircraft} aircraft, {capacity} players at most); taking joins"
         ),
         Report::Log(entry) => log::info!("Host: {}", log_line(entry)),
+        Report::Content(entry) => log::info!("Host: tick {}: {}", entry.tick, entry.text),
         Report::Phase(phase) => log::info!("Host: phase {phase:?}"),
         Report::Note(text) => log::warn!("Host: {text}"),
         Report::Listing(state) => log::info!("Host: {}", state_text(state)),
@@ -1025,13 +1032,17 @@ impl crate::App {
         };
         crate::net::settings::remember_host(&data, &options);
         let resources = Arc::clone(&self.theater_resources);
+        // Stage L: the game's own content is the reference every player's
+        // is compared with, worked out once for the game and the host.
+        let mut host_config = config(&options);
+        host_config.content = Some(crate::net::session::game_content(&resources));
         // Port mapping is on while hosting unless Options turned it off.
         let forward = forward::choose(crate::net::settings::Remembered::load(&data).port_forward);
         let (thread, link) = HostThread::start_forwarded(
             HostSetup {
                 spec: options.spec.clone(),
                 resources: Arc::clone(&resources),
-                config: config(&options),
+                config: host_config,
                 listen: Listen::Any,
                 port: options.port,
             },

@@ -48,7 +48,7 @@ use tore_net::{
 };
 use tore_session::{
     BuildId, Client, ClientConfig, ClientEvent, ClientFrame, ClientPhase, Controls,
-    wire::events::WireEvent,
+    host::content::GameContent, wire::events::WireEvent,
 };
 use tore_sim::attitude::{Basis, Vector};
 use tore_sim::combat::countermeasures::Release;
@@ -77,6 +77,92 @@ pub fn build_id() -> BuildId {
         // The same rule as the server and the bot: a stamped tag is a
         // release build.
         release: option_env!("TORE_BUILD_VERSION").is_some(),
+    }
+}
+
+/// What the game's multiplayer screens know about this game's content
+/// (stage L, slice L4): the import's source, set once at start-up, and the
+/// content computed from it, once for each import.
+static SOURCE: std::sync::Mutex<Option<tore_import::source::Source>> = std::sync::Mutex::new(None);
+static CONTENT: std::sync::Mutex<ContentSlot> = std::sync::Mutex::new(ContentSlot::Idle);
+
+/// Where this game's content stands.
+enum ContentSlot {
+    /// Not asked for yet.
+    Idle,
+    /// A worker is computing it for these resources.
+    Computing(
+        Arc<BTreeMap<String, Vec<u8>>>,
+        std::thread::JoinHandle<Arc<GameContent>>,
+    ),
+    /// Computed for these resources.
+    Ready(Arc<BTreeMap<String, Vec<u8>>>, Arc<GameContent>),
+}
+
+/// Notes the import's Fighters Anthology build and importer (`Source::read`,
+/// from the pack's own entry or, for an older pack, the import report), as
+/// the game starts (and again after a re-import, which starts it afresh). A
+/// game that never calls this reads the pack's entry alone.
+pub fn remember_source(multiplayer: &BTreeMap<String, Vec<u8>>) {
+    let data = crate::assets::data_directory().ok();
+    let source = match &data {
+        Some(data) => tore_import::source::Source::read(data, multiplayer),
+        None => tore_import::source::Source::UNKNOWN,
+    };
+    *SOURCE.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
+}
+
+/// This game's content over `resources` with the import's source.
+fn compute_content(resources: &BTreeMap<String, Vec<u8>>) -> GameContent {
+    let source = SOURCE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    match source {
+        Some(source) => GameContent::with_source(resources, source),
+        None => GameContent::of(resources),
+    }
+}
+
+/// Starts working out this game's content on a worker, when a multiplayer
+/// screen first opens, so the first join or host does not wait for it (0.23
+/// seconds in a release build, about 3 in a debug one). Does nothing when it
+/// is under way or done for these resources.
+pub fn start_content(resources: &Arc<BTreeMap<String, Vec<u8>>>) {
+    let mut slot = CONTENT.lock().unwrap_or_else(|e| e.into_inner());
+    let current = match &*slot {
+        ContentSlot::Idle => None,
+        ContentSlot::Computing(have, _) | ContentSlot::Ready(have, _) => Some(have),
+    };
+    if current.is_some_and(|have| Arc::ptr_eq(have, resources)) {
+        return;
+    }
+    let work = Arc::clone(resources);
+    let handle = std::thread::Builder::new()
+        .name("content".into())
+        .spawn(move || Arc::new(compute_content(&work)));
+    *slot = match handle {
+        Ok(handle) => ContentSlot::Computing(Arc::clone(resources), handle),
+        // No thread: it is worked out when it is asked for.
+        Err(_) => ContentSlot::Idle,
+    };
+}
+
+/// This game's content over `resources`: the worker's, waiting for it when it
+/// is still at work, else worked out now.
+pub fn game_content(resources: &Arc<BTreeMap<String, Vec<u8>>>) -> Arc<GameContent> {
+    start_content(resources);
+    let mut slot = CONTENT.lock().unwrap_or_else(|e| e.into_inner());
+    match std::mem::replace(&mut *slot, ContentSlot::Idle) {
+        ContentSlot::Computing(have, handle) => {
+            let content = handle
+                .join()
+                .unwrap_or_else(|_| Arc::new(compute_content(&have)));
+            *slot = ContentSlot::Ready(have, Arc::clone(&content));
+            content
+        }
+        ContentSlot::Ready(have, content) => {
+            *slot = ContentSlot::Ready(have, Arc::clone(&content));
+            content
+        }
+        ContentSlot::Idle => Arc::new(compute_content(resources)),
     }
 }
 
@@ -665,6 +751,8 @@ impl NetSession {
             entropy: Entropy::System,
             retail_stall_speeds: tore_sim::flight::retail_stall_speeds(),
             auto_ready: !lobby,
+            // Stage L: the content the screens' worker worked out.
+            content: Some(game_content(&resources)),
             ..ClientConfig::new(server, &callsign, build_id())
         };
         let mut client = Client::connect(config.clone(), Arc::clone(&resources), now)
@@ -1261,6 +1349,30 @@ fn release_of(
 mod tests {
     use super::*;
     use tore_sim::combat::live::DeviceRelease as Combat;
+    use tore_world::test_support::resources::resources;
+
+    /// The content of an import is worked out once for the import: the
+    /// worker's result is what a join and a host are then given, for the
+    /// same resources, and another import gets its own.
+    #[test]
+    fn the_games_content_is_worked_out_once_for_each_import() {
+        let one = Arc::new(resources());
+        start_content(&one);
+        // Asking again while it works, or after, starts nothing new.
+        start_content(&one);
+        let first = game_content(&one);
+        let again = game_content(&one);
+        assert!(Arc::ptr_eq(&first, &again));
+        assert!(!first.digests().is_empty());
+        // Another import is another computation, and the first stays right.
+        let mut changed = resources();
+        changed.insert("EXTRA.JT".into(), vec![1, 2, 3]);
+        let two = Arc::new(changed);
+        let other = game_content(&two);
+        assert!(!Arc::ptr_eq(&first, &other));
+        let back = game_content(&one);
+        assert_eq!(back.digests(), first.digests());
+    }
 
     /// What combat released, sent by the host and read back here, is the
     /// release combat made to within the wire's steps.

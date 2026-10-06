@@ -57,6 +57,9 @@ impl App {
             return;
         }
         self.menu.state.cancel();
+        // Stage L: this game's content is worked out on a worker, once, so a
+        // join or a host does not wait for it.
+        crate::net::session::start_content(&self.theater_resources);
         if self.direct.kit.is_some() {
             self.make_direct_screen();
             return;

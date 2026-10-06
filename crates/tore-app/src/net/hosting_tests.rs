@@ -1013,6 +1013,78 @@ fn the_log_names_the_hosting_players_own_connection() {
     assert_eq!(line, "tick 300: Cobra: game stalled");
 }
 
+/// Stage L (slice L4): the host's content lines, which the dedicated
+/// server prints, reach the hosting game's log as reports: the player's
+/// content, as its callsign's line, the moment the game joins.
+#[test]
+fn the_hosts_content_lines_reach_the_games_reports_and_log() {
+    let (mut thread, link, _) = start_host(0);
+    let mut game = Game::join(link);
+    let mut reports = Vec::new();
+    let mut seen = false;
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(10) && !seen {
+        game.pump();
+        reports.extend(thread.poll());
+        seen = reports
+            .iter()
+            .any(|r| matches!(r, Report::Content(entry) if entry.text.starts_with("content Host")));
+        thread::sleep(FRAME);
+    }
+    assert!(seen, "{reports:?}");
+    let Some(Report::Content(entry)) = reports
+        .iter()
+        .find(|r| matches!(r, Report::Content(entry) if entry.text.starts_with("content Host")))
+    else {
+        unreachable!();
+    };
+    // The same text as the dedicated server's line, with the host's tick.
+    assert!(
+        entry.text.contains("same items as the host"),
+        "{}",
+        entry.text
+    );
+    assert!(thread.stop(JOIN_LIMIT));
+}
+
+/// The host's configuration carries the game's content when the game gives
+/// it (slice L4), and the host compares players with that.
+#[test]
+fn a_hosted_game_uses_the_content_it_is_given() {
+    let resources = import();
+    let content = crate::net::session::game_content(&resources);
+    let mut config = hosted_config();
+    config.content = Some(Arc::clone(&content));
+    let (mut thread, link) = HostThread::start(HostSetup {
+        spec: spec(),
+        resources: Arc::clone(&resources),
+        config,
+        listen: loopback(),
+        port: 0,
+    })
+    .expect("the host starts");
+    let mut game = Game::join(link);
+    let mut reports = Vec::new();
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(10)
+        && !reports.iter().any(|r| matches!(r, Report::Content(_)))
+    {
+        game.pump();
+        reports.extend(thread.poll());
+        thread::sleep(FRAME);
+    }
+    assert!(reports.iter().any(|r| matches!(r, Report::Content(_))));
+    // The game's own client sent the content of the same import: the host's
+    // log says its items are the host's.
+    assert!(
+        reports.iter().any(|r| matches!(
+            r, Report::Content(entry) if entry.text.contains("same items as the host")
+        )),
+        "{reports:?}"
+    );
+    assert!(thread.stop(JOIN_LIMIT));
+}
+
 /// A game this one hosts is found by the search loop (slice EF5) at its
 /// game port, with the hosting player listed as the King: the answer comes
 /// from the host thread's own socket while the game's session is joined over

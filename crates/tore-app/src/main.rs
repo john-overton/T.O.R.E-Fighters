@@ -10385,6 +10385,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     let theater_resources = assets.theater_resources.clone();
     net::chat::load_quick_messages(&assets.multiplayer_resources);
+    net::session::remember_source(&assets.multiplayer_resources);
     let creator_options = assets.creator_options.clone();
     if let Some((airport_id, mut aircraft, angles)) = airport_probe
         && !(smoke_test && initial_screen == Screen::Flight)
@@ -10465,6 +10466,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     | "lobby-ordnance"
                     | "lobby-ordnance-refused"
                     | "lobby-ordnance-cheat"
+                    | "lobby-ordnance-gaps"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
                     tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
