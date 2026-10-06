@@ -193,7 +193,9 @@ The release packages are built by `.github/workflows/release.yml` when a `v*`
 tag is pushed, and by the same three scripts when a developer runs them by
 hand. A push to any branch named `release-test/...` runs the build half only,
 so the packaging path can be exercised without publishing anything; download
-the five `packages-*` artifacts from that run with `gh run download`.
+the five `packages-*` artifacts from that run with `gh run download`
+(and `master-ubuntu-22.04`, the Linux `tore-master` for the Internet Lobby's
+master server; [operations](MASTER-SERVER.md#downloading-a-release)).
 `workflow_dispatch` does the same once the workflow exists on `main`.
 
 Every script takes the version from `--version`, then from the tag the workflow
