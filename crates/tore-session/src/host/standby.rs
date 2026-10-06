@@ -640,6 +640,58 @@ impl Host {
         }
     }
 
+    /// Makes the game with join order `order` standby 1, for the lobby's
+    /// move (slice KP, agent decision): [`Host::hand_over`] hands the game
+    /// to standby 1, so the player the lobby moves to must hold that role.
+    /// The standby in it changes places with it when it is standby 2 (each
+    /// is appointed again with its new role: in the lobby that costs the
+    /// state parts only), and a game not standing by takes the role from
+    /// the one that holds it. True when `order` is standby 1 now (ready or
+    /// not yet); false when the standbys are off, the game is not in its
+    /// lobby, or the player may not stand by.
+    pub(super) fn make_first_standby(&mut self, order: u64) -> bool {
+        if !self.standbys.enabled || !matches!(self.life, Life::Lobby) {
+            return false;
+        }
+        let Some(connection) = self
+            .peers
+            .iter()
+            .find(|(_, p)| p.lobby.order == order)
+            .map(|(id, _)| *id)
+        else {
+            return false;
+        };
+        let ranked = self.ranked_candidates();
+        if !self.may_stand_by(connection, &ranked) {
+            return false;
+        }
+        let position = |host: &Self, role: StandbyMark| {
+            host.standbys.streams.iter().position(|s| s.role == role)
+        };
+        let first = position(self, StandbyMark::First);
+        match self.standbys.streams.iter().position(|s| s.order == order) {
+            Some(index) if Some(index) == first => return true,
+            Some(index) => {
+                // Standby 2 and standby 1 change places.
+                self.standbys.streams[index].role = StandbyMark::First;
+                let warm = self.standbys.streams[index].warm;
+                self.reappoint(index, warm);
+                if let Some(other) = first {
+                    self.standbys.streams[other].role = StandbyMark::Second;
+                    let warm = self.standbys.streams[other].warm;
+                    self.reappoint(other, warm);
+                }
+            }
+            None => {
+                if let Some(index) = first {
+                    self.dismiss(index);
+                }
+                self.appoint_new(connection);
+            }
+        }
+        true
+    }
+
     /// Appoints `connection`'s game in the free role.
     fn appoint_new(&mut self, connection: ConnectionId) {
         let first_taken = self

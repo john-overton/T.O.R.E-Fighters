@@ -31,7 +31,8 @@
 //! - **The calculated host** stays on the house while it passes; in the
 //!   lobby, when it does not and another candidate does, the game moves to
 //!   the best one passing (John, 2026-10-05). The move is slice K4's
-//!   handover; until it lands the decision is kept ([`Host::host_move`]).
+//!   handover, called once the player to move to is ready as standby 1
+//!   (slice KP; [`Host::host_move`] says who it is).
 //! - **The pin** (setting 21): a player the King names. A relayed player,
 //!   one who switched hosting off, or a pin on a dedicated server is
 //!   refused; a pinned player who leaves falls back to calculated, with a
@@ -296,9 +297,7 @@ pub mod words {
         format!("No player has the lobby id {id}.")
     }
 
-    /// The line when the game moves in the lobby (the design's words), for
-    /// slice K4's handover.
-    #[allow(dead_code)] // Slice K4 says it.
+    /// The line when the game moves in the lobby (the design's words).
     pub fn moved(callsign: &str, players: usize) -> String {
         format!("The game moved to {callsign}'s machine, which can carry {players} players.")
     }
@@ -814,6 +813,32 @@ impl Host {
         }
     }
 
+    /// Carries out the lobby's move (slice KP, with slice K4's handover):
+    /// the player to move to becomes standby 1 and, once it is ready, the
+    /// game is handed to it with one call to [`Host::hand_over`], and the
+    /// King reads the line in Messages. Nothing happens while the standbys
+    /// are off, the player is not ready or the game has been handed over.
+    fn carry_out_move(&mut self, players: usize) {
+        if self.resume_handed() {
+            return;
+        }
+        let Some(order) = self.succession.move_to else {
+            return;
+        };
+        if !self.make_first_standby(order) {
+            return;
+        }
+        let Some((connection, peer)) = self.peer_of_order(order) else {
+            return;
+        };
+        if self.ready_standbys().first().map(|&(c, _)| c) != Some(connection) {
+            return;
+        }
+        let line = words::moved(&peer.callsign, players);
+        self.tell_king_line(line);
+        let _ = self.hand_over();
+    }
+
     /// The lobby's move and the King's warnings.
     fn decide_host(&mut self) {
         let players = self.live_peers().count();
@@ -838,9 +863,8 @@ impl Host {
             None if host_passes => None,
             None => passing.first().copied(),
         };
-        // Slice K4 hands the game over to `move_to` here, with
-        // `words::moved` in Messages.
         self.succession.move_to = move_to;
+        self.carry_out_move(players);
         let mut warnings = BTreeSet::new();
         if let Some(host) = pinned.or(house)
             && !self.host_passes_for(host, players)

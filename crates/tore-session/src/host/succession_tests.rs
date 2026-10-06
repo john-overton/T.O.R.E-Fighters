@@ -12,7 +12,7 @@ use super::state::CandidatesPart;
 use super::*;
 use crate::client::candidate::CandidateSettings;
 use crate::client::{Client, ClientConfig, ClientEvent, Controls, Race};
-use crate::host::{AfterEnd, BuildId, CrownRule, HostConfig, StartMode};
+use crate::host::{AfterEnd, BuildId, CrownRule, HostConfig, ResumeNote, StartMode};
 use crate::wire::PROTOCOL_VERSION;
 use crate::wire::messages::{SettingsChange, kind};
 use crate::wire::migration::{ReachResult, Reached};
@@ -92,7 +92,14 @@ struct Game {
     events: Vec<ClientEvent>,
     throttle: Option<Throttle>,
     gone: bool,
+    /// The game's standby, run in process as the game's worker would; it
+    /// holds no flight (the lobby's only), so it never builds a world.
+    standby: crate::standby::Standby,
+    status_at: Option<Duration>,
 }
+
+/// A standby's status goes to the host this often.
+const STATUS_EVERY: Duration = Duration::from_millis(500);
 
 /// A host and its players' games on one simulated network.
 struct Rig {
@@ -170,6 +177,10 @@ impl Rig {
             events: Vec::new(),
             throttle: None,
             gone: false,
+            standby: crate::standby::Standby::new(Box::new(|_| {
+                Err("the lobby holds no flight".to_owned())
+            })),
+            status_at: None,
         });
         self.games.len() - 1
     }
@@ -201,6 +212,18 @@ impl Rig {
                 }
             }
             game.client.update(now, &Controls::default());
+            for record in game.client.take_standby_records() {
+                let _ = game.standby.receive(&record);
+            }
+            if game.standby.appointed().is_some()
+                && game
+                    .status_at
+                    .is_none_or(|at| now.saturating_sub(at) >= STATUS_EVERY)
+            {
+                game.status_at = Some(now);
+                let status = game.standby.status();
+                game.client.request(now, Message::StandbyStatus(status));
+            }
             game.client.drive_peers(now, &mut game.peers);
             game.peers.update(now);
             game.peers.transmit(&mut game.socket).unwrap();
@@ -587,6 +610,157 @@ fn the_calculated_host_stays_while_it_passes_and_moves_when_it_fails_and_another
     });
     rig.run(Duration::from_millis(50));
     assert_eq!(rig.host.host_move(), None);
+}
+
+/// A game of a house and `others` direct players, standbys on, every
+/// report and upload test in and both standby roles ready.
+fn moving(others: usize) -> Rig {
+    let mut rig = Rig::new();
+    rig.host.set_standbys_enabled(true);
+    rig.join_at(HOUSE, "Viper");
+    for n in 0..others {
+        rig.join_at(&format!("198.51.100.{}:40000", 21 + n), &format!("P{n}"));
+    }
+    rig.settle();
+    assert!(
+        rig.run_until(Duration::from_secs(30), |r| {
+            r.host.ready_standbys().len() == 2
+                && (1..=others).all(|n| {
+                    r.host.succession.measures[&r.order(n)]
+                        .upload
+                        .is_some_and(|u| usize::from(u.players) == others + 1)
+                })
+        }),
+        "every upload test, and two standbys ready"
+    );
+    rig
+}
+
+/// The players of the game with standbys' roles, as game indices.
+fn roles(rig: &Rig) -> (Option<usize>, Option<usize>) {
+    let find = |role| {
+        (1..rig.games.len()).find(|&n| {
+            rig.host
+                .standby_figures()
+                .iter()
+                .any(|f| f.role == role && f.player == rig.id(n))
+        })
+    };
+    (
+        find(crate::wire::messages::StandbyMark::First),
+        find(crate::wire::messages::StandbyMark::Second),
+    )
+}
+
+/// John's rule (2026-10-05), slice KP: a lobby moves to the better host
+/// when the current one fails and another passes, by slice K4's handover.
+/// The better host is standby 2: the two change places, and the game is
+/// handed to it once it is ready as standby 1.
+#[test]
+fn a_lobby_moves_to_the_better_host_when_the_current_one_fails_and_another_passes() {
+    let mut rig = moving(2);
+    let (first, second) = roles(&rig);
+    let (first, second) = (first.unwrap(), second.unwrap());
+    assert_eq!(rig.host.host_move(), None, "the house passes");
+    rig.run(Duration::from_secs(2));
+    assert!(!rig.host.handed_over() && rig.host.take_resume_notes().is_empty());
+    assert!(rig.notices(0).is_empty());
+    // The player in the second role is the better machine by its CPU, and
+    // the house's flights say it carried 70 percent: the game moves.
+    let better = second;
+    let order = rig.order(better);
+    m(&mut rig, order).report.as_mut().unwrap().cpu_micros = 500;
+    assert_eq!(rig.ranked()[0], better, "the better host ranks first");
+    rig.host.succession.house_upload = Some(Upload {
+        players: 3,
+        per_mille: 700,
+    });
+    assert!(
+        rig.run_until(Duration::from_secs(10), |r| r.host.resume_handed()),
+        "the game was handed over"
+    );
+    let notes = rig.host.take_resume_notes();
+    let to = rig.id(better);
+    assert!(
+        notes
+            .iter()
+            .any(|n| matches!(n, ResumeNote::HandedOver { to: t, .. } if *t == to)),
+        "handed to the better host, not the first standby: {notes:?}"
+    );
+    let callsign = format!("P{}", better - 1);
+    assert!(
+        rig.run_until(Duration::from_secs(2), |r| r.notices(0).contains(&format!(
+            "The game moved to {callsign}'s machine, which can carry 3 players."
+        ))),
+        "{:?}",
+        rig.notices(0)
+    );
+    // Every player but the new host's own was told: each races it.
+    assert!(
+        rig.run_until(Duration::from_secs(2), |r| (0..r.games.len())
+            .filter(|&n| n != better)
+            .all(|n| {
+                r.games[n].client.migration() != crate::client::migrate::MigrationState::Steady
+            })),
+        "every player heard Host moving"
+    );
+    // The handover is said once.
+    rig.run(Duration::from_secs(3));
+    assert!(rig.host.take_resume_notes().is_empty());
+    assert_ne!(first, better);
+}
+
+/// A pin of a player who is no standby takes the standby role of the first
+/// and the game is handed to it.
+#[test]
+fn a_pin_of_a_player_who_is_no_standby_moves_the_lobby_to_it() {
+    let mut rig = moving(3);
+    let (first, second) = roles(&rig);
+    let (first, second) = (first.unwrap(), second.unwrap());
+    let pinned = (1..=3).find(|&n| n != first && n != second).unwrap();
+    rig.pin(1 + u32::from(rig.id(pinned)));
+    assert!(
+        rig.run_until(Duration::from_secs(20), |r| r.host.resume_handed()),
+        "the game was handed over"
+    );
+    let to = rig.id(pinned);
+    let notes = rig.host.take_resume_notes();
+    assert!(
+        notes
+            .iter()
+            .any(|n| matches!(n, ResumeNote::HandedOver { to: t, .. } if *t == to)),
+        "{notes:?}"
+    );
+}
+
+/// With the standbys off no game can take over: the decision is kept and
+/// nothing moves. A lobby that may not move (the house passes) stays too.
+#[test]
+fn a_lobby_does_not_move_without_a_ready_standby_or_while_the_house_passes() {
+    let mut rig = Rig::new();
+    rig.join_at(HOUSE, "Viper");
+    let delta = rig.join_at("198.51.100.21:40000", "Delta");
+    rig.settle();
+    assert!(rig.run_until(Duration::from_secs(10), |r| {
+        r.host.succession.measures[&r.order(delta)].upload.is_some()
+    }));
+    rig.host.succession.house_upload = Some(Upload {
+        players: 2,
+        per_mille: 700,
+    });
+    rig.run(Duration::from_secs(3));
+    assert_eq!(rig.host.host_move(), Some(rig.id(delta)));
+    assert!(!rig.host.resume_handed(), "no standbys: nowhere to hand to");
+    assert!(rig.notices(0).is_empty());
+    // Standbys on and the house passing again: it stays.
+    rig.host.set_standbys_enabled(true);
+    rig.host.succession.house_upload = Some(Upload {
+        players: 2,
+        per_mille: 950,
+    });
+    rig.run(Duration::from_secs(5));
+    assert_eq!(rig.host.host_move(), None);
+    assert!(!rig.host.resume_handed());
 }
 
 #[test]
