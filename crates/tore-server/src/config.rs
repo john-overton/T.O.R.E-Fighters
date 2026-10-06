@@ -402,11 +402,12 @@ pub const SETTINGS: [&str; 37] = [
     "idle-ai",
 ];
 
-/// How many of the registry's units one of the file's is: `revive-delay` is
-/// written in minutes, as `time-limit` is; every other number as the
-/// registry counts it (seconds, nautical miles, a count).
+/// How many of the registry's units one of the file's is: `revive-delay` and
+/// `idle-ai` are written in minutes, as `time-limit` is (the lobby shows
+/// minutes too); every other number as the registry counts it (nautical
+/// miles, a count).
 fn file_scale(setting: &Setting) -> u32 {
-    if setting.number == number::REVIVE_DELAY {
+    if matches!(setting.number, number::REVIVE_DELAY | number::IDLE_AI) {
         60
     } else {
         1
@@ -576,6 +577,20 @@ mod tests {
         assert_eq!(
             refused("revive-delay 6"),
             "line 1: `revive-delay` must be none, 1, 2, 3, 4 or 5, not `6`"
+        );
+        // The idle time is written in minutes (John, 2026-10-06: minutes in
+        // the lobby too; the list is an agent decision).
+        assert_eq!(
+            parse("idle-ai 2").unwrap().settings,
+            [(number::IDLE_AI, 120)]
+        );
+        assert_eq!(
+            parse("idle-ai 10").unwrap().settings,
+            [(number::IDLE_AI, 600)]
+        );
+        assert_eq!(
+            refused("idle-ai 3"),
+            "line 1: `idle-ai` must be never, 1, 2, 5 or 10, not `3`"
         );
         assert_eq!(
             refused("lives 11"),

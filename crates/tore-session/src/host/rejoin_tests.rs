@@ -403,6 +403,104 @@ fn a_plane_the_ai_loses_while_its_player_is_still_here_but_away_counts_too() {
     no_errors(&rig);
 }
 
+/// The away player's menu (slice F2-O4): Spawn in Aircraft after the AI lost
+/// the reserved aircraft is the revival rules' Revive, as it was for a
+/// player at the controls; where the rules allow nothing it is refused in
+/// the rules' words, which the menu shows beside the dimmed row.
+#[test]
+fn spawn_in_aircraft_after_a_loss_while_away_is_the_revival_rules_revive() {
+    let (mut rig, _, viper, _) = trio();
+    rig.host
+        .settings
+        .apply(&[
+            (number::RESPAWN, Respawn::Revive.value()),
+            (number::LIVES, 1),
+            (number::REVIVE_DELAY, 0),
+        ])
+        .unwrap();
+    let order = peer(&rig, "Viper").lobby.order;
+    rig.clients[viper].send(&Message::Away);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.host.rejoin.reserved.get(&order).is_some_and(|r| r.away)
+    }));
+    lose_ai_plane(&mut rig, 0);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        !r.clients[viper].revivals.is_empty()
+    }));
+    // No reserved aircraft is left: Take Back Flight would be refused.
+    rig.clients[viper].send(&Message::Back);
+    rig.run(Duration::from_millis(300));
+    assert_eq!(
+        refused(&rig, viper, kind::BACK),
+        ["The AI is not flying your aircraft."]
+    );
+    let mission = rig.clients[viper].number();
+    rig.clients[viper].send(&Message::Revive { mission });
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.clients[viper]
+            .seated
+            .as_ref()
+            .is_some_and(|s| s.plane != 0)
+    }));
+    assert_eq!(rig.host.revival.players[&order].used, 1);
+    no_errors(&rig);
+}
+
+#[test]
+fn spawn_in_aircraft_under_no_revival_is_refused_in_the_rules_words() {
+    let (mut rig, _, viper, _) = trio();
+    let order = peer(&rig, "Viper").lobby.order;
+    rig.clients[viper].send(&Message::Away);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.host.rejoin.reserved.get(&order).is_some_and(|r| r.away)
+    }));
+    lose_ai_plane(&mut rig, 0);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        !r.clients[viper].revivals.is_empty()
+    }));
+    assert_eq!(rig.clients[viper].revivals[0].rule, Respawn::None);
+    let mission = rig.clients[viper].number();
+    rig.clients[viper].send(&Message::Revive { mission });
+    rig.run(Duration::from_millis(500));
+    assert_eq!(peer(&rig, "Viper").stage, Stage::Lobby);
+    assert!(
+        rig.clients[viper]
+            .seat_refused
+            .iter()
+            .chain(rig.clients[viper].refused.iter().map(|(_, why)| why))
+            .any(|why| why == NO_REVIVAL),
+        "{:?} {:?}",
+        rig.clients[viper].seat_refused,
+        rig.clients[viper].refused
+    );
+}
+
+/// The King released an away player's aircraft: no revival is noted, so the
+/// menu's Spawn in Aircraft takes any free aircraft by the usual take rules.
+#[test]
+fn spawn_in_aircraft_after_a_release_takes_a_free_aircraft() {
+    let (mut rig, hawk, viper, _) = trio();
+    let order = peer(&rig, "Viper").lobby.order;
+    rig.clients[viper].send(&Message::Away);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.host.rejoin.reserved.get(&order).is_some_and(|r| r.away)
+    }));
+    rig.clients[hawk].send(&Message::Release(0));
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.host.rejoin.reserved.is_empty()
+    }));
+    assert!(
+        rig.clients[viper].revivals.is_empty(),
+        "a release is no loss"
+    );
+    let before = rig.clients[viper].seated.as_ref().map(|s| s.flight);
+    rig.clients[viper].take(None);
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.clients[viper].seated.as_ref().map(|s| s.flight) != before
+    }));
+    no_errors(&rig);
+}
+
 #[test]
 fn a_token_that_expired_another_game_issued_or_a_kick_voided_is_refused_in_words() {
     let (mut rig, hawk, viper, cobra) = trio();

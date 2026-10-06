@@ -1037,7 +1037,23 @@ pub fn lobby() -> LobbyState {
                 reserved: Some("Hawk".into()),
             },
         ],
-        settings: crate::settings::Store::defaults(crate::settings::Mode::Pvp).lobby_list(),
+        // The idle time stays the 10 seconds the sample was first made with:
+        // the registry's default moved to 5 minutes (slice F2-O4), which is
+        // a value and not a change of the wire's bytes.
+        settings: crate::settings::Store::defaults(crate::settings::Mode::Pvp)
+            .lobby_list()
+            .into_iter()
+            .map(|(n, v)| {
+                (
+                    n,
+                    if n == crate::settings::number::IDLE_AI {
+                        10
+                    } else {
+                        v
+                    },
+                )
+            })
+            .collect(),
     }
 }
 

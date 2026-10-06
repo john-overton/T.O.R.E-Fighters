@@ -48,6 +48,9 @@ pub mod number {
 /// its lobby id.
 pub const CALCULATED_HOST: u32 = 0;
 
+/// The `idle-ai` default, in co-op and PvP: 5 minutes (John, 2026-10-06).
+pub const IDLE_AI_DEFAULT: u32 = 300;
+
 /// The `lives` value that means no limit.
 pub const UNLIMITED_LIVES: u32 = 255;
 
@@ -422,11 +425,14 @@ pub const REGISTRY: [Setting; 21] = [
     Setting {
         number: number::IDLE_AI,
         name: "idle-ai",
-        allowed: Allowed::List(&[0, 10, 30, 60]),
+        // Minutes, written in seconds as the wire carries them (John,
+        // 2026-10-06: 10 seconds was too short for someone on autopilot who
+        // steps away; the list is an agent decision).
+        allowed: Allowed::List(&[0, 60, 120, 300, 600]),
         unit: Unit::Seconds,
         words: &[(0, "never")],
-        coop: 10,
-        pvp: 10,
+        coop: IDLE_AI_DEFAULT,
+        pvp: IDLE_AI_DEFAULT,
         change: Change::AnyTime,
         pvp_only: false,
     },
@@ -609,6 +615,13 @@ impl Store {
             }),
         );
         store
+    }
+
+    /// Sets a value past the registry's lists, so a test that waits on
+    /// simulated time need not wait minutes.
+    #[cfg(test)]
+    pub(crate) fn set_for_test(&mut self, number: u8, value: u32) {
+        self.put(number, value);
     }
 
     fn put(&mut self, number: u8, value: u32) {

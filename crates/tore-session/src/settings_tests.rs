@@ -49,7 +49,7 @@ fn the_defaults_follow_the_design_table() {
     assert_eq!(coop.kill_limit(), None);
     assert_eq!(coop.kill_owner(), KillOwner::Side);
     assert_eq!(coop.observer_delay_seconds(), 0);
-    assert_eq!(coop.idle_ai_seconds(), Some(10));
+    assert_eq!(coop.idle_ai_seconds(), Some(300));
 
     let pvp = Store::defaults(Mode::Pvp);
     assert_eq!(pvp.mode(), Mode::Pvp);
@@ -86,6 +86,23 @@ fn values_read_and_print_in_words() {
     );
     let observer = by_name("observer-delay").unwrap();
     assert_eq!(observer.text(30), "30 seconds");
+    // The idle time is minutes, never, 1, 2, 5 or 10, and 5 by default in
+    // both modes (John, 2026-10-06; the list is an agent decision).
+    let idle = by_name("idle-ai").unwrap();
+    assert_eq!(idle.text(0), "never");
+    assert_eq!(idle.text(60), "1 minute");
+    assert_eq!(idle.text(300), "5 minutes");
+    assert_eq!(
+        idle.values_text(),
+        "never, 1 minute, 2 minutes, 5 minutes or 10 minutes"
+    );
+    assert_eq!(idle.parse("never"), Some(0));
+    assert_eq!(idle.parse("10"), None, "10 seconds is gone");
+    assert_eq!(idle.parse("300"), Some(300));
+    assert_eq!(idle.default_in(Mode::Coop), 300);
+    assert_eq!(idle.default_in(Mode::Pvp), 300);
+    assert!(!idle.allows(30));
+    assert!(idle.allows(600));
     let distance = by_name("revive-distance").unwrap();
     assert_eq!(distance.text(40), "40 nm");
     assert_eq!(distance.parse("15"), None);

@@ -192,7 +192,10 @@ fn a_game_that_sends_nothing_for_the_settings_seconds_is_away() {
     let (mut rig, viper, _) = pair();
     let before = rig.clients[viper].seated.clone().unwrap();
     // Its game sends no input (a stalled loop): the stall rule flies the
-    // plane neutral, and the default 10 seconds later the AI flies it.
+    // plane neutral, and the setting's seconds later the AI flies it. The
+    // setting is 10 seconds here (the lists start at a minute), so the test
+    // runs 10 simulated seconds, not 5 minutes.
+    rig.host.settings.set_for_test(number::IDLE_AI, 10);
     rig.clients[viper].flying = false;
     rig.run(Duration::from_secs(9));
     assert!(!away_mark(&rig, viper));
@@ -220,7 +223,7 @@ fn a_game_that_sends_nothing_for_the_settings_seconds_is_away() {
 #[test]
 fn never_and_a_longer_setting_leave_the_plane_with_its_player() {
     let (mut rig, viper, _) = pair();
-    rig.host.settings.apply(&[(number::IDLE_AI, 30)]).unwrap();
+    rig.host.settings.apply(&[(number::IDLE_AI, 120)]).unwrap();
     rig.clients[viper].flying = false;
     rig.run(Duration::from_secs(12));
     assert!(!away_mark(&rig, viper));

@@ -1512,7 +1512,7 @@ value's coding. The names are the configuration file's and the logs'.
 | 17 | `kill-limit` | 0 none, 1, 2, 3, 5, 7 or 10 |
 | 18 | `kill-owner` | 0 total, 1 side, 2 player |
 | 19 | `observer-delay` | seconds: 0, 10, 30 or 60 |
-| 20 | `idle-ai` | seconds: 0 never, 10, 30 or 60 |
+| 20 | `idle-ai` | seconds: 0 never, 60, 120, 300 or 600 (default 300; John, 2026-10-06, slice F2-O4; no wire change: the value is the same u32, only its list and default moved) |
 | 21 | `host` | 0 calculated, or 1 plus the lobby id of the player the King pinned (stage K, [designed](#host-migration-and-rejoin-stage-k)) |
 
 A number the host does not know, or a value outside its list, is refused with

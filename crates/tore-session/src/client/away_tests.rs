@@ -78,6 +78,11 @@ fn a_game_away_finds_the_ai_flying_its_plane_and_takes_it_back() {
 #[test]
 fn a_game_stalled_past_the_setting_comes_back_to_the_ai_flying() {
     let (mut rig, viper) = flying();
+    // The lists start at a minute; the test sets 10 seconds so it need not
+    // wait out 5 simulated minutes (slice F2-O4).
+    rig.host
+        .settings_for_test()
+        .set_for_test(crate::settings::number::IDLE_AI, 10);
     let keepalive = rig.players[viper]
         .client
         .keepalive_datagram()

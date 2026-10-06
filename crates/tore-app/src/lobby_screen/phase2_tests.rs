@@ -421,7 +421,7 @@ fn rows_read_the_hosts_values_in_words() {
     assert_eq!(word(number::LIVES), "unlimited");
     assert_eq!(word(number::REVIVE_DISTANCE), "10 nm");
     assert_eq!(word(number::RESPAWN), "revive");
-    assert_eq!(word(number::IDLE_AI), "10 seconds");
+    assert_eq!(word(number::IDLE_AI), "5 minutes");
     assert_eq!(row_value(Kind::Name, &c), "Maverick's game");
     assert_eq!(row_value(Kind::Password, &c), "none");
     let mut with = state.clone();

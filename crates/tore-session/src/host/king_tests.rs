@@ -282,7 +282,7 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
         (number::KILL_LIMIT, 7),
         (number::KILL_OWNER, 2),
         (number::OBSERVER_DELAY, 60),
-        (number::IDLE_AI, 30),
+        (number::IDLE_AI, 120),
     ];
     let number_before = rig.host.mission_number();
     rig.client(king).change_settings(SettingsChange {
@@ -342,7 +342,7 @@ fn a_non_king_and_a_wrong_phase_are_refused() {
     // The registry's and the host's own words, and nothing applied.
     rig.change(king, &[(number::IDLE_AI, 60), (number::LIVES, 11)]);
     assert!(rig.refused(king, kind::SETTINGS, "lives is 0 to 10 or unlimited."));
-    assert_eq!(rig.host.settings().idle_ai_seconds(), Some(10));
+    assert_eq!(rig.host.settings().idle_ai_seconds(), Some(300));
     rig.change(king, &[(number::KILL_LIMIT, 3)]);
     assert!(rig.refused(king, kind::SETTINGS, "kill-limit applies only in PvP."));
     rig.change(king, &[(number::MAX_PLAYERS, 1)]);
@@ -665,10 +665,10 @@ fn the_crown_is_passed_used_and_passed_on_when_the_king_leaves() {
     // The house stays the house.
     assert_eq!(rig.lobby(hawk).unwrap().host, Some(viper_id));
     // The new King rules; the old one is refused.
-    rig.change(viper, &[(number::IDLE_AI, 30)]);
+    rig.change(viper, &[(number::IDLE_AI, 120)]);
     assert!(rig.refused(viper, kind::SETTINGS, "Only the King may do that."));
-    rig.change(cobra, &[(number::IDLE_AI, 30)]);
-    assert_eq!(rig.host.settings().idle_ai_seconds(), Some(30));
+    rig.change(cobra, &[(number::IDLE_AI, 120)]);
+    assert_eq!(rig.host.settings().idle_ai_seconds(), Some(120));
     // The house cannot be kicked: its leaving would end the game.
     rig.client(cobra).kick(viper_id, "bye");
     rig.run(Duration::from_millis(200));
@@ -732,7 +732,7 @@ fn a_servers_first_player_is_king_and_its_start_rule_gives_way_to_the_king() {
     let viper = rig.join("Viper");
     rig.gather(&[viper]);
     assert_eq!(rig.lobby(viper).unwrap().king, None);
-    rig.change(viper, &[(number::IDLE_AI, 30)]);
+    rig.change(viper, &[(number::IDLE_AI, 120)]);
     assert!(rig.refused(viper, kind::SETTINGS, "Only the King may do that."));
 
     // `king first-player`: the first to join wears the crown, and the
@@ -779,7 +779,7 @@ fn a_locked_servers_king_starts_kicks_and_passes_but_changes_nothing() {
     let viper = rig.join("Viper");
     let cobra = rig.join("Cobra");
     rig.gather(&[viper, cobra]);
-    rig.change(viper, &[(number::IDLE_AI, 30)]);
+    rig.change(viper, &[(number::IDLE_AI, 120)]);
     assert!(rig.refused(viper, kind::SETTINGS, super::king::MISSION_LOCKED));
     let spec = rig.host.spec().clone();
     rig.client(viper).change_mission(&spec);

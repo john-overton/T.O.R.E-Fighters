@@ -191,7 +191,7 @@ or a delayed observer. Each value is one of the setting's words or a number:
 | `kill-limit` | `none`, `5` | PvP only: `none`, 1, 2, 3, 5, 7 or 10 |
 | `kill-owner` | `side` | PvP only: `total`, `side` or `player` |
 | `observer-delay` | `0` | PvP only, seconds: 0 (`none`), 10, 30 or 60 |
-| `idle-ai` | `10` | Seconds a player's game is away before the AI flies its aircraft: `never`, 10, 30 or 60 |
+| `idle-ai` | `5` | Minutes a player's game is away before the AI flies its aircraft: `never`, 1, 2, 5 or 10 (written in minutes, as `time-limit` is; John, 2026-10-06, slice F2-O4) |
 
 The player limit, the password and the time limit are the settings
 `max-players`, `password` and `time-limit` above.
