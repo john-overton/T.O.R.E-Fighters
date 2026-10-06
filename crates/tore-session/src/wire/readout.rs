@@ -37,6 +37,7 @@
 use super::bits::{self, read_u32};
 use super::flat::{self, Kind, List, ListRaw, Schema, Slow};
 use super::{WireError, WireResult};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, VecDeque};
 use tore_codec::{BitReader, BitWriter};
 use tore_formats::aircraft::AircraftId;
@@ -2027,12 +2028,23 @@ impl ReadoutSender {
     }
 }
 
+/// Whether a scalar group always holds values once it has arrived: all but
+/// the AI locks, which are a list of ids and empty when nothing locks the
+/// plane. An empty one of these has not arrived yet.
+fn always_holds_values(group: usize) -> bool {
+    group != scalar::LOCKS
+}
+
 /// The client's readouts by snapshot tick, kept as baselines.
 #[derive(Clone, Debug)]
 pub struct ReadoutReceiver {
     ticks_per_snapshot: u32,
     readouts: VecDeque<(u32, QReadout)>,
     newest: Option<u32>,
+    /// The plane of the newest readout and the values each scalar group
+    /// last arrived with for it, which [`Self::presented`] shows while a
+    /// group waits after the host coded a record against the empty readout.
+    arrived: Option<(u32, [Vec<i64>; scalar::COUNT])>,
 }
 
 impl ReadoutReceiver {
@@ -2042,6 +2054,7 @@ impl ReadoutReceiver {
             ticks_per_snapshot: ticks_per_snapshot.clamp(1, 120),
             readouts: VecDeque::new(),
             newest: None,
+            arrived: None,
         }
     }
 
@@ -2071,8 +2084,26 @@ impl ReadoutReceiver {
             self.newest = Some(tick);
             let keep = tick.saturating_sub(64 * self.ticks_per_snapshot);
             self.readouts.retain(|(t, _)| *t >= keep);
+            self.note_arrived(&readout);
         }
         Ok(readout)
+    }
+
+    /// Keeps the scalar groups the newest readout holds; another plane's
+    /// readout starts afresh.
+    fn note_arrived(&mut self, readout: &QReadout) {
+        let Some(plane) = readout.plane() else {
+            return;
+        };
+        let arrived = match &mut self.arrived {
+            Some((p, groups)) if *p == plane => groups,
+            slot => &mut slot.insert((plane, Default::default())).1,
+        };
+        for (group, values) in readout.scalars.iter().enumerate() {
+            if !values.is_empty() {
+                arrived[group].clone_from(values);
+            }
+        }
     }
 
     /// The newest readout received, with its snapshot tick.
@@ -2081,5 +2112,32 @@ impl ReadoutReceiver {
             .iter()
             .max_by_key(|(t, _)| *t)
             .map(|(t, r)| (*t, r))
+    }
+
+    /// The newest readout as the cockpit shows it: a scalar group that has
+    /// not arrived since the host last coded against the empty readout (its
+    /// baseline was over 31 snapshots old, after a stall or on a round trip
+    /// over a second) shows what it last arrived with for the same plane,
+    /// as a group waiting for room against a held baseline does. Without
+    /// this the radar page read the empty sensor flags as NOT INSTALLED
+    /// (bug B1). The baselines stay as the host holds them.
+    pub fn presented(&self) -> Option<(u32, Cow<'_, QReadout>)> {
+        let (tick, latest) = self.latest()?;
+        let Some((plane, arrived)) = &self.arrived else {
+            return Some((tick, Cow::Borrowed(latest)));
+        };
+        let waiting = |group: usize| {
+            always_holds_values(group)
+                && latest.scalars[group].is_empty()
+                && !arrived[group].is_empty()
+        };
+        if latest.plane() != Some(*plane) || !(0..scalar::COUNT).any(waiting) {
+            return Some((tick, Cow::Borrowed(latest)));
+        }
+        let mut shown = latest.clone();
+        for group in (0..scalar::COUNT).filter(|g| waiting(*g)) {
+            shown.scalars[group].clone_from(&arrived[group]);
+        }
+        Some((tick, Cow::Owned(shown)))
     }
 }

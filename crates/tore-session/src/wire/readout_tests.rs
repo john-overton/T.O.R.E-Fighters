@@ -398,3 +398,103 @@ fn a_busy_readout_stays_within_the_packet() {
 fn latest_tick(client: &ClientConnection) -> u32 {
     client.readout.latest().unwrap().0
 }
+
+/// Bug B1: when the client's newest acknowledgement is over 31 snapshots old
+/// (a stall of the game, or a round trip over a second), the host codes the
+/// readout against the empty readout, and in a tight share the sensor flags
+/// wait behind the parts before them. The client then held a readout whose
+/// sensor group had not arrived, and the radar page read its empty flags as
+/// NOT INSTALLED. The cockpit shows what last arrived for the plane until
+/// the group comes again; the baselines stay as the host holds them.
+#[test]
+fn a_group_waiting_after_a_restart_from_the_empty_readout_shows_what_last_arrived() {
+    use tore_sim::sensors::Channel;
+    let mut host = ReadoutSender::new(4);
+    let mut client = ReadoutReceiver::new(4);
+    let readout = samples::readout();
+    let receive = |client: &mut ReadoutReceiver, bits: &tore_codec::BitWriter, tick: u32| {
+        let section =
+            super::snapshot::write_section(&samples::header(tick), Some(bits), &[]).unwrap();
+        let section = SnapshotSection::decode(&section).unwrap();
+        client
+            .receive(section.readout.as_ref().unwrap(), tick)
+            .unwrap()
+    };
+    let shown = |client: &ReadoutReceiver| {
+        let (tick, q) = client.presented().unwrap();
+        q.readout(tick, None, None).unwrap()
+    };
+    // The first readout arrives whole and is acknowledged.
+    let (bits, report) = host.build(400, &QReadout::of(&readout, 400), 8 * 1_000);
+    assert_eq!(report.waiting, 0);
+    host.sent(0);
+    receive(&mut client, &bits, 400);
+    host.delivered(0);
+    assert!(shown(&client).sensors.available(Channel::Radar));
+    // The game stalls: 40 snapshots go unacknowledged, so the next record
+    // is against the empty readout, in a share too small for the sensors.
+    for k in 1..=40u32 {
+        let tick = 400 + 4 * k;
+        let (bits, report) = host.build(tick, &QReadout::of(&readout, tick), 8 * 1_000);
+        host.sent(k as u16);
+        if k == 40 {
+            assert_eq!(report.waiting, 0, "a full share sends it all");
+        }
+        let _ = bits;
+    }
+    let tick = 400 + 4 * 41;
+    let (bits, report) = host.build(tick, &QReadout::of(&readout, tick), 120);
+    assert!(report.waiting > 0, "the tight share leaves parts waiting");
+    host.sent(41);
+    let held = receive(&mut client, &bits, tick);
+    assert_eq!(
+        &held,
+        host.staged_for_tests(41),
+        "the baseline is the host's"
+    );
+    let raw = held.readout(tick, None, None).unwrap();
+    assert!(
+        !raw.sensors.available(Channel::Radar),
+        "the held readout's sensor flags have not arrived"
+    );
+    let cockpit = shown(&client);
+    assert_eq!(cockpit.sensors.available, readout.sensors.available);
+    assert_eq!(cockpit.sensors.operating, readout.sensors.operating);
+    assert_eq!(
+        cockpit.sensors.radar_track_nmi,
+        readout.sensors.radar_track_nmi
+    );
+    assert_eq!(cockpit.sensors.selected, readout.sensors.selected);
+    assert_eq!(
+        cockpit.stores, readout.stores,
+        "so do the stores, which waited too"
+    );
+    assert_eq!(
+        (cockpit.plane, cockpit.tick),
+        (raw.plane, raw.tick),
+        "the header is new"
+    );
+    // Acknowledged, the next record has room: the flags arrive and the
+    // cockpit shows the held readout itself.
+    host.delivered(41);
+    let tick = 400 + 4 * 42;
+    let mut changed = readout.clone();
+    changed.sensors.operating[0] = false;
+    let (bits, report) = host.build(tick, &QReadout::of(&changed, tick), 8 * 1_000);
+    assert_eq!(report.waiting, 0);
+    host.sent(42);
+    let held = receive(&mut client, &bits, tick);
+    let (_, presented) = client.presented().unwrap();
+    assert!(matches!(presented, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(*presented, held);
+    assert!(!shown(&client).sensors.operating(Channel::Radar));
+    // Another plane's readout starts afresh: nothing of the last plane's is
+    // shown for it.
+    let mut other = readout.clone();
+    other.plane = 4;
+    let tick = 400 + 4 * 43;
+    let (bits, _) = ReadoutSender::new(4).build(tick, &QReadout::of(&other, tick), 120);
+    receive(&mut client, &bits, tick);
+    assert_eq!(shown(&client).plane, 4);
+    assert!(!shown(&client).sensors.available(Channel::Radar));
+}

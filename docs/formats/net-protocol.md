@@ -1136,6 +1136,19 @@ built from the tick's flight, in every snapshot.
   first, then new entries, then the largest changes go, and the client keeps
   the rest as the baseline predicts it, which the host's record of what the
   client holds does too, so the next packet catches up from there.
+- **Starting again from empty.** *Found in B1:* when the client's newest
+  acknowledgement is over 31 snapshots old (a stall of the game, or a round
+  trip over a second at 30 Hz), the record is against the empty readout, and
+  in a busy fight what does not fit is empty on the client, not kept. The
+  baseline stays so, as the host holds it, but the cockpit shows a scalar
+  group that has not arrived since with what it last arrived with for the
+  same plane (`ReadoutReceiver::presented`): every group but the AI locks
+  always holds values, so an empty one has not arrived. Before this the
+  radar page read the sensor flags of such a readout as `NOT INSTALLED`.
+  The lists cannot be told apart from an empty list, so they show what came:
+  with acknowledgements always over 31 snapshots late, a busy fight's
+  contacts, strobes, plots, trails, visual and map contacts and the link's
+  lists do not reach the client.
 - **Steps.** Scope, visual, map, threat and inbound positions in whole feet
   and velocities in 1/4 ft/s; target rows and seeker observations in 1/32 ft
   and 1/64 ft/s, as the entities; plot and strobe angles 2^-12 of a turn;

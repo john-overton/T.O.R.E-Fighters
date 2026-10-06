@@ -68,6 +68,8 @@ mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
+#[cfg(test)]
+mod radar_page_tests;
 pub mod rejoin;
 #[cfg(test)]
 mod rejoin_tests;

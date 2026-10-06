@@ -514,6 +514,10 @@ RULES: tuple[Rule, ...] = (
         "crates/tore-session/src/client/migration_seams_tests.rs", NET_MIGRATE,
         "stage K's seams on the network simulator (slice K0's tests)",
     ),
+    _r(
+        "crates/tore-session/src/client/radar_page_tests.rs", NET_FAMILIES,
+        "the cockpit readout a game shows through stalls on a slow round trip (bug B1; a real-data test for the full run)",
+    ),
     _r("crates/tore-session/src/client/convert*", ("net-convert",), "capture conversion"),
     _r("crates/tore-session/src/client/seen.rs", ("net-convert",), "capture conversion"),
     _r("crates/tore-session/src/client/capture.rs", ("net-convert",), "captures"),
