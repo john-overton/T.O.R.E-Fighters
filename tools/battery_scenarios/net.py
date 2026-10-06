@@ -150,6 +150,15 @@ def check_report_problems(text: str) -> list[str]:
         problems.append("the runway list is missing")
     if not re.search(r"^Content manifest: \d+ resources, digest [0-9a-f]{16}$", text, re.M):
         problems.append("the content manifest line is missing")
+    # Stage L (slice L3): the import's source, its counts and one line per item.
+    if not re.search(r"^Content: .*Fighters Anthology.*, imported by .*T\.O\.R\.E", text, re.M):
+        problems.append("the content's source line is missing")
+    if not re.search(r"^Content items: \d+ aircraft, \d+ theaters?, \d+ weapons?, the shared data$", text, re.M):
+        problems.append("the content's counts line is missing or has no shared data")
+    items = content_item_lines(text)
+    for kind in ("aircraft", "theater", "weapon", "shared"):
+        if not any(line.startswith(kind) for line in items):
+            problems.append(f"the content lists no {kind} item")
     return problems
 
 
@@ -1222,6 +1231,98 @@ def drive_convert(d: Drive) -> None:
     cut_info.expect(r"^Result +end=cut, capture=cut short at byte", "the footer's note")
 
 
+# --------------------------------------------------------------------------
+# Stage L: content and gaps (slice L3)
+# --------------------------------------------------------------------------
+
+# The 1.0 disc, which net-content-builds imports for its bot.
+DISC_10 = ROOT / "gameassets" / "fighters-anthology" / "disc1"
+
+
+def content_item_lines(text: str) -> list[str]:
+    """The item lines of a content report (`--check` or `tore-bot --content-report`): "aircraft F18.PT <digest>"."""
+    return [m.group(1) for m in re.finditer(r"(?m)^(?:\[\w-]+\] )?  ((?:aircraft|theater|weapon) \S+ [0-9a-f]{16}|shared data [0-9a-f]{16})$", text)]
+
+
+def drive_content_builds(d: Drive) -> None:
+    """A server on the profile's 1.02F import and a bot on a 1.0 import made here: every item is the same, the bot
+    reads that it imported 1.0 and the host 1.02F, and flies."""
+    if not (DISC_10 / "SETUP.ESA").exists():
+        raise DriveError(f"the 1.0 disc is missing: {DISC_10} (net-content-builds needs it)")
+    fa10 = d.work / "fa10"
+    d.run("import", [d.server, "--import", DISC_10, "--data-dir", fa10], timeout=600)
+    report = d.run("report", [d.bot, "--content-report", "--data-dir", fa10], timeout=120)
+    report.expect(r"^Content: Fighters Anthology 1\.0, imported by T\.O\.R\.E ", "the 1.0 import's source")
+    port = d.port()
+    config = write_server_files(d, port, guide_mission(separation_nm=5))
+    check = d.run("check", [d.server, "--config", config, "--check"], timeout=120)
+    check.expect(r"^Content: Fighters Anthology 1\.02F, imported by ", "the server's 1.02F source")
+    ours, theirs = content_item_lines(check.text()), content_item_lines(report.text())
+    if not ours:
+        d.problem("tore-server --check listed no content items")
+    elif ours != theirs:
+        differing = sorted(set(ours) ^ set(theirs))
+        d.problem(f"the 1.0 and 1.02F imports differ in {len(differing)} item lines, such as {differing[:3]}")
+    server = start_server(d, port, guide_mission(separation_nm=5))
+    bot = start_bots(d, port, "bot", 30, "--callsign", "Old", "--data-dir", fa10)
+    bot.finish(90, 0)
+    server.finish(40, 0)
+    bot.expect(
+        r"^Old: You imported Fighters Anthology 1\.0; the host, 1\.02F\. Every aircraft, weapon and theater is the "
+        r"same\.$",
+        "the build line",
+    )
+    bot.expect(r"^Old: gaps: none$", "no gaps")
+    bot.expect(r"^Old: seat \d+, plane \d+, at tick \d+$", "a seating")
+    bot.expect(r"^Old: debrief: ", "a debrief")
+    bot.expect(r"^Old: The connection ended: the player left\.$", "a clean leave")
+    bot.forbid(NET_BAD, "a network problem")
+    server.expect(r"^Content: Fighters Anthology 1\.02F, imported by ", "the server's content line")
+    server.forbid(NET_BAD, "a network problem")
+    log_must(
+        d, server_log(d), r"joined as Old",
+        r"content Old: Fighters Anthology 1\.0, imported by T\.O\.R\.E \S+ \([0-9a-f]+\); the same items as the host",
+        forbid=NET_BAD + r"|^.*gaps: (?!none)",
+    )
+    # The 1.0 import is about 170 MB; the run's log keeps what it showed.
+    shutil.rmtree(fa10, ignore_errors=True)
+
+
+def drive_content_missing(d: Drive) -> None:
+    """A bot whose import lacks the Su-27 joins the guide's mission (which flies it): every player gets the gap, the
+    bot is unable with the words and leaves, another bot flies, and the server's log names the gap and its end."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5), empty_timeout=3)
+    hawk = start_bots(d, port, "hawk", 15, "--callsign", "Hawk", "--drop-resource", "SU27.PT", "--expect-unable")
+    viper = start_bots(d, port, "viper", 35, "--callsign", "Viper")
+    hawk.finish(60, 0)
+    viper.finish(90, 0)
+    server.finish(40, 0)
+    hawk.expect(r"^dropped SU27\.PT from the import$", "the dropped profile")
+    hawk.expect(
+        r"^Hawk: Your game has no Su-27[^,]*, which this mission flies\. .*Re-import Fighters Anthology \(Pref, "
+        r"Re-import\) to add it\. \(",
+        "its own words",
+    )
+    hawk.expect(r"^Hawk: gaps: aircraft SU27\.PT \(Hawk lacks it\)$", "the gap")
+    hawk.expect(r"^Hawk: Your game differs from the host's: no Su-27[^.]*\.$", "its own difference line")
+    hawk.expect(r"^Hawk: The connection ended: the player left\.$", "a clean leave")
+    hawk.forbid(r"^Hawk: seat \d+", "a seating")
+    viper.expect(r"^Viper: gaps: aircraft SU27\.PT \(Hawk lacks it\)$", "the gap")
+    viper.expect(r"^Viper: Hawk's game differs from the host's: no Su-27[^.]*\.$", "Hawk's difference line")
+    viper.expect(r"^Viper: lobby: .*Hawk no slot unable", "Hawk unable in the lobby")
+    viper.expect(r"^Viper: seat \d+, plane \d+, at tick \d+$", "a seating")
+    viper.expect(r"^Viper: debrief: ", "a debrief")
+    viper.forbid(NET_BAD, "a network problem")
+    log_must(
+        d, server_log(d), r"joined as Hawk", r"joined as Viper",
+        r"content Hawk: .*; lacks aircraft SU27\.PT$",
+        r"gaps: aircraft SU27\.PT \(Hawk lacks it\)$",
+        r"Hawk cannot play the mission: Hawk's game has no Su-27[^,]*, which this mission flies\.",
+        r"gaps: none$",
+    )
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -1314,6 +1415,18 @@ def scenarios() -> list[Scenario]:
             timeout=180,
             notes="tore-bot --path relay joins a listed tore-server through the relay of a tore-master on this "
             "machine, flies 30 seconds with no drop, and the master counts the channel and its bytes (slice J3)",
+        ),
+        Scenario(
+            name="net-content-builds", lane="net", args=[], driver=drive_content_builds, uses=("server", "bot"),
+            timeout=900,
+            notes="a server on the profile's 1.02F import and a bot on a 1.0 import of gameassets' disc1 made in the "
+            "run: every content item is the same, the bot reads the build line and flies (slice L3)",
+        ),
+        Scenario(
+            name="net-content-missing", lane="net", args=[], driver=drive_content_missing, uses=("server", "bot"),
+            timeout=240,
+            notes="a bot whose import lacks SU27.PT (tore-bot --drop-resource) joins the guide's mission: the gap, its "
+            "unable words, another bot flies, the server's content and gaps lines (slice L3)",
         ),
         Scenario(
             name="net-window-internet-relay", lane="net", args=[], driver=drive_internet_relay, uses=("server",),

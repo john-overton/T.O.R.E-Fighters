@@ -31,6 +31,14 @@ Runways of UKR (the numbers start ground takes):
     0  Zaporizhzhya (5532 ft)
 
 Content manifest: 433 resources, digest 012f3911765f6c35
+
+Content: Fighters Anthology 1.02F, imported by T.O.R.E 0.1.4 (48d62dac)
+Content items: 2 aircraft, 1 theater, 1 weapon, the shared data
+  aircraft F14.PT 0c68b3b124f7f3b8
+  aircraft F18.PT 195dfc20f45d3807
+  theater UKR 2ef6db2ac361554f
+  weapon AIM9X.JT 69d2821b6ba1980a
+  shared data 3fe3336ebde69141
 """
 
 PLAYERS = """id   seat callsign        plane      rtt    loss    margin  repeated  address
@@ -90,6 +98,11 @@ class CheckReportTests(unittest.TestCase):
         self.assertTrue(any("manifest" in p for p in net.check_report_problems(CHECK_REPORT.replace("Content manifest", "Content"))))
         self.assertTrue(any("summary" in p for p in net.check_report_problems(CHECK_REPORT.replace("UKR (clear)", "BAL (clear)"))))
         self.assertTrue(any("runway" in p for p in net.check_report_problems(CHECK_REPORT.replace("Runways of", "Strips of"))))
+        # Stage L (slice L3): the import's source, its counts and one line per item.
+        no_source = CHECK_REPORT.replace("Content: Fighters", "Contents: Fighters")
+        self.assertTrue(any("source" in p for p in net.check_report_problems(no_source)))
+        no_items = "".join(line for line in CHECK_REPORT.splitlines(True) if not line.startswith("  aircraft"))
+        self.assertTrue(any("aircraft" in p for p in net.check_report_problems(no_items)))
 
 
 class ParsingTests(unittest.TestCase):
@@ -264,6 +277,31 @@ class ParsingTests(unittest.TestCase):
             self.assertEqual([p.name for p in data.iterdir()], ["keep.pack"])
 
 
+class ContentReportTests(unittest.TestCase):
+    """The item lines net-content-builds compares between `tore-server --check` and `tore-bot --content-report`."""
+
+    def test_item_lines_are_read_and_nothing_else(self):
+        text = (
+            "Content manifest: 1405 resources, digest 0011223344556677\n\n"
+            "Content: Fighters Anthology 1.02F, imported by T.O.R.E 0.1.4 (48d62dac)\n"
+            "Content items: 1 aircraft, 1 theater, 1 weapon, the shared data\n"
+            "  aircraft F18.PT 0123456789abcdef\n"
+            "  theater UKR fedcba9876543210\n"
+            "  weapon AIM9X.JT 00000000000000ff\n"
+            "  shared data 1111111111111111\n"
+            "   0  F18.PT    friendly wing 1, member 1, average\n"
+        )
+        self.assertEqual(
+            net.content_item_lines(text),
+            [
+                "aircraft F18.PT 0123456789abcdef",
+                "theater UKR fedcba9876543210",
+                "weapon AIM9X.JT 00000000000000ff",
+                "shared data 1111111111111111",
+            ],
+        )
+
+
 class ScenarioListTests(unittest.TestCase):
     def test_every_scenario_is_a_driver_in_the_net_lane(self):
         scenarios = net.scenarios()
@@ -271,7 +309,12 @@ class ScenarioListTests(unittest.TestCase):
         for s in scenarios:
             self.assertEqual(s.lane, "net", s.name)
             self.assertTrue(callable(s.driver), s.name)
-            self.assertTrue(s.name.startswith(("net-server-", "net-discovery", "net-convert-", "net-window-", "net-master-")), s.name)
+            self.assertTrue(
+                s.name.startswith(
+                    ("net-server-", "net-discovery", "net-convert-", "net-window-", "net-master-", "net-content-")
+                ),
+                s.name,
+            )
             self.assertTrue(set(s.uses) <= {"server", "bot"}, s.name)
             self.assertEqual(s.window, s.name.startswith("net-window-"), f"{s.name}: only the window scenarios open one")
 

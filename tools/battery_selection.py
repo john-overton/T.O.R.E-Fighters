@@ -195,6 +195,16 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-convert-*",),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
+    "net-content": (
+        "stage L's content and gaps: a bot whose import lacks an aircraft joins, is unable with the words, the gap "
+        "and its end are logged",
+        ("net-content-missing",),
+    ),
+    "net-builds": (
+        "a 1.0 import made in the run against the profile's 1.02F: the same items, the build line, a flight (slow: "
+        "it imports the disc)",
+        ("net-content-builds",),
+    ),
     "net-master": (
         "the master server on this machine: its limits under the flood tool, a server listing itself",
         ("net-master-*",),
@@ -352,7 +362,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _r("crates/tore-world/src/resources.rs", ("ai-missions", "menus-creator", "airports"), "mission resource reads"),
     _r(
-        "crates/tore-world/src/content.rs", (),
+        "crates/tore-world/src/content.rs", ("net-content", "net-builds"),
         "the content digests (stage L): computed by the lobby and the dedicated server, which later slices wire in; "
         "no scenario reads them yet",
     ),
@@ -405,7 +415,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-extract/*", ("replay-settings", "menus-validate"), "extractor"),
     # Stage D crates. Until networked scenarios exist, only the import reaches a battery scenario.
     _r(
-        "crates/tore-import/src/source.rs", ("menus-validate", "replay-settings"),
+        "crates/tore-import/src/source.rs", ("menus-validate", "replay-settings", "net-builds"),
         "the import's source entry (build and importer); nothing in single player reads it",
     ),
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
@@ -433,6 +443,14 @@ RULES: tuple[Rule, ...] = (
     ),
     _r("crates/tore-session/src/client/results.rs", NET_FAMILIES, "the results a game keeps and their words (tore-bot prints them)"),
     _r("crates/tore-session/src/host/results*", NET_FAMILIES, "the results message at a mission's end, and its tests"),
+    _r(
+        "crates/tore-session/src/host/content*", NET_FAMILIES + ("net-content", "net-builds"),
+        "stage L on the host: players' content, the gaps, the refusals and words, the content log, and their tests",
+    ),
+    _r(
+        "crates/tore-session/src/client/content.rs", ("net-content", "net-builds"),
+        "a player's own words about its import and the lobby's build and gap lines (tore-bot prints them)",
+    ),
     _r(
         "crates/tore-session/src/host/king*",
         NET_FAMILIES + ("net-discovery",),
@@ -470,10 +488,13 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-session/src/bin/tore-bot.rs", NET_FAMILIES, "the bot, which keeps the capture the scenario converts"),
     _r(
         "crates/tore-session/*",
-        NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay"),
+        NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay", "net-content"),
         "network sessions, the host and tore-bot",
     ),
-    _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery", "net-listing"), "dedicated server"),
+    _r(
+        "crates/tore-server/*", ("net-check", "net-fly", "net-discovery", "net-listing", "net-content"),
+        "dedicated server",
+    ),
     _r("crates/tore-master/*", ("net-master",), "the master server, its configuration and its flood tool"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),
     # tore-app: rendering (windowed).

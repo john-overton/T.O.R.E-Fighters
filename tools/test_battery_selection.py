@@ -81,8 +81,16 @@ class MapTests(unittest.TestCase):
         for path in ("crates/tore-net/src/connection.rs", "crates/tore-session/src/host/mod.rs", "crates/tore-codec/src/lib.rs"):
             self.assertIn("net-fly", self.families(path), path)
         self.assertEqual(
-            set(self.families("crates/tore-server/src/run.rs")), {"net-check", "net-fly", "net-discovery", "net-listing"},
+            set(self.families("crates/tore-server/src/run.rs")),
+            {"net-check", "net-fly", "net-discovery", "net-listing", "net-content"},
         )
+        # Stage L (slice L3): the content code runs the content scenarios; only it, the import's source and the
+        # world's content items run the slow one that imports the 1.0 disc.
+        self.assertIn("net-builds", self.families("crates/tore-session/src/host/content.rs"))
+        self.assertIn("net-builds", self.families("crates/tore-session/src/client/content.rs"))
+        self.assertIn("net-content", self.families("crates/tore-session/src/client/mod.rs"))
+        self.assertNotIn("net-builds", self.families("crates/tore-session/src/client/mod.rs"))
+        self.assertNotIn("net-builds", self.families("crates/tore-server/src/run.rs"))
         # The host's side of the master (slice I3) runs the master's scenarios, the listing among them.
         self.assertEqual(self.families("crates/tore-net/src/master/rendezvous.rs"), {"net-master"})
         self.assertIn("net-window", self.families("crates/tore-session/src/client/mod.rs"))
