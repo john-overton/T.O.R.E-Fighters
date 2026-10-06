@@ -298,6 +298,8 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
     assert!(rig.refusals(king).is_empty(), "{:?}", rig.refusals(king));
     let mut expected: Vec<(u8, u32)> = values.to_vec();
     expected.push((number::PASSWORD, 1));
+    // Setting 21, the host, stays calculated (its pin is slice K6's).
+    expected.push((number::HOST, 0));
     expected.sort_unstable();
     for p in [king, cobra] {
         let lobby = rig.lobby(p).unwrap();

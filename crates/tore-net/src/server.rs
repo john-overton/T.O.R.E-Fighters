@@ -13,12 +13,12 @@ use crate::master::Path;
 use crate::master::routed::is_relayed;
 use crate::packet::{
     self, Accepted, Challenge, Discover, DiscoverAnswer, MAX_DATAGRAM, MAX_REFUSE_TEXT, Packet,
-    PacketKind, Refuse,
+    PacketKind, ReachAnswer, ReachRole, Refuse, Token,
 };
 use crate::platform::Platform;
 use crate::{
     COOKIE_SLOT, Counters, Datagrams, MAX_SECTION_KIND, RATE_LIMIT_PER_ADDRESS, RATE_LIMIT_TOTAL,
-    Transmit,
+    REACH_PER_ADDRESS, Transmit,
 };
 
 /// The host's settings.
@@ -70,6 +70,9 @@ pub struct ConnectDetails {
     /// How it reached the host (protocol 9): what its Challenge answer says,
     /// or the relay for a relayed address whatever the answer says.
     pub path: Path,
+    /// Its rejoin token for this session, when its game holds one (stage K,
+    /// protocol 13). The transport reads nothing into it: the gate does.
+    pub token: Option<Token>,
 }
 
 /// What the host tells an accepted client, besides its connection id.
@@ -180,6 +183,12 @@ struct RateLimiter {
 
 impl RateLimiter {
     fn allow(&mut self, now: Duration, address: IpAddr) -> bool {
+        self.allow_up_to(now, address, RATE_LIMIT_PER_ADDRESS)
+    }
+
+    /// As [`RateLimiter::allow`], with `per_address` a second from one
+    /// address instead of the joins' 20.
+    fn allow_up_to(&mut self, now: Duration, address: IpAddr, per_address: u32) -> bool {
         let second = now.as_secs();
         if second != self.second {
             self.second = second;
@@ -190,7 +199,7 @@ impl RateLimiter {
             return false;
         }
         let count = self.per_address.entry(address).or_insert(0);
-        if *count >= RATE_LIMIT_PER_ADDRESS {
+        if *count >= per_address {
             return false;
         }
         *count += 1;
@@ -216,6 +225,12 @@ pub struct Server {
     /// Discover queries have a limiter of their own, with the same limits, so
     /// a flood of them cannot use up the joins' allowance (agent decision).
     discover_limiter: RateLimiter,
+    /// Reach packets have a limiter of their own too: 10 a second from one
+    /// address (stage K).
+    reach_limiter: RateLimiter,
+    /// The session a Reach must name to be answered, as hosting it (role 1);
+    /// `None` answers none (stage K, slice K0).
+    reach_session: Option<u64>,
     out: VecDeque<Transmit>,
     events: VecDeque<ServerEvent>,
     counters: Counters,
@@ -234,6 +249,8 @@ impl Server {
             ids: HashMap::new(),
             limiter: RateLimiter::default(),
             discover_limiter: RateLimiter::default(),
+            reach_limiter: RateLimiter::default(),
+            reach_session: None,
             out: VecDeque::new(),
             events: VecDeque::new(),
             counters: Counters::default(),
@@ -243,6 +260,14 @@ impl Server {
     /// The settings.
     pub fn config(&self) -> &ServerConfig {
         &self.config
+    }
+
+    /// Answers a Reach that names `session` as the game that hosts it (role
+    /// 1), at most 10 a second from one address; `None` answers none. A host
+    /// sets its own session's id (stage K): a returning old host, or a
+    /// client, asks a standby this way whether it hosts now.
+    pub fn set_reach_session(&mut self, session: Option<u64>) {
+        self.reach_session = session;
     }
 
     /// Datagrams dropped before reaching a connection, by cause.
@@ -413,14 +438,46 @@ impl Server {
             PacketKind::Disconnect => self.on_disconnect(from, body),
             PacketKind::Discover => self.on_discover(now, from, datagram.len(), body),
             PacketKind::Keepalive => self.on_keepalive(now, from, body),
+            PacketKind::Reach => self.on_reach(now, from, body),
             PacketKind::Challenge
             | PacketKind::Accepted
             | PacketKind::Refuse
             | PacketKind::DiscoverAnswer
-            | PacketKind::Punch => {
+            | PacketKind::Punch
+            | PacketKind::ReachAnswer => {
                 self.counters.unexpected += 1;
             }
         }
+    }
+
+    /// A Reach (stage K): answered as the host of the session it names,
+    /// never longer than itself. One for another session, or to a host that
+    /// answers none, is counted as unexpected; one past 10 a second from its
+    /// address as rate limited.
+    fn on_reach(&mut self, now: Duration, from: SocketAddr, body: &[u8]) {
+        let Ok(reach) = packet::decode_reach(body) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        if self.reach_session != Some(reach.session_id) {
+            self.counters.unexpected += 1;
+            return;
+        }
+        if !self
+            .reach_limiter
+            .allow_up_to(now, from.ip(), REACH_PER_ADDRESS)
+        {
+            self.counters.rate_limited += 1;
+            return;
+        }
+        self.send(
+            from,
+            &Packet::ReachAnswer(ReachAnswer {
+                nonce: reach.nonce,
+                session_id: reach.session_id,
+                role: ReachRole::Hosting,
+            }),
+        );
     }
 
     fn on_discover(&mut self, now: Duration, from: SocketAddr, len: usize, body: &[u8]) {
@@ -551,6 +608,7 @@ impl Server {
             } else {
                 answer.path
             },
+            token: answer.token,
         };
         let info = match gate.accept(&details) {
             Decision::Accept(info) => info,
@@ -955,6 +1013,7 @@ mod tests {
                 game_commit: String::new(),
                 platform: Platform::Linux,
                 path: said,
+                token: None,
             })
             .encode(V)
             .unwrap();
@@ -964,6 +1023,152 @@ mod tests {
             };
             assert_eq!(details.path, kept);
         }
+    }
+
+    fn reach(session_id: u64, nonce: u64) -> Vec<u8> {
+        Packet::Reach(packet::Reach {
+            session_id,
+            nonce,
+            from: 3,
+        })
+        .encode(V)
+        .unwrap()
+    }
+
+    #[test]
+    fn a_host_answers_a_reach_for_its_own_session_only_and_never_longer() {
+        let mut server = host();
+        let asker: SocketAddr = "203.0.113.9:40000".parse().unwrap();
+        let now = Duration::from_secs(2);
+        // A host that answers no session counts it.
+        server.receive(now, asker, &reach(77, 1), &mut accept_all);
+        assert!(server.poll_transmit().is_none());
+        assert_eq!(server.counters().unexpected, 1);
+        server.set_reach_session(Some(77));
+        let sent = reach(77, 5);
+        server.receive(now, asker, &sent, &mut accept_all);
+        let answer = server.poll_transmit().expect("an answer");
+        assert_eq!(answer.to, asker);
+        assert!(answer.datagram.len() <= sent.len());
+        assert_eq!(
+            Packet::decode(&answer.datagram, V),
+            Ok(Packet::ReachAnswer(packet::ReachAnswer {
+                nonce: 5,
+                session_id: 77,
+                role: ReachRole::Hosting,
+            }))
+        );
+        // Another session's Reach is counted and dropped; so is an answer.
+        server.receive(now, asker, &reach(78, 6), &mut accept_all);
+        let stray = Packet::ReachAnswer(packet::ReachAnswer {
+            nonce: 5,
+            session_id: 77,
+            role: ReachRole::NotHosting,
+        })
+        .encode(V)
+        .unwrap();
+        server.receive(now, asker, &stray, &mut accept_all);
+        assert!(server.poll_transmit().is_none());
+        assert_eq!(server.counters().unexpected, 3);
+        // No connection, no event: a Reach leaves nothing behind.
+        assert!(server.poll_event().is_none());
+        assert_eq!(server.connections().count(), 0);
+    }
+
+    #[test]
+    fn reaches_are_answered_ten_a_second_from_one_address() {
+        let mut server = host();
+        server.set_reach_session(Some(9));
+        let asker: SocketAddr = "203.0.113.9:40000".parse().unwrap();
+        let now = Duration::from_millis(3_500);
+        for nonce in 0..25 {
+            server.receive(now, asker, &reach(9, nonce), &mut accept_all);
+        }
+        let answers = std::iter::from_fn(|| server.poll_transmit()).count();
+        assert_eq!(answers, REACH_PER_ADDRESS as usize);
+        assert_eq!(
+            server.counters().rate_limited,
+            25 - u64::from(REACH_PER_ADDRESS)
+        );
+        // Another address has its own ten, and joins keep their allowance.
+        let other: SocketAddr = "203.0.113.10:40000".parse().unwrap();
+        server.receive(now, other, &reach(9, 1), &mut accept_all);
+        assert!(server.poll_transmit().is_some());
+        let request = Packet::ConnectRequest(packet::ConnectRequest {
+            protocol_version: V,
+            nonce: 5,
+            game_version: String::new(),
+            game_commit: String::new(),
+        })
+        .encode(V)
+        .unwrap();
+        server.receive(now, asker, &request, &mut accept_all);
+        assert!(matches!(
+            server
+                .poll_transmit()
+                .map(|t| Packet::decode(&t.datagram, V)),
+            Some(Ok(Packet::Challenge(_)))
+        ));
+        // The next second allows more.
+        server.receive(
+            now + Duration::from_secs(1),
+            asker,
+            &reach(9, 99),
+            &mut accept_all,
+        );
+        assert!(server.poll_transmit().is_some());
+    }
+
+    #[test]
+    fn the_token_in_the_answer_reaches_the_gate() {
+        let mut seen = Vec::new();
+        for token in [None, Some(Token(0xABCD_u128 << 100 | 7))] {
+            let mut server = host();
+            let from: SocketAddr = "203.0.113.9:40000".parse().unwrap();
+            let now = Duration::from_secs(3);
+            let request = Packet::ConnectRequest(packet::ConnectRequest {
+                protocol_version: V,
+                nonce: 5,
+                game_version: String::new(),
+                game_commit: String::new(),
+            })
+            .encode(V)
+            .unwrap();
+            let mut gate = |details: &ConnectDetails| {
+                seen.push(details.token);
+                Decision::Accept(AcceptInfo {
+                    session_id: 1,
+                    ticks_per_second: 120,
+                    ticks_per_snapshot: 4,
+                    host_tick: 0,
+                })
+            };
+            server.receive(now, from, &request, &mut gate);
+            let Ok(Packet::Challenge(challenge)) =
+                Packet::decode(&server.poll_transmit().unwrap().datagram, V)
+            else {
+                panic!("no challenge")
+            };
+            let answer = Packet::ChallengeAnswer(packet::ChallengeAnswer {
+                nonce: 5,
+                cookie: challenge.cookie,
+                callsign: "Viper".into(),
+                password: String::new(),
+                game_version: String::new(),
+                game_commit: String::new(),
+                platform: Platform::Linux,
+                path: Path::ByAddress,
+                token,
+            })
+            .encode(V)
+            .unwrap();
+            server.receive(now, from, &answer, &mut gate);
+            let Some(ServerEvent::Connected { details, .. }) = server.poll_event() else {
+                panic!("not connected")
+            };
+            assert_eq!(details.token, token);
+        }
+        assert_eq!(seen, [None, Some(Token(0xABCD_u128 << 100 | 7))]);
     }
 
     #[test]

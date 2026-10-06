@@ -73,6 +73,7 @@ pub(crate) fn player(id: u8, name: &str, slot: Option<u32>) -> LobbyPlayer {
             2 => Build::V10,
             _ => Build::Unknown,
         },
+        standby: Default::default(),
     }
 }
 
@@ -96,6 +97,7 @@ pub(crate) fn slots(holders: &[(u32, u8)]) -> Vec<LobbySlot> {
             aircraft,
             holder: holders.iter().find(|(p, _)| *p == plane).map(|(_, id)| *id),
             lock: Default::default(),
+            reserved: None,
         });
     }
     slots

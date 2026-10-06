@@ -38,6 +38,8 @@
 mod away;
 #[cfg(test)]
 mod away_tests;
+// Stage K's seams (slice K0): each later slice fills its own.
+mod candidate;
 pub mod capture;
 #[cfg(test)]
 mod chat_tests;
@@ -51,12 +53,16 @@ pub mod interpolation;
 mod lobby_tests;
 #[cfg(test)]
 mod matrix_tests;
+mod migrate;
+#[cfg(test)]
+mod migration_seams_tests;
 pub mod observe;
 #[cfg(test)]
 mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
+mod rejoin;
 #[cfg(test)]
 mod relay_tests;
 pub mod results;
@@ -399,6 +405,7 @@ pub fn describe(reason: &CloseReason) -> String {
                 DisconnectReason::ContentMismatch => "the game data differs from the server's",
                 DisconnectReason::ServerStopping => "the server is stopping",
                 DisconnectReason::Kicked => "kicked by the server",
+                DisconnectReason::MovedToNewHost => "the player moved to the game's new host",
                 DisconnectReason::Other(_) => "an unknown reason",
             };
             if *by_peer {
@@ -711,6 +718,9 @@ pub struct Client {
     /// What the session was given, kept for converting a capture into a
     /// replay ([`seen`]); off in a game.
     observed: Option<seen::Observed>,
+    /// Stage K's migration: the standby records passed on, and what slice
+    /// K4 adds.
+    migration: migrate::Migration,
     now: Duration,
 }
 
@@ -829,6 +839,7 @@ impl Client {
             watching: None,
             away: away::Away::default(),
             observed: None,
+            migration: migrate::Migration::default(),
             now,
         })
         .map(|mut client| {
@@ -1780,6 +1791,16 @@ impl Client {
                 self.event(ClientEvent::Results(results));
             }
             Message::Observing(observing) => self.observing_message(*observing),
+            // Stage K (protocol 13): each later slice's module acts on its
+            // own; slice K0 passes the standby records on.
+            Message::Token(grant) => self.rejoin_token(grant),
+            message @ (Message::ReachTest(_) | Message::ReachPeers(_) | Message::UploadTest(_)) => {
+                self.candidate_message(message);
+            }
+            message @ (Message::Succession(_)
+            | Message::StandbyRecord(_)
+            | Message::Resumed(_)
+            | Message::HostMoving(_)) => self.migrate_message(message),
             // Client-to-host messages from the host break the protocol.
             _ => self.net.disconnect(DisconnectReason::ProtocolError),
         }

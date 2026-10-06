@@ -24,6 +24,7 @@
 //! - [`own_state`]: the Own state section, the exact state of the player's
 //!   plane against an acknowledged one.
 //! - [`messages`]: the reliable message bodies.
+//! - [`migration`]: stage K's message bodies, host migration and rejoin.
 //! - [`connection`]: the host's and the client's per-connection wire state,
 //!   which tie the parts above to the transport's packet numbers.
 //! - [`from_world`]: filling the wire's plain data from `tore-world`'s.
@@ -39,6 +40,7 @@ pub mod events;
 pub mod from_world;
 pub mod inputs;
 pub mod messages;
+pub mod migration;
 pub mod names;
 pub mod own_state;
 pub mod priority;
@@ -46,7 +48,7 @@ pub mod readout;
 pub mod snapshot;
 pub mod space;
 
-mod bits;
+pub(crate) mod bits;
 mod flat;
 
 #[cfg(test)]
@@ -57,6 +59,8 @@ mod fuzz_tests;
 mod golden_tests;
 #[cfg(test)]
 mod lossy_tests;
+#[cfg(test)]
+mod migration_tests;
 #[cfg(test)]
 mod phase2_tests;
 #[cfg(test)]
@@ -102,8 +106,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// and the path byte of the Challenge answer (stage J's slice J2), 10 since
 /// stage L's Content and Content gaps messages and each lobby player's
 /// Fighters Anthology build (slice L2), 12 since each lobby player's
-/// connection path (slice J6; 11 is stage K's).
-pub const PROTOCOL_VERSION: u16 = 12;
+/// connection path (slice J6), 13 since stage K's host migration and rejoin:
+/// the transport's Reach and Reach answer packets, the Challenge answer's
+/// token, disconnect reason 8, the Filler section, messages 39 to 54, the
+/// lobby's standby marks and reserved slots, and setting 21 (slice K0).
+pub const PROTOCOL_VERSION: u16 = 13;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
@@ -122,6 +129,9 @@ pub const SECTION_SNAPSHOT: u8 = 3;
 pub const SECTION_EVENTS: u8 = 4;
 /// The Own state section.
 pub const SECTION_OWN_STATE: u8 = 5;
+/// The Filler section (protocol 13, client to host): zero bytes a game sends
+/// only for an Upload test, which the host ignores and counts.
+pub const SECTION_FILLER: u8 = 6;
 
 /// Why a section or a message could not be written or read.
 #[derive(Debug, Clone, PartialEq)]
@@ -145,6 +155,8 @@ pub enum WireError {
     /// More unacknowledged events than the protocol allows: the connection is
     /// too far behind and ends.
     TooFarBehind,
+    /// A journal record's coding by the checkpoint trait failed (stage K).
+    Journal(String),
 }
 
 impl fmt::Display for WireError {
@@ -156,6 +168,7 @@ impl fmt::Display for WireError {
             Self::Trailing => f.write_str("data after the end of the body"),
             Self::Exact(error) => write!(f, "own state: {error}"),
             Self::TooFarBehind => f.write_str("too many unacknowledged events"),
+            Self::Journal(error) => write!(f, "journal: {error}"),
         }
     }
 }
@@ -165,6 +178,12 @@ impl std::error::Error for WireError {}
 impl From<CodecError> for WireError {
     fn from(error: CodecError) -> Self {
         Self::Codec(error)
+    }
+}
+
+impl From<tore_sim::checkpoint::CheckpointError> for WireError {
+    fn from(error: tore_sim::checkpoint::CheckpointError) -> Self {
+        Self::Journal(error.to_string())
     }
 }
 

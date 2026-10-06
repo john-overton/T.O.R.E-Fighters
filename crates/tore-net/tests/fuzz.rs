@@ -114,7 +114,7 @@ fn fuzz_packet(rng: &mut SplitMix64, samples: &[Vec<u8>], connection: u32) -> Ve
             let len = rng.below(1300) as usize;
             let mut bytes = random_bytes(rng, len);
             if rng.chance(0.5) && bytes.len() > 4 {
-                bytes[4] = rng.below(9) as u8;
+                bytes[4] = rng.below(14) as u8;
                 reseal(&mut bytes);
             }
             bytes
@@ -197,8 +197,25 @@ fn a_hundred_thousand_bad_packets_never_panic() {
             .unwrap();
         w.step(10 * MS);
     }
-    let samples: Vec<Vec<u8>> = w.net.take_trace().into_iter().map(|t| t.datagram).collect();
+    let mut samples: Vec<Vec<u8>> = w.net.take_trace().into_iter().map(|t| t.datagram).collect();
     assert!(samples.len() > 50, "{} samples", samples.len());
+    // Stage K's Reach and its answer (protocol 13), which the host answers
+    // for its own session.
+    w.server.set_reach_session(Some(0x5E55));
+    for packet in [
+        packet::Packet::Reach(packet::Reach {
+            session_id: 0x5E55,
+            nonce: 7,
+            from: 1,
+        }),
+        packet::Packet::ReachAnswer(packet::ReachAnswer {
+            nonce: 7,
+            session_id: 0x5E55,
+            role: tore_net::ReachRole::Hosting,
+        }),
+    ] {
+        samples.push(packet.encode(VERSION).unwrap());
+    }
 
     let mut rng = SplitMix64::new(0xF022);
     let mut joins = 1;

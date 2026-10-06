@@ -87,6 +87,28 @@ impl Rng {
     }
 }
 
+/// Where a host draws its players' rejoin tokens (stage K): each token is two
+/// draws of the endpoint's generator, so with [`Entropy::System`] it is 128
+/// bits from the standard library's randomly keyed hasher, which the
+/// operating system's random source keys: no new dependency (John,
+/// 2026-10-05). A seeded source repeats for tests and the simulator.
+#[derive(Debug, Clone)]
+pub struct TokenSource(Rng);
+
+impl TokenSource {
+    /// A source of tokens.
+    pub fn new(entropy: Entropy) -> Self {
+        Self(Rng::new(entropy))
+    }
+
+    /// The next token: two draws, the first its low 64 bits.
+    pub fn next_token(&mut self) -> crate::packet::Token {
+        let low = self.0.next_u64();
+        let high = self.0.next_u64();
+        crate::packet::Token(u128::from(low) | u128::from(high) << 64)
+    }
+}
+
 /// The host's key for the stateless connect cookie.
 #[derive(Debug, Clone)]
 pub(crate) enum CookieKey {
@@ -133,6 +155,27 @@ mod tests {
         let first = s.next_u64();
         let second = s.next_u64();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn tokens_are_two_draws_and_repeat_only_when_seeded() {
+        let mut a = TokenSource::new(Entropy::Seeded(9));
+        let mut b = TokenSource::new(Entropy::Seeded(9));
+        let mut draws = Rng::new(Entropy::Seeded(9));
+        for _ in 0..4 {
+            let token = a.next_token();
+            assert_eq!(token, b.next_token());
+            let low = draws.next_u64();
+            let high = draws.next_u64();
+            assert_eq!(token.0, u128::from(low) | u128::from(high) << 64);
+        }
+        let mut system = TokenSource::new(Entropy::System);
+        let first = system.next_token();
+        let second = system.next_token();
+        assert_ne!(first, second);
+        // Both halves are drawn: neither is left zero by the joining.
+        assert_ne!(first.0 >> 64, 0);
+        assert_ne!(first.0 as u64, 0);
     }
 
     #[test]

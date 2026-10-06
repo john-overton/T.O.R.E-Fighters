@@ -29,6 +29,11 @@
 //! scoring, the results, observers and the idle aircraft, each in a module
 //! of its own (`king`, `revive`, `score`, `results`, `observe`, `away`) that
 //! this one calls.
+//!
+//! Stage K (docs/ARCHITECTURE.md, "Host migration and rejoin") steps the
+//! world through the journal ([`crate::journal::apply_tick`]) and adds its
+//! own modules (`journal`, `standby`, `resume`, `rejoin`, `succession`,
+//! `state`), each a seam slice K0 placed for a later slice to fill.
 
 // Stage F phase 2's parts (slice F2-0 adds them as hooks; each slice in
 // docs/ARCHITECTURE.md, "Phase 2 slices", fills its own).
@@ -50,11 +55,20 @@ mod score;
 mod sorting;
 #[cfg(test)]
 mod tests;
+// Stage K's parts (slice K0 adds them as hooks; each slice in
+// docs/ARCHITECTURE.md, "How stage K lands", fills its own).
+mod journal;
+mod rejoin;
+mod resume;
+mod standby;
+mod state;
+mod succession;
 
 pub use config::{AfterEnd, BuildId, CrownRule, HostConfig, HostError, OpenPlanes, StartMode};
 pub use lobby::LobbyEvent;
 pub use sorting::{BURST_SLACK_TICKS, round_interval};
 
+use crate::journal::{Tick, apply_tick};
 use crate::wire::chat::{RateLimit, Receiver};
 use crate::wire::connection::HostConnection;
 use crate::wire::entity::{Entity, EntityKind};
@@ -67,7 +81,8 @@ use crate::wire::messages::{
 };
 use crate::wire::snapshot::SnapshotHeader;
 use crate::wire::{
-    PROTOCOL_VERSION, Path, Platform, SECTION_INPUTS, SECTION_OWN_STATE, WireError, from_world,
+    PROTOCOL_VERSION, Path, Platform, SECTION_FILLER, SECTION_INPUTS, SECTION_OWN_STATE,
+    WireError, from_world,
 };
 use inputs::InputBuffer;
 use lobby::Entry;
@@ -86,7 +101,7 @@ use tore_sim::combat::live;
 use tore_world::debrief;
 use tore_world::mission::{LoadoutSpec, MissionSpec, StationLoad};
 use tore_world::resources::{Manifest, ResourceReads};
-use tore_world::seats::{Pilot, PlaneId, SeatId, SeatInput};
+use tore_world::seats::{Pilot, PlaneId, SeatId};
 use tore_world::world::plane::{ExactState, OwnPlane, OwnshipTerms};
 use tore_world::world::{Cue, MissionCommand, Seating, TickOutput, World};
 
@@ -555,6 +570,17 @@ pub struct Host {
     court: king::Court,
     /// The mission's scores (stage F phase 2, `score`).
     score: score::Scoring,
+    // Stage K's state, each filled by its slice (slice K0 places them).
+    /// The journal's records on their way to the standbys (slice K1).
+    journal: journal::Journal,
+    /// The standbys and their streams (slice K3).
+    standbys: standby::Standbys,
+    /// The players absent until they resume, and the resume window (K4).
+    resuming: resume::Resuming,
+    /// Tokens and reservations (slice K5).
+    rejoin: rejoin::Rejoin,
+    /// Candidates, their measures and the succession (slice K6).
+    succession: succession::Succession,
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
@@ -765,15 +791,20 @@ impl Host {
         let court = king::Court::new(&config, &spec);
         let spec = king::with_settings(spec, &settings);
         let (world, manifest) = build_world(&spec, &resources)?;
-        let server = Server::new(ServerConfig {
+        let mut server = Server::new(ServerConfig {
             protocol_version: PROTOCOL_VERSION,
             max_connections: config.max_players,
-            max_section_kind: tore_net::MAX_SECTION_KIND,
+            // A player's game may send the Filler section (protocol 13).
+            max_section_kind: SECTION_FILLER,
             entropy: config.entropy,
         });
+        let session_id = session_id(config.entropy);
+        // The host's transport answers a Reach for its own session as the
+        // game that hosts it (stage K).
+        server.set_reach_session(Some(session_id));
         let tracker = Tracker::new(&world);
         let mut host = Host {
-            session_id: session_id(config.entropy),
+            session_id,
             spec_text: spec.to_text(),
             number: 1,
             spec,
@@ -808,6 +839,11 @@ impl Host {
             out: TickOutput::default(),
             stream: observe::Stream::default(),
             score: score::Scoring::default(),
+            journal: journal::Journal::default(),
+            standbys: standby::Standbys::default(),
+            resuming: resume::Resuming::default(),
+            rejoin: rejoin::Rejoin::default(),
+            succession: succession::Succession::default(),
             court,
             settings,
             config,
@@ -1238,7 +1274,11 @@ impl Host {
                 ServerEvent::Connected {
                     connection,
                     details,
-                } => self.connected(connection, details),
+                } => {
+                    let token = details.token;
+                    self.connected(connection, details);
+                    self.rejoin_connected(connection, token);
+                }
                 ServerEvent::Closed {
                     connection, reason, ..
                 } => self.closed(connection, reason),
@@ -1247,8 +1287,12 @@ impl Host {
                     Event::Message { kind, body } => self.message(connection, kind, &body),
                     Event::Payload { sections, .. } => {
                         for section in sections {
-                            if section.kind == SECTION_INPUTS {
-                                self.inputs(connection, &section.body);
+                            match section.kind {
+                                SECTION_INPUTS => self.inputs(connection, &section.body),
+                                SECTION_FILLER => {
+                                    self.filler_received(connection, section.body.len());
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -1459,7 +1503,15 @@ impl Host {
             return;
         }
         let king = peer.king;
-        if !matches!(message, Message::Leave | Message::ContentRefused(_)) {
+        // A resumed player's Backlog and a standby's status are not lobby
+        // requests: neither counts against the 20 a second (stage K).
+        if !matches!(
+            message,
+            Message::Leave
+                | Message::ContentRefused(_)
+                | Message::Backlog(_)
+                | Message::StandbyStatus(_)
+        ) {
             let now = self.now;
             let Some(peer) = self.peers.get_mut(&connection) else {
                 return;
@@ -1505,6 +1557,7 @@ impl Host {
                 | Message::PassCrown(_)
                 | Message::Settings(_)
                 | Message::SlotLock(_)
+                | Message::Release(_)
         );
         if king_only && !king {
             self.refuse(
@@ -1593,6 +1646,40 @@ impl Host {
                 let result = self.back_request(connection);
                 self.answer(connection, kind::BACK, "back", result);
             }
+            // Stage K: each slice's module answers its own (slice K0 refuses
+            // them all, "Not available yet.").
+            Message::Candidate(report) => {
+                let result = self.candidate_report(connection, &report);
+                self.answer(connection, kind::CANDIDATE, "a candidate report", result);
+            }
+            Message::ReachReport(report) => {
+                let result = self.reach_report(connection, &report);
+                self.answer(connection, kind::REACH_REPORT, "a reach report", result);
+            }
+            Message::StandbyStatus(status) => {
+                let result = self.standby_status(connection, status);
+                self.answer(connection, kind::STANDBY_STATUS, "a standby status", result);
+            }
+            Message::Resume(resume) => {
+                let result = self.resume_request(connection, resume);
+                self.answer(connection, kind::RESUME, "a resume", result);
+            }
+            Message::Backlog(backlog) => {
+                let result = self.backlog(connection, &backlog);
+                self.answer(connection, kind::BACKLOG, "a backlog", result);
+            }
+            Message::TakenOver(taken) => {
+                let result = self.taken_over(connection, taken);
+                self.answer(connection, kind::TAKEN_OVER, "a takeover", result);
+            }
+            Message::Release(plane) => {
+                let result = self.release_request(connection, plane);
+                self.answer(connection, kind::RELEASE, "a release", result);
+            }
+            Message::Rejoin(token) => {
+                let result = self.rejoin_request(connection, token);
+                self.answer(connection, kind::REJOIN, "a rejoin", result);
+            }
             _ => {}
         }
     }
@@ -1630,6 +1717,14 @@ impl Host {
             kind::OBSERVE => "watching",
             kind::AWAY => "away",
             kind::BACK => "back",
+            kind::CANDIDATE => "a candidate report",
+            kind::REACH_REPORT => "a reach report",
+            kind::STANDBY_STATUS => "a standby status",
+            kind::RESUME => "a resume",
+            kind::BACKLOG => "a backlog",
+            kind::TAKEN_OVER => "a takeover",
+            kind::RELEASE => "a release",
+            kind::REJOIN => "a rejoin",
             _ => "a request",
         };
         self.log_refusal(connection, what, reason);
@@ -2470,6 +2565,8 @@ impl Host {
                     path: peer.path,
                     // Each player's build comes from its Content (slice L3).
                     build: messages::Build::Unknown,
+                    // The standbys are appointed by slice K3.
+                    standby: messages::StandbyMark::None,
                 })
                 .collect(),
             slots: self
@@ -2482,6 +2579,7 @@ impl Host {
                     aircraft: slot.aircraft,
                     holder: holder(slot.id),
                     lock: self.court.lock(slot.id),
+                    reserved: self.reserved_for(PlaneId(slot.id)),
                 })
                 .collect(),
             settings: self.settings.lobby_list(),
@@ -2717,8 +2815,11 @@ impl Host {
         self.away_commands(tick, &mut commands);
         self.revive_commands(tick, &mut commands);
 
-        // Every flying seat's input.
-        let mut inputs: Vec<SeatInput> = Vec::new();
+        // The tick as the journal records it (stage K): its mission
+        // commands, and every flying seat's input with the number of the
+        // last command applied for it.
+        let mut journal = Tick::new(tick);
+        journal.mission = commands;
         for peer in self.peers.values_mut() {
             if peer.stage != Stage::Seated {
                 continue;
@@ -2731,26 +2832,26 @@ impl Host {
                 self.unforeseen_log
                     .push((tick, seat, Unforeseen::LateInput));
             }
-            inputs.push(input);
+            journal.push_input(input, peer.inputs.applied());
         }
         for &(_, seat, _) in &takes {
-            inputs.push(InputFrame::default().seat_input(seat, tick, &[], None));
+            journal.push_input(InputFrame::default().seat_input(seat, tick, &[], None), 0);
         }
         for seat in self.revive_inputs() {
-            if !inputs.iter().any(|input| input.seat == seat) {
-                inputs.push(InputFrame::default().seat_input(seat, tick, &[], None));
+            if !journal.inputs.iter().any(|input| input.seat == seat) {
+                journal.push_input(InputFrame::default().seat_input(seat, tick, &[], None), 0);
             }
         }
 
+        // One door into the world: the host steps through the journal, as a
+        // standby replays it.
         let mut out = std::mem::take(&mut self.out);
-        if let Err(error) = self
-            .world
-            .step_with(&commands, &inputs, &mut out, |_, _| Ok(()))
-        {
+        if let Err(error) = apply_tick(&mut self.world, &journal, &mut out) {
             self.out = out;
             self.fault(format!("tick {tick}: {error}"));
             return;
         }
+        self.journal_ticked(journal);
 
         if !given.is_empty() || !takes.is_empty() {
             self.roster_dirty = true;

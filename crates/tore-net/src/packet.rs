@@ -1,4 +1,4 @@
-//! Packets: the header, the checksum and the eleven kinds.
+//! Packets: the header, the checksum and the thirteen kinds.
 //!
 //! Every packet starts with a CRC-32 checksum (4 bytes, least significant
 //! byte first) and a kind byte. The checksum covers a 10-byte protocol id that
@@ -59,7 +59,7 @@ pub const MAX_DISCOVER_NAME: usize = 64;
 /// The longest mission summary a discover answer carries, in bytes.
 pub const MAX_DISCOVER_SUMMARY: usize = 200;
 
-/// The eleven packet kinds.
+/// The thirteen packet kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PacketKind {
@@ -94,6 +94,14 @@ pub enum PacketKind {
     /// router for the player's address; a player that is joining with that
     /// introduction adds the sender's address to the ones it tries.
     Punch = 11,
+    /// Game to game, 22 bytes (stage K, slice K0, protocol 13): does this
+    /// game reach the other's joined socket, and how long is the round trip?
+    /// Sent the other way first, it opens the sender's router, as a Punch
+    /// does. Answered only for the answerer's own session.
+    Reach = 12,
+    /// Game to game, 22 bytes, never longer than the Reach it answers: the
+    /// Reach's nonce, the session and whether the answerer hosts it now.
+    ReachAnswer = 13,
 }
 
 impl PacketKind {
@@ -111,6 +119,8 @@ impl PacketKind {
             9 => Self::DiscoverAnswer,
             10 => Self::Keepalive,
             11 => Self::Punch,
+            12 => Self::Reach,
+            13 => Self::ReachAnswer,
             _ => return None,
         })
     }
@@ -142,7 +152,7 @@ pub enum PacketError {
     TooShort,
     /// Longer than 1,200 bytes.
     TooLong,
-    /// A kind byte that is not one of the ten.
+    /// A kind byte that is not one of the thirteen.
     UnknownKind(u8),
     /// The checksum does not match: another program, another version or
     /// damage. Dropped silently.
@@ -242,6 +252,76 @@ pub struct ChallengeAnswer {
     /// platform, the master's path codes. A host takes a relayed address as
     /// the relay whatever this says.
     pub path: Path,
+    /// The player's rejoin token for this session, when its game holds one
+    /// (stage K, protocol 13): a byte after the path, 0 none or 1 a token,
+    /// then the 128-bit token. The transport reads nothing into it.
+    pub token: Option<Token>,
+}
+
+/// A player's rejoin token (stage K): 128 bits drawn from the operating
+/// system's randomness ([`crate::TokenSource`]), good only in the session
+/// that issued it. Its `Debug` shows it whole: a log that prints one is the
+/// host's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Token(pub u128);
+
+impl Token {
+    /// Writes the token's 128 bits, the low 64 first.
+    pub fn write(self, w: &mut BitWriter) {
+        w.write_bits(self.0 as u64, 64).ok();
+        w.write_bits((self.0 >> 64) as u64, 64).ok();
+    }
+
+    /// Reads what [`Token::write`] wrote.
+    pub fn read(r: &mut BitReader<'_>) -> Result<Self, CodecError> {
+        let low = r.read_bits(64)?;
+        let high = r.read_bits(64)?;
+        Ok(Self(u128::from(low) | u128::from(high) << 64))
+    }
+}
+
+/// Reach: does this game reach the other's joined socket? 22 bytes (stage
+/// K, protocol 13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reach {
+    /// The session both games are in; another session's game drops it.
+    pub session_id: u64,
+    /// The sender's random nonce, which the answer repeats.
+    pub nonce: u64,
+    /// The sender's lobby id.
+    pub from: u8,
+}
+
+/// What an answering game is in the session (stage K).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReachRole {
+    /// 0: a player's game, not hosting.
+    NotHosting = 0,
+    /// 1: the game hosts this session now.
+    Hosting = 1,
+}
+
+impl ReachRole {
+    /// The role of a wire code; `None` for any other.
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::NotHosting),
+            1 => Some(Self::Hosting),
+            _ => None,
+        }
+    }
+}
+
+/// Reach answer: the Reach's nonce, the session and the answerer's role. 22
+/// bytes, never longer than the Reach (stage K, protocol 13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReachAnswer {
+    /// The nonce of the Reach it answers.
+    pub nonce: u64,
+    /// The answerer's session.
+    pub session_id: u64,
+    /// Whether the answerer hosts the session now.
+    pub role: ReachRole,
 }
 
 /// Accepted: the join succeeded. 31 bytes.
@@ -483,6 +563,10 @@ pub enum Packet {
     Keepalive(Keepalive),
     /// Kind 11.
     Punch(Punch),
+    /// Kind 12.
+    Reach(Reach),
+    /// Kind 13.
+    ReachAnswer(ReachAnswer),
 }
 
 impl Packet {
@@ -500,6 +584,8 @@ impl Packet {
             Self::DiscoverAnswer(_) => PacketKind::DiscoverAnswer,
             Self::Keepalive(_) => PacketKind::Keepalive,
             Self::Punch(_) => PacketKind::Punch,
+            Self::Reach(_) => PacketKind::Reach,
+            Self::ReachAnswer(_) => PacketKind::ReachAnswer,
         }
     }
 
@@ -541,6 +627,15 @@ impl Packet {
                 put_str(&mut w, &p.game_commit)?;
                 w.write_bits(u64::from(p.platform.code()), 8).ok();
                 w.write_bits(u64::from(p.path.code()), 8).ok();
+                match p.token {
+                    None => {
+                        w.write_bits(0, 8).ok();
+                    }
+                    Some(token) => {
+                        w.write_bits(1, 8).ok();
+                        token.write(&mut w);
+                    }
+                }
                 pad(&mut w)?;
             }
             Self::Accepted(p) => {
@@ -607,6 +702,16 @@ impl Packet {
             Self::Punch(p) => {
                 w.write_bits(p.introduction, 64).ok();
             }
+            Self::Reach(p) => {
+                w.write_bits(p.session_id, 64).ok();
+                w.write_bits(p.nonce, 64).ok();
+                w.write_bits(u64::from(p.from), 8).ok();
+            }
+            Self::ReachAnswer(p) => {
+                w.write_bits(p.nonce, 64).ok();
+                w.write_bits(p.session_id, 64).ok();
+                w.write_bits(p.role as u64, 8).ok();
+            }
         }
         seal(w.finish(), version)
     }
@@ -633,6 +738,8 @@ impl Packet {
             PacketKind::DiscoverAnswer => Self::DiscoverAnswer(decode_discover_answer(body)?),
             PacketKind::Keepalive => Self::Keepalive(decode_keepalive(body)?),
             PacketKind::Punch => Self::Punch(decode_punch(body)?),
+            PacketKind::Reach => Self::Reach(decode_reach(body)?),
+            PacketKind::ReachAnswer => Self::ReachAnswer(decode_reach_answer(body)?),
         })
     }
 }
@@ -844,8 +951,8 @@ pub fn decode_challenge(body: &[u8]) -> Result<Challenge, PacketError> {
 }
 
 /// Decodes a Challenge answer's body. `len` is the whole datagram's length,
-/// which must be exactly 1,000. A platform or path code the protocol does not
-/// name is malformed.
+/// which must be exactly 1,000. A platform, path or token code the protocol
+/// does not name is malformed.
 pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswer, PacketError> {
     if len != PADDED_LEN {
         return Err(PacketError::Malformed);
@@ -862,6 +969,11 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
     let game_commit = r.read_str()?;
     let platform = Platform::from_code(u8_of(&mut r)?).ok_or(PacketError::Malformed)?;
     let path = Path::from_code(u64::from(u8_of(&mut r)?)).ok_or(PacketError::Malformed)?;
+    let token = match u8_of(&mut r)? {
+        0 => None,
+        1 => Some(Token::read(&mut r)?),
+        _ => return Err(PacketError::Malformed),
+    };
     padding(&r)?;
     Ok(ChallengeAnswer {
         nonce,
@@ -872,6 +984,7 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
         game_commit,
         platform,
         path,
+        token,
     })
 }
 
@@ -930,6 +1043,33 @@ pub fn decode_punch(body: &[u8]) -> Result<Punch, PacketError> {
     let introduction = r.read_bits(64)?;
     end(&r)?;
     Ok(Punch { introduction })
+}
+
+/// Decodes a Reach's body.
+pub fn decode_reach(body: &[u8]) -> Result<Reach, PacketError> {
+    let mut r = BitReader::new(body);
+    let reach = Reach {
+        session_id: r.read_bits(64)?,
+        nonce: r.read_bits(64)?,
+        from: u8_of(&mut r)?,
+    };
+    end(&r)?;
+    Ok(reach)
+}
+
+/// Decodes a Reach answer's body; a role the protocol does not name is
+/// malformed.
+pub fn decode_reach_answer(body: &[u8]) -> Result<ReachAnswer, PacketError> {
+    let mut r = BitReader::new(body);
+    let nonce = r.read_bits(64)?;
+    let session_id = r.read_bits(64)?;
+    let role = ReachRole::from_code(u8_of(&mut r)?).ok_or(PacketError::Malformed)?;
+    end(&r)?;
+    Ok(ReachAnswer {
+        nonce,
+        session_id,
+        role,
+    })
 }
 
 /// Decodes a Payload's fixed header; returns it and the section bytes.
@@ -1031,6 +1171,7 @@ mod tests {
                 game_commit: "fb9c2ec".into(),
                 platform: Platform::MacOs,
                 path: Path::Punched,
+                token: Some(Token(0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210)),
             }),
             Packet::Accepted(Accepted {
                 nonce: 4,
@@ -1078,6 +1219,16 @@ mod tests {
             }),
             Packet::Punch(Punch {
                 introduction: 0x0123_4567_89AB_CDEF,
+            }),
+            Packet::Reach(Reach {
+                session_id: 0x1122_3344_5566_7788,
+                nonce: 0x99AA_BBCC_DDEE_FF00,
+                from: 7,
+            }),
+            Packet::ReachAnswer(ReachAnswer {
+                nonce: 0x99AA_BBCC_DDEE_FF00,
+                session_id: 0x1122_3344_5566_7788,
+                role: ReachRole::Hosting,
             }),
         ]
     }
@@ -1135,6 +1286,93 @@ mod tests {
         assert!(sizes[9] < PAYLOAD_HEADER_LEN);
         // A punch is its header and the introduction id.
         assert_eq!(sizes[10], 13);
+        // A Reach and its answer are 22 bytes each: the answer is never
+        // longer than the Reach.
+        assert_eq!(sizes[11], 22);
+        assert_eq!(sizes[12], 22);
+    }
+
+    #[test]
+    fn a_reach_answer_names_a_known_role_and_both_are_exact() {
+        for role in [ReachRole::NotHosting, ReachRole::Hosting] {
+            let answer = Packet::ReachAnswer(ReachAnswer {
+                nonce: 1,
+                session_id: 2,
+                role,
+            });
+            let bytes = answer.encode(V).unwrap();
+            assert_eq!(Packet::decode(&bytes, V).unwrap(), answer);
+        }
+        // Role 2 and up name nothing.
+        let mut bytes = samples()[12].encode(V).unwrap();
+        for code in [2, 0x80, u8::MAX] {
+            bytes[21] = code;
+            let crc = checksum(PacketKind::ReachAnswer, V, &bytes[4..]);
+            bytes[..4].copy_from_slice(&crc.to_le_bytes());
+            assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
+        }
+        // Shorter or longer bodies are malformed.
+        assert_eq!(decode_reach(&[0; 16]), Err(PacketError::Malformed));
+        assert_eq!(decode_reach(&[0; 18]), Err(PacketError::Malformed));
+        assert_eq!(decode_reach_answer(&[0; 18]), Err(PacketError::Malformed));
+        assert_eq!(
+            decode_reach(&[1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3]),
+            Ok(Reach {
+                session_id: 1,
+                nonce: 2,
+                from: 3
+            })
+        );
+    }
+
+    #[test]
+    fn the_answer_carries_a_token_or_none_and_refuses_another_code() {
+        let Packet::ChallengeAnswer(base) = samples()[2].clone() else {
+            panic!("not an answer")
+        };
+        // The token byte follows the path byte.
+        let at = 5
+            + 8
+            + 8
+            + [
+                &base.callsign,
+                &base.password,
+                &base.game_version,
+                &base.game_commit,
+            ]
+            .iter()
+            .map(|s| 1 + s.len())
+            .sum::<usize>()
+            + 2;
+        for token in [None, Some(Token(0)), Some(Token(u128::MAX)), base.token] {
+            let answer = ChallengeAnswer {
+                token,
+                ..base.clone()
+            };
+            let bytes = Packet::ChallengeAnswer(answer.clone()).encode(V).unwrap();
+            assert_eq!(bytes.len(), PADDED_LEN);
+            assert_eq!(bytes[at], u8::from(token.is_some()));
+            assert_eq!(
+                Packet::decode(&bytes, V).unwrap(),
+                Packet::ChallengeAnswer(answer)
+            );
+        }
+        // The token's low byte comes first.
+        let bytes = samples()[2].encode(V).unwrap();
+        assert_eq!(bytes[at + 1], 0x10);
+        assert_eq!(bytes[at + 16], 0x01);
+        let mut bytes = Packet::ChallengeAnswer(ChallengeAnswer {
+            token: None,
+            ..base
+        })
+        .encode(V)
+        .unwrap();
+        for code in [2, 0x80, u8::MAX] {
+            bytes[at] = code;
+            let crc = checksum(PacketKind::ChallengeAnswer, V, &bytes[4..]);
+            bytes[..4].copy_from_slice(&crc.to_le_bytes());
+            assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
+        }
     }
 
     #[test]
@@ -1396,6 +1634,7 @@ mod tests {
                 game_commit: String::new(),
                 platform: Platform::Unknown,
                 path: Path::ByAddress,
+                token: None,
             });
             assert_eq!(answer.encode(V), Err(EncodeError::BadString));
         }

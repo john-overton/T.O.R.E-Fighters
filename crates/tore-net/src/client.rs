@@ -23,7 +23,7 @@ use crate::master::Path;
 use crate::master::candidate::canonical;
 use crate::master::rendezvous::path_of;
 use crate::packet::{
-    self, ChallengeAnswer, ConnectRequest, MAX_DATAGRAM, Packet, PacketKind, valid_callsign,
+    self, ChallengeAnswer, ConnectRequest, MAX_DATAGRAM, Packet, PacketKind, Token, valid_callsign,
 };
 use crate::platform::Platform;
 use crate::{Counters, Datagrams, HANDSHAKE_GIVE_UP, HANDSHAKE_RETRY, MAX_SECTION_KIND, Transmit};
@@ -48,11 +48,15 @@ pub struct ClientConfig {
     pub max_section_kind: u8,
     /// Where the nonce comes from; [`Entropy::System`] on a real network.
     pub entropy: Entropy,
+    /// The rejoin token for the session this join goes to, when the game
+    /// holds one (stage K): it goes in the Challenge answer. A game sends it
+    /// only to the session that issued it.
+    pub token: Option<Token>,
 }
 
 impl ClientConfig {
     /// Defaults for a join: no password, empty build strings, this build's
-    /// platform, section kinds up to 5, system entropy.
+    /// platform, section kinds up to 5, system entropy, no token.
     pub fn new(protocol_version: u16, callsign: &str) -> Self {
         Self {
             protocol_version,
@@ -63,6 +67,7 @@ impl ClientConfig {
             platform: Platform::current(),
             max_section_kind: MAX_SECTION_KIND,
             entropy: Entropy::System,
+            token: None,
         }
     }
 }
@@ -514,7 +519,11 @@ impl Client {
             | PacketKind::Discover
             | PacketKind::DiscoverAnswer
             | PacketKind::Keepalive
-            | PacketKind::Punch => {
+            | PacketKind::Punch
+            | PacketKind::Reach
+            | PacketKind::ReachAnswer => {
+                // A game's peers router (stage K) takes Reach packets before
+                // the client sees any.
                 self.counters.unexpected += 1;
             }
         }
@@ -577,6 +586,7 @@ impl Client {
             game_commit: self.config.game_commit.clone(),
             platform: self.config.platform,
             path: self.path,
+            token: self.config.token,
         });
         let Ok(answer) = answer.encode(self.config.protocol_version) else {
             return;
@@ -878,6 +888,52 @@ mod tests {
         plain.receive(now, a("198.51.100.7:26900"), &punch(42));
         assert_eq!(plain.counters().unexpected, 1);
         assert_eq!(plain.targets().len(), 1);
+    }
+
+    #[test]
+    fn a_token_goes_in_the_answer_and_reach_packets_are_counted() {
+        let now = Duration::from_secs(1);
+        let host = a("198.51.100.7:26900");
+        let token = Token(0x5555_u128 << 64 | 0xAAAA);
+        let mut client = Client::connect(
+            ClientConfig {
+                token: Some(token),
+                ..config()
+            },
+            host,
+            now,
+        )
+        .unwrap();
+        while client.poll_transmit().is_some() {}
+        let challenge = Packet::Challenge(packet::Challenge {
+            nonce: client.nonce,
+            cookie: 9,
+        })
+        .encode(V)
+        .unwrap();
+        client.receive(now, host, &challenge);
+        let sent = client.poll_transmit().expect("the answer");
+        let Ok(Packet::ChallengeAnswer(answer)) = Packet::decode(&sent.datagram, V) else {
+            panic!("not an answer")
+        };
+        assert_eq!(answer.token, Some(token));
+        // Reach and Reach answer are a peers router's, never the client's.
+        for packet in [
+            Packet::Reach(packet::Reach {
+                session_id: 1,
+                nonce: 2,
+                from: 3,
+            }),
+            Packet::ReachAnswer(packet::ReachAnswer {
+                nonce: 2,
+                session_id: 1,
+                role: crate::ReachRole::Hosting,
+            }),
+        ] {
+            client.receive(now, host, &packet.encode(V).unwrap());
+        }
+        assert_eq!(client.counters().unexpected, 2);
+        assert!(client.poll_transmit().is_none());
     }
 
     #[test]

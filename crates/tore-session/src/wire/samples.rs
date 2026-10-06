@@ -14,15 +14,23 @@ use super::messages::{
     LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, Message, Mission, MissionEnded, Names,
     Observe, ObserverFlight, Observing, PasswordChange, PilotStatus, PlayerScore, ResultRow,
     ResultStatus, Results, Revival, Roster, RosterPilot, RosterPlane, Scores, Seated, SetReady,
-    SettingsChange, Shots, SideScore, Slot, SlotLock, SlotRequest, Spawned, StartRule, Subject,
-    TakePlane, Winner,
+    SettingsChange, Shots, SideScore, Slot, SlotLock, SlotRequest, Spawned, StandbyMark, StartRule,
+    Subject, TakePlane, Winner,
+};
+use super::migration::{
+    self, Backlog, BacklogCommand, BacklogTick, CandidateReport, CheckResult, HostMoving,
+    Processor, ReachPeers, ReachReport, ReachResult, ReachTarget, ReachTest, Reached, Resume,
+    Resumed, ResumedFlight, StandbyState, StandbyStatus, Succession, Successor, TakenOver,
+    TokenGrant, UploadTest,
 };
 use super::names::NameIndex;
 use super::priority::Relevance;
 use super::snapshot::{EntitySender, SnapshotHeader};
 use super::{Path, Platform};
+use crate::journal;
 use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
 use tore_formats::aircraft::AircraftId;
+use tore_net::master::{Candidate, CandidateKind, MappingType};
 use tore_sim::acoustics;
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::ai::wing::{Formation, PlayerBreak, PlayerOrder};
@@ -36,6 +44,7 @@ use tore_world::comms::Route;
 use tore_world::mission::{LoadoutSpec, StationLoad};
 use tore_world::resources::{Manifest, ManifestEntry};
 use tore_world::seats::SeatCommand;
+use tore_world::seats::SeatInput;
 use tore_world::world::replies::Reply;
 use tore_world::world::revive::Spawn;
 use tore_world::world::{AirportInput, OrderOutcome};
@@ -671,6 +680,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
     .into_iter()
     .chain(phase_two_messages())
     .chain(compatibility_messages())
+    .chain(migration_messages())
     .collect()
 }
 
@@ -876,9 +886,9 @@ pub fn phase_two_messages() -> Vec<Message> {
 /// A lobby with a King, a player flying, one unable, one more waiting, and
 /// three slots: the four players cover every platform, four of the six
 /// connection paths (protocol 12) and every Fighters Anthology build
-/// (protocol 10), the slots every lock, the players every
-/// observing and away mark, and the settings are PvP's defaults (protocol
-/// 8).
+/// (protocol 10), the slots every lock and every reservation, the players
+/// every observing, away and standby mark (protocol 13), and the settings
+/// are PvP's defaults (protocol 8).
 pub fn lobby() -> LobbyState {
     LobbyState {
         name: "Viper's game".into(),
@@ -903,6 +913,7 @@ pub fn lobby() -> LobbyState {
                 platform: Platform::Linux,
                 path: Path::LocalNetwork,
                 build: Build::V102F,
+                standby: StandbyMark::None,
             },
             LobbyPlayer {
                 id: 1,
@@ -917,6 +928,7 @@ pub fn lobby() -> LobbyState {
                 platform: Platform::Windows,
                 path: Path::Punched,
                 build: Build::V10,
+                standby: StandbyMark::First,
             },
             LobbyPlayer {
                 id: 3,
@@ -931,6 +943,7 @@ pub fn lobby() -> LobbyState {
                 platform: Platform::MacOs,
                 path: Path::Relay,
                 build: Build::Unknown,
+                standby: StandbyMark::Second,
             },
             LobbyPlayer {
                 id: 4,
@@ -945,6 +958,7 @@ pub fn lobby() -> LobbyState {
                 platform: Platform::Unknown,
                 path: Path::Ipv6,
                 build: Build::V102F,
+                standby: StandbyMark::None,
             },
         ],
         slots: vec![
@@ -955,6 +969,7 @@ pub fn lobby() -> LobbyState {
                 aircraft: AircraftId::F18,
                 holder: Some(0),
                 lock: Lock::Open,
+                reserved: None,
             },
             LobbySlot {
                 plane: 1,
@@ -963,6 +978,7 @@ pub fn lobby() -> LobbyState {
                 aircraft: AircraftId::F18,
                 holder: Some(1),
                 lock: Lock::Reserved("Cobra".into()),
+                reserved: Some("Cobra".into()),
             },
             LobbySlot {
                 plane: 4,
@@ -971,6 +987,7 @@ pub fn lobby() -> LobbyState {
                 aircraft: AircraftId::F14,
                 holder: None,
                 lock: Lock::Closed,
+                reserved: Some("Hawk".into()),
             },
         ],
         settings: crate::settings::Store::defaults(crate::settings::Mode::Pvp).lobby_list(),
@@ -1284,5 +1301,315 @@ pub fn compatibility_messages() -> Vec<Message> {
             host_importer: None,
             gaps: Vec::new(),
         })),
+    ]
+}
+
+// ----- Protocol 13: stage K, host migration and rejoin ------------------
+
+fn address(text: &str) -> std::net::SocketAddr {
+    text.parse().unwrap()
+}
+
+/// A Candidate report with every own candidate kind (protocol 13).
+pub fn candidate_report() -> CandidateReport {
+    CandidateReport {
+        may_host: true,
+        platform: Platform::Linux,
+        processor: Processor::X86_64,
+        candidates: vec![
+            Candidate::new(CandidateKind::Local, address("192.168.1.20:26900")),
+            Candidate::new(CandidateKind::Mapped, address("203.0.113.7:26900")),
+            Candidate::new(CandidateKind::GlobalIpv6, address("[2001:db8::20]:26900")),
+        ],
+        mapping: MappingType::SamePort,
+        cpu_micros: 1_850,
+        cpu_mission: 7,
+    }
+}
+
+/// A Backlog of a weaving stick, a trigger pull and two commands.
+pub fn backlog() -> Backlog {
+    let frames = inputs().frames;
+    Backlog {
+        flight: 9,
+        first_tick: 72_000,
+        ticks: frames
+            .iter()
+            .enumerate()
+            .map(|(index, frame)| BacklogTick {
+                frame: *frame,
+                view_offset: 12 + index as u8 % 3,
+                interpolation_delay: 10,
+            })
+            .collect(),
+        commands: vec![
+            BacklogCommand {
+                offset: 0,
+                command: Command::Seat(SeatCommand::ReleaseFlare),
+            },
+            BacklogCommand {
+                offset: frames.len() as u32 - 1,
+                command: Command::Pilot(PilotCommand::Toggle(Switch::Gear)),
+            },
+        ],
+    }
+}
+
+/// One message of every stage K kind (protocol 13), and each kind's other
+/// shapes: an empty succession, a player resuming who is not flying.
+pub fn migration_messages() -> Vec<Message> {
+    let records = standby_records();
+    let mut writer = crate::journal::StreamWriter::new();
+    let mut messages = vec![
+        Message::Token(TokenGrant {
+            token: tore_net::Token(0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210),
+            life_seconds: migration::limits::TOKEN_LIFE_SECONDS,
+        }),
+        Message::Candidate(Box::new(candidate_report())),
+        Message::Candidate(Box::new(CandidateReport {
+            may_host: false,
+            platform: Platform::Unknown,
+            processor: Processor::Unknown,
+            candidates: Vec::new(),
+            mapping: MappingType::Unknown,
+            cpu_micros: 0,
+            cpu_mission: 0,
+        })),
+        Message::ReachTest(Box::new(ReachTest {
+            test: 41,
+            candidates: vec![
+                ReachTarget {
+                    player: 2,
+                    addresses: vec![address("192.168.1.20:26900"), address("203.0.113.7:26900")],
+                },
+                ReachTarget {
+                    player: 5,
+                    addresses: vec![address("[2001:db8::5]:26900")],
+                },
+            ],
+        })),
+        Message::ReachPeers(Box::new(ReachPeers {
+            test: 41,
+            players: vec![ReachTarget {
+                player: 0,
+                addresses: vec![address("198.51.100.4:40000"), address("10.0.0.4:26900")],
+            }],
+        })),
+        Message::ReachReport(Box::new(ReachReport {
+            test: 41,
+            results: vec![
+                ReachResult {
+                    player: 2,
+                    reached: Some(Reached {
+                        address: 1,
+                        round_trip_ms: 48,
+                    }),
+                },
+                ReachResult {
+                    player: 5,
+                    reached: None,
+                },
+            ],
+        })),
+        Message::UploadTest(UploadTest {
+            test: 42,
+            rate: 98_000,
+            length_ms: 1_000,
+        }),
+        Message::Succession(Box::new(Succession {
+            standbys: vec![
+                Successor {
+                    player: 2,
+                    warm: true,
+                    addresses: vec![
+                        Candidate::new(CandidateKind::Seen, address("203.0.113.7:51000")),
+                        Candidate::new(CandidateKind::Local, address("192.168.1.20:26900")),
+                    ],
+                },
+                Successor {
+                    player: 5,
+                    warm: false,
+                    addresses: vec![Candidate::new(
+                        CandidateKind::GlobalIpv6,
+                        address("[2001:db8::5]:26900"),
+                    )],
+                },
+            ],
+        })),
+        Message::Succession(Box::default()),
+    ];
+    messages.extend(
+        records
+            .iter()
+            .map(|record| Message::StandbyRecord(writer.encode(record).unwrap())),
+    );
+    messages.extend([
+        Message::StandbyStatus(StandbyStatus {
+            newest_tick: 72_010,
+            state: StandbyState::Warm,
+            step_micros: 2_400,
+            check_tick: 72_000,
+            check: CheckResult::Equal,
+            needs_checkpoint: false,
+        }),
+        Message::StandbyStatus(StandbyStatus {
+            state: StandbyState::Behind,
+            check: CheckResult::Different,
+            needs_checkpoint: true,
+            ..StandbyStatus::default()
+        }),
+        Message::Resume(Resume {
+            flight: 8,
+            newest_tick: 72_030,
+            mission: 7,
+            mission_hash: 0xCBF2_9CE4_8422_2325,
+            watching: false,
+        }),
+        Message::Resumed(Box::new(Resumed::Flying(ResumedFlight {
+            flight: 9,
+            seat: 2,
+            plane: 4,
+            tick: 72_000,
+            last_command: 311,
+            exact: vec![1, 2, 3, 255],
+            destroyed: vec![1_000_001, 7],
+        }))),
+        Message::Resumed(Box::new(Resumed::NotFlying)),
+        Message::Backlog(Box::new(backlog())),
+        Message::HostMoving(HostMoving {
+            standby: 2,
+            last_tick: 72_000,
+        }),
+        Message::TakenOver(TakenOver {
+            new_host: 2,
+            tick: 72_000,
+        }),
+        Message::Release(4),
+        Message::Rejoin(tore_net::Token(u128::MAX - 1)),
+    ]);
+    messages
+}
+
+/// A seat's input of the journal's sample tick.
+fn journal_input(seat: u8, tick: u64, pitch: f64, commands: Vec<SeatCommand>) -> SeatInput {
+    SeatInput {
+        seat: tore_world::seats::SeatId(seat),
+        tick,
+        pilot: tore_sim::flight::PilotInput {
+            pitch,
+            roll: -0.25,
+            throttle: Some(0.8),
+            ..Default::default()
+        },
+        trigger: seat == 1,
+        sensors: Controls::default(),
+        commands,
+        view: Some(tore_world::seats::SeatView {
+            tick: tick - 12,
+            interpolation_delay: 10,
+        }),
+    }
+}
+
+/// One standby record of every type, in a stream's order: an Appoint, a
+/// Flight, Ticks with every change, a take, a revival and two seats, a
+/// checkpoint's begin and a chunk, a State, a Check, a Handover, Ended and
+/// a Dismiss.
+pub fn standby_records() -> Vec<journal::Record> {
+    use journal::{
+        Appoint, Change, Check, CheckpointBegin, CheckpointChunk, FlightRecord, Part, Record,
+        StatePart, Tick, Ticks,
+    };
+    use tore_world::seats::{PlaneId, SeatId};
+    use tore_world::world::MissionCommand;
+    use tore_world::world::revive::RevivalWeapons;
+    let mut first = Tick::new(1_200);
+    first.changes = vec![
+        Change::Scoring(true),
+        Change::StoreCut {
+            plane: PlaneId(6),
+            weapons: RevivalWeapons::HalfGuns,
+        },
+    ];
+    first.mission = vec![
+        MissionCommand::Take {
+            seat: SeatId(1),
+            plane: PlaneId(6),
+        },
+        MissionCommand::Revive {
+            seat: SeatId(2),
+            spawn: Box::new(Spawn {
+                position: [1.0e5, 2.5e4, 12_000.],
+                heading_rad: 1.5,
+                speed_fps: 700.,
+                loadout: LoadoutSpec {
+                    fuel_lbs: 10_000.,
+                    cheat: false,
+                    stations: vec![StationLoad {
+                        weapon: "AIM120.JT".into(),
+                        count: 2,
+                        quantity: 2,
+                    }],
+                },
+            }),
+        },
+    ];
+    first.push_input(
+        journal_input(0, 1_200, 0.5, vec![SeatCommand::ReleaseChaff]),
+        17,
+    );
+    first.push_input(journal_input(1, 1_200, 0., Vec::new()), 0);
+    first.push_input(journal_input(2, 1_200, 0., Vec::new()), 0);
+    let mut second = Tick::new(1_201);
+    second.push_input(journal_input(0, 1_201, 0.5, Vec::new()), 17);
+    second.push_input(
+        journal_input(
+            1,
+            1_201,
+            0.125,
+            vec![SeatCommand::WingOrder(PlayerOrder::Break(
+                PlayerBreak::Left,
+            ))],
+        ),
+        1,
+    );
+    vec![
+        Record::Appoint(Appoint {
+            role: StandbyMark::First,
+            warm: true,
+            check_every: journal::CHECK_EVERY_TICKS,
+            checkpoint_every: journal::CHECKPOINT_EVERY_TICKS,
+            mission: 7,
+        }),
+        Record::Flight(FlightRecord {
+            mission: 7,
+            spec_hash: 0x1122_3344_5566_7788,
+            identity: 0x99AA_BBCC_DDEE_FF00,
+        }),
+        Record::Ticks(Ticks {
+            first: 1_200,
+            ticks: vec![first, second],
+        }),
+        Record::CheckpointBegin(CheckpointBegin {
+            tick: 1_202,
+            length: 5_000,
+            chunks: 2,
+        }),
+        Record::CheckpointChunk(CheckpointChunk {
+            index: 1,
+            bytes: vec![0xAB; 904],
+        }),
+        Record::State(StatePart {
+            part: Part::Scores,
+            tick: 1_201,
+            bytes: vec![9, 8, 7],
+        }),
+        Record::Check(Check {
+            tick: 1_200,
+            hash: 0xFEED_FACE_CAFE_BEEF,
+        }),
+        Record::Handover { last_tick: 1_210 },
+        Record::Ended(EndReason::HostLeft),
+        Record::Dismiss,
     ]
 }

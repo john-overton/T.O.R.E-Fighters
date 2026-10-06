@@ -24,11 +24,22 @@
 //!
 //! Protocol 12 (slice J6) adds each lobby player's connection path
 //! ([`Path`]).
+//!
+//! Protocol 13 (slice K0) adds stage K's, host migration and rejoin, whose
+//! bodies are [`super::migration`]'s: the rejoin token, the candidates and
+//! their reach and upload tests, the succession, the standby stream and its
+//! status, the resume with a new host, the handover, the King's release of a
+//! reservation and a late rejoin; and the lobby state's standby marks and
+//! reserved slots.
 
 use super::bits::{
     self, read_count, read_long_str, read_str, read_u32, write_count, write_long_str, write_str,
 };
 use super::chat::{ChatLine, ChatSend};
+use super::migration::{
+    self, Backlog, CandidateReport, HostMoving, ReachPeers, ReachReport, ReachTest, Resume,
+    Resumed, StandbyStatus, Succession, TakenOver, TokenGrant, UploadTest,
+};
 use super::names::ReceivedNames;
 use super::{Path, Platform, WireError, WireResult, limits};
 use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
@@ -92,6 +103,23 @@ pub mod kind {
     // then the items not every human can use (host to every player).
     pub const CONTENT: u8 = 37;
     pub const CONTENT_GAPS: u8 = 38;
+    // Protocol 13, stage K (K0): host migration and rejoin.
+    pub const TOKEN: u8 = 39;
+    pub const CANDIDATE: u8 = 40;
+    pub const REACH_TEST: u8 = 41;
+    pub const REACH_PEERS: u8 = 42;
+    pub const REACH_REPORT: u8 = 43;
+    pub const UPLOAD_TEST: u8 = 44;
+    pub const SUCCESSION: u8 = 45;
+    pub const STANDBY_RECORD: u8 = 46;
+    pub const STANDBY_STATUS: u8 = 47;
+    pub const RESUME: u8 = 48;
+    pub const RESUMED: u8 = 49;
+    pub const BACKLOG: u8 = 50;
+    pub const HOST_MOVING: u8 = 51;
+    pub const TAKEN_OVER: u8 = 52;
+    pub const RELEASE: u8 = 53;
+    pub const REJOIN: u8 = 54;
 }
 
 /// The limits of stage L's messages (protocol 10; net-protocol.md, "Limits").
@@ -290,6 +318,40 @@ pub struct LobbyPlayer {
     /// The Fighters Anthology build the player's import came from, as its
     /// Content said; unknown until that arrives (protocol 10).
     pub build: Build,
+    /// The player's game is a standby host, first or second (protocol 13).
+    pub standby: StandbyMark,
+}
+
+/// A lobby player's standby mark (protocol 13): 2 bits, code 3 invalid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum StandbyMark {
+    #[default]
+    None,
+    /// The first standby: it takes over when the host is lost.
+    First,
+    /// The second: it takes over if the first is lost too.
+    Second,
+}
+
+impl StandbyMark {
+    /// The wire's code.
+    pub fn code(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::First => 1,
+            Self::Second => 2,
+        }
+    }
+
+    /// The mark of a code; `None` for 3.
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::None),
+            1 => Some(Self::First),
+            2 => Some(Self::Second),
+            _ => None,
+        }
+    }
 }
 
 /// One slot: a friendly plane of the co-op mission (or whatever the host's
@@ -304,6 +366,10 @@ pub struct LobbySlot {
     pub holder: Option<u8>,
     /// The King's lock on it (protocol 8).
     pub lock: Lock,
+    /// The callsign of the player the plane is reserved for (protocol 13):
+    /// a dropped player's plane, or an idle one's, which the AI flies and
+    /// nobody else takes.
+    pub reserved: Option<String>,
 }
 
 /// A slot's lock, which only the King sets (protocol 8).
@@ -955,6 +1021,42 @@ pub enum Message {
     Content(Box<Content>),
     /// The items not every human can use (host to every player).
     ContentGaps(Box<ContentGaps>),
+    // Protocol 13, stage K (docs/formats/net-protocol.md, "Host migration
+    // and rejoin"); the bodies are `super::migration`'s.
+    /// The player's rejoin token (host to player).
+    Token(TokenGrant),
+    /// What the player's game can do as a host (player to host).
+    Candidate(Box<CandidateReport>),
+    /// Try these candidates (host to player).
+    ReachTest(Box<ReachTest>),
+    /// Open the router to these players (host to a candidate).
+    ReachPeers(Box<ReachPeers>),
+    /// A reach test's results (player to host).
+    ReachReport(Box<ReachReport>),
+    /// Send a paced burst of Filler (host to player).
+    UploadTest(UploadTest),
+    /// The ready standbys in order (host to every player).
+    Succession(Box<Succession>),
+    /// One record of the standby stream, as [`crate::journal`] coded it
+    /// (host to a standby).
+    StandbyRecord(Vec<u8>),
+    /// A standby's report (standby to host).
+    StandbyStatus(StandbyStatus),
+    /// A player resumes with the new host (player to host).
+    Resume(Resume),
+    /// The new host's answer to Resume (host to player).
+    Resumed(Box<Resumed>),
+    /// The resumed player's inputs from the takeover on (player to host).
+    Backlog(Box<Backlog>),
+    /// The host hands over (host to every player).
+    HostMoving(HostMoving),
+    /// The new host tells the old one, from its own client's old
+    /// connection (player to host).
+    TakenOver(TakenOver),
+    /// The King ends the reservation of this plane (player to host).
+    Release(u32),
+    /// A player that joined without its token sends it (player to host).
+    Rejoin(tore_net::Token),
 }
 
 /// A flight's loadouts and what they add to the content check.
@@ -1189,6 +1291,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
             platform,
             path,
             build,
+            standby,
         } = player;
         let _ = w.write_bits(u64::from(*id), 8);
         write_str(w, callsign);
@@ -1198,6 +1301,8 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_bool(*flying);
         w.write_bool(*observing);
         w.write_bool(*away);
+        // The standby mark follows the away bit (protocol 13).
+        let _ = w.write_bits(u64::from(standby.code()), 2);
         bits::write_option(w, unable.as_deref(), write_str);
         let _ = w.write_bits(u64::from(platform.code()), PLATFORM_BITS);
         let _ = w.write_bits(u64::from(path.code()), Path::BITS);
@@ -1205,14 +1310,24 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
     }
     write_count(w, slots.len());
     for slot in slots {
-        w.write_varint(u64::from(slot.plane));
-        write_wing(w, slot.wing);
-        let _ = w.write_bits(u64::from(slot.member), 8);
-        let _ = w.write_bits(aircraft_code(slot.aircraft), 4);
-        bits::write_option(w, slot.holder, |w, id| {
+        let LobbySlot {
+            plane,
+            wing,
+            member,
+            aircraft,
+            holder,
+            lock,
+            reserved,
+        } = slot;
+        w.write_varint(u64::from(*plane));
+        write_wing(w, *wing);
+        let _ = w.write_bits(u64::from(*member), 8);
+        let _ = w.write_bits(aircraft_code(*aircraft), 4);
+        bits::write_option(w, *holder, |w, id| {
             let _ = w.write_bits(u64::from(id), 8);
         });
-        write_lock(w, &slot.lock);
+        write_lock(w, lock);
+        bits::write_option(w, reserved.as_deref(), write_str);
     }
     write_count(w, settings.len());
     for (key, value) in settings {
@@ -1271,6 +1386,8 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
             flying: r.read_bool()?,
             observing: r.read_bool()?,
             away: r.read_bool()?,
+            standby: StandbyMark::from_code(r.read_bits(2)? as u8)
+                .ok_or(WireError::Invalid("standby mark"))?,
             unable: bits::read_option(r, read_str)?,
             platform: read_platform(r)?,
             path: read_path(r)?,
@@ -1287,6 +1404,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
             aircraft: read_aircraft(r)?,
             holder: bits::read_option(r, read_id)?,
             lock: read_lock(r)?,
+            reserved: bits::read_option(r, read_str)?,
         });
     }
     let count = read_count(r, SETTINGS_LIMIT, "settings")?;
@@ -1436,7 +1554,7 @@ fn read_strings(
 
 // ----- Protocol 8: stage F phase 2 -------------------------------------
 
-fn write_end_reason(w: &mut BitWriter, reason: EndReason) {
+pub(crate) fn write_end_reason(w: &mut BitWriter, reason: EndReason) {
     let reason = match reason {
         EndReason::EveryoneLeft => 0,
         EndReason::TimeLimit => 1,
@@ -1448,7 +1566,7 @@ fn write_end_reason(w: &mut BitWriter, reason: EndReason) {
     let _ = w.write_bits(reason, 3);
 }
 
-fn read_end_reason(r: &mut BitReader<'_>) -> WireResult<EndReason> {
+pub(crate) fn read_end_reason(r: &mut BitReader<'_>) -> WireResult<EndReason> {
     Ok(match r.read_bits(3)? {
         0 => EndReason::EveryoneLeft,
         1 => EndReason::TimeLimit,
@@ -1876,7 +1994,7 @@ fn read_observe(r: &mut BitReader<'_>) -> WireResult<Observe> {
     }))
 }
 
-fn write_destroyed(w: &mut BitWriter, destroyed: &[u32]) -> WireResult<()> {
+pub(super) fn write_destroyed(w: &mut BitWriter, destroyed: &[u32]) -> WireResult<()> {
     if destroyed.len() > DESTROYED_LIMIT {
         return Err(WireError::TooMany {
             what: "destroyed objects",
@@ -1890,7 +2008,7 @@ fn write_destroyed(w: &mut BitWriter, destroyed: &[u32]) -> WireResult<()> {
     Ok(())
 }
 
-fn read_destroyed(r: &mut BitReader<'_>) -> WireResult<Vec<u32>> {
+pub(super) fn read_destroyed(r: &mut BitReader<'_>) -> WireResult<Vec<u32>> {
     let count = read_count(r, DESTROYED_LIMIT, "destroyed objects")?;
     if count > r.bits_remaining() / 8 {
         return Err(tore_codec::CodecError::UnexpectedEnd.into());
@@ -2229,6 +2347,22 @@ impl Message {
             Self::Back => kind::BACK,
             Self::Content(_) => kind::CONTENT,
             Self::ContentGaps(_) => kind::CONTENT_GAPS,
+            Self::Token(_) => kind::TOKEN,
+            Self::Candidate(_) => kind::CANDIDATE,
+            Self::ReachTest(_) => kind::REACH_TEST,
+            Self::ReachPeers(_) => kind::REACH_PEERS,
+            Self::ReachReport(_) => kind::REACH_REPORT,
+            Self::UploadTest(_) => kind::UPLOAD_TEST,
+            Self::Succession(_) => kind::SUCCESSION,
+            Self::StandbyRecord(_) => kind::STANDBY_RECORD,
+            Self::StandbyStatus(_) => kind::STANDBY_STATUS,
+            Self::Resume(_) => kind::RESUME,
+            Self::Resumed(_) => kind::RESUMED,
+            Self::Backlog(_) => kind::BACKLOG,
+            Self::HostMoving(_) => kind::HOST_MOVING,
+            Self::TakenOver(_) => kind::TAKEN_OVER,
+            Self::Release(_) => kind::RELEASE,
+            Self::Rejoin(_) => kind::REJOIN,
         }
     }
 
@@ -2256,6 +2390,14 @@ impl Message {
                 | Self::Away
                 | Self::Back
                 | Self::Content(_)
+                | Self::Candidate(_)
+                | Self::ReachReport(_)
+                | Self::StandbyStatus(_)
+                | Self::Resume(_)
+                | Self::Backlog(_)
+                | Self::TakenOver(_)
+                | Self::Release(_)
+                | Self::Rejoin(_)
         )
     }
 
@@ -2419,6 +2561,22 @@ impl Message {
             Self::Away | Self::Back => {}
             Self::Content(content) => write_content(&mut w, content)?,
             Self::ContentGaps(gaps) => write_content_gaps(&mut w, gaps)?,
+            Self::Token(grant) => migration::write_token(&mut w, grant),
+            Self::Candidate(report) => migration::write_candidate(&mut w, report)?,
+            Self::ReachTest(test) => migration::write_reach_test(&mut w, test)?,
+            Self::ReachPeers(peers) => migration::write_reach_peers(&mut w, peers)?,
+            Self::ReachReport(report) => migration::write_reach_report(&mut w, report)?,
+            Self::UploadTest(test) => migration::write_upload_test(&mut w, test)?,
+            Self::Succession(succession) => migration::write_succession(&mut w, succession)?,
+            Self::StandbyRecord(record) => migration::write_record(&mut w, record)?,
+            Self::StandbyStatus(status) => migration::write_status(&mut w, status),
+            Self::Resume(resume) => migration::write_resume(&mut w, resume),
+            Self::Resumed(resumed) => migration::write_resumed(&mut w, resumed)?,
+            Self::Backlog(backlog) => migration::write_backlog(&mut w, backlog)?,
+            Self::HostMoving(moving) => migration::write_host_moving(&mut w, moving),
+            Self::TakenOver(taken) => migration::write_taken_over(&mut w, taken),
+            Self::Release(plane) => w.write_varint(u64::from(*plane)),
+            Self::Rejoin(token) => token.write(&mut w),
         }
         let bytes = bits::finish(w);
         if bytes.len() > limits::MESSAGE {
@@ -2612,6 +2770,22 @@ impl Message {
             kind::BACK => Self::Back,
             kind::CONTENT => Self::Content(Box::new(read_content(r)?)),
             kind::CONTENT_GAPS => Self::ContentGaps(Box::new(read_content_gaps(r)?)),
+            kind::TOKEN => Self::Token(migration::read_token(r)?),
+            kind::CANDIDATE => Self::Candidate(Box::new(migration::read_candidate(r)?)),
+            kind::REACH_TEST => Self::ReachTest(Box::new(migration::read_reach_test(r)?)),
+            kind::REACH_PEERS => Self::ReachPeers(Box::new(migration::read_reach_peers(r)?)),
+            kind::REACH_REPORT => Self::ReachReport(Box::new(migration::read_reach_report(r)?)),
+            kind::UPLOAD_TEST => Self::UploadTest(migration::read_upload_test(r)?),
+            kind::SUCCESSION => Self::Succession(Box::new(migration::read_succession(r)?)),
+            kind::STANDBY_RECORD => Self::StandbyRecord(migration::read_record(r)?),
+            kind::STANDBY_STATUS => Self::StandbyStatus(migration::read_status(r)?),
+            kind::RESUME => Self::Resume(migration::read_resume(r)?),
+            kind::RESUMED => Self::Resumed(Box::new(migration::read_resumed(r)?)),
+            kind::BACKLOG => Self::Backlog(Box::new(migration::read_backlog(r)?)),
+            kind::HOST_MOVING => Self::HostMoving(migration::read_host_moving(r)?),
+            kind::TAKEN_OVER => Self::TakenOver(migration::read_taken_over(r)?),
+            kind::RELEASE => Self::Release(read_u32(r)?),
+            kind::REJOIN => Self::Rejoin(tore_net::Token::read(r)?),
             _ => return Err(WireError::Invalid("message kind")),
         };
         bits::end(r)?;

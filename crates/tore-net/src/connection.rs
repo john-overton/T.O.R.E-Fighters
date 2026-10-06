@@ -93,6 +93,9 @@ pub enum DisconnectReason {
     ServerStopping,
     /// 7: the host removed the player.
     Kicked,
+    /// 8: the player resumed with the game's new host and tells the old one,
+    /// which stops flying its plane for it (stage K, protocol 13).
+    MovedToNewHost,
     /// A code this build does not know.
     Other(u8),
 }
@@ -108,6 +111,7 @@ impl DisconnectReason {
             Self::ContentMismatch => 5,
             Self::ServerStopping => 6,
             Self::Kicked => 7,
+            Self::MovedToNewHost => 8,
             Self::Other(code) => code,
         }
     }
@@ -122,6 +126,7 @@ impl DisconnectReason {
             5 => Self::ContentMismatch,
             6 => Self::ServerStopping,
             7 => Self::Kicked,
+            8 => Self::MovedToNewHost,
             other => Self::Other(other),
         }
     }

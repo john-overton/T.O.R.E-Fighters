@@ -40,7 +40,13 @@ pub mod number {
     pub const KILL_OWNER: u8 = 18;
     pub const OBSERVER_DELAY: u8 = 19;
     pub const IDLE_AI: u8 = 20;
+    /// Stage K (slice K0): the host, calculated or pinned by the King.
+    pub const HOST: u8 = 21;
 }
+
+/// Setting 21's value for the calculated host; a pinned player is 1 plus
+/// its lobby id.
+pub const CALCULATED_HOST: u32 = 0;
 
 /// The `lives` value that means no limit.
 pub const UNLIMITED_LIVES: u32 = 255;
@@ -197,7 +203,7 @@ const OFF_ON: &[(u32, &str)] = &[(0, "off"), (1, "on")];
 const OFF_ON_VALUES: &[u32] = &[0, 1];
 
 /// Every setting, in number order: the registry.
-pub const REGISTRY: [Setting; 20] = [
+pub const REGISTRY: [Setting; 21] = [
     Setting {
         number: number::MODE,
         name: "mode",
@@ -424,6 +430,19 @@ pub const REGISTRY: [Setting; 20] = [
         change: Change::AnyTime,
         pvp_only: false,
     },
+    // Stage K: 0 calculated, or 1 plus the lobby id of the player the King
+    // pins. A pin made in flight applies when the lobby returns.
+    Setting {
+        number: number::HOST,
+        name: "host",
+        allowed: Allowed::Range(0, 256, &[]),
+        unit: Unit::Count,
+        words: &[(CALCULATED_HOST, "calculated")],
+        coop: CALCULATED_HOST,
+        pvp: CALCULATED_HOST,
+        change: Change::AnyTime,
+        pvp_only: false,
+    },
 ];
 
 /// The setting with `number`.
@@ -530,6 +549,10 @@ pub fn refusal(number: u8, value: u32) -> Option<String> {
     };
     if number == number::PASSWORD {
         return Some("The password is set on its own, not by number.".into());
+    }
+    // The pin is slice K6's: until it is built, the host stays calculated.
+    if number == number::HOST && setting.allows(value) && value != CALCULATED_HOST {
+        return Some(crate::host::NOT_AVAILABLE.into());
     }
     setting.refusal(value)
 }
@@ -750,6 +773,14 @@ impl Store {
     /// never.
     pub fn idle_ai_seconds(&self) -> Option<u32> {
         Some(self.value(number::IDLE_AI)).filter(|&s| s != 0)
+    }
+
+    /// The lobby id of the player the King pinned as the host; `None` for
+    /// the calculated host (stage K).
+    pub fn pinned_host(&self) -> Option<u8> {
+        self.value(number::HOST)
+            .checked_sub(1)
+            .and_then(|id| u8::try_from(id).ok())
     }
 }
 

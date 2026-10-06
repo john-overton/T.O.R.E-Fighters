@@ -73,23 +73,31 @@ fn lines(version: u16) -> Vec<(String, String)> {
     // since protocol 7 and the path since protocol 9, sealed for the version. It is padded with zeros to
     // 1,000 bytes; the line keeps the bytes before the padding (the checksum
     // covers it all).
-    let answer = tore_net::packet::Packet::ChallengeAnswer(tore_net::packet::ChallengeAnswer {
-        nonce: 0x0123_4567_89AB_CDEF,
-        cookie: 0xFEDC_BA98_7654_3210,
-        callsign: "Viper".into(),
-        password: "secret".into(),
-        game_version: "0.1.3".into(),
-        game_commit: "fb9c2ec".into(),
-        platform: super::Platform::Linux,
-        path: tore_net::master::Path::Punched,
-    })
-    .encode(version)
-    .unwrap();
-    assert_eq!(answer.len(), tore_net::packet::PADDED_LEN);
-    let head = answer.len() - answer.iter().rev().take_while(|&&b| b == 0).count();
+    let challenge_answer =
+        tore_net::packet::Packet::ChallengeAnswer(tore_net::packet::ChallengeAnswer {
+            nonce: 0x0123_4567_89AB_CDEF,
+            cookie: 0xFEDC_BA98_7654_3210,
+            callsign: "Viper".into(),
+            password: "secret".into(),
+            game_version: "0.1.3".into(),
+            game_commit: "fb9c2ec".into(),
+            platform: super::Platform::Linux,
+            path: tore_net::master::Path::Punched,
+            // The rejoin token since protocol 13 (stage K).
+            token: Some(tore_net::Token(0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210)),
+        })
+        .encode(version)
+        .unwrap();
+    assert_eq!(challenge_answer.len(), tore_net::packet::PADDED_LEN);
+    let head = challenge_answer.len()
+        - challenge_answer
+            .iter()
+            .rev()
+            .take_while(|&&b| b == 0)
+            .count();
     out.push((
         "transport-challenge-answer-head".into(),
-        hex(&answer[..head]),
+        hex(&challenge_answer[..head]),
     ));
     // The host's Punch to a player the master introduced (protocol 9, J2).
     let punch = tore_net::packet::Packet::Punch(tore_net::packet::Punch {
@@ -98,6 +106,25 @@ fn lines(version: u16) -> Vec<(String, String)> {
     out.push((
         "transport-punch".into(),
         hex(&punch.encode(version).unwrap()),
+    ));
+    // Stage K's Reach and Reach answer (protocol 13, K0).
+    let reach = tore_net::packet::Packet::Reach(tore_net::packet::Reach {
+        session_id: 0x1122_3344_5566_7788,
+        nonce: 0x99AA_BBCC_DDEE_FF00,
+        from: 7,
+    });
+    out.push((
+        "transport-reach".into(),
+        hex(&reach.encode(version).unwrap()),
+    ));
+    let answer = tore_net::packet::Packet::ReachAnswer(tore_net::packet::ReachAnswer {
+        nonce: 0x99AA_BBCC_DDEE_FF00,
+        session_id: 0x1122_3344_5566_7788,
+        role: tore_net::ReachRole::Hosting,
+    });
+    out.push((
+        "transport-reach-answer".into(),
+        hex(&answer.encode(version).unwrap()),
     ));
     out
 }

@@ -4,14 +4,14 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn the_registry_is_numbered_one_to_twenty_in_order_with_unique_names() {
+fn the_registry_is_numbered_one_to_twenty_one_in_order_with_unique_names() {
     for (index, setting) in REGISTRY.iter().enumerate() {
         assert_eq!(usize::from(setting.number), index + 1, "{}", setting.name);
         assert_eq!(super::setting(setting.number), Some(setting));
         assert_eq!(by_name(setting.name), Some(setting));
     }
     assert_eq!(super::setting(0), None);
-    assert_eq!(super::setting(21), None);
+    assert_eq!(super::setting(22), None);
     assert_eq!(by_name("cheats"), None);
 }
 
@@ -104,7 +104,7 @@ fn the_registry_refuses_with_the_setting_and_its_values() {
         Some("max-players is 1 to 30.")
     );
     assert_eq!(refusal(0, 0).as_deref(), Some("There is no setting 0."));
-    assert_eq!(refusal(21, 0).as_deref(), Some("There is no setting 21."));
+    assert_eq!(refusal(22, 0).as_deref(), Some("There is no setting 22."));
     assert!(refusal(number::PASSWORD, 1).is_some());
     // Public is the registry's since stage I lists games; whether a host can
     // list is the host's question (slice F2-1).
@@ -224,4 +224,27 @@ fn the_choices_match_their_values() {
         Some(Visibility::Public)
     );
     assert_eq!(LoadoutRule::from_value(1), Some(LoadoutRule::Any));
+}
+
+#[test]
+fn setting_21_is_the_host_calculated_until_slice_k6_builds_the_pin() {
+    let host = super::setting(number::HOST).unwrap();
+    assert_eq!(host.name, "host");
+    assert_eq!(host.text(0), "calculated");
+    assert!(host.allows(0) && host.allows(256) && !host.allows(257));
+    assert_eq!(host.change, Change::AnyTime);
+    let mut store = Store::defaults(Mode::Pvp);
+    assert_eq!(store.pinned_host(), None);
+    assert!(store.lobby_list().contains(&(number::HOST, 0)));
+    // A pin is refused in words until it is built; calculated is taken.
+    assert_eq!(
+        refusal(number::HOST, 4),
+        Some(crate::host::NOT_AVAILABLE.to_owned())
+    );
+    assert_eq!(
+        store.apply(&[(number::HOST, 4)]),
+        Err("Not available yet.".into())
+    );
+    assert_eq!(store.apply(&[(number::HOST, 0)]), Ok(()));
+    assert!(refusal(number::HOST, 257).is_some_and(|why| why.starts_with("host is")));
 }

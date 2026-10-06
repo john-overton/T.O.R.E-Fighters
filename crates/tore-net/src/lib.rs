@@ -90,10 +90,10 @@ pub use connection::{
     CloseReason, ConnectionId, DisconnectReason, Event, RefuseReason, SendError, Stats,
 };
 pub use datagram::{Datagrams, RealClock, Transmit, bind_udp};
-pub use entropy::{Entropy, SplitMix64};
+pub use entropy::{Entropy, SplitMix64, TokenSource};
 pub use keepalive::{Keepalive, KeepaliveConfig};
 pub use link::{LINK_ADDRESS, LinkEnd, Linked};
-pub use packet::{MAX_DATAGRAM, Section};
+pub use packet::{MAX_DATAGRAM, ReachRole, Section, Token};
 pub use platform::Platform;
 pub use reliable::{MAX_MESSAGE_BODY, MAX_MESSAGE_LEN, MAX_QUEUED_MESSAGES, MESSAGE_WINDOW};
 pub use server::{AcceptInfo, ConnectDetails, Decision, Gate, Server, ServerConfig, ServerEvent};
@@ -127,6 +127,9 @@ pub const COOKIE_SLOT: Duration = Duration::from_secs(10);
 pub const RATE_LIMIT_PER_ADDRESS: u32 = 20;
 /// Connect requests and answers answered per second in all.
 pub const RATE_LIMIT_TOTAL: u32 = 200;
+/// Reach packets a host answers a second from one IP address (stage K); 200
+/// a second in all, as joins.
+pub const REACH_PER_ADDRESS: u32 = 10;
 /// Datagrams one `receive_from` call takes at most, so a flood cannot hold
 /// the caller's loop.
 pub const MAX_RECEIVE_BATCH: usize = 1024;

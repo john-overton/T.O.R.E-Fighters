@@ -269,7 +269,12 @@ impl HostConnection {
 
     /// Checks an Inputs section before the transport accepts its packet.
     pub fn check(kind: u8, body: &[u8]) -> bool {
-        kind == SECTION_INPUTS && InputsSection::decode(body).is_ok()
+        match kind {
+            SECTION_INPUTS => InputsSection::decode(body).is_ok(),
+            // The Filler section (protocol 13): zero bytes only.
+            super::SECTION_FILLER => body.iter().all(|&byte| byte == 0),
+            _ => false,
+        }
     }
 }
 

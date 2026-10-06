@@ -22,13 +22,22 @@
 //!
 //! [`settings`] is the King's settings' registry and the host's store of
 //! their values (stage F phase 2).
+//!
+//! [`journal`] is stage K's one door into a host's world: each tick's
+//! changes, which the host steps with and a standby replays, and the
+//! standby stream's records. [`standby`] is the standby's side, which slice
+//! K2 builds.
 
 pub mod bot;
 pub mod client;
 #[cfg(feature = "test-support")]
 pub mod fixture;
 pub mod host;
+pub mod journal;
+#[cfg(test)]
+mod journal_tests;
 pub mod settings;
+pub mod standby;
 pub mod wire;
 
 pub use client::capture;

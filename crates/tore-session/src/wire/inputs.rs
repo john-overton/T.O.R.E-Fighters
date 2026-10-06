@@ -356,7 +356,7 @@ fn read_sensors(r: &mut BitReader<'_>) -> WireResult<Controls> {
     })
 }
 
-fn write_frame(
+pub(crate) fn write_frame(
     w: &mut BitWriter,
     frame: &InputFrame,
     previous: Option<&InputFrame>,
@@ -429,7 +429,10 @@ fn read_rate(r: &mut BitReader<'_>) -> WireResult<i8> {
     Ok(q as i8)
 }
 
-fn read_frame(r: &mut BitReader<'_>, previous: Option<&InputFrame>) -> WireResult<InputFrame> {
+pub(crate) fn read_frame(
+    r: &mut BitReader<'_>,
+    previous: Option<&InputFrame>,
+) -> WireResult<InputFrame> {
     let Some(previous) = previous else {
         return Ok(InputFrame {
             pitch: read_stick(r)?,
