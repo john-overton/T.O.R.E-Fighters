@@ -4053,6 +4053,17 @@ and commit are the converting game's, the connection's build is `net.build`,
 and the platform string the live recorder writes is left out, since a flight
 is the same wherever it is converted.
 
+**A join through the master (slice J2) and the relay (J5).** A capture of a
+join through the master has a Race record (kind 10) right after the start; the
+conversion runs the client from it like any other record, so a raced capture
+converts the same as a direct one, and the replay's `net.server` is the address
+the capture's start names. When the race finds nothing and the relay's channel
+opens, the game and `tore-bot` start a new client for the relayed address and
+a new capture (the race's capture, which holds no game, is removed in the game
+and truncated by the bot's new file). The conversion therefore only ever sees
+the capture of the connection that flew; a game that converts the capture of a
+session that never flew (no snapshots) gets no replay, as before.
+
 **How the Replays screen shows it.** A converted replay is an ordinary
 recording to the list: it sorts by the capture's start and has the theater,
 the player's aircraft and the length; its mission reads "Network flight". Its
@@ -4069,7 +4080,8 @@ no problem; every aircraft's path passes through every received state within
 end's speed, or the distance the two states are apart, plus a tenth of a foot);
 the own aircraft equals the host's state at every exact state (and the host's
 own world); the diagnostics read back and equal the live log; converting twice
-gives the same bytes; a cut capture converts, says so, and one cut before
+gives the same bytes; a capture of a raced join (a Race record after the start)
+converts like a direct one; a cut capture converts, says so, and one cut before
 seating gives no flight; and, on states made by hand, the curve stops at the
 first and last state and does not bridge a long silence, the correction is
 spread back exactly, and the host's events become the replay's. `replay/net_convert.rs`

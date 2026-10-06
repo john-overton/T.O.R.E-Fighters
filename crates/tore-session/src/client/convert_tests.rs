@@ -1,15 +1,18 @@
 //! A bot fight's capture converted into a replay, on the synthetic fixtures
 //! (docs/ARCHITECTURE.md, "Converting a capture into a replay").
 
+use super::Race;
 use super::convert::{self, Conversion, End, FlightInfo, MAX_BRIDGE_TICKS};
 use super::prediction::Trace;
 use super::seen::FlightSeen;
-use super::tests::{Rig, Shared, bot_script, spec};
+use super::tests::{Rig, Shared, bot_script, host_address, spec};
 use crate::wire::entity::{EntityKind, EntityState};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tore_net::Target;
+use tore_net::master::Path;
 use tore_net::sim::LinkConfig;
 use tore_replay as replay;
 
@@ -27,11 +30,32 @@ struct Fight {
 /// Two bots fly a fight against a host at 150 ms and 2 percent loss for
 /// `seconds`; the first one's capture and log are what comes out.
 fn fight(seconds: u64) -> Fight {
+    fight_through(seconds, false)
+}
+
+/// [`fight`], the first bot joining through a race of the host's addresses
+/// (a join through the master, slice J2) when `raced`: its capture then names
+/// the race right after the start.
+fn fight_through(seconds: u64, raced: bool) -> Fight {
     let link = LinkConfig::for_round_trip(Duration::from_millis(150), 0.1, 0.02, 0.01);
     let mut rig = Rig::new(spec(2, 2, 2), link, 21);
     rig.watch = true;
     let capture = Shared::default();
-    let a = rig.join(|c| c.callsign = "Alpha".into(), bot_script());
+    let a = rig.join(
+        |c| {
+            c.callsign = "Alpha".into();
+            if raced {
+                c.race = Some(Race {
+                    targets: vec![
+                        Target::new("10.0.0.99:26900".parse().unwrap(), Path::LocalNetwork),
+                        Target::new(host_address(), Path::Punched),
+                    ],
+                    introduction: 0x51,
+                });
+            }
+        },
+        bot_script(),
+    );
     rig.players[a].client.set_capture(Box::new(capture.clone()));
     let log = Shared::default();
     rig.players[a].client.set_diagnostics(Box::new(log.clone()));
@@ -333,6 +357,40 @@ fn converting_twice_gives_the_same_bytes() {
     }
     assert!(files[0].len() > 10_000);
     assert!(files[0] == files[1], "the two replays differ");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A join through the master (slice J2) names its race right after the start:
+/// the conversion runs the client from it and gets the same flight as a
+/// direct join's, and the replay carries the host the race chose.
+#[test]
+fn a_capture_of_a_raced_join_converts_like_a_direct_one() {
+    let fight = fight_through(10, true);
+    let mut reader = super::capture::Reader::new(&fight.capture).unwrap();
+    assert!(matches!(
+        reader.next_record().unwrap(),
+        Some(super::capture::Record::Start { .. })
+    ));
+    assert!(matches!(
+        reader.next_record().unwrap(),
+        Some(super::capture::Record::Race(_))
+    ));
+    let conversion = convert::observe(&fight.capture, Arc::clone(&fight.resources)).unwrap();
+    assert!(conversion.cut.is_none(), "a finished capture is not cut");
+    let flights = conversion.flights();
+    assert_eq!(flights.len(), 1, "one flight");
+    let dir = folder("raced");
+    let path = dir.join("raced.tore-replay");
+    let written = write(&conversion, &flights[0], &path);
+    assert!(written.frames > 10 * 120 - 600);
+    let recording = replay::Recording::open(&path).expect("the replay decodes");
+    assert!(recording.complete(), "{:?}", recording.problems());
+    assert_eq!(recording.header().extra("net.callsign"), Some("Alpha"));
+    assert_eq!(
+        recording.header().extra("net.server"),
+        Some(host_address().to_string().as_str()),
+        "the host the race chose"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
