@@ -40,12 +40,16 @@ mod command_tests;
 mod commands;
 #[cfg(test)]
 mod crowd;
+// What the world does with an AI lead's data link work (stage G, slice G4).
 #[cfg(test)]
 mod datalink_assign_tests;
 #[cfg(test)]
 mod datalink_checkpoint_tests;
 #[cfg(test)]
 mod datalink_cues_tests;
+mod datalink_leads;
+#[cfg(test)]
+mod datalink_leads_tests;
 #[cfg(test)]
 mod datalink_sort_tests;
 #[cfg(test)]
@@ -1026,8 +1030,11 @@ impl World {
             let message = bridge.take_message();
             self.ai_wings = Some(bridge);
             stepped?;
-            self.datalink
+            let given = self
+                .datalink
                 .after_ai(self.combat.state.tick(), self.ai_wings.as_ref());
+            // The AI leads' targets (slice G4) are voiced in the tick.
+            self.voice_lead_assignments(&given);
             if let Some(text) = message {
                 // Agent decision (B7a): the AI wings' one HUD line goes to
                 // the seats flying in Friendly Wing 1, the wing whose
@@ -1044,9 +1051,12 @@ impl World {
         }
         // Two flightmates have both locked one aircraft: the humans among
         // them hear a beep and read a line (the data link's sort warning).
-        for warning in self.datalink.sort_warnings(&self.roster) {
+        let edge = self.datalink.sort_edge(&self.roster);
+        for warning in edge.warnings {
             out.cues.extend(warning.cues());
         }
+        // The AI member of each new pair leaves the aircraft alone (slice G4).
+        self.apply_yields(&edge.yields);
         // The tick's picture: combat and the AI have both written their poses
         // for it. The mission recording reads the same picture, before the
         // radio drains this tick's strikes.

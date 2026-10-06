@@ -33,6 +33,7 @@ use super::{
     WingLeader,
 };
 use crate::ai::airfield::{LandingOrder, RunwayView};
+use crate::ai::link::{SortStamp, Yield};
 use crate::ai::thought::{ActorTrace, Journal};
 use crate::ai::weapon_service::{Delay, ProjectilePacing};
 use crate::checkpoint::{
@@ -99,6 +100,14 @@ crate::checkpoint_struct!(HumanMember {
     member,
     pilot_alive,
 });
+
+crate::checkpoint_struct!(Yield {
+    target,
+    until,
+    announced,
+});
+
+crate::checkpoint_struct!(SortStamp { side, wing, tick });
 
 crate::checkpoint_struct!(WingLeader {
     side,
@@ -221,6 +230,7 @@ impl Checkpoint for AiActor {
             alive,
             dummy,
             escape_monitor,
+            yields,
             trace: _,
             journal_memory: _,
         } = self;
@@ -270,7 +280,10 @@ impl Checkpoint for AiActor {
         last_input.save(s, None)?;
         alive.save(s, None)?;
         dummy.save(s, None)?;
-        escape_monitor.save(s, None)
+        escape_monitor.save(s, None)?;
+        // The bandits it left alone for a flightmate (slice G4): read by
+        // every choice until each lapses.
+        yields.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -328,6 +341,7 @@ impl Checkpoint for AiActor {
             alive: Checkpoint::load(l, None)?,
             dummy: Checkpoint::load(l, None)?,
             escape_monitor: Checkpoint::load(l, None)?,
+            yields: Checkpoint::load(l, None)?,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })
@@ -368,6 +382,7 @@ crate::checkpoint_struct!(AiMission {
     airborne_seen,
     opportunities,
     routes,
+    sort_clock,
 } skip {
     missiles = Vec::new(),
     gun_rounds = Vec::new(),

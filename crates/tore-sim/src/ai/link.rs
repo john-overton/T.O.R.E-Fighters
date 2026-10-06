@@ -26,15 +26,30 @@
 //! the actor's targets: the wingman keeps the order, flies toward the track,
 //! and fires only once its own sensors hold the aircraft.
 //!
+//! Slice G4 lets an AI lead use the picture. When a lead under loose control
+//! commits to a new target it shares it with its idle wingmen, up to the
+//! two-attacker allowance (B43), or, when it knows of another bandit and has
+//! not sorted for thirty seconds, sorts: each fit wingman takes a different
+//! bandit by [`crate::datalink::sort`]. Each wingman takes its target as the
+//! controller takes any target order, the mission's own role unchanged, and
+//! the mission writes a [`LinkEvent::Assign`] for the world to record and
+//! voice. A wingman told by the world (`AiMission::yield_target`) that it
+//! and a flightmate hold one bandit leaves it alone for ten seconds, if it has
+//! another to take ([`Yield`]).
+//!
 //! Neither the table nor the input is state: the table is rebuilt from the
 //! controllers every tick and the input is handed over again before every step
-//! (and consumed by it), so exact checkpoints need not code them.
+//! (and consumed by it), so exact checkpoints need not code them. What the
+//! mission itself keeps (each flight's last sort, each actor's yields) is
+//! coded in the mission's checkpoint.
 
 use super::ScalarSpeed;
 use super::controller::TargetView;
 use super::mission::{AiActor, HumanMember, WorldObject};
 use super::targeting::Side;
 use super::weapon_service::Phase;
+use super::wing::PlayerOrder;
+use crate::datalink::sort::Bandit;
 
 /// Simulation ticks per second, to age a track.
 const TICKS_PER_SECOND: f64 = 120.;
@@ -132,13 +147,47 @@ impl Pursuit {
     }
 }
 
+/// The hostile aircraft a side's flights know of, as the picture last had
+/// them carried forward to the tick it was read: what an AI lead sorts from
+/// (slice G4).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SideBandits {
+    pub side: Side,
+    /// In target id order, without any the picture knows to be dead.
+    pub bandits: Vec<Bandit>,
+}
+
+/// What a flight's last published picture says of one member's state, as a
+/// lead would know it (slice G4). A member the picture has no row for is
+/// taken to be fit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemberState {
+    pub plane: u32,
+    /// No missile and no gun rounds left.
+    pub winchester: bool,
+    /// Bingo fuel or worse.
+    pub bingo: bool,
+    /// Half its hit points or less.
+    pub heavy_damage: bool,
+}
+
+impl MemberState {
+    /// Whether an AI lead leaves this member out of a share or a sort.
+    pub fn skipped(&self) -> bool {
+        self.winchester || self.bingo || self.heavy_damage
+    }
+}
+
 /// What the world hands the AI before a step: the humans' locked targets
-/// (slice G2), in plane id order, and the pursuits of the assigned AI
-/// wingmen (slice G3b), in receiver order.
+/// (slice G2), in plane id order, the pursuits of the assigned AI wingmen
+/// (slice G3b), in receiver order, and for the AI leads' shares and sorts
+/// (slice G4) the bandits each side knows and each member's state.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LinkInput {
     pub humans: Vec<HumanEngagement>,
     pub pursuits: Vec<Pursuit>,
+    pub bandits: Vec<SideBandits>,
+    pub states: Vec<MemberState>,
 }
 
 impl LinkInput {
@@ -146,6 +195,63 @@ impl LinkInput {
     pub fn pursuit_of(&self, receiver: u32) -> Option<&Pursuit> {
         self.pursuits.iter().find(|p| p.receiver == receiver)
     }
+
+    /// The bandits `side` knows of.
+    pub fn bandits_of(&self, side: Side) -> &[Bandit] {
+        self.bandits
+            .iter()
+            .find(|known| known.side == side)
+            .map_or(&[], |known| known.bandits.as_slice())
+    }
+
+    /// The state of `plane` as its flight's picture last had it.
+    pub fn state_of(&self, plane: u32) -> Option<&MemberState> {
+        self.states.iter().find(|state| state.plane == plane)
+    }
+}
+
+/// What an AI lead did with the picture this tick (slice G4), for the world
+/// to record and voice.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LinkEvent {
+    /// A lead gave `receiver` a target: its own, shared under loose control
+    /// ([`PlayerOrder::EngageMyTarget`]), or one dealt by a sort
+    /// ([`PlayerOrder::Sort`]). The receiver took it before this was written.
+    Assign {
+        lead: u32,
+        receiver: u32,
+        target: u32,
+        order: PlayerOrder,
+    },
+    /// `actor` leaves `target` alone for [`YIELD_TICKS`] when it has another
+    /// target to take, because a flightmate it was not sorted with locked the
+    /// same aircraft.
+    Yield { actor: u32, target: u32 },
+}
+
+/// How long an AI member leaves a bandit alone after yielding it: ten
+/// seconds at 120 Hz.
+pub const YIELD_TICKS: u64 = 10 * 120;
+
+/// The least time between two sorts by one flight's AI lead: thirty seconds.
+pub const SORT_INTERVAL_TICKS: u64 = 30 * 120;
+
+/// One bandit an actor has agreed to leave alone for a while.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Yield {
+    pub target: u32,
+    /// The mission tick the yield ends.
+    pub until: u64,
+    /// The `Yield` event has been written.
+    pub announced: bool,
+}
+
+/// The tick each flight last sorted, by side and wing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SortStamp {
+    pub side: Side,
+    pub wing: u8,
+    pub tick: u64,
 }
 
 /// One actor's row: who it is, its wing, and what it attacks.

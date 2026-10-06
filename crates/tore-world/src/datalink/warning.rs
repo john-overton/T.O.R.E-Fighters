@@ -73,11 +73,32 @@ fn name_of(flight: u8, member: u8) -> String {
     }
 }
 
+/// What a tick's new pairs of locks on one aircraft ask for: the warnings
+/// the seats are owed, and the AI members that leave the aircraft alone
+/// (slice G4).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SortEdge {
+    pub warnings: Vec<SortWarning>,
+    /// `(AI member, aircraft)`, to hand to [`AiMission::yield_target`]
+    /// (`tore_sim::ai::mission`).
+    pub yields: Vec<(u32, u32)>,
+}
+
 impl DataLink {
-    /// Finds the pairs that have just started to lock one aircraft and the
-    /// warnings the seats of those pairs are owed. Call it after the AI step,
-    /// when every member's lock is current.
+    /// [`Self::sort_edge`]'s warnings alone.
     pub fn sort_warnings(&mut self, roster: &Roster) -> Vec<SortWarning> {
+        self.sort_edge(roster).warnings
+    }
+
+    /// Finds the pairs that have just started to lock one aircraft, the
+    /// warnings the seats of those pairs are owed and the AI member of each
+    /// pair that leaves the aircraft alone. Call it after the AI step, when
+    /// every member's lock is current.
+    ///
+    /// The member that yields is an AI aircraft, never a human; when both are
+    /// AI it is the one with the higher member number; and it is never one
+    /// that was assigned the aircraft (agent decisions, slice G4).
+    pub fn sort_edge(&mut self, roster: &Roster) -> SortEdge {
         // The living members holding a lock, in plane id order: usually few.
         let holders: Vec<(u32, super::FlightId, u32)> = self
             .members
@@ -98,7 +119,7 @@ impl DataLink {
         }
         // A pair that let go is forgotten, so it can warn again.
         self.warned.retain(|pair| pairs.contains(pair));
-        let mut warnings = Vec::new();
+        let mut edge = SortEdge::default();
         for pair in pairs {
             if self.warned.contains(&pair) || self.meant(pair) {
                 continue;
@@ -106,10 +127,31 @@ impl DataLink {
             self.warned.insert(pair);
             let (a, b, target) = pair;
             for (plane, other) in [(a, b), (b, a)] {
-                warnings.extend(self.warn_seat(roster, plane, other, target));
+                edge.warnings
+                    .extend(self.warn_seat(roster, plane, other, target));
+            }
+            if let Some(actor) = self.yielder(pair) {
+                edge.yields.push((actor, target));
             }
         }
-        warnings
+        edge
+    }
+
+    /// The AI member of `pair` that leaves the aircraft alone, if there is
+    /// one: no human, none assigned the aircraft, the higher member number of
+    /// those left.
+    fn yielder(&self, (a, b, target): (u32, u32, u32)) -> Option<u32> {
+        [a, b]
+            .into_iter()
+            .filter_map(|plane| self.member(plane))
+            .filter(|member| member.alive && !member.human)
+            .filter(|member| {
+                self.assignments
+                    .get(&member.plane)
+                    .is_none_or(|assignment| assignment.target != target)
+            })
+            .max_by_key(|member| (member.member, member.plane))
+            .map(|member| member.plane)
     }
 
     /// Whether the lead meant the pair: both were assigned the aircraft, or
@@ -441,6 +483,97 @@ mod tests {
             ]
         );
         assert!(link.warned().contains(&(0, 1, 50)));
+    }
+
+    // The yield (slice G4).
+
+    #[test]
+    fn the_ai_member_of_a_pair_with_a_human_yields_and_the_human_never_does() {
+        let (mut link, roster) = fixture();
+        lock(&mut link, 0, 50);
+        lock(&mut link, 2, 50);
+        assert_eq!(link.sort_edge(&roster).yields, [(2, 50)]);
+        // Two humans: nobody yields.
+        let (mut link, roster) = fixture();
+        lock(&mut link, 0, 50);
+        lock(&mut link, 1, 50);
+        assert!(link.sort_edge(&roster).yields.is_empty());
+    }
+
+    #[test]
+    fn of_two_ai_members_the_higher_member_number_yields() {
+        let (mut link, roster) = fixture();
+        link.members.push(member(4, RED, 3, false, true));
+        lock(&mut link, 4, 50);
+        lock(&mut link, 2, 50);
+        // Red three and Red four are both AI: Red four yields.
+        assert_eq!(link.sort_edge(&roster).yields, [(4, 50)]);
+        // With the lower number listed first nothing changes.
+        let (mut link, roster) = fixture();
+        link.members.push(member(4, RED, 3, false, true));
+        lock(&mut link, 2, 50);
+        lock(&mut link, 4, 50);
+        assert_eq!(link.sort_edge(&roster).yields, [(4, 50)]);
+    }
+
+    #[test]
+    fn a_member_assigned_the_aircraft_does_not_yield_it() {
+        let (mut link, roster) = fixture();
+        link.members.push(member(4, RED, 3, false, true));
+        lock(&mut link, 4, 50);
+        lock(&mut link, 2, 50);
+        // Red four was assigned it by somebody other than Red three, so the
+        // pair is not the lead's, but Red four keeps its order: Red three
+        // looks elsewhere.
+        assigned(&mut link, 4, 50, 0);
+        assert_eq!(link.sort_edge(&roster).yields, [(2, 50)]);
+        // A pair the lead meant yields nothing.
+        let (mut link, roster) = fixture();
+        link.members.push(member(4, RED, 3, false, true));
+        lock(&mut link, 4, 50);
+        lock(&mut link, 2, 50);
+        assigned(&mut link, 4, 50, 2);
+        assert!(link.sort_edge(&roster).yields.is_empty());
+    }
+
+    #[test]
+    fn a_pair_yields_once_and_again_after_it_lets_go() {
+        let (mut link, roster) = fixture();
+        lock(&mut link, 0, 50);
+        lock(&mut link, 2, 50);
+        assert_eq!(link.sort_edge(&roster).yields.len(), 1);
+        link.tick += 1;
+        assert!(link.sort_edge(&roster).yields.is_empty());
+        link.locks.remove(&2);
+        link.tick += 1;
+        assert!(link.sort_edge(&roster).yields.is_empty());
+        lock(&mut link, 2, 50);
+        assert_eq!(link.sort_edge(&roster).yields, [(2, 50)]);
+    }
+
+    #[test]
+    fn a_pair_in_different_flights_or_a_dead_member_yields_nothing() {
+        let (mut link, roster) = fixture();
+        lock(&mut link, 3, 50);
+        lock(&mut link, 2, 50);
+        assert!(link.sort_edge(&roster).yields.is_empty());
+        let (mut link, roster) = fixture();
+        lock(&mut link, 0, 50);
+        lock(&mut link, 2, 50);
+        link.members[2].alive = false;
+        assert!(link.sort_edge(&roster).yields.is_empty());
+    }
+
+    #[test]
+    fn the_yield_is_recorded_even_when_the_seat_is_held_back() {
+        // Seat 0 was warned a moment ago; the AI member still yields.
+        let (mut link, roster) = fixture();
+        lock(&mut link, 0, 50);
+        lock(&mut link, 2, 50);
+        link.seat_warned.insert(SeatId(0), link.tick);
+        let edge = link.sort_edge(&roster);
+        assert!(edge.warnings.is_empty());
+        assert_eq!(edge.yields, [(2, 50)]);
     }
 
     #[test]

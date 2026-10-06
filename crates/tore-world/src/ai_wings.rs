@@ -1560,10 +1560,13 @@ impl AiWings {
     /// [`Self::step`]'s humans are handed over: the humans' locked targets
     /// (slice G2), which its engagement table counts as attacks on the wing's
     /// behalf, and the tracks assigned wingmen fly toward while their own
-    /// sensors do not hold the aircraft they were sent after (slice G3b). The
-    /// step consumes them, so the world sets them before every step, after
-    /// combat has read the sensors.
+    /// sensors do not hold the aircraft they were sent after (slice G3b), and
+    /// what the AI leads share and sort from: the bandits each side knows and
+    /// each member's last published state (slice G4). The step consumes
+    /// them, so the world sets them before every step, after combat has read
+    /// the sensors.
     pub fn set_link(&mut self, link: &crate::datalink::DataLink) {
+        let (bandits, states) = link.lead_input();
         self.mission.set_link(tore_sim::ai::link::LinkInput {
             humans: link
                 .human_engagements()
@@ -1574,7 +1577,16 @@ impl AiWings {
                 })
                 .collect(),
             pursuits: link.pursuits(),
+            bandits,
+            states,
         });
+    }
+
+    /// `actor` and a flightmate hold one bandit the lead did not mean: the AI
+    /// actor leaves it alone for ten seconds when it has another to take
+    /// (slice G4). `false` for an aircraft that is no living AI actor.
+    pub fn yield_target(&mut self, actor: u32, target: u32) -> bool {
+        self.mission.yield_target(actor, target)
     }
 
     /// The remaining waypoints of the wing aircraft `plane` flies in (a human

@@ -58,6 +58,10 @@ use super::{Result, ScalarSpeed, SpeedLimits};
 #[path = "mission_observation.rs"]
 mod observation;
 
+// What an AI lead does with the flight data link (stage G, slice G4).
+#[path = "mission_leads.rs"]
+mod leads;
+
 #[cfg(test)]
 #[path = "mission_observation_tests.rs"]
 mod observation_tests;
@@ -65,6 +69,10 @@ mod observation_tests;
 #[cfg(test)]
 #[path = "link_tests.rs"]
 mod link_tests;
+
+#[cfg(test)]
+#[path = "mission_leads_tests.rs"]
+mod leads_tests;
 
 /// Fitted dispatch floor: smaller missions keep their observation state in
 /// place. The worker-count comparison probe covers preparation and joining.
@@ -179,6 +187,10 @@ pub struct MissionOutput {
     /// Wings whose lead passed to another aircraft this tick, in the order
     /// it happened.
     pub leadership: Vec<LeadershipChange>,
+    /// What the AI leads did with the flight data link this tick: targets
+    /// shared and sorted, and bandits left alone (slice G4). The world
+    /// records the assignments and voices them.
+    pub link: Vec<super::link::LinkEvent>,
 }
 
 /// A human-flown aircraft in a wing, which the leadership rule needs beside
@@ -349,6 +361,9 @@ pub struct AiActor {
     alive: bool,
     dummy: bool,
     escape_monitor: crate::ejection::Monitor,
+    /// Bandits this actor leaves alone for a while because a flightmate it
+    /// was not sorted with holds them too (slice G4).
+    yields: Vec<super::link::Yield>,
     /// Write-only record of the latest mission step. No decision reads it.
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
@@ -416,6 +431,7 @@ impl AiActor {
             ),
             alive: true,
             dummy: false,
+            yields: Vec::new(),
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })
@@ -1390,6 +1406,10 @@ pub struct AiMission {
     /// Each wing's remaining waypoints, in order, as the host last gave them
     /// ([`Self::set_wing_route`]).
     routes: Vec<(super::targeting::Side, u8, Vec<[f64; 3]>)>,
+    /// The tick each flight's AI lead last sorted its wingmen (slice G4), so
+    /// a flight sorts at most once every
+    /// [`SORT_INTERVAL_TICKS`](super::link::SORT_INTERVAL_TICKS).
+    sort_clock: Vec<super::link::SortStamp>,
     /// Write-only journal of messages between aircraft. No decision reads
     /// it; the host drains it with [`Self::take_journal`].
     journal: thought::Journal,
@@ -1424,6 +1444,7 @@ impl AiMission {
             airborne_seen: Vec::new(),
             opportunities: Vec::new(),
             routes: Vec::new(),
+            sort_clock: Vec::new(),
             journal: thought::Journal::default(),
         }
     }
@@ -2114,12 +2135,15 @@ impl AiMission {
         let link = std::mem::take(&mut self.link);
         let mut engagements =
             super::link::Engagements::new(&self.actors).with_humans(&self.humans, &link);
+        // The AI leads that took a new target this tick (slice G4).
+        let mut commits = Vec::new();
         for index in 0..self.actors.len() {
             let observed = if observations.peek().is_some_and(|(at, _)| *at == index) {
                 observations.next().map(|(_, observed)| observed)
             } else {
                 None
             };
+            let before = self.actors[index].controller.target();
             self.step_actor(
                 index,
                 world,
@@ -2134,6 +2158,10 @@ impl AiMission {
                 &mut output,
             )?;
             engagements.decided(index, &self.actors[index]);
+            let after = self.actors[index].controller.target();
+            if self.actors[index].identity.is_leader() && after.is_some() && after != before {
+                commits.push(index);
+            }
             self.journal_actor(index, tick);
         }
 
@@ -2298,6 +2326,10 @@ impl AiMission {
                 }
             }
         }
+        // A lead that took a new target gives its wingmen targets (slice
+        // G4), after the automatic releases above so a wing released this
+        // tick can take them.
+        self.lead_commits(&commits, &link, &engagements, &mut output);
         // An aircraft lost or abandoned during the tick hands over lead on
         // the same tick.
         self.refresh_leaders(world, &mut output);
@@ -2880,27 +2912,67 @@ impl AiMission {
         } else {
             &actor.assignment
         };
-        let selection = actor.mission_policy.select(
-            actor_id,
-            identity.side,
-            own.position,
-            permission,
-            &targets,
-            &protected,
-            &reports,
-            actor.controller.target(),
-            2,
-        );
+        // Slice G4: a bandit this actor yielded to a flightmate is left out
+        // of the choice while it has another to take.
+        actor.yields.retain(|y| y.until > tick);
+        for held in actor.yields.iter_mut().filter(|y| !y.announced) {
+            held.announced = true;
+            output.link.push(super::link::LinkEvent::Yield {
+                actor: actor_id,
+                target: held.target,
+            });
+        }
+        let yielded: Vec<u32> = actor.yields.iter().map(|y| y.target).collect();
+        let others: Vec<TargetView> = targets
+            .iter()
+            .filter(|t| !yielded.contains(&t.id))
+            .copied()
+            .collect();
+        let current = actor.controller.target();
+        let mut choice: &[TargetView] = &targets;
+        let mut kept = current;
+        let mut selection = None;
+        if !yielded.is_empty() {
+            let leaving = current.filter(|id| !yielded.contains(id));
+            selection = actor.mission_policy.select(
+                actor_id,
+                identity.side,
+                own.position,
+                permission,
+                &others,
+                &protected,
+                &reports,
+                leaving,
+                2,
+            );
+            if selection.is_some() {
+                choice = &others;
+                kept = leaving;
+            }
+        }
+        if selection.is_none() {
+            selection = actor.mission_policy.select(
+                actor_id,
+                identity.side,
+                own.position,
+                permission,
+                &targets,
+                &protected,
+                &reports,
+                current,
+                2,
+            );
+        }
         // The explanation reads the leash state `select` just updated.
         let explanation = actor.mission_policy.explain(
             actor_id,
             identity.side,
             own.position,
             permission,
-            &targets,
+            choice,
             &protected,
             &reports,
-            actor.controller.target(),
+            kept,
             2,
         );
         let must_rejoin = actor.mission_policy.must_rejoin();

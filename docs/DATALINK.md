@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Stage G design of 2026-10-05, for the [multiplayer plan](multiplayer-plan.md#stages).
-Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a), the player's locked target in the AI's engagement table (G2), the cues (G6) and the sort order on Alt+A (G3c, 2026-10-05) and the battle net's voice with its monitor key, Alt+N (G8, 2026-10-05). Of this page a player today meets the assignment call, the sort, the battle net (once monitored), AI wingmen that spread away from the bandit the player has locked, and the cues (the radar markers, the target window tags, the HUD brackets and the sort warning); the rest waits for its slices. It is the guide for players and agents:
+Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a), the player's locked target in the AI's engagement table (G2), the cues (G6), the sort order on Alt+A (G3c, 2026-10-05), the AI leads' share and sort with the AI's yield (G4, 2026-10-06) and the battle net's voice with its monitor key, Alt+N (G8, 2026-10-05). Of this page a player today meets the assignment call, the sort, the battle net (once monitored), AI wingmen that spread away from the bandit the player has locked, AI leads that give their wingmen targets, and the cues (the radar markers, the target window tags, the HUD brackets and the sort warning); the rest waits for its slices. It is the guide for players and agents:
 what a flight shares, who can share it, what the player sees and
 hears, and how the AI uses it. The code design and the slices that build it
 are in the [architecture guide](ARCHITECTURE.md#flight-data-link); the bytes on
@@ -285,20 +285,37 @@ acknowledged: the cues stop blinking.
   answers "cannot see the target" as before. The track is the freshest one any
   member of the side reports; if no member reports it any more, the wingman
   falls back to choosing a target as it would without the order.
-- **An AI lead assigns.** Under loose control an AI lead shares its target
-  with wingmen in formation, up to two attackers on one bandit. That is the
-  retail rule ([wing control](spec/ai.md#b43-wing-commands-and-formation-variation)
+- **An AI lead assigns (built, slice G4, 2026-10-05).** When an AI lead takes
+  a new target, on loose control, it gives its wingmen targets, one of two
+  ways. If its flight has not sorted for 30 seconds and the side knows another
+  bandit within 40 nm of the lead, it **sorts**: each fit wingman is dealt a
+  different bandit, at most two on one, the lead's own left out, by the same
+  rule as your Alt+A. Otherwise it **shares**: its own target goes to the
+  wingmen that have no target of their own, up to two attackers on the bandit
+  with the lead counted as one, so it gives one wingman the target. The share
+  is the retail rule ([wing control](spec/ai.md#b43-wing-commands-and-formation-variation)
   and its attacker allowance, [B41](spec/ai.md#b41-target-retention-eligibility-and-ranking)),
-  specified but never connected until now. An AI lead
-  sorts instead when it commits and knows of two or more bandits, at
-  most once every 30 seconds. Its assignments are radio calls like a human
-  lead's.
-- **The sort warning.** When two members of a flight lock the same bandit and
-  neither was assigned it, the AI member with the higher member number looks
-  for another target and leaves that bandit alone for 10 seconds, if another
-  is eligible. A human is never moved.
-- **Member state.** An AI lead skips wingmen it knows to be Winchester, at
-  bingo fuel or worse, or heavily damaged.
+  specified but never connected until now. Under medium or tight control the
+  lead gives nothing. A wingman takes the target as it takes your Engage
+  order, but it keeps its own mission role, so when the target is gone it
+  picks again by itself (your order leaves it idle until your next one). Only
+  released AI wingmen on the free engagement take targets: escorts, patrols,
+  wingmen that are landing or going home hurt, and human wingmen are left
+  alone. Each target given is an assignment (a flightmate sees the lock
+  numbers and the brackets) and a radio call in the lead's voice, "Two, attack
+  bandit, bearing 270, 15 miles, angels 20", heard by the humans in the lead's
+  flight, 3.5 seconds apart when it gives several. The battle net does not
+  carry an AI lead's calls yet.
+- **The sort warning, and the yield (built, slice G4).** When two members of a
+  flight lock the same bandit and the lead did not mean it, the AI member
+  looks for another target and leaves that bandit alone for 10 seconds, if
+  another is eligible, and keeps the bandit if it is the only one. Of two AI
+  members the one with the higher member number yields; an AI member that was
+  assigned the bandit never does; a human is never moved. After the ten
+  seconds the AI keeps whatever it took.
+- **Member state (built, slice G4).** An AI lead skips wingmen it knows to be
+  Winchester, at bingo fuel or worse, or heavily damaged, as the picture last
+  published them: it gives them nothing, in a share or a sort.
 
 ## Frequencies
 
@@ -377,8 +394,13 @@ before the merge. In order:
 3. Wingmen take assignments by link (built, G3b): they pursue a target only a
    flightmate's track holds, where they used to refuse it.
 4. AI leads share and sort, and AI members move off a bandit when the
-   sort warning fires.
-5. The cues are drawn (built, G6): the flightmates' lock numbers, the tags and the sort warning show in a flight with AI wingmen; the assignment cues wait for the lead's assignments (G3a).
+   sort warning fires (built, G4). A lead that takes a new target gives its
+   wingmen targets, so in a fight the leads' wingmen choose differently, and a
+   yielding wingman takes a second-best bandit for ten seconds. Targets,
+   launches and kills move wherever an AI-led wing under loose control has
+   idle wingmen or known bandits, and the radio journal gains the leads'
+   calls.
+5. The cues are drawn (built, G6): the flightmates' lock numbers, the tags and the sort warning show in a flight with AI wingmen, and now the assignments of an AI lead too.
 6. Recordings gain the `datalink.*` events (built, G9).
 
 The new keys (Alt+A and Alt+N, both built) change nothing until pressed, and the

@@ -31,7 +31,11 @@ use super::{Assignment, Damage, DataLink, Entry, Fuel, MemberStatus, Track, Weap
 use crate::ai_wings::{AiWings, ENEMY_SIDE, FRIENDLY_SIDE};
 use std::collections::BTreeMap;
 use tore_sim::{
-    ai::{launch::Side, link::Pursuit, wing::PlayerOrder},
+    ai::{
+        launch::Side,
+        link::{MemberState, Pursuit, SideBandits},
+        wing::PlayerOrder,
+    },
     datalink::sort::{self, Bandit, Wingman},
 };
 
@@ -54,6 +58,17 @@ pub struct SortPlan {
     pub given: Vec<SortPick>,
     pub skipped: Vec<u32>,
     pub left: Vec<u32>,
+}
+
+/// A target an AI lead gave one of its wingmen (slice G4), the order being
+/// the share ([`PlayerOrder::EngageMyTarget`]) or a sort
+/// ([`PlayerOrder::Sort`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeadAssignment {
+    pub lead: u32,
+    pub receiver: u32,
+    pub target: u32,
+    pub order: PlayerOrder,
 }
 
 /// Why an assignment ended.
@@ -181,20 +196,7 @@ impl DataLink {
         lead_target: Option<u32>,
     ) -> Option<SortPlan> {
         let lead = self.member(sender)?;
-        let known: Vec<Bandit> = self
-            .side_tracks(lead.flight.side)
-            .into_iter()
-            .filter(|track| self.member(track.target).is_none_or(|m| m.alive))
-            .map(|track| {
-                let age = self.tick.saturating_sub(track.observed) as f64 / TICKS_PER_SECOND;
-                Bandit {
-                    id: track.target,
-                    position: std::array::from_fn(|axis| {
-                        track.position[axis] + track.velocity[axis] * age
-                    }),
-                }
-            })
-            .collect();
+        let known = self.known_bandits(lead.flight.side);
         let wingmen: Vec<Wingman> = self
             .members
             .iter()
@@ -231,6 +233,50 @@ impl DataLink {
             skipped: sorted.skipped,
             left: sorted.left,
         })
+    }
+
+    /// The hostile aircraft `side`'s pictures hold, each carried forward at
+    /// its own velocity to the tick of the last observation and without any
+    /// known to be dead, in target id order: what a sort deals out.
+    pub fn known_bandits(&self, side: Side) -> Vec<Bandit> {
+        self.side_tracks(side)
+            .into_iter()
+            .filter(|track| self.member(track.target).is_none_or(|m| m.alive))
+            .map(|track| {
+                let age = self.tick.saturating_sub(track.observed) as f64 / TICKS_PER_SECOND;
+                Bandit {
+                    id: track.target,
+                    position: std::array::from_fn(|axis| {
+                        track.position[axis] + track.velocity[axis] * age
+                    }),
+                }
+            })
+            .collect()
+    }
+
+    /// What the AI leads read of the picture (slice G4): each side's known
+    /// bandits and every member's last published state.
+    pub fn lead_input(&self) -> (Vec<SideBandits>, Vec<MemberState>) {
+        let bandits = [(Side::Friendly, FRIENDLY_SIDE), (Side::Enemy, ENEMY_SIDE)]
+            .into_iter()
+            .map(|(side, ai_side)| SideBandits {
+                side: ai_side,
+                bandits: self.known_bandits(side),
+            })
+            .filter(|known| !known.bandits.is_empty())
+            .collect();
+        let states = self
+            .pictures
+            .iter()
+            .flat_map(|picture| picture.status.iter())
+            .map(|status| MemberState {
+                plane: status.plane,
+                winchester: status.weapons == Weapons::Winchester,
+                bingo: status.fuel >= Fuel::Bingo,
+                heavy_damage: status.damage == Damage::Heavy,
+            })
+            .collect();
+        (bandits, states)
     }
 
     /// The state `plane` last published to its flight's picture.
@@ -737,6 +783,63 @@ mod tests {
         );
         link.assign(100, 0, PlayerOrder::Disengage, &[2], None);
         assert!(link.assignment(2).is_none());
+    }
+
+    // Slice G4: what the AI leads read of the picture.
+
+    #[test]
+    fn the_leads_input_holds_each_sides_known_bandits_and_every_members_state() {
+        let mut link = sorting();
+        link.pictures[0].status = vec![
+            MemberStatus {
+                plane: 1,
+                weapons: Weapons::Winchester,
+                fuel: Fuel::Normal,
+                damage: Damage::None,
+            },
+            MemberStatus {
+                plane: 2,
+                weapons: Weapons::Missiles,
+                fuel: Fuel::Bingo,
+                damage: Damage::Heavy,
+            },
+        ];
+        link.pictures
+            .push(picture(ENEMY, vec![track(10, 1, 90, [7. * NM, 0., 0.])]));
+        let (bandits, states) = link.lead_input();
+        // Friendly aircraft 10, 11 and 12 are the friendly side's bandits; the
+        // enemy side knows friendly plane 1.
+        assert_eq!(bandits.len(), 2);
+        assert_eq!(
+            bandits[0].bandits.iter().map(|b| b.id).collect::<Vec<_>>(),
+            [10, 11, 12]
+        );
+        assert_eq!(bandits[0].side, crate::ai_wings::FRIENDLY_SIDE);
+        assert_eq!(bandits[1].side, crate::ai_wings::ENEMY_SIDE);
+        assert_eq!(bandits[1].bandits[0].id, 1);
+        assert_eq!(states.len(), 2);
+        assert!(states[0].winchester && !states[0].bingo && !states[0].heavy_damage);
+        assert!(!states[1].winchester && states[1].bingo && states[1].heavy_damage);
+        assert!(states[0].skipped() && states[1].skipped());
+        // A side that knows nothing has no row, and the dead are not bandits.
+        link.members[3].alive = false;
+        let (bandits, _) = link.lead_input();
+        assert_eq!(
+            bandits[0].bandits.iter().map(|b| b.id).collect::<Vec<_>>(),
+            [11, 12]
+        );
+        link.pictures.truncate(1);
+        assert_eq!(link.lead_input().0.len(), 1);
+    }
+
+    #[test]
+    fn the_known_bandits_are_the_same_the_sort_deals_from() {
+        let link = sorting();
+        let known = link.known_bandits(Side::Friendly);
+        assert_eq!(known.len(), 3);
+        // Carried forward at 10 ft/s east to the tick of the picture.
+        assert_eq!(known[0].position, [15. * NM, 0., 10. * NM]);
+        assert!(link.known_bandits(Side::Enemy).is_empty());
     }
 
     // Slice G3b: the picture's side of an assignment reaching the AI.

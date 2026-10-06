@@ -373,6 +373,59 @@ def order_sort_check(wingmen: list[int], enemies: list[int], lead: int) -> Calla
     return check
 
 
+def datalink_lead_sort_check(wing_size: int, per_side: int, player: int = 0) -> Callable[[str], list[str]]:
+    """An AI lead's share and sort (stage G4), in a fight of `per_side` aircraft
+    a side flown in wings of `wing_size` numbered in sequence, the friendly side
+    first (the scripted player is plane `player`, which leads the first wing, so
+    it is never assigned anything). Every assignment is from a lead to a member
+    of its own wing, with the order EngageMyTarget (the share) or Sort, and
+    never to the player; its target is on the other side; the share gives
+    at most one wingman a target in a tick (the lead and one wingman make the
+    two-attacker allowance); a sort puts at most two wingmen on one bandit; and
+    one lead sorts at most once in 30 seconds (3,600 ticks). At least one sort
+    must have dealt two or more wingmen a bandit each."""
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output)
+        batches: dict[tuple[int, int, str], list[tuple[int, int]]] = {}
+        for tick, kind, who, aimed, by, order, _ in ASSIGNMENT_LINE.findall(output):
+            if kind != "assign" or int(by) == player:
+                continue
+            tick, who, aimed, by = int(tick), int(who), int(aimed), int(by)
+            if order not in ("Sort", "EngageMyTarget"):
+                problems.append(f"t={tick}: plane {who} was given {aimed} by AI lead {by} with order {order}")
+            if who == player or who // wing_size != by // wing_size or who == by:
+                problems.append(f"t={tick}: plane {by} gave {aimed} to plane {who}, which is not one of its wingmen")
+            if aimed // per_side == by // per_side:
+                problems.append(f"t={tick}: plane {by} gave plane {who} the friendly aircraft {aimed}")
+            batches.setdefault((tick, by, order), []).append((who, aimed))
+        for plane in re.findall(r"^t=\d+ data link: assign plane=(\d+) target=\d+ by=(\d+) order=\w+$", output, re.M):
+            if int(plane[0]) == player:
+                problems.append(f"the scripted player was assigned a target by plane {plane[1]}")
+        sorts: dict[int, list[int]] = {}
+        dealt = False
+        for (tick, by, order), given in sorted(batches.items()):
+            if order == "EngageMyTarget":
+                if len(given) > 1:
+                    problems.append(f"t={tick}: lead {by} shared its target with {len(given)} wingmen: the allowance is two attackers")
+                continue
+            sorts.setdefault(by, []).append(tick)
+            dealt |= len(given) >= 2
+            counts = [aimed for _, aimed in given]
+            for aimed in set(counts):
+                if counts.count(aimed) > 2:
+                    problems.append(f"t={tick}: lead {by} put {counts.count(aimed)} wingmen on bandit {aimed}")
+        for by, ticks in sorts.items():
+            for first, second in zip(ticks, ticks[1:]):
+                if second - first < 3600:
+                    problems.append(f"lead {by} sorted at t={first} and again at t={second}, inside 30 seconds")
+        if not dealt:
+            problems.append("no AI lead sorted two or more wingmen onto bandits")
+        return problems
+
+    return check
+
+
 def datalink_picture_check(planes: int, designated: int) -> Callable[[str], list[str]]:
     """The flight data link's picture, as the probe prints it (`data link:`
     lines, from `--probe-player-lock` and `--probe-data-link`): every plane is
@@ -694,6 +747,13 @@ def scenarios() -> list[Scenario]:
                                           "--probe-wing-order", "400:sort"], ticks=2400,
                      expect=[r"data link: assign plane=1 target=\d+ by=0 order=Sort", r'order=Sort reply="Sort: 3 assigned'],
                      check=order_sort_check(wingmen=[1, 2, 3], enemies=[6, 7], lead=0)))
+
+    # 9a2. AI leads share and sort (stage G4): in a fight of ten against ten the
+    # AI leads of the other wings (planes 5, 10 and 15; the scripted player leads
+    # plane 0's wing) deal their wingmen bandits when they take a new target.
+    out.append(probe("datalink-lead-sort", ["--probe-fight", "10:10", "--separation", "20", "--probe-data-link"], ticks=9000,
+                     expect=[r"data link: assign plane=\d+ target=\d+ by=(5|10|15) order=Sort"],
+                     check=datalink_lead_sort_check(wing_size=5, per_side=10)))
 
     # 9b. The flight data link's picture (stage G0): members and their radar flag, the
     # player's lock from its designation, AI engagements, and a wing order to

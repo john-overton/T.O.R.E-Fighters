@@ -789,3 +789,43 @@ fn a_mission_without_actors_and_damaged_bytes_are_handled() {
         let _ = from_bytes::<AiMission>(&damaged, &models);
     }
 }
+
+#[test]
+fn the_sort_clock_and_the_yields_of_the_data_link_leads_round_trip() {
+    // Slice G4: each flight's last sort and each actor's yields are state, so
+    // a restored mission holds them and steps on as the original does.
+    let mut mission = AiMission::new();
+    mission.push(sensor_actor(1, 1, 0, [0., 20_000., 0.], 0.));
+    mission.push(sensor_actor(2, 1, 1, [800., 20_000., 0.], 0.));
+    mission.stamp_sort(Side(1), 0, 4_321);
+    mission.stamp_sort(Side(2), 1, 99);
+    assert!(mission.yield_target(2, 77));
+    assert!(mission.yield_target(2, 78));
+    let before = coded(&mission);
+    let copy = restored(&mission);
+    assert_eq!(coded(&copy), before);
+    assert_eq!(copy.last_sort(Side(1), 0), Some(4_321));
+    assert_eq!(copy.last_sort(Side(2), 1), Some(99));
+    assert_eq!(copy.last_sort(Side(2), 0), None);
+    assert_eq!(
+        copy.actor(2).unwrap().yields(),
+        mission.actor(2).unwrap().yields()
+    );
+    assert_eq!(copy.actor(2).unwrap().yields().len(), 2);
+    // A yield announced by a step is announced once, restored or not.
+    let mut original = mission;
+    let mut host = |m: &mut AiMission| {
+        let world: Vec<_> = m.actors().iter().map(|a| object(a, 1)).collect();
+        let tick = m.tick();
+        m.step(&world, &flat, TimeOfDay(tick)).unwrap()
+    };
+    step_on(&mut original, &mut host, 60);
+    assert!(
+        original
+            .actor(2)
+            .unwrap()
+            .yields()
+            .iter()
+            .all(|y| y.announced)
+    );
+}

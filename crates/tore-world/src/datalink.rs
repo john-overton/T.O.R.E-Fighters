@@ -33,14 +33,14 @@ mod view;
 mod warning;
 
 pub use ai_input::{AiInput, FlightFeed};
-pub use assign::{ClearReason, SortPick, SortPlan};
+pub use assign::{ClearReason, LeadAssignment, SortPick, SortPlan};
 pub use journal::{CAPACITY as JOURNAL_CAPACITY, Entry, Journal};
 pub use picture::{
     Assignment, Damage, Engagement, FLIGHT_TRACKS, FlightId, FlightPicture, Fuel, Lock,
     MemberStatus, PUBLISH_TICKS, SEAT_TRACKS, Source, Track, Weapons, flight_key,
 };
 pub use view::{LinkView, TrackSource, ViewTrack};
-pub use warning::{SORT_BEEP, SORT_COOLDOWN_TICKS, SortWarning};
+pub use warning::{SORT_BEEP, SORT_COOLDOWN_TICKS, SortEdge, SortWarning};
 
 use crate::{
     ai_wings::{AiWings, ENEMY_SIDE, FRIENDLY_SIDE},
@@ -150,7 +150,11 @@ impl DataLink {
     /// The step's second half, after the AI: reads each AI actor's lock and
     /// target, then ends the assignments the mission has finished and marks
     /// the ones the receiver has locked.
-    pub fn after_ai(&mut self, tick: u64, wings: Option<&AiWings>) {
+    ///
+    /// Returns the targets the AI leads gave their wingmen this step (slice
+    /// G4), recorded as assignments, for the world to voice. One that ended
+    /// in the same tick (the target is already gone) is left out.
+    pub fn after_ai(&mut self, tick: u64, wings: Option<&AiWings>) -> Vec<LeadAssignment> {
         for index in 0..self.members.len() {
             let member = self.members[index];
             if member.human {
@@ -169,7 +173,33 @@ impl DataLink {
             self.set_lock(member.plane, lock, tick);
             self.set_engagement(member.plane, target);
         }
+        let mut given = Vec::new();
+        for event in wings.map_or(&[][..], |wings| wings.last_output().link.as_slice()) {
+            if let link::LinkEvent::Assign {
+                lead,
+                receiver,
+                target,
+                order,
+            } = *event
+                && !self
+                    .assign(tick, lead, order, &[receiver], Some(target))
+                    .is_empty()
+            {
+                given.push(LeadAssignment {
+                    lead,
+                    receiver,
+                    target,
+                    order,
+                });
+            }
+        }
         self.settle(tick, wings);
+        given.retain(|g| {
+            self.assignments
+                .get(&g.receiver)
+                .is_some_and(|held| held.by == g.lead && held.target == g.target)
+        });
+        given
     }
 
     fn refresh_members(&mut self, scene: &Scene<'_>) {
