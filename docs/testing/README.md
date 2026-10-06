@@ -236,7 +236,7 @@ A lane is a family of scenarios with one file each under
 | `flight` | Ground start, takeoff, landing, every aircraft's flight, weapons, jettison, countermeasures, damage, ejection, environment | `flight.py` | [lane-flight](lane-flight.md) |
 | `ai` | One against one up to fifteen against fifteen, every theater, missions, skills, damage, wing orders, invariants on every tick | `ai.py` | [lane-ai](lane-ai.md) |
 | `replay` | Recording, playback, the Replays screen, radio and crew comms, audio start-up, input, hand-flown and mouse scripts, cheats, import errors | `replay.py` and `_replay_*.py` | [lane-replay](lane-replay.md) |
-| `net` | Multiplayer on one machine over real UDP: the dedicated server (`--check`, a flown fight, chat, the console), the local-network search, a joined game that stalls, a hosted game. Each scenario runs several programs (`tore-server`, `tore-bot`, `tore-app`) from a Python driver | `net.py` | [lane-net](lane-net.md) |
+| `net` | Multiplayer on one machine over real UDP: the dedicated server (`--check`, a flown fight, chat, the console), the local-network search, a joined game that stalls, a hosted game, host migration with bots that host (`tore-bot --host`) and stand by (`--standby on`). Each scenario runs several programs (`tore-server`, `tore-bot`, `tore-app`) from a Python driver | `net.py` | [lane-net](lane-net.md) |
 
 Each lane page lists what the lane covers, how long it takes, every bug found and
 fixed, the known failures, the behaviours that need a decision and the things
