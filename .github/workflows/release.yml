@@ -179,6 +179,44 @@ jobs:
             dist/*.dmg
             dist/*.msi
 
+      # The master server (docs/MASTER-SERVER.md) is a Linux program, so only
+      # the Linux job builds it. It builds on the same Ubuntu 22.04 runner as
+      # the game's Linux package, so its glibc floor is the same (2.35) and it
+      # runs on any current long-term Ubuntu. It is its own artifact, kept out
+      # of the game's packages-* artifact, and lands in dist/master/ so the
+      # packages upload above (dist/*.tar.gz) never picks it up twice.
+      - name: Build the master server (Linux)
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked -p tore-master
+      - name: Check the master server (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python tools/check_assets.py target/release/tore-master
+          python tools/check_runtime_dependencies.py --max-glibc 2.35 target/release/tore-master
+          target/release/tore-master --version
+      - name: Package the master server (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          name="tore-master-${TORE_BUILD_VERSION}-linux-x86_64"
+          stage="dist/stage/master/$name"
+          rm -rf "$stage"
+          mkdir -p "$stage" dist/master
+          install -m 755 target/release/tore-master "$stage/tore-master"
+          install -m 644 LICENSE "$stage/LICENSE"
+          install -m 644 THIRD_PARTY_NOTICES.md "$stage/THIRD_PARTY_NOTICES.md"
+          install -m 644 docs/MASTER-SERVER.md "$stage/MASTER-SERVER.md"
+          tar -czf "dist/master/$name.tar.gz" -C "$(dirname "$stage")" "$name"
+          (cd dist/master && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          python tools/check_assets.py "dist/master/$name.tar.gz"
+          ls -l dist/master
+      - name: Upload the master server (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: master-${{ matrix.os }}
+          if-no-files-found: error
+          path: dist/master/
+
   release:
     needs: package
     if: github.ref_type == 'tag'
@@ -194,6 +232,14 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: packages-*
+          merge-multiple: true
+          path: dist
+      # The Linux master server is its own artifact (master-*), published
+      # beside the game's packages under the same tag.
+      - name: Download the master server
+        uses: actions/download-artifact@v8
+        with:
+          pattern: master-*
           merge-multiple: true
           path: dist
       - name: List packages

@@ -28,6 +28,7 @@ What it says on the wire: [master protocol](formats/master-protocol.md).
 - [What it is](#what-it-is)
 - [What it needs](#what-it-needs)
 - [Building it](#building-it)
+  - [Downloading a release](#downloading-a-release)
 - [Running it](#running-it)
 - [The configuration file](#the-configuration-file)
 - [Running it as a service](#running-it-as-a-service)
@@ -95,9 +96,36 @@ The program is `target/release/tore-master`, one file with no libraries
 beside the system's C library. Build it where it will run, or on a system
 with an older C library than the server's: a build from a rolling
 distribution (such as the development machine's) can refuse to start on a
-long-term release ("GLIBC_2.xx not found"). *Agent proposal:* the release
-workflow also publishes a Linux `tore-master`, built on the same Ubuntu
-runner as the game, which runs on any current long-term Ubuntu.
+long-term release ("GLIBC_2.xx not found").
+
+### Downloading a release
+
+The other way to get the program is the release workflow's. Each release tag
+also publishes a Linux build of `tore-master` beside the game's packages, on
+the [releases page](https://github.com/john-overton/T.O.R.E-Fighters/releases)
+(*agent decision:* it is a separate file, not part of the game's package):
+
+- `tore-master-<version>-linux-x86_64.tar.gz`, holding `tore-master`, this
+  guide, the license and the third-party notices;
+- `tore-master-<version>-linux-x86_64.tar.gz.sha256`, its checksum.
+
+It is built on the same Ubuntu 22.04 runner as the game's Linux package and
+checked not to need a newer C library than that release's 2.35, so it runs on
+any current long-term Ubuntu (22.04 and later) without building anything:
+
+```sh
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-master-0.2.0-linux-x86_64.tar.gz
+curl -LO https://github.com/john-overton/T.O.R.E-Fighters/releases/download/v0.2.0/tore-master-0.2.0-linux-x86_64.tar.gz.sha256
+sha256sum -c tore-master-0.2.0-linux-x86_64.tar.gz.sha256
+tar -xzf tore-master-0.2.0-linux-x86_64.tar.gz
+tore-master-0.2.0-linux-x86_64/tore-master --version
+```
+
+(`v0.2.0` stands for the release you want.) A workflow run that is not a tag
+(a `release-test/...` branch, or a manual run) builds the same file as the
+`master-ubuntu-22.04` artifact without publishing it. The build is unsigned,
+like the game's. Run `--check-config` ([updating](#updating)) before it takes
+over.
 
 ## Running it
 
@@ -375,7 +403,7 @@ month, UTC:
 
 ## Updating
 
-1. Build or download the new `tore-master`.
+1. Build the new `tore-master` or [download the release's](#downloading-a-release).
 2. `tore-master --config /etc/tore-master/master.conf --check-config` with
    the new program. Read its `relay` line: from slice J3's build on it says
    `relay ACTIVE` with its limits (the default, John's choice), or `relay
@@ -464,7 +492,8 @@ his ([open questions](MULTIPLAYER.md#open-questions)); the rest follows.
 4. **Firewall:** a Linode Cloud Firewall allowing UDP 26901 and 26902 from
    anywhere and TCP 22 from home; on the machine `sudo ufw allow OpenSSH`,
    `sudo ufw allow 26901:26902/udp`, `sudo ufw enable`.
-5. **Install:** copy `tore-master` to `/opt/tore-master/`, write
+5. **Install:** copy `tore-master` to `/opt/tore-master/` (built on the
+   machine, or [downloaded](#downloading-a-release)), write
    `/etc/tore-master/master.conf` (the example above), install the unit
    ([as a service](#running-it-as-a-service)), `sudo systemctl enable --now
    tore-master`.
@@ -478,6 +507,10 @@ his ([open questions](MULTIPLAYER.md#open-questions)); the rest follows.
    set to it, and from that build on the Internet Lobby uses it.
 8. **Each month,** glance at the plan's transfer in the Linode Cloud Manager
    and the master's `relay-month=` figure.
+
+The record of the first deployment, on 2026-10-05, with its flood result and
+the manual checks still open, is
+[the deployment baseline](baselines/master-2026-10-05.md).
 
 ## When something is wrong
 
