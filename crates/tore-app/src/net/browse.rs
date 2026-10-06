@@ -611,8 +611,9 @@ pub(crate) mod testing {
                 got.unwrap()
             };
             host.send_to(&register(0), self.main).unwrap();
-            let MasterPacket::Challenge(challenge) = answer(&host, self) else {
-                panic!("no challenge");
+            let challenge = match answer(&host, self) {
+                MasterPacket::Challenge(challenge) => challenge,
+                other => panic!("no challenge: {other:?}"),
             };
             host.send_to(&register(challenge.cookie), self.main)
                 .unwrap();

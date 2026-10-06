@@ -341,7 +341,17 @@ fn a_listed_game_is_joined_directly_through_the_masters_introduction_and_flown()
     );
     // On this machine the master sees the host at its own address: the race
     // reads it as a punched hole.
-    assert_eq!(game.session().client.path(), JoinedPath::Punched);
+    assert_eq!(
+        game.session().client.path(),
+        JoinedPath::Punched,
+        "the race's targets {:?}\nMessages {:?}\nnotices {:?}\njoiner {:?}\nhost reports {:?}\nclient {:#?}",
+        request.race.targets,
+        game.screen.message_lines(),
+        game.notices,
+        game.joiner().counters,
+        game.reports,
+        game.session().client.clone_stats()
+    );
     assert!(game.session().client.chosen());
     game.fly();
     let screen = game.screen.message_lines();
