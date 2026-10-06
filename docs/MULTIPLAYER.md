@@ -292,6 +292,31 @@ watches when none is left ([architecture](ARCHITECTURE.md#the-observer-view)).
 Rejoining with a token is stage K. *Built (F2-O1, 2026-10-05):* the stream, as
 described; the live mode of the viewer is slice F2-O2's.
 
+*Designed (stage K, 2026-10-05; agent proposals awaiting John unless
+credited):*
+
+- **The token** is 128 random bits, sent when a player first joins and kept
+  by the game in its data folder (at most 32). It is good only in the session
+  that issued it, whichever machine hosts that session now, and for 24 hours
+  after its player was last connected (John, 2026-09-28). A kick voids it. The
+  game sends it by itself when it joins that session again: from Direct
+  Connection's list or the Internet Lobby, which mark such a game "Rejoin", or
+  at the address it came from.
+- **Reserved.** A player who drops (silence, a crash, quitting without ending
+  the flight) leaves its aircraft to the AI, reserved for it while it is
+  alive: its slot reads "AI (Viper away)" and nobody else takes it (John,
+  2026-09-28). A player who ends its own flight frees its aircraft. The King's
+  "Release reserved aircraft" in the Players panel frees one. A mission's end
+  clears them all.
+- **Coming back.** With its token the player is itself again: its callsign,
+  scores, lives, side and, in flight, its reserved aircraft, even when the
+  game is full. Messages say "Welcome back, Viper: your aircraft is waiting."
+  If the aircraft was lost meanwhile, the revival rules apply with the lives
+  the player had; with none (co-op's default), it watches until the mission
+  ends, John's rule.
+- A dedicated server holds reservations and takes tokens the same way, for as
+  long as it runs.
+
 ## Comms and chat
 
 When a human leads, their wing orders go to all wingmen, human or AI. Human
@@ -498,6 +523,24 @@ client's traffic would then flow through the relay. If the best candidate looks
 underpowered for the slot count, the King sees a warning. The King can instead
 pin a player as host.
 
+*Designed (stage K, 2026-10-05; agent proposals awaiting John unless
+credited):* every player's game tells the host its addresses, its system and
+processor, and how long its machine takes to step the lobby's mission for two
+seconds. The host measures who can reach whom and the round trips between
+them, and in the lobby asks the three best candidates for a one-second burst
+at the upload the game needs (28 KB/s for each other player). A candidate
+must not be relayed (John, 2026-09-28), must be reachable by every other
+player, and must not have turned off "Let my game take over hosting" in
+Options. Candidates rank by upload (passing the test first), then median
+round trip, then how open their router is, then CPU. The game stays on the
+machine it is on while that machine passes; when it does not and another
+does, it moves there in the lobby, never in flight for a better score. The
+King's Host row (setting 21) pins a player; a pinned player who leaves falls
+back to calculated, and a relayed player cannot be pinned. When no machine
+passes, the King reads why in Messages; when no other game can take over, the
+King reads "No other game can take over hosting: if you leave, the game
+ends." ([architecture](ARCHITECTURE.md#host-selection))
+
 ### Host migration
 
 When the host drops, the next-best candidate starts the server core from the
@@ -540,6 +583,44 @@ When the old and new host run the same operating system and processor type, the
 result is exactly what the old host would have computed. Across platforms it can
 differ in the last digits, which clients correct like any other prediction
 error. See the [plan](multiplayer-plan.md#host-migration-exact-checkpoints).
+
+*Designed (stage K, 2026-10-05; agent proposals awaiting John unless
+credited):*
+
+- **Who migrates.** Only a game a player hosts. A dedicated server never
+  migrates: when it stops, the game ends, as today.
+- **Standbys.** Up to two, the best candidates after the host. A standby on
+  the host's own system and processor type simulates the mission alongside
+  the host (**warm**, 15 to 40 percent of one core for 30 aircraft), checked
+  against the host every 5 seconds, and takes over at once; any other keeps a
+  checkpoint every 10 seconds and the inputs since (**cold**), paced at no
+  more than 1 Mbit/s, and catches up when it takes over. Everything the host
+  does to the mission reaches them through one journal, so a warm standby is
+  the host, bit for bit.
+- **The host is lost.** After 1.5 seconds without a word from the host, the
+  first standby takes over and every player's game moves to it with its token:
+  the same session, the same plane, its own aircraft flying on throughout.
+  The new host replays the inputs the players' games kept and catches the
+  mission up to the present. The second standby takes over only if the first
+  does not answer within 3 seconds more. Target: the game flying again within
+  5 seconds of the loss, about 2 to 3 seconds with a warm standby.
+- **What a player sees.** The HUD says "Lost contact with the host. Moving
+  the game to Hawk..." and then "The game moved to Hawk." The other aircraft
+  hold still for the gap and then jump to where they are; missiles in flight
+  fly on; the debrief keeps every kill from before. If no game can take over
+  within 15 seconds, the mission ends with "No other game could take over.
+  The host left the game."
+- **Leaving on purpose.** When the host's player leaves, the game moves to the
+  first standby at once instead of ending, a gap of a round trip or two.
+- **What moves.** Players, slots, the King's settings and crown, scores,
+  lives, reservations, tokens, the Internet Lobby listing and the relay
+  channels. A relayed player keeps its relay channel, which the master moves
+  to the new host with the listing. An observer watching with a delay waits
+  out the delay again.
+
+The [architecture](ARCHITECTURE.md#host-migration-and-rejoin) has the design
+and its slices, the [wire protocol](formats/net-protocol.md#host-migration-and-rejoin-stage-k)
+the bytes.
 
 ### Dedicated servers
 
@@ -1131,7 +1212,41 @@ Raised while planning (2026-09-28):
   file's mission and settings ([server guide](DEDICATED-SERVER.md#the-kings-settings-and-a-king)).
 - **No eligible host.** If every peer can connect only through the relay, no one
   can be the calculated host. *Agent proposal:* the King sees a plain warning
-  and can pin a relayed host anyway, or use a dedicated server.
+  and can pin a relayed host anyway, or use a dedicated server. *Designed in
+  stage K, changed:* the King reads "No other game can take over hosting: if
+  you leave, the game ends.", and a relayed player cannot be pinned either,
+  since every other player would then go through the relay
+  ([host selection](ARCHITECTURE.md#host-selection)).
+
+Raised by the stage K design (2026-10-05), each with the agent proposal the
+design is built on ([questions](ARCHITECTURE.md#questions-for-john-stage-k)):
+
+- **Standbys.** *Agent proposal:* up to two, the second a fallback.
+- **Warm standbys.** *Agent proposal:* a standby on the host's own system and
+  processor type simulates alongside the host (15 to 40 percent of one core)
+  and takes over at once; any other is cold and catches up.
+- **Checkpoint cadence and pacing.** *Agent proposal:* a cold standby gets a
+  checkpoint every 10 seconds, paced at no more than 1 Mbit/s; a warm one when
+  appointed or after a failed 5-second check.
+- **The checkpoint size levers first.** *Agent proposal:* not now; measured in
+  the stage's acceptance.
+- **What a player sees during a migration.** *Agent proposal:* the two HUD
+  lines above; the own aircraft flies on, the others hold still for 2 to 3
+  seconds.
+- **How long before the game moves.** *Agent proposal:* 1.5 seconds without
+  a word from the host.
+- **Randomness for tokens** (the plan's `getrandom` question). *Agent
+  proposal:* no new dependency; 128-bit tokens from the standard library's
+  randomly keyed hasher, which the operating system's random source keys.
+- **The calculated host in the lobby.** *Agent proposal:* the game stays where
+  it is while that machine can carry its players, and moves only when it
+  cannot and another can.
+- **Reservations.** *Agent proposal:* a drop reserves the aircraft, ending
+  one's own flight does not; an aircraft lost while its player is away brings
+  the revival rules on return.
+- **"Let my game take over hosting"** in Options. *Agent proposal:* on by
+  default.
+- **Dedicated servers never migrate.** *Agent proposal:* as stated.
 - **Lobby screens.** Retail's connection screens, Players dialog and message
   window exist in the retail media. Research whether their art can be reused, as
   the project rules prefer.

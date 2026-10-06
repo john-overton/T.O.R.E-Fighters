@@ -8027,3 +8027,684 @@ protocol version and the two message kinds at L2's merge.
 | L2 Wire | Opus | none | `crates/tore-session/src/wire/messages.rs`, `wire/samples.rs`, `wire/mod.rs` (the protocol version), `wire-golden.txt`, the wire's tests; the protocol's [compatibility section](formats/net-protocol.md#compatibility-stage-l) | The Content and Content gaps messages and the lobby state's build field, as the protocol section codes them, with the protocol version raised and the golden refreshed | Round trips of both messages at their limits; every bound refused by the writer and the reader; the decoders survive random and mutated bodies (the shared fuzz test); `wire_golden` under the new version | SAME (no app or simulation change; `--no-battery`) |
 | L3 Sessions, server and bot | Opus | L1, L2 | `crates/tore-session/src/host/content.rs` and `client/content.rs` (new) with their tests, `host/mod.rs`, `host/config.rs`, `client/mod.rs`, `src/bin/tore-bot.rs`; `crates/tore-server/src/prepare.rs`, `check.rs`, `wiring.rs`; `tools/battery_scenarios/net.py`, `tools/battery_selection.py` (rules for its new files and scenarios), `docs/testing/lane-net.md`, `docs/DEDICATED-SERVER.md`; this section | [Joining](#joining), [what the lobby offers](#what-the-lobby-offers) on the host side and [the words](#the-words): the client sends Content first; the host keeps each player's, finds the gaps, sends them, fills the build field, refuses a mission or loadout in a gap, words the unable reason in the third person; the client words its own refusal by item; `ClientConfig::content` and `HostConfig::content` (computed when not given); `tore-server --check`'s source and items and its `content` and `gaps` log lines; `tore-bot --drop-resource NAME` (a test aid that removes a resource from the bot's loaded import) and `--content-report`, and the bot printing the gaps and build lines | Simulator, synthetic imports: a player lacking an aircraft joins, every player gets the gap, the King's mission with it and a loadout with a lacking weapon are refused with the words, the player is unable for a mission that uses it with the third-person reason, and the gap closes when it leaves; a player whose item differs is treated alike; a server's file mission is not refused; two players whose builds differ and items match get the "same" line and fly. Battery: `net-content-builds`, `net-content-missing` | SAME |
 | L4 The game | Sonnet | L3, F2-L | `crates/tore-app/src/quick_mission.rs` (lobby mode only), `ordnance.rs` (lobby mode only), `lobby_screen/facts.rs`, `mod.rs`, `tests.rs`, `crates/tore-app/src/net/session.rs` and `net/hosting.rs` (passing the content); the guide's [compatibility handshake](MULTIPLAYER.md#compatibility-handshake) | The game computes its content on a worker when a multiplayer screen first opens and passes it to the client and the host; the creator dims items in a gap and says why, Accept checks; Load Ordnance refuses a weapon in a gap; the hint shows a selected player's build and platform; Messages gets the build and difference lines | Headless: the creator in lobby mode dims an aircraft and a theater in a gap, choosing one keeps the old choice and sets the notice, Accept refuses a mission with one, and single player's creator is unchanged (both covered); Load Ordnance refuses a weapon in a gap in lobby mode only; the hint and Messages lines for a build difference, a gap and an unable player; the lobby preview pictures. No windowed run is required; the lead may add one to the full run | SAME (creator and Load Ordnance change in lobby mode only) |
+## Host migration and rejoin
+
+Design for stage K of the [multiplayer plan](multiplayer-plan.md#stages),
+written on 2026-10-05 by a design agent for the lead, from a survey of the
+`multiplayer` branch at `d7244b0c`. Not built and not yet reviewed by John.
+John's decisions bind it (the guide's [decisions](MULTIPLAYER.md#decisions)):
+migration is exact; the host is calculated or pinned by the King; a relayed
+peer is never the calculated host; a dropped player's aircraft stays reserved
+for them while it is alive, and otherwise they observe until the round ends; a
+rejoin token is specific to one server and lasts 24 hours. Every other choice
+is an *agent proposal*. The specs that go with it:
+
+- the bytes: [net-protocol.md, host migration and rejoin](formats/net-protocol.md#host-migration-and-rejoin-stage-k);
+- the master: [master-protocol.md, moving a listing](formats/master-protocol.md#moving-a-listing-stage-k);
+- what players see: the guide's [host selection](MULTIPLAYER.md#host-selection),
+  [host migration](MULTIPLAYER.md#host-migration) and
+  [rejoin](MULTIPLAYER.md#rejoin-and-observers).
+
+In short:
+
+- **Only a game a player hosts migrates.** A dedicated server never does: it
+  is the host by its operator's choice, and when it stops the game ends, as
+  today. Its players still get rejoin tokens.
+- **Up to two standbys.** The host picks the best one or two other players'
+  games as standby hosts and streams them the mission: its start or a
+  checkpoint, then every tick's inputs and every other change the host makes
+  to its world, all through one door, the **journal**, so a standby's copy is
+  the host's bit for bit. A standby on the same system and processor type
+  steps its copy along (**warm**); any other keeps the newest checkpoint and
+  the journal since (**cold**).
+- **The session moves too.** Players, slots, the King's settings, the crown,
+  scores, lives, reservations, tokens, the listing and the relay channels
+  travel in the same stream as coded **state parts**.
+- **Losing the host.** After 1.5 seconds without a packet from the host, the
+  first standby takes over on the socket it already joined with, and every
+  client races its addresses and **resumes**: the same session and plane, its
+  own aircraft predicted throughout, its inputs since the standby's last tick
+  sent again. The new host steps from that tick to the present with them and
+  the mission goes on. Target: snapshots again within 5 seconds of the loss,
+  typically 2 to 3.
+- **Rejoin.** Every player gets a 128-bit token. A dropped player's aircraft
+  goes to the AI, reserved for them while it is alive, and the token brings
+  them back into it from whichever host now runs the session.
+- **Host selection.** Players' games report their addresses, their system and
+  a short CPU measure; the host measures who reaches whom, the round trips and
+  the upload, and ranks candidates by upload, then round trip, then router,
+  then CPU. The King can pin a host. A host too weak for its players is
+  warned about, and in the lobby the game moves to a machine that can carry
+  them.
+- Single player does not change.
+
+### What the survey found
+
+At `d7244b0c`, line numbers indicative:
+
+- **The host changes its world in five places.** `Host::tick` steps it with
+  the tick's mission commands and seat inputs (`World::step_with`,
+  `host/mod.rs`); scoring switches it on when a mission starts
+  (`World::set_scoring`, `host/score.rs`) and drains its facts after every
+  step (`take_score_facts`); the `ai-slot` revival cuts an AI aircraft's
+  stores between ticks (`World::cut_ai_stores`, `host/revive.rs`); and the
+  event tracker drains combat's device notes through `&mut World`
+  (`Tracker::sort`, `host/sorting.rs`). A new mission replaces the world
+  (`start_flying`, `next_mission`). Everything else only reads it, so all of
+  it fits behind one door.
+- **The session keys people by connection.** `Host::peers` is a
+  `BTreeMap<ConnectionId, Peer>`; revivals hold seats and pending revivals by
+  connection (`revive::Revivals::held`, `pending`), and scores note what each
+  connection was last sent. Scores and lives are already kept by a player's
+  join order (`lobby::Entry::order`), which no later connection reuses. A
+  migration gives every player a new connection, so the join order becomes
+  the player's identity.
+- **What a host keeps beside the world**, each marked "for stage K" by the
+  slice that built it: the settings store, the court (slot locks, sides by
+  callsign), scoring, revivals (lives, held seats, side starts, spawned
+  planes), the observers' delay rings, the lobby entries, the crown and the
+  house, the mission's number and texts. The listing's token and the relay
+  channels live outside `Host`, in the hosting thread's `HostListing`
+  (`tore-net`, `master/rendezvous.rs`).
+- **The house's leaving ends the game** (`Host::closed`, `host_left`), and
+  nothing reconnects: a client whose host goes silent closes after the
+  transport's 5 seconds. A game joined by address binds one address family on
+  a port the system picks (`Join::to`, `net/session.rs`); a join through the
+  master binds a dual-stack `ServerSocket`.
+- **The client keeps 2 seconds of inputs** (`prediction::HISTORY_TICKS`, 240),
+  and Accepted already carries a session id, drawn once per host
+  (`host::session_id`).
+- **The master pins a relay channel to an address.** A listing moves to a new
+  address when a Heartbeat or Keep with its token arrives from one, at most
+  once a minute (`tore-master`, `master.rs`), but its channels keep the old
+  host address (`relay.rs`, `Channel::host`).
+- **Randomness.** Every secret today is a fresh `RandomState`'s SipHash of a
+  counter (`tore-net`, `entropy.rs`). The standard library draws those keys
+  from the operating system's random source, so the values cannot be
+  predicted without them.
+- **Checkpoints are ready** ([exact checkpoints](#exact-checkpoints)): written
+  in 1 to 8 ms, restored in 2 to 9 ms over a world built fresh in 40 to 80 ms,
+  up to 1.0 MB in a 15 against 15 furball, and re-stepping costs what the
+  ticks cost: 0.3 to 6 seconds for 10 seconds of mission
+  ([baseline](baselines/checkpoint-2026-10-05.md)).
+
+### Roles
+
+| Role | Who | What it does |
+| --- | --- | --- |
+| Host | The game that runs the mission: the house, or the game it moved to | Runs the mission, chooses its standbys and streams them the mission and the session |
+| Standby | Up to two other players' games, ranked by [host selection](#host-selection) | Holds the mission and the session; the first takes over when the host is lost |
+| Player | Every connection, the standbys included | Reports its addresses and what it can do, keeps 10 seconds of its inputs, resumes with whichever host takes over |
+| Dedicated server | `tore-server` | Never migrates and appoints no standby; issues tokens and holds reservations |
+
+```mermaid
+flowchart LR
+  host["Host<br/>the mission at 120 Hz"]
+  s1["Standby 1, warm<br/>steps the journal"]
+  s2["Standby 2, cold<br/>checkpoint and journal"]
+  p["Players"]
+  host -->|"journal, state parts, checks"| s1
+  host -->|"journal, state parts,<br/>a checkpoint every 10 s"| s2
+  host -->|"snapshots and the succession"| p
+  p -->|"inputs, each kept 10 s"| host
+  s1 -.->|"takes over when<br/>the host is lost"| p
+```
+
+Standbys are players too: they fly, and their games draw the mission like any
+other client's.
+
+### The journal: one door into the world
+
+Every change the host makes to its `World` goes through one type,
+`host::journal::Driver`, which owns the world, lets the rest of the host read
+it (`Deref<Target = World>`), and records each change as it makes it. Nothing
+else in the host holds `&mut World`.
+
+| Record | When | Applied as |
+| --- | --- | --- |
+| Flight | A mission starts flying (`start_flying`), and each next one | `World::new(spec, resources, Seating::Open)` from the flight's spec text, which every player already holds |
+| Tick | Every tick | The changes before the step (the scoring switch, an `ai-slot` revival's store cut), `World::step_with` with the tick's mission commands and seat inputs, then the drains every tick makes (score facts, device notes) |
+| Ended | The mission ends | The world is dropped |
+
+A tick is one function, `tore_session::journal::apply_tick(world, &tick, out)`,
+which the host calls to step and a standby calls to replay, so the two cannot
+drift. It returns what the drains took: the host uses the score facts for its
+tallies and the device notes for its events; a standby discards them or feeds
+its own tracker. Each seat's input is recorded as the host stepped it: the
+quantized controls, the commands in order, the view for lag compensation, and
+the number of the last command applied. Mission commands (Take, GiveBack,
+Abandon, Revive with its spawn) are recorded as given.
+
+The journal's coders use the [checkpoint trait](formats/checkpoint.md#coding-rules)
+(`tore_sim::checkpoint::Checkpoint`), so every field is named: a field added to
+`SeatInput`, `SeatCommand`, `SeatView` or `Spawn`, or a variant added to
+`MissionCommand`, fails to compile until the journal codes it. Each seat's
+input is coded against the same seat's previous recorded input, across
+records (the stream is ordered and reliable), so an unchanged control costs a
+bit. *Estimate:* 2 to 5 bytes a seat a tick, about 1 to 4 KB/s with four to
+eight humans and about 15 KB/s with 30; slice K3 measures it.
+
+This settles the two orderings the [checkpoint format](formats/checkpoint.md#restoring)
+leaves to stage K: the host takes a checkpoint between ticks, after the
+drains, and a standby turns scoring on only by replaying the record that did,
+never by calling `World::set_scoring` itself.
+
+### What moves with the host
+
+| What | How it travels | Holds |
+| --- | --- | --- |
+| The world | A Flight record or a checkpoint, then the journal | Everything in the [checkpoint](formats/checkpoint.md#what-it-holds-and-what-it-leaves-out); bit for bit on one class |
+| Players | State part *players* | By join order: callsign, lobby id, platform, path, lobby entry (slot, loadout, ready, unable), King, house, seat and plane, watching or away |
+| The session | State part *session* | The session id; the session's clock (seconds since it began, for token expiry); the settings store with the name and password; the lobby's and the flight's mission texts and number; the phase and its timers; the join counter and the next lobby id |
+| The court | State part *court* | Slot locks, sides by callsign |
+| Scores | State part *scores* | Tallies by player and side, who last flew each plane. What each connection was last sent is not moved: the new host sends Scores to everyone at once |
+| Revivals | State part *revivals* | Lives and losses by player; seats held for players whose plane is lost, and revivals asked for, both by player rather than connection; side starts; spawned planes |
+| Rejoin | State part *rejoin* | Tokens with their expiry, and reservations ([rejoin](#rejoin-tokens-and-reservations)) |
+| Host selection | State part *candidates* | Each player's report and measurements, the address the host sees it at, and the pinned host, so the new host punches every player and appoints standbys at once |
+| Listing | State part *listing*, opaque to `Host` | The master's address, the listing id and token, the relay channels and their keys. The hosting thread hands it to its `Host` whenever it changes; the new hosting thread resumes its listing from it ([reaching the new host](#reaching-the-new-host)) |
+
+**Not moved:** the observers' delay rings (8 MB at a minute's delay: a delayed
+observer's stream starts again and waits out its delay), the connections' wire
+state (every player starts a new [flight](formats/net-protocol.md#flights)),
+chat and request rates, the tick-cost figures and the logs, and the event
+tracker, which the new host builds from its world: a gun burst already firing
+at the takeover gets no closing event, and clients drop open bursts with their
+old flight.
+
+**Coding.** Each part is coded whole with the checkpoint trait and its macros,
+in a child module beside the state it codes (`host/king_state.rs` beside
+`king.rs`, as stage H's `*_checkpoint.rs` files sit beside theirs), so a field
+added to the court, the scores or the revivals fails to compile until it is
+coded or skipped with its class. Connection ids belong to one host and are
+coded as join orders. A part goes into the stream right after the tick in
+which it changed, never later, so the parts a standby holds always match the
+tick its journal has reached. Sizes: a few hundred bytes to a few KB each; the
+players part is the largest with every loadout (about 64 bytes a player, up to
+1.3 KB for one 64-station cheat loadout).
+
+### Standbys
+
+**Appointing.** The host keeps up to two standbys, the two best
+[candidates](#host-selection) other than itself. A standby is replaced only
+when it leaves or stops being eligible, never for a slightly better score,
+since a new standby mid-flight costs a checkpoint. The host sends Appoint,
+then the world: nothing in the lobby (it has no world to carry), the Flight
+record when a mission starts, a checkpoint when a standby is appointed in
+flight. A standby is **ready** once it holds a world at a tick the journal
+continues from. Every player is sent the ready standbys and their addresses
+(the **succession**).
+
+**The stream** is one ordered, reliable stream of
+[standby records](formats/net-protocol.md#the-standby-stream) on the standby's
+own connection: Appoint, Dismiss, Flight, Checkpoint begin and chunks, Ticks
+(a snapshot interval of journal ticks, sent with the snapshots), State,
+Check, Ended and Handover. Order is what keeps it simple: any prefix of the
+stream a standby holds is consistent.
+
+**Warm and cold.** A standby whose **class** (the platform codes and the
+processor architecture) matches the host's is **warm**: a thread of its game
+steps its copy with each Ticks record as it arrives, a few ticks behind the
+host, and costs what hosting costs (1.2 to 3.4 ms a tick for 30 aircraft on
+the development machine, 15 to 40 percent of one core). Any other standby is
+**cold**: it keeps the newest checkpoint and the journal since, and steps
+them only when it takes over. A warm standby that falls 2 seconds behind (a
+slow machine, a long frame) drops its copy and is cold until its next
+checkpoint.
+
+| | Warm | Cold |
+| --- | --- | --- |
+| Receives | The Flight record or one checkpoint, then the journal and the parts | The journal and the parts, and a checkpoint every 10 seconds (1,200 ticks, the plan's setting) |
+| Checked by | A Check every 5 seconds (600 ticks): an FNV-1a 64 hash of the host's checkpoint at that tick, which the standby compares with its own at the same tick. A mismatch is logged and asks for a checkpoint; the standby is cold until it arrives | Each checkpoint's CRC-32 |
+| Takes over | At once: its world is at the last tick it received | After a restore (2 to 9 ms) and the journal since the checkpoint (0.3 to 6 seconds for 10 seconds of mission) |
+| Host upload | The journal and the parts, a few KB/s; a checkpoint only when appointed in flight or after a mismatch | The same, plus 6 to 100 KB/s of checkpoints ([measured](baselines/checkpoint-2026-10-05.md)) |
+
+The check costs the host one checkpoint every 5 seconds (1 to 8 ms). It is
+also the proof that two machines of one class really compute alike: if they
+do not (a system library taking another instruction path, say), the checks
+find it within 5 seconds and the standby carries on cold.
+
+**Pacing.** A checkpoint goes in chunks of 4 KB, at most four unacknowledged
+at once, so the standby's own reliable messages (its lobby, names and chat,
+which share the ordered channel) never wait behind more than 16 KB. The rate
+is the checkpoint's size over 8 seconds, at least 32 KB/s and at most 128
+KB/s (1 Mbit/s) per standby, so the furball's 1.0 MB fits the 10-second
+cadence. A cold checkpoint still going out when the next is due delays the
+next; a checkpoint is never dropped half-sent. Ticks and State records are
+never paced.
+
+**Status.** At most twice a second a standby reports the newest tick it
+holds, whether it is ready, warm or cold, its mean step cost, the last check's
+result and whether it needs a checkpoint. The host's log and status line show
+each standby.
+
+**On the standby's side** (`tore_session::standby`): a state machine that takes
+the records in order, builds the fresh world (`World::new` from the flight's
+spec, which it holds as a player from the Mission and Flight loadouts
+messages), assembles and restores checkpoints, replays ticks with
+`journal::apply_tick`, keeps the state parts by id, checks the hashes and
+reports. A worker thread runs it, in the game and in `tore-bot`, never on the
+frame loop. It keeps one fresh world built ahead (40 to 80 ms), so a restore
+never waits for a build.
+
+### Losing the host
+
+```mermaid
+sequenceDiagram
+  participant H as Host
+  participant S as Standby 1
+  participant C as Client
+  H->>S: Journal and state parts, every snapshot interval
+  H->>C: Snapshots and the succession
+  Note over H: The host is lost
+  Note over S,C: 1.5 s without a packet from the host
+  S->>S: Take over at the last tick it holds (T)
+  C->>S: Connect requests to every address in the succession, with the token
+  S->>C: Accepted, the same session id
+  C->>S: Resume: the newest tick it predicted
+  S->>C: Resumed: seat, plane, tick T, the plane's exact state
+  C->>S: Backlog: its inputs from T on
+  S->>S: Steps from T to the present with them
+  S->>C: Snapshots again
+```
+
+**Detection.** A host sends every player at least 10 packets a second from a
+thread no window can hold, so 1.5 seconds of silence means the host, or the
+network to it, is gone. A client that hears nothing from its host for 1.5
+seconds keeps the connection open and races the succession; whichever answers
+first wins: the old host (the race stops) or a new one. A client with no
+ready standby waits out the transport's 5 seconds, as today, and its mission
+ends with "The host left the game."
+
+**Who takes over.** Standby 1, after 1.5 seconds without the host. Standby 2
+waits 3 seconds more, racing standby 1 as a client meanwhile, and takes over
+only if standby 1 has not answered, so a second host never starts beside a
+live first. A standby that is not ready never takes over; it joins whoever
+does.
+
+**Taking over:**
+
+1. The standby replays what it holds to its end, tick T (a cold one restores
+   its checkpoint first).
+2. It builds a `Host` with `Host::resume` from the world and the parts: the
+   session's id and clock, the settings, court, scores, revivals, tokens,
+   reservations and candidates; every player of the players part **absent**
+   until it resumes; an event tracker built from the world; its own player as
+   the house. Its game's client switches to the in-process link, and a
+   hosting thread takes the socket the standby joined with
+   ([reaching the new host](#reaching-the-new-host)).
+3. It sends Taken over to the old host on the connection its client still
+   holds, in case the old host is alive, and punches every player's addresses.
+4. It holds its clock at T for the **resume window**: until every seated
+   player has resumed, at most 1.5 seconds.
+5. It steps from T to the **present** as fast as it can: each resumed seat
+   with the inputs its backlog brought, each absent seat on its last recorded
+   controls and then neutral by the
+   [stall rule](#a-stalled-game-stays-connected-ef-k). It sends no snapshot
+   meanwhile; the first goes out at the present.
+6. A player still absent 5 seconds after the takeover (the drop timeout) is
+   dropped: its plane goes to the AI, reserved for it
+   ([rejoin](#rejoin-tokens-and-reservations)).
+
+**The present** is where the old host's clock would be now. The standby's own
+client already estimates the host's newest tick from the snapshots' arrivals
+(it draws by it) and carries it forward from the last one. The new host keeps
+the old one's pace, so every client's clock and prediction stay where they
+were.
+
+**On the client** (`client::migrate`):
+
+- Its own aircraft flies on throughout: prediction never stops. It keeps 10
+  seconds (1,200 ticks) of its inputs and numbered commands for the backlog,
+  beside the predictor's 2 seconds.
+- It connects from the same socket, with its token in the Challenge answer,
+  so the new host knows the player at the handshake and admits it even when
+  full. Accepted must carry the session's id; any other ends the race for
+  that address.
+- **Resume** carries its newest predicted tick and the mission it holds.
+  **Resumed** answers with the new flight, the seat and plane, tick T, the
+  last command applied for it, and its plane's exact state at T. The client
+  compares that with its own prediction at T: equal, the rule on one class,
+  changes nothing; otherwise it restarts from it and steps its backlog again,
+  as any correction.
+- **Backlog** sends its inputs from T to its newest tick and the commands not
+  yet applied, numbered afresh for the new flight.
+- A new flight starts the wire state afresh (baselines, names, events) but
+  keeps the prediction, the clocks and the other aircraft's histories: the
+  others hold still through the gap and then jump to the present, as after a
+  [stall](#a-stalled-game-stays-connected-ef-k).
+- A player in the lobby resumes into the lobby, and an observer's watch starts
+  again. The mission is built again only when its number or text differs.
+
+**The old host.** A host that receives Taken over, or that loses every remote
+player at once for 1.5 seconds while it had a ready standby, asks standby 1
+whether it hosts now (a [Reach](formats/net-protocol.md#reach-and-reach-answer)
+from the game port). Until it learns so it flies on, privately if it is cut
+off, its own player included. Once a new host answers, its hosting thread
+stops without a word to anyone, hands the socket back to its game, and the
+game's client resumes with the new host like any other: "Your connection
+dropped; the game moved to Hawk's machine." A network split that leaves two
+halves alive is not healed: each half flies on with its AI (a known limit).
+
+**Leaving on purpose.** When the house leaves, or the host moves in the lobby,
+the host hands over instead of ending the game. It ends the leaving player's
+flight as usual (the debrief, the plane to the AI), sends standby 1 a Handover
+after its last tick and every player Host moving, and stops stepping. Standby
+1 takes over at once and every client races it at once, so the gap is a round
+trip or two and a few ticks of fast-forward. With no ready standby the house's
+leaving ends the game as today, and the King reads beforehand "No other game
+can take over hosting: if you leave, the game ends."
+
+**The timeline**, with a warm standby (estimates; slices K4 and K10 measure
+them):
+
+| Step | Time |
+| --- | --- |
+| Detection | 1.5 s |
+| Takeover: replay to its end, build the host, hand over the socket | under 0.1 s warm; cold, a restore and up to 10 s of journal: 0.3 to 6 s |
+| Every client connects (it has raced every 250 ms since the 1.5 s) and resumes | 2 to 3 round trips |
+| Fast-forward from T to the present | about 2 s of ticks at 1 to 5 ms each: 0.2 to 1 s |
+| **Snapshots again** | **about 2 to 3 s after the loss with a warm standby** |
+
+A cold standby in a furball can pass 5 seconds; that is why warm is the
+default wherever the class allows it.
+
+### Reaching the new host
+
+**The socket a game joined with is its future host socket.** Its router
+already maps it, the host and the master have seen it, and players can punch
+to it as to any host. From stage K every joined game binds a dual-stack
+`ServerSocket` on the game port (26900, or the setting) when that port is
+free, and on any port otherwise, as a join through the master already does.
+On the game port, a game that takes over is also found by the local network's
+search and by a friend typing its address.
+
+- **A router in front of the joined socket** (`tore_net::peers`): datagrams
+  from the current host go to the client; Reach packets go to the reach
+  answerer; Connect requests, Discover queries and anything else are dropped
+  until the game hosts, and go to its host's transport after.
+- **Candidates.** Each game reports its socket's Local IPv4 and Global IPv6
+  addresses, and a Mapped one when the player's "Forward the game port on my
+  router" switch is on and it is a standby (it maps the port when appointed).
+  The host adds the address it sees the game at. The succession lists them.
+- **Reach tests.** The host sends a candidate every player's addresses and
+  every player the candidate's (Reach peers, Reach test). The candidate sends
+  each player address five
+  [Reach](formats/net-protocol.md#reach-and-reach-answer) packets 200 ms apart,
+  which open its router to them; each player sends Reach to the candidate's
+  addresses from its joined socket, and the answers give each pair's round
+  trip. Each player reports to the host which address answered and the median
+  round trip. The rows of the [punching table](#hole-punching) that punch get
+  through; a candidate some player cannot reach is not eligible.
+- **At the takeover** the new host punches every player's addresses again, and
+  each client races every address in the succession and any a Reach taught
+  it.
+- **Relayed players** cannot be reached directly. In a listed game the new
+  hosting thread resumes the listing from the listing part and heartbeats from
+  its own socket with the listing's token, which moves the listing and, from
+  stage K, its relay channels with it
+  ([master](formats/master-protocol.md#moving-a-listing-stage-k)). A relayed
+  player's game keeps its channel when its host is lost and connects again to
+  the same relayed address; the master forwards to the new host, which knows
+  the channel's key from the part. A game that is not listed has no relayed
+  players.
+- **The listing** moves the same way, so the Internet Lobby keeps one entry
+  and an introduction reaches the new host within a heartbeat. *Known limit:*
+  the master moves a listing at most once a minute, so a second migration
+  within the minute leaves it at the dead address until the minute is up.
+
+### Host selection
+
+**What each game reports** (Candidate, in the lobby and whenever it changes):
+whether it may host (the Options switch "Let my game take over hosting", on by
+default), its class, its candidates, its router's mapping type when it ran the
+master's [mapping test](formats/master-protocol.md#mapping-test), and a **CPU
+measure**: on a thread of its own it builds the lobby's mission once more and
+steps that throwaway copy for 240 ticks (2 seconds of mission, all AI), and
+reports the mean cost of a tick.
+
+**What the host measures:**
+
+- **Reach and round trips**, by the reach tests above, for the three best
+  candidates by the other measures, again when a player joins, and at most one
+  test every 10 seconds.
+- **Upload**, in the lobby only: the host asks the three best candidates, one
+  at a time, for a 1-second paced burst at the rate the game needs (Upload
+  test: Payload packets with a Filler section, under 1,200 bytes each). The
+  need is 28 KB/s for every other player (the stage D peak per player,
+  [measured](baselines/net-2026-09-30.md)) and 10 KB/s for each standby. A
+  candidate **passes** when 90 percent of it arrives. A player who joined in
+  flight has no upload figure and ranks below those that have one.
+
+**Eligible:** not relayed (John, 2026-09-28); reached by every other
+non-relayed player; its switch on; in a game a player hosts. **Ranked** in the
+guide's order, with *agent proposal* steps so that small differences do not
+decide: upload (a pass before a fail), then the median round trip to the
+other players in 20 ms steps, then the router (no translation or a mapped
+port; one outside port for every destination; a new one for each; unknown),
+then CPU in 0.5 ms steps, then the longest-connected. The host ranks itself
+the same way from its own figures.
+
+**The pinned host.** The King's new setting 21, `host`: `calculated` (the
+default) or a player. A pin moves the host in the lobby at once, by a
+handover; a pin made in flight applies when the lobby returns. A pinned player
+who leaves falls back to calculated, with a line. A relayed player cannot be
+pinned: "Hawk connects through the relay and cannot host."
+
+**Calculated, in the lobby.** The game stays on the machine it is on while
+that machine passes. When it does not and another candidate does, the game
+moves to the best passing one in the lobby, with a line in Messages: "The game
+moved to Hawk's machine, which can carry 12 players." It never moves in flight
+for a better score, only when its host is lost or leaves.
+
+**The warning.** The King reads it in Messages whenever the host, calculated
+or pinned, does not pass: "No machine here passed the test for 12 players:
+Hawk's carried 70 percent of what they need. Fewer players, or a dedicated
+server, will fly better." The CPU warning follows the same rule, with a
+threshold slice K6 fits from the measured 15 against 15 costs (the busiest
+minute must stay under half of one core) and records in its baseline.
+
+**No eligible host.** With no eligible candidate the host appoints no
+standby, and the King reads "No other game can take over hosting: if you
+leave, the game ends." This designs the guide's open question with its agent
+proposal.
+
+### Rejoin tokens and reservations
+
+**Tokens.** At a player's first join the host draws a 128-bit token, two
+draws from `tore_net::entropy` (the standard library's randomly keyed hasher,
+keyed from the operating system's random source), and sends it in a Token
+message. The game keeps it in its data folder (`rejoin-v1.conf`) with the
+session id, the host's addresses, the succession's, the listing id if any,
+and the callsign: at most 32 tokens, each dropped when it expires. No new
+dependency is needed (John's open question on `getrandom`).
+
+- **One server's.** A token is good only in the session that issued it,
+  whichever host runs that session now. A dedicated server's session lasts as
+  long as its process, so a restarted server knows no old token.
+- **24 hours** (John, 2026-09-28), counted from when its player was last
+  connected, on the session's clock, which moves with the host.
+- **Sent** in the Challenge answer whenever the game knows it is joining that
+  session: a migration's race; a game in Direct Connection's list or on the
+  Internet Lobby whose session id matches (both show it); or the address the
+  token came from. A game that joined by a typed address with no token and
+  learns the session from Accepted sends it in a Rejoin message instead.
+- **A kick voids** the player's token; leaving does not.
+
+**Reservations.** When a seated player is **dropped** (silence, a crash,
+quitting without ending the flight), its plane goes to the AI as today, but
+**reserved** for that player while the plane is alive: nobody else takes it,
+and its slot reads "AI (Viper away)". A player who **ends its flight** (End
+Mission) frees the plane: a reservation is for someone who did not mean to
+go. The idle-player rule ([F2-A](#the-ai-flies-an-idle-players-aircraft))
+keeps its planes in the same table.
+
+- **Rejoining** with a valid token, the player is that player again: its lobby
+  id when free, its callsign, its join order (so its scores and lives are its
+  own), its side under lock sides, and in flight its reserved plane, taken
+  back at the next tick (a Seated, a new flight). A reservation admits its
+  player even when the game is full.
+- **Lost while away.** A reserved plane that is lost ends the reservation. The
+  player rejoins as one whose plane was lost: the
+  [revival](#death-revival-and-lives) rules apply with the lives it had, and
+  with none (co-op's default `none`, or no lives left) it watches until the
+  mission ends, which is John's rule.
+- **Release.** The King's "Release reserved aircraft" (the Players panel)
+  frees a reservation; the player who comes back finds no plane and takes a
+  free slot by the usual rules.
+- **The end** of a mission clears every reservation; a player who rejoins in
+  the lobby finds its slot and loadout, as the lobby keeps them.
+- **Dedicated servers** do all of this the same way.
+
+### What players see
+
+- **During a migration**, on the HUD's message line: "Lost contact with the
+  host. Moving the game to Hawk..." and then "The game moved to Hawk." The
+  player's own aircraft flies on; the others hold still through the gap (2 to
+  3 seconds) and then jump to where they are; missiles in flight fly on. If no
+  host answers within 15 seconds: "No other game could take over. The host
+  left the game.", and the debrief.
+- **In the lobby** the house mark moves to the new host and Messages says the
+  same line.
+- **The debrief** is the world's: kills from before the migration count, and
+  Results list every pilot, as before.
+- **Rejoining:** "Welcome back, Viper: your aircraft is waiting." in Messages.
+  Direct Connection and the Internet Lobby mark a game whose session the
+  player holds a token for with "Rejoin".
+- The **net log** gains `migrate` lines (host lost, racing, resumed with whom
+  after how long) and the **host's log** standby, takeover, resume and rejoin
+  lines.
+
+### Captures, replays and telemetry
+
+- **Captures** run again offline: the race, the new connection and the resume
+  follow from the received datagrams and the clock, and the new connection's
+  nonce from the capture's seed. If the replay cannot derive one of them,
+  slice K4 adds a record for it and raises the capture's format.
+- **Converted replays** (stage E) run through a migration: the plane is the
+  same before and after, so the conversion continues across the Resumed
+  flight.
+- **Telemetry:** a report's migrations and failed migrations
+  ([Report](formats/master-protocol.md#reports)) count the migrations the game
+  resumed through and those it lost the session to.
+
+### Single player
+
+Nothing changes. The journal wraps only a host's world; single player steps
+its `World` from the frame loop as before. No slice changes simulation code,
+so each runs the quick single-player guard, and none needs the full baseline
+unless it finds it must touch `tore-world` or `tore-sim` beyond the journal's
+coders.
+
+### How stage K lands
+
+Slices, each on its own `mp/k-<topic>` branch and worktree, merged by the lead
+with the quick check per change. "Opus" slices are networking, concurrency,
+determinism or risky refactors (John's rule); the rest are Sonnet. Every slice
+adds its tests to the full suite: Rust tests in its crates, a `net` lane
+scenario for anything done through a binary (a driver in
+`tools/battery_scenarios/net.py`, a family in `tools/battery_selection.py`),
+slow tests `#[ignore]`d and listed in the "Network tests outside the battery"
+table of `docs/testing/README.md`, and a rule in `tools/battery_selection.py`
+for every new file. As in phase 2, each slice's tests go in files of their
+own, never in `host/tests.rs`. K0 takes **the next protocol version** for
+every wire change below; no later slice changes the wire without the lead.
+
+| Slice | Model | After | Owns | Work | Acceptance |
+| --- | --- | --- | --- | --- | --- |
+| K0 Wire and seams | Opus | | `tore-net`: `packet.rs` (Reach, Reach answer, the Challenge answer's token, disconnect reason 8), `server.rs` and `client.rs` (the token through `ConnectDetails` and `tore_net::ClientConfig`), `entropy.rs` (the token's draw); `tore-session`: `wire/{messages,mod}.rs`, `wire-golden.txt`, new `wire/migration_tests.rs`, new `journal.rs`, `settings.rs` (setting 21), new empty `host/{journal,standby,resume,rejoin,succession,state}.rs`, `standby/mod.rs` and `client/{migrate,rejoin,candidate}.rs`, the calls to them in `host/mod.rs` and `client/mod.rs`, the client's pass-through of standby records; `tore-world`: coders for `SeatInput`, `SeatCommand` and `SeatView` (`seats_checkpoint.rs`), `MissionCommand` and `Spawn` (new `world/commands_checkpoint.rs`) | Every packet, section, message, record and field of the [stage K wire](formats/net-protocol.md#host-migration-and-rejoin-stage-k) with its coding; `journal::Tick`, its coding and `apply_tick`, and the host stepping through `apply_tick` from the start, so there is one code path; a host's transport answering Reach for its own session (role 1); the hooks, and the empty fields on `Host` and `Client`, that each later slice fills (the journal's queue, the standbys, absent players, tokens and reservations, candidates, the migration's state), doing nothing yet; requests not built yet refused "Not available yet." | Round trip, fuzz and golden tests for every new packet, message and record; a world stepped by the host's path and a twin replaying the coded Ticks code to the same checkpoint bytes every 30 ticks for 1,200 ticks of the crowd fight; a field added to `SeatInput` fails to compile in its coder (by hand); every existing session test passes; quick check `--no-battery` |
+| K1 Journal and session state | Opus | K0 | `host/journal.rs`, new `host/journal_tests.rs`, `host/state.rs`, new `host/{lobby,king,score,revive}_state.rs` and their `mod state` lines, the world's field and its uses in `host/mod.rs`, `host/sorting.rs` (the notes as an argument), one line each in `host/score.rs` and `host/revive.rs` | The `Driver`: the world behind it and read-only elsewhere; Flight, Tick (with its changes before the step) and Ended records out of it, into a queue the standby stream (K3) drains; the parts players, session, court, scores and revivals with their coders (connection ids coded as join orders) and a changed flag each | On the network simulator a host and three bots fly the crowd fight for 5 minutes with an `ai-slot` revival, scoring on and a late joiner: the journal replayed over the Flight record's world codes to the host's checkpoint bytes every 30 ticks, and so does a checkpoint at tick N with the journal from N; each part round-trips and restores into a fresh host's structures as equal; a field added to `Court` fails to compile (by hand); quick guard |
+| K2 Standby replay | Opus | K0 | new `tore-session/src/standby/{mod,assemble,thread}.rs`, new `standby/tests.rs`, the `pub mod standby;` line | The `Standby` state machine and its worker thread, as [standbys](#standbys) describes: records in order, the fresh world and its spare, checkpoint assembly and restore, warm replay within a budget, cold mode, checks, the fall to cold, status, and handing its world and parts to a takeover | In-process, with records made by `journal::apply_tick` on the crowd fight: a warm standby equals its source at every check for 5 minutes; a cold one restored at ten moments and replayed to the end equals it; a damaged chunk is refused and asked for again; a standby starved of time goes cold and comes back warm; a mismatch injected by hand asks for a checkpoint; the thread stops cleanly |
+| K5 Rejoin tokens and reservations | Sonnet | K0 | `host/rejoin.rs`, new `host/rejoin_state.rs`, new `host/rejoin_tests.rs`, `client/rejoin.rs`, new `client/rejoin_tests.rs`, the client's token store trait, `tore-bot`'s `--token-file`, the `net-server-rejoin` scenario | Tokens drawn, sent, kept, expired and voided; the gate admitting a token holder; a rejoin restoring the player; reservations on a drop and not on End Mission; the reserved slot in the lobby state; Release; a plane lost while away; the end clearing them; all of it on a dedicated server too | Simulator: a dropped bot rejoins its reserved plane, which nobody else could take meanwhile; End Mission frees it, and so does Release; a plane lost while away gives the revival prompt, or the watch under `none`; a token 24 hours after its player left (the session's clock), from another session, or after a kick is refused in words; a full game admits the token holder; scores and lives follow the token. `net-server-rejoin`: a `tore-server`, a bot killed in flight and started again with its token file is back in its plane |
+| K6 Candidates and host selection | Opus | K0 | `host/succession.rs`, new `host/succession_state.rs`, new `host/succession_tests.rs`, `client/candidate.rs`, new `client/candidate_tests.rs`, new `tore-net/src/peers.rs` and its `pub mod` line | Candidate reports and the CPU measure; the peers router and its reach answerer; reach tests and reports; the upload test; eligibility, ranking and the succession; setting 21 and its fallback; the King's warnings; the lobby's move decision, carried out by K4's handover (a one-line call once K4 is in) | Ranking by each measure in turn; a relayed player never chosen and never pinnable; reach tests along every row of the [punching table](#hole-punching) on the NAT simulator (the eligible rows are the punching rows); an upload test on a link throttled to half the need fails and at the full need passes; the warnings' words; the pin and its fallback; the bytes of a 30-player reach test bounded |
+| K8 Listing and relay follow the host | Opus | K0 | `crates/tore-master/src/{relay,master}.rs`, new `crates/tore-master/tests/migrate.rs`, `tore-net/src/master/{rendezvous,relay,join,routed}.rs` | The master moves a listing's relay channels with it; `HostListing` exports its listing part (master, id, token, channels) and resumes from one; a relayed player's game keeps its channel when its host is lost and connects on it again | On the simulator with the real master: a listed host with a relayed and a punched player hands its listing part to another game, which heartbeats from its own port; the listing keeps its id and shows the new address in the next browse; the relayed player's new handshake over its old channel reaches the new host; the old address gets nothing more; the once-a-minute rule still holds |
+| K3 The host's standby stream | Opus | K1, K2 | `host/standby.rs`, new `host/standby_tests.rs` | Appoint and dismiss (by K6's ranking once it lands; until then the longest-connected eligible players), the records out with the snapshots, the parts after their tick, Checks every 600 ticks, cold checkpoints every 1,200, the pacing, status in, resync, a leaving standby replaced | Simulator: a host and three bots, one warm and one cold standby run in-process by K2's `Standby`, fly the crowd fight 5 minutes: the warm one matches every Check; the cold one's checkpoints arrive within their pace; a forced mismatch resyncs; a standby appointed in flight is ready within its checkpoint's pace; the stream's bytes a second recorded. Ignored, for the full run: the same on the real-data 15 against 15 mission, warm and cold |
+| K4 Takeover and resume | Opus | K3, K5 | `host/resume.rs`, new `host/resume_tests.rs`, new `standby/takeover.rs`, `client/migrate.rs`, new `client/migrate_tests.rs` | Detection, the standbys' order, `Host::resume`, absent players, the resume window, the fast-forward, Resume, Resumed and Backlog, the client's continuity, Taken over and the old host's return, the handover and Host moving | **The plan's simulator acceptance:** a host cut off from every link in a dogfight keeps running privately; the new host's world at T codes to the old host's bytes at T; every client gets snapshots again within 5 simulated seconds of the cut; missiles in flight at the cut fly on and end on the new host; kills from before the cut are in the debrief and Results. Also: a handover under 1 second; standby 2 takes over when standby 1 is cut too; an old host that comes back stops and resumes as a player; on one class, no correction of any client's own plane at the resume; a player who never resumes is dropped at 5 seconds with its plane reserved |
+| K7a Standby and takeover in the game | Opus | K4, K8 | `tore-app/src/net/{session,hosting}.rs`, new `net/standby.rs`, new `net/standby_tests.rs` | The joined socket on the game port; the peers router in the transport; the standby thread; the takeover (the socket into `HostThread::take_over`, the client onto the link, the keepalive thread stopped, the listing resumed); the house's leaving hands over; the old host's stop and resume; telemetry's counts | Real time on loopback: a hosting game, a joined game (a warm standby) and a bot; the host thread stopped abruptly: the joined game hosts, and the bot and the joined game's own player fly on within 5 seconds; a hosting game that leaves hands over; quick guard |
+| K9 Headless hosting and the net lane | Sonnet | K4, K5, K8 | `tore-session/src/bin/tore-bot.rs` (`--host FILE`, `--standby on\|off`, the migration lines), `tools/battery_scenarios/net.py`, `tools/battery_selection.py`, `docs/testing/lane-net.md`, `docs/testing/README.md` | A bot that hosts with no window, as a hosting game does; scenarios `net-migrate-kill` (a hosting bot killed by SIGKILL in a fight, three bots: each flies on within 5 seconds, the missiles in flight at the kill end on the new host, Results keep the kills), `net-migrate-handover` (the hosting bot leaves), `net-migrate-relay` (a loopback master, one bot through the relay) | The three scenarios pass twice in a row; the Python tests of their drivers |
+| K7b Migration and rejoin on the screens | Sonnet | K7a, F2-L, J5 | `tore-app/src/net/play.rs`, new `net/rejoin_store.rs` (the token file), `lobby_screen/{settings_panel,players_panel}.rs`, the Rejoin marks in `direct_screen/` and `internet_screen/`, the Options switch | The HUD and Messages lines; the token file; the Host row (calculated or a player); Release; the reserved slot's words; the Rejoin marks; "Let my game take over hosting" | `facts` tests; headless renders of the Settings page with the Host row, a reserved slot and a Rejoin mark; a windowed run through `tools/agent-run.sh`: a hosting game killed while a joined game and a bot fly; the joined game hosts and shows the line |
+| K10 Acceptance and measurement | lead, then John | all | `docs/baselines/migration-<date>.md` | The stream's bytes and the takeover's times on the real-data 15 against 15 mission, warm and cold; the lead's smoke test; then John on three machines: the hosting game killed in a fight, one player relayed if he can, one rejoin | The plan's acceptance for stage K: with real processes clients fly on within 5 seconds of the host's loss, missiles in flight continue, the debrief keeps the kills from before, and a dropped player rejoins its reserved aircraft |
+
+```mermaid
+flowchart TD
+  K0["K0 Wire and seams"] --> K1["K1 Journal and<br/>session state"]
+  K0 --> K2["K2 Standby replay"]
+  K0 --> K5["K5 Rejoin tokens<br/>and reservations"]
+  K0 --> K6["K6 Candidates and<br/>host selection"]
+  K0 --> K8["K8 Listing and relay<br/>follow the host"]
+  K1 --> K3["K3 The host's<br/>standby stream"]
+  K2 --> K3
+  K6 -.->|"ranking"| K3
+  K3 --> K4["K4 Takeover and resume"]
+  K5 --> K4
+  K4 --> K7a["K7a Standby and<br/>takeover in the game"]
+  K8 --> K7a
+  K4 --> K9["K9 Headless hosting<br/>and the net lane"]
+  K5 --> K9
+  K8 --> K9
+  K7a --> K7b["K7b Migration and rejoin<br/>on the screens"]
+  K7b --> K10["K10 Acceptance<br/>and measurement"]
+  K9 --> K10
+```
+
+**What runs at once.**
+
+1. **K0** alone: it takes the wire and places every hook.
+2. **K1, K2, K5, K6 and K8** together (four Opus, one Sonnet). Their files are
+   disjoint: K1 is the only one to edit `host/mod.rs` beyond K0's hooks, K2
+   owns the new `standby` module, K5 and K6 their own host and client modules
+   (K6 also `tore-net`'s new `peers.rs`), K8 the master and `tore-net`'s master
+   module.
+3. **K3**, then **K4**, which needs K3's stream and K5's tokens.
+4. **K7a** and **K9** together (the game; `tore-bot` and the lane), and K6's
+   one-line lobby move once K4 is in.
+5. **K7b**, then **K10**.
+
+**Beside other work.** Slices F2-A (the idle aircraft) and F2-D (the debrief)
+edit `host/away.rs`, `host/results.rs` and `host/mod.rs`; K1 changes every
+`self.world` in `host/mod.rs`, so whichever lands second rebases on the other.
+F2-A's reservation and K5's are one table: whichever lands second uses the
+other's. Slice J5 owns `net/session.rs` and `net/play.rs` now, so K7a and K7b
+follow it; K7b also follows F2-L's lobby panels. Stage L's content check is
+untouched: a standby has passed the content check as a player already.
+
+### Questions for John (stage K)
+
+The design builds as written with these recommendations; each is John's to
+change.
+
+1. **Standbys:** up to two, the second a fallback if the first is lost too.
+   *Recommended* (the plan's "one or two"; one halves the stream but leaves no
+   fallback).
+2. **Warm standbys:** a standby on the host's own system and processor type
+   simulates the mission alongside the host, which costs it 15 to 40 percent
+   of one core and makes the takeover immediate; any other standby is cold.
+   *Recommended.* Without warm standbys every takeover replays up to 10
+   seconds of mission, which in a furball passes the 5-second target.
+3. **Cadence and pacing:** a cold standby gets a checkpoint every 10 seconds,
+   paced at no more than 128 KB/s (1 Mbit/s); a warm one gets one when
+   appointed or after a failed check, with a check every 5 seconds.
+   *Recommended.*
+4. **Checkpoint size levers first** (leaving out destroyed AI actors' sensor
+   pictures, tighter flare coding): *not recommended now.* Pacing and warm
+   standbys keep the stream within the budget; K10 measures it and the levers
+   wait for a measured need.
+5. **What a player sees:** HUD lines "Lost contact with the host. Moving the
+   game to Hawk..." and "The game moved to Hawk."; the own aircraft flies on,
+   the others hold still for 2 to 3 seconds and then jump. *Recommended.*
+6. **Detection:** 1.5 seconds of silence before the game moves. Shorter moves
+   sooner but risks moving on a Wi-Fi hiccup. *Recommended.*
+7. **Randomness for tokens:** no `getrandom`; 128-bit tokens from the standard
+   library's randomly keyed hasher, which the operating system's random
+   source keys. *Recommended.*
+8. **The calculated host in the lobby:** the game stays where it is while that
+   machine passes the test for its players, and moves only when it does not
+   and another passes. *Recommended* over always moving to the best scorer,
+   which could move it whenever someone joins.
+9. **Reservations:** a drop reserves the aircraft, ending one's flight (End
+   Mission) does not; a reserved aircraft lost while its player is away
+   brings the revival rules when the player returns (under co-op's default of
+   no revival that is John's "observe until the round ends"). *Recommended.*
+10. **A switch "Let my game take over hosting"** in Options, on by default,
+    so a player on a weak connection can opt out. *Recommended.*
+11. **Dedicated servers never migrate.** *Recommended:* a server is the host
+    by its operator's choice.

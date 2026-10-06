@@ -49,6 +49,7 @@ the master.
 - [Introductions](#introductions)
 - [Relay](#relay)
   - [The relay as built](#the-relay-as-built)
+- [Moving a listing (stage K)](#moving-a-listing-stage-k) (designed)
 - [Reports](#reports)
 - [Limits](#limits)
 - [Security](#security)
@@ -571,6 +572,40 @@ sections above:
   listing or an introduction proves, so neither is fitted to a request or
   charged to the answer rate, as Meets are not.
 
+## Moving a listing (stage K)
+
+*Designed 2026-10-05; agent proposals awaiting John's review.* When a game
+that a player hosts loses its host, another player's game takes the mission
+over ([host migration](../ARCHITECTURE.md#host-migration-and-rejoin)). A
+listed game must stay one listing, at its new host's address, and its relayed
+players must reach the new host on the channels they already have. **No
+packet changes and the master protocol stays at version 1**; the master's
+behaviour changes in one place.
+
+- **The token travels with the game.** The old host gives its standbys its
+  listing part: the master's address, the listing id, the token and every
+  relay channel with its key. The new host's game never registers: it sends a
+  Heartbeat with the listing's token from its own game port.
+- **The listing moves**, as any listing moves when its token arrives from a
+  new address (the router rebound the port): the master answers with the
+  address it saw, browsers see the listing at the new address after their
+  next refresh, and introductions reach the new host from then on. The rule
+  of one move a minute per listing stands, so a second migration within the
+  minute leaves the listing at the dead address until the minute is up (a
+  known limit).
+- **Its relay channels move with it.** *New in stage K:* when a listing
+  moves, every open channel of that listing takes the new address as its
+  host end, keeping its number and key. A relayed player's game keeps its
+  channel when its host is lost and connects again on it; its frames reach
+  the new host, whose game takes them because it holds the channel's key.
+  The master sends nothing to the old address after the move. A channel's
+  idle close (30 seconds) is longer than a migration takes (under 5 seconds),
+  so a channel survives the gap.
+- **Relay open acks** after the move count from the new address, which is
+  now the listing's.
+- **Reports.** A game's report counts the migrations it went through and those
+  that failed, in the fields already there ([reports](#reports)).
+
 ## Reports
 
 Telemetry, when the game's setting allows it
@@ -593,7 +628,7 @@ mission. There is no answer; a report that is lost is lost.
 | Port mapping | 3 | 0 not tried, 1 UPnP, 2 NAT-PMP, 3 PCP, 4 tried and failed, 5 mapped but behind a second router |
 | Relayed kilobytes | 32 | A player's traffic through the relay |
 | Players by path | 6 × 8 | A host's or server's players, counted by their path |
-| Migrations, failed | 8, 8 | Host migrations in the session and how many failed (stage K; 0 until then) |
+| Migrations, failed | 8, 8 | Host migrations in the session and how many failed (stage K; 0 until then). *Designed:* the migrations a game resumed through, and those after which it found no new host |
 
 What the master keeps of a report is in the
 [operations guide](../MASTER-SERVER.md#what-the-master-keeps): daily counts,
