@@ -20,6 +20,7 @@ use crate::comms::journal::{
 };
 use crate::comms::{self, Call, Comms, Crew, Hearer, Kind, Phrase, Phrases, Route};
 use crate::seats::{Pilot, PlaneId, Roster, SeatId};
+use crate::world::replies::Reply;
 
 /// Flight colours, first flight first (spec-derived).
 pub const FLIGHTS: [&str; 8] = [
@@ -72,6 +73,9 @@ const GUN: &str = "radio-gun";
 const UNGUIDED_HIT: &str = "radio-unguided-hit";
 const OTHER_KILL: &str = "radio-other-kill";
 const COMPLAINT: &str = "radio-friendly-fire";
+/// A seat's own cooldown between two reply calls (slice F2-R): a held reply
+/// key cannot flood the flight's radio.
+pub(crate) const REPLY: &str = "radio-reply";
 
 /// Who a call is addressed to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -681,6 +685,25 @@ impl Radio {
             scene.now,
             Call::new(label, phrase, kind).after(delay).because(origin),
             &hearers,
+        );
+    }
+
+    /// A human wingman's reply key (slice F2-R): "Winchester" and the rest go
+    /// from the speaker's plane to its flight, heard by every human of it at
+    /// once under the speaker's label, and by the speaker as `YOU`. It is
+    /// routine chatter, so a seat under radio silence does not hear it. The AI
+    /// takes nothing from it. A reply from a plane that leads its flight is
+    /// refused before it gets here.
+    pub fn reply(&mut self, comms: &mut Comms, scene: &Scene, speaker: u32, reply: Reply) {
+        self.say(
+            comms,
+            scene,
+            speaker,
+            Audience::Flight,
+            reply.phrase(scene.phrases),
+            Kind::Chatter,
+            0.,
+            Origin::of(Source::Reply, Cause::Replied(reply)),
         );
     }
 

@@ -9,8 +9,8 @@
 //! wingman, one journal line each). The assignments are written as sorts. The
 //! first assignment call plays at once as the order voice, as every order
 //! call does; the rest are queued on the radio 3.5 seconds apart, one for each
-//! AI wingman (a human wingman gets the cues of its assignment and no call:
-//! that is stage F's order call to human wingmen).
+//! AI wingman. A human wingman hears its own call at once on its own channel
+//! (slice F2-R, `World::call_human_wingmen`).
 
 use super::{Cue, TickOutput, World};
 use crate::{
@@ -122,6 +122,15 @@ impl World {
             told += 1;
             self.datalink
                 .assign(tick, plane.0, order, &report.reached, Some(pick.target));
+            // A human wingman hears its own call at once, on its own channel
+            // (slice F2-R); the lead's voice and the battle net carry the AI
+            // wingmen's calls only.
+            self.call_human_wingmen(
+                plane,
+                PlayerOrder::EngageMyTarget,
+                Some(pick.member),
+                &report,
+            );
             if report.radio.is_empty() {
                 continue;
             }

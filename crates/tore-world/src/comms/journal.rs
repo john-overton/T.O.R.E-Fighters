@@ -598,6 +598,9 @@ pub enum Cause {
     Death { ejection_seat: bool },
     /// The speaker accepted the player's order.
     Reply(WingReply),
+    /// A human wingman told its flight something with a reply key
+    /// (Alt+Shift+E, W, B or H; stage F phase 2, slice F2-R).
+    Replied(crate::world::replies::Reply),
     /// The speaker's target changed: a contact report may follow.
     NewTarget { target: u32 },
     /// The speaker picked up a new target to report.
@@ -741,6 +744,7 @@ impl fmt::Display for Cause {
                 if *aircraft { "aircraft" } else { "surface" }
             ),
             Cause::Reply(WingReply::Showtime) => write!(f, "accepted \"protect me\""),
+            Cause::Replied(reply) => write!(f, "a wingman's reply key: {}", reply.text()),
             Cause::NewTarget { target } => write!(f, "new target {}", who(*target)),
             Cause::Contact {
                 target,

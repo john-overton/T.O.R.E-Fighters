@@ -174,8 +174,10 @@ impl World {
                     .trigger(plane.0)
                     .input
                     .space(down, repeat, blocked),
-                // The call to the flight is slice F2-R's.
-                SeatCommand::WingReply(_) => {}
+                // The call to the flight (slice F2-R; world/replies.rs).
+                SeatCommand::WingReply(reply) => {
+                    self.wing_reply(plane, seat, cockpit, reply, out);
+                }
                 SeatCommand::BattleNet => {
                     let message = self.comms.toggle_battle(seat);
                     out.cues.push(Cue::Message {
@@ -428,7 +430,13 @@ impl World {
             )
         });
         let outcome = match result {
-            Some(Ok(report)) => {
+            Some(Ok(mut report)) => {
+                // An attack order that only human wingmen took has no AI
+                // wingman's place to be worded from: the lead says it as the
+                // first human wingman hears it (slice F2-R).
+                if report.radio.is_empty() {
+                    report.radio = self.human_attack_stems(plane, order, recipient, &report);
+                }
                 // The lead's order becomes assignments: written for the
                 // members it reached, or cleared for them (slice G3a).
                 self.datalink.assign(
@@ -463,6 +471,9 @@ impl World {
                     };
                     self.battle_net_call(plane, words, 0., cause);
                 }
+                // Each human wingman the order addressed hears it as a radio
+                // call on its own channel (slice F2-R).
+                self.call_human_wingmen(plane, order, recipient, &report);
                 out.cues.push(Cue::OrderVoice {
                     seat,
                     stems: report.radio,

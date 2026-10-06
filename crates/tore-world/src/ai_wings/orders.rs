@@ -32,6 +32,9 @@ pub struct OrderReport {
     pub reached: Vec<u32>,
     /// The aircraft an attack order named.
     pub target: Option<u32>,
+    /// The human-flown wingmen the order addressed, which the world calls on
+    /// the radio (slice F2-R). They are in `reached` as well.
+    pub humans: Vec<u32>,
 }
 
 /// The player's aircraft as the landing-priority rule sees it.
@@ -697,13 +700,21 @@ impl AiWings {
         // The order call. The attack orders say it with the target's place as
         // the first addressed wingman hears it (or a blanket "Attack
         // bandits"); every other order says its one stem.
+        // With only human wingmen addressed, the lead still says the call: a
+        // human's place for an attack call is the world's to word, so it
+        // leaves the voice empty (slice F2-R).
         let radio = match (order, members.first()) {
-            (_, None) => Vec::new(),
+            (_, None) if humans.is_empty() => Vec::new(),
             (PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation, Some(&(_, first))) => {
                 self.assignment_stems(first, target, recipient, flight.unwrap_or(0))
             }
+            (PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation, None) => Vec::new(),
             (PlayerOrder::AttackOnContact, _) => calls::blanket_stems(),
-            _ => wing_sender.flatten().into_iter().collect(),
+            _ => wing_sender
+                .flatten()
+                .or_else(|| human_stem(order))
+                .into_iter()
+                .collect(),
         };
         let mut message = format!(
             "{}: {applied} applied, {rejected} rejected, {no_motion} without motion",
@@ -726,6 +737,7 @@ impl AiWings {
             radio,
             reached,
             target: named,
+            humans: humans.iter().map(|(_, id)| *id).collect(),
         };
         let reply = replied.unwrap_or_else(|| no_reply(order, first, &answers));
         self.journal_order(
@@ -861,9 +873,11 @@ impl AiWings {
             side: Vec::new(),
         };
         let mut reached = Vec::new();
+        let mut human_planes = Vec::new();
         for (member, id) in humans {
             human += 1;
             reached.push(id);
+            human_planes.push(id);
             answers.push(answer(id, member, Answered::Human));
         }
         for (member, id) in members {
@@ -985,6 +999,7 @@ impl AiWings {
         let report = OrderReport {
             message: format!("{label}: {}", parts.join(", ")),
             reached,
+            humans: human_planes,
             ..OrderReport::default()
         };
         let outcome = Outcome::Answered {
@@ -1088,6 +1103,24 @@ fn mission_assignment(sender: u32, order: PlayerOrder, target: Option<u32>) -> O
     }
 }
 
+/// The recording a human wingman hears for `order` when no AI wingman took it
+/// to take the state from: the stem as an AI wingman in its default state
+/// (loose control, 512 ft spacing, level) would have given it.
+fn human_stem(order: PlayerOrder) -> Option<&'static str> {
+    let horizontal = if order == PlayerOrder::Spacing {
+        wing::toggle_horizontal_spacing(512)
+    } else {
+        512
+    };
+    let vertical = if order == PlayerOrder::Stacking {
+        wing::cycle_vertical_stacking(0).ok()?
+    } else {
+        0
+    };
+    let control = wing::apply_control_side_effect(order, WingControl::Loose).ok()?;
+    sender_stem(order, horizontal, vertical, control)
+}
+
 fn sender_stem(
     order: PlayerOrder,
     horizontal: i32,
@@ -1151,7 +1184,7 @@ fn sender_stem(
     })
 }
 
-fn order_label(order: PlayerOrder) -> &'static str {
+pub(crate) fn order_label(order: PlayerOrder) -> &'static str {
     use wing::{Formation as F, PlayerApproach as A, PlayerBreak as B};
     match order {
         PlayerOrder::BugOut => "Bug out",

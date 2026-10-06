@@ -80,6 +80,8 @@ pub use commands::{MissionCommand, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod replies;
+#[cfg(test)]
+mod replies_tests;
 pub mod revive;
 #[cfg(test)]
 mod score_tests;

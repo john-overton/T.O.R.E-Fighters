@@ -1450,19 +1450,17 @@ impl App {
                 }
                 Action::None
             }
+            // The four reply keys: in a networked flight the world answers
+            // (the call to the flight, or "You lead this flight." for the
+            // plane that leads it, which succession can change); single player
+            // has no human wingman to call and says so itself.
             Command::Reply(reply) => {
                 if !self.flight_ui.frozen() {
-                    let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
-                    let leads = self
-                        .world
-                        .roster
-                        .plane(frame.plane)
-                        .is_none_or(|plane| plane.slot.member == 0);
-                    self.flight_ui.message(flight_ui::reply_answer(
-                        leads,
-                        self.flight_ui.session,
-                        reply,
-                    ));
+                    if self.flight_ui.session {
+                        self.queue(seats::SeatCommand::WingReply(reply.world()));
+                    } else {
+                        self.flight_ui.message(flight_ui::SINGLE_PLAYER_REPLY);
+                    }
                 }
                 Action::None
             }

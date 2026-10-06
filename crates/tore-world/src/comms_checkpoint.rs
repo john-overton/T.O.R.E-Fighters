@@ -23,7 +23,7 @@ use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 /// [`Comms::seat_cooldown`], in coding order. Append new keys at the end: a
 /// key not listed here makes a checkpoint fail with a named error, and a test
 /// reads the rule files to catch one that is not.
-pub(crate) const COOLDOWN_KEYS: [&str; 7] = [
+pub(crate) const COOLDOWN_KEYS: [&str; 8] = [
     "radio-bombs",
     "radio-gun",
     "radio-unguided-hit",
@@ -31,6 +31,7 @@ pub(crate) const COOLDOWN_KEYS: [&str; 7] = [
     "radio-friendly-fire",
     "crew-infrared-warning",
     "crew-radar-warning",
+    "radio-reply",
 ];
 
 fn save_key(s: &mut Saver, key: &str) -> Result<(), CheckpointError> {

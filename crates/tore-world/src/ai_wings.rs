@@ -28,6 +28,7 @@ pub use chatter::{Chatter, Contact, ContactView, FuelLevel, Member};
 mod engagement;
 pub use engagement::Preset;
 mod orders;
+pub(crate) use orders::{OrderReport, order_label};
 pub mod outcome;
 mod record;
 pub use record::DecoyRoll;

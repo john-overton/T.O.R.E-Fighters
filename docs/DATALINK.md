@@ -195,13 +195,14 @@ with no bearing, range or height (John, 2026-10-05). It makes no assignment.
 When the whole flight is addressed, the call is made once and each hearer
 hears the bearing, range and height from its own aircraft, as each hearer of a
 contact report hears its own clock position. The lead, who speaks the call,
-hears it from the first wingman addressed, the one that replies. Today only
-the human lead hears it: giving it to a human wingman's radio is stage F's
-order call (slice F2-R).
+hears it from the first wingman addressed, the one that replies. A human
+wingman addressed hears it too, on its own channel, from where its own aircraft
+is (built, slice F2-R, [orders to human wingmen](ARCHITECTURE.md#orders-to-human-wingmen-and-their-replies)).
 
 **Replies.** A wingman that takes an assignment answers as it answers
 "Engage my target" today ("Engaging", "I'm on him" and the other retail
-lines). A human wingman answers with the reply keys of stage F's phase 2.
+lines). A human wingman answers with the reply keys of stage F's phase 2
+(Alt+Shift+E, W, B and H, built in slice F2-R).
 
 **The sort warning** is a beep and a HUD line, with no voice: retail has no
 recording for "sort", "locked" or "spike".
@@ -240,7 +241,8 @@ worse, or heavily damaged is skipped. Each assignment is its own radio call,
   each AI wingman, in member order) follows 3.5 seconds after the one before
   and is heard as a radio line from your own flight position ("Red one:
   'Four, attack bandit, bearing 090, 12 miles, angels 20'"). A human
-  wingman gets no call yet: that is stage F's order call to human wingmen.
+  wingman dealt a bandit hears its own call at once on its own channel
+  (slice F2-R), not in the 3.5-second sequence.
 - The HUD line reads "Sort: 3 assigned", with ", 1 skipped" for each wingman
   left out for its state and ", 1 without a bandit" for each fit wingman that
   found every bandit already taken by two. With no bandit in reach (or none

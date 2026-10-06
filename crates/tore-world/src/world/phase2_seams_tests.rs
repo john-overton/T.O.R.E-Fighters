@@ -18,14 +18,25 @@ fn input(world: &World, commands: Vec<SeatCommand>) -> SeatInput {
     }
 }
 
+/// Slice F2-R built the reply (world/replies_tests.rs): in single player the
+/// plane leads its flight, so each key only says so and nothing else moves.
 #[test]
-fn a_wing_reply_does_nothing_until_its_slice_lands() {
+fn a_single_player_wing_reply_only_says_the_plane_leads() {
     let mut world = mission();
     let mut out = TickOutput::default();
     let replies = Reply::ALL.map(SeatCommand::WingReply).to_vec();
     let input = input(&world, replies);
     world.step(&[input], &mut out).unwrap();
-    assert_eq!(out.commanded, 0, "no cue from the command phase");
+    let said: Vec<_> = out
+        .cues
+        .iter()
+        .filter_map(|cue| match cue {
+            Cue::Message { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(said, ["You lead this flight."; 4]);
+    assert!(out.cues.iter().all(|cue| !matches!(cue, Cue::Radio { .. })));
     assert_eq!(world.tick(), 1);
 }
 

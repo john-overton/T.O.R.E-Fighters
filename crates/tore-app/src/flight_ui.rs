@@ -103,13 +103,14 @@ impl Reply {
             _ => return None,
         })
     }
-    /// The words the reply says.
-    pub fn words(self) -> &'static str {
+    /// The mission core's reply, which the seat command carries (slice F2-R).
+    pub fn world(self) -> tore_world::world::replies::Reply {
+        use tore_world::world::replies::Reply as World;
         match self {
-            Self::Engaging => "Engaging",
-            Self::Winchester => "Winchester",
-            Self::BingoFuel => "Bingo fuel",
-            Self::NeedHelp => "Need help",
+            Self::Engaging => World::Engaging,
+            Self::Winchester => World::Winchester,
+            Self::BingoFuel => World::BingoFuel,
+            Self::NeedHelp => World::NeedHelp,
         }
     }
 }
@@ -122,17 +123,11 @@ pub fn score_board_answer(session: bool) -> &'static str {
         "Score board: network games only"
     }
 }
-/// What a reply key says until the wing reply slice sends the call. A lead has
-/// no one to answer, in single player too (John, 2026-10-05).
-pub fn reply_answer(leads: bool, session: bool, reply: Reply) -> String {
-    if leads {
-        "You lead this flight.".into()
-    } else if session {
-        format!("{}: not available yet", reply.words())
-    } else {
-        format!("{}: network games only", reply.words())
-    }
-}
+/// What a reply key says in single player: the plane leads its flight and has
+/// no one to answer (John, 2026-10-05). In a networked flight the world
+/// answers, with this line for a lead and the call to the flight for a
+/// wingman (slice F2-R).
+pub const SINGLE_PLAYER_REPLY: &str = "You lead this flight.";
 /// The flight menu's bottom buttons, left to right.
 const BUTTONS: [&str; 3] = ["Resume flight", "Restart free flight", "Keyboard shortcuts"];
 /// How flight presents the shared paused menu.
@@ -2077,27 +2072,21 @@ mod tests {
         assert_eq!(ui.key("a", true, false, true, &[]), Command::None);
         assert_eq!(ui.key("n", true, false, true, &[]), Command::None);
         assert_eq!(ui.key("n", false, false, true, &[]), Command::BattleNet);
-        assert_eq!(Reply::NeedHelp.words(), "Need help");
+        assert_eq!(Reply::NeedHelp.world().text(), "Need help");
         assert_eq!(Reply::of_key("x"), None);
+        // Each key's reply is the mission core's, in wire order.
+        for (key, reply) in [
+            ("e", tore_world::world::replies::Reply::Engaging),
+            ("w", tore_world::world::replies::Reply::Winchester),
+            ("b", tore_world::world::replies::Reply::BingoFuel),
+            ("h", tore_world::world::replies::Reply::NeedHelp),
+        ] {
+            assert_eq!(Reply::of_key(key).unwrap().world(), reply);
+        }
     }
     #[test]
-    fn the_keys_answer_what_they_will_do_until_their_slices_land() {
-        assert_eq!(
-            reply_answer(true, false, Reply::Engaging),
-            "You lead this flight."
-        );
-        assert_eq!(
-            reply_answer(true, true, Reply::Winchester),
-            "You lead this flight."
-        );
-        assert_eq!(
-            reply_answer(false, true, Reply::BingoFuel),
-            "Bingo fuel: not available yet"
-        );
-        assert_eq!(
-            reply_answer(false, false, Reply::NeedHelp),
-            "Need help: network games only"
-        );
+    fn single_player_replies_say_the_plane_leads_and_the_board_says_network_only() {
+        assert_eq!(SINGLE_PLAYER_REPLY, "You lead this flight.");
         assert_eq!(score_board_answer(false), "Score board: network games only");
         assert_eq!(score_board_answer(true), "Score board: not available yet");
     }
