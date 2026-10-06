@@ -237,6 +237,20 @@ as on the wire. A cockpit's `previous_flight` is per-tick scratch: the next
 step overwrites it before reading it, so a restored cockpit starts with it
 equal to `flight`, as a decoded own plane does.
 
+One field follows the exact coding: a two-seater's second chute
+(`crew_escape`, an `Option<Escape>` by the trait, one bit when there is
+none). The wire's exact state leaves it out, since a client's prediction
+never needs it (a client draws it from the host's pilot entities, slice B5),
+but it is world state: each step of the flight steps it and tells the HUD
+when it comes down, and the picture draws it. *Built (B6, 2026-10-06):* B5
+left it out of the checkpoint too, so a world restored after an ejection
+lost the chute, and the combat section's poses, rebuilt from the flight on
+the next tick, differed from the original's: a cold standby's world differed
+from its host's, a warm standby appointed in flight failed its Checks, and a
+host taking over mid-descent lost the chute. *Agent decision:* coded here,
+in `save_flight` and `load_flight`, rather than in the exact state, so the
+wire's own-state bytes and the protocol stay as they were.
+
 ## Coding rules
 
 The trait is `tore_sim::checkpoint::Checkpoint`:
@@ -356,6 +370,7 @@ macOS); every scenario is built from synthetic fixtures, never retail data.
 | Changing weather | The single-player fingerprint mission with a weather configuration whose two layers both run the fog callback and whose first layer ends five seconds in. *Built (H8)* | The first layer active with a fog tint drawn; after the run the second layer is active | 300; 1,200 |
 | Revivals and wrecks | `World::new` open mission, three against three; seat 0's pilot killed at step 200 and revived at 201, seat 1's plane crashed at 300 and abandoned at 301, its wreck retired by hand at 400, seat 0's new plane lost at 500 and revived at 501. *Built (F2-V)* | Planes 0 and 6 abandoned (wrecks with cockpits nobody flies), plane 5 retired, planes 6 and 7 added by revivals and seat 0 in plane 7: a structure no fresh build has, restored into one | 700; 600 |
 | A human lead's order | The data link's assignment fight (`world/datalink_assign_tests.rs`): the crowd fixture's mission with a human lead (seat 0), a second human (seat 1) and two AI wingmen armed as a built mission arms them; the lead's radar on at step 10, an enemy AI aircraft designated at 40, "engage my target" at 60. *Built (H9)* | Three assignments of that target from the lead, one acknowledged by the wingman that locked it and two not yet; after the run the target is shot down and the assignments have ended | 1,000; 600 |
+| Two-seaters' crews ejected | The crowd fixture in two-seaters (PLANE flags 0x10 and 0x4, `crowd::two_seat_crowded_mission`): AI 6 ejects both its crew at step 700 (`flight::State::eject`, its row emptied), and seat 3 presses the handle twice at 740 and 780. *Built (B6)* | Four chutes in the air, two of them second crew members', both drawn; after the run each has fallen exactly 600 ticks further | 900; 600 |
 
 The scenarios live in `world/checkpoint_scenarios.rs`. Each has an `expect`
 that asserts its state at tick N, and the test
@@ -367,7 +382,7 @@ AI's takeoff, landing and parking read.
 
 The whole-world test (`a_whole_world_restores_into_a_fresh_one_and_flies_on_identically`)
 runs in the normal suite since every section is coded (slice H9); it takes
-about 8 seconds in a debug build on the development machine for all twelve
+about 8 seconds in a debug build on the development machine for all thirteen
 scenarios. While sections were still being coded, each slice ran the **twin
 restore** instead, and it stays as a second test: build the scenario twice,
 step both to N, restore only the covered sections from one into the other, and

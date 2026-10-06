@@ -81,6 +81,7 @@ pub(super) fn all() -> Vec<Scenario> {
         changing_weather(),
         revivals(),
         lead_order(),
+        crew_ejection(),
     ]
 }
 
@@ -1126,6 +1127,117 @@ pub(super) fn lead_order() -> Scenario {
         build,
         drive,
         at: 1_000,
+        then: 600,
+        expect,
+        after: Some(after),
+    }
+}
+
+/// The crowd fight in two-seaters (slice B6): an AI two-seater ejects both
+/// its crew (`flight::State::eject`, as the AI's escape monitor calls it)
+/// and a human in another presses the handle twice, so at the checkpoint
+/// four chutes fall, two of them the second crew members', which the wire's
+/// exact state leaves out and the checkpoint must keep. They fall on through
+/// the restore.
+pub(super) fn crew_ejection() -> Scenario {
+    /// The AI two-seater that ejects, and the seat that ejects.
+    const AI: u32 = 6;
+    const SEAT: SeatId = SeatId(3);
+    fn build() -> World {
+        crowd::two_seat_crowded_mission()
+    }
+    fn drive(world: &mut World, step: u64) -> Step {
+        if step == 700 {
+            // Shot down, as the damaged aircraft's AI 7 is, but the crew
+            // ejected by the flight's own rule.
+            let wings = world.ai_wings.as_mut().unwrap();
+            let flight = wings.mission_mut().actor_mut(AI).unwrap().flight_mut();
+            assert!(flight.eject(), "the AI two-seater ejects");
+            flight.crashed = true;
+            let row = world.combat.state.targets.iter_mut().find(|t| t.id == AI);
+            row.unwrap().hp = 0;
+        }
+        let inputs = crowd::inputs(world, |seat| {
+            let mut input = crowd_pilot(step, seat, false);
+            if seat == SEAT && (step == 740 || step == 780) {
+                input.pilot.commands.push(PilotCommand::Eject);
+            }
+            input
+        });
+        (Vec::new(), inputs)
+    }
+    /// The four chutes, each as (owner, crew, ticks).
+    fn chutes(world: &World) -> Vec<(u32, bool, u64)> {
+        let wings = world.ai_wings.as_ref().unwrap();
+        let mut chutes: Vec<(u32, bool, u64)> = wings
+            .escapees()
+            .map(|(id, e)| (id, false, e.ticks))
+            .chain(wings.crew_escapees().map(|(id, e)| (id, true, e.ticks)))
+            .collect();
+        let flight = &cockpit(world).flight;
+        for (crew, escape) in [(false, &flight.escape), (true, &flight.crew_escape)] {
+            let escape = escape.as_ref().expect("the seat's crew ejected");
+            chutes.push((crowd::E_HUMAN.0, crew, escape.ticks));
+        }
+        chutes.sort_unstable();
+        chutes
+    }
+    fn cockpit(world: &World) -> &super::Cockpit {
+        let at = world
+            .cockpits
+            .iter()
+            .position(|c| c.plane == crowd::E_HUMAN);
+        &world.cockpits[at.expect("the ejecting seat's cockpit")]
+    }
+    fn expect(world: &World) -> String {
+        let chutes = chutes(world);
+        let owners: Vec<(u32, bool)> = chutes.iter().map(|c| (c.0, c.1)).collect();
+        assert_eq!(
+            owners,
+            [
+                (crowd::E_HUMAN.0, false),
+                (crowd::E_HUMAN.0, true),
+                (AI, false),
+                (AI, true)
+            ]
+        );
+        // Every chute is still in the air: mid-descent from 10,000 feet.
+        let wings = world.ai_wings.as_ref().unwrap();
+        let airborne = |e: &tore_sim::ejection::Escape| {
+            !matches!(
+                e.phase,
+                tore_sim::ejection::Phase::Landed | tore_sim::ejection::Phase::Impact
+            ) && e.position[1] > 3_000.
+        };
+        assert!(wings.escapees().all(|(_, e)| airborne(e)));
+        assert!(wings.crew_escapees().all(|(_, e)| airborne(e)));
+        assert!(airborne(
+            cockpit(world).flight.crew_escape.as_ref().unwrap()
+        ));
+        // The picture draws both second crew members.
+        let crew = world
+            .combat
+            .snapshot(0, &world.cockpits[0].flight, world.ai_wings.as_ref())
+            .pilots
+            .iter()
+            .filter(|p| p.crew)
+            .count();
+        assert_eq!(crew, 2, "two second crew members drawn");
+        format!("{chutes:?}")
+    }
+    fn after(world: &World, at_checkpoint: &str) {
+        // Every chute fell on 600 ticks from where it was.
+        let then: Vec<(u32, bool, u64)> = chutes(world)
+            .into_iter()
+            .map(|(id, crew, ticks)| (id, crew, ticks - 600))
+            .collect();
+        assert_eq!(format!("{then:?}"), at_checkpoint);
+    }
+    Scenario {
+        name: "two-seaters' crews ejected",
+        build,
+        drive,
+        at: 900,
         then: 600,
         expect,
         after: Some(after),

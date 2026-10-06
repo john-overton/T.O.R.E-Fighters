@@ -1096,7 +1096,8 @@ a pilot's is its escape phase (3 bits).
   its id, and the `owner` field of its full record, is the aircraft's id with
   bit 31 set (`wire::entity::CREW_PILOT_BIT`). Unlike the pilot's, it is sent
   to the seat that flies the plane as well, since the exact state does not
-  carry it (it is drawn only and nothing steps from it). A build that does not
+  carry it (the client's prediction never needs it; a checkpoint does carry
+  it, after the exact state, slice B6). A build that does not
   know the bit sees a pilot of an aircraft that does not exist and draws it
   there; a client that knows it draws two chutes for one aircraft.
 - **Removals.** The host sends Removed for every entity the client may know

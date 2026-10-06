@@ -152,9 +152,10 @@ pub struct State {
     pub autopilot: crate::autopilot::Autopilot,
     pub escape: Option<crate::ejection::Escape>,
     /// A two-seater's second crew member, ejected ahead of the pilot
-    /// ([`crate::ejection::CREW_LEAD_TICKS`]). Drawn and recorded, never read
-    /// by a step of flight, and not part of the exact state (see
-    /// [`crate::flight::exact`]).
+    /// ([`crate::ejection::CREW_LEAD_TICKS`]). Stepped with the pilot's
+    /// escape, drawn and recorded. Not part of the wire's exact state (see
+    /// [`crate::flight::exact`]), but coded by a checkpoint after it
+    /// ([`crate::checkpoint::save_flight`]).
     pub crew_escape: Option<crate::ejection::Escape>,
     pub(crate) eject_armed_at: Option<u64>,
     pub crashed: bool,

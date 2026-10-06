@@ -48,6 +48,22 @@ const OFFSET: f64 = 2_500.;
 /// The mission with every plane but plane 0 flown by the AI, armed the way a
 /// built mission arms it, and the two wings placed nose to nose.
 pub(super) fn ai_mission() -> World {
+    ai_mission_flying(aircraft)
+}
+
+/// [`crowded_mission`] with every AI aircraft a two-seater with an ejection
+/// seat (PLANE flags 0x10 a seat, 0x4 a second crew member), for slice B6's
+/// checkpoint of a crew that ejected.
+pub(super) fn two_seat_crowded_mission() -> World {
+    crowd_of(ai_mission_flying(|| {
+        let mut profile = aircraft();
+        profile.fields.get_mut("flags").unwrap().value = "20".into();
+        profile
+    }))
+}
+
+/// [`ai_mission`] with the AI flying the aircraft `profile` makes.
+fn ai_mission_flying(profile: impl Fn() -> tore_formats::aircraft::Aircraft) -> World {
     let mut world = mission();
     fixtures::set_types(&mut world.combat, fixtures::types());
     let selection = |side, count, skill_level| WingSelection {
@@ -93,7 +109,7 @@ pub(super) fn ai_mission() -> World {
     world.combat.state.targets = rows;
     world.combat.state.targets.extend(scenery);
     let mut wings = ai_wings::AiWings::build_with(&payload, &world.combat.state.targets, 0, |_| {
-        Ok((aircraft(), Some(sensor_profiles())))
+        Ok((profile(), Some(sensor_profiles())))
     })
     .unwrap();
     let start = [0., ALTITUDE, 0.];
@@ -133,7 +149,12 @@ pub(super) fn ai_mission() -> World {
 
 /// [`ai_mission`] with seats 1, 2 and 3 taking planes 1, 4 and 5.
 pub(super) fn crowded_mission() -> World {
-    let mut world = ai_mission();
+    crowd_of(ai_mission())
+}
+
+/// `world`, an [`ai_mission`], with seats 1, 2 and 3 taking planes 1, 4 and
+/// 5.
+fn crowd_of(mut world: World) -> World {
     for (seat, plane) in [
         (SeatId(1), F_HUMAN),
         (SeatId(2), E_LEAD),

@@ -1104,6 +1104,103 @@ fn a_cold_standby_takes_over_at_the_same_world() {
     }
 }
 
+/// Slice B6: the crowd fight in two-seaters. An AI two-seater shot down
+/// ejects both its crew; the standbys, appointed again so their copy holds
+/// it, restore a checkpoint taken mid-descent and the warm one's Checks stay
+/// equal; the host is cut off, and the second crew member's chute falls on
+/// from the new host's world, which codes to the old host's at T, and every
+/// player still draws it.
+#[test]
+fn a_two_seaters_second_chute_falls_on_after_a_takeover() {
+    use tore_world::test_support::resources::two_seat_resources;
+    /// The bandits' lead, an AI two-seater.
+    const VICTIM: u32 = 4;
+    let mut rig = Rig::with_resources(crowd_spec(20), Arc::new(two_seat_resources()));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    rig.fly();
+    let (first, _) = rig.standbys();
+    // Shot down by hand, as combat leaves it; its escape monitor ejects the
+    // crew in the next steps.
+    shoot_down(rig.host_mut(), 0, VICTIM);
+    let crew_of = |world: &World| {
+        world
+            .ai_wings
+            .as_ref()
+            .and_then(|w| w.crew_escapees().find(|(id, _)| *id == VICTIM))
+            .map(|(_, escape)| escape.clone())
+    };
+    assert!(
+        rig.run_until(Duration::from_secs(15), |r| crew_of(&r.host().world)
+            .is_some()),
+        "the AI two-seater's crew ejects"
+    );
+    // The standbys appointed again (a change by hand is not journaled), so
+    // each restores a checkpoint holding both chutes.
+    rig.host_mut().set_standbys_enabled(false);
+    rig.run(Duration::from_millis(20));
+    rig.host_mut().set_standbys_enabled(true);
+    assert!(
+        rig.run_until(Duration::from_secs(15), |r| r.host().ready_standbys().len()
+            == 2),
+        "the standbys ready again"
+    );
+    // A Check every 600 ticks: the warm standby's are equal.
+    rig.run(Duration::from_secs(6));
+    let figures = rig.host().standby_figures();
+    assert!(figures.iter().all(|f| f.mismatches == 0), "{figures:?}");
+    assert!(
+        figures.iter().any(|f| f.warm && f.checks_equal >= 1),
+        "{figures:?}"
+    );
+
+    rig.record_from = Some(rig.host().world.tick());
+    rig.run(Duration::from_millis(200));
+    rig.cut(0);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| !r.takeovers.is_empty()),
+        "standby 1 takes over"
+    );
+    rig.record_from = None;
+    let (game, _, tick, coded) = rig.takeovers[0].clone();
+    assert_eq!(game, first);
+    let old = rig
+        .checkpoints
+        .get(&tick)
+        .expect("the old host's world at T");
+    assert!(
+        *old == coded,
+        "the new host's world at T differs from the old host's"
+    );
+    let at_t = crew_of(&rig.world_of(old)).expect("the second chute at T");
+    assert!(
+        !matches!(
+            at_t.phase,
+            tore_sim::ejection::Phase::Landed | tore_sim::ejection::Phase::Impact
+        ),
+        "mid-descent at T: {at_t:?}"
+    );
+
+    // The chute falls on from the new host, tick for tick, and every
+    // player still draws two chutes for the aircraft.
+    rig.run(Duration::from_secs(3));
+    let new = rig.host_of(game).world();
+    let now = crew_of(new).expect("the second chute on the new host");
+    assert_eq!(now.ticks, at_t.ticks + (new.tick() - tick));
+    assert!(now.position[1] < at_t.position[1], "{now:?} after {at_t:?}");
+    for g in 1..rig.games.len() {
+        let drawn: Vec<bool> = rig.games[g]
+            .picture
+            .iter()
+            .flat_map(|p| p.pilots.iter())
+            .filter(|p| p.owner == VICTIM)
+            .map(|p| p.crew)
+            .collect();
+        assert_eq!(drawn, [false, true], "{}", rig.games[g].callsign);
+    }
+}
+
 /// A host lost in the lobby: standby 1 takes the lobby over, the players
 /// resume into it, the house mark moves, the crown passes once the old King
 /// is dropped, and the mission flies from the new host.

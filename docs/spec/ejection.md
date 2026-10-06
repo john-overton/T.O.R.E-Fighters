@@ -80,10 +80,12 @@ flags carry bit 0x4, the multi-crew mark the cockpit voice reads, with a seat
   pilot. The crew member's fate is one HUD line when his chute comes down,
   "Crew member landed safely" or "Crew member killed during ejection". No
   debrief row, kill credit or rescue counts him; campaign rescue is not built.
-- The crew member's chute is not part of the plane's exact state: nothing
-  steps from it, so the wire's own-state coding and the checkpoints are
-  unchanged. A host taking over a flight mid-descent therefore loses the crew
-  member's chute (the pilot's continues), a cosmetic limit.
+- The crew member's chute is not part of the plane's exact state, the wire's
+  own-state coding: a client's prediction never needs it, and a client draws
+  it from the host's pilot entities, so the wire is unchanged. It is world
+  state all the same (each step of the flight steps it, and its landing is a
+  HUD line), so a checkpoint codes it after the exact state (slice B6): a
+  restored world, a standby and a host taking over mid-descent keep it.
 
 ## Fitted AI decision
 

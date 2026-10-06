@@ -426,10 +426,11 @@ pub fn round_trip_in_place<T: InPlace>(
 // Flight states.
 
 /// Codes a flight state as its aircraft's identity, its model's ordinal
-/// among the world's models of that identity (see [`Models`]) and the wire's
-/// exact coding with no baseline (docs/formats/checkpoint.md, "Flight
-/// states"). The write-only trace is not coded; the native research adapter
-/// is refused.
+/// among the world's models of that identity (see [`Models`]), the wire's
+/// exact coding with no baseline, then a two-seater's second chute
+/// (`crew_escape`), which the wire's exact state leaves out
+/// (docs/formats/checkpoint.md, "Flight states"). The write-only trace is not
+/// coded; the native research adapter is refused.
 pub fn save_flight(
     s: &mut Saver,
     flight: &crate::flight::State,
@@ -443,6 +444,12 @@ pub fn save_flight(
     aircraft.save(s, None)?;
     s.w.write_varint(u64::from(ordinal));
     flight.write_exact(&mut s.w, None)?;
+    // The second crew member's chute is world state (every step of the
+    // flight steps it, and the picture draws it), but a client's prediction
+    // never needs it, so the wire's exact coder, frozen by the wire's golden,
+    // leaves it out and the checkpoint codes it here (slice B6,
+    // docs/ARCHITECTURE.md).
+    flight.crew_escape.save(s, None)?;
     Ok(())
 }
 
@@ -458,7 +465,8 @@ pub fn load_flight(
             "no flight model {ordinal} of the aircraft {aircraft:?} in this world"
         ));
     };
-    let flight = crate::flight::State::read_exact(&mut l.r, None, model)?;
+    let mut flight = crate::flight::State::read_exact(&mut l.r, None, model)?;
+    flight.crew_escape = Checkpoint::load(l, None)?;
     Ok((aircraft, flight))
 }
 

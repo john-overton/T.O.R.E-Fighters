@@ -608,9 +608,10 @@ mod tests {
             "{notices:?}"
         );
     }
-    /// The second chute is the host's to draw: no step reads it, so it is not
-    /// in the exact state, which keeps the wire and the checkpoints as they
-    /// were.
+    /// The second chute is the host's to draw: a client's prediction never
+    /// needs it, so it is not in the exact state, which keeps the wire as it
+    /// was. A checkpoint codes it after the exact state (slice B6,
+    /// `checkpoint_tests::a_two_seaters_second_chute_survives_a_checkpoint_mid_descent`).
     #[test]
     fn the_second_chute_is_not_part_of_the_exact_state() {
         use tore_codec::{BitReader, BitWriter};

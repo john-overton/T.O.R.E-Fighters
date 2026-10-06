@@ -422,6 +422,68 @@ fn a_flight_state_round_trips_through_its_aircraft_and_flies_on_identically() {
     l.finish().unwrap();
 }
 
+/// Slice B6: a two-seater's second chute is world state, so a checkpoint
+/// keeps it though the wire's exact state does not. Restored mid-descent,
+/// both chutes fall on exactly as the original's, to the ground.
+#[test]
+fn a_two_seaters_second_chute_survives_a_checkpoint_mid_descent() {
+    use crate::ejection::Phase;
+    // PLANE flags: 0x10 an ejection seat, 0x4 a second crew member.
+    let mut profile = profile();
+    profile.fields.get_mut("flags").unwrap().value = "20".into();
+    let two_seat = AircraftModel::for_aircraft(&profile).unwrap();
+    let mut models = Models::default();
+    models.insert(AircraftId::F14, two_seat.clone()).unwrap();
+    let mut original = State::from_model(two_seat, [0., 1500., 0.]);
+    original.velocity = [0., 0., 400.];
+    original.speed = 400.;
+    assert!(original.eject());
+    let ground = |_: f64, _: f64| 0.;
+    for _ in 0..400 {
+        original.step(&PilotInput::default(), ground);
+    }
+    let crew = original.crew_escape.clone().expect("a second chute");
+    assert!(
+        matches!(crew.phase, Phase::Inflating | Phase::Parachute),
+        "mid-descent: {crew:?}"
+    );
+
+    let mut s = Saver::with_models(models.clone());
+    save_flight(&mut s, &original, AircraftId::F14).unwrap();
+    let body = s.finish_section();
+    let mut l = Loader::new(&body, &[], &models);
+    let (_, mut copy) = load_flight(&mut l).unwrap();
+    l.finish().unwrap();
+    assert_eq!(copy.crew_escape, original.crew_escape);
+    assert_eq!(copy, original);
+    // Room for the landing's line (nobody drains the messages here).
+    original.systems.messages.clear();
+    copy.systems.messages.clear();
+    for tick in 0..120 * 120 {
+        original.step(&PilotInput::default(), ground);
+        copy.step(&PilotInput::default(), ground);
+        assert_eq!(copy, original, "tick {tick}");
+    }
+    assert_eq!(copy.crew_escape.unwrap().phase, Phase::Landed);
+    assert!(
+        copy.systems
+            .messages
+            .iter()
+            .any(|m| m == "Crew member landed safely"),
+        "the restored copy tells of the crew member's landing"
+    );
+
+    // A flight with no second chute codes none.
+    let mut s = Saver::with_models(models.clone());
+    let mut single = original.clone();
+    single.crew_escape = None;
+    save_flight(&mut s, &single, AircraftId::F14).unwrap();
+    let body = s.finish_section();
+    let mut l = Loader::new(&body, &[], &models);
+    assert!(load_flight(&mut l).unwrap().1.crew_escape.is_none());
+    l.finish().unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // Damaged bytes.
 

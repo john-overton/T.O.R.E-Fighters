@@ -9,8 +9,9 @@
 //! coder names each of its fields, with no `..`, through [`exact_struct`], so a
 //! field added to a state without coding it fails to compile.
 //!
-//! Not coded: the second crew member's chute (`crew_escape`, drawn only), the
-//! write-only trace, which equality ignores and the next step rewrites, and
+//! Not coded: the second crew member's chute (`crew_escape`, which a
+//! client's prediction never needs; a checkpoint codes it after this coding,
+//! `checkpoint::save_flight`), the write-only trace, which equality ignores and the next step rewrites, and
 //! the imported tables (the aircraft model and its raw envelope polygons),
 //! which the decoder takes from the caller. The weight-scaled envelopes are
 //! rebuilt from those tables and the coded scale exactly as the step builds
@@ -404,10 +405,11 @@ impl State {
             failure_rng,
             cheats,
             jolt,
-            // The second crew member's chute is only drawn, and no step of
-            // flight reads it, so it is not coded: the wire and the
-            // checkpoints are unchanged. A client draws it from the host's
-            // pilot entities (slice B5, docs/ARCHITECTURE.md).
+            // The second crew member's chute: a client's prediction never
+            // needs it (it draws it from the host's pilot entities, slice
+            // B5), so the wire leaves it out. It is world state all the same,
+            // so a checkpoint codes it after this coding, in
+            // `checkpoint::save_flight` (slice B6, docs/ARCHITECTURE.md).
             crew_escape: _,
             // Write-only, outside equality; the next step rewrites it.
             trace: _,
