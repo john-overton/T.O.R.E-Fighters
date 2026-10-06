@@ -117,8 +117,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// marks and mates, the Link event, the radio events' net, and the Sort order
 /// and Battle net command the golden now lists, 16 since the baseline field
 /// of the readout and the entity records is 7 bits, a window of 127
-/// snapshots (slice B2).
-pub const PROTOCOL_VERSION: u16 = 16;
+/// snapshots (slice B2), 17 since setting 22, the King's snapshot rate, is
+/// in the lobby state's list and a flight starts from it (slice R1).
+pub const PROTOCOL_VERSION: u16 = 17;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

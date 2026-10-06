@@ -149,10 +149,10 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (16), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (17), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
 | Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
-| Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before), host tick now (32); 31 bytes |
+| Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
 | Refuse | client nonce (64), reason (8), text (string, up to 200 bytes) |
 | Disconnect | connection id (32), reason (8); sent three times at once; 10 bytes |
 
@@ -172,6 +172,20 @@ D12). Both ends work *F* out from this byte, so no other field carries it:
 | 15 | 8 | 4 | 32 | 3.75 |
 | 12 | 10 | 3 | 30 | 4 |
 | 10 | 12 | 3 | 36 | 3.33 |
+
+**The King's rate changes it for a flight (protocol 17, slice R1).** In a game
+a player hosts the King may turn the snapshot rate to 60, 30 or 20 in the
+lobby ([setting 22](#settings-by-number)), so the byte Accepted carried when a
+player joined may be old by the time a mission flies. Each flight starts from
+the setting in force: the host builds its connections for it, and a player's
+game takes 120 over the lobby state's setting 22 when the flight starts. The
+host sends every player the lobby state before the first seat of a flight, so
+the setting is there first (the lobby state is otherwise sent at most every
+250 ms). A setting changes only in the lobby, so what the lobby says as a
+flight starts is what the host runs; a player who joins a flight in progress
+gets the rate in Accepted. A dedicated server's rate is its file's (any of 10,
+12, 15, 20, 24, 30, 40 or 60), carried in setting 22 as given; the King's
+change of it is refused.
 
 The client draws a far entity its interval further in the past
 ([guide](../MULTIPLAYER.md#netcode-numbers)). It takes an entity for far
@@ -1573,6 +1587,7 @@ value's coding. The names are the configuration file's and the logs'.
 | 19 | `observer-delay` | seconds: 0, 10, 30 or 60 |
 | 20 | `idle-ai` | seconds: 0 never, 60, 120, 300 or 600 (default 300; John, 2026-10-06, slice F2-O4; no wire change: the value is the same u32, only its list and default moved) |
 | 21 | `host` | 0 calculated, or 1 plus the lobby id of the player the King pinned (stage K, [designed](#host-migration-and-rejoin-stage-k)) |
+| 22 | `snapshot-rate` | snapshots a second: 60, 30 or 20 from the King of a game a player hosts (default 60); a dedicated server's file may give 10, 12, 15, 20, 24, 30, 40 or 60, which the lobby state carries as given and the King may not change (slice R1, protocol 17: [what the rate sets](#connecting)) |
 
 A number the host does not know, or a value outside its list, is refused with
 the setting's name and its values.

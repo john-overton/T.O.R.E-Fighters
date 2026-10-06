@@ -801,7 +801,7 @@ fn an_upload_test_on_a_link_at_half_the_need_fails_and_at_the_full_need_passes()
             assert_eq!(
                 rig.notices(0),
                 vec![
-                    "No machine here passed the test for 2 players: Viper's carried 70 percent of what they need. Fewer players, or a dedicated server, will fly better."
+                    "No machine here passed the test for 2 players: Viper's carried 70 percent of what they need. At 30 snapshots a second it would fit: turn the snapshot rate down in the lobby's Settings. Fewer players, or a dedicated server, will fly better."
                         .to_owned()
                 ]
             );
@@ -861,7 +861,7 @@ fn the_cpu_and_pinned_host_warnings_read_as_designed() {
     rig.run(Duration::from_millis(300));
     assert!(
         rig.notices(0).contains(
-            &"Delta's machine, the pinned host, carried 42 percent of what 2 players need. Fewer players, or a dedicated server, will fly better."
+            &"Delta's machine, the pinned host, carried 42 percent of what 2 players need. At 20 snapshots a second it would fit: turn the snapshot rate down in the lobby's Settings. Fewer players, or a dedicated server, will fly better."
                 .to_owned()
         ),
         "{:?}",
@@ -1311,4 +1311,114 @@ fn cpu_measure_against_the_busiest_minute() {
             busiest / f64::from(measure)
         );
     }
+}
+
+/// John, 2026-10-06 (Q56), slice R1: when no machine passes the upload test
+/// at the rate in force, the King's warning says so if the best machine's
+/// figure would fit a lower rate the King offers, and which.
+#[test]
+fn the_upload_warning_says_which_lower_rate_would_fit() {
+    // The need for 2 players, no standby cold: 28 KB/s a player at 30 a
+    // second scaled by the rate, and 4,040 for the warm standby.
+    assert_eq!(upload_need(2, 0, 60), 60_040);
+    assert_eq!(upload_need(2, 0, 30), 32_040);
+    assert_eq!(upload_need(2, 0, 20), 22_706);
+    let mut rig = Rig::new();
+    rig.join_at(HOUSE, "Viper");
+    let delta = rig.join_at("198.51.100.21:40000", "Delta");
+    rig.settle();
+    assert!(rig.run_until(Duration::from_secs(10), |r| {
+        r.host.succession.measures[&r.order(delta)].upload.is_some()
+    }));
+    let figure = |rig: &mut Rig, per_mille| {
+        rig.host.succession.house_upload = Some(Upload {
+            players: 2,
+            per_mille,
+        });
+        let delta_order = rig.order(delta);
+        rig.host
+            .succession
+            .measures
+            .get_mut(&delta_order)
+            .unwrap()
+            .upload = Some(Upload {
+            players: 2,
+            per_mille,
+        });
+        rig.run(Duration::from_millis(100));
+    };
+    let hint = |rate: u32| {
+        format!(
+            "At {rate} snapshots a second it would fit: turn the snapshot rate down in the lobby's Settings. "
+        )
+    };
+    let said = |rig: &Rig| rig.notices(0).last().cloned().unwrap_or_default();
+    // 70 percent of 60 a second's need: 30 would fit (it needs 53 percent).
+    figure(&mut rig, 700);
+    assert!(said(&rig).contains(&hint(30)), "{}", said(&rig));
+    // 45 percent: only 20 fits (it needs 38 percent, 30 needs 53).
+    figure(&mut rig, 450);
+    assert!(said(&rig).contains(&hint(20)), "{}", said(&rig));
+    // 30 percent: none of the King's rates fits, and the words are as before.
+    figure(&mut rig, 300);
+    assert!(
+        said(&rig).starts_with("No machine here passed the test for 2 players: Viper's carried 30 percent of what they need. Fewer players"),
+        "{}",
+        said(&rig)
+    );
+    // At 30 a second the figure is of 30's need: 75 percent of 32,040 is
+    // 24,030, which fits 20's 22,706 (it needs 20,436 to pass).
+    let mut rig = Rig::new();
+    rig.join_at(HOUSE, "Viper");
+    rig.join_at("198.51.100.21:40000", "Delta");
+    rig.settle();
+    rig.host
+        .settings
+        .apply(&[(number::SNAPSHOT_RATE, 30)])
+        .unwrap();
+    rig.host.rate_changed();
+    rig.host.succession.house_upload = Some(Upload {
+        players: 2,
+        per_mille: 750,
+    });
+    rig.run(Duration::from_millis(100));
+    let line = rig.notices(0).last().cloned().unwrap_or_default();
+    assert!(line.contains(&hint(20)), "{line}");
+    // A game already at 20 offers nothing lower.
+    assert_eq!(
+        words::upload(2, "Viper", 70, None),
+        "No machine here passed the test for 2 players: Viper's carried 70 percent of what they need. Fewer players, or a dedicated server, will fly better."
+    );
+}
+
+/// Changing the snapshot rate forgets the upload figures: they measured the
+/// old rate's need, and the tests run again at the new one.
+#[test]
+fn a_new_snapshot_rate_forgets_the_upload_figures_and_tests_again() {
+    let mut rig = Rig::new();
+    rig.join_at(HOUSE, "Viper");
+    let delta = rig.join_at("198.51.100.21:40000", "Delta");
+    rig.settle();
+    assert!(rig.run_until(Duration::from_secs(10), |r| {
+        r.host.succession.measures[&r.order(delta)].upload.is_some()
+    }));
+    rig.host.succession.house_upload = Some(Upload {
+        players: 2,
+        per_mille: 700,
+    });
+    rig.host
+        .settings
+        .apply(&[(number::SNAPSHOT_RATE, 30)])
+        .unwrap();
+    rig.host.rate_changed();
+    assert_eq!(rig.host.succession.house_upload, None);
+    assert!(
+        rig.host.succession.measures[&rig.order(delta)]
+            .upload
+            .is_none()
+    );
+    // The test runs again, and asks for the 30 a second need.
+    assert!(rig.run_until(Duration::from_secs(10), |r| {
+        r.host.succession.measures[&r.order(delta)].upload.is_some()
+    }));
 }

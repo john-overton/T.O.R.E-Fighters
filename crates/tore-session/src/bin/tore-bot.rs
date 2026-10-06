@@ -141,6 +141,9 @@
 //! client's own notices ("Lost contact with the host. Moving the game to
 //! Hawk...", "The game moved to Hawk.") print as the bot's other notices do.
 //!
+//! A bot also prints the snapshot rate of each flight as it is seated
+//! ("Bot: snapshots: 30 a second", slice R1).
+//!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
 //! every bot was seated, got a debrief and then left cleanly, or was told the
@@ -1590,6 +1593,13 @@ fn main() -> ExitCode {
                         r.seatings += 1;
                         r.last_plane = Some(plane);
                         println!("{}: seat {seat}, plane {plane}, at tick {tick}", r.name);
+                        // The flight's snapshot rate (slice R1): the host's
+                        // setting in force as the flight started.
+                        println!(
+                            "{}: snapshots: {} a second",
+                            r.name,
+                            120 / bot.client.ticks_per_snapshot().max(1)
+                        );
                     }
                     ClientEvent::Notice(text) => println!("{}: {text}", r.name),
                     ClientEvent::Chat(line) => {

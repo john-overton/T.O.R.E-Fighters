@@ -4,14 +4,14 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn the_registry_is_numbered_one_to_twenty_one_in_order_with_unique_names() {
+fn the_registry_is_numbered_one_to_twenty_two_in_order_with_unique_names() {
     for (index, setting) in REGISTRY.iter().enumerate() {
         assert_eq!(usize::from(setting.number), index + 1, "{}", setting.name);
         assert_eq!(super::setting(setting.number), Some(setting));
         assert_eq!(by_name(setting.name), Some(setting));
     }
     assert_eq!(super::setting(0), None);
-    assert_eq!(super::setting(22), None);
+    assert_eq!(super::setting(23), None);
     assert_eq!(by_name("cheats"), None);
 }
 
@@ -121,7 +121,7 @@ fn the_registry_refuses_with_the_setting_and_its_values() {
         Some("max-players is 1 to 30.")
     );
     assert_eq!(refusal(0, 0).as_deref(), Some("There is no setting 0."));
-    assert_eq!(refusal(22, 0).as_deref(), Some("There is no setting 22."));
+    assert_eq!(refusal(23, 0).as_deref(), Some("There is no setting 23."));
     assert!(refusal(number::PASSWORD, 1).is_some());
     // Public is the registry's since stage I lists games; whether a host can
     // list is the host's question (slice F2-1).
@@ -259,4 +259,86 @@ fn setting_21_is_the_host_calculated_or_a_pinned_player() {
     assert_eq!(store.pinned_host(), Some(3));
     assert_eq!(store.apply(&[(number::HOST, 0)]), Ok(()));
     assert!(refusal(number::HOST, 257).is_some_and(|why| why.starts_with("host is")));
+}
+
+/// Slice R1 (John, 2026-10-06, Q56): the King's snapshot rate.
+#[test]
+fn the_snapshot_rate_offers_60_30_and_20_and_defaults_to_60() {
+    let rate = by_name("snapshot-rate").unwrap();
+    assert_eq!(rate.number, number::SNAPSHOT_RATE);
+    assert_eq!(rate.change, Change::InLobby);
+    assert!(!rate.pvp_only);
+    assert_eq!(rate.coop, 60);
+    assert_eq!(rate.pvp, 60);
+    assert_eq!(KING_SNAPSHOT_RATES, [60, 30, 20]);
+    for value in [60, 30, 20] {
+        assert!(rate.allows(value), "{value}");
+    }
+    // The rates that divide 120 and are not offered, and the ends.
+    for value in [0, 10, 12, 15, 24, 40, 61, 120] {
+        assert!(!rate.allows(value), "{value}");
+    }
+    assert_eq!(rate.text(60), "60 a second");
+    assert_eq!(rate.text(30), "30 a second");
+    assert_eq!(
+        rate.values_text(),
+        "60 a second, 30 a second or 20 a second"
+    );
+    assert_eq!(rate.parse("30"), Some(30));
+    assert_eq!(rate.parse("24"), None);
+    assert_eq!(
+        refusal(number::SNAPSHOT_RATE, 24).unwrap(),
+        "snapshot-rate is 60 a second, 30 a second or 20 a second."
+    );
+    assert_eq!(refusal(number::SNAPSHOT_RATE, 20), None);
+    assert_eq!(Store::defaults(Mode::Coop).snapshot_rate(), 60);
+    assert_eq!(Store::defaults(Mode::Pvp).snapshot_rate(), 60);
+    assert_eq!(
+        words(&[(number::SNAPSHOT_RATE, 20)]),
+        "snapshot-rate 20 a second"
+    );
+}
+
+#[test]
+fn the_store_applies_the_rate_and_a_new_mode_keeps_it() {
+    let mut store = Store::defaults(Mode::Coop);
+    store.apply(&[(number::SNAPSHOT_RATE, 30)]).unwrap();
+    assert_eq!(store.snapshot_rate(), 30);
+    assert_eq!(store.get(number::SNAPSHOT_RATE), Some(30));
+    // A new mode resets what the King changes in the lobby, but not this.
+    store.apply(&[(number::MODE, 1)]).unwrap();
+    assert_eq!(store.mode(), Mode::Pvp);
+    assert_eq!(store.snapshot_rate(), 30);
+    // A refused list changes nothing.
+    assert!(store.apply(&[(number::SNAPSHOT_RATE, 40)]).is_err());
+    assert_eq!(store.snapshot_rate(), 30);
+    assert_eq!(
+        store.lobby_list().last(),
+        Some(&(number::SNAPSHOT_RATE, 30)),
+        "in the lobby state, last by number"
+    );
+}
+
+#[test]
+fn a_configurations_rate_is_kept_as_given_past_the_kings_list() {
+    let mut config = HostConfig::new(crate::host::BuildId {
+        version: "test".into(),
+        commit: "test".into(),
+        release: false,
+    });
+    assert_eq!(Store::from_config(&config).snapshot_rate(), 60);
+    for rate in crate::host::config::SNAPSHOT_RATES {
+        config.snapshot_rate = rate;
+        let store = Store::from_config(&config);
+        assert_eq!(store.snapshot_rate(), rate);
+        assert_eq!(store.get(number::SNAPSHOT_RATE), Some(rate));
+    }
+    // A file may not set it by number: it has its own key.
+    config.settings = vec![(number::SNAPSHOT_RATE, 30)];
+    assert!(
+        config
+            .check_settings()
+            .unwrap_err()
+            .contains("its own field")
+    );
 }

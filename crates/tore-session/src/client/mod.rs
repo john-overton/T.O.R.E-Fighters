@@ -1145,6 +1145,18 @@ impl Client {
 
     // ----- The lobby -----------------------------------------------------
 
+    /// Ticks between the host's snapshots to this player: the host's
+    /// Accepted packet gives them at the join, and each flight starts from
+    /// the snapshot rate in the lobby's settings (slice R1).
+    pub fn ticks_per_snapshot(&self) -> u32 {
+        self.ticks_per_snapshot
+    }
+
+    /// The tick of the newest snapshot of the flight, once one has come.
+    pub fn snapshot_tick(&self) -> Option<u32> {
+        self.snapshot_tick
+    }
+
     /// The lobby as the host last sent it; `None` before the first.
     pub fn lobby(&self) -> Option<&LobbyState> {
         self.lobby.as_ref()
@@ -2247,11 +2259,30 @@ impl Client {
         }
     }
 
+    /// The snapshot rate the lobby's settings carry becomes this flight's
+    /// ticks per snapshot (slice R1): the host's Accepted packet gave the rate
+    /// of the day the player joined, and the King may have turned it in the
+    /// lobby since. Settings that change in the lobby cannot change while a
+    /// flight runs, so what the lobby says as a flight starts is the host's.
+    fn follow_snapshot_rate(&mut self) {
+        let rate = self.lobby.as_ref().and_then(|lobby| {
+            lobby
+                .settings
+                .iter()
+                .find(|(n, _)| *n == crate::settings::number::SNAPSHOT_RATE)
+                .map(|&(_, rate)| rate)
+        });
+        if let Some(rate) = rate.filter(|rate| (1..=120).contains(rate) && 120 % rate == 0) {
+            self.ticks_per_snapshot = 120 / rate;
+        }
+    }
+
     /// A new flight of the connection starts (its Seated message, or a
     /// section of it that came first): the wire's baselines, events and
     /// names start afresh, as the host's did, and so do the picture's
     /// clocks and what it held.
     fn begin_flight(&mut self, flight: u8) {
+        self.follow_snapshot_rate();
         if self.observed.is_some() {
             let names = self.wire.as_ref().map(|wire| wire.names.clone());
             let now = self.now;

@@ -1024,3 +1024,78 @@ fn the_head_line_is_drawn_and_the_screen_keeps_it_with_the_panels_up() {
     screen.wheel(1);
     assert!(screen.settings_open().is_some());
 }
+
+// ---- the snapshot rate row (slice R1) ----
+
+#[test]
+fn the_snapshot_rate_is_a_game_row_and_the_observer_delay_moved_to_scoring() {
+    let rate = Kind::Setting(number::SNAPSHOT_RATE);
+    let game = page_rows(Page::Game);
+    assert_eq!(game.len(), 12, "the Game page keeps its twelve rows");
+    assert_eq!(game[game.len() - 2], rate, "just above the Host row");
+    assert_eq!(game[game.len() - 1], Kind::Host);
+    assert_eq!(sp::row_label(rate), "Snapshot rate");
+    assert_eq!(
+        page_rows(Page::Scoring).last(),
+        Some(&Kind::Setting(number::OBSERVER_DELAY))
+    );
+    assert!(!game.contains(&Kind::Setting(number::OBSERVER_DELAY)));
+}
+
+#[test]
+fn the_king_of_a_game_a_player_hosts_turns_the_rate_through_60_30_and_20() {
+    let rate = Kind::Setting(number::SNAPSHOT_RATE);
+    let mut state = king();
+    assert!(state.host.is_some(), "the sample game has a house");
+    assert_eq!(row_value(rate, &ctx(&state)), "60 a second");
+    assert_eq!(row_state(rate, &ctx(&state)), Ok(()));
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        let edit = sp::click(rate, &ctx(&state), true).expect("an edit");
+        let Edit::Settings(change) = edit else {
+            panic!("a settings change");
+        };
+        assert_eq!(change.values.len(), 1);
+        assert_eq!(change.values[0].0, number::SNAPSHOT_RATE);
+        seen.push(change.values[0].1);
+        set(&mut state, number::SNAPSHOT_RATE, change.values[0].1);
+    }
+    assert_eq!(seen, vec![30, 20, 60], "forward, wrapping to 60");
+    set(&mut state, number::SNAPSHOT_RATE, 20);
+    assert_eq!(row_value(rate, &ctx(&state)), "20 a second");
+    // Right click turns back.
+    let Some(Edit::Settings(back)) = sp::click(rate, &ctx(&state), false) else {
+        panic!("an edit");
+    };
+    assert_eq!(back.values, vec![(number::SNAPSHOT_RATE, 30)]);
+}
+
+#[test]
+fn a_dedicated_servers_rate_row_is_read_only_and_shows_its_files_rate() {
+    let rate = Kind::Setting(number::SNAPSHOT_RATE);
+    let mut state = king();
+    state.host = None;
+    set(&mut state, number::SNAPSHOT_RATE, 24);
+    let ctx = ctx(&state);
+    assert_eq!(row_value(rate, &ctx), "24 a second");
+    assert_eq!(
+        row_state(rate, &ctx),
+        Err("This server's snapshot rate is set by its operator.".to_owned())
+    );
+    assert_eq!(sp::click(rate, &ctx, true), None);
+}
+
+#[test]
+fn the_rate_is_a_lobby_row_greyed_in_flight_and_for_a_joiner() {
+    let rate = Kind::Setting(number::SNAPSHOT_RATE);
+    let mut state = king();
+    state.phase = LobbyPhase::Flying;
+    assert_eq!(
+        row_state(rate, &ctx(&state)),
+        Err("Change it in the lobby, between missions.".to_owned())
+    );
+    assert_eq!(
+        row_state(rate, &ctx(&sample(2))),
+        Err("Only the King may change the settings.".to_owned())
+    );
+}

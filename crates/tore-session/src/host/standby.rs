@@ -429,7 +429,7 @@ impl Host {
             self.checks_due();
             self.cold_checkpoints_due();
         }
-        let interval = self.config.ticks_per_snapshot() as usize;
+        let interval = self.ticks_per_snapshot() as usize;
         for index in 0..self.standbys.streams.len() {
             if self.standbys.streams[index].ticks.len() >= interval {
                 self.flush_ticks(index);

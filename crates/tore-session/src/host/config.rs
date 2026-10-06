@@ -273,6 +273,7 @@ impl HostConfig {
                 settings::number::MAX_PLAYERS
                     | settings::number::PASSWORD
                     | settings::number::TIME_LIMIT
+                    | settings::number::SNAPSHOT_RATE
             ) {
                 return Err(format!("{} is set by its own field", setting.name));
             }
@@ -310,6 +311,11 @@ impl HostConfig {
 /// dedicated server lists itself by its operator's `broadcast`.
 pub const PUBLIC_IS_BROADCAST: &str =
     "A dedicated server lists itself on the Internet Lobby only by its operator's `broadcast on`.";
+
+/// Why a dedicated server refuses the King's change of the snapshot rate:
+/// its operator's file sets it (slice R1).
+pub const RATE_IS_THE_FILES: &str =
+    "A dedicated server's snapshot rate is set by its operator's `snapshot-rate`.";
 
 /// Why a host could not start.
 #[derive(Debug)]

@@ -1240,6 +1240,17 @@ impl Host {
         &self.config
     }
 
+    /// Snapshots a second to each player: the King's setting in force (slice
+    /// R1; a dedicated server's file's rate to start with).
+    pub fn snapshot_rate(&self) -> u32 {
+        self.settings.snapshot_rate()
+    }
+
+    /// Ticks between snapshots: 120 over [`Host::snapshot_rate`].
+    pub fn ticks_per_snapshot(&self) -> u32 {
+        120 / self.snapshot_rate().max(1)
+    }
+
     /// The transport's counters of datagrams dropped before a connection.
     pub fn counters(&self) -> &tore_net::Counters {
         self.server.counters()
@@ -1311,7 +1322,7 @@ impl Host {
             accept: AcceptInfo {
                 session_id: self.session_id,
                 ticks_per_second: TICKS_PER_SECOND as u8,
-                ticks_per_snapshot: self.config.ticks_per_snapshot() as u8,
+                ticks_per_snapshot: self.ticks_per_snapshot() as u8,
                 host_tick: self.world.tick() as u32,
             },
             tick: self.world.tick(),
@@ -1447,7 +1458,7 @@ impl Host {
                 stage: Stage::Lobby,
                 seat: None,
                 plane: None,
-                wire: HostConnection::new(self.config.ticks_per_snapshot()),
+                wire: HostConnection::new(self.ticks_per_snapshot()),
                 inputs: InputBuffer::new(),
                 unforeseen: false,
                 last_own_state: 0,
@@ -2703,6 +2714,14 @@ impl Host {
     fn send_lobby(&mut self) {
         // Stage L: the gaps, when they changed or a player's content came.
         self.send_gaps();
+        self.send_stale_lobbies(false);
+    }
+
+    /// Sends the lobby's state to every player that has not got its latest,
+    /// at once when `now_whatever_the_interval` (slice R1: a flight's start
+    /// sends them first, so a player's game reads the settings in force,
+    /// the snapshot rate among them, before its seat arrives).
+    fn send_stale_lobbies(&mut self, now_whatever_the_interval: bool) {
         if std::mem::take(&mut self.lobby_dirty) {
             for peer in self.peers.values_mut() {
                 peer.lobby_stale = true;
@@ -2720,9 +2739,10 @@ impl Host {
                 };
                 peer.lobby_stale
                     && !matches!(peer.stage, Stage::Closing { .. })
-                    && peer
-                        .lobby_sent
-                        .is_none_or(|at| now.saturating_sub(at) >= interval)
+                    && (now_whatever_the_interval
+                        || peer
+                            .lobby_sent
+                            .is_none_or(|at| now.saturating_sub(at) >= interval))
             })
             .map(|(id, peer)| (*id, peer.lobby.id))
             .collect();
@@ -2774,6 +2794,9 @@ impl Host {
         // The same mission, with the loadouts: its number stays, so a
         // request made just before the start still counts.
         self.spec_text = spec.to_text();
+        // Every player reads the settings now in force before its seat comes:
+        // a client takes the snapshot rate from them (slice R1).
+        self.send_stale_lobbies(true);
         // Stage K: the journal starts from the flight's world at tick 0.
         self.journal_flight();
         self.gives.clear();
@@ -3069,13 +3092,15 @@ impl Host {
                 cheat: false,
                 stations: Vec::new(),
             });
+        // The rate in force as the flight starts (slice R1).
+        let tps = self.ticks_per_snapshot();
         let Some(peer) = self.peers.get_mut(&connection) else {
             return;
         };
         // A new flight of the connection: its sections start afresh, apart
         // from any of an earlier flight still on the way.
         peer.flight = peer.flight.wrapping_add(1);
-        peer.wire = HostConnection::for_flight(self.config.ticks_per_snapshot(), peer.flight);
+        peer.wire = HostConnection::for_flight(tps, peer.flight);
         peer.stage = Stage::Seated;
         peer.seat = Some(seat);
         peer.plane = Some(plane);
@@ -3208,7 +3233,7 @@ impl Host {
         out: &TickOutput,
         executor: &tore_workers::Executor,
     ) {
-        let tps = self.config.ticks_per_snapshot();
+        let tps = self.ticks_per_snapshot();
         let ids: Vec<ConnectionId> = self
             .peers
             .iter()

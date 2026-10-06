@@ -508,6 +508,23 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(any("over 3500 ms" in p for p in net.migrate_problems(fast, PILOT_NAMES, BEFORE, net.SNAPSHOTS_AGAIN_MS)))
 
 
+class RateTests(unittest.TestCase):
+    """Slice R1: what a bot prints of the snapshot rate."""
+
+    def test_a_flight_at_the_rate_and_a_lobby_that_shows_it_pass(self):
+        text = "Bot: settings: snapshot-rate 30 a second\nBot: seat 0, plane 0, at tick 0\nBot: snapshots: 30 a second\n"
+        self.assertEqual(net.rate_problems(text, "Bot", 30), [])
+        # A bot of a server at the default 60 shows no setting (it is co-op's default).
+        self.assertEqual(net.rate_problems("Bot: snapshots: 60 a second\n", "Bot", 60, setting_seen=False), [])
+
+    def test_a_missing_line_or_another_rate_is_a_problem(self):
+        self.assertTrue(any("no snapshot rate" in p for p in net.rate_problems("Bot: joined\n", "Bot", 30, setting_seen=False)))
+        wrong = "Bot: settings: snapshot-rate 30 a second\nBot: snapshots: 60 a second\n"
+        self.assertTrue(any("ran at ['60']" in p for p in net.rate_problems(wrong, "Bot", 30)))
+        unseen = "Bot: snapshots: 30 a second\n"
+        self.assertTrue(any("never showed" in p for p in net.rate_problems(unseen, "Bot", 30)))
+
+
 class ScenarioListTests(unittest.TestCase):
     def test_every_scenario_is_a_driver_in_the_net_lane(self):
         scenarios = net.scenarios()
@@ -518,7 +535,7 @@ class ScenarioListTests(unittest.TestCase):
             self.assertTrue(
                 s.name.startswith(
                     ("net-server-", "net-discovery", "net-convert-", "net-window-", "net-master-", "net-content-",
-                     "net-migrate-", "net-reach-")
+                     "net-migrate-", "net-reach-", "net-host-")
                 ),
                 s.name,
             )

@@ -47,6 +47,9 @@ const SELECTED: [u8; 4] = [235, 225, 179, 255];
 const BOX: [u8; 4] = [81, 81, 81, 255];
 /// What a pin made while the mission flies does (stage K).
 const PIN_IN_FLIGHT: &str = "A pin made in flight applies when the lobby returns.";
+/// Why a dedicated server's snapshot rate row is greyed (slice R1): its
+/// operator sets it in the configuration file.
+const RATE_IS_THE_SERVERS: &str = "This server's snapshot rate is set by its operator.";
 /// The most bytes of a game's name (the host's rule).
 const NAME_BYTES: usize = 64;
 
@@ -191,7 +194,7 @@ pub fn page_rows(page: Page) -> Vec<Kind> {
             Kind::Setting(number::LOCK_SIDES),
             Kind::Setting(number::LOADOUTS),
             Kind::Setting(number::IDLE_AI),
-            Kind::Setting(number::OBSERVER_DELAY),
+            Kind::Setting(number::SNAPSHOT_RATE),
             Kind::Host,
         ],
         Page::Revival => vec![
@@ -207,6 +210,7 @@ pub fn page_rows(page: Page) -> Vec<Kind> {
             Kind::Setting(number::TIME_LIMIT),
             Kind::Setting(number::KILL_LIMIT),
             Kind::Setting(number::KILL_OWNER),
+            Kind::Setting(number::OBSERVER_DELAY),
         ],
         Page::Realism => {
             let mut rows = vec![Kind::Damage, Kind::EnemyAi];
@@ -245,6 +249,7 @@ pub fn row_label(kind: Kind) -> &'static str {
             number::KILL_OWNER => "Kill limit counts",
             number::OBSERVER_DELAY => "Observer delay",
             number::IDLE_AI => "AI flies idle aircraft after",
+            number::SNAPSHOT_RATE => "Snapshot rate",
             _ => "",
         },
     }
@@ -346,6 +351,12 @@ impl Context {
         self.value(number::MODE) == Some(1)
     }
 
+    /// A player's game runs the host: not a dedicated server, whose rate is
+    /// its operator's file's (slice R1).
+    pub fn hosted_by_a_player(&self) -> bool {
+        self.players.iter().any(|p| p.house)
+    }
+
     fn password_set(&self) -> bool {
         self.value(number::PASSWORD) == Some(1)
     }
@@ -373,6 +384,9 @@ pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
     }
     if matches!(kind, Kind::Damage | Kind::EnemyAi | Kind::Cheat(_)) && ctx.cheats.is_none() {
         return Err("The mission has not arrived yet.".into());
+    }
+    if kind == Kind::Setting(number::SNAPSHOT_RATE) && !ctx.hosted_by_a_player() {
+        return Err(RATE_IS_THE_SERVERS.into());
     }
     Ok(())
 }

@@ -678,6 +678,9 @@ fn the_session_part_restores_its_settings_and_timers_on_another_clock() {
         time_limit: Some(Duration::from_secs(4 * 3_600)),
         restart_delay: Duration::from_secs(20),
         settings: vec![(number::MODE, crate::settings::Mode::Pvp.value())],
+        // A rate past the King's list (a server's file), which a host taking
+        // over starts without and restores (slice R1).
+        snapshot_rate: 24,
         ..config()
     };
     let mut host = Host::new(crowd_spec(), Arc::new(resources()), config.clone()).unwrap();
@@ -693,7 +696,16 @@ fn the_session_part_restores_its_settings_and_timers_on_another_clock() {
         panic!("ended, with a next mission");
     };
     let bytes = host.encode_part(Part::Session).unwrap();
-    let mut fresh = Host::new(crowd_spec(), Arc::new(resources()), config).unwrap();
+    let mut fresh = Host::new(
+        crowd_spec(),
+        Arc::new(resources()),
+        HostConfig {
+            snapshot_rate: 60,
+            ..config
+        },
+    )
+    .unwrap();
+    assert_eq!(fresh.snapshot_rate(), 60);
     fresh.now = Duration::from_secs(1_000);
     let old_clock = fresh.session_clock(&bytes).unwrap();
     assert_eq!(old_clock, host.now);
@@ -710,6 +722,8 @@ fn the_session_part_restores_its_settings_and_timers_on_another_clock() {
     assert_eq!(fresh.settings.max_players(), 30);
     assert_eq!(fresh.settings.time_limit_seconds(), Some(4 * 3_600));
     assert_eq!(fresh.settings.password(), Some("secret"));
+    assert_eq!(fresh.snapshot_rate(), 24, "the rate restores as it was");
+    assert_eq!(fresh.ticks_per_snapshot(), 5);
     let moved = |at: Duration| fresh.now + (at - host.now);
     match fresh.life {
         Life::Ended {

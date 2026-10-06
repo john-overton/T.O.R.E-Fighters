@@ -299,7 +299,12 @@ fn load_life(l: &mut Loader<'_>, clock: Clock) -> Result<Life> {
 /// The settings that a host's configuration sets past the King's lists
 /// ([`Store::from_config`]), and the password, which has a field of its
 /// own: coded beside the list, not in it.
-const SETTINGS_BESIDE: [u8; 3] = [number::PASSWORD, number::MAX_PLAYERS, number::TIME_LIMIT];
+const SETTINGS_BESIDE: [u8; 4] = [
+    number::PASSWORD,
+    number::MAX_PLAYERS,
+    number::TIME_LIMIT,
+    number::SNAPSHOT_RATE,
+];
 
 /// The settings store: every registry value, the name and the password.
 fn save_settings(s: &mut Saver, settings: &Store) -> Result<()> {
@@ -330,6 +335,7 @@ fn load_settings(l: &mut Loader<'_>, config: &HostConfig) -> Result<Store> {
         name,
         password,
         max_players: value(number::MAX_PLAYERS).unwrap_or_default() as usize,
+        snapshot_rate: value(number::SNAPSHOT_RATE).unwrap_or(config.snapshot_rate),
         time_limit: value(number::TIME_LIMIT)
             .filter(|seconds| *seconds > 0)
             .map(|seconds| Duration::from_secs(u64::from(seconds))),

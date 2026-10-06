@@ -13,7 +13,7 @@
 //! Every rule below that the design leaves open is an agent decision, named
 //! as such in docs/ARCHITECTURE.md's "Built (F2-1)" notes.
 
-use super::config::PUBLIC_IS_BROADCAST;
+use super::config::{PUBLIC_IS_BROADCAST, RATE_IS_THE_FILES};
 use super::{
     ConnectionId, CrownRule, Host, HostError, Life, LobbyEvent, Stage, StartMode, build_world,
 };
@@ -259,6 +259,10 @@ impl Host {
         if moved(number::MODE) {
             self.fit_slots();
         }
+        // The upload figures measured what the old rate needs.
+        if moved(number::SNAPSHOT_RATE) {
+            self.rate_changed();
+        }
         // A change that alters what players chose clears every ready mark,
         // as a mission change does.
         if moved(number::MODE) || moved(number::LOCK_SIDES) || moved(number::LOADOUTS) {
@@ -398,6 +402,9 @@ impl Host {
                     if value == settings::Visibility::Public.value() && !self.config.listable =>
                 {
                     return Err(PUBLIC_IS_BROADCAST.into());
+                }
+                number::SNAPSHOT_RATE if self.config.house.is_none() => {
+                    return Err(RATE_IS_THE_FILES.into());
                 }
                 _ => {}
             }

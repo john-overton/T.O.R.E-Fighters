@@ -266,18 +266,33 @@ pub mod words {
         format!("{callsign} connects through the relay and cannot host.")
     }
 
-    /// No machine passed the upload test (the design's words).
-    pub fn upload(players: usize, best: &str, percent: u32) -> String {
+    /// No machine passed the upload test (the design's words). `lower` is
+    /// the highest snapshot rate below the one in force that the best
+    /// machine's figure would fit (slice R1).
+    pub fn upload(players: usize, best: &str, percent: u32, lower: Option<u32>) -> String {
         format!(
-            "No machine here passed the test for {players} players: {best}'s carried {percent} percent of what they need. Fewer players, or a dedicated server, will fly better."
+            "No machine here passed the test for {players} players: {best}'s carried {percent} percent of what they need. {}Fewer players, or a dedicated server, will fly better.",
+            rate_hint(lower)
         )
     }
 
     /// The pinned host did not pass the upload test.
-    pub fn pinned_upload(players: usize, pinned: &str, percent: u32) -> String {
+    pub fn pinned_upload(players: usize, pinned: &str, percent: u32, lower: Option<u32>) -> String {
         format!(
-            "{pinned}'s machine, the pinned host, carried {percent} percent of what {players} players need. Fewer players, or a dedicated server, will fly better."
+            "{pinned}'s machine, the pinned host, carried {percent} percent of what {players} players need. {}Fewer players, or a dedicated server, will fly better.",
+            rate_hint(lower)
         )
+    }
+
+    /// The sentence that says a lower snapshot rate would fit (slice R1;
+    /// *agent decision* on the words).
+    fn rate_hint(lower: Option<u32>) -> String {
+        match lower {
+            Some(rate) => format!(
+                "At {rate} snapshots a second it would fit: turn the snapshot rate down in the lobby's Settings. "
+            ),
+            None => String::new(),
+        }
     }
 
     /// No machine passed the CPU test.
@@ -738,6 +753,18 @@ impl Host {
         })
     }
 
+    /// The King changed the snapshot rate (slice R1): every upload figure
+    /// measured what the old rate needs, so they are forgotten and the tests
+    /// run again at the new one.
+    pub(super) fn rate_changed(&mut self) {
+        for measure in self.succession.measures.values_mut() {
+            measure.upload = None;
+        }
+        self.succession.upload = None;
+        self.succession.house_upload = None;
+        self.succession.house_samples.clear();
+    }
+
     /// Ends the running upload test when its time is up, and starts the next
     /// one due.
     fn upload_update(&mut self, now: Duration) {
@@ -788,7 +815,7 @@ impl Host {
         let rate = upload_need(
             players,
             self.cold_standbys_for(order),
-            self.config.snapshot_rate,
+            self.settings.snapshot_rate(),
         );
         let round_trip = self
             .server
@@ -915,12 +942,19 @@ impl Host {
             if let Some(upload) = self.upload_figure(host).filter(|u| !u.passed()) {
                 let percent = u32::from(upload.per_mille) / 10;
                 warnings.insert(match pinned {
-                    Some(_) => words::pinned_upload(players, &callsign, percent),
+                    Some(_) => words::pinned_upload(
+                        players,
+                        &callsign,
+                        percent,
+                        self.lower_rate_that_fits(host, upload),
+                    ),
                     None => {
-                        let (best, percent) = self
-                            .best_upload_figure(players)
-                            .unwrap_or((callsign.clone(), percent));
-                        words::upload(players, &best, percent)
+                        let (best, percent, lower) = self.best_upload_figure(players).unwrap_or((
+                            callsign.clone(),
+                            percent,
+                            None,
+                        ));
+                        words::upload(players, &best, percent, lower)
                     }
                 });
             }
@@ -1080,16 +1114,39 @@ impl Host {
             .min(limits::STANDBYS)
     }
 
-    /// The machine that carried the most of `players`' need, and its share
-    /// in percent.
-    fn best_upload_figure(&self, players: usize) -> Option<(String, u32)> {
+    /// The machine that carried the most of `players`' need, its share in
+    /// percent, and the lower snapshot rate its figure would fit.
+    fn best_upload_figure(&self, players: usize) -> Option<(String, u32, Option<u32>)> {
         self.live_peers()
             .filter_map(|(_, p)| {
                 let upload = self.upload_figure(p.lobby.order)?;
-                (p.house || usize::from(upload.players) >= players)
-                    .then(|| (p.callsign.clone(), u32::from(upload.per_mille) / 10))
+                (p.house || usize::from(upload.players) >= players).then(|| {
+                    (
+                        p.callsign.clone(),
+                        u32::from(upload.per_mille) / 10,
+                        self.lower_rate_that_fits(p.lobby.order, upload),
+                    )
+                })
             })
-            .max_by_key(|(_, percent)| *percent)
+            .max_by_key(|(_, percent, _)| *percent)
+    }
+
+    /// The highest snapshot rate the King offers below the one in force that
+    /// `upload`, measured at the one in force, would fit for the players it
+    /// was measured for (slice R1): what arrived of the need at this rate
+    /// against the need at the lower one, which counts the standbys' share
+    /// as it is, so it is no more hopeful than the real need.
+    fn lower_rate_that_fits(&self, order: u64, upload: Upload) -> Option<u32> {
+        let rate = self.settings.snapshot_rate();
+        let players = usize::from(upload.players);
+        let cold = self.cold_standbys_for(order);
+        let carried = u64::from(upload_need(players, cold, rate)) * u64::from(upload.per_mille);
+        crate::settings::KING_SNAPSHOT_RATES
+            .into_iter()
+            .filter(|&lower| lower < rate)
+            .find(|&lower| {
+                carried >= u64::from(upload_need(players, cold, lower)) * u64::from(UPLOAD_PASS)
+            })
     }
 
     fn upload_figure(&self, order: u64) -> Option<Upload> {

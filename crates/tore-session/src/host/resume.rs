@@ -412,7 +412,7 @@ impl Host {
             absent: count,
         });
         if let Some(player) = handed {
-            let peer = player.into_peer(clock, host.config.ticks_per_snapshot());
+            let peer = player.into_peer(clock, host.ticks_per_snapshot());
             host.drop_player(peer, LeaveReason::Left);
         }
         if !flying {
@@ -471,7 +471,7 @@ impl Host {
         let Ok(order) = self.rejoin.claim(token, now) else {
             return false;
         };
-        let tps = self.config.ticks_per_snapshot();
+        let tps = self.ticks_per_snapshot();
         let Some(active) = &mut self.resuming.active else {
             return false;
         };
@@ -619,7 +619,7 @@ impl Host {
             0 => 1,
             flight => flight,
         };
-        let tps = self.config.ticks_per_snapshot();
+        let tps = self.ticks_per_snapshot();
         let standing = Tracker::standing(&self.world, tick);
         let destroyed: Vec<u32> = self.tracker.destroyed().iter().copied().collect();
         let Some(peer) = self.peers.get_mut(&connection) else {
@@ -1034,7 +1034,7 @@ impl Host {
         let clock = active.clock;
         let handed_house = active.handed_house;
         let absent = std::mem::take(&mut active.absent);
-        let tps = self.config.ticks_per_snapshot();
+        let tps = self.ticks_per_snapshot();
         for (order, Absent { player, .. }) in absent {
             let callsign = player.callsign.clone();
             let peer = player.into_peer(clock, tps);

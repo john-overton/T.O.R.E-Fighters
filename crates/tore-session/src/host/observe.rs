@@ -415,7 +415,7 @@ impl Host {
         out: &TickOutput,
         wide: &[Timed],
     ) {
-        let tps = u64::from(self.config.ticks_per_snapshot());
+        let tps = u64::from(self.ticks_per_snapshot());
         let delay = self.observer_delay_ticks();
         if self.stream.ring.as_ref().is_some_and(|r| r.delay != delay) {
             self.stream.ring = None;

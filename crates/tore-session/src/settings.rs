@@ -42,6 +42,8 @@ pub mod number {
     pub const IDLE_AI: u8 = 20;
     /// Stage K (slice K0): the host, calculated or pinned by the King.
     pub const HOST: u8 = 21;
+    /// Slice R1: the King's snapshot rate, snapshots a second.
+    pub const SNAPSHOT_RATE: u8 = 22;
 }
 
 /// Setting 21's value for the calculated host; a pinned player is 1 plus
@@ -50,6 +52,12 @@ pub const CALCULATED_HOST: u32 = 0;
 
 /// The `idle-ai` default, in co-op and PvP: 5 minutes (John, 2026-10-06).
 pub const IDLE_AI_DEFAULT: u32 = 300;
+
+/// The snapshot rates the King may choose, a second, in the order the lobby
+/// turns through them (John, 2026-10-06, slice R1: 60, 30 and 20). A
+/// dedicated server's file may give any rate that divides 120
+/// ([`crate::host::config::SNAPSHOT_RATES`]).
+pub const KING_SNAPSHOT_RATES: [u32; 3] = [60, 30, 20];
 
 /// The `lives` value that means no limit.
 pub const UNLIMITED_LIVES: u32 = 255;
@@ -170,6 +178,8 @@ pub enum Unit {
     Count,
     Seconds,
     NauticalMiles,
+    /// Snapshots a second.
+    PerSecond,
 }
 
 /// The values a setting allows.
@@ -206,7 +216,7 @@ const OFF_ON: &[(u32, &str)] = &[(0, "off"), (1, "on")];
 const OFF_ON_VALUES: &[u32] = &[0, 1];
 
 /// Every setting, in number order: the registry.
-pub const REGISTRY: [Setting; 21] = [
+pub const REGISTRY: [Setting; 22] = [
     Setting {
         number: number::MODE,
         name: "mode",
@@ -449,6 +459,21 @@ pub const REGISTRY: [Setting; 21] = [
         change: Change::AnyTime,
         pvp_only: false,
     },
+    // Slice R1: how often the host sends each player a snapshot. A game a
+    // player hosts lets the King turn it in the lobby; a dedicated server's
+    // file sets it (it may give any rate that divides 120, which the lobby
+    // state carries as given) and the King's change is refused.
+    Setting {
+        number: number::SNAPSHOT_RATE,
+        name: "snapshot-rate",
+        allowed: Allowed::List(&KING_SNAPSHOT_RATES),
+        unit: Unit::PerSecond,
+        words: &[],
+        coop: crate::host::config::DEFAULT_SNAPSHOT_RATE,
+        pvp: crate::host::config::DEFAULT_SNAPSHOT_RATE,
+        change: Change::InLobby,
+        pvp_only: false,
+    },
 ];
 
 /// The setting with `number`.
@@ -500,6 +525,7 @@ impl Setting {
         match self.unit {
             Unit::Count => value.to_string(),
             Unit::NauticalMiles => format!("{value} nm"),
+            Unit::PerSecond => format!("{value} a second"),
             Unit::Seconds if value == 60 => "1 minute".to_owned(),
             Unit::Seconds if value > 0 && value.is_multiple_of(60) => {
                 format!("{} minutes", value / 60)
@@ -606,6 +632,9 @@ impl Store {
             number::MAX_PLAYERS,
             u32::try_from(config.max_players).unwrap_or(u32::MAX),
         );
+        // The configuration's own rate, kept as given: a dedicated server's
+        // file allows rates the King's list does not offer.
+        store.put(number::SNAPSHOT_RATE, config.snapshot_rate);
         // The configuration's own limit, kept as given: a dedicated server's
         // file allows longer limits than the King's list.
         store.put(
@@ -683,7 +712,13 @@ impl Store {
             && let Some(mode) = Mode::from_value(mode)
             && mode != self.mode()
         {
-            for setting in REGISTRY.iter().filter(|s| s.change == Change::InLobby) {
+            // The snapshot rate belongs to the game, not the mode (and a
+            // dedicated server's file sets it): kept, as the ones changed
+            // any time are (slice R1, agent decision).
+            for setting in REGISTRY
+                .iter()
+                .filter(|s| s.change == Change::InLobby && s.number != number::SNAPSHOT_RATE)
+            {
                 self.put(setting.number, setting.default_in(mode));
             }
         }
@@ -782,6 +817,15 @@ impl Store {
     /// never.
     pub fn idle_ai_seconds(&self) -> Option<u32> {
         Some(self.value(number::IDLE_AI)).filter(|&s| s != 0)
+    }
+
+    /// Snapshots a second the host sends each player: the King's choice in a
+    /// game a player hosts, a dedicated server's file's value otherwise
+    /// (slice R1).
+    pub fn snapshot_rate(&self) -> u32 {
+        Some(self.value(number::SNAPSHOT_RATE))
+            .filter(|rate| (1..=120).contains(rate) && 120 % rate == 0)
+            .unwrap_or(crate::host::config::DEFAULT_SNAPSHOT_RATE)
     }
 
     /// The lobby id of the player the King pinned as the host; `None` for

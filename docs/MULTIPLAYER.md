@@ -852,7 +852,8 @@ estimates. How they are used is in the
 | Item | Value | Source |
 | --- | --- | --- |
 | Simulation | 120 ticks a second | John, 2026-09-28 |
-| Snapshots | 60 a second to each player (every second tick, each seat on its own tick of the two: seat number modulo the ticks per snapshot, an agent decision so a full server does not build all at once); a server setting of 10, 12, 15, 20, 24, 30, 40 or 60, the rates that divide 120 | John, 2026-10-06 (30 a second from 2026-09-28 to 2026-10-06); the other rates are an agent proposal |
+| Snapshots | 60 a second to each player (every second tick, each seat on its own tick of the two: seat number modulo the ticks per snapshot, an agent decision so a full server does not build all at once); a server setting of 10, 12, 15, 20, 24, 30, 40 or 60, the rates that divide 120; in a game a player hosts, the King's lobby setting of 60 (default), 30 or 20 | John, 2026-10-06 (30 a second from 2026-09-28 to 2026-10-06; the King's setting, Q56); the other rates are an agent proposal |
+| Relay | Each relayed channel up to 128 KB/s each way, bursts of 256 KB (64 KB/s before 2026-10-06); a relayed player's busiest second at 60 snapshots a second is 63 to 74 KB/s | John, 2026-10-06 (Q55) |
 | Inputs | Up to 60 packets a second, each repeating every unacknowledged tick up to 24 ticks (200 ms) | Agent proposal |
 | Keepalive | At least 10 packets a second each way; a joined game whose loop is stalled sends a [Keepalive](formats/net-protocol.md#keepalive) once a second, for at most 60 seconds (EF-K) | Agent proposal |
 | Packet size | At most 1,200 bytes | Guide |
@@ -1243,6 +1244,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | The away player's observer menu | John, 2026-10-06: in place of Stop Watching, the menu offers Take Back Flight (back into the player's own reserved aircraft), Spawn in Aircraft (only when no reserved aircraft is left, under the revival rules) and Leave Game (built in F2-O4) |
 | Esc in the observer view | John, 2026-10-06: Esc opens the viewer's pause menu, whose first row is Stop Watching |
 | Snapshot rates | John, 2026-10-06: snapshots 60 a second by default, the near band's rate, and the far band 4 times a second, raised from 30 and twice a second; he accepts about double the bandwidth. The setting keeps 10 to 60 a second so a host on a weak uplink can go down (built in D12; [measured](baselines/net-rates-2026-10-06.md)) |
+| The King's snapshot rate | John, 2026-10-06 (Q56): a game a player hosts has a lobby setting for the snapshot rate, 60 (default), 30 or 20, so a host on a weak uplink need not host at 60. The King turns it in the lobby only, never in flight. A dedicated server keeps its file's `snapshot-rate`, which the lobby shows read-only (agent decision). When no machine passes the upload test, the King's warning says whether the best machine's figure would fit 30 or 20 (built in R1) |
 | The relay's rate | John, 2026-10-06 (Q55): the master's `relay-rate` default goes from 64 to 128 KB/s each way per channel, since a relayed player's busiest second at 60 snapshots a second is 63 to 74 KB/s (D12). A master whose file sets `relay-rate` keeps its own value (built in R1; [the master's guide](MASTER-SERVER.md#the-configuration-file)) |
 
 ## Open questions

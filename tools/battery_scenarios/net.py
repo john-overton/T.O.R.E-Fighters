@@ -534,6 +534,64 @@ def drive_king(d: Drive) -> None:
     )
 
 
+def rate_problems(text: str, name: str, rate: int, setting_seen: bool = True) -> list[str]:
+    """What a bot printed of the snapshot rate (slice R1): the lobby's settings carrying `rate` when the setting is not
+    the default, and the rate of each flight as it was seated."""
+    problems = []
+    rates = re.findall(rf"^{name}: snapshots: (\d+) a second$", text, re.M)
+    if not rates:
+        problems.append(f"{name} printed no snapshot rate for its flight")
+    elif set(rates) != {str(rate)}:
+        problems.append(f"{name}'s flight ran at {sorted(set(rates))} snapshots a second, expected {rate}")
+    if setting_seen and not re.search(rf"^{name}: settings: .*snapshot-rate {rate} a second", text, re.M):
+        problems.append(f"{name}'s lobby never showed snapshot-rate {rate} a second")
+    return problems
+
+
+def drive_rate_server(d: Drive) -> None:
+    """A dedicated server whose file sets `snapshot-rate 30` (slice R1): the lobby state carries it, a bot joins, and
+    its flight runs at 30 snapshots a second, though a server's own rate is its operator's (the King could not turn
+    it)."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5), snapshot_rate=30)
+    bot = start_bots(d, port, "bot", 20, "--callsign", "Bot")
+    bot.finish(90, 0)
+    server.finish(40, 0)
+    for problem in rate_problems(bot.text(), "Bot", 30):
+        d.problem(problem)
+    bot.expect(r"^Bot: seat \d+, plane \d+, at tick \d+$", "a seating")
+    bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
+def drive_rate_host(d: Drive) -> None:
+    """A game a player hosts (a hosting bot, the house and the King, slice R1): the King turns the snapshot rate to 30 in
+    the lobby, a second bot joins, and both flights run at 30 snapshots a second. (Whether the joiner's Accepted packet
+    already said 30 depends on which came first; the stale Accepted is `host::king_tests`' to check on the simulator.)"""
+    port = d.port()
+    mission = write_mission(d)
+    host = d.start(
+        "host",
+        [d.bot, "--host", mission, "--port", port, "--callsign", "Lead", "--slot", "0", "--seconds", 40, "--players", "2",
+         "--standby", "off", "--king", "snapshot-rate=30"],
+    )
+    if not host.wait_for(r"^Lead: hosting ", 60):
+        raise DriveError("the hosting bot never began to host")
+    pilot = d.start(
+        "pilot", [d.bot, "--connect", f"{LOCALHOST}:{port}", "--callsign", "Pilot", "--slot", "1", "--seconds", 25],
+    )
+    if not host.wait_for(r"^Lead: host: mission started", 90):
+        raise DriveError("the hosting bot never started the mission")
+    pilot.finish(120, 0)
+    host.finish(120, 0)
+    host.expect(r"^Lead: as the King, changing the settings: snapshot-rate 30 a second$", "the King's change")
+    for problem in rate_problems(host.text(), "Lead", 30) + rate_problems(pilot.text(), "Pilot", 30):
+        d.problem(problem)
+    pilot.expect(r"^Pilot: seat \d+, plane 1, at tick \d+$", "the joiner's seat")
+    host.forbid(NET_BAD, "a network problem")
+    pilot.forbid(NET_BAD, "a network problem")
+
+
 def drive_pvp(d: Drive) -> None:
     """PvP from the server's file (slice F2-1's keys): `mode pvp`, a kill limit of one kill in all, four minutes at
     most (the first pass kills in about 20 seconds; the bots merge again every 20 seconds or so, which leaves a
@@ -1923,6 +1981,16 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-hunt", lane="net", args=[], driver=drive_hunt, uses=("server", "bot"), timeout=240,
             notes="a bot shoots down dummy enemies on the guide's mission 5 nm apart: the kill limit ends the mission",
+        ),
+        Scenario(
+            name="net-server-rate", lane="net", args=[], driver=drive_rate_server, uses=("server", "bot"), timeout=240,
+            notes="a server whose file sets snapshot-rate 30: the lobby carries it and a bot's flight runs at 30 a second "
+            "(slice R1)",
+        ),
+        Scenario(
+            name="net-host-rate", lane="net", args=[], driver=drive_rate_host, uses=("bot",), timeout=300,
+            notes="a game a hosting bot hosts: the King turns the snapshot rate to 30 in the lobby, a second bot joins, "
+            "and both flights run at 30 a second (slice R1)",
         ),
         Scenario(
             name="net-server-pvp", lane="net", args=[], driver=drive_pvp, uses=("server", "bot"), timeout=420,

@@ -298,8 +298,10 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
     assert!(rig.refusals(king).is_empty(), "{:?}", rig.refusals(king));
     let mut expected: Vec<(u8, u32)> = values.to_vec();
     expected.push((number::PASSWORD, 1));
-    // Setting 21, the host, stays calculated (its pin is slice K6's).
+    // Setting 21, the host, stays calculated (its pin is slice K6's), and
+    // setting 22, the snapshot rate, stays at 60 (slice R1).
     expected.push((number::HOST, 0));
+    expected.push((number::SNAPSHOT_RATE, 60));
     expected.sort_unstable();
     for p in [king, cobra] {
         let lobby = rig.lobby(p).unwrap();
@@ -931,4 +933,109 @@ fn watching_is_logged_when_it_starts_and_stops() {
             .iter()
             .any(|(who, e)| who == "Owl" && *e == LobbyEvent::Watching(false))
     }));
+}
+
+/// John, 2026-10-06 (Q56), slice R1: a game a player hosts has a lobby
+/// setting for the snapshot rate, 60 (default), 30 or 20, and the flight
+/// that starts follows it on the host and on every player.
+#[test]
+fn the_king_turns_the_snapshot_rate_in_the_lobby_and_the_flight_follows_it() {
+    let mut rig = Rig::hosted(spec(2, 1));
+    let viper = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[viper, cobra]);
+    assert_eq!(rig.host.snapshot_rate(), 60);
+    assert_eq!(rig.client(cobra).ticks_per_snapshot(), 2);
+
+    // A rate off the King's list is refused with the list.
+    rig.change(viper, &[(number::SNAPSHOT_RATE, 24)]);
+    assert!(rig.refused(
+        viper,
+        kind::SETTINGS,
+        "snapshot-rate is 60 a second, 30 a second or 20 a second."
+    ));
+    assert_eq!(rig.host.snapshot_rate(), 60);
+
+    // 30 applies, every lobby shows it, and a player's flight starts from it
+    // though its Accepted packet said 2 ticks.
+    rig.change(viper, &[(number::SNAPSHOT_RATE, 30)]);
+    assert_eq!(rig.host.snapshot_rate(), 30);
+    assert_eq!(rig.host.ticks_per_snapshot(), 4);
+    for p in [viper, cobra] {
+        let shown = rig.lobby(p).unwrap().settings.clone();
+        assert!(shown.contains(&(number::SNAPSHOT_RATE, 30)), "{shown:?}");
+    }
+    assert_eq!(
+        rig.client(cobra).ticks_per_snapshot(),
+        2,
+        "not in the lobby"
+    );
+    rig.client(cobra).take_slot(1);
+    rig.run(Duration::from_millis(200));
+    rig.client(cobra).set_ready(true);
+    rig.run(Duration::from_millis(300));
+    rig.client(viper).start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(cobra)));
+    assert_eq!(rig.client(cobra).ticks_per_snapshot(), 4);
+
+    // Snapshots come every fourth tick, 30 a second.
+    let mut ticks: Vec<u32> = Vec::new();
+    let end = rig.net.now() + Duration::from_secs(2);
+    while rig.net.now() < end {
+        rig.step();
+        if let Some(tick) = rig.client(cobra).snapshot_tick()
+            && ticks.last() != Some(&tick)
+        {
+            ticks.push(tick);
+        }
+    }
+    assert!(ticks.len() >= 55, "{} snapshots in 2 seconds", ticks.len());
+    assert!(
+        ticks.windows(2).all(|pair| pair[1] - pair[0] == 4),
+        "every fourth tick: {ticks:?}"
+    );
+
+    // Not in flight: the rate is a lobby setting.
+    rig.change(viper, &[(number::SNAPSHOT_RATE, 20)]);
+    assert!(rig.refused(viper, kind::SETTINGS, super::king::IN_THE_LOBBY));
+    assert_eq!(rig.host.snapshot_rate(), 30);
+}
+
+/// A mode change resets what the King changes in the lobby, but not the
+/// snapshot rate, which belongs to the game (agent decision, slice R1).
+#[test]
+fn a_new_mode_keeps_the_snapshot_rate() {
+    let mut rig = Rig::hosted(spec(2, 1));
+    let viper = rig.join("Viper");
+    rig.gather(&[viper]);
+    rig.change(viper, &[(number::SNAPSHOT_RATE, 20)]);
+    rig.change(viper, &[(number::MODE, Mode::Pvp.value())]);
+    assert_eq!(rig.host.settings().mode(), Mode::Pvp);
+    assert_eq!(rig.host.snapshot_rate(), 20);
+}
+
+/// A dedicated server's snapshot rate is its file's: the King may not turn
+/// it, and the lobby state carries it as given, whatever the rate.
+#[test]
+fn a_dedicated_servers_rate_is_its_files_and_the_king_may_not_turn_it() {
+    let mut rig = Rig::new(spec(2, 1), |config| {
+        config.crown = CrownRule::FirstPlayer;
+        config.snapshot_rate = 24;
+    });
+    let viper = rig.join("Viper");
+    rig.gather(&[viper]);
+    assert_eq!(rig.host.snapshot_rate(), 24);
+    assert_eq!(rig.host.ticks_per_snapshot(), 5);
+    assert!(
+        rig.lobby(viper)
+            .unwrap()
+            .settings
+            .contains(&(number::SNAPSHOT_RATE, 24))
+    );
+    rig.change(viper, &[(number::SNAPSHOT_RATE, 30)]);
+    assert!(rig.refused(viper, kind::SETTINGS, super::config::RATE_IS_THE_FILES));
+    assert_eq!(rig.host.snapshot_rate(), 24);
+    // The mode may change on it and the rate stays.
+    rig.change(viper, &[(number::MODE, Mode::Pvp.value())]);
+    assert_eq!(rig.host.snapshot_rate(), 24);
 }
