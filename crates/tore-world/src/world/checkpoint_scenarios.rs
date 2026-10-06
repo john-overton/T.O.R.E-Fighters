@@ -1061,6 +1061,20 @@ pub(super) fn lead_order() -> Scenario {
         world
     }
     fn drive(world: &mut World, step: u64) -> Step {
+        // The target is shot down 10 steps after the checkpoint. (It used to
+        // fall to a collision with the idle human-flown plane 1 at step 1077;
+        // the AI's traffic avoidance now steers clear of it, B4b, and nothing
+        // else in this fight fires.)
+        if step == 1_010 {
+            let row = world
+                .combat
+                .state
+                .targets
+                .iter_mut()
+                .find(|t| t.id == crowd::E_AI[0].0)
+                .expect("an AI row");
+            row.hp = 0;
+        }
         let inputs = crowd::inputs(world, |seat| {
             let mut input = SeatInput::default();
             if seat == SeatId(0) {
