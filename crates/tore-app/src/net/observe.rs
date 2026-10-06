@@ -416,9 +416,12 @@ impl Store {
         std::fs::create_dir_all(folder)
             .map_err(|error| format!("{}: {error}", folder.display()))?;
         let name = format!(
-            "observer-{}-{}.tore-replay",
+            "observer-{}-{}-{}.tore-replay",
             std::process::id(),
-            MADE.fetch_add(1, Ordering::Relaxed)
+            MADE.fetch_add(1, Ordering::Relaxed),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_millis())
         );
         let path = folder.join(name);
         let writer = replay::Writer::create_with(
@@ -566,6 +569,8 @@ pub struct Observing {
     store: Option<Store>,
     /// Where the recording's file goes.
     folder: PathBuf,
+    /// Why the recording could not start: the watch cannot be shown.
+    failure: Option<String>,
 }
 
 impl Observing {
@@ -575,6 +580,7 @@ impl Observing {
             feeder: Feeder::new(),
             store: None,
             folder,
+            failure: None,
         }
     }
 
@@ -608,6 +614,9 @@ impl Observing {
     /// One more frame of the picture. The first one starts the recording,
     /// with the mission's world and models.
     pub fn feed(&mut self, frame: &ObserverFrame, around: Context<'_>) {
+        if self.failure.is_some() {
+            return;
+        }
         if self.store.is_none() {
             let Some(world) = around.world else {
                 return;
@@ -616,6 +625,7 @@ impl Observing {
                 Ok(store) => self.store = Some(store),
                 Err(error) => {
                     log::warn!("Observer recording: {error}");
+                    self.failure = Some(error);
                     return;
                 }
             }
@@ -626,6 +636,11 @@ impl Observing {
         {
             store.write(out);
         }
+    }
+
+    /// Why the recording could not start, when it could not.
+    pub fn failure(&self) -> Option<&str> {
+        self.failure.as_deref()
     }
 
     /// The newest read of the recording, when there is one the viewer has
@@ -669,6 +684,14 @@ impl App {
                     world: session.client.mission(),
                 },
             );
+        }
+        if let Some(failure) = observing.failure() {
+            // Nothing can be shown: say so, and stop the watch.
+            let words = format!("Could not show the mission: {failure}");
+            session.client.stop_watching();
+            self.observing = None;
+            self.message(words);
+            return;
         }
         let live = self.replay.as_mut().filter(|replay| replay.viewer.live());
         if let Some(replay) = &live {
@@ -1208,5 +1231,33 @@ mod tests {
         assert!(read.problems().is_empty());
         assert!(size < 40 << 20, "{size} bytes");
         assert!(took < Duration::from_secs(5), "{took:?}");
+    }
+
+    /// A recording that cannot start says why once and is not tried again
+    /// every frame; nothing is left behind.
+    #[test]
+    fn a_recording_that_cannot_start_says_so_and_is_not_retried() {
+        let watched = tore_session::fixture::observed_fight(3);
+        let folder = crate::replay::tests::TempDir::new("observe-failure");
+        // The folder is a file: nothing can be made in it.
+        let blocked = folder.path().join("blocked");
+        std::fs::write(&blocked, b"a file").unwrap();
+        let mut observing = Observing::new(blocked.clone());
+        let around = Context {
+            roster: watched.client.roster(),
+            world: watched.client.mission(),
+        };
+        let frame = watched.frames.iter().find(|f| f.render_tick >= 0.).unwrap();
+        observing.feed(frame, around);
+        let failure = observing.failure().expect("it failed").to_owned();
+        assert!(failure.contains("blocked"), "{failure}");
+        observing.feed(frame, around);
+        assert_eq!(observing.failure(), Some(failure.as_str()));
+        assert!(observing.newest().is_none());
+        assert_eq!(std::fs::read(&blocked).unwrap(), b"a file");
+        // Without a mission to build the header from, the first frame waits.
+        let mut waiting = Observing::new(folder.path().join("waiting"));
+        waiting.feed(frame, Context::default());
+        assert!(waiting.failure().is_none() && waiting.store.is_none());
     }
 }
