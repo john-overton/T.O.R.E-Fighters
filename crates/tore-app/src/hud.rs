@@ -327,7 +327,15 @@ pub fn draw(
     p.readout_box(font, &format!("{speed:.0}"), 211, 235);
     p.readout_box(font, &format!("{:.0}", s.position[1]), 405, 235);
     p.text(font, &format!("{:.1}G", s.g), 235, 164);
-    p.text(font, &format!("{:.0}%", s.throttle * 100.), 235, 178);
+    // A rotorcraft's throttle keys drive its collective, so the readout shows
+    // that (VTOL overhaul design section 6).
+    match crate::powered_hud::collective_label(s) {
+        Some(collective) => {
+            let (x, y) = crate::powered_hud::THROTTLE_READOUT;
+            p.text(font, &collective, x, y);
+        }
+        None => p.text(font, &format!("{:.0}%", s.throttle * 100.), 235, 178),
+    }
     if s.afterburner_active() {
         p.text(font, "AFT", 235, 150);
     }
@@ -378,6 +386,13 @@ pub fn draw(
     if s.autopilot.mode() != tore_sim::autopilot::Mode::Off {
         p.text(font, "AUTO", 211, 133);
         p.text(font, &s.autopilot.label(), 211, 145);
+    }
+    // The powered-lift cluster: rotor and torque, nozzle or nacelle angle,
+    // the hover display, radar height and the stability level.
+    if s.model().powered_lift().is_some() {
+        let agl = air.map_or(s.position[1] - ground, |d| d.altitude_agl_ft);
+        let cluster = crate::powered_hud::marks(s, agl, weapons);
+        crate::powered_hud::draw(&mut p, font, &cluster);
     }
     if let Some(wind) = wind {
         p.text(

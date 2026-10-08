@@ -131,8 +131,9 @@ pub fn fly(
 /// What the part of the step after the weather clock tells the plane's seat.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Warnings {
-    /// The turn-back or OVERSPEED lines, in that order, when due.
-    pub messages: [Option<&'static str>; 2],
+    /// The turn-back, OVERSPEED, LOW ROTOR, ROTOR OVERSPEED and GEAR SPEED
+    /// lines, in that order, when due.
+    pub messages: [Option<&'static str>; 5],
     /// Turbulence shook the aircraft.
     pub turbulence: Option<tore_input::FeedbackEvent>,
 }
@@ -158,9 +159,11 @@ pub fn after_weather(
         weather,
         enabled,
     );
-    let messages = edge_and_overspeed(flight, edge_message_at, overspeed_message_at, terrain);
+    let [edge, overspeed] =
+        edge_and_overspeed(flight, edge_message_at, overspeed_message_at, terrain);
+    let [low_rotor, rotor_overspeed, gear_speed] = rotor_warnings(flight);
     Warnings {
-        messages,
+        messages: [edge, overspeed, low_rotor, rotor_overspeed, gear_speed],
         turbulence,
     }
 }
@@ -245,6 +248,38 @@ pub fn edge_and_overspeed(
         }
     }
     messages
+}
+
+/// A rotor warning's condition must hold this many ticks before the message
+/// first shows (a quarter of a second), then it repeats every four seconds
+/// while it holds.
+pub const ROTOR_WARNING_DEBOUNCE_TICKS: u32 = 30;
+pub const ROTOR_WARNING_REPEAT_TICKS: u32 = 480;
+
+/// Whether a warning counter, the ticks its condition has held, is due a
+/// message this tick.
+fn warning_due(held: u32) -> bool {
+    held >= ROTOR_WARNING_DEBOUNCE_TICKS
+        && (held - ROTOR_WARNING_DEBOUNCE_TICKS).is_multiple_of(ROTOR_WARNING_REPEAT_TICKS)
+}
+
+/// The powered-lift warnings due this tick: LOW ROTOR below 80 percent rotor
+/// speed, ROTOR OVERSPEED above 110 percent, and the V-22's GEAR SPEED. They
+/// follow the flight's own warning counters, so they need no clock of their
+/// own and repeat the same way on a host and on a client's prediction.
+/// Retreating blade stall and vortex ring state have no message (the real
+/// aircraft have none): they shake the view and change the rotor's sound.
+pub fn rotor_warnings(flight: &flight::State) -> [Option<&'static str>; 3] {
+    if flight.crashed {
+        return [None; 3];
+    }
+    let held = flight.lift_controls.warnings;
+    [
+        (held.low_rotor, "LOW ROTOR"),
+        (held.rotor_overspeed, "ROTOR OVERSPEED"),
+        (held.gear_speed, "GEAR SPEED"),
+    ]
+    .map(|(ticks, text)| warning_due(ticks).then_some(text))
 }
 
 /// Combat's first write-back, once combat has stepped: the flight takes one

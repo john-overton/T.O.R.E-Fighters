@@ -176,7 +176,7 @@ impl Scene {
                     listener.position,
                     listener_velocity,
                     super::DOPPLER_LIMITS,
-                );
+                ) * source.pitch;
                 let voice = self.loops.entry(source.key).or_insert_with(|| LoopVoice {
                     voice: Voice {
                         clip: clip.clone(),
@@ -419,6 +419,7 @@ mod tests {
             gain: 0.3,
             reference: 100.,
             maximum: 2000.,
+            pitch: 1.,
         };
         let level = |external, x| {
             let mut scene = Scene::default();

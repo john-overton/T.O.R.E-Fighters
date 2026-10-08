@@ -51,6 +51,9 @@ struct Mixer {
     ejection_warning: bool,
     engine_gain: f32,
     burner_gain: f32,
+    /// The engine loop's pitch factor: a rotorcraft's rotor speed, 1 for any
+    /// other aircraft (the rotor sound follows NR).
+    engine_pitch: f64,
     /// Where the engine and afterburner loops are heard from: inside the
     /// cockpit, or from the aircraft in an external view.
     engine_place: spatial::Placed,
@@ -144,6 +147,9 @@ pub struct LoopSource {
     pub gain: f32,
     pub reference: f64,
     pub maximum: f64,
+    /// Pitch factor on the loop besides the Doppler shift: a rotorcraft's
+    /// rotor speed for its engine, 1 for anything else.
+    pub pitch: f64,
 }
 /// Lowest and highest Doppler pitch ratio (fitted).
 pub const DOPPLER_LIMITS: (f64, f64) = (0.5, 2.0);
@@ -181,6 +187,7 @@ pub fn loop_sources(
             gain: FIRE_LEVEL * m.strength,
             reference: FIRE_REFERENCE_FT,
             maximum: blast::FIRE_SOUND_FT,
+            pitch: 1.,
         })
         .collect();
     for pose in &snapshot.targets {
@@ -203,6 +210,11 @@ pub fn loop_sources(
                 gain,
                 reference: ENGINE_REFERENCE_FT,
                 maximum: ENGINE_MAXIMUM_FT,
+                pitch: if key == 1 {
+                    rotor_pitch(pose.engine.rotor, 0., 0.)
+                } else {
+                    1.
+                },
             })
         };
         out.extend(place(1, &sounds.engine, engine_gain(OTHER_THROTTLE)));
@@ -300,6 +312,42 @@ const ENGINE_STOP: &str = "engineOffSound";
 fn engine_gain(throttle: f64) -> f32 {
     0.08 + 0.15 * throttle as f32
 }
+/// The engine loop's pitch factor for a rotorcraft at rotor speed `nr` (a
+/// share of the governed 100 percent; zero or none for any other aircraft,
+/// which keep the recording's pitch): the rotor sound follows NR, so a
+/// bleeding rotor drops and an overspeeding one rises. Buffeting (the
+/// vortex ring state, retreating blade stall), 0 to 1, adds a warble at 9 Hz
+/// of up to 4 percent, `seconds` into the flight. Presentation only;
+/// `opinionated`, the sizes are an agent decision (VTOL overhaul slice P7).
+pub(crate) fn rotor_pitch(nr: f64, buffet: f64, seconds: f64) -> f64 {
+    if nr.is_nan() || nr <= 0. {
+        return 1.;
+    }
+    nr.clamp(0.3, 1.3)
+        * (1. + 0.04 * buffet.clamp(0., 1.) * (std::f64::consts::TAU * 9. * seconds).sin())
+}
+/// The warning tone of a rotor warning: the stall horn for LOW ROTOR, the
+/// stall warning for ROTOR OVERSPEED and the V-22's GEAR SPEED, once the
+/// condition has held long enough to be announced (the same quarter second
+/// as its message).
+pub(crate) fn rotor_cue(flight: &crate::flight::State) -> Option<&'static str> {
+    const DEBOUNCE: u32 = 30;
+    let held = flight.lift_controls.warnings;
+    if flight.crashed {
+        None
+    } else if held.low_rotor >= DEBOUNCE {
+        Some("&STALL.5K")
+    } else if held.rotor_overspeed >= DEBOUNCE || held.gear_speed >= DEBOUNCE {
+        Some("&STALLWR.5K")
+    } else {
+        None
+    }
+}
+/// The player's warning tone: the stall warning, or else a rotor warning.
+/// Shared with the mission recorder.
+pub(crate) fn warning_cue(flight: &crate::flight::State, ground: f64) -> Option<&'static str> {
+    stall_cue(flight.stall_alert(ground)).or_else(|| rotor_cue(flight))
+}
 /// The RWR warning tone's level at the default settings. The original plays
 /// it at 200 of 255 scaled by RWR 50% and Overall 75% twice, and an ordinary
 /// level-255 effect at 255 scaled by Overall once; TORE plays such an effect
@@ -341,6 +389,9 @@ pub struct EngineLoops {
     pub throttle: f64,
     /// The afterburner is lit.
     pub afterburner: bool,
+    /// Rotor speed, a share of the governed 100 percent, when the aircraft
+    /// is a rotorcraft that recorded one: the rotor sound follows it.
+    pub rotor_speed: Option<f64>,
 }
 fn cue(action: Action) -> Option<&'static str> {
     match action {
@@ -516,6 +567,7 @@ impl Audio {
             flight_paused: false,
             ejection_warning: false,
             engine_gain: 0.,
+            engine_pitch: 1.,
             burner_gain: 0.,
             engine_place: spatial::Placed::inside(),
             last_listener: None,
@@ -878,7 +930,7 @@ impl Audio {
                     m.radio.clear();
                     m.engine_aircraft = Some(a.id);
                 }
-                let alert = stall_cue(s.stall_alert(ground));
+                let alert = warning_cue(s, ground);
                 if m.stall_cue != alert {
                     m.stall = alert
                         .and_then(|name| self.clips.get(name))
@@ -925,6 +977,11 @@ impl Audio {
                 } else {
                     0.
                 };
+                m.engine_pitch = rotor_pitch(
+                    s.rotor_speed_percent().map_or(0., |nr| nr / 100.),
+                    s.rotor_buffet(),
+                    s.ticks as f64 * crate::flight::DT,
+                );
                 m.burner_gain = if s.afterburner_active() && s.escape.is_none() {
                     BURNER_GAIN
                 } else {
@@ -1144,8 +1201,10 @@ impl Mixer {
         let Some(engine) = engine else {
             self.engine_gain = 0.;
             self.burner_gain = 0.;
+            self.engine_pitch = 1.;
             return;
         };
+        self.engine_pitch = rotor_pitch(engine.rotor_speed.unwrap_or(0.), 0., 0.);
         // A reset leaves the aircraft type but drops the loops.
         if self.engine_aircraft != Some(engine.aircraft)
             || (self.engine.is_none() && self.burner.is_none())
@@ -1325,7 +1384,7 @@ impl Mixer {
             let pitch = self.engine_place.pitch();
             let mut engine = 0.;
             if let Some(v) = &mut self.engine {
-                engine += v.next(rate / pitch, true) * self.engine_gain;
+                engine += v.next(rate / (pitch * self.engine_pitch), true) * self.engine_gain;
             }
             if let Some(v) = &mut self.burner {
                 engine += v.next(rate / pitch, true) * self.burner_gain;
@@ -1787,6 +1846,7 @@ mod tests {
             flight_paused: false,
             ejection_warning: false,
             engine_gain: 0.,
+            engine_pitch: 1.,
             burner_gain: 0.,
             engine_place: spatial::Placed::inside(),
             last_listener: None,
@@ -1838,6 +1898,92 @@ mod tests {
         assert!((effects[0] - 0.1).abs() < 1e-6, "{effects:?}");
         assert!((speech - 0.2).abs() < 1e-6, "{speech}");
         assert_eq!((live.radio_started, offline.radio_started), (1, 1));
+    }
+
+    #[test]
+    fn the_rotor_sound_follows_rotor_speed_and_the_rotor_warnings_have_tones() {
+        // Pitch: the rotor's speed, so a bleeding rotor drops and an
+        // overspeeding one rises; no rotor leaves the recording's pitch.
+        assert_eq!(rotor_pitch(0., 0., 0.), 1.);
+        assert_eq!(rotor_pitch(1., 0., 5.), 1.);
+        assert!((rotor_pitch(0.84, 0., 5.) - 0.84).abs() < 1e-12);
+        assert!(rotor_pitch(0.6, 0., 0.) < rotor_pitch(1., 0., 0.));
+        assert!(rotor_pitch(1.08, 0., 0.) > rotor_pitch(1., 0., 0.));
+        assert_eq!(rotor_pitch(5., 0., 0.), 1.3);
+        assert_eq!(rotor_pitch(0.01, 0., 0.), 0.3);
+        // Buffeting warbles it a little, never far.
+        let warble = (0..400)
+            .map(|i| rotor_pitch(1., 1., i as f64 * 0.003))
+            .fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)));
+        assert!(warble.0 < 0.97 && warble.1 > 1.03 && warble.0 > 0.95 && warble.1 < 1.05);
+        // Tones: the stall horn for LOW ROTOR, the warning for the others,
+        // after the same quarter second as the message.
+        let mut s = crate::flight::State::new(
+            &tore_world::test_support::powered_profile(tore_formats::aircraft::AircraftId::Ah64),
+            [0., 3_000., 0.],
+        )
+        .unwrap();
+        assert_eq!(rotor_cue(&s), None);
+        s.lift_controls.warnings.low_rotor = 29;
+        assert_eq!(rotor_cue(&s), None);
+        s.lift_controls.warnings.low_rotor = 30;
+        assert_eq!(rotor_cue(&s), Some("&STALL.5K"));
+        s.lift_controls.warnings = Default::default();
+        s.lift_controls.warnings.rotor_overspeed = 30;
+        assert_eq!(rotor_cue(&s), Some("&STALLWR.5K"));
+        s.lift_controls.warnings = Default::default();
+        s.lift_controls.warnings.gear_speed = 100;
+        assert_eq!(rotor_cue(&s), Some("&STALLWR.5K"));
+        s.crashed = true;
+        assert_eq!(rotor_cue(&s), None);
+        // The player's warning tone is the stall warning first, else the rotor's.
+        s.crashed = false;
+        s.lift_controls.warnings.low_rotor = 50;
+        assert_eq!(warning_cue(&s, f64::MIN), Some("&STALL.5K"));
+    }
+
+    #[test]
+    fn another_rotorcrafts_engine_loop_follows_its_rotor_speed() {
+        use tore_formats::aircraft::AircraftId;
+        let mut pose = crate::snapshot::AircraftPose {
+            id: 7,
+            aircraft: Some(AircraftId::Ah64),
+            draw: crate::snapshot::Draw::Model(AircraftId::Ah64),
+            position: [0.; 3],
+            attitude: [0.; 3],
+            velocity: [0.; 3],
+            devices: None,
+            engine: crate::snapshot::Engine {
+                lit: true,
+                rotor: 0.82,
+                ..Default::default()
+            },
+            damage: Default::default(),
+            airborne: true,
+            wreck: None,
+            crashed: false,
+        };
+        let engines = [(
+            AircraftId::Ah64,
+            EngineSounds {
+                engine: Some("AH64LOOP".into()),
+                ..Default::default()
+            },
+        )];
+        let pitch = |pose: &crate::snapshot::AircraftPose| {
+            let snapshot = crate::snapshot::RenderSnapshot {
+                targets: vec![pose.clone()],
+                ..Default::default()
+            };
+            loop_sources(&snapshot, &engines)
+                .iter()
+                .find(|l| l.key.0 == 1)
+                .unwrap()
+                .pitch
+        };
+        assert!((pitch(&pose) - 0.82).abs() < 1e-12);
+        pose.engine.rotor = 0.;
+        assert_eq!(pitch(&pose), 1.);
     }
 
     #[test]
@@ -2207,6 +2353,7 @@ mod tests {
             running: true,
             throttle: 0.4,
             afterburner: true,
+            rotor_speed: None,
         };
         let mut m = test_mixer();
         m.stall = None;

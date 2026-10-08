@@ -26,8 +26,10 @@
 //!   [`helicopter`]: the single-rotor AH-64 and Mi-24 force law, its drive
 //!   and its trim (P2).
 //! - [`jet`] and [`aero`]: the vectoring jets and their wing (P4).
-//! - Still to come, each in its own file: the CH-47's tandem mixer (P3),
-//!   `tiltrotor.rs` (P5), `trim.rs` (P7). The parameters are in
+//! - [`trim`]: the airborne and ground starts (P7), which replace the old
+//!   hover start.
+//! - Still to come, each in its own file: the CH-47's tandem mixer (P3) and
+//!   `tiltrotor.rs` (P5). The parameters are in
 //!   [`crate::models::variety::PoweredLift`].
 //!
 //! The CH-47 and the V-22 still fly the fitted law of the variety import,
@@ -38,9 +40,11 @@ pub mod body;
 pub mod fuselage;
 pub mod helicopter;
 pub mod jet;
+pub mod readout;
 pub mod rotor;
 pub mod sas;
 pub mod state;
+pub mod trim;
 
 #[cfg(test)]
 mod easy_physics_tests;
@@ -61,48 +65,6 @@ pub use state::{Drive, LiftState, PilotAids, Rotor, TrimLatch, Warnings};
 const LOW_SPEED_DAMPING_FPS: f64 = 10.;
 
 impl State {
-    /// Initialize a human airborne start after its final mass and altitude are set.
-    /// This never trims an aircraft that has stepped or is supported by wheels.
-    pub fn initialize_airborne_hover(&mut self) {
-        if self.ticks != 0
-            || self.native.is_some()
-            || self
-                .research
-                .as_ref()
-                .is_none_or(|research| research.on_ground)
-        {
-            return;
-        }
-        let Some(lift) = self
-            .model()
-            .powered_lift()
-            .filter(|lift| lift.kind != LiftKind::VectorJet)
-        else {
-            return;
-        };
-        // The single-rotor helicopters trim on their own physics (P2).
-        if helicopter::SingleRotor::new(&lift, self.model().configuration()).is_some() {
-            if !self.trim_single_rotor(0.) {
-                self.throttle = 1.;
-                self.lift_controls.collective = 1.;
-                self.lift_controls.collective_actual = 1.;
-            }
-            return;
-        }
-        let c = self.model().configuration();
-        let weight = c.mass.empty_lbs + self.fuel + self.carried_lbs();
-        let capacity = c.propulsion.military_thrust_lbf
-            * lift.efficiency
-            * (-self.position[1].max(0.) / c.tuning.thrust_lapse_feet).exp();
-        let collective = (weight / capacity).clamp(0., 1.);
-        self.throttle = 1.;
-        self.lift_controls.conversion = 1.;
-        self.lift_controls.conversion_actual = 1.;
-        self.lift_controls.collective = collective;
-        self.lift_controls.collective_actual = collective;
-        self.lift_controls.thrust_lbf = capacity * collective;
-    }
-
     pub fn flight_axis_available(&self, axis: FlightAxis) -> bool {
         self.model().powered_lift().is_some_and(|lift| match axis {
             FlightAxis::VectorPitch => lift.kind == LiftKind::VectorJet,
@@ -822,14 +784,14 @@ mod tests {
         s.position[1] = 15000.;
         s.fuel = 500.;
         s.set_payload(1500.).unwrap();
-        s.initialize_airborne_hover();
+        s.start_airborne([0.; 3]);
         let weight = s.model().configuration().mass.empty_lbs + s.fuel + s.carried_lbs();
         assert!((s.lift_controls.thrust_lbf - weight).abs() < 1e-8);
         run(&mut s, &Default::default(), 1200);
         assert!((s.position[1] - 15000.).abs() < 0.01);
         let collective = s.lift_controls.collective;
         s.set_payload(2500.).unwrap();
-        s.initialize_airborne_hover();
+        s.start_airborne([0.; 3]);
         assert_eq!(s.lift_controls.collective, collective);
         run(&mut s, &Default::default(), 600);
         assert!(s.position[1] < 14990.);
@@ -837,7 +799,7 @@ mod tests {
         overloaded.position[1] = 15000.;
         overloaded.fuel = 500.;
         overloaded.set_payload(1500.).unwrap();
-        overloaded.initialize_airborne_hover();
+        overloaded.start_airborne([0.; 3]);
         assert_eq!(overloaded.lift_controls.collective, 1.);
         assert!(overloaded.lift_controls.thrust_lbf < 12000.);
         run(&mut overloaded, &Default::default(), 600);

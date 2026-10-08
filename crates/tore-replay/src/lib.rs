@@ -18,6 +18,7 @@ pub mod limits;
 pub mod model;
 mod predict;
 mod reader;
+mod rotors;
 mod spawns;
 mod strings;
 mod trees;

@@ -234,6 +234,13 @@ impl Flier {
             } else {
                 [0.; 3]
             },
+            // A rotor speed on the violent flights only, wandering about the
+            // governed 100 percent, so a busy and an idle channel both run.
+            rotor_speed: if self.violent {
+                1. + 0.12 * (t * 0.3).sin() + 0.05 * (t * 2.1).sin()
+            } else {
+                0.
+            },
             hp: self.hp,
             max_hp: 1_000,
             sections: [0, (1_000 - self.hp) / 2, 0, 0, 0, 0],

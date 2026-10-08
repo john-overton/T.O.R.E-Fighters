@@ -378,3 +378,45 @@ fn a_copy_of_a_human_wingman_steps_like_the_world_through_a_fight() {
     assert!(copy.flight.crashed, "our plane was not shot down");
     assert!(copy.flight.damage_fraction > 0.);
 }
+
+#[test]
+fn rotor_warnings_follow_the_flights_counters_and_repeat_every_four_seconds() {
+    use super::plane::{
+        ROTOR_WARNING_DEBOUNCE_TICKS as DEBOUNCE, ROTOR_WARNING_REPEAT_TICKS as REPEAT,
+    };
+    let mut flight = flight::State::new(
+        &crate::test_support::powered_profile(tore_formats::aircraft::AircraftId::Ah64),
+        [0., 3_000., 0.],
+    )
+    .unwrap();
+    assert_eq!(plane::rotor_warnings(&flight), [None; 3]);
+    let due = |flight: &mut flight::State, ticks: u32| {
+        flight.lift_controls.warnings.low_rotor = ticks;
+        flight.lift_controls.warnings.rotor_overspeed = ticks;
+        flight.lift_controls.warnings.gear_speed = ticks;
+        plane::rotor_warnings(flight)
+    };
+    // Not for the first quarter second, then once, then every four seconds.
+    assert_eq!(due(&mut flight, 1), [None; 3]);
+    assert_eq!(due(&mut flight, DEBOUNCE - 1), [None; 3]);
+    assert_eq!(
+        due(&mut flight, DEBOUNCE),
+        [
+            Some("LOW ROTOR"),
+            Some("ROTOR OVERSPEED"),
+            Some("GEAR SPEED")
+        ]
+    );
+    assert_eq!(due(&mut flight, DEBOUNCE + 1), [None; 3]);
+    assert!(due(&mut flight, DEBOUNCE + REPEAT)[0].is_some());
+    assert_eq!(due(&mut flight, DEBOUNCE + REPEAT + 1), [None; 3]);
+    // The counters are independent, and a crashed aircraft says nothing.
+    flight.lift_controls.warnings = Default::default();
+    flight.lift_controls.warnings.rotor_overspeed = DEBOUNCE;
+    assert_eq!(
+        plane::rotor_warnings(&flight),
+        [None, Some("ROTOR OVERSPEED"), None]
+    );
+    flight.crashed = true;
+    assert_eq!(plane::rotor_warnings(&flight), [None; 3]);
+}

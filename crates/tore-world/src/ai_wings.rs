@@ -571,6 +571,18 @@ pub(crate) fn station_specs_loaded(
     stores
 }
 
+/// Puts an AI aircraft on the hybrid flight model, seeded as the AI probe
+/// seeds its researched actors. An airborne powered-lift aircraft that has
+/// not flown yet is trimmed into forward flight as it goes, so a helicopter or
+/// a jet that a multiplayer seat, a revival or a mission start puts on the
+/// model begins in balance, with its final mass and altitude (VTOL overhaul,
+/// decision 8). Its velocity is air-relative, as every AI start's is.
+fn enter_hybrid(flight: &mut flight::State, seed: i32) -> WorldResult<()> {
+    flight.enable_research(seed)?;
+    flight.start_airborne([0.; 3]);
+    Ok(())
+}
+
 /// What an AI aircraft built from `config` carries: its external equipment
 /// and every round of `stores` hung outside it, pounds.
 fn payload_lbs(config: &live::Configuration, stores: &[tore_sim::ai::mission::StationSpec]) -> f64 {
@@ -1349,7 +1361,7 @@ impl AiWings {
             .collect();
         let mut actor = AiActor::new(setup).map_err(|e| e.to_string())?;
         if self.flight_model == AiFlightModel::AllHybrid && actor.flight().research.is_none() {
-            actor.flight_mut().enable_research(1 + insert.id as i32)?;
+            enter_hybrid(actor.flight_mut(), 1 + insert.id as i32)?;
         }
         actor.set_home_runway(home);
         if let Some(warnings) = insert.warnings {
@@ -1520,7 +1532,7 @@ impl AiWings {
             {
                 if actor.flight().research.is_none() {
                     let seed = 1 + actor.id() as i32;
-                    actor.flight_mut().enable_research(seed)?;
+                    enter_hybrid(actor.flight_mut(), seed)?;
                 }
             }
         }
@@ -1549,7 +1561,7 @@ impl AiWings {
                 flight.velocity = std::array::from_fn(|i| forward[i] * flight.speed + wind[i]);
             }
             if researched && actor.flight().research.is_none() {
-                actor.flight_mut().enable_research(1 + id as i32)?;
+                enter_hybrid(actor.flight_mut(), 1 + id as i32)?;
             }
         }
         Ok(())
@@ -4082,6 +4094,16 @@ mod tests {
     /// its member 0, against one distant enemy. `humans` are flown by people
     /// and take the member numbers they name.
     fn led_wing(count: usize, humans: &[HumanSlot]) -> (AiWings, Vec<live::Target>) {
+        led_wing_of(count, humans, 20000., aircraft)
+    }
+
+    /// [`led_wing`] with every aircraft built from `profile`.
+    fn led_wing_of(
+        count: usize,
+        humans: &[HumanSlot],
+        altitude: f64,
+        profile: impl Fn() -> Aircraft,
+    ) -> (AiWings, Vec<live::Target>) {
         let selections = [
             (launch::Side::Friendly, 1u8, count),
             (launch::Side::Enemy, 0, 1),
@@ -4094,21 +4116,21 @@ mod tests {
         });
         let payload = resolve_wings(&selections, None).unwrap();
         let mut targets: Vec<_> = (1..=count as u32)
-            .map(|id| target(id, [f64::from(id) * 600., 20000., 0.], 0.))
+            .map(|id| target(id, [f64::from(id) * 600., altitude, 0.], 0.))
             .collect();
         targets.push(target(
             count as u32 + 1,
-            [0., 20000., 900_000.],
+            [0., altitude, 900_000.],
             std::f64::consts::PI,
         ));
         let mut wings =
             AiWings::build_for(&payload, &targets, &Airfields::default(), humans, |_| {
-                Ok((aircraft(), None))
+                Ok((profile(), None))
             })
             .unwrap();
         // Weapons hold: the flights keep formation instead of chasing the
         // enemy the fixture's sensorless aircraft can see at any range.
-        wings.apply_mission_preset(Preset::Hold, [0., 20000., 0.]);
+        wings.apply_mission_preset(Preset::Hold, [0., altitude, 0.]);
         (wings, targets)
     }
 
@@ -4559,6 +4581,64 @@ mod tests {
         wings.mission.actor_mut(2).unwrap().set_dummy();
         wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
         assert_eq!(hybrid(&wings), [true, false, true]);
+    }
+
+    #[test]
+    fn a_powered_lift_ai_aircraft_is_trimmed_as_it_joins_the_hybrid_model() {
+        // VTOL overhaul decision 8 and acceptance S1: a multiplayer seat is
+        // an AI actor until a human takes it, and a revival joins as one, so
+        // both begin in trimmed forward flight on every spawn path.
+        for id in [
+            AircraftId::Ah64,
+            AircraftId::Mi24,
+            AircraftId::Av8,
+            AircraftId::Yak141,
+        ] {
+            let profile = || crate::test_support::powered_profile(id);
+            let (mut wings, mut targets) = led_wing_of(1, &[], 3_000., profile);
+            let before = wings.mission.actor(1).unwrap().flight().clone();
+            assert!(before.research.is_none());
+            // Standard leaves the start as it is.
+            wings.set_flight_model(AiFlightModel::Standard).unwrap();
+            assert_eq!(wings.mission.actor(1).unwrap().flight(), &before, "{id:?}");
+            wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+            let flight = wings.mission.actor(1).unwrap().flight().clone();
+            assert!(flight.research.is_some());
+            assert_ne!(flight.lift_controls, before.lift_controls, "{id:?} trimmed");
+            assert_eq!(flight.lift_controls.body_rates, [0.; 3]);
+            assert!(
+                (flight.speed - before.speed).abs() < 1e-9,
+                "{id:?} start speed"
+            );
+            assert!(flight.speed > 60. * 1.687_81, "{id:?} forward flight");
+            assert_eq!(flight.nozzle_degrees(), 0.);
+            // Hands off for ten seconds it stays where it was put.
+            let (height, speed) = (flight.position[1], flight.speed);
+            for _ in 0..1200 {
+                fly_one_tick(&mut wings, &mut targets, vec![]);
+            }
+            let after = wings.mission.actor(1).unwrap().flight();
+            assert!(!after.crashed, "{id:?}");
+            // The wing holds formation with the player's lead, so only the
+            // trim itself is judged: no collapse, no climb away.
+            assert!(
+                (after.position[1] - height).abs() < 300.,
+                "{id:?} height {height} to {}",
+                after.position[1]
+            );
+            assert!(after.speed > 0.5 * speed, "{id:?}");
+
+            // An aircraft that joins later (a revival) is trimmed as it joins.
+            let removed = wings.remove_actor(1).unwrap();
+            let mut back = ActorInsert::from_removed(removed);
+            back.flight = flight::State::new(&profile(), [3000., 3_000., 0.]).unwrap();
+            let fresh = back.flight.lift_controls;
+            wings.insert_actor(back).unwrap();
+            let joined = wings.mission.actor(1).unwrap().flight();
+            assert!(joined.research.is_some());
+            assert_ne!(joined.lift_controls, fresh, "{id:?} trimmed on joining");
+            assert_eq!(joined.ticks, 0);
+        }
     }
 
     #[test]

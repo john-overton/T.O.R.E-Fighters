@@ -304,6 +304,11 @@ impl State {
                 ((model.configuration().mass.empty_lbs + fuel) / (capacity * lapse)).clamp(0., 1.);
             lift_controls.collective_actual = lift_controls.collective;
             lift_controls.thrust_lbf = capacity * lift_controls.collective * lapse;
+            // The aircraft that trim into forward flight start at the
+            // variety rule's speed (slice P7); the others still hover.
+            if powered::trim::starts_in_forward_flight(&lift, model.configuration()) {
+                speed = variety_start_speed(&model, position[1]).unwrap_or(0.);
+            }
         }
         // A vectoring jet's engine is already turning at the start throttle
         // (VTOL overhaul slice P4: the engine spools, so it cannot start at
@@ -436,6 +441,7 @@ impl State {
         self.autopilot = Default::default();
         self.crashed = false;
         self.research.as_mut().unwrap().on_ground = true;
+        self.start_on_ground();
         Ok(())
     }
     /// Interpolate presentation only, leaving fixed-tick state and discrete controls untouched.
