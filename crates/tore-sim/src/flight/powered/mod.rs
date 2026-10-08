@@ -42,6 +42,9 @@ pub mod rotor;
 pub mod sas;
 pub mod state;
 
+#[cfg(test)]
+mod easy_physics_tests;
+
 use super::{DT, FlightAxis, PilotInput, State, airframe, trace};
 use crate::{
     attitude::{Basis, dot, unit},
