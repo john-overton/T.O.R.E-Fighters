@@ -19,7 +19,11 @@ selection does not hide their status. A station that carries nothing is not on
 the aircraft: the ring steps over it and the WEAPONS list leaves it out (John,
 2026-09-28, after a bug report that Mavericks taken off the loadout page were
 still listed). A station that runs dry in flight stays selected until the next
-`[` or `]`, and unlimited ammunition keeps every station reachable. Startup
+`[` or `]`, and unlimited ammunition keeps every station that was loaded
+reachable. The retained selection stations some aircraft carry at zero rounds
+(see [aircraft ordnance](../formats/aircraft-ordnance.md)) were never loaded, so
+the ring steps over them even with unlimited ammunition, and `[` and `]` agree
+with the minus and plus buttons. Startup
 selects the gun, else the first station that carries something, else NAV, so an
 aircraft loaded with nothing starts on NAV. Ground starts use NAV; airborne starts
 retain the canonical gun, now armed. Existing headless range commands and old

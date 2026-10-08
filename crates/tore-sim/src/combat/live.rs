@@ -1735,12 +1735,24 @@ impl Ownship {
             .is_some_and(|s| !guns_only || is_gun(&s.weapon))
     }
     /// A station the selection ring may stop on: one that carries something
-    /// (an empty station is not on the aircraft), or any station under
-    /// unlimited ammunition.
+    /// (an empty station is not on the aircraft), or a loaded one that has
+    /// run dry under unlimited ammunition.
+    ///
+    /// Unlimited ammunition only keeps a station that was loaded: a retained
+    /// selection station that never held anything cannot fire, so it is never
+    /// a stop however the cheat is set.
     pub fn carries(&self, station: usize, unlimited_ammo: bool) -> bool {
         self.ammo
             .get(station)
-            .is_some_and(|ammo| unlimited_ammo || ammo & 0x7fff != 0)
+            .is_some_and(|ammo| ammo & 0x7fff != 0 || (unlimited_ammo && self.was_loaded(station)))
+    }
+    /// A station that holds something now, or held something this mission
+    /// (it ran dry): it keeps its place in the selection ring. A retained
+    /// selection station that was never loaded does not.
+    fn on_aircraft(&self, station: usize) -> bool {
+        self.ammo
+            .get(station)
+            .is_some_and(|ammo| ammo & 0x7fff != 0 || self.was_loaded(station))
     }
     /// Guns only turned on with a missile selected moves to the gun, or to
     /// NAV when the aircraft has none.
@@ -1767,7 +1779,13 @@ impl Ownship {
         self.bore_observation = None;
         self.mounted = Seeker::default();
         self.mounted_key = None;
-        self.selected = (self.selected + 1) % self.ammo.len();
+        // Skip a retained selection station that never held anything; with
+        // nothing else to stop on, stay where we are.
+        let count = self.ammo.len();
+        self.selected = (1..=count)
+            .map(|step| (self.selected + step) % count)
+            .find(|i| self.on_aircraft(*i))
+            .unwrap_or(self.selected);
         if let Some(group) = &mut self.gunship {
             group.solo(self.selected);
         }
@@ -7741,6 +7759,73 @@ mod tests {
         s.cheats.unlimited_ammo = true;
         s.cycle_selection(0, false);
         assert_eq!((s.own().armed, s.own().selected), (true, 0));
+    }
+    /// A fixture with stations 0 and 1 loaded and station 2 a retained
+    /// selection station that never held anything.
+    fn fixture_with_retained_station() -> State {
+        let mut s = fixture(false);
+        let station = s.own().config.stations[0].clone();
+        s.own_mut().config.stations.push(station.clone());
+        s.own_mut().config.stations.push(station);
+        s.own_mut().ammo = vec![2, 2, 0];
+        s.own_mut().ever_loaded = vec![true, true, false];
+        s.own_mut().armed = true;
+        s.own_mut().selected = 0;
+        s
+    }
+    #[test]
+    fn next_weapon_skips_a_retained_station_that_was_never_loaded() {
+        let mut s = fixture_with_retained_station();
+        for cheat in [false, true] {
+            s.cheats.unlimited_ammo = cheat;
+            s.own_mut().selected = 0;
+            s.own_mut().select_next();
+            assert_eq!(s.own().selected, 1);
+            s.own_mut().select_next();
+            assert_eq!(s.own().selected, 0, "the retained station is not a stop");
+        }
+        // A station that ran dry in flight is still on the aircraft.
+        s.own_mut().ammo[1] = 0;
+        s.own_mut().selected = 0;
+        s.own_mut().select_next();
+        assert_eq!(s.own().selected, 1);
+    }
+    #[test]
+    fn selection_ring_skips_a_never_loaded_station_even_with_unlimited_ammo() {
+        let mut s = fixture_with_retained_station();
+        for cheat in [false, true] {
+            s.cheats.unlimited_ammo = cheat;
+            s.own_mut().selected = 1;
+            s.cycle_selection(0, true);
+            assert!(!s.own().armed, "past station 1 comes NAV, not station 2");
+            s.cycle_selection(0, false);
+            assert_eq!((s.own().armed, s.own().selected), (true, 1));
+            s.cycle_selection(0, false);
+            s.cycle_selection(0, false);
+            s.cycle_selection(0, false);
+            assert_ne!(s.own().selected, 2, "backwards never lands on it either");
+            assert!(!s.own().carries(2, cheat));
+        }
+        // A loaded station that runs dry stays selectable under the cheat only.
+        s.own_mut().ammo[1] = 0;
+        assert!(!s.own().carries(1, false));
+        assert!(s.own().carries(1, true));
+    }
+    #[test]
+    fn advance_from_empty_never_lands_on_a_never_loaded_station() {
+        let mut s = fixture_with_retained_station();
+        s.cheats.unlimited_ammo = true;
+        s.own_mut().ammo = vec![0, 0, 0];
+        s.own_mut().selected = 0;
+        s.own_mut().advance_from_empty(false, true);
+        assert_eq!(s.own().selected, 0, "a dry loaded station still carries");
+        s.own_mut().selected = 2;
+        s.own_mut().advance_from_empty(false, true);
+        assert_ne!(
+            (s.own().armed, s.own().selected),
+            (true, 2),
+            "leaves the retained station"
+        );
     }
     #[test]
     fn guns_only_leaves_the_player_the_gun_and_nav() {
