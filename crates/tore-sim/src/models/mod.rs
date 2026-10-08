@@ -151,7 +151,7 @@ impl AircraftModel {
     }
     pub fn powered_lift(&self) -> Option<variety::PoweredLift> {
         match self {
-            Self::Variety(m) => m.lift,
+            Self::Variety(m) => m.lift.as_deref().copied(),
             _ => None,
         }
     }

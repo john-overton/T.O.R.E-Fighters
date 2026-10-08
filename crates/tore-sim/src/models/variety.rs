@@ -6,28 +6,17 @@ use super::{
 use std::sync::Arc;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum LiftKind {
-    VectorJet,
-    Tiltrotor,
-    Helicopter,
-}
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PoweredLift {
-    pub kind: LiftKind,
-    pub efficiency: f64,
-    pub additional_lift_lbf: f64,
-    pub response_seconds: f64,
-    pub pitch_degrees: f64,
-    pub bank_degrees: f64,
-    pub yaw_degrees_per_second: f64,
-    pub horizontal_damping: f64,
-}
+mod lift;
+pub use lift::{
+    BodyParameters, CorridorPoint, HandlingTargets, JetParameters, LiftEngines, LiftKind,
+    PoweredLift, RotorLayout, RotorParameters, RotorRotation, TiltrotorParameters,
+};
 #[derive(Clone, Debug, PartialEq)]
 pub struct VarietyFlightModel {
     pub id: AircraftId,
     pub(super) configuration: Arc<Configuration>,
-    pub lift: Option<PoweredLift>,
+    /// Shared, so cloning the model each tick stays cheap.
+    pub lift: Option<Arc<PoweredLift>>,
 }
 impl VarietyFlightModel {
     /// Exact reviewed PT identity, including shared F-4B/J shape references.
@@ -136,36 +125,7 @@ impl VarietyFlightModel {
         }
         configuration.hook_available = a.fields["flags"].number()? & 0x02 != 0;
         configuration.controls = Some(super::handling::Profile::from_aircraft(a)?);
-        let lift = match a.id {
-            Av8 => Some((LiftKind::VectorJet, 1., 0., 0.35, 20., 25., 35., 0.06)),
-            Yak141 => Some((LiftKind::VectorJet, 1., 18000., 0.45, 20., 25., 30., 0.07)),
-            V22 => Some((LiftKind::Tiltrotor, 1.10, 0., 0.65, 20., 25., 30., 0.10)),
-            Ah64 => Some((LiftKind::Helicopter, 0.98, 0., 0.45, 20., 30., 45., 0.14)),
-            Mi24 => Some((LiftKind::Helicopter, 0.84, 0., 0.60, 18., 25., 35., 0.12)),
-            Ch47 => Some((LiftKind::Helicopter, 0.245, 0., 0.85, 15., 20., 25., 0.10)),
-            _ => None,
-        }
-        .map(
-            |(
-                kind,
-                efficiency,
-                additional_lift_lbf,
-                response_seconds,
-                pitch_degrees,
-                bank_degrees,
-                yaw_degrees_per_second,
-                horizontal_damping,
-            )| PoweredLift {
-                kind,
-                efficiency,
-                additional_lift_lbf,
-                response_seconds,
-                pitch_degrees,
-                bank_degrees,
-                yaw_degrees_per_second,
-                horizontal_damping,
-            },
-        );
+        let lift = PoweredLift::for_aircraft(a, &configuration).map(Arc::new);
         Ok(Self {
             id: a.id,
             configuration: Arc::new(configuration),
