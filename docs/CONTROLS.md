@@ -36,6 +36,17 @@ forward nozzle/nacelle neutral. AC-130 View+right-stick gestures control its gun
 group. Other aircraft keep their original modifier look/rudder/fixture mappings.
 The full profile remains visible in Controls. See [input contexts](INPUT.md).
 
+**macOS and laptop keyboards.** The powered-lift keyboard defaults use Ctrl with
+the arrow keys (nozzle pitch and yaw) and Ctrl with Home, End, Page Up and Page
+Down (collective and nacelle conversion). On a Mac, macOS claims Ctrl+Up for
+Mission Control, Ctrl+Down for App Exposé and Ctrl+Left and Ctrl+Right to switch
+Spaces, so those presses may never reach the game unless you turn the shortcuts
+off in System Settings, Keyboard, Keyboard Shortcuts, Mission Control. Laptop
+keyboards also have no dedicated Home, End, Page Up or Page Down keys; they are
+Fn with the arrow keys, which makes the Ctrl combinations awkward. Every one of
+these can be remapped in the controls screen (Controls, then the action's row),
+and a gamepad's View+stick defaults avoid the problem.
+
 
 <!-- controls-table:start -->
 
