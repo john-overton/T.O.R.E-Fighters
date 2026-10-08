@@ -41,10 +41,15 @@ pub fn keep_face(id: AircraftId, address: usize) -> bool {
     !alternatives.contains(&address)
 }
 
+/// Fitted presentation speed of every propeller and main rotor, revolutions per
+/// second. Constant, like a governed rotor, so the phase is a plain function of
+/// the tick and a throttle change cannot move it (docs/spec/rotor-presentation.md).
+pub const REVOLUTIONS_PER_SECOND: f64 = 15.;
+
 /// Positions use source X/right, Y/forward, Z/up coordinates before render scale.
 pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
     let phase = if state.engine && state.fuel > 0. {
-        state.ticks as f64 * flight::DT * TAU * (5. + 15. * state.throttle.clamp(0., 1.))
+        state.ticks as f64 * flight::DT * TAU * REVOLUTIONS_PER_SECOND
     } else {
         0.
     };
@@ -289,6 +294,51 @@ mod tests {
         let mut stopped = source.clone();
         animate(AircraftId::C130, &mut stopped, &s);
         assert_eq!(stopped.positions, source.positions);
+    }
+    #[test]
+    fn a_throttle_change_never_moves_the_blades() {
+        let source = face(0x1b44, vec![[27., 23., 6.], [37., 23., 6.]]);
+        for tick in [0, 1, 7, 1200, 40_000] {
+            let mut s = state();
+            s.engine = true;
+            s.ticks = tick;
+            let mut reference = source.clone();
+            s.throttle = 0.;
+            animate(AircraftId::C130, &mut reference, &s);
+            for throttle in [0.25, 0.5, 1., 7., -3.] {
+                s.throttle = throttle;
+                let mut moved = source.clone();
+                animate(AircraftId::C130, &mut moved, &s);
+                assert_eq!(moved.positions, reference.positions, "{tick} {throttle}");
+            }
+        }
+    }
+    #[test]
+    fn blades_turn_the_same_angle_every_tick() {
+        // The phase advances by one fixed step a tick, so consecutive ticks are
+        // continuous through any throttle change between them.
+        let source = face(0x1b44, vec![[27., 23., 6.], [37., 23., 6.]]);
+        let angle = |tick: u64| {
+            let mut s = state();
+            s.engine = true;
+            s.ticks = tick;
+            let mut moved = source.clone();
+            animate(AircraftId::C130, &mut moved, &s);
+            let tip = moved.positions[1];
+            f64::from(tip[2] - 6.).atan2(f64::from(tip[0] - 27.))
+        };
+        let step = TAU * REVOLUTIONS_PER_SECOND * flight::DT;
+        for tick in [0u64, 10, 999] {
+            // The signed turn between ticks, folded to (-pi, pi].
+            let mut turned = (angle(tick + 1) - angle(tick)).rem_euclid(TAU);
+            if turned > TAU / 2. {
+                turned -= TAU;
+            }
+            assert!(
+                (turned.abs() - step).abs() < 1e-3,
+                "{tick}: {turned} against {step}"
+            );
+        }
     }
     #[test]
     fn nacelle_hinge_follows_actual_conversion_and_moves_normals() {

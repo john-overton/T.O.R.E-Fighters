@@ -18,15 +18,18 @@ proprotors plus converting nacelles on V-22.
 ## Rotation and conversion
 
 With engine running and fuel remaining, presentation phase is simulation time
-in seconds times 2 pi times `(5 + 15 * throttle)` revolutions per second. The
-5 and 20 rev/s endpoints are fitted visual choices, shared by propellers and
-main rotors. Tail rotors use three times the main phase. V-22 left/right and
+in seconds times 2 pi times 15 revolutions per second. The 15 rev/s speed is a
+fitted visual choice (agent decision, 2026-10-08), the same for propellers and
+main rotors, like a governed rotor: throttle sets thrust, not blade speed. It
+replaces an earlier `(5 + 15 * throttle)` rev/s rule, which multiplied the whole
+elapsed time by the changing rate and so jumped many revolutions at every
+throttle change. Tail rotors use three times the main phase. V-22 left/right and
 CH-47 front/rear use opposite directions. Spin is deterministic from fixed
-120 Hz simulation ticks and remains unchanged when rendering frequency changes.
-The current throttle sets phase directly, so power changes can shift blade phase.
-Engine off or no fuel returns blades to their source pose immediately. Gradual
-spool and stationary phase retention are unknown and not simulated by this
-presentation rule.
+120 Hz simulation ticks and remains unchanged when rendering frequency changes,
+and consecutive ticks differ by one fixed step. Engine off or no fuel returns
+blades to their source pose immediately. Gradual spool and stationary phase
+retention are unknown and not simulated by this presentation rule; a rotor speed
+that follows power would need the phase kept as simulation state.
 
 The V-22 nacelle angle equals actual simulated conversion times 90 degrees:
 0 is forward propeller thrust, 1 is vertical rotor lift. It follows the actual
