@@ -1454,4 +1454,73 @@ mod tests {
         assert_eq!(r.read_bits(COMMAND_BITS).unwrap(), TOGGLE);
         assert_eq!(r.read_bits(4).unwrap(), 11);
     }
+
+    /// Slice P6: every command the VTOL overhaul's bindings make (each named
+    /// powered-lift action, the trim keys' taps and held steps on each axis
+    /// and direction, and hover hold) crosses the wire in an Inputs section
+    /// and reads back as the host will step it.
+    #[test]
+    fn every_vtol_binding_command_crosses_the_wire() {
+        use tore_input::trim_keys;
+        let mut commands: Vec<PilotCommand> = tore_input::bindings::LIFT_ACTIONS
+            .iter()
+            .map(|(_, command)| PilotCommand::Lift(*command))
+            .collect();
+        for axis in TRIM_AXES {
+            for amount in [trim_keys::TAP, trim_keys::STEP] {
+                for sign in [1., -1.] {
+                    commands.push(PilotCommand::Lift(LiftCommand::TrimAdjust(
+                        axis,
+                        sign * amount,
+                    )));
+                }
+            }
+        }
+        commands.extend([
+            PilotCommand::Toggle(Switch::HoverHold),
+            PilotCommand::Set(Switch::HoverHold, true),
+            PilotCommand::Set(Switch::HoverHold, false),
+        ]);
+        assert!(commands.len() <= limits::COMMANDS);
+        let section = InputsSection {
+            flight: 1,
+            newest_tick: 500,
+            frames: vec![InputFrame::default()],
+            view_offset: 0,
+            interpolation_delay: 3,
+            view_subject: None,
+            mismatch: 0,
+            commands: commands
+                .iter()
+                .enumerate()
+                .map(|(index, command)| NumberedCommand {
+                    number: 40 + index as u16,
+                    tick: 500,
+                    command: Command::Pilot(*command),
+                })
+                .collect(),
+        };
+        let back = InputsSection::decode(&section.encode().unwrap()).unwrap();
+        let read: Vec<PilotCommand> = back
+            .commands
+            .iter()
+            .map(|numbered| expected_pilot(numbered.command))
+            .collect();
+        let expected: Vec<PilotCommand> = commands.iter().map(|&c| quantize_command(c)).collect();
+        assert_eq!(read, expected);
+        // The rounding moves a tap or a held step by at most half a wire
+        // step.
+        for (sent, got) in commands.iter().zip(&read) {
+            if let (
+                PilotCommand::Lift(LiftCommand::TrimAdjust(_, a)),
+                PilotCommand::Lift(LiftCommand::TrimAdjust(_, b)),
+            ) = (sent, got)
+            {
+                assert!(
+                    (a - b).abs() <= 0.5 / f64::from(SIGNED_UNIT_I16_STEPS),
+                    "{a} {b}"
+                );
+            }
+        }
+    }
 }
