@@ -355,7 +355,13 @@ impl State {
                 capacity,
                 lift_scale,
                 limits: limits.limits,
-                controls: augmented.pilot,
+                // The jet's pitch trim (slice P7: the start sets it, so the
+                // wing's neutral-stick command is an exact equilibrium).
+                controls: [
+                    (augmented.pilot[0] + self.lift_controls.aids.trim[0]).clamp(-1., 1.),
+                    augmented.pilot[1],
+                    augmented.pilot[2],
+                ],
                 rudder: self.rudder * regional.authority[2] + regional.yaw_bias,
                 other_force: std::array::from_fn(|i| thrust[i] + intake_force[i]),
                 rudder_slip: tuning.rudder_rate / tuning.alignment_rate,
@@ -570,35 +576,15 @@ impl State {
     }
 }
 
-/// Sets a vectoring jet at rest in the air into a hover with the nozzles
-/// vertical and its engines spooled to just hold its weight, for the tests
-/// (the trimmed starts are slice P7's).
+/// Sets a vectoring jet at rest in the air into a hover, for the tests
+/// ([`State::trim_hover`]).
 #[cfg(test)]
 pub(crate) fn trim_hover(s: &mut State) {
-    let lift = s.model().powered_lift().unwrap();
-    let jet = lift.jet.unwrap();
-    let c = s.model().configuration();
-    let weight = c.mass.empty_lbs + s.fuel + s.carried_lbs();
-    let lapse = (-s.position[1].max(0.) / c.tuning.thrust_lapse_feet).exp();
-    let height = s.position[1] - c.equipment.ground_clearance_ft;
-    let vertical = 90. / jet.nozzle_range_degrees;
-    let nozzle = std::f64::consts::FRAC_PI_2;
-    let lift_engines = jet.lift_engines.map_or(0., |e| e.thrust_lbf);
-    let military = c.propulsion.military_thrust_lbf;
-    let throttle = weight
-        / ((military * nozzle_efficiency(&jet, nozzle) + lift_engines)
-            * lapse
-            * (1. - suck_down(&jet, height, nozzle)));
-    s.throttle = throttle;
-    s.lift_controls.vector_pitch = vertical;
-    s.lift_controls.vector_pitch_actual = vertical;
-    s.lift_controls.drive.engine_output =
-        [military * throttle * lapse, lift_engines * throttle * lapse];
-    s.lift_controls.drive.lift_engine_spool = f64::from(jet.lift_engines.is_some());
+    assert!(s.trim_hover());
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The jet acceptance tests of the VTOL overhaul (design section 10,
     //! J1 to J13, slice P4's parts) on synthetic aircraft carrying the AV-8
     //! and Yak-141 PT numbers of design section 8 as plain constants. The
@@ -654,7 +640,7 @@ mod tests {
     }
 
     /// An aircraft with `id`'s identity and its PT figures (design 8.2).
-    fn fixture(id: AircraftId) -> Aircraft {
+    pub(crate) fn fixture(id: AircraftId) -> Aircraft {
         let mut a = crate::models::variety::tests::synthetic(id);
         let (empty, fuel, thrust, afterburner, maximum, elevator, drag, pull, stall, top) = match id
         {
