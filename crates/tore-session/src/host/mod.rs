@@ -3072,22 +3072,7 @@ impl Host {
             .combat
             .state
             .ownship(plane.0)
-            .map(|own| LoadoutSpec {
-                tanks: None,
-                fuel_lbs: cockpit.flight.fuel,
-                cheat: false,
-                stations: own
-                    .configuration()
-                    .stations
-                    .iter()
-                    .zip(&own.ammo)
-                    .map(|(station, &quantity)| StationLoad {
-                        weapon: station.weapon.source.clone(),
-                        count: station.count,
-                        quantity,
-                    })
-                    .collect(),
-            })
+            .map(|own| carried_loadout(own.configuration(), &own.ammo, cockpit.flight.fuel))
             .unwrap_or(LoadoutSpec {
                 tanks: None,
                 fuel_lbs: cockpit.flight.fuel,
@@ -3627,4 +3612,59 @@ fn aircraft_of(world: &World, plane: PlaneId) -> Option<tore_formats::aircraft::
                 .ownship(plane.0)
                 .map(|own| own.configuration().aircraft)
         })
+}
+
+/// What a seated plane carries now, as a loadout names it: each station's
+/// rounds, except that a gun pod station counts the pods still carrying
+/// rounds (the loadout's unit, which the configuration multiplies by each
+/// pod's rounds when the loadout is applied), and the external tanks
+/// installed. A station's failure bit is kept.
+fn carried_loadout(
+    config: &tore_sim::combat::live::Configuration,
+    ammo: &[u16],
+    fuel_lbs: f64,
+) -> LoadoutSpec {
+    const FAILED: u16 = 0x8000;
+    LoadoutSpec {
+        tanks: Some(
+            config
+                .tanks
+                .iter()
+                .filter(|s| s.quantity > 0)
+                .filter_map(|s| {
+                    s.store.as_ref().map(|store| tore_world::mission::TankLoad {
+                        hardpoint: s.hardpoint as u8,
+                        tank: store.source.clone(),
+                        quantity: s.quantity,
+                    })
+                })
+                .collect(),
+        ),
+        fuel_lbs,
+        cheat: false,
+        stations: config
+            .stations
+            .iter()
+            .zip(ammo)
+            .enumerate()
+            .map(|(index, (station, &rounds))| {
+                let quantity = config
+                    .gun_pods
+                    .iter()
+                    .find(|pod| pod.station == index)
+                    .filter(|_| station.weapon.source == "SUU16.JT")
+                    .map_or(rounds, |pod| {
+                        let units = (rounds & !FAILED)
+                            .div_ceil(pod.rounds_per_pod.max(1))
+                            .min(pod.quantity);
+                        units | (rounds & FAILED)
+                    });
+                StationLoad {
+                    weapon: station.weapon.source.clone(),
+                    count: station.count,
+                    quantity,
+                }
+            })
+            .collect(),
+    }
 }

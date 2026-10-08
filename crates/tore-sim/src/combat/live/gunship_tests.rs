@@ -247,3 +247,42 @@ fn self_clearance_rejects_upward_fire_through_wing_or_nacelle_and_accepts_downwa
         Readiness::GunObscured
     );
 }
+
+/// Exact checkpoints carry the AC-130's mounts: a combat state saved while
+/// the guns slew to a moved target restores with the same angles, linked
+/// membership and readiness, and fires on identically.
+#[test]
+fn a_gunship_checkpoint_restores_mid_slew_and_fires_on_identically() {
+    use crate::checkpoint::{Models, from_bytes, to_bytes};
+    fn drained(mut s: State) -> State {
+        s.take_device_notes();
+        s.take_decoy_rolls();
+        s.ledger.take_outcomes();
+        s
+    }
+    let mut s = gunship();
+    s.command(OWN, Command::NextGunGroup, launcher());
+    s.command(OWN, Command::ToggleGunGroup, launcher());
+    s.targets[0].position = [-800., 1000., 700.];
+    for _ in 0..3 {
+        tick(&mut s, false);
+    }
+    let before = s.own().gunship.clone().unwrap();
+    assert!(before.status.contains(&Readiness::GunSlewing), "{before:?}");
+    assert!(before.included.iter().filter(|on| **on).count() >= 2);
+    let models = Models::default();
+    let mut s = drained(s);
+    let coded = to_bytes(&s, &models).unwrap();
+    let mut copy: State = from_bytes(&coded, &models).unwrap();
+    assert_eq!(copy.own().gunship.as_ref(), Some(&before));
+    for n in 0..240 {
+        let held = (10..200).contains(&n);
+        let a = tick(&mut s, held);
+        let b = tick(&mut copy, held);
+        assert_eq!(format!("{a:?}"), format!("{b:?}"), "tick {n}");
+    }
+    assert_eq!(
+        to_bytes(&drained(s), &models).unwrap(),
+        to_bytes(&drained(copy), &models).unwrap()
+    );
+}

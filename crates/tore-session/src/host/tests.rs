@@ -1541,3 +1541,63 @@ mod path_tests;
 
 #[path = "rejoin_tests.rs"]
 mod rejoin_tests;
+
+/// A seated plane's loadout names gun pods as pods, not rounds, and its
+/// installed tanks, so a rejoin or a revival that applies it again carries
+/// the same rounds and tanks.
+#[test]
+fn a_seated_loadout_counts_gun_pods_as_pods_and_names_its_tanks() {
+    use tore_sim::combat::live::{GunPod, TankStation, TankStore};
+    let host = Host::new(spec(1, 0, 10), Arc::new(resources()), config()).unwrap();
+    let mut config = host.world.combat.dummy_configurations()[0].clone();
+    assert!(config.stations.len() >= 2);
+    config.stations[1].weapon.source = "SUU16.JT".into();
+    config.gun_pods = vec![GunPod {
+        station: 1,
+        quantity: 2,
+        rounds_per_pod: 1200,
+        weight_lbs: 1700,
+    }];
+    config.tanks = vec![
+        TankStation {
+            hardpoint: 4,
+            mount: [0.; 3],
+            store: Some(TankStore {
+                source: "F4_370.GAS".into(),
+                name: "370 gal".into(),
+                tank: tore_formats::weapons::Tank {
+                    empty_weight: 300,
+                    fuel_weight: 2400,
+                    flags: 0,
+                },
+            }),
+            quantity: 1,
+        },
+        TankStation {
+            hardpoint: 5,
+            mount: [0.; 3],
+            store: None,
+            quantity: 0,
+        },
+    ];
+    let mut ammo = vec![0; config.stations.len()];
+    ammo[0] = 578;
+    // One pod fired down to 1,300 rounds still carries two pods' worth.
+    ammo[1] = 1_300;
+    let load = super::carried_loadout(&config, &ammo, 5_000.);
+    assert_eq!(load.stations[0].quantity, 578);
+    assert_eq!(load.stations[1].quantity, 2);
+    assert_eq!(
+        load.tanks,
+        Some(vec![tore_world::mission::TankLoad {
+            hardpoint: 4,
+            tank: "F4_370.GAS".into(),
+            quantity: 1,
+        }])
+    );
+    // A failed pod station keeps its failure bit; a station's plain rounds
+    // are unchanged.
+    ammo[1] = 0x8000 | 1_200;
+    let load = super::carried_loadout(&config, &ammo, 5_000.);
+    assert_eq!(load.stations[1].quantity, 0x8000 | 1);
+}

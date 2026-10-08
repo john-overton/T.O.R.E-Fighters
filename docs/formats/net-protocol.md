@@ -1287,8 +1287,9 @@ its plane's aircraft model. A loadout is the fuel as a 64-bit float, the
 loadout screen's cheat bit, each station's weapon, count and quantity, and
 since protocol 18 a presence bit and the tank list (at most nine, each a
 hardpoint byte, the tank record's name and a 16-bit quantity; absent keeps
-the aircraft's source tanks). A roster plane is its id, side, wing (2 bits),
-place in the wing, aircraft (6 bits since protocol 18) and pilot (the AI, or a seat and callsign). The Debrief mirrors the
+the aircraft's source tanks). A gun pod station's quantity counts pods, not
+rounds, also in Seated. A roster plane is its id, side, wing (2 bits), place
+in the wing, aircraft (6 bits since protocol 18) and pilot (the AI, or a seat and callsign). The Debrief mirrors the
 game's debrief report field for field (the damage as a 64-bit float, the ten
 kill rows and the eight shot tallies). Mission ended carries its reason in 2
 bits (every human left 0, time limit 1, server stopping 2, ended by the
