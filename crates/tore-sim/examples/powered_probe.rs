@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "rotor: radius {:.1} ft, tip {:.0} ft/s; rated power {:.0} hp at sea level",
             h.rotor.radius_ft,
             h.rotor.tip_speed_fps,
-            h.rated_power / HP
+            h.drive.rated_power / HP
         );
         let level = |weight: f64, altitude: f64, kt: f64| {
             h.trim(

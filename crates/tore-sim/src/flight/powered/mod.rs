@@ -25,6 +25,8 @@
 //!   [`fuselage`]: the helicopters' fuselage and fixed surfaces (P2);
 //!   [`helicopter`]: the single-rotor AH-64 and Mi-24 force law, its drive
 //!   and its trim (P2).
+//! - [`drive`]: the rotor speed, governor and engines shared by every
+//!   rotorcraft, for any number of rotors on one interconnected drive.
 //! - [`jet`] and [`aero`]: the vectoring jets and their wing (P4).
 //! - Still to come, each in its own file: the CH-47's tandem mixer (P3),
 //!   `tiltrotor.rs` (P5), `trim.rs` (P7). The parameters are in
@@ -35,6 +37,7 @@
 //! it records them in the state's body rates.
 pub mod aero;
 pub mod body;
+pub mod drive;
 pub mod fuselage;
 pub mod helicopter;
 pub mod jet;
