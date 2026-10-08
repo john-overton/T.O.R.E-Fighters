@@ -795,9 +795,6 @@ fn instant_of(s: &State) -> Instant {
 fn h11_retreating_blade_stall_past_vne_pitches_up_and_rolls() {
     for (id, retreating) in [(Ah64, -1.), (Mi24, 1.)] {
         let mut s = trimmed(id, 4_000., 120. * KT);
-        // The PT envelope's top speed is the overspeed rule's limit and
-        // lies below Vne; keep the airframe from that rule's failure here.
-        s.cheats.damage = crate::cheats::Damage::Invulnerable;
         let mut pilot = Trimmer::default();
         let vne = s
             .model()
@@ -837,6 +834,13 @@ fn h11_retreating_blade_stall_past_vne_pitches_up_and_rolls() {
             }
         }
         let start = start.unwrap_or_else(|| panic!("{id:?} no vibration, {} kt", s.speed / KT));
+        // The stall shows before the airframe is at any risk: the overspeed
+        // rule counts from Vne and rolls only after five seconds past it.
+        assert!(
+            s.overspeed_ticks < 5 * 120 && !s.crashed,
+            "{id:?} stalled {} ticks into the overspeed",
+            s.overspeed_ticks
+        );
         // Near Vne: a little below it in the thinner air at altitude, where
         // the blades work harder.
         assert!(
@@ -1180,4 +1184,72 @@ fn each_hazard_switches_off_at_the_rotor() {
         loads.torque_yaw,
         h.tail_arm_ft * loads.tail.force_right_lbf
     );
+}
+
+/// The overspeed rule on a helicopter limits it to Vne (AH-64 197 kt, Mi-24
+/// 190), not to the PT envelope's top speed (158 and 178 kt): both fly 10
+/// kt above their old limits for a long time unharmed, and above Vne are lost
+/// to the same time-based rule as any aircraft (docs/spec/overspeed.md).
+#[test]
+fn h11b_overspeed_is_judged_against_vne() {
+    for (id, vne) in [(Ah64, 197.), (Mi24, 190.)] {
+        let mut s = trimmed(id, 3_000., 0.);
+        let old_limit = s
+            .model()
+            .configuration()
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .and_then(|e| e.speeds(s.position[1]))
+            .unwrap()
+            .1
+            / KT;
+        assert!(old_limit < vne - 10., "{id:?} {old_limit} kt");
+        assert_eq!(s.overspeed_limit_fps(), Some(vne * KT), "{id:?}");
+        // Between the envelope's top speed and Vne: no warning, no timer.
+        s.speed = (vne - 5.) * KT;
+        assert!(s.overspeed_ratio().unwrap() < 1., "{id:?}");
+        for _ in 0..120 * 30 {
+            s.check_overspeed();
+        }
+        assert_eq!((s.overspeed_ticks, s.crashed), (0, false), "{id:?}");
+        // Past Vne the rule runs: ten seconds and the airframe is gone.
+        s.speed = (vne + 5.) * KT;
+        for _ in 0..crate::flight::OVERSPEED_DEADLINE_TICKS {
+            s.check_overspeed();
+        }
+        assert!(s.crashed, "{id:?}");
+        assert_eq!(
+            s.systems.structure.cause,
+            Some(crate::aircraft_systems::LossCause::Overspeed),
+            "{id:?}"
+        );
+    }
+}
+
+/// An aircraft whose rotor table sets no structural speed, and the legacy
+/// adapter, keep the envelope's top speed as the overspeed limit.
+#[test]
+fn h11c_without_a_structural_speed_the_envelope_is_the_limit() {
+    for id in [AircraftId::Ch47, AircraftId::V22] {
+        let aircraft = crate::models::variety::tests::synthetic(id);
+        let mut s = State::new(&aircraft, [0., 3_000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        let top = s
+            .model()
+            .configuration()
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .and_then(|e| e.speeds(s.position[1]))
+            .unwrap()
+            .1;
+        assert_eq!(s.structural_speed_fps(), None, "{id:?}");
+        assert_eq!(s.overspeed_limit_fps(), Some(top), "{id:?}");
+    }
+    // The legacy adapter flies the old law and keeps the old limit.
+    let legacy = State::new(&super::tests::pt_aircraft(Ah64), [0., 3_000., 0.]).unwrap();
+    assert_eq!(legacy.structural_speed_fps(), None);
 }

@@ -119,6 +119,13 @@ pub struct RotorParameters {
     /// mode for the V-22). Retreating blade stall starts here at the
     /// reference blade loading.
     pub never_exceed_kt: f64,
+    /// The speed the overspeed rule (docs/spec/overspeed.md) uses instead of
+    /// the PT envelope's top speed, kt of true airspeed: the structural
+    /// limit of an airframe whose envelope row is a performance figure, not
+    /// a limit. Retreating blade stall begins at `never_exceed_kt`, so at or
+    /// below this speed the aircraft shows the stall before it risks
+    /// break-up. `None` keeps the envelope's top speed.
+    pub structural_kt: Option<f64>,
     /// Blade collective pitch at the bottom and the top of the lever,
     /// degrees (Fit).
     pub collective_degrees: [f64; 2],
@@ -422,6 +429,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rated_power_hp: None,
             energy_seconds: 1.8,
             never_exceed_kt: 197.,
+            structural_kt: Some(197.),
             // Hovers at gross weight near 75 percent lever (design 5.5).
             collective_degrees: [1., 15.],
             cyclic_degrees: [12., 22.],
@@ -465,6 +473,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rated_power_hp: Some(MI24_RATED_HP),
             energy_seconds: 2.,
             never_exceed_kt: 190.,
+            structural_kt: Some(190.),
             collective_degrees: [1., 16.],
             cyclic_degrees: [9., 20.],
             blowback: 0.05,
@@ -511,6 +520,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rated_power_hp: None,
             energy_seconds: 2.5,
             never_exceed_kt: 180.,
+            structural_kt: None,
             // Starting values for slice P3; the CH-47 still flies the old
             // powered law.
             collective_degrees: [1., 14.],
@@ -548,6 +558,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rated_power_hp: None,
             energy_seconds: 1.5,
             never_exceed_kt: 280.,
+            structural_kt: None,
             // Starting values for slice P5; the V-22 still flies the old
             // powered law. Proprotor blade pitch reaches about 50 degrees
             // to absorb full power at cruise (design 4.8).
@@ -766,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn published_power_is_set_where_the_pt_cannot_give_it() {
+    fn published_power_and_structural_speeds_are_set_where_the_pt_cannot_give_them() {
         use AircraftId::*;
         let rotor = |id| lift(id).unwrap().rotor.unwrap();
         // The Mi-24's rated power is its two TV3-117 at 2,225 shp less
@@ -775,6 +786,18 @@ mod tests {
         assert!((0.5 * 4_450. ..4_450.).contains(&hp), "{hp}");
         for id in [Ah64, Ch47, V22] {
             assert_eq!(rotor(id).rated_power_hp, None, "{id:?}");
+        }
+        // The helicopters' overspeed rule uses their never-exceed speed
+        // (197 and 190 kt); the tandem and the tiltrotor keep the envelope
+        // until their own slices set one.
+        for id in [Ah64, Mi24] {
+            let rotor = rotor(id);
+            assert_eq!(rotor.structural_kt, Some(rotor.never_exceed_kt), "{id:?}");
+        }
+        assert_eq!(rotor(Ah64).structural_kt, Some(197.));
+        assert_eq!(rotor(Mi24).structural_kt, Some(190.));
+        for id in [Ch47, V22] {
+            assert_eq!(rotor(id).structural_kt, None, "{id:?}");
         }
     }
 
