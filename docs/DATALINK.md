@@ -111,9 +111,11 @@ its flight and over the side's battle net.
 
 The aircraft type holds one flag, **has a radar**
 (`tore_sim::datalink::has_radar`). The F-22N and the F/A-XX take the F-22A's
-row, as they take its sensors. Every ported aircraft has a radar record
-(`--sensor-summary` lists each one's), so the flag is true for all fourteen
-selectable aircraft today. It is there for the first aircraft without one.
+row, as they take its sensors. The flag is the aircraft's installed radar
+record (`--sensor-summary` lists each one's): true for the fourteen original
+selectable aircraft and false for the seven variety aircraft that install
+none, the C-130, V-22, Mi-24, CH-47, MiG-17F, 747 and A310
+([variety format](formats/aircraft-variety.md#installed-systems-and-authored-sensor-assignments)).
 
 An aircraft with no radar:
 
