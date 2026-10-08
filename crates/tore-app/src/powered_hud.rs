@@ -98,6 +98,25 @@ fn line(marks: &mut Vec<Mark>, from: (f64, f64), to: (f64, f64)) {
     marks.push(Mark::Line { from, to });
 }
 
+/// The stability label: what really acts, shown unless it is the Damper the
+/// pilot chose. `SAS EZ DMP` and `SAS EZ ATT` mark the Easy flight physics
+/// cheat supplying the damping or the attitude retention.
+pub fn stability_label(s: &State) -> Option<String> {
+    let acting = s.stability_acting()?;
+    let word = match acting.level {
+        StabilityLevel::Off => "OFF",
+        StabilityLevel::Damper => "DMP",
+        StabilityLevel::Attitude => "ATT",
+    };
+    if acting.easy {
+        Some(format!("SAS EZ {word}"))
+    } else if acting.level == StabilityLevel::Damper {
+        None
+    } else {
+        Some(format!("SAS {word}"))
+    }
+}
+
 /// A flashing row is drawn in the first half of each period.
 fn flash_on(s: &State) -> bool {
     (s.ticks / FLASH_TICKS).is_multiple_of(2)
@@ -131,10 +150,8 @@ pub fn marks(s: &State, agl_ft: f64, weapons: bool) -> Vec<Mark> {
     {
         text(&mut marks, format!("TQ {tq:.0}"), LEFT_X, TQ_Y);
     }
-    match s.stability_in_effect() {
-        Some(StabilityLevel::Off) => text(&mut marks, "SAS OFF", LEFT_X, SAS_Y),
-        Some(StabilityLevel::Attitude) => text(&mut marks, "SAS ATT", LEFT_X, SAS_Y),
-        Some(StabilityLevel::Damper) | None => {}
+    if let Some(label) = stability_label(s) {
+        text(&mut marks, label, LEFT_X, SAS_Y);
     }
     if agl_ft < RADAR_HEIGHT_FT {
         text(
@@ -421,6 +438,18 @@ mod tests {
         let mut jet = state(AircraftId::Av8);
         jet.lift_controls.aids.stability = StabilityLevel::Off;
         assert!(has(&marks(&jet, 3_000., false), "SAS OFF"));
+        // With the Easy flight physics cheat the label says what really acts:
+        // the damped jet and the helicopter's attitude retention, even at the
+        // default level.
+        jet.cheats.easy_physics = true;
+        assert!(has(&marks(&jet, 3_000., false), "SAS EZ DMP"));
+        jet.lift_controls.aids.stability = StabilityLevel::Damper;
+        assert!(at(&marks(&jet, 3_000., false), "SAS").is_none());
+        let mut heli = state(AircraftId::Ah64);
+        heli.cheats.easy_physics = true;
+        assert!(has(&marks(&heli, 3_000., false), "SAS EZ ATT"));
+        heli.systems.fluids.hydraulic = 0.;
+        assert!(has(&marks(&heli, 3_000., false), "SAS OFF"));
     }
 
     #[test]
@@ -564,7 +593,7 @@ mod tests {
         let mut boxes = vec![
             ("NR", LEFT_X, NR_Y, w("NR 100")),
             ("TQ", LEFT_X, TQ_Y, w("TQ 100")),
-            ("SAS", LEFT_X, SAS_Y, w("SAS OFF")),
+            ("SAS", LEFT_X, SAS_Y, w("SAS EZ DMP")),
             ("R", RIGHT_X, RADAR_Y, w("R 1000")),
             ("NOZ", RIGHT_X, ANGLE_Y, w("NOZ 100")),
             ("LIFT", LIFT_X, ANGLE_Y, w("LIFT")),

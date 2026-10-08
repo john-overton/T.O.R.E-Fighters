@@ -37,6 +37,17 @@ pub const NACELLE_TRAVEL_DEGREES: f64 = 97.5;
 /// (design section 6).
 pub const ROTORCRAFT_HOVER_DISPLAY_KNOTS: f64 = 40.;
 
+/// The stability augmentation really acting, for the HUD's label.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StabilityReadout {
+    /// The level acting: Off without hydraulics; the Damper for a jet at Off
+    /// whose puffers the Easy flight physics cheat damps; the Attitude level
+    /// for a rotorcraft the cheat gives its weak attitude retention.
+    pub level: tore_input::StabilityLevel,
+    /// The Easy flight physics cheat supplies it, not the pilot's choice.
+    pub easy: bool,
+}
+
 /// The hover display's two instruments (manual pp. 62 and 81).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HoverDisplay {
@@ -61,6 +72,29 @@ impl State {
     pub fn rotor_speed_percent(&self) -> Option<f64> {
         self.is_rotorcraft()
             .then_some(self.lift_controls.drive.rotor_speed * 100.)
+    }
+
+    /// What the stability augmentation is really doing (see
+    /// [`StabilityReadout`]): [`State::stability_in_effect`] with the Easy
+    /// flight physics cheat's additions. None on aircraft without powered lift.
+    pub fn stability_acting(&self) -> Option<StabilityReadout> {
+        use tore_input::StabilityLevel;
+        let lift = self.model().powered_lift()?;
+        let level = self.stability_in_effect()?;
+        if lift.jet.is_some() {
+            let acting = self.puffer_level(self.jet_hazards());
+            return Some(StabilityReadout {
+                level: acting,
+                easy: acting != level,
+            });
+        }
+        if self.easy_retention(&lift, level) {
+            return Some(StabilityReadout {
+                level: StabilityLevel::Attitude,
+                easy: true,
+            });
+        }
+        Some(StabilityReadout { level, easy: false })
     }
 
     /// The collective lever's actual position, percent, for the rotorcraft.
@@ -232,6 +266,49 @@ mod tests {
         assert_eq!(jet.torque_percent(), None);
         assert_eq!(jet.collective_percent(), None);
         assert_eq!(jet.nacelle_degrees(), None);
+    }
+
+    #[test]
+    fn the_stability_acting_includes_what_the_easy_cheat_supplies() {
+        use tore_input::StabilityLevel::{Attitude, Damper, Off};
+        for id in [AircraftId::Ah64, AircraftId::Av8] {
+            let mut s = state(id);
+            let jet = id == AircraftId::Av8;
+            let act = |s: &State| {
+                let r = s.stability_acting().unwrap();
+                (r.level, r.easy)
+            };
+            assert_eq!(act(&s), (Damper, false));
+            s.lift_controls.aids.stability = Off;
+            assert_eq!(act(&s), (Off, false));
+            s.cheats.easy_physics = true;
+            // The jet at Off is damped like the Damper; the helicopter gets
+            // its weak attitude retention.
+            assert_eq!(
+                act(&s),
+                if jet {
+                    (Damper, true)
+                } else {
+                    (Attitude, true)
+                }
+            );
+            s.lift_controls.aids.stability = Damper;
+            assert_eq!(
+                act(&s),
+                if jet {
+                    (Damper, false)
+                } else {
+                    (Attitude, true)
+                }
+            );
+            s.lift_controls.aids.stability = Attitude;
+            assert_eq!(act(&s), (Attitude, false));
+            // No hydraulics: nothing acts, cheat or no cheat.
+            s.systems.fluids.hydraulic = 0.;
+            assert_eq!(act(&s), (Off, false));
+        }
+        let plain = State::new(&crate::flight::integration_tests::profile(), [0.; 3]).unwrap();
+        assert_eq!(plain.stability_acting(), None);
     }
 
     #[test]

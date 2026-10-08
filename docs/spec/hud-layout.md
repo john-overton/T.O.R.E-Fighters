@@ -117,7 +117,7 @@ flight state in `crates/tore-sim/src/flight/powered/readout.rs`.
 | Torque | Helicopters, V-22 | Always | `TQ 72` at (211,304), percent of rated power; flashes above 100 |
 | Collective | Helicopters, V-22 | Always | `COL 81` in the throttle readout's place, (235,178) |
 | Radar height | All six | Below 1,000 ft above ground | `R 450` at (388,262) |
-| Stability level | All six | The level in effect is not Damper (Off without hydraulics) | `SAS OFF` or `SAS ATT` at (211,316) |
+| Stability level | All six | What really acts is not the Damper (Off without hydraulics) | `SAS OFF` or `SAS ATT` at (211,316); `SAS EZ DMP` (a jet at Off damped by the Easy flight physics cheat) or `SAS EZ ATT` (a rotorcraft given the cheat's weak attitude retention, even at Damper) while the cheat supplies it |
 | Nacelle | V-22 | Always | `NAC 75` at (388,274), a vertical tape at x=446 from 0 degrees (bottom) to 97.5 (60 pixels) with a pointer at the nacelle and a caret at the demand, and `CONV` at (388,286) while the conversion protection moves or holds the nacelles. The corridor bracket for the current airspeed waits for the tiltrotor law |
 | Autopilot | Helicopters, V-22 | Hover hold engaged | `AUTO` above `HOVER` in the existing autopilot label slot: the hover hold mode only has to give its autopilot label the word `HOVER` |
 
