@@ -426,7 +426,8 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
   not a manoeuvring limit. So from that last fast edge to the top speed, and on
   past it, the aircraft keeps the G of the row whose fast edge reaches furthest
   (the higher G on a tie), before the loading divisor, and the 1 G floor
-  applies there too. Inside any row above 1 G nothing changes: a fighter's
+  applies there too. Near the ceiling, where no row above 1 G reaches the
+  altitude, the hold past the 1 G edge is 1 G. Inside any row above 1 G nothing changes: a fighter's
   staircase is untouched, and only its last few percent below top speed (and
   overspeed) keep 2 G instead of 1 G. The powered-lift solver and the
   autopilot's stick scaling apply the same hold. The AI adapter

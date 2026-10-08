@@ -2008,7 +2008,9 @@ pub(crate) fn low_speed_positive_g_ceiling(
 /// reaches furthest (the higher G on a tie). The 1 G row's fast edge is the
 /// aircraft's top speed, which the overspeed rule governs, so the band between
 /// the two edges and the overspeed beyond it keep that row's pull rather than
-/// only 1 G. Fitted rule, agent decision 2026-10-08; see docs/FLIGHT-MODEL.md.
+/// only 1 G. Where no row above 1 G reaches the altitude, past the 1 G row's
+/// edge the hold is 1 G. Fitted rule, agent decision 2026-10-08; see
+/// docs/FLIGHT-MODEL.md.
 pub fn fast_side_hold(
     envelopes: &[tore_formats::aircraft::Envelope],
     altitude_ft: f64,
@@ -2022,7 +2024,16 @@ pub fn fast_side_hold(
                 .speeds(altitude_ft)
                 .map(|speeds| (speeds.1, envelope.g))
         })
-        .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))?;
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        // Near the ceiling only the 1 G row may reach this altitude: past
+        // its edge the aircraft still keeps 1 G.
+        .or_else(|| {
+            envelopes
+                .iter()
+                .find(|envelope| envelope.g == 1)?
+                .speeds(altitude_ft)
+                .map(|speeds| (speeds.1, 1))
+        })?;
     (speed_fps > edge_fps).then(|| trace::FastSideHold {
         g: f64::from(g),
         edge_fps,
@@ -2304,6 +2315,10 @@ mod tests {
             assert_eq!(e.fast_hold.is_some(), held, "{speed} ft/s");
         }
         assert_eq!(fast_side_hold(&a.envelopes, 60_000., 1_000.), None);
+        // Above the 2 G row's ceiling, past the 1 G edge, the hold is 1 G.
+        let heavy = transport().envelopes;
+        assert_eq!(fast_side_hold(&heavy, 27_000., 600.), None);
+        assert_eq!(fast_side_hold(&heavy, 27_000., 800.).map(|h| h.g), Some(1.));
     }
     #[test]
     fn an_ai_heavy_recovers_from_a_fast_descent_instead_of_hitting_the_ground() {
