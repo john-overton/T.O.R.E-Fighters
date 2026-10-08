@@ -38,8 +38,20 @@ fn first_difference(a: &str, b: &str) -> String {
 pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let world = Terrain::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
+    // A retained selection station (a store the default load leaves off,
+    // which the loadout editor can fill) starts empty and can release
+    // nothing, so the default load's stations are what this covers. Read at
+    // the start: firing the earlier slots empties the later ones.
+    let loaded: Vec<bool> = combat
+        .state
+        .own()
+        .ammo
+        .iter()
+        .map(|rounds| rounds & 0x7fff != 0)
+        .collect();
     wreck_contacts(
         combat.state.own().configuration(),
+        &loaded,
         launcher(&h.start(&world)),
     )?;
     println!(
@@ -217,7 +229,9 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     );
     for index in 0..combat.state.own().ammo.len() {
         let station = &combat.state.own().configuration().stations[index];
-        if !station.internal && station.weapon.seeker.signature == 0 {
+        if !loaded.get(index).copied().unwrap_or(false)
+            || (!station.internal && station.weapon.seeker.signature == 0)
+        {
             continue;
         }
         for jammer in [false, true] {
@@ -296,10 +310,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     // tape replaces it, as they did when combat held the file.
     let mut recorder: Option<crate::tape_file::Recorder> = None;
     for index in 0..combat.state.own().ammo.len() {
-        // A retained selection station (a store the default load leaves off,
-        // which the loadout editor can fill) starts empty and can release
-        // nothing, so the default load's stations are what this covers.
-        if combat.state.own().ammo[index] & 0x7fff == 0 {
+        if !loaded.get(index).copied().unwrap_or(false) {
             continue;
         }
         let station = &combat.state.own().configuration().stations[index];
@@ -858,18 +869,25 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
 
 /// Real imported gun and missile records must collide with a present ownship
 /// wreck, without damage or a second kill. This runs in the headless battery.
-fn wreck_contacts(config: &live::Configuration, mut input: Launcher) -> AppResult<()> {
+fn wreck_contacts(
+    config: &live::Configuration,
+    loaded: &[bool],
+    mut input: Launcher,
+) -> AppResult<()> {
     use tore_sim::combat::missiles::{Profile, TargetRole};
-    let gun = config.stations.iter().position(|s| live::is_gun(&s.weapon));
-    let missile = config
-        .stations
-        .iter()
-        .position(|s| s.weapon.source == "AIM120.JT")
-        .or_else(|| {
-            config.stations.iter().position(|s| {
-                Profile::for_weapon(&s.weapon).is_some_and(|p| p.role == TargetRole::Aircraft)
-            })
-        });
+    // Only the default load's stations: a retained selection station starts empty.
+    let carried = |index: usize| loaded.get(index).copied().unwrap_or(false);
+    let find = |wanted: &dyn Fn(&live::Station) -> bool| {
+        config
+            .stations
+            .iter()
+            .enumerate()
+            .position(|(index, s)| carried(index) && wanted(s))
+    };
+    let gun = find(&|s| live::is_gun(&s.weapon));
+    let missile = find(&|s| s.weapon.source == "AIM120.JT").or_else(|| {
+        find(&|s| Profile::for_weapon(&s.weapon).is_some_and(|p| p.role == TargetRole::Aircraft))
+    });
     input.position = [0., 10000., 0.];
     input.basis = Basis::new(0., 0., 0.);
     input.velocity = [0.; 3];
