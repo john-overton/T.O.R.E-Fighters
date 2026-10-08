@@ -833,7 +833,9 @@ impl State {
             .collect();
         configuration
     }
-    /// The imported polygons, before the weight scaling.
+    /// The model's polygons before the weight scaling: the imported ones, with
+    /// a variety aircraft's fitted top-speed correction
+    /// (docs/spec/variety-flight.md, "Top speeds").
     pub fn retail_envelopes(&self) -> &[tore_formats::aircraft::Envelope] {
         self.raw_envelopes
             .as_deref()
@@ -1505,6 +1507,18 @@ impl State {
                 rows += 1;
             }
         }
+        // Past the fast edge of every row above 1 G the aircraft keeps that
+        // last row's G up to and beyond its top speed, instead of falling to
+        // 1 G with no pull left (docs/FLIGHT-MODEL.md, "Envelope limits and
+        // loading"). Hybrid only; the legacy compatibility model is unchanged.
+        let fast_hold = if self.research.is_some() {
+            fast_side_hold(&c.aerodynamics.envelopes, self.position[1], self.speed)
+        } else {
+            None
+        };
+        if let Some(hold) = fast_hold {
+            hi = hi.max(hold.g);
+        }
         // Above the aircraft's own 1 G ceiling the air is too thin to lift its
         // weight (manual p. 90): the available lift falls with the air density
         // above the ceiling, so an aircraft carried past it by a zoom climb
@@ -1532,7 +1546,7 @@ impl State {
         // aircraft less than 1 G and it sank at full power near its top speed
         // and its ceiling. Fitted rule (agent decision, 2026-09-29), hybrid
         // adapter only.
-        if hybrid && rows > 0 && envelope_g[1] >= 1. {
+        if hybrid && (rows > 0 || fast_hold.is_some()) && envelope_g[1] >= 1. {
             hi = hi.max(1.);
         }
         let loaded_positive_g = hi;
@@ -1566,6 +1580,7 @@ impl State {
             authority,
             rows,
             envelope_g,
+            fast_hold,
             loading,
             load_divisor: load_factor,
             loaded_positive_g,
@@ -1854,10 +1869,13 @@ impl State {
         } else {
             1.
         };
+        // The drag reaches full thrust at the 1 G top speed times the
+        // aircraft's level-speed fraction (1 except for fitted heavies).
+        let drag_speed = (vmax * c.aerodynamics.level_speed_fraction).max(100.);
         let drag = slip_drag
             + max_thrust
                 * lapse
-                * (self.speed / vmax.max(100.)).powi(2)
+                * (self.speed / drag_speed).powi(2)
                 * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
             + weight
                 * (c.aerodynamics.g_pull_drag_f8 * (self.lift_g.abs() - 1.).max(0.)
@@ -1878,7 +1896,7 @@ impl State {
         let drag = drag_cap.map_or(drag, |cap| drag.min(cap));
         let gear_on_wheels = self.research.is_some() && wheel_contact;
         // Display breakdown of the drag above, from the same inputs.
-        let airframe_drag = max_thrust * lapse * (self.speed / vmax.max(100.)).powi(2);
+        let airframe_drag = max_thrust * lapse * (self.speed / drag_speed).powi(2);
         let drag_trace = trace::DragTrace {
             total_lbf: drag,
             undamaged_lbf: undamaged_drag,
@@ -2028,6 +2046,43 @@ pub(crate) fn low_speed_positive_g_ceiling(
 ) -> Option<f64> {
     low_speed_ceiling(c, altitude_ft, speed_fps, effective_stall_fps, extra_g)
         .map(|ceiling| ceiling.limit_g)
+}
+
+/// The hybrid fast-side hold: when `speed_fps` is past the fast edge of every
+/// envelope row above 1 G at `altitude_ft`, the G of the row whose fast edge
+/// reaches furthest (the higher G on a tie). The 1 G row's fast edge is the
+/// aircraft's top speed, which the overspeed rule governs, so the band between
+/// the two edges and the overspeed beyond it keep that row's pull rather than
+/// only 1 G. Where no row above 1 G reaches the altitude, past the 1 G row's
+/// edge the hold is 1 G. Fitted rule, agent decision 2026-10-08; see
+/// docs/FLIGHT-MODEL.md.
+pub fn fast_side_hold(
+    envelopes: &[tore_formats::aircraft::Envelope],
+    altitude_ft: f64,
+    speed_fps: f64,
+) -> Option<trace::FastSideHold> {
+    let (edge_fps, g) = envelopes
+        .iter()
+        .filter(|envelope| envelope.g > 1)
+        .filter_map(|envelope| {
+            envelope
+                .speeds(altitude_ft)
+                .map(|speeds| (speeds.1, envelope.g))
+        })
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        // Near the ceiling only the 1 G row may reach this altitude: past
+        // its edge the aircraft still keeps 1 G.
+        .or_else(|| {
+            envelopes
+                .iter()
+                .find(|envelope| envelope.g == 1)?
+                .speeds(altitude_ft)
+                .map(|speeds| (speeds.1, 1))
+        })?;
+    (speed_fps > edge_fps).then(|| trace::FastSideHold {
+        g: f64::from(g),
+        edge_fps,
+    })
 }
 
 /// The hybrid positive-G ramp from 1 G at the effective stall speed to the
@@ -2243,6 +2298,199 @@ mod tests {
         let limits = s.trace().adapter.unwrap().envelope.limits_g;
         assert_eq!(s.trace().adapter.unwrap().envelope.rows, 1);
         assert!(limits[1] >= 1., "the upper G limit is {}", limits[1]);
+    }
+    /// A synthetic transport shaped like the decoded heavies: the 3 G and
+    /// 2 G rows stop well short of the 1 G row's fast edge (the top speed).
+    /// Round numbers, not retail values.
+    fn transport() -> Aircraft {
+        let mut a =
+            crate::models::variety::tests::synthetic(tore_formats::aircraft::AircraftId::Il76);
+        a.envelopes = vec![
+            tore_formats::aircraft::Envelope {
+                g: 1,
+                points: vec![[200., 0.], [300., 25_000.], [700., 30_000.], [780., 0.]],
+            },
+            tore_formats::aircraft::Envelope {
+                g: 2,
+                points: vec![[280., 0.], [380., 22_000.], [650., 24_000.], [720., 0.]],
+            },
+            tore_formats::aircraft::Envelope {
+                g: 3,
+                points: vec![[360., 0.], [460., 18_000.], [620., 18_000.], [680., 0.]],
+            },
+        ];
+        a
+    }
+    fn level(a: &Aircraft, altitude: f64, speed: f64) -> State {
+        let mut s = State::new(a, [0., altitude, 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.yaw = 0.;
+        s.pitch = 0.;
+        s.bank = 0.;
+        s.speed = speed;
+        s.velocity = [0., 0., speed];
+        s.throttle = 1.;
+        s
+    }
+    #[test]
+    fn a_heavy_keeps_its_pull_from_the_last_g_row_up_to_and_past_its_top_speed() {
+        // John, 2026-10-08: heavies went from pulling 2 G to nothing well below
+        // overspeed, and the AI flew an E-3 into the ground at about 400 kt.
+        // Past the 2 G row's fast edge only the 1 G row held, so a full pull
+        // gave 1 G. The fast-side hold keeps the 2 G row's pull instead.
+        let a = transport();
+        let mut previous = f64::INFINITY;
+        for step in 0..=24 {
+            let speed = 500. + 15. * f64::from(step);
+            let mut s = level(&a, 1_000., speed);
+            s.step(
+                &PilotInput {
+                    pitch: 1.,
+                    ..Default::default()
+                },
+                |_, _| 0.,
+            );
+            let e = s.trace().adapter.unwrap().envelope;
+            let floor = 2. / e.load_divisor;
+            assert!(
+                e.limits_g[1] >= floor - 1e-9,
+                "{speed} ft/s: positive limit {} below the 2 G row's {floor}",
+                e.limits_g[1]
+            );
+            assert_eq!(e.fast_hold.is_some(), speed > 718.5, "{speed} ft/s");
+            // Never rising with speed on the fast side, and no step bigger
+            // than one row.
+            assert!(e.limits_g[1] <= previous + 1e-9);
+            assert!(
+                previous.is_infinite() || previous - e.limits_g[1] <= 1. / e.load_divisor + 1e-9
+            );
+            previous = e.limits_g[1];
+        }
+        // At 97 percent of top speed a full aft stick pulls the 2 G row's
+        // loaded value and the nose comes up.
+        let mut s = level(&a, 1_000., 0.97 * 779.);
+        let mut peak = 0_f64;
+        for _ in 0..240 {
+            s.step(
+                &PilotInput {
+                    pitch: 1.,
+                    ..Default::default()
+                },
+                |_, _| 0.,
+            );
+            peak = peak.max(s.g);
+        }
+        let divisor = s.trace().adapter.unwrap().envelope.load_divisor;
+        assert!(
+            peak > 2. / divisor - 0.05,
+            "peak {peak} G, divisor {divisor}"
+        );
+        assert!(
+            s.pitch > 3_f64.to_radians(),
+            "pitch {}",
+            s.pitch.to_degrees()
+        );
+    }
+    #[test]
+    fn the_fast_side_hold_leaves_a_fighter_staircase_alone() {
+        // Rows 2..6 end 50 ft/s apart below the 1 G row's 1,800 ft/s edge. Inside
+        // any row above 1 G the limit is still that row, exactly as before; the
+        // hold only starts past the 2 G row's edge.
+        let mut a = profile();
+        for e in &mut a.envelopes {
+            if e.g > 1 {
+                let fast = 1_800. - 50. * f64::from(e.g);
+                e.points = vec![
+                    [200., 0.],
+                    [250., 50_000.],
+                    [fast - 100., 50_000.],
+                    [fast, 0.],
+                ];
+            }
+        }
+        for (speed, row, held) in [
+            (1_400., 6., false),
+            (1_520., 5., false),
+            (1_640., 3., false),
+            (1_690., 2., false),
+            (1_710., 2., true),
+            (1_790., 2., true),
+            (1_850., 2., true),
+        ] {
+            let mut s = level(&a, 1_000., speed);
+            s.step(&PilotInput::default(), |_, _| 0.);
+            let e = s.trace().adapter.unwrap().envelope;
+            assert_eq!(e.envelope_g[1], row, "{speed} ft/s");
+            assert_eq!(e.fast_hold.is_some(), held, "{speed} ft/s");
+        }
+        assert_eq!(fast_side_hold(&a.envelopes, 60_000., 1_000.), None);
+        // Above the 2 G row's ceiling, past the 1 G edge, the hold is 1 G.
+        let heavy = transport().envelopes;
+        assert_eq!(fast_side_hold(&heavy, 27_000., 600.), None);
+        assert_eq!(fast_side_hold(&heavy, 27_000., 800.).map(|h| h.g), Some(1.));
+    }
+    #[test]
+    fn an_ai_heavy_recovers_from_a_fast_descent_instead_of_hitting_the_ground() {
+        use crate::ai::{
+            ScalarSpeed, SpeedLimits,
+            controller::{Completion, MotionIntent},
+            motion::{Bank, CompletionAxis, Duration, MotionRequest, PitchRequest, SpeedRequest},
+            steering::CommandMode,
+            steering_adapter::ControlAdapter,
+        };
+        let a = transport();
+        for (altitude, speed, dive) in [(5_000., 750., 20.), (8_000., 740., 30.)] {
+            let mut s = level(&a, altitude, speed);
+            s.pitch = -f64::to_radians(dive);
+            s.velocity = Basis::new(0., s.pitch, 0.).forward.map(|v| v * speed);
+            let level_out = MotionIntent {
+                formation_flight: false,
+                afterburner: false,
+                id: 1,
+                request: MotionRequest::new(
+                    0,
+                    PitchRequest::Explicit(0),
+                    Bank::Unconstrained,
+                    SpeedRequest::Explicit(ScalarSpeed(speed)),
+                    Duration::Timed(5),
+                ),
+                heading_deg: 0.,
+                flight_path_pitch_deg: 0.,
+                speed: ScalarSpeed(speed),
+                bank: Bank::Unconstrained,
+                completion: Completion::Axis(CompletionAxis::Heading),
+                steering_point: None,
+                mode: CommandMode::Ordinary,
+            };
+            let limits = SpeedLimits {
+                minimum: ScalarSpeed(300.),
+                maximum: ScalarSpeed(780.),
+                corner: ScalarSpeed(600.),
+            };
+            let mut adapter = ControlAdapter::new();
+            let mut lowest = altitude;
+            for _ in 0..120 * 30 {
+                let output = adapter
+                    .controls(&s, &level_out, &limits, 3., 30., 60., Some(0.), DT)
+                    .unwrap();
+                s.step(&output.input, |_, _| 0.);
+                lowest = lowest.min(s.position[1]);
+            }
+            assert!(
+                !s.crashed,
+                "{altitude} ft, {dive} degrees: lowest {lowest:.0} ft"
+            );
+            assert!(
+                lowest > altitude * 0.4,
+                "lowest {lowest:.0} ft from {altitude}"
+            );
+            let path = s.velocity[1].atan2(s.velocity[0].hypot(s.velocity[2]));
+            assert!(
+                path.to_degrees().abs() < 3.,
+                "flight path {}",
+                path.to_degrees()
+            );
+        }
     }
     #[test]
     fn the_legacy_adapter_keeps_the_old_envelope_limits() {

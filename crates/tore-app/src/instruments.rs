@@ -1291,10 +1291,13 @@ impl Instruments {
                     text(&mut r, "ETA --:--", 41, 101);
                 }
             }
+            // The flight model's own polygons (fitted top speeds included),
+            // before weight scaling, so the window shows the limits the
+            // aircraft flies to.
             1 => envelope::draw(
                 &mut r,
                 f,
-                &h.profile.envelopes,
+                s.retail_envelopes(),
                 s,
                 self.envelope_mode,
                 self.combat.as_ref(),

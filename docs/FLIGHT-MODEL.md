@@ -100,7 +100,9 @@ fitted collective-controlled rotor lift. Ordinary throttle remains engine power.
 Apache and Chinook gear stays down from initialization through simulation and
 commands, matching their visible fixed wheels. Hind gear remains retractable.
 The fits, travel rates, initial clearance and known limits have one home in the
-linked contract. Ground contact uses the complete deployed gear, including
+linked contract, including the fitted top-speed corrections for six aircraft
+and the level-speed fraction (drag reaches full thrust at 96 percent of the top
+speed) that keeps the transports and airliners out of the overspeed shake. Ground contact uses the complete deployed gear, including
 AV8 central pieces already present in the neutral shape; counting only a switched
 branch missed its lowest nose wheel. These are working approximations, not
 measured retail parity.
@@ -414,14 +416,37 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
   G limit (`ai/steering_adapter.rs`) applies the same floor and the same ceiling rule, so
   it never asks for G the aircraft cannot give. Both rules are hybrid adapter rules; the
   legacy compatibility model keeps the old limits.
+- **Fast-side hold (fitted, agent decision 2026-10-08).** On the fast side of
+  the envelope the higher rows end one after another before the 1 G row's top
+  speed, so the available G steps down with speed. Past the fast edge of the
+  last row above 1 G (in practice the 2 G row) only the 1 G row used to hold,
+  and a full pull gave 1 G: no pull at all. Transports and airliners have few
+  rows and reach that band in level flight at full power, so John reported
+  (2026-10-08) heavies going from pulling 2 G to nothing well below overspeed,
+  and an AI E-3 flying into the ground. The 1 G row's fast edge is the
+  aircraft's structural speed limit, which the overspeed rule below governs,
+  not a manoeuvring limit. So from that last fast edge to the top speed, and on
+  past it, the aircraft keeps the G of the row whose fast edge reaches furthest
+  (the higher G on a tie), before the loading divisor, and the 1 G floor
+  applies there too. Near the ceiling, where no row above 1 G reaches the
+  altitude, the hold past the 1 G edge is 1 G. Inside any row above 1 G nothing changes: a fighter's
+  staircase is untouched, and only its last few percent below top speed (and
+  overspeed) keep 2 G instead of 1 G. The powered-lift solver and the
+  autopilot's stick scaling apply the same hold. The AI adapter
+  (`ai/steering_adapter.rs`) still computes 1 G there; with the flight model
+  delivering the hold it asks for full stick and gets the held G, which is
+  enough to recover (see the regression tests below). Regression:
+  `flight::tests::a_heavy_keeps_its_pull_*`, `the_fast_side_hold_leaves_a_fighter_staircase_alone`,
+  `an_ai_heavy_recovers_from_a_fast_descent_*` and the `flight-variety-gcurve-*`
+  battery scenarios.
 - **Above the ceiling (fitted, 2026-09-29).** Above the top of the 1 G polygon the
   air is too thin to lift the weight (manual p. 90), so the upper limit is
   multiplied by the ratio of the air density there to the density at the ceiling
   (standard atmosphere, held at its 100,000 ft value above that, so the thinning stays finite). A zoom climb can carry an aircraft a little past its
   ceiling but it cannot stay there.
-- Outside every row at that speed (faster than the polygon's right edge) the limit
-  stays at 1 G divided by the loading divisor: the aircraft cannot hold level
-  flight. Overspeed is `opinionated` (requested by John,
+- Outside every row at that speed the limit is 1 G divided by the loading
+  divisor, except past the right edge, where the fast-side hold above keeps the
+  last higher row's pull so a pilot can still pull out of an overspeed dive. Overspeed is `opinionated` (requested by John,
   2026-10-01; timing and odds are requested values, [overspeed](spec/overspeed.md)). The manual says that below about
   36,000 ft, beyond the structural limit, "air resistance begins to weaken the airframe and the
   wings will eventually tear off" and gives no numbers. Here the view shakes from 95% of the top speed

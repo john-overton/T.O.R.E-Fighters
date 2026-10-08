@@ -44,7 +44,9 @@ Agent choices, 2026-09-21, unless explicitly stated otherwise:
 
 - Plot only within the 138 by 114 instrument screen: window x=12..149, y=20..133
   in the 162 by 160 window ([bezel geometry](instrument-bezel.md)).
-  Use the selected aircraft's own imported PT polygons. Axis maxima are 1.06
+  Use the selected aircraft's own imported PT polygons, with a variety
+  aircraft's [fitted top-speed correction](variety-flight.md#top-speeds), the
+  same polygons the flight model and overspeed rule use. Axis maxima are 1.06
   times maximum speed and 1.12 times ceiling over its nonempty positive-G rows.
   Compare mode uses the union of both aircraft's bounds. Zero is the lower left.
   This keeps the entire envelope inside the window without a universal

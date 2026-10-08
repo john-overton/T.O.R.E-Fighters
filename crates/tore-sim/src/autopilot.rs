@@ -140,6 +140,14 @@ impl Autopilot {
                 high = high.max(e.g as f64);
             }
         }
+        // The flight model's fast-side hold, so the autopilot scales its
+        // stick for the pull the aircraft actually has near top speed.
+        if s.research.is_some()
+            && let Some(hold) =
+                crate::flight::fast_side_hold(&c.aerodynamics.envelopes, s.position[1], s.speed)
+        {
+            high = high.max(hold.g);
+        }
         let loading = 1.
             + (s.fuel + s.carried_lbs()) / c.mass.empty_lbs
                 * c.aerodynamics.loaded_elevator_percent

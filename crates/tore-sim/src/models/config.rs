@@ -30,6 +30,11 @@ pub struct Aerodynamics {
     pub roll_limit_rad_per_second: f64,
     /// Imported fixed8 flap-lift coefficient.
     pub flaps_lift_f8: f64,
+    /// Hybrid adapter: the share of the 1 G top speed at which drag equals
+    /// full thrust, so unloaded level flight at full power settles there.
+    /// 1 for every decoded aircraft; a fitted value below 1 for the variety
+    /// transports and airliners (docs/spec/variety-flight.md, "Top speeds").
+    pub level_speed_fraction: f64,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Equipment {
@@ -144,6 +149,7 @@ impl Configuration {
                 g_pull_drag_f8: number("_gpullDrag")?,
                 roll_limit_rad_per_second: number("_brv.x.max")?.to_radians(),
                 flaps_lift_f8: number("flapsLift")?,
+                level_speed_fraction: 1.,
             },
             turbulence_percent: i16::try_from(
                 a.fields
@@ -191,6 +197,7 @@ impl Configuration {
             m.max_takeoff_lbs,
             p.military_thrust_lbf,
             a.roll_limit_rad_per_second,
+            a.level_speed_fraction,
         ];
         let nonnegative = [
             m.internal_fuel_lbs,
