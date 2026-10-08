@@ -1378,8 +1378,23 @@ fn card_outline(c: &mut Canvas, x: i32, y: i32, selected: bool) {
 
 /// Source-cache regression probe. No GPU, native execution, or invented targets.
 /// Headless source-backed regression for explicit tank selections and restart.
-pub fn validate_tanks(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+/// It covers the reviewed F-14 tank contract only: `requested` is the aircraft
+/// named with `--aircraft`, if any, and any other aircraft is refused rather
+/// than silently probing the F-14. `--validate-ordnance` covers every aircraft.
+pub fn validate_tanks(
+    data: &BTreeMap<String, Vec<u8>>,
+    requested: Option<tore_formats::aircraft::AircraftId>,
+) -> AppResult<()> {
     use tore_world::mission::LoadoutSpec;
+    if let Some(id) = requested
+        && id != tore_formats::aircraft::AircraftId::F14
+    {
+        return Err(format!(
+            "--validate-tanks probes the F-14 tank contract only, not --aircraft {}; use --validate-ordnance for every aircraft's tanks",
+            id.selection_key()
+        )
+        .into());
+    }
     let profile = tore_formats::aircraft::Aircraft::parse(
         data.get("F14.PT")
             .ok_or("tank probe missing F14.PT; re-import media")?,
@@ -2071,6 +2086,21 @@ mod tests {
     use super::*;
     use crate::menu::{HEIGHT, WIDTH};
     use tore_formats::aircraft::Hardpoint;
+
+    #[test]
+    fn the_tank_probe_covers_the_f14_and_refuses_any_other_aircraft() {
+        use tore_formats::aircraft::AircraftId;
+        let empty = BTreeMap::new();
+        for id in [AircraftId::F18, AircraftId::A4E, AircraftId::Faxx] {
+            let error = validate_tanks(&empty, Some(id)).unwrap_err().to_string();
+            assert!(error.contains("F-14 tank contract only"), "{error}");
+        }
+        // The F-14, named or by default, goes on to read the F-14's record.
+        for requested in [Some(AircraftId::F14), None] {
+            let error = validate_tanks(&empty, requested).unwrap_err().to_string();
+            assert!(error.contains("missing F14.PT"), "{error}");
+        }
+    }
 
     fn fixture() -> Ordnance {
         let mut config = tore_world::test_support::combat_fixture(true)

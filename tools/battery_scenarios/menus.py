@@ -215,8 +215,8 @@ def scenarios() -> list[Scenario]:
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 9 recovered weapon stations, [0-9]+ weapon placements, [0-9]+ tank placements; passed"],
-            notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration.",
+            expect=[r"ordnance audit: 36 aircraft, 9 recovered weapon stations, 1464 weapon placements, 146 tank placements, 40 weapon and 4 tank records; passed"],
+            notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
     out.append(
@@ -231,6 +231,18 @@ def scenarios() -> list[Scenario]:
                 r"F14 tanks: full selection, removal, empty shells, old defaults and accepted restart passed",
             ],
             notes="Source F14 GAS quantities, mass, removal and accepted-load restart without a display.",
+        )
+    )
+    out.append(
+        Scenario(
+            name="menus-tanks-refuses-other-aircraft",
+            lane="menus",
+            args=["--validate-tanks", "--aircraft", "f18", "--no-audio"],
+            timeout=120,
+            expect_exit=1,
+            expect=[r"--validate-tanks probes the F-14 tank contract only, not --aircraft F18.PT"],
+            forbid=[r"F14 tank selection"],
+            notes="The tank probe is the F-14's reviewed contract: another --aircraft is refused instead of silently probing the F-14.",
         )
     )
     out.append(

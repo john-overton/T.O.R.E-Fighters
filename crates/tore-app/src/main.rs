@@ -8135,6 +8135,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut background = None;
     let mut theater_code = String::from("UKR");
     let mut aircraft_id = tore_formats::aircraft::AircraftId::F18;
+    // Whether --aircraft was given, for probes that cover one aircraft only.
+    let mut aircraft_requested = false;
     let mut initial_screen = Screen::Main;
     let mut flight_view = 0;
     let mut flight_reference = flight_views::Reference::Player;
@@ -8635,6 +8637,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 aircraft_id = tore_formats::aircraft::AircraftId::parse(
                     &args.next().ok_or("--aircraft needs a supported aircraft ID (see --help)")?,
                 )?;
+                aircraft_requested = true;
             }
             "--theater" => {
                 theater_code = args
@@ -9590,7 +9593,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Ok(Outcome::Done);
     }
     if validate_tanks {
-        ordnance::validate_tanks(&assets.theater_resources)?;
+        ordnance::validate_tanks(
+            &assets.theater_resources,
+            aircraft_requested.then_some(aircraft_id),
+        )?;
         return Ok(Outcome::Done);
     }
     if validate_text {

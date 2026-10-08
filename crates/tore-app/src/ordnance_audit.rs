@@ -8,11 +8,34 @@ use tore_formats::{
 use tore_sim::combat::{
     live::TankStore,
     loading,
-    loadout::{Loadout, supported},
+    loadout::{Loadout, SUPPORTED_WEAPONS, supported},
 };
 use tore_world::mission::{LoadoutSpec, MissionSpec};
 
+/// What the audit must find: a short count of anything fails the run, so a
+/// partial import cannot pass with fewer checks. Raise these on purpose, and
+/// record why in `docs/baselines/ordnance-availability.md`, when the supported
+/// weapon list, the tank records or the aircraft change.
+const AIRCRAFT: usize = 36;
+const RECOVERED_STATIONS: usize = 9;
+const TANK_RECORDS: usize = 4;
+const WEAPON_PLACEMENTS: usize = 1464;
+const TANK_PLACEMENTS: usize = 146;
+
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    if AircraftId::ALL.len() != AIRCRAFT {
+        return Err(format!(
+            "ordnance audit expects {AIRCRAFT} aircraft, the roster has {}",
+            AircraftId::ALL.len()
+        )
+        .into());
+    }
+    if let Some(name) = SUPPORTED_WEAPONS
+        .iter()
+        .find(|name| !data.contains_key(**name))
+    {
+        return Err(format!("ordnance audit missing supported weapon record {name}").into());
+    }
     let weapons = data
         .iter()
         .filter(|(name, _)| supported(name))
@@ -23,6 +46,21 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         .filter(|(name, _)| name.ends_with(".GAS"))
         .map(|(name, bytes)| TankStore::parse(name, bytes))
         .collect::<std::io::Result<Vec<_>>>()?;
+    if weapons.len() != SUPPORTED_WEAPONS.len() {
+        return Err(format!(
+            "ordnance audit read {} weapon records, expected {}",
+            weapons.len(),
+            SUPPORTED_WEAPONS.len()
+        )
+        .into());
+    }
+    if tanks.len() != TANK_RECORDS {
+        return Err(format!(
+            "ordnance audit read {} tank records, expected {TANK_RECORDS}",
+            tanks.len()
+        )
+        .into());
+    }
     let mut total_weapons = 0;
     let mut total_tanks = 0;
     let mut recovered = 0;
@@ -201,13 +239,22 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             tank_cases
         );
     }
-    if recovered != 9 {
-        return Err(
-            format!("expected 9 reviewed missing weapon stations, found {recovered}").into(),
-        );
+    if recovered != RECOVERED_STATIONS {
+        return Err(format!(
+            "expected {RECOVERED_STATIONS} reviewed missing weapon stations, found {recovered}"
+        )
+        .into());
+    }
+    if total_weapons != WEAPON_PLACEMENTS || total_tanks != TANK_PLACEMENTS {
+        return Err(format!(
+            "ordnance audit checked {total_weapons} weapon and {total_tanks} tank placements, expected {WEAPON_PLACEMENTS} and {TANK_PLACEMENTS}: a record or station is missing or new"
+        )
+        .into());
     }
     println!(
-        "ordnance audit: 36 aircraft, {recovered} recovered weapon stations, {total_weapons} weapon placements, {total_tanks} tank placements; passed"
+        "ordnance audit: {AIRCRAFT} aircraft, {recovered} recovered weapon stations, {total_weapons} weapon placements, {total_tanks} tank placements, {} weapon and {} tank records; passed",
+        weapons.len(),
+        tanks.len()
     );
     Ok(())
 }
@@ -257,4 +304,22 @@ fn assert_roundtrip(
     tore_sim::combat::live::State::new(light.configuration.clone(), true)?;
     LoadoutSpec::of(&light).check_for_plane(aircraft, data, false)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_import_missing_a_supported_weapon_record_fails_the_audit() {
+        let error = validate(&BTreeMap::new()).unwrap_err().to_string();
+        assert!(error.contains("missing supported weapon record"), "{error}");
+        assert!(error.contains(SUPPORTED_WEAPONS[0]), "{error}");
+    }
+
+    #[test]
+    fn the_pinned_counts_match_the_reviewed_roster() {
+        assert_eq!(AircraftId::ALL.len(), AIRCRAFT);
+        assert_eq!(SUPPORTED_WEAPONS.len(), 40);
+    }
 }

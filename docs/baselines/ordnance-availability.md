@@ -44,8 +44,18 @@ placement/persistence checks precede a separate one-unit-per-station, zero-
 internal-fuel validation. This does not assert every full-capacity combination
 can take off.
 
+The audit pins what it must find, so a partial import cannot pass with fewer
+checks (2026-10-08): all 40 supported weapon records and all 4 tank records
+present, 36 aircraft, nine recovered weapon rows, exactly 1,464 weapon
+placements and 146 tank placements. A missing record, or a count that moves,
+fails the run; raise the pins in `crates/tore-app/src/ordnance_audit.rs` and
+here when the supported list, the tanks or the roster change on purpose.
+
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
-shell mass, total mass, consumption order and accepted-load restoration.
+shell mass, total mass, consumption order and accepted-load restoration. It is
+the reviewed F-14 contract only: `--validate-tanks` refuses any other
+`--aircraft` (`menus-tanks-refuses-other-aircraft`) rather than silently
+probing the F-14; `--validate-ordnance` covers every aircraft's tanks.
 
 ## Results
 
