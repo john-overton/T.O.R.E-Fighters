@@ -30,6 +30,8 @@
 //! import: its body rates are commanded, not integrated, and it records them
 //! in the state's body rates.
 pub mod body;
+pub mod fuselage;
+pub mod rotor;
 pub mod sas;
 pub mod state;
 

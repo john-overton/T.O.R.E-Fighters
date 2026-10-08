@@ -111,8 +111,92 @@ pub struct RotorParameters {
     /// speed to fall from 100 to 80 percent (Fit).
     pub energy_seconds: f64,
     /// Never-exceed speed, kt (true for the helicopters; KCAS in airplane
-    /// mode for the V-22).
+    /// mode for the V-22). Retreating blade stall starts here at the
+    /// reference blade loading.
     pub never_exceed_kt: f64,
+    /// Blade collective pitch at the bottom and the top of the lever,
+    /// degrees (Fit).
+    pub collective_degrees: [f64; 2],
+    /// Disk tilt from the shaft at full stick, [longitudinal, lateral],
+    /// degrees (Fit, with the Lock number, to the hover rate targets).
+    pub cyclic_degrees: [f64; 2],
+    /// Disk tilt away from the in-plane airflow per unit advance ratio,
+    /// rad: the blowback that gives speed stability (Fit).
+    pub blowback: f64,
+    /// Lock number: the rotor's rate damping is a disk lag of
+    /// `16 / (lock_number x rotor speed)` seconds times the body rate (Fit).
+    pub lock_number: f64,
+    /// Hub height above the centre of gravity, ft (Fit).
+    pub hub_height_ft: f64,
+    /// Hub moment per radian of disk tilt, beyond the thrust's own lever
+    /// arm, as a multiple of the reference weight times the hub height
+    /// (Fit).
+    pub hub_stiffness: f64,
+    /// Blade profile drag coefficient (Fit).
+    pub profile_drag: f64,
+    /// Ground effect: induced velocity times `1 - (R / (k z))²` at hub
+    /// height `z`; this is `k` (Fit; the textbook value is 4).
+    pub ground_effect_constant: f64,
+    /// Peak rise of the induced velocity in the vortex ring state above the
+    /// hover value, as a share of it, at a descent of one hover induced
+    /// velocity (Fit to the shape of NACA TN-2474, design 4.4).
+    pub vortex_ring_rise: f64,
+    /// The anti-torque tail rotor: single main rotor only.
+    pub tail_rotor: Option<TailRotorParameters>,
+    /// Fuselage, tail surfaces and stub wings.
+    pub airframe: RotorcraftAirframe,
+}
+
+/// A single-rotor helicopter's tail rotor (design 4.5). It sits at the
+/// layout's tail rotor arm behind the centre of gravity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TailRotorParameters {
+    /// Radius, ft.
+    pub radius_ft: f64,
+    /// Tip speed at 100 percent rotor speed, ft/s (Fit).
+    pub tip_speed_fps: f64,
+    /// Blade area over disk area (Fit).
+    pub solidity: f64,
+    /// Thrust change at full pedal as a share of the thrust that balances
+    /// the hover torque at the reference weight (Fit).
+    pub pedal_authority: f64,
+}
+
+/// A rotorcraft's fuselage and fixed surfaces (design 4.4 and 4.5).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RotorcraftAirframe {
+    /// Equivalent flat-plate drag areas along the body [forward, side,
+    /// vertical] axes, ft² (Fit: the forward area to the level top speed).
+    pub flat_plate_ft2: [f64; 3],
+    /// Horizontal tail: pitch moment per radian of angle of attack per unit
+    /// dynamic pressure, ft³ (tail area x lift slope x arm; Fit).
+    pub tail_pitch_ft3: f64,
+    /// The angle of attack at which the horizontal tail carries no load,
+    /// degrees (Fit).
+    pub tail_trim_degrees: f64,
+    /// Vertical fin: yaw moment per radian of sideslip per unit dynamic
+    /// pressure, ft³ (Fit).
+    pub fin_yaw_ft3: f64,
+    /// Share of the reference hover torque the cambered fin carries at
+    /// 120 kt, growing with dynamic pressure (Fit).
+    pub fin_torque_share: f64,
+    /// Half the main wheel track, ft: the lever the weight has against a
+    /// roll about the wheels on the ground (Fit).
+    pub half_track_ft: f64,
+    /// Stub wings that carry lift at speed: the Mi-24.
+    pub stub_wing: Option<StubWing>,
+}
+
+/// Stub wings (design 4.5: the Mi-24's carry up to a quarter of the lift
+/// at speed).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StubWing {
+    /// Wing area times lift slope, ft² per radian (Fit).
+    pub lift_area_ft2: f64,
+    /// Incidence to the fuselage datum, degrees (Fit).
+    pub incidence_degrees: f64,
+    /// Stall angle of attack, degrees: the lift holds there (Fit).
+    pub stall_degrees: f64,
 }
 
 impl RotorParameters {
@@ -300,6 +384,31 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             max_thrust_lbf: pt_thrust,
             energy_seconds: 1.8,
             never_exceed_kt: 197.,
+            // Hovers at gross weight near 75 percent lever (design 5.5).
+            collective_degrees: [1., 15.],
+            cyclic_degrees: [12., 22.],
+            blowback: 0.05,
+            lock_number: 2.4,
+            hub_height_ft: 6.5,
+            hub_stiffness: 1.5,
+            profile_drag: 0.008,
+            ground_effect_constant: 2.7,
+            vortex_ring_rise: 1.3,
+            tail_rotor: Some(TailRotorParameters {
+                radius_ft: 4.6,
+                tip_speed_fps: 700.,
+                solidity: 0.2,
+                pedal_authority: 1.25,
+            }),
+            airframe: RotorcraftAirframe {
+                flat_plate_ft2: [65., 300., 450.],
+                tail_pitch_ft3: 5_000.,
+                tail_trim_degrees: -2.,
+                fin_yaw_ft3: 2_000.,
+                fin_torque_share: 0.2,
+                half_track_ft: 3.3,
+                stub_wing: None,
+            },
         },
         // 17.30 m rotor and 240 rpm (Pub AW-Mi24); solidity, tail arm and
         // Vne Fit (not verifiable).
@@ -314,6 +423,36 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             max_thrust_lbf: pt_thrust,
             energy_seconds: 2.,
             never_exceed_kt: 190.,
+            collective_degrees: [1., 16.],
+            cyclic_degrees: [9., 20.],
+            blowback: 0.05,
+            lock_number: 3.5,
+            hub_height_ft: 7.5,
+            hub_stiffness: 1.5,
+            profile_drag: 0.008,
+            ground_effect_constant: 2.7,
+            vortex_ring_rise: 1.3,
+            tail_rotor: Some(TailRotorParameters {
+                radius_ft: 6.4,
+                tip_speed_fps: 700.,
+                solidity: 0.15,
+                pedal_authority: 2.4,
+            }),
+            // Stub wings carry about a quarter of the weight at 170 kt
+            // (Pub W-Mi24: "up to a quarter of total lift").
+            airframe: RotorcraftAirframe {
+                flat_plate_ft2: [52., 300., 500.],
+                tail_pitch_ft3: 3_000.,
+                tail_trim_degrees: -2.,
+                fin_yaw_ft3: 2_500.,
+                fin_torque_share: 0.2,
+                half_track_ft: 4.9,
+                stub_wing: Some(StubWing {
+                    lift_area_ft2: 320.,
+                    incidence_degrees: 14.,
+                    stall_degrees: 15.,
+                }),
+            },
         },
         // Two 60 ft counter-rotating rotors (Pub W-CH47), 38.9 ft apart
         // (Derived from the 98 ft 10.7 in rotors-turning length); rotor
@@ -329,6 +468,27 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             max_thrust_lbf: 1.25 * c.mass.max_takeoff_lbs,
             energy_seconds: 2.5,
             never_exceed_kt: 180.,
+            // Starting values for slice P3; the CH-47 still flies the old
+            // powered law.
+            collective_degrees: [1., 14.],
+            cyclic_degrees: [8., 8.],
+            blowback: 0.1,
+            lock_number: 4.,
+            hub_height_ft: 8.,
+            hub_stiffness: 1.,
+            profile_drag: 0.008,
+            ground_effect_constant: 2.7,
+            vortex_ring_rise: 1.3,
+            tail_rotor: None,
+            airframe: RotorcraftAirframe {
+                flat_plate_ft2: [60., 250., 600.],
+                tail_pitch_ft3: 0.,
+                tail_trim_degrees: 0.,
+                fin_yaw_ft3: 1_500.,
+                fin_torque_share: 0.,
+                half_track_ft: 5.,
+                stub_wing: None,
+            },
         },
         // Two 38 ft 1 in rotors 46.5 ft apart (Pub, Derived), 397 rpm at
         // 100 percent (Pub), 0.105 solidity (Pub, scale rotor); the PT thrust
@@ -344,6 +504,28 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             max_thrust_lbf: pt_thrust,
             energy_seconds: 1.5,
             never_exceed_kt: 280.,
+            // Starting values for slice P5; the V-22 still flies the old
+            // powered law. Proprotor blade pitch reaches about 50 degrees
+            // to absorb full power at cruise (design 4.8).
+            collective_degrees: [0., 50.],
+            cyclic_degrees: [8., 8.],
+            blowback: 0.1,
+            lock_number: 4.,
+            hub_height_ft: 0.,
+            hub_stiffness: 1.,
+            profile_drag: 0.008,
+            ground_effect_constant: 2.7,
+            vortex_ring_rise: 1.3,
+            tail_rotor: None,
+            airframe: RotorcraftAirframe {
+                flat_plate_ft2: [30., 200., 500.],
+                tail_pitch_ft3: 0.,
+                tail_trim_degrees: 0.,
+                fin_yaw_ft3: 0.,
+                fin_torque_share: 0.,
+                half_track_ft: 7.,
+                stub_wing: None,
+            },
         },
         _ => return None,
     })
