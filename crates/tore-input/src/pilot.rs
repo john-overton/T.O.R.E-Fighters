@@ -78,6 +78,29 @@ pub enum NozzlePreset {
     /// braking stop.
     Vertical,
 }
+/// The trim keys (design 5.3). A press moves the trim a tap's worth at
+/// once; held past the delay it then moves at the rate, in steps a few ticks
+/// apart, so taps are an exact 2 percent and a held key about 10 percent a
+/// second. The resolver turns the trim rate axes into
+/// [`LiftCommand::TrimAdjust`] commands on these numbers. Stepping at 20 Hz
+/// rather than every tick keeps a held key to 20 commands a second on the
+/// wire (fitted, agent decision 2026-10-08).
+pub mod trim_keys {
+    /// One tap, share of full travel.
+    pub const TAP: f64 = 0.02;
+    /// The held rate, share of full travel a second.
+    pub const RATE_PER_SECOND: f64 = 0.1;
+    /// Ticks a key is held before the rate starts (0.2 s).
+    pub const DELAY_TICKS: u32 = 24;
+    /// Ticks between the held rate's steps (20 Hz).
+    pub const STEP_TICKS: u32 = 6;
+    /// The simulation tick, s (the fixed 120 Hz).
+    pub const TICK_SECONDS: f64 = 1. / 120.;
+    /// The trim one tick of the held rate adds at full deflection.
+    pub const PER_TICK: f64 = RATE_PER_SECOND * TICK_SECONDS;
+    /// One step of the held rate at full deflection.
+    pub const STEP: f64 = PER_TICK * STEP_TICKS as f64;
+}
 /// The powered-lift pilot commands of the VTOL overhaul (design section 5).
 /// Each is applied once, at the start of its tick, on the aircraft it suits;
 /// the others ignore it.

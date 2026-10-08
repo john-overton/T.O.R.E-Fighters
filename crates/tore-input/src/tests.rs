@@ -522,3 +522,107 @@ fn digital_lift_override_holds_until_lever_movement_even_after_focus_loss() {
     event(&mut r, "stick", "yaw", 0.45, false);
     assert_eq!(frame(&mut r).vector_yaw, Some(0.45));
 }
+
+#[test]
+fn vtol_overhaul_actions_parse_name_and_roundtrip_through_profiles() {
+    let lift = |c| Action::Pilot(PilotCommand::Lift(c));
+    for (name, action) in [
+        (
+            "nozzle-step-up",
+            lift(LiftCommand::NozzleStep { down: false }),
+        ),
+        (
+            "nozzle-step-down",
+            lift(LiftCommand::NozzleStep { down: true }),
+        ),
+        (
+            "nozzle-preset-forward",
+            lift(LiftCommand::NozzlePreset(NozzlePreset::Forward)),
+        ),
+        (
+            "nozzle-preset-vertical",
+            lift(LiftCommand::NozzlePreset(NozzlePreset::Vertical)),
+        ),
+        ("stability-level", lift(LiftCommand::CycleStability)),
+        (
+            "stability-level=off",
+            lift(LiftCommand::SetStability(StabilityLevel::Off)),
+        ),
+        (
+            "stability-level=damper",
+            lift(LiftCommand::SetStability(StabilityLevel::Damper)),
+        ),
+        (
+            "stability-level=attitude",
+            lift(LiftCommand::SetStability(StabilityLevel::Attitude)),
+        ),
+        ("trim-set", lift(LiftCommand::TrimSet)),
+        ("trim-centre", lift(LiftCommand::TrimCentre)),
+        (
+            "hover-hold",
+            Action::Pilot(PilotCommand::Toggle(Switch::HoverHold)),
+        ),
+        ("trim-pitch-rate", Action::Axis(Axis::TrimPitchRate)),
+        ("trim-roll-rate", Action::Axis(Axis::TrimRollRate)),
+        ("trim-pedal-rate", Action::Axis(Axis::TrimPedalRate)),
+    ] {
+        assert_eq!(Action::parse(name), Ok(action.clone()), "{name}");
+        assert_eq!(profile_text::action_name(&action), name);
+    }
+    let p = Profile::parse(
+        "tore-input 1\nbind keyboard Ctrl-Alt-a hover-hold press\nbind keyboard Ctrl-Shift-a stability-level press\nbind keyboard Shift-z nozzle-preset-forward press\nbind stick hat trim-pitch-rate negative\nbind stick t trim-roll-rate axis\nbind stick b trim-set press\nbind stick b2 stability-level=attitude press",
+    )
+    .unwrap();
+    let text = p.to_text().unwrap();
+    assert_eq!(Profile::parse(&text).unwrap().to_text().unwrap(), text);
+    for bad in ["stability-level=full", "nozzle-step", "trim-yaw-rate"] {
+        assert!(Action::parse(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn held_trim_taps_two_percent_then_moves_ten_percent_a_second() {
+    let mut r = resolver(
+        "bind keyboard Ctrl-ArrowUp trim-pitch-rate negative\nbind keyboard Ctrl-ArrowRight trim-roll-rate positive",
+    );
+    let trims = |input: PilotInput| -> Vec<(TrimAxis, f64)> {
+        input
+            .commands
+            .into_iter()
+            .filter_map(|c| match c {
+                PilotCommand::Lift(LiftCommand::TrimAdjust(axis, v)) => Some((axis, v)),
+                _ => None,
+            })
+            .collect()
+    };
+    event(&mut r, "keyboard", "Ctrl-ArrowUp", 0., true);
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 0., true);
+    assert!(trims(frame(&mut r)).is_empty());
+    // A tap: one press for a few ticks is exactly 2 percent.
+    event(&mut r, "keyboard", "Ctrl-ArrowUp", 1., false);
+    assert_eq!(trims(frame(&mut r)), vec![(TrimAxis::Pitch, -0.02)]);
+    for _ in 0..10 {
+        assert!(trims(frame(&mut r)).is_empty());
+    }
+    event(&mut r, "keyboard", "Ctrl-ArrowUp", 0., false);
+    assert!(trims(frame(&mut r)).is_empty());
+    // Held for one second: the tap, then the rate after 0.2 s.
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 1., false);
+    let total: f64 = (0..120)
+        .flat_map(|_| trims(frame(&mut r)))
+        .map(|(axis, v)| {
+            assert_eq!(axis, TrimAxis::Roll);
+            v
+        })
+        .sum();
+    let steps = (120 - trim_keys::DELAY_TICKS).div_ceil(trim_keys::STEP_TICKS);
+    let expected = trim_keys::TAP + f64::from(steps) * trim_keys::STEP;
+    assert!((total - expected).abs() < 1e-12, "{total}");
+    assert!((total - 0.1).abs() < 1e-9, "{total}");
+    // Losing focus forgets the hold: the next press is a fresh tap.
+    r.context(false, false);
+    r.context(false, true);
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 0., true);
+    event(&mut r, "keyboard", "Ctrl-ArrowRight", 1., false);
+    assert_eq!(trims(frame(&mut r)), vec![(TrimAxis::Roll, 0.02)]);
+}
