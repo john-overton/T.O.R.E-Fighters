@@ -288,6 +288,14 @@ exact_struct!(Cheats {
     enemy_ai,
 });
 
+// The powered-lift stability level; the rest of the powered-lift state is
+// coded beside its types in `flight/powered/state.rs`.
+exact_enum!(tore_input::StabilityLevel {
+    Off = 0,
+    Damper = 1,
+    Attitude = 2,
+});
+
 use crate::sensors::{Channel, Controls};
 exact_enum!(Channel {
     Radar = 0,

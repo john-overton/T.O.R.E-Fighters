@@ -19,6 +19,7 @@ fn switch_name(s: crate::Switch) -> &'static str {
         Jammer => "jammer",
         Autopilot => "autopilot",
         WaypointAutopilot => "waypoint-autopilot",
+        HoverHold => "hover-hold",
     }
 }
 pub fn write_frame(mut out: impl Write, tick: u64, input: &PilotInput) -> io::Result<()> {
@@ -84,6 +85,8 @@ pub fn write_frame(mut out: impl Write, tick: u64, input: &PilotInput) -> io::Re
             PilotCommand::Set(s, on) => format!("set:{}:{}", switch_name(*s), u8::from(*on)),
             PilotCommand::Throttle(v) => format!("throttle:{v}"),
             PilotCommand::AdjustThrottle(v) => format!("adjust:{v}"),
+            // Refused by `valid` above: tape version 2 has no words for them.
+            PilotCommand::Lift(_) => return Err(invalid()),
         };
         write!(out, " {s}")?;
     }
@@ -123,6 +126,11 @@ fn valid(i: &PilotInput) -> bool {
             PilotCommand::AdjustAxis(_, v) => v.is_finite() && (-1. ..=1.).contains(v),
             PilotCommand::Throttle(v) => v.is_finite() && (0. ..=1.).contains(v),
             PilotCommand::AdjustThrottle(v) => v.is_finite() && (-1. ..=1.).contains(v),
+            // The VTOL overhaul's commands and hover hold arrive in the tape
+            // with its next version (slice P6); version 2 cannot hold them.
+            PilotCommand::Lift(_)
+            | PilotCommand::Toggle(crate::Switch::HoverHold)
+            | PilotCommand::Set(crate::Switch::HoverHold, _) => false,
             _ => true,
         })
 }

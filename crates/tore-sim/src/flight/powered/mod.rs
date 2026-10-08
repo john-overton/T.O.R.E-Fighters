@@ -1,5 +1,35 @@
-//! Fitted continuous powered lift. Only the hybrid adapter calls this solver.
-use super::{DT, FlightAxis, PilotInput, State, trace};
+//! The powered-lift aircraft: the AV-8 and Yak-141 vectoring jets, the V-22
+//! tiltrotor and the AH-64, Mi-24 and CH-47 helicopters. Only the hybrid
+//! adapter calls this solver.
+//!
+//! The VTOL overhaul replaces the fitted attitude-hold law below,
+//! [`State::step_powered`], with a rigid body and physical rotors, nozzles
+//! and wings, one slice at a time (its design moves into
+//! docs/FLIGHT-MODEL.md when the project ships):
+//!
+//! - [`body`]: the rigid body (P1). Force laws build a
+//!   [`body::Moments`] from their rotors, puffers and surfaces, take the
+//!   inertia from [`body::Inertia::from_weight`] with the aircraft's
+//!   [`crate::models::variety::BodyParameters`], and call
+//!   [`State::advance_body`]; they integrate velocity and position after it.
+//! - [`state`]: [`LiftState`], everything a powered-lift aircraft adds to
+//!   the exact flight state, and the powered-lift commands (P1).
+//! - The conventional step's envelope, drag and contact pieces are in
+//!   `flight/airframe.rs` (`State::envelope_limits`, `State::airframe_drag`,
+//!   `State::advance_position`, `State::finish_contact`) for the wings and
+//!   the contact of every kind.
+//! - Still to come, each in its own file: `rotor.rs` and `helicopter.rs`
+//!   (P2, P3), `aero.rs` and `jet.rs` (P4), `tiltrotor.rs` (P5), `sas.rs`
+//!   (P6), `trim.rs` (P7). The parameters are in
+//!   [`crate::models::variety::PoweredLift`].
+//!
+//! Until P2 and P4 land, `step_powered` keeps the fitted law of the variety
+//! import: its body rates are commanded, not integrated, and it records them
+//! in the state's body rates.
+pub mod body;
+pub mod state;
+
+use super::{DT, FlightAxis, PilotInput, State, airframe, trace};
 use crate::{
     attitude::{Basis, dot, unit},
     models::{
@@ -7,86 +37,13 @@ use crate::{
         variety::{LiftKind, PoweredLift},
     },
 };
+pub use state::{Drive, LiftState, PilotAids, Rotor, TrimLatch, Warnings};
 
 /// Airspeed, ft/s, above which the low-speed horizontal damping force stops
 /// growing (fitted, agent decision 2026-10-08). Below it the damping rate is
 /// the aircraft's own; well above it the force is about rate x 10 ft/s.
 const LOW_SPEED_DAMPING_FPS: f64 = 10.;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Controls {
-    pub vector_pitch: f64,
-    pub vector_yaw: f64,
-    pub conversion: f64,
-    pub collective: f64,
-    pub vector_pitch_actual: f64,
-    pub vector_yaw_actual: f64,
-    pub conversion_actual: f64,
-    pub collective_actual: f64,
-    /// Lagged force in lbf, coded exactly along with actuator positions.
-    pub thrust_lbf: f64,
-}
-impl Default for Controls {
-    fn default() -> Self {
-        Self {
-            vector_pitch: 0.,
-            vector_yaw: 0.,
-            conversion: 1.,
-            collective: 0.,
-            vector_pitch_actual: 0.,
-            vector_yaw_actual: 0.,
-            conversion_actual: 1.,
-            collective_actual: 0.,
-            thrust_lbf: 0.,
-        }
-    }
-}
-impl Controls {
-    pub fn reset_ground(&mut self) {
-        self.collective = 0.;
-        self.collective_actual = 0.;
-        self.thrust_lbf = 0.;
-    }
-    pub fn hover_fraction(&self, kind: LiftKind) -> f64 {
-        match kind {
-            LiftKind::VectorJet => self.vector_pitch_actual,
-            LiftKind::Tiltrotor => self.conversion_actual,
-            LiftKind::Helicopter => 1.,
-        }
-    }
-    fn axis_mut(&mut self, axis: FlightAxis) -> &mut f64 {
-        match axis {
-            FlightAxis::VectorPitch => &mut self.vector_pitch,
-            FlightAxis::VectorYaw => &mut self.vector_yaw,
-            FlightAxis::Conversion => &mut self.conversion,
-            FlightAxis::Collective => &mut self.collective,
-        }
-    }
-    fn advance(&mut self, hydraulics: bool) {
-        if !hydraulics {
-            return;
-        }
-        for (actual, target, rate) in [
-            (&mut self.vector_pitch_actual, self.vector_pitch, 0.25),
-            (&mut self.vector_yaw_actual, self.vector_yaw, 1.),
-            (&mut self.conversion_actual, self.conversion, 0.25),
-            (&mut self.collective_actual, self.collective, 0.7),
-        ] {
-            *actual += (target - *actual).clamp(-rate * DT, rate * DT);
-        }
-    }
-}
-crate::flight::exact::exact_struct!(Controls {
-    vector_pitch,
-    vector_yaw,
-    conversion,
-    collective,
-    vector_pitch_actual,
-    vector_yaw_actual,
-    conversion_actual,
-    collective_actual,
-    thrust_lbf,
-});
 impl State {
     /// Initialize a human airborne start after its final mass and altitude are set.
     /// This never trims an aircraft that has stepped or is supported by wheels.
@@ -246,12 +203,10 @@ impl State {
         let yaw_rate = powered_rate(stick[2] * lift.yaw_degrees_per_second.to_radians(), 2)
             * hover_control
             + turn;
-        let rotation = std::array::from_fn(|i| {
-            -basis_before.right[i] * self.pitch_rate * DT
-                - basis_before.forward[i] * self.roll_rate * DT
-                + basis_before.up[i] * yaw_rate * DT
-        });
-        let basis = basis_before.rotated(rotation);
+        // Commanded rates, not integrated ones: the old law has no inertia.
+        let rates = [self.roll_rate, self.pitch_rate, yaw_rate];
+        self.lift_controls.body_rates = rates;
+        let basis = basis_before.rotated(body::rotation(&basis_before, rates, DT));
         [self.yaw, self.pitch, self.bank] = basis.angles();
         let lapse = self
             .model()
@@ -409,10 +364,7 @@ impl State {
             *velocity += wind;
         }
         self.vertical_speed = self.velocity[1];
-        let previous_position = self.position;
-        for i in 0..3 {
-            self.position[i] += self.velocity[i] * DT;
-        }
+        let previous_position = self.advance_position();
         let surface = ground(self.position[0], self.position[2]);
         let mut research = self.research.take().expect("hybrid powered lift");
         if lift.kind != LiftKind::Helicopter && hover <= 0.5 {
@@ -436,15 +388,17 @@ impl State {
             research.severity_f8 = 0;
             research.stall_active = false;
         }
-        research.contact(
-            self,
-            surface,
+        self.finish_contact(
+            Some(research),
             c,
-            wheel_load,
-            runway_wind_fraction,
-            previous_position,
+            surface,
+            airframe::ContactInputs {
+                wheel_load,
+                runway_wind_fraction,
+                previous_position,
+                parked_in_wind: None,
+            },
         );
-        self.research = Some(research);
     }
 }
 
@@ -735,6 +689,8 @@ mod tests {
     fn powered_state_restoration_and_input_replay_continue_exactly() {
         for id in IDS {
             let mut s = hover(id, 500.);
+            // Every field the VTOL overhaul added, away from its default.
+            s.lift_controls = state::tests::busy(s.lift_controls);
             run(
                 &mut s,
                 &PilotInput {

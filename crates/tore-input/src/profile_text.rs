@@ -50,6 +50,7 @@ pub fn action_name(action: &Action) -> String {
             Switch::Jammer => "jammer",
             Switch::Autopilot => "autopilot",
             Switch::WaypointAutopilot => "waypoint-autopilot",
+            Switch::HoverHold => "hover-hold",
         }
         .into(),
         Action::Pilot(PilotCommand::Throttle(v)) => format!("throttle={v}"),

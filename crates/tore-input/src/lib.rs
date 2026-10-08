@@ -1,6 +1,9 @@
 //! Hand-rolled physical controls, bindings and pilot frames; no OS or renderer.
 pub mod pilot;
-pub use pilot::{FlightAxis, PilotCommand, PilotInput, Switch};
+pub use pilot::{
+    FlightAxis, LiftCommand, NozzlePreset, PilotCommand, PilotInput, StabilityLevel, Switch,
+    TrimAxis,
+};
 pub mod bindings;
 pub use bindings::{
     Action, Axis, Binding, Calibration, Event, Mode, Profile, Resolver, chord_parts, token_base,

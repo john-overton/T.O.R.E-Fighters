@@ -22,7 +22,10 @@ use crate::ai::{ScalarSpeed, SpeedLimits};
 use crate::airport::ApproachEnd;
 use crate::attitude::Basis;
 use crate::sensors::passive::{Emitter, Symbol};
-use tore_input::{FlightAxis, PilotCommand, PilotInput, Switch};
+use tore_input::{
+    FlightAxis, LiftCommand, NozzlePreset, PilotCommand, PilotInput, StabilityLevel, Switch,
+    TrimAxis,
+};
 
 // The types with an exact own-plane coder already: one coder to keep
 // complete, not two.
@@ -352,6 +355,7 @@ crate::checkpoint_enum!(Switch {
     Jammer = 8,
     Autopilot = 9,
     WaypointAutopilot = 10,
+    HoverHold = 11,
 });
 
 crate::checkpoint_enum!(FlightAxis {
@@ -360,6 +364,65 @@ crate::checkpoint_enum!(FlightAxis {
     Conversion = 2,
     Collective = 3,
 });
+
+crate::checkpoint_enum!(StabilityLevel {
+    Off = 0,
+    Damper = 1,
+    Attitude = 2,
+});
+
+crate::checkpoint_enum!(TrimAxis {
+    Pitch = 0,
+    Roll = 1,
+    Pedal = 2,
+});
+
+crate::checkpoint_enum!(NozzlePreset {
+    Forward = 0,
+    Vertical = 1,
+});
+
+impl Checkpoint for LiftCommand {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        match self {
+            Self::SetStability(level) => {
+                s.writer().write_varint(0);
+                level.save(s, None)?;
+            }
+            Self::CycleStability => s.writer().write_varint(1),
+            Self::TrimSet => s.writer().write_varint(2),
+            Self::TrimAdjust(axis, amount) => {
+                s.writer().write_varint(3);
+                axis.save(s, None)?;
+                amount.save(s, None)?;
+            }
+            Self::TrimCentre => s.writer().write_varint(4),
+            Self::NozzleStep { down } => {
+                s.writer().write_varint(5);
+                down.save(s, None)?;
+            }
+            Self::NozzlePreset(preset) => {
+                s.writer().write_varint(6);
+                preset.save(s, None)?;
+            }
+        }
+        Ok(())
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        Ok(match l.reader().read_varint()? {
+            0 => Self::SetStability(Checkpoint::load(l, None)?),
+            1 => Self::CycleStability,
+            2 => Self::TrimSet,
+            3 => Self::TrimAdjust(Checkpoint::load(l, None)?, Checkpoint::load(l, None)?),
+            4 => Self::TrimCentre,
+            5 => Self::NozzleStep {
+                down: Checkpoint::load(l, None)?,
+            },
+            6 => Self::NozzlePreset(Checkpoint::load(l, None)?),
+            other => return invalid(format!("LiftCommand has no variant {other}")),
+        })
+    }
+}
 
 impl Checkpoint for PilotCommand {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
@@ -393,6 +456,10 @@ impl Checkpoint for PilotCommand {
                 value.save(s, None)?;
             }
             Self::NeutralVector => s.writer().write_varint(7),
+            Self::Lift(command) => {
+                s.writer().write_varint(8);
+                command.save(s, None)?;
+            }
         }
         Ok(())
     }
@@ -406,6 +473,7 @@ impl Checkpoint for PilotCommand {
             5 => Self::SetAxis(Checkpoint::load(l, None)?, Checkpoint::load(l, None)?),
             6 => Self::AdjustAxis(Checkpoint::load(l, None)?, Checkpoint::load(l, None)?),
             7 => Self::NeutralVector,
+            8 => Self::Lift(Checkpoint::load(l, None)?),
             other => return invalid(format!("PilotCommand has no variant {other}")),
         })
     }

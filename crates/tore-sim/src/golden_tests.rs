@@ -264,6 +264,10 @@ fn record_input(fp: &mut Fingerprint, input: &PilotInput) {
                 fp.f64(value);
             }
             PilotCommand::NeutralVector => fp.u64(8),
+            PilotCommand::Lift(command) => {
+                fp.u64(9);
+                fp.name(&command);
+            }
         }
     }
 }

@@ -300,8 +300,18 @@ fn the_shared_leaf_types_round_trip() {
         Switch::Jammer,
         Switch::Autopilot,
         Switch::WaypointAutopilot,
+        Switch::HoverHold,
     ];
+    use tore_input::{LiftCommand, NozzlePreset, StabilityLevel, TrimAxis};
     let mut commands = vec![
+        PilotCommand::Lift(LiftCommand::SetStability(StabilityLevel::Off)),
+        PilotCommand::Lift(LiftCommand::SetStability(StabilityLevel::Attitude)),
+        PilotCommand::Lift(LiftCommand::CycleStability),
+        PilotCommand::Lift(LiftCommand::TrimSet),
+        PilotCommand::Lift(LiftCommand::TrimAdjust(TrimAxis::Pedal, -0.0625)),
+        PilotCommand::Lift(LiftCommand::TrimCentre),
+        PilotCommand::Lift(LiftCommand::NozzleStep { down: false }),
+        PilotCommand::Lift(LiftCommand::NozzlePreset(NozzlePreset::Forward)),
         PilotCommand::Eject,
         PilotCommand::Throttle(0.75),
         PilotCommand::AdjustThrottle(-0.1),
@@ -368,6 +378,48 @@ fn airborne() -> State {
         s.step_surface(&input, |_, _| Surface::runway(0.));
     }
     s
+}
+
+/// The VTOL overhaul's powered-lift state (body rates, rotors and engines,
+/// pilot aids, warning timers, the corridor hold) rides in a checkpoint's
+/// flight with the rest of the exact state, for every powered-lift kind.
+#[test]
+fn a_powered_lift_flight_round_trips_with_its_new_state_and_flies_on_identically() {
+    for id in [AircraftId::Ah64, AircraftId::V22, AircraftId::Yak141] {
+        let aircraft = crate::models::variety::tests::synthetic(id);
+        let model = AircraftModel::for_aircraft(&aircraft).unwrap();
+        let mut original = State::from_model(model.clone(), [0., 2_000., 0.]);
+        original.enable_research(5).unwrap();
+        original.cheats.unlimited_fuel = true;
+        for _ in 0..120 {
+            let input = PilotInput {
+                pitch: -0.2,
+                collective_rate: 0.1,
+                ..PilotInput::default()
+            };
+            original.step_surface(&input, |_, _| Surface::runway(0.));
+        }
+        original.lift_controls = crate::flight::powered::state::tests::busy(original.lift_controls);
+        let mut models = Models::default();
+        models.insert(id, model).unwrap();
+        let mut s = Saver::with_models(models.clone());
+        save_flight(&mut s, &original, id).unwrap();
+        let body = s.finish_section();
+        let mut l = Loader::new(&body, &[], &models);
+        let (aircraft, mut copy) = load_flight(&mut l).unwrap();
+        l.finish().unwrap();
+        assert_eq!(aircraft, id);
+        assert_eq!(copy, original, "{id:?}");
+        for tick in 0..240 {
+            let input = PilotInput {
+                roll: if tick < 60 { 0.3 } else { 0. },
+                ..PilotInput::default()
+            };
+            original.step_surface(&input, |_, _| Surface::runway(0.));
+            copy.step_surface(&input, |_, _| Surface::runway(0.));
+            assert_eq!(copy, original, "{id:?} tick {tick}");
+        }
+    }
 }
 
 #[test]

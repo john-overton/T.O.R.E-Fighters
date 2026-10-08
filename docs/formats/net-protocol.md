@@ -149,7 +149,7 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (18), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (19), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
 | Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
@@ -753,7 +753,11 @@ damage in each section; the full list is in the
 turn-back and OVERSPEED message clocks.
 Every field is coded, the private ones included (the stall scale that depends
 on the weight's history, the hybrid model's random state, the systems, the
-autopilot, the wreck and the escape), except the write-only trace, the flight
+autopilot, the wreck and the escape; since protocol 19 the powered-lift
+state too: body rates, rotor speed and its reference, each rotor's induced
+velocity and disk tilt, engine output, lift-engine spool, stability level,
+trim, attitude reference, trim latch, warning timers and the V-22 corridor
+hold), except the write-only trace, the flight
 at the start of the tick and the imported tables, which the client already
 has ([details](../ARCHITECTURE.md#the-exact-state-of-a-humans-plane)).
 
@@ -1041,6 +1045,27 @@ Set-axis (code 24) and adjust-axis (code 25) commands carry a two-bit axis
 code plus an optional position or signed step; neutral-vector (code 26) is a
 separate command with no fields. Ordinary
 fixed-wing input pays only the absent bit on the first tick.
+
+Protocol 19 (the VTOL overhaul) adds the **powered-lift command**, code 27,
+which extends the nearly full 5-bit code space with a 4-bit sub-code and the
+sub-code's fields. Hover hold is switch 11 (a switch's 4-bit code has room
+for four more). The sub-codes:
+
+| Sub-code | Command | Fields |
+| --- | --- | --- |
+| 0 | Set the stability level | level, 2 bits: 0 Off, 1 Damper, 2 Attitude (3 is refused) |
+| 1 | Cycle the stability level (Off, Damper, Attitude, Off) | none |
+| 2 | Trim set (the stick plus trim becomes the trim) | none |
+| 3 | Trim adjust | axis, 2 bits: 0 pitch, 1 roll, 2 pedal (3 is refused); step, 16 signed, 1/32,767 of full travel, rounded as an adjust-axis step is |
+| 4 | Trim to centre | none |
+| 5 | Nozzle step of 10 degrees | 1 bit: down (X) or up (Z) |
+| 6 | Nozzle preset | 1 bit: vertical (Shift+X) or forward (Shift+Z) |
+
+Sub-codes 7 to 15 are refused. The powered-lift input block keeps its four
+axes and its coding. What a nozzle or conversion position of 0 to 1 means
+moves with the overhaul's jet and tiltrotor slices, to 0 to 100 degrees of
+nozzle travel and 0 to 97.5 degrees of nacelle angle; until they land, the
+flight reads both as 0 to 90 degrees.
 
 The command codes cover every `SeatCommand` (a combat command has its own
 5-bit code, with a heat byte, a distance or a target id where it has one; a
@@ -2216,7 +2241,9 @@ again with an observer; the capture format did not change for it.
   axis commands 24 to 26, the lift, vector and gun-mount devices, the
   readout's gun aim and linked-gun mask, gun-group combat commands 26 and
   27, the loadout's tank list, and the exact flight state's powered-lift
-  controls; 11 was never used).
+  controls, 19 since the VTOL overhaul's foundations: the exact flight
+  state's powered-lift state, the powered-lift command 27 and its sub-codes,
+  and hover hold as switch 11; 11 was never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

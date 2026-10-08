@@ -10,7 +10,7 @@ use super::entity::{EntityKey, EntityKind};
 use super::{WireError, WireResult, bits, limits};
 use tore_codec::quant::{SIGNED_UNIT_I8_STEPS, SIGNED_UNIT_I16_STEPS, UNIT_U16_STEPS};
 use tore_codec::{BitReader, BitWriter, CodecError};
-use tore_input::pilot::FlightAxis;
+use tore_input::pilot::{FlightAxis, LiftCommand, NozzlePreset, StabilityLevel, TrimAxis};
 use tore_sim::ai::wing::{Formation, PlayerApproach, PlayerBreak, PlayerOrder};
 use tore_sim::airport;
 use tore_sim::combat::live;
@@ -199,6 +199,9 @@ pub fn quantize_command(command: PilotCommand) -> PilotCommand {
         ),
         PilotCommand::AdjustAxis(axis, value) => {
             PilotCommand::AdjustAxis(axis, stick_value(stick(value)))
+        }
+        PilotCommand::Lift(LiftCommand::TrimAdjust(axis, value)) => {
+            PilotCommand::Lift(LiftCommand::TrimAdjust(axis, stick_value(stick(value))))
         }
         other => other,
     }
@@ -633,7 +636,27 @@ const SET_FLIGHT_AXIS: u64 = 24;
 const ADJUST_FLIGHT_AXIS: u64 = 25;
 /// Protocol 18: return the thrust vector to neutral. No fields.
 const NEUTRAL_VECTOR: u64 = 26;
+/// Protocol 19 (the VTOL overhaul): a powered-lift command, then its
+/// [`LIFT_BITS`]-bit sub-code and its fields. The extension keeps the 5-bit
+/// code field, which has four codes left (28 to 31).
+const LIFT: u64 = 27;
 const COMMAND_BITS: u32 = 5;
+
+// The powered-lift sub-codes (protocol 19). The numbers are the wire's; the
+// golden test pins them.
+const LIFT_BITS: u32 = 4;
+/// Then the level in 2 bits: 0 Off, 1 Damper, 2 Attitude.
+const LIFT_SET_STABILITY: u64 = 0;
+const LIFT_CYCLE_STABILITY: u64 = 1;
+const LIFT_TRIM_SET: u64 = 2;
+/// Then the axis in 2 bits (0 pitch, 1 roll, 2 pedal) and a signed 16-bit
+/// step of 1/32,767 of full travel.
+const LIFT_TRIM_ADJUST: u64 = 3;
+const LIFT_TRIM_CENTRE: u64 = 4;
+/// Then 1 bit: down (X) or up (Z).
+const LIFT_NOZZLE_STEP: u64 = 5;
+/// Then 1 bit: vertical (Shift+X) or forward (Shift+Z).
+const LIFT_NOZZLE_PRESET: u64 = 6;
 
 /// Writes one command.
 pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
@@ -731,7 +754,88 @@ pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
                 let _ = w.write_signed(i64::from(stick(value)), 16);
             }
             PilotCommand::NeutralVector => code(NEUTRAL_VECTOR),
+            PilotCommand::Lift(command) => {
+                code(LIFT);
+                write_lift(w, command);
+            }
         },
+    }
+}
+
+fn write_lift(w: &mut BitWriter, command: LiftCommand) {
+    let mut code = |value: u64| {
+        let _ = w.write_bits(value, LIFT_BITS);
+    };
+    match command {
+        LiftCommand::SetStability(level) => {
+            code(LIFT_SET_STABILITY);
+            let _ = w.write_bits(stability_code(level), 2);
+        }
+        LiftCommand::CycleStability => code(LIFT_CYCLE_STABILITY),
+        LiftCommand::TrimSet => code(LIFT_TRIM_SET),
+        LiftCommand::TrimAdjust(axis, value) => {
+            code(LIFT_TRIM_ADJUST);
+            let _ = w.write_bits(trim_axis_code(axis), 2);
+            let _ = w.write_signed(i64::from(stick(value)), 16);
+        }
+        LiftCommand::TrimCentre => code(LIFT_TRIM_CENTRE),
+        LiftCommand::NozzleStep { down } => {
+            code(LIFT_NOZZLE_STEP);
+            w.write_bool(down);
+        }
+        LiftCommand::NozzlePreset(preset) => {
+            code(LIFT_NOZZLE_PRESET);
+            w.write_bool(preset == NozzlePreset::Vertical);
+        }
+    }
+}
+
+fn read_lift(r: &mut BitReader<'_>) -> WireResult<LiftCommand> {
+    Ok(match r.read_bits(LIFT_BITS)? {
+        LIFT_SET_STABILITY => LiftCommand::SetStability(
+            *StabilityLevel::ALL
+                .get(r.read_bits(2)? as usize)
+                .ok_or(WireError::Invalid("stability level"))?,
+        ),
+        LIFT_CYCLE_STABILITY => LiftCommand::CycleStability,
+        LIFT_TRIM_SET => LiftCommand::TrimSet,
+        LIFT_TRIM_ADJUST => {
+            let axis = *TRIM_AXES
+                .get(r.read_bits(2)? as usize)
+                .ok_or(WireError::Invalid("trim axis"))?;
+            LiftCommand::TrimAdjust(axis, stick_value(read_stick(r)?))
+        }
+        LIFT_TRIM_CENTRE => LiftCommand::TrimCentre,
+        LIFT_NOZZLE_STEP => LiftCommand::NozzleStep {
+            down: r.read_bool()?,
+        },
+        LIFT_NOZZLE_PRESET => LiftCommand::NozzlePreset(if r.read_bool()? {
+            NozzlePreset::Vertical
+        } else {
+            NozzlePreset::Forward
+        }),
+        _ => return Err(WireError::Invalid("powered-lift command")),
+    })
+}
+
+/// A stability level's code: its place in [`StabilityLevel::ALL`]. The
+/// match is exhaustive so a new level cannot go uncoded.
+fn stability_code(level: StabilityLevel) -> u64 {
+    match level {
+        StabilityLevel::Off => 0,
+        StabilityLevel::Damper => 1,
+        StabilityLevel::Attitude => 2,
+    }
+}
+
+const TRIM_AXES: [TrimAxis; 3] = [TrimAxis::Pitch, TrimAxis::Roll, TrimAxis::Pedal];
+
+/// A trim axis's code: its place in [`TRIM_AXES`].
+fn trim_axis_code(axis: TrimAxis) -> u64 {
+    match axis {
+        TrimAxis::Pitch => 0,
+        TrimAxis::Roll => 1,
+        TrimAxis::Pedal => 2,
     }
 }
 
@@ -808,6 +912,7 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
             )))
         }
         NEUTRAL_VECTOR => Ok(Command::Pilot(PilotCommand::NeutralVector)),
+        LIFT => Ok(Command::Pilot(PilotCommand::Lift(read_lift(r)?))),
         _ => Err(WireError::Invalid("command")),
     }
 }
@@ -832,7 +937,7 @@ fn flight_axis_code(axis: FlightAxis) -> u64 {
     }
 }
 
-const SWITCHES: [Switch; 11] = [
+const SWITCHES: [Switch; 12] = [
     Switch::Gear,
     Switch::Flaps,
     Switch::Airbrake,
@@ -844,6 +949,7 @@ const SWITCHES: [Switch; 11] = [
     Switch::Jammer,
     Switch::Autopilot,
     Switch::WaypointAutopilot,
+    Switch::HoverHold,
 ];
 
 /// A switch's code: its place in [`SWITCHES`]. The match is exhaustive so a
@@ -861,6 +967,8 @@ fn switch_code(switch: Switch) -> u64 {
         Switch::Jammer => 8,
         Switch::Autopilot => 9,
         Switch::WaypointAutopilot => 10,
+        // Protocol 19.
+        Switch::HoverHold => 11,
     }
 }
 
@@ -1076,10 +1184,27 @@ mod tests {
             SET_FLIGHT_AXIS,
             ADJUST_FLIGHT_AXIS,
             NEUTRAL_VECTOR,
+            LIFT,
         ];
         let unique: std::collections::BTreeSet<u64> = codes.iter().copied().collect();
         assert_eq!(unique.len(), codes.len(), "a command code is used twice");
         assert!(codes.iter().all(|c| *c < 1 << COMMAND_BITS));
+        let lift = [
+            LIFT_SET_STABILITY,
+            LIFT_CYCLE_STABILITY,
+            LIFT_TRIM_SET,
+            LIFT_TRIM_ADJUST,
+            LIFT_TRIM_CENTRE,
+            LIFT_NOZZLE_STEP,
+            LIFT_NOZZLE_PRESET,
+        ];
+        let unique: std::collections::BTreeSet<u64> = lift.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            lift.len(),
+            "a powered-lift sub-code is used twice"
+        );
+        assert!(lift.iter().all(|c| *c < 1 << LIFT_BITS));
         let live = [
             TARGET_HEAT,
             TARGET_DISTANCE,
@@ -1242,5 +1367,91 @@ mod tests {
         for (index, switch) in SWITCHES.iter().enumerate() {
             assert_eq!(switch_code(*switch), index as u64);
         }
+        for (index, level) in StabilityLevel::ALL.iter().enumerate() {
+            assert_eq!(stability_code(*level), index as u64);
+        }
+        for (index, axis) in TRIM_AXES.iter().enumerate() {
+            assert_eq!(trim_axis_code(*axis), index as u64);
+        }
+    }
+
+    fn expected_pilot(command: Command) -> PilotCommand {
+        match command {
+            Command::Pilot(pilot) => pilot,
+            Command::Seat(_) => unreachable!("a pilot command"),
+        }
+    }
+
+    /// Every powered-lift command reads back as itself after the wire's
+    /// rounding, the trim step rounded to 1/32,767; unknown sub-codes,
+    /// levels and axes are refused.
+    #[test]
+    fn powered_lift_commands_read_back_and_bad_fields_are_refused() {
+        let commands = [
+            LiftCommand::SetStability(StabilityLevel::Off),
+            LiftCommand::SetStability(StabilityLevel::Damper),
+            LiftCommand::SetStability(StabilityLevel::Attitude),
+            LiftCommand::CycleStability,
+            LiftCommand::TrimSet,
+            LiftCommand::TrimAdjust(TrimAxis::Pitch, 0.02),
+            LiftCommand::TrimAdjust(TrimAxis::Roll, -1.),
+            LiftCommand::TrimAdjust(TrimAxis::Pedal, 0.333_333),
+            LiftCommand::TrimCentre,
+            LiftCommand::NozzleStep { down: true },
+            LiftCommand::NozzleStep { down: false },
+            LiftCommand::NozzlePreset(NozzlePreset::Vertical),
+            LiftCommand::NozzlePreset(NozzlePreset::Forward),
+        ];
+        for lift in commands {
+            let command = Command::Pilot(PilotCommand::Lift(lift));
+            let mut w = BitWriter::new();
+            write_command(&mut w, &command);
+            let bytes = w.finish();
+            let back = read_command(&mut BitReader::new(&bytes)).unwrap();
+            let expected = Command::Pilot(quantize_command(PilotCommand::Lift(lift)));
+            assert_eq!(back, expected);
+            // Rounding twice changes nothing.
+            assert_eq!(
+                quantize_command(expected_pilot(expected)),
+                expected_pilot(expected)
+            );
+        }
+        assert_eq!(
+            quantize_command(PilotCommand::Lift(LiftCommand::TrimAdjust(
+                TrimAxis::Pitch,
+                0.5
+            ))),
+            PilotCommand::Lift(LiftCommand::TrimAdjust(
+                TrimAxis::Pitch,
+                stick_value(stick(0.5))
+            ))
+        );
+        let refused = |fields: &[(u64, u32)]| {
+            let mut w = BitWriter::new();
+            let _ = w.write_bits(LIFT, COMMAND_BITS);
+            for (value, bits) in fields {
+                let _ = w.write_bits(*value, *bits);
+            }
+            read_command(&mut BitReader::new(&w.finish())).is_err()
+        };
+        assert!(refused(&[(7, LIFT_BITS)]), "unknown sub-code");
+        assert!(
+            refused(&[(LIFT_SET_STABILITY, LIFT_BITS), (3, 2)]),
+            "level 3"
+        );
+        assert!(
+            refused(&[(LIFT_TRIM_ADJUST, LIFT_BITS), (3, 2), (0, 16)]),
+            "axis 3"
+        );
+        // Hover hold is switch 11.
+        let mut w = BitWriter::new();
+        write_command(
+            &mut w,
+            &Command::Pilot(PilotCommand::Toggle(Switch::HoverHold)),
+        );
+        let bytes = w.finish();
+        let mut r = BitReader::new(&bytes);
+        assert_eq!(r.read_bits(COMMAND_BITS).unwrap(), TOGGLE);
+        assert_eq!(r.read_bits(4).unwrap(), 11);
     }
 }

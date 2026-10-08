@@ -12,6 +12,9 @@ pub enum Switch {
     Jammer,
     Autopilot,
     WaypointAutopilot,
+    /// Hover hold, the autopilot mode of the helicopters and the V-22 (VTOL
+    /// overhaul, slice P9). The flight ignores it until that slice lands.
+    HoverHold,
 }
 /// Extra powered-lift demands. Positions are 0..1 except signed vector yaw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -31,6 +34,69 @@ pub enum PilotCommand {
     SetAxis(FlightAxis, f64),
     AdjustAxis(FlightAxis, f64),
     NeutralVector,
+    /// The powered-lift aircraft's discrete controls: stability level, trim
+    /// and nozzle steps (one wire command code with a sub-code).
+    Lift(LiftCommand),
+}
+/// How much stability augmentation a powered-lift aircraft flies with. Every
+/// level is limited-authority feedback on top of the pilot's inputs; Damper
+/// is the default (John, 2026-10-08).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StabilityLevel {
+    /// No augmentation: natural rotor and aerodynamic damping only.
+    Off,
+    /// Rate damping, torque feed-forward and turn coordination.
+    #[default]
+    Damper,
+    /// Damper plus attitude command about the trimmed attitude.
+    Attitude,
+}
+impl StabilityLevel {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Damper, Self::Attitude];
+    /// The level the cycle key moves to: Off, Damper, Attitude, then Off.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Damper,
+            Self::Damper => Self::Attitude,
+            Self::Attitude => Self::Off,
+        }
+    }
+}
+/// The axes of the cyclic and pedal trim, in stick travel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TrimAxis {
+    Pitch,
+    Roll,
+    Pedal,
+}
+/// The vectoring jets' nozzle presets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NozzlePreset {
+    /// Shift+Z: nozzles aft (0 degrees), or from the braking stop to vertical.
+    Forward,
+    /// Shift+X: nozzles vertical (90 degrees), or from vertical to the
+    /// braking stop.
+    Vertical,
+}
+/// The powered-lift pilot commands of the VTOL overhaul (design section 5).
+/// Each is applied once, at the start of its tick, on the aircraft it suits;
+/// the others ignore it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LiftCommand {
+    /// Select a stability level.
+    SetStability(StabilityLevel),
+    /// Move to the next stability level (Ctrl+Shift+A).
+    CycleStability,
+    /// Trim set: the current stick plus trim becomes the trim.
+    TrimSet,
+    /// Move the trim on one axis by a signed share of full travel, -1..1.
+    TrimAdjust(TrimAxis, f64),
+    /// Return the trim to centre.
+    TrimCentre,
+    /// One 10-degree nozzle step, down (X) or up (Z).
+    NozzleStep { down: bool },
+    /// A nozzle preset (Shift+Z, Shift+X).
+    NozzlePreset(NozzlePreset),
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PilotInput {

@@ -121,7 +121,8 @@ pub struct State {
     pub maneuver: crate::telemetry::Maneuver,
     lift_g: f64,
     pub throttle: f64,
-    pub lift_controls: powered::Controls,
+    /// The powered-lift aircraft's own state; defaults on every other one.
+    pub lift_controls: powered::LiftState,
     /// Display-only gun mount heading/PI and elevation/(PI/2), populated in draw clones.
     pub gun_aim: [[f64; 2]; 3],
     /// Display-only linked gun membership, bits 0..2.
@@ -286,7 +287,7 @@ impl State {
     pub fn from_model(model: crate::models::AircraftModel, position: [f64; 3]) -> Self {
         let fuel = model.configuration().mass.internal_fuel_lbs;
         let lift = model.powered_lift();
-        let mut lift_controls = powered::Controls::default();
+        let mut lift_controls = powered::LiftState::for_kind(lift.map(|lift| lift.kind));
         let mut throttle = 0.7;
         let default_speed = 450. * 1.68781;
         let mut speed = variety_start_speed(&model, position[1]).unwrap_or(default_speed);
@@ -643,6 +644,10 @@ impl State {
                 self.command_lift_axis(axis, value, true);
                 return;
             }
+            PilotCommand::Lift(command) => {
+                self.command_lift(command);
+                return;
+            }
             PilotCommand::NeutralVector => {
                 if self.research.is_some() && self.native.is_none() {
                     self.lift_controls.vector_pitch = 0.;
@@ -678,6 +683,10 @@ impl State {
             || (switch == Switch::Burner
                 && self.model.configuration().propulsion.afterburner_thrust_lbf == 0.)
         {
+            return;
+        }
+        // Hover hold arrives with slice P9 of the VTOL overhaul.
+        if switch == Switch::HoverHold {
             return;
         }
         if matches!(switch, Switch::Autopilot | Switch::WaypointAutopilot) {
@@ -716,7 +725,7 @@ impl State {
             Switch::Burner => &mut self.burner,
             Switch::Radar => &mut self.radar,
             Switch::Jammer => &mut self.jammer,
-            Switch::Autopilot | Switch::WaypointAutopilot => unreachable!(),
+            Switch::Autopilot | Switch::WaypointAutopilot | Switch::HoverHold => unreachable!(),
         };
         *target = setting.unwrap_or(!*target);
     }

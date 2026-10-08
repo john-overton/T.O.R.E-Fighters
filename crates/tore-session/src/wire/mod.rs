@@ -123,8 +123,12 @@ pub fn path_words(path: Path) -> &'static str {
 /// selectable aircraft, the Inputs section's powered-lift block and its
 /// axis commands (24 to 26), the actual lift, vector and gun-mount devices,
 /// the readout's gun aim and linked-gun mask, gun-group commands, the
-/// loadout's tank list and the exact flight state's powered-lift controls.
-pub const PROTOCOL_VERSION: u16 = 18;
+/// loadout's tank list and the exact flight state's powered-lift controls,
+/// 19 since the VTOL overhaul: the exact flight state's powered-lift state
+/// (body rates, rotors and engines, stability level and trim, warning
+/// timers, the corridor hold), the powered-lift command 27 with its
+/// sub-codes, and switch 11, hover hold.
+pub const PROTOCOL_VERSION: u16 = 19;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
