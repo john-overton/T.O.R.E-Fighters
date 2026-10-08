@@ -486,7 +486,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         quick.apply(13, index);
         for player in 0..selectable {
             quick.apply(6, player);
-            for enemy in 0..selectable {
+            for enemy in 0..quick.wing_files.len() {
                 for field in [23, 26, 29] {
                     quick.apply(field, enemy);
                 }
@@ -526,7 +526,14 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
             }
         }
         quick.apply(field, 2);
-        for aircraft in 0..selectable {
+        // Friendly wing 1 shares the player's list; the other five wings hold
+        // only what the AI can fly.
+        let choices = if field == 4 {
+            selectable
+        } else {
+            quick.wing_files.len()
+        };
+        for aircraft in 0..choices {
             quick.apply(field + 2, aircraft);
             m.run(&quick, &world, "wing aircraft sweep");
         }

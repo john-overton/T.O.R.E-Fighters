@@ -17,6 +17,18 @@ use tore_sim::ai::{
 };
 use tore_world::mission::{ALTITUDES_FT, Condition, MissionSpec, Skill, Start, WingSpec};
 pub mod matrix;
+/// The aircraft fields of the five wings the AI flies. Field 6 is friendly
+/// wing 1's, which is also the player's own aircraft.
+const AI_AIRCRAFT_FIELDS: [usize; 5] = [9, 12, 23, 26, 29];
+/// The creator's aircraft list cut down to what the AI can fly.
+fn ai_catalog(files: &[String], names: &[String]) -> (Vec<String>, Vec<String>) {
+    files
+        .iter()
+        .zip(names)
+        .filter(|(file, _)| AircraftId::parse(file).is_ok_and(AircraftId::ai_flyable))
+        .map(|(file, name)| (file.clone(), name.clone()))
+        .unzip()
+}
 type Rect = (i32, i32, i32, i32);
 const POPUP: Rect = (185, 100, 270, 370);
 const ROWS: usize = 15;
@@ -75,6 +87,11 @@ pub struct QuickMission {
     pub aircraft_selection: usize,
     pub aircraft_names: Vec<String>,
     pub aircraft_files: Vec<String>,
+    /// The aircraft the AI can fly (`AircraftId::ai_flyable`): the choices of
+    /// the five wing fields that are not the player's (9, 12, 23, 26, 29). A
+    /// draft value in those fields indexes this list, not the player's.
+    pub wing_names: Vec<String>,
+    pub wing_files: Vec<String>,
     pub draft: Draft,
     /// Friendly groups 1 through 3, then enemy groups 1 through 3.
     pub group_objectives: [GroupObjective; OBJECTIVE_COUNT],
@@ -170,9 +187,15 @@ impl QuickMission {
             .iter()
             .position(|n| n == id.selection_key())
             .unwrap_or(0);
+        let (wing_files, wing_names) = ai_catalog(&aircraft_files, &aircraft_names);
+        let wing_selected = wing_files
+            .iter()
+            .position(|n| n == id.selection_key())
+            .unwrap_or(0);
         let mut draft = Draft::default();
-        for i in [6, 9, 12, 23, 26, 29] {
-            draft.values[i] = selected;
+        draft.values[6] = selected;
+        for i in AI_AIRCRAFT_FIELDS {
+            draft.values[i] = wing_selected;
         }
         // Only the sixteen base theaters are offered to the player. The
         // imported `~` layout variants are incomplete (mostly one or two
@@ -214,6 +237,8 @@ impl QuickMission {
             aircraft_selection: selected,
             aircraft_names,
             aircraft_files,
+            wing_names,
+            wing_files,
             draft,
             group_objectives: [GroupObjective::Inherit; OBJECTIVE_COUNT],
             group_must_survive: [false; OBJECTIVE_COUNT],
@@ -365,6 +390,33 @@ impl QuickMission {
             .get(self.draft.values[6])
             .and_then(|n| AircraftId::parse(n).ok())
     }
+    /// Rebuilds the AI's aircraft list from the player's.
+    #[cfg(test)]
+    fn refresh_wing_catalog(&mut self) {
+        (self.wing_files, self.wing_names) = ai_catalog(&self.aircraft_files, &self.aircraft_names);
+    }
+    /// The aircraft the draft chose in an aircraft field (6, 9, 12, 23, 26 or
+    /// 29), if it resolves to an import.
+    fn wing_aircraft(&self, field: usize) -> Option<AircraftId> {
+        let files = if field == 6 {
+            &self.aircraft_files
+        } else {
+            &self.wing_files
+        };
+        files
+            .get(self.draft.values[field])
+            .and_then(|n| AircraftId::parse(n).ok())
+    }
+    /// The value that picks `id` in one of the AI's wing fields (9, 12, 23,
+    /// 26 and 29), or `None` when the AI cannot fly it or it is not imported.
+    pub fn ai_choice(&self, id: AircraftId) -> Option<usize> {
+        self.wing_files.iter().position(|n| n == id.selection_key())
+    }
+    /// Whether the player's aircraft is one the AI cannot fly, so no AI
+    /// wingman can share friendly wing 1 with the player.
+    fn player_without_ai_wingmen(&self) -> Option<AircraftId> {
+        self.player().filter(|id| !id.ai_flyable())
+    }
     pub fn guns_only(&self) -> bool {
         self.draft.values[19] == 0
     }
@@ -385,8 +437,10 @@ impl QuickMission {
             .unwrap_or(0)
     }
     fn values(&self, id: usize) -> &[String] {
-        if matches!(id, 6 | 9 | 12 | 23 | 26 | 29) {
+        if id == 6 {
             &self.aircraft_names
+        } else if AI_AIRCRAFT_FIELDS.contains(&id) {
+            &self.wing_names
         } else if id == 33 {
             &self.start_modes
         } else if id == 34 {
@@ -553,11 +607,7 @@ impl QuickMission {
             (24, Side::Enemy, 1),
             (27, Side::Enemy, 2),
         ] {
-            let Some(aircraft) = self
-                .aircraft_files
-                .get(self.draft.values[field + 2])
-                .and_then(|name| AircraftId::parse(name).ok())
-            else {
+            let Some(aircraft) = self.wing_aircraft(field + 2) else {
                 continue;
             };
             selections.push(WingSelection {
@@ -603,11 +653,7 @@ impl QuickMission {
         for (index, field) in [4, 7, 10, 21, 24, 27].into_iter().enumerate() {
             // A wing whose aircraft choice does not resolve keeps the
             // player's type; `unsupported` refuses to fly one with aircraft.
-            let aircraft = self
-                .aircraft_files
-                .get(v[field + 2])
-                .and_then(|name| AircraftId::parse(name).ok())
-                .unwrap_or(player);
+            let aircraft = self.wing_aircraft(field + 2).unwrap_or(player);
             spec.wings[index] = WingSpec {
                 aircraft,
                 count: v[field].max(usize::from(index == 0)),
@@ -693,17 +739,20 @@ impl QuickMission {
         }
         let v = &self.draft.values;
         for field in [4, 7, 10, 21, 24, 27] {
-            if v[field] > 0
-                && self
-                    .aircraft_files
-                    .get(v[field + 2])
-                    .and_then(|name| AircraftId::parse(name).ok())
-                    .is_none()
-            {
+            if v[field] > 0 && self.wing_aircraft(field + 2).is_none() {
                 return Some(
                     "Choose a supported imported aircraft for every populated wing.".into(),
                 );
             }
+        }
+        if !self.lobby
+            && v[4] > 1
+            && let Some(player) = self.player_without_ai_wingmen()
+        {
+            return Some(format!(
+                "The AI cannot fly the {} yet, so friendly wing 1 can only hold you. Set friendly wing 1 to one aircraft.",
+                player.label()
+            ));
         }
         if v[30] != 0 || v[31] != 0 || v[32] != 0 {
             return Some(
@@ -800,8 +849,10 @@ impl QuickMission {
         if !self.lobby {
             return None;
         }
-        let (kind, key) = if matches!(field, 6 | 9 | 12 | 23 | 26 | 29) {
+        let (kind, key) = if field == 6 {
             (ItemKind::Aircraft, self.aircraft_files.get(index)?)
+        } else if AI_AIRCRAFT_FIELDS.contains(&field) {
+            (ItemKind::Aircraft, self.wing_files.get(index)?)
         } else if field == 13 {
             (ItemKind::Theater, self.theater_codes.get(index)?)
         } else {
@@ -885,6 +936,18 @@ impl QuickMission {
         self.aircraft_selection = self.draft.values[6];
         self.selection = self.theater_index();
         self.notice = None;
+        // The AI cannot fly the player's aircraft yet: friendly wing 1 holds
+        // just the player (a lobby's wing 1 is for humans, so it keeps its size).
+        if !self.lobby
+            && self.draft.values[4] > 1
+            && let Some(player) = self.player_without_ai_wingmen()
+        {
+            self.draft.values[4] = 1;
+            self.notice = Some(format!(
+                "The AI cannot fly the {} yet, so friendly wing 1 is just you.",
+                player.label()
+            ));
+        }
     }
     fn show_ground_notice(&mut self) {
         self.cancel();
@@ -1885,7 +1948,103 @@ mod tests {
         let mut q = QuickMission::new(AircraftId::F18, options, &BTreeMap::new());
         q.aircraft_names = vec!["Hornet".into(), "Rafale".into(), "Other".into()];
         q.aircraft_files = vec!["F18.PT".into(), "RAFALE.PT".into(), "OTHER.PT".into()];
+        q.refresh_wing_catalog();
         q
+    }
+    /// A creator offering every selectable aircraft.
+    fn full_catalog() -> QuickMission {
+        let mut q = setup();
+        q.aircraft_files = AircraftId::SELECTABLE
+            .map(|id| id.selection_key().to_string())
+            .to_vec();
+        q.aircraft_names = AircraftId::SELECTABLE
+            .map(|id| id.label().to_string())
+            .to_vec();
+        q.refresh_wing_catalog();
+        q.draft.values[6] = 0;
+        for field in AI_AIRCRAFT_FIELDS {
+            q.draft.values[field] = 0;
+        }
+        q
+    }
+    #[test]
+    fn the_ais_wing_choices_leave_out_what_it_cannot_fly_but_the_player_keeps_them() {
+        let q = full_catalog();
+        let kept: Vec<AircraftId> = AircraftId::SELECTABLE
+            .into_iter()
+            .filter(|id| !id.ai_flyable())
+            .collect();
+        assert_eq!(kept.len(), 6);
+        for field in AI_AIRCRAFT_FIELDS {
+            assert_eq!(q.values(field).len(), AircraftId::SELECTABLE.len() - 6);
+            for id in &kept {
+                assert!(
+                    !q.values(field).contains(&id.label().to_string()),
+                    "{id:?} in field {field}"
+                );
+            }
+        }
+        assert!(q.ai_choice(AircraftId::Ah64).is_none());
+        assert!(q.ai_choice(AircraftId::Mig29).is_some());
+        // The player's list is whole.
+        assert_eq!(q.values(6).len(), AircraftId::SELECTABLE.len());
+        for id in kept {
+            assert!(q.values(6).contains(&id.label().to_string()));
+        }
+    }
+    #[test]
+    fn a_wing_field_names_the_aircraft_of_the_ais_list_not_the_players() {
+        let mut q = full_catalog();
+        for field in [9, 12, 23, 26, 29] {
+            let index = q.ai_choice(AircraftId::Mig17).unwrap();
+            q.apply(field, index);
+            assert_eq!(q.wing_aircraft(field), Some(AircraftId::Mig17));
+        }
+        // The same number in the player's field is a different aircraft.
+        let index = q.ai_choice(AircraftId::Mig17).unwrap();
+        q.apply(6, index);
+        assert_ne!(q.player(), Some(AircraftId::Mig17));
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.wings[2].aircraft, AircraftId::Mig17);
+        assert_eq!(spec.wings[5].aircraft, AircraftId::Mig17);
+    }
+    #[test]
+    fn a_player_in_an_aircraft_the_ai_cannot_fly_leads_friendly_wing_1_alone() {
+        let mut q = full_catalog();
+        q.apply(4, 3);
+        for id in [
+            AircraftId::Ah64,
+            AircraftId::Mi24,
+            AircraftId::Ch47,
+            AircraftId::V22,
+            AircraftId::Av8,
+            AircraftId::Yak141,
+        ] {
+            q.apply(6, 0);
+            q.apply(4, 3);
+            let index = q
+                .aircraft_files
+                .iter()
+                .position(|f| f == id.selection_key())
+                .unwrap();
+            q.apply(6, index);
+            assert_eq!(q.player(), Some(id));
+            assert_eq!(q.draft.values[4], 1, "{id:?}");
+            assert!(q.notice.as_deref().is_some_and(|n| n.contains("just you")));
+            assert!(q.unsupported().is_none());
+            // The count cannot be raised again while they fly it.
+            q.apply(4, 2);
+            assert_eq!(q.draft.values[4], 1);
+            assert_eq!(q.wing_launches(None).unwrap()[0].count(), 0);
+        }
+        // A draft that slipped through is refused with the reason.
+        q.draft.values[4] = 2;
+        assert!(q.unsupported().unwrap().contains("cannot fly the"));
+        // The lobby's wing 1 is for people, so it keeps its size.
+        q.lobby = true;
+        assert!(q.unsupported().is_none());
+        q.apply(4, 3);
+        assert_eq!(q.draft.values[4], 3);
     }
     fn right_click(q: &mut QuickMission, id: usize) -> Action {
         q.hover = Some(id);

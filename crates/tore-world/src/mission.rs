@@ -732,6 +732,18 @@ impl MissionSpec {
                 ));
             }
         }
+        // Friendly wing 1 is flown by people; every other wing is the AI's,
+        // and the AI cannot fly the helicopters, the V-22, the AV-8 or the
+        // Yak-141 yet (`AircraftId::ai_flyable`).
+        for (index, wing) in self.wings.iter().enumerate().skip(1) {
+            if wing.count > 0 && !wing.aircraft.ai_flyable() {
+                return refuse(format!(
+                    "{} cannot hold the {}: the AI cannot fly it yet",
+                    wing_name(Self::wing_id(index)),
+                    wing.aircraft.label()
+                ));
+            }
+        }
         for (index, objective) in self.objectives.iter().enumerate() {
             let own = Self::wing_id(index);
             match *objective {
@@ -2335,6 +2347,31 @@ mod tests {
         let high = MissionSpec::from_text(&format!("{BASE}start ground 12 20000\n")).unwrap();
         assert_eq!(high.start.altitude_ft(), 20_000);
         assert!(high.to_text().contains("start ground 12 20000\n"));
+    }
+
+    #[test]
+    fn the_ai_is_not_given_aircraft_it_cannot_fly_yet() {
+        for id in AircraftId::SELECTABLE {
+            // A person may fly any aircraft, alone or leading friendly wing 1.
+            let mut spec = MissionSpec::new("UKR", id);
+            spec.validate().unwrap();
+            spec.wings[3].count = 0;
+            spec.wings[0].count = 1;
+            // A wing the AI flies holds only what the AI can fly.
+            spec.wings[1].aircraft = id;
+            spec.wings[1].count = 2;
+            spec.wings[4].aircraft = id;
+            spec.wings[4].count = 1;
+            let verdict = spec.validate();
+            assert_eq!(verdict.is_ok(), id.ai_flyable(), "{id:?}");
+            if let Err(error) = verdict {
+                assert!(error.to_string().contains("AI cannot fly"), "{error}");
+            }
+            // An empty wing names no aircraft that matters.
+            spec.wings[1].count = 0;
+            spec.wings[4].count = 0;
+            spec.validate().unwrap();
+        }
     }
 
     #[test]

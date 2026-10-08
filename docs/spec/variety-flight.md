@@ -157,6 +157,29 @@ inputs and exact snapshot restoration produce identical future ticks. The
 legacy adapter and restricted native research path retain their existing
 behavior and limitations.
 
+## AI wingmen
+
+Opinionated, agent decision 2026-10-08: the AI does not fly the helicopters
+(AH-64, Mi-24, CH-47), the V-22, the AV-8 or the Yak-141 yet. On the legacy
+adapter the rotorcraft start at zero speed, drop about 400 feet and fly like
+airplanes (the CH-47 pitches to 69 degrees). A headless probe of the AV-8 and
+the Yak-141 shows they fly an airborne fight and land, but on a ground start the
+second wingman never leaves the taxiway (333 seconds checked, against a takeoff
+at 66 seconds for the F/A-18D and 54 seconds for the F-15). All six stay
+player-flyable.
+
+- Quick Mission's five AI wing fields (friendly wings 2 and 3, enemy wings 1 to 3)
+  do not list them. Friendly wing 1 shares the player's list, so a player who
+  picks one flies with no AI wingmen: the wing count drops to one, with a notice.
+  The multiplayer lobby's wing 1 is for people and keeps its size.
+- A mission file or lobby spec that puts one in a wing other than friendly
+  wing 1 is refused (`AircraftId::ai_flyable`).
+- The probe options `--probe-enemy-aircraft` and `--probe-friendly-aircraft`
+  refuse them, and `--probe-matrix` skips them as opponents.
+
+A planned VTOL and helicopter overhaul will restore them as AI wingmen; this list
+is the one switch to undo then.
+
 ## Unknown evidence
 
 Retail hover power, altitude ceiling, nozzle travel/rate, rotor torque, lift

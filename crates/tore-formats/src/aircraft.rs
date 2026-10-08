@@ -273,6 +273,20 @@ impl AircraftId {
         Self::B747,
         Self::A310,
     ];
+    /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
+    /// decision, 2026-10-08). The helicopters and the V-22 need a hover and
+    /// transition controller the AI does not have: on the legacy adapter they
+    /// start at rest, drop several hundred feet and fly like airplanes. The
+    /// AV-8 and the Yak-141 fly airborne missions, but on a ground start the
+    /// second wingman never leaves the taxiway. All of them stay player-flyable.
+    /// A planned VTOL and helicopter overhaul will restore them as AI aircraft;
+    /// until then no wingman choice, mission file or random pick offers them.
+    pub fn ai_flyable(self) -> bool {
+        !matches!(
+            self,
+            Self::Ah64 | Self::Mi24 | Self::Ch47 | Self::V22 | Self::Av8 | Self::Yak141
+        )
+    }
     /// Retail import identities. Runtime variants reuse these dependencies.
     pub const ALL: [Self; 36] = [
         Self::F18,
@@ -1299,6 +1313,16 @@ pub fn dependency_report(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_rotor_and_vtol_aircraft_are_kept_from_the_ai() {
+        use super::AircraftId::*;
+        let kept: Vec<_> = super::AircraftId::SELECTABLE
+            .into_iter()
+            .filter(|id| !id.ai_flyable())
+            .collect();
+        assert_eq!(kept, [Av8, Yak141, V22, Ah64, Mi24, Ch47]);
+        assert!(F18.ai_flyable() && Faxx.ai_flyable() && Mig17.ai_flyable());
+    }
     #[test]
     fn concept_selection_is_distinct_from_its_retail_dependency() {
         use super::AircraftId;

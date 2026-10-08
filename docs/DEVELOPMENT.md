@@ -1355,8 +1355,9 @@ TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
   --record-mission .local/su27-ground-fire.tore-replay --verify-render --no-audio
 ```
 
-`--probe-matrix NEW_DIR` runs and records **1,008 encounters** with one imported
-world: F-22A/F-22N/F/A-XX by all 14 opponents, four skills, three initial headings
+`--probe-matrix NEW_DIR` runs and records one encounter per case with one imported
+world: F-22A/F-22N/F/A-XX by every opponent the AI can fly (31 of the 37 selectable
+aircraft, see [AI wingmen](spec/variety-flight.md#ai-wingmen)), four skills, three initial headings
 and both flight adapters. Use `--ai-probe-ticks 360 --separation 1 --verify-render`
 for close-contact acquisition, or a larger tick budget and the attack options
 for firing. It refuses an existing output directory. The usual actor, trace and

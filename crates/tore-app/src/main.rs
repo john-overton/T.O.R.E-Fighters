@@ -6670,21 +6670,17 @@ fn ai_probe_run(
         quick.draft.values[19] = 0;
     }
     if let Some(enemy) = script.enemy_aircraft {
-        let index = quick
-            .aircraft_files
-            .iter()
-            .position(|p| p == enemy.selection_key())
-            .ok_or("probe enemy aircraft is not imported")?;
+        let index = quick.ai_choice(enemy).ok_or(
+            "probe enemy aircraft is not imported, or the AI cannot fly it (no helicopter, V-22, AV-8 or Yak-141 wings)",
+        )?;
         for field in [23, 26, 29] {
             quick.draft.values[field] = index;
         }
     }
     if let Some(friend) = script.friendly_aircraft {
-        let index = quick
-            .aircraft_files
-            .iter()
-            .position(|p| p == friend.selection_key())
-            .ok_or("probe friendly aircraft is not imported")?;
+        let index = quick.ai_choice(friend).ok_or(
+            "probe friendly aircraft is not imported, or the AI cannot fly it (no helicopter, V-22, AV-8 or Yak-141 wings)",
+        )?;
         for field in [9, 12] {
             quick.draft.values[field] = index;
         }
@@ -10901,7 +10897,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 tore_formats::aircraft::AircraftId::Faxx,
             ] {
                 let airframe = aircraft::Airframe::load(&theater_resources, player)?;
-                for enemy in tore_formats::aircraft::AircraftId::SELECTABLE {
+                // The AI cannot fly the helicopters, the V-22, the AV-8 or the
+                // Yak-141 yet, so they are not opponents.
+                for enemy in tore_formats::aircraft::AircraftId::SELECTABLE
+                    .into_iter()
+                    .filter(|enemy| enemy.ai_flyable())
+                {
                     for skill in 0..4 {
                         for geometry in [
                             ProbeGeometry::Head,
