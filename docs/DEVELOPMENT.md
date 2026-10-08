@@ -721,7 +721,7 @@ every that many ticks. These are development harness options, not game behaviour
 - `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies a system fault to the player's
   aircraft at that tick through the normal fault path and adds a `systems:` line.
 - `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-g-effects`, `no-spins`, `no-crashes`,
-  `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
+  `unlimited-fuel`, `unlimited-ammo`, `easy-physics`, `invulnerable` or `realistic-damage`. It also applies to
   `--live-fire` captures.
 - `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
 - `--loadout none|guns` now also applies to a headless ground start (payload and fuel systems follow
