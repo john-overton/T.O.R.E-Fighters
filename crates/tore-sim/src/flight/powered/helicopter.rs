@@ -31,9 +31,11 @@
 //! will reuse [`super::rotor::RotorModel`] and this file's drive and trim
 //! pieces where they fit.
 
+pub use super::drive::{LOW_ROTOR, ROTOR_OVERSPEED};
 use super::{
     DT, State, airframe,
     body::{GRAVITY, Inertia, Moments},
+    drive::{self, DriveModel, DriveStep},
     fuselage::{self, AirframeInput, AirframeLoads},
     rotor::{self, DiskFrame, Hazards, RotorInput, RotorModel, RotorOutput},
     sas,
@@ -51,22 +53,6 @@ use crate::{
     },
 };
 
-/// Governor gain: rated power per unit rotor speed error (fitted).
-const GOVERNOR_GAIN: f64 = 5.;
-/// Engine power lag, seconds (design 4.4: 0.5 to 1 s).
-const ENGINE_SECONDS: f64 = 0.6;
-/// Turboshaft power lapse: (rho / rho0) to this power (fitted: the AH-64
-/// at its maximum weight stops hovering out of ground effect near
-/// 4,000 ft, design H13).
-const ENGINE_LAPSE_EXPONENT: f64 = 0.8;
-/// LOW ROTOR below, ROTOR OVERSPEED above (design 4.4).
-pub const LOW_ROTOR: f64 = 0.8;
-pub const ROTOR_OVERSPEED: f64 = 1.1;
-/// With rotor stall switched off the rotor speed stays above this in
-/// flight (design 4.12).
-const EASY_ROTOR_FLOOR: f64 = 0.85;
-/// Rotor speed limits of the integration.
-const ROTOR_SPEED_LIMIT: f64 = 1.5;
 /// Dynamic rollover: bank on the wheels beyond this with the thrust leaning
 /// the same way, carrying more than this share of the weight (fitted).
 const ROLLOVER_BANK_DEGREES: f64 = 15.;
@@ -102,10 +88,9 @@ pub struct SingleRotor {
     pub reference_torque: f64,
     /// Tail rotor thrust that balances it, lbf.
     pub tail_reference_thrust: f64,
-    /// Rated power at sea level, ft·lbf/s.
-    pub rated_power: f64,
-    /// Rotor energy constant `J Omega0²`, ft·lbf.
-    pub rotor_energy: f64,
+    /// The engines and the rotor speed governor (rated power, rotor
+    /// energy).
+    pub drive: DriveModel,
     /// Maximum static thrust at sea level, lbf.
     pub max_thrust: f64,
 }
@@ -189,8 +174,7 @@ impl SingleRotor {
             reference_weight,
             reference_torque: 0.,
             tail_reference_thrust: 0.,
-            rated_power: 0.,
-            rotor_energy: 0.,
+            drive: DriveModel::new(0., 0., 0.),
             max_thrust: p.max_thrust_lbf,
         };
         let main_hover = rotor.hover_power(reference_weight, rho0);
@@ -198,13 +182,9 @@ impl SingleRotor {
         model.tail_reference_thrust = model.reference_torque / tail_rotor_arm_ft;
         let hover = main_hover + model.tail_power(model.tail_reference_thrust, rho0, 1., 0.);
         let main_rated = rotor.hover_power(p.max_thrust_lbf, rho0);
-        model.rated_power = main_rated
+        let rated = main_rated
             + model.tail_power(main_rated / rotor.omega / tail_rotor_arm_ft, rho0, 1., 0.);
-        // With the engines cut and the collective held, the power the rotor
-        // needs falls with the cube of its speed, so its speed falls from 1
-        // to 0.8 in `energy_seconds` when J Omega0² = 4 x that x the hover
-        // power.
-        model.rotor_energy = 4. * p.energy_seconds * hover;
+        model.drive = DriveModel::new(rated, hover, p.energy_seconds);
         Some(model)
     }
 
@@ -386,10 +366,7 @@ impl SingleRotor {
 
     /// Engine power the helicopter can have now, ft·lbf/s.
     pub fn available_power(&self, density: f64, damage: f64, throttle: f64) -> f64 {
-        self.rated_power
-            * (density / rotor::sea_level_density()).powf(ENGINE_LAPSE_EXPONENT)
-            * damage
-            * throttle.clamp(0., 1.)
+        self.drive.available_power(density, damage, throttle)
     }
 
     /// The trimmed state of flight at `airspeed_fps` along `heading`, level,
@@ -671,34 +648,29 @@ impl State {
         let loads = heli.loads(&instant);
         rotor::relax(&mut self.lift_controls.rotors[0], &loads.main, DT);
         // Rotor speed and engines.
-        let drive = &mut self.lift_controls.drive;
-        let nr = drive.rotor_speed;
         let available = if self.engine {
             heli.available_power(density, self.systems.power_available(), self.throttle)
         } else {
             0.
         };
-        let engine = drive.engine_output[0];
-        let mut next = (nr + DT * (engine - loads.power) / (heli.rotor_energy * nr.max(0.05)))
-            .clamp(0., ROTOR_SPEED_LIMIT);
-        if !hazards.rotor_stall && !wheel_contact {
-            next = next.max(EASY_ROTOR_FLOOR);
-        }
-        drive.rotor_speed = next;
-        let demand = (loads.power
-            + GOVERNOR_GAIN * (drive.rotor_speed_reference - nr) * heli.rated_power)
-            .clamp(0., available);
-        drive.engine_output[0] = if available > 0. {
-            engine + (demand - engine) * (DT / ENGINE_SECONDS).min(1.)
-        } else {
-            0.
-        };
+        let next = heli.drive.advance(
+            &mut self.lift_controls.drive,
+            DriveStep {
+                load_power: loads.power,
+                available_power: available,
+                rotor_stall_hazard: hazards.rotor_stall,
+                wheel_contact,
+                seconds: DT,
+            },
+        );
         self.lift_controls.thrust_lbf = loads.main.thrust_lbf;
         let warnings = &mut self.lift_controls.warnings;
-        let count = |ticks: u32, on: bool| if on { ticks.saturating_add(1) } else { 0 };
-        warnings.low_rotor = count(warnings.low_rotor, next < LOW_ROTOR);
-        warnings.rotor_overspeed = count(warnings.rotor_overspeed, next > ROTOR_OVERSPEED);
-        warnings.blade_stall = count(warnings.blade_stall, loads.main.blade_stall > 0.05);
+        drive::update_warnings(warnings, next);
+        warnings.blade_stall = if loads.main.blade_stall > 0.05 {
+            warnings.blade_stall.saturating_add(1)
+        } else {
+            0
+        };
         // The rigid body, then the velocity, from the start-of-tick loads.
         let inertia = Inertia::from_weight(weight, lift.body.radii_of_gyration_ft);
         self.advance_body(inertia, loads.moments);
@@ -742,7 +714,7 @@ impl State {
             fuel_flow_lbs_per_second: if self.engine { fuel_rate } else { 0. },
             unlimited_fuel: self.cheats.unlimited_fuel,
             rated_thrust_lbf: heli.max_thrust,
-            lapse: available / heli.rated_power.max(1.),
+            lapse: available / heli.drive.rated_power.max(1.),
             power_available: self.systems.power_available(),
             thrust_lbf: loads.main.thrust_lbf,
         };
