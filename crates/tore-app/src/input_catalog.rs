@@ -365,6 +365,129 @@ pub const ENTRIES: &[Entry] = &[
         Flight,
         &["0"],
     ),
+    cmd(
+        "nozzle-step-up",
+        "Nozzles up (aft) 10 degrees (AV-8, Yak-141)",
+        Flight,
+        &["z"],
+    ),
+    cmd(
+        "nozzle-step-down",
+        "Nozzles down 10 degrees (AV-8, Yak-141)",
+        Flight,
+        &["x"],
+    ),
+    cmd(
+        "nozzle-preset-forward",
+        "Nozzles to 0, or braking stop to vertical (AV-8, Yak-141)",
+        Flight,
+        &["Shift-z"],
+    ),
+    cmd(
+        "nozzle-preset-vertical",
+        "Nozzles vertical, again to the braking stop (AV-8, Yak-141)",
+        Flight,
+        &["Shift-x"],
+    ),
+    e(
+        "trim-pitch-rate",
+        "Cyclic trim fore/aft (helicopters / V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "trim-pitch-rate",
+        "Cyclic trim forward (helicopters / V-22)",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-ArrowUp"],
+    ),
+    e(
+        "trim-pitch-rate",
+        "Cyclic trim aft (helicopters / V-22)",
+        Flight,
+        Direction(1.),
+        &["Ctrl-ArrowDown"],
+    ),
+    e(
+        "trim-roll-rate",
+        "Cyclic trim left/right (helicopters / V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "trim-roll-rate",
+        "Cyclic trim left (helicopters / V-22)",
+        Flight,
+        Direction(-1.),
+        &["Ctrl-ArrowLeft"],
+    ),
+    e(
+        "trim-roll-rate",
+        "Cyclic trim right (helicopters / V-22)",
+        Flight,
+        Direction(1.),
+        &["Ctrl-ArrowRight"],
+    ),
+    e(
+        "trim-pedal-rate",
+        "Pedal trim (helicopters / V-22) rate axis",
+        Flight,
+        Axis,
+        &[],
+    ),
+    e(
+        "trim-pedal-rate",
+        "Pedal trim left (helicopters / V-22)",
+        Flight,
+        Direction(-1.),
+        &[],
+    ),
+    e(
+        "trim-pedal-rate",
+        "Pedal trim right (helicopters / V-22)",
+        Flight,
+        Direction(1.),
+        &[],
+    ),
+    cmd(
+        "trim-set",
+        "Trim set / force trim release (helicopters / V-22)",
+        Flight,
+        &[],
+    ),
+    cmd(
+        "trim-centre",
+        "Trim to centre (helicopters)",
+        Flight,
+        &["0"],
+    ),
+    cmd(
+        "stability-level",
+        "Stability level: Off, Damper, Attitude (VTOL)",
+        Flight,
+        &["Ctrl-Shift-a"],
+    ),
+    cmd(
+        "stability-level=off",
+        "Stability level Off (VTOL)",
+        Flight,
+        &[],
+    ),
+    cmd(
+        "stability-level=damper",
+        "Stability level Damper (VTOL)",
+        Flight,
+        &[],
+    ),
+    cmd(
+        "stability-level=attitude",
+        "Stability level Attitude (VTOL)",
+        Flight,
+        &[],
+    ),
     e(
         "throttle",
         "Throttle / engine power lever",
@@ -401,6 +524,12 @@ pub const ENTRIES: &[Entry] = &[
         "Waypoint autopilot",
         Flight,
         &["Ctrl-a"],
+    ),
+    cmd(
+        "hover-hold",
+        "Hover hold autopilot (helicopters / V-22)",
+        Flight,
+        &["Ctrl-Alt-a"],
     ),
     cmd("eject", "Eject (press twice)", Systems, &["Shift-e"]),
     cmd("gear", "Landing gear", Systems, &["g"]),
@@ -852,6 +981,137 @@ pub const ENTRIES: &[Entry] = &[
 /// always reach the menu, change window mode and quit.
 pub const PROTECTED_KEYS: [&str; 3] = ["Escape", "Alt-Enter", "Alt-F4"];
 
+/// The kinds of aircraft whose stock keys differ (VTOL overhaul, design
+/// 5.6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Airframe {
+    /// Every aircraft without powered lift.
+    Fixed,
+    /// The AV-8 and Yak-141.
+    VectorJet,
+    /// The V-22.
+    Tiltrotor,
+    /// The AH-64, Mi-24 and CH-47.
+    Helicopter,
+}
+impl Airframe {
+    #[cfg(test)]
+    pub const ALL: [Airframe; 4] = [
+        Airframe::Fixed,
+        Airframe::VectorJet,
+        Airframe::Tiltrotor,
+        Airframe::Helicopter,
+    ];
+    /// The kind of aircraft whose powered-lift levers are `vectoring`
+    /// (nozzles), `conversion` (nacelles) and `collective`.
+    pub fn of(vectoring: bool, conversion: bool, collective: bool) -> Self {
+        match (vectoring, conversion, collective) {
+            (true, ..) => Self::VectorJet,
+            (_, true, _) => Self::Tiltrotor,
+            (_, _, true) => Self::Helicopter,
+            _ => Self::Fixed,
+        }
+    }
+    #[cfg(test)]
+    fn name(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed-wing",
+            Self::VectorJet => "AV-8 / Yak-141",
+            Self::Tiltrotor => "V-22",
+            Self::Helicopter => "helicopters",
+        }
+    }
+}
+/// A set of [`Airframe`]s.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Airframes(u8);
+impl Airframes {
+    pub const FIXED: Self = Self(1);
+    pub const VECTOR_JET: Self = Self(2);
+    pub const HELICOPTER: Self = Self(8);
+    pub const ALL: Self = Self(15);
+    pub const ROTORCRAFT: Self = Self(4 | 8);
+    pub const POWERED_LIFT: Self = Self(2 | 4 | 8);
+    pub const fn but(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+    pub fn contains(self, airframe: Airframe) -> bool {
+        self.0 & (1 << airframe as u8) != 0
+    }
+    #[cfg(test)]
+    fn disjoint(self, other: Self) -> bool {
+        self.0 & other.0 == 0
+    }
+    /// Where the key acts, for the controls document: empty for every
+    /// aircraft.
+    #[cfg(test)]
+    pub fn describe(self) -> String {
+        let named = |set: Self| -> Vec<&str> {
+            Airframe::ALL
+                .into_iter()
+                .filter(|a| set.contains(*a))
+                .map(Airframe::name)
+                .collect()
+        };
+        match Self::ALL.but(self) {
+            Self(0) => String::new(),
+            missing if named(missing).len() == 1 => format!("not on {}", named(missing)[0]),
+            _ => format!("{} only", named(self).join(" and ")),
+        }
+    }
+}
+
+/// Stock keys whose action depends on the aircraft flown (VTOL overhaul,
+/// design 5.6): the same key may name one action on some aircraft and
+/// another on the rest, never two on the same aircraft. Every stock key not
+/// listed here acts on every aircraft. A player's own bindings always act.
+/// The aircraft-dependent meanings are opinionated, decided by John on
+/// 2026-10-08 (design decisions 4 and 5).
+pub const CONTEXTUAL: &[(&str, &str, Airframes)] = &[
+    // Z and X: rudder, except on the vectoring jets, where they are the
+    // retail nozzle keys.
+    ("z", "yaw", Airframes::ALL.but(Airframes::VECTOR_JET)),
+    ("x", "yaw", Airframes::ALL.but(Airframes::VECTOR_JET)),
+    ("z", "nozzle-step-up", Airframes::VECTOR_JET),
+    ("x", "nozzle-step-down", Airframes::VECTOR_JET),
+    ("Shift-z", "nozzle-preset-forward", Airframes::VECTOR_JET),
+    ("Shift-x", "nozzle-preset-vertical", Airframes::VECTOR_JET),
+    // Ctrl+arrows: nozzle slew on the jets (and, doing nothing, on every
+    // other aircraft as before), cyclic trim on the rotorcraft.
+    (
+        "Ctrl-ArrowUp",
+        "vector-pitch-rate",
+        Airframes::ALL.but(Airframes::ROTORCRAFT),
+    ),
+    (
+        "Ctrl-ArrowDown",
+        "vector-pitch-rate",
+        Airframes::ALL.but(Airframes::ROTORCRAFT),
+    ),
+    ("Ctrl-ArrowLeft", "vector-yaw-rate", Airframes::FIXED),
+    ("Ctrl-ArrowRight", "vector-yaw-rate", Airframes::FIXED),
+    ("Ctrl-ArrowUp", "trim-pitch-rate", Airframes::ROTORCRAFT),
+    ("Ctrl-ArrowDown", "trim-pitch-rate", Airframes::ROTORCRAFT),
+    ("Ctrl-ArrowLeft", "trim-roll-rate", Airframes::ROTORCRAFT),
+    ("Ctrl-ArrowRight", "trim-roll-rate", Airframes::ROTORCRAFT),
+    // 0: nozzles and nacelles forward, except on the helicopters.
+    (
+        "0",
+        "neutral-vector",
+        Airframes::ALL.but(Airframes::HELICOPTER),
+    ),
+    ("0", "trim-centre", Airframes::HELICOPTER),
+    ("Ctrl-Shift-a", "stability-level", Airframes::POWERED_LIFT),
+];
+
+/// The aircraft on which stock `key` performs `action`.
+pub fn stock_airframes(key: &str, action: &str) -> Airframes {
+    CONTEXTUAL
+        .iter()
+        .find(|(k, a, _)| *k == key && *a == action)
+        .map_or(Airframes::ALL, |(.., set)| *set)
+}
+
 /// Menu-only rows use the keyboard's built-in navigation; their stock keys are
 /// not flight shortcuts and are never disabled by remapping.
 pub fn menu_only(entry: &Entry) -> bool {
@@ -1054,17 +1314,74 @@ mod tests {
             }
         }
     }
+    /// The clash check (design 5.6): a stock key names one action on any
+    /// one aircraft. Two entries share a key only through
+    /// [`CONTEXTUAL`], on aircraft that do not overlap.
     #[test]
     fn stock_keys_are_not_shared_between_flight_entries() {
-        let mut seen = std::collections::BTreeMap::new();
-        for entry in ENTRIES.iter().filter(|e| !menu_only(e)) {
-            for key in entry.keys {
-                if let Some(other) = seen.insert((entry.replay_only(), *key), entry.label) {
-                    // The menu key opens and backs out of the same menu.
-                    assert_eq!(*key, "Escape", "{key}: {other} and {}", entry.label);
+        for airframe in Airframe::ALL {
+            let mut seen = std::collections::BTreeMap::new();
+            for entry in ENTRIES.iter().filter(|e| !menu_only(e)) {
+                for key in entry.keys {
+                    if !stock_airframes(key, entry.action).contains(airframe) {
+                        continue;
+                    }
+                    if let Some(other) = seen.insert((entry.replay_only(), *key), entry.label) {
+                        // The menu key opens and backs out of the same menu.
+                        assert_eq!(
+                            *key, "Escape",
+                            "{key} on {airframe:?}: {other} and {}",
+                            entry.label
+                        );
+                    }
                 }
             }
         }
+        // Every contextual key is a stock key of its entry, and each key's
+        // meanings cover disjoint aircraft.
+        for (index, (key, action, set)) in CONTEXTUAL.iter().enumerate() {
+            assert!(
+                ENTRIES
+                    .iter()
+                    .any(|e| e.action == *action && e.keys.contains(key)),
+                "{key} {action}"
+            );
+            for (other_key, other_action, other) in &CONTEXTUAL[index + 1..] {
+                if other_key == key {
+                    assert!(set.disjoint(*other), "{key}: {action} and {other_action}");
+                }
+            }
+        }
+    }
+    /// The design's clash check of the new chords: Shift+Z, Shift+X,
+    /// Ctrl+Alt+A and Ctrl+Shift+A were free; Ctrl+A and Alt+A stay
+    /// distinct, Shift+A (AWACS radar link) stays free.
+    #[test]
+    fn the_vtol_chords_are_their_own() {
+        let owners = |key: &str| -> Vec<&str> {
+            ENTRIES
+                .iter()
+                .filter(|e| e.keys.contains(&key))
+                .map(|e| e.action)
+                .collect()
+        };
+        assert_eq!(owners("Ctrl-Alt-a"), ["hover-hold"]);
+        assert_eq!(owners("Ctrl-Shift-a"), ["stability-level"]);
+        assert_eq!(owners("Shift-z"), ["nozzle-preset-forward"]);
+        assert_eq!(owners("Shift-x"), ["nozzle-preset-vertical"]);
+        assert_eq!(owners("Ctrl-a"), ["waypoint-autopilot"]);
+        assert_eq!(owners("Alt-a"), ["key:Alt-a"]);
+        assert!(owners("Shift-a").is_empty());
+        assert!(owners("Ctrl-z").is_empty() && owners("Ctrl-x").is_empty());
+        assert_eq!(
+            Airframes::ALL.but(Airframes::VECTOR_JET).describe(),
+            "not on AV-8 / Yak-141"
+        );
+        assert_eq!(
+            Airframes::ROTORCRAFT.describe(),
+            "V-22 and helicopters only"
+        );
+        assert_eq!(Airframes::ALL.describe(), "");
     }
     #[test]
     fn the_phase_two_keys_are_listed_with_their_stock_keys() {
@@ -1119,7 +1436,14 @@ mod tests {
                 group.title()
             ));
             for entry in ENTRIES.iter().filter(|e| e.group == group) {
-                let keys = entry.keys.iter().map(|k| key_label(k)).collect();
+                let keys = entry
+                    .keys
+                    .iter()
+                    .map(|k| match stock_airframes(k, entry.action).describe() {
+                        place if place.is_empty() => key_label(k),
+                        place => format!("{} ({place})", key_label(k)),
+                    })
+                    .collect();
                 let mut mouse: Vec<String> = entry.mouse.iter().map(|m| mouse_label(m)).collect();
                 if matches!(entry.kind, Kind::Axis) && entry.action.starts_with("look-") {
                     mouse.push("Hold right button and drag".into());

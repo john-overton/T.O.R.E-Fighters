@@ -25,6 +25,17 @@ bind keyboard Ctrl-PageDown conversion-rate positive\n\
 bind keyboard Ctrl-End collective-rate negative\n\
 bind keyboard Ctrl-Home collective-rate positive\n\
 bind keyboard 0 neutral-vector press\n\
+bind keyboard z nozzle-step-up press\n\
+bind keyboard x nozzle-step-down press\n\
+bind keyboard Shift-z nozzle-preset-forward press\n\
+bind keyboard Shift-x nozzle-preset-vertical press\n\
+bind keyboard Ctrl-ArrowUp trim-pitch-rate negative\n\
+bind keyboard Ctrl-ArrowDown trim-pitch-rate positive\n\
+bind keyboard Ctrl-ArrowLeft trim-roll-rate negative\n\
+bind keyboard Ctrl-ArrowRight trim-roll-rate positive\n\
+bind keyboard 0 trim-centre press\n\
+bind keyboard Ctrl-Alt-a hover-hold press\n\
+bind keyboard Ctrl-Shift-a stability-level press\n\
 bind keyboard Ctrl-7 weapon-group-next press\n\
 bind keyboard Ctrl-8 weapon-group-toggle press\n\
 bind keyboard Shift-e eject press\n\
@@ -69,16 +80,38 @@ fn complete(custom: &Profile) -> Result<Profile, String> {
     Ok(profile)
 }
 fn is_stock(binding: &tore_input::Binding) -> bool {
-    Profile::parse(DEFAULTS)
-        .expect("static defaults")
-        .bindings
-        .iter()
-        .any(|d| {
-            d.device == binding.device
-                && d.control == binding.control
-                && d.action == binding.action
-                && d.mode == binding.mode
-        })
+    in_stock(
+        &Profile::parse(DEFAULTS).expect("static defaults").bindings,
+        binding,
+    )
+}
+fn in_stock(stock: &[tore_input::Binding], binding: &tore_input::Binding) -> bool {
+    stock.iter().any(|d| {
+        d.device == binding.device
+            && d.control == binding.control
+            && d.action == binding.action
+            && d.mode == binding.mode
+    })
+}
+/// Whether a stock keyboard binding acts on `airframe` (VTOL overhaul,
+/// design 5.6: [`crate::input_catalog::CONTEXTUAL`]). A player's own binding
+/// on the same key turns the aircraft-dependent stock meaning off, so it
+/// wins.
+fn keyboard_binding_enabled(
+    binding: &tore_input::Binding,
+    airframe: crate::input_catalog::Airframe,
+    stock: &[tore_input::Binding],
+    custom_keys: &BTreeSet<String>,
+) -> bool {
+    if binding.device != "keyboard" || !in_stock(stock, binding) {
+        return true;
+    }
+    let action = tore_input::profile_text::action_name(&binding.action);
+    let airframes = crate::input_catalog::stock_airframes(&binding.control, &action);
+    if airframes == crate::input_catalog::Airframes::ALL {
+        return true;
+    }
+    airframes.contains(airframe) && !custom_keys.contains(&binding.control)
 }
 pub const AUTO_GAMEPAD_PREFIX: &str = "auto-gamepad:";
 
@@ -221,6 +254,12 @@ impl Input {
             head_raw: None,
             head_center: [0.; 2],
         })
+        .map(|mut input| {
+            // The stock keys of a fixed-wing aircraft until a flight says
+            // otherwise.
+            input.aircraft_controls(false, false, false, false);
+            input
+        })
     }
     pub fn settings_profile(&self) -> Profile {
         let mut profile = self.resolver.profile.clone();
@@ -284,6 +323,8 @@ impl Input {
         if path.is_some() {
             self.profile_path = path;
         }
+        let [vectoring, conversion, collective, gunship] = self.gamepad_roles;
+        self.aircraft_controls(vectoring, conversion, collective, gunship);
     }
     pub fn context(&mut self, paused: bool, focused: bool) {
         if self.context != (paused, focused) {
@@ -303,6 +344,36 @@ impl Input {
         self.backend.stop();
         self.commands.clear();
     }
+    /// Whether the throttle controls drive the collective: the helicopters
+    /// and the V-22, whose engines are governed (VTOL overhaul, John's
+    /// decision 4 of 2026-10-08).
+    pub fn collective_role(&self) -> bool {
+        self.gamepad_roles[2]
+    }
+    /// The lever the throttle controls move, for the throttle lever's
+    /// pickup: the collective on the helicopters and the V-22, else the
+    /// throttle.
+    pub fn throttle_reference(&self, throttle: f64, collective: f64) -> f64 {
+        if self.collective_role() {
+            collective
+        } else {
+            throttle
+        }
+    }
+    /// A throttle command as the aircraft takes it: on the helicopters and
+    /// the V-22 a throttle setting or step moves the collective instead.
+    fn role(&self, command: PilotCommand) -> PilotCommand {
+        use tore_input::FlightAxis::Collective;
+        match command {
+            PilotCommand::Throttle(v) if self.collective_role() => {
+                PilotCommand::SetAxis(Collective, v)
+            }
+            PilotCommand::AdjustThrottle(v) if self.collective_role() => {
+                PilotCommand::AdjustAxis(Collective, v)
+            }
+            other => other,
+        }
+    }
     pub fn queue(&mut self, command: PilotCommand) {
         if self.context.0 || !self.context.1 {
             return;
@@ -313,6 +384,7 @@ impl Input {
         ) {
             self.resolver.override_throttle();
         }
+        let command = self.role(command);
         match command {
             PilotCommand::NeutralVector => self.resolver.override_lift_axes(&[
                 tore_input::Axis::VectorPitch,
@@ -345,6 +417,20 @@ impl Input {
                 _ => (value, burner),
             },
         )
+    }
+    /// The stability level once the commands queued for the next tick
+    /// apply, starting from `current`: what a stability key announces.
+    pub fn pending_stability(
+        &self,
+        current: tore_input::StabilityLevel,
+    ) -> tore_input::StabilityLevel {
+        self.commands
+            .iter()
+            .fold(current, |level, command| match command {
+                PilotCommand::Lift(tore_input::LiftCommand::SetStability(l)) => *l,
+                PilotCommand::Lift(tore_input::LiftCommand::CycleStability) => level.next(),
+                _ => level,
+            })
     }
     pub fn claimed(&self, key: &str) -> bool {
         self.key_claims.contains_key(key)
@@ -526,7 +612,20 @@ impl Input {
                 )
             })
             .collect();
+        let airframe = crate::input_catalog::Airframe::of(vectoring, conversion, collective);
+        let stock = Profile::parse(DEFAULTS).expect("static defaults").bindings;
+        let custom_keys: BTreeSet<String> = self
+            .resolver
+            .profile
+            .bindings
+            .iter()
+            .filter(|b| b.device == "keyboard" && !in_stock(&stock, b))
+            .map(|b| b.control.clone())
+            .collect();
         let changed = self.resolver.filter_bindings(|binding| {
+            if !keyboard_binding_enabled(binding, airframe, &stock, &custom_keys) {
+                return false;
+            }
             if binding.device.starts_with(AUTO_GAMEPAD_PREFIX) {
                 let device = aliases.get(&binding.device).unwrap_or(&binding.device);
                 let (mods, base) = tore_input::chord_parts(&binding.control);
@@ -669,15 +768,28 @@ impl Input {
             .collect();
         (actions, lost, warnings)
     }
+    /// One tick's pilot input from the held `keys` and the bindings.
+    /// `throttle` is the lever the throttle controls move
+    /// ([`Self::throttle_reference`]).
     pub fn frame(&mut self, keys: &BTreeSet<String>, throttle: f64) -> (PilotInput, [f32; 2]) {
+        let [vectoring, conversion, collective, _] = self.gamepad_roles;
+        let airframe = crate::input_catalog::Airframe::of(vectoring, conversion, collective);
         let held = |key: &str| f64::from(keys.contains(key));
+        // FA rudder is End and PageDown; Z and X are a second pair, except
+        // where they are the nozzle keys (the vectoring jets).
+        let rudder = |key: &str| {
+            if crate::input_catalog::stock_airframes(key, "yaw").contains(airframe) {
+                held(key)
+            } else {
+                0.
+            }
+        };
         for (control, value) in [
             ("flight-pitch", held("ArrowDown") - held("ArrowUp")),
             ("flight-roll", held("ArrowRight") - held("ArrowLeft")),
-            // FA rudder is End and PageDown; Z and X stay as a second pair.
             (
                 "flight-yaw",
-                held("x").max(held("PageDown")) - held("z").max(held("End")),
+                rudder("x").max(held("PageDown")) - rudder("z").max(held("End")),
             ),
             (
                 "flight-look-x",
@@ -688,15 +800,31 @@ impl Input {
             self.key_value(control, value);
         }
         // Resolve pickup against the setting that ordered presets will establish this tick.
-        let target = self
-            .commands
-            .iter()
-            .fold(throttle, |value, command| match command {
-                PilotCommand::Throttle(v) => *v,
-                PilotCommand::AdjustThrottle(v) => (value + v).clamp(0., 1.),
+        let target = self.commands.iter().fold(throttle, |value, command| {
+            match (command, self.collective_role()) {
+                (PilotCommand::Throttle(v), false)
+                | (PilotCommand::SetAxis(tore_input::FlightAxis::Collective, v), true) => *v,
+                (PilotCommand::AdjustThrottle(v), false)
+                | (PilotCommand::AdjustAxis(tore_input::FlightAxis::Collective, v), true) => {
+                    (value + v).clamp(0., 1.)
+                }
                 _ => value,
-            });
+            }
+        });
         let (mut frame, look) = self.resolver.frame(target);
+        if self.collective_role() {
+            // The throttle lever and rate drive the collective; a bound
+            // collective lever keeps priority.
+            if frame.collective.is_none() {
+                frame.collective = frame.throttle;
+            }
+            frame.throttle = None;
+            frame.collective_rate = (frame.collective_rate + frame.throttle_rate).clamp(-1., 1.);
+            frame.throttle_rate = 0.;
+            for command in &mut frame.commands {
+                *command = self.role(*command);
+            }
+        }
         if self.gamepad_roles[3]
             && self
                 .resolver
@@ -1758,5 +1886,233 @@ mod tests {
                 assert_eq!(r.frame(0.5).0.throttle_rate, 0.);
             }
         }
+    }
+    /// K1 (VTOL overhaul, design section 10): the stock keys whose meaning
+    /// depends on the aircraft. Roles are [vectoring, conversion,
+    /// collective, gunship] as the flight sets them.
+    #[test]
+    fn k1_key_roles_follow_the_aircraft() {
+        use tore_input::{FlightAxis, LiftCommand, NozzlePreset, Switch, TrimAxis};
+        const F16: [bool; 4] = [false; 4];
+        const AV8: [bool; 4] = [true, false, false, false];
+        const V22: [bool; 4] = [false, true, true, false];
+        const AH64: [bool; 4] = [false, false, true, false];
+        let on = |roles: [bool; 4]| {
+            let mut i = input("");
+            i.context(false, true);
+            i.aircraft_controls(roles[0], roles[1], roles[2], roles[3]);
+            i
+        };
+        let press = |i: &mut Input, key: &str, m: M| -> Vec<Action> {
+            let claimed = i.key(key, true, m);
+            i.key(key, false, M::empty());
+            assert!(claimed || i.resolver.drain().is_empty());
+            i.resolver.drain().into_iter().map(|(_, a)| a).collect()
+        };
+        let lift = |c| Action::Pilot(PilotCommand::Lift(c));
+        // The jets: Z / X step, Shift+Z / Shift+X preset, never the rudder.
+        let mut jet = on(AV8);
+        for (key, m, expected) in [
+            (
+                "z",
+                M::empty(),
+                lift(LiftCommand::NozzleStep { down: false }),
+            ),
+            (
+                "x",
+                M::empty(),
+                lift(LiftCommand::NozzleStep { down: true }),
+            ),
+            (
+                "z",
+                M::SHIFT,
+                lift(LiftCommand::NozzlePreset(NozzlePreset::Forward)),
+            ),
+            (
+                "x",
+                M::SHIFT,
+                lift(LiftCommand::NozzlePreset(NozzlePreset::Vertical)),
+            ),
+        ] {
+            assert_eq!(press(&mut jet, key, m), vec![expected], "{key} {m:?}");
+        }
+        let held: BTreeSet<String> = ["z".into()].into();
+        assert_eq!(jet.frame(&held, 0.5).0.yaw, 0.);
+        let held: BTreeSet<String> = ["x".into(), "End".into()].into();
+        assert_eq!(jet.frame(&held, 0.5).0.yaw, -1., "End stays the rudder");
+        // The F-16, AH-64 and V-22: Z / X stay rudder.
+        for roles in [F16, AH64, V22] {
+            let mut i = on(roles);
+            assert!(!i.key("z", true, M::empty()), "{roles:?}");
+            assert!(!i.key("x", true, M::SHIFT), "{roles:?}");
+            let held: BTreeSet<String> = ["z".into()].into();
+            assert_eq!(i.frame(&held, 0.5).0.yaw, -1., "{roles:?}");
+            let held: BTreeSet<String> = ["x".into()].into();
+            assert_eq!(i.frame(&held, 0.5).0.yaw, 1., "{roles:?}");
+        }
+        // Ctrl+arrows trim only on the rotorcraft; elsewhere they are the
+        // nozzle slew as before.
+        let trims = |pilot: &PilotInput| -> Vec<(TrimAxis, f64)> {
+            pilot
+                .commands
+                .iter()
+                .filter_map(|c| match c {
+                    PilotCommand::Lift(LiftCommand::TrimAdjust(axis, v)) => Some((*axis, *v)),
+                    _ => None,
+                })
+                .collect()
+        };
+        for roles in [AH64, V22] {
+            let mut i = on(roles);
+            assert!(i.key("ArrowUp", true, M::CONTROL));
+            let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+            assert_eq!(trims(&pilot), vec![(TrimAxis::Pitch, -0.02)], "{roles:?}");
+            assert_eq!(pilot.vector_pitch_rate, 0.);
+            i.key("ArrowUp", false, M::empty());
+            assert!(i.key("ArrowRight", true, M::CONTROL));
+            let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+            assert_eq!(trims(&pilot), vec![(TrimAxis::Roll, 0.02)], "{roles:?}");
+            assert_eq!(pilot.vector_yaw_rate, 0.);
+        }
+        for roles in [F16, AV8] {
+            let mut i = on(roles);
+            assert!(i.key("ArrowDown", true, M::CONTROL));
+            let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+            assert!(trims(&pilot).is_empty(), "{roles:?}");
+            assert_eq!(pilot.vector_pitch_rate, 1., "{roles:?}");
+        }
+        // Nozzle yaw is gone from the jets' Ctrl+Left / Right.
+        let mut i = on(AV8);
+        assert!(!i.key("ArrowLeft", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.vector_yaw_rate, 0.);
+        // 0: trim centre on the helicopters, forward neutral elsewhere.
+        assert_eq!(
+            press(&mut on(AH64), "0", M::empty()),
+            vec![lift(LiftCommand::TrimCentre)]
+        );
+        for roles in [F16, AV8, V22] {
+            assert_eq!(
+                press(&mut on(roles), "0", M::empty()),
+                vec![Action::Pilot(PilotCommand::NeutralVector)],
+                "{roles:?}"
+            );
+        }
+        // Ctrl+Alt+A is hover hold everywhere (the flight refuses it where
+        // it does not apply); Ctrl+Shift+A the stability level on the six.
+        for roles in [F16, AV8, V22, AH64] {
+            assert_eq!(
+                press(&mut on(roles), "a", M::CONTROL | M::ALT),
+                vec![Action::Pilot(PilotCommand::Toggle(Switch::HoverHold))],
+                "{roles:?}"
+            );
+        }
+        for roles in [AV8, V22, AH64] {
+            assert_eq!(
+                press(&mut on(roles), "a", M::CONTROL | M::SHIFT),
+                vec![lift(LiftCommand::CycleStability)],
+                "{roles:?}"
+            );
+        }
+        assert!(!on(F16).key("a", true, M::CONTROL | M::SHIFT));
+        // Throttle keys drive the collective only on the rotorcraft.
+        for (roles, rotorcraft) in [(F16, false), (AV8, false), (AH64, true), (V22, true)] {
+            let mut i = on(roles);
+            i.queue(PilotCommand::Throttle(0.75));
+            i.queue(PilotCommand::AdjustThrottle(0.05));
+            let expected = if rotorcraft {
+                vec![
+                    PilotCommand::SetAxis(FlightAxis::Collective, 0.75),
+                    PilotCommand::AdjustAxis(FlightAxis::Collective, 0.05),
+                ]
+            } else {
+                vec![
+                    PilotCommand::Throttle(0.75),
+                    PilotCommand::AdjustThrottle(0.05),
+                ]
+            };
+            assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.commands, expected);
+            assert_eq!(i.collective_role(), rotorcraft);
+            assert_eq!(
+                i.throttle_reference(0.9, 0.4),
+                if rotorcraft { 0.4 } else { 0.9 }
+            );
+        }
+    }
+
+    #[test]
+    fn the_throttle_lever_and_rate_drive_the_collective_on_rotorcraft() {
+        let mut i = input("bind hotas t throttle unit\nbind hotas up throttle-rate positive");
+        i.context(false, true);
+        let hotas = |i: &mut Input, control: &str, value: f64, baseline: bool| {
+            i.resolver.event(Event {
+                device: "hotas".into(),
+                control: control.into(),
+                value,
+                baseline,
+            })
+        };
+        // The lever picks up against the collective, not the engine
+        // throttle, which the governed engines leave at 100 percent.
+        i.aircraft_controls(false, false, true, false);
+        hotas(&mut i, "t", 0.2, true);
+        hotas(&mut i, "up", 0., true);
+        let pilot = i.frame(&BTreeSet::new(), 0.6).0;
+        assert_eq!((pilot.throttle, pilot.collective), (None, Some(0.6)));
+        hotas(&mut i, "t", 0.3, false);
+        let pilot = i.frame(&BTreeSet::new(), 0.6).0;
+        assert_eq!((pilot.throttle, pilot.collective), (None, Some(0.65)));
+        hotas(&mut i, "up", 1., false);
+        let pilot = i.frame(&BTreeSet::new(), 0.65).0;
+        assert_eq!((pilot.throttle_rate, pilot.collective_rate), (0., 1.));
+        // A throttle key overrides the lever until it moves again.
+        i.queue(PilotCommand::Throttle(0.25));
+        let pilot = i.frame(&BTreeSet::new(), 0.65).0;
+        assert_eq!(pilot.collective, None);
+        assert_eq!(
+            pilot.commands,
+            vec![PilotCommand::SetAxis(
+                tore_input::FlightAxis::Collective,
+                0.25
+            )]
+        );
+        // On a fighter the same lever is the throttle.
+        i.aircraft_controls(false, false, false, false);
+        hotas(&mut i, "t", 0.3, true);
+        hotas(&mut i, "up", 0., true);
+        let pilot = i.frame(&BTreeSet::new(), 0.65).0;
+        assert_eq!((pilot.throttle, pilot.collective), (Some(0.65), None));
+    }
+
+    #[test]
+    fn a_players_own_binding_on_a_contextual_key_wins() {
+        let mut i = input("");
+        let p = Profile::parse("tore-input 1\nbind keyboard z gear press").unwrap();
+        i.save_settings_to(&p, None);
+        i.context(false, true);
+        i.aircraft_controls(true, false, false, false);
+        assert!(i.key("z", true, M::empty()));
+        assert_eq!(
+            i.resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .collect::<Vec<_>>(),
+            vec![Action::Pilot(PilotCommand::Toggle(
+                tore_input::Switch::Gear
+            ))]
+        );
+        // X keeps its stock nozzle meaning.
+        i.key("z", false, M::empty());
+        assert!(i.key("x", true, M::empty()));
+        assert_eq!(
+            i.resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .collect::<Vec<_>>(),
+            vec![Action::Pilot(PilotCommand::Lift(
+                tore_input::LiftCommand::NozzleStep { down: true }
+            ))]
+        );
     }
 }

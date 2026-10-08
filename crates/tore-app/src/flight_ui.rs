@@ -218,6 +218,17 @@ pub const WEAPON_DIAGNOSTICS: &str = "Weapon diagnostics?";
 /// panels. Not in the retail menu; opinionated, requested by John on
 /// 2026-09-26 (the label is an agent choice).
 pub const DEBUG_PANELS: &str = "Debug panels?";
+/// The authored Pref row choosing the powered-lift aircraft's stability
+/// level (VTOL overhaul, design 5.2 and 5.7); retail has no such row.
+pub const STABILITY_LEVEL: &str = "Stability level";
+/// The name a stability level is shown and announced by.
+pub fn stability_name(level: tore_input::StabilityLevel) -> &'static str {
+    match level {
+        tore_input::StabilityLevel::Off => "Off",
+        tore_input::StabilityLevel::Damper => "Damper",
+        tore_input::StabilityLevel::Attitude => "Attitude",
+    }
+}
 /// Whether a Pref row is retail's Show Target Info (Ctrl+T).
 pub fn is_target_info(label: &str) -> bool {
     label
@@ -231,7 +242,7 @@ pub fn add_authored_rows(tree: &mut [MenuNode]) {
     let Some(pref) = tree.iter_mut().find(|node| node.label == "Pref") else {
         return;
     };
-    for label in [WEAPON_DIAGNOSTICS, DEBUG_PANELS] {
+    for label in [WEAPON_DIAGNOSTICS, DEBUG_PANELS, STABILITY_LEVEL] {
         if !pref.children.iter().any(|row| row.label == label) {
             pref.children.push(MenuNode {
                 label: label.into(),
@@ -258,6 +269,10 @@ pub struct FlightUi {
     pub target_info: bool,
     /// Session-only cheats; they survive Restart but are not saved.
     pub cheats: tore_sim::cheats::Cheats,
+    /// The stability level the powered-lift aircraft fly at, a saved
+    /// preference: Pref's row or Ctrl+Shift+A changes it, and the flight
+    /// follows it (VTOL overhaul, design 5.2).
+    pub stability: tore_input::StabilityLevel,
     pub brightness: i16,
     pub zoom: f32,
     pub look: [f32; 2],
@@ -287,6 +302,7 @@ impl Default for FlightUi {
             ladder: true,
             weapon_diagnostics: false,
             debug_panels: false,
+            stability: tore_input::StabilityLevel::Damper,
             target_info: false,
             cheats: Default::default(),
             brightness: 0,
@@ -406,6 +422,9 @@ impl FlightUi {
     /// On/Off for a working cheat row or an authored diagnostics row; the
     /// selected Damage choice reads On.
     fn cheat_state(&self, label: &str) -> Option<&'static str> {
+        if label == STABILITY_LEVEL {
+            return Some(stability_name(self.stability));
+        }
         let mut cheats = self.cheats;
         let on = match label {
             WEAPON_DIAGNOSTICS => self.weapon_diagnostics,
@@ -619,6 +638,11 @@ impl FlightUi {
                 } else {
                     "Show target info: off"
                 });
+                Command::Click
+            }
+            STABILITY_LEVEL => {
+                self.stability = self.stability.next();
+                self.message(format!("Stability: {}", stability_name(self.stability)));
                 Command::Click
             }
             DEBUG_PANELS => {
@@ -1500,7 +1524,12 @@ mod tests {
         let rows: Vec<_> = t[1].children.iter().map(|n| n.label.as_str()).collect();
         assert_eq!(
             rows,
-            ["HUD pitch ladder?", WEAPON_DIAGNOSTICS, DEBUG_PANELS]
+            [
+                "HUD pitch ladder?",
+                WEAPON_DIAGNOSTICS,
+                DEBUG_PANELS,
+                STABILITY_LEVEL
+            ]
         );
         // Other roots are untouched.
         assert_eq!(t[0].children.len(), 1);
@@ -1575,6 +1604,32 @@ mod tests {
         ui.debug_panels = true;
         ui.reset_for_flight();
         assert!(!ui.debug_panels);
+    }
+
+    #[test]
+    fn stability_row_cycles_the_level_with_a_message() {
+        let mut t = tree();
+        t.push(MenuNode {
+            label: "Pref".into(),
+            shortcut: String::new(),
+            children: vec![],
+        });
+        add_authored_rows(&mut t);
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.cheat_state(STABILITY_LEVEL), Some("Damper"));
+        for (expected, shown_name) in [
+            (tore_input::StabilityLevel::Attitude, "Attitude"),
+            (tore_input::StabilityLevel::Off, "Off"),
+            (tore_input::StabilityLevel::Damper, "Damper"),
+        ] {
+            assert_eq!(ui.activate(STABILITY_LEVEL, ""), Command::Click);
+            assert_eq!(ui.stability, expected);
+            assert_eq!(ui.cheat_state(STABILITY_LEVEL), Some(shown_name));
+            assert_eq!(
+                *shown(&ui).last().unwrap(),
+                format!("Stability: {shown_name}")
+            );
+        }
     }
 
     #[test]

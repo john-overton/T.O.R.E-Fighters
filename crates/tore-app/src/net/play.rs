@@ -253,8 +253,16 @@ impl App {
                 }
             }
         }
-        let throttle = self.world.cockpits[OWN].flight.throttle;
-        let (pilot, _) = self.input.frame(&self.camera.keys, throttle);
+        crate::sync_stability(
+            &self.world.cockpits[OWN].flight,
+            &mut self.input,
+            self.flight_ui.stability,
+        );
+        let flight = &self.world.cockpits[OWN].flight;
+        let lever = self
+            .input
+            .throttle_reference(flight.throttle, flight.lift_controls.collective);
+        let (pilot, _) = self.input.frame(&self.camera.keys, lever);
         Controls {
             pilot,
             trigger: self.input.resolver.held("fire"),
