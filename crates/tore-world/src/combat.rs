@@ -464,6 +464,18 @@ impl Combat {
             .filter(|actor| actor.alive())
             .map(|actor| (actor.id(), crate::snapshot::devices(actor.flight())))
             .collect();
+        // The AI rotorcraft's rotor speeds, for their sound.
+        let rotors: BTreeMap<u32, f64> = wings
+            .into_iter()
+            .flat_map(|wings| wings.mission().actors())
+            .filter(|actor| actor.alive())
+            .filter_map(|actor| {
+                actor
+                    .flight()
+                    .rotor_speed_percent()
+                    .map(|percent| (actor.id(), percent / 100.))
+            })
+            .collect();
         // AI aircraft whose afterburner is lit, for their flame lights.
         let burning: std::collections::BTreeSet<u32> = wings
             .into_iter()
@@ -492,6 +504,7 @@ impl Combat {
             lit: player.engine && player.fuel > 0.,
             afterburner: player.afterburner_active(),
             rates: player.auxiliary_rates,
+            rotor: player.lift_controls.drive.rotor_speed,
             flame: player.afterburner_active() && player.escape.is_none() && own.hp > 0,
         };
         // Fixtures copy the player's state with their own crash flag.
@@ -507,6 +520,7 @@ impl Combat {
             lit: true,
             afterburner: false,
             rates: [0.; 3],
+            rotor: 0.,
             flame: false,
         };
         let pilot = |owner: u32, escape: &tore_sim::ejection::Escape| PilotPose {
@@ -562,7 +576,10 @@ impl Combat {
                                 ..player_engine
                             }
                         } else {
-                            model_engine
+                            Engine {
+                                rotor: rotors.get(&t.id).copied().unwrap_or(0.),
+                                ..model_engine
+                            }
                         }
                     },
                     damage: Damage {
@@ -1405,6 +1422,7 @@ impl Pose {
                 lit: s.engine && s.fuel > 0.,
                 afterburner: s.afterburner_active(),
                 rates: s.auxiliary_rates,
+                rotor: s.lift_controls.drive.rotor_speed,
                 flame: s.afterburner_active() && s.escape.is_none(),
             },
             wreck: s.wreck.as_ref().map(|wreck| wreck.phase),

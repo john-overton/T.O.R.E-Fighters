@@ -555,6 +555,13 @@ fn validate(frame: &Frame) -> Result<usize> {
             return Err(invalid("gun group must be an integer from 0 to 7"));
         }
     }
+    for aircraft in &frame.aircraft {
+        if !aircraft.rotor_speed.is_finite()
+            || !(0. ..=crate::rotors::MAX_ROTOR_SPEED).contains(&aircraft.rotor_speed)
+        {
+            return Err(invalid("rotor speed must be a finite share from 0 to 60"));
+        }
+    }
     let mut bound = 64;
     bound += frame.aircraft.len() * 512;
     bound += frame.projectiles.len() * 220;

@@ -103,6 +103,10 @@ pub struct Engine {
     pub afterburner: bool,
     /// Angular rates the X-31 paddles and plume follow.
     pub rates: [f64; 3],
+    /// A rotorcraft's rotor speed, a share of its governed 100 percent; zero
+    /// on every other aircraft (VTOL overhaul slice P7). Presentation: the
+    /// rotor's sound follows it.
+    pub rotor: f64,
     /// The afterburner flame lights the scene
     /// (docs/spec/engine-material.md#afterburner-glow): the player's while
     /// its pilot is aboard and it has hit points, and an AI aircraft's
@@ -428,6 +432,11 @@ pub fn pose_state(template: &flight::State, pose: &AircraftPose) -> flight::Stat
     s.engine = pose.engine.lit;
     s.burner = pose.engine.afterburner;
     s.auxiliary_rates = pose.engine.rates;
+    // Only a rotorcraft's rotor speed is drawn from the pose; the rest keep
+    // the template's.
+    if pose.engine.rotor > 0. {
+        s.lift_controls.drive.rotor_speed = pose.engine.rotor;
+    }
     s.crashed = pose.crashed;
     s.wreck = pose.wreck.map(wreck_in);
     s.damage_fraction = pose.damage.fraction();

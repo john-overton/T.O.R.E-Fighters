@@ -981,6 +981,7 @@ pub fn pose_state(
         fuel_lb: data.fuel_lb,
         controls: data.controls,
         auxiliary_rates: pose.engine.rates,
+        rotor_speed: pose.engine.rotor,
         hp: pose.damage.hp,
         max_hp: pose.damage.initial_hp,
         sections: pose.damage.sections,
