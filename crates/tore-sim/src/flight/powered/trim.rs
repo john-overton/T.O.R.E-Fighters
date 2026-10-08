@@ -302,7 +302,18 @@ impl State {
             return true;
         }
         let c = self.model().configuration();
-        SingleRotor::new(&lift, c).is_some() && self.trim_single_rotor(0.)
+        if SingleRotor::new(&lift, c).is_none() {
+            return false;
+        }
+        // At rest in the air: a hover keeps the velocity it has.
+        let (velocity, speed) = (self.velocity, self.speed);
+        self.velocity = [0.; 3];
+        self.speed = 0.;
+        if self.trim_single_rotor(0.) {
+            return true;
+        }
+        (self.velocity, self.speed) = (velocity, speed);
+        false
     }
 
     /// Sets a powered-lift aircraft up for a ground start, stationary on the

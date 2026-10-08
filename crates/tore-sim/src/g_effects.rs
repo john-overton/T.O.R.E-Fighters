@@ -108,6 +108,30 @@ pub fn shake(g: f64, seconds: f64) -> [f64; 2] {
     })
 }
 
+/// Full-strength rotor buffet shake, radians: half the overspeed shake,
+/// about 0.7 degrees. `opinionated`: the real aircraft give no message for
+/// the vortex ring state or retreating blade stall, only vibration, so the
+/// view shakes (VTOL overhaul design section 6); the size is an agent
+/// decision.
+pub const ROTOR_BUFFET_SHAKE_RADIANS: f64 = 0.012;
+
+/// Rotor buffet view shake as [yaw, pitch] radians for a buffet of `level`
+/// (0 to 1, [`crate::flight::State::rotor_buffet`]) at simulation time
+/// `seconds`: a pure function, like the other shakes, at the lower blade-pass
+/// rates of a rotor (11 and 14 Hz).
+pub fn rotor_buffet_shake(level: f64, seconds: f64) -> [f64; 2] {
+    let x = level.clamp(0., 1.);
+    if x == 0. || !x.is_finite() {
+        return [0.; 2];
+    }
+    let strength = ROTOR_BUFFET_SHAKE_RADIANS * x * x * (3. - 2. * x);
+    [0, 1].map(|axis| {
+        let a = noise(seconds * 11., axis * 2 + 8);
+        let b = noise(seconds * 14., axis * 2 + 9);
+        strength * (0.6 * a + 0.4 * b)
+    })
+}
+
 /// Full-strength overspeed shake, radians: two and a half times the high-G
 /// shake, about 1.4 degrees. `opinionated`: John asked for a clear maximum on
 /// 2026-09-29; the size is an agent decision.
@@ -168,6 +192,26 @@ mod tests {
         assert_eq!(peak(1.4), d);
         assert_eq!(overspeed_shake(1.0, 3.3), overspeed_shake(1.0, 3.3));
         assert_eq!(overspeed_shake(f64::NAN, 1.0), [0.; 2]);
+    }
+    #[test]
+    fn rotor_buffet_shake_scales_with_the_buffet_and_is_deterministic() {
+        let peak = |level: f64| {
+            (0..2000)
+                .map(|i| rotor_buffet_shake(level, i as f64 * 0.01))
+                .flat_map(|[a, b]| [a.abs(), b.abs()])
+                .fold(0., f64::max)
+        };
+        assert_eq!(rotor_buffet_shake(0., 1.234), [0.; 2]);
+        assert_eq!(rotor_buffet_shake(f64::NAN, 1.234), [0.; 2]);
+        let (a, b, c) = (peak(0.25), peak(0.5), peak(1.0));
+        assert!(0. < a && a < b && b < c, "{a} {b} {c}");
+        assert!(c <= ROTOR_BUFFET_SHAKE_RADIANS && c > 0.6 * ROTOR_BUFFET_SHAKE_RADIANS);
+        assert_eq!(peak(3.), c);
+        assert!(
+            c < OVERSPEED_SHAKE_RADIANS,
+            "gentler than the overspeed buffet"
+        );
+        assert_eq!(rotor_buffet_shake(1., 3.3), rotor_buffet_shake(1., 3.3));
     }
     fn seconds_to_full(g: f64) -> f64 {
         let mut e = GEffects::default();

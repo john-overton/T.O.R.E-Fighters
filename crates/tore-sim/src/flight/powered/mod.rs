@@ -40,6 +40,7 @@ pub mod body;
 pub mod fuselage;
 pub mod helicopter;
 pub mod jet;
+pub mod readout;
 pub mod rotor;
 pub mod sas;
 pub mod state;
