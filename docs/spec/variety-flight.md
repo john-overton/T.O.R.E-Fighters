@@ -75,20 +75,36 @@ claim recovered retail actuator logic or add a new binding.
 | B747 | 20 |
 | A310 | 14 |
 
-Airborne starts for the new conventional aircraft and VTOL jets use 65 percent
-of their own top speed at the start altitude, bounded above by 95 percent of
-top speed and below by 130 percent of clean stall speed. The altitude is the
-mission's: a single-player or multiplayer airborne start picks the speed after
-the selected altitude is applied, and AI aircraft pick it at their own spawn
-altitude. Ported fighters keep their fixed 450 knots. Helicopters and V22
-start level at zero speed, full engine power and collective chosen to balance
-the configured mass and altitude lapse, capped at full collective. This is an
-agent-authored initial condition; it does not add a hover controller. An airborne
-Quick Mission recomputes this initial collective once after its selected altitude,
-fuel, stores and tanks are applied. Above available lift capacity it uses full
-collective and falls rather than inventing support. After the first tick, mass
-changes never retrim collective automatically. Ground starts retain the existing
-idle/brakes/gear setup and clear collective and lagged lift.
+Airborne starts for the new conventional aircraft and the powered-lift aircraft
+use 65 percent of their own top speed at the start altitude, bounded above by
+95 percent of top speed and below by 130 percent of clean stall speed. The
+altitude is the mission's: a single-player or multiplayer airborne start picks
+the speed after the selected altitude is applied, and AI aircraft pick it at
+their own spawn altitude. Ported fighters keep their fixed 450 knots.
+
+The AH-64, Mi-24, AV-8 and Yak-141 (VTOL overhaul decision 8, slice P7) start in
+**trimmed forward flight** at that speed, not a hover, on every spawn path:
+single player's restart, an AI actor put on the hybrid model (a multiplayer seat
+is one until a human takes it) and a revival. One trim routine
+(`crates/tore-sim/src/flight/powered/trim.rs`) runs after the final mass,
+altitude and heading are set. A single-rotor helicopter gets the collective,
+cyclic and pedals of its rotor trim with the rotor governed at 100 percent and
+the body at rest. A jet gets its nozzles at 0 and its lift engines off, and a
+throttle, pitch and small pitch trim found by probing the force law one tick at
+a time, so that hands off it holds height within 10 feet and speed within 2
+knots for ten seconds (acceptance S1). A start above a helicopter's ceiling
+tries a hover and then falls back to full collective; it never invents support.
+The CH-47 and the V-22 still start level at zero speed with full engine power
+and the collective that balances the configured mass and altitude lapse
+(capped at full collective), until their slices land. After the first tick,
+mass changes never retrim anything.
+
+Ground starts match the fixed-wing ones: stationary, engine running at idle,
+gear and flaps down, brakes on, autopilot off. A helicopter has its rotor at the
+governed speed with the collective down and its engines at 100 percent (the
+throttle keys drive the collective, so the engine throttle is set at the start),
+a jet has its nozzles at 0 and its lift engines off. There is no cold start. The
+V-22's nacelles will start at the 87-degree helicopter preset with its slice.
 
 ## Powered lift and controls
 

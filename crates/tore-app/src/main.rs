@@ -10126,6 +10126,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .map(|v| v * state.speed);
             }
         }
+        // A powered-lift aircraft starts in trimmed forward flight, as in a
+        // mission (VTOL overhaul decision 8); a ground start below replaces it.
+        if state.research.is_some() {
+            state.start_airborne(replay_world.as_ref().map_or([0.; 3], |w| w.wind()));
+        }
         println!(
             "flight_model={}",
             if native_tables.is_some() {
@@ -11148,6 +11153,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     flight.jammer = jammer_on;
     if researched_flight {
         flight.enable_research(1)?;
+        if ground_start.is_none() {
+            flight.start_airborne(world.wind());
+        }
     }
     if let Some(tables) = &native_tables {
         flight.enable_native(tables.clone(), 1)?;
