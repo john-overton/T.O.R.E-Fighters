@@ -25,7 +25,12 @@ fn the_numbers_stand_for_the_readout() {
     assert_eq!(QReadout::of(&back, 400), q);
     assert_eq!(back.plane, 3);
     assert_eq!(back.tick, 401);
-    assert_eq!(back.stores, readout.stores);
+    let mut expected_stores = readout.stores.clone();
+    for (actual, expected) in back.stores.gun_aim.iter().zip(expected_stores.gun_aim) {
+        assert!((actual - expected).abs() <= 0.5 / 127. + 1e-12);
+    }
+    expected_stores.gun_aim = back.stores.gun_aim;
+    assert_eq!(back.stores, expected_stores);
     assert_eq!(back.damage, readout.damage);
     assert_eq!(back.targets, readout.targets);
     assert_eq!(back.seeker, readout.seeker);
@@ -466,8 +471,14 @@ fn a_group_waiting_after_a_restart_from_the_empty_readout_shows_what_last_arrive
         readout.sensors.radar_track_nmi
     );
     assert_eq!(cockpit.sensors.selected, readout.sensors.selected);
+    // The gun-mount angles travel at 1/127, so they come back on that grid.
+    let mut expected = readout.stores.clone();
+    for (shown, sent) in cockpit.stores.gun_aim.iter().zip(expected.gun_aim) {
+        assert!((shown - sent).abs() <= 0.5 / 127. + 1e-12);
+    }
+    expected.gun_aim = cockpit.stores.gun_aim;
     assert_eq!(
-        cockpit.stores, readout.stores,
+        cockpit.stores, expected,
         "so do the stores, which waited too"
     );
     assert_eq!(

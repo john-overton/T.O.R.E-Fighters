@@ -464,3 +464,61 @@ fn star_bindings_never_match_keyboard_or_mouse() {
     event(&mut r, "mouse", "wheel:up", 1., false);
     assert!(r.drain().is_empty());
 }
+
+#[test]
+fn lift_levers_retain_zero_and_release_on_disconnect() {
+    let mut r = resolver("bind stick lift collective unit\nbind stick turn vector-yaw axis");
+    event(&mut r, "stick", "lift", -1., true);
+    event(&mut r, "stick", "turn", 0., true);
+    assert_eq!(frame(&mut r).collective, Some(0.));
+    assert_eq!(frame(&mut r).vector_yaw, Some(0.));
+    event(&mut r, "stick", "lift", 1., false);
+    assert_eq!(frame(&mut r).collective, Some(1.));
+    assert!(r.disconnect("stick"));
+    assert_eq!(frame(&mut r).collective, None);
+}
+#[test]
+fn lift_profile_commands_roundtrip_and_reject_invalid_positions() {
+    let p = Profile::parse("tore-input 1\nbind stick c collective unit\nbind stick r collective-rate positive\nbind stick n neutral-vector press\nbind stick z vector-yaw=-0.5 press\nbind stick s conversion-step=-0.25 press").unwrap();
+    assert_eq!(
+        Profile::parse(&p.to_text().unwrap())
+            .unwrap()
+            .to_text()
+            .unwrap(),
+        p.to_text().unwrap()
+    );
+    for action in [
+        "collective=-0.1",
+        "conversion=1.1",
+        "vector-yaw=NaN",
+        "vector-pitch-step=2",
+    ] {
+        assert!(Action::parse(action).is_err());
+    }
+}
+
+#[test]
+fn digital_lift_override_holds_until_lever_movement_even_after_focus_loss() {
+    let mut r = resolver(
+        "bind stick lever vector-pitch unit\nbind stick yaw vector-yaw axis -1 0 1 0 1 1 10",
+    );
+    event(&mut r, "stick", "lever", -0.2, true);
+    assert_eq!(frame(&mut r).vector_pitch, Some(0.4));
+    r.override_lift_axes(&[Axis::VectorPitch]);
+    assert_eq!(frame(&mut r).vector_pitch, None);
+    event(&mut r, "stick", "lever", -0.19, false);
+    assert_eq!(frame(&mut r).vector_pitch, None);
+    r.context(false, false);
+    r.context(false, true);
+    assert_eq!(frame(&mut r).vector_pitch, None);
+    event(&mut r, "stick", "lever", -0.15, false);
+    assert!((frame(&mut r).vector_pitch.unwrap() - 0.425).abs() < 1e-12);
+    event(&mut r, "stick", "yaw", 0., true);
+    event(&mut r, "stick", "yaw", 0.4, false);
+    assert_eq!(frame(&mut r).vector_yaw, Some(0.4));
+    r.override_lift_axes(&[Axis::VectorYaw]);
+    event(&mut r, "stick", "yaw", 0.41, false);
+    assert_eq!(frame(&mut r).vector_yaw, None);
+    event(&mut r, "stick", "yaw", 0.45, false);
+    assert_eq!(frame(&mut r).vector_yaw, Some(0.45));
+}

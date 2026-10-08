@@ -117,6 +117,8 @@ impl TimingProfile {
             | AircraftId::F22
             | AircraftId::F22n
             | AircraftId::Faxx => 5,
+            // The player-only variety import does not add AI timing calibration.
+            _ => 5,
         };
         Self {
             search_delay_s,

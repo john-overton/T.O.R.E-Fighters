@@ -208,8 +208,9 @@ otherwise active radar. These facts are separate from fitted border colors,
 dial angle selection, menu presentation and event timing.
 
 The app implements JT catalog cards, station compatibility, quantity/fuel controls,
-weight validation and custom-load flight/restart. Auxiliary stores and native stock,
-year and airbase lifecycle remain open. Cheat loading and the supported-weapon
+weight validation and custom-load flight/restart. Selectable GAS tanks and the
+[aircraft-wide source-row audit](aircraft-ordnance.md) extend that editor. Other
+auxiliary-equipment replacement, stock, year and airbase lifecycle remain open. Cheat loading and the supported-weapon
 catalog are described in the
 [current spec](../spec/ordnance-presentation.md#catalog-availability). See
 [implementation evidence and user testing gate](../baselines/creator-ordnance.md).

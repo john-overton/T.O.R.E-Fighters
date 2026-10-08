@@ -147,7 +147,7 @@ const MAP: Schema = &[
     BIT,
     BIT,
     BIT,
-    Kind::Slow(Slow::Bits(4, 14)),
+    Kind::Slow(Slow::Bits(6, AircraftId::SELECTABLE.len() as i64)),
 ];
 const PLOT: Schema = &[Kind::Slow(Slow::Bits(2, 2)), D, D, D, D, D, D, D];
 const STROBE: Schema = &[D, D, D, D, D];
@@ -182,7 +182,7 @@ const THREAT: Schema = &[
 ];
 const INBOUND: Schema = &[D, D, D, Kind::Slow(Slow::Bits(8, 255)), BIT];
 const ROW: Schema = &[
-    Kind::Slow(Slow::Bits(4, 14)),
+    Kind::Slow(Slow::Bits(6, AircraftId::SELECTABLE.len() as i64)),
     Kind::Pos {
         vel: 4,
         divisor: 240,
@@ -457,9 +457,13 @@ fn readiness_code(r: Readiness) -> i64 {
         R::MaximumRange => 17,
         R::Altitude => 18,
         R::FieldOfView => 19,
+        R::GunArc => 20,
+        R::GunSlewing => 21,
+        R::GroupEmpty => 22,
+        R::GunObscured => 23,
     }
 }
-const READINESS: [Readiness; 20] = [
+const READINESS: [Readiness; 24] = [
     Readiness::Ready,
     Readiness::Safe,
     Readiness::BayClosed,
@@ -480,6 +484,10 @@ const READINESS: [Readiness; 20] = [
     Readiness::MaximumRange,
     Readiness::Altitude,
     Readiness::FieldOfView,
+    Readiness::GunArc,
+    Readiness::GunSlewing,
+    Readiness::GroupEmpty,
+    Readiness::GunObscured,
 ];
 
 fn status_code(s: seeker::Status) -> i64 {
@@ -729,8 +737,15 @@ impl QReadout {
             flag(stores.armed),
             flag(stores.launch_mode == LaunchMode::Boresight),
             i64::from(stores.loaded),
+            i64::from(stores.gun_group),
         ]
         .into_iter()
+        .chain(
+            stores
+                .gun_aim
+                .iter()
+                .map(|a| q(a.clamp(-1., 1.), 1. / 127.)),
+        )
         .chain(stores.ammo.iter().map(|a| i64::from(*a)))
         .collect();
         s[scalar::COUNTERMEASURES] = vec![
@@ -1059,7 +1074,7 @@ impl QReadout {
 
         let st = get(scalar::STORES);
         let ammo = st
-            .get(4..)
+            .get(11..)
             .unwrap_or(&[])
             .iter()
             .map(|a| u16::try_from(*a).map_err(|_| bad("rounds")))
@@ -1077,7 +1092,19 @@ impl QReadout {
             },
             ammo,
             loaded: u32_of(pick(st, 3))?,
+            gun_group: u8::try_from(pick(st, 4))
+                .ok()
+                .filter(|v| *v <= 7)
+                .ok_or(bad("gun group"))?,
+            gun_aim: std::array::from_fn(|i| v(pick(st, 5 + i), 1. / 127.)),
         };
+        if stores
+            .gun_aim
+            .iter()
+            .any(|value| !(-1. ..=1.).contains(value))
+        {
+            return Err(bad("gun aim"));
+        }
 
         let cm = get(scalar::COUNTERMEASURES);
         let countermeasures = Countermeasures {

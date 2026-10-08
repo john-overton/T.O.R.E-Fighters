@@ -198,6 +198,29 @@ pub enum AircraftId {
     F22,
     F22n,
     Faxx,
+    C130,
+    Ac130,
+    E3,
+    Il76,
+    E2,
+    Av8,
+    Yak141,
+    V22,
+    Ah64,
+    Mi24,
+    Ch47,
+    Mig17,
+    F4B,
+    F4J,
+    F4E,
+    F4G,
+    A7,
+    F15,
+    F16C,
+    F104,
+    A10,
+    B747,
+    A310,
 }
 impl AircraftId {
     /// Retail donor for an opinionated runtime variant.
@@ -211,7 +234,7 @@ impl AircraftId {
             self.pt()
         }
     }
-    pub const SELECTABLE: [Self; 14] = [
+    pub const SELECTABLE: [Self; 37] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -226,9 +249,32 @@ impl AircraftId {
         Self::F22,
         Self::F22n,
         Self::Faxx,
+        Self::C130,
+        Self::Ac130,
+        Self::E3,
+        Self::Il76,
+        Self::E2,
+        Self::Av8,
+        Self::Yak141,
+        Self::V22,
+        Self::Ah64,
+        Self::Mi24,
+        Self::Ch47,
+        Self::Mig17,
+        Self::F4B,
+        Self::F4J,
+        Self::F4E,
+        Self::F4G,
+        Self::A7,
+        Self::F15,
+        Self::F16C,
+        Self::F104,
+        Self::A10,
+        Self::B747,
+        Self::A310,
     ];
     /// Retail import identities. Runtime variants reuse these dependencies.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 36] = [
         Self::F18,
         Self::Rafale,
         Self::F14,
@@ -242,6 +288,29 @@ impl AircraftId {
         Self::Su35,
         Self::F22,
         Self::F22n,
+        Self::C130,
+        Self::Ac130,
+        Self::E3,
+        Self::Il76,
+        Self::E2,
+        Self::Av8,
+        Self::Yak141,
+        Self::V22,
+        Self::Ah64,
+        Self::Mi24,
+        Self::Ch47,
+        Self::Mig17,
+        Self::F4B,
+        Self::F4J,
+        Self::F4E,
+        Self::F4G,
+        Self::A7,
+        Self::F15,
+        Self::F16C,
+        Self::F104,
+        Self::A10,
+        Self::B747,
+        Self::A310,
     ];
     pub fn parse(name: &str) -> Result<Self> {
         match name.to_ascii_lowercase().as_str() {
@@ -259,8 +328,31 @@ impl AircraftId {
             "faxx" | "fa-xx" | "f/a-xx" => Ok(Self::Faxx),
             "f22" | "f22.pt" => Ok(Self::F22),
             "f22n" | "f22n.pt" => Ok(Self::F22n),
+            "c130" | "c130.pt" => Ok(Self::C130),
+            "ac130" | "ac130.pt" => Ok(Self::Ac130),
+            "e3" | "e3.pt" => Ok(Self::E3),
+            "il76" | "il76.pt" => Ok(Self::Il76),
+            "e2" | "e2.pt" => Ok(Self::E2),
+            "av8" | "av8.pt" => Ok(Self::Av8),
+            "yak141" | "yak141.pt" => Ok(Self::Yak141),
+            "v22" | "v22.pt" => Ok(Self::V22),
+            "ah64" | "ah64.pt" => Ok(Self::Ah64),
+            "mi24" | "mi24.pt" => Ok(Self::Mi24),
+            "ch47" | "ch47.pt" => Ok(Self::Ch47),
+            "mig17" | "mig17f" | "mig17f.pt" => Ok(Self::Mig17),
+            "f4b" | "f4b.pt" => Ok(Self::F4B),
+            "f4j" | "f4j.pt" => Ok(Self::F4J),
+            "f4e" | "f4e.pt" => Ok(Self::F4E),
+            "f4g" | "f4" | "f4.pt" => Ok(Self::F4G),
+            "a7" | "a7.pt" => Ok(Self::A7),
+            "f15" | "f15.pt" => Ok(Self::F15),
+            "f16c" | "f16c.pt" => Ok(Self::F16C),
+            "f104" | "f104.pt" => Ok(Self::F104),
+            "a10" | "a10.pt" => Ok(Self::A10),
+            "b747" | "b747.pt" => Ok(Self::B747),
+            "a310" | "a310.pt" => Ok(Self::A310),
             _ => Err(invalid(
-                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx",
+                "supported aircraft: f18, rafale, f14, a4e, x31, mig29, su27, mig21, su25, mig23, su35, f22, f22n, faxx, c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747, a310",
             )),
         }
     }
@@ -279,6 +371,29 @@ impl AircraftId {
             Self::Su35 => "SU35.PT",
             Self::F22 => "F22.PT",
             Self::F22n | Self::Faxx => "F22N.PT",
+            Self::C130 => "C130.PT",
+            Self::Ac130 => "AC130.PT",
+            Self::E3 => "E3.PT",
+            Self::Il76 => "IL76.PT",
+            Self::E2 => "E2.PT",
+            Self::Av8 => "AV8.PT",
+            Self::Yak141 => "YAK141.PT",
+            Self::V22 => "V22.PT",
+            Self::Ah64 => "AH64.PT",
+            Self::Mi24 => "MI24.PT",
+            Self::Ch47 => "CH47.PT",
+            Self::Mig17 => "MIG17F.PT",
+            Self::F4B => "F4B.PT",
+            Self::F4J => "F4J.PT",
+            Self::F4E => "F4E.PT",
+            Self::F4G => "F4.PT",
+            Self::A7 => "A7.PT",
+            Self::F15 => "F15.PT",
+            Self::F16C => "F16C.PT",
+            Self::F104 => "F104.PT",
+            Self::A10 => "A10.PT",
+            Self::B747 => "B747.PT",
+            Self::A310 => "A310.PT",
         }
     }
     pub fn hud(self) -> &'static str {
@@ -296,6 +411,29 @@ impl AircraftId {
             Self::Su35 => "SU35.HUD",
             Self::F22 => "F22.HUD",
             Self::F22n | Self::Faxx => "F22N.HUD",
+            Self::C130 => "AC130.HUD",
+            Self::Ac130 => "AC130.HUD",
+            Self::E3 => "AC130.HUD",
+            Self::Il76 => "AC130.HUD",
+            Self::E2 => "AC130.HUD",
+            Self::Av8 => "AV8.HUD",
+            Self::Yak141 => "YAK141.HUD",
+            Self::V22 => "AC130.HUD",
+            Self::Ah64 => "AC130.HUD",
+            Self::Mi24 => "SU33.HUD",
+            Self::Ch47 => "AC130.HUD",
+            Self::Mig17 => "MIG17.HUD",
+            Self::F4B => "F4.HUD",
+            Self::F4J => "F4.HUD",
+            Self::F4E => "F4.HUD",
+            Self::F4G => "F4.HUD",
+            Self::A7 => "A7.HUD",
+            Self::F15 => "AV8.HUD",
+            Self::F16C => "F16C.HUD",
+            Self::F104 => "F104_C.HUD",
+            Self::A10 => "F104_C.HUD",
+            Self::B747 => "AC130.HUD",
+            Self::A310 => "AC130.HUD",
         }
     }
     pub fn stem(self) -> &'static str {
@@ -313,6 +451,29 @@ impl AircraftId {
             Self::Su35 => "SU35",
             Self::F22 => "F22",
             Self::F22n | Self::Faxx => "F22N",
+            Self::C130 => "C130",
+            Self::Ac130 => "AC130",
+            Self::E3 => "AWACS",
+            Self::Il76 => "IL76",
+            Self::E2 => "E2C",
+            Self::Av8 => "AV8",
+            Self::Yak141 => "Y141",
+            Self::V22 => "V22",
+            Self::Ah64 => "APA",
+            Self::Mi24 => "HIND",
+            Self::Ch47 => "CH47",
+            Self::Mig17 => "M17",
+            Self::F4B => "F4J",
+            Self::F4J => "F4J",
+            Self::F4E => "F4E",
+            Self::F4G => "F4",
+            Self::A7 => "A7",
+            Self::F15 => "F15",
+            Self::F16C => "F16",
+            Self::F104 => "F104",
+            Self::A10 => "A10",
+            Self::B747 => "B747",
+            Self::A310 => "A310",
         }
     }
     pub fn cockpit_stem(self) -> &'static str {
@@ -326,6 +487,29 @@ impl AircraftId {
             Self::Su35 => "SU35",
             Self::F22 | Self::F22n | Self::Faxx => "F22",
 
+            Self::C130 => "AC130",
+            Self::Ac130 => "AC130",
+            Self::E3 => "AC130",
+            Self::Il76 => "AC130",
+            Self::E2 => "AC130",
+            Self::Av8 => "AV8",
+            Self::Yak141 => "Y141",
+            Self::V22 => "AC130",
+            Self::Ah64 => "AC130",
+            Self::Mi24 => "SU33",
+            Self::Ch47 => "AC130",
+            Self::Mig17 => "M17",
+            Self::F4B => "F4",
+            Self::F4J => "F4",
+            Self::F4E => "F4",
+            Self::F4G => "F4",
+            Self::A7 => "A7",
+            Self::F15 => "AV8",
+            Self::F16C => "F16",
+            Self::F104 => "F104",
+            Self::A10 => "F104",
+            Self::B747 => "AC130",
+            Self::A310 => "AC130",
             _ => self.stem(),
         }
     }
@@ -348,6 +532,29 @@ impl AircraftId {
             Self::Mig23 => "~SU33H.PIC",
             Self::Su35 => "~SU35H.PIC",
             Self::F22 | Self::F22n | Self::Faxx => "~F22H.PIC",
+            Self::C130 => "~AC130H.PIC",
+            Self::Ac130 => "~AC130H.PIC",
+            Self::E3 => "~AC130H.PIC",
+            Self::Il76 => "~AC130H.PIC",
+            Self::E2 => "~AC130H.PIC",
+            Self::Av8 => "~AV8H.PIC",
+            Self::Yak141 => "~Y141H.PIC",
+            Self::V22 => "~AC130H.PIC",
+            Self::Ah64 => "~AC130H.PIC",
+            Self::Mi24 => "~SU33H.PIC",
+            Self::Ch47 => "~AC130H.PIC",
+            Self::Mig17 => "~M17H.PIC",
+            Self::F4B => "~F4H.PIC",
+            Self::F4J => "~F4H.PIC",
+            Self::F4E => "~F4H.PIC",
+            Self::F4G => "~F4H.PIC",
+            Self::A7 => "~A7H.PIC",
+            Self::F15 => "~AV8H.PIC",
+            Self::F16C => "~F16H.PIC",
+            Self::F104 => "~F104H.PIC",
+            Self::A10 => "~F104H.PIC",
+            Self::B747 => "~AC130H.PIC",
+            Self::A310 => "~AC130H.PIC",
         }
     }
     pub fn label(self) -> &'static str {
@@ -366,38 +573,194 @@ impl AircraftId {
             Self::F22 => "F-22A Raptor",
             Self::F22n => "F-22N Raptor",
             Self::Faxx => "F/A-XX",
+            Self::C130 => "C-130 Hercules",
+            Self::Ac130 => "AC-130U Spectre",
+            Self::E3 => "E-3 AWACS Sentry (AIR)",
+            Self::Il76 => "IL-76 Mainstay (AIR)",
+            Self::E2 => "E-2C Hawkeye (AIR)",
+            Self::Av8 => "Av-8B Harrier II",
+            Self::Yak141 => "Yak-141 Freestyle-A",
+            Self::V22 => "V-22 Osprey",
+            Self::Ah64 => "AH-64 Apache",
+            Self::Mi24 => "Mi-24 Hind-D",
+            Self::Ch47 => "CH-47 Chinook",
+            Self::Mig17 => "MiG-17F Fresco",
+            Self::F4B => "F-  4B Phantom II",
+            Self::F4J => "F-  4J Phantom II",
+            Self::F4E => "F-  4E (Desert) Phantom",
+            Self::F4G => "F-  4G Wild Weasel Phantom",
+            Self::A7 => "A- 7E Corsair II",
+            Self::F15 => "F- 15C Eagle",
+            Self::F16C => "F- 16C Falcon",
+            Self::F104 => "F-104N Starfighter",
+            Self::A10 => "A-10 Thunderbolt",
+            Self::B747 => "Boeing 747",
+            Self::A310 => "Airbus 310",
         }
     }
-    pub fn radar(self) -> &'static str {
-        match self {
-            Self::F14 => "F14R.SEE",
-            Self::A4E => "F4BR.SEE",
-            Self::Mig29 => "MIG29R.SEE",
-            Self::Su27 => "SU27R.SEE",
-            Self::Mig21 => "MIG21R.SEE",
-            Self::Su25 => "SU24R.SEE",
-            Self::Mig23 => "MIG27R.SEE",
-            Self::Su35 => "SU27R.SEE",
-            Self::F22 | Self::F22n | Self::Faxx => "F22R.SEE",
+    /// Exact reviewed short/long retail names, absent for the original loose fixtures.
+    pub fn reviewed_names(self) -> Option<(&'static str, &'static str)> {
+        match self.source() {
+            Self::F14 => Some(("F-14", "F- 14D Tomcat")),
+            Self::A4E => Some(("A-4E", "A- 4E Skyhawk")),
+            Self::X31 => Some(("X-31", "X-31 EFM")),
+            Self::Mig29 => Some(("MiG-29", "MiG-29 Fulcrum-C")),
+            Self::Su27 => Some(("Su-27", "Su-27 Flanker-B")),
+            Self::Mig21 => Some(("MiG-21", "MiG-21 Fishbed")),
+            Self::Su25 => Some(("Su-25", "Su-25 Frogfoot-A")),
+            Self::Mig23 => Some(("MiG-23", "MiG-23 Flogger-B")),
+            Self::Su35 => Some(("Su-35", "Su-35")),
+            Self::F22 => Some(("F-22", "F- 22A Raptor")),
+            Self::F22n => Some(("F-22", "F- 22N Raptor")),
 
-            _ => "F18R.SEE",
+            Self::C130 => Some(("C-130", "C-130 Hercules")),
+            Self::Ac130 => Some(("AC-130U", "AC-130U Spectre")),
+            Self::E3 => Some(("E-3", "E-3 AWACS Sentry (AIR)")),
+            Self::Il76 => Some(("IL-76", "IL-76 Mainstay (AIR)")),
+            Self::E2 => Some(("E-2C", "E-2C Hawkeye (AIR)")),
+            Self::Av8 => Some(("Av-8", "Av-8B Harrier II")),
+            Self::Yak141 => Some(("Yak-141", "Yak-141 Freestyle-A")),
+            Self::V22 => Some(("V-22", "V-22 Osprey")),
+            Self::Ah64 => Some(("AH-64", "AH-64 Apache")),
+            Self::Mi24 => Some(("Mi-24", "Mi-24 Hind-D")),
+            Self::Ch47 => Some(("CH-47", "CH-47 Chinook")),
+            Self::Mig17 => Some(("MiG-17", "MiG-17F Fresco")),
+            Self::F4B => Some(("F-4B", "F-  4B Phantom II")),
+            Self::F4J => Some(("F-4J", "F-  4J Phantom II")),
+            Self::F4E => Some(("F-4", "F-  4E (Desert) Phantom")),
+            Self::F4G => Some(("F-4G", "F-  4G Wild Weasel Phantom")),
+            Self::A7 => Some(("A-7", "A- 7E Corsair II")),
+            Self::F15 => Some(("F-15", "F- 15C Eagle")),
+            Self::F16C => Some(("F-16C", "F- 16C Falcon")),
+            Self::F104 => Some(("F-104", "F-104N Starfighter")),
+            Self::A10 => Some(("A-10", "A-10 Thunderbolt")),
+            Self::B747 => Some(("B747", "Boeing 747")),
+            Self::A310 => Some(("A310", "Airbus 310")),
+            _ => None,
         }
     }
-    pub fn gun(self) -> &'static str {
+    /// Installed source radar, absent when the PT has no radar channel.
+    pub fn radar(self) -> Option<&'static str> {
         match self {
-            Self::F18 => "M61.JT",
-            Self::Rafale => "DEFA.JT",
-            Self::F14 => "M61.JT",
-            Self::A4E => "MK12.JT",
-            Self::X31 => "M61.JT",
-            Self::Mig29 => "GSH301.JT",
-            Self::Su27 => "GSH301.JT",
-            Self::Mig21 => "GSH23.JT",
-            Self::Su25 => "GSH301.JT",
-            Self::Mig23 => "GSH6_30.JT",
-            Self::Su35 => "GSH301.JT",
-            Self::F22 | Self::F22n | Self::Faxx => "M61.JT",
+            Self::F18 => Some("F18R.SEE"),
+            Self::Rafale => Some("F18R.SEE"),
+            Self::F14 => Some("F14R.SEE"),
+            Self::A4E => Some("F4BR.SEE"),
+            Self::X31 => Some("F18R.SEE"),
+            Self::Mig29 => Some("MIG29R.SEE"),
+            Self::Su27 => Some("SU27R.SEE"),
+            Self::Mig21 => Some("MIG21R.SEE"),
+            Self::Su25 => Some("SU24R.SEE"),
+            Self::Mig23 => Some("MIG27R.SEE"),
+            Self::Su35 => Some("SU27R.SEE"),
+            Self::F22 => Some("F22R.SEE"),
+            Self::F22n => Some("F22R.SEE"),
+            Self::Faxx => Some("F22R.SEE"),
+            Self::C130 => None,
+            Self::Ac130 => Some("AC130R.SEE"),
+            Self::E3 => Some("E3R.SEE"),
+            Self::Il76 => Some("E3R.SEE"),
+            Self::E2 => Some("E2R.SEE"),
+            Self::Av8 => Some("AV8R.SEE"),
+            Self::Yak141 => Some("YAK141R.SEE"),
+            Self::V22 => None,
+            Self::Ah64 => Some("F18R.SEE"),
+            Self::Mi24 => None,
+            Self::Ch47 => None,
+            Self::Mig17 => None,
+            Self::F4B => Some("F4BR.SEE"),
+            Self::F4J => Some("F4JR.SEE"),
+            Self::F4E => Some("F18R.SEE"),
+            Self::F4G => Some("F18R.SEE"),
+            Self::A7 => Some("A7R.SEE"),
+            Self::F15 => Some("F15R.SEE"),
+            Self::F16C => Some("F18R.SEE"),
+            Self::F104 => Some("F104R.SEE"),
+            Self::A10 => Some("A10R.SEE"),
+            Self::B747 => None,
+            Self::A310 => None,
         }
+    }
+    /// Primary installed gun. Multi-gun identities expose every type in `guns`.
+    pub fn gun(self) -> Option<&'static str> {
+        self.guns().first().copied()
+    }
+    /// Source gun types. An empty slice means the aircraft is unarmed with guns.
+    pub fn guns(self) -> &'static [&'static str] {
+        match self {
+            Self::F18 => &["M61.JT"],
+            Self::Rafale => &["DEFA.JT"],
+            Self::F14 => &["M61.JT"],
+            Self::A4E => &["MK12.JT"],
+            Self::X31 => &["M61.JT"],
+            Self::Mig29 => &["GSH301.JT"],
+            Self::Su27 => &["GSH301.JT"],
+            Self::Mig21 => &["GSH23.JT"],
+            Self::Su25 => &["GSH301.JT"],
+            Self::Mig23 => &["GSH6_30.JT"],
+            Self::Su35 => &["GSH301.JT"],
+            Self::F22 => &["M61.JT"],
+            Self::F22n => &["M61.JT"],
+            Self::Faxx => &["M61.JT"],
+            Self::C130 => &[],
+            Self::Ac130 => &["C_25.JT", "C_40.JT", "C_105.JT"],
+            Self::E3 => &[],
+            Self::Il76 => &[],
+            Self::E2 => &[],
+            Self::Av8 => &["GAU12.JT"],
+            Self::Yak141 => &["GSH30.JT"],
+            Self::V22 => &["T30_1.JT"],
+            Self::Ah64 => &["M61.JT"],
+            Self::Mi24 => &["T12_4.JT"],
+            Self::Ch47 => &[],
+            Self::Mig17 => &["GSH30.JT", "GSH23.JT"],
+            Self::F4B => &[],
+            Self::F4J => &["SUU16.JT"],
+            Self::F4E => &["M61.JT"],
+            Self::F4G => &["M61.JT"],
+            Self::A7 => &["M61.JT"],
+            Self::F15 => &["M61.JT"],
+            Self::F16C => &["M61.JT"],
+            Self::F104 => &["M61.JT"],
+            Self::A10 => &["GAU8.JT"],
+            Self::B747 => &[],
+            Self::A310 => &[],
+        }
+    }
+    /// Reviewed optional left, centre and right cockpit overlays.
+    pub fn cockpit_overlays(self) -> [Option<String>; 3] {
+        let available = match self.cockpit_stem() {
+            "AC130" | "M17" | "F16" | "F31" | "M21" | "F22" => [false; 3],
+            "SU33" | "Y141" | "F104" => [true, false, true],
+            _ => [true; 3],
+        };
+        std::array::from_fn(|i| {
+            available[i].then(|| format!("~{}_{}H.PIC", self.cockpit_stem(), ["L", "C", "R"][i]))
+        })
+    }
+    /// Whether this reviewed source identity supplies an inert PTS companion.
+    pub fn has_pts(self) -> bool {
+        !matches!(
+            self.source(),
+            Self::Mig29
+                | Self::Su27
+                | Self::Su25
+                | Self::Mig23
+                | Self::C130
+                | Self::E3
+                | Self::Il76
+                | Self::E2
+                | Self::V22
+                | Self::Ah64
+                | Self::Mi24
+                | Self::Ch47
+                | Self::F4E
+                | Self::F4G
+                | Self::F15
+                | Self::A10
+                | Self::B747
+                | Self::A310
+        )
     }
 }
 #[derive(Debug)]
@@ -431,6 +794,29 @@ impl Aircraft {
         let size = match id {
             AircraftId::F14 | AircraftId::F22 | AircraftId::F22n | AircraftId::Mig29 => 636,
             AircraftId::A4E | AircraftId::Mig21 => 612,
+            AircraftId::C130 => 468,
+            AircraftId::Ac130 => 612,
+            AircraftId::E3 => 516,
+            AircraftId::Il76 => 516,
+            AircraftId::E2 => 516,
+            AircraftId::Av8 => 660,
+            AircraftId::Yak141 => 588,
+            AircraftId::V22 => 540,
+            AircraftId::Ah64 => 636,
+            AircraftId::Mi24 => 516,
+            AircraftId::Ch47 => 468,
+            AircraftId::Mig17 => 540,
+            AircraftId::F4B => 612,
+            AircraftId::F4J => 636,
+            AircraftId::F4E => 636,
+            AircraftId::F4G => 636,
+            AircraftId::A7 => 612,
+            AircraftId::F15 => 588,
+            AircraftId::F16C => 660,
+            AircraftId::F104 => 660,
+            AircraftId::A10 => 660,
+            AircraftId::B747 => 468,
+            AircraftId::A310 => 468,
             _ => 660,
         };
         if object["structType"].number()? != 5 || object["typeSize"].number()? != size {
@@ -441,21 +827,7 @@ impl Aircraft {
         if !names[2].eq_ignore_ascii_case(id.pt()) {
             return Err(invalid("aircraft identity must name its PT resource"));
         }
-        let expected_names = match id {
-            AircraftId::F14 => Some(("F-14", "F- 14D Tomcat")),
-            AircraftId::A4E => Some(("A-4E", "A- 4E Skyhawk")),
-            AircraftId::X31 => Some(("X-31", "X-31 EFM")),
-            AircraftId::Mig29 => Some(("MiG-29", "MiG-29 Fulcrum-C")),
-            AircraftId::Su27 => Some(("Su-27", "Su-27 Flanker-B")),
-            AircraftId::Mig21 => Some(("MiG-21", "MiG-21 Fishbed")),
-            AircraftId::Su25 => Some(("Su-25", "Su-25 Frogfoot-A")),
-            AircraftId::Mig23 => Some(("MiG-23", "MiG-23 Flogger-B")),
-            AircraftId::Su35 => Some(("Su-35", "Su-35")),
-            AircraftId::F22 => Some(("F-22", "F- 22A Raptor")),
-            AircraftId::F22n => Some(("F-22", "F- 22N Raptor")),
-
-            _ => None,
-        };
+        let expected_names = id.reviewed_names();
         if expected_names.is_some_and(|(short, long)| names[0] != short || names[1] != long) {
             return Err(invalid("unreviewed FA aircraft variant"));
         }
@@ -701,10 +1073,7 @@ pub fn dependency_report(
         }
         // These reviewed FA profiles have no compiled PTS companion. Runtime
         // flight and editable loadouts use PT data, never the inert PTS code.
-        if !matches!(
-            id,
-            AircraftId::Mig29 | AircraftId::Su27 | AircraftId::Su25 | AircraftId::Mig23
-        ) {
+        if id.has_pts() {
             let pts = id.pt().replace(".PT", ".PTS");
             if !catalog.contains(&pts) {
                 return Err(invalid(&format!("aircraft import missing {pts}")));
@@ -752,6 +1121,31 @@ pub fn dependency_report(
         }
     }
     let mut edges = BTreeSet::new();
+    // These reviewed editable rows lack an appropriate default-JT reference.
+    // The host retains a real compatible selection at zero count; it must be
+    // readable even in aircraft-only profiles. This is not a retail PT pointer.
+    for &id in aircraft {
+        let seed = match id {
+            AircraftId::Mig17 => Some((3, "MK82.JT")),
+            AircraftId::Mig23 => Some((5, "AIM9M.JT")),
+            _ => None,
+        };
+        if let Some((hardpoint, name)) = seed {
+            if !catalog.contains(name) {
+                return Err(invalid(&format!(
+                    "{} -> host retained selection at hardpoint {hardpoint} -> missing dependency {name}",
+                    id.pt()
+                )));
+            }
+            selected.insert(name.into());
+            edges.insert(DependencyEdge {
+                source: id.pt().into(),
+                target: name.into(),
+                kind: "host-retained-station-seed",
+                available: true,
+            });
+        }
+    }
     for name in &selected {
         edges.insert(DependencyEdge {
             source: if COMBAT_RESOURCES.contains(&name.as_str()) {
@@ -779,6 +1173,21 @@ pub fn dependency_report(
             .find(|a| a.entries.contains_key(&name))
             .ok_or_else(|| invalid("missing dependency"))?;
         let bytes = a.read(&name)?;
+        // Reviewed GAS records carry names and mass, not an icon pointer.
+        // Their original menu art uses the same generated filename as the UI.
+        if let Some(stem) = name.strip_suffix(".GAS") {
+            let icon = format!("${stem}.PIC");
+            let available = catalog.contains(&icon);
+            edges.insert(DependencyEdge {
+                source: name.clone(),
+                target: icon.clone(),
+                kind: "generated-tank-thumbnail",
+                available,
+            });
+            if available && selected.insert(icon.clone()) {
+                pending.push(icon);
+            }
+        }
         let refs = references(&bytes);
         // BRF strings and symbols are typed edges. Never execute a symbol.
         if bytes.starts_with(b"[brent's_relocatable_format]") {
@@ -909,6 +1318,52 @@ mod tests {
         for id in AircraftId::SELECTABLE {
             assert_eq!(AircraftId::parse(id.selection_key()).unwrap(), id);
         }
+    }
+
+    #[test]
+    fn variety_capabilities_preserve_missing_and_multiple_source_guns() {
+        use super::AircraftId;
+        for id in [
+            AircraftId::C130,
+            AircraftId::E3,
+            AircraftId::Il76,
+            AircraftId::E2,
+            AircraftId::Ch47,
+            AircraftId::F4B,
+            AircraftId::B747,
+            AircraftId::A310,
+        ] {
+            assert_eq!(id.gun(), None);
+            assert!(id.guns().is_empty());
+        }
+        for id in [
+            AircraftId::C130,
+            AircraftId::V22,
+            AircraftId::Mi24,
+            AircraftId::Ch47,
+            AircraftId::Mig17,
+            AircraftId::B747,
+            AircraftId::A310,
+        ] {
+            assert_eq!(id.radar(), None);
+        }
+        assert_eq!(
+            AircraftId::Ac130.guns(),
+            &["C_25.JT", "C_40.JT", "C_105.JT"]
+        );
+        assert_eq!(AircraftId::Mig17.guns(), &["GSH30.JT", "GSH23.JT"]);
+        assert_eq!(AircraftId::V22.gun(), Some("T30_1.JT"));
+        assert_eq!(AircraftId::F4G.gun(), Some("M61.JT"));
+        assert_eq!(AircraftId::F4J.gun(), Some("SUU16.JT"));
+        assert_eq!(AircraftId::Ah64.radar(), Some("F18R.SEE"));
+        assert_eq!(AircraftId::parse("f4.pt").unwrap(), AircraftId::F4G);
+        assert_ne!(AircraftId::F4B.pt(), AircraftId::F4J.pt());
+        assert!(AircraftId::parse("mig15").is_err());
+        assert!(AircraftId::parse("f4u").is_err());
+        assert_eq!(AircraftId::C130.cockpit_overlays(), [None, None, None]);
+        assert_eq!(AircraftId::F16C.cockpit_overlays(), [None, None, None]);
+        assert_eq!(AircraftId::Yak141.cockpit_overlays()[1], None);
+        assert!(AircraftId::Yak141.cockpit_overlays()[0].is_some());
     }
 
     use super::*;
@@ -1061,6 +1516,29 @@ mod profile_tests {
             (AircraftId::Su35, "Su-35", "Su-35", 660),
             (AircraftId::F22, "F-22", "F- 22A Raptor", 636),
             (AircraftId::F22n, "F-22", "F- 22N Raptor", 636),
+            (AircraftId::C130, "C-130", "C-130 Hercules", 468),
+            (AircraftId::Ac130, "AC-130U", "AC-130U Spectre", 612),
+            (AircraftId::E3, "E-3", "E-3 AWACS Sentry (AIR)", 516),
+            (AircraftId::Il76, "IL-76", "IL-76 Mainstay (AIR)", 516),
+            (AircraftId::E2, "E-2C", "E-2C Hawkeye (AIR)", 516),
+            (AircraftId::Av8, "Av-8", "Av-8B Harrier II", 660),
+            (AircraftId::Yak141, "Yak-141", "Yak-141 Freestyle-A", 588),
+            (AircraftId::V22, "V-22", "V-22 Osprey", 540),
+            (AircraftId::Ah64, "AH-64", "AH-64 Apache", 636),
+            (AircraftId::Mi24, "Mi-24", "Mi-24 Hind-D", 516),
+            (AircraftId::Ch47, "CH-47", "CH-47 Chinook", 468),
+            (AircraftId::Mig17, "MiG-17", "MiG-17F Fresco", 540),
+            (AircraftId::F4B, "F-4B", "F-  4B Phantom II", 612),
+            (AircraftId::F4J, "F-4J", "F-  4J Phantom II", 636),
+            (AircraftId::F4E, "F-4", "F-  4E (Desert) Phantom", 636),
+            (AircraftId::F4G, "F-4G", "F-  4G Wild Weasel Phantom", 636),
+            (AircraftId::A7, "A-7", "A- 7E Corsair II", 612),
+            (AircraftId::F15, "F-15", "F- 15C Eagle", 588),
+            (AircraftId::F16C, "F-16C", "F- 16C Falcon", 660),
+            (AircraftId::F104, "F-104", "F-104N Starfighter", 660),
+            (AircraftId::A10, "A-10", "A-10 Thunderbolt", 660),
+            (AircraftId::B747, "B747", "Boeing 747", 468),
+            (AircraftId::A310, "A310", "Airbus 310", 468),
         ] {
             let text = fixture()
                 .replace("F18.PT", id.pt())
@@ -1138,6 +1616,9 @@ mod dependency_tests {
     fn resources() -> BTreeMap<String, Vec<u8>> {
         let mut resources = BTreeMap::new();
         for &name in COMBAT_RESOURCES {
+            resources.insert(name.into(), vec![0]);
+        }
+        for name in ["AIM9M.JT", "MK82.JT"] {
             resources.insert(name.into(), vec![0]);
         }
         for name in ["PALETTE.PAL", "WIN11.FNT", "HUD11.FNT", "FMENUD.MNU"] {
@@ -1261,6 +1742,76 @@ mod dependency_tests {
                 .any(|e| e.kind == "native-symbol-unimplemented" && !e.available)
         );
     }
+    #[test]
+    fn optional_station_seeds_are_explicit_required_host_edges() {
+        for (id, seed) in [
+            (AircraftId::Mig17, "MK82.JT"),
+            (AircraftId::Mig23, "AIM9M.JT"),
+        ] {
+            let archive_with = archive(resources(), None);
+            let report = dependency_report(&[&archive_with], &[id], false).unwrap();
+            assert!(report.resources.contains(seed));
+            assert!(report.edges.iter().any(|edge| edge.source == id.pt()
+                && edge.target == seed
+                && edge.kind == "host-retained-station-seed"
+                && edge.available));
+            let without = archive(resources(), Some(seed));
+            let error = dependency_report(&[&without], &[id], false)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("host retained selection") && error.contains(seed));
+            let unrelated = dependency_report(&[&archive_with], &[AircraftId::F18], false).unwrap();
+            assert!(!unrelated.resources.contains(seed));
+            assert!(dependency_report(&[&without], &[AircraftId::F18], false).is_ok());
+        }
+    }
+
+    #[test]
+    fn tank_thumbnails_follow_selected_gas_across_archives_without_guessing_shapes() {
+        let mut data = resources();
+        data.insert(
+            "F18.PT".into(),
+            b"[brent's_relocatable_format]\nstring \"TEST.GAS\"\nend\n".to_vec(),
+        );
+        data.insert("TEST.GAS".into(), b"[brent's_relocatable_format]\nbyte 8\nptr names\nword 100\nbyte 1\ndword 500\n:names\nstring \"Test\"\nstring \"Test tank\"\nstring \"TEST.GAS\"\nend\n".to_vec());
+        data.insert("OTHER.GAS".into(), b"[brent's_relocatable_format]\nbyte 8\nptr names\nword 200\nbyte 1\ndword 600\n:names\nstring \"Other\"\nstring \"Other tank\"\nstring \"OTHER.GAS\"\nend\n".to_vec());
+        data.insert("TEST.SH".into(), vec![0]);
+        let definitions = archive(data, None);
+        let pictures = archive(
+            BTreeMap::from([
+                ("$TEST.PIC".into(), vec![1]),
+                ("$OTHER.PIC".into(), vec![2]),
+            ]),
+            None,
+        );
+        let report =
+            dependency_report(&[&pictures, &definitions], &[AircraftId::F18], false).unwrap();
+        assert!(report.resources.contains("TEST.GAS"));
+        assert!(report.resources.contains("$TEST.PIC"));
+        assert_eq!(report.providers["$TEST.PIC"], vec![0]);
+        assert!(report.edges.iter().any(|edge| edge.source == "TEST.GAS"
+            && edge.target == "$TEST.PIC"
+            && edge.kind == "generated-tank-thumbnail"
+            && edge.available));
+        assert!(!report.resources.contains("$OTHER.PIC"));
+        assert!(!report.resources.contains("TEST.SH"));
+        let all = dependency_report(&[&pictures, &definitions], &[], true).unwrap();
+        assert!(all.resources.contains("$TEST.PIC") && all.resources.contains("$OTHER.PIC"));
+    }
+    #[test]
+    fn absent_tank_thumbnails_are_explicit_optional_edges() {
+        let mut data = resources();
+        data.insert("TEST.GAS".into(), b"[brent's_relocatable_format]\nbyte 8\nptr names\nword 100\nbyte 1\ndword 500\n:names\nstring \"Test\"\nstring \"Test tank\"\nstring \"TEST.GAS\"\nend\n".to_vec());
+        let definitions = archive(data, None);
+        let report = dependency_report(&[&definitions], &[], true).unwrap();
+        assert!(report.resources.contains("TEST.GAS"));
+        assert!(!report.resources.contains("$TEST.PIC"));
+        assert!(report.edges.iter().any(|edge| edge.source == "TEST.GAS"
+            && edge.target == "$TEST.PIC"
+            && edge.kind == "generated-tank-thumbnail"
+            && !edge.available));
+    }
+
     #[test]
     fn compiled_pts_candidates_remain_explicit_without_inventing_missing_icons() {
         let mut r = resources();

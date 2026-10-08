@@ -272,7 +272,7 @@ pub fn take_system_hits(
                     ));
                 } else {
                     flight.systems.notify(
-                        if terms.radar_failed && hardpoint == config.radar_hardpoint {
+                        if terms.radar_failed && Some(hardpoint) == config.radar_hardpoint {
                             "Radar failed"
                         } else if terms.visual_failed && hardpoint == config.visual_hardpoint {
                             "Visual sensor failed"
@@ -282,7 +282,7 @@ pub fn take_system_hits(
                             "Infrared sensor failed"
                         } else if Some(hardpoint) == config.rwr_hardpoint {
                             "RWR failed"
-                        } else if hardpoint == config.ecm_hardpoint {
+                        } else if Some(hardpoint) == config.ecm_hardpoint {
                             "Countermeasure equipment damaged"
                         } else {
                             "Hardpoint equipment damaged"

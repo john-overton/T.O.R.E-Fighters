@@ -211,6 +211,27 @@ fn record_input(fp: &mut Fingerprint, input: &PilotInput) {
     fp.f64(input.yaw);
     fp.f64(input.throttle_rate);
     fp.option(input.throttle, |fp, throttle| fp.f64(throttle));
+    let extra = [
+        input.vector_pitch_rate,
+        input.vector_yaw_rate,
+        input.conversion_rate,
+        input.collective_rate,
+    ];
+    let positions = [
+        input.vector_pitch,
+        input.vector_yaw,
+        input.conversion,
+        input.collective,
+    ];
+    if extra.iter().any(|v| *v != 0.) || positions.iter().any(Option::is_some) {
+        fp.u64(0x766563746f72);
+        for value in extra {
+            fp.f64(value);
+        }
+        for position in positions {
+            fp.option(position, |fp, value| fp.f64(value));
+        }
+    }
     fp.count(input.commands.len());
     for command in &input.commands {
         match *command {
@@ -232,6 +253,17 @@ fn record_input(fp: &mut Fingerprint, input: &PilotInput) {
                 fp.u64(5);
                 fp.f64(value);
             }
+            PilotCommand::SetAxis(axis, value) => {
+                fp.u64(6);
+                fp.name(&axis);
+                fp.f64(value);
+            }
+            PilotCommand::AdjustAxis(axis, value) => {
+                fp.u64(7);
+                fp.name(&axis);
+                fp.f64(value);
+            }
+            PilotCommand::NeutralVector => fp.u64(8),
         }
     }
 }
@@ -255,6 +287,22 @@ fn record_threat(fp: &mut Fingerprint, record: &crate::combat::threats::ThreatRe
 /// configuration are left out; the private lift memory shows up through the
 /// state it drives.
 fn record_flight(fp: &mut Fingerprint, s: &crate::flight::State) {
+    if s.model().powered_lift().is_some() {
+        let controls = s.lift_controls;
+        for value in [
+            controls.vector_pitch,
+            controls.vector_yaw,
+            controls.conversion,
+            controls.collective,
+            controls.vector_pitch_actual,
+            controls.vector_yaw_actual,
+            controls.conversion_actual,
+            controls.collective_actual,
+            controls.thrust_lbf,
+        ] {
+            fp.f64(value);
+        }
+    }
     fp.vector(s.position);
     fp.f64(s.yaw);
     fp.f64(s.pitch);

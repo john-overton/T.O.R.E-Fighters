@@ -22,7 +22,7 @@ use crate::ai::{ScalarSpeed, SpeedLimits};
 use crate::airport::ApproachEnd;
 use crate::attitude::Basis;
 use crate::sensors::passive::{Emitter, Symbol};
-use tore_input::{PilotCommand, PilotInput, Switch};
+use tore_input::{FlightAxis, PilotCommand, PilotInput, Switch};
 
 // The types with an exact own-plane coder already: one coder to keep
 // complete, not two.
@@ -58,6 +58,29 @@ crate::checkpoint_enum!(tore_formats::aircraft::AircraftId {
     F22 = 11,
     F22n = 12,
     Faxx = 13,
+    C130 = 14,
+    Ac130 = 15,
+    E3 = 16,
+    Il76 = 17,
+    E2 = 18,
+    Av8 = 19,
+    Yak141 = 20,
+    V22 = 21,
+    Ah64 = 22,
+    Mi24 = 23,
+    Ch47 = 24,
+    Mig17 = 25,
+    F4B = 26,
+    F4J = 27,
+    F4E = 28,
+    F4G = 29,
+    A7 = 30,
+    F15 = 31,
+    F16C = 32,
+    F104 = 33,
+    A10 = 34,
+    B747 = 35,
+    A310 = 36,
 });
 
 crate::checkpoint_tuple!(Side(side));
@@ -331,6 +354,13 @@ crate::checkpoint_enum!(Switch {
     WaypointAutopilot = 10,
 });
 
+crate::checkpoint_enum!(FlightAxis {
+    VectorPitch = 0,
+    VectorYaw = 1,
+    Conversion = 2,
+    Collective = 3,
+});
+
 impl Checkpoint for PilotCommand {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
         match self {
@@ -352,6 +382,17 @@ impl Checkpoint for PilotCommand {
                 s.writer().write_varint(4);
                 value.save(s, None)?;
             }
+            Self::SetAxis(axis, value) => {
+                s.writer().write_varint(5);
+                axis.save(s, None)?;
+                value.save(s, None)?;
+            }
+            Self::AdjustAxis(axis, value) => {
+                s.writer().write_varint(6);
+                axis.save(s, None)?;
+                value.save(s, None)?;
+            }
+            Self::NeutralVector => s.writer().write_varint(7),
         }
         Ok(())
     }
@@ -362,6 +403,9 @@ impl Checkpoint for PilotCommand {
             2 => Self::Set(Checkpoint::load(l, None)?, Checkpoint::load(l, None)?),
             3 => Self::Throttle(Checkpoint::load(l, None)?),
             4 => Self::AdjustThrottle(Checkpoint::load(l, None)?),
+            5 => Self::SetAxis(Checkpoint::load(l, None)?, Checkpoint::load(l, None)?),
+            6 => Self::AdjustAxis(Checkpoint::load(l, None)?, Checkpoint::load(l, None)?),
+            7 => Self::NeutralVector,
             other => return invalid(format!("PilotCommand has no variant {other}")),
         })
     }
@@ -373,5 +417,13 @@ crate::checkpoint_struct!(PilotInput {
     yaw,
     throttle_rate,
     throttle,
+    vector_pitch_rate,
+    vector_yaw_rate,
+    conversion_rate,
+    collective_rate,
+    vector_pitch,
+    vector_yaw,
+    conversion,
+    collective,
     commands,
 });

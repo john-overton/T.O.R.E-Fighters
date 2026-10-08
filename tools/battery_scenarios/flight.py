@@ -12,8 +12,9 @@ import time
 
 from battery import Scenario
 
-# The fourteen flyable identities, `AircraftId::SELECTABLE`.
+# Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
+VARIETY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "av8", "yak141", "v22", "ah64", "mi24", "ch47", "mig17", "f4b", "f4j", "f4e", "f4g", "a7", "f15", "f16c", "f104", "a10", "b747", "a310"]
 # Aircraft whose PT disables spins (X-31 flag, F-22 family): they never enter one.
 SPIN_IMMUNE = {"x31", "f22", "f22n", "faxx"}
 
@@ -2007,6 +2008,29 @@ def daytime_scenarios() -> list[Scenario]:
     return out
 
 
+def check_variety_flight(output: str) -> list[str]:
+    problems = extremes_problems(output)
+    if "flight_model=hybrid" not in output or "crashed=false" not in output:
+        problems.append("variety aircraft did not complete a live hybrid flight")
+    if _plain_numbers(output).get("ticks") != "1200":
+        problems.append("variety flight did not complete 1,200 ticks")
+    return problems
+
+
+def variety_scenarios() -> list[Scenario]:
+    """Every new identity loads its own app assets and flies without a display.
+
+    Hover/conversion numerical checks live in the shared powered-flight tests
+    and the source-backed variety_flight example, not the jet-only maneuvers.
+    """
+    return [Scenario(
+        name=f"flight-variety-{aircraft}", lane="flight",
+        args=["--headless-flight", "1200", "--aircraft", aircraft,
+              "--researched-flight", "--no-audio", "--no-controllers"],
+        check=check_variety_flight, timeout=120,
+    ) for aircraft in VARIETY_AIRCRAFT]
+
+
 def scenarios() -> list[Scenario]:
     return (
         takeoff_scenarios()
@@ -2044,4 +2068,5 @@ def scenarios() -> list[Scenario]:
         + waypoint_scenarios()
         + climb_scenarios()
         + sprint_scenarios()
+        + variety_scenarios()
     )

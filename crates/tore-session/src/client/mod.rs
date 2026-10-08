@@ -1637,7 +1637,7 @@ impl Client {
             })
             .chain(drawn.pilots)
             .collect();
-        let picture = RenderSnapshot {
+        let mut picture = RenderSnapshot {
             tick: render.max(0.) as u64,
             player,
             targets,
@@ -1653,6 +1653,19 @@ impl Client {
             wire.cockpit_readout(&presented, Some(&mission.world.terrain.airport_scene))
                 .and_then(Result::ok)
         });
+        if let Some(readout) = &readout {
+            presented.gun_aim = std::array::from_fn(|mount| {
+                [
+                    readout.stores.gun_aim[mount * 2],
+                    readout.stores.gun_aim[mount * 2 + 1],
+                ]
+            });
+            presented.gun_group = readout.stores.gun_group;
+            if let Some(devices) = &mut picture.player.devices {
+                devices[15..21].copy_from_slice(&readout.stores.gun_aim);
+                devices[21] = f64::from(readout.stores.gun_group);
+            }
+        }
         Some(ClientFrame {
             seat: seat.seat,
             plane: PlaneId(plane),

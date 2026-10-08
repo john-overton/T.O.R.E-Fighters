@@ -240,6 +240,86 @@ fail import or loading. VIS240 joins VIS340 as a reviewed source visual sensor
 for the new default stations. Default guns/stores join the existing manually
 controlled service and loadout allowlist, not a claim of all-JT support.
 
+## F-4 variant comparison
+
+Research, 2026-10-05, for the [variety batch](../spec/aircraft-variety.md).
+Compared the four decompressed PT records from the catalog extraction using
+`tools/catalog_fa.py` and the shared Rust field schema. The installed
+`FA_2.LIB` SHA-256 matches the [catalog source identity](fa-catalog.md).
+This is a data comparison, not a flight test or retail trajectory comparison.
+
+| PT | Empty lb | Internal fuel lb | Maximum takeoff lb | Military thrust lbf | Afterburner thrust lbf |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| F4B.PT | 30,328 | 12,290 | 61,795 | 23,260 | 35,800 |
+| F4J.PT | 30,328 | 12,290 | 61,795 | 23,260 | 35,800 |
+| F4E.PT | 31,853 | 12,290 | 51,000 | 23,620 | 35,800 |
+| F4.PT, F-4G | 31,853 | 10,790 | 51,000 | 23,620 | 35,800 |
+
+All four decoded G-envelope tables are identical, including every point in
+every row from -4 through +7 G. B and J have identical decoded PLANE fields.
+Their object records, stations and equipment are not thereby identical.
+Against J, E/G differ in flags, rudder bounds and acceleration/deceleration,
+spinExit, military thrust, afterburner consumption and maximum takeoff weight.
+G additionally differs in internal fuel. E and G PLANE fields differ only in
+internal fuel. The source afterburner consumption values are 19 for B/J and
+27 for E/G; conversion to a player-visible burn rate needs the existing fuel
+contract, not an assumed unit. Raw spinExit is 75 for B/J and -1 for E/G;
+the resulting departure/recovery behavior needs review before model acceptance.
+
+All four name F4.HUD. B and J reference F4J.SH; E references F4E.SH and G
+references F4.SH. Default radar records are F4BR.SEE for B, F4JR.SEE for J,
+and F18R.SEE for E/G. B has no default gun record; J names SUU16.JT, while
+E/G name M61.JT. Do not infer an internal gun from the catalog's gun column:
+it identifies default gun-class records, and station flags still need review.
+G names AGM88.JT, E names AGM65G.JT. These are source references, not proof
+that those weapons' complete behavior is supported. Full defaults stay in
+the [catalog](fa-aircraft.csv).
+
+Decompressed PT SHA-256 values:
+
+| Resource | SHA-256 |
+| --- | --- |
+| F4B.PT | `40ee72698c9e2966bad34466038e3692c351f5ec4cd2c0c572012a043e6567d9` |
+| F4J.PT | `3ebedc917d157403e11b99695f0e6d2845c5643ff388b5c93020648102f6bf13` |
+| F4E.PT | `3c1ca544abd442fa20ceb82b16e0dfc4afc26ad5075a16bbfddda89321d8164c` |
+| F4.PT | `bbd6812a392a222c46273c1dfc1de0235437dca6444b8d4546ee31e54360dd38` |
+
+Open: full dependency closure, variant equipment/capability interpretation,
+shape branches, fuel/departure behavior and flight validation. Next step:
+review these differences against the hybrid configuration consumers and
+write the numerical behavior contract before registering the family.
+
+## F-14 default external fuel
+
+Research, 2026-10-05, for [selectable tanks](../spec/external-fuel-tanks.md).
+The catalog's F14.PT hardpoint at zero-based index 5 names F250.GAS and has
+`maxItems = 2`, which the Rust aircraft reader exposes as the station count.
+It is one source station representing two tanks, not one tank. The source
+GAS record decodes through the existing five-field tank grammar:
+
+| Item | Source value |
+| --- | ---: |
+| Each F250 tank empty mass | 198 lb |
+| Each F250 tank fuel capacity | 1,650 lb |
+| Default count | 2 |
+| Total external fuel under the current default-load rule | 3,300 lb |
+| Total empty tank mass | 396 lb |
+| Total full tank mass | 3,696 lb |
+
+F14.PT SHA-256 is
+`f2bcbcfa275147f7641356fb6d8c5bf6f3772b9131d0634ddba06400d6a861a1`.
+F250.GAS SHA-256 is
+`974e49de6eb22237bf7a1bd24b3ed9308300bbb95270a9c0fe7104892514f0de`.
+The local `aircraft-fa/extraction-report.json` records F250.GAS from FA_2.LIB
+at offset 7,233,849, 152 stored bytes and 205 decoded bytes; its output hash
+matches the inspected file. F14.PT is from the catalog extraction with the
+[catalog archive identity](fa-catalog.md).
+
+These are source values and current load-rule arithmetic. They do not prove
+the user's live starting state, original fill policy, shell jettison behavior,
+or correct visual placement. Next: reproduce the loadout-to-flight path and
+review tank placement and removal separately.
+
 ## Hook capability in original-game exports
 
 The reviewed F22.PT PLANE_TYPE flags at assembled offset 0xba are 0x91. Bit

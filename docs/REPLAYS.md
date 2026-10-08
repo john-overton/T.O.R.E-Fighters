@@ -485,7 +485,7 @@ finishing renames it to its final name. All integers are little endian.
 
 | Part | Contents |
 | --- | --- |
-| Prelude, 12 bytes | `TOREREPL`, the format version (currently 1), two reserved bytes |
+| Prelude, 12 bytes | `TOREREPL`, the format version (currently 2), two reserved bytes |
 | Header chunk | The text header: `key=value` lines in UTF-8 |
 | Data chunks | One to two seconds of frames each (120 by default) |
 | Footer chunk | End tick, the writer's totals and the mission result |
@@ -552,7 +552,7 @@ is positive right wing down.
 
 | Item | Values |
 | --- | --- |
-| Aircraft | Position, attitude, velocity, airspeed, G, the 11 animated devices, engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel (internal and external tanks, see [Versions and damage](#versions-and-damage)), pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
+| Aircraft | Position, attitude, velocity, airspeed, G, the 22 animated devices (including actual nozzle pitch/yaw, nacelle conversion, collective, gun mount poses and linked gun membership), engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel (internal and external tanks, see [Versions and damage](#versions-and-damage)), pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
 | Projectiles | Owner, weapon, target, position, previous position, direction, speed, tracer, inbound on the player, age, and the seeker's state |
 | Debris and ejected pilots | Position and attitude or heading |
 | Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect |
@@ -630,6 +630,16 @@ beyond them.
 
 ### Versions and damage
 
+- Format 2 adds four powered-lift actuator positions, six signed gun mount
+  coordinates and discrete linked gun membership to each aircraft record. Nozzle pitch, nacelle conversion and collective use the existing
+  0-to-1 device precision; nozzle yaw uses the signed precision. Playback
+  interpolates these actual positions and restores them for aircraft animation.
+  Gun headings are divided by PI and elevations by PI/2. Linked membership
+  is an exact integer from 0 to 7 and changes discretely; malformed masks
+  are rejected.
+  Format 1 records remain readable with their eleven original device slots and
+  eleven neutral extension values. The writer produces format 2; refreshed export
+  goldens identify the new format.
 - The format version is in the prelude. A reader refuses a newer version
   with a plain message. Within a version, unknown sections, unknown chunk
   kinds and unknown header keys are skipped or kept, never fatal.

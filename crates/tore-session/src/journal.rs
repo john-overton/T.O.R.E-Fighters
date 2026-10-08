@@ -341,6 +341,15 @@ fn same_bits(a: f64, b: f64) -> bool {
     a.to_bits() == b.to_bits()
 }
 
+/// Both absent, or both present with the same bits.
+fn same_option(a: Option<f64>, b: Option<f64>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => same_bits(a, b),
+        _ => false,
+    }
+}
+
 /// Codes one seat's input at `tick` against its baseline (protocol 14,
 /// slice K3): the seat; the number of its last command applied, one bit
 /// when the baseline's; the controls as the Inputs section codes them (the
@@ -371,6 +380,14 @@ fn write_seat_input(
         yaw,
         throttle_rate,
         throttle,
+        vector_pitch_rate,
+        vector_yaw_rate,
+        conversion_rate,
+        collective_rate,
+        vector_pitch,
+        vector_yaw,
+        conversion,
+        collective,
         commands: pilot_commands,
     } = pilot;
     let base_input = base.map(|(b, _)| b);
@@ -389,11 +406,15 @@ fn write_seat_input(
         && same_bits(back.roll, *roll)
         && same_bits(back.yaw, *yaw)
         && same_bits(back.throttle_rate, *throttle_rate)
-        && match (back.throttle, throttle) {
-            (None, None) => true,
-            (Some(a), Some(b)) => same_bits(a, *b),
-            _ => false,
-        };
+        && same_option(back.throttle, *throttle)
+        && same_bits(back.vector_pitch_rate, *vector_pitch_rate)
+        && same_bits(back.vector_yaw_rate, *vector_yaw_rate)
+        && same_bits(back.conversion_rate, *conversion_rate)
+        && same_bits(back.collective_rate, *collective_rate)
+        && same_option(back.vector_pitch, *vector_pitch)
+        && same_option(back.vector_yaw, *vector_yaw)
+        && same_option(back.conversion, *conversion)
+        && same_option(back.collective, *collective);
     s.writer().write_bool(on_grid);
     if on_grid {
         let previous = base_input.map(|b| InputFrame::of(&b.pilot, b.trigger, b.sensors));
@@ -405,6 +426,14 @@ fn write_seat_input(
         yaw.save(s, b.map(|b| &b.yaw))?;
         throttle_rate.save(s, b.map(|b| &b.throttle_rate))?;
         throttle.save(s, b.map(|b| &b.throttle))?;
+        vector_pitch_rate.save(s, b.map(|b| &b.vector_pitch_rate))?;
+        vector_yaw_rate.save(s, b.map(|b| &b.vector_yaw_rate))?;
+        conversion_rate.save(s, b.map(|b| &b.conversion_rate))?;
+        collective_rate.save(s, b.map(|b| &b.collective_rate))?;
+        vector_pitch.save(s, b.map(|b| &b.vector_pitch))?;
+        vector_yaw.save(s, b.map(|b| &b.vector_yaw))?;
+        conversion.save(s, b.map(|b| &b.conversion))?;
+        collective.save(s, b.map(|b| &b.collective))?;
         trigger.save(s, base_input.map(|b| &b.trigger))?;
         sensors.save(s, base_input.map(|b| &b.sensors))?;
     }
@@ -468,6 +497,14 @@ fn read_seat_input(
             yaw: Checkpoint::load(l, b.map(|b| &b.yaw))?,
             throttle_rate: Checkpoint::load(l, b.map(|b| &b.throttle_rate))?,
             throttle: Checkpoint::load(l, b.map(|b| &b.throttle))?,
+            vector_pitch_rate: Checkpoint::load(l, b.map(|b| &b.vector_pitch_rate))?,
+            vector_yaw_rate: Checkpoint::load(l, b.map(|b| &b.vector_yaw_rate))?,
+            conversion_rate: Checkpoint::load(l, b.map(|b| &b.conversion_rate))?,
+            collective_rate: Checkpoint::load(l, b.map(|b| &b.collective_rate))?,
+            vector_pitch: Checkpoint::load(l, b.map(|b| &b.vector_pitch))?,
+            vector_yaw: Checkpoint::load(l, b.map(|b| &b.vector_yaw))?,
+            conversion: Checkpoint::load(l, b.map(|b| &b.conversion))?,
+            collective: Checkpoint::load(l, b.map(|b| &b.collective))?,
             commands: Vec::new(),
         };
         let trigger = Checkpoint::load(l, base_input.map(|b| &b.trigger))?;

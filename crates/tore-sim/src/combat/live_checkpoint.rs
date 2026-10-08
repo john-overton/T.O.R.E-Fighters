@@ -56,6 +56,23 @@ crate::checkpoint_enum!(Readiness {
     MaximumRange = 17,
     Altitude = 18,
     FieldOfView = 19,
+    GunArc = 20,
+    GunSlewing = 21,
+    GroupEmpty = 22,
+    GunObscured = 23,
+});
+
+// The AC-130's player-directed gun mounts: their actual slewed angles, the
+// linked membership, the aim point and each gun's readiness are stepped at
+// the fixed tick, so a restore carries them.
+type GunshipState = crate::combat::gunship::State;
+crate::checkpoint_struct!(GunshipState {
+    stations,
+    included,
+    headings,
+    elevations,
+    target,
+    status,
 });
 
 crate::checkpoint_enum!(FriendlyFire { On = 0, Off = 1 });
@@ -310,6 +327,7 @@ crate::checkpoint_struct!(Ownship {
     ammo,
     ever_loaded,
     selected,
+    gunship,
     armed,
     sensors,
     hud_selection,
@@ -514,7 +532,7 @@ mod tests {
     /// rewind, so rounds are in flight with their rewinds recorded.
     fn gun_fight() -> State {
         let mut state = fixture(false);
-        state.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        state.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().unwrap().into();
         let mut row = target(7, [-200., 1000., 1500.], 1000, 0);
         row.velocity = [260., 0., 0.];
         row.radius = 60.;

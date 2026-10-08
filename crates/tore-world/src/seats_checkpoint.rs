@@ -183,6 +183,8 @@ fn save_live(s: &mut Saver, command: Live) -> Result<(), CheckpointError> {
         Live::ToggleTargetJammer => put(s, 23),
         Live::ReleaseChaff => put(s, 24),
         Live::ReleaseFlare => put(s, 25),
+        Live::NextGunGroup => put(s, 26),
+        Live::ToggleGunGroup => put(s, 27),
     }
     Ok(())
 }
@@ -215,6 +217,8 @@ fn load_live(l: &mut Loader<'_>) -> Result<Live, CheckpointError> {
         23 => Live::ToggleTargetJammer,
         24 => Live::ReleaseChaff,
         25 => Live::ReleaseFlare,
+        26 => Live::NextGunGroup,
+        27 => Live::ToggleGunGroup,
         other => return invalid(format!("a combat command has no variant {other}")),
     })
 }
@@ -643,8 +647,19 @@ mod tests {
                 yaw: 0.125,
                 throttle_rate: -1.,
                 throttle: Some(0.75),
+                vector_pitch_rate: 0.5,
+                vector_yaw_rate: -0.25,
+                conversion_rate: 1.,
+                collective_rate: -0.5,
+                vector_pitch: Some(0.25),
+                vector_yaw: Some(-0.5),
+                conversion: None,
+                collective: Some(0.875),
                 commands: vec![
                     PilotCommand::Toggle(Switch::Gear),
+                    PilotCommand::SetAxis(tore_input::FlightAxis::Conversion, 0.5),
+                    PilotCommand::AdjustAxis(tore_input::FlightAxis::VectorYaw, -0.125),
+                    PilotCommand::NeutralVector,
                     PilotCommand::Set(Switch::Burner, true),
                     PilotCommand::Eject,
                 ],

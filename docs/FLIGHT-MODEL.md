@@ -63,7 +63,7 @@ The app defaults to the researched hybrid adapter, requested by John on
 2026-09-16. `--researched-flight` remains an explicit alias; `--legacy-flight`
 selects the previous compatibility model. Selection persists across new free
 flights in that process. It also works
-with `--headless-flight 7200 --maneuver loop`. Twelve aircraft have rendered initial ports; the
+with `--headless-flight 7200 --maneuver loop`. Thirty-seven aircraft identities have flight configurations; the
 [roster guide](aircraft-import.md) lists their identities. Select Rafale with
 `--aircraft rafale` or Quick Mission. Each uses its source-referenced cockpit family and
 its own reviewed exterior device mapping. No F18.SH animation addresses are applied to another shape. The additional
@@ -88,11 +88,39 @@ checks cover full loops, bank symmetry/AoA, wind advection, departure/recovery,
 contact outcomes and fuel consumption. Synthetic unit tests cover pause/render
 rate independence, wind, mass validation and ground behavior without retail data.
 
+## Variety aircraft and powered lift
+
+The [variety flight contract](spec/variety-flight.md) covers seventeen additional
+conventional aircraft and six powered-lift aircraft. Every exact identity owns
+its source mass, fuel, thrust, controls and envelopes. The four F-4 variants
+share algorithms while preserving their own source configuration. Conventional
+variety aircraft use the established hybrid solver. AV8 and YAK141 use fitted
+vector thrust, V22 uses fitted nacelle conversion, and AH64, MI24 and CH47 use
+fitted collective-controlled rotor lift. Ordinary throttle remains engine power.
+Apache and Chinook gear stays down from initialization through simulation and
+commands, matching their visible fixed wheels. Hind gear remains retractable.
+The fits, travel rates, initial clearance and known limits have one home in the
+linked contract. Ground contact uses the complete deployed gear, including
+AV8 central pieces already present in the neutral shape; counting only a switched
+branch missed its lowest nose wheel. These are working approximations, not
+measured retail parity.
+
+Powered controls operate only in the hybrid adapter. Legacy compatibility and
+restricted native research remain separate. Actuator positions and lagged lift
+are tick-owned and included in exact snapshots, so replay and seat transfer
+continue the same flight. The source-backed acceptance probe reads user-owned
+PT files at runtime and checks conventional flight or hover, vertical landing,
+departure, stick/yaw response and forward conversion:
+
+```sh
+cargo run --locked -p tore-sim --example variety_flight -- PATH/FA_2.LIB/AV8.PT PATH/FA_2.LIB/AH64.PT
+```
+
 ## Data and implementation boundaries
 
 | Component | Runtime behavior and provenance |
 | --- | --- |
-| Aircraft selection | Reviewed F18.PT (F/A-18D) and RAFALE.PT (Rafale C), both FA type 5 / size 660. Other identities remain rejected, including RAFALEE/RAFALEF and F18C. |
+| Aircraft selection | Exact reviewed PT identities for the existing roster and the [23-aircraft variety batch](spec/aircraft-variety.md). F18.PT remains the F/A-18D; RAFALE.PT remains the Rafale C. F18C, RAFALEE and RAFALEF are not aliases. |
 | Envelopes and mass | Original G polygons, empty weight, internal fuel, military/AB thrust, consumption and drag/loading fields. Scalars resolve once when creating state; envelope intersection no longer allocates per update. |
 | Attitude and momentum | Shared orthonormal basis, independent velocity and nose direction, full vertical/inverted flight. Float integration, aerodynamic alignment, trim AoA, atmosphere lapse, response and drag normalization are fitted. |
 | Controls | Original roll-rate maximum in the hybrid path; G authority from aircraft envelopes/loading. Response filtering, pitch/yaw coupling and actuator travel are fitted. |

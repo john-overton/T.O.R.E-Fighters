@@ -446,6 +446,21 @@ pub fn readout(
             .filter(|(_, _, count, selected, loaded)| *count > 0 || *selected || *loaded)
             .map(|(_, name, count, selected, _)| (name, count, selected))
             .collect(),
+        gun_group: (config.aircraft == AircraftId::Ac130).then(|| {
+            let names: Vec<_> = ["25", "40", "105"]
+                .into_iter()
+                .enumerate()
+                .filter_map(|(slot, name)| (ro.stores.gun_group & (1 << slot) != 0).then_some(name))
+                .collect();
+            format!(
+                "LINK {}",
+                if names.is_empty() {
+                    "EMPTY".into()
+                } else {
+                    names.join("+")
+                }
+            )
+        }),
         chaff: ro.countermeasures.chaff,
         flares: ro.countermeasures.flares,
         target: ro.targets.display.as_ref().map(|target| {
@@ -573,7 +588,7 @@ pub fn equipment_damage_report(config: &live::Configuration, ro: &CockpitReadout
                 format!("External tank {} damaged", hardpoint + 1)
             } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
                 format!("{} station failed", config.stations[*slot].weapon.hud_name)
-            } else if hardpoint == config.radar_hardpoint {
+            } else if Some(hardpoint) == config.radar_hardpoint {
                 "Radar failed".into()
             } else if hardpoint == config.visual_hardpoint {
                 "Visual sensor failed".into()
@@ -581,7 +596,7 @@ pub fn equipment_damage_report(config: &live::Configuration, ro: &CockpitReadout
                 "Infrared sensor failed".into()
             } else if Some(hardpoint) == config.rwr_hardpoint {
                 "RWR failed".into()
-            } else if hardpoint == config.ecm_hardpoint {
+            } else if Some(hardpoint) == config.ecm_hardpoint {
                 format!(
                     "Countermeasures: jammer {}, chaff {}, flares {}",
                     if ro.damage.ecm_failed {
@@ -621,7 +636,12 @@ pub fn status(
                             .ground_name(id)
                             .map_or_else(|| format!("T{id}"), str::to_owned),
                         t.hp,
-                        if config.stations[i].weapon.seeker.signature == 0 {
+                        if config.stations.get(i).is_none_or(|station| station
+                            .weapon
+                            .seeker
+                            .signature
+                            == 0)
+                        {
                             "VISUAL"
                         } else if ro.estimates.can_lock {
                             "LOCK"
@@ -635,7 +655,10 @@ pub fn status(
     let scope = crate::scope::scope(ro, s, s.sensors);
     format!(
         "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {} | {} {} {:.0}NM {} CONTACTS{}{}",
-        config.stations[i].weapon.name,
+        config
+            .stations
+            .get(i)
+            .map_or("UNARMED", |station| station.weapon.name.as_str()),
         ro.stores.rounds(i),
         ro.estimates.readiness.label(),
         target,
@@ -694,15 +717,18 @@ pub(crate) mod render_hash_tests {
     /// Batches per model, fixture targets with the ownship, combat geometry
     /// beside loaded models, camera poses and ejected pilots.
     const HASHES: [u64; 5] = [
-        0x70a8_9dbd_8b33_c9ff,
-        0xdd1a_67a0_c439_7ced,
+        // Reviewed F/A-18D/Rafale attachment repairs change aircraft vertices,
+        // including the Hornet's retained main-gear art at full stow. Combat,
+        // camera and ejection outputs below are unchanged by that repair.
+        0x6031_e577_f39a_cffe,
+        0x87cb_4458_d06e_7fdc,
         0x2f6c_0a1c_b3b7_f4e5,
         0x7ddb_79bb_1315_bf69,
         0x7e3f_dcdd_a149_201d,
     ];
 
-    /// Where `HASHES` was recorded. The camera poses (`HASHES[3]`) are f64
-    /// angles from trigonometry, whose last bit differs between maths
+    /// Where the retained camera hash (`HASHES[3]`) was recorded. Those f64
+    /// angles come from trigonometry, whose last bit differs between maths
     /// libraries, so, as in tore-sim's golden tests, that hash is compared
     /// only here. The drawn vertices are f32 and match on every CI platform.
     const RECORDED_PLATFORM: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));

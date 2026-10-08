@@ -11,11 +11,13 @@
 //!
 //! Not coded: the second crew member's chute (`crew_escape`, which a
 //! client's prediction never needs; a checkpoint codes it after this coding,
-//! `checkpoint::save_flight`), the write-only trace, which equality ignores and the next step rewrites, and
-//! the imported tables (the aircraft model and its raw envelope polygons),
-//! which the decoder takes from the caller. The weight-scaled envelopes are
-//! rebuilt from those tables and the coded scale exactly as the step builds
-//! them. The native research adapter is refused.
+//! `checkpoint::save_flight`), the write-only trace, which equality ignores
+//! and the next step rewrites, the display-only gun poses populated in draw
+//! clones (the combat ownship owns their authoritative state), and the
+//! imported tables (the aircraft model and its raw envelope polygons), which
+//! the decoder takes from the caller. The weight-scaled envelopes are rebuilt
+//! from those tables and the coded scale exactly as the step builds them. The
+//! native research adapter is refused.
 
 use crate::flight::State;
 use crate::models::FlightModel;
@@ -364,6 +366,9 @@ impl State {
             roll_rate,
             pitch_rate,
             auxiliary_rates,
+            lift_controls,
+            gun_aim: _,
+            gun_group: _,
             vertical_speed,
             g,
             maneuver,
@@ -437,6 +442,7 @@ impl State {
             roll_rate,
             pitch_rate,
             auxiliary_rates,
+            lift_controls,
             vertical_speed,
             g,
             maneuver,
@@ -529,6 +535,9 @@ impl State {
             roll_rate: get!(roll_rate),
             pitch_rate: get!(pitch_rate),
             auxiliary_rates: get!(auxiliary_rates),
+            lift_controls: get!(lift_controls),
+            gun_aim: [[0.; 2]; 3],
+            gun_group: 0,
             vertical_speed: get!(vertical_speed),
             g: get!(g),
             maneuver: get!(maneuver),

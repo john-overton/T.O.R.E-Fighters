@@ -305,6 +305,11 @@ fn the_shared_leaf_types_round_trip() {
         PilotCommand::Eject,
         PilotCommand::Throttle(0.75),
         PilotCommand::AdjustThrottle(-0.1),
+        PilotCommand::SetAxis(tore_input::FlightAxis::VectorPitch, 0.5),
+        PilotCommand::SetAxis(tore_input::FlightAxis::VectorYaw, -0.5),
+        PilotCommand::AdjustAxis(tore_input::FlightAxis::Conversion, -0.25),
+        PilotCommand::AdjustAxis(tore_input::FlightAxis::Collective, 0.125),
+        PilotCommand::NeutralVector,
     ];
     for switch in switches {
         commands.push(PilotCommand::Toggle(switch));
@@ -317,6 +322,14 @@ fn the_shared_leaf_types_round_trip() {
         yaw: -0.,
         throttle_rate: 0.5,
         throttle: Some(0.9),
+        vector_pitch_rate: 0.5,
+        vector_yaw_rate: -0.25,
+        conversion_rate: 1.,
+        collective_rate: -1.,
+        vector_pitch: Some(0.3),
+        vector_yaw: Some(-0.7),
+        conversion: None,
+        collective: Some(0.6),
         commands,
     });
     same(&PilotInput::default());

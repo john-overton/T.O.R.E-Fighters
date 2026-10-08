@@ -59,6 +59,10 @@ pub(crate) fn entity(rng: &mut SplitMix64, kind: EntityKind, id: u32) -> Entity 
                 surfaces: std::array::from_fn(|_| signed(rng, 127) as i8),
                 speed: signed(rng, 20_000) as i32,
                 throttle: rng.below(256) as u8,
+                lift_levels: std::array::from_fn(|_| rng.below(256) as u8),
+                vector_yaw: signed(rng, 127) as i8,
+                gun_aim: std::array::from_fn(|_| signed(rng, 127) as i8),
+                gun_group: rng.below(8) as u8,
             }),
             engine: EngineState {
                 lit: chance(rng),
@@ -193,6 +197,18 @@ fn frame(rng: &mut SplitMix64) -> InputFrame {
             channel: pick(rng, &[Channel::Radar, Channel::Infrared, Channel::Visual]),
             range_index: rng.below(6) as usize,
             history: chance(rng),
+        },
+        powered_lift: super::inputs::PoweredLiftInput {
+            rates: std::array::from_fn(|_| signed(rng, 127) as i8),
+            positions: std::array::from_fn(|i| {
+                chance(rng).then(|| {
+                    if i == 1 {
+                        signed(rng, 32767) as i16
+                    } else {
+                        rng.below(32768) as i16
+                    }
+                })
+            }),
         },
     }
 }
@@ -445,6 +461,34 @@ fn events_round_trip() {
             EventsSection::decode(&section.encode().unwrap()).unwrap(),
             section
         );
+    }
+}
+
+#[test]
+fn tank_loadout_messages_preserve_explicit_empty_and_source_defaults() {
+    use super::messages::Loadout;
+    use tore_world::mission::{LoadoutSpec, TankLoad};
+    for tanks in [
+        None,
+        Some(vec![]),
+        Some(vec![TankLoad {
+            hardpoint: 5,
+            tank: "SYNTHETIC.GAS".into(),
+            quantity: 2,
+        }]),
+    ] {
+        let message = Message::Loadout(Box::new(Loadout {
+            mission: 7,
+            plane: 2,
+            loadout: Some(LoadoutSpec {
+                fuel_lbs: 15741.,
+                cheat: false,
+                stations: vec![],
+                tanks,
+            }),
+        }));
+        let bytes = message.encode().unwrap();
+        assert_eq!(Message::decode(message.kind(), &bytes).unwrap(), message);
     }
 }
 

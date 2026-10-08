@@ -18,30 +18,17 @@ use tore_formats::aircraft::AircraftId;
 pub mod sort;
 
 /// Whether an aircraft type has a radar. The F-22N and the F/A-XX take the
-/// F-22A's row, as they take its sensors, because the match reads
-/// [`AircraftId::source`]. Every aircraft needs a row: the match has no
-/// wildcard, so a new aircraft does not compile until it has one.
+/// F-22A's row, as they take its sensors, because it reads
+/// [`AircraftId::source`]. The answer is the aircraft's installed radar
+/// record ([`AircraftId::radar`], whose match has no wildcard, so a new
+/// aircraft does not compile until it says whether it has one).
 ///
-/// Every aircraft ported so far has a radar record, so every row is `true`;
-/// `--sensor-summary` lists each one's radar. The flag is here for the first
-/// aircraft that has none.
+/// The fourteen original selectable aircraft all have a radar. Of the
+/// variety import's aircraft, the C-130, V-22, Mi-24, CH-47, MiG-17F, 747
+/// and A310 have none (docs/formats/aircraft-variety.md); they stay linked,
+/// and their players see no link cues on displays they do not have.
 pub fn has_radar(id: AircraftId) -> bool {
-    match id.source() {
-        AircraftId::F18
-        | AircraftId::Rafale
-        | AircraftId::F14
-        | AircraftId::A4E
-        | AircraftId::X31
-        | AircraftId::Mig29
-        | AircraftId::Su27
-        | AircraftId::Mig21
-        | AircraftId::Su25
-        | AircraftId::Mig23
-        | AircraftId::Su35
-        | AircraftId::F22
-        | AircraftId::F22n
-        | AircraftId::Faxx => true,
-    }
+    id.source().radar().is_some()
 }
 
 #[cfg(test)]
@@ -63,9 +50,26 @@ mod tests {
     }
 
     #[test]
-    fn every_ported_aircraft_has_a_radar() {
+    fn the_aircraft_without_a_radar_are_the_seven_variety_types() {
         // The sensor summary of the imported data lists a radar for each of
-        // the fourteen selectable aircraft.
-        assert!(AircraftId::SELECTABLE.into_iter().all(has_radar));
+        // the fourteen original selectable aircraft; the variety import
+        // installs none on seven of its types.
+        let without: Vec<AircraftId> = AircraftId::SELECTABLE
+            .into_iter()
+            .filter(|id| !has_radar(*id))
+            .collect();
+        assert_eq!(
+            without,
+            [
+                AircraftId::C130,
+                AircraftId::V22,
+                AircraftId::Mi24,
+                AircraftId::Ch47,
+                AircraftId::Mig17,
+                AircraftId::B747,
+                AircraftId::A310,
+            ]
+        );
+        assert!(AircraftId::SELECTABLE[..14].iter().all(|id| has_radar(*id)));
     }
 }

@@ -43,12 +43,13 @@ from typing import Iterable, Optional, Sequence
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Flight lane.
+    "flight-animation": ("reviewed CPU control-surface and device poses", ("flight-animation-*",)),
     "flight-maneuvers": (
         "flight model in the air: level, pull, loop, roll, bank, sprint, climb, overspeed, G, autopilot",
         (
             "flight-level-*", "flight-pull-*", "flight-loop-*", "flight-roll-*", "flight-bank-*",
             "flight-sprint-*", "flight-climb-*", "flight-overspeed-*", "flight-combatg-*",
-            "flight-autopilot-*", "flight-waypoint-*", "flight-lateral-rudder-*",
+            "flight-autopilot-*", "flight-waypoint-*", "flight-lateral-rudder-*", "flight-variety-*",
         ),
     ),
     "flight-stall": (
@@ -135,7 +136,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "replay-snapshot-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
-        ("menus-start-*", "menus-loadout-*", "menus-validate-creator", "menus-snap-quick-*"),
+        ("menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-validate-creator", "menus-snap-quick-*"),
     ),
     "menus-validate": (
         "text, maps, weather, creator and ILS validators",
@@ -559,7 +560,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/canvas_present.rs", RENDER_FAMILIES, "presentation", windowed=True),
     _r("crates/tore-app/src/static_art.rs", RENDER_FAMILIES, "art", windowed=True),
     _r("crates/tore-app/src/*_art.rs", RENDER_FAMILIES, "art", windowed=True),
-    _r("crates/tore-app/src/*animation.rs", RENDER_FAMILIES, "animation", windowed=True),
+    _r("crates/tore-app/src/aircraft_animation_probe*", ("flight-animation",), "CPU animation witnesses"),
+    _r("crates/tore-app/src/*animation.rs", RENDER_FAMILIES + ("flight-animation",), "animation", windowed=True),
     _r("crates/tore-app/src/engine_material.rs", RENDER_FAMILIES, "materials", windowed=True),
     _r("crates/tore-app/src/f14_geometry.rs", ("flight-views",), "F-14 source geometry repairs", windowed=True),
     _r("crates/tore-app/src/surface_lighting.rs", RENDER_FAMILIES, "lighting", windowed=True),
@@ -578,6 +580,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/locate.rs", ("menus-screens", "replay-settings"), "locate screen", windowed=True),
     _r("crates/tore-app/src/quick_mission.rs", MENU_FAMILIES + ("airports",), "Quick Mission creator", windowed=True),
     _r("crates/tore-app/src/quick_mission/*", MENU_FAMILIES + ("airports",), "Quick Mission creator", windowed=True),
+    _r("crates/tore-app/src/ordnance_audit.rs", ("menus-creator",), "ordnance availability probe"),
     _r("crates/tore-app/src/ordnance.rs", ("menus-creator", "flight-combat"), "ordnance page", windowed=True),
     _r("crates/tore-app/src/controls_editor.rs", ("menus-screens", "replay-input"), "controls screen", windowed=True),
     _r("crates/tore-app/src/sound_screen.rs", ("menus-screens", "replay-settings"), "sound screen", windowed=True),
@@ -661,6 +664,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_quick_check.py", (), "the quick check's tests", unit_tests=("test_quick_check",)),
     _r("tools/battery.py", ("flight-maneuvers", "net-check"), "the battery runner (one cheap scenario of each kind runs end to end)", unit_tests=("test_battery", "test_battery_selection", "test_battery_net")),
     _r("tools/test_battery.py", (), "the battery runner's tests", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/animation.py", ("flight-animation",), "CPU animation regressions", unit_tests=("test_battery_animation",)),
     _r("tools/battery_scenarios/flight.py", LANE_SMOKE["flight"], "flight scenarios", unit_tests=("test_battery_flight",)),
     _r("tools/test_battery_flight.py", (), "flight scenario tests", unit_tests=("test_battery_flight",)),
     _r("tools/battery_scenarios/render.py", ("flight-views",), "render capture scenarios", windowed=True, unit_tests=("test_battery",)),

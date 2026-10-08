@@ -13,7 +13,9 @@
 use super::{Client, ClientConfig, ClientFrame, Race, Sampled};
 use crate::host::BuildId;
 use crate::wire::entity::{EntityKey, EntityKind};
-use crate::wire::inputs::{InputFrame, read_command, write_command};
+use crate::wire::inputs::{
+    InputFrame, read_command, read_powered_lift, write_command, write_powered_lift,
+};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -27,7 +29,7 @@ use tore_sim::sensors::{Channel, Controls as Scope};
 /// The file's first bytes.
 pub const MAGIC: &[u8; 8] = b"TORE-CAP";
 /// The capture format's version.
-pub const FORMAT_VERSION: u16 = 2;
+pub const FORMAT_VERSION: u16 = 3;
 
 /// Record kinds.
 pub mod kind {
@@ -240,6 +242,7 @@ pub fn encode_sampled(sampled: &Sampled) -> Vec<u8> {
     let _ = w.write_bits(channel_code(f.sensors.channel), 2);
     let _ = w.write_bits(f.sensors.range_index.min(15) as u64, 4);
     w.write_bool(f.sensors.history);
+    write_powered_lift(&mut w, f.powered_lift);
     w.write_bool(sampled.view_subject.is_some());
     if let Some(key) = sampled.view_subject {
         let _ = w.write_bits(u64::from(key.kind.code()), 2);
@@ -274,6 +277,8 @@ pub fn decode_sampled(bytes: &[u8]) -> Result<Sampled, CaptureError> {
     };
     let range_index = r.read_bits(4).map_err(bad)? as usize;
     let history = r.read_bool().map_err(bad)?;
+    let powered_lift =
+        read_powered_lift(&mut r).map_err(|_| CaptureError::Damaged("powered-lift controls"))?;
     let view_subject = if r.read_bool().map_err(bad)? {
         let kind = EntityKind::from_code(r.read_bits(2).map_err(bad)? as u8);
         let id = u32::try_from(r.read_varint().map_err(bad)?)
@@ -303,6 +308,7 @@ pub fn decode_sampled(bytes: &[u8]) -> Result<Sampled, CaptureError> {
                 range_index,
                 history,
             },
+            powered_lift,
         },
         commands,
         view_subject,
@@ -732,6 +738,7 @@ mod tests {
                     range_index: 3,
                     history: true,
                 },
+                powered_lift: Default::default(),
             },
             commands: vec![
                 Command::Pilot(PilotCommand::Toggle(Switch::Gear)),

@@ -371,7 +371,9 @@ fn a_moving_stick_on_the_wires_grid_costs_a_few_bytes_a_seat_a_tick() {
     // Over the records' own bytes, which nobody's inputs leave.
     let (_, empty) = through(&fight(0));
     let per_seat = (bytes - empty) as f64 / 2_400.;
-    assert!(per_seat < 5., "{per_seat:.2} bytes a seat a tick");
+    // Protocol 18's eighth change bit, the powered-lift block's, costs a
+    // moving stick an eighth of a byte a tick.
+    assert!(per_seat < 5.25, "{per_seat:.2} bytes a seat a tick");
 }
 
 #[test]

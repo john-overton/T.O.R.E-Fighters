@@ -149,7 +149,7 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (17), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (18), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
 | Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
@@ -1021,11 +1021,26 @@ an escape to a varint; strings are a length byte and UTF-8.
 | Interpolation delay | 6, 0 to 63 |
 | View subject | 1, then kind 2 and id varint |
 | Mismatch | 32 |
-| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1 |
-| Each later tick | 1 bit "same as the tick before"; else 7 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
+| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; powered-lift block (below); scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1 |
+| Each later tick | 1 bit "same as the tick before"; else 8 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope, powered lift), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
 | Command count | 7, 0 to 64 |
 | First command number | 16, when there are commands; the rest follow one by one |
 | Each command | ticks before the newest (varint), a 5-bit code and its fields |
+
+Protocol 18 adds a powered-lift block: one present bit, then four signed rate
+bytes (-127 through 127) and four optional signed 16-bit positions (-32,767
+through 32,767). Axis order is vector pitch, vector yaw, conversion, collective.
+Only vector yaw permits negative positions; other positions cover 0 through
+32,767. An absent block means zero rates and no absolute positions.
+The cockpit stores readout also carries the authoritative six gun angles
+and linked mask for the predicting player, whose remote entity is excluded.
+Combat command codes 26 and 27 select a gun-group candidate and toggle its
+membership. Device mask interpolation is discrete.
+
+Set-axis (code 24) and adjust-axis (code 25) commands carry a two-bit axis
+code plus an optional position or signed step; neutral-vector (code 26) is a
+separate command with no fields. Ordinary
+fixed-wing input pays only the absent bit on the first tick.
 
 The command codes cover every `SeatCommand` (a combat command has its own
 5-bit code, with a heat byte, a distance or a target id where it has one; a
@@ -1062,12 +1077,14 @@ its records in id order.
 | Body against a baseline | 1 bit "moved"; if set, the position residuals after the prediction, the velocity, angle and speed differences, each bucketed (position and velocity 3, 6, 10, 14 or 20 bits; angles 3, 6, 9, 12 or 17; speed 3, 6, 10 or 16); then for each group of slow fields a changed bit, and in a changed group a bit per field and each new value |
 
 The identity fields (full records only): an aircraft's type as 1 bit and its
-place among the fourteen selectable aircraft (4 bits); a projectile's owner
+place among the 37 selectable aircraft (6 bits); a projectile's owner
 (varint), weapon (12-bit name index), shape (1 and 12), target (1 and a
 varint) and whether it is aimed at this player; a debris piece's owner, the
-aircraft whose model draws it (1 and 4) and its damage variant (1 and 3); a
+aircraft whose model draws it (1 and 6) and its damage variant (1 and 3); a
 pilot's aircraft. An aircraft's slow groups are its devices (present, six
-levels at 1/255, three control surfaces at 1/127, the throttle at 1/255; an
+levels at 1/255, three control surfaces at 1/127, the throttle at 1/255, actual vector pitch/conversion/collective at 1/255
+and actual vector yaw at 1/127, six normalized gun-mount angles at 1/127 and
+a three-bit linked-gun mask; an
 aircraft without devices sends only the present bit), its engine (lit,
 afterburner, flame, three rates as signed varints), its damage (hit points,
 initial hit points and six sections as signed varints, the structural
@@ -1267,9 +1284,11 @@ protocol 8. The
 spec text and the exact state are long byte strings (a varint length); the
 exact state in Seated is coded with no baseline and the client decodes it with
 its plane's aircraft model. A loadout is the fuel as a 64-bit float, the
-loadout screen's cheat bit, and each station's weapon, count and quantity.
-A roster plane is its id, side, wing (2 bits), place in the wing, aircraft
-(4 bits) and pilot (the AI, or a seat and callsign). The Debrief mirrors the
+loadout screen's cheat bit, each station's weapon, count and quantity, and
+since protocol 18 a presence bit and the tank list (at most nine, each a
+hardpoint byte, the tank record's name and a 16-bit quantity; absent keeps
+the aircraft's source tanks). A roster plane is its id, side, wing (2 bits),
+place in the wing, aircraft (6 bits since protocol 18) and pilot (the AI, or a seat and callsign). The Debrief mirrors the
 game's debrief report field for field (the damage as a 64-bit float, the ten
 kill rows and the eight shot tallies). Mission ended carries its reason in 2
 bits (every human left 0, time limit 1, server stopping 2, ended by the
@@ -1314,7 +1333,7 @@ host left the game (4); the King's End mission is reason 3.
   6 and 7 invalid, and, since protocol 10, its
   Fighters Anthology build in 2 bits, as [Content](#content) codes it), the
   slots in plane order (a count, then each: plane
-  varint, side 1 bit, wing 2, member 8, aircraft 4, a presence bit and the
+  varint, side 1 bit, wing 2, member 8, aircraft 6, a presence bit and the
   holder's id) and the King's settings (a count, then each a number of 8
   bits and a varint value; none in phase 1).
 - **Refused** is the request's kind (8 bits) and the reason (a string).
@@ -1418,9 +1437,9 @@ Refused (kind 20) with its words.
 | 27 | Slot lock | the King to host | The mission's number (varint), the plane (varint), the lock (2 bits: 0 open, 1 closed, 2 reserved) and, when reserved, the callsign (a string) |
 | 28 | Revive | client to host | The mission's number (varint): fly again after a loss, by the respawn rule |
 | 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
-| 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (4 bits, the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
+| 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (6 bits, the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
 | 31 | Scores | host to client | The tally (2 bits: kills 0, damage 1, ratio 2), the fight (1 bit: sides 0, free for all 1), a presence bit and the seconds left (varint), the kill limit (4 bits, 0 for none), the kill owner (2 bits: total 0, side 1, player 2); the players (a count, at most 64; each: lobby id 8 bits, callsign a string, a presence bit and its side 1 bit, kills, losses and damage in thousandths of an aircraft, each a varint); each side's kills, losses and damage (six varints); and the winner (2 bits: 0 none yet, 1 a side then 1 bit, 2 a player then 8 bits, 3 a draw) |
-| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 4 bits, a presence bit and the callsign of its last human pilot, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
+| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 6 bits, a presence bit and the callsign of its last human pilot, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
 | 33 | Observe | client to host | 1 bit: 0 stop watching; 1 watch, then the subject (2 bits: 0 none, 1 an aircraft then its id as a varint, 2 a point then x, y and z in whole feet as signed varints) |
 | 34 | Observing | host to client | 1 bit: 0 the observer flight has ended (nothing follows); 1 it starts: the connection's new [flight](#flights) (8 bits), the delay in seconds (8 bits), the tick the first snapshot will show (32 bits), the roster as the Roster message codes it, and the destroyed ground objects (a count and varints) |
 | 35 | Away | client to host | Nothing: the game has been away (a menu, no focus, a lost controller) for the `idle-ai` setting's seconds |
@@ -2143,7 +2162,7 @@ number changes on its own.
 
 The file starts with 12 bytes: the 8-byte magic `TORE-CAP`
 (`tore_session::capture::MAGIC`, which a game's pruner checks so that it only
-ever deletes captures), the capture format's version (16 bits, 2 since EF4) and the
+ever deletes captures), the capture format's version (16 bits, 3 since powered-lift controls) and the
 protocol version (16 bits); a reader refuses another of either. Records follow, each a kind (8 bits), a body length (32 bits) and the
 body; a capture cut short ends at its last whole record. Numbers are least
 significant byte first, times are nanoseconds of the client's clock (64 bits),
@@ -2153,7 +2172,7 @@ and strings are a 16-bit length and UTF-8.
 | --- | --- | --- |
 | 1 | Start | The time the join started, the seed of its randomness (64 bits: the nonce comes from it), the server's address, the callsign, the game version and commit, a release-build byte, the plane asked for (a byte, then 32 bits when 1), and whether the client readies by itself (a byte, format 2). Never the password |
 | 2 | Receive | The time, the sender's address, then the datagram as it arrived |
-| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
+| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the powered-lift block in Inputs coding, the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
 | 4 | Frame | The time a frame was drawn |
 | 5 | Leave | The time the player ended the mission |
 | 6 | Disconnect | The time the player quit |
@@ -2190,7 +2209,13 @@ again with an observer; the capture format did not change for it.
   the standby stream's seat inputs code their controls as the Inputs
   section does, K3, 15 since the [flight data link](#data-link-stage-g),
   G7, 16 since the baseline field of the readout and the entity records is
-  7 bits, a window of 127 snapshots, B2; 11 was never used).
+  7 bits, a window of 127 snapshots, B2, 17 since setting 22, the King's
+  snapshot rate, R1, 18 since the aircraft variety import: 6-bit aircraft
+  codes for the 37 selectable aircraft, the Inputs powered-lift block and
+  axis commands 24 to 26, the lift, vector and gun-mount devices, the
+  readout's gun aim and linked-gun mask, gun-group combat commands 26 and
+  27, the loadout's tank list, and the exact flight state's powered-lift
+  controls; 11 was never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

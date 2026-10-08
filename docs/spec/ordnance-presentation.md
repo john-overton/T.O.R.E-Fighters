@@ -36,6 +36,80 @@ weapons return only after their flight behaviour is implemented and validated,
 following the [weapon update passes](../ROADMAP.md#weapon-catalog-update-passes).
 Validation is recorded in the [catalog baseline](../baselines/ordnance-catalog.md).
 
+John's retail reference and correction on 2026-10-05 put compatible tanks
+first in the air-to-surface catalog. Retain exactly two categories controlled by
+the original dial: air-to-air and air-to-surface. Tanks precede the supported
+surface weapons, ordered by their display names (150, 250, 350, 500 gallon for
+the reviewed catalog), and share the existing eight-card paging. Preserve the
+existing weapon ordering after them. Do not show a separate Tanks button or the
+added external-fuel/tank-shell banner above the station area. The supplied
+reference's executable identity is unknown; it establishes this presentation
+request, not broader source-build parity.
+
+Tank quantities are installed equipment, not ammunition. Use original tank
+thumbnails where imported. Catalog cards show the tank name and full loaded
+mass in pounds, using the same mass-label format as weapons. The station view
+stays the same in both categories. Internal fuel remains in its original panel;
+vehicle weight still includes selected external fuel and shell mass. Existing
+plus/minus and right-click gestures change one installed tank. The internal-fuel
+rocker keeps its 500 lb step. Unload All and toggling Cheat clear both kinds of
+equipment. Rules, persistence and geometry limits live in the
+[tank specification](external-fuel-tanks.md).
+
+## Source stations and availability
+
+John requested an aircraft-wide ordnance and weapon-availability pass on
+2026-10-05, including missing stations and external tanks. This pass changes the
+editor and accepted loadouts; it adds no aircraft rendering. The per-aircraft
+source evidence and missing-mount inventory live in the
+[ordnance source matrix](../formats/aircraft-ordnance.md).
+
+Agent-selected presentation rules: display one row per editable source
+hardpoint, ordered by its original number. The visible number is the source
+index plus one, followed by its source location label. A source row may carry
+multiple stores; its quantity is not evidence of multiple physical pylons.
+Weapon and tank capabilities on the same hardpoint share one row. Always show
+its actual loaded occupant, regardless of the selected catalog. Switching between
+air-to-air and air-to-surface never hides an installed store or moves its row. Fixed sensors and countermeasure equipment are not editable store rows. A
+source compatibility bit alone does not enable replacing an installed device
+whose removal is not implemented. Keep those occupied device mounts out of the
+tank compatibility test and editable union; do not present them as empty mounts.
+
+An empty source hardpoint is available when its reviewed compatibility permits
+an imported, implemented weapon. A default tank does not prevent that station
+from being used for a compatible weapon instead. Preserve source-default
+weapon and tank quantities; newly exposed empty weapon stations start empty.
+The implementation may retain a compatible weapon definition at zero quantity
+for editing, but this contributes no ammunition or weapon mass and must not
+appear as an installed store. Saved loads retain their existing weapon station
+order; any new optional rows append after those stations, and older saved loads
+leave those new rows empty.
+
+Use six station cards per page in the existing three-row area. When more than
+six rows exist, source-station Previous/Next controls and a page count occupy the
+top strip, independent of catalog paging. Tab cycles all source rows and reveals
+the focused page. This is an agent-selected layout safeguard, not a claim about
+retail pagination. All currently reviewed aircraft fit in six rows.
+
+A loaded row responds to left-click, right-click and quantity keys according to
+its actual occupant, irrespective of catalog selection. Left-click adds one;
+right-click and quantity keys retain the existing weapon step or one tank.
+Clicking an empty row loads the selected compatible catalog item. Dragging a
+catalog item onto a compatible row replaces its current occupant, including
+weapon-to-tank and tank-to-weapon replacement. A rejected edit preserves the
+previous load. A tank dragged between compatible stations transfers one tank,
+limited by source quantity and destination capacity; dropping it in the catalog
+unloads that row. Use the same original-thumbnail drag presentation and cancel
+rules as weapons. An empty row can restore its retained type with the quantity
+keys without changing its store kind merely because the catalog category changed. Draft edits may remain temporarily overweight;
+removal must still work, and Fly/lobby acceptance enforces takeoff weight. These
+cross-category interactions are agent choices extending the existing editor
+contract.
+
+Physical source compatibility does not supply missing radar or designator
+capabilities. Guided release still follows the [missile contract](missiles.md)
+and the aircraft's actual sensor and target state.
+
 ## Presentation
 
 The original ORD_AIR3 background, thumbnail images, dial, rocker and button

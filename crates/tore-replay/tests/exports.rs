@@ -142,7 +142,10 @@ fn player(tick: u64) -> AircraftState {
         velocity: [speed * s, 0., speed * c],
         airspeed: speed,
         g: 2.,
-        devices: [0., 0., 0., 0., 0., 0.5, 0.25, 0.4, 0., speed, 0.9],
+        devices: [
+            0., 0., 0., 0., 0., 0.5, 0.25, 0.4, 0., speed, 0.9, 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+            0., 0.,
+        ],
         heat: 0.8,
         flags: AircraftFlags {
             engine_on: true,
@@ -177,7 +180,10 @@ fn enemy(tick: u64) -> AircraftState {
         velocity: [-600., if dead { -400. } else { 0. }, 0.],
         airspeed: 600.,
         g: 1.,
-        devices: [0., 0., 0., 0., 0., 0.4, 0., 0., 0., 600., 0.7],
+        devices: [
+            0., 0., 0., 0., 0., 0.4, 0., 0., 0., 600., 0.7, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+            0.,
+        ],
         heat: 0.6,
         flags: AircraftFlags {
             engine_on: !dead,

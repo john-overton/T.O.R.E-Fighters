@@ -108,6 +108,7 @@ pub fn nozzle(id: AircraftId, address: usize) -> bool {
         | AircraftId::F22
         | AircraftId::F22n
         | AircraftId::Faxx => false,
+        _ => false,
     }
 }
 /// Reviewed round, afterburning outlet families. F-22 deliberately excluded.
@@ -119,7 +120,13 @@ pub fn outlet_count(id: AircraftId) -> usize {
         | AircraftId::F22
         | AircraftId::F22n
         | AircraftId::Faxx => 0,
-        _ => 2,
+        AircraftId::F18
+        | AircraftId::Rafale
+        | AircraftId::F14
+        | AircraftId::Mig29
+        | AircraftId::Su27
+        | AircraftId::Su35 => 2,
+        _ => 0,
     }
 }
 pub fn outlet_group(id: AircraftId, positions: &[[f32; 3]]) -> usize {

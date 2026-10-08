@@ -17,7 +17,10 @@ use tore_world::readout::CockpitReadout;
 
 /// Reserve the weapon readout area even for a safe gun, keeping flight text clear.
 pub fn active(frame: &FlightFrame) -> bool {
-    let weapon = &frame.config.stations[frame.readout.stores.selected()].weapon;
+    let Some(station) = frame.config.stations.get(frame.readout.stores.selected()) else {
+        return false;
+    };
+    let weapon = &station.weapon;
     live::is_gun(weapon)
         || (frame.readout.stores.armed && missiles::Profile::for_weapon(weapon).is_some())
 }
@@ -91,14 +94,16 @@ pub fn draw(
         .text(font, "NAV", 207, 259);
         return;
     }
-    if live::is_gun(&frame.config.stations[ro.stores.selected()].weapon) {
+    let Some(station) = frame.config.stations.get(ro.stores.selected()) else {
+        return;
+    };
+    if live::is_gun(&station.weapon) {
         draw_gun(pixels, frame, font, color, zoom);
         return;
     }
     if !active(frame) {
         return;
     }
-    let station = &frame.config.stations[ro.stores.selected()];
     let w = &station.weapon;
     let Some(profile) = missiles::Profile::for_weapon(w) else {
         return;
@@ -622,6 +627,8 @@ pub fn debug(
         font,
         if ro.airport.nav_mode {
             "NAV"
+        } else if frame.config.stations.get(ro.stores.selected()).is_none() {
+            "UNARMED"
         } else if live::is_gun(&frame.config.stations[ro.stores.selected()].weapon) {
             "GUN"
         } else if state.weapon_rules == missiles::Rules::Compatibility {
@@ -676,12 +683,13 @@ pub fn debug(
         .enumerate()
     {
         let f = shot.guidance.as_ref().unwrap();
+        let weapon = state.weapon(shot);
         let remaining = shot
             .guidance_ticks
             .unwrap_or(f.profile.guidance_ticks)
             .saturating_sub(shot.age) as f64
             / 120.;
-        let motor = match missiles::phase(&shot.weapon(frame.config).movement, shot.age) {
+        let motor = match missiles::phase(&weapon.movement, shot.age) {
             tore_sim::combat::EnginePhase::BeforeIgnition => "WAIT",
             tore_sim::combat::EnginePhase::Powered => "BURN",
             tore_sim::combat::EnginePhase::Coast => "COAST",
@@ -691,7 +699,7 @@ pub fn debug(
             &format!(
                 "#{} {} {} {motor} {remaining:.0}S",
                 shot.id,
-                shot.weapon(frame.config).hud_name,
+                weapon.hud_name,
                 if f.seeker.status == Status::Search && f.profile.guidance != Guidance::Active {
                     "SEARCH"
                 } else {
@@ -706,6 +714,46 @@ pub fn debug(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_empty_loadout_can_draw_before_the_readout_arrives() {
+        let state = tore_world::test_support::combat_fixture(false);
+        let mut config = state.own().configuration().clone();
+        config.stations.clear();
+        let flight =
+            flight::State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
+        let picture = crate::snapshot::RenderSnapshot::default();
+        let frame = FlightFrame {
+            seat: tore_world::seats::SeatId(0),
+            plane: tore_world::seats::PlaneId(0),
+            flight: &flight,
+            previous: &flight,
+            presented: std::borrow::Cow::Borrowed(&flight),
+            picture: &picture,
+            smoke: [&Default::default(), &Default::default()],
+            devices: &Default::default(),
+            config: &config,
+            readout: tore_world::frame::ReadoutSlot::ready(
+                tore_world::readout::build(&state, 0, combat::launcher(&flight), None, None)
+                    .unwrap(),
+            ),
+            tick_cues: &[],
+        };
+        let font = Font {
+            height: 8,
+            glyphs: (0..256)
+                .map(|_| tore_formats::font::Glyph {
+                    advance: 6,
+                    pixels: vec![(0, 0)],
+                })
+                .collect(),
+        };
+        let mut pixels = vec![0; 640 * 480 * 4];
+        assert!(!active(&frame));
+        draw(&mut pixels, &frame, &font, [0, 255, 0], 1., false, false);
+        debug(&mut pixels, &frame, &state, &font, [0, 255, 0]);
+        assert!(pixels.iter().any(|v| *v != 0));
+    }
+
     #[test]
     fn friendly_target_box_adds_only_a_centered_x() {
         let render = |friendly| {

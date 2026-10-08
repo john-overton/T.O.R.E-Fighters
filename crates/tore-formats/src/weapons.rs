@@ -137,6 +137,21 @@ pub struct Countermeasures {
     pub infrared_lose_lock_time: u8,
 }
 impl Countermeasures {
+    /// Explicit absence of countermeasure equipment, with no carried devices.
+    pub const NONE: Self = Self {
+        weight: 0,
+        flags: 0,
+        mode_flags: 0,
+        chaff: [0; 4],
+        flare: [0; 4],
+        radar_deception_chance: 0,
+        radar_signature_add: 0,
+        radar_noise_range: [0; 2],
+        infrared_deception_chance: 0,
+        infrared_signature_add: 0,
+        infrared_lose_lock_time: 0,
+    };
+
     pub fn parse(name: &str, bytes: &[u8]) -> Result<Self> {
         let name = name.to_ascii_uppercase();
         if !name.ends_with(".ECM") {

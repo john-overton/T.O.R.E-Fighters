@@ -428,6 +428,7 @@ impl Layout {
 #[derive(Default)]
 pub struct CombatReadout {
     pub weapons: Vec<(String, u32, bool)>,
+    pub gun_group: Option<String>,
     pub chaff: u8,
     pub flares: u8,
     pub target: Option<crate::target_window::Readout>,
@@ -1205,6 +1206,9 @@ impl Instruments {
                         r.text(f, &count, 48 - width as i32, y, colour);
                         let name = fit_width(f, name, 80);
                         r.text(f, &name, 54, y, colour);
+                    }
+                    if let Some(group) = &c.gun_group {
+                        text(&mut r, &fit_width(f, group, 130), 4, 88);
                     }
                     text(&mut r, &format!("{} CHAFF", c.chaff), 4, 101);
                     let flare = format!("{} FLARE", c.flares);

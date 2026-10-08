@@ -523,7 +523,11 @@ impl Editor {
     /// The device reference new bindings use: an existing alias, `*` for
     /// session-only Apple gamepads, otherwise the identity.
     fn reference(&self, id: &str) -> String {
-        if let Some((alias, _)) = self.profile.aliases.iter().find(|(_, v)| *v == id) {
+        if let Some((alias, _)) =
+            self.profile.aliases.iter().find(|(alias, v)| {
+                !alias.starts_with(crate::input::AUTO_GAMEPAD_PREFIX) && *v == id
+            })
+        {
             return alias.clone();
         }
         if id.starts_with("macos-gc-session-") {
@@ -1141,6 +1145,7 @@ impl Editor {
                 if let Some(d) = self.device(id) {
                     let defaults = crate::input::gamepad_defaults(d);
                     self.profile.bindings.extend(defaults.bindings);
+                    self.profile.aliases.extend(defaults.aliases);
                     self.profile.modifiers.extend(defaults.modifiers);
                 }
             }

@@ -133,21 +133,26 @@ intakes, cockpit and device openings. These are corrections to the loaded base
 model, not claims of retail parity or a replacement model. Source files stay
 intact. No aircraft dimensions or flight dynamics are changed.
 
-Flaps droop up to 0.4 rad. F-14 tailplanes mix -0.3 rad pitch and ±0.2 rad roll;
-A-4 elevators use -0.3 rad pitch and outboard ailerons ±0.2 rad roll.
-The A-4 elevator is the complete strip aft of fitted source y=-54, z=7 across
-both tail halves. Split all eight horizontal-tail faces at this straight hinge,
-interpolating texture coordinates; keep the forward stabilizer fixed. Source
-polygon diagonals are not hinges. X-31
-canards use +0.35 rad pitch; aft panels mix 0.4 rad flap, -0.3 rad pitch and
-±0.2 rad roll. Rudders deflect up to 0.35 rad. F-14 fin clipping preserves the
-fixed forward area. These hinges and mixing are fitted, not original schedules.
+F-14 now uses its source flap endpoint morph and corrected differential-tail
+sign in the [attachment contract](aircraft-animation.md#f-14d-attachment-corrections).
+A-4 now uses its own diagonal pitch seams, attached roll/rudder skins and
+reconciled source trailing flaps in its
+[attachment contract](aircraft-animation.md#a-4e-attachment-corrections).
+Its source forward flap-branch strips remain an explicit mapping gap.
+X-31 now uses exact source inner flap and
+signed rudder endpoints, corrected thick surface attachments and independently
+reviewed gear/brace/door paths in its
+[attachment contract](aircraft-animation.md#x-31-attachment-corrections).
+Canards and prototype vector controls retain their existing laws above.
+F-14 fin clipping preserves the fixed forward area. These hinges and mixing
+are fitted, not original schedules.
 
-Gear rotates through a fitted quarter turn and disappears at full retraction.
-A-4/X-31 side brakes interpolate through 1.05 rad from their open meshes;
-F-14 brakes hinge continuously through a fitted 45 degrees to the source raised
-pose, around their forward edge; see the [animation contract](aircraft-animation.md). A-4's stowed hook rotates
-0.9 rad. The F-14 source hook has two untextured, collapsed triangles. John
+All three use their individual reviewed gear, brace and panel paths. A-4
+brakes use separate leaves, fixed cavities and fitted actuators; its hook uses
+both source endpoint poses and remains visible when stowed. X-31 side brakes
+retain 1.05-radian travel and close toward its body instead of outward.
+F-14 brake closure uses its corrected 75-degree fit around original forward
+edges; see the [animation contract](aircraft-animation.md#f-14d-attachment-corrections). The F-14 source hook has two untextured, collapsed triangles. John
 suggested the F-22N hook as a shape/texture reference on 2026-10-02. The agent
 chooses to replace the triangles with the loaded F-22N's textured,
 two-sided hook blade, retaining its original UVs and transparent outline. This

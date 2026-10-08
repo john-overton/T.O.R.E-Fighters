@@ -16,6 +16,23 @@ file is [`tools/battery_scenarios/flight.py`](../../tools/battery_scenarios/flig
 runner works is in the [testing overview](README.md). The `render-*` capture scenarios live in
 [`tools/battery_scenarios/render.py`](../../tools/battery_scenarios/render.py).
 
+## Variety aircraft checks
+
+`flight-variety-*` checks each of the 23 new identities through real application
+asset loading and 1,200 hybrid flight ticks, with finite motion, no crash and
+bounded fuel/energy output. It is separate from the original roster's fighter
+maneuver and AI acceptance cases. Source-backed powered-lift checks use
+`tore-sim`'s `variety_flight` example; synthetic tests cover hover limits,
+conversion, control release and exact-state continuation. See
+[the variety flight evidence](../baselines/variety-flight.md).
+
+```sh
+TORE_BATTERY_PROFILE="$PWD/.local/dev-profile" python3 tools/battery.py --scenario 'flight-variety-*' --profile .local/dev-profile --jobs 4
+```
+
+The profile must contain a current runtime import. Rendering cases use the
+required agent window wrapper; their captures remain local.
+
 ## What it means for the game
 
 Nothing in this lane crashed, produced a NaN, put an aircraft under the ground, let ammunition go
@@ -445,6 +462,37 @@ The synthetic GPU checks run separately with
 `cargo test --locked -p tore-app gpu_airport_ -- --ignored`. They test that
 pavement never hides an aircraft above it and that paint over pavement holds at
 distant and moving cameras.
+
+## Headless animation regressions
+
+`flight-animation-*` scenarios run the actual drawing-path geometry probe for
+individually reviewed aircraft, without opening a window. Combined rotor, flap/roll and
+nozzle sweeps are required where their aircraft contracts specify them. They require reviewed
+attachment scope and passing per-control gates, including signed motion,
+root/skin coherence, wheel rigidity/separation, intermediate topology and hook
+closing direction. They write user-owned OBJ and CPU contact-sheet evidence
+under the ignored battery output directory. Apache and Chinook scenarios also
+check the loaded fixed-gear state and ignored retraction commands before the
+mesh sweep. Multi-axis artifacts are required separately, including both V-22
+conversion/rotor and flaperon sweeps and all 125 Rafale control combinations.
+F-14 isolated controls use the existing unswept 400-knot threshold; separate
+coupled sweep/flap/roll and pitch/roll grids cover its operational interactions.
+Its hook also samples positive near-stow before hiding. A-4E adds 202 samples
+each for gear, hook and brake, plus coupled flap/roll and pitch/roll checks.
+The original stowed A-4E hook stays visible at zero. Exact selection keys
+keep F/A-XX separate from the F22N source donor in reports and scenario matching.
+
+Run one repaired aircraft before expanding the audit:
+
+```sh
+python3 tools/battery.py --scenario flight-animation-a7 --profile .local/dev-profile
+```
+
+Expand the roster in `tools/battery_scenarios/animation.py` only after independent
+source and pose-sheet review. This regression family does not replace that
+review, validate GPU appearance, or establish retail animation parity. Current
+coverage and remaining profiles are in the
+[aircraft animation audit](../baselines/aircraft-animations.md).
 
 ## Runtime
 

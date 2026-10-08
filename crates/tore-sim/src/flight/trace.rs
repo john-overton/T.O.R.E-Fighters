@@ -307,6 +307,8 @@ pub enum BurnerBlock {
     NoFuel,
     /// Throttle at or below `PowerTrace::afterburner_throttle`.
     ThrottleLow,
+    /// Fitted powered-lift gate: nozzle pitch at or above 20 percent travel.
+    Vectoring,
 }
 
 /// Stall and top speed, control authority and the G limits.

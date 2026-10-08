@@ -54,6 +54,7 @@ fn abandon_and_revive_refuse_a_plane_that_is_not_lost() {
             fuel_lbs: 10_000.,
             cheat: false,
             stations: Vec::new(),
+            tanks: None,
         },
     };
     for command in [

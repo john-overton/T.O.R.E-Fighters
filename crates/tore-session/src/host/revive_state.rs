@@ -212,6 +212,7 @@ mod tests {
                     heading_rad: 1.25,
                     speed_fps: 640.,
                     loadout: LoadoutSpec {
+                        tanks: None,
                         fuel_lbs: 9_000.,
                         cheat: false,
                         stations: vec![StationLoad {

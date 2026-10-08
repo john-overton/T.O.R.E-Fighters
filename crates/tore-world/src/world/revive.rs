@@ -499,6 +499,8 @@ impl World {
         let standard = || -> WorldResult<LoadoutSpec> {
             let config = self.standard_configuration(aircraft)?;
             Ok(LoadoutSpec {
+                // The standard load keeps the aircraft's source tanks.
+                tanks: None,
                 fuel_lbs: 0.,
                 cheat: false,
                 stations: config

@@ -48,7 +48,7 @@ use tore_formats::aircraft::AircraftId;
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::combat::ledger::Tally;
 use tore_sim::models::AircraftModel;
-use tore_world::mission::{LoadoutSpec, MissionSpec, StationLoad};
+use tore_world::mission::{LoadoutSpec, MissionSpec, StationLoad, TankLoad};
 use tore_world::resources::{Manifest, ManifestEntry};
 use tore_world::world::plane::ExactState;
 use tore_world::world::revive::Spawn;
@@ -1180,7 +1180,7 @@ fn aircraft_code(id: AircraftId) -> u64 {
 
 fn read_aircraft(r: &mut BitReader<'_>) -> WireResult<AircraftId> {
     AircraftId::SELECTABLE
-        .get(r.read_bits(4)? as usize)
+        .get(r.read_bits(6)? as usize)
         .copied()
         .ok_or(WireError::Invalid("aircraft"))
 }
@@ -1322,7 +1322,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_varint(u64::from(*plane));
         write_wing(w, *wing);
         let _ = w.write_bits(u64::from(*member), 8);
-        let _ = w.write_bits(aircraft_code(*aircraft), 4);
+        let _ = w.write_bits(aircraft_code(*aircraft), 6);
         bits::write_option(w, *holder, |w, id| {
             let _ = w.write_bits(u64::from(id), 8);
         });
@@ -1440,7 +1440,7 @@ fn write_roster(w: &mut BitWriter, roster: &Roster) -> WireResult<()> {
         w.write_bool(plane.wing.side == Side::Enemy);
         let _ = w.write_bits(u64::from(plane.wing.index), 2);
         let _ = w.write_bits(u64::from(plane.member), 8);
-        let _ = w.write_bits(aircraft_code(plane.aircraft), 4);
+        let _ = w.write_bits(aircraft_code(plane.aircraft), 6);
         match &plane.pilot {
             RosterPilot::Ai => w.write_bool(false),
             RosterPilot::Human { seat, callsign } => {
@@ -1501,6 +1501,21 @@ fn write_loadout(w: &mut BitWriter, loadout: &LoadoutSpec) -> WireResult<()> {
         let _ = w.write_bits(u64::from(station.count), 16);
         let _ = w.write_bits(u64::from(station.quantity), 16);
     }
+    w.write_bool(loadout.tanks.is_some());
+    if let Some(tanks) = &loadout.tanks {
+        if tanks.len() > 9 {
+            return Err(WireError::TooMany {
+                what: "tanks",
+                limit: 9,
+            });
+        }
+        write_count(w, tanks.len());
+        for tank in tanks {
+            let _ = w.write_bits(u64::from(tank.hardpoint), 8);
+            write_str(w, &tank.tank);
+            let _ = w.write_bits(u64::from(tank.quantity), 16);
+        }
+    }
     Ok(())
 }
 
@@ -1516,7 +1531,22 @@ fn read_loadout(r: &mut BitReader<'_>) -> WireResult<LoadoutSpec> {
             quantity: r.read_bits(16)? as u16,
         });
     }
+    let tanks = if r.read_bool()? {
+        let count = read_count(r, 9, "tanks")?;
+        let mut tanks = Vec::with_capacity(count);
+        for _ in 0..count {
+            tanks.push(TankLoad {
+                hardpoint: r.read_bits(8)? as u8,
+                tank: read_str(r)?,
+                quantity: r.read_bits(16)? as u16,
+            });
+        }
+        Some(tanks)
+    } else {
+        None
+    };
     Ok(LoadoutSpec {
+        tanks,
         fuel_lbs,
         cheat,
         stations,
@@ -1718,7 +1748,7 @@ fn write_spawned(w: &mut BitWriter, spawned: &Spawned) -> WireResult<()> {
     let _ = w.write_bits(u64::from(spawned.tick), 32);
     write_wing(w, spawned.wing);
     let _ = w.write_bits(u64::from(spawned.member), 8);
-    let _ = w.write_bits(aircraft_code(spawned.aircraft), 4);
+    let _ = w.write_bits(aircraft_code(spawned.aircraft), 6);
     let spawn = &spawned.spawn;
     for value in spawn
         .position
@@ -1873,7 +1903,7 @@ fn write_results(w: &mut BitWriter, results: &Results) -> WireResult<()> {
         w.write_varint(u64::from(row.plane));
         write_wing(w, row.wing);
         let _ = w.write_bits(u64::from(row.member), 8);
-        let _ = w.write_bits(aircraft_code(row.aircraft), 4);
+        let _ = w.write_bits(aircraft_code(row.aircraft), 6);
         bits::write_option(w, row.callsign.as_deref(), write_str);
         let status = match row.status {
             ResultStatus::Alive => 0,

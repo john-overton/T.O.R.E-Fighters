@@ -54,7 +54,8 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on
   Fly & Fight; keypad 5 (center) and plus and minus (zoom) on Cockpit & View;
   keypad 7, 8, 9, 4, 6, 1, 2 and 3 (playback), 5 (center) and plus and minus
-  (zoom) on Replay.
+  (zoom) on Replay. The VTOL / Helicopters sheet also shows the Ctrl variants on
+  keypad 7/1 (collective), 9/3 (conversion), 8/2 (nozzle pitch) and 4/6 (nozzle yaw).
 - Identify context or capability limits in the key label, tooltip or callout.
   Examples include F-22 weapon bays and Home while the live map is open.
   Instrument button letters are not automatically global keyboard bindings.
@@ -65,8 +66,10 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
 
 ## Sheets and key labels
 
-Retain the four sheets: **Fly & Fight**, **Comms**, **Cockpit & View** and
-**Replay**. The Replay sheet's keys cannot be remapped, so its subtitle and
+Retain the five sheets: **Fly & Fight**, **Comms**, **Cockpit & View**,
+**Replay** and **VTOL / Helicopters**. The fifth sheet was added for John's
+2026-10-05 aircraft-variety request and shows powered-lift defaults alongside
+ordinary attitude, power and ground controls. The Replay sheet's keys cannot be remapped, so its subtitle and
 footer call them built in instead of naming the controls screen.
 Place an action on the sheet for its purpose. One physical key can appear on
 several sheets with different commands. A dim key means there is no highlighted
@@ -121,7 +124,7 @@ controls are document controls, not new game bindings.
 - Compare relevant normal defaults with the input catalog; check both new and
   existing entries for omissions or stale descriptions. Explicitly exclude test
   and range bindings during this comparison.
-- Check all four sheets in a browser at 1920×1080 and at a smaller viewport.
+- Check all five sheets in a browser at 1920×1080 and at a smaller viewport.
   Verify every modified key, modifier badge, callout and leader. Text must not
   overflow, overlap unrelated controls or rely on a tooltip to explain
   ejection confirmation.

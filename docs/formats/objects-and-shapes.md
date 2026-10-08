@@ -237,6 +237,17 @@ Use the bytes. Do not use marker searching as a substitute for bounded parsing:
 the gear example targets beyond an intervening header, and native return C3
 bytes belong to a different grammar.
 
+The reviewed FA Y141.SH also uses a signed greater-than-or-equal word guard
+(`0x7d`) for flap geometry at CODE+0x386d and +0x3b28, comparing against zero.
+The bounded reader supports this alongside equality and inequality. It selects
+inert drawing records without executing imported instructions. Synthetic cases
+cover negative, zero and positive words plus an out-of-bounds branch. This
+format extension does not establish continuous Yak-141 flap animation.
+
+Source review, 2026-10-05: Y141.SH from the catalog's
+[FA_2.LIB build](fa-catalog.md), SHA-256
+`9b2fb3601090c85ab6a81cf17d6478941f01688310cbd4baf526bd6a890a330b`.
+
 The so-called “Z-buffer structures” chapter proposes visibility/order planes
 and links between groups. It expressly leaves their complete operation unknown.
 Its proposed regrouping of 12/38 and 6C export rows is a research lead, not a

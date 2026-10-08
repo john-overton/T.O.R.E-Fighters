@@ -70,7 +70,10 @@ fn aircraft(id: u32, path: &Path, tick: u64, alive: bool) -> AircraftState {
         velocity,
         airspeed: path.speed,
         g: if id == 0 { g + 3. } else { g },
-        devices: [0., 0., 0., 0., 0., 0.4, -0.3, 0.2, 0., path.speed, 0.95],
+        devices: [
+            0., 0., 0., 0., 0., 0.4, -0.3, 0.2, 0., path.speed, 0.95, 0., 0., 0., 0., 0., 0., 0.,
+            0., 0., 0., 0.,
+        ],
         heat: 0.95,
         flags: AircraftFlags {
             engine_on: alive,

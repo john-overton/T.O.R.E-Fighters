@@ -145,7 +145,10 @@ pub fn roster_probe(
                 config.sensors.radar.is_some(),
                 config.sensors.infrared.is_some(),
                 config.stations.len(),
-                config.stations.iter().any(|s| s.weapon.source == id.gun()),
+                config
+                    .stations
+                    .iter()
+                    .any(|s| id.guns().contains(&s.weapon.source.as_str())),
                 bridge.realised_launches,
                 bridge.dropped_launches
             );

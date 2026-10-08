@@ -382,6 +382,7 @@ mod tests {
         let mut lobby = Entry::new(order as u8 + 2, order);
         lobby.slot = Some(PlaneId(3));
         lobby.loadout = Some(LoadoutSpec {
+            tanks: None,
             fuel_lbs: 7_500.5,
             cheat: true,
             stations: vec![StationLoad {

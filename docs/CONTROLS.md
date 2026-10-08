@@ -30,6 +30,13 @@ Gamepad defaults apply automatically to standard Linux gamepads. On Windows and
 macOS, and for sticks, throttles and pedals, bind controls in the controls
 screen. "View + RB" means hold View, then press RB. A dash means no default.
 
+Added gamepad mappings depend on aircraft capability. Powered-lift aircraft use
+View+Start for the engine; vectoring jets and the V-22 use View+D-pad Up for
+forward nozzle/nacelle neutral. AC-130 View+right-stick gestures control its gun
+group. Other aircraft keep their original modifier look/rudder/fixture mappings.
+The full profile remains visible in Controls. See [input contexts](INPUT.md).
+
+
 <!-- controls-table:start -->
 
 ### Flight controls
@@ -45,7 +52,24 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Rudder (yaw) | - | - | - |
 | Rudder left | End or Z | - | LT |
 | Rudder right | Page Down or X | - | RT |
-| Throttle lever | - | - | - |
+| Nozzle pitch (VTOL) lever | - | - | - |
+| Nozzle pitch (VTOL) rate axis | - | - | View + Right stick Y |
+| Nozzle pitch (VTOL): decrease | Ctrl+Up | - | - |
+| Nozzle pitch (VTOL): increase | Ctrl+Down | - | - |
+| Nozzle yaw (VTOL) lever | - | - | - |
+| Nozzle yaw (VTOL) rate axis | - | - | View + Right stick X |
+| Nozzle yaw (VTOL): decrease | Ctrl+Left | - | - |
+| Nozzle yaw (VTOL): increase | Ctrl+Right | - | - |
+| Nacelle conversion (V-22) lever | - | - | - |
+| Nacelle conversion (V-22) rate axis | - | - | View + Right stick X |
+| Nacelle conversion (V-22): decrease | Ctrl+Page Up | - | - |
+| Nacelle conversion (V-22): increase | Ctrl+Page Down | - | - |
+| Collective (helicopters / V-22) lever | - | - | - |
+| Collective (helicopters / V-22) rate axis | - | - | View + Right stick Y |
+| Collective (helicopters / V-22): decrease | Ctrl+End | - | - |
+| Collective (helicopters / V-22): increase | Ctrl+Home | - | - |
+| Nozzles/nacelles: forward neutral | 0 | - | View + D-pad up |
+| Throttle / engine power lever | - | - | - |
 | Throttle rate (axis) | - | - | - |
 | Throttle up | - | - | RB |
 | Throttle down | - | - | LB |
@@ -70,7 +94,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Flaps | F | - | X |
 | Airbrake / wheel brakes | B | - | B |
 | Tailhook | H | - | - |
-| Engine on/off | E | - | - |
+| Engine on/off | E | - | View + Menu |
 | Weapon bays (F-22) | O | - | - |
 | Damage report | D | - | - |
 
@@ -81,6 +105,8 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Fire / release weapon | Space | - | View + RB |
 | Next weapon / NAV | ] | - | View + LB |
 | Previous weapon / NAV | [ | - | View + X |
+| Next gun candidate (AC-130) | Ctrl+7 | - | View + Right stick X (pressed) |
+| Link/unlink candidate gun (AC-130) | Ctrl+8 | - | View + Right stick X (pulled) |
 | Next radar target | T | - | View + A |
 | Previous radar target | Shift+T | - | - |
 | Select visual target | Enter or Apostrophe | - | - |

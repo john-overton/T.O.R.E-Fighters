@@ -35,7 +35,7 @@ pub use reader::{
 pub use writer::{Writer, WriterOptions, partial_path};
 
 /// The format version this build writes, and the newest it reads.
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
 
 #[cfg(test)]
 mod tests {

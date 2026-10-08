@@ -33,7 +33,7 @@ NORMAL_STATES = [
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [
-    "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-empty", "ordnance-drag",
+    "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
     "ordnance-message", "ordnance-message-long", "debrief", "debrief-2", "debrief-3", "debrief-4",
     "debrief-5", "debrief-success", "objectives", "ground-start", "airports", "ground-targets-unavailable",
     "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
@@ -210,6 +210,29 @@ def no_ordnance_leak(output: str) -> list[str]:
 
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
+    out.append(
+        Scenario(
+            name="menus-ordnance-availability",
+            lane="menus",
+            args=["--validate-ordnance", "--no-audio"],
+            expect=[r"ordnance audit: 36 aircraft, 9 recovered weapon stations, [0-9]+ weapon placements, [0-9]+ tank placements; passed"],
+            notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration.",
+        )
+    )
+    out.append(
+        Scenario(
+            name="menus-tanks-f14",
+            lane="menus",
+            args=["--validate-tanks", "--aircraft", "f14", "--no-audio"],
+            expect=[
+                r"F14 tank selection 0: internal 15741 external 0 shells 0 .*restart passed",
+                r"F14 tank selection 1: internal 15741 external 1650 shells 198 .*restart passed",
+                r"F14 tank selection 2: internal 15741 external 3300 shells 396 .*restart passed",
+                r"F14 tanks: full selection, removal, empty shells, old defaults and accepted restart passed",
+            ],
+            notes="Source F14 GAS quantities, mass, removal and accepted-load restart without a display.",
+        )
+    )
     out.append(
         Scenario(
             name="menus-validate-creator",

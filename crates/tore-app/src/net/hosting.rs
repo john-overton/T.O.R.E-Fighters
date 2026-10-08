@@ -471,7 +471,7 @@ impl Datagrams for GamePort {
 enum Start {
     /// A new host for `spec`.
     New {
-        spec: MissionSpec,
+        spec: Box<MissionSpec>,
         config: HostConfig,
     },
     /// The game takes the game over from its standby.
@@ -540,7 +540,10 @@ impl HostThread {
         // After the checks above: a refused start asks the router nothing.
         let forwarder = forward.map(|forward| Forwarder::start(forward, port));
         Self::spawn(
-            Start::New { spec, config },
+            Start::New {
+                spec: Box::new(spec),
+                config,
+            },
             resources,
             GamePort::new(socket),
             Listings {
@@ -1066,7 +1069,7 @@ fn serve(
     let activity = Activity::begin("Hosting a T.O.R.E-Fighters game");
     let took_over = matches!(start, Start::TakeOver { .. });
     let host = match start {
-        Start::New { spec, config } => match Host::new(spec, resources, config) {
+        Start::New { spec, config } => match Host::new(*spec, resources, config) {
             Ok(host) => host,
             Err(error) => return End::BuildFailed(error.to_string()),
         },

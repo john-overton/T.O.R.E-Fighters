@@ -118,8 +118,13 @@ pub fn path_words(path: Path) -> &'static str {
 /// and Battle net command the golden now lists, 16 since the baseline field
 /// of the readout and the entity records is 7 bits, a window of 127
 /// snapshots (slice B2), 17 since setting 22, the King's snapshot rate, is
-/// in the lobby state's list and a flight starts from it (slice R1).
-pub const PROTOCOL_VERSION: u16 = 17;
+/// in the lobby state's list and a flight starts from it (slice R1), 18
+/// since the aircraft variety import: 6-bit aircraft codes for the 37
+/// selectable aircraft, the Inputs section's powered-lift block and its
+/// axis commands (24 to 26), the actual lift, vector and gun-mount devices,
+/// the readout's gun aim and linked-gun mask, gun-group commands, the
+/// loadout's tank list and the exact flight state's powered-lift controls.
+pub const PROTOCOL_VERSION: u16 = 18;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

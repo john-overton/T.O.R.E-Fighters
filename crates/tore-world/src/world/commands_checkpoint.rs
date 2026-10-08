@@ -8,7 +8,7 @@
 //! loadout, fails to compile here until the journal codes it.
 
 use super::{MissionCommand, Settings};
-use crate::mission::{LoadoutSpec, StationLoad};
+use crate::mission::{LoadoutSpec, StationLoad, TankLoad};
 use crate::world::revive::Spawn;
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 
@@ -20,10 +20,17 @@ tore_sim::checkpoint_struct!(StationLoad {
     quantity,
 });
 
+tore_sim::checkpoint_struct!(TankLoad {
+    hardpoint,
+    tank,
+    quantity,
+});
+
 tore_sim::checkpoint_struct!(LoadoutSpec {
     fuel_lbs,
     cheat,
     stations,
+    tanks,
 });
 
 tore_sim::checkpoint_struct!(Spawn {
@@ -109,6 +116,11 @@ mod tests {
             loadout: LoadoutSpec {
                 fuel_lbs: 10_860.,
                 cheat: true,
+                tanks: Some(vec![TankLoad {
+                    hardpoint: 4,
+                    tank: "F18_330.GAS".into(),
+                    quantity: 1,
+                }]),
                 stations: vec![
                     StationLoad {
                         weapon: "AIM9X.JT".into(),

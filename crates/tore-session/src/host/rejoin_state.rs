@@ -199,6 +199,7 @@ mod tests {
         let viper = rejoin.players.get_mut(&3).unwrap();
         viper.slot = Some(PlaneId(2));
         viper.loadout = Some(LoadoutSpec {
+            tanks: None,
             fuel_lbs: 9_000.5,
             cheat: false,
             stations: vec![StationLoad {

@@ -196,6 +196,7 @@ pub(crate) fn decode_frames(
     first_tick: u64,
     frames: u32,
     strings: &StringTable,
+    version: u16,
 ) -> Result<Vec<Frame>> {
     let mut out: Vec<Frame> = (0..frames)
         .map(|i| Frame {
@@ -211,7 +212,7 @@ pub(crate) fn decode_frames(
     let mut input = In::new(payload);
     let mut coder = FrameCoder::default();
     for frame in &mut out {
-        coder.get(&mut input, frame)?;
+        coder.get(&mut input, frame, version)?;
     }
     if !input.done() {
         return Err(corrupt("the frames section has trailing bytes"));

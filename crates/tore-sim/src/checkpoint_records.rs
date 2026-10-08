@@ -10,10 +10,10 @@
 //! on many aircraft, is coded once), and so is a configuration's sensor
 //! profile set, which the aircraft's `Sensors` carries a second copy of.
 
-use crate::combat::live::{Configuration, Station};
+use crate::combat::live::{Configuration, GunPod, Station, TankStation, TankStore};
 use tore_formats::weapons::{
     Burst, Countermeasures, Damage as WeaponDamage, Effects, Guidance as WeaponGuidance, Movement,
-    Seeker, Weapon, Zone,
+    Seeker, Tank, Weapon, Zone,
 };
 
 crate::checkpoint_struct!(Zone {
@@ -135,6 +135,31 @@ crate::checkpoint_struct!(Countermeasures {
 
 crate::checkpoint_struct!(Station { mount, count, internal } shared { weapon });
 
+crate::checkpoint_struct!(Tank {
+    empty_weight,
+    fuel_weight,
+    flags,
+});
+
+crate::checkpoint_struct!(TankStore { source, name, tank });
+
+// A selectable external tank station and its installed store (the variety
+// import's configurable stores): the load-out the player picked, so it is
+// mission state a handoff carries.
+crate::checkpoint_struct!(TankStation {
+    hardpoint,
+    mount,
+    store,
+    quantity,
+});
+
+crate::checkpoint_struct!(GunPod {
+    station,
+    quantity,
+    rounds_per_pod,
+    weight_lbs,
+});
+
 // A configuration is imported once per aircraft type and never changes, but a
 // handoff can copy it into state the fresh world does not hold, so callers
 // code it as a shared record. Its sensor profile set is shared inside it, so
@@ -155,6 +180,9 @@ crate::checkpoint_struct!(Configuration {
     stations,
     hit_points,
     target_category,
+    fixed_external_equipment_lbs,
+    tanks,
+    gun_pods,
     external_equipment_lbs,
     external_fuel_lbs,
     engines,
@@ -329,11 +357,11 @@ mod tests {
             fragment_offsets: [[1., -0., 3.], [f64::INFINITY, 5., 6.]],
             afterburner_available: true,
             hardpoint_slots: (0..count).map(Some).chain([None, Some(0)]).collect(),
-            radar_hardpoint: count,
+            radar_hardpoint: Some(count),
             visual_hardpoint: count + 1,
             infrared_hardpoint: Some(2),
             rwr_hardpoint: None,
-            ecm_hardpoint: count + 2,
+            ecm_hardpoint: Some(count + 2),
             aircraft: AircraftId::F18,
             stations: (0..count)
                 .map(|i| Station {
@@ -345,6 +373,35 @@ mod tests {
                 .collect(),
             hit_points: 20,
             target_category: 0x80,
+            fixed_external_equipment_lbs: 140,
+            tanks: vec![
+                TankStation {
+                    hardpoint: 3,
+                    mount: [0.5, -2., 1.],
+                    store: Some(TankStore {
+                        source: "F18_330.GAS".into(),
+                        name: "330 gal".into(),
+                        tank: Tank {
+                            empty_weight: 270,
+                            fuel_weight: 2244,
+                            flags: 1,
+                        },
+                    }),
+                    quantity: 1,
+                },
+                TankStation {
+                    hardpoint: 5,
+                    mount: [-0.5, -2., 1.],
+                    store: None,
+                    quantity: 0,
+                },
+            ],
+            gun_pods: vec![GunPod {
+                station: 1,
+                quantity: 2,
+                rounds_per_pod: 1200,
+                weight_lbs: 1700,
+            }],
             external_equipment_lbs: 300,
             external_fuel_lbs: [10., 20., 30., 0., 0., 0., 0., 0., 1.],
             engines: 2,

@@ -261,7 +261,12 @@ impl World {
         let cockpit = &self.cockpits[self.cockpit_of(seat)?];
         let config = self.combat.state.ownship(cockpit.plane.0)?.configuration();
         let launcher = combat_launcher(presented.as_ref().unwrap_or(&cockpit.flight));
-        let presented = presented.map_or(Cow::Borrowed(&cockpit.flight), Cow::Owned);
+        let mut presented = presented.map_or(Cow::Borrowed(&cockpit.flight), Cow::Owned);
+        if config.aircraft == tore_formats::aircraft::AircraftId::Ac130
+            && let Some(devices) = picture.player.devices.as_ref()
+        {
+            crate::snapshot::set_gun_devices(presented.to_mut(), devices);
+        }
         Some(FlightFrame {
             seat,
             plane: cockpit.plane,

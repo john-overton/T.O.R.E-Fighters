@@ -23,6 +23,37 @@ Steering turns the nosewheel and steerable strut, leaving separate braces fixed.
 Nosewheel steering has 90-degree authority through 10 mph, fading
 linearly to zero at 25 mph ground speed. [Rules and fitted constants](spec/lateral-flight.md).
 
+## AC-130 directed guns
+
+Select an observed target, then use Ctrl+7 to choose a gun candidate and Ctrl+8
+to include or remove it from the firing group. Hold Fire to release eligible
+linked guns. The Weapons instrument's LINK row shows membership and its ordinary
+arrow identifies the current candidate. Each gun has its own ammo, cadence,
+source-informed arc and fitted tracking slew. A gun that cannot bear, is empty
+or has lost its target does not fire. These are player-directed controls;
+[limits and gamepad defaults](INPUT.md#ac-130-directed-gun-groups).
+
+## VTOL, tiltrotors and helicopters
+
+Use the ordinary arrow stick, End/Page Down rudder, E engine switch and 1-8
+power controls. Ctrl+Up/Down moves VTOL nozzles toward forward/vertical thrust;
+Ctrl+Left/Right requests nozzle yaw. **0** returns nozzles and V-22 nacelles to
+forward neutral. V-22 conversion uses Ctrl+Page Up for airplane mode and
+Ctrl+Page Down for helicopter mode. Ctrl+Home increases collective and Ctrl+End
+reduces it on rotorcraft. Rate controls retain the position when released.
+
+Set power independently of collective. In helicopter mode the collective
+controls lift and pitch/roll tilts the lift direction. The controls editor
+exposes all four added demands as bindable absolute axes, rate axes and button
+alternatives. The [input guide](INPUT.md#vtol-tiltrotor-and-helicopter-controls)
+lists gamepad defaults, axis calibration and modifier behaviour. Source evidence,
+fitted rates and aircraft applicability belong in the
+[flight variety behaviour spec](spec/variety-flight.md).
+
+The Apache and Chinook keep their fixed landing gear down; G reports that the
+gear is fixed. The Hind retains retractable gear. This is an explicit
+[fitted equipment rule](spec/variety-flight.md), with no new binding.
+
 ## Working flight commands
 
 | Key | Action | Evidence/status |
@@ -238,11 +269,20 @@ Attitude rotates as an orthonormal basis and is interpolated in that basis. The 
 
 ## Exterior animations
 
-The seven added aircraft now have fitted moving flaps, pitch/roll/yaw surfaces,
-rigid gear and continuous airbrakes. MiG-23 wings sweep visually with speed.
-F-22 main bays open with O or an armed guided-weapon designation; this does
-not delay firing. Its exterior canopy is amber and 75% opaque; cockpit rendering stays clear.
-See the [animation contract](spec/aircraft-animation.md) for fits and limits.
+All 37 playable profiles have bounded headless checks for their applicable
+control surfaces and devices. Gear wheels, braces and doors use separate
+reviewed attachments; retractable hooks, vector nozzles, nacelles and rotor
+cyclic motion have aircraft-specific fits. Remaining source gaps include the
+AC-130 hook, individual rotor feathering and A-4E forward flap-branch strips.
+See the [fleet audit](baselines/aircraft-animations.md) and
+[animation contract](spec/aircraft-animation.md) for coverage and limits.
+
+MiG-23 and F-14 wings sweep visually with speed and flap demand. F-22 bays open
+with O or automatically on a ready bay-weapon trigger. Automatic release waits
+for the doors, about one second, then they close one second after release;
+designating a target alone does not open them. Its exterior canopy remains
+amber and 75% opaque, with clear cockpit rendering. These are the existing
+[fitted bay and canopy rules](spec/aircraft-animation.md#f-22-main-weapon-bays).
 
 
 Use **6** for full throttle and afterburner, and **F10** to inspect the model. G/F/B/H animate gear/flaps/airbrake/hook continuously. Pitch/roll inputs move fitted stabilators; the rudder keys move fitted trailing rudders. Engine/fuel/throttle gate afterburner consistently across HUD and audio; flame length has a short visual transition. These reuse original polygons with authored hinges and schedules. [Coverage, captures and remaining work](baselines/f18-animations.md).

@@ -12,6 +12,7 @@ pub mod rafale_c;
 pub mod su25;
 pub mod su27;
 pub mod su35;
+pub mod variety;
 pub mod x31;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -92,6 +93,7 @@ pub enum AircraftModel {
     Mig23(mig23::Mig23FlightModel),
     Su35(su35::Su35FlightModel),
     F22(f22::F22FlightModel),
+    Variety(variety::VarietyFlightModel),
 }
 /// Stall reference fractions, one per aircraft (see
 /// [`AircraftModel::stall_reference_fraction`]). `fitted`: an agent decision
@@ -122,6 +124,9 @@ impl AircraftModel {
     /// Keyed by the aircraft's own model (its exact identity), never by weight,
     /// and read the same for the player and every AI aircraft.
     pub fn stall_reference_fraction(&self) -> f64 {
+        if matches!(self, Self::Variety(_)) {
+            return 1.;
+        }
         STALL_REFERENCE_FRACTIONS[match self {
             Self::F18(_) => 0,
             Self::RafaleC(_) => 1,
@@ -135,10 +140,27 @@ impl AircraftModel {
             Self::Mig23(_) => 9,
             Self::Su35(_) => 10,
             Self::F22(_) => 11,
+            Self::Variety(_) => unreachable!(),
         }]
         .1
     }
+    /// Authored fixed-gear behavior for the reviewed always-present rotorcraft gear.
+    pub fn fixed_gear(&self) -> bool {
+        matches!(self, Self::Variety(m) if matches!(m.id,
+            tore_formats::aircraft::AircraftId::Ah64 | tore_formats::aircraft::AircraftId::Ch47))
+    }
+    pub fn powered_lift(&self) -> Option<variety::PoweredLift> {
+        match self {
+            Self::Variety(m) => m.lift,
+            _ => None,
+        }
+    }
     pub fn for_aircraft(a: &tore_formats::aircraft::Aircraft) -> tore_formats::Result<Self> {
+        if variety::VarietyFlightModel::identity(a.id).is_some() {
+            return Ok(Self::Variety(variety::VarietyFlightModel::from_aircraft(
+                a,
+            )?));
+        }
         match (a.name.as_str(), a.shape.as_str()) {
             ("F/A-18D", "F18.SH") => Ok(Self::F18(f18::F18FlightModel::from_aircraft(a)?)),
             ("RAFALE", "RAF.SH") => Ok(Self::RafaleC(rafale_c::RafaleCFlightModel::from_aircraft(
@@ -187,6 +209,7 @@ impl AircraftModel {
             Self::Mig23(m) => m.configuration = configuration,
             Self::Su35(m) => m.configuration = configuration,
             Self::F22(m) => m.configuration = configuration,
+            Self::Variety(m) => m.configuration = configuration,
         }
         Ok(())
     }
@@ -206,6 +229,7 @@ impl FlightModel for AircraftModel {
             Self::Mig23(m) => m.configuration(),
             Self::Su35(m) => m.configuration(),
             Self::F22(m) => m.configuration(),
+            Self::Variety(m) => m.configuration(),
         }
     }
     fn response(&self, c: Conditions) -> Response {
@@ -222,6 +246,7 @@ impl FlightModel for AircraftModel {
             Self::Mig23(m) => m.response(c),
             Self::Su35(m) => m.response(c),
             Self::F22(m) => m.response(c),
+            Self::Variety(m) => m.response(c),
         }
     }
     fn tuning(&self) -> Tuning {
@@ -238,6 +263,7 @@ impl FlightModel for AircraftModel {
             Self::Mig23(m) => m.tuning(),
             Self::Su35(m) => m.tuning(),
             Self::F22(m) => m.tuning(),
+            Self::Variety(m) => m.tuning(),
         }
     }
 }

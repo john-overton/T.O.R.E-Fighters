@@ -199,8 +199,9 @@ fn heat(pose: &AircraftPose) -> f64 {
     } else if pose.engine.afterburner {
         1.
     } else {
-        pose.devices
-            .map_or(0., |devices| devices[DEVICES - 1].clamp(0., 1.))
+        pose.devices.map_or(0., |devices| {
+            devices[replay::device::THROTTLE].clamp(0., 1.)
+        })
     }
 }
 
@@ -1501,7 +1502,10 @@ mod tests {
             position: [1., 2., 3.],
             attitude: [0.5, -0.2, 3.],
             velocity: [100., 0., -200.],
-            devices: Some([1., 0.5, 0.25, 0., 1., 0.75, -0.5, 0.5, 1., 812., 0.9]),
+            devices: Some([
+                1., 0.5, 0.25, 0., 1., 0.75, -0.5, 0.5, 1., 812., 0.9, 0.8, -0.6, 0.4, 0.2, 0., 0.,
+                0., 0., 0., 0., 0.,
+            ]),
             engine: Engine {
                 lit: true,
                 afterburner: true,

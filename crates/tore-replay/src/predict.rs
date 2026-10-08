@@ -175,6 +175,7 @@ enum Slot {
     Unit,
     Signed,
     Speed,
+    Group,
 }
 
 const SLOTS: [Slot; DEVICE_COUNT] = [
@@ -189,6 +190,17 @@ const SLOTS: [Slot; DEVICE_COUNT] = [
     Slot::Signed,
     Slot::Speed,
     Slot::Unit,
+    Slot::Unit,
+    Slot::Signed,
+    Slot::Unit,
+    Slot::Unit,
+    Slot::Signed,
+    Slot::Signed,
+    Slot::Signed,
+    Slot::Signed,
+    Slot::Signed,
+    Slot::Signed,
+    Slot::Group,
 ];
 
 impl Slot {
@@ -197,6 +209,7 @@ impl Slot {
             Self::Unit => UNIT,
             Self::Signed => SIGNED,
             Self::Speed => SPEED,
+            Self::Group => 1.,
         }
     }
 
@@ -204,6 +217,7 @@ impl Slot {
         match self {
             Self::Unit | Self::Signed => v.is_finite(),
             Self::Speed => within(v, SCALAR_LIMIT),
+            Self::Group => valid_group(v),
         }
     }
 
@@ -212,7 +226,7 @@ impl Slot {
         match self {
             Self::Unit => v.clamp(0., 1.),
             Self::Signed => v.clamp(-1., 1.),
-            Self::Speed => v,
+            Self::Speed | Self::Group => v,
         }
     }
 
@@ -221,6 +235,7 @@ impl Slot {
             Self::Unit => c.bounded(UNIT, 0., 1.),
             Self::Signed => c.bounded(SIGNED, -1., 1.),
             Self::Speed => c.value(SPEED),
+            Self::Group => c.value(1.),
         }
     }
 }
@@ -239,6 +254,17 @@ const DEVICE_ORDER: [usize; DEVICE_COUNT] = [
     device::FLAPS,
     device::HOOK,
     device::BAY,
+    device::VECTOR_PITCH,
+    device::VECTOR_YAW,
+    device::CONVERSION,
+    device::COLLECTIVE,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    device::GUN_GROUP,
 ];
 
 const A_POS: u64 = 1;
@@ -393,7 +419,11 @@ fn put_aircraft_key(buf: &mut Vec<u8>, s: &AircraftState) {
     put_opt_u8(buf, s.structural_section);
 }
 
-fn get_aircraft_key(input: &mut In) -> Result<AircraftState> {
+fn valid_group(value: f64) -> bool {
+    value.is_finite() && value.fract() == 0. && (0. ..=7.).contains(&value)
+}
+
+fn get_aircraft_key(input: &mut In, device_count: usize) -> Result<AircraftState> {
     let mut f = || input.xf64();
     let position = [f()?, f()?, f()?];
     let attitude = [f()?, f()?, f()?];
@@ -401,8 +431,11 @@ fn get_aircraft_key(input: &mut In) -> Result<AircraftState> {
     let airspeed = f()?;
     let g = f()?;
     let mut devices = [0.; DEVICE_COUNT];
-    for v in &mut devices {
+    for v in &mut devices[..device_count] {
         *v = f()?;
+    }
+    if !valid_group(devices[device::GUN_GROUP]) {
+        return Err(corrupt("gun group must be an integer from 0 to 7"));
     }
     let heat = f()?;
     let fuel_lb = f()?;
@@ -603,13 +636,18 @@ pub(crate) fn put_aircraft(
 }
 
 /// Reads one aircraft record on top of the state from the previous tick.
-pub(crate) fn get_aircraft(input: &mut In, old: Option<AircraftPred>) -> Result<AircraftPred> {
+pub(crate) fn get_aircraft(
+    input: &mut In,
+    old: Option<AircraftPred>,
+    version: u16,
+) -> Result<AircraftPred> {
+    let device_count = if version == 1 { 11 } else { DEVICE_COUNT };
     let mask = input.uv()?;
     if mask & A_KEY != 0 {
         if mask != A_KEY {
             return Err(corrupt("an aircraft key record carries change bits"));
         }
-        return Ok(AircraftPred::key(&get_aircraft_key(input)?));
+        return Ok(AircraftPred::key(&get_aircraft_key(input, device_count)?));
     }
     if mask & !A_ALL != 0 {
         return Err(corrupt("an aircraft record has unknown bits"));
@@ -624,10 +662,10 @@ pub(crate) fn get_aircraft(input: &mut In, old: Option<AircraftPred>) -> Result<
     let mut devices = [0i64; DEVICE_COUNT];
     if has(A_DEVICES) {
         let bits = input.uv()?;
-        if bits >> DEVICE_COUNT != 0 || bits == 0 {
+        if bits >> device_count != 0 || bits == 0 {
             return Err(corrupt("a device mask is invalid"));
         }
-        for (i, slot) in DEVICE_ORDER.iter().enumerate() {
+        for (i, slot) in DEVICE_ORDER[..device_count].iter().enumerate() {
             if bits & (1 << i) != 0 {
                 devices[*slot] = input.iv()?;
             }
@@ -669,6 +707,9 @@ pub(crate) fn get_aircraft(input: &mut In, old: Option<AircraftPred>) -> Result<
             c.p1()
         };
         c.apply(pred, *r);
+    }
+    if !valid_group(p.devices[device::GUN_GROUP].value(1.)) {
+        return Err(corrupt("gun group must be an integer from 0 to 7"));
     }
     let pred = p.heat.p1();
     p.heat.apply(pred, heat);
@@ -1267,4 +1308,135 @@ pub(crate) fn get_escapee(input: &mut In, old: Option<EscapeePred>) -> Result<Es
         p.phase = input.u8()?;
     }
     Ok(p)
+}
+
+#[cfg(test)]
+mod powered_lift_tests {
+    use super::*;
+    #[test]
+    fn powered_devices_round_trip_key_and_delta_with_authored_precision() {
+        let mut initial = AircraftState::default();
+        initial.devices[device::VECTOR_PITCH] = 0.3;
+        initial.devices[device::VECTOR_YAW] = -0.2;
+        initial.devices[device::CONVERSION] = 0.7;
+        initial.devices[device::COLLECTIVE] = 0.8;
+        initial.devices[device::GUN_AIM..device::GUN_GROUP]
+            .copy_from_slice(&[-0.5, 0.1, -0.4, 0.2, -0.6, -0.1]);
+        initial.devices[device::GUN_GROUP] = 7.;
+        let mut key = Vec::new();
+        let writer = put_aircraft(&mut key, None, &initial);
+        let mut input = In::new(&key);
+        let reader = get_aircraft(&mut input, None, 2).unwrap();
+        assert!(input.done());
+        assert_eq!(reader.state(0), initial);
+        let mut changed = initial.clone();
+        changed.devices[device::VECTOR_PITCH] = 0.8;
+        changed.devices[device::VECTOR_YAW] = 0.4;
+        changed.devices[device::CONVERSION] = 0.2;
+        changed.devices[device::COLLECTIVE] = 0.5;
+        changed.devices[device::GUN_AIM..device::GUN_GROUP]
+            .copy_from_slice(&[-0.7, 0.3, -0.2, 0.4, -0.5, 0.1]);
+        changed.devices[device::GUN_GROUP] = 5.;
+        let mut delta = Vec::new();
+        put_aircraft(&mut delta, Some(writer), &changed);
+        let mut input = In::new(&delta);
+        let decoded = get_aircraft(&mut input, Some(reader), 2).unwrap().state(0);
+        assert!(input.done());
+        for (slot, kind) in SLOTS.iter().enumerate().skip(11) {
+            assert!(
+                (decoded.devices[slot] - changed.devices[slot]).abs() <= kind.step() / 2. + 1e-12
+            );
+        }
+    }
+    #[test]
+    fn malformed_gun_membership_is_rejected_in_keys_and_deltas() {
+        for value in [-1., 8., 1.25, f64::NAN] {
+            let mut state = AircraftState::default();
+            state.devices[device::GUN_GROUP] = value;
+            let mut bytes = Vec::new();
+            put_aircraft(&mut bytes, None, &state);
+            assert!(get_aircraft(&mut In::new(&bytes), None, 2).is_err());
+        }
+        let mut bytes = Vec::new();
+        put_uv(&mut bytes, A_DEVICES);
+        put_uv(&mut bytes, 1 << 21);
+        put_iv(&mut bytes, 8);
+        assert!(
+            get_aircraft(
+                &mut In::new(&bytes),
+                Some(AircraftPred::key(&AircraftState::default())),
+                2
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn version_one_file_reads_original_key_and_delta_and_neutral_extension() {
+        use crate::format;
+        let state = AircraftState {
+            fuel_lb: 123.,
+            hp: 42,
+            max_hp: 50,
+            ..Default::default()
+        };
+        let mut frames = Vec::new();
+        put_uv(&mut frames, 0); // Frame flags.
+        put_uv(&mut frames, 2); // Full aircraft list.
+        put_uv(&mut frames, 1); // One aircraft.
+        put_iv(&mut frames, 0); // ID 0.
+        put_uv(&mut frames, A_KEY);
+        for value in state
+            .position
+            .iter()
+            .chain(&state.attitude)
+            .chain(&state.velocity)
+            .chain([&state.airspeed, &state.g])
+            .chain(&state.devices[..11])
+            .chain([&state.heat, &state.fuel_lb])
+            .chain(&state.controls)
+            .chain(&state.auxiliary_rates)
+        {
+            put_xf64(&mut frames, *value);
+        }
+        put_uv(&mut frames, u64::from(state.flags.bits()));
+        frames.push(state.wreck_phase);
+        put_iv(&mut frames, i64::from(state.hp));
+        put_iv(&mut frames, i64::from(state.max_hp));
+        for value in state.sections {
+            put_iv(&mut frames, i64::from(value));
+        }
+        put_opt_u8(&mut frames, state.structural_section);
+        for _ in 0..3 {
+            put_uv(&mut frames, 0);
+        } // Other lists unchanged, empty.
+        put_uv(&mut frames, 0); // Next frame flags.
+        put_uv(&mut frames, 0); // Aircraft list unchanged.
+        put_uv(&mut frames, A_DEVICES);
+        put_uv(&mut frames, 1 << 7); // Original gear mask order.
+        put_iv(&mut frames, 128);
+        for _ in 0..3 {
+            put_uv(&mut frames, 0);
+        }
+        let mut bytes = format::prelude();
+        bytes[8..10].copy_from_slice(&1u16.to_le_bytes());
+        bytes.extend(format::chunk(
+            format::KIND_HEADER,
+            0,
+            0,
+            &format::encode_header(&crate::Header::default()).unwrap(),
+        ));
+        let mut body = Vec::new();
+        format::put_section(&mut body, format::SECTION_FRAMES, &frames);
+        bytes.extend(format::chunk(format::KIND_DATA, 2, 0, &body));
+        let recording = crate::Recording::from_bytes(bytes).unwrap();
+        assert_eq!(recording.header().format_version, 1);
+        let decoded = recording.decode_chunk(0).unwrap();
+        assert_eq!(decoded[0].aircraft[0], state);
+        assert!((decoded[1].aircraft[0].devices[device::GEAR] - 128. / 255.).abs() < 1e-12);
+        assert_eq!(
+            decoded[1].aircraft[0].devices[11..],
+            [0.; DEVICE_COUNT - 11]
+        );
+        assert_eq!(decoded[1].aircraft[0].fuel_lb, 123.);
+    }
 }

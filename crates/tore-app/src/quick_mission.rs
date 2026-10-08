@@ -953,7 +953,11 @@ impl QuickMission {
                     ordnance.preview(name);
                 }
             }
-            "ordnance-empty" | "ordnance-drag" | "ordnance-message" | "ordnance-message-long" => {
+            "ordnance-tanks"
+            | "ordnance-empty"
+            | "ordnance-drag"
+            | "ordnance-message"
+            | "ordnance-message-long" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }

@@ -107,11 +107,11 @@ impl Preset {
     /// record fails the import rather than borrowing another aircraft's radar.
     pub fn for_record(record: &str) -> Option<Self> {
         match record.to_ascii_uppercase().as_str() {
-            "F4BR.SEE" | "MIG21R.SEE" | "MIG27R.SEE" => Some(Self::Basic),
-            "F14R.SEE" => Some(Self::Transitional),
-            "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" => {
-                Some(Self::Advanced)
-            }
+            "F4BR.SEE" | "MIG21R.SEE" | "MIG27R.SEE" | "F104R.SEE" => Some(Self::Basic),
+            "F14R.SEE" | "F4JR.SEE" | "AC130R.SEE" | "AV8R.SEE" | "YAK141R.SEE" | "A7R.SEE"
+            | "A10R.SEE" => Some(Self::Transitional),
+            "F18R.SEE" | "MIG29R.SEE" | "SU24R.SEE" | "SU27R.SEE" | "F22R.SEE" | "F15R.SEE"
+            | "E3R.SEE" | "E2R.SEE" => Some(Self::Advanced),
             _ => None,
         }
     }
@@ -191,13 +191,16 @@ pub enum Generation {
 }
 impl Generation {
     /// Explicit reviewable assignment for every ECM record installed on the
-    /// twelve imported aircraft, from docs/radar.md. Never derived from the
+    /// reviewed imported aircraft, from docs/radar.md. Never derived from the
     /// associated radar preset or the airframe year.
     pub fn for_record(record: &str) -> Option<Self> {
         match record.to_ascii_uppercase().as_str() {
-            "F4.ECM" | "MIG21.ECM" => Some(Self::Early),
-            "F14.ECM" | "MIG29.ECM" | "SU24.ECM" => Some(Self::Transitional),
-            "F18.ECM" | "SU27.ECM" | "F22.ECM" => Some(Self::LateColdWar),
+            "F4.ECM" | "MIG21.ECM" | "AV8.ECM" | "YAK141.ECM" | "KA50.ECM" | "A7.ECM"
+            | "F104.ECM" => Some(Self::Early),
+            "F14.ECM" | "MIG29.ECM" | "SU24.ECM" | "AC130.ECM" | "B52.ECM" | "A10.ECM" => {
+                Some(Self::Transitional)
+            }
+            "F18.ECM" | "SU27.ECM" | "F22.ECM" | "F15.ECM" => Some(Self::LateColdWar),
             _ => None,
         }
     }

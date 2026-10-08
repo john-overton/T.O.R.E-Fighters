@@ -2122,6 +2122,7 @@ pub fn effect_line(effect: &Effect) -> EffectLine {
                 BurnerBlock::NoPower => "no engine power".into(),
                 BurnerBlock::NotFitted => "this aircraft has no afterburner".into(),
                 BurnerBlock::NoFuel => "no fuel".into(),
+                BurnerBlock::Vectoring => "nozzles in powered-lift position".into(),
                 BurnerBlock::ThrottleLow => {
                     format!("throttle at or below {}", percent(*afterburner_throttle))
                 }

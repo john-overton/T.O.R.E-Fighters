@@ -517,8 +517,17 @@ pub(crate) fn station_specs_loaded(
     let mut stores = Vec::new();
     for (index, station) in config.stations.iter().enumerate() {
         let w = &station.weapon;
-        let gun = w.source == config.aircraft.gun();
-        let carried = u32::from(quantities.get(index).copied().unwrap_or(station.count));
+        let gun = config.aircraft.guns().contains(&w.source.as_str());
+        let units = u32::from(quantities.get(index).copied().unwrap_or(station.count));
+        // Source bookkeeping must use the same ammo units for a human taking
+        // this depot's aircraft. This changes no targeting or steering rules.
+        let carried = units
+            * config
+                .gun_pods
+                .iter()
+                .find(|pod| pod.station == index)
+                .filter(|_| w.source == "SUU16.JT")
+                .map_or(1, |pod| u32::from(pod.rounds_per_pod));
         // An empty station is the same record with no rounds.
         let mut spec = if gun {
             simple_stations(0, carried.max(1), AI_STORE_SPEED).remove(0)
@@ -537,7 +546,7 @@ pub(crate) fn station_specs_loaded(
         };
         // The reviewed default inventory owns the record used at release.
         spec.debit = u32::from(w.burst.actual_rounds_per_game).max(1);
-        spec.external_round_lbs = if station.internal {
+        spec.external_round_lbs = if station.internal || w.source == "SUU16.JT" {
             0.0
         } else {
             f64::from(w.weight.max(0))
@@ -1243,13 +1252,13 @@ impl AiWings {
         // action, not what the mission's Air combat guns only setting holds
         // back; that setting is the AI's, and the human's selection ring
         // has its own.
-        let gun = slot.aircraft.gun();
+        let guns = slot.aircraft.guns();
         for spec in &mut parts.stations {
             let by_setting = self.guns_only
                 && self
                     .weapons
                     .get(&(id, spec.station.0))
-                    .is_some_and(|w| w.source != gun)
+                    .is_some_and(|w| !guns.contains(&w.source.as_str()))
                 && !self.damaged_stations.contains(&(id, spec.station.0));
             if by_setting {
                 spec.store.inhibited = false;
@@ -1370,7 +1379,7 @@ impl AiWings {
             let gun = |station: u8| {
                 self.weapons
                     .get(&(insert.id, station))
-                    .is_some_and(|w| w.source == insert.aircraft.gun())
+                    .is_some_and(|w| insert.aircraft.guns().contains(&w.source.as_str()))
             };
             for spec in actor.stations_mut() {
                 if !gun(spec.station.0) {
@@ -1760,7 +1769,7 @@ impl AiWings {
                 let gun = self
                     .weapons
                     .get(&(slot.id, spec.station.0))
-                    .is_some_and(|w| w.source == slot.aircraft.gun());
+                    .is_some_and(|w| slot.aircraft.guns().contains(&w.source.as_str()));
                 if !gun {
                     spec.store.inhibited =
                         on || self.damaged_stations.contains(&(slot.id, spec.station.0));
@@ -2555,7 +2564,7 @@ impl AiWings {
                         spec.store.inhibited = true;
                     }
                 }
-            } else if h == config.radar_hardpoint {
+            } else if Some(h) == config.radar_hardpoint {
                 equipment.radar = true;
             } else if h == config.visual_hardpoint {
                 equipment.visual = true;
@@ -2563,7 +2572,7 @@ impl AiWings {
                 equipment.infrared = true;
             } else if Some(h) == config.rwr_hardpoint {
                 equipment.rwr = true;
-            } else if h == config.ecm_hardpoint {
+            } else if Some(h) == config.ecm_hardpoint {
                 let random = &mut self.fault_random;
                 let lost = match tore_sim::combat::systems::ecm_loss(&config.ecm, |n| {
                     random.below(u32::from(n)) as u16
@@ -4785,7 +4794,7 @@ mod tests {
         let mut gun = combat_fixture(false).own().configuration().stations[0]
             .weapon
             .clone();
-        gun.source = slot.aircraft.gun().into();
+        gun.source = slot.aircraft.gun().unwrap().into();
         wings.weapons.insert((slot.id, stations[0].station.0), gun);
         let inhibited = |wings: &AiWings| -> Vec<bool> {
             wings

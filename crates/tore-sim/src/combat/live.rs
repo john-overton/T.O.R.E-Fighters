@@ -26,6 +26,8 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
     (*state % u32::from(bound)) as u16
 }
 
+#[cfg(test)]
+mod gunship_tests;
 mod handoff;
 mod observation;
 #[cfg(test)]
@@ -98,6 +100,10 @@ pub enum Readiness {
     MaximumRange,
     Altitude,
     FieldOfView,
+    GunArc,
+    GunSlewing,
+    GroupEmpty,
+    GunObscured,
 }
 impl Readiness {
     pub fn label(self) -> &'static str {
@@ -122,6 +128,10 @@ impl Readiness {
             Self::MaximumRange => "MAX RANGE",
             Self::Altitude => "ALTITUDE LIMIT",
             Self::FieldOfView => "SEEKER FOV",
+            Self::GunArc => "CANNOT BEAR",
+            Self::GunSlewing => "SLEWING",
+            Self::GroupEmpty => "GROUP EMPTY",
+            Self::GunObscured => "NO LINE OF FIRE",
         }
     }
 }
@@ -130,6 +140,8 @@ impl Readiness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     NextWeapon,
+    NextGunGroup,
+    ToggleGunGroup,
     NextSelection,
     PreviousSelection,
     SelectNav,
@@ -253,6 +265,50 @@ pub struct Station {
     pub count: u16,
     pub internal: bool,
 }
+/// One selected external tank type, kept separate from weapon ammunition.
+#[derive(Clone, Debug)]
+pub struct TankStore {
+    pub source: String,
+    pub name: String,
+    pub tank: tore_formats::weapons::Tank,
+}
+impl TankStore {
+    pub fn parse(source: &str, bytes: &[u8]) -> Result<Self> {
+        if !source.ends_with(".GAS") {
+            return Err(super::invalid("expected tank resource"));
+        }
+        let brf = tore_formats::aircraft::Brf::parse(bytes)?;
+        let names = brf.strings("si_names")?;
+        if names.len() != 3 || !names[2].eq_ignore_ascii_case(source) {
+            return Err(super::invalid(
+                "tank identity differs from selected resource",
+            ));
+        }
+        Ok(Self {
+            source: source.into(),
+            name: names[0].clone(),
+            tank: tore_formats::weapons::Tank::parse(bytes)?,
+        })
+    }
+    pub fn full_mass_lbs(&self) -> f64 {
+        f64::from(self.tank.empty_weight) + f64::from(self.tank.fuel_weight)
+    }
+}
+#[derive(Clone, Debug)]
+pub struct TankStation {
+    pub hardpoint: usize,
+    pub mount: Vector,
+    pub store: Option<TankStore>,
+    pub quantity: u16,
+}
+/// Reviewed external gun pod hardware and its separate ammunition budget.
+#[derive(Clone, Debug)]
+pub struct GunPod {
+    pub station: usize,
+    pub quantity: u16,
+    pub rounds_per_pod: u16,
+    pub weight_lbs: i32,
+}
 #[derive(Clone, Debug)]
 pub struct Configuration {
     pub ecm: tore_formats::weapons::Countermeasures,
@@ -261,15 +317,19 @@ pub struct Configuration {
     pub fragment_offsets: [Vector; 2],
     pub afterburner_available: bool,
     pub hardpoint_slots: Vec<Option<usize>>,
-    pub radar_hardpoint: usize,
+    pub radar_hardpoint: Option<usize>,
     pub visual_hardpoint: usize,
     pub infrared_hardpoint: Option<usize>,
     pub rwr_hardpoint: Option<usize>,
-    pub ecm_hardpoint: usize,
+    pub ecm_hardpoint: Option<usize>,
     pub aircraft: AircraftId,
     pub stations: Vec<Station>,
     pub hit_points: i32,
     pub target_category: u16,
+    /// Source fixed external hardware, excluding selectable tanks and gun pods.
+    pub fixed_external_equipment_lbs: i32,
+    pub tanks: Vec<TankStation>,
+    pub gun_pods: Vec<GunPod>,
     pub external_equipment_lbs: i32,
     pub external_fuel_lbs: [f64; 9],
     pub engines: u8,
@@ -278,9 +338,88 @@ pub struct Configuration {
     pub sensors: sensors::SensorProfiles,
 }
 impl Configuration {
+    /// Convert installed gun pod quantities to logical rounds. The high ammo
+    /// bit remains reserved for station failure, so overflow is rejected.
+    pub fn ammunition(&self, quantities: &[u16]) -> Result<Vec<u16>> {
+        if quantities.len() != self.stations.len() {
+            return Err(super::invalid("invalid ammunition station count"));
+        }
+        quantities
+            .iter()
+            .enumerate()
+            .map(|(station, quantity)| {
+                let multiplier = self
+                    .gun_pods
+                    .iter()
+                    .find(|pod| pod.station == station)
+                    .filter(|_| self.stations[station].weapon.source == "SUU16.JT")
+                    .map_or(1, |pod| u32::from(pod.rounds_per_pod));
+                let rounds = u32::from(*quantity) * multiplier;
+                if rounds >= 32767 {
+                    return Err(super::invalid(
+                        "gun pod ammunition exceeds the 15-bit station limit",
+                    ));
+                }
+                Ok(rounds as u16)
+            })
+            .collect()
+    }
+    /// Derive shell/fuel totals from explicit installed tank quantities.
+    pub fn refresh_tanks(&mut self) -> Result<()> {
+        if self.tanks.len() > 9 || self.fixed_external_equipment_lbs < 0 {
+            return Err(super::invalid("invalid tank configuration"));
+        }
+        let mut mass = i64::from(self.fixed_external_equipment_lbs);
+        for pod in &self.gun_pods {
+            if pod.station >= self.stations.len() || pod.weight_lbs < 0 || pod.rounds_per_pod == 0 {
+                return Err(super::invalid("invalid gun pod configuration"));
+            }
+            mass += i64::from(pod.quantity) * i64::from(pod.weight_lbs);
+        }
+        let mut fuel = [0.; 9];
+        let mut used = [false; 9];
+        for station in &self.tanks {
+            if station.hardpoint >= fuel.len() || station.mount.iter().any(|v| !v.is_finite()) {
+                return Err(super::invalid("invalid tank station"));
+            }
+            if std::mem::replace(&mut used[station.hardpoint], true) {
+                return Err(super::invalid("duplicate tank station"));
+            }
+            if let Some(store) = &station.store {
+                if store.tank.fuel_weight < 0 {
+                    return Err(super::invalid("negative tank fuel capacity"));
+                }
+                let count = i64::from(station.quantity);
+                mass = mass
+                    .checked_add(
+                        count
+                            * (i64::from(store.tank.empty_weight)
+                                + i64::from(store.tank.fuel_weight)),
+                    )
+                    .ok_or_else(|| super::invalid("tank mass overflow"))?;
+                fuel[station.hardpoint] +=
+                    f64::from(station.quantity) * f64::from(store.tank.fuel_weight);
+            } else if station.quantity != 0 {
+                return Err(super::invalid("tank quantity has no selected type"));
+            }
+        }
+        self.external_equipment_lbs =
+            i32::try_from(mass).map_err(|_| super::invalid("tank mass exceeds bounds"))?;
+        self.external_fuel_lbs = fuel;
+        Ok(())
+    }
+
     fn validate(&self) -> Result<()> {
-        if self.stations.is_empty()
-            || self.stations.len() > 32
+        let mut equipment = self.clone();
+        equipment.refresh_tanks()?;
+        if equipment.external_equipment_lbs != self.external_equipment_lbs
+            || equipment.external_fuel_lbs != self.external_fuel_lbs
+        {
+            return Err(super::invalid(
+                "installed hardware mass or fuel is inconsistent",
+            ));
+        }
+        if self.stations.len() > 32
             || self.damage_capacity <= 0
             || !self
                 .fragment_offsets
@@ -289,6 +428,7 @@ impl Configuration {
                 .all(|v| v.is_finite())
             || self.hit_points <= 0
             || self.external_equipment_lbs < 0
+            || self.fixed_external_equipment_lbs < 0
             || !(1..=4).contains(&self.engines)
             || self
                 .external_fuel_lbs
@@ -303,8 +443,7 @@ impl Configuration {
                 profile.validate()?;
             }
             let m = &s.weapon.movement;
-            if s.count == 0
-                || s.count >= 32767
+            if s.count >= 32767
                 || s.mount.iter().any(|v| !v.is_finite())
                 || m.minimum_speed < 0
                 || m.maximum_speed < m.minimum_speed
@@ -322,6 +461,7 @@ impl Configuration {
         mut read: impl FnMut(&str) -> Result<Vec<u8>>,
     ) -> Result<Self> {
         let mut stations = Vec::new();
+        let mut gun_pods = Vec::new();
         let mut external_equipment_lbs = 0i32;
         let mut external_fuel_lbs = [0.; 9];
         for (index, h) in a
@@ -361,11 +501,63 @@ impl Configuration {
                     .ok_or_else(|| super::invalid("external mass overflow"))?;
             }
         }
+        let mut tanks = Vec::new();
+        for (index, h) in a.hardpoints.iter().enumerate().take(9) {
+            let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
+            let retained_equipment = h
+                .store
+                .as_deref()
+                .is_some_and(|name| name.ends_with(".SEE") || name.ends_with(".ECM"));
+            if h.flags & 8 == 0
+                && !retained_equipment
+                && (h.flags & 0x200 != 0 || default.is_some())
+            {
+                tanks.push(TankStation {
+                    hardpoint: index,
+                    mount: h.position.map(|v| f64::from(v) / 3.),
+                    store: default
+                        .map(|name| TankStore::parse(name, &read(name)?))
+                        .transpose()?,
+                    quantity: if default.is_some() {
+                        u16::try_from(h.count).map_err(|_| super::invalid("invalid tank count"))?
+                    } else {
+                        0
+                    },
+                });
+            }
+        }
+        let tank_mass: i64 = tanks
+            .iter()
+            .filter_map(|s| {
+                s.store.as_ref().map(|store| {
+                    i64::from(s.quantity)
+                        * (i64::from(store.tank.empty_weight) + i64::from(store.tank.fuel_weight))
+                })
+            })
+            .sum();
+        let fixed_external_equipment_lbs =
+            i32::try_from(i64::from(external_equipment_lbs) - tank_mass)
+                .map_err(|_| super::invalid("invalid fixed external hardware mass"))?;
         for h in &a.hardpoints {
             let Some(name) = h.store.as_deref().filter(|n| n.ends_with(".JT")) else {
                 continue;
             };
             let weapon = Weapon::parse(name, &read(name)?)?;
+            if name == "SUU16.JT" {
+                let equipment = tore_formats::aircraft::Equipment::parse(name, &read(name)?)?;
+                let real_rounds = i32::from(weapon.burst.projectiles_in_pod);
+                let multiplier = i32::from(weapon.burst.actual_rounds_per_game);
+                if real_rounds <= 0 || multiplier <= 0 || real_rounds % multiplier != 0 {
+                    return Err(super::invalid("unreviewed gun pod ammunition contract"));
+                }
+                gun_pods.push(GunPod {
+                    station: stations.len(),
+                    quantity: h.count as u16,
+                    rounds_per_pod: u16::try_from(real_rounds / multiplier)
+                        .map_err(|_| super::invalid("gun pod round count exceeds word"))?,
+                    weight_lbs: equipment.object["weight"].number()?,
+                });
+            }
             // Restrict the live adapter to the actual default stations of the
             // reviewed aircraft. Catalog import never makes another type flyable.
             let permitted = match a.id {
@@ -386,6 +578,31 @@ impl Configuration {
                 AircraftId::Rafale => {
                     ["DEFA.JT", "AGM65G.JT", "MICA.JT", "R530.JT", "R550.JT"].contains(&name)
                 }
+                AircraftId::C130 => false,
+                AircraftId::Ac130 => ["C_105.JT", "C_25.JT", "C_40.JT"].contains(&name),
+                AircraftId::E3 => false,
+                AircraftId::Il76 => false,
+                AircraftId::E2 => false,
+                AircraftId::Av8 => ["AGM65G.JT", "AIM9M.JT", "GAU12.JT"].contains(&name),
+                AircraftId::Yak141 => ["AA10.JT", "AA11.JT", "GSH30.JT"].contains(&name),
+                AircraftId::V22 => ["T30_1.JT"].contains(&name),
+                AircraftId::Ah64 => ["AIM9M.JT", "LAU61.JT", "M61.JT"].contains(&name),
+                AircraftId::Mi24 => ["AT2.JT", "T12_4.JT"].contains(&name),
+                AircraftId::Ch47 => false,
+                AircraftId::Mig17 => ["GSH23.JT", "GSH30.JT"].contains(&name),
+                AircraftId::F4B => ["AIM9B.JT", "MK82.JT"].contains(&name),
+                AircraftId::F4J => ["AIM7E.JT", "AIM9B.JT", "SUU16.JT"].contains(&name),
+                AircraftId::F4E => ["AGM65G.JT", "AIM7.JT", "M61.JT"].contains(&name),
+                AircraftId::F4G => ["AGM88.JT", "AIM7.JT", "M61.JT"].contains(&name),
+                AircraftId::A7 => ["AGM65G.JT", "AIM9M.JT", "M61.JT", "MK82.JT"].contains(&name),
+                AircraftId::F15 => ["AIM120.JT", "AIM9M.JT", "M61.JT"].contains(&name),
+                AircraftId::F16C => {
+                    ["AGM65G.JT", "AIM120.JT", "AIM9M.JT", "M61.JT"].contains(&name)
+                }
+                AircraftId::F104 => ["AIM7.JT", "AIM9M.JT", "M61.JT"].contains(&name),
+                AircraftId::A10 => ["AGM65G.JT", "GAU8.JT"].contains(&name),
+                AircraftId::B747 => false,
+                AircraftId::A310 => false,
             };
             if weapon.movement.acceleration > i32::MAX / 256
                 || weapon.movement.deceleration > i32::MAX / 256
@@ -403,15 +620,69 @@ impl Configuration {
                 weapon,
                 mount: h.position.map(|v| f64::from(v) / 3.),
                 count: h.count as u16,
-                internal: h.flags & 8 != 0,
+                // Source bit 8 fixes the loading slot; the reviewed SUU16 pod
+                // is still separate external hardware rather than an internal gun.
+                internal: h.flags & 8 != 0 && name != "SUU16.JT",
             });
+        }
+        // Preserve every existing default-JT index. Additional source rows
+        // retain a real compatible selection at zero quantity, never a fake store.
+        let mut hardpoint_slots = vec![None; a.hardpoints.len()];
+        let mut slot = 0;
+        for (hardpoint, h) in a.hardpoints.iter().enumerate() {
+            if h.store.as_deref().is_some_and(|name| name.ends_with(".JT")) {
+                hardpoint_slots[hardpoint] = Some(slot);
+                slot += 1;
+            }
+        }
+        let default_weapons: Vec<_> = stations
+            .iter()
+            .map(|station| station.weapon.clone())
+            .collect();
+        for (hardpoint, h) in a.hardpoints.iter().enumerate() {
+            if hardpoint_slots[hardpoint].is_some() || h.flags & 8 != 0 {
+                continue;
+            }
+            let source_station = super::loading::Station::from_source(h)?;
+            let compatible = |weapon: &Weapon| {
+                weapon.source != "SUU16.JT"
+                    && (1..32767).contains(
+                        &source_station.allowed_count(super::loading::Store::weapon(weapon), false),
+                    )
+            };
+            let mut selected = default_weapons
+                .iter()
+                .find(|weapon| compatible(weapon))
+                .cloned();
+            if selected.is_none() {
+                let fallback = match (a.id, hardpoint) {
+                    (AircraftId::Mig23, 5) => Some("AIM9M.JT"),
+                    (AircraftId::Mig17, 3) => Some("MK82.JT"),
+                    _ => None,
+                };
+                if let Some(name) = fallback {
+                    let weapon = Weapon::parse(name, &read(name)?)?;
+                    if compatible(&weapon) {
+                        selected = Some(weapon);
+                    }
+                }
+            }
+            if let Some(weapon) = selected {
+                hardpoint_slots[hardpoint] = Some(stations.len());
+                stations.push(Station {
+                    weapon,
+                    mount: h.position.map(|v| f64::from(v) / 3.),
+                    count: 0,
+                    internal: false,
+                });
+            }
         }
         let hit_points = a
             .object
             .get("hitPoints")
             .ok_or_else(|| super::invalid("missing aircraft hit points"))?
             .number()?;
-        if hit_points <= 0 || stations.is_empty() || !stations[0].internal {
+        if hit_points <= 0 {
             return Err(super::invalid("invalid live-fire aircraft configuration"));
         }
         // Sensors resolve by parsed record channel, so a missing device is an
@@ -426,20 +697,20 @@ impl Configuration {
                 })
             })
         };
-        let radar_hardpoint = station(profiles.radar.as_ref().map(|r| &r.record))
-            .ok_or_else(|| super::invalid("missing reviewed radar station"))?;
+        let radar_hardpoint = station(profiles.radar.as_ref().map(|r| &r.record));
         let visual_hardpoint = station(profiles.visual.as_ref().map(|v| &v.record))
             .ok_or_else(|| super::invalid("missing reviewed visual sensor"))?;
         let infrared_hardpoint = station(profiles.infrared.as_ref().map(|i| &i.record));
         let ecm_hardpoint = a
             .hardpoints
             .iter()
-            .position(|h| h.store.as_deref().is_some_and(|n| n.ends_with(".ECM")))
-            .ok_or_else(|| super::invalid("missing ECM"))?;
-        let ecm = tore_formats::weapons::Countermeasures::parse(
-            a.hardpoints[ecm_hardpoint].store.as_deref().unwrap(),
-            &read(a.hardpoints[ecm_hardpoint].store.as_deref().unwrap())?,
-        )?;
+            .position(|h| h.store.as_deref().is_some_and(|n| n.ends_with(".ECM")));
+        let ecm = if let Some(index) = ecm_hardpoint {
+            let name = a.hardpoints[index].store.as_deref().unwrap();
+            tore_formats::weapons::Countermeasures::parse(name, &read(name)?)?
+        } else {
+            tore_formats::weapons::Countermeasures::NONE
+        };
         let mut rwr_hardpoint = None;
         for (index, h) in a.hardpoints.iter().enumerate() {
             if let Some(name) = h.store.as_deref().filter(|name| name.ends_with(".SEE")) {
@@ -463,20 +734,6 @@ impl Configuration {
                 .ok_or_else(|| super::invalid("missing system damage"))?
                 .number()? as u8;
         }
-        let mut slot = 0;
-        let hardpoint_slots = a
-            .hardpoints
-            .iter()
-            .map(|h| {
-                if h.store.as_deref().is_some_and(|n| n.ends_with(".JT")) {
-                    let i = slot;
-                    slot += 1;
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect();
         let damage_capacity = hit_points
             .checked_mul(2)
             .filter(|v| *v <= i32::from(i16::MAX))
@@ -489,6 +746,14 @@ impl Configuration {
             .unwrap_or(1)
             .clamp(1, 4) as u8;
         let fuel = a.number("internalFuel") + external_fuel_lbs.iter().sum::<f64>();
+        external_equipment_lbs = i32::try_from(
+            i64::from(external_equipment_lbs)
+                + gun_pods
+                    .iter()
+                    .map(|pod| i64::from(pod.quantity) * i64::from(pod.weight_lbs))
+                    .sum::<i64>(),
+        )
+        .map_err(|_| super::invalid("gun pod equipment mass exceeds bounds"))?;
         let mass = a
             .object
             .get("weight")
@@ -499,7 +764,7 @@ impl Configuration {
             + f64::from(external_equipment_lbs)
             + stations
                 .iter()
-                .filter(|s| !s.internal)
+                .filter(|s| !s.internal && s.weapon.source != "SUU16.JT")
                 .map(|s| f64::from(s.weapon.weight) * f64::from(s.count))
                 .sum::<f64>();
         let wreck_power = crate::wreck::Power::symmetric(
@@ -528,6 +793,9 @@ impl Configuration {
             rwr_hardpoint,
             ecm_hardpoint,
             sensors: profiles,
+            fixed_external_equipment_lbs,
+            tanks,
+            gun_pods,
             external_equipment_lbs,
             external_fuel_lbs,
             wreck_power,
@@ -939,6 +1207,8 @@ pub struct Ownship {
     /// never loaded has none. See `note_loaded`.
     ever_loaded: Vec<bool>,
     pub selected: usize,
+    /// AC-130 fixed-tick barrel angles and linked membership.
+    pub gunship: Option<super::gunship::State>,
     pub armed: bool,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
@@ -1171,15 +1441,31 @@ impl Ownship {
     /// The combat state of `aircraft`, fresh from its stores and hit points.
     pub fn new(aircraft: u32, side: Side, config: Configuration, external: bool) -> Result<Self> {
         config.validate()?;
-        let ammo: Vec<u16> = config
+        let quantities: Vec<u16> = config
             .stations
             .iter()
-            .map(|s| if s.internal || external { s.count } else { 0 })
+            .enumerate()
+            .map(|(station, s)| {
+                if !s.internal && !external {
+                    return 0;
+                }
+                if s.weapon.source == "SUU16.JT" {
+                    config
+                        .gun_pods
+                        .iter()
+                        .find(|pod| pod.station == station)
+                        .map_or(s.count, |pod| pod.quantity)
+                } else {
+                    s.count
+                }
+            })
             .collect();
+        let ammo = config.ammunition(&quantities)?;
         let ever_loaded = ammo.iter().map(|a| a & 0x7fff != 0).collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let sensors = Sensors::new(config.sensors.clone());
+        let gunship = super::gunship::State::new(&config);
         Ok(Self {
             aircraft,
             side,
@@ -1206,11 +1492,12 @@ impl Ownship {
             previous_position: None,
             external,
             range_estimate: None,
-            armed: true,
+            armed: !config.stations.is_empty(),
             config,
             ammo,
             ever_loaded,
             selected: 0,
+            gunship,
             sensors,
             emitters: vec![],
             missile_threats: super::threats::ThreatService::new(aircraft),
@@ -1229,6 +1516,66 @@ impl Ownship {
     pub fn configuration(&self) -> &Configuration {
         &self.config
     }
+    pub fn gun_group_label(&self) -> Option<String> {
+        let group = self.gunship.as_ref()?;
+        let members: Vec<_> = super::gunship::NAMES
+            .into_iter()
+            .zip(group.included)
+            .filter_map(|(name, on)| on.then_some(name))
+            .collect();
+        let candidate = group
+            .slot(self.selected)
+            .map_or("NONE", |slot| super::gunship::NAMES[slot]);
+        Some(format!(
+            "Gun group: {}. Candidate: {candidate}",
+            if members.is_empty() {
+                "EMPTY".into()
+            } else {
+                members.join("+")
+            }
+        ))
+    }
+    fn gun_readiness(&self, slot: usize) -> Readiness {
+        let Some(group) = &self.gunship else {
+            return Readiness::Safe;
+        };
+        let Some(index) = group.stations[slot] else {
+            return Readiness::Empty;
+        };
+        if !self.armed {
+            Readiness::Safe
+        } else if self.hp <= 0 {
+            Readiness::LauncherLost
+        } else if self.ammo[index] & 0x8000 != 0 {
+            Readiness::StationFailed
+        } else if self.rounds(index) == 0 {
+            Readiness::Empty
+        } else {
+            group.status[slot]
+        }
+    }
+    fn gun_group_readiness(&self) -> Option<Readiness> {
+        let group = self.gunship.as_ref()?;
+        let candidate = group.slot(self.selected)?;
+        if group.fire_stations().is_empty() {
+            return Some(Readiness::GroupEmpty);
+        }
+        let selected_readiness = self.gun_readiness(candidate);
+        if selected_readiness != Readiness::Ready {
+            return Some(selected_readiness);
+        }
+        let mut status = Readiness::GroupEmpty;
+        for slot in (0..3).filter(|slot| group.included[*slot] && group.stations[*slot].is_some()) {
+            let readiness = self.gun_readiness(slot);
+            if readiness == Readiness::Ready {
+                return Some(readiness);
+            }
+            if status == Readiness::GroupEmpty {
+                status = readiness;
+            }
+        }
+        Some(status)
+    }
     pub fn damage_section(&self) -> Option<DamageSection> {
         self.localized_damage.structural_section
     }
@@ -1243,7 +1590,12 @@ impl Ownship {
     }
     /// Whether the selected weapon sits behind bay doors that are not open yet.
     fn bay_waits(&self, launcher: Launcher) -> bool {
-        !launcher.bay_ready && !self.config.stations[self.selected].internal
+        !launcher.bay_ready
+            && self
+                .config
+                .stations
+                .get(self.selected)
+                .is_some_and(|s| !s.internal)
     }
     /// The automatic bay request: a trigger press waiting on the doors, or the
     /// brief hold open after a bay release so the weapon clears them.
@@ -1260,7 +1612,7 @@ impl Ownship {
         }
     }
     pub fn rounds(&self, station: usize) -> u16 {
-        self.ammo[station] & 0x7fff
+        self.ammo.get(station).copied().unwrap_or(0) & 0x7fff
     }
     pub fn designated(&self) -> Option<u32> {
         self.sensors.selected()
@@ -1273,18 +1625,26 @@ impl Ownship {
         }
     }
     pub fn payload_lbs(&self) -> f64 {
+        let absent_pods: f64 = self
+            .config
+            .gun_pods
+            .iter()
+            .filter(|pod| !self.was_loaded(pod.station))
+            .map(|pod| f64::from(pod.quantity) * f64::from(pod.weight_lbs))
+            .sum();
         f64::from(if self.external {
             self.config.external_equipment_lbs
         } else {
             0
-        }) + self
-            .config
-            .stations
-            .iter()
-            .zip(&self.ammo)
-            .filter(|(s, _)| !s.internal)
-            .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff))
-            .sum::<f64>()
+        }) - if self.external { absent_pods } else { 0. }
+            + self
+                .config
+                .stations
+                .iter()
+                .zip(&self.ammo)
+                .filter(|(s, _)| !s.internal && s.weapon.source != "SUU16.JT")
+                .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff))
+                .sum::<f64>()
     }
 }
 impl Ownship {
@@ -1323,6 +1683,9 @@ impl Ownship {
         self.armed = next != 0;
         if self.armed {
             self.selected = next - 1;
+            if let Some(group) = &mut self.gunship {
+                group.solo(self.selected);
+            }
         }
     }
     /// The mission's starting load is what `ammo` holds now: only those
@@ -1337,8 +1700,8 @@ impl Ownship {
             *loaded |= ammo & 0x7fff != 0;
         }
     }
-    /// Whether a station was loaded at the start of the mission, whatever it
-    /// holds now.
+    /// Whether an ordinary station was loaded at mission start. A gun pod
+    /// remains present when empty, until explicit jettison clears this flag.
     pub fn was_loaded(&self, station: usize) -> bool {
         self.ever_loaded.get(station).copied().unwrap_or(false)
     }
@@ -1349,6 +1712,15 @@ impl Ownship {
         if !self.armed || self.carries(self.selected, unlimited_ammo) {
             return;
         }
+        if self.gunship.as_ref().is_some_and(|group| {
+            group.slot(self.selected).is_some()
+                && group
+                    .fire_stations()
+                    .into_iter()
+                    .any(|index| self.carries(index, unlimited_ammo))
+        }) {
+            return;
+        }
         let count = self.ammo.len();
         let next = (1..count)
             .map(|step| (self.selected + step) % count)
@@ -1357,13 +1729,18 @@ impl Ownship {
     }
     /// Whether the guns only cheat lets this station be selected.
     pub fn station_allowed(&self, station: usize, guns_only: bool) -> bool {
-        !guns_only || is_gun(&self.config.stations[station].weapon)
+        self.config
+            .stations
+            .get(station)
+            .is_some_and(|s| !guns_only || is_gun(&s.weapon))
     }
     /// A station the selection ring may stop on: one that carries something
     /// (an empty station is not on the aircraft), or any station under
     /// unlimited ammunition.
     pub fn carries(&self, station: usize, unlimited_ammo: bool) -> bool {
-        unlimited_ammo || self.ammo[station] & 0x7fff != 0
+        self.ammo
+            .get(station)
+            .is_some_and(|ammo| unlimited_ammo || ammo & 0x7fff != 0)
     }
     /// Guns only turned on with a missile selected moves to the gun, or to
     /// NAV when the aircraft has none.
@@ -1382,11 +1759,18 @@ impl Ownship {
         }
     }
     pub fn select_next(&mut self) {
+        if self.ammo.is_empty() {
+            self.armed = false;
+            return;
+        }
         self.release();
         self.bore_observation = None;
         self.mounted = Seeker::default();
         self.mounted_key = None;
         self.selected = (self.selected + 1) % self.ammo.len();
+        if let Some(group) = &mut self.gunship {
+            group.solo(self.selected);
+        }
         if missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
             .is_none_or(|p| !p.supports_boresight())
         {
@@ -1532,6 +1916,13 @@ impl<'a> LauncherView<'a> {
         if !self.view.own.armed {
             return Readiness::Safe;
         }
+        if let Some(readiness) = self.view.own.gun_group_readiness() {
+            return if self.view.state.projectiles.len() >= MAX_PROJECTILES {
+                Readiness::Capacity
+            } else {
+                readiness
+            };
+        }
         if self.view.own.ammo[self.view.own.selected] & 0x8000 != 0 {
             return Readiness::StationFailed;
         }
@@ -1558,6 +1949,9 @@ impl<'a> LauncherView<'a> {
     }
 
     fn compute_launch_solution(&self) -> Readiness {
+        if self.view.own.config.stations.is_empty() {
+            return Readiness::Safe;
+        }
         let launcher = self.launcher;
         let w = &self.view.own.config.stations[self.view.own.selected].weapon;
         if w.seeker.signature == 0 {
@@ -1657,6 +2051,9 @@ impl<'a> LauncherView<'a> {
     }
 
     pub fn can_lock(&self) -> bool {
+        if self.view.own.config.stations.is_empty() {
+            return false;
+        }
         let launcher = self.launcher;
         if self.view.state.weapon_rules == Rules::Spec
             && !self.view.own.guidance_available(launcher)
@@ -1688,7 +2085,13 @@ impl<'a> LauncherView<'a> {
     /// silence with nothing in it (John, 2026-09-23).
     pub fn seeker_tone(&self) -> Option<SeekerTone> {
         let launcher = self.launcher;
-        let w = &self.view.own.config.stations[self.view.own.selected].weapon;
+        let w = &self
+            .view
+            .own
+            .config
+            .stations
+            .get(self.view.own.selected)?
+            .weapon;
         let profile = missiles::Profile::for_weapon(w)?;
         if self.view.state.weapon_rules != Rules::Spec
             || !self.view.own.guidance_available(launcher)
@@ -1767,7 +2170,13 @@ impl<'a> LauncherView<'a> {
 
     fn compute_mounted_solution(&self) -> Option<missiles::Solution> {
         let launcher = self.launcher;
-        let w = &self.view.own.config.stations[self.view.own.selected].weapon;
+        let w = &self
+            .view
+            .own
+            .config
+            .stations
+            .get(self.view.own.selected)?
+            .weapon;
         let profile = missiles::Profile::for_weapon(w)?;
         let observed = self.weapon_observation()?;
         missiles::intercept(
@@ -1917,8 +2326,10 @@ fn weapon_observation<'a>(
 
 impl Ownship {
     pub fn guidance_available(&self, launcher: Launcher) -> bool {
-        missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
-            .is_none_or(|p| p.guidance_available(launcher.radar_power))
+        self.config.stations.get(self.selected).is_some_and(|s| {
+            missiles::Profile::for_weapon(&s.weapon)
+                .is_none_or(|p| p.guidance_available(launcher.radar_power))
+        })
     }
 }
 impl State {
@@ -2339,7 +2750,10 @@ impl State {
                 }
             }
             Command::Incoming => {
-                if self.projectiles.len() < MAX_PROJECTILES && own.hp > 0 {
+                if self.projectiles.len() < MAX_PROJECTILES
+                    && own.hp > 0
+                    && !own.config.stations.is_empty()
+                {
                     let w = &own.config.stations[own.selected].weapon;
                     let position = std::array::from_fn(|i| {
                         launcher.position[i] + launcher.basis.forward[i] * 1800.
@@ -2410,6 +2824,28 @@ impl State {
                 own.mounted_key = None;
                 own.release();
             }
+            Command::NextGunGroup => {
+                let Some(group) = &own.gunship else {
+                    return;
+                };
+                let slots: Vec<_> = group.stations.iter().flatten().copied().collect();
+                if slots.is_empty() {
+                    return;
+                }
+                let next = slots
+                    .iter()
+                    .position(|index| *index == own.selected)
+                    .map_or(0, |i| (i + 1) % slots.len());
+                let membership = group.included;
+                own.set_selection(slots[next] + 1);
+                own.gunship.as_mut().expect("existing gunship").included = membership;
+            }
+            Command::ToggleGunGroup => {
+                if let Some(group) = &mut own.gunship {
+                    group.toggle(own.selected);
+                    own.release();
+                }
+            }
             Command::NextWeapon => own.select_next(),
             Command::NextSelection => {
                 own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo)
@@ -2449,12 +2885,25 @@ impl State {
                 own.release();
             }
             Command::ToggleArm => {
-                own.armed = !own.armed;
+                own.armed = !own.armed && !own.config.stations.is_empty();
                 own.release();
             }
             Command::Jettison => {
-                if !own.config.stations[own.selected].internal {
+                if own
+                    .config
+                    .stations
+                    .get(own.selected)
+                    .is_some_and(|s| !s.internal)
+                {
                     unload(&mut own.ammo[own.selected], 0);
+                    if own
+                        .config
+                        .gun_pods
+                        .iter()
+                        .any(|pod| pod.station == own.selected)
+                    {
+                        own.ever_loaded[own.selected] = false;
+                    }
                     own.release();
                 }
             }
@@ -2467,7 +2916,9 @@ impl State {
             // Native equipment damage marks the station's high bit. Selecting
             // the failure manually is a test fixture, not a recovered damage roll.
             Command::FailStation => {
-                own.ammo[own.selected] |= 0x8000;
+                if let Some(ammo) = own.ammo.get_mut(own.selected) {
+                    *ammo |= 0x8000;
+                }
                 own.release();
             }
         }
@@ -2594,7 +3045,7 @@ impl State {
                 if own.rounds(*slot) > 0 {
                     own.ammo[*slot] |= 0x8000;
                 }
-            } else if h == own.config.radar_hardpoint {
+            } else if Some(h) == own.config.radar_hardpoint {
                 own.radar_failed = true;
             } else if h == own.config.visual_hardpoint {
                 own.visual_failed = true;
@@ -2602,7 +3053,7 @@ impl State {
                 own.infrared_failed = true;
             } else if Some(h) == own.config.rwr_hardpoint {
                 own.rwr_failed = true;
-            } else if h == own.config.ecm_hardpoint {
+            } else if Some(h) == own.config.ecm_hardpoint {
                 use super::systems::EcmLoss;
                 match super::systems::ecm_loss(&own.config.ecm, |n| draw(&mut self.rng, n)) {
                     Some(EcmLoss::Everything) => {
@@ -2831,12 +3282,13 @@ impl State {
         self.with_ownship(aircraft, |state, own| state.range_target_of(own, launcher));
     }
     fn range_target_of(&mut self, own: &mut Ownship, launcher: Launcher) {
-        let w = &own.config.stations[own.selected].weapon;
-        let distance = if w.seeker.signature == 0 {
-            900.
-        } else {
-            f64::from(w.seeker.zones[1].minimum_range) + 3000.
-        };
+        let distance = own.config.stations.get(own.selected).map_or(900., |s| {
+            if s.weapon.seeker.signature == 0 {
+                900.
+            } else {
+                f64::from(s.weapon.seeker.zones[1].minimum_range) + 3000.
+            }
+        });
         // Retire the previous engagement atomically. Never let an old missile
         // hit or track a replacement fixture with a reused identity.
         own.release();
@@ -3099,13 +3551,14 @@ impl State {
             if std::mem::take(&mut own.pending_damage) && own.hp > 0 {
                 // Explicit no-AI hit fixture uses this aircraft's gun damage. Native
                 // percent input is 100; deterministic adapter RNG is not native RNG.
-                let base = scaled_weapon_damage(
-                    &own.config.stations[0].weapon,
-                    i32::from(
-                        own.config.stations[0].weapon.damage.by_class
-                            [damage_class(own.config.target_category)],
-                    ),
-                ) as u16;
+                let base = own.config.stations.first().map_or(1, |s| {
+                    scaled_weapon_damage(
+                        &s.weapon,
+                        i32::from(
+                            s.weapon.damage.by_class[damage_class(own.config.target_category)],
+                        ),
+                    ) as u16
+                });
                 let amount =
                     super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
                 own.localized_damage.record(
@@ -3195,211 +3648,304 @@ impl State {
                     },
                 );
             }
-            let index = own.selected;
-            own.release_readiness = view(self, own).readiness(launcher);
-            let bay_waits = own.bay_waits(launcher);
-            // A pending bay release lapses if the shot is no longer wanted or the
-            // doors never open.
-            if own.bay_release.is_some_and(|(station, pressed)| {
-                station != index
-                    || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
-                    || !matches!(
-                        own.release_readiness,
-                        Readiness::Ready | Readiness::BayClosed
-                    )
-            }) {
-                own.bay_release = None;
+            if own.config.stations.is_empty() {
+                own.release_readiness = Readiness::Safe;
+                own.release();
+                continue;
             }
-            let allowed = own.release_readiness == Readiness::Ready && !bay_waits;
-            let station = &own.config.stations[index];
-            let w = &station.weapon;
-            let guided = w.seeker.signature != 0;
-            let gun = is_gun(w);
-            let pressed = held && launcher.alive && !own.triggers[index].was_held;
-            let polled = own.triggers[index].poll(
-                held && launcher.alive,
-                w.flags,
-                w.burst.game_burst_t,
-                now,
-            );
-            if polled && bay_waits && own.release_readiness == Readiness::Ready {
-                own.bay_release = Some((index, self.tick));
-                own.release_readiness = Readiness::BayClosed;
+            let designation = own
+                .designated()
+                .and_then(|id| own.sensors.observation(id).map(|contact| (id, contact)));
+            let absent = if designation.is_some_and(|(_, contact)| contact.destroyed) {
+                Readiness::TargetDestroyed
+            } else {
+                Readiness::NoTarget
+            };
+            let target =
+                designation
+                    .filter(|(_, contact)| !contact.destroyed)
+                    .map(|(id, contact)| {
+                        (
+                            id,
+                            super::gunsight::TargetObservation {
+                                position: contact.position,
+                                velocity: contact.velocity,
+                            },
+                        )
+                    });
+            if let Some(group) = &mut own.gunship {
+                group.update(&own.config, launcher, target, absent, |from, to| {
+                    !obscured(from, to)
+                });
             }
-            let bay_open = own.bay_release.is_some() && !bay_waits;
-            if bay_open {
-                own.bay_release = None;
+            let selected = own.selected;
+            let grouped = own
+                .gunship
+                .as_ref()
+                .is_some_and(|group| group.slot(selected).is_some());
+            let fire_stations = if grouped {
+                own.gunship
+                    .as_ref()
+                    .expect("grouped gunship")
+                    .fire_stations()
+            } else {
+                vec![selected]
+            };
+            if fire_stations.is_empty() {
+                own.release_readiness = Readiness::GroupEmpty;
+                own.release();
             }
-            let due = polled || bay_open
+            for index in fire_stations {
+                own.selected = index;
+                own.release_readiness = if grouped {
+                    let slot = own
+                        .gunship
+                        .as_ref()
+                        .expect("grouped gunship")
+                        .slot(index)
+                        .expect("gun slot");
+                    if !launcher.alive {
+                        Readiness::LauncherLost
+                    } else if self.projectiles.len() >= MAX_PROJECTILES {
+                        Readiness::Capacity
+                    } else {
+                        own.gun_readiness(slot)
+                    }
+                } else {
+                    view(self, own).readiness(launcher)
+                };
+                let bay_waits = own.bay_waits(launcher);
+                // A pending bay release lapses if the shot is no longer wanted or the
+                // doors never open.
+                if own.bay_release.is_some_and(|(station, pressed)| {
+                    station != index
+                        || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
+                        || !matches!(
+                            own.release_readiness,
+                            Readiness::Ready | Readiness::BayClosed
+                        )
+                }) {
+                    own.bay_release = None;
+                }
+                let allowed = own.release_readiness == Readiness::Ready && !bay_waits;
+                let station = &own.config.stations[index];
+                let w = &station.weapon;
+                let guided = w.seeker.signature != 0;
+                let gun = is_gun(w);
+                let pressed = held && launcher.alive && !own.triggers[index].was_held;
+                let polled = own.triggers[index].poll(
+                    held && launcher.alive,
+                    w.flags,
+                    w.burst.game_burst_t,
+                    now,
+                );
+                if polled && bay_waits && own.release_readiness == Readiness::Ready {
+                    own.bay_release = Some((index, self.tick));
+                    own.release_readiness = Readiness::BayClosed;
+                }
+                let bay_open = own.bay_release.is_some() && !bay_waits;
+                if bay_open {
+                    own.bay_release = None;
+                }
+                let due = polled || bay_open
                 // A gun repress uses the retained physical-round deadline,
                 // not the old representative burst's quarter-second deadline.
                 || (gun && pressed);
-            let (count, debit, gun_round, tracer) = if gun {
-                let cadence = &mut own.gun_cadence[index];
-                let physical_rounds = u16::from(w.burst.game_rounds_in_burst.max(1))
-                    .saturating_mul(u16::from(w.burst.actual_rounds_per_game.max(1)));
-                if due && allowed {
-                    cadence.pending = cadence
-                        .pending
-                        .saturating_add(physical_rounds)
-                        .min(physical_rounds);
-                    cadence.next_scaled = cadence
-                        .next_scaled
-                        .max(self.tick.saturating_mul(u64::from(physical_rounds)));
-                }
-                if !held || !launcher.alive {
-                    cadence.pending = 0;
-                }
-                if !allowed && cadence.pending > 0 {
-                    cadence.next_scaled = self
-                        .tick
-                        .saturating_mul(u64::from(physical_rounds))
-                        .saturating_add(u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30));
-                }
-                let ready = cadence.pending > 0
-                    && allowed
-                    && self.tick.saturating_mul(u64::from(physical_rounds)) >= cadence.next_scaled;
-                if ready {
-                    let ordinal = cadence.ordinal;
+                let (count, debit, gun_round, tracer) = if gun {
+                    let cadence = &mut own.gun_cadence[index];
+                    let physical_rounds = u16::from(w.burst.game_rounds_in_burst.max(1))
+                        .saturating_mul(u16::from(w.burst.actual_rounds_per_game.max(1)));
+                    if due && allowed {
+                        cadence.pending = cadence
+                            .pending
+                            .saturating_add(physical_rounds)
+                            .min(physical_rounds);
+                        cadence.next_scaled = cadence
+                            .next_scaled
+                            .max(self.tick.saturating_mul(u64::from(physical_rounds)));
+                    }
+                    if !held || !launcher.alive {
+                        cadence.pending = 0;
+                    }
+                    if !allowed && cadence.pending > 0 {
+                        cadence.next_scaled = self
+                            .tick
+                            .saturating_mul(u64::from(physical_rounds))
+                            .saturating_add(
+                                u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30),
+                            );
+                    }
+                    let ready = cadence.pending > 0
+                        && allowed
+                        && self.tick.saturating_mul(u64::from(physical_rounds))
+                            >= cadence.next_scaled;
+                    if ready {
+                        let ordinal = cadence.ordinal;
+                        (
+                            1,
+                            1,
+                            Some(
+                                (ordinal % u64::from(w.burst.actual_rounds_per_game.max(1))) as u8,
+                            ),
+                            ordinal.is_multiple_of(3),
+                        )
+                    } else {
+                        (0, 1, None, false)
+                    }
+                } else if due && allowed {
                     (
-                        1,
-                        1,
-                        Some((ordinal % u64::from(w.burst.actual_rounds_per_game.max(1))) as u8),
-                        ordinal.is_multiple_of(3),
+                        usize::from(w.burst.game_rounds_in_burst.max(1)).min(32),
+                        u16::from(w.burst.actual_rounds_per_game),
+                        None,
+                        false,
                     )
                 } else {
-                    (0, 1, None, false)
-                }
-            } else if due && allowed {
-                (
-                    usize::from(w.burst.game_rounds_in_burst.max(1)).min(32),
-                    u16::from(w.burst.actual_rounds_per_game),
-                    None,
-                    false,
-                )
-            } else {
-                (0, u16::from(w.burst.actual_rounds_per_game), None, false)
-            };
-            let mut fired = false;
-            if count > 0 {
-                for _ in 0..count {
-                    let loaded = if self.cheats.unlimited_ammo {
-                        own.rounds(index) > 0
-                    } else {
-                        unload(&mut own.ammo[index], debit)
-                    };
-                    if self.projectiles.len() == MAX_PROJECTILES || !loaded {
-                        break;
-                    }
-                    let position = std::array::from_fn(|i| {
-                        launcher.position[i]
-                            + launcher.basis.right[i] * station.mount[0]
-                            + launcher.basis.up[i] * station.mount[1]
-                            + launcher.basis.forward[i] * station.mount[2]
-                    });
-                    let target =
-                        if self.weapon_rules == Rules::Spec && !own.guidance_available(launcher) {
+                    (0, u16::from(w.burst.actual_rounds_per_game), None, false)
+                };
+                let mut fired = false;
+                if count > 0 {
+                    for _ in 0..count {
+                        let loaded = if self.cheats.unlimited_ammo {
+                            own.rounds(index) > 0
+                        } else {
+                            unload(&mut own.ammo[index], debit)
+                        };
+                        if self.projectiles.len() == MAX_PROJECTILES || !loaded {
+                            break;
+                        }
+                        let gun_pose = own.gunship.as_ref().and_then(|group| {
+                            group
+                                .slot(index)
+                                .map(|slot| (slot, group.headings[slot], group.elevations[slot]))
+                        });
+                        let position = if let Some((slot, heading, elevation)) = gun_pose {
+                            super::gunship::muzzle(slot, launcher, heading, elevation)
+                        } else {
+                            std::array::from_fn(|i| {
+                                launcher.position[i]
+                                    + launcher.basis.right[i] * station.mount[0]
+                                    + launcher.basis.up[i] * station.mount[1]
+                                    + launcher.basis.forward[i] * station.mount[2]
+                            })
+                        };
+                        let direction =
+                            gun_pose.map_or(launcher.basis.forward, |(_, heading, elevation)| {
+                                super::gunship::direction(launcher, heading, elevation)
+                            });
+                        let target = if self.weapon_rules == Rules::Spec
+                            && !own.guidance_available(launcher)
+                        {
                             None
                         } else if own.launch_mode == LaunchMode::Boresight {
                             own.mounted.target
                         } else {
                             own.designated()
                         };
-                    let guidance = missiles::Profile::for_weapon(w)
-                        .filter(|_| self.weapon_rules == Rules::Spec)
-                        .map(|profile| {
-                            let mut flight =
-                                Flight::new(profile, own.launch_mode, target, launcher.position);
-                            flight.qualified_target = target.filter(|id| {
-                                self.targets
-                                    .iter()
-                                    .chain(peers(&rows, k))
-                                    .find(|t| t.id == *id)
-                                    .is_some_and(|t| flight.eligible(w, t))
+                        let guidance = missiles::Profile::for_weapon(w)
+                            .filter(|_| self.weapon_rules == Rules::Spec)
+                            .map(|profile| {
+                                let mut flight = Flight::new(
+                                    profile,
+                                    own.launch_mode,
+                                    target,
+                                    launcher.position,
+                                );
+                                flight.qualified_target = target.filter(|id| {
+                                    self.targets
+                                        .iter()
+                                        .chain(peers(&rows, k))
+                                        .find(|t| t.id == *id)
+                                        .is_some_and(|t| flight.eligible(w, t))
+                                });
+                                if own.mounted.acquired
+                                    && own.mounted.target == target
+                                    && (profile.guidance != Guidance::Active
+                                        || own.launch_mode == LaunchMode::Boresight)
+                                {
+                                    flight.seeker = own.mounted.clone();
+                                }
+                                if !profile.guidance_available(launcher.radar_power) {
+                                    flight.unguided = true;
+                                    flight.enabled = false;
+                                    flight.seeker = Seeker::default();
+                                    flight.seeker.status = Status::Unguided;
+                                }
+                                flight
                             });
-                            if own.mounted.acquired
-                                && own.mounted.target == target
-                                && (profile.guidance != Guidance::Active
-                                    || own.launch_mode == LaunchMode::Boresight)
-                            {
-                                flight.seeker = own.mounted.clone();
-                            }
-                            if !profile.guidance_available(launcher.radar_power) {
-                                flight.unguided = true;
-                                flight.enabled = false;
-                                flight.seeker = Seeker::default();
-                                flight.seeker.status = Status::Unguided;
-                            }
-                            flight
+                        self.projectiles.push(Projectile {
+                            id: self.next_shot,
+                            owner: own.aircraft,
+                            weapon: None,
+                            guidance,
+                            guidance_ticks: (self.weapon_rules == Rules::Spec)
+                                .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
+                                .flatten(),
+                            motion: (self.weapon_rules == Rules::Spec
+                                && missiles::Profile::for_weapon(w).is_some())
+                            .then(|| Motion::launch(w, launcher.velocity, position[1])),
+                            age: 0,
+                            incoming: None,
+                            station: index,
+                            position,
+                            previous: position,
+                            direction,
+                            speed_f8: launch_speed(&w.movement, (launcher.speed_fps * 256.) as i32)
+                                .expect("validated speed limits")
+                                * 256,
+                            launched_t: now,
+                            target: if guided { target } else { None },
+                            fall: FallState::default(),
+                            gun_round,
+                            tracer,
                         });
-                    self.projectiles.push(Projectile {
-                        id: self.next_shot,
-                        owner: own.aircraft,
-                        weapon: None,
-                        guidance,
-                        guidance_ticks: (self.weapon_rules == Rules::Spec)
-                            .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
-                            .flatten(),
-                        motion: (self.weapon_rules == Rules::Spec
-                            && missiles::Profile::for_weapon(w).is_some())
-                        .then(|| Motion::launch(w, launcher.velocity, position[1])),
-                        age: 0,
-                        incoming: None,
-                        station: index,
-                        position,
-                        previous: position,
-                        direction: launcher.basis.forward,
-                        speed_f8: launch_speed(&w.movement, (launcher.speed_fps * 256.) as i32)
-                            .expect("validated speed limits")
-                            * 256,
-                        launched_t: now,
-                        target: if guided { target } else { None },
-                        fall: FallState::default(),
-                        gun_round,
-                        tracer,
-                    });
-                    if let Some(flight) = self.projectiles.last().and_then(|p| p.guidance.as_ref())
-                        && flight.profile.guidance == Guidance::Active
-                        && flight.enabled
-                    {
-                        events.push(Event::SeekerActivated(self.next_shot));
-                        if flight.seeker.acquired {
-                            events.push(Event::Pitbull(self.next_shot));
+                        if let Some(flight) =
+                            self.projectiles.last().and_then(|p| p.guidance.as_ref())
+                            && flight.profile.guidance == Guidance::Active
+                            && flight.enabled
+                        {
+                            events.push(Event::SeekerActivated(self.next_shot));
+                            if flight.seeker.acquired {
+                                events.push(Event::Pitbull(self.next_shot));
+                            }
+                        }
+                        if let Some(ticks) = rewinds
+                            .iter()
+                            .find(|(aircraft, _)| *aircraft == own.aircraft)
+                            .map(|(_, ticks)| (*ticks).min(rewind::MAX_REWIND_TICKS))
+                            .filter(|ticks| gun && *ticks > 0)
+                        {
+                            self.rewinds.insert(self.next_shot, ticks);
+                        }
+                        own.shots += 1;
+                        self.next_shot += 1;
+                        fired = true;
+                        events.push(Event::Fired {
+                            aircraft: own.aircraft,
+                            station: index,
+                        });
+                        if gun {
+                            let cadence = &mut own.gun_cadence[index];
+                            cadence.pending -= 1;
+                            cadence.ordinal = cadence.ordinal.wrapping_add(1);
+                            cadence.next_scaled = cadence.next_scaled.saturating_add(
+                                u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30),
+                            );
                         }
                     }
-                    if let Some(ticks) = rewinds
-                        .iter()
-                        .find(|(aircraft, _)| *aircraft == own.aircraft)
-                        .map(|(_, ticks)| (*ticks).min(rewind::MAX_REWIND_TICKS))
-                        .filter(|ticks| gun && *ticks > 0)
-                    {
-                        self.rewinds.insert(self.next_shot, ticks);
+                }
+                if fired {
+                    if !station.internal && !gun {
+                        own.bay_hold_until = self.tick + BAY_HOLD_TICKS;
                     }
-                    own.shots += 1;
-                    self.next_shot += 1;
-                    fired = true;
-                    events.push(Event::Fired {
-                        aircraft: own.aircraft,
-                        station: index,
-                    });
-                    if gun {
-                        let cadence = &mut own.gun_cadence[index];
-                        cadence.pending -= 1;
-                        cadence.ordinal = cadence.ordinal.wrapping_add(1);
-                        cadence.next_scaled = cadence.next_scaled.saturating_add(
-                            u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30),
-                        );
-                    }
+                    self.effect(launcher.position, EffectKind::Launch);
+                    own.bore_observation = None;
+                    own.mounted = Seeker::default();
+                    own.mounted_key = None;
                 }
             }
-            if fired {
-                if !station.internal && !gun {
-                    own.bay_hold_until = self.tick + BAY_HOLD_TICKS;
-                }
-                self.effect(launcher.position, EffectKind::Launch);
-                own.bore_observation = None;
-                own.mounted = Seeker::default();
-                own.mounted_key = None;
+            own.selected = selected;
+            if grouped {
+                own.release_readiness = view(self, own).readiness(launcher);
             }
         }
         // Living target poses remain owned by their existing flight service.
@@ -4327,7 +4873,12 @@ pub fn is_gun(w: &Weapon) -> bool {
     AircraftId::ALL
         .into_iter()
         .chain([AircraftId::Faxx])
-        .any(|aircraft| w.source.eq_ignore_ascii_case(aircraft.gun()))
+        .any(|aircraft| {
+            aircraft
+                .guns()
+                .iter()
+                .any(|gun| w.source.eq_ignore_ascii_case(gun))
+        })
 }
 
 const GUN_DISPERSION_HALF_ANGLE: f64 = 0.25_f64.to_radians();
@@ -4466,6 +5017,341 @@ mod tests {
     const OWN: u32 = 0;
     use tore_formats::weapons::*;
     use tore_formats::weapons::{Guidance, Seeker};
+    #[test]
+    fn external_tank_quantity_accounts_for_shell_fuel_and_empty_equipment() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        let tank = TankStore {
+            source: "SYNTHETIC.GAS".into(),
+            name: "Synthetic tank".into(),
+            tank: tore_formats::weapons::Tank {
+                empty_weight: 198,
+                fuel_weight: 1650,
+                flags: 1,
+            },
+        };
+        let hardpoint = Hardpoint {
+            location: 4,
+            flags: 0x200,
+            position: [0; 3],
+            store: Some(tank.source.clone()),
+            count: 2,
+            weight_class: 0,
+        };
+        let mut config = fixture(false).own().configuration().clone();
+        config.stations.clear();
+        config.hardpoint_slots = vec![None; 6];
+        config.tanks = vec![TankStation {
+            hardpoint: 5,
+            mount: [0.; 3],
+            store: Some(tank.clone()),
+            quantity: 2,
+        }];
+        config.refresh_tanks().unwrap();
+        let mut load = Loadout {
+            aircraft: AircraftId::F14,
+            configuration: config,
+            quantities: vec![],
+            fuel_lbs: 15741.,
+            internal_capacity_lbs: 15741.,
+            empty_lbs: 10000.,
+            maximum_lbs: 50000.,
+            hardpoints: vec![],
+            tank_hardpoints: vec![hardpoint],
+            cheat: false,
+        };
+        load.validate().unwrap();
+        assert_eq!(load.external_fuel_lbs(), 3300.);
+        assert_eq!(load.tank_shell_lbs(), 396.);
+        assert_eq!(load.total_lbs(), 10000. + 15741. + 3696.);
+        let accepted = load.clone();
+        load.clear_tanks().unwrap();
+        load.validate().unwrap();
+        assert_eq!(load.external_fuel_lbs(), 0.);
+        assert_eq!(load.tank_shell_lbs(), 0.);
+        assert_eq!(load.fuel_lbs, 15741.);
+        assert_eq!(load.total_lbs(), 10000. + 15741.);
+        assert_eq!(accepted.external_fuel_lbs(), 3300.);
+        load.select_tank(0, tank).unwrap();
+        let mut fuel = crate::aircraft_systems::Fuel::new(load.configuration.external_fuel_lbs);
+        let mut internal = load.fuel_lbs;
+        fuel.consume(&mut internal, 3300.);
+        assert_eq!(fuel.external_lbs(), 0.);
+        assert_eq!(internal, 15741.);
+        assert_eq!(
+            f64::from(load.configuration.external_equipment_lbs) - fuel.used_lbs(),
+            396.
+        );
+        assert_eq!(load.configuration.tanks[0].quantity, 2);
+        load.configuration.tanks[0].quantity = 3;
+        load.configuration.refresh_tanks().unwrap();
+        assert!(load.validate().is_err());
+    }
+
+    #[test]
+    fn gun_pod_has_separate_installed_units_ammunition_and_retained_hardware() {
+        let mut config = fixture(false).own().configuration().clone();
+        config.aircraft = AircraftId::F4J;
+        config.stations[0].weapon.source = "SUU16.JT".into();
+        config.stations[0].weapon.weight = 0;
+        config.stations[0].count = 1;
+        config.stations[0].internal = false;
+        config.gun_pods = vec![GunPod {
+            station: 0,
+            quantity: 1,
+            rounds_per_pod: 600,
+            weight_lbs: 1702,
+        }];
+        config.refresh_tanks().unwrap();
+        assert_eq!(config.ammunition(&[1]).unwrap(), [600]);
+        assert!(config.ammunition(&[60]).is_err());
+        let mut state = State::new(config, true).unwrap();
+        assert_eq!(state.own().ammo, [600]);
+        assert_eq!(state.own().payload_lbs(), 1702.);
+        for _ in 0..120 {
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: launcher(),
+                }],
+                |_, _| -10000.,
+            );
+        }
+        assert!(state.own().ammo[0] > 0 && state.own().ammo[0] < 599);
+        assert!(state.projectiles.len() > 1);
+        state.own_mut().ammo[0] = 0;
+        state.own_mut().note_loaded();
+        assert_eq!(state.own().payload_lbs(), 1702.);
+        state.command(0, Command::Jettison, launcher());
+        assert_eq!(state.own().payload_lbs(), 0.);
+    }
+
+    #[test]
+    fn dormant_source_station_starts_empty_and_plus_restores_capacity() {
+        use crate::combat::loadout::{EditableStation, Loadout};
+        use tore_formats::aircraft::Hardpoint;
+        let mut config = fixture(false).own().configuration().clone();
+        config.stations[0].weapon.source = "MK82.JT".into();
+        config.stations[0].weapon.flags |= 2;
+        config.stations[0].internal = false;
+        config.stations[0].count = 0;
+        config.hardpoint_slots = vec![None, None, Some(0)];
+        let state = State::new(config.clone(), true).unwrap();
+        assert_eq!(state.own().ammo, [0]);
+        assert_eq!(state.own().payload_lbs(), 0.);
+        let mut load = Loadout {
+            aircraft: AircraftId::F18,
+            configuration: config,
+            quantities: vec![0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 100.,
+            maximum_lbs: 1000.,
+            hardpoints: vec![Hardpoint {
+                location: 4,
+                flags: 0x100,
+                position: [0; 3],
+                store: None,
+                count: 4,
+                weight_class: 0,
+            }],
+            tank_hardpoints: vec![],
+            cheat: false,
+        };
+        assert_eq!(
+            load.editable_stations(),
+            [EditableStation {
+                hardpoint: 2,
+                location: 4,
+                weapon: Some(0),
+                tank: None
+            }]
+        );
+        load.change(0, 1);
+        assert_eq!(load.quantities, [1]);
+        assert_eq!(load.configuration.stations[0].count, 4);
+        load.validate().unwrap();
+    }
+
+    #[test]
+    fn tank_transfer_is_one_unit_atomic_and_unloading_overweight_drafts_is_allowed() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        let store = TankStore {
+            source: "SYNTHETIC.GAS".into(),
+            name: "Synthetic tank".into(),
+            tank: tore_formats::weapons::Tank {
+                empty_weight: 100,
+                fuel_weight: 200,
+                flags: 1,
+            },
+        };
+        let h = Hardpoint {
+            location: 4,
+            flags: 0x200,
+            position: [0; 3],
+            store: Some(store.source.clone()),
+            count: 2,
+            weight_class: 0,
+        };
+        let mut config = fixture(false).own().configuration().clone();
+        config.stations.clear();
+        config.hardpoint_slots = vec![None; 3];
+        config.tanks = vec![
+            TankStation {
+                hardpoint: 1,
+                mount: [0.; 3],
+                store: Some(store.clone()),
+                quantity: 2,
+            },
+            TankStation {
+                hardpoint: 2,
+                mount: [0.; 3],
+                store: None,
+                quantity: 0,
+            },
+        ];
+        config.refresh_tanks().unwrap();
+        let mut load = Loadout {
+            aircraft: AircraftId::F14,
+            configuration: config,
+            quantities: vec![],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 100.,
+            maximum_lbs: 200.,
+            hardpoints: vec![],
+            tank_hardpoints: vec![h.clone(), h],
+            cheat: false,
+        };
+        assert!(load.validate().is_err());
+        load.transfer_tank(0, 1).unwrap();
+        assert_eq!(
+            load.configuration
+                .tanks
+                .iter()
+                .map(|s| s.quantity)
+                .collect::<Vec<_>>(),
+            [1, 1]
+        );
+        load.unload_tank(0).unwrap();
+        assert_eq!(load.configuration.tanks[0].quantity, 0);
+        assert!(load.validate().is_err());
+        load.tank_hardpoints[0].flags = 0;
+        load.tank_hardpoints[0].store = None;
+        let mass = load.total_lbs();
+        assert!(load.transfer_tank(1, 0).is_err());
+        assert_eq!(load.configuration.tanks[1].quantity, 1);
+        assert_eq!(load.configuration.tanks[0].quantity, 0);
+        assert_eq!(load.total_lbs(), mass);
+    }
+
+    #[test]
+    fn variety_guided_defaults_use_reviewed_families_and_at2_stays_unguided() {
+        let mut weapon = fixture(true).own().configuration().stations[0]
+            .weapon
+            .clone();
+        for (source, guidance, role, removal) in [
+            (
+                "AA10.JT",
+                missiles::Guidance::Supported,
+                TargetRole::Aircraft,
+                424,
+            ),
+            (
+                "AIM7.JT",
+                missiles::Guidance::Supported,
+                TargetRole::Aircraft,
+                424,
+            ),
+            (
+                "AIM7E.JT",
+                missiles::Guidance::Supported,
+                TargetRole::Aircraft,
+                240,
+            ),
+            (
+                "AIM9B.JT",
+                missiles::Guidance::Infrared,
+                TargetRole::Aircraft,
+                80,
+            ),
+            (
+                "AGM88.JT",
+                missiles::Guidance::Emitter,
+                TargetRole::Surface,
+                160,
+            ),
+        ] {
+            weapon.source = source.into();
+            weapon.movement.remove_t = removal;
+            let profile = missiles::Profile::for_weapon(&weapon).unwrap();
+            profile.validate().unwrap();
+            assert_eq!(profile.guidance, guidance);
+            assert_eq!(profile.role, role);
+            assert_eq!(profile.guidance_ticks, u64::from(removal) * 30);
+            assert_eq!(profile.memory_ticks, 240);
+            assert_eq!(profile.activation_ft, None);
+            assert!(!profile.jammer_emissions);
+        }
+        weapon.source = "AT2.JT".into();
+        weapon.seeker.signature = 0;
+        assert!(missiles::Profile::for_weapon(&weapon).is_none());
+        assert!(super::super::loadout::supported(&weapon.source));
+    }
+
+    #[test]
+    fn unarmed_aircraft_keeps_nav_and_absent_systems_through_commands_and_ticks() {
+        let mut config = fixture(false).own().configuration().clone();
+        config.aircraft = AircraftId::C130;
+        config.stations.clear();
+        config.hardpoint_slots = vec![None];
+        config.radar_hardpoint = None;
+        config.ecm_hardpoint = None;
+        config.ecm = Countermeasures::NONE;
+        config.sensors.radar = None;
+        config.sensors.infrared = None;
+        config.sensors.jammer = None;
+        let mut state = State::new(config, false).unwrap();
+        let launcher = launcher();
+        assert!(!state.own().armed);
+        for command in [
+            Command::NextWeapon,
+            Command::NextSelection,
+            Command::PreviousSelection,
+            Command::ToggleArm,
+            Command::ToggleSeekerMode,
+            Command::Jettison,
+            Command::FailStation,
+            Command::ReleaseChaff,
+            Command::ReleaseFlare,
+            Command::Incoming,
+            Command::DamagePlayer,
+        ] {
+            state.command(0, command, launcher);
+        }
+        for _ in 0..120 {
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher,
+                }],
+                |_, _| -10000.,
+            );
+            let view = state.view(0).unwrap();
+            assert_eq!(view.readiness(launcher), Readiness::Safe);
+            assert!(!view.can_lock(launcher));
+            assert_eq!(view.seeker_tone(launcher), None);
+            assert!(view.mounted_solution(launcher).is_none());
+        }
+        assert!(state.projectiles.is_empty());
+        assert!(!state.own().armed);
+        assert_eq!(state.own().chaff, 0);
+        assert_eq!(state.own().flares, 0);
+    }
+
     pub(super) fn fixture(guided: bool) -> State {
         let zone = Zone {
             heading: 12000,
@@ -4577,9 +5463,9 @@ mod tests {
                 damage_capacity: 30,
                 afterburner_available: true,
                 hardpoint_slots: vec![Some(0)],
-                radar_hardpoint: 1,
+                radar_hardpoint: Some(1),
                 visual_hardpoint: 3,
-                ecm_hardpoint: 2,
+                ecm_hardpoint: Some(2),
                 aircraft: AircraftId::F18,
                 stations: vec![Station {
                     weapon: w,
@@ -4589,6 +5475,9 @@ mod tests {
                 }],
                 hit_points: 20,
                 target_category: 0x80,
+                fixed_external_equipment_lbs: 0,
+                tanks: vec![],
+                gun_pods: vec![],
                 external_equipment_lbs: 0,
                 external_fuel_lbs: [0.; 9],
                 engines: 1,
@@ -4928,7 +5817,7 @@ mod tests {
         let mut s = fixture(false);
         s.cheats.damage = damage;
         // Synthetic gun data uses the exact reviewed gun identity for contact classification.
-        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().unwrap().into();
         let l = launcher();
         s.command(0, Command::Incoming, l);
         let p = s.projectiles.last_mut().unwrap();
@@ -5798,13 +6687,20 @@ mod tests {
         let aircraft = AircraftId::ALL
             .into_iter()
             .chain([AircraftId::Faxx])
+            .filter(|id| id.gun().is_some())
             .collect::<Vec<_>>();
-        assert_eq!(aircraft.len(), 14);
+        assert_eq!(
+            aircraft.len(),
+            AircraftId::SELECTABLE
+                .iter()
+                .filter(|id| id.gun().is_some())
+                .count()
+        );
         let launcher = launcher();
         for (number, id) in aircraft.into_iter().enumerate() {
             let mut state = fixture(false);
             state.own_mut().config.aircraft = id;
-            state.own_mut().config.stations[0].weapon.source = id.gun().into();
+            state.own_mut().config.stations[0].weapon.source = id.gun().unwrap().into();
             let gun = &state.own().config.stations[0].weapon;
             assert!(is_gun(gun), "{} gun was not recognized", id.label());
             assert_eq!(scaled_weapon_damage(gun, 11), 3, "{} damage", id.label());
@@ -5919,6 +6815,7 @@ mod tests {
                 empty_lbs: 10000.,
                 maximum_lbs: 20000.,
                 cheat: false,
+                tank_hardpoints: vec![],
                 hardpoints: vec![hardpoint.clone(), hardpoint],
             };
             load.transfer(0, 1).unwrap();
@@ -5957,14 +6854,17 @@ mod tests {
     #[test]
     fn guns_only_removes_internal_bay_and_external_weapons_without_refilling_guns() {
         use crate::combat::loadout::Loadout;
-        for aircraft in AircraftId::SELECTABLE {
+        for aircraft in AircraftId::SELECTABLE
+            .into_iter()
+            .filter(|id| id.gun().is_some())
+        {
             let mut configuration = fixture(true).own().configuration().clone();
             configuration.aircraft = aircraft;
             configuration.stations[0].weapon.source = "AIM120.JT".into();
             let mut bay = configuration.stations[0].clone();
             bay.internal = true;
             let mut gun = bay.clone();
-            gun.weapon.source = aircraft.gun().into();
+            gun.weapon.source = aircraft.gun().unwrap().into();
             configuration.stations.extend([bay, gun]);
             let mut load = Loadout {
                 aircraft,
@@ -5975,6 +6875,7 @@ mod tests {
                 empty_lbs: 10000.,
                 maximum_lbs: 20000.,
                 cheat: false,
+                tank_hardpoints: vec![],
                 hardpoints: vec![],
             };
             load.restrict_to_guns();
@@ -6001,6 +6902,7 @@ mod tests {
             empty_lbs: 10000.,
             maximum_lbs: 11000.,
             cheat: false,
+            tank_hardpoints: vec![],
             hardpoints: vec![Hardpoint {
                 location: 2,
                 flags: 8,
@@ -6586,7 +7488,7 @@ mod tests {
     fn invulnerable_cockpit_hit_neither_damages_nor_kills_the_pilot() {
         let mut s = fixture(false);
         s.cheats.damage = crate::cheats::Damage::Invulnerable;
-        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().unwrap().into();
         let l = launcher();
         s.command(0, Command::Incoming, l);
         let p = s.projectiles.last_mut().unwrap();
@@ -6820,7 +7722,7 @@ mod tests {
     fn the_selection_ring_skips_stations_that_carry_nothing() {
         let mut s = fixture(false);
         let mut gun = s.own().config.stations[0].clone();
-        gun.weapon.source = AircraftId::F18.gun().into();
+        gun.weapon.source = AircraftId::F18.gun().unwrap().into();
         s.own_mut().config.stations.push(gun.clone());
         s.own_mut().config.stations.push(gun);
         s.own_mut().ammo = vec![0, 100, 0];
@@ -6844,7 +7746,7 @@ mod tests {
     fn guns_only_leaves_the_player_the_gun_and_nav() {
         let mut s = fixture(false);
         let mut gun = s.own().config.stations[0].clone();
-        gun.weapon.source = AircraftId::F18.gun().into();
+        gun.weapon.source = AircraftId::F18.gun().unwrap().into();
         s.own_mut().config.stations.push(gun);
         s.own_mut().ammo.push(100);
         s.own_mut().armed = true;

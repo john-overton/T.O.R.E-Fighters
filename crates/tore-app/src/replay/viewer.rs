@@ -2563,6 +2563,7 @@ impl Viewer {
     /// the recorded load factor and the roll rate its attitudes imply.
     fn player_state(&mut self, picture: &RenderSnapshot, tick: u64) -> flight::State {
         let mut state = snapshot::pose_state(&self.template, &picture.player);
+        state.ticks = tick;
         if let Some(now) = self.playback.aircraft(tick, self.player) {
             state.g = now.g;
             state.roll_rate = tick
