@@ -1,4 +1,5 @@
 //! Deterministic 120 Hz free-flight adapter. PT facts are recovered; integration is authored.
+mod airframe;
 pub mod exact;
 pub mod powered;
 pub mod trace;
@@ -1485,118 +1486,20 @@ impl State {
             );
             return;
         }
-        let env = c.aerodynamics.envelopes.iter().find(|e| e.g == 1).unwrap();
-        let stall_scale = self.envelope_scale;
-        let env_speeds = env.speeds(self.position[1]);
-        let (clean_stall, vmax) = env_speeds.unwrap_or((900., 1000.));
-        let stall = if self.research.is_some() {
-            clean_stall * (1. - 0.25 * self.flaps)
-        } else {
-            clean_stall
-        };
-        let authority = (self.speed / stall.max(1.)).powi(2).clamp(0., 1.);
-        let (mut lo, mut hi) = (-1., 1.);
-        let mut rows = 0;
-        for e in &c.aerodynamics.envelopes {
-            if let Some((low, high)) = e.speeds(self.position[1])
-                && self.speed >= low
-                && self.speed <= high
-            {
-                lo = f64::min(lo, e.g as f64);
-                hi = f64::max(hi, e.g as f64);
-                rows += 1;
-            }
-        }
-        // Past the fast edge of every row above 1 G the aircraft keeps that
-        // last row's G up to and beyond its top speed, instead of falling to
-        // 1 G with no pull left (docs/FLIGHT-MODEL.md, "Envelope limits and
-        // loading"). Hybrid only; the legacy compatibility model is unchanged.
-        let fast_hold = if self.research.is_some() {
-            fast_side_hold(&c.aerodynamics.envelopes, self.position[1], self.speed)
-        } else {
-            None
-        };
-        if let Some(hold) = fast_hold {
-            hi = hi.max(hold.g);
-        }
-        // Above the aircraft's own 1 G ceiling the air is too thin to lift its
-        // weight (manual p. 90): the available lift falls with the air density
-        // above the ceiling, so an aircraft carried past it by a zoom climb
-        // sinks back instead of flying on. Fitted rule (agent decision,
-        // 2026-09-29), hybrid adapter only: the legacy compatibility model is
-        // unchanged. The density ratio is a standard atmosphere estimate; the
-        // lookup altitude is clamped to the atmosphere model's range so the
-        // thinning holds, finite and small, above 100,000 ft.
-        let hybrid = self.research.is_some();
-        if hybrid && env_speeds.is_none() {
-            let top = env.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
-            if self.position[1] > top {
-                hi *= ceiling_lift_ratio(self.position[1], top);
-            }
-        }
-        let envelope_g = [lo, hi];
-        let loading = (self.fuel + self.carried_lbs()) / c.mass.empty_lbs;
-        let load_factor = 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
-        hi /= load_factor;
-        lo /= load_factor;
-        // Loading takes away manoeuvring G, not the aircraft's ability to fly
-        // at all: inside the 1 G envelope (manual p. 90, "absolute limits at
-        // 1G") an aircraft always keeps 1 G, however full its tanks. Without
-        // this the outermost band, where only the 1 G row holds, gave a loaded
-        // aircraft less than 1 G and it sank at full power near its top speed
-        // and its ceiling. Fitted rule (agent decision, 2026-09-29), hybrid
-        // adapter only.
-        if hybrid && (rows > 0 || fast_hold.is_some()) && envelope_g[1] >= 1. {
-            hi = hi.max(1.);
-        }
-        let loaded_positive_g = hi;
-        // Pull extra G: 9 G whatever the load. Near stall the low-speed ceiling
-        // still ramps up to it.
-        let extra_g = self.cheats.extra_g;
-        if extra_g {
-            hi = hi.max(crate::cheats::EXTRA_G);
-        }
-        let ceiling = if self.research.is_some() {
-            low_speed_ceiling(c, self.position[1], self.speed, stall, extra_g)
-        } else {
-            None
-        };
-        if let Some(ceiling) = ceiling {
-            hi = if extra_g {
-                ceiling.limit_g
-            } else {
-                ceiling.limit_g / load_factor
-            };
-        }
+        let envelope = self.envelope_limits(c);
+        let airframe::EnvelopeLimits {
+            clean_stall,
+            top_speed: vmax,
+            stall,
+            authority,
+            loading,
+            limits: [lo, hi],
+            ..
+        } = envelope;
         let mut command =
             (1. + aero[0] * if aero[0] > 0. { hi - 1. } else { 1. - lo }).clamp(lo, hi) * authority;
-        t.envelope = trace::EnvelopeTrace {
-            clean_stall_fps: clean_stall,
-            stall_scale,
-            stall_fps: stall,
-            flaps: self.flaps,
-            top_speed_fps: vmax,
-            no_1g_envelope: env_speeds.is_none(),
-            authority,
-            rows,
-            envelope_g,
-            fast_hold,
-            loading,
-            load_divisor: load_factor,
-            loaded_positive_g,
-            extra_g,
-            low_speed_ceiling: ceiling,
-            limits_g: [lo, hi],
-            stick: aero[0],
-            stick_g: command,
-        };
-        let drag_percent = tore_formats::flight_model::drag_percent(
-            (self.speed * 256.) as i32,
-            (self.position[1] * 256.) as i32,
-            vmax.round().clamp(1., f64::from(i16::MAX)) as i16,
-        )
-        .unwrap_or_else(|_| ((self.speed / vmax.max(1.)) * 100.).round() as i32)
-        .clamp(0, 100) as f64;
+        t.envelope = envelope.trace(aero[0], command);
+        let drag_percent = self.device_drag_percent(vmax);
         let mut flap = (1., 0.);
         if self.research.is_some() {
             let scaled_flap_lift = drag_percent * c.aerodynamics.flaps_lift_f8 / 100.;
@@ -1864,62 +1767,21 @@ impl State {
         // rudder command or the native display-slip offset. Aircraft-owned tuning.
         let slip_fraction = dot(unit(self.velocity), basis.right);
         let slip_drag = weight * tuning.sideslip_drag * slip_fraction.powi(2) * authority;
-        let device_drag_fraction = if self.research.is_some() {
-            drag_percent / 100.
-        } else {
-            1.
-        };
-        // The drag reaches full thrust at the 1 G top speed times the
-        // aircraft's level-speed fraction (1 except for fitted heavies).
-        let drag_speed = (vmax * c.aerodynamics.level_speed_fraction).max(100.);
-        let drag = slip_drag
-            + max_thrust
-                * lapse
-                * (self.speed / drag_speed).powi(2)
-                * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
-            + weight
-                * (c.aerodynamics.g_pull_drag_f8 * (self.lift_g.abs() - 1.).max(0.)
-                    + c.native.drag.gear as f64
-                        * self.gear
-                        * f64::from(!(self.research.is_some() && wheel_contact))
-                    + c.native.drag.flaps as f64 * self.flaps * device_drag_fraction
-                    + c.native.drag.airbrake as f64 * self.brake * device_drag_fraction)
-                / 256.;
-        let undamaged_drag = drag;
-        let drag = drag * (1. + regional.drag_percent / 100.);
-        let uncapped_drag = drag;
-        let drag_cap = if self.research.is_some() {
-            Some(weight * self.speed / 32.174 / DT)
-        } else {
-            None
-        };
-        let drag = drag_cap.map_or(drag, |cap| drag.min(cap));
-        let gear_on_wheels = self.research.is_some() && wheel_contact;
-        // Display breakdown of the drag above, from the same inputs.
-        let airframe_drag = max_thrust * lapse * (self.speed / drag_speed).powi(2);
-        let drag_trace = trace::DragTrace {
-            total_lbf: drag,
-            undamaged_lbf: undamaged_drag,
-            uncapped_lbf: uncapped_drag,
-            cap_lbf: drag_cap,
-            airframe_lbf: airframe_drag,
-            load_lbf: airframe_drag * loading * c.aerodynamics.loaded_drag_percent / 100.,
-            pull_lbf: weight * c.aerodynamics.g_pull_drag_f8 * (self.lift_g.abs() - 1.).max(0.)
-                / 256.,
-            gear_lbf: weight * c.native.drag.gear as f64 * self.gear * f64::from(!gear_on_wheels)
-                / 256.,
-            flaps_lbf: weight * c.native.drag.flaps as f64 * self.flaps * device_drag_fraction
-                / 256.,
-            airbrake_lbf: weight
-                * c.native.drag.airbrake as f64
-                * self.brake
-                * device_drag_fraction
-                / 256.,
-            slip_lbf: slip_drag,
-            damage_percent: regional.drag_percent,
-            gear_on_wheels,
-            device_fraction: device_drag_fraction,
-        };
+        let (drag, drag_trace) = self.airframe_drag(
+            c,
+            airframe::DragInputs {
+                weight,
+                top_speed: vmax,
+                reference_thrust: max_thrust,
+                lapse,
+                loading,
+                load_factor: self.lift_g,
+                slip_drag,
+                drag_percent,
+                wheel_contact,
+                damage_percent: regional.drag_percent,
+            },
+        );
         let direction = unit(self.velocity);
         let along = dot(basis.up, direction);
         let lift = unit(std::array::from_fn(|i| basis.up[i] - along * direction[i]));
@@ -1976,44 +1838,20 @@ impl State {
             self.speed = self.velocity[1].abs();
         }
         self.vertical_speed = self.velocity[1];
-        let previous_position = self.position;
-        for i in 0..3 {
-            self.position[i] += self.velocity[i] * DT;
-        }
+        let previous_position = self.advance_position();
         let surface = ground(self.position[0], self.position[2]);
-        if let Some(mut r) = self.research.take() {
-            r.contact(
-                self,
-                surface,
-                c,
-                wheel_load_fraction,
+        let research = self.research.take();
+        self.finish_contact(
+            research,
+            c,
+            surface,
+            airframe::ContactInputs {
+                wheel_load: wheel_load_fraction,
                 runway_wind_fraction,
                 previous_position,
-            );
-            if static_hold && r.on_ground {
-                self.position[0] = previous_position[0];
-                self.position[2] = previous_position[2];
-                self.velocity[0] = 0.;
-                self.velocity[2] = 0.;
-                self.speed = air_wind[0].hypot(air_wind[2]);
-            }
-            self.research = Some(r);
-            return;
-        }
-        let floor = surface.height + c.equipment.ground_clearance_ft;
-        if self.position[1] <= floor && self.cheats.no_crashes {
-            self.trace.0.contact = Some(trace::Contact::LegacyFloor { bounced: true });
-            self.ricochet(floor);
-        } else if self.position[1] <= floor {
-            self.trace.0.contact = Some(trace::Contact::LegacyFloor { bounced: false });
-            self.position[1] = floor;
-            self.crashed = true;
-            self.speed = 0.;
-            self.velocity = [0.; 3];
-            self.vertical_speed = 0.;
-            self.engine = false;
-            self.burner = false;
-        }
+                parked_in_wind: static_hold.then_some(air_wind),
+            },
+        );
     }
 }
 
