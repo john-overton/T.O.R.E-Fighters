@@ -92,6 +92,20 @@ idle/brakes/gear setup and clear collective and lagged lift.
 
 ## Powered lift and controls
 
+**AV8 and YAK141 since the VTOL overhaul's slice P4 (2026-10-08).** The two
+jets no longer fly the fitted law below. Nozzle pitch 0 to 1 is now 0 (aft) to
+the PT's 100-degree braking stop, slewed at the PT's 100 degrees per second;
+there is no vector yaw. Thrust follows the nozzles through a spooling engine
+and a vertical efficiency (AV-8 0.75, Yak-141 0.92 with its 18,000 lbf lift
+engines for takeoff and landing only), puffer jets give bleed-driven moments
+under the stability levels, intake momentum drag and a jet-induced dihedral
+make the low-speed roll-off, suck-down takes up to 6 percent near the ground,
+and an angle-of-attack wing matched to the conventional model on the same PT
+carries the aircraft in forward flight. The overhaul's final pass rewrites this
+section; until then the paragraphs below describe the V22 and the helicopters
+(the jets' parts of them are history), and the jets' rules are in
+`crates/tore-sim/src/flight/powered/jet.rs` and `aero.rs`.
+
 AV8 and YAK141 nozzle pitch is normalized 0 (forward) to 1 (90 degrees down),
 with signed yaw producing up to 15 degrees of lateral thrust. Neutral resets
 both nozzle demands to forward/center and V22 conversion to forward airplane

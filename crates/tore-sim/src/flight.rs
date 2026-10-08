@@ -305,6 +305,15 @@ impl State {
             lift_controls.collective_actual = lift_controls.collective;
             lift_controls.thrust_lbf = capacity * lift_controls.collective * lapse;
         }
+        // A vectoring jet's engine is already turning at the start throttle
+        // (VTOL overhaul slice P4: the engine spools, so it cannot start at
+        // zero thrust).
+        if lift.is_some_and(|lift| lift.kind == crate::models::variety::LiftKind::VectorJet) {
+            let lapse = (-position[1].max(0.) / model.tuning().thrust_lapse_feet).exp();
+            lift_controls.drive.engine_output[0] =
+                model.configuration().propulsion.military_thrust_lbf * throttle * lapse;
+            lift_controls.thrust_lbf = lift_controls.drive.engine_output[0];
+        }
         let fixed_gear = model.fixed_gear();
         Self {
             model,

@@ -301,8 +301,10 @@ pub(super) fn combinations(
     let mut failures = Vec::new();
     let mut poses = Vec::new();
     let mut csv = String::from("pitch,yaw,center_gap_ft,rigidity_error_ft,skin_gap_ft\n");
-    for pitch in [0., 0.25, 0.5, 0.75, 1.] {
-        for yaw in [-1., -0.5, 0., 0.5, 1.] {
+    for pitch in [0., 0.25, 0.5, 0.75, 0.9, 1.] {
+        // Neither jet vectors sideways (VTOL overhaul slice P4); yaw 1 checks
+        // that the old vector yaw no longer moves the nozzles.
+        for yaw in [0., 1.] {
             let mut s = neutral.clone();
             s.lift_controls.vector_pitch_actual = pitch;
             s.lift_controls.vector_yaw_actual = yaw;

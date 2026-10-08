@@ -31,7 +31,12 @@
 //!   vectoring jets the damper is the puffers' rate limit instead: the valve
 //!   demand is the pilot's less the rate as a share of the PT `puffRot`
 //!   maximum, so full stick settles at that rate and a released stick stops
-//!   the rotation. Release the stick and the rotation stops where it is.
+//!   the rotation. In roll and yaw a tight loop on the departure from the
+//!   commanded rate (the stick's travel times the PT rate; the damper's 20
+//!   percent, reached 5 degrees per second off it) holds off the low-speed
+//!   roll-off, and the rate limit takes the remaining 80 percent of travel,
+//!   so full stick still settles at the PT rate (slice P4). Release the
+//!   stick and the rotation stops where it is.
 //! - *Attitude*: the damper plus attitude retention about the trimmed
 //!   attitude, one full travel per 30 degrees of pitch and 45 of bank (the
 //!   design's full-stick attitudes), with 35 percent authority, and heading
@@ -84,6 +89,11 @@ pub const LATCH_CENTRE: f64 = 0.05;
 /// adjustment: 5 degrees per second for the 10 percent a second the trim
 /// keys move the trim (design 5.3; [`tore_input::trim_keys`]).
 pub const ATTITUDE_TRIM_DEGREES_PER_TRAVEL: f64 = 50.;
+/// The vectoring jets' roll and yaw rate loop reaches the damper's
+/// authority at this rate, deg/s (fitted in slice P4 so a jetborne jet
+/// with 10 degrees of sideslip at 40 kt stays within 10 degrees of bank
+/// for 3 s at Damper, design test J11).
+const JET_RATE_LOOP_SATURATION: f64 = 5.;
 /// The CH-47's longitudinal cyclic trim schedule: none below the first
 /// airspeed, all of it at the second, kt (fitted; P3 maps the share onto
 /// its disk tilt).
@@ -197,18 +207,6 @@ pub fn augment(
     let mut augmentation = [0.; 3];
     if level != StabilityLevel::Off {
         let jet = lift.kind == LiftKind::VectorJet;
-        let damping: [f64; 3] = std::array::from_fn(|axis| {
-            if jet {
-                -rates[axis] / full_rates[axis]
-            } else {
-                -rates[axis] * DAMPER_AUTHORITY / (DAMPER_SATURATION * full_rates[axis])
-            }
-        });
-        let mut feedback = damping;
-        if !jet {
-            feedback[2] += sensed.torque_pedal
-                + coordinated * sensed.sideslip_rad / SIDESLIP_PER_TRAVEL_DEGREES.to_radians();
-        }
         let mut hold = [0.; 3];
         if level == StabilityLevel::Attitude {
             let [pitch_span, bank_span] = ATTITUDE_PER_TRAVEL_DEGREES.map(f64::to_radians);
@@ -224,11 +222,36 @@ pub fn augment(
         } else {
             DAMPER_AUTHORITY
         };
+        // The jets' hold is limited on its own (their rate limit is not);
+        // the rotorcraft limit the hold and the damping together.
+        let jet_hold = hold.map(|h| h.clamp(-authority, authority));
+        let damping: [f64; 3] = std::array::from_fn(|axis| {
+            if jet && axis == 0 {
+                -rates[axis] / full_rates[axis]
+            } else if jet {
+                // Roll and yaw: a tight loop within the damper's authority
+                // on the departure from the rate the pilot and the attitude
+                // hold ask for (their travel times the PT rate), on top of
+                // the puffers' rate limit, which is scaled so the two
+                // together still hold full stick at the PT rate (slice P4).
+                let demand = (pilot[axis] + jet_hold[axis]) * full_rates[axis];
+                (-(rates[axis] - demand) / JET_RATE_LOOP_SATURATION.to_radians())
+                    .clamp(-DAMPER_AUTHORITY, DAMPER_AUTHORITY)
+                    - (1. - DAMPER_AUTHORITY) * rates[axis] / full_rates[axis]
+            } else {
+                -rates[axis] * DAMPER_AUTHORITY / (DAMPER_SATURATION * full_rates[axis])
+            }
+        });
+        let mut feedback = damping;
+        if !jet {
+            feedback[2] += sensed.torque_pedal
+                + coordinated * sensed.sideslip_rad / SIDESLIP_PER_TRAVEL_DEGREES.to_radians();
+        }
         augmentation = std::array::from_fn(|axis| {
             if jet {
                 // The puffers' rate limit is not bounded by the authority:
                 // it is what keeps full stick at the PT rate.
-                feedback[axis] + hold[axis].clamp(-authority, authority)
+                feedback[axis] + jet_hold[axis]
             } else {
                 (feedback[axis] + hold[axis]).clamp(-authority, authority)
             }

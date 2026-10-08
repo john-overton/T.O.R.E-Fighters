@@ -386,9 +386,15 @@ pub(crate) mod tests {
             assert_eq!(s.lift_controls.drive.rotor_speed, 1., "{id:?}");
             assert_eq!(s.lift_controls.drive.rotor_speed_reference, 1., "{id:?}");
         }
-        for id in [AircraftId::Av8, AircraftId::F16C] {
-            assert_eq!(hybrid(id).lift_controls.drive, Drive::default(), "{id:?}");
-        }
+        assert_eq!(
+            hybrid(AircraftId::F16C).lift_controls.drive,
+            Drive::default()
+        );
+        // A vectoring jet has no rotor; its engine turns at the start
+        // throttle (slice P4).
+        let jet = hybrid(AircraftId::Av8).lift_controls.drive;
+        assert_eq!((jet.rotor_speed, jet.rotor_speed_reference), (0., 0.));
+        assert!(jet.engine_output[0] > 0. && jet.engine_output[1] == 0.);
         assert_eq!(
             hybrid(AircraftId::Ah64).lift_controls.aids.stability,
             StabilityLevel::Damper

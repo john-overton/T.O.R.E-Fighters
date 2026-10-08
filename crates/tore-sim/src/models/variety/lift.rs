@@ -224,11 +224,28 @@ pub struct JetParameters {
     /// takes off vertically unloaded but cannot hover at combat weight; the
     /// Yak-141 just hovers clean).
     pub vertical_efficiency: f64,
-    /// Engine spool lags up and down near hover power, seconds (Fit).
+    /// Engine spool lags up and down near hover power, seconds (Fit). From
+    /// idle the spool up is slower (slice P4's rule in `powered/jet.rs`).
     pub spool_up_seconds: f64,
     pub spool_down_seconds: f64,
     /// The Yak-141's lift engines.
     pub lift_engines: Option<LiftEngines>,
+    /// Wing span, ft: suck-down and reingestion act within one span of the
+    /// ground (design 4.7).
+    pub span_ft: f64,
+    /// How far ahead of the centre of gravity the intakes take their air,
+    /// ft (Fit): the arm of the intake momentum drag.
+    pub intake_arm_ft: f64,
+    /// Jet exhaust velocity, ft/s (Fit): the engine's air mass flow is the
+    /// thrust over it.
+    pub jet_velocity_fps: f64,
+    /// Jet-induced dihedral (Fit): the rolling moment away from sideslip in
+    /// jetborne flight, as a share of span x mass flow x forward airspeed x
+    /// sine of sideslip x its size, with the nozzles down.
+    pub jet_dihedral: f64,
+    /// Half the track of the wheels the aircraft tips over, ft (Fit): the
+    /// wheels' righting arm against a rolling moment on the ground.
+    pub half_track_ft: f64,
 }
 
 /// Lift engines that run only for takeoff and landing (Yak-141).
@@ -246,6 +263,9 @@ pub struct LiftEngines {
     pub stop_nozzle_degrees: f64,
     /// They stop above this airspeed, kt (Fit).
     pub stop_speed_kt: f64,
+    /// Fuel at full throttle, lb/s (Fit: twice the main engine's flow per
+    /// pound of thrust, lift engines being thirsty).
+    pub fuel_lbs_per_second: f64,
 }
 
 /// One row of the V-22 conversion corridor: indicated airspeed limits at a
@@ -539,17 +559,35 @@ fn jet(a: &Aircraft) -> Option<JetParameters> {
         .filter(|v| *v < 0.)
         .map_or(100., f64::abs);
     let nozzle_rate_degrees_per_second = field(a, "vtSpeed").filter(|v| *v > 0.).unwrap_or(100.);
-    let (vertical_efficiency, lift_engines) = match a.id {
-        Av8 => (0.75, None),
+    // Lift engine fuel: twice the main engine's flow per pound of thrust.
+    let lift_fuel = |thrust_lbf: f64| {
+        let main = field(a, "thrust").filter(|v| *v > 0.).unwrap_or(1.);
+        let flow = field(a, "fuelConsumption").unwrap_or(0.);
+        2. * flow * thrust_lbf / main
+    };
+    // Spans are the published wing spans (AV-8B 30 ft 4 in, Yak-141 10.1
+    // m; W-AV8B and W-Yak, read for slice P4, not re-verified); the
+    // other figures are Fit. The vertical efficiency (design 4.7, Fit): the
+    // AV-8 lifts off unloaded with full internal fuel (16 percent margin)
+    // and cannot hover at combat weight; the Yak-141 was refitted in slice
+    // P4 from 0.95 to 0.92, so a clean Yak with full internal fuel hovers
+    // on dry thrust and its lift engines with 2.5 percent to spare at sea
+    // level, and a 1,000 lb store takes the hover away (test J13).
+    let (vertical_efficiency, lift_engines, span_ft, intake_arm_ft, half_track_ft) = match a.id {
+        Av8 => (0.75, None, 30.33, 9., 8.5),
         Yak141 => (
-            0.95,
+            0.92,
             Some(LiftEngines {
                 thrust_lbf: 18000.,
                 spool_seconds: 2.,
                 start_nozzle_degrees: 30.,
                 stop_nozzle_degrees: 20.,
                 stop_speed_kt: 200.,
+                fuel_lbs_per_second: lift_fuel(18000.),
             }),
+            33.1,
+            10.,
+            7.,
         ),
         _ => return None,
     };
@@ -560,6 +598,11 @@ fn jet(a: &Aircraft) -> Option<JetParameters> {
         spool_up_seconds: 0.8,
         spool_down_seconds: 0.6,
         lift_engines,
+        span_ft,
+        intake_arm_ft,
+        jet_velocity_fps: 1200.,
+        jet_dihedral: 4.0,
+        half_track_ft,
     })
 }
 

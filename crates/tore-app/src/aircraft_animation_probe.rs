@@ -205,8 +205,6 @@ impl Control {
             Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx) => Expectation::Required,
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
-            Self::VectorYaw if id == Id::Av8 => Expectation::Required,
-            Self::VectorYaw if id == Id::Yak141 => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw if id == Id::X31 => Expectation::Required,
             Self::VectorPitch | Self::VectorYaw => Expectation::Unsupported,
             Self::Conversion if id == Id::V22 => Expectation::Required,
