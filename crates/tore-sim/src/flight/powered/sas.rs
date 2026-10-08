@@ -27,7 +27,8 @@
 //!   percent of travel) at a quarter of the aircraft's full-stick hover rate;
 //!   above 40 kt the yaw damper damps the departure from a coordinated turn
 //!   and steers out sideslip; the force law's torque estimate is fed to the
-//!   pedals; the CH-47's longitudinal cyclic trim follows airspeed. On the
+//!   pedals, outside the authority clamp so a collective step does not yaw
+//!   the nose and never past the pedals' travel; the CH-47's longitudinal cyclic trim follows airspeed. On the
 //!   vectoring jets the damper is the puffers' rate limit instead: the valve
 //!   demand is the pilot's less the rate as a share of the PT `puffRot`
 //!   maximum, so full stick settles at that rate and a released stick stops
@@ -112,8 +113,9 @@ pub struct Sensed {
     /// the air (`asin(v / V)`, design 4.1).
     pub sideslip_rad: f64,
     /// The pedal travel that would cancel the main rotor's uncompensated
-    /// torque this tick (single main rotor only; zero elsewhere). The Damper
-    /// feeds it forward within its authority.
+    /// torque this tick (single main rotor only; zero elsewhere). Damper and
+    /// Attitude feed it forward to the pedals outside their authority, within
+    /// the pedals' travel.
     pub torque_pedal: f64,
 }
 
@@ -244,8 +246,8 @@ pub fn augment(
         });
         let mut feedback = damping;
         if !jet {
-            feedback[2] += sensed.torque_pedal
-                + coordinated * sensed.sideslip_rad / SIDESLIP_PER_TRAVEL_DEGREES.to_radians();
+            feedback[2] +=
+                coordinated * sensed.sideslip_rad / SIDESLIP_PER_TRAVEL_DEGREES.to_radians();
         }
         augmentation = std::array::from_fn(|axis| {
             if jet {
@@ -256,6 +258,15 @@ pub fn augment(
                 (feedback[axis] + hold[axis]).clamp(-authority, authority)
             }
         });
+        if !jet {
+            // Torque compensation is a mixer, not a feedback: it moves the
+            // pedals' neutral with the drive torque, outside the authority
+            // clamp, so a collective step does not yaw the nose (design 5.2,
+            // H12). It never takes the pedals past their physical travel.
+            let pedals = pilot[2] + augmentation[2];
+            let fed = (pedals + sensed.torque_pedal).clamp(-1., 1.);
+            augmentation[2] += fed - pedals.clamp(-1., 1.);
+        }
     }
     let longitudinal_trim = match lift.rotor.map(|rotor| rotor.layout) {
         Some(RotorLayout::Tandem { .. }) if level != StabilityLevel::Off => {
@@ -651,7 +662,34 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(capped.augmentation[2], DAMPER_AUTHORITY);
+        // The feed-forward is outside the authority clamp (a mixer, not a
+        // feedback), and still within the pedals' travel.
+        assert!((capped.augmentation[2] - 0.6).abs() < 1e-12);
+        let beyond = augment(
+            &lift,
+            level,
+            &mut aids,
+            [0., 0., 0.9],
+            still,
+            Sensed {
+                torque_pedal: 0.6,
+                ..Default::default()
+            },
+        );
+        assert_eq!(beyond.controls[2], 1.);
+        // The damping alone still keeps to the authority.
+        let spun = augment(
+            &lift,
+            level,
+            &mut aids,
+            [0.; 3],
+            Body {
+                rates: [0., 0., 3.],
+                ..Default::default()
+            },
+            Sensed::default(),
+        );
+        assert_eq!(spun.augmentation[2], -DAMPER_AUTHORITY);
         // At 100 kt in a 30-degree banked coordinated turn the yaw damper
         // leaves the turn rate alone; below 35 kt it damps it.
         let bank = 30_f64.to_radians();

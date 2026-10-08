@@ -252,13 +252,19 @@ fn h3_power_sets_the_level_top_speed() {
 }
 
 /// The body rate on `axis` after `seconds` of full stick (or pedal) from a
-/// trimmed hover.
+/// hover trimmed at `level`, as an airborne start would be.
 fn full_stick_rate(id: AircraftId, axis: usize, seconds: f64, level: StabilityLevel) -> f64 {
+    stick_rate(id, axis, 1., seconds, level)
+}
+
+/// As [`full_stick_rate`], full travel in the direction `sign`.
+fn stick_rate(id: AircraftId, axis: usize, sign: f64, seconds: f64, level: StabilityLevel) -> f64 {
     let mut s = trimmed(id, 3_000., 0.);
     s.lift_controls.aids.stability = level;
+    assert!(s.trim_single_rotor(0.));
     fly(&mut s, (seconds * 120.) as usize, |_| {
         let mut stick = [0.; 3];
-        stick[axis] = 1.;
+        stick[axis] = sign;
         PilotInput {
             pitch: stick[0],
             roll: stick[1],
@@ -293,6 +299,31 @@ fn h4_full_stick_reaches_the_hover_rate_targets() {
                 (damped / target - 1.).abs() < 0.15,
                 "{id:?} axis {axis}: {damped} deg/s damped against {target}"
             );
+        }
+    }
+}
+
+/// H4b: the damper never adds rate. Full stick or full pedal for 2 s from a
+/// hover, trimmed at the level flown, turns the aircraft no faster at Damper
+/// than at Off, in either direction on every axis (P2-fix notes: the
+/// AH-64's right pedal used to turn faster at Damper, 115 against 106
+/// deg/s).
+#[test]
+fn h4b_the_damper_never_adds_rate() {
+    for id in BOTH {
+        for axis in 0..3 {
+            for sign in [1., -1.] {
+                let off = stick_rate(id, axis, sign, 2., StabilityLevel::Off);
+                let damper = stick_rate(id, axis, sign, 2., StabilityLevel::Damper);
+                assert!(
+                    damper.abs() <= off.abs(),
+                    "{id:?} axis {axis} sign {sign}: {damper} deg/s at Damper against {off} at Off"
+                );
+                assert!(
+                    damper * sign > 0.,
+                    "{id:?} axis {axis} sign {sign}: {damper} deg/s"
+                );
+            }
         }
     }
 }
@@ -833,8 +864,8 @@ fn h11_retreating_blade_stall_past_vne_pitches_up_and_rolls() {
 
 /// H12: a 30 percent collective step from a hover with the pedals fixed
 /// yaws at least 10 deg/s within 2 s toward the torque side at Off (AH-64
-/// right, Mi-24 left), and under 3 deg/s at Damper, which feeds the
-/// torque forward to the pedals.
+/// right, Mi-24 left), and under 3 deg/s at Damper and Attitude, whose
+/// torque feed-forward moves the pedals outside the damper's authority.
 #[test]
 fn h12_collective_swings_the_nose_with_torque() {
     for (id, side) in [(Ah64, 1.), (Mi24, -1.)] {
@@ -849,27 +880,78 @@ fn h12_collective_swings_the_nose_with_torque() {
             }
         });
         assert!(degrees(fastest) >= 10., "{id:?} {} deg/s", degrees(fastest));
-        // At Damper, which feeds the torque forward to the pedals.
-        let mut s = trimmed(id, 3_000., 0.);
-        s.lift_controls.aids.stability = StabilityLevel::Damper;
-        assert!(s.trim_single_rotor(0.));
-        let mut worst: f64 = 0.;
-        fly(&mut s, 240, |s| {
-            worst = worst.max(s.lift_controls.body_rates[2].abs());
-            PilotInput {
-                collective: Some(lever),
-                ..Default::default()
-            }
-        });
-        // The design's 3 deg/s needs the feed-forward beyond the Damper's 20
-        // percent authority (P2 notes); within it the swing is only cut.
-        assert!(
-            worst < 0.8 * fastest,
-            "{id:?} damped {} deg/s against {}",
-            degrees(worst),
-            degrees(fastest)
-        );
+        for level in [StabilityLevel::Damper, StabilityLevel::Attitude] {
+            let mut s = trimmed(id, 3_000., 0.);
+            s.lift_controls.aids.stability = level;
+            assert!(s.trim_single_rotor(0.));
+            let lever = s.lift_controls.collective + 0.3;
+            let mut worst: f64 = 0.;
+            let mut pedals: f64 = 0.;
+            fly(&mut s, 240, |s| {
+                worst = worst.max(s.lift_controls.body_rates[2].abs());
+                pedals = pedals.max(s.maneuver.effective_rudder.abs());
+                PilotInput {
+                    collective: Some(lever),
+                    ..Default::default()
+                }
+            });
+            assert!(
+                degrees(worst) < 3.,
+                "{id:?} {level:?}: {} deg/s against {} at Off",
+                degrees(worst),
+                degrees(fastest)
+            );
+            // The feed-forward never asks for more than the pedals have.
+            assert!(pedals <= 1., "{id:?} {level:?} pedals {pedals}");
+        }
     }
+}
+
+/// The same step with the Damper's feed-forward asked for more than the
+/// pedals can give stops at their travel, and at Off nothing is added.
+#[test]
+fn h12b_the_feed_forward_stops_at_the_pedal_travel() {
+    let lift = trimmed(Ah64, 3_000., 0.).model().powered_lift().unwrap();
+    for level in [StabilityLevel::Damper, StabilityLevel::Attitude] {
+        for (pilot, fed, want) in [
+            (0.9, 0.5, 1.),
+            (-0.9, -0.5, -1.),
+            (0., 0.5, 0.5),
+            (1., -0.5, 0.5),
+            (0., -3., -1.),
+        ] {
+            let mut aids = Default::default();
+            let out = sas::augment(
+                &lift,
+                level,
+                &mut aids,
+                [0., 0., pilot],
+                sas::Body::default(),
+                sas::Sensed {
+                    torque_pedal: fed,
+                    ..Default::default()
+                },
+            );
+            assert!(
+                (out.controls[2] - want).abs() < 1e-9,
+                "{level:?} pilot {pilot} fed {fed}: {:?}",
+                out
+            );
+        }
+    }
+    let mut aids = Default::default();
+    let off = sas::augment(
+        &lift,
+        StabilityLevel::Off,
+        &mut aids,
+        [0., 0., 0.3],
+        sas::Body::default(),
+        sas::Sensed {
+            torque_pedal: 0.5,
+            ..Default::default()
+        },
+    );
+    assert_eq!(off.controls, [0., 0., 0.3]);
 }
 
 /// The highest altitude, ft, at which `id` at `weight` can hover out of
