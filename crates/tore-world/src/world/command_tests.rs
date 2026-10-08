@@ -565,6 +565,7 @@ fn a_settings_change_reaches_every_part_of_the_mission_before_the_commands() {
         unlimited_ammo: true,
         no_crashes: true,
         guns_only: true,
+        easy_physics: true,
         enemy_ai: Some(tore_sim::ai::Experience::Novice),
         ..Default::default()
     };

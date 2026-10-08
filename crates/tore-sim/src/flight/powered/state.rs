@@ -251,9 +251,15 @@ impl State {
             return;
         };
         let attitude = [self.pitch, self.bank, self.yaw];
+        let easy_physics = self.cheats.easy_physics;
         let aids = &mut self.lift_controls.aids;
         let rotorcraft = lift.kind != LiftKind::VectorJet;
+        // At the Attitude level the cyclic trim keys move the attitude it
+        // returns to instead of the cyclic; with the Easy flight physics
+        // cheat's retention (below Attitude) they do both, so the retention
+        // pulls toward the attitude the trimmed cyclic leads to.
         let attitude_level = aids.stability == StabilityLevel::Attitude;
+        let retention = easy_physics && rotorcraft && !attitude_level;
         match command {
             // Entering the Attitude level holds the attitude it finds (slice
             // P6, agent decision 2026-10-08).
@@ -280,6 +286,9 @@ impl State {
                     super::sas::adjust_reference(aids, index, amount);
                 } else {
                     aids.trim[index] = (aids.trim[index] + amount).clamp(-1., 1.);
+                    if retention && index < 2 {
+                        super::sas::adjust_reference(aids, index, amount);
+                    }
                 }
             }
             LiftCommand::TrimCentre if rotorcraft => {

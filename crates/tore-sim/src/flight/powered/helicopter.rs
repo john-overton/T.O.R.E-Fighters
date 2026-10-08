@@ -33,7 +33,7 @@
 //! will reuse [`super::rotor::RotorModel`] and this file's drive and trim
 //! pieces where they fit.
 
-pub use super::drive::{LOW_ROTOR, ROTOR_OVERSPEED};
+pub use super::drive::{EASY_ROTOR_FLOOR, LOW_ROTOR, ROTOR_OVERSPEED};
 use super::{
     DT, State, airframe,
     body::{GRAVITY, Inertia, Moments},
@@ -391,6 +391,30 @@ impl SingleRotor {
         drag_factor: f64,
         level: tore_input::StabilityLevel,
     ) -> Option<Trim> {
+        self.trim_with(
+            Hazards::ALL,
+            weight,
+            heading,
+            airspeed_fps,
+            density,
+            drag_factor,
+            level,
+        )
+    }
+
+    /// [`SingleRotor::trim`] under the given `hazards`: with the Easy flight
+    /// physics cheat's none, the trim needs no anti-torque pedal.
+    #[allow(clippy::too_many_arguments)] // The trim's inputs, plus the hazards in force.
+    pub fn trim_with(
+        &self,
+        hazards: Hazards,
+        weight: f64,
+        heading: f64,
+        airspeed_fps: f64,
+        density: f64,
+        drag_factor: f64,
+        level: tore_input::StabilityLevel,
+    ) -> Option<Trim> {
         let air_velocity = Basis::new(heading, 0., 0.)
             .forward
             .map(|f| f * airspeed_fps);
@@ -417,7 +441,7 @@ impl SingleRotor {
                 controls: [x[1], x[2], x[3]],
                 hub_height_agl_ft: None,
                 seconds: 0.,
-                hazards: Hazards::ALL,
+                hazards,
                 drag_factor,
                 lift_factor: 1.,
             };
@@ -537,10 +561,14 @@ fn solve(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
 }
 
 impl State {
-    /// The hazards in force: all of them. Slice P8 builds them from the Easy
-    /// flight physics cheat.
+    /// The rotor hazards in force: all of them, or none with the Easy flight
+    /// physics cheat. Every rotorcraft step builds its rotors' hazards here.
     pub(super) fn rotor_hazards(&self) -> Hazards {
-        Hazards::ALL
+        if self.cheats.easy_physics {
+            Hazards::NONE
+        } else {
+            Hazards::ALL
+        }
     }
 
     /// Fuselage drag growth from carried stores and regional damage.
@@ -570,8 +598,16 @@ impl State {
         let level = self
             .stability_in_effect()
             .unwrap_or(tore_input::StabilityLevel::Off);
-        let Some(trim) = heli.trim(weight, self.yaw, airspeed_fps, density, drag_factor, level)
-        else {
+        let hazards = self.rotor_hazards();
+        let Some(trim) = heli.trim_with(
+            hazards,
+            weight,
+            self.yaw,
+            airspeed_fps,
+            density,
+            drag_factor,
+            level,
+        ) else {
             return false;
         };
         self.pitch = trim.pitch;

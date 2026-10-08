@@ -35,7 +35,7 @@ pub const LOW_ROTOR: f64 = 0.8;
 pub const ROTOR_OVERSPEED: f64 = 1.1;
 /// With rotor stall switched off the rotor speed stays above this in
 /// flight (design 4.12).
-const EASY_ROTOR_FLOOR: f64 = 0.85;
+pub const EASY_ROTOR_FLOOR: f64 = 0.85;
 /// Rotor speed limits of the integration.
 const ROTOR_SPEED_LIMIT: f64 = 1.5;
 
