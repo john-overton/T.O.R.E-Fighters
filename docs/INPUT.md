@@ -61,26 +61,76 @@ bridge tests without touching hardware.
 
 ## VTOL, tiltrotor and helicopter controls
 
-Ctrl+arrows operate thrust vectoring and **0** returns nozzles and nacelles to
-forward neutral. The retail key assignments are confirmed in the
-[keyboard spec](spec/keyboard.md); the directional interpretation and rates are
-fitted choices described in the [flight variety spec](spec/variety-flight.md).
-The extra collective/conversion keys and gamepad layer are agent decisions
-made on 2026-10-05 after checking the existing defaults for conflicts.
+The six powered-lift aircraft share the ordinary stick and rudder, and some
+stock keys change meaning with the aircraft flown. John chose the retail nozzle
+keys and the collective on the throttle controls on 2026-10-08 (VTOL overhaul
+decisions 4 and 5); the trim keys, the stability chord and the gamepad layer
+are agent decisions, made after checking the defaults for clashes. Every other
+aircraft keeps its keys. The flying guide is
+[flight controls](FLIGHT-CONTROLS.md#vtol-tiltrotors-and-helicopters).
+
+| Key | AV-8, Yak-141 | Helicopters (AH-64, Mi-24, CH-47) | V-22 | Every other aircraft |
+| --- | --- | --- | --- | --- |
+| Z / X | Nozzles up / down 10 degrees | Rudder | Rudder | Rudder |
+| Shift+Z | Nozzles to 0, or from the 100-degree braking stop to 90 | Rudder (as Z) | Rudder (as Z) | Rudder (as Z) |
+| Shift+X | Nozzles to 90, again to 100 | Rudder (as X) | Rudder (as X) | Rudder (as X) |
+| End / Page Down | Rudder | Rudder | Rudder | Rudder |
+| Ctrl+Up / Ctrl+Down | Nozzle slew | Cyclic trim forward / aft | Cyclic trim forward / aft | Nothing |
+| Ctrl+Left / Ctrl+Right | Nothing | Cyclic trim left / right | Cyclic trim left / right | Nothing |
+| 0 | Nozzles to 0 | Trim to centre | Nacelles forward | Nothing |
+| 1-8 | Engine throttle | Collective | Collective (thrust control lever) | Engine throttle |
+| Ctrl+Page Up / Ctrl+Page Down | Nothing | Nothing | Nacelles toward airplane / helicopter | Nothing |
+| Ctrl+Home / Ctrl+End | Nothing | Collective up / down | Collective up / down | Nothing |
+| Ctrl+Alt+A | Hover hold (refused) | Hover hold | Hover hold | Hover hold (refused) |
+| Ctrl+Shift+A | Stability level | Stability level | Stability level | Nothing |
+
+How the aircraft-dependent keys work:
+
+- **Contextual stock keys.** `crates/tore-app/src/input_catalog.rs` lists them
+  (`CONTEXTUAL`): each says on which aircraft its action is live, and the input
+  layer switches the stock bindings with the aircraft. A key never has two
+  meanings on the same aircraft; the catalog test checks it. A player's own
+  binding on one of these keys turns the aircraft-dependent stock meaning off,
+  so it wins. Removing such a key in the controls screen removes it from every
+  aircraft, because a removed stock key is removed by key.
+- **Throttle controls drive the collective** on the helicopters and the V-22,
+  whose engines are governed: the 1 to 8 keys, a bound throttle lever and the
+  gamepad throttle buttons become collective settings, steps and rates in the
+  input layer, so the simulation still receives an explicit collective and the
+  wire is unchanged. A throttle lever picks up against the collective. The
+  dedicated `collective` lever and Ctrl+Home / Ctrl+End stay, and a bound
+  collective lever takes priority over the throttle lever.
+- **Trim keys** (`trim-pitch-rate`, `trim-roll-rate`, `trim-pedal-rate`) move
+  the trim a 2 percent tap at once and then, held past 0.2 s, 10 percent of
+  travel a second in 20 Hz steps (fitted). Each step is a trim command, so the
+  host, recordings and tapes see it. At the Attitude stability level the
+  cyclic trim keys move the attitude the aircraft returns to instead, 5
+  degrees a second. `trim-set` (no keyboard default; bind a stick button) makes
+  the current stick plus trim the trim and ignores the stick until it is back
+  within 5 percent of centre: force trim on a spring-centred stick.
+  `trim-centre` clears it.
+- **Stability level.** `stability-level` cycles Off, Damper and Attitude and
+  `stability-level=off`, `=damper` and `=attitude` choose one; Damper is the
+  default (John, 2026-10-08). The choice is announced (`Stability: Damper`),
+  saved as a preference (Pref → Stability level, which also cycles it) and
+  applied to every powered-lift flight, restart and seat as a pilot command.
+- **Hover hold** (`hover-hold`) is the autopilot mode of the helicopters and
+  the V-22 (VTOL overhaul slice P9). Ctrl+Alt+A is the stock key; on some
+  European layouts Windows reports AltGr as Ctrl+Alt.
+
+The gamepad keeps its layer:
 
 | Control | Keyboard default | Standard Linux gamepad default |
 | --- | --- | --- |
-| Nozzle pitch, forward / vertical | Ctrl+Up / Ctrl+Down | Hold Select, right stick forward / back |
-| Nozzle yaw, left / right | Ctrl+Left / Ctrl+Right | Hold Select, right stick left / right |
+| Nozzle pitch, forward / vertical | Ctrl+Up / Ctrl+Down (vectoring jets) | Hold Select, right stick forward / back |
 | V-22 conversion, airplane / helicopter | Ctrl+Page Up / Ctrl+Page Down | Hold Select, right stick left / right |
-| Collective, increase / decrease | Ctrl+Home / Ctrl+End | Hold Select, right stick up / down |
-| Nozzles/nacelles forward neutral | 0 | Hold Select, D-pad up |
+| Collective, increase / decrease | Ctrl+Home / Ctrl+End, or the throttle keys | Hold Select, right stick up / down, or the throttle buttons |
+| Nozzles/nacelles forward neutral | 0 (not on helicopters) | Hold Select, D-pad up |
 | Engine on/off | E | Hold Select, Start |
-| Engine power | Existing 1-8 throttle presets/steps | Existing shoulder buttons |
+| Engine power (vectoring jets) | 1-8 throttle presets and steps | Shoulder buttons |
 
-Power and collective are independent: throttle controls available engine power,
-while collective requests rotor lift. Pitch/roll and rudder keep their ordinary
-arrows and End/Page Down assignments. The right-stick additions use the selected
+Pitch, roll and rudder keep their ordinary arrows and End / Page Down
+assignments. The right-stick additions use the selected
 aircraft's modifier map.
 Combat shoulder, face, countermeasure and click bindings retain their actions.
 Powered-lift engine and forward-neutral commands use the contextual Start and
@@ -113,8 +163,10 @@ with the aircraft state on restart or seat handoff.
 
 The [VTOL / Helicopters keyboard sheet](tore-keyboard-map.html#lift) shows these
 controls together with ordinary attitude, engine, gear and brake keys. Pilot
-input tapes now write version 2 to retain lift controls; version 1 tapes remain
-readable.
+input tapes write version 3 (`tore-pilot 3`), which adds the trim, stability,
+nozzle-key and hover-hold commands; version 1 and 2 tapes remain readable, and
+reject those words. Old tapes of the six powered-lift aircraft do not reproduce
+once their physics changes.
 
 The Apache and Chinook keep their fixed landing gear down; G reports that the
 gear is fixed. The Hind retains retractable gear. This is an explicit
@@ -368,8 +420,11 @@ Shift+L (next airport, request landing), Ctrl+Shift+R and Ctrl+Shift+C (tower
 repeat and cancel), Alt+L (land at selected airport), Alt+A (sort: a
 different bandit for each wingman, [data link](DATALINK.md#giving-assignments)),
 Alt+N (monitor the [battle net](DATALINK.md#frequencies)), Alt+0 with
-Alt+Shift+1–4 (address the flight or one wingman), and Ctrl+B (mark a
-[mission replay](REPLAYS.md#when) moment). With Pref → Debug panels? on, a
+Alt+Shift+1–4 (address the flight or one wingman), Ctrl+B (mark a
+[mission replay](REPLAYS.md#when) moment), and on the powered-lift aircraft
+Ctrl+Alt+A (hover hold), Ctrl+Shift+A (stability level) and the Ctrl+arrow
+cyclic trim of the helicopters and the V-22, where FA's Ctrl+arrows (thrust
+vectoring) do nothing. With Pref → Debug panels? on, a
 right-click that does not drag opens the debug menu, which takes no key.
 
 Deliberate differences from FA:
@@ -377,7 +432,7 @@ Deliberate differences from FA:
 | Key | T.O.R.E | FA | Why |
 | --- | --- | --- | --- |
 | Ctrl+A | Waypoint autopilot | Find-nearest cheat, when the Multi menu allows it | John requested the two autopilot modes on 2026-09-17 |
-| Z / X | Rudder, alongside End / Page Down | Wing sweep | Laptops lack End and Page Down; T.O.R.E sweeps the F-14 automatically |
+| Z / X | Rudder, alongside End / Page Down; on the AV-8 and Yak-141 the nozzle steps, as in FA | Wing sweep and, on the VTOL jets, nozzle steps (Shift+Z / Shift+X presets) | Laptops lack End and Page Down; T.O.R.E sweeps the F-14 automatically. The jets' nozzle keys are John's choice of 2026-10-08 |
 | M | Cycle sensor channels | HARM seeker | No HARM channel yet |
 | Shift+K | Jettison the selected external group, live-fire range only | Jettison all air-to-ground ordnance | Fitted jettison |
 | L | Clear designation, alongside ; | Unused | Earlier T.O.R.E key, kept |
