@@ -287,7 +287,8 @@ impl State {
         let lift = model.powered_lift();
         let mut lift_controls = powered::Controls::default();
         let mut throttle = 0.7;
-        let mut speed = variety_start_speed(&model, position[1]).unwrap_or(450. * 1.68781);
+        let default_speed = 450. * 1.68781;
+        let mut speed = variety_start_speed(&model, position[1]).unwrap_or(default_speed);
         if let Some(lift) = lift
             && lift.kind != crate::models::variety::LiftKind::VectorJet
         {
@@ -314,7 +315,15 @@ impl State {
             pitch: 0.,
             bank: 0.,
             speed,
-            velocity: Basis::new(0.3, 0., 0.).forward.map(|v| v * speed),
+            // The ported fighters keep the original two-step product
+            // (`v * 450 * 1.68781`), so their start velocity stays bit-identical.
+            velocity: Basis::new(0.3, 0., 0.).forward.map(|v| {
+                if speed == default_speed {
+                    v * 450. * 1.68781
+                } else {
+                    v * speed
+                }
+            }),
             roll_rate: 0.,
             pitch_rate: 0.,
             auxiliary_rates: [0.; 3],
@@ -2168,6 +2177,12 @@ mod tests {
         s.retune_airborne_start_speed([3., 0., 4.]);
         assert_eq!(s.speed, 450. * 1.68781);
         assert_eq!(s.velocity, before.velocity);
+        // The start velocity is the original two-step product, bit for bit:
+        // `v * (450 * 1.68781)` differs from it in the last digit.
+        assert_eq!(
+            before.velocity,
+            Basis::new(0.3, 0., 0.).forward.map(|v| v * 450. * 1.68781)
+        );
     }
     #[test]
     fn airborne_player_ground_impact_is_terminal_and_kills_pilot_without_a_poll() {
