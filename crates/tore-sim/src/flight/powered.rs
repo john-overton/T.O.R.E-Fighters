@@ -8,6 +8,11 @@ use crate::{
     },
 };
 
+/// Airspeed, ft/s, above which the low-speed horizontal damping force stops
+/// growing (fitted, agent decision 2026-10-08). Below it the damping rate is
+/// the aircraft's own; well above it the force is about rate x 10 ft/s.
+const LOW_SPEED_DAMPING_FPS: f64 = 10.;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Controls {
     pub vector_pitch: f64,
@@ -304,9 +309,26 @@ impl State {
             / (1. + loading * c.aerodynamics.loaded_elevator_percent / 100.);
         let requested_g = (1. + stick[0] * (max_g.max(1.) - 1.)).clamp(-1., max_g.max(1.));
         let wing_g = requested_g * wing_authority * t.regional.effects.lift;
-        let drag = c.propulsion.military_thrust_lbf
-            * lift.efficiency
-            * lapse
+        // Forward drag reaches the reference force at the envelope's top speed.
+        // Jets and the tiltrotor: their full rated thrust, with the afterburner
+        // when they have one, as the fixed-wing adapter does. Helicopters fly
+        // forward by tilting their rotor thrust, so their reference is the
+        // forward force at their full attitude target while holding their
+        // weight, less the saturated low-speed damping. Fitted, agent
+        // decision 2026-10-08 (docs/spec/variety-flight.md).
+        let reference = if lift.kind == LiftKind::Helicopter {
+            weight
+                * (lift.pitch_degrees.to_radians().tan()
+                    - lift.horizontal_damping * LOW_SPEED_DAMPING_FPS / GRAVITY)
+                    .max(0.05)
+        } else {
+            c.propulsion
+                .military_thrust_lbf
+                .max(c.propulsion.afterburner_thrust_lbf)
+                * lift.efficiency
+                * lapse
+        };
+        let drag = reference
             * (self.speed / top_speed.max(100.)).powi(2)
             * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
             * (1. + t.regional.effects.drag_percent / 100.);
@@ -331,7 +353,9 @@ impl State {
             let damping = if i == 1 {
                 0.35 * hover + 0.5 * wing_authority
             } else {
-                lift.horizontal_damping * hover
+                // Low-speed damping: its force stops growing above about
+                // 10 ft/s, so forward flight is left to the drag above.
+                lift.horizontal_damping * hover / (1. + self.speed / LOW_SPEED_DAMPING_FPS)
             };
             *velocity += (thrust_direction[i] * thrust / weight * GRAVITY
                 + basis.up[i] * wing_g * GRAVITY
@@ -469,6 +493,76 @@ mod tests {
         for _ in 0..ticks {
             s.step_surface(input, |_, _| crate::research::Surface::runway(0.));
         }
+    }
+    #[test]
+    fn a_helicopter_reaches_nearly_its_top_speed_at_full_forward_stick() {
+        // Before 2026-10-08 the low-speed damping acted at every speed and the
+        // drag was scaled to full rotor thrust, so helicopters topped out near
+        // 40 kt whatever their envelope said. Synthetic 166 kt envelope.
+        let mut aircraft = crate::models::variety::tests::synthetic(AircraftId::Mi24);
+        for e in &mut aircraft.envelopes {
+            e.points = vec![[60., 0.], [70., 7_000.], [260., 7_000.], [280., 0.]];
+        }
+        let mut s = State::new(&aircraft, [0., 1_000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.cheats.unlimited_fuel = true;
+        let top = 280. - 20. * 1_000. / 7_000.;
+        let mut collective = s.lift_controls.collective;
+        let mut speeds = Vec::new();
+        for stick in [0.25, 0.5, 1.] {
+            for _ in 0..120 * 120 {
+                collective = (collective
+                    + (-0.0005 * s.velocity[1] + 0.00005 * (1_000. - s.position[1])))
+                    .clamp(0., 1.);
+                let input = PilotInput {
+                    pitch: -stick,
+                    roll: (-2. * s.bank).clamp(-1., 1.),
+                    throttle: Some(1.),
+                    collective: Some(collective),
+                    ..Default::default()
+                };
+                run(&mut s, &input, 1);
+            }
+            assert!((s.position[1] - 1_000.).abs() < 200., "{}", s.position[1]);
+            speeds.push(s.speed);
+        }
+        assert!(speeds.windows(2).all(|w| w[1] > w[0]), "{speeds:?}");
+        assert!(
+            speeds[2] > 0.9 * top && speeds[2] < top,
+            "{} of {top}",
+            speeds[2]
+        );
+    }
+    #[test]
+    fn afterburner_jets_are_held_to_their_top_speed_by_drag() {
+        // Drag at the top speed equals the afterburner thrust, as in the
+        // fixed-wing adapter, so full burner cannot exceed the envelope.
+        let mut aircraft = crate::models::variety::tests::synthetic(AircraftId::Yak141);
+        aircraft.fields.get_mut("thrust").unwrap().value = "20000".into();
+        aircraft.fields.get_mut("aftThrust").unwrap().value = "34000".into();
+        let mut s = State::new(&aircraft, [0., 10_000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        let top = 1_800. - 500. * 10_000. / 50_000.;
+        s.yaw = 0.;
+        s.pitch = 0.;
+        s.bank = 0.;
+        s.speed = top;
+        s.velocity = [0., 0., top];
+        s.throttle = 1.;
+        s.burner = true;
+        run(&mut s, &PilotInput::default(), 1);
+        let c = s.model().configuration();
+        let t = s.trace().adapter.unwrap();
+        let loading = (s.fuel + s.carried_lbs()) / c.mass.empty_lbs;
+        let expected = 34_000.
+            * t.power.lapse
+            * (s.speed / top).powi(2)
+            * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.);
+        assert!(
+            (t.forces.drag.total_lbf / expected - 1.).abs() < 0.01,
+            "{} vs {expected}",
+            t.forces.drag.total_lbf
+        );
     }
     #[test]
     fn all_six_hover_climb_descend_and_lose_support_with_engine_off() {

@@ -233,7 +233,11 @@ and validation, not real-aircraft assumptions, when importing the next type.
    `tore-sim::models::variety`. Reuse the shared integration and response laws,
    retain the aircraft's own source fields, and document every tuning choice
    in the [flight contract](spec/variety-flight.md). Derive ground clearance
-   from its deployed geometry at the host scale.
+   from its deployed geometry at the host scale. Compare the decoded 1 G top
+   speed and the simulated level speed (`tore-sim` example `envelope_probe`)
+   with published figures; a clearly wrong edge gets a fitted correction in
+   `variety::fitted_envelopes`, recorded with its source under
+   [top speeds](spec/variety-flight.md#top-speeds).
 4. Review the shape layout and device branches with the bounded
    `shape_inspect` example. The app's `variety_animation` descriptor checks
    those measurements before animating. Propeller/rotor phase selection and

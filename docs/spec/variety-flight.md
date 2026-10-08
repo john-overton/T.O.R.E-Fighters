@@ -126,10 +126,19 @@ reduces vertical support. Yaw control needs engine power; attitude authority sca
 by weight, capped at 1. No automatic height
 or position hold exists. Neutral stick levels the aircraft but does not cancel
 velocity. Low-speed horizontal damping is respectively 0.06, 0.07, 0.10,
-0.14, 0.12 and 0.10/second; vertical damping is 0.35/second times hover fraction plus 0.5/second times
-forward wing authority. Forward drag
-adds acceleration proportional to speed squared using source top speed and
-thrust. Lift is limited by fuel and payload weight; full collective cannot
+0.14, 0.12 and 0.10/second, times hover fraction, divided by 1 plus airspeed
+over 10 ft/s, so its force stops growing above a few knots (agent decision,
+2026-10-08; before that it acted at every speed and held the helicopters near
+40 kt). Vertical damping is 0.35/second times hover fraction plus 0.5/second times
+forward wing authority. Forward drag grows with the square of airspeed and
+equals a reference force at the envelope's top speed at that altitude, times
+the source loaded-drag factor. For AV8, YAK141 and V22 the reference is their
+rated thrust, afterburner included when the PT has one, as in the fixed-wing
+adapter; before 2026-10-08 it was military thrust only, so YAK141 at full
+burner flew past its own top speed. For helicopters it is their weight times
+the tangent of their full pitch target, less the saturated damping force, so
+full forward stick in level flight settles just under the top speed (agent
+decision, 2026-10-08). Lift is limited by fuel and payload weight; full collective cannot
 hold a load exceeding the available lift. No autorotation or detailed rotor
 vortex-ring model is claimed.
 
@@ -153,6 +162,75 @@ work on a flat runway. Cloned configurations remain independent. Identical
 inputs and exact snapshot restoration produce identical future ticks. The
 legacy adapter and restricted native research path retain their existing
 behavior and limitations.
+
+## Top speeds
+
+Units: PT envelope speeds are true airspeed in ft/s at each altitude; the
+tables below give knots true (ft/s divided by 1.68781). The right edge of the
+1 G row is the top speed: the hybrid drag reaches full thrust there, the
+[envelope window](envelope.md) draws it and the [overspeed](overspeed.md) rule
+uses it as the structural limit. Level flight at full power therefore settles
+at that edge divided by the square root of 1 plus loading times the source
+loaded-drag percent. The transports and airliners have a loaded drag of 0, so
+they fly right at the edge; fighters, with full internal fuel, at 87 to 96
+percent of it.
+
+The variety numbers are fitted contract values. On 2026-10-08 an agent
+compared the decoded 1 G top speed, the simulated level top speed (headless
+probe, full power, full internal fuel) and published figures for all 23
+aircraft; the measurements are in the
+[validation record](../baselines/variety-flight.md#top-speed-pass-2026-10-08).
+Five decoded envelopes were clearly wrong and are corrected below. These are
+agent decisions, not retail behavior. The decoded PT values stay in the
+imported data and its reports; only the flight model's copy, which the
+overspeed rule and envelope window also read, is corrected.
+
+| Aircraft | Decoded 1 G top, kt | Fitted 1 G top, kt | Rule | Reason and source |
+| --- | --- | --- | --- | --- |
+| AC130 | 338 at sea level, 334 at 20,000 ft | 261, 258 | Fast-side speeds of every row times 261/338 | USAF AC-130U fact sheet: 300 mph (261 kt) at sea level. The decoded envelope is the C-130's. |
+| V22 | 130 at sea level; ceiling 7,000 ft | 276 at sea level, 256 at 20,000 ft; ceiling 25,000 ft | Fast-side speeds times 275/130, all altitudes times 25,000/7,000 | Decoded as a copy of the AH-64 envelope. Published V-22: 275 kt at sea level, 25,000 ft service ceiling (Wikipedia citing Aviation Week; Naval History and Heritage Command). |
+| AH64 | 130 at sea level | 158 | Fast-side speeds times 158/130 | Published AH-64 maximum level speed 158 kt (Vne 197 kt). |
+| B747 | 492 at every altitude | 375 at sea level, 429 at 10,000 ft, 492 from about 18,000 ft | Capped at VMO 375 KCAS and MMO 0.92, standard atmosphere | EASA TCDS IM.A.196, 747-400. The decoded edge was right at cruise altitude but 31 percent over VMO at sea level. |
+| A310 | 456 at sea level, 479 at 20,000 ft | 360, 412 at 10,000 ft, 475 at 20,000 ft, unchanged above | Capped at VMO 360 KIAS and MMO 0.84 | EASA TCDS EASA.A.172, A310-300 basic VMO. |
+
+The capped rows: the 1 G row's fast-side vertices take the calibrated-speed
+cap, with vertices added every 5,000 ft up to 35,000 ft so the edge follows
+the curve. Every other row's fast side shrinks by the same ratio at each
+altitude and never reaches past the 1 G edge. Scaled rows keep the top vertex,
+and fast-side points never move left of it. Slow sides are untouched apart
+from the V22 altitude scale, so stall speeds stay decoded.
+
+The model fixes above (helicopter damping and drag, YAK141 afterburner drag)
+change the simulated top speed without touching an envelope: AH64 from about
+37 kt to 154 kt at 1,000 ft, MI24 from 39 to 168 kt (published 173 to
+181 kt), CH47 from 39 to 164 kt (published 170 kt), and YAK141 from a descent
+past its edge to 659 kt at 1,000 ft (published 675 kt at sea level).
+
+Left as decoded, within about 8 percent of the published figure at the
+altitude it applies to, or with no reliable figure to fit to:
+
+- C130: 334 kt at 20,000 ft against the C-130H's 320 kt there (4 percent).
+- E3: 462 kt to 20,000 ft against a published 461 kt maximum. Its sea-level
+  edge is probably fast compared with a 707 VMO, but no 707-320B VMO could be
+  verified, so it is not capped. Next step: the FAA 4A26 data sheet.
+- IL76: 462 kt against 459 kt at 11,000 m.
+- E2: 314 to 322 kt against 325 to 350 kt in conflicting sources.
+- AV8, MIG17, F-4 family, A7, F15, F16C, F104 and A10: the decoded edge is
+  within about 8 percent of the published sea-level or altitude figure. The
+  simulated level speed is lower at full internal fuel because of the shared
+  loaded-drag rule, as for the original roster.
+
+With the fitted edges no aircraft exceeds its top speed in level flight at
+full power, so overspeed still needs a dive. Transports and airliners reach
+the edge in level flight and so sit in the overspeed shake band (from 95
+percent); for the airliners at low altitude that matches a real VMO warning.
+Past the edge the [fast-side hold](../FLIGHT-MODEL.md#envelope-limits-and-loading)
+keeps their pull, so they can climb back under it within the five safe seconds.
+
+Not changed and recorded for later: decoded ceilings that differ from
+published ones (helicopters 7,000 ft, A10 22,812 ft, F-4 42,000 ft, IL76
+51,000 ft, E3 30,000 ft, at which its envelope has no row above 1 G), and the
+V22's mass, fuel and thrust, which are also the AH-64's.
 
 ## Unknown evidence
 

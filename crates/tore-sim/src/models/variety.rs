@@ -127,6 +127,7 @@ impl VarietyFlightModel {
             ground_clearance_ft: clearance,
         };
         let mut configuration = Configuration::from_aircraft(a, tuning, equipment)?;
+        configuration.aerodynamics.envelopes = fitted_envelopes(a);
         configuration.hook_available = a.fields["flags"].number()? & 0x02 != 0;
         configuration.controls = Some(super::handling::Profile::from_aircraft(a)?);
         let lift = match a.id {
@@ -166,6 +167,145 @@ impl VarietyFlightModel {
         })
     }
 }
+/// A fitted correction to a decoded speed envelope (docs/spec/variety-flight.md,
+/// "Top speeds"). Agent decisions, 2026-10-08, from published figures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SpeedFit {
+    /// Multiply every fast-side speed by `fast` and every altitude by `altitude`.
+    Scale { fast: f64, altitude: f64 },
+    /// Cap the 1 G row's top speed at the true airspeed of `vmo_kcas`
+    /// calibrated, and at `mmo`, in the standard atmosphere; the other rows'
+    /// fast sides shrink in the same proportion at each altitude.
+    Limits { vmo_kcas: f64, mmo: f64 },
+}
+
+fn speed_fit(id: AircraftId) -> Option<SpeedFit> {
+    use AircraftId::*;
+    Some(match id {
+        // af.mil AC-130U fact sheet: 300 mph (261 kt) at sea level; decoded
+        // 338 kt there (the C-130's envelope).
+        Ac130 => SpeedFit::Scale {
+            fast: 261. / 338.,
+            altitude: 1.,
+        },
+        // Decoded as a copy of the AH-64 envelope: 130 kt, 7,000 ft. Published
+        // V-22 figures: 275 kt at sea level, 25,000 ft service ceiling.
+        V22 => SpeedFit::Scale {
+            fast: 275. / 130.,
+            altitude: 25_000. / 7_000.,
+        },
+        // AH-64: maximum level speed 158 kt published; decoded 130 kt.
+        Ah64 => SpeedFit::Scale {
+            fast: 158. / 130.,
+            altitude: 1.,
+        },
+        // EASA TCDS IM.A.196: 747-400 VMO/MMO 375 KCAS / 0.92.
+        B747 => SpeedFit::Limits {
+            vmo_kcas: 375.,
+            mmo: 0.92,
+        },
+        // EASA TCDS EASA.A.172: A310-300 VMO 360 KIAS (basic), MMO 0.84.
+        A310 => SpeedFit::Limits {
+            vmo_kcas: 360.,
+            mmo: 0.84,
+        },
+        _ => return None,
+    })
+}
+
+/// True airspeed in ft/s at `altitude_ft` for a calibrated airspeed in knots,
+/// limited to Mach `mmo`, in the standard atmosphere (subsonic, compressible).
+fn limit_speed_fps(altitude_ft: f64, vmo_kcas: f64, mmo: f64) -> f64 {
+    const P0: f64 = 101_325.;
+    const A0: f64 = 340.294;
+    let Ok(air) = crate::telemetry::Atmosphere::standard(altitude_ft.clamp(-2_000., 100_000.))
+    else {
+        return f64::INFINITY;
+    };
+    let calibrated = vmo_kcas * 0.514_444;
+    let impact = P0 * ((1. + 0.2 * (calibrated / A0).powi(2)).powf(3.5) - 1.);
+    let mach = (5. * ((impact / air.static_pressure_pa + 1.).powf(2. / 7.) - 1.))
+        .sqrt()
+        .min(mmo);
+    let sound = (1.4 * 287.053 * air.temperature_k).sqrt();
+    mach * sound / 0.514_444 * 1.68781
+}
+
+/// The index of a polygon's first highest vertex. Points up to it are the
+/// slow side, the ones after it the fast side (the decoded row layout).
+fn top_index(points: &[[f64; 2]]) -> usize {
+    let top = points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+    points.iter().position(|p| p[1] == top).unwrap_or(0)
+}
+
+/// The aircraft's speed envelopes with its fitted top-speed correction
+/// applied, or the decoded ones unchanged. The flight model, the overspeed
+/// rule and the envelope window all use these.
+pub fn fitted_envelopes(a: &Aircraft) -> Vec<tore_formats::aircraft::Envelope> {
+    let mut envelopes = a.envelopes.clone();
+    match speed_fit(a.id) {
+        None => {}
+        Some(SpeedFit::Scale { fast, altitude }) => {
+            for e in &mut envelopes {
+                let top = top_index(&e.points);
+                let slowest = e.points[top][0];
+                for (i, p) in e.points.iter_mut().enumerate() {
+                    if i > top {
+                        p[0] = (p[0] * fast).max(slowest);
+                    }
+                    p[1] *= altitude;
+                }
+            }
+        }
+        Some(SpeedFit::Limits { vmo_kcas, mmo }) => {
+            let Some(one) = a.envelopes.iter().find(|e| e.g == 1) else {
+                return envelopes;
+            };
+            let factor = |altitude: f64| {
+                one.speeds(altitude).map_or(1., |(_, top)| {
+                    (limit_speed_fps(altitude, vmo_kcas, mmo) / top).min(1.)
+                })
+            };
+            for e in &mut envelopes {
+                let top = top_index(&e.points);
+                // Add fast-side vertices every 5,000 ft up to 35,000 ft so
+                // the capped edge follows the calibrated-speed curve.
+                let mut points = e.points[..=top].to_vec();
+                for pair in e.points[top..].windows(2) {
+                    let ([s0, h0], [s1, h1]) = (pair[0], pair[1]);
+                    let mut levels: Vec<f64> = (1..8)
+                        .map(|k| f64::from(k) * 5_000.)
+                        .filter(|h| *h < h0.max(h1) && *h > h0.min(h1))
+                        .collect();
+                    if h1 < h0 {
+                        levels.reverse();
+                    }
+                    for h in levels {
+                        points.push([s0 + (s1 - s0) * (h - h0) / (h1 - h0), h]);
+                    }
+                    points.push(pair[1]);
+                }
+                for p in &mut points[top + 1..] {
+                    p[0] *= factor(p[1]);
+                }
+                e.points = points;
+            }
+            // No higher row may reach past the fitted top speed.
+            if let Some(one) = envelopes.iter().find(|e| e.g == 1).cloned() {
+                for e in envelopes.iter_mut().filter(|e| e.g != 1) {
+                    let top = top_index(&e.points);
+                    for p in &mut e.points[top + 1..] {
+                        if let Some((_, limit)) = one.speeds(p[1]) {
+                            p[0] = p[0].min(limit);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    envelopes
+}
+
 impl FlightModel for VarietyFlightModel {
     fn configuration(&self) -> &Configuration {
         &self.configuration
@@ -213,7 +353,7 @@ pub(crate) mod tests {
             assert_eq!(model.configuration().propulsion.military_thrust_lbf, 50000.);
             assert_eq!(
                 model.configuration().aerodynamics.envelopes,
-                aircraft.envelopes
+                fitted_envelopes(&aircraft)
             );
             let mut config = model.configuration().clone();
             config.mass.internal_fuel_lbs = 500.;
@@ -224,6 +364,51 @@ pub(crate) mod tests {
             let mut wrong = synthetic(id);
             wrong.shape = "F18.SH".into();
             assert!(AircraftModel::for_aircraft(&wrong).is_err());
+        }
+    }
+    #[test]
+    fn fitted_top_speeds_move_only_the_fast_side_and_stay_valid() {
+        // Synthetic rows: slow side 200 ft/s at sea level, top at 50,000 ft,
+        // fast edge 1,800 ft/s at sea level.
+        let one = |a: &Aircraft, h: f64| {
+            fitted_envelopes(a)
+                .iter()
+                .find(|e| e.g == 1)
+                .unwrap()
+                .speeds(h)
+                .unwrap()
+        };
+        let plain = synthetic(AircraftId::E3);
+        assert_eq!(fitted_envelopes(&plain), plain.envelopes);
+        let gunship = synthetic(AircraftId::Ac130);
+        let (slow, fast) = one(&gunship, 0.);
+        assert_eq!(slow, 200.);
+        assert!((fast - 1_800. * 261. / 338.).abs() < 1e-6);
+        let osprey = synthetic(AircraftId::V22);
+        let top = fitted_envelopes(&osprey)[0]
+            .points
+            .iter()
+            .map(|p| p[1])
+            .fold(0., f64::max);
+        assert!((top - 50_000. * 25_000. / 7_000.).abs() < 1e-6);
+        for id in [AircraftId::B747, AircraftId::A310] {
+            let airliner = synthetic(id);
+            let fitted = fitted_envelopes(&airliner);
+            // Sea level: the published VMO, calibrated equals true.
+            let vmo = if id == AircraftId::B747 { 375. } else { 360. };
+            assert!((one(&airliner, 0.).1 / 1.68781 - vmo).abs() < 1., "{id:?}");
+            // Higher, the calibrated limit is a faster true airspeed.
+            assert!(one(&airliner, 10_000.).1 > one(&airliner, 0.).1 * 1.12);
+            // Slow sides and every vertex count stay inside the PT contract,
+            // and no row reaches past the fitted 1 G edge at its vertices.
+            for (e, raw) in fitted.iter().zip(&airliner.envelopes) {
+                assert!(e.points.len() <= 20);
+                assert_eq!(e.points[..2], raw.points[..2]);
+                for p in &e.points {
+                    assert!(p[0] <= one(&airliner, p[1]).1 + 1e-6);
+                }
+            }
+            assert!(AircraftModel::for_aircraft(&airliner).is_ok());
         }
     }
     #[test]

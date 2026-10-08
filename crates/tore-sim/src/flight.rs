@@ -793,7 +793,9 @@ impl State {
             .collect();
         configuration
     }
-    /// The imported polygons, before the weight scaling.
+    /// The model's polygons before the weight scaling: the imported ones, with
+    /// a variety aircraft's fitted top-speed correction
+    /// (docs/spec/variety-flight.md, "Top speeds").
     pub fn retail_envelopes(&self) -> &[tore_formats::aircraft::Envelope] {
         self.raw_envelopes
             .as_deref()

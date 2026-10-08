@@ -100,7 +100,8 @@ fitted collective-controlled rotor lift. Ordinary throttle remains engine power.
 Apache and Chinook gear stays down from initialization through simulation and
 commands, matching their visible fixed wheels. Hind gear remains retractable.
 The fits, travel rates, initial clearance and known limits have one home in the
-linked contract. Ground contact uses the complete deployed gear, including
+linked contract, including the fitted top-speed corrections for five aircraft
+whose decoded envelopes were clearly wrong. Ground contact uses the complete deployed gear, including
 AV8 central pieces already present in the neutral shape; counting only a switched
 branch missed its lowest nose wheel. These are working approximations, not
 measured retail parity.

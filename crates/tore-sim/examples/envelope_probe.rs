@@ -287,7 +287,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         } else if level {
-            for alt in [1_000., 10_000., 20_000., 30_000.] {
+            let altitudes: Vec<f64> = env::var("PROBE_ALTS").map_or_else(
+                |_| vec![1_000., 10_000., 20_000., 30_000.],
+                |list| list.split(',').filter_map(|a| a.parse().ok()).collect(),
+            );
+            for alt in altitudes {
                 let Some((_, top)) = one.and_then(|e| e.speeds(alt)) else {
                     continue;
                 };

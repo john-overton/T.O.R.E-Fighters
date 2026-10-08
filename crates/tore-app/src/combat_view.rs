@@ -480,7 +480,7 @@ pub fn readout(
                 .dummy_types()
                 .iter()
                 .find(|h| Some(h.profile.id) == target.aircraft)
-                .map(|h| h.profile.envelopes.clone())
+                .map(|h| tore_sim::models::variety::fitted_envelopes(&h.profile))
         }),
         scope: crate::scope::scope(ro, s, controls),
         rcs: crate::scope::rcs(config, ro, s, rcs_scale),
