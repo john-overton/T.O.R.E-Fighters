@@ -18,15 +18,19 @@
 //!   `flight/airframe.rs` (`State::envelope_limits`, `State::airframe_drag`,
 //!   `State::advance_position`, `State::finish_contact`) for the wings and
 //!   the contact of every kind.
+//! - [`sas`]: the trim-set latch and trim, applied to the stick before any
+//!   force law runs, and the stability levels' feedback, which the force
+//!   laws call through [`State::augment`] with their own air data (P6).
 //! - Still to come, each in its own file: `rotor.rs` and `helicopter.rs`
-//!   (P2, P3), `aero.rs` and `jet.rs` (P4), `tiltrotor.rs` (P5), `sas.rs`
-//!   (P6), `trim.rs` (P7). The parameters are in
+//!   (P2, P3), `aero.rs` and `jet.rs` (P4), `tiltrotor.rs` (P5),
+//!   `trim.rs` (P7). The parameters are in
 //!   [`crate::models::variety::PoweredLift`].
 //!
 //! Until P2 and P4 land, `step_powered` keeps the fitted law of the variety
 //! import: its body rates are commanded, not integrated, and it records them
 //! in the state's body rates.
 pub mod body;
+pub mod sas;
 pub mod state;
 
 use super::{DT, FlightAxis, PilotInput, State, airframe, trace};
