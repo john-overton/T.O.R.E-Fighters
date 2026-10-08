@@ -26,6 +26,13 @@ maneuver and AI acceptance cases. Source-backed powered-lift checks use
 conversion, control release and exact-state continuation. See
 [the variety flight evidence](../baselines/variety-flight.md).
 
+`flight-variety-gcurve-*` sweeps the full-stick G limit of the seven transports
+and airliners from 100 to 750 kt at 5,000 ft (`--maneuver gcurve`). Once the
+limit has passed 1.4 G it must not fall below 1.3 G, through the top speed and
+into overspeed. Before the fast-side hold
+([flight model](../FLIGHT-MODEL.md#envelope-limits-and-loading)) it fell to
+about 1 G well below the top speed.
+
 ```sh
 TORE_BATTERY_PROFILE="$PWD/.local/dev-profile" python3 tools/battery.py --scenario 'flight-variety-*' --profile .local/dev-profile --jobs 4
 ```

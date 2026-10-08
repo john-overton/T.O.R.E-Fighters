@@ -2005,6 +2005,41 @@ def variety_scenarios() -> list[Scenario]:
     ) for aircraft in VARIETY_AIRCRAFT]
 
 
+# Transports and airliners: their higher G rows end well short of the 1 G row's
+# top speed, the band where they once could not pull at all (John, 2026-10-08).
+HEAVY_AIRCRAFT = ["c130", "ac130", "e3", "il76", "e2", "b747", "a310"]
+
+
+def check_heavy_gcurve(output: str) -> list[str]:
+    """Once the full-stick limit has passed 1.4 G it never falls back near 1 G.
+
+    The probe's `gcurve:` lines sweep 100 to 750 kt at 5,000 ft, so the sweep
+    runs from the slow-side ramp through the top speed into overspeed. Before
+    the fast-side hold the limit fell from about 1.5 to 2 G to 1.00 well below
+    the top speed (docs/FLIGHT-MODEL.md, "Envelope limits and loading")."""
+    limits = [(int(kt), float(g)) for kt, g in re.findall(r"^gcurve: kt=(\d+) limit_g=(\S+)", output, re.M)]
+    if len(limits) < 20:
+        return ["gcurve sweep missing"]
+    problems = []
+    pulled = False
+    for kt, g in limits:
+        pulled = pulled or g > 1.4
+        if pulled and g < 1.3:
+            problems.append(f"full-stick limit fell to {g:.2f} G at {kt} kt")
+    if not pulled:
+        problems.append("never reached 1.4 G")
+    return problems
+
+
+def heavy_gcurve_scenarios() -> list[Scenario]:
+    return [Scenario(
+        name=f"flight-variety-gcurve-{aircraft}", lane="flight",
+        args=["--headless-flight", "10", "--maneuver", "gcurve", "--aircraft", aircraft,
+              "--researched-flight", "--no-audio", "--no-controllers"],
+        check=check_heavy_gcurve, timeout=120,
+    ) for aircraft in HEAVY_AIRCRAFT]
+
+
 def scenarios() -> list[Scenario]:
     return (
         takeoff_scenarios()
@@ -2043,4 +2078,5 @@ def scenarios() -> list[Scenario]:
         + climb_scenarios()
         + sprint_scenarios()
         + variety_scenarios()
+        + heavy_gcurve_scenarios()
     )

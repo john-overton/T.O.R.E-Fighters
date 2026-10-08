@@ -2185,6 +2185,15 @@ pub fn effect_line(effect: &Effect) -> EffectLine {
             "G limits +/-1 before loading",
             "no envelope row holds this speed at this height".into(),
         ),
+        Effect::FastSideHold { hold, .. } => limit(
+            "Fast-side G hold",
+            hold.g,
+            format!(
+                "past the {} G row's fast edge at {}, the pull stays",
+                fixed(hold.g, 0),
+                kt_text(hold.edge_fps)
+            ),
+        ),
         Effect::LoadedLimits { divisor, loading } => EffectLine {
             label: "Loaded G limits".into(),
             value: Value::Num(round(*divisor, 3)),
@@ -2453,7 +2462,9 @@ pub fn g_limit_reason(trace: &FlightTrace) -> String {
             fixed(e.load_divisor, 2)
         ));
     }
-    if e.rows == 0 {
+    if let Some(hold) = e.fast_hold {
+        why.push(format!("fast-side hold at {} G", fixed(hold.g, 0)));
+    } else if e.rows == 0 {
         why.push("outside every envelope row".to_owned());
     } else {
         why.push(format!(

@@ -297,6 +297,10 @@ impl State {
             })
             .map(|e| f64::from(e.g))
             .fold(1., f64::max)
+            .max(
+                super::fast_side_hold(&c.aerodynamics.envelopes, self.position[1], self.speed)
+                    .map_or(1., |hold| hold.g),
+            )
             / (1. + loading * c.aerodynamics.loaded_elevator_percent / 100.);
         let requested_g = (1. + stick[0] * (max_g.max(1.) - 1.)).clamp(-1., max_g.max(1.));
         let wing_g = requested_g * wing_authority * t.regional.effects.lift;
