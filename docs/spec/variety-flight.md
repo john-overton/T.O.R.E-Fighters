@@ -77,7 +77,10 @@ claim recovered retail actuator logic or add a new binding.
 
 Airborne starts for the new conventional aircraft and VTOL jets use 65 percent
 of their own top speed at the start altitude, bounded above by 95 percent of
-top speed and below by 130 percent of clean stall speed. Helicopters and V22
+top speed and below by 130 percent of clean stall speed. The altitude is the
+mission's: a single-player or multiplayer airborne start picks the speed after
+the selected altitude is applied, and AI aircraft pick it at their own spawn
+altitude. Ported fighters keep their fixed 450 knots. Helicopters and V22
 start level at zero speed, full engine power and collective chosen to balance
 the configured mass and altitude lapse, capped at full collective. This is an
 agent-authored initial condition; it does not add a hover controller. An airborne

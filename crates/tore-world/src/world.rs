@@ -343,6 +343,11 @@ impl World {
         if let Some((altitude, fuel)) = self.setup.mission {
             lead.position[1] = altitude;
             lead.fuel = fuel;
+            // The start speed was chosen at the free-flight altitude; the
+            // variety rule (65 percent of top speed) wants the mission's.
+            if self.setup.ground_start.is_none() {
+                lead.retune_airborne_start_speed(self.terrain.wind());
+            }
         }
         // The accepted creator layout, reused unchanged on restart.
         let layout = self

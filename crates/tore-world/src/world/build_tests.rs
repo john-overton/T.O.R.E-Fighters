@@ -301,3 +301,46 @@ fn the_callers_hooks_supply_the_types_and_the_weapon_labels() {
     let stations = &built.world.combat.state.own().configuration().stations;
     assert!(stations.iter().all(|s| s.weapon.name == "Tidy"));
 }
+
+/// A variety aircraft's airborne start speed is chosen at the mission's
+/// altitude, not at the free-flight default the type starts at; a ported
+/// fighter keeps its fixed start speed.
+#[test]
+fn an_airborne_start_takes_the_variety_speed_at_the_mission_altitude() {
+    use tore_sim::models::{AircraftModel, variety::VarietyFlightModel};
+    let map = resources();
+    let mut world = World::new(&spec(), &map, Seating::SinglePlayer).unwrap();
+    let fighter = aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
+    world.restart(&fighter, &map).unwrap();
+    assert_eq!(world.cockpits[0].flight.speed, 450. * 1.68781);
+
+    let mut profile = tore_formats::aircraft::Aircraft::parse(
+        crate::resources::ResourceSource::get(&map, "F18.PT").unwrap(),
+    )
+    .unwrap();
+    let (name, shape) = VarietyFlightModel::identity(AircraftId::F15).unwrap();
+    profile.id = AircraftId::F15;
+    profile.name = name.into();
+    profile.shape = shape.into();
+    let model = AircraftModel::for_aircraft(&profile).unwrap();
+    let variety = aircraft_type::AircraftType::new(
+        profile,
+        model.clone(),
+        fighter.sensors.clone(),
+        Vec::new(),
+    );
+    let free_flight = variety.start(&world.terrain).speed;
+    let at_mission = tore_sim::flight::State::from_model(model, [0., 10_000., 0.]).speed;
+    assert_ne!(free_flight, at_mission, "the altitudes must matter here");
+    world.restart(&variety, &map).unwrap();
+    let flight = &world.cockpits[0].flight;
+    assert_eq!(flight.speed, at_mission);
+    assert!((flight.position[1] - 10_000.).abs() < 1e-6);
+    // The velocity follows the speed and the wind, ground-relative.
+    let wind = world.terrain.wind();
+    let ground: f64 = (0..3)
+        .map(|i| (flight.velocity[i] - wind[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!((ground - at_mission).abs() < 1e-6, "{ground} {at_mission}");
+}

@@ -178,6 +178,22 @@ pub struct State {
     /// Write-only record of the last step. Read it through [`State::trace`].
     pub(crate) trace: trace::Slot,
 }
+/// The airborne start speed of a variety aircraft at `altitude`: 65 percent of
+/// its top speed there, never above 95 percent of top speed or below 130
+/// percent of clean stall speed. Other aircraft have no such rule.
+fn variety_start_speed(model: &crate::models::AircraftModel, altitude: f64) -> Option<f64> {
+    if !matches!(model, crate::models::AircraftModel::Variety(_)) {
+        return None;
+    }
+    let (stall, top) = model
+        .configuration()
+        .aerodynamics
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .and_then(|e| e.speeds(altitude))?;
+    Some((top * 0.65).max(stall * 1.3).min(top * 0.95))
+}
 impl State {
     pub fn new(a: &Aircraft, position: [f64; 3]) -> tore_formats::Result<Self> {
         Ok(Self::from_model(
@@ -243,6 +259,25 @@ impl State {
         };
         (mode != DepartureMode::Normal).then_some(mode)
     }
+    /// Gives an airborne start that has not flown yet the speed its aircraft's
+    /// start rule calls for at the altitude it now has. `from_model` picks the
+    /// speed at the altitude it is built at; a host that moves the start to
+    /// the mission's altitude afterwards calls this once, with the wind the
+    /// start was given (velocity is ground-relative). Only the variety
+    /// aircraft's rule (65 percent of top speed at the start altitude)
+    /// depends on altitude: every other aircraft keeps its fixed start speed,
+    /// and a powered-lift aircraft that starts at rest stays at rest.
+    pub fn retune_airborne_start_speed(&mut self, wind: [f64; 3]) {
+        if self.ticks != 0 || self.native.is_some() || self.speed <= 0. {
+            return;
+        }
+        let Some(speed) = variety_start_speed(&self.model, self.position[1]) else {
+            return;
+        };
+        let forward = Basis::new(self.yaw, self.pitch, self.bank).forward;
+        self.speed = speed;
+        self.velocity = std::array::from_fn(|i| forward[i] * speed + wind[i]);
+    }
     pub fn model(&self) -> &crate::models::AircraftModel {
         &self.model
     }
@@ -252,18 +287,7 @@ impl State {
         let lift = model.powered_lift();
         let mut lift_controls = powered::Controls::default();
         let mut throttle = 0.7;
-        let mut speed = 450. * 1.68781;
-        if let crate::models::AircraftModel::Variety(_) = &model
-            && let Some((stall, top)) = model
-                .configuration()
-                .aerodynamics
-                .envelopes
-                .iter()
-                .find(|e| e.g == 1)
-                .and_then(|e| e.speeds(position[1]))
-        {
-            speed = (top * 0.65).max(stall * 1.3).min(top * 0.95);
-        }
+        let mut speed = variety_start_speed(&model, position[1]).unwrap_or(450. * 1.68781);
         if let Some(lift) = lift
             && lift.kind != crate::models::variety::LiftKind::VectorJet
         {
@@ -2087,6 +2111,64 @@ pub fn ceiling_lift_ratio(altitude_ft: f64, ceiling_ft: f64) -> f64 {
 mod tests {
     use super::integration_tests::profile;
     use super::*;
+    #[test]
+    fn a_variety_airborne_start_follows_the_altitude_it_is_moved_to() {
+        use crate::models::variety::{VarietyFlightModel, tests::synthetic};
+        use tore_formats::aircraft::AircraftId;
+        let wind = [12., 0., -5.];
+        let (mut checked, mut moved) = (0, 0);
+        for id in AircraftId::SELECTABLE {
+            if VarietyFlightModel::identity(id).is_none() {
+                continue;
+            }
+            let aircraft = synthetic(id);
+            let mut s = State::new(&aircraft, [0., 5000., 0.]).unwrap();
+            if s.speed <= 0. {
+                // Helicopters and the V22 start at rest, whatever the altitude.
+                s.position[1] = 25000.;
+                s.retune_airborne_start_speed(wind);
+                assert_eq!(s.speed, 0., "{id:?}");
+                continue;
+            }
+            let built_high = State::new(&aircraft, [0., 25000., 0.]).unwrap();
+            moved += usize::from(built_high.speed != s.speed);
+            s.position[1] = 25000.;
+            s.retune_airborne_start_speed(wind);
+            assert_eq!(s.speed, built_high.speed, "{id:?}");
+            let forward = Basis::new(s.yaw, s.pitch, s.bank).forward;
+            for i in 0..3 {
+                assert!((s.velocity[i] - (forward[i] * s.speed + wind[i])).abs() < 1e-9);
+            }
+            // Retuning again changes nothing, and a flown state is left alone.
+            let again = s.clone();
+            s.retune_airborne_start_speed(wind);
+            assert_eq!(s, again, "{id:?}");
+            s.ticks = 1;
+            s.position[1] = 5000.;
+            s.retune_airborne_start_speed(wind);
+            assert_eq!(
+                s,
+                {
+                    let mut t = again.clone();
+                    t.position[1] = 5000.;
+                    t.ticks = 1;
+                    t
+                },
+                "{id:?}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 10 && moved > 5, "{checked} {moved}");
+    }
+    #[test]
+    fn a_ported_fighters_airborne_start_speed_ignores_the_altitude() {
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        let before = s.clone();
+        s.position[1] = 25000.;
+        s.retune_airborne_start_speed([3., 0., 4.]);
+        assert_eq!(s.speed, 450. * 1.68781);
+        assert_eq!(s.velocity, before.velocity);
+    }
     #[test]
     fn airborne_player_ground_impact_is_terminal_and_kills_pilot_without_a_poll() {
         let mut s = State::new(&profile(), [0., 8.1, 0.]).unwrap();
