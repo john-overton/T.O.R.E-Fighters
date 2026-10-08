@@ -169,18 +169,30 @@ Units: PT envelope speeds are true airspeed in ft/s at each altitude; the
 tables below give knots true (ft/s divided by 1.68781). The right edge of the
 1 G row is the top speed: the hybrid drag reaches full thrust there, the
 [envelope window](envelope.md) draws it and the [overspeed](overspeed.md) rule
-uses it as the structural limit. Level flight at full power therefore settles
-at that edge divided by the square root of 1 plus loading times the source
-loaded-drag percent. The transports and airliners have a loaded drag of 0, so
-they fly right at the edge; fighters, with full internal fuel, at 87 to 96
-percent of it.
+uses it as the structural limit. The drag reaches full thrust at that edge
+times a level-speed fraction, so level flight at full power settles there
+divided by the square root of 1 plus loading times the source loaded-drag
+percent. The fraction is 1 for every aircraft except the transports and
+airliners below; fighters, with full internal fuel, settle at 87 to 96 percent
+of the edge.
+
+**Heavy level-speed fraction (fitted, 2026-10-08).** C130, AC130, E3, IL76,
+E2, B747 and A310 have a source loaded drag of 0, so at full power they flew
+right at the edge, inside the overspeed shake band (from 95 percent). John
+asked on 2026-10-08 for a little drag so they top out a few percent under it.
+Their fraction is 0.96, an agent choice: full power in level flight settles
+at 96 percent of the top speed at any fuel load, just out of the shake band.
+It reuses the drag normalization every aircraft already has rather than a
+fuel-dependent loaded-drag value, which would return them to the edge as fuel
+burns off.
 
 The variety numbers are fitted contract values. On 2026-10-08 an agent
 compared the decoded 1 G top speed, the simulated level top speed (headless
 probe, full power, full internal fuel) and published figures for all 23
 aircraft; the measurements are in the
 [validation record](../baselines/variety-flight.md#top-speed-pass-2026-10-08).
-Five decoded envelopes were clearly wrong and are corrected below. These are
+Six decoded envelopes are corrected below: five were clearly wrong, and the
+E3 is capped like the airliners at John's request (2026-10-08). These are
 agent decisions, not retail behavior. The decoded PT values stay in the
 imported data and its reports; only the flight model's copy, which the
 overspeed rule and envelope window also read, is corrected.
@@ -192,6 +204,7 @@ overspeed rule and envelope window also read, is corrected.
 | AH64 | 130 at sea level | 158 | Fast-side speeds times 158/130 | Published AH-64 maximum level speed 158 kt (Vne 197 kt). |
 | B747 | 492 at every altitude | 375 at sea level, 429 at 10,000 ft, 492 from about 18,000 ft | Capped at VMO 375 KCAS and MMO 0.92, standard atmosphere | EASA TCDS IM.A.196, 747-400. The decoded edge was right at cruise altitude but 31 percent over VMO at sea level. |
 | A310 | 456 at sea level, 479 at 20,000 ft | 360, 412 at 10,000 ft, 475 at 20,000 ft, unchanged above | Capped at VMO 360 KIAS and MMO 0.84 | EASA TCDS EASA.A.172, A310-300 basic VMO. |
+| E3 | 462 to 20,000 ft, 438 at 30,000 ft | 375 at sea level, 436 at 10,000 ft, 462 from about 13,000 ft | Capped at the VMO schedule 375 KIAS at sea level, 381 at 10,000 ft, 385 at 15,000, 390 at 20,000, 394 at 23,000, and MMO 0.887 | No E-3 limit is public. Analogue: FAA TCDS 4A26 revision 11, part III, 707-300B series. The E-3 is a 707-320B airframe, and its TF33 engines are the military JT3D that the 707-300B uses. |
 
 The capped rows: the 1 G row's fast-side vertices take the calibrated-speed
 cap, with vertices added every 5,000 ft up to 35,000 ft so the edge follows
@@ -210,9 +223,6 @@ Left as decoded, within about 8 percent of the published figure at the
 altitude it applies to, or with no reliable figure to fit to:
 
 - C130: 334 kt at 20,000 ft against the C-130H's 320 kt there (4 percent).
-- E3: 462 kt to 20,000 ft against a published 461 kt maximum. Its sea-level
-  edge is probably fast compared with a 707 VMO, but no 707-320B VMO could be
-  verified, so it is not capped. Next step: the FAA 4A26 data sheet.
 - IL76: 462 kt against 459 kt at 11,000 m.
 - E2: 314 to 322 kt against 325 to 350 kt in conflicting sources.
 - AV8, MIG17, F-4 family, A7, F15, F16C, F104 and A10: the decoded edge is
@@ -221,11 +231,11 @@ altitude it applies to, or with no reliable figure to fit to:
   loaded-drag rule, as for the original roster.
 
 With the fitted edges no aircraft exceeds its top speed in level flight at
-full power, so overspeed still needs a dive. Transports and airliners reach
-the edge in level flight and so sit in the overspeed shake band (from 95
-percent); for the airliners at low altitude that matches a real VMO warning.
-Past the edge the [fast-side hold](../FLIGHT-MODEL.md#envelope-limits-and-loading)
-keeps their pull, so they can climb back under it within the five safe seconds.
+full power, so overspeed still needs a dive, and with the level-speed fraction
+the transports and airliners cruise flat out about 4 percent under it, out of
+the shake. Past the edge the
+[fast-side hold](../FLIGHT-MODEL.md#envelope-limits-and-loading) keeps their
+pull, so they can climb back under it within the five safe seconds.
 
 Not changed and recorded for later: decoded ceilings that differ from
 published ones (helicopters 7,000 ft, A10 22,812 ft, F-4 42,000 ft, IL76

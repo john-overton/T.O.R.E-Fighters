@@ -1829,10 +1829,13 @@ impl State {
         } else {
             1.
         };
+        // The drag reaches full thrust at the 1 G top speed times the
+        // aircraft's level-speed fraction (1 except for fitted heavies).
+        let drag_speed = (vmax * c.aerodynamics.level_speed_fraction).max(100.);
         let drag = slip_drag
             + max_thrust
                 * lapse
-                * (self.speed / vmax.max(100.)).powi(2)
+                * (self.speed / drag_speed).powi(2)
                 * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
             + weight
                 * (c.aerodynamics.g_pull_drag_f8 * (self.lift_g.abs() - 1.).max(0.)
@@ -1853,7 +1856,7 @@ impl State {
         let drag = drag_cap.map_or(drag, |cap| drag.min(cap));
         let gear_on_wheels = self.research.is_some() && wheel_contact;
         // Display breakdown of the drag above, from the same inputs.
-        let airframe_drag = max_thrust * lapse * (self.speed / vmax.max(100.)).powi(2);
+        let airframe_drag = max_thrust * lapse * (self.speed / drag_speed).powi(2);
         let drag_trace = trace::DragTrace {
             total_lbf: drag,
             undamaged_lbf: undamaged_drag,
@@ -2197,7 +2200,7 @@ mod tests {
     /// Round numbers, not retail values.
     fn transport() -> Aircraft {
         let mut a =
-            crate::models::variety::tests::synthetic(tore_formats::aircraft::AircraftId::E3);
+            crate::models::variety::tests::synthetic(tore_formats::aircraft::AircraftId::Il76);
         a.envelopes = vec![
             tore_formats::aircraft::Envelope {
                 g: 1,

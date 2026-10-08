@@ -113,15 +113,22 @@ after.
 ### Level top speed, full power, full internal fuel
 
 Decoded: the 1 G row's right edge. Simulated: the probe's settled speed.
-Columns give sea level or 1,000 ft / 10,000 / 20,000 / 30,000 ft.
+Columns give sea level or 1,000 ft / 10,000 / 20,000 / 30,000 ft. "After"
+includes the follow-up John asked for the same day: the E3 capped at the
+707-300B VMO/MMO and the 0.96 level-speed fraction for the seven transports
+and airliners ("heavy drag"). Each of those seven settles at 95.7 to 95.9
+percent of its fitted edge at every altitude it holds; before the follow-up
+they settled at 99.7 to 99.9 percent, inside the overspeed shake. The F-15,
+F-16C and other fighters are unchanged, and the golden fingerprints are
+identical before and after on Linux.
 
 | Aircraft | Decoded top, kt (ceiling, ft) | Simulated before | Simulated after | Published | Result |
 | --- | --- | --- | --- | --- | --- |
-| C130 | 338 / 336 / 334 / 326 (34,000) | 337 / 335 / 333 / 326 | same | C-130H 320 at 20,000 ft | Left, 4 percent |
-| AC130 | 338 / 336 / 334 / 326 (34,000) | 337 / 335 / 333 / 325 | 260 / 258 / 257 / 251 | AC-130U 261 at sea level | Fitted |
-| E3 | 462 / 462 / 462 / 438 (30,000) | 462 / 462 / 462 / - | same | 461 maximum | Left |
-| IL76 | 462 at all (51,000) | 462 at all | same | 459 at 11,000 m | Left |
-| E2 | 314 / 318 / 322 / 312 (31,000) | 314 / 318 / 322 / 312 | same | 325 to 350 | Left |
+| C130 | 338 / 336 / 334 / 326 (34,000) | 337 / 335 / 333 / 326 | 324 / 322 / 320 / 313 | C-130H 320 at 20,000 ft | Edge left (4 percent); heavy drag |
+| AC130 | 338 / 336 / 334 / 326 (34,000) | 337 / 335 / 333 / 325 | 249 / 248 / 247 / 241 | AC-130U 261 at sea level | Fitted; heavy drag |
+| E3 | 462 / 462 / 462 / 438 (30,000) | 462 / 462 / 462 / - | 365 / 418 / 443 / - | 461 maximum; 707-300B VMO 375 KIAS at sea level | Fitted (707-300B analogue); heavy drag |
+| IL76 | 462 at all (51,000) | 462 at all | 443 at all | 459 at 11,000 m | Edge left; heavy drag |
+| E2 | 314 / 318 / 322 / 312 (31,000) | 314 / 318 / 322 / 312 | 301 / 305 / 309 / 299 | 325 to 350 | Edge left; heavy drag |
 | AV8 | 581 / 576 / 571 / 567 (50,125) | 519 / 515 / 511 / 507 | same | 585 | Left (loaded drag) |
 | YAK141 | 675 / 758 / 840 / 922 (50,000) | over its edge, 721 at 1,000 ft in a descent | 659 / 731 / 810 / 889 | 675 at sea level, 971 at 11,000 m | Model fix |
 | V22 | 130 (7,000) | 127 at 1,000 ft | 270 / 261 / 252 / - (25,000) | 275 at sea level | Fitted |
@@ -137,11 +144,11 @@ Columns give sea level or 1,000 ft / 10,000 / 20,000 / 30,000 ft.
 | F16C | 794 / 865 / 947 / 1071 (60,000) | 749 / 809 / 885 / 1001 | same | 795 at sea level, 1,147 to 1,176 at 40,000 ft | Left |
 | F104 | 646 / 815 / 985 / 1154 (58,000) | 616 / 758 / 915 / 1073 | same | 996 to 1,154 at altitude | Left |
 | A10 | 385 / 418 / 450 / - (22,812) | 347 / 373 / 402 / - | same | 381 at sea level | Left (loaded drag) |
-| B747 | 492 at all (50,000) | 491 at all | 380 / 429 / 491 / 491 | VMO 375 KCAS, MMO 0.92 | Fitted |
-| A310 | 456 / 468 / 479 / 491 (46,875) | 457 / 467 / 479 / 490 | 365 / 412 / 475 / 490 | VMO 360 KIAS, MMO 0.84 | Fitted |
+| B747 | 492 at all (50,000) | 491 at all | 364 / 412 / 472 / 472 | VMO 375 KCAS, MMO 0.92 | Fitted; heavy drag |
+| A310 | 456 / 468 / 479 / 491 (46,875) | 457 / 467 / 479 / 490 | 350 / 396 / 456 / 471 | VMO 360 KIAS, MMO 0.84 | Fitted; heavy drag |
 
 The E3 at 30,000 ft, its 1 G ceiling, cannot hold level flight in the probe
 before or after: no row above 1 G reaches 25,500 ft or more, so it has no pull
 margin there and sinks into overspeed once disturbed. It holds level to
-29,000 ft. Every other aircraft held its altitude and stayed at or under its
-fitted top speed (ratio at most 0.999) in level flight.
+29,000 ft. Every other aircraft held its altitude and stayed under its fitted
+top speed in level flight.
