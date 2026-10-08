@@ -827,7 +827,7 @@ mod tests {
         assert!(clean.vertical_speed > 10., "{}", clean.vertical_speed);
     }
 
-    /// Highest hover rates [pitch, roll, yaw], deg/s, in 2 s of full stick
+    /// Highest hover rates [pitch, roll, yaw], deg/s, in 3 s of full stick
     /// on each axis at `level`.
     fn hover_rates(id: AircraftId, level: StabilityLevel) -> [f64; 3] {
         std::array::from_fn(|axis| {
@@ -835,7 +835,7 @@ mod tests {
             let mut stick = [0.; 3];
             stick[axis] = 1.;
             let mut peak: f64 = 0.;
-            for _ in 0..240 {
+            for _ in 0..360 {
                 let [pitch, roll, yaw] = stick;
                 let throttle = s.throttle;
                 step(
@@ -1269,12 +1269,6 @@ mod tests {
 
     /// Bank after 3 s hands off, jetborne at 40 kt with 10 degrees of
     /// sideslip, at the Damper level or Off.
-    /// J11's Damper half needs a tighter rate loop than slice P6's puffer
-    /// damping alone gives (17.9 degrees of bank with it, against the
-    /// design's 10): a 20-percent-authority loop that saturates at 5
-    /// degrees per second, flown here on the stick on top of the Damper
-    /// level. See the P4 notes in the design; P6's `sas.rs` should take it.
-    const TIGHT: bool = true;
     fn roll_off(damped: bool, hazards: bool) -> f64 {
         let level = if damped {
             StabilityLevel::Damper
@@ -1296,24 +1290,14 @@ mod tests {
             let (_, moments) = intake(&jet, &air, &Basis::new(0., 0., 0.), 30_000., 1.5, false);
             return moments[0].abs() + moments[2].abs();
         }
-        for _ in 0..360 {
-            let [p, _, r] = s.lift_controls.body_rates;
-            let tight = |rate: f64| (-rate / 5_f64.to_radians()).clamp(-0.2, 0.2);
-            let (roll, yaw) = if damped && TIGHT {
-                (tight(p), tight(r))
-            } else {
-                (0., 0.)
-            };
-            step(
-                &mut s,
-                &PilotInput {
-                    roll,
-                    yaw,
-                    throttle: Some(throttle),
-                    ..Default::default()
-                },
-            );
-        }
+        run(
+            &mut s,
+            &PilotInput {
+                throttle: Some(throttle),
+                ..Default::default()
+            },
+            360,
+        );
         s.bank.to_degrees().abs()
     }
 
