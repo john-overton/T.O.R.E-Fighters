@@ -236,19 +236,33 @@ pub fn is_target_info(label: &str) -> bool {
         .trim_end_matches('?')
         .eq_ignore_ascii_case("show target info")
 }
-/// Append the authored rows to the imported menu tree. The retail rows and
-/// their order are unchanged.
+/// The authored Cheat row that removes the powered-lift aircraft's flight
+/// hazards (VTOL overhaul, design 4.12). Retail has no such row; opinionated,
+/// requested by John on 2026-10-08 (the label is the design's).
+pub const EASY_PHYSICS: &str = "Easy flight physics?";
+/// Append the authored rows to the imported menu tree: three to Pref and the
+/// Easy flight physics row after the imported Cheat rows. The retail rows
+/// and their order are unchanged.
 pub fn add_authored_rows(tree: &mut [MenuNode]) {
-    let Some(pref) = tree.iter_mut().find(|node| node.label == "Pref") else {
-        return;
-    };
-    for label in [WEAPON_DIAGNOSTICS, DEBUG_PANELS, STABILITY_LEVEL] {
-        if !pref.children.iter().any(|row| row.label == label) {
-            pref.children.push(MenuNode {
-                label: label.into(),
-                shortcut: String::new(),
-                children: vec![],
-            });
+    let authored = [
+        (
+            "Pref",
+            &[WEAPON_DIAGNOSTICS, DEBUG_PANELS, STABILITY_LEVEL][..],
+        ),
+        ("Cheat", &[EASY_PHYSICS][..]),
+    ];
+    for (menu, labels) in authored {
+        let Some(menu) = tree.iter_mut().find(|node| node.label == menu) else {
+            continue;
+        };
+        for label in labels {
+            if !menu.children.iter().any(|row| row.label == *label) {
+                menu.children.push(MenuNode {
+                    label: (*label).into(),
+                    shortcut: String::new(),
+                    children: vec![],
+                });
+            }
         }
     }
 }
@@ -399,6 +413,7 @@ fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Op
         "Easy targeting?" => &mut cheats.easy_targeting,
         "Air combat guns only?" => &mut cheats.guns_only,
         "No screen-shaking?" => &mut cheats.no_screen_shake,
+        EASY_PHYSICS => &mut cheats.easy_physics,
         _ => return None,
     })
 }
@@ -1632,6 +1647,59 @@ mod tests {
         }
     }
 
+    /// E3: the Easy flight physics row follows the imported Cheat rows,
+    /// toggles mid-flight, survives Restart and is the server's in a session.
+    #[test]
+    fn easy_physics_row_is_authored_after_the_cheat_rows_and_is_the_servers_in_a_session() {
+        let mut t = retail_tree();
+        let imported = labels(&t);
+        let imported_cheat = labels(&t.iter().find(|n| n.label == "Cheat").unwrap().children);
+        add_authored_rows(&mut t);
+        add_authored_rows(&mut t);
+        let cheat = t.iter().find(|n| n.label == "Cheat").unwrap();
+        let rows: Vec<_> = cheat.children.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(rows.last(), Some(&EASY_PHYSICS), "after the imported rows");
+        assert_eq!(rows.iter().filter(|r| **r == EASY_PHYSICS).count(), 1);
+        // Nothing imported moved or went from the Cheat menu; only the row
+        // was added at its end.
+        let mut before_the_row = labels(&cheat.children);
+        assert_eq!(before_the_row.pop().as_deref(), Some(EASY_PHYSICS));
+        assert_eq!(before_the_row, imported_cheat);
+        assert!(imported.iter().all(|label| authored_has(&t, label)));
+        // Off to start; a toggle takes effect at once, with a line.
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.cheat_state(EASY_PHYSICS), Some("Off"));
+        assert!(!ui.cheats.easy_physics);
+        assert_eq!(ui.activate(EASY_PHYSICS, ""), Command::Click);
+        assert!(ui.cheats.easy_physics);
+        assert_eq!(ui.cheat_state(EASY_PHYSICS), Some("On"));
+        assert_eq!(*shown(&ui).last().unwrap(), "Easy flight physics: on");
+        // It lasts for the session: a new flight keeps it.
+        ui.reset_for_flight();
+        assert!(ui.cheats.easy_physics);
+        assert_eq!(ui.activate(EASY_PHYSICS, ""), Command::Click);
+        assert!(!ui.cheats.easy_physics);
+        assert_eq!(*shown(&ui).last().unwrap(), "Easy flight physics: off");
+        // In a session it changes the simulation, so the server alone sets
+        // it: refused with the usual line, gone from the session's menu, and
+        // not carried in from single player.
+        assert_eq!(
+            session_refusal(EASY_PHYSICS),
+            Some("The server sets the cheats in a multiplayer flight")
+        );
+        assert!(!labels(&session_menu(&t)).contains(&EASY_PHYSICS.to_string()));
+        ui.cheats.easy_physics = true;
+        ui.enter_session();
+        assert!(!ui.cheats.easy_physics, "single player's choice stays out");
+        assert_eq!(ui.activate(EASY_PHYSICS, ""), Command::Click);
+        assert!(!ui.cheats.easy_physics, "a client cannot turn it on");
+        assert!(
+            ui.notices
+                .iter()
+                .any(|(line, _)| line == "The server sets the cheats in a multiplayer flight")
+        );
+    }
+
     #[test]
     fn source_whiteout_cheat_toggles_while_paused() {
         let mut ui = FlightUi {
@@ -1742,6 +1810,9 @@ mod tests {
             ),
             node("Pos", "", vec![node("40,000 feet", "", vec![])]),
         ]
+    }
+    fn authored_has(tree: &[MenuNode], label: &str) -> bool {
+        labels(tree).iter().any(|l| l == label)
     }
     fn labels(tree: &[MenuNode]) -> Vec<String> {
         tree.iter()

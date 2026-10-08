@@ -22,7 +22,9 @@
 //!   speed moves with the difference between engine and rotor power over its
 //!   energy constant.
 //! - **Rated power** is the power that hovers at the PT maximum thrust at
-//!   sea level (design 8.1): about 3,600 hp for the AH-64's PT.
+//!   sea level (design 8.1): about 3,600 hp for the AH-64's PT. Where the PT
+//!   thrust is implausible (the Mi-24's) the rotor table gives the published
+//!   power instead.
 //! - **Ground**: wheels hold yaw and pitch; a roll about the wheels that the
 //!   weight cannot hold banks the aircraft, and 15 degrees of bank with the
 //!   thrust leaning the same way is dynamic rollover (design 4.9).
@@ -64,7 +66,7 @@ pub const LOW_ROTOR: f64 = 0.8;
 pub const ROTOR_OVERSPEED: f64 = 1.1;
 /// With rotor stall switched off the rotor speed stays above this in
 /// flight (design 4.12).
-const EASY_ROTOR_FLOOR: f64 = 0.85;
+pub const EASY_ROTOR_FLOOR: f64 = 0.85;
 /// Rotor speed limits of the integration.
 const ROTOR_SPEED_LIMIT: f64 = 1.5;
 /// Dynamic rollover: bank on the wheels beyond this with the thrust leaning
@@ -198,8 +200,13 @@ impl SingleRotor {
         model.tail_reference_thrust = model.reference_torque / tail_rotor_arm_ft;
         let hover = main_hover + model.tail_power(model.tail_reference_thrust, rho0, 1., 0.);
         let main_rated = rotor.hover_power(p.max_thrust_lbf, rho0);
-        model.rated_power = main_rated
-            + model.tail_power(main_rated / rotor.omega / tail_rotor_arm_ft, rho0, 1., 0.);
+        model.rated_power = p.rated_power_hp.map_or_else(
+            || {
+                main_rated
+                    + model.tail_power(main_rated / rotor.omega / tail_rotor_arm_ft, rho0, 1., 0.)
+            },
+            |hp| hp * 550.,
+        );
         // With the engines cut and the collective held, the power the rotor
         // needs falls with the cube of its speed, so its speed falls from 1
         // to 0.8 in `energy_seconds` when J Omega0² = 4 x that x the hover
@@ -407,6 +414,30 @@ impl SingleRotor {
         drag_factor: f64,
         level: tore_input::StabilityLevel,
     ) -> Option<Trim> {
+        self.trim_with(
+            Hazards::ALL,
+            weight,
+            heading,
+            airspeed_fps,
+            density,
+            drag_factor,
+            level,
+        )
+    }
+
+    /// [`SingleRotor::trim`] under the given `hazards`: with the Easy flight
+    /// physics cheat's none, the trim needs no anti-torque pedal.
+    #[allow(clippy::too_many_arguments)] // The trim's inputs, plus the hazards in force.
+    pub fn trim_with(
+        &self,
+        hazards: Hazards,
+        weight: f64,
+        heading: f64,
+        airspeed_fps: f64,
+        density: f64,
+        drag_factor: f64,
+        level: tore_input::StabilityLevel,
+    ) -> Option<Trim> {
         let air_velocity = Basis::new(heading, 0., 0.)
             .forward
             .map(|f| f * airspeed_fps);
@@ -433,7 +464,7 @@ impl SingleRotor {
                 controls: [x[1], x[2], x[3]],
                 hub_height_agl_ft: None,
                 seconds: 0.,
-                hazards: Hazards::ALL,
+                hazards,
                 drag_factor,
                 lift_factor: 1.,
             };
@@ -553,10 +584,14 @@ fn solve(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
 }
 
 impl State {
-    /// The hazards in force: all of them. Slice P8 builds them from the Easy
-    /// flight physics cheat.
+    /// The rotor hazards in force: all of them, or none with the Easy flight
+    /// physics cheat. Every rotorcraft step builds its rotors' hazards here.
     pub(super) fn rotor_hazards(&self) -> Hazards {
-        Hazards::ALL
+        if self.cheats.easy_physics {
+            Hazards::NONE
+        } else {
+            Hazards::ALL
+        }
     }
 
     /// Fuselage drag growth from carried stores and regional damage.
@@ -586,8 +621,16 @@ impl State {
         let level = self
             .stability_in_effect()
             .unwrap_or(tore_input::StabilityLevel::Off);
-        let Some(trim) = heli.trim(weight, self.yaw, airspeed_fps, density, drag_factor, level)
-        else {
+        let hazards = self.rotor_hazards();
+        let Some(trim) = heli.trim_with(
+            hazards,
+            weight,
+            self.yaw,
+            airspeed_fps,
+            density,
+            drag_factor,
+            level,
+        ) else {
             return false;
         };
         self.pitch = trim.pitch;

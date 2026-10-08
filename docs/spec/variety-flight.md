@@ -225,7 +225,8 @@ Units: PT envelope speeds are true airspeed in ft/s at each altitude; the
 tables below give knots true (ft/s divided by 1.68781). The right edge of the
 1 G row is the top speed: the hybrid drag reaches full thrust there, the
 [envelope window](envelope.md) draws it and the [overspeed](overspeed.md) rule
-uses it as the structural limit. The drag reaches full thrust at that edge
+uses it as the structural limit (except the AH64 and MI24 on the hybrid adapter,
+which use their never-exceed speeds, below). The drag reaches full thrust at that edge
 times a level-speed fraction, so level flight at full power settles there
 divided by the square root of 1 plus loading times the source loaded-drag
 percent. The fraction is 1 for every aircraft except the transports and
@@ -297,6 +298,77 @@ Not changed and recorded for later: decoded ceilings that differ from
 published ones (helicopters 7,000 ft, A10 22,812 ft, F-4 42,000 ft, IL76
 51,000 ft, E3 30,000 ft, at which its envelope has no row above 1 G), and the
 V22's mass, fuel and thrust, which are also the AH-64's.
+
+### Helicopter power and structural speed (VTOL overhaul P2-fix, 2026-10-08)
+
+All agent decisions. They apply to the AH64 and MI24 on the hybrid adapter,
+which fly the rotor physics; the CH47 and V22 are left to their slices.
+
+**Overspeed at Vne.** The overspeed rule uses each helicopter's never-exceed
+speed, not the envelope's top speed above: AH64 197 kt (Wikipedia, AH-64
+specifications), MI24 190 kt (fitted: no reliable published figure). Before
+this, a dive was judged against 158 and 178 kt. Retreating blade stall starts
+at the same speed, so the stall shows before the airframe is at risk.
+Details in [overspeed](overspeed.md).
+
+**MI24 rotor power.** The PT thrust (35,691 lbf) is 1.67 times the gross
+weight, so deriving the rated power from it (4,798 hp) gave an aircraft that
+hovered out of ground effect to 17,700 ft and climbed at 5,558 ft/min, against
+a published hover ceiling out of ground effect of 4,915 ft. The Mi-24's rated
+power is now the published 2 x 2,225 shp (TV3-117) times 0.745, or 3,315 hp at
+the rotors and tail rotor; the PT mass, fuel and stores are kept. About 8
+percent of the 0.745 is transmission, tail drive and installation loss; the
+rest is what the published hover ceiling leaves, since that figure may be
+quoted at a lower power rating or a warmer day. The whole share is fitted to
+the 4,915 ft ceiling at the 24,250 lb normal takeoff weight. The forward
+flat-plate drag area drops from 52 to 34 ft² so the lower power still reaches
+the published level speed.
+
+| Mi-24 at sea level, standard day | Before | After | Published |
+| --- | --- | --- | --- |
+| Rated power at the rotors, hp | 4,798 | 3,315 | 2 x 2,225 shp |
+| Hover margin at the PT gross weight (21,385 lb) | 103 percent | 41 percent | |
+| Hover ceiling out of ground effect at gross | 17,700 ft | 9,700 ft | |
+| Same at 24,250 lb (normal takeoff weight) | 13,800 ft | 4,900 ft | 4,915 ft |
+| Same at 26,455 lb (maximum takeoff weight) | 11,100 ft | 1,500 ft | |
+| Best climb at 24,250 lb | 4,663 ft/min | 2,791 ft/min | 2,460 ft/min |
+| Best climb at gross | 5,558 ft/min | 3,406 ft/min | |
+| Level top speed at gross | 170 kt | 177 kt | 170 to 181 kt |
+| Vertical climb at full collective, gross | 3,538 ft/min | 2,252 ft/min, rotor 89 percent | |
+
+The hover ceiling is met. The climb is 13 percent above the published figure:
+the excess-power estimate of the best climb is generous, and lower power would
+take away the published hover. At the PT's own maximum takeoff weight of
+28,660 lb the Mi-24 can no longer hover at sea level; the real maximum is 26,455
+lb. Full collective in a hover at gross now droops the rotor to about 89
+percent, which an overloaded helicopter does.
+
+Sources (read 2026-10-08): the 2 x 2,225 shp, the 24,250 and 26,455 lb normal
+and maximum takeoff weights, the 4,915 ft out-of-ground-effect and 7,210 ft
+in-ground-effect hover ceilings, the 2,460 ft/min maximum climb and the 335
+km/h level speed are from [Aerospaceweb, Mi-24
+Hind](https://aerospaceweb.org/aircraft/helicopter-m/mi24) (the Mi-24D and V).
+[Wikipedia, Mil Mi-24](https://en.wikipedia.org/wiki/Mil_Mi-24) gives 2 x
+2,200 shp, 170 kt and a 3,000 ft/min climb; it gives no hover ceiling.
+[Armed Conflicts](https://www.armedconflicts.com/-t42100) gives 2 x 2,225 hp, a
+24,692 lb normal takeoff weight, a 2,461 ft/min climb and 335 km/h. None of
+the sources says at which weight the hover ceiling is quoted; the 24,250 lb
+normal weight is the assumption.
+
+**AH64 power, checked and left alone.** The AH-64's rated power (3,668 hp,
+from the PT thrust) is 97 percent of two -701C engines at 1,890 shp and 8
+percent above two -701 at 1,696 shp. At the PT gross weight of 20,298 lb the
+model hovers out of ground effect to 9,900 ft. At 17,650 lb, the AH-64A
+maximum takeoff weight, it would reach 15,000 ft, against published figures
+of 11,500 ft (AH-64A) and 9,810 ft (AH-64D) from [Aerospaceweb, AH-64
+Apache](https://aerospaceweb.org/aircraft/helicopter-m/ah64/), neither with a
+stated weight. The PT's empty weight (18,298 lb) is 61 percent above the
+real 11,385 lb, so the published power-to-weight cannot be applied without
+grounding the PT aircraft; the model's ceiling at the PT weights is in the
+published range. Climb: 3,602 ft/min best, against 3,240 ft/min maximum and
+2,500 ft/min vertical published. Level speed 151 kt against 158. Not
+adjusted. The 10,200 ft at 17,650 lb quoted for the -701C could not be found
+in a source.
 
 ## Unknown evidence
 

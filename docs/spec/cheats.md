@@ -37,6 +37,10 @@ imported `FMENUD.MNU` and contains, in order:
 | Ignore midair collisions? | on / off |
 | Easy targeting? | on / off |
 | Air combat guns only? | on / off |
+| Easy flight physics? | on / off |
+
+The last row, **Easy flight physics?**, is not in the retail menu: it is
+appended after the imported rows (opinionated, John, 2026-10-08).
 
 Every cheat takes effect immediately, mid-flight, and all start off. They last
 for the session and survive Restart, like the two that already work (No
@@ -118,6 +122,49 @@ continue; turning the cheat off restores the stores. The player's weapon
 selection skips every other station, and a missile selected when the cheat
 turns on switches to the gun, or to NAV without one. The Quick Mission Guns
 only setting, which removes the other stores at launch, is separate.
+
+**Easy flight physics.** Opinionated, John, 2026-10-08 (decision 1 of the
+[VTOL and helicopter overhaul](variety-flight.md)); the numbers are fitted and
+John expects to tune them. The six powered-lift aircraft (AV-8, Yak-141, V-22,
+AH-64, Mi-24 and CH-47) fly the same physics as ever, with the hazards that
+punish a careless pilot removed. Fixed-wing aircraft ignore it. It turns off:
+
+| Hazard | With the cheat on |
+| --- | --- |
+| Main rotor torque | Torque and the tail rotor's imbalance cancel; a collective change does not yaw the aircraft |
+| Vortex ring state | Momentum inflow only: no extra sink, no buffet, no loss of cyclic authority, so full collective arrests a vertical descent |
+| Retreating blade stall | No pitch-up, roll or thrust loss past the never-exceed speed; the vibration cue (shake and `blade_stall` warning) stays |
+| Rotor stall | Rotor speed cannot fall below 85 percent in flight, so an engine failure never makes the rotor unrecoverable (autorotation still needs the collective down to keep lift); on the ground it is not held |
+| Harrier and Yak-141 low-speed roll-off | The intake momentum drag's yawing moment and the jet-induced dihedral are removed |
+| Undamped puffers at stability level Off | A jet at Off gets the Damper's rate damping on its puffers (hydraulics permitting). Helicopters at Off stay at Off |
+| Dynamic rollover | Off; tipping on the ground follows the normal contact rules |
+
+It also gives the helicopters, and the V-22 in proportion to its helicopter
+mode, a weak **attitude retention** at stability levels Damper and Off
+(opinionated, John, 2026-10-08; fitted). Release the stick and pitch and roll
+slowly return to the trim attitude: the Attitude level's hold at 0.6 of its
+gain and limited to 10 percent of travel (the Damper's cap is 20), so a few
+taps of forward cyclic trim (Ctrl+Up) settle the aircraft in steady forward
+flight hands-off. With the cheat on the cyclic trim keys move the cyclic and
+the attitude it returns to together (10 percent of trim is 5 degrees of
+pitch), and Trim set captures the current attitude. It holds nothing else:
+no speed, height, position or heading, and it does not hover the aircraft.
+The Damper itself stays rate damping only, and with the cheat off nothing
+changes. The AH-64 with 10 percent of forward trim settles at about 90 kt.
+
+It keeps: weight, power and thrust limits, inertia, translational lift,
+ground effect, the rule that a loaded jet cannot hover, engine failure, the
+V-22's conversion corridor protection and rotor strike. The aircraft still
+needs to be flown. A trim made while it is on (a start, or the trim routine)
+is trimmed without the hazards. When a human gives an aircraft back to the
+AI, the cheat goes with the human (an AI aircraft carries no cheats).
+
+In a multiplayer session it changes the simulation, so only the server sets it,
+like the other mission cheats: the Cheat row is not in a session's menu, the
+King's Realism page edits it with the other mission cheats, a dedicated
+server's `cheats` list takes `easy-physics`, and every client's prediction
+runs the same rules because the cheat travels in the exact flight state. A
+recording notes it switching on and off like any cheat.
 
 **Easy aiming.** Aircraft hitboxes are **50% larger**, missiles get extra
 maneuverability, and missile seekers have a **25% wider** tracking cone.

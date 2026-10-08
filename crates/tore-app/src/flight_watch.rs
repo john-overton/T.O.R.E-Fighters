@@ -143,10 +143,12 @@ impl FlightWatch {
         self.last_energy_ft = energy;
         // The same figure the overspeed rule uses: none above the ceiling.
         let top = state.overspeed_ratio().map_or(0., |_| {
-            state
-                .trace()
-                .adapter
-                .map_or(0., |adapter| adapter.envelope.top_speed_fps)
+            state.structural_speed_fps().unwrap_or_else(|| {
+                state
+                    .trace()
+                    .adapter
+                    .map_or(0., |adapter| adapter.envelope.top_speed_fps)
+            })
         });
         if top > 0. && !state.crashed && state.position[1] > 60. {
             self.max_over_top_speed = self.max_over_top_speed.max(state.speed / top);

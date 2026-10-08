@@ -46,9 +46,10 @@
 //! once a tick through [`State::augment`]; the wing's surfaces fly the
 //! pilot's own command, since its law already commands G and roll rate.
 //! At Damper, the default, the puffers' rate limit holds full stick at the
-//! PT `puffRot` maximum rate. The hazards a player can
-//! remove with the Easy flight physics cheat are [`Hazards`], read through
-//! [`State::jet_hazards`], the hook slice P8 fills.
+//! PT `puffRot` maximum rate. The hazards the Easy flight physics cheat
+//! removes (design 4.12) are [`Hazards`], read through
+//! [`State::jet_hazards`]; with it on, a pilot at Off gets the Damper's rate
+//! damping on the puffers ([`State::puffer_level`]).
 //!
 //! Every constant here is `fitted` (agent decisions, 2026-10-08, slice P4)
 //! unless its line says otherwise; the per-aircraft values are in
@@ -184,10 +185,34 @@ impl State {
         self.lift_controls.vector_pitch_actual.clamp(0., 1.) * range
     }
 
-    /// The vectoring jets' hazards now: all on, until slice P8 turns them
-    /// off with the Easy flight physics cheat.
+    /// The vectoring jets' hazards now: all on, or all off with the Easy
+    /// flight physics cheat. The jet step reads them here and nowhere else.
     pub fn jet_hazards(&self) -> Hazards {
-        Hazards::default()
+        if self.cheats.easy_physics {
+            Hazards {
+                roll_off: false,
+                undamped_puffers: false,
+                dynamic_rollover: false,
+            }
+        } else {
+            Hazards::default()
+        }
+    }
+
+    /// The stability law's level for the jet's puffers: the pilot's, except
+    /// that with `undamped_puffers` off a pilot at Off (with hydraulics) gets
+    /// the Damper's rate damping.
+    pub(super) fn puffer_level(&self, hazards: Hazards) -> tore_input::StabilityLevel {
+        use tore_input::StabilityLevel;
+        let level = self.stability_in_effect().unwrap_or(StabilityLevel::Off);
+        if level == StabilityLevel::Off
+            && !hazards.undamped_puffers
+            && self.systems.fluids.hydraulic > 0.
+        {
+            StabilityLevel::Damper
+        } else {
+            level
+        }
     }
 
     /// One tick of a vectoring jet on the hybrid adapter. `stick` is the
@@ -304,9 +329,15 @@ impl State {
         let puffer_acceleration =
             axes.map(|axis| f64::from(axis.acceleration).to_radians() * authority);
         let rates = self.lift_controls.body_rates;
-        let augmented = self.augment(
+        let augmented = super::sas::augment(
             &lift,
+            self.puffer_level(hazards),
+            &mut self.lift_controls.aids,
             stick,
+            super::sas::Body {
+                attitude: [self.pitch, self.bank, self.yaw],
+                rates,
+            },
             super::sas::Sensed {
                 airspeed_fps: air.speed,
                 sideslip_rad: air.beta,
@@ -584,7 +615,7 @@ pub(crate) fn trim_hover(s: &mut State) {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub(super) mod tests {
     //! The jet acceptance tests of the VTOL overhaul (design section 10,
     //! J1 to J13, slice P4's parts) on synthetic aircraft carrying the AV-8
     //! and Yak-141 PT numbers of design section 8 as plain constants. The
@@ -640,7 +671,7 @@ pub(crate) mod tests {
     }
 
     /// An aircraft with `id`'s identity and its PT figures (design 8.2).
-    pub(crate) fn fixture(id: AircraftId) -> Aircraft {
+    pub(in crate::flight::powered) fn fixture(id: AircraftId) -> Aircraft {
         let mut a = crate::models::variety::tests::synthetic(id);
         let (empty, fuel, thrust, afterburner, maximum, elevator, drag, pull, stall, top) = match id
         {
@@ -677,7 +708,7 @@ pub(crate) mod tests {
         a
     }
 
-    fn state(a: &Aircraft, position: [f64; 3]) -> State {
+    pub(in crate::flight::powered) fn state(a: &Aircraft, position: [f64; 3]) -> State {
         let mut s = State::new(a, position).unwrap();
         s.enable_research(1).unwrap();
         s.cheats.unlimited_fuel = true;
@@ -705,7 +736,7 @@ pub(crate) mod tests {
         s
     }
 
-    fn hover(id: AircraftId, height: f64) -> State {
+    pub(in crate::flight::powered) fn hover(id: AircraftId, height: f64) -> State {
         let mut s = state(&fixture(id), [0., height, 0.]);
         s.speed = 0.;
         s.velocity = [0.; 3];
@@ -716,7 +747,7 @@ pub(crate) mod tests {
     }
 
     /// Full power with the nose held level for `ticks`.
-    fn hold_level(s: &mut State, throttle: f64, ticks: usize) {
+    pub(in crate::flight::powered) fn hold_level(s: &mut State, throttle: f64, ticks: usize) {
         for _ in 0..ticks {
             let [pitch, roll] = attitude(s, 0.);
             step(
@@ -731,11 +762,11 @@ pub(crate) mod tests {
         }
     }
 
-    fn step(s: &mut State, input: &PilotInput) {
+    pub(in crate::flight::powered) fn step(s: &mut State, input: &PilotInput) {
         s.step_surface(input, |_, _| Surface::runway(0.));
     }
 
-    fn run(s: &mut State, input: &PilotInput, ticks: usize) {
+    pub(in crate::flight::powered) fn run(s: &mut State, input: &PilotInput, ticks: usize) {
         for _ in 0..ticks {
             step(s, input);
         }
@@ -746,19 +777,19 @@ pub(crate) mod tests {
     }
 
     /// A pilot's stick holding `pitch` and wings level.
-    fn attitude(s: &State, pitch: f64) -> [f64; 2] {
+    pub(in crate::flight::powered) fn attitude(s: &State, pitch: f64) -> [f64; 2] {
         [
             (3. * (pitch - s.pitch) - 0.6 * s.pitch_rate).clamp(-1., 1.),
             (-3. * s.bank - 0.5 * s.roll_rate).clamp(-1., 1.),
         ]
     }
 
-    fn lift(command: LiftCommand) -> PilotCommand {
+    pub(in crate::flight::powered) fn lift(command: LiftCommand) -> PilotCommand {
         PilotCommand::Lift(command)
     }
 
     /// `s` at stability level `level` (slice P6; Damper is the default).
-    fn at(mut s: State, level: StabilityLevel) -> State {
+    pub(in crate::flight::powered) fn at(mut s: State, level: StabilityLevel) -> State {
         s.command(lift(LiftCommand::SetStability(level)));
         s
     }
@@ -815,9 +846,22 @@ pub(crate) mod tests {
 
     /// Highest hover rates [pitch, roll, yaw], deg/s, in 3 s of full stick
     /// on each axis at `level`.
-    fn hover_rates(id: AircraftId, level: StabilityLevel) -> [f64; 3] {
+    pub(in crate::flight::powered) fn hover_rates(
+        id: AircraftId,
+        level: StabilityLevel,
+    ) -> [f64; 3] {
+        hover_rates_easy(id, level, false)
+    }
+
+    /// [`hover_rates`] with the Easy flight physics cheat on or off.
+    pub(in crate::flight::powered) fn hover_rates_easy(
+        id: AircraftId,
+        level: StabilityLevel,
+        easy: bool,
+    ) -> [f64; 3] {
         std::array::from_fn(|axis| {
             let mut s = at(hover(id, 1_000.), level);
+            s.cheats.easy_physics = easy;
             let mut stick = [0.; 3];
             stick[axis] = 1.;
             let mut peak: f64 = 0.;

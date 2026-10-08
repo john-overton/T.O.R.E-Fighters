@@ -908,11 +908,15 @@ impl State {
             .find(|e| e.g == 1)?;
         envelope.speeds(self.position[1]).map(|speeds| speeds.0)
     }
-    /// Airspeed as a share of the aircraft's own top speed at this altitude
-    /// (the right edge of its 1 G envelope, the figure the envelope window and
-    /// the flight probe use). `None` above the ceiling, where the envelope has
-    /// no speed range, and for the restricted native path.
-    pub fn overspeed_ratio(&self) -> Option<f64> {
+    /// The speed the overspeed rule limits this aircraft to, ft/s: the top
+    /// speed at this altitude (the right edge of its 1 G envelope, the figure
+    /// the envelope window and the flight probe use), or, for a rotorcraft on
+    /// the hybrid adapter whose rotor table sets a structural speed, that
+    /// speed (its never-exceed speed; the envelope row of a helicopter is a
+    /// performance figure, not a structural one). `None` above the ceiling,
+    /// where the envelope has no speed range, and for the restricted native
+    /// path.
+    pub fn overspeed_limit_fps(&self) -> Option<f64> {
         if self.native.is_some() {
             return None;
         }
@@ -924,6 +928,20 @@ impl State {
             .iter()
             .find(|e| e.g == 1)?;
         let (_, top) = env.speeds(self.position[1])?;
+        Some(self.structural_speed_fps().unwrap_or(top))
+    }
+    /// The structural speed of a rotorcraft on the hybrid adapter, ft/s, from
+    /// its rotor table; `None` for every other aircraft, which keep the
+    /// envelope's top speed.
+    pub fn structural_speed_fps(&self) -> Option<f64> {
+        self.research.as_ref()?;
+        let kt = self.model.powered_lift()?.rotor?.structural_kt?;
+        Some(kt * crate::runway_wind::FEET_PER_SECOND_PER_KNOT)
+    }
+    /// Airspeed as a share of the limit [`State::overspeed_limit_fps`]. `None`
+    /// where that has none.
+    pub fn overspeed_ratio(&self) -> Option<f64> {
+        let top = self.overspeed_limit_fps()?;
         (top > 0.).then(|| self.speed / top)
     }
     /// Time-based structural failure, docs/spec/overspeed.md. All state and

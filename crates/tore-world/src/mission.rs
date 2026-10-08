@@ -1101,7 +1101,7 @@ fn objective_words(objective: GroupObjective) -> String {
 }
 
 /// The cheat switches, by the names the text form uses.
-const CHEAT_FLAGS: [&str; 14] = [
+const CHEAT_FLAGS: [&str; 15] = [
     "unlimited-ammo",
     "unlimited-fuel",
     "no-spins",
@@ -1116,6 +1116,7 @@ const CHEAT_FLAGS: [&str; 14] = [
     "ignore-midair-collisions",
     "easy-targeting",
     "guns-only",
+    "easy-physics",
 ];
 
 fn cheat_flag<'c>(cheats: &'c mut Cheats, name: &str) -> Option<&'c mut bool> {
@@ -1134,6 +1135,7 @@ fn cheat_flag<'c>(cheats: &'c mut Cheats, name: &str) -> Option<&'c mut bool> {
         "ignore-midair-collisions" => &mut cheats.ignore_midair_collisions,
         "easy-targeting" => &mut cheats.easy_targeting,
         "guns-only" => &mut cheats.guns_only,
+        "easy-physics" => &mut cheats.easy_physics,
         _ => return None,
     })
 }
@@ -1908,6 +1910,34 @@ mod tests {
         assert!(text.starts_with("tore-mission 1\n"));
     }
 
+    #[test]
+    fn easy_physics_is_a_mission_cheat_in_the_text_form() {
+        let mut spec = MissionSpec::from_text(&guide_example()).unwrap();
+        assert!(!spec.cheats.easy_physics);
+        spec.cheats.easy_physics = true;
+        spec.cheats.no_spins = true;
+        let text = spec.to_text();
+        assert!(
+            text.lines()
+                .any(|line| line == "cheats no-spins easy-physics"),
+            "{text}"
+        );
+        let back = MissionSpec::from_text(&text).unwrap();
+        assert!(back.cheats.easy_physics && back.cheats.no_spins);
+        assert_eq!(back, spec);
+        // Alone, and listed twice (refused like any cheat).
+        let text = text.replace("cheats no-spins easy-physics", "cheats easy-physics");
+        let alone = MissionSpec::from_text(&text).unwrap();
+        assert!(alone.cheats.easy_physics && !alone.cheats.no_spins);
+        let twice = text.replace("cheats easy-physics", "cheats easy-physics easy-physics");
+        assert!(
+            MissionSpec::from_text(&twice)
+                .unwrap_err()
+                .to_string()
+                .contains("the cheat `easy-physics` is listed twice")
+        );
+    }
+
     fn busy() -> MissionSpec {
         let mut spec = MissionSpec::new("KURILE", AircraftId::Rafale);
         spec.condition = Condition::Night;
@@ -1981,6 +2011,7 @@ mod tests {
             ignore_midair_collisions: true,
             easy_targeting: true,
             guns_only: true,
+            easy_physics: true,
             enemy_ai: Some(Experience::Experienced),
         };
         spec.researched_flight = false;

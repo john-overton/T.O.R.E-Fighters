@@ -286,6 +286,10 @@ fn the_shared_leaf_types_round_trip() {
         unlimited_fuel: true,
         ..Default::default()
     });
+    same(&crate::cheats::Cheats {
+        easy_physics: true,
+        ..Default::default()
+    });
     // A pilot's controls with every command and switch (slice H9).
     use tore_input::{PilotCommand, Switch};
     let switches = [
