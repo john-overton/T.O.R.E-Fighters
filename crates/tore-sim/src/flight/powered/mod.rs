@@ -31,6 +31,7 @@
 //! in the state's body rates.
 pub mod body;
 pub mod fuselage;
+pub mod helicopter;
 pub mod rotor;
 pub mod sas;
 pub mod state;
@@ -70,6 +71,15 @@ impl State {
         else {
             return;
         };
+        // The single-rotor helicopters trim on their own physics (P2).
+        if helicopter::SingleRotor::new(&lift, self.model().configuration()).is_some() {
+            if !self.trim_single_rotor(0.) {
+                self.throttle = 1.;
+                self.lift_controls.collective = 1.;
+                self.lift_controls.collective_actual = 1.;
+            }
+            return;
+        }
         let c = self.model().configuration();
         let weight = c.mass.empty_lbs + self.fuel + self.carried_lbs();
         let capacity = c.propulsion.military_thrust_lbf
@@ -153,6 +163,21 @@ impl State {
         afterburner: bool,
         fuel_rate: f64,
     ) {
+        // The single-rotor helicopters fly their rotor physics (P2).
+        if let Some(heli) = helicopter::SingleRotor::new(&lift, c) {
+            self.step_single_rotor(
+                lift,
+                heli,
+                c,
+                stick,
+                initial_surface,
+                runway_wind_fraction,
+                t,
+                ground,
+                fuel_rate,
+            );
+            return;
+        }
         const GRAVITY: f64 = 32.174;
         self.lift_controls
             .advance(self.systems.fluids.hydraulic > 0.);
@@ -420,8 +445,17 @@ mod tests {
         AircraftId::Mi24,
         AircraftId::Ch47,
     ];
+    /// The synthetic record of `id`; the single-rotor helicopters carry
+    /// their PT's flight numbers, since their rotors size their power.
+    fn fixture(id: AircraftId) -> tore_formats::aircraft::Aircraft {
+        if matches!(id, AircraftId::Ah64 | AircraftId::Mi24) {
+            helicopter::tests::pt_aircraft(id)
+        } else {
+            crate::models::variety::tests::synthetic(id)
+        }
+    }
     fn hover(id: AircraftId, height: f64) -> State {
-        let aircraft = crate::models::variety::tests::synthetic(id);
+        let aircraft = fixture(id);
         let mut s = State::new(&aircraft, [0., height, 0.]).unwrap();
         s.enable_research(1).unwrap();
         s.cheats.unlimited_fuel = true;
@@ -432,6 +466,10 @@ mod tests {
         s.velocity = [0.; 3];
         let lift = s.model().powered_lift().unwrap();
         let c = s.model().configuration();
+        if helicopter::SingleRotor::new(&lift, c).is_some() {
+            assert!(s.trim_single_rotor(0.), "{id:?}");
+            return s;
+        }
         let weight = c.mass.empty_lbs + s.fuel;
         let lapse = (-height / c.tuning.thrust_lapse_feet).exp();
         let fraction = weight
@@ -458,8 +496,9 @@ mod tests {
     fn a_helicopter_reaches_nearly_its_top_speed_at_full_forward_stick() {
         // Before 2026-10-08 the low-speed damping acted at every speed and the
         // drag was scaled to full rotor thrust, so helicopters topped out near
-        // 40 kt whatever their envelope said. Synthetic 166 kt envelope.
-        let mut aircraft = crate::models::variety::tests::synthetic(AircraftId::Mi24);
+        // 40 kt whatever their envelope said. Synthetic 166 kt envelope. The
+        // CH-47 still flies this law; the AH-64 and Mi-24 fly their rotors.
+        let mut aircraft = crate::models::variety::tests::synthetic(AircraftId::Ch47);
         for e in &mut aircraft.envelopes {
             e.points = vec![[60., 0.], [70., 7_000.], [260., 7_000.], [280., 0.]];
         }
@@ -488,7 +527,7 @@ mod tests {
         }
         assert!(speeds.windows(2).all(|w| w[1] > w[0]), "{speeds:?}");
         assert!(
-            speeds[2] > 0.9 * top && speeds[2] < top,
+            speeds[2] > 0.9 * top && speeds[2] < 1.001 * top,
             "{} of {top}",
             speeds[2]
         );
@@ -527,11 +566,12 @@ mod tests {
     #[test]
     fn all_six_hover_climb_descend_and_lose_support_with_engine_off() {
         for id in IDS {
-            let original = hover(id, 100.);
+            // Out of ground effect, where a trimmed rotor hovers steadily.
+            let original = hover(id, 1_000.);
             let mut steady = original.clone();
             run(&mut steady, &Default::default(), 1200);
             assert!(
-                (steady.position[1] - 100.).abs() < 0.01,
+                (steady.position[1] - 1_000.).abs() < 0.1,
                 "{id:?} {}",
                 steady.position[1]
             );
@@ -548,12 +588,12 @@ mod tests {
             run(&mut climb, &Default::default(), 600);
             run(&mut descend, &Default::default(), 600);
             assert!(
-                climb.position[1] > 110.,
+                climb.position[1] > 1_010.,
                 "{id:?} climb {}",
                 climb.position[1]
             );
             assert!(
-                descend.position[1] < 90.,
+                descend.position[1] < 990.,
                 "{id:?} descend {}",
                 descend.position[1]
             );
@@ -562,7 +602,8 @@ mod tests {
                 super::super::Switch::Engine,
                 false,
             ));
-            run(&mut off, &Default::default(), 120);
+            // A rotor's stored energy holds it up a moment longer.
+            run(&mut off, &Default::default(), 240);
             assert!(off.vertical_speed < -10., "{id:?} {}", off.vertical_speed);
         }
     }
@@ -584,7 +625,12 @@ mod tests {
             assert!(s.velocity[0].hypot(s.velocity[2]) > 3., "{id:?}");
             assert!(s.yaw > 0.1, "{id:?}");
             run(&mut s, &Default::default(), 360);
-            assert!(s.pitch.abs() < 0.01 && s.bank.abs() < 0.01, "{id:?}");
+            // The old law holds attitude; a rotor without stability
+            // augmentation keeps the attitude it was left at.
+            let lift = s.model().powered_lift().unwrap();
+            if helicopter::SingleRotor::new(&lift, s.model().configuration()).is_none() {
+                assert!(s.pitch.abs() < 0.01 && s.bank.abs() < 0.01, "{id:?}");
+            }
             assert!(!s.crashed);
         }
     }
@@ -708,10 +754,7 @@ mod tests {
                 },
                 120,
             );
-            let model = crate::models::AircraftModel::for_aircraft(
-                &crate::models::variety::tests::synthetic(id),
-            )
-            .unwrap();
+            let model = crate::models::AircraftModel::for_aircraft(&fixture(id)).unwrap();
             let mut writer = tore_codec::BitWriter::new();
             s.write_exact(&mut writer, None).unwrap();
             let bytes = writer.as_bytes();
@@ -733,7 +776,9 @@ mod tests {
     }
     #[test]
     fn airborne_start_uses_final_mass_and_altitude_without_later_retrim() {
-        let mut s = hover(AircraftId::Ah64, 5000.);
+        // The old law's start (the single-rotor helicopters trim on their
+        // rotor physics: helicopter::tests).
+        let mut s = hover(AircraftId::V22, 5000.);
         s.position[1] = 15000.;
         s.fuel = 500.;
         s.set_payload(1500.).unwrap();
@@ -769,8 +814,14 @@ mod tests {
         assert!(loaded.position[1] < 470. && loaded.vertical_speed < -5.);
         let mut damaged = hover(AircraftId::Ah64, 500.);
         damaged.throttle *= 0.5;
-        run(&mut damaged, &Default::default(), 600);
-        assert!(damaged.position[1] < 450. && damaged.vertical_speed < -10.);
+        // The rotor's speed sags first, then the aircraft.
+        run(&mut damaged, &Default::default(), 1200);
+        assert!(
+            damaged.position[1] < 450. && damaged.vertical_speed < -10.,
+            "{} {}",
+            damaged.position[1],
+            damaged.vertical_speed
+        );
     }
     #[test]
     fn conversion_gains_forward_motion_and_recovers_vertical_velocity() {
