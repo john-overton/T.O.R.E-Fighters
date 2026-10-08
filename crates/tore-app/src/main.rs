@@ -4993,7 +4993,7 @@ fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
 }
 
 /// The `--flight-cheat` names, for headless probes and live-fire captures.
-const PROBE_CHEATS: [&str; 8] = [
+const PROBE_CHEATS: [&str; 9] = [
     "extra-g",
     "no-g-effects",
     "no-spins",
@@ -5002,6 +5002,7 @@ const PROBE_CHEATS: [&str; 8] = [
     "unlimited-ammo",
     "invulnerable",
     "realistic-damage",
+    "easy-physics",
 ];
 
 fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
@@ -5013,6 +5014,7 @@ fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
         "no-crashes" => cheats.no_crashes = true,
         "unlimited-fuel" => cheats.unlimited_fuel = true,
         "unlimited-ammo" => cheats.unlimited_ammo = true,
+        "easy-physics" => cheats.easy_physics = true,
         "invulnerable" => cheats.damage = Damage::Invulnerable,
         _ => cheats.damage = Damage::Realistic,
     }
@@ -8835,9 +8837,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 flight_fuel = Some(pounds);
             }
             "--flight-cheat" => {
-                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage")?;
+                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, easy-physics, invulnerable or realistic-damage")?;
                 if !PROBE_CHEATS.contains(&name.as_str()) {
-                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage".into());
+                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, easy-physics, invulnerable or realistic-damage".into());
                 }
                 flight_cheats.push(name);
             }

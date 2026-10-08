@@ -1161,7 +1161,8 @@ fn each_hazard_switches_off_at_the_rotor() {
     let stalled = h.loads(&fast).main;
     fast.hazards.blade_stall = false;
     let clean = h.loads(&fast).main;
-    assert!(stalled.blade_stall > 0.5 && clean.blade_stall == 0.);
+    // The vibration cue stays; the pitch-up and the thrust loss go.
+    assert!(stalled.blade_stall > 0.5 && clean.blade_stall == stalled.blade_stall);
     assert!(stalled.tilt_target[0] < clean.tilt_target[0]);
     assert!(stalled.thrust_lbf < clean.thrust_lbf);
     // A rotor at 65 percent.

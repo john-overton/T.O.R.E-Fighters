@@ -226,9 +226,9 @@ fn every_setting_of_the_registry_is_on_a_page() {
         "each registry setting is one row, the password on the Game page"
     );
     // The name is the Game page's first row; Realism has Damage, Enemy AI
-    // and the thirteen switches.
+    // and the fourteen switches.
     assert_eq!(page_rows(Page::Game)[0], Kind::Name);
-    assert_eq!(page_rows(Page::Realism).len(), 15);
+    assert_eq!(page_rows(Page::Realism).len(), 16);
 }
 
 #[test]
@@ -507,6 +507,49 @@ fn a_cheat_edit_becomes_a_mission_change_request() {
         panic!("a cheats request");
     };
     assert!(cheats.no_crashes && cheats.no_spins);
+}
+
+/// Easy flight physics changes the simulation, so in a session it is the
+/// King's mission setting like the other mission cheats: the King's click
+/// turns it, a joiner's row is greyed, and it is fixed once the mission flies.
+#[test]
+fn easy_flight_physics_is_the_kings_mission_cheat() {
+    let c = ctx(&king());
+    assert_eq!(Flag::EasyPhysics.label(), "Easy flight physics");
+    assert_eq!(row_value(Kind::Cheat(Flag::EasyPhysics), &c), "Off");
+    let Some(Edit::Cheats(on)) = sp::click(Kind::Cheat(Flag::EasyPhysics), &c, true) else {
+        panic!("a cheat edit");
+    };
+    assert!(
+        on.easy_physics && on.unlimited_fuel && on.no_spins,
+        "the rest are kept"
+    );
+    let with = Context::of(&king(), Some(on));
+    assert_eq!(row_value(Kind::Cheat(Flag::EasyPhysics), &with), "On");
+    let Some(Edit::Cheats(off)) = sp::click(Kind::Cheat(Flag::EasyPhysics), &with, true) else {
+        panic!("a cheat edit");
+    };
+    assert!(!off.easy_physics);
+    // A joiner cannot turn it, and no click of theirs makes an edit.
+    let joiner = Context::of(&sample(2), Some(on));
+    assert_eq!(
+        row_state(Kind::Cheat(Flag::EasyPhysics), &joiner),
+        Err("Only the King may change the settings.".to_owned())
+    );
+    assert_eq!(
+        sp::click(Kind::Cheat(Flag::EasyPhysics), &joiner, true),
+        None
+    );
+    // Fixed once the mission flies.
+    let mut state = king();
+    state.phase = LobbyPhase::Flying;
+    assert_eq!(
+        row_state(
+            Kind::Cheat(Flag::EasyPhysics),
+            &Context::of(&state, Some(on))
+        ),
+        Err("Change it in the lobby, between missions.".to_owned())
+    );
 }
 
 // ---- the name and the password ----
