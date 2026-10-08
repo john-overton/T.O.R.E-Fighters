@@ -1007,8 +1007,9 @@ fn heat(pose: &tore_world::snapshot::AircraftPose) -> f64 {
     } else if pose.engine.afterburner {
         1.
     } else {
-        pose.devices
-            .map_or(0., |devices| devices[DEVICES - 1].clamp(0., 1.))
+        pose.devices.map_or(0., |devices| {
+            devices[replay::device::THROTTLE].clamp(0., 1.)
+        })
     }
 }
 
@@ -1061,7 +1062,7 @@ fn aircraft_state(
     pose.id = id;
     let [x, y, z] = pose.velocity;
     let speed = (x * x + y * y + z * z).sqrt();
-    let device = pose.devices.map_or(0., |d| d[DEVICES - 2]);
+    let device = pose.devices.map_or(0., |d| d[replay::device::SPEED]);
     pose_state(
         &pose,
         &Flight {

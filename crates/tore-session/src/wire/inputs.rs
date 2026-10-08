@@ -1043,6 +1043,69 @@ pub(crate) fn read_order(r: &mut BitReader<'_>) -> WireResult<PlayerOrder> {
 mod tests {
     use super::*;
 
+    /// Every top-level command code is its own and fits the 5-bit field, and
+    /// combat's value-less codes end where its valued ones begin; two
+    /// branches once both took 22 and 23, which a decoder reads as the first.
+    #[test]
+    fn command_codes_are_unique_and_fit_their_fields() {
+        let codes = [
+            CYCLE_WEAPON,
+            NAV_MODE,
+            SELECT_AIRPORT,
+            REQUEST_LANDING,
+            REPEAT_REPLY,
+            CANCEL_APPROACH,
+            COMBAT,
+            MANUAL,
+            RANGE_RESET,
+            RELEASE_CHAFF,
+            RELEASE_FLARE,
+            RELEASE_TRIGGER,
+            RADIO_SILENCE,
+            WING_RECIPIENT,
+            WING_ORDER,
+            WING_FORMATION_CYCLE,
+            TRIGGER_KEY,
+            EJECT,
+            TOGGLE,
+            SET,
+            THROTTLE,
+            ADJUST_THROTTLE,
+            WING_REPLY,
+            BATTLE_NET,
+            SET_FLIGHT_AXIS,
+            ADJUST_FLIGHT_AXIS,
+            NEUTRAL_VECTOR,
+        ];
+        let unique: std::collections::BTreeSet<u64> = codes.iter().copied().collect();
+        assert_eq!(unique.len(), codes.len(), "a command code is used twice");
+        assert!(codes.iter().all(|c| *c < 1 << COMMAND_BITS));
+        let live = [
+            TARGET_HEAT,
+            TARGET_DISTANCE,
+            DESIGNATE_TARGET,
+            NEXT_GUN_GROUP,
+            TOGGLE_GUN_GROUP,
+        ];
+        assert_eq!(TARGET_HEAT, LIVE.len() as u64);
+        let unique: std::collections::BTreeSet<u64> = live.iter().copied().collect();
+        assert_eq!(unique.len(), live.len());
+        assert!(live.iter().all(|c| *c < 32));
+        // And every sample command reads back as itself.
+        for command in super::super::samples::commands() {
+            let mut w = BitWriter::new();
+            write_command(&mut w, &command);
+            let bytes = w.finish();
+            let mut r = BitReader::new(&bytes);
+            let back = read_command(&mut r).unwrap();
+            let expected = match command {
+                Command::Pilot(pilot) => Command::Pilot(quantize_command(pilot)),
+                other => other,
+            };
+            assert_eq!(format!("{back:?}"), format!("{expected:?}"));
+        }
+    }
+
     #[test]
     fn powered_lift_positions_and_releases_survive_delta_frames() {
         let neutral = InputFrame::default();

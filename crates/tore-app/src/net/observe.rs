@@ -264,7 +264,7 @@ impl Feeder {
         for pose in picture.targets.iter().filter(|pose| is_aircraft(pose)) {
             let ejected = picture.pilots.iter().any(|p| p.owner == pose.id);
             let speed = pose.velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
-            let device = pose.devices.map_or(0., |d| d[snapshot::DEVICES - 2]);
+            let device = pose.devices.map_or(0., |d| d[replay::device::SPEED]);
             let lost = pose.damage.hp <= 0 || pose.crashed;
             frame.aircraft.push(convert::aircraft_state(
                 pose,
