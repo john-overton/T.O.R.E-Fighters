@@ -133,20 +133,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ceiling(gross),
             ceiling(maximum)
         );
-        let mut top = 0.;
-        let mut minimum = (f64::MAX, 0.);
-        for kt in 0..260 {
-            let kt = f64::from(kt);
-            match level(gross, 0., kt) {
-                Some(t) if t.engine_power <= available => {
-                    top = kt;
-                    if t.engine_power < minimum.0 {
-                        minimum = (t.engine_power, kt);
+        let profile = |weight: f64| {
+            let mut top = 0.;
+            let mut minimum = (f64::MAX, 0.);
+            for kt in 0..260 {
+                let kt = f64::from(kt);
+                match level(weight, 0., kt) {
+                    Some(t) if t.engine_power <= available => {
+                        top = kt;
+                        if t.engine_power < minimum.0 {
+                            minimum = (t.engine_power, kt);
+                        }
                     }
+                    _ => break,
                 }
-                _ => break,
             }
-        }
+            (top, minimum)
+        };
+        let (top, minimum) = profile(gross);
         println!(
             "level top speed at sea level, gross: {top:.0} kt; least power {:.0} hp at {:.0} kt",
             minimum.0 / HP,
@@ -156,6 +160,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "best climb (excess power over weight): {:.0} ft/min",
             (available - minimum.0) / gross * 60.
         );
+        // Published reference weights: the AH-64A maximum takeoff weight
+        // (17,650 lb, Aerospaceweb), the Mi-24D and V normal and maximum
+        // takeoff weights (24,250 and 26,455 lb, Aerospaceweb).
+        let published: &[f64] = if a.name.contains("AH-64") {
+            &[17_650.]
+        } else {
+            &[24_250., 26_455.]
+        };
+        for weight in published {
+            let (top, minimum) = profile(*weight);
+            let hover = level(*weight, 0., 0.).map(|t| t.engine_power);
+            let above = ceiling(*weight) + 100.;
+            let why = match level(*weight, above, 0.) {
+                None => "no trim within the controls' travel".to_string(),
+                Some(t) => format!(
+                    "needs {:.0} hp, has {:.0} hp",
+                    t.engine_power / HP,
+                    h.available_power(rotor::air_density(above), 1., 1.) / HP
+                ),
+            };
+            println!("  100 ft above it: {why}");
+            println!(
+                "at {weight:.0} lb: hover OGE ceiling {:.0} ft, hover margin {:.0} percent at sea level, top speed {top:.0} kt, best climb {:.0} ft/min",
+                ceiling(*weight),
+                hover.map_or(f64::NAN, |p| 100. * (available / p - 1.)),
+                (available - minimum.0) / weight * 60.
+            );
+        }
         // Full collective from a hover, level attitude.
         let mut climb = trimmed(&a, 1_000., 0., StabilityLevel::Damper);
         fly(&mut climb, 120 * 20, |s| attitude(s, 0., 1.));

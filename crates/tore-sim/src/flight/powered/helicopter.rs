@@ -22,7 +22,9 @@
 //!   speed moves with the difference between engine and rotor power over its
 //!   energy constant.
 //! - **Rated power** is the power that hovers at the PT maximum thrust at
-//!   sea level (design 8.1): about 3,600 hp for the AH-64's PT.
+//!   sea level (design 8.1): about 3,600 hp for the AH-64's PT. Where the PT
+//!   thrust is implausible (the Mi-24's) the rotor table gives the published
+//!   power instead.
 //! - **Ground**: wheels hold yaw and pitch; a roll about the wheels that the
 //!   weight cannot hold banks the aircraft, and 15 degrees of bank with the
 //!   thrust leaning the same way is dynamic rollover (design 4.9).
@@ -198,8 +200,13 @@ impl SingleRotor {
         model.tail_reference_thrust = model.reference_torque / tail_rotor_arm_ft;
         let hover = main_hover + model.tail_power(model.tail_reference_thrust, rho0, 1., 0.);
         let main_rated = rotor.hover_power(p.max_thrust_lbf, rho0);
-        model.rated_power = main_rated
-            + model.tail_power(main_rated / rotor.omega / tail_rotor_arm_ft, rho0, 1., 0.);
+        model.rated_power = p.rated_power_hp.map_or_else(
+            || {
+                main_rated
+                    + model.tail_power(main_rated / rotor.omega / tail_rotor_arm_ft, rho0, 1., 0.)
+            },
+            |hp| hp * 550.,
+        );
         // With the engines cut and the collective held, the power the rotor
         // needs falls with the cube of its speed, so its speed falls from 1
         // to 0.8 in `energy_seconds` when J Omega0² = 4 x that x the hover

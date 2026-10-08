@@ -107,6 +107,11 @@ pub struct RotorParameters {
     /// Maximum static thrust of all the rotors together at sea level, lbf:
     /// the PT thrust where plausible, else Fit.
     pub max_thrust_lbf: f64,
+    /// Rated shaft power at sea level that reaches the main and tail rotors,
+    /// hp: published engine power less transmission and installation losses
+    /// (Pub, Fit losses). `None` derives it from `max_thrust_lbf` (the
+    /// PT-fit rule, design 8.1), for aircraft whose PT thrust is plausible.
+    pub rated_power_hp: Option<f64>,
     /// Engine cut in a hover at fixed collective: seconds for the rotor
     /// speed to fall from 100 to 80 percent (Fit).
     pub energy_seconds: f64,
@@ -385,6 +390,18 @@ fn field(a: &Aircraft, key: &str) -> Option<f64> {
         .map(f64::from)
 }
 
+/// The Mi-24's rated power at the rotors, hp: two TV3-117 at 2,225 shp each
+/// (Pub AW-Mi24) times the share of it that reaches the rotors.
+const MI24_RATED_HP: f64 = 2. * 2_225. * MI24_ROTOR_POWER_SHARE;
+/// Share of the engines' published shaft power that the rotors get (Fit).
+/// Transmission, tail drive and installation losses take about 8 percent;
+/// the rest is what the published 4,915 ft out-of-ground-effect hover
+/// ceiling at the 24,250 lb normal takeoff weight leaves (the figure may be
+/// quoted at a lower rating or a warmer day). The PT thrust (1.67 times
+/// the gross weight) would have it hover to 17,700 ft. See the P2-fix
+/// notes and docs/spec/variety-flight.md.
+const MI24_ROTOR_POWER_SHARE: f64 = 0.745;
+
 fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
     use AircraftId::*;
     let pt_thrust = c.propulsion.military_thrust_lbf;
@@ -402,6 +419,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rotor_speed_rpm: 289.,
             solidity: 0.0928,
             max_thrust_lbf: pt_thrust,
+            rated_power_hp: None,
             energy_seconds: 1.8,
             never_exceed_kt: 197.,
             // Hovers at gross weight near 75 percent lever (design 5.5).
@@ -430,8 +448,11 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
                 stub_wing: None,
             },
         },
-        // 17.30 m rotor and 240 rpm (Pub AW-Mi24); solidity, tail arm and
-        // Vne Fit (not verifiable).
+        // 17.30 m rotor and 240 rpm (Pub AW-Mi24); rated power from the
+        // published engines rather than the PT thrust (which is 1.67 times
+        // the gross weight); solidity, tail arm and Vne Fit (not
+        // verifiable); the forward flat-plate area Fit to the published 170
+        // to 181 kt on that power.
         Mi24 => RotorParameters {
             layout: RotorLayout::Single {
                 rotation: RotorRotation::Clockwise,
@@ -441,6 +462,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rotor_speed_rpm: 240.,
             solidity: 0.078,
             max_thrust_lbf: pt_thrust,
+            rated_power_hp: Some(MI24_RATED_HP),
             energy_seconds: 2.,
             never_exceed_kt: 190.,
             collective_degrees: [1., 16.],
@@ -461,7 +483,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             // Stub wings carry about a quarter of the weight at 170 kt
             // (Pub W-Mi24: "up to a quarter of total lift").
             airframe: RotorcraftAirframe {
-                flat_plate_ft2: [52., 300., 500.],
+                flat_plate_ft2: [34., 300., 500.],
                 tail_pitch_ft3: 3_000.,
                 tail_trim_degrees: -2.,
                 fin_yaw_ft3: 2_500.,
@@ -486,6 +508,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rotor_speed_rpm: 225.,
             solidity: 0.062,
             max_thrust_lbf: 1.25 * c.mass.max_takeoff_lbs,
+            rated_power_hp: None,
             energy_seconds: 2.5,
             never_exceed_kt: 180.,
             // Starting values for slice P3; the CH-47 still flies the old
@@ -522,6 +545,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rotor_speed_rpm: 397.,
             solidity: 0.105,
             max_thrust_lbf: pt_thrust,
+            rated_power_hp: None,
             energy_seconds: 1.5,
             never_exceed_kt: 280.,
             // Starting values for slice P5; the V-22 still flies the old
@@ -738,6 +762,19 @@ mod tests {
                 let rotors = if matches!(id, Ah64 | Mi24) { 1 } else { 2 };
                 assert_eq!(rotor.layout.rotors(), rotors, "{id:?}");
             }
+        }
+    }
+
+    #[test]
+    fn published_power_is_set_where_the_pt_cannot_give_it() {
+        use AircraftId::*;
+        let rotor = |id| lift(id).unwrap().rotor.unwrap();
+        // The Mi-24's rated power is its two TV3-117 at 2,225 shp less
+        // losses, below the engines' sum and above half of it.
+        let hp = rotor(Mi24).rated_power_hp.unwrap();
+        assert!((0.5 * 4_450. ..4_450.).contains(&hp), "{hp}");
+        for id in [Ah64, Ch47, V22] {
+            assert_eq!(rotor(id).rated_power_hp, None, "{id:?}");
         }
     }
 
