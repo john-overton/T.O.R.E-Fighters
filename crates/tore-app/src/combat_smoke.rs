@@ -296,6 +296,12 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     // tape replaces it, as they did when combat held the file.
     let mut recorder: Option<crate::tape_file::Recorder> = None;
     for index in 0..combat.state.own().ammo.len() {
+        // A retained selection station (a store the default load leaves off,
+        // which the loadout editor can fill) starts empty and can release
+        // nothing, so the default load's stations are what this covers.
+        if combat.state.own().ammo[index] & 0x7fff == 0 {
+            continue;
+        }
         let station = &combat.state.own().configuration().stations[index];
         if !station.internal && station.weapon.seeker.signature == 0 {
             ballistic_smoke(combat.state.own().configuration(), index)?;
