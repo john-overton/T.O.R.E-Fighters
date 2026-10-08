@@ -29,7 +29,9 @@
 //! Until P2 and P4 land, `step_powered` keeps the fitted law of the variety
 //! import: its body rates are commanded, not integrated, and it records them
 //! in the state's body rates.
+pub mod aero;
 pub mod body;
+pub mod jet;
 pub mod sas;
 pub mod state;
 
@@ -84,7 +86,10 @@ impl State {
 
     pub fn flight_axis_available(&self, axis: FlightAxis) -> bool {
         self.model().powered_lift().is_some_and(|lift| match axis {
-            FlightAxis::VectorPitch | FlightAxis::VectorYaw => lift.kind == LiftKind::VectorJet,
+            FlightAxis::VectorPitch => lift.kind == LiftKind::VectorJet,
+            // Neither vectoring jet vectors sideways (manual, thrust
+            // vectoring table; VTOL overhaul slice P4).
+            FlightAxis::VectorYaw => false,
             FlightAxis::Conversion => lift.kind == LiftKind::Tiltrotor,
             FlightAxis::Collective => lift.kind != LiftKind::VectorJet,
         })
@@ -151,6 +156,20 @@ impl State {
         afterburner: bool,
         fuel_rate: f64,
     ) {
+        if let Some(jet) = lift.jet {
+            return self.step_jet(
+                lift,
+                jet,
+                c,
+                stick,
+                initial_surface,
+                runway_wind_fraction,
+                t,
+                ground,
+                afterburner,
+                fuel_rate,
+            );
+        }
         const GRAVITY: f64 = 32.174;
         self.lift_controls
             .advance(self.systems.fluids.hydraulic > 0.);
@@ -418,6 +437,14 @@ mod tests {
         AircraftId::Mi24,
         AircraftId::Ch47,
     ];
+    /// The aircraft the old attitude-hold law still flies (the jets have
+    /// their own physics since slice P4, tested in `jet.rs`).
+    const OLD_LAW: [AircraftId; 4] = [
+        AircraftId::V22,
+        AircraftId::Ah64,
+        AircraftId::Mi24,
+        AircraftId::Ch47,
+    ];
     fn hover(id: AircraftId, height: f64) -> State {
         let aircraft = crate::models::variety::tests::synthetic(id);
         let mut s = State::new(&aircraft, [0., height, 0.]).unwrap();
@@ -436,9 +463,8 @@ mod tests {
             / ((c.propulsion.military_thrust_lbf * lift.efficiency + lift.additional_lift_lbf)
                 * lapse);
         if lift.kind == LiftKind::VectorJet {
-            s.throttle = fraction;
-            s.lift_controls.vector_pitch = 1.;
-            s.lift_controls.vector_pitch_actual = 1.;
+            jet::trim_hover(&mut s);
+            return s;
         } else {
             s.throttle = 1.;
             s.lift_controls.collective = fraction;
@@ -566,7 +592,7 @@ mod tests {
     }
     #[test]
     fn cyclic_and_yaw_control_translate_and_turn_each_hover_aircraft() {
-        for id in IDS {
+        for id in OLD_LAW {
             let mut s = hover(id, 500.);
             run(
                 &mut s,
@@ -598,10 +624,12 @@ mod tests {
             },
             120,
         );
+        // The nozzles travel 100 degrees a second from vertical to aft, and
+        // the jets have no vector yaw to move (slice P4).
         assert_eq!(jet.lift_controls.vector_pitch, 0.);
-        assert!((jet.lift_controls.vector_pitch_actual - 0.75).abs() < 1e-12);
-        assert!((jet.lift_controls.vector_yaw - 1.).abs() < 1e-12);
-        assert!(jet.lift_controls.vector_yaw_actual > 0.99);
+        assert_eq!(jet.lift_controls.vector_pitch_actual, 0.);
+        assert_eq!(jet.lift_controls.vector_yaw, 0.);
+        assert_eq!(jet.lift_controls.vector_yaw_actual, 0.);
         let mut tilt = hover(AircraftId::V22, 500.);
         run(
             &mut tilt,
@@ -676,12 +704,16 @@ mod tests {
             s.position[1] = clearance + 0.001;
             run(&mut s, &Default::default(), 1);
             assert!(s.weight_on_wheels() && !s.crashed, "{id:?}");
-            if s.model().powered_lift().unwrap().kind == LiftKind::VectorJet {
+            // The jets' engines spool up (slower from low power) before they
+            // lift off.
+            let ticks = if s.model().powered_lift().unwrap().kind == LiftKind::VectorJet {
                 s.throttle *= 1.2;
+                600
             } else {
                 s.lift_controls.collective *= 1.2;
-            }
-            run(&mut s, &Default::default(), 360);
+                360
+            };
+            run(&mut s, &Default::default(), ticks);
             assert!(
                 !s.weight_on_wheels() && s.position[1] > clearance + 5.,
                 "{id:?} {}",
@@ -771,8 +803,9 @@ mod tests {
         assert!(damaged.position[1] < 450. && damaged.vertical_speed < -10.);
     }
     #[test]
+    #[allow(clippy::single_element_loop)] // The jets left for `jet.rs`; P5 takes the V-22.
     fn conversion_gains_forward_motion_and_recovers_vertical_velocity() {
-        for id in [AircraftId::Av8, AircraftId::Yak141, AircraftId::V22] {
+        for id in [AircraftId::V22] {
             let mut s = hover(id, 5000.);
             run(
                 &mut s,

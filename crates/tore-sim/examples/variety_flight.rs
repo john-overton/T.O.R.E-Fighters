@@ -43,15 +43,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             let weight = config.mass.empty_lbs + state.fuel;
             let lapse = (-1000. / config.tuning.thrust_lapse_feet).exp();
-            let fraction = weight
-                / ((config.propulsion.military_thrust_lbf * lift.efficiency
-                    + lift.additional_lift_lbf)
-                    * lapse);
+            // The jets hover on their nozzles' vertical efficiency and lift
+            // engines (VTOL overhaul slice P4); the others on the old law.
+            let jet = lift.jet;
+            let capacity = jet.map_or(
+                config.propulsion.military_thrust_lbf * lift.efficiency + lift.additional_lift_lbf,
+                |jet| {
+                    config.propulsion.military_thrust_lbf * jet.vertical_efficiency
+                        + jet.lift_engines.map_or(0., |e| e.thrust_lbf)
+                },
+            );
+            let fraction = weight / (capacity * lapse);
+            let military = config.propulsion.military_thrust_lbf;
             assert!(fraction < 1., "{} cannot hover at this mass", aircraft.name);
-            if lift.kind == LiftKind::VectorJet {
+            if let Some(jet) = jet {
+                let vertical = 90. / jet.nozzle_range_degrees;
                 state.throttle = fraction;
-                state.lift_controls.vector_pitch = 1.;
-                state.lift_controls.vector_pitch_actual = 1.;
+                state.lift_controls.vector_pitch = vertical;
+                state.lift_controls.vector_pitch_actual = vertical;
+                state.lift_controls.drive.engine_output = [
+                    military * fraction * lapse,
+                    jet.lift_engines.map_or(0., |e| e.thrust_lbf) * fraction * lapse,
+                ];
+                state.lift_controls.drive.lift_engine_spool = f64::from(jet.lift_engines.is_some());
             } else {
                 state.throttle = 1.;
                 state.lift_controls.collective = fraction;
@@ -75,6 +89,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 aircraft.name
             );
             if lift.kind == LiftKind::VectorJet {
+                // A fully fuelled Yak-141 hovers with 2.5 percent to spare,
+                // less than its suck-down on the ground: it lifts off
+                // vertically only lighter, as the real aircraft did.
+                state.fuel *= 0.5;
                 state.command(PilotCommand::AdjustThrottle(0.15));
             } else {
                 state.command(PilotCommand::AdjustAxis(FlightAxis::Collective, 0.15));

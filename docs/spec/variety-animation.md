@@ -409,11 +409,14 @@ left [-27,-33,0] to [-49,-30,-3], right [28,-33,1] to [49,-30,-3], through
 `-0.20*aileron` on outward axes. Preserve inner outrigger strips.
 
 Rotate each original nozzle card about its own center: rear [+/-8,-14.5,-3.5],
-front [+/-11,3,-2.5]. Apply -15 degrees times actual vector yaw about Z, then
-90 degrees times actual vector pitch about X. All four centers and card
-sizes remain fixed, including shared vertices of the split left rear card.
-This expresses the existing force direction without adding a new nozzle mesh.
-Check all 25 pitch/yaw combinations.
+front [+/-11,3,-2.5], about X by the simulated nozzle angle: 0 aft, 90
+vertical, 100 at the braking stop (the PT's `vtLimitDown`, VTOL overhaul
+slice P4, 2026-10-08). The drawn angle is the flight model's actual nozzle
+angle in degrees. There is no yaw term: neither jet vectors sideways. All
+four centers and card sizes remain fixed, including shared vertices of the
+split left rear card. This expresses the force direction without adding a
+new nozzle mesh. Check 0, 25, 50, 75, 90 and 100 degrees, each with the old
+vector yaw at 0 and at full travel (it must not move the cards).
 
 Own all sixteen gear pieces, including the eight always-present central pieces.
 Outrigger wheels rise 14 units and move inward 3 units in the second half of
@@ -466,10 +469,12 @@ times aileron while retaining the cut. Inboard flaps morph to their own exact
 down endpoints independently of roll.
 
 The nozzle's front ring at Y=-47 remains fixed. Its eight-point outlet moves
-rigidly around [0.5,-47,-3], first yawing -15 degrees times actual nozzle yaw
-around Z, then pitching +90 degrees times actual nozzle pitch around X.
+rigidly around [0.5,-47,-3], pitching around X by the simulated nozzle angle
+in degrees: 0 aft, 90 vertical, 100 at the braking stop (VTOL overhaul slice
+P4, 2026-10-08). There is no yaw term: the Yak-141 does not vector sideways.
 Original shell faces connect that moving outlet to the fixed ring. This is a
-flexible-neck fit, not recovered mechanics. No lift-fan or door art is invented.
+flexible-neck fit, not recovered mechanics. No lift-fan or door art is invented:
+the reviewed shape has no separate lift-engine intake or exhaust door faces.
 
 Keep painted wheel circles rigid. Split right main, left main and nose cards
 at Z=-13,-12,-14 respectively. The main lower pieces lift 16 units, moving
