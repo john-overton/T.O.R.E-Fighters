@@ -35,19 +35,44 @@ or has lost its target does not fire. These are player-directed controls;
 
 ## VTOL, tiltrotors and helicopters
 
-Use the ordinary arrow stick, End/Page Down rudder, E engine switch and 1-8
-power controls. Ctrl+Up/Down moves VTOL nozzles toward forward/vertical thrust;
-Ctrl+Left/Right requests nozzle yaw. **0** returns nozzles and V-22 nacelles to
-forward neutral. V-22 conversion uses Ctrl+Page Up for airplane mode and
-Ctrl+Page Down for helicopter mode. Ctrl+Home increases collective and Ctrl+End
-reduces it on rotorcraft. Rate controls retain the position when released.
+Use the ordinary arrow stick, End / Page Down rudder and E engine switch. Some
+keys change with the aircraft ([the full table](INPUT.md#vtol-tiltrotor-and-helicopter-controls)):
 
-Set power independently of collective. In helicopter mode the collective
-controls lift and pitch/roll tilts the lift direction. The controls editor
-exposes all four added demands as bindable absolute axes, rate axes and button
-alternatives. The [input guide](INPUT.md#vtol-tiltrotor-and-helicopter-controls)
-lists gamepad defaults, axis calibration and modifier behaviour. Source evidence,
-fitted rates and aircraft applicability belong in the
+- **AV-8 and Yak-141**, the retail keys: **X** turns the nozzles down 10
+  degrees and **Z** up 10. **Shift+X** puts them vertical (90 degrees), and a
+  second press to the 100-degree braking stop; **Shift+Z** puts them aft (0),
+  or from the braking stop back to vertical. Ctrl+Up / Ctrl+Down slew them,
+  **0** sends them aft. Z and X are not rudder keys on these two; use End and
+  Page Down. 1-8 set engine power as on any jet. Per the manual: Shift+X and
+  full power to lift off, Z three times at 500 ft, Shift+Z past 80 to 90 kt;
+  for a short takeoff, X four times (40 degrees) at 80 to 90 kt.
+- **Helicopters (AH-64, Mi-24, CH-47) and the V-22**: the throttle keys 1-8
+  (and a throttle lever or the gamepad throttle buttons) set the
+  **collective**; the engines are governed. Ctrl+Home / Ctrl+End still move
+  the collective. **Ctrl+arrows trim the cyclic**: a tap moves the trim 2
+  percent of travel, a held key 10 percent a second, so a few taps of
+  Ctrl+Up and the aircraft flies forward hands off. **0** recentres the trim on
+  the helicopters; on the V-22 it still sends the nacelles forward. V-22
+  conversion uses Ctrl+Page Up toward airplane mode and Ctrl+Page Down toward
+  helicopter mode. Z and X stay rudder keys.
+- **All six**: **Ctrl+Shift+A** cycles the stability level, announced as
+  `Stability: Off`, `Damper` or `Attitude`; Pref → Stability level does the
+  same and the choice is kept for later flights. **Damper** (the default)
+  stops the aircraft rotating when you let go of the stick and leaves it at
+  the attitude you left it; **Attitude** also returns it to the trimmed
+  attitude, and at the Attitude level Ctrl+arrows move that attitude
+  instead of the trim; **Off** adds nothing. No level limits the attitude:
+  full stick always wins. **Ctrl+Alt+A** is hover hold on the helicopters
+  and the V-22.
+
+A stick button bound to **Trim set** makes the current stick plus trim the new
+trim and ignores the stick until it is back near centre, which turns a
+spring-centred stick into a force-trim cyclic. The stability levels act
+through the VTOL overhaul's new flight model; until its rotor and jet physics
+are in, the level is kept and shown but these aircraft fly the earlier fitted
+law, which already takes the trim and the nozzle keys. The controls editor
+exposes the lift demands, the trim axes and every new command as bindable
+rows. Source evidence, fitted rates and aircraft applicability belong in the
 [flight variety behaviour spec](spec/variety-flight.md).
 
 The Apache and Chinook keep their fixed landing gear down; G reports that the

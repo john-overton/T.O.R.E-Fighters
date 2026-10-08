@@ -1,4 +1,7 @@
-use crate::{FlightAxis, PilotCommand, PilotInput, Switch};
+use crate::{
+    FlightAxis, LiftCommand, NozzlePreset, PilotCommand, PilotInput, StabilityLevel, Switch,
+    TrimAxis, trim_keys,
+};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -22,6 +25,55 @@ pub enum Axis {
     HeadYaw,
     /// Absolute head-tracker pitch: -1..1 maps to -90..90 degrees before scaling.
     HeadPitch,
+    /// Cyclic and pedal trim of the helicopters and the V-22, held at a rate
+    /// (design 5.3): each tick becomes a [`LiftCommand::TrimAdjust`].
+    TrimPitchRate,
+    TrimRollRate,
+    TrimPedalRate,
+}
+impl Axis {
+    /// The trim rate axes in [`TrimAxis`] order.
+    pub const TRIM: [(Axis, TrimAxis); 3] = [
+        (Axis::TrimPitchRate, TrimAxis::Pitch),
+        (Axis::TrimRollRate, TrimAxis::Roll),
+        (Axis::TrimPedalRate, TrimAxis::Pedal),
+    ];
+}
+/// Profile names of the powered-lift commands (VTOL overhaul, design 5.7).
+pub const LIFT_ACTIONS: [(&str, LiftCommand); 10] = [
+    ("nozzle-step-up", LiftCommand::NozzleStep { down: false }),
+    ("nozzle-step-down", LiftCommand::NozzleStep { down: true }),
+    (
+        "nozzle-preset-forward",
+        LiftCommand::NozzlePreset(NozzlePreset::Forward),
+    ),
+    (
+        "nozzle-preset-vertical",
+        LiftCommand::NozzlePreset(NozzlePreset::Vertical),
+    ),
+    ("stability-level", LiftCommand::CycleStability),
+    (
+        "stability-level=off",
+        LiftCommand::SetStability(StabilityLevel::Off),
+    ),
+    (
+        "stability-level=damper",
+        LiftCommand::SetStability(StabilityLevel::Damper),
+    ),
+    (
+        "stability-level=attitude",
+        LiftCommand::SetStability(StabilityLevel::Attitude),
+    ),
+    ("trim-set", LiftCommand::TrimSet),
+    ("trim-centre", LiftCommand::TrimCentre),
+];
+/// The profile name of a powered-lift command, when it has one. Trim
+/// adjustments are named by their rate axes instead.
+pub fn lift_action_name(command: LiftCommand) -> Option<&'static str> {
+    LIFT_ACTIONS
+        .iter()
+        .find(|(_, c)| *c == command)
+        .map(|(name, _)| *name)
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -79,6 +131,9 @@ impl Action {
             "look-y" => Some(Axis::LookY),
             "head-yaw" => Some(Axis::HeadYaw),
             "head-pitch" => Some(Axis::HeadPitch),
+            "trim-pitch-rate" => Some(Axis::TrimPitchRate),
+            "trim-roll-rate" => Some(Axis::TrimRollRate),
+            "trim-pedal-rate" => Some(Axis::TrimPedalRate),
             _ => None,
         };
         if let Some(axis) = axis {
@@ -86,6 +141,9 @@ impl Action {
         }
         if s == "neutral-vector" {
             return Ok(Self::Pilot(PilotCommand::NeutralVector));
+        }
+        if let Some((_, command)) = LIFT_ACTIONS.iter().find(|(name, _)| *name == s) {
+            return Ok(Self::Pilot(PilotCommand::Lift(*command)));
         }
         for (name, axis) in [
             ("vector-pitch", FlightAxis::VectorPitch),
@@ -127,6 +185,7 @@ impl Action {
             ("jammer", Switch::Jammer),
             ("autopilot", Switch::Autopilot),
             ("waypoint-autopilot", Switch::WaypointAutopilot),
+            ("hover-hold", Switch::HoverHold),
         ] {
             if s == name {
                 return Ok(Self::Pilot(PilotCommand::Toggle(switch)));
@@ -646,6 +705,8 @@ pub struct Resolver {
     physical: BTreeMap<(String, String), f64>,
     /// The chord (or plain control) each base control currently feeds.
     layers: BTreeMap<(String, String), String>,
+    /// Ticks each trim rate axis has been held, in [`Axis::TRIM`] order.
+    trim_held: [u32; 3],
 }
 /// A chord binding split into its modifiers, base control and full token.
 type Chord = (Vec<String>, String, String);
@@ -734,6 +795,9 @@ impl Resolver {
                                 | Axis::ConversionRate
                                 | Axis::Collective
                                 | Axis::CollectiveRate
+                                | Axis::TrimPitchRate
+                                | Axis::TrimRollRate
+                                | Axis::TrimPedalRate
                         )
                 ) || b.action == Action::Ui("fire".into()))
         })
@@ -746,6 +810,7 @@ impl Resolver {
         self.focused = focused;
         self.events.clear();
         self.owners.clear();
+        self.trim_held = [0; 3];
         for ((index, _), s) in &mut self.states {
             let binding = &self.profile.bindings[*index];
             let neutral = match binding.mode {
@@ -1240,6 +1305,26 @@ impl Resolver {
             }
         }
         commands.extend(follows.values().map(|(_, c)| *c));
+        // Held trim: a tap at once, then steps at the rate after the delay.
+        for (index, (axis, trim)) in Axis::TRIM.into_iter().enumerate() {
+            let rate = self.axis(axis, 0.);
+            if rate == 0. {
+                self.trim_held[index] = 0;
+                continue;
+            }
+            let held = self.trim_held[index];
+            self.trim_held[index] = held.saturating_add(1);
+            let amount = if held == 0 {
+                trim_keys::TAP * rate
+            } else if held >= trim_keys::DELAY_TICKS
+                && (held - trim_keys::DELAY_TICKS).is_multiple_of(trim_keys::STEP_TICKS)
+            {
+                trim_keys::STEP * rate
+            } else {
+                continue;
+            };
+            commands.push(PilotCommand::Lift(LiftCommand::TrimAdjust(trim, amount)));
+        }
         let input = PilotInput {
             pitch: self.axis(Axis::Pitch, throttle),
             roll: self.axis(Axis::Roll, throttle),

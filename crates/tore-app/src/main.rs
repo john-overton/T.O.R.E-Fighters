@@ -234,6 +234,25 @@ enum Screen {
     /// The mission replay viewer; see replay/viewer.rs.
     Replay,
 }
+/// Keeps the own powered-lift aircraft `flight` at the preferred stability
+/// level `wanted` (VTOL overhaul, design 5.2): a flight, a restart or a seat
+/// taken over starts at Damper, and the level the player chose in Pref or
+/// with Ctrl+Shift+A follows as a pilot command, so it reaches the host,
+/// recordings and pilot tapes like any other.
+fn sync_stability(
+    flight: &tore_sim::flight::State,
+    input: &mut input::Input,
+    wanted: tore_input::StabilityLevel,
+) {
+    if flight.crashed || flight.stability_in_effect().is_none() {
+        return;
+    }
+    if input.pending_stability(flight.lift_controls.aids.stability) != wanted {
+        input.queue(tore_input::PilotCommand::Lift(
+            tore_input::LiftCommand::SetStability(wanted),
+        ));
+    }
+}
 struct App {
     preference_path: Option<PathBuf>,
     preference_saved: String,
@@ -1116,6 +1135,28 @@ impl App {
         }
     }
 
+    /// `Stability: Damper` and so on for a stability-level command on a
+    /// powered-lift aircraft (VTOL overhaul, design 5.2). The level becomes
+    /// the preference, which [`sync_stability`] keeps the flight at.
+    fn announce_stability(&mut self, command: tore_input::PilotCommand) {
+        use tore_input::{LiftCommand, PilotCommand};
+        if !matches!(
+            command,
+            PilotCommand::Lift(LiftCommand::SetStability(_) | LiftCommand::CycleStability)
+        ) {
+            return;
+        }
+        let flight = &self.world.cockpits[OWN].flight;
+        if flight.stability_in_effect().is_none() {
+            return;
+        }
+        let level = self
+            .input
+            .pending_stability(flight.lift_controls.aids.stability);
+        self.flight_ui.stability = level;
+        self.flight_ui
+            .message(format!("Stability: {}", flight_ui::stability_name(level)));
+    }
     fn input_action(&mut self, action: tore_input::Action) -> Action {
         use flight_ui::Command;
         let name = match action {
@@ -1136,6 +1177,7 @@ impl App {
                         self.instruments.channel = 0;
                     } else {
                         self.input.queue(command);
+                        self.announce_stability(command);
                     }
                 }
                 return Action::None;
@@ -1816,6 +1858,12 @@ impl App {
                     tore_input::Switch::Burner,
                     burner,
                 ));
+                Action::None
+            }
+            // On the helicopters and the V-22 the step moves the collective.
+            Command::ThrottleStep(delta) if self.input.collective_role() => {
+                self.input
+                    .queue(tore_input::PilotCommand::AdjustThrottle(delta));
                 Action::None
             }
             Command::ThrottleStep(delta) => {
@@ -3754,8 +3802,16 @@ impl ApplicationHandler for App {
                                     );
                                 }
                             }
-                            let (pilot, _) =
-                                self.input.frame(&self.camera.keys, start.flight.throttle);
+                            sync_stability(
+                                &self.world.cockpits[OWN].flight,
+                                &mut self.input,
+                                self.flight_ui.stability,
+                            );
+                            let lever = self.input.throttle_reference(
+                                start.flight.throttle,
+                                start.flight.lift_controls.collective,
+                            );
+                            let (pilot, _) = self.input.frame(&self.camera.keys, lever);
                             if let Some(recording) = &mut self.input_recording {
                                 self.recorded_ticks += 1;
                                 if let Err(error) = tore_input::recording::write_frame(

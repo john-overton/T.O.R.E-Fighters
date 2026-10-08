@@ -2,7 +2,7 @@
 pub mod pilot;
 pub use pilot::{
     FlightAxis, LiftCommand, NozzlePreset, PilotCommand, PilotInput, StabilityLevel, Switch,
-    TrimAxis,
+    TrimAxis, trim_keys,
 };
 pub mod bindings;
 pub use bindings::{

@@ -1482,10 +1482,12 @@ impl State {
         if self.research.is_some()
             && let Some(lift) = model.powered_lift()
         {
+            // The stick through the trim-set latch, plus the trim (slice P6).
+            let stick = self.trimmed_stick(aero);
             self.step_powered(
                 lift,
                 c,
-                aero,
+                stick,
                 initial_surface,
                 runway_wind_fraction,
                 t,

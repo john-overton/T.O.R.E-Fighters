@@ -235,9 +235,12 @@ impl State {
     /// do not suit the aircraft, the legacy adapter or the native research
     /// path change nothing.
     ///
-    /// - Stability level: every powered-lift aircraft.
+    /// - Stability level: every powered-lift aircraft. Entering the
+    ///   Attitude level takes the current attitude as its reference.
     /// - Trim (set, adjust, centre): the helicopters and the V-22. At the
-    ///   Attitude level slice P6 moves the reference attitude instead.
+    ///   Attitude level the cyclic trim keys move the reference attitude
+    ///   instead; trim centre also levels it. Trim set is completed by the
+    ///   per-tick latch in [`super::sas`].
     /// - Nozzle steps and presets: the vectoring jets, on the demand, in
     ///   degrees of the PT's nozzle range.
     pub(crate) fn command_lift(&mut self, command: LiftCommand) {
@@ -247,21 +250,43 @@ impl State {
         let Some(lift) = self.model().powered_lift() else {
             return;
         };
+        let attitude = [self.pitch, self.bank, self.yaw];
         let aids = &mut self.lift_controls.aids;
         let rotorcraft = lift.kind != LiftKind::VectorJet;
+        let attitude_level = aids.stability == StabilityLevel::Attitude;
         match command {
-            LiftCommand::SetStability(level) => aids.stability = level,
-            LiftCommand::CycleStability => aids.stability = aids.stability.next(),
+            // Entering the Attitude level holds the attitude it finds (slice
+            // P6, agent decision 2026-10-08).
+            LiftCommand::SetStability(_) | LiftCommand::CycleStability => {
+                aids.stability = match command {
+                    LiftCommand::SetStability(level) => level,
+                    _ => aids.stability.next(),
+                };
+                if !attitude_level && aids.stability == StabilityLevel::Attitude {
+                    aids.attitude_reference = super::sas::reference_of(attitude);
+                }
+            }
             LiftCommand::TrimSet if rotorcraft => aids.trim_latch = TrimLatch::Capture,
             LiftCommand::TrimAdjust(axis, amount) if rotorcraft && amount.is_finite() => {
+                let amount = amount.clamp(-1., 1.);
                 let index = match axis {
                     TrimAxis::Pitch => 0,
                     TrimAxis::Roll => 1,
                     TrimAxis::Pedal => 2,
                 };
-                aids.trim[index] = (aids.trim[index] + amount.clamp(-1., 1.)).clamp(-1., 1.);
+                // At the Attitude level the cyclic trim keys move the
+                // attitude it returns to instead (design 5.3).
+                if attitude_level && index < 2 {
+                    super::sas::adjust_reference(aids, index, amount);
+                } else {
+                    aids.trim[index] = (aids.trim[index] + amount).clamp(-1., 1.);
+                }
             }
-            LiftCommand::TrimCentre if rotorcraft => aids.trim = [0.; 3],
+            LiftCommand::TrimCentre if rotorcraft => {
+                aids.trim = [0.; 3];
+                aids.attitude_reference[0] = 0.;
+                aids.attitude_reference[1] = 0.;
+            }
             LiftCommand::NozzleStep { down } => {
                 if let Some(jet) = lift.jet {
                     let step = NOZZLE_STEP_DEGREES / jet.nozzle_range_degrees;
@@ -405,6 +430,45 @@ pub(crate) mod tests {
         let before = legacy.lift_controls;
         legacy.command(Lift(LiftCommand::CycleStability));
         assert_eq!(legacy.lift_controls, before);
+    }
+
+    /// The key parts of the design's J3, J8, J9 and J12 (slice P6): the
+    /// manual's key sequences set the nozzle demand they name. The nozzles'
+    /// travel and what the aircraft does are P4's.
+    #[test]
+    fn the_manuals_nozzle_key_sequences_set_their_demands() {
+        use crate::flight::PilotCommand::Lift;
+        let step = |down| Lift(LiftCommand::NozzleStep { down });
+        let preset = |p| Lift(LiftCommand::NozzlePreset(p));
+        let degrees = |s: &State| (s.lift_controls.vector_pitch * 100.).round();
+        for id in [AircraftId::Av8, AircraftId::Yak141] {
+            let mut jet = hybrid(id);
+            // J3: Shift+X for the vertical takeoff, Z three times at 500 ft
+            // (60 degrees), Shift+Z past stall speed (0).
+            jet.lift_controls.vector_pitch = 0.;
+            jet.command(preset(NozzlePreset::Vertical));
+            assert_eq!(degrees(&jet), 90., "{id:?}");
+            for expected in [80., 70., 60.] {
+                jet.command(step(false));
+                assert_eq!(degrees(&jet), expected, "{id:?}");
+            }
+            jet.command(preset(NozzlePreset::Forward));
+            assert_eq!(degrees(&jet), 0., "{id:?}");
+            // J8: Shift+X twice, the braking stop.
+            jet.command(preset(NozzlePreset::Vertical));
+            jet.command(preset(NozzlePreset::Vertical));
+            assert_eq!(degrees(&jet), 100., "{id:?}");
+            // J12: Shift+Z from the stop goes to vertical, again to 0.
+            jet.command(preset(NozzlePreset::Forward));
+            assert_eq!(degrees(&jet), 90., "{id:?}");
+            jet.command(preset(NozzlePreset::Forward));
+            assert_eq!(degrees(&jet), 0., "{id:?}");
+            // J9: X four times for the short takeoff, 40 degrees.
+            for _ in 0..4 {
+                jet.command(step(true));
+            }
+            assert_eq!(degrees(&jet), 40., "{id:?}");
+        }
     }
 
     #[test]
