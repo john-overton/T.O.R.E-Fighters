@@ -455,6 +455,9 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
   at 6, 7, 8 and 9 seconds and guaranteed destruction at 10 seconds. Returning
   to the limit resets the timer. Loss uses the ordinary destroyed path with cause `overspeed`.
   Above the ceiling the envelope has no speed range and the rule does not apply.
+  The AH-64 and Mi-24 on the hybrid adapter are judged against their never-exceed
+  speeds (197 and 190 kt) instead, because their envelope row is a performance
+  figure ([overspeed](spec/overspeed.md)).
 - The autopilot makes no promise outside the envelope ([autopilot](spec/autopilot.md)).
 
 ### Weight-scaled stall speed
