@@ -1450,6 +1450,14 @@ with small camera movements and sunglare disabled. The glare test checks
 every channel of a synthetic gradient under two flare circles against continuous
 optical composition. Both tests use no retail media.
 
+## Powered-lift HUD fixtures
+
+`--hud-snapshot PATH --aircraft ah64 --hud-snapshot-state hover` (or `forward`)
+draws the HUD of the selected aircraft headless, as a PPM over a flat sky and
+ground split at the horizon. A powered-lift aircraft is started in trimmed
+forward flight or in a hover, 3,000 feet over a plain, and flown a second.
+Layout is in the [HUD layout spec](spec/hud-layout.md#powered-lift-cluster).
+
 ## Systems instrument fixtures
 
 `--panel-snapshot PATH --instrument-page 7` renders one 162×160 window, framed and coloured with the aircraft's stored daytime cockpit palette, from the aircraft's actual default

@@ -1383,7 +1383,7 @@ impl Recorder {
             events.push(event);
             self.tone = tone;
         }
-        let stall = crate::audio::stall_cue(flight.stall_alert(player_ground));
+        let stall = crate::audio::warning_cue(flight, player_ground);
         if stall != self.stall {
             let mut event = Event::new(kind::AUDIO_STALL_WARNING)
                 .with_subject(player)

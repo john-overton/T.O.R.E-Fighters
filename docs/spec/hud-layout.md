@@ -99,6 +99,35 @@ color beneath BRAKE. The [steering spec](lateral-flight.md) defines when it
 shows and the percentage; inactive steering has no label. Fitted layout: NSW at (388,173), HOOK at (388,184),
 and MSL at (402,201), leaving ten-pixel glyphs clear of each other.
 
+## Powered-lift cluster
+
+VTOL overhaul decision 11 (John, 2026-10-08): the AV-8, Yak-141, helicopters
+and V-22 get a proper HUD cluster drawn over the borrowed HUD art in the same
+font and colour. Opinionated (agent-chosen positions, fitted at 640x480); the
+retail manual (pp. 62, 81, 153) describes the hover display. Code:
+`crates/tore-app/src/powered_hud.rs`; the readings are plain functions of the
+flight state in `crates/tore-sim/src/flight/powered/readout.rs`.
+
+| Element | Shown on | When | Where and what |
+| --- | --- | --- | --- |
+| Nozzle angle | AV-8, Yak-141 | Nozzles not at 0 | `NOZ 60` in whole degrees at (388,274), a 60-pixel gauge for 0 to 100 degrees under it with a mark at 90 and the nozzle's pointer, and a caret under the gauge at the demand while the nozzles slew. The retail `VCTR` cue is in the borrowed art |
+| Lift engines | Yak-141 | Running | `LIFT` at (430,274) |
+| Hover display | Jets below their stall speed; helicopters and the V-22 below 40 kt ground speed | Navigation HUD only (not the weapon HUD) | Cross hairs and a 22-pixel circle centred at (320,296): the circle moves with the ground velocity (2.2 pixels a knot, forward up), so its radius is 10 knots and its forward edge over the hairs means drifting back at 10 knots. Vertical bars at x=376 (80 pixels, 1.6 pixels per ft/s): a tick rides with the climb or sink, the centre marks are zero sink, the long cap at the bottom is the lower edge |
+| Rotor speed | Helicopters, V-22 | Always | `NR 100` at (211,292); flashes below 90 and above 105 percent |
+| Torque | Helicopters, V-22 | Always | `TQ 72` at (211,304), percent of rated power; flashes above 100 |
+| Collective | Helicopters, V-22 | Always | `COL 81` in the throttle readout's place, (235,178) |
+| Radar height | All six | Below 1,000 ft above ground | `R 450` at (388,262) |
+| Stability level | All six | The level in effect is not Damper (Off without hydraulics) | `SAS OFF` or `SAS ATT` at (211,316) |
+| Nacelle | V-22 | Always | `NAC 75` at (388,274), a vertical tape at x=446 from 0 degrees (bottom) to 97.5 (60 pixels) with a pointer at the nacelle and a caret at the demand, and `CONV` at (388,286) while the conversion protection moves or holds the nacelles. The corridor bracket for the current airspeed waits for the tiltrotor law |
+| Autopilot | Helicopters, V-22 | Hover hold engaged | `AUTO` above `HOVER` in the existing autopilot label slot: the hover hold mode only has to give its autopilot label the word `HOVER` |
+
+Flashing rows are on for 30 ticks and off for 30 (a quarter second). The
+lower edge of the vertical bars is the same scale on every aircraft; the
+manual's "stall rather than sink" mark for the jets is fitted to it rather
+than computed. The cluster is a list of marks, a pure function of the flight
+state, so each row is tested by what it puts where; `--hud-snapshot PATH
+[--hud-snapshot-state forward|hover]` draws the HUD of `--aircraft` headless.
+
 ## Cockpit glass and layer order
 
 Requested by John after the layout checkpoint was committed. When cockpit
