@@ -72,6 +72,11 @@ impl Checkpoint for MissionCommand {
                 plane.save(s, None)?;
                 spawn.save(s, None)
             }
+            MissionCommand::Respawn { root, spawn } => {
+                s.writer().write_varint(6);
+                root.save(s, None)?;
+                spawn.save(s, None)
+            }
         }
     }
 
@@ -95,6 +100,10 @@ impl Checkpoint for MissionCommand {
             5 => MissionCommand::ReviveLost {
                 seat: Checkpoint::load(l, None)?,
                 plane: Checkpoint::load(l, None)?,
+                spawn: Checkpoint::load(l, None)?,
+            },
+            6 => MissionCommand::Respawn {
+                root: Checkpoint::load(l, None)?,
                 spawn: Checkpoint::load(l, None)?,
             },
             other => return invalid(format!("a mission command has no variant {other}")),
@@ -167,6 +176,10 @@ mod tests {
                 plane: PlaneId(1_001),
                 spawn: Box::new(spawn()),
             },
+            MissionCommand::Respawn {
+                root: PlaneId(9),
+                spawn: Box::new(spawn()),
+            },
         ]
     }
 
@@ -197,6 +210,12 @@ mod tests {
         }
         let mut s = Saver::new();
         s.writer().write_varint(5);
+        let body = s.finish_section();
+        let mut l = Loader::new(&body, &[], &models);
+        assert!(MissionCommand::load(&mut l, None).is_err());
+        // No variant 7.
+        let mut s = Saver::new();
+        s.writer().write_varint(7);
         let body = s.finish_section();
         let mut l = Loader::new(&body, &[], &models);
         assert!(MissionCommand::load(&mut l, None).is_err());

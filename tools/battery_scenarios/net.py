@@ -708,6 +708,87 @@ def drive_revive(d: Drive) -> None:
     log_must(d, server_log(d), r"Phoenix took plane 0\b", r"Phoenix took plane 12\b", forbid=NET_BAD)
 
 
+SPAWN_AT = (
+    r"x (-?[\d.]+) nm, z (-?[\d.]+) nm \(map x (-?[\d.]+) to (-?[\d.]+) nm, z (-?[\d.]+) to (-?[\d.]+) nm\)"
+)
+
+
+def spawn_points(text: str, pattern: str) -> list[tuple[float, float, float, float, float, float]]:
+    """The positions the server's log gives for each revival or AI respawn line matching `pattern` (slice R1's
+    "..., x X nm, z Z nm (map x A to B nm, z C to D nm)"), with the map's usable part, as (x, z, A, B, C, D)."""
+    return [
+        tuple(float(v) for v in m.groups())  # type: ignore[misc]
+        for m in re.finditer(rf"{pattern}, {SPAWN_AT}", text, re.M)
+    ]
+
+
+def drive_ai_respawn(d: Drive) -> None:
+    """AI respawn (the lobby pass's slice R1): PvP on the guide's mission 5 nm apart with the AI fighting, `respawn
+    revive`, no delay and one life. One bot flies for each side. The AI shoots itself down within a minute or so; each
+    lost AI aircraft respawns at once in a new plane at its flight's original spawn, which every bot is told of
+    (Spawned), and a lineage that loses its respawned plane too has no life left and stays down."""
+    port = d.port()
+    server = start_server(
+        d, port, guide_mission(separation_nm=5), mode="pvp", respawn="revive", revive_delay=0, lives=1,
+        kill_limit="none", time_limit=4,
+    )
+    blue = start_bots(d, port, "blue", 250, "--callsign", "Blue", "--slot", "0")
+    red = start_bots(d, port, "red", 250, "--callsign", "Red", "--slot", "6")
+    if not server.wait_for(r"no lives left, the AI does not respawn it", 240):
+        d.problem("no AI lineage ran out of lives within four minutes")
+    d.sleep(1)
+    server.send("end")
+    blue.finish(60, None)
+    red.finish(60, None)
+    server.finish(60, 0)
+    log = server_log(d)
+    log_must(
+        d, log, r"(Blue|Red) \d-\d lost plane \d+: the AI respawns it at once",
+        r"(Blue|Red) \d-\d respawned in plane 1[2-9] at its original spawn, x ",
+        forbid=NET_BAD,
+    )
+    points = spawn_points(log, r"respawned in plane \d+ at its original spawn")
+    if not points:
+        d.problem("no AI respawn's place in the server log")
+    for x, z, x0, x1, z0, z1 in points:
+        if not (x0 <= x <= x1 and z0 <= z <= z1):
+            d.problem(f"an AI respawn at x {x} nm, z {z} nm is off the map")
+    # The bots hear each respawn's new plane.
+    respawned = set(re.findall(r"respawned in plane (\d+) ", log))
+    heard = set(re.findall(r"^Blue: spawned plane (\d+) in ", blue.text(), re.M))
+    if respawned - heard:
+        d.problem(f"Blue was not told of AI respawns {sorted(respawned - heard)}")
+    for bot in (blue, red):
+        bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
+def drive_revive_150(d: Drive) -> None:
+    """A revival 150 nm from the battle (the lobby pass's slice R1): the guide's mission over Ukraine (208 by 200
+    cells, about 278 by 267 nm, the battle near its middle) with `revive-distance 150`; a bot ejects 8 seconds in and
+    flies again. The revival point would lie past the map's edge, so it is walked back towards the battle onto the
+    map: the server's log puts the new plane on the map's usable part, at its edge."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(), respawn="revive", revive_distance=150, ai_respawn="off")
+    bot = start_bots(d, port, "bot", 40, "--callsign", "Phoenix", "--revive", "8")
+    bot.finish(90, 0)
+    server.finish(40, 0)
+    for problem in revive_problems(bot.text(), "Phoenix", 12):
+        d.problem(problem)
+    bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+    log = server_log(d)
+    log_must(d, log, r"Phoenix took plane 12\b", r"Phoenix flies again in plane 12, x ", forbid=NET_BAD)
+    points = spawn_points(log, r"Phoenix flies again in plane 12")
+    if not points:
+        d.problem("the revival's place is not in the server log")
+    for x, z, x0, x1, z0, z1 in points:
+        if not (x0 <= x <= x1 and z0 <= z <= z1):
+            d.problem(f"the revival at x {x} nm, z {z} nm is off the map")
+        elif min(x - x0, x1 - x, z - z0, z1 - z) > 0.1:
+            d.problem(f"the revival at x {x} nm, z {z} nm is not at the map's edge: 150 nm did not reach it")
+
+
 def drive_replies(d: Drive) -> None:
     """Orders to human wingmen and their replies (slice F2-R): two bots in the first friendly wing of the guide's
     mission, the AI on weapons hold. The lead bot (plane 0) orders "break left" and, later, presses a reply key, which
@@ -2093,6 +2174,18 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-revive", lane="net", args=[], driver=drive_revive, uses=("server", "bot"), timeout=200,
             notes="retail's revival: a bot ejects, flies again in a new plane of its wing (slice F2-V) and leaves",
+        ),
+        Scenario(
+            name="net-server-ai-respawn", lane="net", args=[], driver=drive_ai_respawn, uses=("server", "bot"),
+            timeout=420,
+            notes="PvP with the AI fighting, revival with no delay and one life: lost AI aircraft respawn at their "
+            "original spawn, the bots hear Spawned, and a lineage that loses its respawn stays down (lobby pass R1)",
+        ),
+        Scenario(
+            name="net-server-revive-150", lane="net", args=[], driver=drive_revive_150, uses=("server", "bot"),
+            timeout=200,
+            notes="`revive-distance 150` on the guide's mission: a bot ejects and flies again on the map's edge, the "
+            "revival point walked back onto the map (lobby pass R1)",
         ),
         Scenario(
             name="net-server-replies", lane="net", args=[], driver=drive_replies, uses=("server", "bot"), timeout=300,

@@ -1801,6 +1801,14 @@ removing it would need a new protocol version, so it waits for one.
 - **The journal** codes the command that revives a seat from a plane nobody
   holds (`MissionCommand::ReviveLost`) as mission command variant 5, after
   Revive's 4; no stream record, message or packet changed.
+- **AI respawn** (the lobby pass's slice R1, under protocol 20): the journal
+  codes `MissionCommand::Respawn { root, spawn }` as mission command variant
+  6 (the lineage's root plane, then the spawn as Revive codes it); the
+  revivals part gains the AI lineages (by root: respawns used, the loss tick,
+  whether the log was told) and every lineage's original spawn (position and
+  heading); the checkpoint's revival section gains each added plane's root.
+  Every connection is sent Spawned (message 30, unchanged) for an AI respawn
+  as for a revival.
 
 ## Limits of stage L
 
