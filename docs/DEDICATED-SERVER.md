@@ -179,18 +179,19 @@ or a delayed observer. Each value is one of the setting's words or a number:
 | `join-in-progress` | `on` | `off` refuses every seating once the mission has flown its first tick |
 | `visibility` | `local` | `local` answers the local network's search, `hidden` does not; a server lists itself on the Internet Lobby only with `broadcast on`, so `public` is refused |
 | `friendly-fire` | `on` | `off`: no round damages an aircraft of its shooter's side |
-| `lock-sides` | `off`, `on` | `on` keeps each player on the side of the first plane it flew in a mission |
+| `lock-sides` | `off`, `on` | PvP only. `on` keeps each player on the side of the first plane it flew in a mission; `balanced` (Autobalance, John 2026-10-09) has the host pick each player's side, refuses the players' own choice of side and keeps the sides fixed in flight (*in progress:* the file and the lobby take it and it refuses the side boxes; the host's seating rule is not built yet); `off` lets players change side |
 | `loadouts` | `own` | `any` allows the loadout page's Cheat loading |
 | `respawn` | `none`, `revive` | `none`, `ai-slot` or `revive` |
 | `lives` | `unlimited` | 0 to 10 or `unlimited` |
 | `revive-delay` | `0` | Minutes: 0 to 5 (`none` is 0) |
-| `revive-distance` | `10` | Nautical miles: 1, 5, 10, 20 or 40 |
+| `revive-distance` | `10` | Nautical miles: 1, 5, 10, 20 or 40 (retail's), or 50, 75, 100 or 150 (John, 2026-10-09) |
 | `revive-weapons` | `missiles` | `missiles`, `no-missiles`, `guns` or `half-guns` |
 | `fight` | `sides` | PvP only: `sides` or `free-for-all` |
 | `tally` | `kills` | PvP only: `kills`, `damage` or `ratio` |
 | `kill-limit` | `none`, `5` | PvP only: `none`, 1, 2, 3, 5, 7 or 10 |
 | `kill-owner` | `side` | PvP only: `total`, `side` or `player` |
 | `observer-delay` | `0` | PvP only, seconds: 0 (`none`), 10, 30 or 60 |
+| `ai-respawn` | `on` | `off` or `on`: whether a lost AI aircraft comes back under the revival rules (`lives` and `revive-delay`), at its flight's original spawn point. No effect while `respawn` is `none` (John, 2026-10-09; *in progress:* the setting is read and shown, the respawn itself is not built yet) |
 | `idle-ai` | `5` | Minutes a player's game is away before the AI flies its aircraft: `never`, 1, 2, 5 or 10 (written in minutes, as `time-limit` is; John, 2026-10-06, slice F2-O4) |
 
 The player limit, the password and the time limit are the settings

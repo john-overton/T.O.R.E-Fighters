@@ -127,8 +127,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// 19 since the VTOL overhaul: the exact flight state's powered-lift state
 /// (body rates, rotors and engines, stability level and trim, warning
 /// timers, the corridor hold), the powered-lift command 27 with its
-/// sub-codes, and switch 11, hover hold.
-pub const PROTOCOL_VERSION: u16 = 19;
+/// sub-codes, and switch 11, hover hold, 20 since the lobby pass: the slot
+/// request's side (value 3, `SlotRequest::Side`), setting 7's `balanced`,
+/// setting 12's 50 to 150 nautical miles and setting 23, AI respawn, in the
+/// lobby state's list (slice W0).
+pub const PROTOCOL_VERSION: u16 = 20;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

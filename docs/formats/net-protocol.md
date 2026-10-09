@@ -584,7 +584,7 @@ The lobby's messages, protocol 3 ([the lobby](../ARCHITECTURE.md#the-lobby)):
 
 | Kind | Direction | Body |
 | --- | --- | --- |
-| Slot | client to host | The mission's number, and take a plane's slot, take the first free one, or leave it |
+| Slot | client to host | The mission's number, and take a plane's slot, take the first free one, leave it, or (protocol 20) take the first free one on a side |
 | Loadout | client to host | The mission's number, the slot's plane, and the loadout for it or none (the standard load) |
 | Set ready | client to host | The mission's number, and ready or not |
 | Change mission | client to host, the King | The new `MissionSpec` text |
@@ -1352,7 +1352,9 @@ host left the game (4); the King's End mission is reason 3.
 - **Take plane** is the number (varint), then a presence bit and the plane
   (varint).
 - **Slot** is the number, then 2 bits (0 take, then the plane as a varint;
-  1 the first free; 2 leave). **Loadout** is the number, the plane (varints),
+  1 the first free; 2 leave; since protocol 20, 3 a side's first free slot,
+  then the side as one bit, 0 Bluefor, the friendly side, 1 Redfor; see
+  [side requests](#side-requests)). **Loadout** is the number, the plane (varints),
   a presence bit and the loadout as Seated codes one. **Set ready** is the
   number and a bit. **Change mission** is a long string. **Start** and
   **End mission** are empty. **Kick** is the player's id (8 bits) and the
@@ -1637,12 +1639,12 @@ value's coding. The names are the configuration file's and the logs'.
 | 4 | `visibility` | 0 hidden, 1 local, 2 public (a game a player hosts; a dedicated server refuses it) |
 | 5 | `password` | 0 none, 1 set (in the lobby state only; Settings carries the text) |
 | 6 | `friendly-fire` | 0 off, 1 on |
-| 7 | `lock-sides` | 0 off, 1 on |
+| 7 | `lock-sides` | 0 off, 1 on (locked once flown), 2 balanced (the host picks the sides; protocol 20). PvP only since protocol 20 |
 | 8 | `loadouts` | 0 own, 1 any |
 | 9 | `respawn` | 0 none, 1 AI slot, 2 revive |
 | 10 | `lives` | 0 to 10, 255 unlimited |
 | 11 | `revive-delay` | seconds: 0, 60, 120, 180, 240 or 300 |
-| 12 | `revive-distance` | nautical miles: 1, 5, 10, 20 or 40 |
+| 12 | `revive-distance` | nautical miles: 1, 5, 10, 20, 40, 50, 75, 100 or 150 (50 to 150 since protocol 20; John, 2026-10-09) |
 | 13 | `revive-weapons` | 0 missiles, 1 no missiles, 2 guns, 3 half guns |
 | 14 | `fight` | 0 sides, 1 free for all |
 | 15 | `tally` | 0 kills, 1 damage, 2 ratio |
@@ -1654,8 +1656,40 @@ value's coding. The names are the configuration file's and the logs'.
 | 21 | `host` | 0 calculated, or 1 plus the lobby id of the player the King pinned (stage K, [designed](#host-migration-and-rejoin-stage-k)) |
 | 22 | `snapshot-rate` | snapshots a second: 60, 30 or 20 from the King of a game a player hosts (default 60); a dedicated server's file may give 10, 12, 15, 20, 24, 30, 40 or 60, which the lobby state carries as given and the King may not change (slice R1, protocol 17: [what the rate sets](#connecting)) |
 
+| 23 | `ai-respawn` | 0 off, 1 on (default on in both modes): a lost AI aircraft respawns under the revival rules; no effect while `respawn` is none (protocol 20; John, 2026-10-09; the respawn itself is the lobby pass's slice R1) |
+
 A number the host does not know, or a value outside its list, is refused with
-the setting's name and its values.
+the setting's name and its values. A setting marked PvP only is refused in
+co-op with "`name` applies only in PvP."
+
+### Side requests
+
+*Built (the lobby pass, slice W0), protocol 20; agent decisions unless
+credited.* A PvP lobby's Bluefor and Redfor boxes (John, 2026-10-09) send a
+Slot with request 3 and the side. A player's side is the side of the slot it
+holds; one with no slot has none, so the lobby state's slots say every
+player's side and no new message carries it.
+
+- **The slot.** The host gives the side's first free slot in plane order,
+  its first wing's lead first, so the first humans on a side lead its
+  flights. A slot is free when no other player holds it and the King's lock
+  allows this player (a slot kept for the player is free to it alone); while
+  the mission flies it must also be flown by the AI for nobody. A request for
+  the side the player holds already keeps its slot.
+- **Leave** frees the slot and with it the side.
+
+Refusals are Refused (kind 20). The refusals every slot request shares (a
+player flying, a player whose game cannot play the mission, an old mission
+number) come first, as before; then, in this order:
+
+| When | Words |
+| --- | --- |
+| A co-op game | "Sides are chosen only in a PvP game." |
+| `lock-sides balanced` | "Autobalance picks the sides." |
+| The player holds a slot on the other side | "Leave Bluefor first." or "Leave Redfor first." (it leaves, then joins: John's D3) |
+| The side has no slots players may take | "Redfor has no slots players may take." |
+| In flight, with the side fixed by lock sides | "Sides are locked until the mission ends." |
+| The side has no free slot | "Bluefor is full." or "Redfor is full." |
 
 ## Compatibility (stage L)
 
@@ -2255,8 +2289,10 @@ again with an observer; the capture format did not change for it.
   27, the loadout's tank list, and the exact flight state's powered-lift
   controls, 19 since the VTOL overhaul's foundations: the exact flight
   state's powered-lift state, the powered-lift command 27 and its sub-codes,
-  hover hold as switch 11, and the aircraft record's rotor group; 11 was
-  never used).
+  hover hold as switch 11, and the aircraft record's rotor group, 20 since
+  the lobby pass: the Slot request's [side](#side-requests), setting 7's
+  `balanced`, setting 12's 50 to 150 nautical miles and setting 23,
+  `ai-respawn`, in the lobby state's list, W0; 11 was never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

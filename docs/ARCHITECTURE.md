@@ -5837,12 +5837,12 @@ choices below are fitted to retail's ranges ([numbers](spec/multiplayer.md#numbe
 | 4 | `visibility` | `hidden` (join by address only), `local` (answer the local network's search), `public` (also listed on the Internet Lobby; a game a player hosts only, built in F2-1) | local | local | Any time |
 | 5 | `password` | set or not (the text travels only in the King's request, never in the lobby state) | not set | not set | Any time; applies to the next joins |
 | 6 | `friendly-fire` | `off`, `on` | on | on | In the lobby |
-| 7 | `lock-sides` | `off`, `on` | off | on | In the lobby |
+| 7 | `lock-sides` | `off`, `on` (locked once flown), `balanced` (the host picks the sides, Autobalance; the lobby pass, John 2026-10-09); PvP only since the lobby pass | off | on | In the lobby |
 | 8 | `loadouts` | `own` (what each aircraft really carries), `any` (any store on any station, the loadout page's Cheat) | own | own | In the lobby |
 | 9 | `respawn` | `none`, `ai-slot` (take a free AI aircraft of one's side), `revive` (retail's revival: a new aircraft out of the battle) | none | revive | In the lobby |
 | 10 | `lives` | 0 to 10, `unlimited` | unlimited | unlimited | In the lobby |
 | 11 | `revive-delay` | 0 to 5 minutes, whole minutes | 0 | 0 | In the lobby |
-| 12 | `revive-distance` | 1, 5, 10, 20 or 40 nautical miles | 10 | 10 | In the lobby |
+| 12 | `revive-distance` | 1, 5, 10, 20 or 40 nautical miles (retail's), 50, 75, 100 or 150 (John, 2026-10-09) | 10 | 10 | In the lobby |
 | 13 | `revive-weapons` | `missiles`, `no-missiles` (keeps air-to-ground missiles), `guns`, `half-guns` | missiles | missiles | In the lobby |
 | 14 | `fight` | `sides`, `free-for-all` | sides | sides | In the lobby |
 | 15 | `tally` | `kills`, `damage`, `ratio` | kills | kills | In the lobby |
@@ -5852,6 +5852,7 @@ choices below are fitted to retail's ranges ([numbers](spec/multiplayer.md#numbe
 | 19 | `observer-delay` | 0, 10, 30 or 60 seconds; PvP only | 0 | 0 | In the lobby |
 | 20 | `idle-ai` | `never`, 1, 2, 5 or 10 minutes away (60, 120, 300 or 600 seconds on the wire) | 5 minutes | 5 minutes | Any time |
 | 22 | `snapshot-rate` | 60, 30 or 20 snapshots a second (a dedicated server's file may give any rate that divides 120); a game a player hosts only (slice R1, John, 2026-10-06) | 60 | 60 | In the lobby |
+| 23 | `ai-respawn` | `off`, `on`: a lost AI aircraft respawns under the revival rules; no effect, and greyed, while `respawn` is `none` (the lobby pass, John 2026-10-09) | on | on | In the lobby |
 
 - **Changing the mode** sets every other setting to the new mode's defaults,
   as the creator's own choices reset what depends on them; the King then
@@ -5860,7 +5861,7 @@ choices below are fitted to retail's ranges ([numbers](spec/multiplayer.md#numbe
   progress, visibility, password, idle aircraft) belong to the game and are
   kept, as are the name and the password (`settings::Store::apply`), and, an
   agent decision of slice R1, the snapshot rate, which belongs to the game
-  (and, on a dedicated server, to its file). Settings 14 to 19 are greyed in co-op except the time limit, which
+  (and, on a dedicated server, to its file). Setting 7 and settings 14 to 19 are greyed in co-op except the time limit, which
   ends a co-op mission too (the dedicated server's `time-limit` is this
   setting).
 - **A change in the lobby** that alters what players chose (mode, lock

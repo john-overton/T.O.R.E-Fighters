@@ -50,6 +50,8 @@ const PIN_IN_FLIGHT: &str = "A pin made in flight applies when the lobby returns
 /// Why a dedicated server's snapshot rate row is greyed (slice R1): its
 /// operator sets it in the configuration file.
 const RATE_IS_THE_SERVERS: &str = "This server's snapshot rate is set by its operator.";
+/// Why the AI respawn row is greyed: with revival `none` nothing comes back.
+pub const AI_RESPAWN_NEEDS_REVIVAL: &str = "With Revival none, no aircraft comes back.";
 /// The most bytes of a game's name (the host's rule).
 const NAME_BYTES: usize = 64;
 
@@ -207,6 +209,7 @@ pub fn page_rows(page: Page) -> Vec<Kind> {
             Kind::Setting(number::REVIVE_DELAY),
             Kind::Setting(number::REVIVE_DISTANCE),
             Kind::Setting(number::REVIVE_WEAPONS),
+            Kind::Setting(number::AI_RESPAWN),
         ],
         Page::Scoring => vec![
             Kind::Setting(number::FIGHT),
@@ -254,6 +257,7 @@ pub fn row_label(kind: Kind) -> &'static str {
             number::OBSERVER_DELAY => "Observer delay",
             number::IDLE_AI => "AI flies idle aircraft after",
             number::SNAPSHOT_RATE => "Snapshot rate",
+            number::AI_RESPAWN => "AI respawn",
             _ => "",
         },
     }
@@ -391,6 +395,13 @@ pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
     }
     if kind == Kind::Setting(number::SNAPSHOT_RATE) && !ctx.hosted_by_a_player() {
         return Err(RATE_IS_THE_SERVERS.into());
+    }
+    // AI respawn follows the revival rule: greyed while nothing revives
+    // (John, 2026-10-09).
+    if kind == Kind::Setting(number::AI_RESPAWN)
+        && ctx.value(number::RESPAWN) == Some(settings::Respawn::None.value())
+    {
+        return Err(AI_RESPAWN_NEEDS_REVIVAL.into());
     }
     Ok(())
 }

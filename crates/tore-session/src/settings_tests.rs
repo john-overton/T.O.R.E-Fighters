@@ -4,14 +4,14 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn the_registry_is_numbered_one_to_twenty_two_in_order_with_unique_names() {
+fn the_registry_is_numbered_one_to_twenty_three_in_order_with_unique_names() {
     for (index, setting) in REGISTRY.iter().enumerate() {
         assert_eq!(usize::from(setting.number), index + 1, "{}", setting.name);
         assert_eq!(super::setting(setting.number), Some(setting));
         assert_eq!(by_name(setting.name), Some(setting));
     }
     assert_eq!(super::setting(0), None);
-    assert_eq!(super::setting(23), None);
+    assert_eq!(super::setting(24), None);
     assert_eq!(by_name("cheats"), None);
 }
 
@@ -114,14 +114,14 @@ fn the_registry_refuses_with_the_setting_and_its_values() {
     assert_eq!(refusal(number::MODE, 1), None);
     assert_eq!(
         refusal(number::REVIVE_DISTANCE, 15).as_deref(),
-        Some("revive-distance is 1 nm, 5 nm, 10 nm, 20 nm or 40 nm.")
+        Some("revive-distance is 1 nm, 5 nm, 10 nm, 20 nm, 40 nm, 50 nm, 75 nm, 100 nm or 150 nm.")
     );
     assert_eq!(
         refusal(number::MAX_PLAYERS, 0).as_deref(),
         Some("max-players is 1 to 30.")
     );
     assert_eq!(refusal(0, 0).as_deref(), Some("There is no setting 0."));
-    assert_eq!(refusal(23, 0).as_deref(), Some("There is no setting 23."));
+    assert_eq!(refusal(24, 0).as_deref(), Some("There is no setting 24."));
     assert!(refusal(number::PASSWORD, 1).is_some());
     // Public is the registry's since stage I lists games; whether a host can
     // list is the host's question (slice F2-1).
@@ -312,10 +312,9 @@ fn the_store_applies_the_rate_and_a_new_mode_keeps_it() {
     // A refused list changes nothing.
     assert!(store.apply(&[(number::SNAPSHOT_RATE, 40)]).is_err());
     assert_eq!(store.snapshot_rate(), 30);
-    assert_eq!(
-        store.lobby_list().last(),
-        Some(&(number::SNAPSHOT_RATE, 30)),
-        "in the lobby state, last by number"
+    assert!(
+        store.lobby_list().contains(&(number::SNAPSHOT_RATE, 30)),
+        "in the lobby state"
     );
 }
 
@@ -341,4 +340,108 @@ fn a_configurations_rate_is_kept_as_given_past_the_kings_list() {
             .unwrap_err()
             .contains("its own field")
     );
+}
+
+/// The lobby pass (slice W0): setting 7 is "Sides", free, locked once flown
+/// or balanced by the host, and PvP's alone.
+#[test]
+fn setting_7_is_free_locked_or_balanced_and_applies_only_in_pvp() {
+    let sides = super::setting(number::LOCK_SIDES).unwrap();
+    assert_eq!(sides.name, "lock-sides", "the file's word stays");
+    assert!(sides.pvp_only);
+    assert_eq!(sides.change, Change::InLobby);
+    assert_eq!(sides.values_text(), "off, on or balanced");
+    assert_eq!(sides.parse("balanced"), Some(2));
+    assert_eq!(sides.parse("3"), None);
+    assert_eq!((sides.coop, sides.pvp), (0, 1));
+    for value in [Sides::Free, Sides::Locked, Sides::Balanced] {
+        assert_eq!(Sides::from_value(value.value()), Some(value));
+    }
+    assert_eq!(Sides::from_value(3), None);
+
+    let mut store = Store::defaults(Mode::Pvp);
+    assert_eq!(store.sides(), Sides::Locked);
+    assert!(store.lock_sides() && !store.balanced());
+    store.apply(&[(number::LOCK_SIDES, 2)]).unwrap();
+    assert_eq!(store.sides(), Sides::Balanced);
+    assert!(store.lock_sides(), "balanced sides stay fixed in flight");
+    assert!(store.balanced());
+    assert_eq!(words(&[(number::LOCK_SIDES, 2)]), "lock-sides balanced");
+    store.apply(&[(number::LOCK_SIDES, 0)]).unwrap();
+    assert_eq!(store.sides(), Sides::Free);
+    assert!(!store.lock_sides());
+    // A new mode resets it with the other lobby settings.
+    store.apply(&[(number::LOCK_SIDES, 2)]).unwrap();
+    store.apply(&[(number::MODE, 0)]).unwrap();
+    assert_eq!(store.get(number::LOCK_SIDES), Some(0));
+    assert_eq!(store.sides(), Sides::Free, "co-op's sides are never chosen");
+    store.apply(&[(number::MODE, 1)]).unwrap();
+    assert_eq!(store.sides(), Sides::Locked, "PvP's default");
+}
+
+/// The lobby pass (slice W0; John, 2026-10-09): revival reaches 150 nm.
+#[test]
+fn the_revival_distance_reaches_150_nm_and_defaults_to_10() {
+    let distance = by_name("revive-distance").unwrap();
+    assert_eq!(REVIVE_DISTANCES, [1, 5, 10, 20, 40, 50, 75, 100, 150]);
+    for value in REVIVE_DISTANCES {
+        assert!(distance.allows(value), "{value}");
+        assert_eq!(distance.parse(&value.to_string()), Some(value));
+    }
+    for value in [0, 2, 30, 60, 125, 200, 300] {
+        assert!(!distance.allows(value), "{value}");
+    }
+    assert_eq!(distance.text(150), "150 nm");
+    assert_eq!((distance.coop, distance.pvp), (10, 10));
+    assert!(!distance.pvp_only);
+    let mut store = Store::defaults(Mode::Pvp);
+    store.apply(&[(number::REVIVE_DISTANCE, 75)]).unwrap();
+    assert_eq!(store.revive_distance_nm(), 75);
+}
+
+/// The lobby pass (slice W0; John, 2026-10-09): setting 23, AI respawn, on
+/// by default in both modes and of no effect while respawn is none.
+#[test]
+fn setting_23_ai_respawn_is_on_by_default_and_needs_a_respawn_rule() {
+    let ai = super::setting(number::AI_RESPAWN).unwrap();
+    assert_eq!(ai.number, 23);
+    assert_eq!(ai.name, "ai-respawn");
+    assert_eq!((ai.coop, ai.pvp), (1, 1));
+    assert_eq!(ai.change, Change::InLobby);
+    assert!(!ai.pvp_only);
+    assert_eq!(ai.values_text(), "off or on");
+    assert_eq!(
+        REGISTRY.last().map(|s| s.number),
+        Some(number::AI_RESPAWN),
+        "last by number"
+    );
+
+    // Co-op's respawn is none: the setting is on, but nothing respawns.
+    let mut coop = Store::defaults(Mode::Coop);
+    assert_eq!(coop.get(number::AI_RESPAWN), Some(1));
+    assert!(!coop.ai_respawn());
+    coop.apply(&[(number::RESPAWN, Respawn::Revive.value())])
+        .unwrap();
+    assert!(coop.ai_respawn());
+    // PvP revives by default, so the AI respawns.
+    let mut pvp = Store::defaults(Mode::Pvp);
+    assert!(pvp.ai_respawn());
+    pvp.apply(&[(number::AI_RESPAWN, 0)]).unwrap();
+    assert!(!pvp.ai_respawn());
+    assert_eq!(pvp.respawn(), Respawn::Revive, "players still revive");
+    pvp.apply(&[(number::AI_RESPAWN, 1), (number::RESPAWN, 1)])
+        .unwrap();
+    assert!(pvp.ai_respawn(), "under ai-slot too");
+    // A new mode resets it.
+    pvp.apply(&[(number::AI_RESPAWN, 0)]).unwrap();
+    pvp.apply(&[(number::MODE, 0)]).unwrap();
+    assert_eq!(pvp.get(number::AI_RESPAWN), Some(1));
+    assert!(pvp.lobby_list().contains(&(number::AI_RESPAWN, 1)));
+}
+
+#[test]
+fn the_sides_are_called_bluefor_and_redfor() {
+    use tore_sim::ai::launch::Side;
+    assert_eq!(side_name(Side::Friendly), "Bluefor");
+    assert_eq!(side_name(Side::Enemy), "Redfor");
 }

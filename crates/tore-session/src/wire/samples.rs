@@ -701,6 +701,15 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             mission: 7,
             request: SlotRequest::Leave,
         }),
+        // The lobby pass (protocol 20): a side's first free slot.
+        Message::Slot(Slot {
+            mission: 7,
+            request: SlotRequest::Side(Side::Friendly),
+        }),
+        Message::Slot(Slot {
+            mission: 7,
+            request: SlotRequest::Side(Side::Enemy),
+        }),
         Message::Loadout(Box::new(Loadout {
             mission: 7,
             plane: 2,

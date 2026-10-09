@@ -228,6 +228,10 @@ pub enum SlotRequest {
     Any,
     /// Hold none.
     Leave,
+    /// Hold the first free slot on this side, in plane order: its first
+    /// wing's lead first (the lobby pass, slice W0: the Bluefor and Redfor
+    /// boxes). The 2-bit request's value 3, then the side as one bit.
+    Side(Side),
 }
 
 /// A player's slot request (client to host).
@@ -2522,6 +2526,10 @@ impl Message {
                     SlotRequest::Leave => {
                         let _ = w.write_bits(2, 2);
                     }
+                    SlotRequest::Side(side) => {
+                        let _ = w.write_bits(3, 2);
+                        w.write_bool(side == Side::Enemy);
+                    }
                 }
             }
             Self::Loadout(load) => {
@@ -2735,7 +2743,11 @@ impl Message {
                     0 => SlotRequest::Take(read_u32(r)?),
                     1 => SlotRequest::Any,
                     2 => SlotRequest::Leave,
-                    _ => return Err(WireError::Invalid("slot request")),
+                    _ => SlotRequest::Side(if r.read_bool()? {
+                        Side::Enemy
+                    } else {
+                        Side::Friendly
+                    }),
                 };
                 Self::Slot(Slot { mission, request })
             }

@@ -283,6 +283,7 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
         (number::KILL_OWNER, 2),
         (number::OBSERVER_DELAY, 60),
         (number::IDLE_AI, 120),
+        (number::AI_RESPAWN, 0),
     ];
     let number_before = rig.host.mission_number();
     rig.client(king).change_settings(SettingsChange {
@@ -1039,3 +1040,7 @@ fn a_dedicated_servers_rate_is_its_files_and_the_king_may_not_turn_it() {
     rig.change(viper, &[(number::MODE, Mode::Pvp.value())]);
     assert_eq!(rig.host.snapshot_rate(), 24);
 }
+
+// The lobby pass's side requests (slice W0) drive this file's rig.
+#[path = "sides_tests.rs"]
+mod sides_tests;

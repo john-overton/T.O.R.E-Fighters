@@ -60,6 +60,7 @@ mod observe_tests;
 mod results;
 mod revive;
 mod score;
+mod sides;
 mod sorting;
 #[cfg(test)]
 mod tests;
@@ -2067,6 +2068,8 @@ impl Host {
                 }
                 Some(PlaneId(plane))
             }
+            // The lobby pass (slice W0): a side's first free slot.
+            SlotRequest::Side(side) => Some(self.side_slot(connection, side, held)?),
             SlotRequest::Any => match held {
                 Some(plane) => Some(plane),
                 None => Some(
