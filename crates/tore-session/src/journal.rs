@@ -371,6 +371,10 @@ fn write_seat_input(
         pilot,
         trigger,
         sensors,
+        // Coded with the wire's Inputs section in protocol 21 (plan slice
+        // S4); until then a standby replays no gunsight slew.
+        sight: _,
+        sight_zoom: _,
         commands,
         view,
     } = input;
@@ -544,6 +548,8 @@ fn read_seat_input(
         pilot,
         trigger,
         sensors,
+        sight: [0; 2],
+        sight_zoom: 0,
         commands,
         view,
     };

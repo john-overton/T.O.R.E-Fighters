@@ -43,10 +43,13 @@ recreates initial membership and neutral mount angles.
 
 ## Tracking and fitted limits
 
-Only the pilot's designated, currently observed target is tracked. Lost,
-cleared or destroyed targets block firing. The code does not select a replacement.
-Aiming uses that observation's position and velocity through the shared gun
-ballistics solver, including its own weapon speed, drop and available life.
+The guns train on the gunsight's aim point (below) every tick, in every sight
+mode, with or without a target. A tracked object is aimed at with its true
+position and velocity through the shared gun ballistics solver, including the
+weapon's own speed, drop and available life; a pinned or free-slew ground point
+is aimed at the same way with no velocity. When the solver finds no solution
+(the point is beyond the rounds' reach) the guns still point along the plain
+line to the aim point and report MAX RANGE. Firing still needs READY.
 The launch direction follows the actual slewed mount. Projectile dispersion
 retains the existing fitted 0.25-degree cone. Gun firing range is 0 through 13,000 feet for all three installed records,
 using each weapon's source range rather than its longer projectile life.
@@ -99,12 +102,68 @@ individual arc limits. Feedback is NO LINE OF FIRE. Geometry hinges and
 clearance are agent choices from the reviewed mesh, not original motion
 consumers.
 
+## The gunsight
+
+Opinionated (John, 2026-10-09) unless marked. The AC-130's camera line of sight
+is fixed-tick sim state, so single player, the multiplayer host and a restored
+checkpoint all hold the same sight. It has three modes:
+
+| Mode | Line of sight | Aim point |
+| --- | --- | --- |
+| Free slew | Body-relative heading and elevation the pilot slews | Where the line meets the ground; with no ground (sky), a point along it at the longest installed gun range (13,000 feet) |
+| Pinned | Toward a fixed world ground point; slewing moves the point | The pin |
+| Tracked | Toward an object, air or ground, at any range | The object, with lead |
+
+- **Default view**: free slew at heading -90 degrees (abeam left) and elevation
+  -25 degrees in the aircraft's own frame, zoom step 3. It is inside every
+  gun's arc and clear of the airframe at any bank. Mission start, restart and
+  respawn begin there; the guns start neutral and reach it in under a second.
+- **Slew**: the seat sends a normalized deflection (-127 to 127, x right, y up)
+  and its zoom step (1 to 6) with every tick's input; the host integrates the
+  look at 120 Hz. Full deflection turns 0.75 of the camera's vertical field of
+  view a second across the screen (the heading rate is divided by the cosine of
+  elevation, floored at a quarter): 22.5 degrees a second at step 1 down to
+  0.7 at step 6. Heading wraps through a full turn and elevation stops at
+  89 degrees up or down (fitted). The zoom ladder is 30 degrees tall at step 1
+  and halves each step (fitted, agent choice). Slewing while tracking does
+  nothing and raises a one-off "L to drop" notice.
+- **Backslash** (designate): the object nearest the line of sight within the
+  pipper circle's angular radius (9/114 of the vertical field, 0.6 degrees at
+  step 3), then the nearest, then the lowest id, is tracked; friendlies,
+  destroyed and terrain-masked objects are skipped (agent choice). With no such
+  object the ground under the crosshair is pinned. While tracking, Backslash
+  keeps the track.
+- **Shift+Backslash** (pin): the ground under the crosshair is pinned, also from
+  a track (under a ground target, behind an air target). With no ground on the
+  line of sight nothing changes and a one-off "no ground point" notice is
+  raised.
+- **L** (or `;`) drops a target or pin and slews freely from the current view.
+  With nothing held, L travels back to the default view at 22.5 degrees a
+  second, the fastest sight slew, whatever the zoom; it never snaps (John,
+  2026-10-09; the rate is an agent choice). A slew on the way takes over.
+- **Pod track**: on the AC-130, T, Shift+T, Enter and a scope click also start
+  a sight track, and the radar selection follows the sight (it is set when the
+  radar holds the object and cleared otherwise), so the HUD, the scope and the
+  guns never disagree. A track ends only on L, a new designation, or the
+  object's destruction or removal; the sight then pins the ground under its
+  line of sight, so the pilot sees the hit.
+- **Always-on Easy targeting**: the AC-130 has Easy targeting's effects
+  whatever the session cheat says, including in multiplayer with cheats off,
+  because the sight is the aircraft's sensor. Its target camera and HUD square
+  follow the sight's track, ground objects included. Other aircraft are
+  unchanged.
+- The line of sight meets the ground by marching in steps of half the height
+  above the ground (16 to 1,000 feet) out to 40 nmi, then halving the last
+  step twenty times (fitted). Terrain within 25 feet of a point does not mask
+  it, so a ground point is not masked by the ground it lies on (fitted).
+
 ## Feedback and shared state
 
 The input page exposes the two group actions with AC-130 applicability. A group
 label shows each included cannon and the current candidate. Weapon readiness
-reports NO TARGET, TARGET DESTROYED, CANNOT BEAR, SLEWING, NO LINE OF FIRE, EMPTY
-or GROUP EMPTY as applicable. The selected candidate's blocking reason remains
+reports NO TARGET, CANNOT BEAR, SLEWING, MAX RANGE, MIN RANGE, NO LINE OF FIRE
+(the gun's own airframe), TERRAIN MASK (terrain between muzzle and aim point),
+EMPTY or GROUP EMPTY as applicable. The selected candidate's blocking reason remains
 visible even when another group member is ready; ready members remain operational
 independently.
 

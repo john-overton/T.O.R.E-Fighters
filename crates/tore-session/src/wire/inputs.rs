@@ -164,6 +164,10 @@ impl InputFrame {
             pilot,
             trigger: self.trigger,
             sensors: self.sensors,
+            // The gunsight slew and zoom join the frame in protocol 21
+            // (plan slice S4); until then a remote seat sends none.
+            sight: [0; 2],
+            sight_zoom: 0,
             commands: seat_commands,
             view,
         }
@@ -1011,6 +1015,8 @@ const TARGET_DISTANCE: u64 = 24;
 const DESIGNATE_TARGET: u64 = 25;
 const NEXT_GUN_GROUP: u64 = 26;
 const TOGGLE_GUN_GROUP: u64 = 27;
+const SIGHT_DESIGNATE: u64 = 28;
+const SIGHT_PIN_GROUND: u64 = 29;
 
 /// A combat command's code, exhaustively, so a new command cannot go
 /// uncoded.
@@ -1045,6 +1051,8 @@ fn live_code(command: live::Command) -> u64 {
         C::DesignateTarget(_) => DESIGNATE_TARGET,
         C::NextGunGroup => NEXT_GUN_GROUP,
         C::ToggleGunGroup => TOGGLE_GUN_GROUP,
+        C::SightDesignate => SIGHT_DESIGNATE,
+        C::SightPinGround => SIGHT_PIN_GROUND,
     }
 }
 
@@ -1067,6 +1075,8 @@ fn read_live(r: &mut BitReader<'_>) -> WireResult<live::Command> {
         DESIGNATE_TARGET => live::Command::DesignateTarget(read_u32(r)?),
         NEXT_GUN_GROUP => live::Command::NextGunGroup,
         TOGGLE_GUN_GROUP => live::Command::ToggleGunGroup,
+        SIGHT_DESIGNATE => live::Command::SightDesignate,
+        SIGHT_PIN_GROUND => live::Command::SightPinGround,
         code => *LIVE
             .get(code as usize)
             .ok_or(WireError::Invalid("combat command"))?,

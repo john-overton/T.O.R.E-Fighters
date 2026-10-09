@@ -1711,6 +1711,8 @@ fn journal_input(seat: u8, tick: u64, pitch: f64, commands: Vec<SeatCommand>) ->
         },
         trigger: seat == 1,
         sensors: Controls::default(),
+        sight: [0; 2],
+        sight_zoom: 0,
         commands,
         view: Some(tore_world::seats::SeatView {
             tick: tick - 12,

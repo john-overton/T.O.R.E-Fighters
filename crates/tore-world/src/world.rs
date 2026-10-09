@@ -804,6 +804,9 @@ impl World {
                 .trigger(cockpit.plane.0)
                 .controller
                 .space(input.trigger, false, false);
+            self.combat
+                .state
+                .set_sight_input(cockpit.plane.0, input.sight, input.sight_zoom);
         }
         if self.combat.recording_tape()
             && let Some(own) = self.cockpits.first()

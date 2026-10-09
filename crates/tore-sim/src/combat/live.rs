@@ -107,7 +107,10 @@ pub enum Readiness {
     GunArc,
     GunSlewing,
     GroupEmpty,
+    /// The gun's own airframe (wing, nacelles, skin) is in the line of fire.
     GunObscured,
+    /// Terrain lies between a gun's muzzle and its aim point (AC-130).
+    TerrainMask,
 }
 impl Readiness {
     pub fn label(self) -> &'static str {
@@ -136,6 +139,7 @@ impl Readiness {
             Self::GunSlewing => "SLEWING",
             Self::GroupEmpty => "GROUP EMPTY",
             Self::GunObscured => "NO LINE OF FIRE",
+            Self::TerrainMask => "TERRAIN MASK",
         }
     }
 }
@@ -166,6 +170,11 @@ pub enum Command {
     /// Persistent selection of one current contact by its stable identity.
     DesignateTarget(u32),
     ClearDesignation,
+    /// Backslash on the AC-130: track the object under the gunsight's
+    /// crosshair, else pin the ground there. Nothing on other aircraft.
+    SightDesignate,
+    /// Shift+Backslash on the AC-130: pin the ground under the crosshair.
+    SightPinGround,
     ToggleArm,
     Jettison,
     ReplaceTarget,
@@ -1386,6 +1395,49 @@ fn owner_ownship(ships: &[Ownship], owner: u32) -> Option<&Ownship> {
         .or(ships.first())
 }
 /// The rows of the other ownships, as seen from the ownship at `index`.
+/// The AC-130's gunsight and guns for one tick: the sight moves and finds
+/// its aim point among every target and the other ownships' aircraft, then
+/// the guns train on it. The radar selection follows the sight's track, so
+/// the HUD, the scope and the guns never disagree.
+fn step_gunship(
+    own: &mut Ownship,
+    index: usize,
+    launcher: Launcher,
+    targets: &[Target],
+    rows: &[OwnRow],
+    ground: &impl Fn(f64, f64) -> f64,
+    tick: u64,
+) {
+    let Some(group) = own.gunship.as_mut() else {
+        return;
+    };
+    let objects: Vec<super::gunship::SightObject> = targets
+        .iter()
+        .chain(peers(rows, index))
+        .map(|t| super::gunship::SightObject {
+            id: t.id,
+            position: t.position,
+            velocity: t.velocity,
+            alive: t.hp > 0,
+            friendly: own.friendlies.contains(&t.id),
+        })
+        .collect();
+    let before = group.target();
+    let aim = group.step_sight(&own.config, launcher, &objects, ground, tick);
+    group.update(&own.config, launcher, Some(aim), |from, to| {
+        terrain_hit(from, to, ground).is_none()
+    });
+    // Hook for the pipper (plan slice S2): evaluate each linked gun's impact
+    // here, after the guns moved, from `aim` and the actual train.
+    let after = group.target();
+    if after != before {
+        match after {
+            Some(id) if own.sensors.designate(id) => {}
+            _ => own.sensors.clear_selection(),
+        }
+        own.hud_selection = own.designated();
+    }
+}
 fn peers(rows: &[OwnRow], index: usize) -> impl Iterator<Item = &Target> + Clone {
     rows.iter()
         .filter(move |r| r.index != index)
@@ -1817,6 +1869,19 @@ impl Ownship {
         if self.designated().is_some() {
             self.launch_mode = LaunchMode::Cued;
         }
+        self.sight_follows_designation();
+    }
+    /// On the AC-130 a radar or visual designation (T, Enter, a scope click)
+    /// becomes the gunsight's track, which then outlives the radar contact.
+    fn sight_follows_designation(&mut self) {
+        if let (Some(group), Some(id)) = (&mut self.gunship, self.sensors.selected()) {
+            group.track(id);
+        }
+    }
+    /// The AC-130 behaves as if Easy targeting were always on: its sight is
+    /// an aircraft capability, not a cheat (John, 2026-10-09).
+    fn easy_targeting(&self, cheat: bool) -> bool {
+        cheat || self.gunship.is_some()
     }
 }
 /// One ownship read against the shared state: what its cockpit shows and
@@ -1850,6 +1915,12 @@ impl<'a> OwnshipView<'a> {
     /// The target the HUD square and target camera follow: the selection, or
     /// with Easy targeting the last selection after the sensors lose it.
     pub fn display_target(&self) -> Option<&'a Target> {
+        // The AC-130's sight track, air or ground, at any range.
+        if let Some(group) = &self.own.gunship {
+            return self
+                .contact(group.target()?)
+                .filter(|target| target.body_present());
+        }
         let id = if self.state.cheats.easy_targeting {
             self.own.designated().or(self.own.hud_selection)
         } else {
@@ -2695,6 +2766,17 @@ impl State {
             own.designate_visual(launcher);
         }
     }
+    /// The seat's gunsight controls for the coming steps: slew deflection
+    /// (x right, y up, -127 to 127) and the zoom step (1 to 6, 0 for the
+    /// default). Held until set again; nothing without an AC-130 gun group.
+    pub fn set_sight_input(&mut self, aircraft: u32, deflection: [i8; 2], zoom: u8) {
+        if let Some(group) = self
+            .ownship_mut(aircraft)
+            .and_then(|own| own.gunship.as_mut())
+        {
+            group.input = super::gunship::SightInput { deflection, zoom };
+        }
+    }
     /// A manual range or cockpit command for one ownship.
     pub fn command(&mut self, aircraft: u32, command: Command, launcher: Launcher) {
         self.with_ownship(aircraft, |state, own| {
@@ -2896,6 +2978,7 @@ impl State {
                 if own.designated().is_some() {
                     own.launch_mode = LaunchMode::Cued;
                 }
+                own.sight_follows_designation();
             }
             Command::ClearDesignation => {
                 own.sensors.clear_selection();
@@ -2905,6 +2988,19 @@ impl State {
                 own.mounted = Seeker::default();
                 own.mounted_key = None;
                 own.release();
+                if let Some(group) = &mut own.gunship {
+                    group.drop_hold();
+                }
+            }
+            Command::SightDesignate => {
+                if let Some(group) = &mut own.gunship {
+                    group.request = Some(super::gunship::SightRequest::Designate);
+                }
+            }
+            Command::SightPinGround => {
+                if let Some(group) = &mut own.gunship {
+                    group.request = Some(super::gunship::SightRequest::Pin);
+                }
             }
             Command::ToggleArm => {
                 own.armed = !own.armed && !own.config.stations.is_empty();
@@ -3675,30 +3771,8 @@ impl State {
                 own.release();
                 continue;
             }
-            let designation = own
-                .designated()
-                .and_then(|id| own.sensors.observation(id).map(|contact| (id, contact)));
-            let absent = if designation.is_some_and(|(_, contact)| contact.destroyed) {
-                Readiness::TargetDestroyed
-            } else {
-                Readiness::NoTarget
-            };
-            let target =
-                designation
-                    .filter(|(_, contact)| !contact.destroyed)
-                    .map(|(id, contact)| {
-                        (
-                            id,
-                            super::gunsight::TargetObservation {
-                                position: contact.position,
-                                velocity: contact.velocity,
-                            },
-                        )
-                    });
-            if let Some(group) = &mut own.gunship {
-                group.update(&own.config, launcher, target, absent, |from, to| {
-                    !obscured(from, to)
-                });
+            if own.gunship.is_some() {
+                step_gunship(own, k, launcher, &self.targets, &rows, &ground, self.tick);
             }
             let selected = own.selected;
             let grouped = own

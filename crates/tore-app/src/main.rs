@@ -3836,6 +3836,10 @@ impl ApplicationHandler for App {
                                 // player controls, part of the tick's input so
                                 // a recording reproduces every change.
                                 sensors: self.instruments.controls(),
+                                // The AC-130 gunsight slew and zoom: plan
+                                // slice S5 fills them from the bound keys.
+                                sight: [0; 2],
+                                sight_zoom: 0,
                                 commands,
                                 // A local seat: no lag compensation.
                                 view: None,

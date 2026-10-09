@@ -461,9 +461,10 @@ fn readiness_code(r: Readiness) -> i64 {
         R::GunSlewing => 21,
         R::GroupEmpty => 22,
         R::GunObscured => 23,
+        R::TerrainMask => 24,
     }
 }
-const READINESS: [Readiness; 24] = [
+const READINESS: [Readiness; 25] = [
     Readiness::Ready,
     Readiness::Safe,
     Readiness::BayClosed,
@@ -488,6 +489,7 @@ const READINESS: [Readiness; 24] = [
     Readiness::GunSlewing,
     Readiness::GroupEmpty,
     Readiness::GunObscured,
+    Readiness::TerrainMask,
 ];
 
 fn status_code(s: seeker::Status) -> i64 {

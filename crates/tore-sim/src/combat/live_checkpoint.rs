@@ -60,20 +60,68 @@ crate::checkpoint_enum!(Readiness {
     GunSlewing = 21,
     GroupEmpty = 22,
     GunObscured = 23,
+    TerrainMask = 24,
 });
 
-// The AC-130's player-directed gun mounts: their actual slewed angles, the
-// linked membership, the aim point and each gun's readiness are stepped at
-// the fixed tick, so a restore carries them.
+// The AC-130's player-directed gun mounts and gunsight: the actual slewed
+// angles, the linked membership, the sight's mode, look angles and aim point,
+// the seat's held sight controls, a pending Backslash, the last notice and
+// each gun's readiness are stepped at the fixed tick, so a restore carries
+// them.
 type GunshipState = crate::combat::gunship::State;
 crate::checkpoint_struct!(GunshipState {
     stations,
     included,
     headings,
     elevations,
-    target,
+    sight,
+    look,
+    returning,
+    aim,
     status,
+    input,
+    slew_held,
+    request,
+    notice,
 });
+
+type Sight = crate::combat::gunship::Sight;
+impl Checkpoint for Sight {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        match self {
+            Self::Free => s.writer().write_varint(0),
+            Self::Pinned(point) => {
+                s.writer().write_varint(1);
+                point.save(s, None)?;
+            }
+            Self::Tracked(id) => {
+                s.writer().write_varint(2);
+                id.save(s, None)?;
+            }
+        }
+        Ok(())
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        Ok(match l.reader().read_varint()? {
+            0 => Self::Free,
+            1 => Self::Pinned(Checkpoint::load(l, None)?),
+            2 => Self::Tracked(Checkpoint::load(l, None)?),
+            other => return invalid(format!("a gunsight has no mode {other}")),
+        })
+    }
+}
+type SightInput = crate::combat::gunship::SightInput;
+crate::checkpoint_struct!(SightInput { deflection, zoom });
+crate::checkpoint_enum!(crate::combat::gunship::SightRequest {
+    Designate = 0,
+    Pin = 1,
+});
+crate::checkpoint_enum!(crate::combat::gunship::Notice {
+    NoGroundPoint = 0,
+    DropToSlew = 1,
+});
+type SightNotice = crate::combat::gunship::SightNotice;
+crate::checkpoint_struct!(SightNotice { notice, tick });
 
 crate::checkpoint_enum!(FriendlyFire { On = 0, Off = 1 });
 

@@ -387,6 +387,13 @@ pub struct SeatInput {
     /// The step sets them on the seat's flight before its commands, so a
     /// command given after a change sees it and the labels never lag.
     pub sensors: tore_sim::sensors::Controls,
+    /// The AC-130 gunsight slew: normalized deflection, x right and y up,
+    /// -127 to 127. The host integrates the look angles from it, so single
+    /// player and multiplayer run the same slew. Ignored on other aircraft.
+    pub sight: [i8; 2],
+    /// The AC-130 target camera's zoom step, 1 to 6 (0: the default step).
+    /// The host needs it for the slew rate and the Backslash pick radius.
+    pub sight_zoom: u8,
     /// Commands given since the last tick, applied in this order at its start.
     pub commands: Vec<SeatCommand>,
     /// What the seat's screen showed when this input was sampled, for lag

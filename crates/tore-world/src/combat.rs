@@ -2303,8 +2303,9 @@ pub mod fixtures {
             included: [true, false, true],
             headings: [-std::f64::consts::FRAC_PI_2, -1.2, -1.8],
             elevations: [0.1, -0.2, 0.3],
-            target: Some(99),
+            sight: tore_sim::combat::gunship::Sight::Tracked(99),
             status: [live::Readiness::Ready; 3],
+            ..Default::default()
         };
         let expected = gunship.normalized_devices();
         combat.state.ownship_mut(0).unwrap().gunship = Some(gunship);

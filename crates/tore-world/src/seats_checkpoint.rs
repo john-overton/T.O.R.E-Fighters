@@ -146,6 +146,8 @@ tore_sim::checkpoint_struct!(SeatInput {
     pilot,
     trigger,
     sensors,
+    sight,
+    sight_zoom,
     commands,
     view,
 });
@@ -198,6 +200,8 @@ fn save_live(s: &mut Saver, command: Live) -> Result<(), CheckpointError> {
         Live::ReleaseFlare => put(s, 25),
         Live::NextGunGroup => put(s, 26),
         Live::ToggleGunGroup => put(s, 27),
+        Live::SightDesignate => put(s, 28),
+        Live::SightPinGround => put(s, 29),
     }
     Ok(())
 }
@@ -232,6 +236,8 @@ fn load_live(l: &mut Loader<'_>) -> Result<Live, CheckpointError> {
         25 => Live::ReleaseFlare,
         26 => Live::NextGunGroup,
         27 => Live::ToggleGunGroup,
+        28 => Live::SightDesignate,
+        29 => Live::SightPinGround,
         other => return invalid(format!("a combat command has no variant {other}")),
     })
 }
@@ -599,6 +605,10 @@ mod tests {
             Live::ToggleTargetJammer,
             Live::ReleaseChaff,
             Live::ReleaseFlare,
+            Live::NextGunGroup,
+            Live::ToggleGunGroup,
+            Live::SightDesignate,
+            Live::SightPinGround,
         ];
         let mut orders = vec![
             PlayerOrder::EngageMyTarget,
@@ -683,6 +693,8 @@ mod tests {
             },
             trigger: true,
             sensors: tore_sim::sensors::Controls::default(),
+            sight: [-127, 64],
+            sight_zoom: 5,
             commands: every_command(),
             view: Some(SeatView {
                 tick: 7_190,

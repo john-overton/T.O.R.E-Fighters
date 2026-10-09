@@ -40,12 +40,13 @@ pub(super) fn observe_ownship(
         ground: &height,
         obscured: &obscured,
     };
-    own.sensors.keep_selection = context.easy_targeting;
+    let easy_targeting = own.easy_targeting(context.easy_targeting);
+    own.sensors.keep_selection = easy_targeting;
     let in_view = own.designated().or(own.sight_hold);
     own.sensors.step(&observer, &observables, &environment);
     if let Some(id) = own.designated() {
         own.hud_selection = Some(id);
-    } else if !context.easy_targeting {
+    } else if !easy_targeting {
         // A dropped target is gone; nothing is remembered for later.
         own.hud_selection = None;
     }
