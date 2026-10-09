@@ -606,7 +606,7 @@ impl Report {
     pub fn summary(&self) -> String {
         let pilot = |p: &Pilot| {
             format!(
-                "{:?} damage={:.0}% kills={:?} ff={} a2a={}/{} dmg={} gun={}/{} enemy_aam={}/{} enemy_gun={}/{}{}",
+                "{:?} damage={:.0}% kills={:?} ff={} a2a={}/{} dmg={} gun={}/{} a2g={}/{} bomb={}/{} enemy_aam={}/{} enemy_gun={}/{}{}",
                 p.status,
                 p.damage * 100.,
                 p.kills,
@@ -616,6 +616,10 @@ impl Report {
                 p.air_to_air.damage,
                 p.gun.hit,
                 p.gun.launched,
+                p.air_to_ground.hit,
+                p.air_to_ground.launched,
+                p.bombs.hit,
+                p.bombs.launched,
                 p.enemy_aam.hit,
                 p.enemy_aam.launched,
                 p.enemy_gun.hit,
@@ -779,6 +783,58 @@ mod tests {
         assert_eq!(result.outcome, Outcome::Failure);
         assert_eq!(result.player.friendly_fire, 1);
         assert_eq!(result.player.kills, [0; 10]);
+    }
+    /// The rule in docs/spec/debrief.md, "Kills": a pilot's kills, friendly
+    /// fire included, never exceed the hits its tallies hold.
+    fn assert_kills_are_backed_by_hits(pilot: &Pilot) {
+        let kills = pilot.kills.iter().sum::<u32>() + pilot.friendly_fire;
+        let hits = pilot.air_to_air.hit + pilot.air_to_ground.hit + pilot.gun.hit + pilot.bombs.hit;
+        assert!(kills <= hits, "{kills} kills from {hits} hits: {pilot:?}");
+    }
+    #[test]
+    fn a_kill_after_a_decoyed_missile_struck_anyway_is_backed_by_its_hit() {
+        use tore_sim::combat::ledger::Resolution;
+        let mut ledger = Ledger::default();
+        // The player's missile is spoofed, flies on, damages enemy 11 and
+        // that aircraft's pilot then ejects.
+        ledger.launch(5, 0, Some(11), ShotKind::AirToAir);
+        ledger.resolve(5, Resolution::Spoofed);
+        ledger.resolve(5, Resolution::Hit(140));
+        ledger.damaged(Kill {
+            owner: 0,
+            victim: 11,
+            category: 0x8000,
+            aircraft: true,
+        });
+        let mut end = ending(&ledger);
+        end.aircraft[3].alive = false;
+        end.aircraft[3].ejected = true;
+        let result = report(&end);
+        assert_eq!(result.player.kills[0], 1);
+        let missiles = result.player.air_to_air;
+        assert_eq!(
+            (
+                missiles.launched,
+                missiles.hit,
+                missiles.damage,
+                missiles.spoofed
+            ),
+            (1, 1, 140, 0)
+        );
+        assert_kills_are_backed_by_hits(&result.player);
+        // A missile that stays spoofed, with the same ejection credited to
+        // nobody's damage, is no kill and no hit.
+        let mut ledger = Ledger::default();
+        ledger.launch(5, 0, Some(11), ShotKind::AirToAir);
+        ledger.resolve(5, Resolution::Spoofed);
+        ledger.resolve(5, Resolution::Missed);
+        let mut end = ending(&ledger);
+        end.aircraft[3].alive = false;
+        end.aircraft[3].ejected = true;
+        let result = report(&end);
+        assert_eq!(result.player.kills, [0; 10]);
+        assert_eq!(result.player.air_to_air.spoofed, 1);
+        assert_kills_are_backed_by_hits(&result.player);
     }
     fn report_outcome(end: &Ending) -> Outcome {
         report(end).outcome

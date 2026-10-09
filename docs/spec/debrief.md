@@ -113,10 +113,38 @@ matching row of its object class word: 0x8000 Fighter, 0x4000 Bomber,
 0x40 Other. Retail puts helicopters (a PT flag) first; no supported aircraft is
 a helicopter yet, so that row stays empty.
 
-The kill goes to the shooter whose hit destroyed it. An aircraft that is lost
-another way after being damaged, for example its pilot ejects or it crashes,
-goes to the last shooter who damaged it (retail credits the attributed last
-attacker). Airport and scene objects count as not friendly.
+**One record.** A kill is only ever credited to a shooter whose hit, with
+damage, the hit tally also holds. The debrief's hit counts and the credit for a
+kill come from the same strike, so a pilot's kills never exceed its recorded
+hits. A hit that did no damage is counted as a hit, but it does not make its
+shooter the last attacker.
+
+- **Direct kill.** The kill goes to the shooter whose hit destroyed the
+  aircraft.
+- **Indirect kill.** An aircraft that is lost another way after being damaged,
+  for example its pilot ejects, it crashes or it hits the ground, goes to the
+  last shooter whose hit damaged it (retail credits the attributed last
+  attacker). A mid-air collision is the same: if the aircraft was damaged
+  earlier, its last attacker is credited. This holds however long ago the hit
+  was.
+- **No credit.** An aircraft lost to the map edge, overspeed or belly scrape
+  wear credits nobody, whoever hit it earlier. An aircraft nobody hit credits
+  nobody.
+- **A missile that was decoyed.** A missile resolves once. If a flare or chaff
+  spoofs it, it counts as Spoofed, and if it then flies on and damages an
+  aircraft after all, that strike is its hit (Spoofed is withdrawn, Hit and its
+  damage are counted, and the missile is still one launch). Without this an
+  aircraft could lose its hit points and its shooter be credited with the kill
+  while the hit table showed none. A decoyed missile that only touches a wreck,
+  explodes on the ground, runs out or is jammed stays Spoofed.
+- **Same rule everywhere.** Multiplayer scores (kills, damage) and the PvP
+  kill limit credit a lost plane by this same record (`Ledger::credit`), so a
+  plane's credited kill, its debrief and its score agree. A kill before the
+  pilot ejects still counts twice in a multiplayer score, as the manual says.
+  Agent decision, 2026-10-09: the manual does not describe indirect kills,
+  decoyed missiles or hits that did no damage.
+
+Airport and scene objects count as not friendly.
 
 ### Outcome and objectives
 

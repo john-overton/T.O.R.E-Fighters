@@ -360,7 +360,10 @@ than reconstructing the original executable's combat tick.
 `combat::ledger` records every projectile from its first step to its outcome
 (hit with damage, missed, spoofed by a decoy, jammed), keyed by shooter,
 intended target and retail weapon class, plus credited kills and each target's
-last attacker. Nothing in flight reads it. The evaluator in `tore_world::debrief`
+last attacker. A missile resolves once, except that a spoofed one is remembered
+and, if it strikes an aircraft after all, becomes that hit, so a kill or last
+attacker always has a recorded hit behind it (spec: [debrief kills](spec/debrief.md#kills)).
+Nothing in flight reads it. The evaluator in `tore_world::debrief`
 turns it into a report, and the app's `debrief.rs` keeps the screen that draws
 the post-mission pages; `ai_wings.rs` (in `tore-world`) supplies the intended target of AI gun rounds and
 reports decoyed missiles. See the [debrief spec](spec/debrief.md).

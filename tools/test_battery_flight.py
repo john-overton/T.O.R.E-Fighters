@@ -230,8 +230,20 @@ class LossTests(unittest.TestCase):
         self.assertTrue(flight.check_belly_airborne(air.format(1, "0.55") + EXTREMES))
         self.assertTrue(flight.check_belly_airborne(air.format(0, "1.00") + EXTREMES))
 
+    def test_the_attacking_fight_holds_the_debrief_to_its_recorded_hits(self):
+        out = (
+            "AI probe debrief: FAILURE [] elapsed=1s player[Alive damage=0% kills=[1, 0, 0, 0, 0, 0, 0, 0, 0, 0] ff=0 "
+            "a2a=0/2 dmg=0 gun=0/0 a2g=0/0 bomb=0/0 enemy_aam=0/0 enemy_gun=0/0] wingman[-]\n"
+            "AI probe attack: clicks=1 steps=1 presses=1 missiles=2 gun_bursts=0 gun_rounds=0 player_hits=1 player_kills=0 "
+            "hits=1 destroyed=0 lost_friendly=0/1 lost_enemy=0/1 player_alive=true player_damaged=0\n"
+            "player crashed=false\nplayer_hp=100\nAI probe invariants: actors=2 samples=1 anomalies=0\n"
+        )
+        # No aircraft is exempt: the Su-27 and Su-35 used to be.
+        for ac in ("faxx", "su27", "su35"):
+            self.assertTrue(any("1 kills but only 0 recorded hits" in p for p in flight.check_attacking_fight(out, ac)), ac)
+
     def test_the_debrief_cause_suffix_still_parses(self):
-        line = "AI probe debrief: Lost Ok elapsed=10s player[Dead damage=100% kills=[] ff=0 a2a=0/0 dmg=0 gun=0/0 enemy_aam=0/0 enemy_gun=0/0 cause=overspeed] wingman[-]"
+        line = "AI probe debrief: Lost Ok elapsed=10s player[Dead damage=100% kills=[] ff=0 a2a=0/0 dmg=0 gun=0/0 a2g=0/0 bomb=0/0 enemy_aam=0/0 enemy_gun=0/0 cause=overspeed] wingman[-]"
         self.assertTrue(flight.PLAYER_LINE.search(line))
 
 

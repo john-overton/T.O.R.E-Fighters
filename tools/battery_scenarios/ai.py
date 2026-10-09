@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from battery import ROOT, Scenario
 
 from battery_scenarios import _ai_fuzz
+from battery_scenarios._debrief import kill_hit_problems
 from battery_scenarios._strips import ground_airport
 
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
@@ -111,6 +112,7 @@ def probe_problems(
     totals = TOTALS.search(output)
     if totals and int(totals.group(4)) > 0:
         problems.append(f"dropped launches: {totals.group(4)}")
+    problems.extend(kill_hit_problems(output))
     debrief = DEBRIEF.search(output)
     attack = ATTACK.search(output)
     if debrief and attack:

@@ -165,13 +165,18 @@ terrain checks. Three problems belong to other lanes and were handed on:
   (B44, `ai/steering.rs::terrain_pitch_floor`) looks only 1,000 ft ahead, under a second at 800 kt,
   so it cannot start a climb in time, and the formation code lets the wingman sink below its slot.
   Not changed: it is AI behaviour.
-- **The debrief can credit more kills than recorded hits.** With the seeded fight
-  `--aircraft su27 --probe-enemy-aircraft mig29 --probe-enemy-skill average --ai-probe-ticks 20000 --probe-fight 5:5 --separation 10 --probe-attack 100:8`
-  the debrief shows `a2a=1/5 kills=[2]` while the probe saw two player hits; the Su-35 shows the
-  same (`a2a=1/4 kills=[2]`). One of the two kills is credited from a last-hit record with no
-  hit in the launch tally (`ledger.rs`: a lost aircraft is credited to the last shooter to damage
-  it). The two scenarios skip that one check (`DEBRIEF_KILL_MISMATCH`); every other fight check
-  passes.
+- **The debrief credited kills with no recorded hit (fixed 2026-10-09).** With
+  `--aircraft faxx --probe-enemy-aircraft su27 --probe-enemy-skill average --ai-probe-ticks 20000 --probe-fight 5:5 --separation 10 --probe-attack 100:8`
+  the debrief showed `kills=[1,...] a2a=0/2` while the probe saw one player hit (the Su-35
+  showed `a2a=1/4 kills=[2]`). The cause: a flare or chaff spoofed the missile, the ledger closed
+  it as Spoofed, and the missile flew on and struck the aircraft anyway. The damage, the kill and
+  the last-attacker credit were applied, but the hit could not be tallied because the missile was
+  already resolved. The ledger now remembers spoofed missiles and counts a late strike as the
+  missile's hit (see [debrief kills](../spec/debrief.md#kills)). Before the fix the same
+  mismatch showed in 33 of 186 AI-lane and combat scenarios (every default `ai-fight-NvN`, the
+  MiG-29 vs F-14 skill pairs and 10 fuzz seeds) and the two lane fights above; the scenario check
+  no longer exempts the Su-27 and Su-35, and `tools/battery_scenarios/_debrief.py` holds every
+  AI probe debrief line to it, for the player and the wingman.
 - **AI aircraft collide.** In the F-14 rear-geometry fight two AI enemies touch (56 ft apart)
   and both are lost; the AI invariant counts it. The fight scenarios do not count mid-air
   collisions between AI aircraft.
