@@ -774,7 +774,12 @@ fn debrief_inputs(
         .collect();
     let wings = world.ai_wings.as_ref().unwrap();
     fates.extend(outcome::ai_aircraft(wings, side));
-    let requirements = outcome::Requirements::of(wings, plane.0, side);
+    let requirements = outcome::Requirements::of(
+        wings,
+        plane.0,
+        side,
+        &world.revival.objective_lineages(&world.roster),
+    );
     (plane.0, fates, requirements)
 }
 
@@ -807,11 +812,18 @@ fn each_seats_debrief_inputs_name_its_own_plane() {
                 other.0
             );
         }
-        // What each plane must destroy: the AI aircraft of the other side.
-        let hostile: &[u32] = if friendly { &[6, 7] } else { &[2, 3] };
+        // What each plane must destroy: every aircraft of the other side the
+        // mission started with, the human-flown ones too (the lobby pass's
+        // follow-up F1; before it only the AI's rows were known).
+        let hostile: &[u32] = if friendly {
+            &[4, 5, 6, 7]
+        } else {
+            &[0, 1, 2, 3]
+        };
         assert_eq!(requirements.destroy, hostile, "seat {seat}");
         assert!(requirements.protect.is_empty());
-        assert_eq!(standing.destroyed(), 0);
+        // Plane 0, shot down, is one of the enemy side's targets.
+        assert_eq!(standing.destroyed(), u32::from(!friendly), "seat {seat}");
         // The kill of plane 0 is credited to plane 1, and no kill to any
         // other seat.
         let kills = standing.kills();

@@ -142,9 +142,42 @@ pub struct Aircraft {
     pub alive: bool,
 }
 
+/// What the mission result knows of lineages (the lobby pass's follow-up
+/// F1): the root of every plane a respawn or a revival added (the plane the
+/// mission started with that it continues), and the side of every plane the
+/// mission started with. An objective is a lineage, counted once by its
+/// root: destroyed the first time any plane of it is lost, protected while
+/// none of it has been. Single player's is empty, every plane its own root.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Lineages {
+    pub roots: std::collections::BTreeMap<u32, u32>,
+    pub sides: std::collections::BTreeMap<u32, Side>,
+}
+
+impl Lineages {
+    /// The root of `plane`'s lineage: `plane` itself for one the mission
+    /// started with.
+    pub fn root_of(&self, plane: u32) -> u32 {
+        self.roots.get(&plane).copied().unwrap_or(plane)
+    }
+
+    /// `ids` as lineages: each plane's root, once, in the order first named.
+    fn fold(&self, ids: &[u32]) -> Vec<u32> {
+        let mut roots: Vec<u32> = Vec::with_capacity(ids.len());
+        for id in ids {
+            let root = self.root_of(*id);
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+        roots
+    }
+}
+
 /// What the mission asks of one plane: the aircraft it must destroy and the
-/// ones it must protect. The debrief's objectives and the result check read
-/// the same lists (docs/spec/debrief.md).
+/// ones it must protect, each a lineage named by its root (the lobby pass's
+/// follow-up F1). The debrief's objectives and the result check read the same
+/// lists (docs/spec/debrief.md).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Requirements {
     pub destroy: Vec<u32>,
@@ -155,18 +188,30 @@ impl Requirements {
     /// The requirements of `plane`, which flies for `side`, from its own
     /// assignment. Retail Quick Missions make every aircraft of the other side
     /// a target when the plane has no assigned target group, and the aircraft
-    /// the mission says must survive are protected.
-    pub fn of(wings: &AiWings, plane: u32, side: Side) -> Self {
+    /// the mission says must survive are protected. A respawn or a revival
+    /// continues its lineage's objective rather than adding one
+    /// ([`Lineages`]); every aircraft of the other side the mission started
+    /// with is a target, whoever flies it now.
+    pub fn of(wings: &AiWings, plane: u32, side: Side, lineages: &Lineages) -> Self {
         let mission = wings.mission();
         let assignment = mission.human_assignment(plane);
-        let mut destroy = assignment.destroy_ids.clone();
+        let mut destroy = lineages.fold(&assignment.destroy_ids);
         if destroy.is_empty() {
             destroy = wings
                 .slots()
                 .iter()
                 .filter(|slot| slot.side != side)
-                .map(|slot| slot.id)
+                .map(|slot| lineages.root_of(slot.id))
+                .chain(
+                    lineages
+                        .sides
+                        .iter()
+                        .filter(|(_, root_side)| **root_side != side)
+                        .map(|(root, _)| *root),
+                )
                 .collect();
+            destroy.sort_unstable();
+            destroy.dedup();
         }
         let mut protect = assignment.protected_ids.clone();
         // Only the plane's own side is its objective: an enemy group whose
@@ -174,6 +219,7 @@ impl Requirements {
         // "Friendly objectives"; bug bash finding 2026-09-29).
         for id in mission.must_survive(plane) {
             let own_side = *id == plane
+                || lineages.sides.get(&lineages.root_of(*id)) == Some(&side)
                 || wings
                     .slots()
                     .iter()
@@ -182,7 +228,10 @@ impl Requirements {
                 protect.push(*id);
             }
         }
-        Self { destroy, protect }
+        Self {
+            destroy,
+            protect: lineages.fold(&protect),
+        }
     }
 }
 
@@ -274,24 +323,30 @@ impl Standing<'_> {
 
 /// Whether the mission has succeeded for the plane `plane`, as the debrief
 /// decides it ([`Standing`]). `plane_alive` is whether the plane and its pilot
-/// are alive. Human-flown planes other than `plane` are not in the AI's rows,
-/// so they count as neither friendly nor alive here until the AI reports them
-/// (B3).
+/// are alive, `side` the side it flies for. `humans` are the other human-flown
+/// planes as they stand (a multiplayer game's; the lobby pass's follow-up F1),
+/// each friendly when on `side`: without them they count as neither friendly
+/// nor alive here (B3). `lineages` folds respawns and revivals into the
+/// objectives they continue.
 pub fn succeeded(
     state: &live::State,
     wings: Option<&AiWings>,
     plane: u32,
     plane_alive: bool,
+    side: Side,
+    humans: &[Aircraft],
+    lineages: &Lineages,
 ) -> bool {
     let mut aircraft = vec![Aircraft {
         id: plane,
         friendly: true,
         alive: plane_alive,
     }];
+    aircraft.extend(humans.iter().filter(|human| human.id != plane).copied());
     let mut requirements = Requirements::default();
     if let Some(wings) = wings {
-        aircraft.extend(ai_aircraft(wings, Side::Friendly));
-        requirements = Requirements::of(wings, plane, Side::Friendly);
+        aircraft.extend(ai_aircraft(wings, side));
+        requirements = Requirements::of(wings, plane, side, lineages);
     }
     Standing {
         ledger: &state.ledger,
@@ -451,9 +506,25 @@ mod tests {
     #[test]
     fn a_mission_without_wings_succeeds_unless_the_plane_shot_a_friend() {
         let state = crate::test_support::combat_fixture(true);
-        assert!(succeeded(&state, None, 0, true));
+        assert!(succeeded(
+            &state,
+            None,
+            0,
+            true,
+            Side::Friendly,
+            &[],
+            &Lineages::default()
+        ));
         assert!(
-            succeeded(&state, None, 0, false),
+            succeeded(
+                &state,
+                None,
+                0,
+                false,
+                Side::Friendly,
+                &[],
+                &Lineages::default()
+            ),
             "the plane's own death is not a failure"
         );
     }
@@ -569,7 +640,15 @@ mod tests {
                 .iter()
                 .any(|id| enemies.contains(id))
         );
-        assert!(succeeded(&state, Some(&wings), 0, true));
+        assert!(succeeded(
+            &state,
+            Some(&wings),
+            0,
+            true,
+            Side::Friendly,
+            &[],
+            &Lineages::default()
+        ));
         // A friendly group that must survive still is the plane's objective.
         wings.apply_group_survival(&[true, false, false, false, false, false]);
         let friends: Vec<u32> = wings
@@ -584,7 +663,15 @@ mod tests {
             .unwrap()
             .flight_mut()
             .crashed = true;
-        assert!(!succeeded(&state, Some(&wings), 0, true));
+        assert!(!succeeded(
+            &state,
+            Some(&wings),
+            0,
+            true,
+            Side::Friendly,
+            &[],
+            &Lineages::default()
+        ));
     }
 }
 

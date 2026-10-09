@@ -38,7 +38,7 @@
 use super::World;
 use crate::{
     WorldResult,
-    ai_wings::{self, ENEMY_SIDE, FRIENDLY_SIDE},
+    ai_wings::{self, ENEMY_SIDE, FRIENDLY_SIDE, outcome},
     combat,
     mission::{LoadoutSpec, StationLoad},
     mission_layout::MapBounds,
@@ -247,6 +247,28 @@ impl Book {
             .collect();
         first.sort_by_key(|plane| plane.id);
         first
+    }
+}
+
+impl Book {
+    /// What the mission result knows of lineages (the lobby pass's follow-up
+    /// F1): every added plane's root, and the side of every plane the mission
+    /// started with, from `roster` and the retired planes.
+    pub fn objective_lineages(&self, roster: &crate::seats::Roster) -> outcome::Lineages {
+        outcome::Lineages {
+            roots: self
+                .roots
+                .iter()
+                .map(|(plane, root)| (plane.0, root.0))
+                .collect(),
+            sides: roster
+                .planes()
+                .iter()
+                .chain(&self.retired)
+                .filter(|plane| !self.added.contains(&plane.id))
+                .map(|plane| (plane.id.0, plane.slot.wing.side))
+                .collect(),
+        }
     }
 }
 
@@ -872,6 +894,7 @@ impl World {
         self.abandon_plane(seat)?;
         self.add_plane(&new)?;
         self.revival.roots.insert(new.plane, root);
+        self.join_objectives(root, new.plane);
         self.take_plane(seat, new.plane)?;
         Ok(new.plane)
     }
@@ -899,6 +922,7 @@ impl World {
         }
         self.add_plane(&new)?;
         self.revival.roots.insert(new.plane, root);
+        self.join_objectives(root, new.plane);
         self.take_plane(seat, new.plane)?;
         Ok(new.plane)
     }
@@ -907,6 +931,24 @@ impl World {
     /// and aircraft, for the host's Spawned message.
     pub fn revival_plane_from(&self, plane: PlaneId, spawn: &Spawn) -> WorldResult<NewPlane> {
         self.revival_check_from(plane, spawn).map(|plan| plan.new)
+    }
+
+    /// Objectives follow lineages (the lobby pass's follow-up F1, agent
+    /// decision): `new`, just added to `root`'s lineage, is named by every
+    /// objective that names a plane of the lineage, and takes the lineage's
+    /// own objectives for whoever flies it
+    /// ([`tore_sim::ai::mission::AiMission::join_lineage`]). Mission state,
+    /// changed only by the commands that add a plane, so a standby replaying
+    /// the journal makes the same lists.
+    fn join_objectives(&mut self, root: PlaneId, new: PlaneId) {
+        let lineage: Vec<u32> = self
+            .lineage(root)
+            .into_iter()
+            .map(|plane| plane.0)
+            .collect();
+        if let Some(wings) = self.ai_wings.as_mut() {
+            wings.join_lineage(new.0, &lineage);
+        }
     }
 
     /// The wing launch the mission built `wing` from.
@@ -1165,6 +1207,7 @@ impl World {
         }
         self.add_plane_as(&new, dummy)?;
         self.revival.roots.insert(new.plane, root);
+        self.join_objectives(root, new.plane);
         if self
             .roster
             .plane(head)
@@ -1438,6 +1481,12 @@ mod revive_lost_tests;
 #[cfg(test)]
 #[path = "ai_respawn_tests.rs"]
 mod ai_respawn_tests;
+
+// The world tests of objectives that follow lineages (the lobby pass's
+// follow-up F1).
+#[cfg(test)]
+#[path = "objective_lineage_tests.rs"]
+mod objective_lineage_tests;
 
 #[cfg(test)]
 mod tests {

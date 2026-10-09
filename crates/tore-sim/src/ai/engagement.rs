@@ -81,6 +81,47 @@ pub struct Assignment {
     pub patrol: Option<PatrolRegion>,
 }
 
+impl Assignment {
+    /// `new` continues the lineage of the planes `lineage` (a respawn or a
+    /// revival in a multiplayer game; the lobby pass's follow-up F1): every
+    /// list that names a plane of the lineage names `new` too, and every
+    /// escort relationship with a plane of it gains one with `new` in its
+    /// place. The lists keep their order, `new` added at the end once.
+    /// Returns whether anything changed.
+    pub fn join_lineage(&mut self, new: u32, lineage: &[u32]) -> bool {
+        let named = |ids: &[u32]| ids.iter().any(|id| lineage.contains(id)) && !ids.contains(&new);
+        let mut changed = false;
+        for ids in [&mut self.destroy_ids, &mut self.protected_ids] {
+            if named(ids) {
+                ids.push(new);
+                changed = true;
+            }
+        }
+        let mut gained = Vec::new();
+        for relation in &self.hostile_escorts {
+            if lineage.contains(&relation.principal_id) {
+                gained.push(HostileEscort {
+                    principal_id: new,
+                    escort_id: relation.escort_id,
+                });
+            }
+            if lineage.contains(&relation.escort_id) {
+                gained.push(HostileEscort {
+                    principal_id: relation.principal_id,
+                    escort_id: new,
+                });
+            }
+        }
+        for relation in gained {
+            if !self.hostile_escorts.contains(&relation) {
+                self.hostile_escorts.push(relation);
+                changed = true;
+            }
+        }
+        changed
+    }
+}
+
 impl Default for Assignment {
     fn default() -> Self {
         Self {
@@ -1362,6 +1403,55 @@ mod tests {
             identify_supporting_attacker([0.; 3], 90., 0., &[hostile, second], &[2, 3], FRIEND,),
             None
         );
+    }
+
+    /// The lobby pass's follow-up F1: a plane added to a lineage joins every
+    /// list and relationship that names a plane of it, once, at the end.
+    #[test]
+    fn a_new_plane_joins_the_lists_that_name_its_lineage() {
+        let mut assignment = Assignment {
+            destroy_ids: vec![7, 2, 9],
+            protected_ids: vec![4],
+            hostile_escorts: vec![
+                HostileEscort {
+                    principal_id: 2,
+                    escort_id: 5,
+                },
+                HostileEscort {
+                    principal_id: 8,
+                    escort_id: 2,
+                },
+            ],
+            ..Assignment::default()
+        };
+        assert!(assignment.join_lineage(12, &[2, 10]));
+        assert_eq!(assignment.destroy_ids, [7, 2, 9, 12]);
+        assert_eq!(assignment.protected_ids, [4]);
+        assert_eq!(
+            assignment.hostile_escorts[2..],
+            [
+                HostileEscort {
+                    principal_id: 12,
+                    escort_id: 5,
+                },
+                HostileEscort {
+                    principal_id: 8,
+                    escort_id: 12,
+                },
+            ]
+        );
+        // Once only, and a lineage nobody names changes nothing.
+        let joined = assignment.clone();
+        assert!(!assignment.join_lineage(12, &[2, 10, 12]));
+        assert!(!assignment.join_lineage(13, &[3]));
+        assert_eq!(assignment, joined);
+        let mut protect = Assignment {
+            protected_ids: vec![3],
+            ..Assignment::default()
+        };
+        assert!(protect.join_lineage(20, &[3]));
+        assert_eq!(protect.protected_ids, [3, 20]);
+        assert!(protect.destroy_ids.is_empty());
     }
 }
 
