@@ -124,7 +124,7 @@ turns on switches to the gun, or to NAV without one. The Quick Mission Guns
 only setting, which removes the other stores at launch, is separate.
 
 **Easy flight physics.** Opinionated, John, 2026-10-08 (decision 1 of the
-[VTOL and helicopter overhaul](variety-flight.md)); the numbers are fitted and
+[VTOL and helicopter overhaul](powered-lift-flight.md#easy-flight-physics)); the numbers are fitted and
 John expects to tune them. The six powered-lift aircraft (AV-8, Yak-141, V-22,
 AH-64, Mi-24 and CH-47) fly the same physics as ever, with the hazards that
 punish a careless pilot removed. Fixed-wing aircraft ignore it. It turns off:
