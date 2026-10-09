@@ -3,14 +3,16 @@
 //! rows, and the lines a change of state puts in Messages. All of it is plain
 //! data in and out, so every rule is tested without a window, a kit or a
 //! session.
+use super::sides;
 use crate::widgets::{Cell, Icon, Row, tone};
 use std::collections::BTreeSet;
 use tore_session::client::content;
-use tore_session::settings::{self, number};
+use tore_session::settings::{self, Sides, number};
 use tore_session::wire::Path;
 use tore_session::wire::messages::{
     ContentGaps, LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, StandbyMark, StartRule,
 };
+use tore_sim::ai::launch::Side;
 
 /// What a button does to the player: it is not there, there but cannot be
 /// pressed, or can.
@@ -69,6 +71,12 @@ pub struct Facts {
     pub waiting: Vec<String>,
     /// How many players hold a slot.
     pub holders: usize,
+    /// The game is PvP, so the side boxes show and slots wear their side.
+    pub pvp: bool,
+    /// How players choose their side (always free outside PvP).
+    pub sides: Sides,
+    /// The side of the slot this player holds; none without a slot.
+    pub side: Option<Side>,
 }
 
 impl Facts {
@@ -90,6 +98,9 @@ impl Facts {
                 unable: unable.map(str::to_owned),
                 waiting: Vec::new(),
                 holders: 0,
+                pvp: false,
+                sides: Sides::Free,
+                side: None,
             };
         };
         let me = lobby.me();
@@ -115,6 +126,11 @@ impl Facts {
                 .map(|p| p.callsign.clone())
                 .collect(),
             holders: holders.len(),
+            pvp: sides::is_pvp(lobby),
+            sides: sides::rule(lobby),
+            side: me
+                .and_then(|m| m.slot)
+                .and_then(|plane| sides::side_of_plane(lobby, plane)),
         }
     }
 
@@ -313,6 +329,15 @@ pub fn hint(facts: &Facts) -> String {
         LobbyPhase::Ended => "The mission has ended. Back to the lobby in a moment.".into(),
         LobbyPhase::Lobby => {
             if facts.holds.is_none() {
+                if facts.pvp {
+                    return match facts.sides {
+                        Sides::Balanced => {
+                            "Both sides are full: Autobalance seats you when a slot frees."
+                        }
+                        _ => "Check Bluefor or Redfor to join a side, or click a free slot.",
+                    }
+                    .into();
+                }
                 return "Click a free slot to take it, then choose a loadout and press Ready."
                     .into();
             }
@@ -358,8 +383,11 @@ pub fn status_word(player: &LobbyPlayer) -> &'static str {
 /// The Players list's rows: the crown, the house (or, for a game that stands
 /// by to host, the standby mark; stage K), the ready tick, the platform, the
 /// relay mark (slice J6), the name and the state. Unable players are red and
-/// the player's own row green.
+/// the player's own row green. In PvP a player holding a slot wears the light
+/// colour of its side, and an unable player is dimmed, so that red means
+/// Redfor alone (lobby pass L3).
 pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
+    let pvp = sides::is_pvp(lobby);
     lobby
         .players
         .iter()
@@ -393,8 +421,18 @@ pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
                     Cell::Text(status_word(p).to_owned()),
                 ],
             );
-            if p.unable.is_some() {
+            let side = p
+                .slot
+                .and_then(|plane| sides::side_of_plane(lobby, plane))
+                .filter(|_| pvp);
+            if p.unable.is_some() && pvp {
+                // Red means Redfor alone in PvP; the red cross still marks it.
+                row.dimmed()
+            } else if p.unable.is_some() {
                 row.tinted(tone::ENEMY)
+            } else if let Some(side) = side {
+                // A player's name wears the side it holds a slot on.
+                row.tinted(sides::light(side))
             } else if p.id == lobby.you {
                 row.tinted(tone::OWN_SIDE)
             } else {
@@ -408,9 +446,13 @@ pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
 /// who holds it (AI when nobody does) and the holder's ready tick. A slot
 /// someone else holds is dimmed: it cannot be clicked.
 pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
+    let pvp = sides::is_pvp(lobby);
+    // In PvP a player on a side sees that side's slots only (lobby pass L3).
+    let shown = sides::shown_side(lobby);
     lobby
         .slots
         .iter()
+        .filter(|slot| shown.is_none_or(|side| slot.wing.side == side))
         .map(|slot| {
             let holder = slot.holder.and_then(|id| lobby.player(id));
             let mine = slot.holder == Some(lobby.you);
@@ -426,11 +468,15 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                     } else {
                         Cell::Empty
                     },
-                    Cell::Text(format!(
-                        "Wing {} #{}",
-                        slot.wing.display_number(),
-                        u32::from(slot.member) + 1
-                    )),
+                    Cell::Text(if pvp {
+                        sides::wing_label(slot)
+                    } else {
+                        format!(
+                            "Wing {} #{}",
+                            slot.wing.display_number(),
+                            u32::from(slot.member) + 1
+                        )
+                    }),
                     Cell::Text(slot.aircraft.label().to_owned()),
                     Cell::Text(slot_holder_text(slot, holder)),
                     if holder.is_some_and(|p| p.ready || p.flying) {
@@ -440,6 +486,10 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                     },
                 ],
             );
+            if pvp {
+                let unavailable = slot.holder.is_none() && !sides::free_for_reader(lobby, slot);
+                return pvp_slot_row(row, slot, holder, unavailable);
+            }
             match (holder, &slot.lock) {
                 (Some(_), _) if !mine => row.dimmed(),
                 (Some(_), _) => row.tinted(tone::OWN_SIDE),
@@ -456,6 +506,30 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
             }
         })
         .collect()
+}
+
+/// A PvP slot's colours (John, 2026-10-09): a slot a player holds, the
+/// reader's own included, is a filled bar in its side's strong colour with
+/// white text (dimmed white when the player is away and the AI flies it); an
+/// open one is text in the side's light colour; one nobody may take now (the
+/// King closed it or keeps it for another player, or the AI is kept flying it
+/// for a player who dropped) is dimmed as in co-op.
+fn pvp_slot_row(
+    row: Row,
+    slot: &LobbySlot,
+    holder: Option<&LobbyPlayer>,
+    unavailable: bool,
+) -> Row {
+    let side = slot.wing.side;
+    match holder {
+        Some(p) => row.filled(sides::strong(side)).tinted(if p.away {
+            sides::tone::AWAY
+        } else {
+            sides::tone::WHITE
+        }),
+        None if unavailable => row.dimmed(),
+        None => row.tinted(sides::light(side)),
+    }
 }
 
 /// What a click on a slot asks for: take it, free one's own, or nothing (a
@@ -478,6 +552,10 @@ pub fn slot_click(lobby: &LobbyState, facts: &Facts, plane: u32) -> SlotClick {
         return SlotClick::Refused("There is no such slot.".into());
     };
     if slot.holder == Some(lobby.you) {
+        // Autobalance keeps a seated player seated (the host refuses a Leave).
+        if facts.pvp && facts.sides == Sides::Balanced && !facts.flying {
+            return SlotClick::Refused(sides::BALANCED_WORDS.into());
+        }
         return if facts.flying {
             SlotClick::Refused("Leave your aircraft before you change your slot.".into())
         } else {
@@ -819,8 +897,11 @@ pub fn settings_summary(lobby: &LobbyState) -> Option<String> {
         },
         _ => "no revival".to_owned(),
     });
-    if get(number::LOCK_SIDES) == Some(1) {
-        parts.push("sides locked".to_owned());
+    match get(number::LOCK_SIDES) {
+        Some(1) => parts.push("sides locked".to_owned()),
+        // Autobalance (lobby pass A1/L3): the host picks the sides.
+        Some(2) => parts.push("sides balanced".to_owned()),
+        _ => {}
     }
     if get(number::LOADOUTS) == Some(1) {
         parts.push("any loadout".to_owned());

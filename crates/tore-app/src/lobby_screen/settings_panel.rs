@@ -242,7 +242,7 @@ pub fn row_label(kind: Kind) -> &'static str {
             number::JOIN_IN_PROGRESS => "Join in progress",
             number::VISIBILITY => "Who can find it",
             number::FRIENDLY_FIRE => "Friendly fire",
-            number::LOCK_SIDES => "Lock sides",
+            number::LOCK_SIDES => "Sides",
             number::LOADOUTS => "Loadouts",
             number::RESPAWN => "Revival",
             number::LIVES => "Lives",
@@ -409,6 +409,14 @@ pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
 /// A row's value in words.
 pub fn row_value(kind: Kind, ctx: &Context) -> String {
     match kind {
+        // Lobby pass L3: the sides rule in the words a player reads, not the
+        // configuration file's (`lock-sides off|on|balanced`).
+        Kind::Setting(number::LOCK_SIDES) => match ctx.value(number::LOCK_SIDES) {
+            Some(0) => "Free".into(),
+            Some(1) => "Locked once flown".into(),
+            Some(2) => "Balanced by the host".into(),
+            _ => "...".into(),
+        },
         Kind::Setting(n) => match (settings::setting(n), ctx.value(n)) {
             (Some(setting), Some(value)) => setting.text(value),
             _ => "...".into(),

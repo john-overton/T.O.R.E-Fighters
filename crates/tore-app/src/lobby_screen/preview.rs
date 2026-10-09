@@ -15,7 +15,7 @@ use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 35] = [
+pub const STATES: [&str; 45] = [
     "lobby-king",
     "lobby-joiner",
     "lobby-unable",
@@ -65,6 +65,20 @@ pub const STATES: [&str; 35] = [
     "lobby-joiner-ready-hint",
     "lobby-pvp-hint",
     "lobby-coop-hint",
+    // Lobby pass (slice L3): PvP slot colours on both sides in every state, the
+    // side boxes (own side checked and the list filtered, a full side greyed,
+    // sides locked in flight, Autobalance, a game that cannot play it) and the
+    // Players list tinted by side.
+    "lobby-pvp-colours",
+    "lobby-pvp-colours-red",
+    "lobby-pvp-bluefor",
+    "lobby-pvp-redfor",
+    "lobby-pvp-open",
+    "lobby-pvp-full",
+    "lobby-pvp-locked",
+    "lobby-balanced",
+    "lobby-pvp-balanced-wait",
+    "lobby-pvp-unable",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -192,6 +206,43 @@ pub(crate) fn crowd(you: u8, slot_count: u32, player_count: u8, pvp: bool) -> Lo
         })
         .collect();
     state
+}
+
+/// Seats player `id` in `plane` (and frees the slot it held), for the PvP
+/// renders.
+pub(crate) fn seat(lobby: &mut LobbyState, id: u8, plane: u32) {
+    for slot in &mut lobby.slots {
+        if slot.holder == Some(id) {
+            slot.holder = None;
+        }
+    }
+    lobby.slots[plane as usize].holder = Some(id);
+    if let Some(p) = lobby.players.iter_mut().find(|p| p.id == id) {
+        p.slot = Some(plane);
+    }
+}
+
+/// A PvP lobby of ten planes (Bluefor 0 to 4, Redfor 5 to 9) and six players
+/// as `you` sees it: Maverick (the King, id 1) on Bluefor plane 0, Pilot2 on
+/// Bluefor 1, Pilot3 and Pilot4 on Redfor 5 and 6; Pilot5 and Pilot6 hold no
+/// slot. The slot states of every kind are built on it by the renders.
+pub(crate) fn pvp_crowd(you: u8) -> LobbyState {
+    let mut lobby = crowd(you, 10, 6, true);
+    lobby.players[0].loadout = true;
+    for (id, plane) in [(2, 1), (3, 5), (4, 6)] {
+        seat(&mut lobby, id, plane);
+    }
+    lobby.players[1].ready = true;
+    lobby.players[2].ready = true;
+    lobby
+}
+
+fn set_balanced(lobby: &mut LobbyState) {
+    for entry in &mut lobby.settings {
+        if entry.0 == tore_session::settings::number::LOCK_SIDES {
+            entry.1 = 2;
+        }
+    }
 }
 
 /// The sample mission's cheats: a few on, so the Realism page shows both
@@ -385,6 +436,65 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             lobby.slots[1].holder = Some(2);
             lobby.players[0].ready = true;
         }
+        // Every slot state on both sides, seen by a player with no slot
+        // (Pilot6): taken, one taken by a player who is away, open, closed by
+        // the King, kept for another player and kept for the reader.
+        "lobby-pvp-colours" | "lobby-pvp-colours-red" => {
+            lobby = pvp_crowd(6);
+            hosting = false;
+            lobby.players[3].away = true;
+            lobby.slots[2].lock = Lock::Closed;
+            lobby.slots[3].lock = Lock::Reserved("Pilot6".into());
+            lobby.slots[7].lock = Lock::Reserved("Pilot5".into());
+            lobby.slots[8].reserved = Some("Hawk".into());
+        }
+        // The King on Bluefor, the list showing Bluefor only.
+        "lobby-pvp-bluefor" => {
+            lobby = pvp_crowd(1);
+        }
+        // A joiner on Redfor with the Redfor box checked.
+        "lobby-pvp-redfor" => {
+            lobby = pvp_crowd(3);
+            hosting = false;
+        }
+        // No side yet: both boxes lit, both sides listed.
+        "lobby-pvp-open" => {
+            lobby = pvp_crowd(6);
+            hosting = false;
+        }
+        // Redfor full (five held): its box greyed, Bluefor's lit.
+        "lobby-pvp-full" => {
+            lobby = pvp_crowd(6);
+            hosting = false;
+            seat(&mut lobby, 5, 7);
+            lobby.slots[8].lock = Lock::Closed;
+            lobby.slots[9].reserved = Some("Hawk".into());
+        }
+        // Sides locked while the reader flies Redfor.
+        "lobby-pvp-locked" => {
+            lobby = pvp_crowd(3);
+            hosting = false;
+            lobby.phase = LobbyPhase::Flying;
+            lobby.players[2].flying = true;
+            lobby.players[2].ready = false;
+        }
+        // Autobalance: the reader seated on Redfor, both boxes greyed.
+        "lobby-balanced" => {
+            lobby = pvp_crowd(3);
+            hosting = false;
+            set_balanced(&mut lobby);
+        }
+        "lobby-pvp-balanced-wait" => {
+            lobby = pvp_crowd(6);
+            hosting = false;
+            set_balanced(&mut lobby);
+        }
+        "lobby-pvp-unable" => {
+            lobby = pvp_crowd(6);
+            hosting = false;
+            lobby.players[5].unable =
+                Some("Pilot6's game has no F/A-18D Hornet, which this mission flies.".into());
+        }
         _ => {}
     }
     let mut screen = LobbyScreen::sample(Arc::clone(&kit), lobby.clone(), hosting);
@@ -416,6 +526,8 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         ));
     }
     match state {
+        // The same list scrolled to Redfor's five.
+        "lobby-pvp-colours-red" => screen.slots.scroll_to(5),
         "lobby-scroll" => {
             // Mid way down each list and back from the newest lines.
             screen.slots.scroll_to(4);

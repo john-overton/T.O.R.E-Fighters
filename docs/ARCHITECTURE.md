@@ -5986,6 +5986,58 @@ the side each player first flew, so exact checkpoints carry nothing new.
   progress off nobody new is seated.
 - **Co-op** has no Autobalance: setting 7 is PvP only.
 
+##### PvP sides in the lobby as built (L3)
+
+*Built (the lobby pass, slice L3, 2026-10-09)* in `lobby_screen/sides.rs`
+(plain data, tested in `sides_tests.rs`), `facts.rs` and `mod.rs`. John's
+decisions are marked; the rest are agent decisions.
+
+- **A player's side is the side of the slot held.** Nothing else is kept: a
+  side box is checked exactly when the player holds a slot on its side, and
+  a click only sends a request (`SlotRequest::Side`, or Leave); the lamp turns
+  when the host's next lobby state says so.
+- **Colours** (John). An open slot is text in light blue 134, 182, 223
+  (Bluefor) or light red 206, 113, 121 (Redfor). A taken slot, the reader's
+  own included, is a filled bar, royal blue 36, 81, 186 or bright red 210, 36,
+  40, with white text (dimmed white while the player is away and the AI flies
+  it). A slot nobody may take now is dimmed as in co-op. Wings read "Blue 1 #2"
+  and "Red 1 #2". Co-op is unchanged. The bar is a per-row fill in the kit's
+  `List` (`Row::filled`), drawn in rows 1 to 13 of the bar, the well between
+  the light edge and the bevel.
+- **Players** wear their side's light colour; a player with no side stays
+  plain, and an unable player is dimmed in PvP so red means Redfor only.
+- **The boxes** are two retail check boxes on the Slots heading's row
+  (`layout::BOXES`, inside `SIDE_BOXES`), labelled "Bluefor 3/5" and "Redfor
+  5/5" in the side's light colour: the count is the slots the reader cannot
+  take (held, closed, kept for another) over all that side's slots, so a full
+  side reads 5/5. States, from `sides::side_boxes`: no side yet, room on the
+  side: lit, a click asks for the side; no room: greyed, "Redfor is full.";
+  your side: checked, a click leaves; the other side while on one: greyed,
+  "Uncheck Bluefor first."; Autobalance: the assigned side checked, both
+  greyed, "Autobalance picks the sides."; locked sides while flying: the side
+  flown checked, both greyed, "Sides are locked until the mission ends.";
+  free sides while flying: "Leave your aircraft before you change your slot.";
+  a game that cannot play the mission: both greyed with its reason. A short
+  note ("Balanced by the host", "Locked for this mission") shows beside them
+  when it fits before the Players heading. A greyed lamp is drawn at half
+  brightness (`CheckBox::dimmed_when_disabled`).
+- **The list** shows the side the player holds and nothing else of the
+  other; with no slot it shows both, Bluefor first. The King, on a side,
+  sees only that side's rows, so to close a slot on the other side the King
+  unchecks first.
+- **Keyboard.** Tab reaches a box that is lit (after Slots, before Players);
+  Space or Enter asks.
+- **Words.** The no-slot hint in PvP reads "Check Bluefor or Redfor to join
+  a side, or click a free slot." (under Autobalance, "Both sides are full:
+  Autobalance seats you when a slot frees."); the Rules line says "sides
+  locked" or "sides balanced"; the settings row is "Sides" with Free, Locked
+  once flown, Balanced by the host. The refusal strings are the host's, copied
+  because its module is private; the box words "Uncheck Bluefor first." are
+  the lobby's own (the host says "Leave Bluefor first.").
+- **Tests.** `lobby_screen/sides_tests.rs`; the `lobby-pvp-*` and
+  `lobby-balanced` renders in the menus lane; `net-server-side-boxes` in the
+  net lane (`tore-bot --side`).
+
 ##### Loadout rule, friendly fire and realism
 
 - `LoadoutSpec::check_for_plane` takes the loadout rule. Under `any`, the

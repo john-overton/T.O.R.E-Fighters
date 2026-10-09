@@ -53,6 +53,9 @@ pub struct Row {
     /// Drawn in this colour instead (the lobby's unable players, EF8). A
     /// dimmed row stays dim.
     pub tint: Option<[u8; 3]>,
+    /// The well behind the row's text filled with this colour (a taken PvP
+    /// slot, lobby pass L3). The text colour is the row's own.
+    pub fill: Option<[u8; 3]>,
 }
 
 impl Row {
@@ -62,6 +65,7 @@ impl Row {
             cells,
             dim: false,
             tint: None,
+            fill: None,
         }
     }
     /// A one-column row of text, keyed by the text.
@@ -76,6 +80,11 @@ impl Row {
     /// The row's text in `colour`.
     pub fn tinted(mut self, colour: [u8; 3]) -> Self {
         self.tint = Some(colour);
+        self
+    }
+    /// The well behind the row filled with `colour`.
+    pub fn filled(mut self, colour: [u8; 3]) -> Self {
+        self.fill = Some(colour);
         self
     }
 }
@@ -110,6 +119,8 @@ const BAR_HEIGHT: i32 = 17;
 /// The selection marker (`LISTHI`'s gold half) starts 4 pixels in and is 12
 /// square; row text starts 4 pixels after it.
 const MARKER: i32 = 4;
+/// How far a filled row's colour stops short of the bar's ends.
+const FILL_INSET: i32 = 2;
 const TEXT_ORIGIN: i32 = 20;
 
 /// A list of rows in recessed bars, `visible` to a page, 18 pixels apart on
@@ -539,6 +550,15 @@ impl List {
             let Some(row) = self.rows.get(index) else {
                 continue;
             };
+            if let Some([r, g, b]) = row.fill {
+                // The well filled behind the text: rows 1 to 13 of the bar, the
+                // dark and near-black ones, inside the light edge above and
+                // the bevel below.
+                canvas.rect(
+                    (x + FILL_INSET, y + 1, w - 2 * FILL_INSET, BAR_HEIGHT - 4),
+                    [r, g, b, 255],
+                );
+            }
             if self.selected == Some(index) {
                 // The gold half of the stripe picture.
                 blit_part(
