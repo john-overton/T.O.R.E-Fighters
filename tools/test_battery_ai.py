@@ -12,7 +12,7 @@ t=1289 (10.7s) destroyed: Enemy 1-1
 t=1289 (10.7s) Enemy 1-1 F18: alive=false agl=4185 kt=430 x=1 z=2 hdg=199 terrain_agl=4185
 actor=1 Friendly 1-2 F18 activity=In formation alive=true rounds=582 x=1.0 y=2.0 z=3.0 hdg=4.0
 actor=2 Enemy 1-1 F18 activity=Destroyed alive=false rounds=582 x=1.0 y=2.0 z=3.0 hdg=4.0
-AI probe debrief: FAILURE [Destroy { destroyed: 1, total: 2 }] elapsed=60s player[Alive damage=0% kills=[1, 0, 0, 0, 0, 0, 0, 0, 0, 0] ff=0 a2a=0/1
+AI probe debrief: FAILURE [Destroy { destroyed: 1, total: 2 }] elapsed=60s player[Alive damage=0% kills=[1, 0, 0, 0, 0, 0, 0, 0, 0, 0] ff=0 a2a=1/1 dmg=140 gun=0/0 a2g=0/0 bomb=0/0 enemy_aam=0/0 enemy_gun=0/0] wingman[-]
 AI probe radio: calls=2 heard=2
   5.5s YOU: 'Fox one' ["^FOXONE"]
   10.8s YOU: 'Splash' ["^SPLASH"]
@@ -25,6 +25,16 @@ AI probe invariants: actors=3 samples=7200 anomalies=0 peak_heading_rate=1.0 pea
 class ProbeCheckTests(unittest.TestCase):
     def test_clean_output_passes(self):
         self.assertEqual(ai.probe_problems(CLEAN), [])
+
+    def test_a_kill_needs_a_recorded_hit(self):
+        # The spoofed-missile accounting bug: a kill credited, no hit tallied.
+        text = CLEAN.replace("a2a=1/1 dmg=140", "a2a=0/1 dmg=0")
+        self.assertTrue(any("1 kills but only 0 recorded hits" in p for p in ai.probe_problems(text)))
+        # Hits of any weapon class count, in either column.
+        text = CLEAN.replace("a2a=1/1 dmg=140", "a2a=0/1 dmg=0").replace("bomb=0/0", "bomb=1/1")
+        self.assertEqual(ai.probe_problems(text), [])
+        text = CLEAN.replace("wingman[-]", "wingman[Alive damage=0% kills=[0, 1, 0] ff=1 a2a=1/1 dmg=9 gun=0/0 a2g=0/0 bomb=0/0 enemy_aam=0/0 enemy_gun=0/0]")
+        self.assertTrue(any("wingman with 2 kills but only 1" in p for p in ai.probe_problems(text)))
 
     def test_missing_invariants_line(self):
         text = CLEAN.replace("AI probe invariants:", "AI probe other:")
@@ -53,7 +63,10 @@ class ProbeCheckTests(unittest.TestCase):
     def test_debrief_kills_never_below_the_combat_count(self):
         text = CLEAN.replace("kills=[1, 0,", "kills=[0, 0,")
         self.assertTrue(any("kills" in p for p in ai.probe_problems(text)))
-        self.assertEqual(ai.probe_problems(CLEAN.replace("kills=[1, 0,", "kills=[2, 0,")), [])
+        # Credited kills beyond the combat count (an ejection after damage)
+        # are fine when each has its recorded hit.
+        text = CLEAN.replace("kills=[1, 0,", "kills=[2, 0,").replace("a2a=1/1 dmg=140", "a2a=2/2 dmg=240")
+        self.assertEqual(ai.probe_problems(text), [])
 
     def test_undamaged_ground_collision(self):
         text = CLEAN.replace(
