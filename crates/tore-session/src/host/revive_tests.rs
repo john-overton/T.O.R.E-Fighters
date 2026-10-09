@@ -411,3 +411,8 @@ mod ai_respawn_tests;
 // The lobby pass's slice R2: the lead hold, on this file's rig.
 #[path = "lead_hold_tests.rs"]
 mod lead_hold_tests;
+
+// The lobby pass's follow-up F1: taking a lineage's aircraft and the
+// players' callsigns, on this file's rig.
+#[path = "lineage_take_tests.rs"]
+mod lineage_take_tests;

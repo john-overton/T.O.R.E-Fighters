@@ -152,6 +152,10 @@ pub(super) struct Revivals {
     /// The lead hold's owners before this tick's step, for the log of what
     /// changed (slice R2): scratch, as `making`.
     pub(super) lead_before: Vec<Owned>,
+    /// Players in the lobby waiting to take a lineage's plane when the AI
+    /// respawns it, by connection, with the lineage's root (the lobby pass's
+    /// follow-up F1, `host::lineage_take`).
+    pub(super) awaiting: BTreeMap<ConnectionId, PlaneId>,
 }
 
 fn side_index(side: Side) -> usize {
@@ -457,10 +461,12 @@ impl Host {
             plane.pilot == Pilot::Ai
                 && plane.slot.wing.side == wing.side
                 && self.open(plane.id)
-                && self.lock_refusal(connection, plane.id.0).is_none()
+                && self
+                    .lock_refusal(connection, self.root_of(plane.id).0)
+                    .is_none()
                 && self.sides_refusal(connection, plane.id).is_none()
                 && !self.reserved(plane.id)
-                && self.holder(plane.id, connection).is_none()
+                && self.holder(self.root_of(plane.id), connection).is_none()
                 && !self.revival.pending.values().any(
                     |p| matches!(p, Pending::AiSlot { plane: taken, .. } if *taken == plane.id),
                 )
@@ -755,8 +761,10 @@ impl Host {
             self.lobby_dirty = true;
             self.seated(made.connection, made.seat, plane, tick, out);
         }
-        // The AI's respawns (slice R1).
+        // The AI's respawns (slice R1), then the players waiting to take
+        // one (follow-up F1).
         self.ai_respawn_after(tick);
+        self.awaiting_takes();
         // The lead hold's changes, for the log (slice R2).
         self.lead_hold_after();
         // Retired planes leave the list a joiner is sent.

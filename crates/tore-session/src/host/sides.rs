@@ -85,6 +85,16 @@ impl Host {
         if !matches!(self.life, Life::Flying) {
             return true;
         }
+        // The slot's lineage (the lobby pass's follow-up F1): its newest
+        // plane when the AI flies that for nobody, and free while the AI is
+        // about to respawn it.
+        let plane = match self.lineage_take(plane) {
+            super::lineage_take::LineageTake::Head(head) => head,
+            super::lineage_take::LineageTake::Wait(_) => {
+                return self.away_take_refusal(connection, plane).is_none();
+            }
+            super::lineage_take::LineageTake::AsAsked => plane,
+        };
         self.world
             .roster
             .plane(plane)

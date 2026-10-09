@@ -2,8 +2,9 @@
 //! docs/ARCHITECTURE.md, "What moves with the host"): lives and losses by
 //! player, the seats held for players whose plane is lost and the revivals
 //! asked for, both by player (join order) rather than connection, the sides'
-//! starts and the planes revivals added, and (slice R1) the AI lineages'
-//! respawns and every lineage's original spawn. Every field of [`Revivals`] is
+//! starts and the planes revivals added, (slice R1) the AI lineages'
+//! respawns and every lineage's original spawn, and (follow-up F1) the
+//! players waiting to take a lineage's respawn. Every field of [`Revivals`] is
 //! named, so a field added to it fails to compile here until it is coded or
 //! skipped with its class.
 
@@ -111,6 +112,7 @@ pub(in crate::host) fn save_revivals(
         spawned,
         lineages,
         origins,
+        awaiting,
     } = revivals;
     players.save(s, None)?;
     by_order(saving, held.iter().map(|(c, seat)| (*c, *seat))).save(s, None)?;
@@ -128,7 +130,9 @@ pub(in crate::host) fn save_revivals(
         save_spawned(s, spawned)?;
     }
     lineages.save(s, None)?;
-    origins.save(s, None)
+    origins.save(s, None)?;
+    // The players waiting for a lineage's respawn (follow-up F1), by order.
+    by_order(saving, awaiting.iter().map(|(c, root)| (*c, *root))).save(s, None)
 }
 
 pub(in crate::host) fn load_revivals(
@@ -159,6 +163,11 @@ pub(in crate::host) fn load_revivals(
     }
     let lineages = Checkpoint::load(l, None)?;
     let origins = Checkpoint::load(l, None)?;
+    let awaiting: BTreeMap<u64, tore_world::seats::PlaneId> = Checkpoint::load(l, None)?;
+    let awaiting = awaiting
+        .into_iter()
+        .map(|(order, root)| (restoring.connection(order), root))
+        .collect();
     Ok(Revivals {
         players,
         held,
@@ -171,6 +180,7 @@ pub(in crate::host) fn load_revivals(
         origins,
         respawning: Vec::new(),
         lead_before: Vec::new(),
+        awaiting,
     })
 }
 
@@ -215,6 +225,7 @@ mod tests {
             making: Vec::new(),
             respawning: Vec::new(),
             lead_before: Vec::new(),
+            awaiting: BTreeMap::from([(c(8), PlaneId(2)), (c(99), PlaneId(5))]),
             lineages: BTreeMap::from([
                 (
                     PlaneId(2),
@@ -293,6 +304,7 @@ mod tests {
         assert_eq!(restored.players[&1].lost, Some((PlaneId(3), 840)));
         assert_eq!(restored.lineages, revivals.lineages);
         assert_eq!(restored.origins, revivals.origins);
+        assert_eq!(restored.awaiting, BTreeMap::from([(c(102), PlaneId(2))]));
         let back = |connection: ConnectionId| Some(u64::from(connection.0 - 100));
         assert_eq!(
             to_bytes(|s| save_revivals(s, &Saving::new(&back), &restored)).unwrap(),

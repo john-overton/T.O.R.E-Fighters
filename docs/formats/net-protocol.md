@@ -1822,6 +1822,20 @@ removing it would need a new protocol version, so it waits for one.
   owners, and the AI wings section the claims, the wingmen waiting to re-form
   and each leader's stand-in flag. No message, packet or golden sample
   changed: leadership stays host-side.
+- **Lineages, objectives and callsigns** (the lobby pass's follow-up F1,
+  under protocol 20, no bump): the journal codes
+  `MissionCommand::Callsign { seat, callsign }` as mission command variant 9
+  (the seat, then the callsign as a string); the host gives it before the
+  command that seats a player whenever the mission does not know that name
+  for the seat yet. The checkpoint's roster section gains the callsigns, the
+  revivals part the players waiting for a lineage's respawn (by join order,
+  each with the lineage's root). A late joiner whose slot's plane is lost
+  takes the lineage's newest plane, or, while the AI is about to respawn it,
+  is sent a **Notice** ("Plane 3 flies again in 0:45: you take it then.") and
+  no Seat refused: its game stays joining, and Seated follows once the AI
+  respawns the plane. Leave or unready ends the wait. Objectives that follow
+  lineages are host state the readout (`TargetBrief`'s objective) and the
+  Debrief message already carry. No message, packet or golden sample changed.
 
 ## Limits of stage L
 
