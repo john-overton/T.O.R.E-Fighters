@@ -14,7 +14,7 @@
 //!          [--capture FILE] [--token-file FILE]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
-//!          [--revive SECONDS] [--away SECONDS,FOR]
+//!          [--revive SECONDS] [--away SECONDS,FOR] [--objectives]
 //!          [--order SECONDS,NAME]... [--reply SECONDS,KIND]...
 //!          [--drop-resource NAME]... [--expect-unable] [--standby on|off]
 //! tore-bot --host MISSION [--port N] [--name TEXT] [--password TEXT] [--standby on|off]
@@ -91,6 +91,13 @@
 //! it watches; FOR seconds later it says it is back and flies on in the same
 //! plane. It prints when the AI takes the plane and when it asks for it
 //! back, and succeeds only if it was seated again in that plane.
+//!
+//! `--objectives` (the lobby pass's follow-up F1) makes every bot designate
+//! each enemy aircraft in turn, one every two seconds while it flies, and
+//! print what its target window says the mission asks of each as it changes
+//! ("Bot: objective: plane 9 destroy", or `survive`, or `none`). Every bot
+//! prints its debrief's objective sentences ("Bot: debrief objective:
+//! Destroyed 2 of 4 targets.").
 //!
 //! `--order` and `--reply` (stage F phase 2, slice F2-R) give a seat command
 //! once, SECONDS after the bot is first seated: `--order` is a wing order from
@@ -181,10 +188,11 @@ use tore_session::host::content::{GameContent, gaps_line, report_lines};
 use tore_session::settings::{self, Mode, Store};
 use tore_session::wire::chat::Receiver;
 use tore_session::wire::messages::{
-    Goodbye, LobbyPhase, LobbyState, Observing, SettingsChange, Subject,
+    DebriefObjective, Goodbye, LobbyPhase, LobbyState, Observing, SettingsChange, Subject,
 };
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 use tore_sim::ai::launch::Side;
+use tore_world::debrief::Objective;
 use tore_world::mission::MissionSpec;
 use tore_world::seats::SeatCommand;
 
@@ -193,7 +201,7 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--wait-standbys N]) [--standby on|off] [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--side blue|red] [--seconds S] [--password TEXT] \
 [--capture FILE] [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
-[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] \
+[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] [--objectives] \
 [--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
 [--drop-resource NAME]... [--expect-unable]\n       tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
@@ -252,6 +260,9 @@ struct Options {
     king: Option<Vec<(u8, u32)>>,
     /// `--revive`: eject this long after the first seating and fly again.
     revive: Option<Duration>,
+    /// `--objectives`: designate each enemy in turn and print what the
+    /// target window says of it (follow-up F1).
+    objectives: bool,
     /// `--away`: away this long after the first seating, back the second
     /// span after the AI took the plane.
     away: Option<(Duration, Duration)>,
@@ -440,6 +451,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         side: None,
         king: None,
         revive: None,
+        objectives: false,
         away: None,
         commands: Vec::new(),
         drop: Vec::new(),
@@ -516,6 +528,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--king" => options.king = Some(king(&value()?)?),
             "--revive" => options.revive = Some(seconds(&value()?)?),
+            "--objectives" => options.objectives = true,
             "--away" => options.away = Some(away(&value()?)?),
             "--order" => options.commands.push(order(&value()?)?),
             "--reply" => options.commands.push(reply(&value()?)?),
@@ -899,6 +912,9 @@ impl Running {
         }
         if let Some(after) = options.revive {
             bot.revive_after(after);
+        }
+        if options.objectives {
+            bot.read_objectives();
         }
         if let Some((after, span)) = options.away {
             bot.away_after(after, span);
@@ -1574,6 +1590,9 @@ fn main() -> ExitCode {
             for line in std::mem::take(&mut bot.link_heard) {
                 println!("{}: link: {line}", r.name);
             }
+            for line in std::mem::take(&mut bot.objectives_read) {
+                println!("{}: objective: {line}", r.name);
+            }
             while let Some(event) = bot.client.poll_event() {
                 match event {
                     ClientEvent::Connected { .. } if r.through.is_some() => println!(
@@ -1695,6 +1714,19 @@ fn main() -> ExitCode {
                             debrief.player.kills.iter().sum::<u32>(),
                             debrief.elapsed_seconds
                         );
+                        // The objective sentences, as the debrief screen
+                        // words them (follow-up F1).
+                        for objective in &debrief.objectives {
+                            let objective = match *objective {
+                                DebriefObjective::Destroy { destroyed, total } => {
+                                    Objective::Destroy { destroyed, total }
+                                }
+                                DebriefObjective::Protect { protected, total } => {
+                                    Objective::Protect { protected, total }
+                                }
+                            };
+                            println!("{}: debrief objective: {}", r.name, objective.sentence());
+                        }
                     }
                     ClientEvent::MissionEnded(ended) => {
                         println!("{}: {}", r.name, ended_text(&ended));
@@ -1878,6 +1910,12 @@ mod tests {
         assert_eq!((o.count, o.seconds, o.slot), (2, 5, Some(3)));
         assert_eq!(o.side, None);
         assert_eq!(o.callsign, "Viper");
+        assert!(!o.objectives);
+        assert!(
+            parse(&args("--connect 127.0.0.1 --objectives"))
+                .unwrap()
+                .objectives
+        );
         let side = |text: &str| parse(&args(&format!("--connect 127.0.0.1 --side {text}")));
         assert_eq!(side("red").unwrap().side, Some(Side::Enemy));
         assert_eq!(side("blue").unwrap().side, Some(Side::Friendly));

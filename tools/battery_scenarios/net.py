@@ -821,6 +821,122 @@ def drive_lead_hold(d: Drive) -> None:
         d.problem("server log: the lead hold's lines came out of order")
 
 
+def dummy_objective_mission() -> str:
+    """The guide's mission cut to its first wings 5 nm apart (the lobby pass's follow-up F1): Friendly Wing 1, four
+    F/A-18s (planes 0 to 3), intercepts Enemy Wing 1, four MiG-29 training targets (planes 4 to 7) that fly straight
+    and level and never fire, so nothing but the friendly side shoots. A respawn or revival is plane 8 or later."""
+    keep = []
+    for line in guide_mission(separation_nm=5).splitlines(keepends=True):
+        if line.startswith(("wing friendly 2", "wing enemy 2", "survive ", "objective ")):
+            continue
+        keep.append(line)
+    mission = dummy_enemies("".join(keep))
+    return mission.replace("cheats none", "objective friendly 1 intercept enemy 1\ncheats none")
+
+
+def respawned_red(log: str) -> dict[int, int]:
+    """Each Enemy Wing 1 respawn in the server's log, as {new plane: member label}."""
+    return {int(m.group(2)): int(m.group(1)) for m in re.finditer(r"Red 1-(\d+) respawned in plane (\d+) ", log)}
+
+
+def drive_objective_respawn(d: Drive) -> None:
+    """Objectives follow lineages (the lobby pass's follow-up F1): on `dummy_objective_mission`, `respawn revive`
+    with no delay, one `tore-bot --objectives` flies plane 0, Friendly Wing 1's lead, designating each enemy in turn.
+    Its AI wingmen shoot the training targets down and the AI respawns each at once at its original spawn: the bot's
+    target window still marks a respawned plane of Enemy Wing 1 "destroy" (the network readout), and its debrief
+    counts the wing's four lineages once each ("of 4 targets", however many respawned)."""
+    port = d.port()
+    server = start_server(d, port, dummy_objective_mission(), respawn="revive", revive_delay=0)
+    hunter = start_bots(d, port, "hunter", 240, "--callsign", "Hunter", "--slot", "0", "--objectives")
+    if not hunter.wait_for(r"^Hunter: objective: plane ([89]|\d\d+) destroy$", 200):
+        d.problem("the bot's target window never marked a respawned enemy as an objective")
+    d.sleep(1)
+    server.send("end")
+    hunter.finish(60, None)
+    server.finish(60, 0)
+    log = server_log(d)
+    log_must(d, log, r"Red 1-\d lost plane \d+: the AI respawns it at once", r"Red 1-\d respawned in plane ",
+             forbid=NET_BAD)
+    respawned = respawned_red(log)
+    marked = {int(n) for n in re.findall(r"^Hunter: objective: plane (\d+) destroy$", hunter.text(), re.M)}
+    if respawned and not marked & set(respawned):
+        d.problem(f"no respawned plane of Enemy Wing 1 {sorted(respawned)} was marked; marked {sorted(marked)}")
+    hunter.expect(r"^Hunter: objective: plane [4-7] destroy$", "an original enemy marked as an objective")
+    hunter.forbid(r"^Hunter: objective: plane \d+ none$", "an enemy of the intercepted wing not marked")
+    hunter.expect(r"^Hunter: debrief objective: Destroyed (the 4 targets|\d of 4 targets)\.$",
+                  "the debrief's four lineages")
+    hunter.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
+def drive_lineage_join(d: Drive) -> None:
+    """A late joiner takes a respawned AI aircraft (the lobby pass's follow-up F1): PvP on `dummy_objective_mission`,
+    `respawn revive` with a minute's delay; a bot flies plane 0 and its AI wingmen shoot the training targets down.
+    Once the server's log says an enemy plane is lost and respawns in 1:00, a second bot joins asking for that
+    plane's slot: it is told it takes the plane when it flies again, waits, and is seated in the lineage's new plane
+    (8 or later) once the AI respawns it."""
+    port = d.port()
+    server = start_server(
+        d, port, dummy_objective_mission(), mode="pvp", respawn="revive", revive_delay=1, kill_limit="none"
+    )
+    hunter = start_bots(d, port, "hunter", 260, "--callsign", "Hunter", "--slot", "0")
+    lost = r"Red 1-\d lost plane ([4-7]): the AI respawns it in 1:00"
+    if not server.wait_for(lost, 150):
+        hunter.finish(60, None)
+        server.finish(60, None)
+        raise DriveError("no enemy plane was lost within two and a half minutes")
+    m = re.search(lost, server.text(), re.M)
+    assert m
+    slot = m.group(1)
+    hawk = start_bots(d, port, "hawk", 120, "--callsign", "Hawk", "--slot", slot)
+    if not hawk.wait_for(r"^Hawk: seat \d+, plane \d+, at tick \d+$", 100):
+        d.problem("the joiner was never seated")
+    d.sleep(5)
+    server.send("end")
+    hawk.finish(60, None)
+    hunter.finish(60, None)
+    server.finish(60, 0)
+    hawk.expect(rf"^Hawk: Plane {slot} (flies again in \d:\d\d: you take it then|is about to fly again: you take "
+                r"it when it does)\.$", "the wait's notice")
+    seated = re.findall(r"^Hawk: seat \d+, plane (\d+), at tick \d+$", hawk.text(), re.M)
+    log = server_log(d)
+    log_must(d, log, rf"Hawk waits to take plane {slot} when it respawns", forbid=NET_BAD)
+    respawned = respawned_red(log)
+    if seated and int(seated[0]) not in respawned:
+        d.problem(f"the joiner was seated in plane {seated[0]}, not a respawn of Enemy Wing 1 {sorted(respawned)}")
+    if seated:
+        log_must(d, log, rf"Hawk took plane {seated[0]}\b")
+    hawk.forbid(r"^Hawk: no plane: ", "a refused seat")
+    for bot in (hawk, hunter):
+        bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
+def drive_lead_hold_callsign(d: Drive) -> None:
+    """The lead hold's line names the owner's player (the lobby pass's follow-up F1): `respawn revive` and
+    `ai-respawn off` on the guide's mission; `tore-bot --revive 12` Phoenix leads Friendly Wing 1 (plane 0) and a
+    second bot, Wing, flies its plane 1. When Phoenix ejects, Wing, the flight's lowest flying human, stands in and
+    reads "You lead the flight until Phoenix flies again." (the host named both players to the mission core); the
+    server's log has the stand-in."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(), respawn="revive", ai_respawn="off")
+    phoenix = start_bots(d, port, "phoenix", 45, "--callsign", "Phoenix", "--slot", "0", "--revive", "12")
+    if not phoenix.wait_for(r"^Phoenix: seat \d+, plane 0, at tick \d+$", 90):
+        raise DriveError("Phoenix was never seated in plane 0")
+    wing = start_bots(d, port, "wing", 40, "--callsign", "Wing", "--slot", "1")
+    phoenix.finish(120, 0)
+    wing.finish(120, 0)
+    server.finish(40, 0)
+    wing.expect(r"^Wing: seat \d+, plane 1, at tick \d+$", "the wingman flies plane 1")
+    wing.expect(r"^Wing: line: You lead the flight until Phoenix flies again\.$", "the stand-in's line, by callsign")
+    phoenix.expect(r"^Phoenix: line: You lead your flight again\.$", "the lead given back")
+    wing.forbid(r"^Wing: line: You lead the flight until (Blue|Red) ", "the line by radio label")
+    log_must(d, server_log(d), r"Blue 1 lead passes to Wing in plane 1, standing in for Phoenix$", forbid=NET_BAD)
+    for bot in (phoenix, wing):
+        bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
 def drive_replies(d: Drive) -> None:
     """Orders to human wingmen and their replies (slice F2-R): two bots in the first friendly wing of the guide's
     mission, the AI on weapons hold. The lead bot (plane 0) orders "break left" and, later, presses a reply key, which
@@ -2275,6 +2391,24 @@ def scenarios() -> list[Scenario]:
             timeout=200,
             notes="the lead hold: a bot leading Friendly Wing 1 ejects, an AI wingman stands in, the lead goes back "
             "to its revived plane, and when it leaves the flight's own succession leads again (lobby pass R2)",
+        ),
+        Scenario(
+            name="net-server-objective-respawn", lane="net", args=[], driver=drive_objective_respawn,
+            uses=("server", "bot"), timeout=420,
+            notes="a bot leads a flight intercepting four training targets that respawn at once: its target window "
+            "marks a respawned target as an objective, and its debrief counts the four lineages once (follow-up F1)",
+        ),
+        Scenario(
+            name="net-server-lineage-join", lane="net", args=[], driver=drive_lineage_join, uses=("server", "bot"),
+            timeout=420,
+            notes="PvP, a minute's revive delay: a late joiner asks for a lost enemy plane's slot, waits for its "
+            "respawn and is seated in the lineage's new plane (follow-up F1)",
+        ),
+        Scenario(
+            name="net-server-lead-hold-callsign", lane="net", args=[], driver=drive_lead_hold_callsign,
+            uses=("server", "bot"), timeout=240,
+            notes="a human wingman stands in for its lost lead and reads the lead's callsign, \"You lead the flight "
+            "until Phoenix flies again.\" (follow-up F1)",
         ),
         Scenario(
             name="net-server-replies", lane="net", args=[], driver=drive_replies, uses=("server", "bot"), timeout=300,
