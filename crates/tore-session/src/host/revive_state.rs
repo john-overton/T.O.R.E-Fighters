@@ -100,6 +100,9 @@ pub(in crate::host) fn save_revivals(
         making: _,
         // Scratch as `making` is: the AI respawns of one tick (slice R1).
         respawning: _,
+        // Scratch as `making` is: the lead hold's owners before one tick's
+        // step, for its log (slice R2).
+        lead_before: _,
         players,
         held,
         pending,
@@ -167,6 +170,7 @@ pub(in crate::host) fn load_revivals(
         lineages,
         origins,
         respawning: Vec::new(),
+        lead_before: Vec::new(),
     })
 }
 
@@ -210,6 +214,7 @@ mod tests {
             ]),
             making: Vec::new(),
             respawning: Vec::new(),
+            lead_before: Vec::new(),
             lineages: BTreeMap::from([
                 (
                     PlaneId(2),

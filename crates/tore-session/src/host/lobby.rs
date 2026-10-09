@@ -112,6 +112,10 @@ pub enum LobbyEvent {
     /// A revival or an AI respawn, in words (the lobby pass's slice R1); for
     /// an AI aircraft the "callsign" is its label, "Red 2-3".
     Revival(String),
+    /// A flight's lead or the owner of its lead changed under the lead hold,
+    /// in words (the lobby pass's slice R2); the "callsign" is the wing's
+    /// label, "Blue 1".
+    Lead(String),
 }
 
 impl fmt::Display for LobbyEvent {
@@ -182,7 +186,7 @@ impl fmt::Display for LobbyEvent {
             Self::Released { plane } => {
                 write!(f, "had plane {plane} released to the AI by the King")
             }
-            Self::Revival(words) => f.write_str(words),
+            Self::Revival(words) | Self::Lead(words) => f.write_str(words),
         }
     }
 }
