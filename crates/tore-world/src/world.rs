@@ -67,6 +67,8 @@ mod handoff;
 mod handoff_tests;
 #[cfg(test)]
 mod lagcomp_tests;
+// The lobby pass's lead hold (slice R2).
+pub mod lead_hold;
 #[cfg(test)]
 mod loadout_tests;
 #[cfg(test)]
@@ -997,6 +999,9 @@ impl World {
             cockpits: &self.cockpits,
             wings: self.ai_wings.as_ref(),
         });
+        // The lead hold's claims for the AI step (slice R2): nothing with
+        // the hold off, as in single player.
+        self.lead_before_ai();
         // One AI tick per combat tick, immediately after it, so the AI reads
         // the damage combat just applied and then writes the authoritative pose
         // back.
@@ -1043,6 +1048,8 @@ impl World {
             let message = bridge.take_message();
             self.ai_wings = Some(bridge);
             stepped?;
+            // The lead hold's owners and HUD lines from the step (slice R2).
+            self.lead_after_ai(out);
             let given = self
                 .datalink
                 .after_ai(self.combat.state.tick(), self.ai_wings.as_ref());

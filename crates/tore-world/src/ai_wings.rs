@@ -1655,6 +1655,12 @@ impl AiWings {
         &self.mission
     }
 
+    /// Hand the AI mission the lead hold's claims for the next step (the
+    /// lobby pass's slice R2; `world/lead_hold.rs`).
+    pub(crate) fn set_lead_claims(&mut self, claims: Vec<tore_sim::ai::mission::LeadClaim>) {
+        self.mission.set_lead_claims(claims);
+    }
+
     /// Hand the AI what the flight data link holds for the next step, as
     /// [`Self::step`]'s humans are handed over: the humans' locked targets
     /// (slice G2), which its engagement table counts as attacks on the wing's

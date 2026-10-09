@@ -54,6 +54,16 @@ pub enum MissionCommand {
         root: PlaneId,
         spawn: Box<super::revive::Spawn>,
     },
+    /// The lobby pass's slice R2: the lead hold on or off
+    /// ([`super::lead_hold`]). The host turns it on for a game whose
+    /// `respawn` rule is not `none`; single player never does. Off clears
+    /// every owner.
+    LeadHold { on: bool },
+    /// The lobby pass's slice R2: the human `owner` of a flight's lead has
+    /// left the game (left, kicked, or no longer kept by the host): each
+    /// wing it owns passes to the next human in the flight, else back to the
+    /// AI's own succession ([`super::lead_hold`]).
+    LeadLeft { owner: super::lead_hold::LeadOwner },
 }
 
 /// What became of a wing order the step applied.
@@ -104,8 +114,19 @@ impl World {
                     wings.set_guns_only(cheats.guns_only);
                 }
             }
-            MissionCommand::Take { seat, plane } => self.take_plane(*seat, *plane)?,
-            MissionCommand::GiveBack { seat } => self.give_back_plane(*seat)?,
+            MissionCommand::Take { seat, plane } => {
+                self.take_plane(*seat, *plane)?;
+                // A player back from away retakes the lead it owns (R2).
+                self.lead_taken(*seat, *plane);
+            }
+            MissionCommand::GiveBack { seat } => {
+                let plane = self.roster.seat(*seat).and_then(|s| s.plane);
+                self.give_back_plane(*seat)?;
+                // The plane keeps the lead it owns for its player (R2).
+                if let Some(plane) = plane {
+                    self.lead_given_back(*seat, plane);
+                }
+            }
             // Stage F phase 2's revival (slice F2-V; world/revive.rs).
             MissionCommand::Abandon { seat } => {
                 self.abandon_plane(*seat)?;
@@ -115,11 +136,17 @@ impl World {
             }
             MissionCommand::ReviveLost { seat, plane, spawn } => {
                 self.revive_lost_plane(*seat, *plane, spawn)?;
+                // A player back from away, whose plane the AI lost, owns its
+                // flight's lead again from its new plane (R2).
+                self.lead_taken(*seat, *plane);
             }
             // The lobby pass's AI respawn (slice R1; world/revive.rs).
             MissionCommand::Respawn { root, spawn } => {
                 self.respawn_plane(*root, spawn)?;
             }
+            // The lobby pass's lead hold (slice R2; world/lead_hold.rs).
+            MissionCommand::LeadHold { on } => self.set_lead_hold(*on),
+            MissionCommand::LeadLeft { owner } => self.lead_left(*owner),
         }
         Ok(())
     }

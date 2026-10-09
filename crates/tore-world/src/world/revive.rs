@@ -197,6 +197,10 @@ pub struct Book {
     /// client's copy adds from the Spawned message has none, as only the
     /// host decides by lineage.
     roots: BTreeMap<PlaneId, PlaneId>,
+    /// The lead hold (slice R2, `world/lead_hold.rs`): whether a human
+    /// lead keeps its flight's lead while it revives, and the owner of
+    /// each wing's lead. Coded in this section after the lists.
+    pub(super) lead_hold: super::lead_hold::LeadHold,
 }
 
 impl Book {
