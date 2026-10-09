@@ -29,7 +29,7 @@ use tore_sim::sensors::{Channel, Controls as Scope};
 /// The file's first bytes.
 pub const MAGIC: &[u8; 8] = b"TORE-CAP";
 /// The capture format's version.
-pub const FORMAT_VERSION: u16 = 3;
+pub const FORMAT_VERSION: u16 = 4;
 
 /// Record kinds.
 pub mod kind {
@@ -243,6 +243,11 @@ pub fn encode_sampled(sampled: &Sampled) -> Vec<u8> {
     let _ = w.write_bits(f.sensors.range_index.min(15) as u64, 4);
     w.write_bool(f.sensors.history);
     write_powered_lift(&mut w, f.powered_lift);
+    // The gunsight's slew and zoom step (format 4).
+    for v in f.sight {
+        let _ = w.write_bits(u64::from(v as u8), 8);
+    }
+    let _ = w.write_bits(u64::from(f.sight_zoom.min(7)), 3);
     w.write_bool(sampled.view_subject.is_some());
     if let Some(key) = sampled.view_subject {
         let _ = w.write_bits(u64::from(key.kind.code()), 2);
@@ -279,6 +284,11 @@ pub fn decode_sampled(bytes: &[u8]) -> Result<Sampled, CaptureError> {
     let history = r.read_bool().map_err(bad)?;
     let powered_lift =
         read_powered_lift(&mut r).map_err(|_| CaptureError::Damaged("powered-lift controls"))?;
+    let mut sight = [0i8; 2];
+    for v in &mut sight {
+        *v = r.read_bits(8).map_err(bad)? as u8 as i8;
+    }
+    let sight_zoom = r.read_bits(3).map_err(bad)? as u8;
     let view_subject = if r.read_bool().map_err(bad)? {
         let kind = EntityKind::from_code(r.read_bits(2).map_err(bad)? as u8);
         let id = u32::try_from(r.read_varint().map_err(bad)?)
@@ -309,6 +319,8 @@ pub fn decode_sampled(bytes: &[u8]) -> Result<Sampled, CaptureError> {
                 history,
             },
             powered_lift,
+            sight,
+            sight_zoom,
         },
         commands,
         view_subject,
@@ -739,6 +751,8 @@ mod tests {
                     history: true,
                 },
                 powered_lift: Default::default(),
+                sight: [-127, 64],
+                sight_zoom: 6,
             },
             commands: vec![
                 Command::Pilot(PilotCommand::Toggle(Switch::Gear)),

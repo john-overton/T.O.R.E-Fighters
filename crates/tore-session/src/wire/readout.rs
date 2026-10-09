@@ -45,6 +45,8 @@ use tore_formats::aircraft::AircraftId;
 use tore_sim::ai::controller::Activity;
 use tore_sim::airport::{ApproachEnd, Scene, Service};
 use tore_sim::attitude::{Basis, Vector};
+use tore_sim::combat::gunship::{Notice, Sight, SightNotice};
+use tore_sim::combat::gunship_impact::Impact;
 use tore_sim::combat::live::{DamageSection, Readiness, SeekerTone};
 use tore_sim::combat::missiles::{FiringBand, LaunchMode, seeker};
 use tore_sim::combat::threats::{EvidenceSource, GuidanceClass, ThreatRecord};
@@ -56,8 +58,8 @@ use tore_world::datalink::{
 };
 use tore_world::readout::{
     self as world_readout, AirportReadout, CockpitReadout, Countermeasures, DamageReadout,
-    Estimates, InboundMissile, MapRow, MusicReadout, RwrReadout, SeekerReadout, SensorReadout,
-    Stores, TargetRow, Targets, Trail,
+    Estimates, GunsightReadout, InboundMissile, MapRow, MusicReadout, RwrReadout, SeekerReadout,
+    SensorReadout, Stores, TargetRow, Targets, Trail,
 };
 use tore_world::readout::{LinkAssigned, LinkMark, LinkMate, LinkReadout, LinkTrack, MemberRef};
 use tore_world::snapshot::Damage;
@@ -90,6 +92,13 @@ const SMALL_ANGLE: f64 = 1. / 4096.;
 const NMI: f64 = 1. / 64.;
 /// Seconds: 1/64.
 const SECONDS: f64 = 1. / 64.;
+/// The gunsight's aim point, pin and pipper impacts: 1/8 ft, a quarter of
+/// a target camera pixel at the narrowest zoom 7,000 feet away (agent
+/// decision).
+const SIGHT_FT: f64 = 1. / 8.;
+/// The gunsight's look angles: 2^-20 of a turn (agent decision: well under
+/// a pixel at the narrowest zoom).
+const LOOK: f64 = std::f64::consts::TAU / 1_048_576.;
 
 fn q(value: f64, step: f64) -> i64 {
     bits::steps(value, step)
@@ -264,7 +273,8 @@ mod scalar {
     pub const LOCKS: usize = 10;
     pub const SENSORS: usize = 11;
     pub const LINK: usize = 12;
-    pub const COUNT: usize = 13;
+    pub const GUNSIGHT: usize = 13;
+    pub const COUNT: usize = 14;
 }
 
 /// The lists.
@@ -302,7 +312,7 @@ pub enum Part {
 }
 
 /// How many parts a record has.
-pub const PART_COUNT: usize = 30;
+pub const PART_COUNT: usize = 31;
 
 /// The parts in the order they are written, which is their importance:
 /// what is left out for room is what comes last.
@@ -310,6 +320,7 @@ pub const PARTS: [Part; PART_COUNT] = [
     Part::Scalar(scalar::HEADER),
     Part::Scalar(scalar::LINK),
     Part::Scalar(scalar::STORES),
+    Part::Scalar(scalar::GUNSIGHT),
     Part::Scalar(scalar::COUNTERMEASURES),
     Part::Scalar(scalar::DAMAGE),
     Part::Scalar(scalar::SEEKER),
@@ -399,6 +410,7 @@ pub fn part_name(part: Part) -> &'static str {
             "locks",
             "sensors",
             "link",
+            "gunsight",
         ][index],
         Part::List(index) => [
             "seeker observation",
@@ -718,6 +730,160 @@ fn option_pair(value: Option<i64>) -> [i64; 2] {
     [flag(value.is_some()), value.unwrap_or(0)]
 }
 
+/// The gunsight group's values (protocol 21): the sight's mode (0 free,
+/// 1 pinned, 2 tracked) and its tracked id; the look angles; the returning
+/// flag; the aim point (a flag and the point); the pin and each gun's
+/// impact (a kind: 0 none, 1 ground, 2 air, 3 spent; its point; its
+/// seconds and range) as offsets from the aim point; the impacts' tick and
+/// the notice's tick as ticks before the readout's; the three readiness
+/// codes; the notice (0 none, 1 no ground point, 2 drop to slew); and the
+/// zoom step. Empty when the plane has no gunsight.
+fn gunsight_values(g: &GunsightReadout, tick: u64) -> Vec<i64> {
+    let origin = g.aim.unwrap_or([0.; 3]);
+    let offset =
+        |point: Vector| -> [i64; 3] { std::array::from_fn(|i| q(point[i] - origin[i], SIGHT_FT)) };
+    let (mode, id, pin) = match g.sight {
+        Sight::Free => (0, 0, [0; 3]),
+        Sight::Pinned(point) => (1, 0, offset(point)),
+        Sight::Tracked(id) => (2, i64::from(id), [0; 3]),
+    };
+    let mut out = vec![mode, id];
+    out.extend(pin);
+    out.extend(g.look.map(|a| q(a, LOOK)));
+    out.push(flag(g.returning));
+    out.push(flag(g.aim.is_some()));
+    out.extend(origin.map(|x| q(x, SIGHT_FT)));
+    for impact in &g.impacts {
+        let (kind, point, seconds, range) = match *impact {
+            None => (0, [0.; 3], 0., 0.),
+            Some(Impact::Ground {
+                point,
+                seconds,
+                range_ft,
+            }) => (1, point, seconds, range_ft),
+            Some(Impact::Air {
+                point,
+                seconds,
+                range_ft,
+            }) => (2, point, seconds, range_ft),
+            Some(Impact::Spent {
+                point,
+                seconds,
+                range_ft,
+            }) => (3, point, seconds, range_ft),
+        };
+        out.push(kind);
+        out.extend(if kind == 0 { [0; 3] } else { offset(point) });
+        out.push(q(seconds, SECONDS));
+        out.push(q(range, COARSE_FT));
+    }
+    out.push(tick as i64 - g.impacts_tick as i64);
+    out.extend(g.status.map(readiness_code));
+    let (notice, notice_back) = match g.notice {
+        None => (0, 0),
+        Some(SightNotice { notice, tick: at }) => (
+            match notice {
+                Notice::NoGroundPoint => 1,
+                Notice::DropToSlew => 2,
+            },
+            tick as i64 - at as i64,
+        ),
+    };
+    out.extend([notice, notice_back, i64::from(g.zoom)]);
+    out
+}
+
+/// Values of the gunsight group: the count [`gunsight_values`] writes.
+const GUNSIGHT_VALUES: usize = 2 + 3 + 2 + 1 + 4 + 3 * 6 + 1 + 3 + 3;
+
+/// Reads the gunsight group; `None` when it is empty.
+fn gunsight_of(values: &[i64], tick: u64) -> WireResult<Option<GunsightReadout>> {
+    if values.is_empty() {
+        return Ok(None);
+    }
+    let bad = |what: &'static str| WireError::Invalid(what);
+    if values.len() != GUNSIGHT_VALUES {
+        return Err(bad("gunsight values"));
+    }
+    let origin: Vector = std::array::from_fn(|i| v(values[9 + i], SIGHT_FT));
+    let point =
+        |at: usize| -> Vector { std::array::from_fn(|i| origin[i] + v(values[at + i], SIGHT_FT)) };
+    let back = |x: i64| -> WireResult<u64> {
+        u64::try_from(tick as i64 - x).map_err(|_| bad("gunsight tick"))
+    };
+    let sight = match values[0] {
+        0 => Sight::Free,
+        1 => Sight::Pinned(point(2)),
+        2 => Sight::Tracked(u32::try_from(values[1]).map_err(|_| bad("gunsight target"))?),
+        _ => return Err(bad("gunsight mode")),
+    };
+    let mut impacts = [None; 3];
+    for (slot, impact) in impacts.iter_mut().enumerate() {
+        let at = 12 + slot * 6;
+        let (point, seconds, range_ft) = (
+            point(at + 1),
+            v(values[at + 4], SECONDS),
+            v(values[at + 5], COARSE_FT),
+        );
+        *impact = match values[at] {
+            0 => None,
+            1 => Some(Impact::Ground {
+                point,
+                seconds,
+                range_ft,
+            }),
+            2 => Some(Impact::Air {
+                point,
+                seconds,
+                range_ft,
+            }),
+            3 => Some(Impact::Spent {
+                point,
+                seconds,
+                range_ft,
+            }),
+            _ => return Err(bad("gunsight impact")),
+        };
+    }
+    let readiness = |x: i64| -> WireResult<Readiness> {
+        READINESS
+            .get(usize::try_from(x).map_err(|_| bad("readiness"))?)
+            .copied()
+            .ok_or(bad("readiness"))
+    };
+    let notice = match values[34] {
+        0 => None,
+        code @ (1 | 2) => Some(SightNotice {
+            notice: if code == 1 {
+                Notice::NoGroundPoint
+            } else {
+                Notice::DropToSlew
+            },
+            tick: back(values[35])?,
+        }),
+        _ => return Err(bad("gunsight notice")),
+    };
+    let zoom = u8::try_from(values[36])
+        .ok()
+        .filter(|z| (1..=tore_sim::combat::gunship::ZOOM_STEPS).contains(z))
+        .ok_or(bad("gunsight zoom"))?;
+    Ok(Some(GunsightReadout {
+        sight,
+        look: [v(values[5], LOOK), v(values[6], LOOK)],
+        returning: values[7] != 0,
+        aim: (values[8] != 0).then_some(origin),
+        impacts,
+        impacts_tick: back(values[30])?,
+        status: [
+            readiness(values[31])?,
+            readiness(values[32])?,
+            readiness(values[33])?,
+        ],
+        notice,
+        zoom,
+    }))
+}
+
 impl QReadout {
     /// The readout before any is received: nothing in any group.
     pub fn empty() -> Self {
@@ -750,6 +916,10 @@ impl QReadout {
         )
         .chain(stores.ammo.iter().map(|a| i64::from(*a)))
         .collect();
+        s[scalar::GUNSIGHT] = readout
+            .gunsight
+            .as_ref()
+            .map_or_else(Vec::new, |g| gunsight_values(g, readout.tick));
         s[scalar::COUNTERMEASURES] = vec![
             i64::from(readout.countermeasures.chaff),
             i64::from(readout.countermeasures.flares),
@@ -1107,6 +1277,8 @@ impl QReadout {
         {
             return Err(bad("gun aim"));
         }
+
+        let gunsight = gunsight_of(get(scalar::GUNSIGHT), readout_tick)?;
 
         let cm = get(scalar::COUNTERMEASURES);
         let countermeasures = Countermeasures {
@@ -1536,6 +1708,7 @@ impl QReadout {
             plane,
             tick: readout_tick,
             stores,
+            gunsight,
             seeker,
             estimates,
             targets,
@@ -1555,6 +1728,12 @@ impl QReadout {
             music,
             link,
         })
+    }
+
+    /// The gunsight group's values, for tests that damage them.
+    #[cfg(test)]
+    pub(crate) fn gunsight_values_for_tests(&mut self) -> &mut Vec<i64> {
+        &mut self.scalars[scalar::GUNSIGHT]
     }
 
     /// This readout's lists moved on by `ticks`, as the client holds a

@@ -165,6 +165,25 @@ fn aircraft(hardpoints: &[Hardpoint]) -> Vec<u8> {
 /// [`aircraft`] with the PLANE record's flags set: 0x10 an ejection seat, 0x4
 /// a second crew member.
 fn aircraft_with_flags(hardpoints: &[Hardpoint], plane_flags: i64) -> Vec<u8> {
+    aircraft_named(
+        hardpoints,
+        plane_flags,
+        ("F/A-18D", "Synthetic fighter"),
+        "F18",
+        660,
+    )
+}
+
+/// [`aircraft_with_flags`] under another identity: its short and long
+/// names, the stem of its `.PT` and `.SH` resources and the record size its
+/// identity has.
+fn aircraft_named(
+    hardpoints: &[Hardpoint],
+    plane_flags: i64,
+    (name, long): (&str, &str),
+    stem: &str,
+    type_size: i64,
+) -> Vec<u8> {
     let profile = crate::test_support::profile();
     let value = |name: &str| -> i64 {
         if let Some(token) = profile.fields.get(name) {
@@ -172,7 +191,7 @@ fn aircraft_with_flags(hardpoints: &[Hardpoint], plane_flags: i64) -> Vec<u8> {
         }
         match name {
             "structType" => 5,
-            "typeSize" => 660,
+            "typeSize" => type_size,
             "weight" => 10_000,
             "hitPoints" => 100,
             "numHards" => hardpoints.len() as i64,
@@ -251,8 +270,8 @@ fn aircraft_with_flags(hardpoints: &[Hardpoint], plane_flags: i64) -> Vec<u8> {
     for (index, point) in hardpoints.iter().enumerate() {
         text += &format!(":hp{index}\nstring \"{}\"\n", point.store);
     }
-    text += ":ot_names\nstring \"F/A-18D\"\nstring \"Synthetic fighter\"\nstring \"F18.PT\"\n";
-    text += ":shape\nstring \"F18.SH\"\nend\n";
+    text += &format!(":ot_names\nstring \"{name}\"\nstring \"{long}\"\nstring \"{stem}.PT\"\n");
+    text += &format!(":shape\nstring \"{stem}.SH\"\nend\n");
     text.into_bytes()
 }
 
@@ -462,6 +481,45 @@ pub fn resources() -> BTreeMap<String, Vec<u8>> {
                 count: 2,
             },
         ]),
+    );
+    resources
+}
+
+/// [`resources`] with an AC-130U (`AC130.PT`) carrying the three
+/// side-firing guns the gunsight drives (`C_25.JT`, `C_40.JT`, `C_105.JT`,
+/// synthetic guns) and the fighter's sensors, for the AC-130 gunsight's
+/// network and standby tests. It flies the synthetic fighter's flight model.
+/// No other test sees it.
+pub fn gunship_resources() -> BTreeMap<String, Vec<u8>> {
+    let mut resources = resources();
+    resources.insert("AC130.SH".to_owned(), shape(140));
+    for (name, extent) in [("A", 80), ("B", 40), ("C", 80), ("D", 40)] {
+        resources.insert(format!("AC130_{name}.SH"), shape(extent));
+    }
+    for gun in tore_sim::combat::gunship::GUNS {
+        resources.insert(gun.to_owned(), weapon(gun, true));
+    }
+    let hardpoint = |flags, store, count| Hardpoint {
+        flags,
+        store,
+        count,
+    };
+    resources.insert(
+        "AC130.PT".to_owned(),
+        aircraft_named(
+            &[
+                hardpoint(8, "C_25.JT", 1_000),
+                hardpoint(8, "C_40.JT", 200),
+                hardpoint(8, "C_105.JT", 40),
+                hardpoint(8, "F18R.SEE", 1),
+                hardpoint(8, "F18V.SEE", 1),
+                hardpoint(8, "F18.ECM", 1),
+            ],
+            0,
+            ("AC-130U", "AC-130U Spectre"),
+            "AC130",
+            612,
+        ),
     );
     resources
 }

@@ -130,8 +130,12 @@ pub fn path_words(path: Path) -> &'static str {
 /// sub-codes, and switch 11, hover hold, 20 since the lobby pass: the slot
 /// request's side (value 3, `SlotRequest::Side`), setting 7's `balanced`,
 /// setting 12's 50 to 150 nautical miles and setting 23, AI respawn, in the
-/// lobby state's list (slice W0).
-pub const PROTOCOL_VERSION: u16 = 20;
+/// lobby state's list (slice W0), 21 since the AC-130 gunsight: the Inputs
+/// frame's sight slew and zoom step, the sight commands 28 and 29, the
+/// readout's Gunsight group (sight, look, aim point, pipper impacts, per-gun
+/// readiness with TERRAIN MASK, notice and zoom) and the standby stream's
+/// sight (gunsight slice S4).
+pub const PROTOCOL_VERSION: u16 = 21;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

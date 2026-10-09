@@ -214,6 +214,12 @@ fn frame(rng: &mut SplitMix64) -> InputFrame {
                 })
             }),
         },
+        sight: if chance(rng) {
+            [0; 2]
+        } else {
+            std::array::from_fn(|_| signed(rng, 127) as i8)
+        },
+        sight_zoom: rng.below(7) as u8,
     }
 }
 
@@ -224,10 +230,11 @@ pub(crate) fn inputs(rng: &mut SplitMix64) -> InputsSection {
         let mut next = *frames.last().unwrap();
         if chance(rng) {
             let other = frame(rng);
-            match rng.below(4) {
+            match rng.below(5) {
                 0 => next.pitch = other.pitch,
                 1 => next = other,
                 2 => next.trigger = !next.trigger,
+                3 => (next.sight, next.sight_zoom) = (other.sight, other.sight_zoom),
                 _ => next.sensors = other.sensors,
             }
         }

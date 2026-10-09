@@ -149,7 +149,7 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (20), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (21), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
 | Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
@@ -1029,8 +1029,8 @@ an escape to a varint; strings are a length byte and UTF-8.
 | Interpolation delay | 6, 0 to 63 |
 | View subject | 1, then kind 2 and id varint |
 | Mismatch | 32 |
-| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; powered-lift block (below); scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1 |
-| Each later tick | 1 bit "same as the tick before"; else 8 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope, powered lift), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
+| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; powered-lift block (below); scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1; gunsight block (protocol 21, below) |
+| Each later tick | 1 bit "same as the tick before"; else 9 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope, powered lift, gunsight; 8 before protocol 21), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
 | Command count | 7, 0 to 64 |
 | First command number | 16, when there are commands; the rest follow one by one |
 | Each command | ticks before the newest (varint), a 5-bit code and its fields |
@@ -1044,6 +1044,18 @@ The cockpit stores readout also carries the authoritative six gun angles
 and linked mask for the predicting player, whose remote entity is excluded.
 Combat command codes 26 and 27 select a gun-group candidate and toggle its
 membership. Device mask interpolation is discrete.
+
+Protocol 21 (the AC-130 gunsight, slice S4) adds a **gunsight block**: one
+present bit, then the slew's two deflections, x right and y up, each a
+signed byte (-127 to 127; -128 is refused), and the target camera's zoom
+step in 3 bits (0 the default step, 1 to 6; 7 is refused). The block is
+absent when there is no slew and the zoom is 0, and a present block that says
+so is refused. The host integrates the look from it
+([the gunsight](#the-gunsight)), so single player and a network seat run the
+same law. The sight's commands are combat codes 28 (`SightDesignate`,
+Backslash) and 29 (`SightPinGround`, Shift+Backslash), with no fields; L
+stays `ClearDesignation`. A paused game's neutral frames keep the zoom step
+and drop the slew, as they keep the scope.
 
 Set-axis (code 24) and adjust-axis (code 25) commands carry a two-bit axis
 code plus an optional position or signed step; neutral-vector (code 26) is a
@@ -1181,9 +1193,10 @@ no blade angle is sent.
 The readout's record is the baseline (7 bits since protocol 16, 5 before:
 snapshots back to the readout the client acknowledged, 1 to 127, or 0 for
 none, against the empty readout),
-then 30 parts (26 before protocol 15), each behind a changed bit, in this
-order, which is also their importance: header (plane and tick), link (protocol
-15), stores, countermeasures, damage, seeker, seeker observation, estimates,
+then 31 parts (30 before protocol 21, 26 before protocol 15), each behind a
+changed bit, in this order, which is also their importance: header (plane and
+tick), link (protocol 15), stores, gunsight (protocol 21,
+[below](#the-gunsight)), countermeasures, damage, seeker, seeker observation, estimates,
 estimate observation, targets, displayed target, viewed target, airport,
 target window, music, designated enemy, AI locks, inbound missiles, threat
 records, emitters, sensor scalars, contacts, link marks, link mates and link
@@ -1194,7 +1207,7 @@ gives the newest one around the client's predicted plane, for its flight
 frame's `ReadoutSlot::ready`). The host puts each seated player's readout,
 built from the tick's flight, in every snapshot.
 
-- **Scalar groups** (stores, damage, the seeker's status and tone, the
+- **Scalar groups** (stores, the gunsight, damage, the seeker's status and tone, the
   estimates, the target ids, the airport, the target window, the music's
   flags and aims, the locks, the sensor flags) go whole when they changed: a
   count and signed varints.
@@ -1258,6 +1271,65 @@ built from the tick's flight, in every snapshot.
   strobe is rebuilt without its line of sight, which only the host's sensors
   use (`Strobe::presented`).
 - **Order.** Lists come back in id order, and a list holds one entry per id.
+
+#### The gunsight
+
+*Built in protocol 21 (gunsight slice S4); agent decisions unless credited.*
+The AC-130's sight is the host's ([the spec](../spec/ac130-linked-guns.md)):
+the seat sends its slew and zoom step in every Inputs frame, the host's
+combat step turns the look, resolves Backslash and L, trains the guns and
+works out each gun's pipper, and the owner's readout carries the result in
+its gunsight scalar group. The group is empty on every other aircraft. Its
+37 values, in order:
+
+| Values | Meaning |
+| --- | --- |
+| 2 | The sight's mode (0 free, 1 pinned, 2 tracked) and the tracked object's id (0 otherwise) |
+| 3 | The pin, as an offset from the aim point in 1/8 ft (0 unless pinned; a pin is its own aim point, so it costs three bytes) |
+| 2 | The look: body-relative heading and elevation in steps of 2^-20 of a turn |
+| 1 | Travelling back to the default view |
+| 4 | The aim point: present, then its position in 1/8 ft |
+| 3 x 6 | Each gun's pipper by source slot (25 mm, 40 mm, 105 mm): kind (0 none, 1 ground, 2 air, 3 spent), its point as an offset from the aim point in 1/8 ft, its flight time in 1/64 s and its range in whole feet |
+| 1 | The pippers' launch tick, as ticks before the readout's |
+| 3 | Each gun's readiness, in the readout's readiness codes (24 is TERRAIN MASK) |
+| 2 | The last notice (0 none, 1 no ground point, 2 drop to slew) and its tick, as ticks before the readout's |
+| 1 | The zoom step, 1 to 6 |
+
+*Agent decisions:* the plan asked for points relative to the aircraft, but
+the readout does not carry the host's own position, and the client's
+predicted plane is ahead of it; so the aim point is absolute and everything
+else rides as an offset from it, which keeps the pippers to two or three
+bytes a coordinate. 1/8 ft is a quarter of a target camera pixel at the
+narrowest zoom 7,000 feet away, and 2^-20 of a turn (6 microradians) is far
+under a pixel. Whether a readiness only advises (the trigger still fires)
+is the readiness's own (`Readiness::gun_may_fire`), so it needs no bit. A
+reader refuses a group of another length, an unknown mode, impact kind,
+readiness or notice, and a zoom step outside 1 to 6.
+
+Remote players need none of this: an AC-130's barrels travel in its entity's
+gun devices (protocol 18), so a second player sees them follow the sight.
+
+**The client turns the camera itself** (`tore_session::client::sight`). The
+host's look arrives a round trip late, so the client turns its own copy with
+the sim's own law from the same quantized frames its prediction steps: a free
+sight slews or travels home after a predicted L; a pinned one looks at the
+host's pin from the predicted plane, turned by the slews the host's pin does
+not hold yet; a tracked one holds the host's look, since the target camera
+frames a track by itself. When a newer readout arrives, its look (the sight
+after the input of the tick before the readout's) is compared with the
+client's own for that tick; when they differ by more than 10 microradians
+(the wire's step is 6), the client starts again from the host's look and
+steps the frames it sent since. A change of over a tenth of the field of view
+snaps; a smaller one slides away with a 50 ms time constant, counted in ticks
+so a capture replays it the same. The flight frame's readout carries the
+client's look in place of the host's. The pipper, the gun marks and the
+status stay the host's, a round trip late, like the barrels. In the network
+tests (`client::sight_tests`) a gunner slews, pins, fires and slews the pin.
+Over 80 ms with no loss the camera never snapped and slid once, when the
+pin arrived. Over 300 ms with 5 percent loss each way the slews never
+corrected and the pin snapped once: the client cannot predict the pin, and
+by the time it arrives the plane has flown a round trip on, so the view
+swings to the pin by more than a tenth of the field of view.
 
 Measured on the 15 against 15 mission with 100 ms acknowledgements: the
 readout's plain size is 471 to 13,145 bytes, mean 1,895; its record is 4 to
@@ -2005,7 +2077,7 @@ prefix it holds is consistent. Each record starts with its type (4 bits).
 | 2 | Flight | The mission's number (varint), the FNV-1a 64 of the flight's spec text (64) and the [mission identity](checkpoint.md#restoring) (64): build the world fresh from the spec the player holds; the journal starts at its tick 0 |
 | 3 | Checkpoint begin | Its tick (32), its length in bytes (32), its chunks (16) |
 | 4 | Checkpoint chunk | Its index (16), its bytes (a long byte string, at most 4,096) |
-| 5 | Ticks | The first tick (32) and a count (8, 1 to 60), then each tick: the changes before the step (a count; each 1 bit: 0 scoring, then on or off, 1 bit; 1 a store cut, then the plane, a varint, and the revival weapons, 2 bits); the mission commands (a count, each by the checkpoint trait's coder of `MissionCommand`); the seat inputs (a count; each: the seat, 8 bits, then against that seat's previous input in the stream: the last command applied, 1 bit when the previous one's and else 16 bits; the controls, a bit when they lie on the wire's grid and then the Inputs section's frame against the previous one's, else each control by the trait; the two command lists behind one presence bit; the view, 1 bit when the previous one's moved on, else 2 bits for none, as Inputs codes it (offset 8 bits, delay 6) or whole by the trait). Protocol 14 ([as built](#stage-k-as-built)) |
+| 5 | Ticks | The first tick (32) and a count (8, 1 to 60), then each tick: the changes before the step (a count; each 1 bit: 0 scoring, then on or off, 1 bit; 1 a store cut, then the plane, a varint, and the revival weapons, 2 bits); the mission commands (a count, each by the checkpoint trait's coder of `MissionCommand`); the seat inputs (a count; each: the seat, 8 bits, then against that seat's previous input in the stream: the last command applied, 1 bit when the previous one's and else 16 bits; the controls, a bit when they lie on the wire's grid and then the Inputs section's frame against the previous one's, else each control by the trait, the gunsight's slew and zoom step included since protocol 21; the two command lists behind one presence bit; the view, 1 bit when the previous one's moved on, else 2 bits for none, as Inputs codes it (offset 8 bits, delay 6) or whole by the trait). Protocol 14 ([as built](#stage-k-as-built)) |
 | 6 | State | The part (8: 1 players, 2 session, 3 court, 4 scores, 5 revivals, 6 rejoin, 7 candidates, 8 listing), the tick after which it holds (32), its bytes (a long byte string) |
 | 7 | Check | The tick (32) and the FNV-1a 64 of the host's `World::checkpoint()` between that tick and the next (64) |
 | 8 | Ended | The end's reason (3 bits, as Mission ended): drop the world |
@@ -2274,7 +2346,7 @@ number changes on its own.
 
 The file starts with 12 bytes: the 8-byte magic `TORE-CAP`
 (`tore_session::capture::MAGIC`, which a game's pruner checks so that it only
-ever deletes captures), the capture format's version (16 bits, 3 since powered-lift controls) and the
+ever deletes captures), the capture format's version (16 bits, 3 since powered-lift controls, 4 since the gunsight's slew and zoom) and the
 protocol version (16 bits); a reader refuses another of either. Records follow, each a kind (8 bits), a body length (32 bits) and the
 body; a capture cut short ends at its last whole record. Numbers are least
 significant byte first, times are nanoseconds of the client's clock (64 bits),
@@ -2284,7 +2356,7 @@ and strings are a 16-bit length and UTF-8.
 | --- | --- | --- |
 | 1 | Start | The time the join started, the seed of its randomness (64 bits: the nonce comes from it), the server's address, the callsign, the game version and commit, a release-build byte, the plane asked for (a byte, then 32 bits when 1), and whether the client readies by itself (a byte, format 2). Never the password |
 | 2 | Receive | The time, the sender's address, then the datagram as it arrived |
-| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the powered-lift block in Inputs coding, the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
+| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the powered-lift block in Inputs coding, the gunsight's slew (two signed bytes) and zoom step (3 bits, format 4), the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
 | 4 | Frame | The time a frame was drawn |
 | 5 | Leave | The time the player ended the mission |
 | 6 | Disconnect | The time the player quit |
@@ -2339,7 +2411,13 @@ again with an observer; the capture format did not change for it.
   and the AI respawn and lead hold commands (R1, R2) are build-exact codings
   of the journal, the checkpoint and the session's state parts, which the wire
   golden does not sample (the journal's codings are listed under
-  [Rejoin as built](#rejoin-as-built-k5), beside revival's).
+  [Rejoin as built](#rejoin-as-built-k5), beside revival's). 21 since the
+  AC-130 gunsight (slice S4): the Inputs frame's
+  [gunsight block](#inputs-as-built) and its ninth change bit, the sight's
+  combat commands 28 and 29, the readout's [gunsight](#the-gunsight) group
+  (31 parts), and the standby stream's seat inputs, which carry the sight
+  with the rest of the controls. Protocol 21 is the gunsight project's one
+  bump.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

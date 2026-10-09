@@ -34,6 +34,11 @@ pub struct InputFrame {
     /// The scope controls: channel, range step and contact history.
     pub sensors: Controls,
     pub powered_lift: PoweredLiftInput,
+    /// The AC-130 gunsight's slew (protocol 21): deflection [x, y], right
+    /// and up positive, -127 to 127.
+    pub sight: [i8; 2],
+    /// The target camera's zoom step, 1 to 6; 0 means the default step.
+    pub sight_zoom: u8,
 }
 
 /// Vector pitch/yaw, nacelle conversion and collective, in that order.
@@ -110,7 +115,17 @@ impl InputFrame {
                         .and_then(|value| axis_position(FLIGHT_AXES[index], value))
                 }),
             },
+            sight: [0; 2],
+            sight_zoom: 0,
         }
+    }
+
+    /// The frame with the gunsight's slew and zoom step, held inside the
+    /// wire's ranges (-127 to 127, 0 to 6).
+    pub fn with_sight(mut self, sight: [i8; 2], zoom: u8) -> Self {
+        self.sight = sight.map(|v| v.max(-127));
+        self.sight_zoom = zoom.min(SIGHT_ZOOM_STEPS);
+        self
     }
 
     /// The pilot input these controls stand for, with no commands.
@@ -164,10 +179,8 @@ impl InputFrame {
             pilot,
             trigger: self.trigger,
             sensors: self.sensors,
-            // The gunsight slew and zoom join the frame in protocol 21
-            // (plan slice S4); until then a remote seat sends none.
-            sight: [0; 2],
-            sight_zoom: 0,
+            sight: self.sight,
+            sight_zoom: self.sight_zoom,
             commands: seat_commands,
             view,
         }
@@ -391,6 +404,48 @@ impl InputsSection {
 
 /// Stick differences from the tick before: 4, 8 or 17 bits.
 const STICK_LADDER: [u32; 3] = [4, 8, 17];
+/// The highest zoom step the sight takes (`tore_sim::combat::gunship::ZOOM_STEPS`).
+pub const SIGHT_ZOOM_STEPS: u8 = tore_sim::combat::gunship::ZOOM_STEPS;
+
+/// The gunsight's slew and zoom (protocol 21): a present bit, then each
+/// deflection in a signed byte and the zoom step in 3 bits. Idle (no
+/// slew, default zoom) is the present bit alone.
+fn write_sight(w: &mut BitWriter, frame: &InputFrame) -> WireResult<()> {
+    if frame.sight.contains(&i8::MIN) || frame.sight_zoom > SIGHT_ZOOM_STEPS {
+        return Err(WireError::Invalid("sight"));
+    }
+    let present = frame.sight != [0; 2] || frame.sight_zoom != 0;
+    w.write_bool(present);
+    if present {
+        for v in frame.sight {
+            let _ = w.write_signed(i64::from(v), 8);
+        }
+        let _ = w.write_bits(u64::from(frame.sight_zoom), 3);
+    }
+    Ok(())
+}
+
+fn read_sight(r: &mut BitReader<'_>) -> WireResult<([i8; 2], u8)> {
+    if !r.read_bool()? {
+        return Ok(([0; 2], 0));
+    }
+    let mut sight = [0i8; 2];
+    for v in &mut sight {
+        let q = r.read_signed(8)?;
+        if q < -127 {
+            return Err(WireError::Invalid("sight"));
+        }
+        *v = q as i8;
+    }
+    let zoom = r.read_bits(3)? as u8;
+    if zoom > SIGHT_ZOOM_STEPS {
+        return Err(WireError::Invalid("sight zoom"));
+    }
+    if sight == [0; 2] && zoom == 0 {
+        return Err(CodecError::NonCanonical.into());
+    }
+    Ok((sight, zoom))
+}
 
 fn write_sensors(w: &mut BitWriter, sensors: &Controls) -> WireResult<()> {
     let channel = match sensors.channel {
@@ -440,7 +495,8 @@ pub(crate) fn write_frame(
         });
         w.write_bool(frame.trigger);
         write_powered_lift(w, frame.powered_lift);
-        return write_sensors(w, &frame.sensors);
+        write_sensors(w, &frame.sensors)?;
+        return write_sight(w, frame);
     };
     if frame == previous {
         w.write_bool(true);
@@ -456,6 +512,7 @@ pub(crate) fn write_frame(
         frame.trigger != previous.trigger,
         frame.sensors != previous.sensors,
         frame.powered_lift != previous.powered_lift,
+        frame.sight != previous.sight || frame.sight_zoom != previous.sight_zoom,
     ];
     for flag in changed {
         w.write_bool(flag);
@@ -483,6 +540,9 @@ pub(crate) fn write_frame(
     }
     if changed[7] {
         write_powered_lift(w, frame.powered_lift);
+    }
+    if changed[8] {
+        write_sight(w, frame)?;
     }
     Ok(())
 }
@@ -542,7 +602,7 @@ pub(crate) fn read_frame(
     previous: Option<&InputFrame>,
 ) -> WireResult<InputFrame> {
     let Some(previous) = previous else {
-        return Ok(InputFrame {
+        let mut frame = InputFrame {
             pitch: read_stick(r)?,
             roll: read_stick(r)?,
             yaw: read_stick(r)?,
@@ -551,12 +611,15 @@ pub(crate) fn read_frame(
             trigger: r.read_bool()?,
             powered_lift: read_powered_lift(r)?,
             sensors: read_sensors(r)?,
-        });
+            ..InputFrame::default()
+        };
+        (frame.sight, frame.sight_zoom) = read_sight(r)?;
+        return Ok(frame);
     };
     if r.read_bool()? {
         return Ok(*previous);
     }
-    let mut changed = [false; 8];
+    let mut changed = [false; 9];
     for flag in &mut changed {
         *flag = r.read_bool()?;
     }
@@ -594,10 +657,14 @@ pub(crate) fn read_frame(
     if changed[7] {
         frame.powered_lift = read_powered_lift(r)?;
     }
+    if changed[8] {
+        (frame.sight, frame.sight_zoom) = read_sight(r)?;
+    }
     if (changed[3] && frame.throttle_rate == previous.throttle_rate)
         || (changed[4] && frame.throttle == previous.throttle)
         || (changed[6] && frame.sensors == previous.sensors)
         || (changed[7] && frame.powered_lift == previous.powered_lift)
+        || (changed[8] && frame.sight == previous.sight && frame.sight_zoom == previous.sight_zoom)
     {
         return Err(CodecError::NonCanonical.into());
     }

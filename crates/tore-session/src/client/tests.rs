@@ -48,7 +48,7 @@ pub(super) fn weave(t: f64) -> Controls {
     }
 }
 
-type Script = Box<dyn FnMut(Duration, &Client, Option<&RenderSnapshot>) -> Controls>;
+pub(super) type Script = Box<dyn FnMut(Duration, &Client, Option<&RenderSnapshot>) -> Controls>;
 
 /// One player's game on the simulator.
 pub(super) struct Player {

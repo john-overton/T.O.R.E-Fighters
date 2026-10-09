@@ -350,6 +350,12 @@ fn same_option(a: Option<f64>, b: Option<f64>) -> bool {
     }
 }
 
+/// A seat's last input as the Inputs frame its next one is coded against.
+fn baseline_frame(input: &SeatInput) -> InputFrame {
+    InputFrame::of(&input.pilot, input.trigger, input.sensors)
+        .with_sight(input.sight, input.sight_zoom)
+}
+
 /// Codes one seat's input at `tick` against its baseline (protocol 14,
 /// slice K3): the seat; the number of its last command applied, one bit
 /// when the baseline's; the controls as the Inputs section codes them (the
@@ -371,10 +377,8 @@ fn write_seat_input(
         pilot,
         trigger,
         sensors,
-        // Coded with the wire's Inputs section in protocol 21 (plan slice
-        // S4); until then a standby replays no gunsight slew.
-        sight: _,
-        sight_zoom: _,
+        sight,
+        sight_zoom,
         commands,
         view,
     } = input;
@@ -404,9 +408,11 @@ fn write_seat_input(
         let _ = s.writer().write_bits(u64::from(applied), 16);
     }
     // The controls.
-    let frame = InputFrame::of(pilot, *trigger, *sensors);
+    let frame = InputFrame::of(pilot, *trigger, *sensors).with_sight(*sight, *sight_zoom);
     let back = frame.pilot();
-    let on_grid = same_bits(back.pitch, *pitch)
+    let on_grid = frame.sight == *sight
+        && frame.sight_zoom == *sight_zoom
+        && same_bits(back.pitch, *pitch)
         && same_bits(back.roll, *roll)
         && same_bits(back.yaw, *yaw)
         && same_bits(back.throttle_rate, *throttle_rate)
@@ -421,7 +427,7 @@ fn write_seat_input(
         && same_option(back.collective, *collective);
     s.writer().write_bool(on_grid);
     if on_grid {
-        let previous = base_input.map(|b| InputFrame::of(&b.pilot, b.trigger, b.sensors));
+        let previous = base_input.map(baseline_frame);
         write_frame(s.writer(), &frame, previous.as_ref())?;
     } else {
         let b = base_input.map(|b| &b.pilot);
@@ -440,6 +446,8 @@ fn write_seat_input(
         collective.save(s, b.map(|b| &b.collective))?;
         trigger.save(s, base_input.map(|b| &b.trigger))?;
         sensors.save(s, base_input.map(|b| &b.sensors))?;
+        sight.save(s, base_input.map(|b| &b.sight))?;
+        sight_zoom.save(s, base_input.map(|b| &b.sight_zoom))?;
     }
     // The commands.
     let any = !pilot_commands.is_empty() || !commands.is_empty();
@@ -489,10 +497,16 @@ fn read_seat_input(
     } else {
         l.reader().read_bits(16)? as u16
     };
-    let (mut pilot, trigger, sensors) = if l.reader().read_bool()? {
-        let previous = base_input.map(|b| InputFrame::of(&b.pilot, b.trigger, b.sensors));
+    let (mut pilot, trigger, sensors, sight, sight_zoom) = if l.reader().read_bool()? {
+        let previous = base_input.map(baseline_frame);
         let frame = read_frame(l.reader(), previous.as_ref())?;
-        (frame.pilot(), frame.trigger, frame.sensors)
+        (
+            frame.pilot(),
+            frame.trigger,
+            frame.sensors,
+            frame.sight,
+            frame.sight_zoom,
+        )
     } else {
         let b = base_input.map(|b| &b.pilot);
         let pilot = PilotInput {
@@ -513,7 +527,9 @@ fn read_seat_input(
         };
         let trigger = Checkpoint::load(l, base_input.map(|b| &b.trigger))?;
         let sensors = Checkpoint::load(l, base_input.map(|b| &b.sensors))?;
-        (pilot, trigger, sensors)
+        let sight = Checkpoint::load(l, base_input.map(|b| &b.sight))?;
+        let sight_zoom = Checkpoint::load(l, base_input.map(|b| &b.sight_zoom))?;
+        (pilot, trigger, sensors, sight, sight_zoom)
     };
     let mut commands = Vec::new();
     if l.reader().read_bool()? {
@@ -548,8 +564,8 @@ fn read_seat_input(
         pilot,
         trigger,
         sensors,
-        sight: [0; 2],
-        sight_zoom: 0,
+        sight,
+        sight_zoom,
         commands,
         view,
     };

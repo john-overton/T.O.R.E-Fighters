@@ -239,11 +239,12 @@ fn placeholder(order: u64) -> ConnectionId {
     ConnectionId(u32::MAX - (order.min(u64::from(u32::MAX / 2)) as u32))
 }
 
-/// The controls a paused game sends (the stall rule): the scope kept,
-/// everything else centred, the throttle where it is.
+/// The controls a paused game sends (the stall rule): the scope and the
+/// sight's zoom step kept, everything else centred, the throttle where it is.
 fn neutral(frame: &InputFrame) -> InputFrame {
     InputFrame {
         sensors: frame.sensors,
+        sight_zoom: frame.sight_zoom,
         ..InputFrame::default()
     }
 }

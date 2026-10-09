@@ -14,7 +14,7 @@ use tore_sim::flight::PilotInput;
 use tore_world::mission::{MissionSpec, Skill, Start};
 use tore_world::resources::ResourceReads;
 use tore_world::seats::{PlaneId, SeatCommand, SeatId, SeatInput, SeatView};
-use tore_world::test_support::resources::{THEATER, resources};
+use tore_world::test_support::resources::{THEATER, gunship_resources, resources};
 use tore_world::world::{MissionCommand, Seating, TickOutput, World};
 
 /// Four of ours, two of them human, against four bandits 2 nm ahead at
@@ -441,6 +441,188 @@ fn every_way_a_seat_input_is_coded_reads_back_to_the_bit() {
         .collect();
     let (read, _) = through(&ticks);
     same(&ticks, &read);
+}
+
+#[test]
+fn the_gunsight_slew_and_zoom_round_trip_on_and_off_the_wires_grid() {
+    // Protocol 21 (gunsight slice S4): the sight joins the controls.
+    let base = quantized(pilot(0, 100));
+    let mut inputs = Vec::new();
+    for (sight, zoom) in [
+        ([127, 0], 1),
+        ([-127, 127], 6),
+        ([0, -64], 3),
+        ([0, 0], 0),
+        // Off the wire's grid: a deflection of -128 and a zoom past 6 go by
+        // the checkpoint trait, to the bit.
+        ([-128, 5], 2),
+        ([3, 3], 9),
+    ] {
+        let mut input = base.clone();
+        input.sight = sight;
+        input.sight_zoom = zoom;
+        inputs.push(input);
+    }
+    // The sight with a pilot off the grid.
+    let mut off = base.clone();
+    off.pilot.roll = 0.123_456_789;
+    off.sight = [-90, 45];
+    off.sight_zoom = 5;
+    inputs.push(off);
+    let ticks: Vec<Tick> = inputs
+        .into_iter()
+        .enumerate()
+        .flat_map(|(n, input)| {
+            let number = 300 + 2 * n as u64;
+            [number, number + 1].map(|number| {
+                let mut tick = Tick::new(number);
+                let mut input = input.clone();
+                if let Some(view) = &mut input.view {
+                    view.tick = view.tick + number - 100;
+                }
+                input.tick = number;
+                tick.push_input(input, n as u16);
+                tick
+            })
+        })
+        .collect();
+    let (read, _) = through(&ticks);
+    same(&ticks, &read);
+    for (a, b) in ticks.iter().zip(&read) {
+        assert_eq!(a.inputs[0].sight, b.inputs[0].sight);
+        assert_eq!(a.inputs[0].sight_zoom, b.inputs[0].sight_zoom);
+    }
+}
+
+/// Two human AC-130s 5,000 feet over the synthetic ground (gunsight S4).
+fn gunship_spec() -> MissionSpec {
+    let mut spec = MissionSpec::new(THEATER, AircraftId::Ac130);
+    spec.wings[0].count = 2;
+    spec.start = Start::Airborne { altitude_ft: 5_000 };
+    spec
+}
+
+/// The gunner at `tick`: slews right then down at changing zoom steps,
+/// pins the ground, slews the pin, fires, drops it with L, slews again,
+/// presses L once more to travel home, then designates under the
+/// crosshair.
+fn gunner(seat: u8, tick: u64) -> SeatInput {
+    let phase = tick % 900;
+    let sight = match phase {
+        0..120 => [127, 0],
+        120..200 => [0, -64],
+        260..330 => [-40, 20],
+        420..480 => [90, -90],
+        _ => [0, 0],
+    };
+    let command = |c| vec![SeatCommand::Combat(c)];
+    let commands = match phase {
+        200 => command(live::Command::SightPinGround),
+        400 => command(live::Command::ClearDesignation),
+        500 => command(live::Command::ClearDesignation),
+        700 => command(live::Command::SightDesignate),
+        _ => Vec::new(),
+    };
+    SeatInput {
+        seat: SeatId(seat),
+        tick,
+        pilot: PilotInput {
+            roll: -0.05,
+            throttle: Some(0.8),
+            ..PilotInput::default()
+        },
+        trigger: (330..400).contains(&phase),
+        sight,
+        sight_zoom: 1 + ((tick / 150) % 6) as u8,
+        commands,
+        ..SeatInput::default()
+    }
+}
+
+#[test]
+fn a_standby_replays_the_gunsight_slew_bit_for_bit() {
+    let import = gunship_resources();
+    let spec = gunship_spec();
+    let mut host = fresh(&spec, &import);
+    let mut out = TickOutput::default();
+    let mut journal = Vec::new();
+    let mut checkpoints = BTreeMap::new();
+    let mut looks = BTreeMap::new();
+    for _ in 0..1_200 {
+        let number = host.tick();
+        let mut tick = Tick::new(number);
+        if number == 0 {
+            tick.mission = (0..2)
+                .map(|seat| MissionCommand::Take {
+                    seat: SeatId(seat),
+                    plane: PlaneId(u32::from(seat)),
+                })
+                .collect();
+        }
+        for seat in 0..2 {
+            tick.push_input(quantized(gunner(seat, number)), (number / 100) as u16);
+        }
+        apply_tick(&mut host, &tick, &mut out).unwrap();
+        let _ = drain(&mut host);
+        journal.push(tick);
+        let guns = host
+            .combat
+            .state
+            .ownship(0)
+            .unwrap()
+            .gunship
+            .as_ref()
+            .unwrap();
+        looks.insert(host.tick(), (guns.look, guns.sight, guns.headings));
+        if host.tick().is_multiple_of(30) {
+            checkpoints.insert(host.tick(), host.checkpoint().unwrap());
+        }
+    }
+    // The sight really moved: slewed, pinned, dropped and the guns trained.
+    let first = looks[&1];
+    let slewed = looks[&120];
+    assert_ne!(first.0, slewed.0, "the slew turned the look");
+    assert!(
+        looks
+            .values()
+            .any(|(_, sight, _)| matches!(sight, tore_sim::combat::gunship::Sight::Pinned(_))),
+        "the gunner pinned the ground"
+    );
+    assert_ne!(first.2, looks[&600].2, "the guns trained");
+
+    let bytes = stream(&spec, &host, &journal);
+    let mut twin = fresh(&spec, &import);
+    let mut reader = StreamReader::new();
+    let mut compared = 0;
+    for record in &bytes {
+        if let Record::Ticks(ticks) = reader.decode(record).unwrap() {
+            for tick in &ticks.ticks {
+                apply_tick(&mut twin, tick, &mut out).unwrap();
+                let _ = drain(&mut twin);
+                let guns = twin
+                    .combat
+                    .state
+                    .ownship(0)
+                    .unwrap()
+                    .gunship
+                    .as_ref()
+                    .unwrap();
+                let (look, sight, headings) = looks[&twin.tick()];
+                assert_eq!(guns.look.map(f64::to_bits), look.map(f64::to_bits));
+                assert_eq!(guns.sight, sight);
+                assert_eq!(guns.headings.map(f64::to_bits), headings.map(f64::to_bits));
+                if let Some(expected) = checkpoints.get(&twin.tick()) {
+                    assert!(
+                        twin.checkpoint().unwrap() == *expected,
+                        "the standby differs from the host at tick {}",
+                        twin.tick()
+                    );
+                    compared += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(compared, 40);
 }
 
 #[test]

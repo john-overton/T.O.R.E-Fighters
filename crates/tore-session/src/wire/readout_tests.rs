@@ -13,7 +13,7 @@ use tore_world::combat::launcher;
 use tore_world::mission::{MissionSpec, Skill, Start};
 use tore_world::readout::CockpitReadout;
 use tore_world::seats::{SeatId, SeatInput};
-use tore_world::test_support::resources::{THEATER, resources};
+use tore_world::test_support::resources::{THEATER, gunship_resources, resources};
 use tore_world::world::{Seating, TickOutput, World};
 
 #[test]
@@ -556,4 +556,203 @@ fn a_readout_codes_against_a_baseline_up_to_127_snapshots_back() {
         }
         assert_eq!(send(&mut host, gap), back, "gap {gap}");
     }
+}
+
+#[test]
+fn the_gunsight_group_stands_for_the_sight() {
+    use tore_sim::combat::gunship::{Notice, Sight, SightNotice};
+    use tore_sim::combat::gunship_impact::Impact;
+    use tore_sim::combat::live::Readiness;
+    // Protocol 21 (gunsight slice S4). The sample is on the wire's grid, so
+    // it comes back exactly.
+    let readout = samples::readout();
+    let back = QReadout::of(&readout, 400)
+        .readout(400, None, None)
+        .unwrap();
+    assert_eq!(back.gunsight, readout.gunsight);
+    // A plane with no gunsight has none.
+    let mut plain = readout.clone();
+    plain.gunsight = None;
+    let back = QReadout::of(&plain, 400).readout(400, None, None).unwrap();
+    assert_eq!(back.gunsight, None);
+    // Every mode, impact kind and notice, off the grid: within half a step.
+    let aim = [123_456.789, 321.123, -98_765.432_1];
+    let point = |d: f64| [aim[0] + d, aim[1] - d, aim[2] + 2. * d];
+    for (sight, impacts, notice, aimed) in [
+        (
+            Sight::Free,
+            [
+                Some(Impact::Air {
+                    point: point(10.01),
+                    seconds: 2.001,
+                    range_ft: 4_000.4,
+                }),
+                Some(Impact::Ground {
+                    point: point(-3.3),
+                    seconds: 3.3,
+                    range_ft: 5_000.,
+                }),
+                None,
+            ],
+            None,
+            true,
+        ),
+        (
+            Sight::Tracked(70_001),
+            [None, None, None],
+            Some(SightNotice {
+                notice: Notice::NoGroundPoint,
+                tick: 12,
+            }),
+            false,
+        ),
+        (Sight::Pinned(point(0.)), [None; 3], None, true),
+    ] {
+        let mut readout = readout.clone();
+        let gunsight = tore_world::readout::GunsightReadout {
+            sight,
+            look: [2.345_678, -1.234_567],
+            returning: true,
+            aim: aimed.then_some(aim),
+            impacts,
+            impacts_tick: 399,
+            status: [
+                Readiness::GunSlewing,
+                Readiness::MaximumRange,
+                Readiness::NoTarget,
+            ],
+            notice,
+            zoom: 6,
+        };
+        readout.gunsight = Some(gunsight.clone());
+        let q = QReadout::of(&readout, 400);
+        let got = q.readout(400, None, None).unwrap().gunsight.unwrap();
+        // Rounding twice changes nothing.
+        let mut again = readout.clone();
+        again.gunsight = Some(got.clone());
+        assert_eq!(QReadout::of(&again, 400), q);
+        let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() <= 0.125);
+        match (got.sight, gunsight.sight) {
+            (Sight::Pinned(a), Sight::Pinned(b)) => assert!(near(a, b)),
+            (a, b) => assert_eq!(a, b),
+        }
+        let turn = std::f64::consts::TAU / 1_048_576.;
+        assert!((0..2).all(|i| (got.look[i] - gunsight.look[i]).abs() <= turn));
+        assert!(got.returning);
+        assert_eq!(got.aim.is_some(), aimed);
+        if aimed {
+            assert!(near(got.aim.unwrap(), aim));
+        }
+        for (a, b) in got.impacts.iter().zip(&gunsight.impacts) {
+            match (a, b) {
+                (None, None) => {}
+                (Some(a), Some(b)) => {
+                    assert_eq!(std::mem::discriminant(a), std::mem::discriminant(b));
+                    assert!(near(a.point(), b.point()), "{a:?} {b:?}");
+                    assert!((a.seconds() - b.seconds()).abs() <= 1. / 128.);
+                    assert!((a.range_ft() - b.range_ft()).abs() <= 0.5);
+                }
+                _ => panic!("{a:?} against {b:?}"),
+            }
+        }
+        assert_eq!(got.impacts_tick, 399);
+        assert_eq!(got.status, gunsight.status);
+        assert_eq!(got.notice, gunsight.notice);
+        assert_eq!(got.zoom, 6);
+    }
+    // Damaged values are refused, never a panic.
+    let good = QReadout::of(&readout, 400);
+    for (index, value) in [
+        (0, 3),
+        (12, 4),
+        (34, 3),
+        (36, 0),
+        (36, 7),
+        (31, 99),
+        (1, -1),
+    ] {
+        let mut bad = good.clone();
+        bad.gunsight_values_for_tests()[index] = value;
+        if index == 1 {
+            bad.gunsight_values_for_tests()[0] = 2;
+        }
+        assert!(bad.readout(400, None, None).is_err(), "value {index}");
+    }
+    let mut short = good.clone();
+    short.gunsight_values_for_tests().pop();
+    assert!(short.readout(400, None, None).is_err());
+}
+
+#[test]
+fn an_ac130s_readout_carries_its_gunsight_through_a_connection() {
+    // A synthetic AC-130 slewing its sight: the host's readout, sent and
+    // received, shows the sight the sim holds (within the wire's steps).
+    let mut spec = MissionSpec::new(THEATER, AircraftId::Ac130);
+    spec.start = Start::Airborne { altitude_ft: 5_000 };
+    let mut world = World::new(&spec, &gunship_resources(), Seating::SinglePlayer).unwrap();
+    let mut out = TickOutput::default();
+    let mut host = HostConnection::new(4);
+    let mut client = ClientConnection::for_flight(4, 0);
+    let mut checked = 0;
+    for tick in 0..480u64 {
+        world
+            .step(
+                &[SeatInput {
+                    tick,
+                    sight: if tick < 240 { [127, -40] } else { [0, 0] },
+                    sight_zoom: 2,
+                    ..SeatInput::default()
+                }],
+                &mut out,
+            )
+            .unwrap();
+        if tick % 4 != 3 {
+            continue;
+        }
+        let readout = readout_of(&world);
+        let sim = world
+            .combat
+            .state
+            .ownship(0)
+            .unwrap()
+            .gunship
+            .clone()
+            .unwrap();
+        let shown = readout.gunsight.clone().unwrap();
+        assert_eq!(shown.look, sim.look);
+        assert_eq!(shown.zoom, 2);
+        let header = samples::header(world.tick() as u32);
+        let packet = host
+            .snapshot_with_readout(&header, &[], Some(&readout), 0)
+            .unwrap();
+        let sequence = checked as u16;
+        host.sent(sequence);
+        let (_, received) = client.snapshot(&packet.snapshot).unwrap();
+        host.delivered(sequence);
+        let got = received
+            .readout
+            .unwrap()
+            .readout(world.tick() as u32, None, None)
+            .unwrap()
+            .gunsight
+            .unwrap();
+        let turn = std::f64::consts::TAU / 1_048_576.;
+        assert!((0..2).all(|i| (got.look[i] - sim.look[i]).abs() <= turn));
+        assert_eq!(got.sight, tore_sim::combat::gunship::Sight::Free);
+        assert_eq!(got.status, sim.status);
+        assert!((0..3).all(|i| (got.aim.unwrap()[i] - sim.aim.unwrap()[i]).abs() <= 0.125));
+        checked += 1;
+    }
+    assert_eq!(checked, 120);
+    // It slewed: the look moved off the default view.
+    let look = world
+        .combat
+        .state
+        .ownship(0)
+        .unwrap()
+        .gunship
+        .as_ref()
+        .unwrap()
+        .look;
+    assert_ne!(look, tore_sim::combat::gunship::DEFAULT_LOOK);
 }

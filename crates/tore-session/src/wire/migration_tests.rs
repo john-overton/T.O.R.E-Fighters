@@ -327,6 +327,8 @@ fn every_bound_is_refused_by_the_reader() {
         // No powered-lift block (protocol 18).
         w.write_bool(false);
         w.write_bits(0, 7).unwrap();
+        // No sight slew or zoom (protocol 21).
+        w.write_bool(false);
         w.write_bits(0, 14).unwrap();
         w.write_varint(1);
         w.write_varint(1);
