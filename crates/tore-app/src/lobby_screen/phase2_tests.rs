@@ -200,6 +200,21 @@ fn the_kings_seven_buttons_and_the_joiners_four_have_their_places() {
     assert!(joiner.settings_open().is_some());
 }
 
+#[test]
+fn a_joiners_mission_button_opens_the_mission_page_to_read() {
+    let mut joiner = screen_of(&sample(2), false);
+    assert_eq!(joiner.mission.label(), "Mission...");
+    // Mission... leads the joiner's row, three places in from the King's.
+    assert_eq!(
+        click(&mut joiner, button_centre(2)),
+        Some(Request::Mission),
+        "the page opens for a player who is not the King"
+    );
+    // Players... and Fly are the King's and are not drawn for a joiner.
+    assert!(!joiner.shown(Id::PlayersPanel) && !joiner.shown(Id::Fly));
+    assert!(joiner.shown(Id::Mission));
+}
+
 // ---- the Settings rows ----
 
 #[test]

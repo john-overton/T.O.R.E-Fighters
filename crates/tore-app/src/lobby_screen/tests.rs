@@ -52,9 +52,13 @@ fn the_king_in_a_lobby_has_every_button_and_the_joiner_only_his_own() {
     );
 
     let joiner = facts::buttons(&Facts::of(Some(&sample(2)), None), true);
-    for hidden in [joiner.mission, joiner.players, joiner.fly] {
+    for hidden in [joiner.players, joiner.fly] {
         assert_eq!(hidden, Show::Hidden, "the King's buttons are not offered");
     }
+    assert!(
+        joiner.mission.is_enabled(),
+        "Mission... is everyone's: the joiner reads the mission"
+    );
     assert!(
         joiner.settings.is_enabled()
             && joiner.loadout.is_enabled()
@@ -121,8 +125,8 @@ fn while_the_mission_flies_fly_ends_it_and_ready_joins_it() {
     assert!(b.fly.is_enabled());
     assert_eq!(
         b.mission,
-        Show::Disabled,
-        "the mission changes only in the lobby"
+        Show::Enabled,
+        "the mission page opens while it flies, to read (it changes only in the lobby)"
     );
     assert_eq!(
         (b.loadout, b.loadout_as),
@@ -380,7 +384,8 @@ fn a_dedicated_servers_lobby_has_no_kings_controls_and_states_its_rule() {
     let b = facts::buttons(&facts, true);
     assert_eq!(
         [b.mission, b.players, b.fly],
-        [Show::Hidden, Show::Hidden, Show::Hidden]
+        [Show::Enabled, Show::Hidden, Show::Hidden],
+        "a server's players read its mission"
     );
     assert!(
         b.settings.is_enabled(),
