@@ -1231,8 +1231,10 @@ fn h11b_overspeed_is_judged_against_vne() {
 /// An aircraft whose rotor table sets no structural speed, and the legacy
 /// adapter, keep the envelope's top speed as the overspeed limit.
 #[test]
+#[allow(clippy::single_element_loop)] // The tandem sets a structural speed.
 fn h11c_without_a_structural_speed_the_envelope_is_the_limit() {
-    for id in [AircraftId::Ch47, AircraftId::V22] {
+    // The tandem CH-47 sets one since slice P3 (lift.rs tests).
+    for id in [AircraftId::V22] {
         let aircraft = crate::models::variety::tests::synthetic(id);
         let mut s = State::new(&aircraft, [0., 3_000., 0.]).unwrap();
         s.enable_research(1).unwrap();

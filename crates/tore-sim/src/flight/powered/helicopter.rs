@@ -505,7 +505,7 @@ pub struct Trim {
 
 /// Solves `a x = b` by Gaussian elimination with partial pivoting, or none
 /// when `a` is singular.
-fn solve(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
+pub(super) fn solve(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
     for col in 0..6 {
         let pivot = (col..6).fold(col, |best, row| {
             if a[row][col].abs() > a[best][col].abs() {

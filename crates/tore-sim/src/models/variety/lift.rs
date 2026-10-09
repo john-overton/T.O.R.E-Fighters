@@ -76,8 +76,25 @@ pub enum RotorLayout {
         rotation: RotorRotation,
         tail_rotor_arm_ft: f64,
     },
-    /// Two counter-rotating rotors, fore and aft, `hub_spacing_ft` apart.
-    Tandem { hub_spacing_ft: f64 },
+    /// Two counter-rotating rotors, fore and aft, `hub_spacing_ft` apart
+    /// (design 4.6). Pitch is differential collective, yaw differential
+    /// lateral cyclic; all the figures below are Fit.
+    Tandem {
+        hub_spacing_ft: f64,
+        /// The rear rotor's hover inflow from the front rotor's wake, as a
+        /// share of the front rotor's induced velocity; it fades out by
+        /// 40 kt.
+        interference: f64,
+        /// Blade pitch added to one rotor and taken from the other by a full
+        /// pitch stick, degrees.
+        pitch_collective_degrees: f64,
+        /// Share of the lateral cyclic range a full pedal gives each rotor,
+        /// in opposite directions.
+        pedal_cyclic_share: f64,
+        /// Forward tilt of both disks at the full longitudinal trim
+        /// schedule (40 to 140 kt, Damper and Attitude), degrees.
+        trim_tilt_degrees: f64,
+    },
     /// Two counter-rotating rotors side by side on nacelles,
     /// `hub_spacing_ft` apart.
     SideBySide { hub_spacing_ft: f64 },
@@ -409,6 +426,22 @@ const MI24_RATED_HP: f64 = 2. * 2_225. * MI24_ROTOR_POWER_SHARE;
 /// notes and docs/spec/variety-flight.md.
 const MI24_ROTOR_POWER_SHARE: f64 = 0.745;
 
+/// The CH-47's rated power at the rotors per pound of maximum takeoff
+/// weight, hp/lb: the CH-47F's two T55-GA-714A at 4,733 shp each (Pub
+/// W-CH47) at its 54,000 lb maximum gross weight, times the share that
+/// reaches the rotors (Fit, 0.82: transmission and installation losses of
+/// about 8 percent, as for the Mi-24, and the rest the H6 climb band). The PT's weights are 53 percent of
+/// the real aircraft's, so the power is scaled by weight to keep the real
+/// aircraft's power loading (P3 notes; the PT thrust of 135,795 lbf and
+/// the first draft's 1.25 x weight are both set aside).
+const CH47_RATED_HP_AT_MAX: f64 = 2. * 4_733. * 0.82;
+/// The real CH-47F's maximum gross weight, lb (Pub W-CH47).
+const CH47_REAL_MAX_LB: f64 = 54_000.;
+/// The CH-47's maximum static thrust per pound of PT maximum takeoff weight:
+/// what [`CH47_RATED_HP_AT_MAX`] hovers at at sea level by the 4.4 power law
+/// (Derived, Fit). Reported by the trace; the power sets the flight.
+const CH47_MAX_THRUST_PER_LB: f64 = 1.63;
+
 fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
     use AircraftId::*;
     let pt_thrust = c.propulsion.military_thrust_lbf;
@@ -507,35 +540,42 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
         },
         // Two 60 ft counter-rotating rotors (Pub W-CH47), 38.9 ft apart
         // (Derived from the 98 ft 10.7 in rotors-turning length); rotor
-        // speed, solidity and Vne Fit. The PT thrust (4.7 times the maximum
-        // weight) is implausible, so 1.25 x the PT maximum takeoff weight.
+        // speed, solidity and Vne Fit (the published maximum speed is 170
+        // kt; Vne itself was not found). The PT thrust (4.7 times the
+        // maximum weight) is implausible, so the power is the published
+        // engines' per pound of maximum weight (see CH47_RATED_HP_AT_MAX)
+        // and the maximum thrust is what that power hovers at.
         Ch47 => RotorParameters {
             layout: RotorLayout::Tandem {
                 hub_spacing_ft: 38.9,
+                interference: 0.3,
+                pitch_collective_degrees: 1.2,
+                pedal_cyclic_share: 0.85,
+                trim_tilt_degrees: 2.5,
             },
             radius_ft: 30.,
             rotor_speed_rpm: 225.,
             solidity: 0.062,
-            max_thrust_lbf: 1.25 * c.mass.max_takeoff_lbs,
-            rated_power_hp: None,
+            max_thrust_lbf: CH47_MAX_THRUST_PER_LB * c.mass.max_takeoff_lbs,
+            rated_power_hp: Some(
+                CH47_RATED_HP_AT_MAX * (c.mass.max_takeoff_lbs / CH47_REAL_MAX_LB).powf(1.5),
+            ),
             energy_seconds: 2.5,
-            never_exceed_kt: 180.,
-            structural_kt: None,
-            // Starting values for slice P3; the CH-47 still flies the old
-            // powered law.
+            never_exceed_kt: 190.,
+            structural_kt: Some(190.),
             collective_degrees: [1., 14.],
-            cyclic_degrees: [8., 8.],
-            blowback: 0.1,
+            cyclic_degrees: [8., 9.],
+            blowback: 0.12,
             lock_number: 4.,
             hub_height_ft: 8.,
             hub_stiffness: 1.,
             profile_drag: 0.008,
             ground_effect_constant: 2.7,
-            vortex_ring_rise: 1.3,
+            vortex_ring_rise: 2.,
             tail_rotor: None,
             airframe: RotorcraftAirframe {
-                flat_plate_ft2: [60., 250., 600.],
-                tail_pitch_ft3: 0.,
+                flat_plate_ft2: [38., 250., 150.],
+                tail_pitch_ft3: 4_000.,
                 tail_trim_degrees: 0.,
                 fin_yaw_ft3: 1_500.,
                 fin_torque_share: 0.,
@@ -784,21 +824,27 @@ mod tests {
         // losses, below the engines' sum and above half of it.
         let hp = rotor(Mi24).rated_power_hp.unwrap();
         assert!((0.5 * 4_450. ..4_450.).contains(&hp), "{hp}");
-        for id in [Ah64, Ch47, V22] {
+        for id in [Ah64, V22] {
             assert_eq!(rotor(id).rated_power_hp, None, "{id:?}");
         }
+        // The CH-47's is the CH-47F's two T55 at 4,733 shp less 8 percent,
+        // per pound of weight: 15,000 lb of maximum weight in the fixture.
+        let hp = rotor(Ch47).rated_power_hp.unwrap();
+        assert!(
+            (hp - 2. * 4_733. * 0.82 * (15_000_f64 / 54_000.).powf(1.5)).abs() < 1e-6,
+            "{hp}"
+        );
         // The helicopters' overspeed rule uses their never-exceed speed
-        // (197 and 190 kt); the tandem and the tiltrotor keep the envelope
-        // until their own slices set one.
-        for id in [Ah64, Mi24] {
+        // (197, 190 and 190 kt); the tiltrotor keeps the envelope until its
+        // own slice sets one.
+        for id in [Ah64, Mi24, Ch47] {
             let rotor = rotor(id);
             assert_eq!(rotor.structural_kt, Some(rotor.never_exceed_kt), "{id:?}");
         }
         assert_eq!(rotor(Ah64).structural_kt, Some(197.));
         assert_eq!(rotor(Mi24).structural_kt, Some(190.));
-        for id in [Ch47, V22] {
-            assert_eq!(rotor(id).structural_kt, None, "{id:?}");
-        }
+        assert_eq!(rotor(Ch47).structural_kt, Some(190.));
+        assert_eq!(rotor(V22).structural_kt, None);
     }
 
     #[test]
@@ -812,7 +858,7 @@ mod tests {
         // weight 15,000 lb.
         let thrust = |id| lift(id).unwrap().rotor.unwrap().max_thrust_lbf;
         assert_eq!(thrust(AircraftId::Ah64), 50_000.);
-        assert_eq!(thrust(AircraftId::Ch47), 1.25 * 15_000.);
+        assert_eq!(thrust(AircraftId::Ch47), 1.63 * 15_000.);
         let ah64 = lift(AircraftId::Ah64).unwrap().rotor.unwrap();
         assert_eq!(
             ah64.layout,
