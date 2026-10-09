@@ -33,8 +33,14 @@ these gestures retain their flight-control meanings on applicable VTOL and
 rotorcraft. Existing combat buttons and left-stick cyclic remain available.
 These keys and gestures are agent decisions dated 2026-10-05.
 
-The ordinary Fire action releases every enabled gun that can currently bear,
-has ammunition, passes aiming/line-of-fire checks and is ready to fire. Eligible
+The ordinary Fire action releases every enabled gun that has ammunition, is not
+failed or lost, and whose own airframe is not in the line of fire. It needs no
+ballistic solution: with no target held, a pinned point, a point out of arc or
+beyond maximum range, terrain in the way, or the barrels still slewing, the
+rounds leave along the actual barrels wherever they point. Those states are
+advisory labels on the status line, not blocks. Only SAFE (NAV or an
+unarmed selection), LAUNCHER LOST, STATION FAILED, EMPTY, the projectile limit,
+an empty group and NO LINE OF FIRE (the gun's own airframe) stop a gun. Eligible
 guns begin on the same fixed tick of a new trigger press; thereafter each retains
 its own source cadence, ammunition and physical-round scheduling. A blocked or
 empty gun does not prevent another member from firing. Trigger release clears
@@ -49,7 +55,7 @@ position and velocity through the shared gun ballistics solver, including the
 weapon's own speed, drop and available life; a pinned or free-slew ground point
 is aimed at the same way with no velocity. When the solver finds no solution
 (the point is beyond the rounds' reach) the guns still point along the plain
-line to the aim point and report MAX RANGE. Firing still needs READY.
+line to the aim point and report MAX RANGE. Firing does not need READY.
 The launch direction follows the actual slewed mount. Projectile dispersion
 retains the existing fitted 0.25-degree cone. Gun firing range is 0 through 13,000 feet for all three installed records,
 using each weapon's source range rather than its longer projectile life.
@@ -67,11 +73,13 @@ not been established. Shipped limits are:
 | C_105 | -115 to -65 degrees | -45 to +45 degrees |
 
 Both heading and elevation slew at a fitted 30 degrees/second, independently,
-at 120 Hz. A gun may fire within a fitted 1-degree error of both desired angles.
-A demand beyond an arc is clamped for visible movement but marked CANNOT BEAR,
-so it cannot shoot. Every accepted direction points outward on the left side;
-right-facing directions are rejected. Terrain obstruction between muzzle and
-target also blocks fire. There is no hidden path through the aircraft to keep
+at 120 Hz. A gun within a fitted 1-degree error of both desired angles reports ready;
+otherwise it reads SLEWING, and it fires either way.
+A demand beyond an arc is clamped for visible movement and marked CANNOT BEAR;
+the gun fires along the arc limit. Every accepted direction points outward on
+the left side; right-facing directions are rejected. Terrain between muzzle and
+aim point reads TERRAIN MASK and does not block fire: the rounds meet the
+terrain. There is no hidden path through the aircraft to keep
 a group synchronized.
 
 Projectile origins and animated barrels share fitted pivots and tips selected
@@ -163,9 +171,11 @@ The input page exposes the two group actions with AC-130 applicability. A group
 label shows each included cannon and the current candidate. Weapon readiness
 reports NO TARGET, CANNOT BEAR, SLEWING, MAX RANGE, MIN RANGE, NO LINE OF FIRE
 (the gun's own airframe), TERRAIN MASK (terrain between muzzle and aim point),
-EMPTY or GROUP EMPTY as applicable. The selected candidate's blocking reason remains
-visible even when another group member is ready; ready members remain operational
-independently.
+EMPTY or GROUP EMPTY as applicable. The selected candidate's reason, blocking or
+advisory, remains visible even when another group member is ready; every
+member fires independently unless it is itself blocked.
+The status line shows the advisory states only to tell the pilot a shot is not
+solved; none of them holds the trigger.
 
 Host, clients and replay receive actual heading/elevation and membership. The
 six angle values use slot order C_25, C_40, C_105 and interleaved heading/elevation;

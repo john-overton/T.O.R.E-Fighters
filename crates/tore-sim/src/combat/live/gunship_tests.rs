@@ -152,7 +152,7 @@ fn gun_candidate_changes_membership_empty_station_and_empty_group_are_independen
     assert_eq!(s.own_view().readiness(launcher()), Readiness::GroupEmpty);
 }
 #[test]
-fn tracked_mounts_slew_within_limits_and_loss_or_right_targets_block_fire() {
+fn tracked_mounts_slew_within_limits_and_fire_on_at_the_arc_limit() {
     let mut s = gunship();
     let old = s.own().gunship.as_ref().unwrap().headings;
     s.targets[0].position = [-1000., 1000., 1000.];
@@ -163,9 +163,12 @@ fn tracked_mounts_slew_within_limits_and_loss_or_right_targets_block_fire() {
     }
     assert_eq!(pose.status[0], Readiness::GunSlewing);
     s.targets[0].position = [1000., 1000., 0.];
+    // Out of every arc the guns stop at the limit and still fire along it.
+    let mut released = 0;
     for _ in 0..240 {
-        assert!(fired(tick(&mut s, true)).is_empty());
+        released += fired(tick(&mut s, true)).len();
     }
+    assert!(released > 0);
     assert_eq!(
         s.own().gunship.as_ref().unwrap().status[0],
         Readiness::GunArc
@@ -174,7 +177,7 @@ fn tracked_mounts_slew_within_limits_and_loss_or_right_targets_block_fire() {
     // L drops the track and the sight slews freely from where it looked:
     // level out of the right side, where no gun can bear.
     s.command(OWN, Command::ClearDesignation, launcher());
-    assert!(fired(tick(&mut s, true)).is_empty());
+    tick(&mut s, true);
     let group = s.own().gunship.as_ref().unwrap();
     assert_eq!(group.target(), None);
     assert_eq!(group.sight, gunship::Sight::Free);
@@ -198,7 +201,7 @@ fn gun_group_restart_restores_solo_neutral_and_non_gunship_commands_do_nothing()
 }
 
 #[test]
-fn failed_gun_does_not_block_other_members_and_terrain_los_stops_the_group() {
+fn failed_gun_does_not_block_other_members_and_terrain_los_does_not_stop_the_group() {
     let mut s = gunship();
     s.own_mut().gunship.as_mut().unwrap().included = [true; 3];
     s.own_mut().selected = 1;
@@ -207,6 +210,7 @@ fn failed_gun_does_not_block_other_members_and_terrain_los_stops_the_group() {
     assert_eq!(s.own_view().readiness(launcher()), Readiness::StationFailed);
     tick(&mut s, false);
     let before = s.own().shots;
+    let mut released = 0;
     for _ in 0..60 {
         let events = s.step(
             &[OwnshipInput {
@@ -222,9 +226,12 @@ fn failed_gun_does_not_block_other_members_and_terrain_los_stops_the_group() {
                 }
             },
         );
-        assert!(fired(events).is_empty());
+        released += fired(events).len();
     }
-    assert_eq!(s.own().shots, before);
+    // Terrain between the muzzle and the aim point is advisory: the rounds
+    // leave along the barrels and meet the ridge.
+    assert!(released > 0);
+    assert_eq!(s.own().shots, before + released as u32);
 }
 #[test]
 fn self_clearance_rejects_upward_fire_through_wing_or_nacelle_and_accepts_downward_rays() {
@@ -241,13 +248,20 @@ fn self_clearance_rejects_upward_fire_through_wing_or_nacelle_and_accepts_downwa
     s.targets[0].position = [-1000., 1800., 0.];
     s.own_mut().selected = 1;
     s.own_mut().gunship.as_mut().unwrap().included = [false, true, false];
+    // The gun may fire while it is still clear on its way up, never once the
+    // wing or nacelle is in the line.
     for _ in 0..240 {
+        let released = fired(tick(&mut s, true));
+        if group(&s).status[1] == Readiness::GunObscured {
+            assert!(released.is_empty());
+        }
+    }
+    assert_eq!(group(&s).status[1], Readiness::GunObscured);
+    let shots = s.own().shots;
+    for _ in 0..120 {
         assert!(fired(tick(&mut s, true)).is_empty());
     }
-    assert_eq!(
-        s.own().gunship.as_ref().unwrap().status[1],
-        Readiness::GunObscured
-    );
+    assert_eq!(s.own().shots, shots);
 }
 
 /// Exact checkpoints carry the AC-130's mounts: a combat state saved while
@@ -878,4 +892,204 @@ fn the_pipper_is_kept_for_linked_guns_and_the_candidate_and_sits_on_a_trained_ai
         "{:?}",
         g.impacts
     );
+}
+
+/// Holds the trigger for `ticks` over `ground`, returning the station of
+/// every round released.
+fn hold_fire(s: &mut State, ticks: usize, ground: impl Fn(f64, f64) -> f64 + Sync) -> Vec<usize> {
+    let mut stations = Vec::new();
+    for _ in 0..ticks {
+        stations.extend(fired(s.step(
+            &[OwnshipInput {
+                aircraft: OWN,
+                held: true,
+                launcher: launcher(),
+            }],
+            &ground,
+        )));
+    }
+    stations
+}
+/// Every linked gun released rounds, and its rounds are in flight.
+fn assert_all_fire(stations: &[usize]) {
+    for slot in 0..3 {
+        assert!(stations.contains(&slot), "gun {slot} never fired");
+    }
+}
+fn flat(_: f64, _: f64) -> f64 {
+    0.
+}
+
+#[test]
+fn the_trigger_fires_with_nothing_held_along_the_default_view() {
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true; 3];
+    assert_eq!(group(&s).sight, Sight::Free);
+    let shots = s.own().shots;
+    let stations = hold_fire(&mut s, 120, flat);
+    assert_all_fire(&stations);
+    assert_eq!(s.own().shots, shots + stations.len() as u32);
+    assert_eq!(s.own().gunship.as_ref().unwrap().target(), None);
+    // The rounds leave along the actual barrels, not at any target.
+    assert!(!s.projectiles.is_empty());
+}
+
+#[test]
+fn the_trigger_fires_at_a_pin_and_after_the_target_is_lost() {
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true; 3];
+    s.command(OWN, Command::SightPinGround, launcher());
+    tick(&mut s, false);
+    assert!(matches!(group(&s).sight, Sight::Pinned(_)));
+    assert_all_fire(&hold_fire(&mut s, 120, flat));
+    // Track the radar target, then destroy it: the pin takes over and the
+    // guns keep firing.
+    let mut s = gunship();
+    group_mut(&mut s).included = [true; 3];
+    s.targets[0].hp = 0;
+    assert_all_fire(&hold_fire(&mut s, 120, flat));
+}
+
+#[test]
+fn the_trigger_fires_out_of_arc_at_the_limit() {
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true; 3];
+    group_mut(&mut s).look = [-10_f64.to_radians(), -25_f64.to_radians()];
+    for _ in 0..360 {
+        tick(&mut s, false);
+    }
+    assert_eq!(group(&s).status, [Readiness::GunArc; 3]);
+    let before = group(&s).headings;
+    assert_all_fire(&hold_fire(&mut s, 120, flat));
+    assert_eq!(group(&s).status, [Readiness::GunArc; 3]);
+    assert_eq!(group(&s).headings, before);
+}
+
+#[test]
+fn the_trigger_fires_at_max_range_and_while_slewing() {
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true; 3];
+    let mut object = s.targets[0].clone();
+    object.id = 77;
+    object.airborne = false;
+    object.velocity = [0.; 3];
+    let range = 30. * 6076.12;
+    object.position = [-range, 0., 0.];
+    s.targets.push(object);
+    let l = launcher();
+    group_mut(&mut s).look = gunship::body_angles(l, [-range, -1000., 0.]);
+    s.command(OWN, Command::SightDesignate, l);
+    tick(&mut s, false);
+    assert_eq!(group(&s).sight, Sight::Tracked(77));
+    let stations = hold_fire(&mut s, 240, flat);
+    assert_all_fire(&stations);
+    let g = group(&s);
+    let candidate = g.slot(s.own().selected).unwrap();
+    assert_eq!(g.status[candidate], Readiness::MaximumRange);
+    // Slewing: a new pin far from where the guns point releases at once.
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true; 3];
+    for _ in 0..60 {
+        tick(&mut s, false);
+    }
+    group_mut(&mut s).look = [-60_f64.to_radians(), -20_f64.to_radians()];
+    let mut slewing_fire = 0;
+    for _ in 0..30 {
+        let released = hold_fire(&mut s, 1, flat);
+        if group(&s).status.contains(&Readiness::GunSlewing) {
+            slewing_fire += released.len();
+        }
+    }
+    assert!(slewing_fire > 0);
+}
+
+#[test]
+fn the_trigger_fires_through_terrain_mask_and_the_rounds_meet_the_ridge() {
+    let mut s = gunship();
+    group_mut(&mut s).included = [true; 3];
+    let ridge = |x: f64, _: f64| {
+        if (-700. ..-300.).contains(&x) {
+            1200.
+        } else {
+            0.
+        }
+    };
+    tick_over(&mut s, ridge);
+    let candidate = group(&s).slot(s.own().selected).unwrap();
+    assert_eq!(group(&s).status[candidate], Readiness::TerrainMask);
+    let stations = hold_fire(&mut s, 120, ridge);
+    assert!(stations.contains(&candidate));
+    assert!(!s.projectiles.is_empty() || s.own().shots > 0);
+}
+
+#[test]
+fn safe_empty_failed_and_empty_groups_still_block_the_trigger() {
+    // SAFE.
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true; 3];
+    s.own_mut().armed = false;
+    assert!(hold_fire(&mut s, 60, flat).is_empty());
+    // EMPTY: every linked magazine dry.
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true; 3];
+    for i in 0..3 {
+        s.own_mut().ammo[i] = 0;
+    }
+    assert!(hold_fire(&mut s, 60, flat).is_empty());
+    // STATION FAILED on the one linked gun.
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [false, true, false];
+    s.own_mut().selected = 1;
+    s.own_mut().ammo[1] |= 0x8000;
+    assert!(hold_fire(&mut s, 60, flat).is_empty());
+    // GROUP EMPTY: no gun linked or selected into the group.
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [false; 3];
+    s.own_mut().selected = 3;
+    assert!(hold_fire(&mut s, 60, flat).is_empty());
+}
+
+#[test]
+fn the_airframe_blocks_even_when_the_aim_is_out_of_range_or_arc() {
+    let mut s = free_gunship();
+    s.own_mut().selected = 1;
+    group_mut(&mut s).included = [false, true, false];
+    // Level-up sky aim, abeam: the nacelle is in the way of gun 1, and the
+    // sky point is also beyond any arc.
+    group_mut(&mut s).look = [-FRAC_PI_2, 30_f64.to_radians()];
+    for _ in 0..360 {
+        tick(&mut s, false);
+    }
+    assert_eq!(group(&s).status[1], Readiness::GunObscured);
+    let shots = s.own().shots;
+    assert!(hold_fire(&mut s, 120, flat).is_empty());
+    assert_eq!(s.own().shots, shots);
+}
+
+#[test]
+fn only_the_hard_blocks_stop_a_gun() {
+    use Readiness::*;
+    for blocked in [
+        Safe,
+        LauncherLost,
+        StationFailed,
+        Empty,
+        Capacity,
+        GroupEmpty,
+        GunObscured,
+    ] {
+        assert!(!blocked.gun_may_fire(), "{blocked:?}");
+    }
+    for advisory in [
+        Ready,
+        NoTarget,
+        TargetDestroyed,
+        MinimumRange,
+        MaximumRange,
+        GunArc,
+        GunSlewing,
+        TerrainMask,
+    ] {
+        assert!(advisory.gun_may_fire(), "{advisory:?}");
+    }
 }

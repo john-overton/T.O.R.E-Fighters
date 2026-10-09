@@ -410,7 +410,9 @@ impl State {
     /// no ballistic solution the guns still point along the plain line to
     /// the aim point and report MAX RANGE; outside an arc they stop at its
     /// edge. `clear` says whether terrain leaves the line between two points
-    /// open.
+    /// open. The status is a label: only [`Readiness::GunObscured`] (and the
+    /// empty-station states) stop a gun firing, see
+    /// [`Readiness::gun_may_fire`].
     pub fn update(
         &mut self,
         config: &Configuration,
@@ -454,6 +456,12 @@ impl State {
                 self.elevations[slot],
                 elevation.clamp(-ELEVATION_ARC[slot], ELEVATION_ARC[slot]),
             );
+            // The gun's own airframe is the one geometric state that blocks
+            // fire, so it leads the label whatever else is true of the shot.
+            if !clear_airframe(slot, self.headings[slot], self.elevations[slot]) {
+                self.status[slot] = Readiness::GunObscured;
+                continue;
+            }
             let Some(solution) = solution else {
                 self.status[slot] = Readiness::MaximumRange;
                 continue;
@@ -470,8 +478,6 @@ impl State {
                 || (elevation - self.elevations[slot]).abs() > AIM_TOLERANCE
             {
                 Readiness::GunSlewing
-            } else if !clear_airframe(slot, self.headings[slot], self.elevations[slot]) {
-                Readiness::GunObscured
             } else if !clear(muzzle, short_of(muzzle, observation.position)) {
                 Readiness::TerrainMask
             } else {
