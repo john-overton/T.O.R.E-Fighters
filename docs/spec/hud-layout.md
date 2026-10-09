@@ -126,7 +126,21 @@ lower edge of the vertical bars is the same scale on every aircraft; the
 manual's "stall rather than sink" mark for the jets is fitted to it rather
 than computed. The cluster is a list of marks, a pure function of the flight
 state, so each row is tested by what it puts where; `--hud-snapshot PATH
-[--hud-snapshot-state forward|hover]` draws the HUD of `--aircraft` headless.
+[--hud-snapshot-state forward|hover|converting|low]` draws the HUD of
+`--aircraft` headless. Radar height and the stability label are conditional
+rows, so the trimmed `forward` and `hover` states at 3,000 ft and Damper show
+neither; `low` hovers 45 ft over the ground at stability Off and shows both.
+
+The hover display sits over the lower pitch ladder (its circle and cross hairs
+centre 56 pixels below the HUD centre, where the -5 to -15 degree rungs fall
+in a hover). Kept as specified: the ladder's rungs and the display's marks
+are different shapes, and the display matters when the nose is near level
+(agent decision, slice P7b, 2026-10-08).
+
+An aircraft whose gear is fixed down (the AH-64 and CH-47) shows no `GEAR`
+in the status column: the label marks gear lowered into the airflow, which a
+fixed gear always is (slice P7b; it used to read `GEAR` throughout the
+flight).
 
 ## Cockpit glass and layer order
 

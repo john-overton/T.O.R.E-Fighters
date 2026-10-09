@@ -754,7 +754,8 @@ turn-back and OVERSPEED message clocks.
 Every field is coded, the private ones included (the stall scale that depends
 on the weight's history, the hybrid model's random state, the systems, the
 autopilot, the wreck and the escape; since protocol 19 the powered-lift
-state too: body rates, rotor speed and its reference, each rotor's induced
+state too: body rates, rotor speed and its reference, the rotors' turns (the
+blade angle's integral, presentation only), each rotor's induced
 velocity and disk tilt, engine output, lift-engine spool, stability level,
 trim, attitude reference, trim latch, warning timers and the V-22 corridor
 hold), except the write-only trace, the flight
@@ -831,12 +832,13 @@ position plus its velocity times the ticks between, in whole steps with
 integer arithmetic only, and only the difference is sent, as a signed
 variable-length number of quantization steps. Velocity, attitude and speed
 send their difference from the baseline. Slow fields (the other ten animated
-devices, engine flags and rates, damage, wreck phase, airborne and crashed)
-are sent only when their group changed, behind one bit each.
+devices, engine flags and rates, damage, wreck phase, airborne and crashed,
+a rotorcraft's rotors) are sent only when their group changed, behind one bit
+each.
 
 | Kind | Fields |
 | --- | --- |
-| Aircraft | Aircraft key on first sight; position, velocity, attitude (yaw, pitch, bank); devices; engine (lit, afterburner, flame, thrust-vectoring rates); damage (hit points of the initial, section damage, structural section); airborne, crashed, wreck phase |
+| Aircraft | Aircraft key on first sight; position, velocity, attitude (yaw, pitch, bank); devices; engine (lit, afterburner, flame, thrust-vectoring rates); damage (hit points of the initial, section damage, structural section); airborne, crashed, wreck phase; a rotorcraft's rotors (rotor speed, each main rotor's disk tilt; since protocol 19) |
 | Projectile | On first sight: owner, weapon and shape (name table), target, whether it is aimed at this player's plane; then position, velocity, direction. *Built (D6):* velocity replaces speed, so that the prediction needs no trigonometry and both ends agree to the step; the speed is its length |
 | Debris | On first sight: owner, drawn model and damage variant; then position, velocity, attitude (*built (D6):* with a velocity, from the picture a tick before, for the prediction) |
 | Pilot | On first sight: the aircraft it left; then position, velocity, heading, escape phase |
@@ -996,6 +998,8 @@ for messages), at the busy moments when the tracks move.
 | Devices from 0 to 1 | 1/255 | yes |
 | Elevator, aileron, rudder | 1/127 | yes |
 | Thrust-vectoring rates | 1/4096 rad/s | yes |
+| Rotor speed (a share of 100 percent) | 1/1000, up to 2 | yes |
+| Rotor disk tilt | 1/256 rad, up to 127 steps either way | not recorded |
 | Stick inputs | 1/32,767 | finer (replays use 1/1024) |
 | Throttle position | 1/65,535 | finer |
 | The own aircraft's flight state | exact | exact |
@@ -1113,8 +1117,16 @@ a three-bit linked-gun mask; an
 aircraft without devices sends only the present bit), its engine (lit,
 afterburner, flame, three rates as signed varints), its damage (hit points,
 initial hit points and six sections as signed varints, the structural
-section in 3 bits) and its status (airborne, crashed, wreck phase in 2 bits);
-a pilot's is its escape phase (3 bits).
+section in 3 bits), its status (airborne, crashed, wreck phase in 2 bits)
+and, since protocol 19, its rotors (present; the rotor speed in 11 bits,
+thousandths up to 2,000; four disk tilts at 1/256 rad in 8 signed bits each,
+the front or main rotor's longitudinal and lateral, then the CH-47's rear
+rotor's or the V-22's right proprotor's; an aircraft without rotors sends only
+the present bit, and an aircraft whose rotor speed is zero counts as one
+without); a pilot's is its escape phase (3 bits). The client draws a remote
+rotorcraft's blades by integrating the received rotor speed (the [rotor
+presentation](../spec/rotor-presentation.md#rotor-speed-and-blade-angle)), so
+no blade angle is sent.
 
 - **Records parse without their baseline.** Every field against a baseline
   is a self-delimiting difference or a whole new value, so a client that
@@ -2243,7 +2255,8 @@ again with an observer; the capture format did not change for it.
   27, the loadout's tank list, and the exact flight state's powered-lift
   controls, 19 since the VTOL overhaul's foundations: the exact flight
   state's powered-lift state, the powered-lift command 27 and its sub-codes,
-  and hover hold as switch 11; 11 was never used).
+  hover hold as switch 11, and the aircraft record's rotor group; 11 was
+  never used).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

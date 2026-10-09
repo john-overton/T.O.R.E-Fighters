@@ -67,6 +67,24 @@ pub struct Drive {
     pub engine_output: [f64; 2],
     /// The Yak-141's lift engines' spool, 0..1.
     pub lift_engine_spool: f64,
+    /// How far the rotors have turned: the integral of the rotor speed over
+    /// time, in seconds at 100 percent (VTOL overhaul slice P7b). The drawn
+    /// blade angle is this times each rotor's nominal speed, so spool-up,
+    /// droop and autorotation show and the blades never jump. Presentation
+    /// only (nothing in the step reads it); exact-coded so the own aircraft's
+    /// prediction and checkpoints keep the same blade angle. Advanced once a
+    /// tick by [`Drive::advance_turns`]; zero on every aircraft without rotor
+    /// speed.
+    pub rotor_turns: f64,
+}
+
+impl Drive {
+    /// Turns the rotors through one tick at the rotor speed they have.
+    /// Adds exactly zero when the rotor speed is zero, so a fixed-wing
+    /// aircraft's state is unchanged bit for bit.
+    pub fn advance_turns(&mut self) {
+        self.rotor_turns += self.rotor_speed * DT;
+    }
 }
 
 /// One main rotor's state.
@@ -189,6 +207,7 @@ crate::flight::exact::exact_struct!(Drive {
     rotor_speed_reference,
     engine_output,
     lift_engine_spool,
+    rotor_turns,
 });
 crate::flight::exact::exact_struct!(Rotor { induced_fps, tilt });
 crate::flight::exact::exact_enum!(TrimLatch {
@@ -341,6 +360,7 @@ pub(crate) mod tests {
                 rotor_speed_reference: 0.84,
                 engine_output: [1.5e6, 9_000.],
                 lift_engine_spool: 0.4,
+                rotor_turns: 1_234.567,
             },
             rotors: [
                 Rotor {
@@ -411,6 +431,61 @@ pub(crate) mod tests {
             hybrid(AircraftId::Ah64).lift_controls.aids.stability,
             StabilityLevel::Damper
         );
+    }
+
+    #[test]
+    fn the_rotors_turn_at_their_rotor_speed_on_every_adapter() {
+        let input = crate::flight::PilotInput::default();
+        let ground = |_: f64, _: f64| crate::research::Surface::runway(0.);
+        // The hybrid model: the rotor speed integrated a tick at a time, at
+        // the start of each tick's speed.
+        for id in [AircraftId::Ah64, AircraftId::Ch47, AircraftId::V22] {
+            let mut s = hybrid(id);
+            s.start_airborne([0.; 3]);
+            let mut expected = s.lift_controls.drive.rotor_turns;
+            for _ in 0..240 {
+                expected += s.lift_controls.drive.rotor_speed * DT;
+                s.step_surface(&input, ground);
+            }
+            let turns = s.lift_controls.drive.rotor_turns;
+            assert!(
+                (turns - expected).abs() < 1e-12,
+                "{id:?}: {turns} {expected}"
+            );
+            assert!((1.5..2.5).contains(&turns), "{id:?}: {turns}");
+        }
+        // The legacy adapter's rotorcraft keep their 100 percent and turn too.
+        let mut legacy = State::new(
+            &crate::models::variety::tests::synthetic(AircraftId::Mi24),
+            [0., 1_000., 0.],
+        )
+        .unwrap();
+        for _ in 0..120 {
+            legacy.step_surface(&input, ground);
+        }
+        assert!((legacy.lift_controls.drive.rotor_turns - 1.).abs() < 1e-9);
+        // An aircraft without rotors never moves it off exact zero.
+        for id in [AircraftId::F16C, AircraftId::Av8] {
+            let mut s = hybrid(id);
+            for _ in 0..120 {
+                s.step_surface(&input, ground);
+            }
+            assert_eq!(s.lift_controls.drive.rotor_turns.to_bits(), 0, "{id:?}");
+        }
+    }
+
+    #[test]
+    fn the_presented_rotors_turn_and_tilt_between_ticks() {
+        let mut before = hybrid(AircraftId::Ch47);
+        before.lift_controls.drive.rotor_turns = 10.;
+        before.lift_controls.rotors[1].tilt = [0.01, -0.02];
+        let mut after = before.clone();
+        after.lift_controls.drive.rotor_turns = 10. + DT;
+        after.lift_controls.rotors[1].tilt = [0.03, 0.02];
+        let presented = after.presented(&before, 0.25);
+        assert!((presented.lift_controls.drive.rotor_turns - (10. + DT / 4.)).abs() < 1e-12);
+        let tilt = presented.lift_controls.rotors[1].tilt;
+        assert!((tilt[0] - 0.015).abs() < 1e-12 && (tilt[1] + 0.01).abs() < 1e-12);
     }
 
     #[test]

@@ -9,7 +9,8 @@ use super::WireResult;
 use super::bits::{steps, turn16};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKind, EntityState,
-    Motion, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, SPEED_STEP, Status,
+    Motion, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, ROTOR_SPEED_MAX,
+    ROTOR_SPEED_STEP, ROTOR_TILT_STEP, RotorState, SPEED_STEP, Status,
 };
 use super::events::{LinkEvent, Rumble, WireEvent};
 use super::names::NameTable;
@@ -21,7 +22,8 @@ use tore_world::comms;
 use tore_world::datalink::{DataLink, Entry};
 use tore_world::seats::{PlaneId, SeatId};
 use tore_world::snapshot::{
-    AircraftPose, DebrisPose, Draw, EffectPose, MarkPose, PilotPose, ProjectilePose, RenderSnapshot,
+    AircraftPose, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose, ProjectilePose,
+    RenderSnapshot,
 };
 use tore_world::world::{Cue, OrderReply, Release, World};
 
@@ -84,7 +86,19 @@ pub fn aircraft_state(pose: &AircraftPose) -> AircraftState {
             crashed: pose.crashed,
             wreck: pose.wreck,
         },
+        rotor: rotor_state(&pose.engine),
     }
+}
+
+/// A rotorcraft's rotors as drawn, quantized; none where the pose has no
+/// rotor speed (every other aircraft).
+pub fn rotor_state(engine: &Engine) -> Option<RotorState> {
+    (engine.rotor > 0.).then(|| RotorState {
+        speed: steps(engine.rotor, ROTOR_SPEED_STEP).clamp(0, i64::from(ROTOR_SPEED_MAX)) as u16,
+        tilt: engine
+            .rotor_tilt
+            .map(|tilt| tilt.map(|v| steps(v, ROTOR_TILT_STEP).clamp(-127, 127) as i8)),
+    })
 }
 
 /// A projectile as drawn, quantized; `player` is the connection's plane, for
@@ -165,7 +179,7 @@ pub fn observer_picture(world: &World) -> RenderSnapshot {
 /// projectiles, the debris and the AI's ejected pilots, as the combat
 /// snapshot of a mission with drawn models gives them.
 fn targets_picture(world: &World) -> RenderSnapshot {
-    use tore_world::snapshot::{AircraftPose, Damage, Engine};
+    use tore_world::snapshot::{AircraftPose, Damage};
     let combat = &world.combat;
     let state = &combat.state;
     let actors = || {
@@ -181,6 +195,16 @@ fn targets_picture(world: &World) -> RenderSnapshot {
     let burning: std::collections::BTreeSet<u32> = actors()
         .filter(|actor| actor.flight().afterburner_active())
         .map(|actor| actor.id())
+        .collect();
+    // The AI rotorcraft's rotors, as the combat snapshot draws them.
+    let rotors: std::collections::BTreeMap<u32, (f64, f64, [[f64; 2]; 2])> = actors()
+        .filter_map(|actor| {
+            let flight = actor.flight();
+            let (turns, tilt) = tore_world::snapshot::rotor_pose(flight);
+            flight
+                .rotor_speed_percent()
+                .map(|percent| (actor.id(), (percent / 100., turns, tilt)))
+        })
         .collect();
     RenderSnapshot {
         tick: state.tick(),
@@ -199,12 +223,18 @@ fn targets_picture(world: &World) -> RenderSnapshot {
                     .get(&t.id)
                     .copied()
                     .or_else(|| combat.current_target(t.id).and_then(|pose| pose.devices)),
-                engine: Engine {
-                    lit: true,
-                    afterburner: false,
-                    rates: [0.; 3],
-                    rotor: 0.,
-                    flame: t.airborne && t.hp > 0 && burning.contains(&t.id),
+                engine: {
+                    let (rotor, rotor_turns, rotor_tilt) =
+                        rotors.get(&t.id).copied().unwrap_or_default();
+                    Engine {
+                        lit: true,
+                        afterburner: false,
+                        rates: [0.; 3],
+                        rotor,
+                        rotor_turns,
+                        rotor_tilt,
+                        flame: t.airborne && t.hp > 0 && burning.contains(&t.id),
+                    }
                 },
                 damage: Damage {
                     hp: t.hp,
@@ -555,6 +585,36 @@ mod tests {
     use tore_world::seats::SeatInput;
     use tore_world::test_support::resources::{THEATER, resources};
     use tore_world::world::{MissionCommand, Seating, TickOutput};
+
+    #[test]
+    fn a_rotorcrafts_rotors_are_quantized_for_the_wire_and_come_back() {
+        let engine = Engine {
+            rotor: 0.8437,
+            rotor_turns: 1_234.5,
+            rotor_tilt: [[0.1, -0.0123], [0.6, -0.6]],
+            ..Engine::default()
+        };
+        let state = rotor_state(&engine).expect("a rotorcraft");
+        assert_eq!(state.speed, 844);
+        assert_eq!(state.tilt, [[26, -3], [127, -127]]);
+        let (speed, tilt) = crate::client::interpolation::rotor_of(&AircraftState {
+            rotor: Some(state),
+            ..AircraftState::default()
+        });
+        assert!((speed - engine.rotor).abs() <= ROTOR_SPEED_STEP / 2.);
+        assert!((tilt[0][0] - 0.1).abs() <= ROTOR_TILT_STEP / 2.);
+        assert!((tilt[0][1] + 0.0123).abs() <= ROTOR_TILT_STEP / 2.);
+        // Past the wire's reach a tilt holds at its end; the blade angle is
+        // the client's own, so it is not sent.
+        assert!((tilt[1][0] - 127. * ROTOR_TILT_STEP).abs() < 1e-12);
+        // A fixed-wing aircraft (no rotor speed) sends no rotor group.
+        assert_eq!(rotor_state(&Engine::default()), None);
+        let overspeed = Engine {
+            rotor: 9.,
+            ..engine
+        };
+        assert_eq!(rotor_state(&overspeed).unwrap().speed, ROTOR_SPEED_MAX);
+    }
 
     fn aircraft_ids(entities: &[Entity]) -> Vec<u32> {
         entities

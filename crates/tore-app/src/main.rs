@@ -8016,18 +8016,21 @@ fn locate_shell(
     }
 }
 
-/// `--hud-snapshot PATH [--hud-snapshot-state forward|hover]`: the HUD of the
-/// selected aircraft over a flat background, headless, as a PPM. Powered-lift
-/// aircraft start in trimmed forward flight (`forward`) or in a hover
-/// (`hover`: a jet with its nozzles vertical, a helicopter trimmed at rest),
-/// 3,000 feet over flat ground, and fly a second so the rotor and engines
-/// are settled; any other aircraft is shown as it starts.
+/// `--hud-snapshot PATH [--hud-snapshot-state forward|hover|converting|low]`:
+/// the HUD of the selected aircraft over a flat background, headless, as a
+/// PPM. Powered-lift aircraft start in trimmed forward flight (`forward`) or
+/// in a hover (`hover`: a jet with its nozzles vertical, a helicopter trimmed
+/// at rest), 3,000 feet over flat ground, and fly a second so the rotor and
+/// engines are settled; any other aircraft is shown as it starts. `low` is the
+/// hover 45 feet over the ground at stability Off, which shows the radar
+/// height and the stability label (VTOL overhaul design section 6).
 fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> AppResult<()> {
     use std::io::Write;
     let mut flight = flight::State::new(&hornet.profile, [0., 3000., 0.])?;
     flight.enable_research(1)?;
     flight.cheats.unlimited_fuel = true;
     flight.yaw = 0.;
+    let mut ground = 0.;
     match state {
         "forward" => {
             flight.start_airborne([0.; 3]);
@@ -8046,17 +8049,27 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
             flight.velocity = [0., 0., 140. * 1.687_81];
             flight.speed = flight.velocity[2];
         }
+        // The hover low over the ground at stability Off.
+        "low" => {
+            if !flight.trim_hover() {
+                return Err("this aircraft has no hover to show".into());
+            }
+            flight.command(tore_input::PilotCommand::Lift(
+                tore_input::LiftCommand::SetStability(tore_input::StabilityLevel::Off),
+            ));
+            ground = flight.position[1] - 45.;
+        }
         other => {
             return Err(format!(
-                "unknown HUD snapshot state {other}; use forward, hover or converting"
+                "unknown HUD snapshot state {other}; use forward, hover, converting or low"
             )
             .into());
         }
     }
-    // A second of flight over a flat plain 3,000 feet below.
+    // A second of flight over a flat plain 3,000 feet below (45 for `low`).
     for _ in 0..120 {
         flight.step_surface(&tore_input::PilotInput::default(), |_, _| {
-            tore_sim::research::Surface::runway(0.)
+            tore_sim::research::Surface::runway(ground)
         });
     }
     let color = hornet.daylight_palette()[usize::from(hornet.hud.primary_color)];
@@ -8065,7 +8078,7 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
         &mut pixels,
         &flight,
         &hornet.hud_font,
-        0.,
+        ground,
         None,
         true,
         false,
@@ -9053,7 +9066,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 hud_snapshot = Some(args.next().ok_or("--hud-snapshot needs output path")?)
             }
             "--hud-snapshot-state" => {
-                hud_snapshot_state = args.next().ok_or("--hud-snapshot-state needs forward, hover or converting")?
+                hud_snapshot_state = args.next().ok_or("--hud-snapshot-state needs forward, hover, converting or low")?
             }
             "--viewer" => initial_screen = Screen::Viewer,
             "--connect" => {

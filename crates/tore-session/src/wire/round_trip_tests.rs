@@ -3,7 +3,7 @@
 use super::connection::{ClientConnection, HostConnection};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
-    EntityState, Motion, PilotState, ProjectileState, Status,
+    EntityState, Motion, PilotState, ProjectileState, ROTOR_SPEED_MAX, RotorState, Status,
 };
 use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
@@ -100,6 +100,10 @@ pub(crate) fn entity(rng: &mut SplitMix64, kind: EntityKind, id: u32) -> Entity 
                     )
                 }),
             },
+            rotor: chance(rng).then(|| RotorState {
+                speed: rng.below(u64::from(ROTOR_SPEED_MAX) + 1) as u16,
+                tilt: std::array::from_fn(|_| std::array::from_fn(|_| signed(rng, 127) as i8)),
+            }),
         }),
         EntityKind::Projectile => EntityState::Projectile(ProjectileState {
             owner: rng.below(64) as u32,

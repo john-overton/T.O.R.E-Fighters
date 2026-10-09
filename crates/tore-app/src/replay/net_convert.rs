@@ -482,6 +482,8 @@ mod tests {
                 afterburner: true,
                 rates: [0.1, 0.2, 0.3],
                 rotor: 1.043,
+                rotor_turns: 0.,
+                rotor_tilt: [[0.; 2]; 2],
                 flame: true,
             },
             damage: Damage {

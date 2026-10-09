@@ -165,9 +165,18 @@ has rigid source panels, fixed roots, exact deployment and complete stow;
 its intermediate gear sheets were also reviewed.
 
 The combined sweeps contain 1,200 poses each for AH-64 and Mi-24, and 6,000 for
-CH-47. Largest inferred mast attachment error is 0.000007626 ft, and largest
-panel dimension error is 0.000010173 ft. CH-47 minimum rear/front panel clearance
-is 0.388398 ft across overlapping projected footprints. Original tilted Mi-24
+CH-47. Since the VTOL overhaul's moving-parts slice (P7b, 2026-10-08) they
+drive the simulated disk tilt the drawing reads (full stick or pedal at the
+drawn bound) and the rotors' turns, not the stick and the tick; re-run headless
+against the user's import (`.local/tmp-p7b/anim/probe-*`): largest inferred
+mast attachment error 0.000008070 ft, largest panel dimension error
+0.000010173 ft, CH-47 minimum rear/front panel clearance 0.488486 ft across
+overlapping projected footprints (0.388398 ft before, under the old stick fit
+with the CH-47 rotors turning the other way). All six powered-lift aircraft
+(AH64.PT, MI24.PT, CH47.PT, V22.PT, AV8.PT, YAK141.PT) report 0 required or
+check failures, and each writes `moving-parts.ppm`: the V-22 nacelles at 0, 45
+and 90 degrees, the AV-8 and Yak-141 nozzles at 0, 90 and 100, the
+helicopters' disks level, forward and right. Original tilted Mi-24
 and CH-47 panels now spin in their source planes instead of wobbling around
 vertical. Collective feathering and AH-64/Mi-24 pedal blade-pitch geometry
 remain unimplemented because the original art is a flat rotor image. Their
