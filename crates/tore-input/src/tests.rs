@@ -626,3 +626,149 @@ fn held_trim_taps_two_percent_then_moves_ten_percent_a_second() {
     event(&mut r, "keyboard", "Ctrl-ArrowRight", 1., false);
     assert_eq!(trims(frame(&mut r)), vec![(TrimAxis::Roll, 0.02)]);
 }
+
+#[test]
+fn gunsight_names_parse_name_and_roundtrip_through_profiles() {
+    for (name, action) in [
+        ("sight-x", Action::Axis(Axis::SightX)),
+        ("sight-y", Action::Axis(Axis::SightY)),
+        ("sight-designate", Action::Ui("sight-designate".into())),
+        ("sight-pin", Action::Ui("sight-pin".into())),
+        ("sight-zoom-in", Action::Ui("sight-zoom-in".into())),
+        ("sight-zoom-out", Action::Ui("sight-zoom-out".into())),
+        ("sight-left", Action::Ui("sight-left".into())),
+        ("sight-right", Action::Ui("sight-right".into())),
+        ("sight-up", Action::Ui("sight-up".into())),
+        ("sight-down", Action::Ui("sight-down".into())),
+    ] {
+        assert_eq!(Action::parse(name), Ok(action.clone()), "{name}");
+        assert_eq!(profile_text::action_name(&action), name);
+    }
+    let p = Profile::parse(
+        "tore-input 1\nmodifier pad button:314\nbind keyboard Alt-ArrowLeft sight-left hold\nbind keyboard Shift-\\ sight-pin press\nbind keyboard \\ sight-designate press\nbind pad axis:16=-1 sight-left hold\nbind pad button:314+axis:3 sight-x axis -1 0 1 0.1 1 1 10\nbind pad button:314+axis:4 sight-y axis -1 0 1 0.1 1 -1 10\nbind pad button:314+button:304 sight-designate tap\nbind pad button:314+button:304 sight-pin long\nbind stick hat sight-x negative",
+    )
+    .unwrap();
+    let text = p.to_text().unwrap();
+    assert_eq!(Profile::parse(&text).unwrap().to_text().unwrap(), text);
+    assert!(text.contains("button:314+button:304 sight-designate tap"));
+    assert!(text.contains("button:314+button:304 sight-pin long"));
+    assert!(text.contains("button:314+axis:4 sight-y axis -1 0 1 0.1 1 -1 10"));
+    // The axes take analog and hold modes only, the holds hold, and the
+    // timed modes belong to commands.
+    for bad in [
+        "bind stick b sight-x press",
+        "bind stick b sight-x tap",
+        "bind stick a roll long",
+        "bind stick b sight-pin hold",
+    ] {
+        assert!(
+            Profile::parse(&format!("tore-input 1\n{bad}")).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn a_tap_fires_on_release_and_a_long_press_fires_at_half_a_second() {
+    let mut r = resolver(
+        "modifier pad sel\nbind pad sel+a sight-designate tap\nbind pad sel+a sight-pin long\n",
+    );
+    for control in ["sel", "a"] {
+        event(&mut r, "pad", control, 0., true);
+    }
+    event(&mut r, "pad", "sel", 1., false);
+    // A short press designates when the button comes up, not before.
+    event(&mut r, "pad", "a", 1., false);
+    for _ in 0..LONG_PRESS_TICKS - 1 {
+        frame(&mut r);
+    }
+    assert!(r.drain().is_empty());
+    event(&mut r, "pad", "a", 0., false);
+    assert_eq!(
+        r.drain(),
+        vec![("pad".into(), Action::Ui("sight-designate".into()))]
+    );
+    // Held to the long press: the pin fires on that tick, and the release
+    // afterwards designates nothing.
+    event(&mut r, "pad", "a", 1., false);
+    for _ in 0..LONG_PRESS_TICKS - 1 {
+        frame(&mut r);
+    }
+    assert!(r.drain().is_empty());
+    frame(&mut r);
+    assert_eq!(
+        r.drain(),
+        vec![("pad".into(), Action::Ui("sight-pin".into()))]
+    );
+    for _ in 0..LONG_PRESS_TICKS {
+        frame(&mut r);
+    }
+    event(&mut r, "pad", "a", 0., false);
+    assert!(r.drain().is_empty(), "the long press fires once");
+}
+
+#[test]
+fn timed_presses_forget_an_interrupted_hold_and_need_a_fresh_press() {
+    let mut r = resolver("bind pad a sight-pin long\nbind pad b sight-designate tap\n");
+    for control in ["a", "b"] {
+        event(&mut r, "pad", control, 0., true);
+    }
+    event(&mut r, "pad", "a", 1., false);
+    event(&mut r, "pad", "b", 1., false);
+    for _ in 0..10 {
+        frame(&mut r);
+    }
+    // A pause drops both: neither the long press nor the tap completes, and
+    // a control still held when play resumes needs releasing first.
+    r.context(true, true);
+    r.context(false, true);
+    for _ in 0..LONG_PRESS_TICKS {
+        frame(&mut r);
+    }
+    event(&mut r, "pad", "b", 0., false);
+    assert!(r.drain().is_empty());
+    // A press that began in a menu (a baseline) is not a press.
+    event(&mut r, "pad", "a", 1., true);
+    for _ in 0..LONG_PRESS_TICKS {
+        frame(&mut r);
+    }
+    assert!(r.drain().is_empty());
+}
+
+#[test]
+fn sight_axes_read_the_stick_and_the_holds_read_buttons_and_keys() {
+    let mut r = resolver(
+        "modifier pad sel\nbind pad sel+x sight-x axis -1 0 1 0.1 1 1 10\nbind pad sel+y sight-y axis -1 0 1 0.1 1 -1 10\nbind pad axis:16=1 sight-right hold\nbind keyboard Alt-ArrowUp sight-up hold\n",
+    );
+    for (device, control) in [
+        ("pad", "sel"),
+        ("pad", "x"),
+        ("pad", "y"),
+        ("pad", "axis:16"),
+        ("keyboard", "Alt-ArrowUp"),
+    ] {
+        event(&mut r, device, control, 0., true);
+    }
+    assert_eq!(r.sight_axes(), [0.; 2]);
+    event(&mut r, "pad", "sel", 1., false);
+    event(&mut r, "pad", "x", 0.5, false);
+    event(&mut r, "pad", "y", -1., false);
+    let [x, y] = r.sight_axes();
+    assert!(x > 0. && x < 1., "{x}");
+    assert_eq!(
+        y, 1.,
+        "the stick pushed up reads negative, sight-y inverts it"
+    );
+    // Without the Select modifier the stick is not the sight.
+    event(&mut r, "pad", "sel", 0., false);
+    assert_eq!(r.sight_axes(), [0.; 2]);
+    // Holds do not appear in the axes; they are read by name.
+    event(&mut r, "keyboard", "Alt-ArrowUp", 1., false);
+    event(&mut r, "pad", "axis:16", 1., false);
+    assert_eq!(r.sight_axes(), [0.; 2]);
+    assert!(r.held("sight-up") && r.held("sight-right"));
+    assert!(!r.held("sight-left") && !r.held("sight-down"));
+    r.context(true, true);
+    assert!(!r.held("sight-up"), "a pause releases the holds");
+    assert_eq!(r.sight_axes(), [0.; 2]);
+}
