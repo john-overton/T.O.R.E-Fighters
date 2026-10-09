@@ -44,6 +44,7 @@ pub mod jet;
 pub mod rotor;
 pub mod sas;
 pub mod state;
+pub mod tiltrotor;
 
 #[cfg(test)]
 mod easy_physics_tests;
@@ -83,6 +84,17 @@ impl State {
         else {
             return;
         };
+        // The V-22 hovers at its helicopter preset on its own physics (P5).
+        if let Some(tilt) = lift.tiltrotor
+            && tiltrotor::Tiltrotor::new(&lift, self.model().configuration()).is_some()
+        {
+            if !self.trim_tiltrotor(0., tilt.helicopter_nacelle_degrees) {
+                self.throttle = 1.;
+                self.lift_controls.collective = 1.;
+                self.lift_controls.collective_actual = 1.;
+            }
+            return;
+        }
         // The single-rotor helicopters trim on their own physics (P2).
         if helicopter::SingleRotor::new(&lift, self.model().configuration()).is_some() {
             if !self.trim_single_rotor(0.) {
@@ -133,6 +145,15 @@ impl State {
         *current = (if adjust { *current + value } else { value }).clamp(minimum, 1.);
     }
     pub(super) fn update_lift_demands(&mut self, input: &PilotInput) {
+        // A held conversion key moves the V-22's nacelle demand at the
+        // nacelles' own rate (slice P5).
+        let conversion_speed = self
+            .model()
+            .powered_lift()
+            .and_then(|lift| lift.tiltrotor)
+            .map_or(0.25, |t| {
+                t.nacelle_rate_degrees_per_second / t.nacelle_range_degrees
+            });
         for (axis, position, rate, speed) in [
             (
                 FlightAxis::VectorPitch,
@@ -150,7 +171,7 @@ impl State {
                 FlightAxis::Conversion,
                 input.conversion,
                 input.conversion_rate,
-                0.25,
+                conversion_speed,
             ),
             (
                 FlightAxis::Collective,
@@ -178,6 +199,21 @@ impl State {
         afterburner: bool,
         fuel_rate: f64,
     ) {
+        // The V-22 flies its proprotors, nacelles and wing (P5).
+        if let Some(model) = tiltrotor::Tiltrotor::new(&lift, c) {
+            self.step_tiltrotor(
+                lift,
+                model,
+                c,
+                stick,
+                initial_surface,
+                runway_wind_fraction,
+                t,
+                ground,
+                fuel_rate,
+            );
+            return;
+        }
         // The single-rotor helicopters fly their rotor physics (P2).
         if let Some(heli) = helicopter::SingleRotor::new(&lift, c) {
             self.step_single_rotor(
@@ -474,11 +510,14 @@ mod tests {
         AircraftId::Mi24,
         AircraftId::Ch47,
     ];
-    /// The synthetic record of `id`; the single-rotor helicopters carry
-    /// their PT's flight numbers, since their rotors size their power.
+    /// The synthetic record of `id`; the single-rotor helicopters and the
+    /// V-22 carry their PT's flight numbers, since their rotors size their
+    /// power.
     fn fixture(id: AircraftId) -> tore_formats::aircraft::Aircraft {
         if matches!(id, AircraftId::Ah64 | AircraftId::Mi24) {
             helicopter::tests::pt_aircraft(id)
+        } else if id == AircraftId::V22 {
+            tiltrotor::acceptance::pt_v22()
         } else {
             crate::models::variety::tests::synthetic(id)
         }
@@ -506,6 +545,10 @@ mod tests {
         let c = s.model().configuration();
         if helicopter::SingleRotor::new(&lift, c).is_some() {
             assert!(s.trim_single_rotor(0.), "{id:?}");
+            return s;
+        }
+        if let Some(tilt) = lift.tiltrotor {
+            assert!(s.trim_tiltrotor(0., tilt.helicopter_nacelle_degrees));
             return s;
         }
         let weight = c.mass.empty_lbs + s.fuel;
@@ -665,7 +708,10 @@ mod tests {
             // The old law holds attitude; a rotor without stability
             // augmentation keeps the attitude it was left at.
             let lift = s.model().powered_lift().unwrap();
-            if helicopter::SingleRotor::new(&lift, s.model().configuration()).is_none() {
+            let c = s.model().configuration();
+            if helicopter::SingleRotor::new(&lift, c).is_none()
+                && tiltrotor::Tiltrotor::new(&lift, c).is_none()
+            {
                 assert!(s.pitch.abs() < 0.01 && s.bank.abs() < 0.01, "{id:?}");
             }
             assert!(!s.crashed);
@@ -689,6 +735,9 @@ mod tests {
         assert_eq!(jet.lift_controls.vector_pitch_actual, 0.);
         assert_eq!(jet.lift_controls.vector_yaw, 0.);
         assert_eq!(jet.lift_controls.vector_yaw_actual, 0.);
+        // A held conversion key moves the V-22's nacelle demand at the
+        // nacelles' 8 degrees a second; in a hover the corridor stops the
+        // nacelles at its edge, 85 degrees at rest (slice P5).
         let mut tilt = hover(AircraftId::V22, 500.);
         run(
             &mut tilt,
@@ -698,8 +747,12 @@ mod tests {
             },
             120,
         );
-        assert!((tilt.lift_controls.conversion - 0.75).abs() < 1e-12);
-        assert!((tilt.lift_controls.conversion_actual - 0.75).abs() < 1e-12);
+        assert!((tilt.lift_controls.conversion * 97.5 - 79.).abs() < 1e-9);
+        assert!(
+            (tilt.nacelle_degrees() - 85.).abs() < 1.,
+            "{}",
+            tilt.nacelle_degrees()
+        );
         assert!(tilt.position.iter().all(|v| v.is_finite()));
         let mut rotor = hover(AircraftId::Ah64, 100.);
         let before = rotor.lift_controls;
@@ -714,13 +767,21 @@ mod tests {
         let mut s = hover(AircraftId::V22, 5000.);
         let collective = s.lift_controls.collective;
         let throttle = s.throttle;
+        let start = s.lift_controls.conversion_actual;
         s.command(super::super::PilotCommand::NeutralVector);
         assert_eq!(s.lift_controls.conversion, 0.);
-        assert_eq!(s.lift_controls.conversion_actual, 1.);
+        assert_eq!(s.lift_controls.conversion_actual, start);
         assert_eq!(s.lift_controls.collective, collective);
         assert_eq!(s.throttle, throttle);
+        // In a hover the corridor holds the nacelles at its edge, 85
+        // degrees at rest (slice P5).
         run(&mut s, &Default::default(), 120);
-        assert!((s.lift_controls.conversion_actual - 0.75).abs() < 1e-12);
+        assert!(
+            (s.nacelle_degrees() - 85.).abs() < 1.,
+            "{}",
+            s.nacelle_degrees()
+        );
+        assert!(s.lift_controls.corridor_hold.is_some());
     }
 
     #[test]
@@ -819,23 +880,24 @@ mod tests {
     }
     #[test]
     fn airborne_start_uses_final_mass_and_altitude_without_later_retrim() {
-        // The old law's start (the single-rotor helicopters trim on their
-        // rotor physics: helicopter::tests).
+        // The V-22 trims on its own physics at its helicopter preset (slice
+        // P5; the single-rotor helicopters: helicopter::tests); the CH-47
+        // below on the old law.
         let mut s = hover(AircraftId::V22, 5000.);
-        s.position[1] = 15000.;
+        s.position[1] = 3000.;
         s.fuel = 500.;
         s.set_payload(1500.).unwrap();
         s.initialize_airborne_hover();
         let weight = s.model().configuration().mass.empty_lbs + s.fuel + s.carried_lbs();
         assert!((s.lift_controls.thrust_lbf - weight).abs() < 1e-8);
         run(&mut s, &Default::default(), 1200);
-        assert!((s.position[1] - 15000.).abs() < 0.01);
+        assert!((s.position[1] - 3000.).abs() < 0.1, "{}", s.position[1]);
         let collective = s.lift_controls.collective;
         s.set_payload(2500.).unwrap();
         s.initialize_airborne_hover();
         assert_eq!(s.lift_controls.collective, collective);
         run(&mut s, &Default::default(), 600);
-        assert!(s.position[1] < 14990.);
+        assert!(s.position[1] < 2995., "{}", s.position[1]);
         let mut overloaded = hover(AircraftId::Ch47, 5000.);
         overloaded.position[1] = 15000.;
         overloaded.fuel = 500.;
@@ -865,43 +927,6 @@ mod tests {
             damaged.position[1],
             damaged.vertical_speed
         );
-    }
-    #[test]
-    #[allow(clippy::single_element_loop)] // The jets left for `jet.rs`; P5 takes the V-22.
-    fn conversion_gains_forward_motion_and_recovers_vertical_velocity() {
-        for id in [AircraftId::V22] {
-            let mut s = hover(id, 5000.);
-            run(
-                &mut s,
-                &PilotInput {
-                    throttle: Some(1.),
-                    conversion_rate: -1.,
-                    vector_pitch_rate: -1.,
-                    ..Default::default()
-                },
-                480,
-            );
-            assert!(
-                s.lift_controls
-                    .hover_fraction(s.model().powered_lift().unwrap().kind)
-                    < DT
-            );
-            run(
-                &mut s,
-                &PilotInput {
-                    throttle: Some(1.),
-                    ..Default::default()
-                },
-                4800,
-            );
-            assert!(
-                !s.crashed && s.position[1] > 1000.,
-                "{id:?} {}",
-                s.position[1]
-            );
-            assert!(s.velocity[0].hypot(s.velocity[2]) > 200., "{id:?}");
-            assert!(s.vertical_speed.abs() < 5., "{id:?} {}", s.vertical_speed);
-        }
     }
     #[test]
     fn legacy_powered_aircraft_ignore_new_demands_and_native_stays_restricted() {

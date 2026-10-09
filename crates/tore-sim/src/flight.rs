@@ -929,6 +929,10 @@ impl State {
     /// envelope's top speed.
     pub fn structural_speed_fps(&self) -> Option<f64> {
         self.research.as_ref()?;
+        // The V-22's is calibrated and follows its nacelles (slice P5).
+        if let Some(limit) = self.tiltrotor_structural_fps() {
+            return Some(limit);
+        }
         let kt = self.model.powered_lift()?.rotor?.structural_kt?;
         Some(kt * crate::runway_wind::FEET_PER_SECOND_PER_KNOT)
     }

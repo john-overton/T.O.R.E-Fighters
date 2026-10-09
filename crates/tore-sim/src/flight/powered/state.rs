@@ -153,7 +153,10 @@ impl LiftState {
     pub fn hover_fraction(&self, kind: LiftKind) -> f64 {
         match kind {
             LiftKind::VectorJet => self.vector_pitch_actual,
-            LiftKind::Tiltrotor => self.conversion_actual,
+            // The V-22's helicopter share of its nacelle angle (slice P5).
+            LiftKind::Tiltrotor => super::tiltrotor::helicopter_share(
+                self.conversion_actual * crate::models::variety::V22_NACELLE_RANGE_DEGREES,
+            ),
             LiftKind::Helicopter => 1.,
         }
     }
