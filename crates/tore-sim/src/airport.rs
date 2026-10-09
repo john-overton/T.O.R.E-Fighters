@@ -72,9 +72,17 @@ impl OrientedBox {
                 .all(|v| v.is_finite())
     }
     pub fn contains_horizontal(&self, x: f64, z: f64) -> bool {
-        let (s, c) = self.heading.sin_cos();
         let dx = x - self.center[0];
         let dz = z - self.center[2];
+        // A point inside lies within the box's horizontal half diagonal at any
+        // heading. The margin is far above rounding, so this early answer never
+        // differs from the full test below; it only spares the trigonometry for
+        // the many runways nowhere near the point.
+        let diagonal = self.half[0] * self.half[0] + self.half[2] * self.half[2];
+        if dx * dx + dz * dz > diagonal * (1. + 1e-9) + 1e-6 {
+            return false;
+        }
+        let (s, c) = self.heading.sin_cos();
         let local_x = dx * c - dz * s;
         let local_z = dx * s + dz * c;
         local_x.abs() <= self.half[0] && local_z.abs() <= self.half[2]
@@ -166,6 +174,36 @@ impl Runway {
                 - (up[0] * (x - self.approach_center[0]) + up[2] * (z - self.approach_center[2]))
                     / up[1],
         )
+    }
+    /// Where [`Scene::runway_surface`] can answer for this runway and the
+    /// highest it answers there: the horizontal box around its surface
+    /// rectangle (x, z; a foot wider on each side than its corners) and the
+    /// highest corner of its plane, which a plane over a rectangle never
+    /// passes. `None` when it never answers.
+    pub fn surface_extent(&self) -> Option<([f64; 2], [f64; 2], f64)> {
+        let b = &self.surface;
+        let (s, c) = b.heading.sin_cos();
+        let corners = [(1., 1.), (1., -1.), (-1., 1.), (-1., -1.)].map(|(i, j)| {
+            let (x, z) = (b.half[0] * i, b.half[2] * j);
+            [b.center[0] + x * c + z * s, b.center[2] - x * s + z * c]
+        });
+        let top = corners
+            .iter()
+            .map(|p| self.support_height(p[0], p[1]))
+            .collect::<Option<Vec<_>>>()?
+            .into_iter()
+            .reduce(f64::max)?;
+        let lo = std::array::from_fn(|i| {
+            corners.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min) - 1.
+        });
+        let hi = std::array::from_fn(|i| {
+            corners
+                .iter()
+                .map(|p| p[i])
+                .fold(f64::NEG_INFINITY, f64::max)
+                + 1.
+        });
+        Some((lo, hi, top))
     }
     /// A short strip (see [`SHORT_STRIP_FT`]): nobody starts or lands here.
     pub fn short_strip(&self) -> bool {
@@ -778,6 +816,80 @@ fn distance2(a: [f64; 3], b: [f64; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The early distance answer agrees with the rotated test everywhere,
+    /// including points on and just outside the corners.
+    #[test]
+    fn contains_horizontal_matches_the_rotated_test() {
+        let rotated = |b: &OrientedBox, x: f64, z: f64| {
+            let (s, c) = b.heading.sin_cos();
+            let (dx, dz) = (x - b.center[0], z - b.center[2]);
+            (dx * c - dz * s).abs() <= b.half[0] && (dx * s + dz * c).abs() <= b.half[2]
+        };
+        let mut seed = 0x1234_5678_9abc_def1_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % 2_000_000) as f64 / 100. - 10_000.
+        };
+        let mut inside = 0;
+        for _ in 0..200_000 {
+            let b = OrientedBox {
+                center: [next() * 50., 0., next() * 50.],
+                half: [next().abs() / 10. + 1., 10., next().abs() + 1.],
+                heading: next(),
+                pitch: 0.,
+                bank: 0.,
+            };
+            // Points near the box, and exactly on a corner.
+            let (s, c) = b.heading.sin_cos();
+            let corner = [
+                b.center[0] + b.half[0] * c + b.half[2] * s,
+                b.center[2] - b.half[0] * s + b.half[2] * c,
+            ];
+            for (x, z) in [
+                (b.center[0] + next() / 2., b.center[2] + next()),
+                (corner[0], corner[1]),
+            ] {
+                let expected = rotated(&b, x, z);
+                inside += usize::from(expected);
+                assert_eq!(b.contains_horizontal(x, z), expected, "{b:?} {x} {z}");
+            }
+        }
+        assert!(inside > 1000, "too few points inside: {inside}");
+    }
+
+    /// Every point a sloped, turned runway answers for lies in its extent's
+    /// box, no higher than its highest corner.
+    #[test]
+    fn a_runway_surface_extent_holds_every_point_of_it() {
+        let mut scene = scene();
+        let (lo, hi, top) = scene.runways[0].surface_extent().unwrap();
+        assert_eq!((lo, hi, top), ([-101., -5001.], [101., 5001.], 100.));
+        let runway = &mut scene.runways[0];
+        runway.surface.heading = 0.7;
+        runway.surface.pitch = 0.02;
+        runway.surface.bank = -0.01;
+        let (lo, hi, top) = scene.runways[0].surface_extent().unwrap();
+        assert!(
+            top > 100. + 50.,
+            "a slope over 5,000 ft raises a corner: {top}"
+        );
+        let mut answered = 0;
+        for x in (-6000..=6000).step_by(50) {
+            for z in (-6000..=6000).step_by(50) {
+                let (x, z) = (f64::from(x), f64::from(z));
+                if let Some((_, height)) = scene.runway_surface(x, z) {
+                    answered += 1;
+                    assert!(height <= top + 1e-6, "{height} above {top}");
+                    assert!(lo[0] <= x && x <= hi[0] && lo[1] <= z && z <= hi[1]);
+                }
+            }
+        }
+        assert!(answered > 100, "{answered}");
+    }
+
     fn scene() -> Scene {
         let bounds = OrientedBox {
             center: [0., 100., 0.],

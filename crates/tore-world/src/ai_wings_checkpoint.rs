@@ -226,6 +226,8 @@ impl AiWings {
             last_output: _,
             // Why-record: this step's decoy rolls, for the recorder.
             decoy_rolls: _,
+            // Setup: worked out from the world's terrain, which never changes.
+            ground_ceiling: _,
         } = self;
         reports.save(s, None)?;
         slots.save(s, None)?;
@@ -307,6 +309,7 @@ impl AiWings {
             departing,
             last_output: _,
             decoy_rolls: _,
+            ground_ceiling: _,
         } = self;
         *reports = Checkpoint::load(l, None)?;
         *slots = Checkpoint::load(l, None)?;

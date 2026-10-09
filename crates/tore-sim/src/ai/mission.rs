@@ -1405,6 +1405,10 @@ pub struct AiMission {
     humans_flying: Vec<u32>,
     missiles: Vec<MissileSnapshot>,
     gun_rounds: Vec<incoming_fire::Round>,
+    /// The highest the ground reaches over each part of the world, when the
+    /// host knows it: a shortcut for sight lines above it, never a change to
+    /// any answer.
+    ground_ceiling: Option<std::sync::Arc<crate::ground_ceiling::GroundCeiling>>,
     /// The mission assignment of each human-flown aircraft, by aircraft id.
     human_assignments: std::collections::BTreeMap<u32, engagement::Assignment>,
     /// The aircraft each human-flown aircraft must keep alive, by aircraft id.
@@ -1455,6 +1459,7 @@ impl AiMission {
             humans_flying: Vec::new(),
             missiles: Vec::new(),
             gun_rounds: Vec::new(),
+            ground_ceiling: None,
             human_assignments: Default::default(),
             must_survive: Default::default(),
             pending_attack_reports: Vec::new(),
@@ -1641,6 +1646,17 @@ impl AiMission {
     /// receiver. The observation service, not the controller, reads this data.
     pub fn set_gun_rounds(&mut self, rounds: Vec<incoming_fire::Round>) {
         self.gun_rounds = rounds;
+    }
+
+    /// The highest the ground the steps are given can reach over each part of
+    /// the world, terrain and runways alike, or `None` when unknown.
+    /// Incoming-fire sight lines wholly above it skip the terrain samples;
+    /// every answer stays the same.
+    pub fn set_ground_ceiling(
+        &mut self,
+        ceiling: Option<std::sync::Arc<crate::ground_ceiling::GroundCeiling>>,
+    ) {
+        self.ground_ceiling = ceiling;
     }
 
     pub fn set_missiles(&mut self, missiles: Vec<MissileSnapshot>) {
@@ -2771,7 +2787,14 @@ impl AiMission {
 
         // 2. Own state from the actor's own flight model.
         let own = actor.own_state(ground);
-        actor.update_defense(tick, &self.missiles, &self.gun_rounds, &own, ground);
+        actor.update_defense(
+            tick,
+            &self.missiles,
+            &self.gun_rounds,
+            self.ground_ceiling.as_deref(),
+            &own,
+            ground,
+        );
 
         // Takeoff and landing sequences replace combat and formation flying.
         if actor.landing_order.is_none()
@@ -3902,6 +3925,7 @@ impl AiActor {
         tick: u64,
         missiles: &[MissileSnapshot],
         rounds: &[incoming_fire::Round],
+        ground_ceiling: Option<&crate::ground_ceiling::GroundCeiling>,
         own: &OwnState,
         ground: &dyn Fn(f64, f64) -> f64,
     ) {
@@ -3962,8 +3986,12 @@ impl AiActor {
             &mut self.defense_state,
             |position| ground(position[0], position[2]),
         );
-        let clear =
-            |point| crate::combat::live::terrain_hit(own.position, point, &ground).is_none();
+        // A sight line wholly above the highest ground under it cannot meet
+        // it, so it is not sampled; the answer is the same either way.
+        let clear = |point| {
+            ground_ceiling.is_some_and(|ceiling| ceiling.clear_above(own.position, point))
+                || crate::combat::live::terrain_hit(own.position, point, &ground).is_none()
+        };
         self.incoming_fire.observe(
             tick,
             self.id(),

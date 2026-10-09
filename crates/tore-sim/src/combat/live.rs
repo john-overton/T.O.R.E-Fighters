@@ -26,6 +26,7 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
     (*state % u32::from(bound)) as u16
 }
 
+mod broad;
 #[cfg(test)]
 mod gunship_tests;
 mod handoff;
@@ -37,7 +38,10 @@ mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
 pub mod rewind;
 
-pub const MAX_PROJECTILES: usize = 256;
+/// Rounds, missiles and bombs in flight at once. John, 2026-10-09: 5,000,
+/// up from 256, so a crowded gunfight never loses a burst. What a full sky
+/// costs is measured in `docs/baselines/projectile-cap-2026-10-09.md`.
+pub const MAX_PROJECTILES: usize = 5000;
 pub use crate::ai::targeting::Side;
 /// The side of nothing: ground objects, fixtures and rounds nobody owns. It is
 /// never friendly to anything, so friendly fire never spares it.
@@ -4049,6 +4053,43 @@ impl State {
         // Jammer deception on target hits takes the first ownship's ECM record.
         let fixture_ecm = ships.first().map(|own| own.config.ecm);
         let friendly_fire_off = self.friendly_fire == FriendlyFire::Off;
+        // The first pass of the contact search: which targets and ownship
+        // rows a round's segment can reach this tick at all.
+        let body = |t: &Target, previous: Vector| broad::Body {
+            previous,
+            position: t.position,
+            basis: t.basis,
+            radius: t.radius,
+            solid: self
+                .ground_bounds
+                .get(&t.id)
+                .map(|bounds| (bounds.center, bounds.half)),
+        };
+        let target_broad = broad::Broad::new(
+            self.targets
+                .iter()
+                .zip(&old_targets)
+                .map(|(t, previous)| body(t, *previous)),
+        );
+        let row_bounds: Vec<Option<broad::Bounds>> = rows
+            .iter()
+            .map(|r| {
+                broad::Body {
+                    solid: None,
+                    ..body(&r.target, r.previous)
+                }
+                .bounds()
+            })
+            .collect();
+        // Each aircraft's side, the first row of an id answering, for the
+        // friendly fire rule.
+        let mut target_sides: BTreeMap<u32, Side> = BTreeMap::new();
+        if friendly_fire_off {
+            for t in &self.targets {
+                target_sides.entry(t.id).or_insert(t.side);
+            }
+        }
+        let mut candidates: Vec<usize> = Vec::new();
         self.projectiles.retain_mut(|p| {
             let owned = p.weapon.clone();
             let w = owned.as_ref().unwrap_or_else(|| {
@@ -4236,24 +4277,36 @@ impl State {
             let mut first: Option<(f64, Option<Hit>)> = None;
             // With friendly fire off, no round damages an aircraft of its
             // shooter's own side, the shooter included.
-            let shooter_side = ships
-                .iter()
-                .find(|o| o.aircraft == p.owner)
-                .map(|o| o.side)
-                .or_else(|| {
-                    self.targets
-                        .iter()
-                        .find(|t| t.id == p.owner)
-                        .map(|t| t.side)
-                })
-                .unwrap_or(NO_SIDE);
+            let shooter_side = if friendly_fire_off {
+                ships
+                    .iter()
+                    .find(|o| o.aircraft == p.owner)
+                    .map(|o| o.side)
+                    .or_else(|| target_sides.get(&p.owner).copied())
+                    .unwrap_or(NO_SIDE)
+            } else {
+                NO_SIDE
+            };
             let spares =
                 |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
+            // The round's swept segment widened by its fuze, for the first
+            // pass; a round tested against past volumes skips it.
+            let reach = if rewind.is_none() {
+                let fuze = f64::from(w.damage.fuze_radius.max(0));
+                broad::Bounds::segment(p.previous, p.position, fuze)
+            } else {
+                None
+            };
             // One search over every aircraft row and every ownship. A gun round
             // can hit any aircraft but the one that fired it; a missile or bomb
             // can hit any aircraft once its fuze has armed, even its launcher.
             if armed {
                 for (n, r) in rows.iter().enumerate() {
+                    if let (Some(reach), Some(Some(row))) = (reach, row_bounds.get(n))
+                        && !row.overlaps(&reach)
+                    {
+                        continue;
+                    }
                     let t = &r.target;
                     // Easy aiming widens the volume of the aircraft it shoots at,
                     // never the shooter's own.
@@ -4289,11 +4342,15 @@ impl State {
                 }
             }
             if armed {
-                for (i, t) in self.targets.iter().enumerate().filter(|(_, t)| {
-                    t.body_present()
+                target_broad.candidates(reach, &mut candidates);
+                for &i in &candidates {
+                    let t = &self.targets[i];
+                    if !(t.body_present()
                         && (!is_gun(w) || t.id != p.owner)
-                        && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side))
-                }) {
+                        && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side)))
+                    {
+                        continue;
+                    }
                     if t.hp > 0 && p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
                         continue;
                     }

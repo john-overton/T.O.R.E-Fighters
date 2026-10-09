@@ -360,6 +360,10 @@ impl Checkpoint for AiActor {
 // that sets them once and steps many times must set them again after a
 // restore.
 //
+// `ground_ceiling`: host setup, not state. The host sets it from its terrain
+// before every step (`AiWings::step`); it only spares terrain samples that
+// could not change an answer, so a restored mission without it steps the same.
+//
 // `link`: per-step scratch too. The host hands the mission the data link's
 // input with `set_link` before every step and the step takes it
 // (`AiWings::step`'s caller does it every tick, empty when nothing is locked),
@@ -389,6 +393,7 @@ crate::checkpoint_struct!(AiMission {
 } skip {
     missiles = Vec::new(),
     gun_rounds = Vec::new(),
+    ground_ceiling = None,
     link = crate::ai::link::LinkInput::default(),
     journal = Journal::default(),
 });

@@ -83,8 +83,10 @@ them independently of the launcher, guides applicable stores, finds swept target
 or sampled terrain hits, applies source class-0 damage and destroys targets once.
 Destroyed targets stop rendering and cannot be locked or damaged again. Store
 release reduces payload through the aircraft's existing model API. Damage,
-projectile and effect pools are bounded (256 projectiles, 64 effects); pool
-saturation rejects a spawn before ammunition is consumed.
+projectile and effect pools are bounded (5,000 projectiles since 2026-10-09,
+256 before; 64 effects); pool saturation rejects a spawn before ammunition is
+consumed. The [projectile cap baseline](projectile-cap-2026-10-09.md) measures
+the raise.
 
 The target uses the selected aircraft's original mesh and atlas. Missile shapes
 use bounded SH static geometry with palette colors; their textures and native

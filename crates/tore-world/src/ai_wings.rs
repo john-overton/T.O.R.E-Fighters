@@ -34,7 +34,7 @@ mod record;
 pub use record::DecoyRoll;
 mod reports;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_sim::{
@@ -647,7 +647,7 @@ pub struct AiWings {
     /// Draws for what a damaged ECM suite loses, apart from the decoy rolls.
     fault_random: tore_sim::ai::DecisionRandom,
     /// Projectile ids already turned into threat reports.
-    seen_projectiles: Vec<u32>,
+    seen_projectiles: BTreeSet<u32>,
     /// Projectile id to the actor that fired it, for B47 attribution. The
     /// player's shots are absent; the bridge remembers its own launchers.
     ai_shots: BTreeMap<u32, u32>,
@@ -694,6 +694,9 @@ pub struct AiWings {
     /// Every decoy roll of the latest [`Self::step`], for the replay
     /// recorder. Write-only: no decision reads it.
     decoy_rolls: Vec<DecoyRoll>,
+    /// The highest the world's ground reaches over each square, worked out
+    /// at the first step: the mission's shortcut for sight lines above it.
+    ground_ceiling: Option<std::sync::Arc<tore_sim::ground_ceiling::GroundCeiling>>,
 }
 
 struct PendingGun {
@@ -1223,7 +1226,7 @@ impl AiWings {
             damaged_stations: Default::default(),
             handed_over: Default::default(),
             fault_random: tore_sim::ai::DecisionRandom::seeded(0xfa17),
-            seen_projectiles: Vec::new(),
+            seen_projectiles: BTreeSet::new(),
             ai_shots: BTreeMap::new(),
             ejection_events: Vec::new(),
             chatter: Vec::new(),
@@ -1249,6 +1252,7 @@ impl AiWings {
             departing: Default::default(),
             last_output: tore_sim::ai::mission::MissionOutput::default(),
             decoy_rolls: Vec::new(),
+            ground_ceiling: None,
         })
     }
 
@@ -1855,6 +1859,10 @@ impl AiWings {
             } else {
                 Vec::new()
             });
+        let ceiling = self
+            .ground_ceiling
+            .get_or_insert_with(|| std::sync::Arc::new(world.ground_ceiling()));
+        self.mission.set_ground_ceiling(Some(ceiling.clone()));
         self.mission.set_gun_rounds(
             state
                 .projectiles
@@ -2956,10 +2964,9 @@ impl AiWings {
     ) {
         let mut reports: Vec<(u32, ThreatReport)> = Vec::new();
         for projectile in projectiles {
-            if self.seen_projectiles.contains(&projectile.id) {
+            if !self.seen_projectiles.insert(projectile.id) {
                 continue;
             }
-            self.seen_projectiles.push(projectile.id);
             let Some(target) = projectile.target else {
                 continue;
             };
@@ -3017,7 +3024,7 @@ impl AiWings {
         }
         // The seen list only has to outlive the projectiles themselves.
         if self.seen_projectiles.len() > MAX_PROJECTILES * 4 {
-            let live: Vec<u32> = projectiles.iter().map(|p| p.id).collect();
+            let live: BTreeSet<u32> = projectiles.iter().map(|p| p.id).collect();
             self.seen_projectiles.retain(|id| live.contains(id));
             self.ai_shots.retain(|id, _| live.contains(id));
         }
