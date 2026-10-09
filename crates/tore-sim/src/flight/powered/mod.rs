@@ -230,10 +230,9 @@ mod tests {
             crate::models::variety::tests::synthetic(id)
         }
     }
-    /// The rotorcraft: the V-22 on the old attitude-hold law, the AH-64 and
-    /// Mi-24 on their rotors since slice P2 and the CH-47 on its two since P3 (the jets have their
-    /// own physics since slice P4, tested in `jet.rs`).
-    const OLD_LAW: [AircraftId; 3] = [AircraftId::V22, AircraftId::Ah64, AircraftId::Mi24];
+    /// The aircraft whose hover the generic control test below flies: the V-22
+    /// and the single-rotor helicopters.
+    const HOVER_CRAFT: [AircraftId; 3] = [AircraftId::V22, AircraftId::Ah64, AircraftId::Mi24];
     fn hover(id: AircraftId, height: f64) -> State {
         let aircraft = fixture(id);
         let mut s = State::new(&aircraft, [0., height, 0.]).unwrap();
@@ -344,7 +343,7 @@ mod tests {
     }
     #[test]
     fn cyclic_and_yaw_control_translate_and_turn_each_hover_aircraft() {
-        for id in OLD_LAW {
+        for id in HOVER_CRAFT {
             let mut s = hover(id, 500.);
             run(
                 &mut s,
@@ -360,15 +359,6 @@ mod tests {
             assert!(s.velocity[0].hypot(s.velocity[2]) > 3., "{id:?}");
             assert!(s.yaw > 0.1, "{id:?}");
             run(&mut s, &Default::default(), 360);
-            // The old law holds attitude; a rotor without stability
-            // augmentation keeps the attitude it was left at.
-            let lift = s.model().powered_lift().unwrap();
-            let c = s.model().configuration();
-            if helicopter::SingleRotor::new(&lift, c).is_none()
-                && tiltrotor::Tiltrotor::new(&lift, c).is_none()
-            {
-                assert!(s.pitch.abs() < 0.01 && s.bank.abs() < 0.01, "{id:?}");
-            }
             assert!(!s.crashed);
         }
     }
