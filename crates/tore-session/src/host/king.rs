@@ -70,6 +70,13 @@ impl Court {
     pub(super) fn lock(&self, plane: u32) -> Lock {
         self.locks.get(&plane).cloned().unwrap_or_default()
     }
+
+    /// The side the first plane `callsign` flew this mission fixed, if it
+    /// flew one (Autobalance counts it on that side while it is back in the
+    /// lobby).
+    pub(super) fn side_of(&self, callsign: &str) -> Option<Side> {
+        self.sides.get(callsign).copied()
+    }
 }
 
 /// `spec` with the settings the mission itself carries (friendly fire and
@@ -264,8 +271,14 @@ impl Host {
             self.rate_changed();
         }
         // A change that alters what players chose clears every ready mark,
-        // as a mission change does.
-        if moved(number::MODE) || moved(number::LOCK_SIDES) || moved(number::LOADOUTS) {
+        // as a mission change does. Turning Autobalance on is the exception
+        // (slice A1, plan 6.3): only the players its re-deal moves lose
+        // theirs.
+        let balance_on = self.settings.balanced() && !before.balanced();
+        if moved(number::MODE)
+            || moved(number::LOADOUTS)
+            || (moved(number::LOCK_SIDES) && !balance_on)
+        {
             self.clear_ready();
         }
         // Friendly fire and the loadout rule travel in the mission, so a
@@ -278,6 +291,10 @@ impl Host {
             // a failure leaves the settings as they were.
             self.settings = before;
             return Err(why);
+        }
+        // Autobalance turned on: the host deals the sides (slice A1).
+        if balance_on {
+            self.balance_redeal();
         }
         self.lobby_dirty = true;
         Ok(())
@@ -559,8 +576,9 @@ impl Host {
     // ----- Taking a plane -----------------------------------------------
 
     /// Why the King's rules refuse `connection` taking `plane` now, if they
-    /// do: the slot's lock, join in progress, lock sides. A revival (slice
-    /// F2-V) is not a new pilot: it asks [`Host::sides_refusal`] alone.
+    /// do: the slot's lock, join in progress, lock sides, Autobalance. A
+    /// revival (slice F2-V) is not a new pilot: it asks
+    /// [`Host::sides_refusal`] alone.
     pub(super) fn king_take_refusal(
         &self,
         connection: ConnectionId,
@@ -571,6 +589,11 @@ impl Host {
         }
         self.new_pilot_refusal()
             .or_else(|| self.sides_refusal(connection, plane))
+            .or_else(|| {
+                // Autobalance: the side the host gave the player (slice A1).
+                let side = self.world.roster.plane(plane)?.slot.wing.side;
+                self.balance_side_refusal(connection, side)
+            })
     }
 
     /// Why join in progress off refuses a new pilot now: the mission flies

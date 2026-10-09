@@ -6,9 +6,9 @@
 //! has none. Nothing here keeps state: the lobby state's slots are the one
 //! source of truth.
 //!
-//! Autobalance (setting 7's `balanced`) refuses every side request here;
-//! the balancing rule itself, which seats players on a side, is slice A1's
-//! and starts from [`Host::balance_side_refusal`].
+//! Autobalance (setting 7's `balanced`) refuses a request for the other
+//! side than the one the host gave the player; the balancing rule itself,
+//! which seats players on a side, is slice A1's (`host/balance.rs`).
 //!
 //! [`SlotRequest::Side`]: crate::wire::messages::SlotRequest::Side
 
@@ -76,7 +76,7 @@ impl Host {
     /// the King's lock lets this player have it (a slot kept for the player
     /// is free to it alone), and, while the mission flies, the AI flies it
     /// for nobody.
-    fn side_slot_free(&self, connection: ConnectionId, plane: PlaneId) -> bool {
+    pub(super) fn side_slot_free(&self, connection: ConnectionId, plane: PlaneId) -> bool {
         if self.holder(plane, connection).is_some()
             || self.lock_refusal(connection, plane.0).is_some()
         {
@@ -93,17 +93,21 @@ impl Host {
             && self.away_take_refusal(connection, plane).is_none()
     }
 
-    /// Why Autobalance refuses `connection` choosing `side`, if it does.
-    /// Today every side request is refused while the host picks the sides
-    /// (plan 6.3). Slice A1 extends this hook with the balancing rule, and
-    /// refuses a [`SlotRequest::Take`] of the other side's slot through it.
+    /// Why Autobalance refuses `connection` choosing `side`, if it does:
+    /// while the host picks the sides, any side but the one it gave the
+    /// player (plan 6.3; the rule is in `host/balance.rs`). Its own side is
+    /// never refused, so it may still move between its side's slots.
+    /// [`Host::slot`]'s [`SlotRequest::Take`] asks it too, and so does a
+    /// plane taken in flight ([`Host::king_take_refusal`]).
     ///
     /// [`SlotRequest::Take`]: crate::wire::messages::SlotRequest::Take
     pub(super) fn balance_side_refusal(
         &self,
-        _connection: ConnectionId,
-        _side: Side,
+        connection: ConnectionId,
+        side: Side,
     ) -> Option<String> {
-        self.settings.balanced().then(|| SIDES_BALANCED.to_owned())
+        self.balanced_side(connection)
+            .is_some_and(|own| own != side)
+            .then(|| SIDES_BALANCED.to_owned())
     }
 }

@@ -1677,6 +1677,12 @@ player's side and no new message carries it.
   the mission flies it must also be flown by the AI for nobody. A request for
   the side the player holds already keeps its slot.
 - **Leave** frees the slot and with it the side.
+- **Under Autobalance** (`lock-sides balanced`) the host seats every player
+  itself, with no message of its own: the lobby state's slots show it. A
+  request for the player's own side keeps its slot; the other side, a Take
+  of the other side's slot and a Leave are refused "Autobalance picks the
+  sides." (slice A1; the rule is in
+  [Autobalance as built](../ARCHITECTURE.md#autobalance-as-built-a1)).
 
 Refusals are Refused (kind 20). The refusals every slot request shares (a
 player flying, a player whose game cannot play the mission, an old mission
@@ -1685,7 +1691,7 @@ number) come first, as before; then, in this order:
 | When | Words |
 | --- | --- |
 | A co-op game | "Sides are chosen only in a PvP game." |
-| `lock-sides balanced` | "Autobalance picks the sides." |
+| `lock-sides balanced`, and the side is not the one the host gave the player | "Autobalance picks the sides." |
 | The player holds a slot on the other side | "Leave Bluefor first." or "Leave Redfor first." (it leaves, then joins: John's D3) |
 | The side has no slots players may take | "Redfor has no slots players may take." |
 | In flight, with the side fixed by lock sides | "Sides are locked until the mission ends." |

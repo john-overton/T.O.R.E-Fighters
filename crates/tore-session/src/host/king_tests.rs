@@ -1044,3 +1044,7 @@ fn a_dedicated_servers_rate_is_its_files_and_the_king_may_not_turn_it() {
 // The lobby pass's side requests (slice W0) drive this file's rig.
 #[path = "sides_tests.rs"]
 mod sides_tests;
+
+// The lobby pass's Autobalance (slice A1) drives this file's rig.
+#[path = "balance_tests.rs"]
+mod balance_tests;

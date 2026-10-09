@@ -43,6 +43,8 @@
 // Stage F phase 2's parts (slice F2-0 adds them as hooks; each slice in
 // docs/ARCHITECTURE.md, "Phase 2 slices", fills its own).
 mod away;
+// The lobby pass's Autobalance (slice A1).
+mod balance;
 mod chat;
 pub mod config;
 pub mod content;
@@ -2051,10 +2053,19 @@ impl Host {
         }
         let held = peer.lobby.slot;
         let wanted = match request {
+            // The lobby pass: under Autobalance a player keeps the side the
+            // host gave it, so it keeps a slot (slice A1).
+            SlotRequest::Leave if held.is_some() && self.settings.balanced() => {
+                return Err(sides::SIDES_BALANCED.into());
+            }
             SlotRequest::Leave => None,
             SlotRequest::Take(plane) => {
-                if !self.slots().iter().any(|slot| slot.id == plane) {
+                let Some(slot) = self.slots().into_iter().find(|slot| slot.id == plane) else {
                     return Err(format!("Plane {plane} is not a slot players may take."));
+                };
+                // The lobby pass: Autobalance's side (slice A1).
+                if let Some(why) = self.balance_side_refusal(connection, slot.wing.side) {
+                    return Err(why);
                 }
                 if let Some(other) = self.holder(PlaneId(plane), connection) {
                     return Err(format!(
@@ -2072,6 +2083,8 @@ impl Host {
             SlotRequest::Side(side) => Some(self.side_slot(connection, side, held)?),
             SlotRequest::Any => match held {
                 Some(plane) => Some(plane),
+                // The lobby pass: the side Autobalance gives (slice A1).
+                None if self.settings.balanced() => Some(self.balance_any(connection)?),
                 None => Some(
                     self.slots()
                         .into_iter()
@@ -2715,6 +2728,10 @@ impl Host {
     /// [`LOBBY_INTERVAL_FLYING`], since its messages share 256 bytes of each
     /// snapshot packet (agent decision, EF4 review).
     fn send_lobby(&mut self) {
+        // The lobby pass: Autobalance seats the players waiting for a side
+        // before any lobby state goes out, a joiner before its first (slice
+        // A1).
+        self.balance_update();
         // Stage L: the gaps, when they changed or a player's content came.
         self.send_gaps();
         self.send_stale_lobbies(false);

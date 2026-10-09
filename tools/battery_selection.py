@@ -189,13 +189,13 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "net-check": ("the dedicated server's start-up and --check", ("net-server-check",)),
     "net-fly": (
         "a server and bots over UDP: join, fly, chat, console, observe, scores, the King, PvP, a delayed observer, "
-        "revival, the idle AI, debrief, clean exit",
+        "revival, the idle AI, Autobalance, debrief, clean exit",
         (
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
             "net-server-king", "net-server-pvp", "net-server-hunt", "net-server-delay", "net-server-revive",
             "net-server-results", "net-server-away", "net-server-rejoin", "net-server-replies",
             "net-server-datalink", "net-server-datalink-lead", "net-server-smoke-pvp", "net-server-smoke-coop",
-            "net-server-rate", "net-host-rate",
+            "net-server-rate", "net-host-rate", "net-server-autobalance",
         ),
     ),
     "net-convert": (
