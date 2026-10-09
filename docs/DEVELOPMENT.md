@@ -556,6 +556,12 @@ the isolated flight-model probe, not a complete rendered mission. Keep the
 default researched flight adapter unless the task explicitly concerns another
 adapter. Use `--aircraft rafale` for the exact Rafale C identity.
 
+The powered-lift aircraft (`av8`, `yak141`, `v22`, `ah64`, `mi24`, `ch47`) start in
+trimmed forward flight. `--maneuver hover` starts one at rest in the air in its own
+hover trim (hands off it holds), and `--replay-input TAPE` flies a `tore-pilot 3`
+tape from there; the battery's `flight-powered-*` scenarios do exactly this
+([flight lane](testing/lane-flight.md#powered-lift-scenarios-vtol-overhaul)).
+
 For an individual aircraft's actual surface geometry, before broad integration
 checks:
 
