@@ -192,7 +192,7 @@ compile without a section (see [keeping it complete](#keeping-it-complete)):
 | Id | Section | What | Restored |
 | --- | --- | --- | --- |
 | 0 | Shared records | Copied records referred to by index | First |
-| 1 | Roster | Planes' pilots, seats, crews, wing recipients | New value |
+| 1 | Roster | Planes' pilots, seats, crews, wing recipients; then the players' callsigns (*lobby pass follow-up F1*): each seat's, as the host named it, and each plane's, the player who flies it or flew it last | New value |
 | 2 | Combat | `Combat` and its `live::State`: ownships, targets, projectiles with guidance, effects, smoke, contrails, debris, marks, the ledger, the rewind history, random streams, the combat tick (`World::tick`) | In place |
 | 3 | AI wings | `AiWings` and its `AiMission`: actors with flight, controller, memory, sensors and stores; leaders (each with whether it stands in for the wing's owner, *lobby pass R2*), opportunities; the lead hold's claims and the wingmen waiting to re-form once their fight is over (*R2*); the bridge's maps and random streams | In place |
 | 4 | Cockpits | Every human-flown plane's `Cockpit`: flight, turbulence and its stream, airport service, NAV mode, message clocks, tower radio, crew voice, result tracker | New value |

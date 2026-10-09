@@ -487,8 +487,10 @@ plane for it), or flying back after a revival. Single player, and a game with
   [mission of opportunity](#mission-of-opportunity-after-a-lost-human-leader);
   a human stand-in may give wing orders. A stand-in that is lost passes the
   stand-in's place on the same way. A human stand-in reads "You lead the
-  flight until Red one flies again." (the owner's plane by its radio name),
-  with no voice, instead of "You're the Wingleader now". A stand-in never
+  flight until Viper flies again." (the owner's player by callsign, the
+  lobby pass's follow-up F1; the owner's plane by its radio name, "Red one",
+  when the mission has no callsign for it), with no voice, instead of
+  "You're the Wingleader now". A stand-in never
   becomes the owner while the owner is in the game.
 - **The lead given back.** As soon as the owner's new plane flies in the
   flight, it leads: the mission of opportunity ends, the flight re-forms on

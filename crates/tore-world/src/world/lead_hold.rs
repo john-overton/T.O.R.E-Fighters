@@ -31,7 +31,9 @@
 //!   the lead goes to the next human in the flight, else the owner is
 //!   cleared and the current leader leads as an ordinary lead: the AI loop.
 //! - **The HUD lines** (`radio_calls.rs`): a human stand-in reads "You lead
-//!   the flight until Blue one flies again.", an owner given the lead back
+//!   the flight until Viper flies again." (the owner's callsign, follow-up
+//!   F1; its plane's radio label, "Blue one", when the mission has no name
+//!   for it), an owner given the lead back
 //!   "You lead your flight again.", in place of the "You're the Wingleader
 //!   now" call. A new owner (the next human, or a lost human made owner who
 //!   now flies) hears today's call.
@@ -390,10 +392,21 @@ impl World {
             let text = if change.reclaimed {
                 radio_calls::LEAD_AGAIN.to_owned()
             } else if change.acting {
+                // The owner by its player's callsign (follow-up F1), else by
+                // its newest plane's radio label.
                 let owner = self
                     .owned(wing_of(change.side, change.wing))
-                    .and_then(|owned| members.iter().find(|m| m.id == owned.plane.0))
-                    .map(radio_calls::label);
+                    .and_then(|owned| {
+                        self.roster
+                            .plane_callsign(owned.plane)
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                members
+                                    .iter()
+                                    .find(|m| m.id == owned.plane.0)
+                                    .map(radio_calls::label)
+                            })
+                    });
                 radio_calls::stand_in_line(owner.as_deref())
             } else {
                 continue;

@@ -1579,6 +1579,52 @@ impl AiMission {
         self.human_assignments.insert(human, assignment);
     }
 
+    /// Objectives follow lineages (the lobby pass's follow-up F1, agent
+    /// decision): `new`, a plane a respawn or a revival added, continues the
+    /// lineage of the planes `lineage`, oldest first. Every mission list that
+    /// names a plane of the lineage names `new` too: each actor's and each
+    /// human-flown plane's assignment ([`engagement::Assignment::join_lineage`],
+    /// changed in place, so no actor's engagement starts afresh) and each
+    /// survival list. `new` itself takes the newest plane of the lineage's
+    /// human assignment and survival list when it has none of its own, so
+    /// whoever flies it is asked what was asked of the lineage. Single player
+    /// never adds a plane, so nothing here runs there.
+    pub fn join_lineage(&mut self, new: u32, lineage: &[u32]) {
+        for actor in &mut self.actors {
+            actor.assignment.join_lineage(new, lineage);
+        }
+        for assignment in self.human_assignments.values_mut() {
+            assignment.join_lineage(new, lineage);
+        }
+        for ids in self.must_survive.values_mut() {
+            if ids.iter().any(|id| lineage.contains(id)) && !ids.contains(&new) {
+                ids.push(new);
+                ids.sort_unstable();
+            }
+        }
+        let elder = |plane: &&u32| **plane != new;
+        if !self.human_assignments.contains_key(&new)
+            && let Some(assignment) = lineage
+                .iter()
+                .rev()
+                .filter(elder)
+                .find_map(|plane| self.human_assignments.get(plane))
+                .cloned()
+        {
+            self.human_assignments.insert(new, assignment);
+        }
+        if !self.must_survive.contains_key(&new)
+            && let Some(ids) = lineage
+                .iter()
+                .rev()
+                .filter(elder)
+                .find_map(|plane| self.must_survive.get(plane))
+                .cloned()
+        {
+            self.must_survive.insert(new, ids);
+        }
+    }
+
     /// Quick Mission startup permission is independent of its group objectives.
     pub fn start_in_formation(&mut self) {
         for actor in &mut self.actors {

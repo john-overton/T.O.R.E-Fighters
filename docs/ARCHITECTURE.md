@@ -6523,8 +6523,9 @@ flight.
   flight for the lobby with a living plane has left it too; one who leaves
   with a lost plane keeps its held seat and the lead.
 - **HUD lines** (`radio_calls.rs`, text only): a human stand-in reads "You
-  lead the flight until Red one flies again." (the owner's newest plane by
-  its radio label: the mission core has no callsigns), an owner given the
+  lead the flight until Viper flies again." (the owner's callsign, which the
+  host gives the mission core with `MissionCommand::Callsign` (F1); the
+  radio label, such as "Red one", when no name is known), an owner given the
   lead back "You lead your flight again."; neither hears "You're the
   Wingleader now" (`Chatter::Leadership` is not raised for either). A new
   owner taking the lead hears today's call.

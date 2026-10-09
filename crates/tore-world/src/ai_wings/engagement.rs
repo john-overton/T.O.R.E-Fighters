@@ -241,7 +241,47 @@ impl AiWings {
     }
 
     pub fn apply_group_survival(&mut self, groups: &[bool; 6]) {
-        let ids: Vec<u32> = groups
+        let ids = self.survival_ids(groups);
+        for human in self.humans.iter().map(|h| h.id).collect::<Vec<_>>() {
+            self.mission.set_must_survive(human, ids.clone());
+        }
+    }
+
+    /// An open mission's objectives (the lobby pass's follow-up F1): every
+    /// plane starts on the AI, so no human had its objectives set when the
+    /// mission was built, and a human who took a plane by handoff was asked
+    /// nothing (its target window never read "Obj:", its debrief listed no
+    /// friendly objective). Here every plane is given, as a human-flown
+    /// plane's, the assignment the mission gave its AI pilot (its wing's
+    /// group objective over the preset) and the survival list of `groups`,
+    /// so whoever flies it is asked what the mission asks of that plane.
+    /// Call after [`Self::apply_mission_preset`], the group objectives and
+    /// the group survival. Single player never builds an open mission.
+    pub fn open_objectives(&mut self, groups: &[bool; 6]) {
+        let ids = self.survival_ids(groups);
+        let planes: Vec<u32> = self.slots.iter().map(|slot| slot.id).collect();
+        for plane in planes {
+            if let Some(actor) = self.mission.actor(plane) {
+                let assignment = actor.assignment().clone();
+                self.mission.set_human_assignment(plane, assignment);
+            }
+            if !ids.is_empty() {
+                self.mission.set_must_survive(plane, ids.clone());
+            }
+        }
+    }
+
+    /// `new`, a plane a respawn or a revival added, continues the lineage
+    /// `lineage` (oldest first): every objective that names the lineage names
+    /// `new` too ([`tore_sim::ai::mission::AiMission::join_lineage`]; the
+    /// lobby pass's follow-up F1).
+    pub(crate) fn join_lineage(&mut self, new: u32, lineage: &[u32]) {
+        self.mission.join_lineage(new, lineage);
+    }
+
+    /// The aircraft of the groups that must survive, in group order.
+    fn survival_ids(&self, groups: &[bool; 6]) -> Vec<u32> {
+        groups
             .iter()
             .copied()
             .enumerate()
@@ -256,10 +296,7 @@ impl AiWings {
                     launch::WingId::new(side, index as u8 % 3).expect("fixed Quick Mission group"),
                 )
             })
-            .collect();
-        for human in self.humans.iter().map(|h| h.id).collect::<Vec<_>>() {
-            self.mission.set_must_survive(human, ids.clone());
-        }
+            .collect()
     }
 
     fn group_members(&self, group: launch::WingId) -> Vec<u32> {
@@ -288,22 +325,25 @@ impl AiWings {
         id: u32,
     ) -> Option<crate::target_window::TargetObjective> {
         use crate::target_window::TargetObjective;
-        let side = match self.humans.iter().find(|h| h.id == id) {
-            Some(human) => human.side,
-            None => self.slot(id)?.side,
+        let side_of = |plane: u32| match self.humans.iter().find(|h| h.id == plane) {
+            Some(human) => Some(human.side),
+            None => self.slot(plane).map(|slot| slot.side),
         };
+        let side = side_of(id)?;
+        // The viewer's own side: a Redfor player's friends are the enemy
+        // side's planes (the lobby pass's follow-up F1; single player's
+        // viewer is always friendly).
+        let own = side_of(viewer).unwrap_or(launch::Side::Friendly);
         let assignment = self.mission.human_assignment(viewer);
-        match side {
-            launch::Side::Friendly
-                if assignment.protected_ids.contains(&id)
-                    || self.mission.must_survive(viewer).contains(&id) =>
-            {
-                Some(TargetObjective::Survive)
-            }
-            launch::Side::Enemy if assignment.destroy_ids.contains(&id) => {
-                Some(TargetObjective::Destroy)
-            }
-            launch::Side::Friendly | launch::Side::Enemy => None,
+        if side == own {
+            (assignment.protected_ids.contains(&id)
+                || self.mission.must_survive(viewer).contains(&id))
+            .then_some(TargetObjective::Survive)
+        } else {
+            assignment
+                .destroy_ids
+                .contains(&id)
+                .then_some(TargetObjective::Destroy)
         }
     }
 

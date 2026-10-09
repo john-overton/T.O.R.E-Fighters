@@ -584,7 +584,9 @@ impl Host {
         connection: ConnectionId,
         plane: PlaneId,
     ) -> Option<String> {
-        if let Some(why) = self.lock_refusal(connection, plane.0) {
+        // A slot's lock is its lineage's, by the root (the lobby pass's
+        // follow-up F1).
+        if let Some(why) = self.lock_refusal(connection, self.root_of(plane).0) {
             return Some(why);
         }
         self.new_pilot_refusal()

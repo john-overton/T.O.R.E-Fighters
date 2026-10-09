@@ -269,14 +269,29 @@ pub(super) fn open_handoffs() -> Scenario {
     fn drive(world: &mut World, step: u64) -> Step {
         let planes: Vec<PlaneId> = world.roster.planes().iter().map(|p| p.id).collect();
         let commands = match step {
-            60 => vec![MissionCommand::Take {
-                seat: SeatId(0),
-                plane: planes[0],
-            }],
-            61 => vec![MissionCommand::Take {
-                seat: SeatId(1),
-                plane: planes[planes.len() - 1],
-            }],
+            // Each seat's player is named before it is seated (the lobby
+            // pass's follow-up F1), so the roster's callsigns are in the
+            // checkpoint.
+            60 => vec![
+                MissionCommand::Callsign {
+                    seat: SeatId(0),
+                    callsign: "Viper".into(),
+                },
+                MissionCommand::Take {
+                    seat: SeatId(0),
+                    plane: planes[0],
+                },
+            ],
+            61 => vec![
+                MissionCommand::Callsign {
+                    seat: SeatId(1),
+                    callsign: "Hawk".into(),
+                },
+                MissionCommand::Take {
+                    seat: SeatId(1),
+                    plane: planes[planes.len() - 1],
+                },
+            ],
             500 => vec![MissionCommand::GiveBack { seat: SeatId(0) }],
             640 => vec![MissionCommand::Take {
                 seat: SeatId(2),
@@ -302,7 +317,8 @@ pub(super) fn open_handoffs() -> Scenario {
                 | MissionCommand::Revive { .. }
                 | MissionCommand::Respawn { .. }
                 | MissionCommand::LeadHold { .. }
-                | MissionCommand::LeadLeft { .. } => {}
+                | MissionCommand::LeadLeft { .. }
+                | MissionCommand::Callsign { .. } => {}
             }
         }
         let tick = world.tick();
@@ -324,6 +340,9 @@ pub(super) fn open_handoffs() -> Scenario {
     }
     fn expect(world: &World) -> String {
         let plane = |seat| world.roster.seat(SeatId(seat)).and_then(|s| s.plane);
+        // The players' names: plane 0 keeps Viper's though Viper left it.
+        assert_eq!(world.roster.plane_callsign(PlaneId(0)), Some("Viper"));
+        assert_eq!(world.roster.seat_callsign(SeatId(1)), Some("Hawk"));
         // Seat 0 gave its plane back at step 500; seats 1 and 2 hold the
         // planes they took at steps 61 and 640.
         assert_eq!(plane(0), None);
@@ -380,7 +399,8 @@ fn flying_after(world: &World, commands: &[MissionCommand]) -> Vec<SeatId> {
             | MissionCommand::Revive { .. }
             | MissionCommand::Respawn { .. }
             | MissionCommand::LeadHold { .. }
-            | MissionCommand::LeadLeft { .. } => {}
+            | MissionCommand::LeadLeft { .. }
+            | MissionCommand::Callsign { .. } => {}
         }
     }
     flying.sort();

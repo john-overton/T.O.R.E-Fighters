@@ -545,9 +545,9 @@ flowchart TD
   AI stand-in flies the mission of opportunity; a human stand-in may give wing
   orders. A stand-in never becomes the owner of the lead.
 - **Two lines on the HUD.** A human who stands in reads "You lead the flight
-  until Red one flies again." (the lead's plane named by its radio label, its
-  flight colour and place; if it has none the line says "until its lead flies
-  again"). The owner, when their new aircraft joins, reads "You lead your
+  until Viper flies again." (the lead's callsign; for a lead with no known
+  name, the plane's radio label, such as "Red one", and if it has none the
+  line says "until its lead flies again"). The owner, when their new aircraft joins, reads "You lead your
   flight again." Both are text only, with no voice, and neither player hears
   "You're the Wingleader now" for them. A player who takes the lead for good,
   because the owner left, hears the call as always.

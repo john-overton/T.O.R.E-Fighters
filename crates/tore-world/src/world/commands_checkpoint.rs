@@ -1,7 +1,7 @@
 //! The coders of the mission's commands and what they carry: the settings,
-//! a revival's spawn and its loadout (stage K slice K0), and the lead hold's
+//! a revival's spawn and its loadout (stage K slice K0), the lead hold's
 //! two (the lobby pass's slice R2; the owner's coder is in
-//! `lead_hold_checkpoint.rs`).
+//! `lead_hold_checkpoint.rs`) and a seat's callsign (follow-up F1).
 //!
 //! The host's journal records each tick's mission commands as given, and a
 //! standby replays them (docs/ARCHITECTURE.md, "The journal: one door into
@@ -87,6 +87,11 @@ impl Checkpoint for MissionCommand {
                 s.writer().write_varint(8);
                 owner.save(s, None)
             }
+            MissionCommand::Callsign { seat, callsign } => {
+                s.writer().write_varint(9);
+                seat.save(s, None)?;
+                callsign.save(s, None)
+            }
         }
     }
 
@@ -121,6 +126,10 @@ impl Checkpoint for MissionCommand {
             },
             8 => MissionCommand::LeadLeft {
                 owner: Checkpoint::load(l, None)?,
+            },
+            9 => MissionCommand::Callsign {
+                seat: Checkpoint::load(l, None)?,
+                callsign: Checkpoint::load(l, None)?,
             },
             other => return invalid(format!("a mission command has no variant {other}")),
         })
@@ -204,6 +213,14 @@ mod tests {
             },
             MissionCommand::LeadLeft {
                 owner: LeadOwner::Away(PlaneId(12)),
+            },
+            MissionCommand::Callsign {
+                seat: SeatId(5),
+                callsign: "Viper".into(),
+            },
+            MissionCommand::Callsign {
+                seat: SeatId(0),
+                callsign: String::new(),
             },
         ]
     }

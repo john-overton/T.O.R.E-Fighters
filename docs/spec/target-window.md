@@ -50,6 +50,11 @@ on 2026-09-21, an opinionated timing choice.
   marked must-survive in mission requirements. Destroy identifies an enemy
   explicitly required by the player's destroy assignment. Other contacts have
   no objective label. Allegiance alone does not establish a requirement.
+  In a multiplayer game "friendly" is the viewer's own side, and an aircraft a
+  respawn or a revival added carries the objective of the aircraft it
+  continues ([debrief, objectives in a game with
+  respawns](debrief.md#objectives-in-a-game-with-respawns); agent decision of
+  the lobby pass's follow-up F1).
 - Activity, tactical goal and skill keep their existing independent meanings.
 - Goal A means attack, E evade, N neutral, T takeoff, C crash, L land.
   Underline A/E only when directed at the player. Skill has 0..3 dots.
