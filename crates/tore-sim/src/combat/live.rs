@@ -1421,16 +1421,27 @@ fn step_gunship(
             position: t.position,
             velocity: t.velocity,
             alive: t.hp > 0,
+            airborne: t.airborne,
             friendly: own.friendlies.contains(&t.id),
         })
         .collect();
     let before = group.target();
-    let aim = group.step_sight(&own.config, launcher, &objects, ground, tick);
+    let (aim, led) = group.step_sight(&own.config, launcher, &objects, ground, tick);
     group.update(&own.config, launcher, Some(aim), |from, to| {
         terrain_hit(from, to, ground).is_none()
     });
-    // Hook for the pipper (plan slice S2): evaluate each linked gun's impact
-    // here, after the guns moved, from `aim` and the actual train.
+    // The pipper, from the train the fire loop below releases on: a round
+    // fired this step leaves on the tick before the step advanced the clock.
+    let candidate = group.slot(own.selected);
+    let wanted = std::array::from_fn(|slot| group.included[slot] || candidate == Some(slot));
+    group.evaluate_impacts(
+        &own.config,
+        launcher,
+        wanted,
+        led.then_some(aim),
+        tick - 1,
+        ground,
+    );
     let after = group.target();
     if after != before {
         match after {

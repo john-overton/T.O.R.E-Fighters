@@ -329,6 +329,7 @@ fn sight_object(id: u32, position: Vector) -> SightObject {
         position,
         velocity: [0.; 3],
         alive: true,
+        airborne: false,
         friendly: false,
     }
 }
@@ -840,4 +841,41 @@ fn a_gunsight_checkpoint_restores_mid_slew_pinned_and_tracked_and_steps_on_ident
             "{name}"
         );
     }
+}
+
+#[test]
+fn the_pipper_is_kept_for_linked_guns_and_the_candidate_and_sits_on_a_trained_aim() {
+    use crate::combat::gunship_impact::Impact;
+    let mut s = free_gunship();
+    group_mut(&mut s).included = [true, false, true];
+    s.own_mut().selected = group(&s).stations[0].unwrap();
+    for _ in 0..120 {
+        tick(&mut s, false);
+    }
+    let g = group(&s);
+    assert_eq!(g.impacts_tick, s.tick - 1);
+    assert!(g.impacts[1].is_none(), "{g:?}");
+    let aim = g.aim.unwrap();
+    for slot in [0, 2] {
+        let Some(Impact::Ground { point, .. }) = g.impacts[slot] else {
+            panic!("{slot}: {:?}", g.impacts[slot])
+        };
+        let miss = (0..3)
+            .map(|i| (point[i] - aim[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(miss < 60., "{slot}: {miss} ft from the aim point");
+    }
+    // A tracked aircraft is led: the pipper is an air intercept.
+    let mut s = gunship();
+    for _ in 0..10 {
+        tick(&mut s, false);
+    }
+    let g = group(&s);
+    let candidate = g.slot(s.own().selected).unwrap();
+    assert!(
+        matches!(g.impacts[candidate], Some(Impact::Air { .. })),
+        "{:?}",
+        g.impacts
+    );
 }

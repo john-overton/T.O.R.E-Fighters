@@ -78,6 +78,8 @@ crate::checkpoint_struct!(GunshipState {
     look,
     returning,
     aim,
+    impacts,
+    impacts_tick,
     status,
     input,
     slew_held,
@@ -107,6 +109,56 @@ impl Checkpoint for Sight {
             1 => Self::Pinned(Checkpoint::load(l, None)?),
             2 => Self::Tracked(Checkpoint::load(l, None)?),
             other => return invalid(format!("a gunsight has no mode {other}")),
+        })
+    }
+}
+type Impact = crate::combat::gunship_impact::Impact;
+impl Checkpoint for Impact {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        let (kind, point, seconds, range_ft) = match *self {
+            Self::Ground {
+                point,
+                seconds,
+                range_ft,
+            } => (0, point, seconds, range_ft),
+            Self::Air {
+                point,
+                seconds,
+                range_ft,
+            } => (1, point, seconds, range_ft),
+            Self::Spent {
+                point,
+                seconds,
+                range_ft,
+            } => (2, point, seconds, range_ft),
+        };
+        s.writer().write_varint(kind);
+        point.save(s, None)?;
+        seconds.save(s, None)?;
+        range_ft.save(s, None)
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        let kind = l.reader().read_varint()?;
+        let point = Checkpoint::load(l, None)?;
+        let seconds = Checkpoint::load(l, None)?;
+        let range_ft = Checkpoint::load(l, None)?;
+        Ok(match kind {
+            0 => Self::Ground {
+                point,
+                seconds,
+                range_ft,
+            },
+            1 => Self::Air {
+                point,
+                seconds,
+                range_ft,
+            },
+            2 => Self::Spent {
+                point,
+                seconds,
+                range_ft,
+            },
+            other => return invalid(format!("a gun impact has no kind {other}")),
         })
     }
 }

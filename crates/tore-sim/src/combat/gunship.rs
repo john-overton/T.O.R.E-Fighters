@@ -1,6 +1,7 @@
 //! Player-directed AC-130 mounts, linked membership and the gunsight's line of
 //! sight. Source installation and fitted laws: docs/spec/ac130-linked-guns.md.
 use super::{
+    gunship_impact::{self, Impact, Shot},
     gunsight::{self, TargetObservation},
     live::{Configuration, Launcher, Readiness, terrain_hit},
 };
@@ -120,6 +121,8 @@ pub struct SightObject {
     pub velocity: Vector,
     /// Not destroyed: hit points left.
     pub alive: bool,
+    /// Flying: the pipper leads it even when it is still.
+    pub airborne: bool,
     /// On the pilot's side; Backslash skips it.
     pub friendly: bool,
 }
@@ -141,6 +144,14 @@ pub struct State {
     pub returning: bool,
     /// The point the guns train on this tick.
     pub aim: Option<Vector>,
+    /// Where each gun's rounds would end if it fired this tick at its actual
+    /// train (the pipper, [`gunship_impact::impact`]): the linked guns and
+    /// the candidate, `None` for the others. Derived, but kept so a restored
+    /// checkpoint shows the same frame.
+    pub impacts: [Option<Impact>; 3],
+    /// The combat tick a round fired with these impacts would leave on (the
+    /// tick before the step that computed them advanced the clock).
+    pub impacts_tick: u64,
     pub status: [Readiness; 3],
     /// The seat's sight controls, held until the host sets them again.
     pub input: SightInput,
@@ -162,6 +173,8 @@ impl Default for State {
             look: DEFAULT_LOOK,
             returning: false,
             aim: None,
+            impacts: [None; 3],
+            impacts_tick: 0,
             status: [Readiness::NoTarget; 3],
             input: SightInput::default(),
             slew_held: false,
@@ -261,7 +274,8 @@ impl State {
     /// pending Backslash, end a track whose object is gone (pinning the
     /// ground under the line of sight), slew or travel home, then find
     /// where the line of sight meets the ground. Returns what the guns aim
-    /// at: the point and its velocity.
+    /// at, the point and its velocity, and whether the pipper leads it (a
+    /// tracked object that flies or moves).
     pub fn step_sight(
         &mut self,
         config: &Configuration,
@@ -269,7 +283,7 @@ impl State {
         objects: &[SightObject],
         ground: &impl Fn(f64, f64) -> f64,
         tick: u64,
-    ) -> TargetObservation {
+    ) -> (TargetObservation, bool) {
         let origin = launcher.position;
         let found = |id: u32| objects.iter().find(|o| o.id == id && o.alive);
         // A track ends only when its object is destroyed or removed; the
@@ -344,6 +358,7 @@ impl State {
         }
         self.slew_held = deflected;
         let tracked = self.sight.tracked().and_then(found);
+        let led = tracked.is_some_and(|o| o.airborne || o.velocity != [0.; 3]);
         let (position, velocity) = match (self.sight, tracked) {
             (Sight::Tracked(_), Some(object)) => (object.position, object.velocity),
             (Sight::Pinned(point), _) => (point, [0.; 3]),
@@ -357,7 +372,39 @@ impl State {
             }
         };
         self.aim = Some(position);
-        TargetObservation { position, velocity }
+        (TargetObservation { position, velocity }, led)
+    }
+    /// The pipper of every gun in `wanted` (the linked guns and the
+    /// candidate) at its actual train, for a round leaving on `launch_tick`.
+    /// `lead` is the tracked object a led pipper follows.
+    pub fn evaluate_impacts(
+        &mut self,
+        config: &Configuration,
+        launcher: Launcher,
+        wanted: [bool; 3],
+        lead: Option<TargetObservation>,
+        launch_tick: u64,
+        ground: &impl Fn(f64, f64) -> f64,
+    ) {
+        self.impacts_tick = launch_tick;
+        self.impacts = std::array::from_fn(|slot| {
+            let station = self.stations[slot].and_then(|i| config.stations.get(i))?;
+            if !wanted[slot] {
+                return None;
+            }
+            gunship_impact::impact(
+                slot,
+                &station.weapon,
+                &launcher,
+                self.headings[slot],
+                self.elevations[slot],
+                Shot {
+                    target: lead,
+                    launch_tick,
+                },
+                ground,
+            )
+        });
     }
     /// Train every gun toward the aim point and report its readiness. With
     /// no ballistic solution the guns still point along the plain line to
