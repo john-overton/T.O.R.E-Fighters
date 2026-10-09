@@ -670,7 +670,6 @@ impl State {
         fuel_rate: f64,
     ) {
         let hydraulics = self.systems.fluids.hydraulic > 0.;
-        self.lift_controls.advance(hydraulics);
         if hydraulics {
             let lever = &mut self.lift_controls;
             let step = COLLECTIVE_RATE * DT;

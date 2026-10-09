@@ -186,20 +186,6 @@ impl LiftState {
             FlightAxis::Collective => &mut self.collective,
         }
     }
-    /// The old powered law's actuator travel: fixed rates per second.
-    pub(super) fn advance(&mut self, hydraulics: bool) {
-        if !hydraulics {
-            return;
-        }
-        for (actual, target, rate) in [
-            (&mut self.vector_pitch_actual, self.vector_pitch, 0.25),
-            (&mut self.vector_yaw_actual, self.vector_yaw, 1.),
-            (&mut self.conversion_actual, self.conversion, 0.25),
-            (&mut self.collective_actual, self.collective, 0.7),
-        ] {
-            *actual += (target - *actual).clamp(-rate * DT, rate * DT);
-        }
-    }
 }
 
 crate::flight::exact::exact_struct!(Drive {

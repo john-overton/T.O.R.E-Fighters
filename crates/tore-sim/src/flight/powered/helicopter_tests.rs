@@ -400,6 +400,26 @@ fn loop_pilot(s: &State) -> PilotInput {
 /// H6: a 10 percent collective step from a hover climbs at a rate that
 /// settles with a time constant of 2 to 4 s; full collective climbs at
 /// 1,500 to 3,000 ft/min.
+/// The collective lever moves at hand speed, 2 a second, once and not twice:
+/// the old actuator rate (0.7 a second) used to move it as well, so it ran
+/// at 2.7 (P10).
+#[test]
+fn the_collective_lever_moves_at_hand_speed_and_no_faster() {
+    for id in BOTH {
+        let mut s = trimmed(id, 1_000., 0.);
+        let start = s.lift_controls.collective_actual;
+        fly(&mut s, 30, |_| PilotInput {
+            collective: Some(0.),
+            ..Default::default()
+        });
+        let moved = start - s.lift_controls.collective_actual;
+        assert!(
+            (moved - 0.5).abs() < 1e-9,
+            "{id:?} moved {moved} in a quarter second"
+        );
+    }
+}
+
 #[test]
 fn h6_collective_sets_a_climb_rate_not_an_acceleration() {
     for id in BOTH {

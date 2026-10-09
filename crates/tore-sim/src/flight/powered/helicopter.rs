@@ -650,9 +650,7 @@ impl State {
         fuel_rate: f64,
     ) {
         let hydraulics = self.systems.fluids.hydraulic > 0.;
-        self.lift_controls.advance(hydraulics);
-        // The collective lever moves at hand speed, not the old law's
-        // actuator rate.
+        // The collective lever moves at hand speed.
         if hydraulics {
             let lever = &mut self.lift_controls;
             let step = COLLECTIVE_RATE * DT;
