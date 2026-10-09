@@ -407,7 +407,12 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
     draws the same layout flat, from the greys measured on a middle row of the
     pieces: the panel's 81 for the face, a slot with a 12 groove 2 pixels wide
     down the middle (57 on its left, 113 on its right) and a 24 then 12 left
-    edge, a 57 and 113 right edge. The knob (`SLIDERV`) is a menu piece every
+    edge, a 57 and 113 right edge. The slot's top is a bar four rows deep (a 57
+    bevel line, 32, 12, 12, a 40 fade) that joins the left wall in one corner,
+    as `SLIDETOP` does; until L5 the wall began a row above a two row bar and
+    showed as a small black lip at the top left. The same stepped corner is in
+    the retail art itself (the Sound Prefs picture and `SLIDETOP`), so with the
+    real pieces nothing was wrong. The knob (`SLIDERV`) is a menu piece every
     import has. A re-import adds the real track; nobody is forced to.
   - Where it is used: the Messages box on every connection screen (inside the box's
     frame, flush right, 34 wide; the text stops 3 pixels short of it, so a 549
@@ -641,8 +646,8 @@ template):
 | --- | --- | --- |
 | Title | "Lobby" centred on the panel at y 87 | |
 | Game, Rules | `PANELFNT` lines at (45, 102) and (45, 115), up to 549 wide | The game's name and, since F2-L, "Rules: " and the King's settings in words. EF8 also drew the mission's summary at (45, 115) and the start rule in `PANELFND` at (45, 128), with Rules at (45, 141); the lobby pass (John, 2026-10-09) removed both lines, so the mission is read on Mission... and the start rule is in the ready hint |
-| Slots | heading (45, 140); list (45, 168), 286 wide, five rows, scrolling; frame (40, 164, 335, 97); scroll bar art (336, 168), 34 wide; PvP side boxes on the heading's row (lamps (100, 128) and (215, 128), 28 pixel art, labels at y 140) | Columns from the text origin: own mark, or the lock mark of a plane kept for a player who dropped (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 100), ready tick (x 258, 12) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242). EF8's pager (PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240)) was replaced by the scroll bar in the lobby pass; the wing cell reads "Blue 1 #2" or "Red 1 #2" in PvP |
-| Players | heading (380, 140); list (384, 168), 186 wide, five rows, scrolling; grey box (380, 165, 224, 95), frame (379, 164, 226, 97); scroll bar art (570, 168) | Columns (J6): crown (x 0, 12), house, or the outlined standby house of a game that stands by to host (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 60), state word (x 128, 40). The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
+| Slots | heading (45, 140); list (45, 168), 286 wide, five rows, scrolling; frame (40, 164, 335, 97); scroll bar art (336, 168), 34 wide; PvP side boxes on the heading's row (lamps (100, 128) and (215, 128), 28 pixel art, labels at y 140) | Columns from the text origin: own mark, or the lock mark of a plane kept for a player who dropped (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 126) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242; the lobby pass slice L5 dropped the tick, the Players list carries it, and gave its room to the holder). EF8's pager (PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240)) was replaced by the scroll bar in the lobby pass; the wing cell reads "Blue 1 #2" or "Red 1 #2" in PvP |
+| Players | heading (380, 140); list (384, 168), 186 wide, five rows, scrolling; grey box (380, 165, 224, 95), frame (379, 164, 226, 97); scroll bar art (570, 168) | Columns (J6): crown (x 0, 12), house, or the outlined standby house of a game that stands by to host (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 118). The state words (Ready, Slot, Armed, Away and the rest) that followed the callsign until the lobby pass slice L5 are gone: the ticks, the cross, the dimmed or red row and the Slots list's "AI (Viper away)" say the same. The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
 | Hint line | `PANELFNT` at (45, 266), up to 549 wide | |
 | Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | The scroll bar sits flush right inside the box's frame (34 wide); the text is 507 wide |
 | Chat line | grey box (45, 377), 549 by 18 | Hint "type a message, Enter sends to all"; 80 characters |

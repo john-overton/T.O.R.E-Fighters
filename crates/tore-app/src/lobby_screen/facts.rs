@@ -360,29 +360,10 @@ pub fn hint(facts: &Facts) -> String {
     }
 }
 
-/// A player's state as a short word for the Players list.
-pub fn status_word(player: &LobbyPlayer) -> &'static str {
-    if player.unable.is_some() {
-        "Unable"
-    } else if player.away {
-        // The AI flies the player's aircraft, kept for it (slice F2-A).
-        "Away"
-    } else if player.flying {
-        "Flying"
-    } else if player.ready {
-        "Ready"
-    } else if player.loadout {
-        "Armed"
-    } else if player.slot.is_some() {
-        "Slot"
-    } else {
-        ""
-    }
-}
-
 /// The Players list's rows: the crown, the house (or, for a game that stands
 /// by to host, the standby mark; stage K), the ready tick, the platform, the
-/// relay mark (slice J6), the name and the state. Unable players are red and
+/// relay mark (slice J6) and the name; no word follows it, the ticks and the
+/// red cross say the state. Unable players are red and
 /// the player's own row green. In PvP a player holding a slot wears the light
 /// colour of its side, and an unable player is dimmed, so that red means
 /// Redfor alone (lobby pass L3).
@@ -418,7 +399,6 @@ pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
                     Icon::of_platform(p.platform).map_or(Cell::Empty, Cell::Icon),
                     Icon::of_path(p.path).map_or(Cell::Empty, Cell::Icon),
                     Cell::Text(p.callsign.clone()),
-                    Cell::Text(status_word(p).to_owned()),
                 ],
             );
             let side = p
@@ -442,9 +422,9 @@ pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
         .collect()
 }
 
-/// The Slots list's rows: the player's own mark, wing and member, aircraft,
-/// who holds it (AI when nobody does) and the holder's ready tick. A slot
-/// someone else holds is dimmed: it cannot be clicked.
+/// The Slots list's rows: the player's own mark, wing and member, aircraft
+/// and who holds it (AI when nobody does). A slot someone else holds is
+/// dimmed: it cannot be clicked. The Players list carries the ready ticks.
 pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
     let pvp = sides::is_pvp(lobby);
     // In PvP a player on a side sees that side's slots only (lobby pass L3).
@@ -479,11 +459,6 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                     }),
                     Cell::Text(slot.aircraft.label().to_owned()),
                     Cell::Text(slot_holder_text(slot, holder)),
-                    if holder.is_some_and(|p| p.ready || p.flying) {
-                        Cell::Icon(Icon::Ready)
-                    } else {
-                        Cell::Empty
-                    },
                 ],
             );
             if pvp {

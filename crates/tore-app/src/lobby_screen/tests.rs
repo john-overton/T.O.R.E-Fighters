@@ -422,7 +422,8 @@ fn the_players_list_marks_the_crown_the_house_ready_and_unable() {
     assert_eq!(rows[0].cells[1], Cell::Icon(Icon::House));
     assert_eq!(rows[1].cells[2], Cell::Icon(Icon::Ready));
     assert_eq!(rows[2].cells[2], Cell::Icon(Icon::Unable));
-    assert_eq!(rows[2].cells[6], Cell::Text("Unable".into()));
+    // No state word follows the name: the ticks and the cross say it.
+    assert_eq!(rows[2].cells.len(), 6);
     // The platform sits beside the name: the sample players are on Linux
     // (id 1), Windows (2) and macOS (3), and an unnamed platform has no mark.
     assert_eq!(rows[0].cells[3], Cell::Icon(Icon::Linux));
@@ -447,7 +448,8 @@ fn the_slots_list_shows_who_holds_what_with_the_players_own_marked() {
     assert_eq!(rows[0].cells[3], Cell::Text("Maverick".into()));
     assert!(rows[0].dim, "another player's slot is dimmed");
     assert_eq!(rows[1].cells[0], Cell::Icon(Icon::You));
-    assert_eq!(rows[1].cells[4], Cell::Icon(Icon::Ready));
+    // The Players list carries the ready ticks, so the row ends at the holder.
+    assert_eq!(rows[1].cells.len(), 4);
     assert_eq!(rows[2].cells[3], Cell::Text("AI".into()));
     assert_eq!(rows[2].cells[1], Cell::Text("Wing 1 #3".into()));
     assert_eq!(rows[4].cells[2], Cell::Text("F/A-18D Hornet".into()));

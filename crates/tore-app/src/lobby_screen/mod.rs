@@ -324,18 +324,12 @@ impl LobbyScreen {
             },
             Column {
                 x: 156,
-                width: 100,
+                width: 126,
                 align: Align::Left,
-            },
-            Column {
-                x: 258,
-                width: 12,
-                align: Align::Centre,
             },
         ];
         // The crown, the house, the ready tick, the platform and the relay
-        // mark (slice J6), 12 pixels wide at a pitch of 13, then the name and
-        // the state.
+        // mark (slice J6), 12 pixels wide at a pitch of 13, then the name.
         let player_columns = vec![
             Column {
                 x: 0,
@@ -364,12 +358,7 @@ impl LobbyScreen {
             },
             Column {
                 x: 66,
-                width: 60,
-                align: Align::Left,
-            },
-            Column {
-                x: 128,
-                width: 40,
+                width: 118,
                 align: Align::Left,
             },
         ];

@@ -97,13 +97,22 @@ fn only_the_player_a_plane_is_kept_for_may_click_it() {
 }
 
 #[test]
-fn a_player_who_is_away_has_its_own_status_word() {
+fn an_away_player_reads_in_its_slot_and_the_players_row_has_no_state_word() {
     let mut state = sample(1);
-    assert_eq!(facts::status_word(&state.players[1]), "Ready");
     state.players[1].away = true;
-    assert_eq!(facts::status_word(&state.players[1]), "Away");
-    state.players[1].unable = Some("data differs".into());
-    assert_eq!(facts::status_word(&state.players[1]), "Unable");
+    // The slot it holds says the AI flies it; the Players row ends at the name.
+    let slot = state.players[1]
+        .slot
+        .expect("the sample player holds a slot");
+    let rows = facts::slot_rows(&state);
+    let at = state.slots.iter().position(|s| s.plane == slot).unwrap();
+    assert_eq!(rows[at].cells[3], Cell::Text("AI (Goose away)".into()));
+    let players = facts::player_rows(&state);
+    assert_eq!(players[1].cells.len(), 6);
+    assert_eq!(
+        players[1].cells[5],
+        Cell::Text(state.players[1].callsign.clone())
+    );
 }
 
 // ---- a game that stands by ----
