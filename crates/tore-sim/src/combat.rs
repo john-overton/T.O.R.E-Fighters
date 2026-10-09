@@ -7,6 +7,7 @@ pub mod countermeasures;
 pub mod debris;
 pub mod gun_round;
 pub mod gunship;
+pub mod gunship_impact;
 pub mod gunsight;
 pub mod ledger;
 pub mod loading;
