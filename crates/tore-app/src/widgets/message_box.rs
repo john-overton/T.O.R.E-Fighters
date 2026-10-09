@@ -1,6 +1,10 @@
 //! The scrolling message box: wrapped, coloured lines, newest at the bottom,
 //! with a way back through what scrolled off.
-use super::{Kit, Outcome, Point, Rect, Widget, draw::focus_mark, inside};
+use super::{
+    Kit, Outcome, Point, Rect, Widget,
+    draw::focus_mark,
+    scroll_bar::{self, Press, ScrollBar, View},
+};
 use crate::menu::{Canvas, text_width};
 use crate::ui_text;
 use std::collections::VecDeque;
@@ -26,9 +30,11 @@ pub mod tone {
 pub const DEFAULT_CAP: usize = 200;
 /// `PANELFNT`'s line height; the box holds its height less 8, over this.
 const LINE: i32 = 10;
-/// Inner margin, and the scroll bar's width and gap.
+/// Inner margin.
 const PAD: i32 = 4;
-const BAR: i32 = 4;
+/// The scroll bar's art sits flush right inside the box's one pixel frame; the
+/// text stops 3 pixels short of it (the plan's 549 wide box has 507 for text).
+const BAR_GAP: i32 = 3;
 /// Lines the wheel moves per notch.
 const WHEEL_LINES: i32 = 3;
 
@@ -48,10 +54,14 @@ struct Line {
 /// Scrolling back (*agent decision*): the wheel moves three lines a notch,
 /// PageUp and PageDown a page less a line, Up and Down a line, Home and End
 /// to the oldest and newest, while the box has the focus (or under the
-/// pointer for the wheel). A thin bar on the right edge shows the place in the
-/// kept lines when they do not all fit, and a click above or below its thumb
-/// pages back or forward. A view scrolled back stays on the same words as new
-/// lines arrive; at the bottom it follows them.
+/// pointer for the wheel). The retail scroll bar ([`ScrollBar`], the Sound
+/// Prefs slider's red knob in its grey track, 34 wide) runs down the right
+/// edge inside the frame and shows the place in the kept lines when they do
+/// not all fit; a click above or below its knob pages back or forward (a page
+/// less a line) and the knob can be dragged ([`MessageBox::drag`], with
+/// [`MessageBox::release`] to let go). The track is always drawn, so the text
+/// does not move when the bar is needed. A view scrolled back stays on the
+/// same words as new lines arrive; at the bottom it follows them.
 #[derive(Clone, Debug)]
 pub struct MessageBox {
     rect: Rect,
@@ -59,16 +69,19 @@ pub struct MessageBox {
     cap: usize,
     /// How many lines the view is scrolled back from the newest.
     back: usize,
+    bar: ScrollBar,
     enabled: bool,
 }
 
 impl MessageBox {
     pub fn new(rect: Rect) -> Self {
+        let (x, y, w, h) = rect;
         Self {
             rect,
             lines: VecDeque::new(),
             cap: DEFAULT_CAP,
             back: 0,
+            bar: ScrollBar::new((x + w - 1 - scroll_bar::WIDTH, y + 1), h - 2),
             enabled: true,
         }
     }
@@ -118,7 +131,16 @@ impl MessageBox {
         self.lines.len().saturating_sub(self.visible())
     }
     fn text_room(&self) -> i32 {
-        self.rect.2 - 2 * PAD - BAR - 2
+        self.rect.2 - PAD - 1 - scroll_bar::WIDTH - BAR_GAP
+    }
+    /// What the scroll bar is asked about. The knob's line is the first one on
+    /// view, so at the newest the knob is at the bottom.
+    fn view_of_bar(&self) -> View {
+        View {
+            total: self.lines.len(),
+            visible: self.visible(),
+            first: self.max_back() - self.back,
+        }
     }
 
     /// Adds a line, wrapped to the box in `PANELFNT`, in `colour`.
@@ -174,38 +196,49 @@ impl MessageBox {
             _ => Outcome::None,
         }
     }
-    /// The mouse went down: a click on the scroll bar above its thumb pages
-    /// back, below it forward.
+    /// The mouse went down: the knob is grabbed, and a click on the track
+    /// above it pages back, below it forward.
     pub fn press(&mut self, point: Point) -> Outcome {
-        if !self.enabled || self.max_back() == 0 {
-            return Outcome::None;
-        }
-        let (track, thumb) = self.bar();
-        if !inside(track, point) {
+        if !self.enabled {
             return Outcome::None;
         }
         let page = self.visible().saturating_sub(1).max(1) as i32;
-        if point.1 < thumb.1 {
-            self.scroll(page)
-        } else if point.1 >= thumb.1 + thumb.3 {
-            self.scroll(-page)
-        } else {
-            Outcome::None
+        let view = self.view_of_bar();
+        match self.bar.press(point, view) {
+            Press::Up => self.scroll(page),
+            Press::Down => self.scroll(-page),
+            Press::Grab | Press::Miss => Outcome::None,
         }
     }
-
-    /// The scroll bar's track and thumb.
-    fn bar(&self) -> (Rect, Rect) {
-        let (x, y, w, h) = self.rect;
-        let track = (x + w - PAD - BAR, y + PAD, BAR, h - 2 * PAD);
-        let total = self.lines.len().max(1) as i32;
-        let shown = self.visible() as i32;
-        let height = (track.3 * shown / total).clamp(6, track.3);
-        let travel = track.3 - height;
-        let room = self.max_back().max(1) as i32;
-        // Scrolled to the newest, the thumb is at the bottom.
-        let top = track.1 + travel - travel * self.back as i32 / room;
-        (track, (track.0, top, BAR, height))
+    /// The pointer moved to `point`: a held knob scrolls the view. Call it on
+    /// every pointer move; it does nothing when no knob is held.
+    pub fn drag(&mut self, point: Point) -> Outcome {
+        let view = self.view_of_bar();
+        match self.bar.drag(point, view) {
+            Some(first) => {
+                let to = self.max_back() - first;
+                if std::mem::replace(&mut self.back, to) == to {
+                    Outcome::None
+                } else {
+                    Outcome::Changed
+                }
+            }
+            None => Outcome::None,
+        }
+    }
+    /// The mouse went up, or the window lost it: the knob is let go.
+    pub fn release(&mut self) {
+        self.bar.release();
+    }
+    /// True while the scroll bar's knob is held.
+    #[cfg(test)]
+    pub fn dragging(&self) -> bool {
+        self.bar.dragging()
+    }
+    /// True over the scroll bar's art, which sits inside the box.
+    #[cfg(test)]
+    pub fn on_bar(&self, point: Point) -> bool {
+        self.bar.hit(point)
     }
 
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit, focused: bool) {
@@ -227,11 +260,7 @@ impl MessageBox {
                 Some(colour),
             );
         }
-        if self.max_back() > 0 {
-            let (track, thumb) = self.bar();
-            canvas.rect(track, [58, 58, 58, 255]);
-            canvas.rect(thumb, [168, 168, 168, 255]);
-        }
+        self.bar.draw(canvas, kit, self.view_of_bar());
         if focused && self.enabled {
             focus_mark(canvas, (x - 3, y - 3, w + 6, h + 6));
         }
@@ -303,7 +332,7 @@ fn wrap(kit: &Kit, text: &str, room: i32) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_kit::{at, blank, kit};
+    use super::super::test_kit::{at, blank, kit, tone_of};
     use super::*;
 
     /// A box 100 wide (86 pixels of text: 17 five pixel characters) with four
@@ -473,25 +502,94 @@ mod tests {
         for i in 0..20 {
             b.push(&kit, &format!("l{i}"), tone::SYSTEM);
         }
-        let (track, thumb) = b.bar();
-        assert_eq!(
-            thumb.1 + thumb.3,
-            track.1 + track.3,
-            "the thumb rests at the bottom"
-        );
-        let top = (track.0 + 1, track.1);
-        assert_eq!(b.press(top), Outcome::Changed);
-        assert_eq!(b.scrolled_back(), 3);
-        let (_, thumb) = b.bar();
-        assert!(thumb.1 > track.1 && thumb.1 + thumb.3 < track.1 + track.3);
-        let below = (track.0 + 1, track.1 + track.3 - 1);
-        assert_eq!(b.press(below), Outcome::Changed);
+        // The bar is inside the frame, flush right: x 85 to 119, y 21 to 67.
+        assert_eq!(b.bar.bounds(), (85, 21, 34, 46));
+        let knob = b.bar.knob(b.view_of_bar()).unwrap();
+        assert_eq!(knob.1 + knob.3, 21 + 46 - 5, "the knob rests at the bottom");
+        assert_eq!(b.press((86, 22)), Outcome::Changed);
+        assert_eq!(b.scrolled_back(), 3, "a page less a line");
+        assert!(!b.dragging());
+        let knob = b.bar.knob(b.view_of_bar()).unwrap();
+        assert!(knob.1 < 32, "the knob moved up");
+        assert_eq!(b.press((86, 66)), Outcome::Changed);
         assert_eq!(b.scrolled_back(), 0);
+        assert_eq!(b.press((84, 40)), Outcome::None, "off the bar");
+        assert_eq!(b.press((90, 10)), Outcome::None, "off the bar");
+        assert!(b.on_bar((100, 40)) && !b.on_bar((84, 40)));
+    }
+
+    #[test]
+    fn the_knob_drags_the_view_and_lets_go() {
+        let kit = kit();
+        let mut b = small();
+        for i in 0..20 {
+            b.push(&kit, &format!("l{i}"), tone::SYSTEM);
+        }
+        assert_eq!(b.drag((100, 0)), Outcome::None, "nothing is held");
+        // Grab the knob at the bottom, 8 pixels below its top.
+        assert_eq!(b.press((100, 40)), Outcome::None);
+        assert!(b.dragging());
+        assert_eq!(b.drag((100, 40)), Outcome::None, "not moved yet");
+        // Up past the top: the oldest lines.
+        assert_eq!(b.drag((300, 0)), Outcome::Changed);
+        assert_eq!(b.scrolled_back(), 16);
+        assert_eq!(texts(&b), ["l0", "l1", "l2", "l3"]);
+        // Part of the way down: the view follows the knob, not the pointer's
+        // distance from the knob's first place.
+        assert_eq!(b.drag((100, 40 - 5 + 2)), Outcome::Changed);
+        assert!(b.scrolled_back() < 16 && b.scrolled_back() > 0);
+        b.release();
+        assert!(!b.dragging());
+        let held = b.scrolled_back();
+        assert_eq!(b.drag((100, 70)), Outcome::None);
+        assert_eq!(b.scrolled_back(), held);
+        // A press on the track holds nothing.
+        b.press((86, 22));
+        assert!(!b.dragging());
+    }
+
+    #[test]
+    fn the_bar_does_not_move_the_text_and_nothing_to_scroll_has_no_knob() {
+        let kit = kit();
+        let mut b = MessageBox::newnet();
+        // 549 wide: the bar's 34 pixels, the margin and the gap leave 507.
+        assert_eq!(b.text_room(), 507);
+        assert_eq!(b.bar.bounds(), (45 + 549 - 35, 320, 34, 86));
+        b.push(&kit, "one", tone::SYSTEM);
+        assert_eq!(b.bar.knob(b.view_of_bar()), None);
+        let mut pixels = blank();
+        b.draw(&mut Canvas(&mut pixels), &kit, false);
+        // The empty track is there, with no knob.
+        assert_eq!(at(&pixels, 45 + 549 - 34, 330), tone_of(&kit, "SLIDEMID"));
+        assert_ne!(at(&pixels, 45 + 549 - 30, 330), tone_of(&kit, "SLIDERV"));
+        for i in 0..30 {
+            b.push(&kit, &format!("l{i}"), tone::SYSTEM);
+        }
+        let mut pixels = blank();
+        b.draw(&mut Canvas(&mut pixels), &kit, false);
+        // The knob, 6 in, at the bottom of its travel (86 - 41 = 45).
+        let knob = b.bar.knob(b.view_of_bar()).unwrap();
+        assert_eq!(knob, (45 + 549 - 35 + 6, 320 + 6 + 45, 26, 30));
         assert_eq!(
-            b.press((thumb.0 - 20, thumb.1)),
-            Outcome::None,
-            "off the bar"
+            at(&pixels, knob.0 + 1, knob.1 + 1),
+            tone_of(&kit, "SLIDERV")
         );
+    }
+
+    #[test]
+    fn the_knob_follows_the_view_up_and_down() {
+        let kit = kit();
+        let mut b = small();
+        for i in 0..20 {
+            b.push(&kit, &format!("l{i}"), tone::SYSTEM);
+        }
+        let low = b.bar.knob_top(b.view_of_bar()).unwrap();
+        b.key("Home");
+        let high = b.bar.knob_top(b.view_of_bar()).unwrap();
+        assert!(high < low);
+        assert_eq!(high, 21 + 6, "the oldest lines: the knob at the top");
+        b.key("End");
+        assert_eq!(b.bar.knob_top(b.view_of_bar()), Some(low));
     }
 
     #[test]

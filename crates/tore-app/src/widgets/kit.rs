@@ -30,7 +30,17 @@ pub const PIECES: &[&str] = &[
     "CHECK00", "CHECK01", "CHECK02", "CHECK03", "CHECK04", "CHECK05", "CHECK06",
     // The PREV/NEXT rocker.
     "ROCKER00", "ROCKER01", "ROCKER02", "ROCKER03", "ROCKER04",
+    // The scroll bar's knob: the Sound Prefs slider's, a menu piece every
+    // import keeps.
+    "SLIDERV",
 ];
+
+/// Pieces the kit draws when it has them and does without when it has not:
+/// the scroll bar's grey track (`SLIDETOP`, `SLIDEMID`, `SLIDEBOT`), which an
+/// import made before the lobby pass did not keep. The scroll bar draws a flat
+/// track in their greys instead, so nobody has to re-import for it
+/// (`tore_import::selection::SLIDER_ART`).
+pub const OPTIONAL_PIECES: &[&str] = &["SLIDETOP", "SLIDEMID", "SLIDEBOT"];
 
 /// The two buttons' dim fonts, for disabled labels. The kit makes them
 /// [`GHOST_GAIN`] brighter than the retail pictures, but no brighter than the
@@ -76,6 +86,7 @@ impl KitSource {
             PIECES
                 .iter()
                 .chain(BACKGROUNDS.iter())
+                .chain(OPTIONAL_PIECES.iter())
                 .any(|name| format!("{name}.PIC") == file)
         };
         Self {
@@ -205,6 +216,12 @@ impl Kit {
             }
             sprites.insert(format!("{name}.PIC"), sprite);
         }
+        for name in OPTIONAL_PIECES {
+            // A piece an older import lacks, or cannot read, is left out.
+            if let Ok(pic) = find(name) {
+                sprites.insert(format!("{name}.PIC"), decode(&pic, &palette));
+            }
+        }
         Ok(Self {
             sprites,
             header: None,
@@ -268,6 +285,17 @@ impl Kit {
                     .is_some_and(|sprite| std::ptr::eq(sprite, font))
             })
             .and_then(|(_, style)| *style)
+    }
+
+    /// True when the kit has the piece (every required one is always there;
+    /// the optional ones may not be).
+    pub fn has(&self, name: &str) -> bool {
+        let key = if name.ends_with(".PIC") {
+            name.to_owned()
+        } else {
+            format!("{name}.PIC")
+        };
+        self.sprites.contains_key(&key)
     }
 
     /// One piece by retail name, with or without `.PIC`.
@@ -397,5 +425,22 @@ mod tests {
                 "{file} is in neither art list"
             );
         }
+        // The optional ones are in the import's own optional list, and in
+        // no required one (an older pack must still load).
+        for name in OPTIONAL_PIECES {
+            let file = format!("{name}.PIC");
+            assert!(
+                tore_import::selection::SLIDER_ART.contains(&file.as_str()),
+                "{file} is not in SLIDER_ART"
+            );
+            assert!(
+                !MENU_ART.contains(&file.as_str()) && !MULTIPLAYER_ART.contains(&file.as_str()),
+                "{file} is required by the import"
+            );
+        }
+        assert_eq!(
+            OPTIONAL_PIECES.len(),
+            tore_import::selection::SLIDER_ART.len()
+        );
     }
 }

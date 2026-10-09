@@ -1,9 +1,11 @@
-//! The paged list: retail's recessed row bars, a selected row, columns and
-//! icons, the PREV/NEXT rocker and the "PAGE n of m" box.
+//! The list: retail's recessed row bars, a selected row, columns and icons,
+//! and either the PREV/NEXT rocker with the "PAGE n of m" box (a paged list)
+//! or the red scroll bar (a scrolling one).
 use super::{
     Icon, Kit, Outcome, Point, Rect, Widget,
     draw::{bar, blit_part, fit, focus_mark, ghost},
     inside,
+    scroll_bar::{Press, ScrollBar, View},
 };
 use crate::menu::{Canvas, text_width};
 use crate::rocker::Rocker;
@@ -113,6 +115,27 @@ const TEXT_ORIGIN: i32 = 20;
 /// A list of rows in recessed bars, `visible` to a page, 18 pixels apart on
 /// NEWNET (4 rows, 200 wide).
 ///
+/// # Scrolling mode
+///
+/// [`List::with_scroll_bar`] turns the list from pages into a window that
+/// slides over the rows (the lobby pass, *opinionated*, John 2026-10-09):
+/// the retail scroll bar ([`ScrollBar`]) is drawn beside it, and
+///
+/// - the wheel scrolls the *window* a row a notch (see
+///   [`List::with_wheel_rows`]) and leaves the selection where it is, which
+///   may then be out of sight;
+/// - a click on the track above or below the knob scrolls a window's worth,
+///   and a drag on the knob follows the pointer ([`List::drag`], with
+///   [`List::release`] to let go), neither touching the selection;
+/// - the keys move the selection as they do in a paged list, and the window
+///   follows the selection, so keyboard use always shows the selected row;
+/// - [`List::set_rows`] keeps the window where it is (kept within the new
+///   rows), so a list that refreshes every two seconds does not jump;
+/// - [`List::select`] and [`List::scroll_to`] are for the screen: the first
+///   brings the row into view, the second moves the window only.
+///
+/// A paged list is as described below.
+///
 /// Selection (*agent decisions*): the selected row is always on the shown
 /// page. A click selects it (`Changed` when it differs); a second click on it
 /// within 500 ms, or Enter, answers `Activated`. Up and Down move the
@@ -137,6 +160,10 @@ pub struct List {
     selected: Option<usize>,
     page: usize,
     pager: Option<Pager>,
+    /// The scroll bar of a scrolling list, and the first row of its window.
+    scroll: Option<ScrollBar>,
+    first: usize,
+    wheel_rows: usize,
     rocker: Rocker,
     last_click: Option<(usize, Instant)>,
     enabled: bool,
@@ -160,6 +187,9 @@ impl List {
             selected: None,
             page: 0,
             pager: None,
+            scroll: None,
+            first: 0,
+            wheel_rows: 1,
             rocker: Rocker::new(),
             last_click: None,
             enabled: true,
@@ -167,6 +197,28 @@ impl List {
     }
     pub fn with_pager(mut self, pager: Pager) -> Self {
         self.pager = Some(pager);
+        self
+    }
+    /// A scrolling list with its scroll bar's art at `at` (34 wide, as high
+    /// as the list's rows). Instead of a pager: any pager is dropped.
+    #[allow(
+        dead_code,
+        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
+    )]
+    pub fn with_scroll_bar(mut self, at: Point) -> Self {
+        self.pager = None;
+        let height = self.pitch * (self.visible as i32 - 1) + BAR_HEIGHT;
+        self.scroll = Some(ScrollBar::new(at, height));
+        self
+    }
+    /// How many rows the wheel scrolls a notch in a scrolling list (default
+    /// one; at least one).
+    #[allow(
+        dead_code,
+        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
+    )]
+    pub fn with_wheel_rows(mut self, rows: usize) -> Self {
+        self.wheel_rows = rows.max(1);
         self
     }
     pub fn with_columns(mut self, columns: Vec<Column>) -> Self {
@@ -216,6 +268,11 @@ impl List {
         self.rows = rows;
         self.selected = key.and_then(|key| self.rows.iter().position(|row| row.key == key));
         self.last_click = None;
+        if self.scroll.is_some() {
+            // The window stays where it is.
+            self.first = self.first.min(self.view().max_first());
+            return;
+        }
         self.page = match self.selected {
             Some(i) => i / self.visible,
             None => self.page.min(self.pages().saturating_sub(1)),
@@ -228,7 +285,11 @@ impl List {
             return Outcome::None;
         }
         let index = index.min(self.rows.len() - 1);
-        self.page = index / self.visible;
+        if self.scroll.is_some() {
+            self.reveal(index);
+        } else {
+            self.page = index / self.visible;
+        }
         if self.selected == Some(index) {
             Outcome::None
         } else {
@@ -238,6 +299,58 @@ impl List {
     }
     pub fn clear_selection(&mut self) {
         self.selected = None;
+    }
+
+    /// The index of the first row shown: the window's top in a scrolling
+    /// list, the page's first row in a paged one.
+    pub fn first_row(&self) -> usize {
+        if self.scroll.is_some() {
+            self.first
+        } else {
+            self.page * self.visible
+        }
+    }
+    /// How many rows show at once.
+    #[allow(
+        dead_code,
+        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
+    )]
+    pub fn visible_rows(&self) -> usize {
+        self.visible
+    }
+    /// What the scroll bar is asked about: the rows, the window and its top.
+    fn view(&self) -> View {
+        View {
+            total: self.rows.len(),
+            visible: self.visible,
+            first: self.first,
+        }
+    }
+    /// Slides a scrolling list's window to start at row `first` (kept in
+    /// range); the selection is not touched. No effect on a paged list.
+    #[allow(
+        dead_code,
+        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
+    )]
+    pub fn scroll_to(&mut self, first: usize) {
+        if self.scroll.is_some() {
+            self.first = first.min(self.view().max_first());
+        }
+    }
+    /// Slides the window `rows` rows (negative toward the top).
+    pub fn scroll_by(&mut self, rows: i32) {
+        if self.scroll.is_some() {
+            self.first = self.view().shifted(i64::from(rows));
+        }
+    }
+    /// Slides a scrolling list's window just far enough to show row `index`.
+    fn reveal(&mut self, index: usize) {
+        if index < self.first {
+            self.first = index;
+        } else if index >= self.first + self.visible {
+            self.first = index + 1 - self.visible;
+        }
+        self.first = self.first.min(self.view().max_first());
     }
 
     /// The text of the page box, as retail formats it, for example `1  of  3`.
@@ -299,16 +412,36 @@ impl List {
     /// rocker is not a row).
     pub fn row_at(&self, point: Point) -> Option<usize> {
         (0..self.visible).find_map(|slot| {
-            let index = self.page * self.visible + slot;
+            let index = self.first_row() + slot;
             (index < self.rows.len() && inside(self.bar_rect(slot), point)).then_some(index)
         })
     }
 
     /// The mouse went down. A row selects (a second press within 500 ms
-    /// activates it); a rocker half turns the page and tilts the rocker.
+    /// activates it); a rocker half turns the page and tilts the rocker; the
+    /// scroll bar's knob is grabbed, and its track pages the window.
     pub fn press(&mut self, point: Point, now: Instant) -> Outcome {
         if !self.enabled {
             return Outcome::None;
+        }
+        if let Some(mut bar) = self.scroll {
+            let view = self.view();
+            match bar.press(point, view) {
+                Press::Miss => {}
+                Press::Grab => {
+                    self.scroll = Some(bar);
+                    return Outcome::None;
+                }
+                Press::Up => {
+                    self.first = view.shifted(-(self.visible as i64));
+                    return Outcome::None;
+                }
+                Press::Down => {
+                    self.first = view.shifted(self.visible as i64);
+                    return Outcome::None;
+                }
+            }
+            self.scroll = Some(bar);
         }
         if let Some((prev, next)) = self.rocker_halves() {
             for (rect, forward) in [(prev, false), (next, true)] {
@@ -335,11 +468,37 @@ impl List {
             changed
         }
     }
-    /// The mouse went up: the rocker springs back.
+    /// The mouse went up: the rocker springs back, the scroll bar's knob is
+    /// let go.
     pub fn release(&mut self, now: Instant) {
         if self.rocker.held() {
             self.rocker.release(now);
         }
+        if let Some(bar) = &mut self.scroll {
+            bar.release();
+        }
+    }
+    /// The pointer moved to `point`: a held knob drags the window. Call it on
+    /// every pointer move; it does nothing when no knob is held.
+    #[allow(
+        dead_code,
+        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
+    )]
+    pub fn drag(&mut self, point: Point) {
+        if let Some(bar) = self.scroll {
+            let view = self.view();
+            if let Some(first) = bar.drag(point, view) {
+                self.first = first;
+            }
+        }
+    }
+    /// True while the scroll bar's knob is held.
+    #[allow(
+        dead_code,
+        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
+    )]
+    pub fn dragging(&self) -> bool {
+        self.scroll.is_some_and(|bar| bar.dragging())
     }
     /// Moves the rocker's animation on; true while it is still moving.
     pub fn advance(&mut self, now: Instant) -> bool {
@@ -371,8 +530,14 @@ impl List {
         self.select(target)
     }
     /// A wheel step: positive scrolls up (the previous row), negative down.
+    /// A paged list moves its selection; a scrolling one slides its window
+    /// and answers `None` (the selection did not change).
     pub fn wheel(&mut self, lines: i32) -> Outcome {
         if !self.enabled || self.rows.is_empty() || lines == 0 {
+            return Outcome::None;
+        }
+        if self.scroll.is_some() {
+            self.scroll_by(-lines.saturating_mul(self.wheel_rows as i32));
             return Outcome::None;
         }
         let last = self.rows.len() as i64 - 1;
@@ -392,7 +557,7 @@ impl List {
         for slot in 0..self.visible {
             let (x, y, w, _) = self.bar_rect(slot);
             bar(canvas, (left, middle, right), (x, y), w);
-            let index = self.page * self.visible + slot;
+            let index = self.first_row() + slot;
             let Some(row) = self.rows.get(index) else {
                 continue;
             };
@@ -448,6 +613,9 @@ impl List {
         }
         if let Some(pager) = self.pager {
             self.draw_pager(canvas, kit, pager);
+        }
+        if let Some(bar) = &self.scroll {
+            bar.draw(canvas, kit, self.view());
         }
         if focused && self.enabled {
             let (x, y, w, _) = self.bar_rect(0);
@@ -514,6 +682,11 @@ impl Widget for List {
     }
     fn enabled(&self) -> bool {
         self.enabled
+    }
+    /// The rows, and the scroll bar of a scrolling list.
+    fn hit(&self, point: Point) -> bool {
+        self.enabled
+            && (inside(self.bounds(), point) || self.scroll.is_some_and(|bar| bar.hit(point)))
     }
 }
 
@@ -802,4 +975,207 @@ mod tests {
     }
 
     use crate::menu::Canvas;
+
+    // ---- the scrolling mode ----
+
+    /// A five row scrolling list (the lobby's shape) with `n` rows and its
+    /// bar at (350, 185): 34 wide, 89 high.
+    fn scrolling(n: usize) -> List {
+        let mut l = List::new((48, 185), 286, 5).with_scroll_bar((350, 185));
+        l.set_rows(rows(n));
+        l
+    }
+    fn shown(l: &List) -> Vec<String> {
+        (l.first_row()..(l.first_row() + 5).min(l.rows().len()))
+            .map(|i| match &l.rows()[i].cells[0] {
+                Cell::Text(t) => t.clone(),
+                _ => String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_scrolling_list_has_no_pager_and_shows_a_window() {
+        let l = scrolling(12);
+        assert_eq!(l.first_row(), 0);
+        assert_eq!(l.visible_rows(), 5);
+        assert!(l.pager.is_none());
+        assert_eq!(
+            shown(&l),
+            ["game 0", "game 1", "game 2", "game 3", "game 4"]
+        );
+        // A pager given first is dropped.
+        let l = List::new((0, 0), 100, 5)
+            .with_pager(Pager::NEWNET)
+            .with_scroll_bar((110, 0));
+        assert!(l.pager.is_none());
+    }
+
+    #[test]
+    fn the_wheel_slides_the_window_and_leaves_the_selection() {
+        let mut l = scrolling(12);
+        l.select(1);
+        assert_eq!(l.wheel(-1), Outcome::None, "the selection did not change");
+        assert_eq!(l.first_row(), 1);
+        assert_eq!(l.wheel(-3), Outcome::None);
+        assert_eq!(l.first_row(), 4);
+        assert_eq!(l.selected(), Some(1), "scrolled out of sight, still chosen");
+        assert_eq!(shown(&l)[0], "game 4");
+        // Ends: 12 rows, 5 show, the last window starts at 7.
+        l.wheel(-100);
+        assert_eq!(l.first_row(), 7);
+        l.wheel(100);
+        assert_eq!(l.first_row(), 0);
+        // A wheel that moves three rows a notch.
+        let mut l = List::new((48, 185), 286, 5)
+            .with_scroll_bar((350, 185))
+            .with_wheel_rows(3);
+        l.set_rows(rows(20));
+        l.wheel(-2);
+        assert_eq!(l.first_row(), 6);
+    }
+
+    #[test]
+    fn the_keys_move_the_selection_and_the_window_follows() {
+        let mut l = scrolling(12);
+        for _ in 0..7 {
+            l.key("ArrowDown");
+        }
+        assert_eq!(l.selected(), Some(6));
+        assert_eq!(l.first_row(), 2, "row 6 is the window's last");
+        l.key("ArrowUp");
+        assert_eq!(l.first_row(), 2, "still in view: no move");
+        l.key("End");
+        assert_eq!((l.selected(), l.first_row()), (Some(11), 7));
+        l.key("Home");
+        assert_eq!((l.selected(), l.first_row()), (Some(0), 0));
+        l.key("PageDown");
+        assert_eq!((l.selected(), l.first_row()), (Some(5), 1));
+        // After the wheel took the selection out of sight, a key brings the
+        // window back to it.
+        l.wheel(-100);
+        assert_eq!(l.first_row(), 7);
+        l.key("ArrowUp");
+        assert_eq!((l.selected(), l.first_row()), (Some(4), 4));
+    }
+
+    #[test]
+    fn selecting_shows_the_row_and_the_window_stays_put_otherwise() {
+        let mut l = scrolling(30);
+        assert_eq!(l.select(20), Outcome::Changed);
+        assert_eq!(l.first_row(), 16);
+        assert_eq!(l.select(18), Outcome::Changed);
+        assert_eq!(l.first_row(), 16, "already in view");
+        l.select(0);
+        assert_eq!(l.first_row(), 0);
+        l.scroll_to(1000);
+        assert_eq!(l.first_row(), 25, "kept in range");
+        l.scroll_by(-3);
+        assert_eq!(l.first_row(), 22);
+        // A paged list ignores the window calls.
+        let mut p = list(12);
+        p.scroll_to(3);
+        p.scroll_by(2);
+        assert_eq!(p.first_row(), 0);
+    }
+
+    #[test]
+    fn new_rows_keep_the_window_where_it_is() {
+        let mut l = scrolling(30);
+        l.scroll_to(10);
+        l.select(12);
+        l.set_rows(rows(30));
+        assert_eq!((l.first_row(), l.selected()), (10, Some(12)));
+        // The list shrinks under the window.
+        l.set_rows(rows(8));
+        assert_eq!(l.first_row(), 3);
+        l.set_rows(rows(2));
+        assert_eq!(l.first_row(), 0);
+        l.set_rows(Vec::new());
+        assert_eq!(l.first_row(), 0);
+    }
+
+    #[test]
+    fn a_click_on_a_row_picks_the_row_in_the_window() {
+        let mut l = scrolling(12);
+        l.wheel(-4);
+        assert_eq!(l.press(row_point(1), start()), Outcome::Changed);
+        assert_eq!(l.selected(), Some(5));
+        assert_eq!(l.row_at(row_point(4)), Some(8));
+        // A click on the bar is not a row.
+        let before = l.selected();
+        l.press((360, 200), start());
+        assert_eq!(l.selected(), before);
+    }
+
+    #[test]
+    fn the_track_pages_the_window_and_the_knob_drags_it() {
+        let mut l = scrolling(30);
+        // The knob rests at the top: a click below it pages down a window.
+        assert_eq!(l.press((360, 185 + 80), start()), Outcome::None);
+        assert_eq!(l.first_row(), 5);
+        l.press((360, 185 + 80), start());
+        assert_eq!(l.first_row(), 10);
+        // Above the knob pages back.
+        l.press((360, 185 + 1), start());
+        assert_eq!(l.first_row(), 5);
+        assert!(!l.dragging());
+        // Grab the knob (25 rows over 48 pixels of travel) and drag to the
+        // bottom and back.
+        l.scroll_to(0);
+        l.press((360, 185 + 6 + 10), start());
+        assert!(l.dragging());
+        l.drag((360, 400));
+        assert_eq!(l.first_row(), 25);
+        l.drag((500, 185 + 6 + 10 + 24));
+        assert!((12..=13).contains(&l.first_row()), "{}", l.first_row());
+        l.release(start());
+        assert!(!l.dragging());
+        let held = l.first_row();
+        l.drag((360, 190));
+        assert_eq!(l.first_row(), held, "let go: it stays");
+        // None of it touched the selection.
+        assert_eq!(l.selected(), None);
+        // The bar counts as the list for the screen's hit test.
+        assert!(l.hit((360, 200)) && l.hit((100, 200)) && !l.hit((400, 200)));
+        l.set_enabled(false);
+        assert!(!l.hit((360, 200)));
+        assert_eq!(l.press((360, 185 + 80), start()), Outcome::None);
+        assert_eq!(l.first_row(), held);
+    }
+
+    #[test]
+    fn a_list_that_fits_has_no_knob_and_the_track_does_not_react() {
+        let mut l = scrolling(5);
+        assert_eq!(l.press((360, 185 + 80), start()), Outcome::None);
+        assert_eq!(l.first_row(), 0);
+        assert!(!l.dragging());
+        let kit = kit();
+        let mut pixels = blank();
+        l.draw(&mut Canvas(&mut pixels), &kit, false);
+        assert_eq!(at(&pixels, 351, 200), tone_of(&kit, "SLIDEMID"));
+        for y in 185..185 + 89 {
+            assert_ne!(at(&pixels, 360, y), tone_of(&kit, "SLIDERV"), "y {y}");
+        }
+    }
+
+    #[test]
+    fn the_scrolling_list_draws_the_window_and_its_bar() {
+        let kit = kit();
+        let mut l = scrolling(30);
+        l.wheel(-10);
+        let mut pixels = blank();
+        l.draw(&mut Canvas(&mut pixels), &kit, false);
+        // The knob a third of the way along: 10 of 25.
+        let knob = l.scroll.unwrap().knob(l.view()).unwrap();
+        assert_eq!(knob, (356, 185 + 6 + 19, 26, 30));
+        assert_eq!(
+            at(&pixels, knob.0 + 1, knob.1 + 1),
+            tone_of(&kit, "SLIDERV")
+        );
+        // The track is where the pager would have been: no rocker, no PAGE box.
+        assert_eq!(at(&pixels, 351, 186), tone_of(&kit, "SLIDETOP"));
+        // The row bars are the list's own width.
+        assert_eq!(at(&pixels, 49, 185 + 2), at(&pixels, 49, 185 + 18 * 3 + 2));
+    }
 }
