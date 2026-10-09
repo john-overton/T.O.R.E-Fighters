@@ -318,9 +318,11 @@ pub(super) fn combinations(
                     state.elevator = pitch;
                     state.aileron = roll;
                     state.rudder = yaw;
+                    cyclic(&mut state);
                     state.engine = true;
                     state.throttle = 0.5;
                     state.ticks = tick;
+                    state.lift_controls.drive.rotor_turns = tick as f64 * tore_sim::flight::DT;
                     let actual = airframe.animation_faces(&state);
                     let after = keyed(&actual);
                     let mut metric = Metrics {

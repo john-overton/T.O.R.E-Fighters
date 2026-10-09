@@ -510,7 +510,7 @@ length and the bytes, so a reader skips sections it does not know:
 | Events | Everything that happened, tick by tick |
 | Trees | Display tree samples (AI thinking, telemetry, missile guidance) |
 | Checksums | The once-per-second state checksums |
-| Rotors | Each rotorcraft's rotor speed, a share of its governed 100 percent: an entry names a frame and the aircraft whose speed changed on it. The chunk's first value of an aircraft is exact, later changes are quantized to a thousandth. Aircraft without a rotor read zero, and files from before it have no such section |
+| Rotors | Each rotorcraft's rotor speed, a share of its governed 100 percent: an entry names a frame and the aircraft whose speed changed on it. The chunk's first value of an aircraft is exact, later changes are quantized to a thousandth. Aircraft without a rotor read zero, and files from before it have no such section. Playback turns the drawn blades by this speed summed frame by frame from the recording's start, so a tick shows the same blade angle however the playhead reached it; disk tilt is not recorded, so replayed rotor disks stay level ([rotor presentation](spec/rotor-presentation.md#rotor-speed-and-blade-angle)) |
 
 Spawns, events and trees sit in their own sections so the viewer can
 rebuild smoke, and a reader can list every event, without decoding the

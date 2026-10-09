@@ -2846,6 +2846,8 @@ fn player_pose(
             afterburner: flight.afterburner_active(),
             rates: flight.auxiliary_rates,
             rotor: flight.lift_controls.drive.rotor_speed,
+            rotor_turns: tore_world::snapshot::rotor_pose(flight).0,
+            rotor_tilt: tore_world::snapshot::rotor_pose(flight).1,
             flame: flight.afterburner_active() && flight.escape.is_none() && hp > 0,
         },
         damage: Damage {

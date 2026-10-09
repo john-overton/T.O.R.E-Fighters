@@ -394,6 +394,8 @@ pub fn aircraft_pose(
             rates: state.engine.rates.map(|r| f64::from(r) * RATE_STEP),
             // The wire's entity record carries no rotor speed (protocol 19).
             rotor: 0.,
+            rotor_turns: 0.,
+            rotor_tilt: [[0.; 2]; 2],
             flame: state.engine.flame,
         },
         damage: Damage {

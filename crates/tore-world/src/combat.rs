@@ -464,16 +464,26 @@ impl Combat {
             .filter(|actor| actor.alive())
             .map(|actor| (actor.id(), crate::snapshot::devices(actor.flight())))
             .collect();
-        // The AI rotorcraft's rotor speeds, for their sound.
-        let rotors: BTreeMap<u32, f64> = wings
+        // The AI rotorcraft's rotor speeds, for their sound, and their blade
+        // angles and disk tilts, for their drawing.
+        let rotors: BTreeMap<u32, Engine> = wings
             .into_iter()
             .flat_map(|wings| wings.mission().actors())
             .filter(|actor| actor.alive())
             .filter_map(|actor| {
-                actor
-                    .flight()
-                    .rotor_speed_percent()
-                    .map(|percent| (actor.id(), percent / 100.))
+                let flight = actor.flight();
+                flight.rotor_speed_percent().map(|percent| {
+                    let (rotor_turns, rotor_tilt) = crate::snapshot::rotor_pose(flight);
+                    (
+                        actor.id(),
+                        Engine {
+                            rotor: percent / 100.,
+                            rotor_turns,
+                            rotor_tilt,
+                            ..Engine::default()
+                        },
+                    )
+                })
             })
             .collect();
         // AI aircraft whose afterburner is lit, for their flame lights.
@@ -505,6 +515,8 @@ impl Combat {
             afterburner: player.afterburner_active(),
             rates: player.auxiliary_rates,
             rotor: player.lift_controls.drive.rotor_speed,
+            rotor_turns: crate::snapshot::rotor_pose(player).0,
+            rotor_tilt: crate::snapshot::rotor_pose(player).1,
             flame: player.afterburner_active() && player.escape.is_none() && own.hp > 0,
         };
         // Fixtures copy the player's state with their own crash flag.
@@ -521,6 +533,8 @@ impl Combat {
             afterburner: false,
             rates: [0.; 3],
             rotor: 0.,
+            rotor_turns: 0.,
+            rotor_tilt: [[0.; 2]; 2],
             flame: false,
         };
         let pilot = |owner: u32, escape: &tore_sim::ejection::Escape| PilotPose {
@@ -576,9 +590,14 @@ impl Combat {
                                 ..player_engine
                             }
                         } else {
-                            Engine {
-                                rotor: rotors.get(&t.id).copied().unwrap_or(0.),
-                                ..model_engine
+                            match rotors.get(&t.id) {
+                                Some(rotor) => Engine {
+                                    rotor: rotor.rotor,
+                                    rotor_turns: rotor.rotor_turns,
+                                    rotor_tilt: rotor.rotor_tilt,
+                                    ..model_engine
+                                },
+                                None => model_engine,
                             }
                         }
                     },
@@ -1423,6 +1442,8 @@ impl Pose {
                 afterburner: s.afterburner_active(),
                 rates: s.auxiliary_rates,
                 rotor: s.lift_controls.drive.rotor_speed,
+                rotor_turns: crate::snapshot::rotor_pose(s).0,
+                rotor_tilt: crate::snapshot::rotor_pose(s).1,
                 flame: s.afterburner_active() && s.escape.is_none(),
             },
             wreck: s.wreck.as_ref().map(|wreck| wreck.phase),

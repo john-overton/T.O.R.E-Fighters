@@ -100,6 +100,11 @@ fn model_pose(mut s: flight::State, pose: &AircraftPose, tick: u64) -> flight::S
     if let Some(devices) = pose.devices {
         set_devices(&mut s, devices);
     }
+    // A rotorcraft's blades turn at its rotor speed and its disks tilt as it
+    // flies them (slice P7b).
+    if pose.engine.rotor > 0. {
+        crate::snapshot::set_rotor(&mut s, &pose.engine);
+    }
     s
 }
 

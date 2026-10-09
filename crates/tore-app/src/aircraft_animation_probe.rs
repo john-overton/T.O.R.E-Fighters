@@ -120,9 +120,18 @@ impl Control {
     }
     fn apply(self, state: &mut State, value: f64) {
         match self {
-            Self::Elevator => state.elevator = value,
-            Self::Rudder => state.rudder = value,
-            Self::Aileron => state.aileron = value,
+            Self::Elevator => {
+                state.elevator = value;
+                cyclic(state);
+            }
+            Self::Rudder => {
+                state.rudder = value;
+                cyclic(state);
+            }
+            Self::Aileron => {
+                state.aileron = value;
+                cyclic(state);
+            }
             Self::Gear => state.gear = value,
             Self::Flaps => state.flaps = value,
             Self::Brake => state.brake = value,
@@ -135,8 +144,10 @@ impl Control {
             Self::Rotor => {
                 state.engine = true;
                 state.throttle = 0.5;
-                // Short sub-revolution samples of the runtime's fixed-tick phase.
+                // Short sub-revolution samples of the runtime's fixed-tick
+                // phase, and of a rotorcraft's turned rotor.
                 state.ticks = (value * 8.).round() as u64;
+                state.lift_controls.drive.rotor_turns = state.ticks as f64 * tore_sim::flight::DT;
             }
             Self::Sweep => state.speed = 400. + value * 1600.,
             Self::GunHeading => state
@@ -260,6 +271,112 @@ impl Expectation {
             Self::Unknown => "unreviewed",
         }
     }
+}
+
+/// A helicopter's disks tilt as its rotors fly the stick (slice P7b): the
+/// probe sweeps the drawn tilt range with the pilot's stick and pedals,
+/// full travel reaching the drawing's bound. Aft stick tilts the disks aft,
+/// right stick right; the CH-47's pedals tilt its front disk right and its
+/// rear left for a right yaw. The V-22's proprotors keep their shafts here.
+pub(crate) fn cyclic(state: &mut State) {
+    use crate::variety_rotors::{
+        SINGLE_ROTOR_TILT_LIMIT, TANDEM_DIFFERENTIAL_TILT_LIMIT, TANDEM_TILT_LIMIT,
+    };
+    use tore_sim::models::variety::{LiftKind, RotorLayout};
+    let Some(lift) = state.model().powered_lift() else {
+        return;
+    };
+    let (Some(rotor), LiftKind::Helicopter) = (lift.rotor, lift.kind) else {
+        return;
+    };
+    let (pitch, roll, yaw) = (
+        state.elevator.clamp(-1., 1.),
+        state.aileron.clamp(-1., 1.),
+        state.rudder.clamp(-1., 1.),
+    );
+    if matches!(rotor.layout, RotorLayout::Tandem { .. }) {
+        let [long, lat] = TANDEM_TILT_LIMIT;
+        let opposite = TANDEM_DIFFERENTIAL_TILT_LIMIT[1];
+        for (k, side) in [1., -1.].into_iter().enumerate() {
+            state.lift_controls.rotors[k].tilt =
+                [-pitch * long, roll * lat + side * yaw * opposite];
+        }
+    } else {
+        let [long, lat] = SINGLE_ROTOR_TILT_LIMIT;
+        state.lift_controls.rotors[0].tilt = [-pitch * long, roll * lat];
+    }
+}
+
+/// The moving parts at the physical angles a reviewer checks (VTOL overhaul
+/// slice P7b), one contact sheet row each in `moving-parts.ppm`, named in
+/// `moving-parts.txt`: the V-22's nacelles at 0, 45 and 90 degrees, the
+/// AV-8's and Yak-141's nozzles at 0, 90 and 100, and a helicopter's disks
+/// level, tilted forward and tilted right by the drawing's bound. Nothing for
+/// other aircraft.
+fn moving_parts(airframe: &Airframe, neutral: &State, out: &Path) -> AppResult<()> {
+    use crate::variety_rotors::{SINGLE_ROTOR_TILT_LIMIT, TANDEM_TILT_LIMIT};
+    let id = airframe.profile.id;
+    let poses: Vec<(String, State)> = match id {
+        AircraftId::V22 => [0., 45., 90.]
+            .map(|degrees| {
+                let mut s = neutral.clone();
+                s.lift_controls.conversion_actual = degrees
+                    / s.nacelle_range_degrees()
+                        .unwrap_or(tore_sim::models::variety::V22_NACELLE_RANGE_DEGREES);
+                (format!("nacelles {:.1} degrees", s.nacelle_degrees()), s)
+            })
+            .into(),
+        AircraftId::Av8 | AircraftId::Yak141 => [0., 90., 100.]
+            .map(|degrees| {
+                let mut s = neutral.clone();
+                // The nozzles' full travel (the PT's stop, 100 degrees).
+                s.lift_controls.vector_pitch_actual = 1.;
+                let range = s.nozzle_degrees().max(1.);
+                s.lift_controls.vector_pitch_actual = degrees / range;
+                (format!("nozzles {:.1} degrees", s.nozzle_degrees()), s)
+            })
+            .into(),
+        AircraftId::Ah64 | AircraftId::Mi24 | AircraftId::Ch47 => {
+            let limit = if id == AircraftId::Ch47 {
+                TANDEM_TILT_LIMIT
+            } else {
+                SINGLE_ROTOR_TILT_LIMIT
+            };
+            [
+                ("level", [0., 0.]),
+                ("forward", [limit[0], 0.]),
+                ("right", [0., limit[1]]),
+            ]
+            .map(|(name, tilt)| {
+                let mut s = neutral.clone();
+                s.lift_controls.rotors = [tore_sim::flight::powered::state::Rotor {
+                    tilt,
+                    ..Default::default()
+                }; 2];
+                (
+                    format!("disks {name}, tilt {:.2} / {:.2} rad", tilt[0], tilt[1]),
+                    s,
+                )
+            })
+            .into()
+        }
+        _ => return Ok(()),
+    };
+    let original = airframe.animation_faces(neutral);
+    let faces: Vec<Vec<Face>> = poses
+        .iter()
+        .map(|(_, s)| airframe.animation_faces(s))
+        .collect();
+    contact_sheet(&out.join("moving-parts.ppm"), &original, &faces)?;
+    let names: Vec<&str> = poses.iter().map(|(name, _)| name.as_str()).collect();
+    fs::write(
+        out.join("moving-parts.txt"),
+        format!(
+            "Rows of moving-parts.ppm (columns: top, side, front):\n{}\n",
+            names.join("\n")
+        ),
+    )?;
+    Ok(())
 }
 
 /// Write an aircraft's sweep evidence without constructing a window or renderer.
@@ -1033,6 +1150,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         failures.extend(f104::combinations(&airframe, &neutral, out)?);
     }
     failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
+    moving_parts(&airframe, &neutral, out)?;
     report.push_str("]}\n");
     fs::write(out.join("report.json"), report)?;
     fs::write(out.join("index.txt"), notes)?;

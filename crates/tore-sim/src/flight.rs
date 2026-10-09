@@ -493,6 +493,20 @@ impl State {
         result.rudder = lerp(previous.rudder, self.rudder);
         result.elevator = lerp(previous.elevator, self.elevator);
         result.aileron = lerp(previous.aileron, self.aileron);
+        // The rotors' drawn angle and disk tilt (slice P7b).
+        result.lift_controls.drive.rotor_turns = lerp(
+            previous.lift_controls.drive.rotor_turns,
+            self.lift_controls.drive.rotor_turns,
+        );
+        for (rotor, (before, after)) in result.lift_controls.rotors.iter_mut().zip(
+            previous
+                .lift_controls
+                .rotors
+                .iter()
+                .zip(&self.lift_controls.rotors),
+        ) {
+            rotor.tilt = std::array::from_fn(|i| lerp(before.tilt[i], after.tilt[i]));
+        }
         result
     }
     pub fn wreck_power(&self, engine_count: u8) -> crate::wreck::Power {
@@ -1436,6 +1450,8 @@ impl State {
         };
         t.parked_attitude = static_attitude_hold;
         self.ticks += 1;
+        // The rotors' drawn angle, on every adapter (slice P7b).
+        self.lift_controls.drive.advance_turns();
         self.throttle = (self.throttle
             + input.throttle_rate * DT * c.equipment.throttle_rate_per_second)
             .clamp(0., 1.);

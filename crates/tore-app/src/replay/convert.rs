@@ -226,6 +226,10 @@ pub fn aircraft_pose(
             afterburner: state.flags.afterburner,
             rates: state.auxiliary_rates,
             rotor: state.rotor_speed,
+            // The replay records the rotor speed only: playback integrates
+            // it into the blade angle, and the disk tilt is not recorded.
+            rotor_turns: 0.,
+            rotor_tilt: [[0.; 2]; 2],
             flame: state.flags.flame,
         },
         damage: Damage {
@@ -1515,6 +1519,8 @@ mod tests {
                 afterburner: true,
                 rates: [0.1, -0.4, 0.2],
                 rotor: 0.0,
+                rotor_turns: 0.,
+                rotor_tilt: [[0.; 2]; 2],
                 flame: true,
             },
             damage: Damage {

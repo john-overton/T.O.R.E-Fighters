@@ -105,8 +105,19 @@ pub struct Engine {
     pub rates: [f64; 3],
     /// A rotorcraft's rotor speed, a share of its governed 100 percent; zero
     /// on every other aircraft (VTOL overhaul slice P7). Presentation: the
-    /// rotor's sound follows it.
+    /// rotor's sound and the drawn blade speed follow it.
     pub rotor: f64,
+    /// How far the rotors have turned, seconds at 100 percent rotor speed
+    /// (slice P7b): the drawn blade angle. The flight's own
+    /// [`flight::powered::state::Drive::rotor_turns`] where a flight state
+    /// exists; a client's remote aircraft and a replay integrate the rotor
+    /// speed they receive instead.
+    pub rotor_turns: f64,
+    /// Each main rotor's disk tilt from its shaft, [longitudinal (forward
+    /// positive), lateral (right positive)] in radians, as the flight's
+    /// `lift_controls.rotors[..].tilt` (slice P7b): front or main rotor
+    /// first, then the CH-47's rear rotor or the V-22's right proprotor.
+    pub rotor_tilt: [[f64; 2]; 2],
     /// The afterburner flame lights the scene
     /// (docs/spec/engine-material.md#afterburner-glow): the player's while
     /// its pilot is aboard and it has hit points, and an AI aircraft's
@@ -305,6 +316,26 @@ pub fn set_gun_devices(s: &mut flight::State, devices: &[f64; DEVICES]) {
     };
 }
 
+/// A flight's rotor blade angle and disk tilts, for its [`Engine`] (slice
+/// P7b): zero on an aircraft without rotors.
+pub fn rotor_pose(s: &flight::State) -> (f64, [[f64; 2]; 2]) {
+    (
+        s.lift_controls.drive.rotor_turns,
+        s.lift_controls.rotors.map(|rotor| rotor.tilt),
+    )
+}
+
+/// Draws a rotorcraft's rotors from `engine`: rotor speed, blade angle and
+/// disk tilts (slice P7b).
+pub fn set_rotor(s: &mut flight::State, engine: &Engine) {
+    let drive = &mut s.lift_controls.drive;
+    drive.rotor_speed = engine.rotor;
+    drive.rotor_turns = engine.rotor_turns;
+    for (rotor, tilt) in s.lift_controls.rotors.iter_mut().zip(engine.rotor_tilt) {
+        rotor.tilt = tilt;
+    }
+}
+
 /// The picture between two consecutive snapshots at tick fraction `alpha`.
 ///
 /// Targets blend position and attitude from the previous tick and lerp their
@@ -361,6 +392,9 @@ pub fn blend(previous: Option<&AircraftPose>, current: &AircraftPose, alpha: f64
             .blended(Basis::new(next_yaw, next_pitch, next_bank), alpha)
             .angles();
     }
+    if let Some(previous) = previous {
+        blend_rotors(&mut pose.engine, &previous.engine, alpha);
+    }
     if let Some(after) = current.devices {
         let before = previous.and_then(|pose| pose.devices).unwrap_or(after);
         pose.devices = Some(std::array::from_fn(|i| {
@@ -398,7 +432,18 @@ fn presented_player(previous: &AircraftPose, current: &AircraftPose, alpha: f64)
         }
         pose.devices = Some(after);
     }
+    blend_rotors(&mut pose.engine, &previous.engine, alpha);
     pose
+}
+
+/// The rotors turn and tilt between the ticks as the flight's presented
+/// state does (slice P7b): `engine` is the current tick's.
+fn blend_rotors(engine: &mut Engine, before: &Engine, alpha: f64) {
+    let lerp = |a: f64, b: f64| a + (b - a) * alpha;
+    engine.rotor_turns = lerp(before.rotor_turns, engine.rotor_turns);
+    engine.rotor_tilt = std::array::from_fn(|k| {
+        std::array::from_fn(|i| lerp(before.rotor_tilt[k][i], engine.rotor_tilt[k][i]))
+    });
 }
 
 pub fn wreck_in(phase: wreck::Phase) -> wreck::Wreck {
@@ -432,10 +477,10 @@ pub fn pose_state(template: &flight::State, pose: &AircraftPose) -> flight::Stat
     s.engine = pose.engine.lit;
     s.burner = pose.engine.afterburner;
     s.auxiliary_rates = pose.engine.rates;
-    // Only a rotorcraft's rotor speed is drawn from the pose; the rest keep
-    // the template's.
+    // Only a rotorcraft's rotor speed, blade angle and disk tilt are drawn
+    // from the pose; the rest keep the template's.
     if pose.engine.rotor > 0. {
-        s.lift_controls.drive.rotor_speed = pose.engine.rotor;
+        set_rotor(&mut s, &pose.engine);
     }
     s.crashed = pose.crashed;
     s.wreck = pose.wreck.map(wreck_in);
@@ -485,6 +530,52 @@ mod tests {
         // Nothing simulates them: the drawing rules keep the neutral pose.
         current.devices = None;
         assert_eq!(blend(Some(&previous), &current, 0.5).devices, None);
+    }
+
+    #[test]
+    fn rotors_turn_and_tilt_with_the_tick_fraction() {
+        let mut previous = pose(1, [0.; 3], [0.; 3]);
+        previous.engine.rotor = 0.9;
+        previous.engine.rotor_turns = 100.;
+        previous.engine.rotor_tilt = [[0.02, 0.], [-0.04, 0.08]];
+        let mut current = previous.clone();
+        current.engine.rotor = 0.92;
+        current.engine.rotor_turns = 100. + 0.92 / 120.;
+        current.engine.rotor_tilt = [[0.06, -0.04], [0., 0.]];
+        let quarter = blend(Some(&previous), &current, 0.25).engine;
+        assert!((quarter.rotor_turns - (100. + 0.23 / 120.)).abs() < 1e-12);
+        for (drawn, expected) in quarter
+            .rotor_tilt
+            .iter()
+            .flatten()
+            .zip([0.03, -0.01, -0.03, 0.06])
+        {
+            assert!((drawn - expected).abs() < 1e-12, "{drawn} {expected}");
+        }
+        // The rotor speed is the current tick's, as the rest of the engine.
+        assert_eq!(quarter.rotor, 0.92);
+        assert_eq!(blend(None, &current, 0.5).engine, current.engine);
+    }
+
+    #[test]
+    fn a_rotorcraft_pose_draws_its_rotors_and_another_keeps_the_templates() {
+        let template = flight::State::new(&crate::test_support::profile(), [0.; 3]).unwrap();
+        let mut rotorcraft = pose(3, [0.; 3], [0.; 3]);
+        rotorcraft.engine.rotor = 0.84;
+        rotorcraft.engine.rotor_turns = 42.5;
+        rotorcraft.engine.rotor_tilt = [[0.1, -0.1], [0.05, 0.]];
+        let s = pose_state(&template, &rotorcraft);
+        assert_eq!(s.lift_controls.drive.rotor_speed, 0.84);
+        assert_eq!(s.lift_controls.drive.rotor_turns, 42.5);
+        assert_eq!(
+            s.lift_controls.rotors.map(|r| r.tilt),
+            [[0.1, -0.1], [0.05, 0.]]
+        );
+        let mut fixed_wing = rotorcraft.clone();
+        fixed_wing.engine.rotor = 0.;
+        let s = pose_state(&template, &fixed_wing);
+        assert_eq!(s.lift_controls.drive, template.lift_controls.drive);
+        assert_eq!(s.lift_controls.rotors, template.lift_controls.rotors);
     }
 
     #[test]

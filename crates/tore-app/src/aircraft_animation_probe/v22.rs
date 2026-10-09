@@ -376,6 +376,8 @@ pub(super) fn combinations(
                     state.engine = true;
                     state.throttle = 0.5;
                     state.ticks = ((second + 1.) * 12.) as u64;
+                    state.lift_controls.drive.rotor_turns =
+                        state.ticks as f64 * tore_sim::flight::DT;
                 }
                 let pose = airframe.animation_faces(&state);
                 let mut m = measure(&original, &pose, scale);
