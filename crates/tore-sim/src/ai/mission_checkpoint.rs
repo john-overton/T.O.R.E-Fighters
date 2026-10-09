@@ -1,7 +1,8 @@
 //! The coders of the AI mission and its actors (docs/formats/checkpoint.md,
 //! stage H slice H4): every AI aircraft with its flight, controller,
 //! awareness, sensors, stores, orders, airfield sequence and escape monitor;
-//! the wings' leaders, humans, assignments, opportunities and routes.
+//! the wings' leaders, humans, assignments, opportunities and routes, and
+//! the lead hold's claims and waiting re-forms (slice R2 of the lobby pass).
 //!
 //! `AiMission` and `AiActor` are coded as new values, since a handoff adds
 //! and removes actors; the AI wings section (slice H6) restores them whole.
@@ -29,8 +30,8 @@
 //! and the weapon record of each of its guns.
 
 use super::{
-    AiActor, AiMission, EquipmentFaults, HumanMember, JournalMemory, ObservedAttack, StationSpec,
-    WingLeader,
+    AiActor, AiMission, EquipmentFaults, HumanMember, JournalMemory, LeadClaim, ObservedAttack,
+    StationSpec, WingLeader,
 };
 use crate::ai::airfield::{LandingOrder, RunwayView};
 use crate::ai::link::{SortStamp, Yield};
@@ -114,6 +115,14 @@ crate::checkpoint_struct!(WingLeader {
     wing,
     leader,
     reformed,
+    acting,
+});
+
+crate::checkpoint_struct!(LeadClaim {
+    side,
+    wing,
+    plane,
+    fresh,
 });
 
 /// An optional runway view, the view itself a shared record.
@@ -386,6 +395,8 @@ crate::checkpoint_struct!(AiMission {
     opportunities,
     routes,
     sort_clock,
+    lead_claims,
+    reform_after,
 } skip {
     missiles = Vec::new(),
     gun_rounds = Vec::new(),
