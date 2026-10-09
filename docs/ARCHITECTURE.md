@@ -1771,9 +1771,14 @@ missile warnings, equipment faults, skill and combat configuration; the others
 keep their order. `AiWings::insert_actor` adds an aircraft in id order as at
 mission start: same slot, the seed rule (its rank among the wing's member
 numbers no human holds), fresh awareness, neutral, home the nearest runway its
-side may use. It leads if it is its wing's leader, and takes its member number
-as its formation slot, or its rank behind the leader once the flight has
-re-formed. `ActorInsert::from_removed` puts an actor back as it left. The
+side may use. It leads if it is its wing's leader, and otherwise takes the
+lowest formation slot no living AI wingman of its wing holds (the lobby pass's
+slice R1, agent decision: its member number, which grows with every revival
+and respawn, could pass slot 9 and fail the AI step, and a rank could share a
+slot with a wingman in a wing with gaps). A new aircraft (a revival's or a
+respawn's, `AiWings::insert_new`) is seeded by its plane id instead of the rank
+(`new_actor_seed`, apart from every mission seed), flies its wing's mission
+skill and takes its wing's orders. `ActorInsert::from_removed` puts an actor back as it left. The
 preset assignment is not re-applied (*agent decision*). Both calls are for the
 lead's handoff and have no caller yet.
 
@@ -6127,8 +6132,8 @@ build settled, each an agent decision unless the design above says it:
   as the mission's other aircraft are and given that id; the AI aircraft is
   built as an AI aircraft with a lobby loadout is (the stores, fuel and
   payload, fresh sensors from its configuration's profiles, the flares and
-  chaff its configuration fills, a wingmate's skill or Average when its side
-  has no AI aircraft left), then taken by the handoff. `World::add_plane`
+  chaff its configuration fills, its wing's skill as the mission launched it
+  (slice R1; a wingmate's or Average before), then taken by the handoff. `World::add_plane`
   makes the same plane in a client's copy.
 - **The loadout** names its weapons; the mission core takes each record from
   the configurations the mission already holds (the standard loads, the AI's,
@@ -6181,6 +6186,82 @@ build settled, each an agent decision unless the design above says it:
   designates otherwise. A Seated while flying puts the flight away and starts
   the new one, as a player who joins again does, and every copy of the
   mission the game builds gets the spawned planes.
+
+**AI respawn** (the lobby pass's slice R1, *built 2026-10-09*; John's rules
+of 2026-10-09: AI respawn applies in co-op and PvP, under the same lives and
+delay as humans, at the flight's original spawn point, joining the flight as
+a wingman of its current lead). Agent decisions unless marked:
+
+- **Lineages.** Every plane the mission was built with roots a lineage; a
+  revival or a respawn adds its new plane to the lineage of the plane it
+  replaces (`revive::Book::roots`, coded in the revival section). The
+  lineage's newest plane is its head (`World::lineage_head`). A lineage is
+  lost when its head is retired, abandoned, or an AI aircraft gone for good
+  (`World::head_lost`); a human's lost plane, flown or held, stays the
+  human's revival.
+- **Whose loss.** The host's `Host::lineage_holder` says who holds a head: a
+  seat; a player (the AI flies or lost it for an away or dropped player, or a
+  player back in the game whose abandoned wreck it is), whose own revival it
+  is; or nobody, the AI. Only the AI's lost lineages respawn. A player who
+  left the game leaves its lineage to the AI: the respawn clears its note, so
+  it no longer revives from that wreck.
+- **When.** The King's `ai-respawn` setting (23, on by default) while
+  `respawn` is not `none` (`Store::ai_respawn`), under both `revive` and
+  `ai-slot` (an `ai-slot` respawn refills the pool of free AI aircraft). The
+  delay counts from the tick the host saw the lineage lost; lives count AI
+  respawns per lineage (per original aircraft) per mission. Human revivals
+  come first each tick; an AI respawn takes only the room they leave
+  (`World::room`: free places under 64 and rested wrecks) and otherwise
+  waits.
+- **Where.** At the lineage's original spawn, the root's position and
+  heading at the mission's first tick (`World::plane_pose`, recorded by the
+  host with the sides' starts), raised clear of the ground, at the aircraft's
+  start airspeed (`World::respawn_spawn`, fitted). A point a living aircraft
+  or a respawn placed the same tick is within 2,000 ft of steps back 1 nm
+  along the reverse of the heading, at most five times, never off the map.
+- **What.** The root's lobby loadout (`plane_loadouts`) or the standard
+  load, cut by `revive-weapons`, with full fuel; the wing's own skill as the
+  mission launched it (the enemy skill cheat over it, as over every enemy),
+  a training target in a dummy wing; the orders its wing flies under (the
+  leader's assignment, else a wingmate's; free engagement in a mission of
+  opportunity). Its decision stream is seeded from its plane id
+  (`ai_wings::new_actor_seed`), apart from every mission seed.
+- **The command.** `MissionCommand::Respawn { root, spawn }` (journal
+  variant 6) adds an AI plane of the lineage's aircraft in its wing with the
+  next plane id and member number (`World::respawn_plane`). Every connection
+  is sent Spawned, as for a revival; a joiner gets it with the others. The
+  host builds each Spawned from the plane the step made, so a revival and a
+  respawn in one tick each name their own plane.
+- **Joining the flight.** An aircraft that joins a wing (`AiMission::
+  insert_actor`) takes the lowest formation slot no living AI wingman holds,
+  never its member number, which grows with every revival and respawn and
+  once passed slot 9, failing the AI step. Its member number puts it last in
+  line for the lead.
+- **Retiring AI wrecks.** The AI wreck a respawn replaces joins the wrecks
+  waiting to retire; it rests once combat's falling wreck has landed and its
+  pilot's escape is over, and a later revival or respawn may retire it after
+  30 seconds, its AI actor going with it. Without this the 64 planes would
+  stop respawns after a few dozen losses.
+- **Member 255** is never given: a wing that has used 254 stops respawning,
+  and the log says so.
+- **The log** (the dedicated server's and the hosting game's): "Red 2-3 lost
+  plane 7: the AI respawns it in 0:30" (or "at once", or "no lives left, the
+  AI does not respawn it"), "Red 2-5 respawned in plane 14 at its original
+  spawn, x 81.2 nm, z 40.0 nm (map x 1.3 to 277.7 nm, z 1.3 to 267.0 nm)",
+  "... waits for room to respawn"; a human revival's line gives its place the
+  same way. No radio or HUD for an AI respawn.
+- **Session state.** The host's lineage table (respawns used, the loss
+  tick, whether the log was told) and the original spawns are in the
+  revivals part, so a standby that takes over makes a pending respawn on
+  time.
+- **The revival point on the map.** A human's revival point at a long
+  revival distance (up to 150 nm) from a battle near an edge is walked back
+  towards the battle's centre along its bearing until it lies on the map
+  less one cell (`revive::onto_map`, fitted).
+- **Hooks for the lead hold (R2).** `World::lineage_roots`, `lineage`,
+  `lineage_heads` and `head_lost` give a flight's original members and when
+  one is dead or respawning; `Host::lineage_holder` gives the seat that
+  holds a member.
 
 ##### Scoring
 

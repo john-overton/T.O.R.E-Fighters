@@ -109,6 +109,9 @@ pub enum LobbyEvent {
     Rejoined { plane: Option<u32> },
     /// The King released the aircraft kept for the player.
     Released { plane: u32 },
+    /// A revival or an AI respawn, in words (the lobby pass's slice R1); for
+    /// an AI aircraft the "callsign" is its label, "Red 2-3".
+    Revival(String),
 }
 
 impl fmt::Display for LobbyEvent {
@@ -179,6 +182,7 @@ impl fmt::Display for LobbyEvent {
             Self::Released { plane } => {
                 write!(f, "had plane {plane} released to the AI by the King")
             }
+            Self::Revival(words) => f.write_str(words),
         }
     }
 }

@@ -1568,3 +1568,7 @@ fn real_takeover(
         assert!(back - at < Duration::from_secs(5), "{label} {kind}");
     }
 }
+
+// The lobby pass's slice R1: an AI respawn pending at a takeover.
+#[path = "ai_respawn_resume_tests.rs"]
+mod ai_respawn_resume_tests;
