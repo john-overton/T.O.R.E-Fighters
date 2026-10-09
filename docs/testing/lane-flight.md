@@ -33,6 +33,36 @@ into overspeed. Before the fast-side hold
 ([flight model](../FLIGHT-MODEL.md#envelope-limits-and-loading)) it fell to
 about 1 G well below the top speed.
 
+## Powered-lift scenarios (VTOL overhaul)
+
+`flight-powered-*` flies the six powered-lift aircraft (AV-8, Yak-141, V-22, AH-64,
+Mi-24, CH-47) by short scripted pilot-input tapes, from
+[`tools/battery_scenarios/_powered.py`](../../tools/battery_scenarios/_powered.py). The
+app's `--replay-input TAPE --maneuver hover` puts an aircraft at rest in the air in its own
+hover trim (hands off it holds, so a tape starts from a fixed point), and the tapes
+(`tore-pilot 3`, written at run time) fly the rest. Each is open loop, so the checks are
+bands read from the result line (`speed_kt`, `altitude_ft`, `crashed`, `heading_deg`,
+`bank_deg`, `non_finite`); the numbers are in the
+[overhaul baseline](../baselines/vtol-overhaul.md) and the physics in the
+[spec](../spec/powered-lift-flight.md).
+
+| Scenario | What it flies | What must hold |
+| --- | --- | --- |
+| `flight-powered-hover-<aircraft>` (all six) | 15 seconds hands off in the trimmed hover (the Yak-141 with 6,000 lb of fuel: full tanks leave it no hover at 5,000 ft) | Speed under 3 kt and height within 30 ft |
+| `flight-powered-hover-hold-<aircraft>` (AH-64, Mi-24, CH-47, V-22) | A hard stick pulse from the hover, hover hold engaged at 3.5 seconds, and the same pulse without the hold | The held run ends under 3 kt and within 50 ft of its height; the unheld run is drifting at over 15 kt, so the pulse is real. The jets refuse hover hold by design (unit test A2) |
+| `flight-powered-transition-<aircraft>` (all six) | Hover to forward flight: forward cyclic trim taps at the Attitude level (helicopters), the conversion keys at 85 percent lever (V-22), the manual's three nozzle steps and the forward preset (jets) | A speed over each aircraft's minimum, a height inside its band, no crash |
+| `flight-powered-corridor-v22` | Airplane-mode start at 175 kt, the nacelles asked toward helicopter mode for 20 seconds | The aircraft keeps its speed and height and never goes over the overspeed limit: the corridor protection moved the nacelles, the pilot did not |
+| `flight-powered-autorotation-ah64` | Engine cut at the start speed, lever down, Attitude level | A steady descent of 1,500 to 3,500 ft in 50 seconds at 90 to 160 kt, no crash |
+| `flight-powered-vrs-ah64` | A sinking hover, then full collective, with and without Easy flight physics | Without the cheat it sinks at least 100 ft further than with it: the vortex ring state shows |
+| `flight-powered-easy-<aircraft>` (all six) | At stability Off, a 30 percent collective step from the hover (helicopters) or a roll pulse (jets), with and without Easy flight physics | The single-rotor helicopters turn the nose over 15 degrees without the cheat and under 5 with it; the jets bank over 15 degrees without it and under 12 with it; the CH-47 and V-22 have no torque and do not turn either way |
+
+`mp-seat-ah64` (a human taking a rotorcraft seat mid-flight), which the design named, is
+not a scenario: the exact-state continuation it relies on is covered by unit tests
+(`powered_state_restoration_and_input_replay_continue_exactly` and the per-type restore
+tests) and by the wire's round trips. No windowed scenario was added: the HUD cluster is
+covered by `powered_hud` unit tests and `--hud-snapshot`, and the moving parts by the
+`flight-animation-*` scenarios.
+
 ```sh
 TORE_BATTERY_PROFILE="$PWD/.local/dev-profile" python3 tools/battery.py --scenario 'flight-variety-*' --profile .local/dev-profile --jobs 4
 ```

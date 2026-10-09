@@ -52,6 +52,11 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
             "flight-autopilot-*", "flight-waypoint-*", "flight-lateral-rudder-*", "flight-variety-*",
         ),
     ),
+    "flight-powered": (
+        "the VTOL and helicopter overhaul's six powered-lift aircraft flown by scripted tapes: hover, hover hold, "
+        "transition and conversion, the V-22 corridor, autorotation, the vortex ring state, Easy flight physics",
+        ("flight-powered-*",),
+    ),
     "flight-stall": (
         "stall, spin and liftoff speeds, and the recoveries",
         ("flight-stall-*", "flight-stallrecover-*", "flight-spin-*", "flight-spinrecover-*", "flight-liftoff-*"),
@@ -277,7 +282,7 @@ FLIGHT_CORE = ("flight-maneuvers", "flight-stall", "flight-takeoff", "flight-lan
 AI_CORE = ("ai-fights", "ai-missions", "ai-orders", "ai-airfield", "ai-lead", "ai-regression", "ai-datalink")
 MAIN_FAMILIES = (
     "replay-cli", "menus-creator", "flight-maneuvers", "flight-takeoff", "flight-landing", "ai-fights",
-    "ai-airfield", "ai-lead", "ai-orders", "ai-regression",
+    "ai-airfield", "ai-lead", "ai-orders", "ai-regression", "flight-powered",
 )
 NET_FAMILIES = ("net-fly", "net-window", "net-convert")
 # What a change to host migration reaches besides the rest of the net lane (slice K9).
@@ -315,8 +320,10 @@ RULES: tuple[Rule, ...] = (
     # A shared executor serves both the world and CPU render preparation.
     _r("crates/tore-workers/*", ALL_FAMILIES, "shared scoped worker execution", windowed=True),
     # tore-sim: flight model.
+    _r("crates/tore-sim/src/models/variety/*", FLIGHT_CORE + ("flight-damage", "flight-powered"), "the powered-lift aircraft's parameters"),
     _r("crates/tore-sim/src/models/*", FLIGHT_CORE + ("flight-damage",), "per-aircraft flight tables"),
-    _r("crates/tore-sim/src/flight.rs", FLIGHT_CORE, "flight model"),
+    _r("crates/tore-sim/src/flight.rs", FLIGHT_CORE + ("flight-powered",), "flight model; the powered-lift aircraft's start and step"),
+    _r("crates/tore-sim/src/flight/powered/*", FLIGHT_CORE + ("flight-powered", "flight-damage"), "the powered-lift flight: rotors, jets, tiltrotor, stability, starts, hover hold's flight"),
     _r("crates/tore-sim/src/flight/*", FLIGHT_CORE, "flight model"),
     _r("crates/tore-sim/src/research.rs", FLIGHT_CORE, "researched flight model"),
     _r("crates/tore-sim/src/native.rs", FLIGHT_CORE, "native flight research path"),
@@ -325,9 +332,9 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/g_effects.rs", ("flight-maneuvers", "flight-damage", "ai-fights"), "G effects"),
     _r("crates/tore-sim/src/turbulence.rs", ("flight-environment", "flight-maneuvers"), "turbulence"),
     _r("crates/tore-sim/src/runway_wind.rs", ("flight-takeoff", "flight-landing", "flight-environment"), "runway wind"),
-    _r("crates/tore-sim/src/autopilot.rs", ("flight-maneuvers", "flight-landing", "ai-fights"), "autopilot"),
+    _r("crates/tore-sim/src/autopilot.rs", ("flight-maneuvers", "flight-landing", "ai-fights", "flight-powered"), "autopilot; hover hold and the powered-lift A modes"),
     _r("crates/tore-sim/src/telemetry.rs", ("flight-maneuvers", "instruments"), "telemetry"),
-    _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers"), "cheats"),
+    _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers", "flight-powered"), "cheats; Easy flight physics"),
     # tore-sim: AI.
     _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio",), "AI"),
     # tore-sim: the flight data link's radar table.
@@ -421,8 +428,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-formats/src/lib.rs", ("menus-validate", "flight-maneuvers", "ai-fights"), "tore-formats public surface"),
     _r("crates/tore-formats/*", ("menus-validate", "menus-creator", "flight-maneuvers", "ai-fights"), "tore-formats, unmapped file"),
     # tore-input and friends.
-    _r("crates/tore-input/src/pilot.rs", ("flight-maneuvers", "replay-input", "combat-tapes"), "pilot controls"),
-    _r("crates/tore-input/src/recording.rs", ("replay-input", "replay-recording"), "input recording"),
+    _r("crates/tore-input/src/pilot.rs", ("flight-maneuvers", "replay-input", "combat-tapes", "flight-powered"), "pilot controls; the powered-lift commands"),
+    _r("crates/tore-input/src/recording.rs", ("replay-input", "replay-recording", "flight-powered"), "input recording; the tapes the powered-lift scenarios replay"),
     _r("crates/tore-input/*", ("replay-input", "flight-maneuvers"), "input bindings", windowed=True),
     _r("crates/tore-input-native/*", ("replay-input", "replay-settings"), "input devices", windowed=True),
     _r("crates/tore-replay/*", ("replay-recording", "ai-regression", "net-convert"), "replay format"),
@@ -604,6 +611,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/rwr_tone.rs", ("replay-live",), "RWR tones"),
     # tore-app: headless probes and tools.
     _r("crates/tore-app/src/flight_probe.rs", ("flight-maneuvers", "flight-stall", "flight-takeoff", "flight-landing"), "headless flight probe"),
+    _r("crates/tore-app/src/powered_hud.rs", ("instruments", "windowed-menus", "flight-powered"), "the powered-lift HUD cluster", windowed=True),
+    _r("crates/tore-app/src/variety_rotors.rs", ("flight-animation", "flight-powered"), "rotor, nacelle and nozzle drawing", windowed=True),
     _r("crates/tore-app/src/ai_roster_probe.rs", ("ai-regression", "ai-fights"), "AI roster probe"),
     _r("crates/tore-app/src/probe_invariants.rs", AI_CORE, "AI probe checks"),
     _r("crates/tore-app/src/formation_trace.rs", ("ai-fights", "ai-orders"), "formation trace"),
@@ -666,6 +675,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_battery.py", (), "the battery runner's tests", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/animation.py", ("flight-animation",), "CPU animation regressions", unit_tests=("test_battery_animation",)),
     _r("tools/battery_scenarios/flight.py", LANE_SMOKE["flight"], "flight scenarios", unit_tests=("test_battery_flight",)),
+    _r("tools/battery_scenarios/_powered.py", ("flight-powered",), "the powered-lift flight scenarios", unit_tests=("test_battery_flight",)),
     _r("tools/test_battery_flight.py", (), "flight scenario tests", unit_tests=("test_battery_flight",)),
     _r("tools/battery_scenarios/render.py", ("flight-views",), "render capture scenarios", windowed=True, unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/ai.py", LANE_SMOKE["ai"], "AI scenarios", unit_tests=("test_battery_ai",)),

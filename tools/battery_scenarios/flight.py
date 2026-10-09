@@ -11,6 +11,7 @@ import re
 import time
 
 from battery import Scenario
+from battery_scenarios._powered import powered_scenarios
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
@@ -2105,4 +2106,5 @@ def scenarios() -> list[Scenario]:
         + sprint_scenarios()
         + variety_scenarios()
         + heavy_gcurve_scenarios()
+        + powered_scenarios()
     )
