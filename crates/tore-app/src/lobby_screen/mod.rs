@@ -13,16 +13,19 @@
 //!
 //! # What is on it
 //!
-//! - **The head**: the game's name, the mission's summary and the start rule
-//!   in plain words.
+//! - **The head**: the game's name and the King's settings in words (the
+//!   Rules line). The mission is read on the Mission... page, and what to do
+//!   next is the hint above the buttons (lobby pass L2).
 //! - **Slots**: every aircraft a player may take (wing, member, aircraft,
-//!   who holds it, or AI). Click a free slot to take it; click one's own again
-//!   to free it. A slot another player holds is dimmed and cannot be clicked.
+//!   who holds it, or AI), in a list that scrolls with the red scroll bar.
+//!   Click a free slot to take it; click one's own again to free it. A slot
+//!   another player holds is dimmed and cannot be clicked.
 //! - **Players**: callsigns, the King's crown, the house of the player whose
 //!   machine runs the game, a tick when ready, a red mark and the reason
 //!   when a player's game cannot play the mission, the platform's mark and,
 //!   for a player reaching the host through the relay, the relay's mark; the
-//!   selected player's line says how it connected (slice J6).
+//!   selected player's line says how it connected (slice J6). The list
+//!   scrolls with the red scroll bar when more players are in than show.
 //! - **Messages and the chat line** (EF6's [`LobbyChat`]): the game's words
 //!   and chat; Enter in the line sends to All.
 //! - **Buttons**: Mission... (everyone: the King edits the mission in the
@@ -51,6 +54,8 @@ pub mod app;
 pub mod facts;
 #[cfg(test)]
 mod k7b_tests;
+#[cfg(test)]
+mod layout_tests;
 mod modal;
 #[cfg(test)]
 mod phase2_tests;
@@ -64,8 +69,8 @@ use crate::menu::{Canvas, text_width};
 use crate::net::lobby_chat::LobbyChat;
 use crate::ui_text;
 use crate::widgets::{
-    Align, Backdrop, Background, Button, Column, Focus, Kit, List, Outcome as Wo, Pager, Point,
-    Route, Widget, draw_panel, fit, inside,
+    Align, Backdrop, Background, Button, Column, Focus, Kit, List, Outcome as Wo, Point, Route,
+    Widget, draw_panel, fit, inside,
 };
 use facts::{Buttons, DefaultButton, Facts, FlyAs, LoadoutAs, SlotClick};
 use modal::{Answer, Modal, Purpose};
@@ -175,15 +180,53 @@ enum PanelTarget {
     Slot((u32, String)),
 }
 
-/// The slots list's pager: its rocker, the PREV and NEXT labels and the page
-/// box, to the right of the list (the Players box starts at 399).
-const SLOTS_PAGER: Pager = Pager {
-    rocker: (364, 183),
-    prev: (336, 184),
-    next: (336, 207),
-    page_label: (336, 226),
-    counter_box: (336, 240),
-};
+/// Where everything sits on the 640 by 480 canvas (lobby pass L2; the plan's
+/// section 5.2). The two head lines the pass removed free 26 pixels: Rules
+/// moves up, and the Slots heading sits above the Slots frame with room beside
+/// it for the side boxes (slice L3).
+mod layout {
+    use crate::widgets::{Point, Rect};
+
+    /// The Rules line, the head's second line.
+    pub const RULES: Point = (45, 115);
+    /// The "Slots" heading. The side boxes of slice L3 sit on its row.
+    pub const SLOTS_HEADING: Point = (45, 140);
+    /// The room the two PvP side boxes (28 pixel check boxes with their
+    /// "Bluefor 3/5" and "Redfor 5/5" labels) draw in, to the right of the
+    /// Slots heading. Empty in co-op. Slice L3 draws here and nowhere else in
+    /// the head.
+    #[allow(dead_code, reason = "slice L3 draws the side boxes in this room")]
+    pub const SIDE_BOXES: Rect = (100, 128, 275, 28);
+    /// The Players heading, on the Slots heading's row as the plan's mockup
+    /// has it (agent decision: the plan's table said 152, which would leave
+    /// the two headings on different lines).
+    pub const PLAYERS_HEADING: Point = (380, 140);
+    /// The Slots frame (outline), the list inside it and its scroll bar's art
+    /// (34 wide, the list's height).
+    pub const SLOTS_FRAME: Rect = (40, 164, 335, 97);
+    pub const SLOTS_LIST: Point = (45, 168);
+    pub const SLOTS_WIDTH: i32 = 286;
+    pub const SLOTS_BAR: Point = (336, 168);
+    /// The Players box (filled), its frame, the list and its scroll bar.
+    pub const PLAYERS_BOX: Rect = (380, 165, 224, 95);
+    pub const PLAYERS_FRAME: Rect = (379, 164, 226, 97);
+    pub const PLAYERS_LIST: Point = (384, 168);
+    pub const PLAYERS_WIDTH: i32 = 186;
+    pub const PLAYERS_BAR: Point = (570, 168);
+    /// The hint line under the lists.
+    pub const HINT: Point = (45, 266);
+    pub const MESSAGES_HEADING: Point = (45, 282);
+    /// The Messages box and the chat line.
+    pub const MESSAGES: Rect = (45, 294, 549, 78);
+    pub const CHAT_LINE: Point = (45, 377);
+    /// The ready hint above the buttons, in the dim face; it ends above the
+    /// blue button's raised top at 416.
+    pub const READY_HINT: Point = (45, 400);
+    /// How wide the head lines and the hints may run.
+    pub const TEXT_WIDTH: i32 = 549;
+    /// How many rows a wheel notch scrolls in Slots and Players.
+    pub const WHEEL_ROWS: usize = 2;
+}
 
 /// The screen.
 pub struct LobbyScreen {
@@ -328,11 +371,15 @@ impl LobbyScreen {
             kit,
             label: label.to_owned(),
             hosting,
-            slots: List::new((45, 168), 286, 5)
-                .with_pager(SLOTS_PAGER)
+            slots: List::new(layout::SLOTS_LIST, layout::SLOTS_WIDTH, 5)
+                .with_scroll_bar(layout::SLOTS_BAR)
+                .with_wheel_rows(layout::WHEEL_ROWS)
                 .with_columns(slot_columns),
-            players: List::new((404, 168), 186, 5).with_columns(player_columns),
-            chat: LobbyChat::new((45, 294, 549, 78), (45, 377), 549),
+            players: List::new(layout::PLAYERS_LIST, layout::PLAYERS_WIDTH, 5)
+                .with_scroll_bar(layout::PLAYERS_BAR)
+                .with_wheel_rows(layout::WHEEL_ROWS)
+                .with_columns(player_columns),
+            chat: LobbyChat::new(layout::MESSAGES, layout::CHAT_LINE, layout::TEXT_WIDTH),
             mission: button("Mission...", 0),
             settings: button("Settings...", 1),
             players_button: button("Players...", 2),
@@ -989,7 +1036,10 @@ impl LobbyScreen {
         for id in Id::BUTTONS {
             self.button_mut(id).pointer_move(point);
         }
+        // A held scroll bar knob follows the pointer.
         if let Some(p) = self.pointer {
+            self.slots.drag(p);
+            self.players.drag(p);
             self.chat.messages.drag(p);
         }
     }
@@ -1021,6 +1071,7 @@ impl LobbyScreen {
         }
         // Released.
         self.slots.release(now);
+        self.players.release(now);
         self.chat.messages.release();
         let mut fired = None;
         let blocked = self.blocked.take();
@@ -1093,6 +1144,7 @@ impl LobbyScreen {
     pub fn cancel_press(&mut self) {
         let off = (-1, -1);
         self.slots.release(Instant::now());
+        self.players.release(Instant::now());
         self.chat.messages.release();
         for id in Id::BUTTONS {
             let button = self.button_mut(id);
@@ -1114,12 +1166,9 @@ impl LobbyScreen {
         if self.chat.messages.hit(p) {
             self.chat.messages.wheel(notches);
         } else if self.players.hit(p) {
-            if self.players.wheel(notches) == Wo::Changed {
-                self.refresh();
-            }
+            self.players.wheel(notches);
         } else if self.slots.hit(p) {
             self.slots.wheel(notches);
-            self.refresh();
         }
     }
 
@@ -1176,16 +1225,16 @@ impl LobbyScreen {
             None,
         );
         canvas.outline((30, 100, 579, 355), LINE);
-        for (label, x, y) in [
-            ("Slots", 45, 152),
-            ("Players", 400, 152),
-            ("Messages", 45, 282),
+        for (label, at) in [
+            ("Slots", layout::SLOTS_HEADING),
+            ("Players", layout::PLAYERS_HEADING),
+            ("Messages", layout::MESSAGES_HEADING),
         ] {
-            ui_text::text(canvas, kit, font, label, (x, y), None, None);
+            ui_text::text(canvas, kit, font, label, at, None, None);
         }
-        canvas.outline((40, 164, 355, 97), LINE);
-        canvas.rect((400, 165, 194, 95), [81, 81, 81, 255]);
-        canvas.outline((399, 164, 196, 97), LINE);
+        canvas.outline(layout::SLOTS_FRAME, LINE);
+        canvas.rect(layout::PLAYERS_BOX, [81, 81, 81, 255]);
+        canvas.outline(layout::PLAYERS_FRAME, LINE);
     }
 
     /// Draws the whole screen onto the 640 by 480 canvas.
@@ -1216,29 +1265,17 @@ impl LobbyScreen {
             canvas,
             kit,
             font,
-            &fit(font, &game, 549),
+            &fit(font, &game, layout::TEXT_WIDTH),
             (45, 102),
             None,
             None,
         );
         match &self.state {
             Some(state) => {
-                let mission = format!("Mission: {}", state.summary);
-                text(
-                    canvas,
-                    kit,
-                    font,
-                    &fit(font, &mission, 549),
-                    (45, 115),
-                    None,
-                    None,
-                );
-                let rule = fit(dim, &facts::rule_text(state), 549);
-                text(canvas, kit, dim, &rule, (45, 128), None, None);
                 // The King's settings in words (slice F2-L).
                 if let Some(summary) = facts::settings_summary(state) {
-                    let summary = fit(font, &format!("Rules: {summary}"), 549);
-                    text(canvas, kit, font, &summary, (45, 141), None, None);
+                    let summary = fit(font, &format!("Rules: {summary}"), layout::TEXT_WIDTH);
+                    text(canvas, kit, font, &summary, layout::RULES, None, None);
                 }
             }
             None => {
@@ -1247,7 +1284,7 @@ impl LobbyScreen {
                     kit,
                     dim,
                     "Waiting for the game's lobby...",
-                    (45, 115),
+                    layout::RULES,
                     None,
                     None,
                 );
@@ -1263,11 +1300,23 @@ impl LobbyScreen {
             canvas,
             kit,
             font,
-            &fit(font, &hint, 549),
-            (45, 266),
+            &fit(font, &hint, layout::TEXT_WIDTH),
+            layout::HINT,
             None,
             None,
         );
+        // What to do so the mission can start, above the buttons.
+        if let Some(line) = facts::ready_hint(&self.facts) {
+            text(
+                canvas,
+                kit,
+                dim,
+                &fit(dim, line, layout::TEXT_WIDTH),
+                layout::READY_HINT,
+                None,
+                None,
+            );
+        }
         let marked = |id| self.focus.marked(id);
         self.slots.draw(canvas, kit, marked(Id::Slots));
         self.players.draw(canvas, kit, marked(Id::Players));

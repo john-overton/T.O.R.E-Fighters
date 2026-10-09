@@ -15,7 +15,7 @@ use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 27] = [
+pub const STATES: [&str; 35] = [
     "lobby-king",
     "lobby-joiner",
     "lobby-unable",
@@ -54,6 +54,17 @@ pub const STATES: [&str; 27] = [
     "lobby-standby",
     "lobby-release",
     "lobby-reserved",
+    // Lobby pass (slice L2): the red scroll bars on Slots, Players and
+    // Messages; the ready hint above the buttons for the King, a joiner in
+    // each of its states, a PvP game and a co-op game.
+    "lobby-scroll",
+    "lobby-scroll-top",
+    "lobby-king-hint",
+    "lobby-joiner-noslot-hint",
+    "lobby-joiner-hint",
+    "lobby-joiner-ready-hint",
+    "lobby-pvp-hint",
+    "lobby-coop-hint",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -148,6 +159,39 @@ pub(crate) fn sample_pvp(you: u8) -> LobbyState {
     lobby.settings =
         tore_session::settings::Store::defaults(tore_session::settings::Mode::Pvp).lobby_list();
     lobby
+}
+
+/// A lobby with `slot_count` planes (the first `blue` on Bluefor wing 1, the
+/// rest on the other side's wing 1, five to a wing) and `player_count`
+/// players, the King (id 1, Maverick) holding plane 0 and the others without
+/// a slot: for the scroll bars, which need more rows than show.
+pub(crate) fn crowd(you: u8, slot_count: u32, player_count: u8, pvp: bool) -> LobbyState {
+    let mut state = if pvp { sample_pvp(you) } else { sample(you) };
+    state.players = (1..=player_count)
+        .map(|id| player(id, &format!("Pilot{id}"), None))
+        .collect();
+    state.players[0].callsign = "Maverick".into();
+    state.players[0].slot = Some(0);
+    state.players[0].loadout = true;
+    state.slots = (0..slot_count)
+        .map(|plane| {
+            let (side, index) = match (pvp, plane / 5) {
+                (true, n) if n % 2 == 1 => (Side::Enemy, (n / 2) as u8),
+                (true, n) => (Side::Friendly, (n / 2) as u8),
+                (false, n) => (Side::Friendly, n as u8),
+            };
+            LobbySlot {
+                plane,
+                wing: WingId { side, index },
+                member: (plane % 5) as u8,
+                aircraft: AircraftId::F18,
+                holder: (plane == 0).then_some(1),
+                lock: Default::default(),
+                reserved: None,
+            }
+        })
+        .collect();
+    state
 }
 
 /// The sample mission's cheats: a few on, so the Realism page shows both
@@ -299,6 +343,48 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             lobby.players[1].observing = true;
             lobby.slots = slots(&[(0, 1)]);
         }
+        // Twelve slots, nine players and a long Messages: all three bars.
+        "lobby-scroll" | "lobby-scroll-top" => {
+            lobby = crowd(1, 12, 9, false);
+        }
+        // The King, everyone holding a slot ready: Fly can be pressed.
+        "lobby-king-hint" => {
+            lobby.players[0].ready = true;
+        }
+        // A joiner with no slot, with a slot, and ready.
+        "lobby-joiner-noslot-hint" => {
+            lobby = sample(2);
+            hosting = false;
+            lobby.players[1].slot = None;
+            lobby.players[1].ready = false;
+            lobby.slots = slots(&[(0, 1)]);
+        }
+        "lobby-joiner-hint" => {
+            lobby = sample(2);
+            hosting = false;
+            lobby.players[1].ready = false;
+        }
+        "lobby-joiner-ready-hint" => {
+            lobby = sample(2);
+            hosting = false;
+        }
+        // A PvP game, five a side, a joiner with a slot who is not ready.
+        "lobby-pvp-hint" => {
+            lobby = crowd(2, 10, 4, true);
+            hosting = false;
+            lobby.players[1].slot = Some(1);
+            lobby.slots[1].holder = Some(2);
+            lobby.players[2].slot = Some(6);
+            lobby.slots[6].holder = Some(3);
+            lobby.players[2].ready = true;
+        }
+        // A co-op game, the King waiting for a player who holds a slot.
+        "lobby-coop-hint" => {
+            lobby = crowd(1, 8, 3, false);
+            lobby.players[1].slot = Some(1);
+            lobby.slots[1].holder = Some(2);
+            lobby.players[0].ready = true;
+        }
         _ => {}
     }
     let mut screen = LobbyScreen::sample(Arc::clone(&kit), lobby.clone(), hosting);
@@ -318,7 +404,24 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         true,
         "Take a slot and arm up.",
     ));
+    if matches!(state, "lobby-scroll" | "lobby-scroll-top") {
+        for n in 1..=14 {
+            screen.say(&format!("Pilot{n} joined the game."));
+        }
+        screen.chat_line(&said(
+            "Pilot3",
+            Standing::Neutral,
+            false,
+            "Which side are you on?",
+        ));
+    }
     match state {
+        "lobby-scroll" => {
+            // Mid way down each list and back from the newest lines.
+            screen.slots.scroll_to(4);
+            screen.players.scroll_to(2);
+            screen.chat.messages.scroll(6);
+        }
         "lobby-kick" => {
             screen.players.select(1);
             screen.refresh();

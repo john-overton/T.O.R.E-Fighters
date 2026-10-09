@@ -391,9 +391,15 @@ fn a_dedicated_servers_lobby_has_no_kings_controls_and_states_its_rule() {
         b.settings.is_enabled(),
         "a server's players see its settings too"
     );
-    assert!(facts::rule_text(&state).contains("first player holding a slot"));
+    assert!(
+        facts::ready_hint(&Facts::of(Some(&state), None))
+            .is_some_and(|hint| hint.contains("first player holding a slot"))
+    );
     state.start = StartRule::Flying;
-    assert!(facts::rule_text(&state).contains("always flying"));
+    assert!(
+        facts::ready_hint(&Facts::of(Some(&state), None))
+            .is_some_and(|hint| hint.contains("always flying"))
+    );
     // Leave never asks on a server.
     let mut screen = screen_of(&state, false);
     assert_eq!(click(&mut screen, button_centre(6)), Some(Request::Leave));

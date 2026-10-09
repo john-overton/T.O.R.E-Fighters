@@ -30,6 +30,9 @@ NORMAL_STATES = [
     "lobby-relay", "lobby-away",
     # Stage L (slice L4, L5): Messages saying how a player's game differs from the host's.
     "lobby-gaps",
+    # Lobby pass (slice L2): the red scroll bars and the ready hint for the King, a joiner, PvP and co-op.
+    "lobby-scroll", "lobby-scroll-top", "lobby-king-hint", "lobby-joiner-noslot-hint", "lobby-joiner-hint",
+    "lobby-joiner-ready-hint", "lobby-pvp-hint", "lobby-coop-hint",
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [

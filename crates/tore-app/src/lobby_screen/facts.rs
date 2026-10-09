@@ -239,27 +239,56 @@ pub fn ready_label(facts: &Facts) -> &'static str {
     }
 }
 
-/// The start rule in plain words: the line under the mission.
-pub fn rule_text(lobby: &LobbyState) -> String {
-    let king = lobby
-        .king
-        .and_then(|id| lobby.player(id))
-        .map(|p| p.callsign.as_str());
-    match (lobby.start, king) {
-        (StartRule::King, Some(king)) => format!(
-            "{king} is the King: the mission starts when {king} presses Fly and everyone holding a slot is ready."
-        ),
-        (StartRule::King, None) => {
-            "The mission starts when the King presses Fly and everyone holding a slot is ready."
-                .into()
-        }
-        (StartRule::FirstReady, _) => {
-            "This server starts the mission as soon as the first player holding a slot is ready."
-                .into()
-        }
-        (StartRule::Flying, _) => {
-            "This server's mission is always flying: take a slot and press Ready to join it.".into()
-        }
+/// The line above the buttons, in the dim face: what this player should do
+/// next so the mission can start, in plain words (lobby pass L2, John
+/// 2026-10-09). It replaces the old line under the mission that explained the
+/// King's rule to everyone. `None` while there is nothing to say (not
+/// connected, or the mission has just ended).
+pub fn ready_hint(facts: &Facts) -> Option<&'static str> {
+    if !facts.connected {
+        return None;
+    }
+    // The reason itself is in the hint line above.
+    if facts.unable.is_some() {
+        return Some("Your game cannot play this mission.");
+    }
+    match facts.phase {
+        LobbyPhase::Ended => None,
+        LobbyPhase::Flying => Some(if facts.flying {
+            "You are flying the mission."
+        } else if facts.observing {
+            "You are watching the mission."
+        } else if facts.holds.is_none() {
+            "The mission is flying: take a slot and press Join."
+        } else {
+            "The mission is flying: press Join to take your aircraft in."
+        }),
+        LobbyPhase::Lobby => Some(match (facts.start, facts.king) {
+            // A server that starts when its first player is ready, or that
+            // is always flying, has no King to wait for.
+            (StartRule::Flying, _) => {
+                "This server's mission is always flying: take a slot and press Ready to join it."
+            }
+            (StartRule::FirstReady, _) => {
+                "The mission starts as soon as the first player holding a slot is ready."
+            }
+            // The King: Fly is theirs.
+            (StartRule::King, true) if facts.all_ready() => {
+                "Everyone is ready: press Fly to start the mission."
+            }
+            (StartRule::King, true) => "Press Fly when everyone holding a slot is ready.",
+            // A game with no King named (the crown is between players).
+            (StartRule::King, false) if facts.server => {
+                "The mission starts when the King presses Fly and everyone holding a slot is ready."
+            }
+            (StartRule::King, false) if facts.holds.is_none() => {
+                "Take a slot and press Ready so the King can start the mission."
+            }
+            (StartRule::King, false) if !facts.ready => {
+                "Press Ready so the King can start the mission."
+            }
+            (StartRule::King, false) => "You are ready. The King starts the mission with Fly.",
+        }),
     }
 }
 
@@ -682,7 +711,6 @@ pub fn disabled_reason(facts: &Facts, id: super::Id, target: bool) -> Option<Str
     let lobby_only = facts.phase != LobbyPhase::Lobby;
     let flying = facts.phase == LobbyPhase::Flying;
     match id {
-        Id::Mission if lobby_only => Some("The mission can change only in the lobby.".into()),
         Id::Loadout if flying && facts.flying => Some("You are flying.".into()),
         Id::Loadout if flying => None,
         Id::Loadout | Id::Ready if facts.unable.is_some() => facts.unable.clone(),

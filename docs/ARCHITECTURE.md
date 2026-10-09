@@ -5360,11 +5360,12 @@ Messages, and the search starts again. The window title reads "Lobby".
 
 | Element | Place | Notes |
 | --- | --- | --- |
-| Game, Mission, start rule | three lines at (45, 106), (45, 120), (45, 134) | The game's name; the mission's summary; the start rule in plain words (the King's, or "This server starts the mission as soon as the first player holding a slot is ready.", or "always flying") |
-| Slots | list (45, 168), 286 wide, five rows, rocker and PAGE box to its right | Own mark, "Wing 1 #3", aircraft, holder or AI, the holder's ready tick. Another player's slot is dimmed, your own green with the blue arrow |
-| Players | list (404, 168), 186 wide, five rows | Crown (the King), house (the machine that runs the game), ready tick or red cross (unable), callsign (your own row green), status word (Armed, Ready, Flying, Unable, Slot) |
+| Game, Rules | two lines at (45, 102) and (45, 115) | The game's name; the King's settings in a line (the lobby pass, John 2026-10-09, removed the Mission line and the start rule line: the mission is read on Mission..., and the rule moved into the ready hint) |
+| Slots | heading (45, 140); frame (40, 164), 335 by 97; list (45, 168), 286 wide, five rows, scrolling; red scroll bar at (336, 168) | Own mark, "Wing 1 #3", aircraft, holder or AI, the holder's ready tick. Another player's slot is dimmed, your own green with the blue arrow. Room is kept on the heading's row, x 100 to 375 and y 128 to 156, for slice L3's PvP side boxes |
+| Players | heading (380, 140); box (380, 165), 224 by 95; list (384, 168), 186 wide, five rows, scrolling; red scroll bar at (570, 168) | Crown (the King), house (the machine that runs the game), ready tick or red cross (unable), callsign (your own row green), status word (Armed, Ready, Flying, Unable, Slot) |
 | Hint line | (45, 266) | What to do next, or the reason a selected player is unable |
-| Messages and chat line | box (45, 294), 549 by 78; line (45, 377), 549 by 18 | EF6's `LobbyChat`: the game's words and chat in the Messages colours |
+| Messages and chat line | box (45, 294), 549 by 78, red scroll bar flush right inside; line (45, 377), 549 by 18 | EF6's `LobbyChat`: the game's words and chat in the Messages colours |
+| Ready hint | (45, 400), dim face, up to 549 wide | What this player does next so the King can start: "Press Ready so the King can start the mission.", "You are ready. The King starts the mission with Fly.", "Press Fly when everyone holding a slot is ready.", and the flying, server and cannot-play variants (`facts::ready_hint`) |
 | Buttons | y 419, 85 wide, places at x 45, 138, 231, 324, 417, 510 | King: Mission..., Loadout, Ready, Kick, Fly, Leave. Everyone else: Loadout, Ready, Leave in the last three places |
 
 **Who may press what** (`facts::buttons`, tested):

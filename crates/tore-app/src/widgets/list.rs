@@ -201,10 +201,6 @@ impl List {
     }
     /// A scrolling list with its scroll bar's art at `at` (34 wide, as high
     /// as the list's rows). Instead of a pager: any pager is dropped.
-    #[allow(
-        dead_code,
-        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
-    )]
     pub fn with_scroll_bar(mut self, at: Point) -> Self {
         self.pager = None;
         let height = self.pitch * (self.visible as i32 - 1) + BAR_HEIGHT;
@@ -213,10 +209,6 @@ impl List {
     }
     /// How many rows the wheel scrolls a notch in a scrolling list (default
     /// one; at least one).
-    #[allow(
-        dead_code,
-        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
-    )]
     pub fn with_wheel_rows(mut self, rows: usize) -> Self {
         self.wheel_rows = rows.max(1);
         self
@@ -311,10 +303,7 @@ impl List {
         }
     }
     /// How many rows show at once.
-    #[allow(
-        dead_code,
-        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
-    )]
+    #[cfg(test)]
     pub fn visible_rows(&self) -> usize {
         self.visible
     }
@@ -328,10 +317,6 @@ impl List {
     }
     /// Slides a scrolling list's window to start at row `first` (kept in
     /// range); the selection is not touched. No effect on a paged list.
-    #[allow(
-        dead_code,
-        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
-    )]
     pub fn scroll_to(&mut self, first: usize) {
         if self.scroll.is_some() {
             self.first = first.min(self.view().max_first());
@@ -480,10 +465,6 @@ impl List {
     }
     /// The pointer moved to `point`: a held knob drags the window. Call it on
     /// every pointer move; it does nothing when no knob is held.
-    #[allow(
-        dead_code,
-        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
-    )]
     pub fn drag(&mut self, point: Point) {
         if let Some(bar) = self.scroll {
             let view = self.view();
@@ -493,10 +474,7 @@ impl List {
         }
     }
     /// True while the scroll bar's knob is held.
-    #[allow(
-        dead_code,
-        reason = "the lobby screen builds scrolling lists (lobby pass L2)"
-    )]
+    #[cfg(test)]
     pub fn dragging(&self) -> bool {
         self.scroll.is_some_and(|bar| bar.dragging())
     }

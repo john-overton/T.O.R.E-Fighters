@@ -136,6 +136,7 @@ impl ScrollBar {
         inside(self.bounds(), point)
     }
     /// The knob is held.
+    #[cfg(test)]
     pub fn dragging(&self) -> bool {
         self.grip.is_some()
     }
