@@ -91,6 +91,20 @@ pub struct Seat {
 pub struct Roster {
     planes: Vec<Plane>,
     seats: Vec<Seat>,
+    /// Who the players are, by callsign (the lobby pass's follow-up F1).
+    callsigns: Callsigns,
+}
+
+/// The players' callsigns as the mission knows them (the lobby pass's
+/// follow-up F1): the callsign the host gave the player in each seat
+/// ([`crate::world::MissionCommand::Callsign`]), and the callsign of the
+/// player who flies each plane, or flew it last. A seat is reused by the
+/// next player, so the host names a seat's player again before seating
+/// it; a plane keeps the name of whoever flew it. Single player has none.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Callsigns {
+    pub(crate) seats: std::collections::BTreeMap<SeatId, String>,
+    pub(crate) planes: std::collections::BTreeMap<PlaneId, String>,
 }
 
 impl Roster {
@@ -125,6 +139,7 @@ impl Roster {
                 crew,
                 wing_recipient: None,
             }],
+            callsigns: Callsigns::default(),
         }
     }
 
@@ -148,6 +163,7 @@ impl Roster {
         Self {
             planes,
             seats: Vec::new(),
+            callsigns: Callsigns::default(),
         }
     }
 
@@ -189,7 +205,11 @@ impl Roster {
             seats.windows(2).all(|pair| pair[0].id != pair[1].id),
             "two humans share a seat"
         );
-        Self { planes, seats }
+        Self {
+            planes,
+            seats,
+            callsigns: Callsigns::default(),
+        }
     }
 
     /// Every plane, in id order.
@@ -257,7 +277,36 @@ impl Roster {
             }
         }
         self.planes[index].pilot = Pilot::Human(seat);
+        if let Some(callsign) = self.callsigns.seats.get(&seat) {
+            self.callsigns.planes.insert(plane, callsign.clone());
+        }
         Ok(())
+    }
+
+    /// The host names the player in `seat` (the lobby pass's follow-up F1):
+    /// the seat's callsign from now on, and its plane's if it flies one;
+    /// each plane it takes from now on bears the name too.
+    pub fn set_callsign(&mut self, seat: SeatId, callsign: String) {
+        if let Some(plane) = self.seat(seat).and_then(|s| s.plane) {
+            self.callsigns.planes.insert(plane, callsign.clone());
+        }
+        self.callsigns.seats.insert(seat, callsign);
+    }
+
+    /// The callsign of the player the host last named for `seat`.
+    pub fn seat_callsign(&self, seat: SeatId) -> Option<&str> {
+        self.callsigns.seats.get(&seat).map(String::as_str)
+    }
+
+    /// The callsign of the player who flies `plane`, or flew it last; `None`
+    /// for a plane no named player has flown (the AI's, or single player's).
+    pub fn plane_callsign(&self, plane: PlaneId) -> Option<&str> {
+        self.callsigns.planes.get(&plane).map(String::as_str)
+    }
+
+    /// Every callsign the mission knows.
+    pub fn callsigns(&self) -> &Callsigns {
+        &self.callsigns
     }
 
     /// The seat gives its plane back to the AI. The seat stays, waiting.
@@ -477,6 +526,39 @@ mod tests {
         roster.take_plane(SeatId(1), PlaneId(1), None).unwrap();
         assert_eq!(roster.seat_of(PlaneId(1)), Some(SeatId(1)));
         assert_eq!(roster.seats().len(), 2);
+    }
+
+    /// The lobby pass's follow-up F1: a seat's callsign names the plane it
+    /// flies and each plane it takes; a plane keeps the name of whoever flew
+    /// it last when the seat passes to the next player.
+    #[test]
+    fn callsigns_follow_seats_onto_their_planes() {
+        let mut roster = Roster::open([
+            (PlaneId(0), Slot::FRIENDLY_LEAD),
+            (PlaneId(1), slot(Side::Friendly, 0, 1)),
+            (PlaneId(2), slot(Side::Enemy, 0, 0)),
+        ]);
+        assert_eq!(roster.plane_callsign(PlaneId(0)), None);
+        // Named before it takes a plane.
+        roster.set_callsign(SeatId(0), "Viper".into());
+        assert_eq!(roster.seat_callsign(SeatId(0)), Some("Viper"));
+        roster.take_plane(SeatId(0), PlaneId(0), None).unwrap();
+        assert_eq!(roster.plane_callsign(PlaneId(0)), Some("Viper"));
+        // Named while it flies: its plane takes the name at once.
+        roster.take_plane(SeatId(1), PlaneId(1), None).unwrap();
+        assert_eq!(roster.plane_callsign(PlaneId(1)), None);
+        roster.set_callsign(SeatId(1), "Hawk".into());
+        assert_eq!(roster.plane_callsign(PlaneId(1)), Some("Hawk"));
+        // Viper leaves; the seat's next player is another.
+        roster.release_plane(SeatId(0));
+        roster.set_callsign(SeatId(0), "Moth".into());
+        roster.take_plane(SeatId(0), PlaneId(2), None).unwrap();
+        assert_eq!(roster.plane_callsign(PlaneId(2)), Some("Moth"));
+        assert_eq!(roster.plane_callsign(PlaneId(0)), Some("Viper"));
+        // Single player names nobody.
+        let single = Roster::single_player(None, []);
+        assert_eq!(single.plane_callsign(PlaneId(0)), None);
+        assert_eq!(single.callsigns(), &Callsigns::default());
     }
 }
 

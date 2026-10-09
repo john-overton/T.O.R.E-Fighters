@@ -45,6 +45,7 @@
 mod away;
 // The lobby pass's Autobalance (slice A1).
 mod balance;
+mod callsigns;
 mod chat;
 pub mod config;
 pub mod content;
@@ -2972,6 +2973,8 @@ impl Host {
         // revivals and abandoned planes.
         self.away_commands(tick, &mut commands);
         self.revive_commands(tick, &mut commands);
+        // The lobby pass's follow-up F1: each seated player's callsign.
+        self.callsign_commands(&mut commands);
 
         // The tick as the journal records it (stage K): its mission
         // commands, and every flying seat's input with the number of the

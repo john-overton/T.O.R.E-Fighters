@@ -186,6 +186,14 @@ impl Revivals {
         self.held.values().copied()
     }
 
+    /// The connection a revival this tick seats in `seat` (follow-up F1).
+    pub(super) fn making_connection(&self, seat: SeatId) -> Option<ConnectionId> {
+        self.making
+            .iter()
+            .find(|made| made.seat == seat)
+            .map(|made| made.connection)
+    }
+
     /// Whether a revival added `plane` to the mission.
     pub(super) fn added(&self, plane: PlaneId) -> bool {
         self.spawned.iter().any(|spawned| spawned.plane == plane.0)

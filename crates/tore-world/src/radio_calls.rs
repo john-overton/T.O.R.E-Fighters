@@ -169,10 +169,11 @@ pub fn label(member: &Member) -> String {
 pub const LEAD_AGAIN: &str = "You lead your flight again.";
 
 /// The lead hold's HUD line for a human who stands in for the flight's
-/// owner, named by the radio label of the owner's newest plane ("Blue one";
-/// the mission core has no callsigns), or as the flight's lead when it has
-/// none (the lobby pass's slice R2; agent decision: text only, no voice, in
-/// place of "You're the Wingleader now").
+/// owner, named by the owner's callsign ("Viper", the host's name for the
+/// player, follow-up F1) or, with none, the radio label of the owner's newest
+/// plane ("Blue one"), or as the flight's lead when it has neither (the lobby
+/// pass's slice R2; agent decision: text only, no voice, in place of "You're
+/// the Wingleader now").
 pub fn stand_in_line(owner: Option<&str>) -> String {
     match owner {
         Some(owner) => format!("You lead the flight until {owner} flies again."),

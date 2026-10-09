@@ -64,6 +64,12 @@ pub enum MissionCommand {
     /// wing it owns passes to the next human in the flight, else back to the
     /// AI's own succession ([`super::lead_hold`]).
     LeadLeft { owner: super::lead_hold::LeadOwner },
+    /// The lobby pass's follow-up F1: the player in `seat` is `callsign`
+    /// ([`crate::seats::Roster::set_callsign`]). The host names a seat's
+    /// player before it seats it, so the mission's HUD lines can name
+    /// players ("You lead the flight until Viper flies again."); a standby
+    /// replaying the journal knows the same names.
+    Callsign { seat: SeatId, callsign: String },
 }
 
 /// What became of a wing order the step applied.
@@ -147,6 +153,9 @@ impl World {
             // The lobby pass's lead hold (slice R2; world/lead_hold.rs).
             MissionCommand::LeadHold { on } => self.set_lead_hold(*on),
             MissionCommand::LeadLeft { owner } => self.lead_left(*owner),
+            MissionCommand::Callsign { seat, callsign } => {
+                self.roster.set_callsign(*seat, callsign.clone());
+            }
         }
         Ok(())
     }

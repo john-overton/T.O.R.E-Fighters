@@ -684,3 +684,57 @@ fn single_player_never_holds_a_lead() {
     }
     assert!(!world.lead_hold() && world.lead_owners().is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// The lobby pass's follow-up F1: the HUD line names the owner's player.
+
+/// The host's name for the player of `seat`.
+fn callsign(seat: SeatId, name: &str) -> MissionCommand {
+    MissionCommand::Callsign {
+        seat,
+        callsign: name.into(),
+    }
+}
+
+/// A human stand-in reads the owner's callsign; with no name for the owner
+/// it reads the owner's plane's radio label, as before.
+#[test]
+fn a_human_stand_in_reads_the_owners_callsign() {
+    let mut world = mission(true);
+    run(&mut world, &[callsign(SEAT_0, "Viper"), take(SEAT_0, 0)], 1);
+    run(&mut world, &[callsign(SEAT_1, "Hawk"), take(SEAT_1, 2)], 2);
+    lose(&mut world, 0);
+    let flown = run(&mut world, &[], 2);
+    assert_eq!(only_change(&flown), (2, 0, true, false));
+    assert_eq!(
+        flown.messages,
+        [(
+            SEAT_1,
+            "You lead the flight until Viper flies again.".to_owned()
+        )]
+    );
+}
+
+/// An away owner's plane is named by the player who flew it, though its
+/// seat has passed to another player since.
+#[test]
+fn an_away_owners_stand_in_line_names_the_player_who_flew_its_plane() {
+    let mut world = mission(true);
+    run(&mut world, &[callsign(SEAT_0, "Viper"), take(SEAT_0, 0)], 1);
+    run(&mut world, &[callsign(SEAT_1, "Hawk"), take(SEAT_1, 2)], 2);
+    // Viper goes away: the AI flies plane 0 for it, which keeps the lead.
+    run(&mut world, &[MissionCommand::GiveBack { seat: SEAT_0 }], 2);
+    assert_eq!(owner(&world), Some(LeadOwner::Away(PlaneId(0))));
+    // The seat goes to the next player, who takes plane 3.
+    run(&mut world, &[callsign(SEAT_0, "Moth"), take(SEAT_0, 3)], 2);
+    lose(&mut world, 0);
+    let flown = run(&mut world, &[], 2);
+    assert_eq!(only_change(&flown), (2, 0, true, false));
+    assert_eq!(
+        flown.messages,
+        [(
+            SEAT_1,
+            "You lead the flight until Viper flies again.".to_owned()
+        )]
+    );
+}
