@@ -95,7 +95,8 @@ conventional aircraft and six powered-lift aircraft. Every exact identity owns
 its source mass, fuel, thrust, controls and envelopes. The four F-4 variants
 share algorithms while preserving their own source configuration. Conventional
 variety aircraft use the established hybrid solver. AV8 and YAK141 use fitted
-vector thrust, V22 uses fitted nacelle conversion, and AH64, MI24 and CH47 use
+vector thrust, V22 flies two proprotors on nacelles under always-on conversion
+corridor protection (VTOL overhaul slice P5), and AH64, MI24 and CH47 use
 fitted collective-controlled rotor lift. Ordinary throttle remains engine power.
 Apache and Chinook gear stays down from initialization through simulation and
 commands, matching their visible fixed wheels. Hind gear remains retractable.

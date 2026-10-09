@@ -113,12 +113,12 @@ flight state in `crates/tore-sim/src/flight/powered/readout.rs`.
 | Nozzle angle | AV-8, Yak-141 | Nozzles not at 0 | `NOZ 60` in whole degrees at (388,274), a 60-pixel gauge for 0 to 100 degrees under it with a mark at 90 and the nozzle's pointer, and a caret under the gauge at the demand while the nozzles slew. The retail `VCTR` cue is in the borrowed art |
 | Lift engines | Yak-141 | Running | `LIFT` at (430,274) |
 | Hover display | Jets below their stall speed; helicopters and the V-22 below 40 kt ground speed | Navigation HUD only (not the weapon HUD) | Cross hairs and a 22-pixel circle centred at (320,296): the circle moves with the ground velocity (2.2 pixels a knot, forward up), so its radius is 10 knots and its forward edge over the hairs means drifting back at 10 knots. Vertical bars at x=376 (80 pixels, 1.6 pixels per ft/s): a tick rides with the climb or sink, the centre marks are zero sink, the long cap at the bottom is the lower edge |
-| Rotor speed | Helicopters, V-22 | Always | `NR 100` at (211,292); flashes below 90 and above 105 percent |
+| Rotor speed | Helicopters, V-22 | Always | `NR 100` at (211,292); flashes more than 10 points below or 5 above its governed reference (below 90 and above 105 percent, or 74 and 89 around the V-22's 84 on the downstops) |
 | Torque | Helicopters, V-22 | Always | `TQ 72` at (211,304), percent of rated power; flashes above 100 |
 | Collective | Helicopters, V-22 | Always | `COL 81` in the throttle readout's place, (235,178) |
 | Radar height | All six | Below 1,000 ft above ground | `R 450` at (388,262) |
 | Stability level | All six | What really acts is not the Damper (Off without hydraulics) | `SAS OFF` or `SAS ATT` at (211,316); `SAS EZ DMP` (a jet at Off damped by the Easy flight physics cheat) or `SAS EZ ATT` (a rotorcraft given the cheat's weak attitude retention, even at Damper) while the cheat supplies it |
-| Nacelle | V-22 | Always | `NAC 75` at (388,274), a vertical tape at x=446 from 0 degrees (bottom) to 97.5 (60 pixels) with a pointer at the nacelle and a caret at the demand, and `CONV` at (388,286) while the conversion protection moves or holds the nacelles. The corridor bracket for the current airspeed waits for the tiltrotor law |
+| Nacelle | V-22 | Always | `NAC 75` at (388,274), a vertical tape at x=446 from 0 degrees (bottom) to 97.5 (60 pixels) with a pointer at the nacelle and a caret at the demand, and `CONV` at (388,286) while the conversion protection moves or holds the nacelles. Bars beside the tape bracket the nacelle angles the conversion corridor allows at the current indicated airspeed |
 | Autopilot | Helicopters, V-22 | Hover hold engaged | `AUTO` above `HOVER` in the existing autopilot label slot: the hover hold mode only has to give its autopilot label the word `HOVER` |
 
 Flashing rows are on for 30 ticks and off for 30 (a quarter second). The
