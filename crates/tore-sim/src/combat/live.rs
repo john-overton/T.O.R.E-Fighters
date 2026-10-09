@@ -28,6 +28,8 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 
 mod broad;
 #[cfg(test)]
+mod gunship_impact_tests;
+#[cfg(test)]
 mod gunship_tests;
 mod handoff;
 mod observation;
