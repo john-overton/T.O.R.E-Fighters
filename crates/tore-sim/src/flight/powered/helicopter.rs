@@ -29,9 +29,8 @@
 //!   weight cannot hold banks the aircraft, and 15 degrees of bank with the
 //!   thrust leaning the same way is dynamic rollover (design 4.9).
 //!
-//! The CH-47 (P3) and V-22 (P5) still fly the old powered law; their rotors
-//! will reuse [`super::rotor::RotorModel`] and this file's drive and trim
-//! pieces where they fit.
+//! The CH-47 ([`super::tandem`]) and the V-22 ([`super::tiltrotor`]) reuse
+//! [`super::rotor::RotorModel`] and the shared drive ([`super::drive`]).
 
 pub use super::drive::{EASY_ROTOR_FLOOR, LOW_ROTOR, ROTOR_OVERSPEED};
 use super::{

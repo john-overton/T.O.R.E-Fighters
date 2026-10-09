@@ -539,7 +539,7 @@ live in `crates/tore-sim/src/models/variety/lift.rs`.
 | Rotor speed, rpm | | | 397, 84 percent on the downstops (Pub) | 289 (Derived from 727 ft/s) | 240 (Pub) | 225 (Fit) |
 | Solidity | | | 0.105 (Pub) | 0.0928 (Pub) | 0.078 (Fit) | 0.062 (Fit) |
 | Rotor energy time constant, s (Fit) | | | 1.6 | 1.8 | 2.0 | 2.5 |
-| Never-exceed speed, kt | 280 KCAS airplane mode (V-22, Pub) | | | 197 (Pub) | 190 (Fit) | 190 (Fit) |
+| Never-exceed speed, kt | envelope top speed | envelope top speed | 280 KCAS in airplane mode, less at the corridor's maximum with the nacelles up (Pub) | 197 (Pub) | 190 (Fit) | 190 (Fit) |
 | Nozzle or nacelle range | 0 to 100 degrees (PT, Man) | 0 to 100 (PT) | 0 to 97.5 (Pub) | | | |
 | Nozzle or nacelle rate | 100 deg/s (PT, unit inferred) | 100 deg/s (PT) | 8 deg/s (Pub) | | | |
 | Rotor direction | | | counter-rotating pair | counter-clockwise (Pub) | clockwise (Pub) | counter-rotating pair (Pub) |

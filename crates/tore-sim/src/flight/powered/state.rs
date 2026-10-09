@@ -8,12 +8,12 @@
 //! added here without coding it fails to compile. The wire's own state, the
 //! client's prediction and every checkpoint carry it that way.
 //!
-//! Which slice of the VTOL overhaul fills what (design section 11): the body
-//! rates P1 ([`super::body`]); the rotor speed, induced velocities, disk
-//! tilts and engine output P2 to P5; the nozzles and lift engines P4; the
-//! pilot aids P6; the warning timers P7; the corridor hold P5. Until a slice
-//! lands, its fields keep their defaults and the old powered law ignores
-//! them.
+//! Which part of the VTOL overhaul fills what: the body rates
+//! ([`super::body`]); the rotor speed, induced velocities, disk tilts and
+//! engine output (helicopters, tandem, tiltrotor); the nozzles and lift
+//! engines (jets); the pilot aids ([`super::sas`]); the warning timers; the
+//! corridor hold (tiltrotor). A field an aircraft has no use for keeps its
+//! default.
 
 use super::super::{DT, FlightAxis, State};
 use crate::models::variety::LiftKind;
@@ -33,8 +33,10 @@ pub struct LiftState {
     pub vector_yaw_actual: f64,
     pub conversion_actual: f64,
     pub collective_actual: f64,
-    /// Lagged force in lbf of the old powered law (the main jet thrust from
-    /// slice P4).
+    /// The lift force the aircraft makes, lbf: the main rotor thrust of a
+    /// rotorcraft (or its trimmed weight before it first steps), the engines'
+    /// output on a jet. For the trace and the HUD; the force laws do not
+    /// read it.
     pub thrust_lbf: f64,
     /// Body rates [roll, pitch, yaw], rad/s, in the axes of
     /// [`super::body`]. The flight state's `roll_rate` and `pitch_rate`

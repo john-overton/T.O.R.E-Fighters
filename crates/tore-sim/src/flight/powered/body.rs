@@ -70,8 +70,7 @@ pub fn body_axes(basis: &Basis) -> [Vector; 3] {
 }
 
 /// The rotation vector, world axes, rad, that turns `basis` at body `rates`
-/// for `dt`. The same products in the same order as the old powered law's
-/// rotation, so that law turns through here bit for bit.
+/// for `dt`.
 pub fn rotation(basis: &Basis, rates: [f64; 3], dt: f64) -> Vector {
     let [roll, pitch, yaw] = rates;
     std::array::from_fn(|i| {
