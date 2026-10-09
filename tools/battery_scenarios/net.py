@@ -2034,6 +2034,57 @@ def drive_autobalance(d: Drive) -> None:
     )
 
 
+def side_boxes_mission() -> str:
+    """The guide's mission with one Redfor aircraft (planes 0 to 3 Bluefor, plane 4 Redfor), its AI on weapons hold,
+    so a single Redfor request fills that side."""
+    mission = weapons_hold(guide_mission(separation_nm=50))
+    drop = ("wing friendly 2 ", "wing enemy 2 ", "survive ")
+    mission = "".join(line for line in mission.splitlines(keepends=True) if not line.startswith(drop))
+    return re.sub(r"(?m)^(wing enemy 1 \S+) 4 ", r"\1 1 ", mission)
+
+
+def drive_side_boxes(d: Drive) -> None:
+    """The lobby's side boxes (the lobby pass, slice L3): a PvP server with `lock-sides on` and a mission with four
+    Bluefor aircraft (planes 0 to 3) and one Redfor (plane 4), its AI on weapons hold. Alpha asks for Redfor
+    (`tore-bot --side red`, the box's `SlotRequest::Side`) and gets plane 4, which starts the mission. Bravo asks for
+    Redfor too and is refused ("Redfor is full."); Charlie and Delta ask for Bluefor and get its first free aircraft,
+    planes 0 and 1."""
+    port = d.port()
+    server = start_server(d, port, side_boxes_mission(), mode="pvp")
+
+    def flies(name: str, plane: int) -> None:
+        if not server.wait_for(rf"seat \d+ {name} took plane {plane}\b", 90):
+            raise DriveError(f"{name} never flew plane {plane}")
+
+    alpha = start_bots(d, port, "alpha", 120, "--callsign", "Alpha", "--side", "red")
+    flies("Alpha", 4)
+    bravo = start_bots(d, port, "bravo", 40, "--callsign", "Bravo", "--side", "red")
+    if not bravo.wait_for(r"^Bravo: refused: Redfor is full\.$", 60):
+        raise DriveError("Bravo's request for the full Redfor was not refused")
+    charlie = start_bots(d, port, "charlie", 120, "--callsign", "Charlie", "--side", "blue")
+    flies("Charlie", 0)
+    delta = start_bots(d, port, "delta", 120, "--callsign", "Delta", "--side", "blue")
+    flies("Delta", 1)
+    d.sleep(2)
+    stop_server(d, server)
+    for bot in (alpha, bravo, charlie, delta):
+        bot.finish(60, None)
+    alpha.expect(r"^Alpha: asking for Redfor$", "Alpha's side request")
+    bravo.expect(r"^Bravo: asking for Redfor$", "Bravo's side request")
+    charlie.expect(r"^Charlie: asking for Bluefor$", "Charlie's side request")
+    delta.expect(r"^Delta: asking for Bluefor$", "Delta's side request")
+    for bot in (alpha, charlie, delta):
+        bot.forbid(r"refused", "a refusal")
+    for bot in (alpha, bravo, charlie, delta):
+        bot.forbid(NET_BAD_BUT_REFUSALS, "a network problem")
+    bravo.forbid(r"^Bravo: seat \d+, plane", "a seat for the side that was full")
+    server.forbid(NET_BAD_BUT_REFUSALS, "a network problem")
+    log_must(
+        d, server_log(d), r"Bravo was refused .*: Redfor is full\.", r"Charlie took plane 0\b", r"Delta took plane 1\b",
+        forbid=NET_BAD_BUT_REFUSALS,
+    )
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -2127,6 +2178,13 @@ def scenarios() -> list[Scenario]:
             notes="`lock-sides balanced` in PvP: five bots are seated on the side with fewer humans (the lobby and the "
             "flying mission), a side request for the other side is refused, a kick re-deals nothing, and the next "
             "joiner fills the smaller side (the lobby pass, slice A1)",
+        ),
+        Scenario(
+            name="net-server-side-boxes", lane="net", args=[], driver=drive_side_boxes, uses=("server", "bot"),
+            timeout=300,
+            notes="a PvP mission with four Bluefor aircraft and one Redfor: `tore-bot --side` asks for a side like the "
+            "lobby's boxes; the Redfor request takes its only aircraft, a second one is refused as full, and Bluefor "
+            "requests take the lowest free aircraft (the lobby pass, slice L3)",
         ),
         Scenario(
             name="net-migrate-kill", lane="net", args=[], driver=drive_migrate_kill, uses=("bot",), timeout=420,

@@ -119,7 +119,7 @@ const BAR_HEIGHT: i32 = 17;
 /// The selection marker (`LISTHI`'s gold half) starts 4 pixels in and is 12
 /// square; row text starts 4 pixels after it.
 const MARKER: i32 = 4;
-/// How far a filled row's colour stops short of the bar's edge.
+/// How far a filled row's colour stops short of the bar's ends.
 const FILL_INSET: i32 = 2;
 const TEXT_ORIGIN: i32 = 20;
 
@@ -551,14 +551,11 @@ impl List {
                 continue;
             };
             if let Some([r, g, b]) = row.fill {
-                // The well filled behind the text, inside the bar's bevel.
+                // The well filled behind the text: rows 1 to 13 of the bar, the
+                // dark and near-black ones, inside the light edge above and
+                // the bevel below.
                 canvas.rect(
-                    (
-                        x + FILL_INSET,
-                        y + FILL_INSET,
-                        w - 2 * FILL_INSET,
-                        BAR_HEIGHT - 2 * FILL_INSET,
-                    ),
+                    (x + FILL_INSET, y + 1, w - 2 * FILL_INSET, BAR_HEIGHT - 4),
                     [r, g, b, 255],
                 );
             }

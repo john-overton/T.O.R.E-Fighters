@@ -364,6 +364,15 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
   `LISTHI` (24 by 12): see the table above. The `LISTMID` rows are: row 0 a
   light edge (73), rows 1 and 2 dark, rows 3 to 13 near black (12), rows 14 to 16
   a light bevel.
+- **List row fill** (lobby pass L3, 2026-10-09): a taken PvP slot paints the well
+  of its bar in its side's colour (royal blue 36, 81, 186 or bright red 210, 36,
+  40) under white text. The fill covers rows 1 to 13 of the 17 row bar, between
+  the light edge (row 0) and the bevel (rows 14 to 16), and stops 2 pixels short
+  of each end. `Row::filled` carries it; the row's own text colour is unchanged.
+- **Check box in a list's heading row** (lobby pass L3): the PvP side boxes use
+  `CHECK00` to `CHECK06` at 28 pixels, the label drawn by the screen in the
+  side's light colour (134, 182, 223 or 206, 113, 121); a disabled lamp is
+  drawn at half brightness.
 - **Scroll bar** (lobby pass L1, 2026-10-09): retail has no list scroll bar, its
   lists page with the PREV/NEXT rocker. The red bar John remembers is the Sound
   Prefs slider (`docs/spec/sound-prefs.md`, "Each slider is a track and a
