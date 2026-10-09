@@ -115,6 +115,23 @@ pub enum Readiness {
     TerrainMask,
 }
 impl Readiness {
+    /// Whether an AC-130 gun with this readiness releases rounds. Only the
+    /// states that make a shot impossible block it: safe, launcher lost,
+    /// failed, empty, the projectile limit, an empty group, and the gun's
+    /// own airframe in the way. Every other state is advisory: the rounds
+    /// leave along the actual barrel whether or not it is solved.
+    pub fn gun_may_fire(self) -> bool {
+        !matches!(
+            self,
+            Self::Safe
+                | Self::LauncherLost
+                | Self::StationFailed
+                | Self::Empty
+                | Self::Capacity
+                | Self::GroupEmpty
+                | Self::GunObscured
+        )
+    }
     pub fn label(self) -> &'static str {
         match self {
             Self::Ready => "READY",
@@ -3836,7 +3853,13 @@ impl State {
                 }) {
                     own.bay_release = None;
                 }
-                let allowed = own.release_readiness == Readiness::Ready && !bay_waits;
+                // An AC-130 gun fires with or without a solution; any other weapon
+                // needs READY.
+                let allowed = if grouped {
+                    own.release_readiness.gun_may_fire()
+                } else {
+                    own.release_readiness == Readiness::Ready
+                } && !bay_waits;
                 let station = &own.config.stations[index];
                 let w = &station.weapon;
                 let guided = w.seeker.signature != 0;
