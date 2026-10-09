@@ -13,7 +13,7 @@ pub enum Switch {
     Autopilot,
     WaypointAutopilot,
     /// Hover hold, the autopilot mode of the helicopters and the V-22 (VTOL
-    /// overhaul, slice P9). The flight ignores it until that slice lands.
+    /// overhaul, slice P9). Refused, with a message, on every other aircraft.
     HoverHold,
 }
 /// Extra powered-lift demands. Positions are 0..1 except signed vector yaw.
