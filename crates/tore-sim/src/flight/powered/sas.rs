@@ -78,7 +78,7 @@ pub const EASY_RETENTION_GAIN: f64 = 0.6;
 pub const EASY_RETENTION_AUTHORITY: f64 = 0.1;
 /// Attitude per full travel at the Attitude level, [pitch, bank], degrees
 /// (design 5.2: 30 and 45 at full stick).
-const ATTITUDE_PER_TRAVEL_DEGREES: [f64; 2] = [30., 45.];
+pub const ATTITUDE_PER_TRAVEL_DEGREES: [f64; 2] = [30., 45.];
 /// Heading error per full pedal at the Attitude level's heading hold,
 /// degrees (fitted).
 const HEADING_PER_TRAVEL_DEGREES: f64 = 30.;

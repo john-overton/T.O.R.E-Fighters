@@ -163,7 +163,7 @@ fn flight_help(tree: &[MenuNode]) -> Vec<String> {
         "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
         "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
         "T/Shift-T: radar target | Enter/apostrophe: visual target | Space: fire".into(),
-        "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
+        "A: heading/altitude | Ctrl-A: waypoint | Ctrl-Alt-A: hover hold".into(),
         "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
         "N: NAV/ILS mode | W/Shift-W: next/previous waypoint".into(),
         "Insert: chaff | Delete: flare (keypad 0 and . also work)".into(),

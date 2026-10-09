@@ -92,6 +92,10 @@ pub struct AutopilotTrace {
     /// Stick the flight model received, [pitch, roll, yaw]. Equal to `pilot`
     /// when the autopilot let go before steering.
     pub commanded: [f64; 3],
+    /// Collective lever position the flight model received while the
+    /// autopilot was engaged; hover hold and the rotorcraft heading and
+    /// waypoint modes write it.
+    pub collective: Option<f64>,
     /// Why the autopilot switched itself off during the step, if it did.
     pub released: Option<Release>,
 }
@@ -110,6 +114,15 @@ pub enum Release {
     PilotOverride,
     /// On the ground, or crashed.
     Ground,
+    /// Hover hold: the pilot moved the collective or the throttle.
+    PilotCollective,
+    /// Hover hold: the engine failed, stopped or ran out of fuel.
+    EngineFailure,
+    /// Hover hold: the hydraulics were lost.
+    HydraulicsLost,
+    /// The heading or waypoint mode of a helicopter, the V-22 or a vectoring
+    /// jet lost the speed it flies at.
+    TooSlow,
 }
 
 /// What the control system did to the stick (`Systems::controls`).

@@ -63,7 +63,12 @@ keys change with the aircraft ([the full table](INPUT.md#vtol-tiltrotor-and-heli
   attitude, and at the Attitude level Ctrl+arrows move that attitude
   instead of the trim; **Off** adds nothing. No level limits the attitude:
   full stick always wins. **Ctrl+Alt+A** is hover hold on the helicopters
-  and the V-22.
+  and the V-22 below 40 kt: it stops the drift, then holds the spot, the
+  heading and the height above the ground, through the controls. Any stick,
+  pedal or collective input cancels it; Ctrl+arrows move the held spot 10 ft
+  a tap. At 40 kt and above, **A** and **Ctrl+A** fly the helicopters and the
+  V-22 (height on the collective, speed on the cyclic, Ctrl+Up / Ctrl+Down
+  2 kt faster or slower). See [hover hold](spec/autopilot.md#hover-hold-helicopters-and-the-v-22).
 
 A stick button bound to **Trim set** makes the current stick plus trim the new
 trim and ignores the stick until it is back near centre, which turns a
@@ -124,6 +129,7 @@ gear is fixed. The Hind retains retractable gear. This is an explicit
 | Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
 | C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× slow motion | FA keys; fixed 120 Hz ticks, authored adapter time scaling |
 | A / Ctrl-A | Toggle heading/altitude hold / waypoint autopilot | [Autopilot behavior](spec/autopilot.md), requested USNF-ATF modes |
+| Ctrl-Alt-A | Toggle hover hold (helicopters and V-22, below 40 kt) | [Hover hold](spec/autopilot.md#hover-hold-helicopters-and-the-v-22), requested 2026-10-08 |
 | Ctrl-P | Pause/resume | FA menu |
 | Escape | Open/close in-flight menu; return one level from submenus/help | FA menu/manual |
 | Ctrl-Q | End mission and return to creator | FA menu; does not quit the application |
