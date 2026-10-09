@@ -67,6 +67,8 @@ const SHADOW: [u8; 4] = [57, 57, 57, 255];
 const EDGE: [u8; 4] = [24, 24, 24, 255];
 const HIGHLIGHT: [u8; 4] = [113, 113, 113, 255];
 const GROOVE: [u8; 4] = [12, 12, 12, 255];
+/// The top bar's first row, lighter than the dark under it.
+const LIP: [u8; 4] = [32, 32, 32, 255];
 
 /// What the bar needs to know about the content it scrolls, in the owner's
 /// own units (rows, or text lines).
@@ -272,17 +274,22 @@ impl ScrollBar {
 fn flat(canvas: &mut Canvas, (x, y, w, h): Rect) {
     canvas.rect((x, y, w, h), FACE);
     // The slot's box: x 2 to 31 of the 34, from 2 rows down to 7 above the
-    // bottom.
+    // bottom. Its top is a bar four rows deep that runs the full width and
+    // joins the left wall in one corner (measured on `SLIDETOP`: a bevel line
+    // on row 1, then 32, 12, 12 and a fade to the slot's face on rows 2 to 5).
+    // A wall that starts above the bar's top row shows as a small black lip.
     let (top, bottom) = (y + 2, y + h - 7);
     let rows = bottom - top;
+    canvas.rect((x + 2, y + 1, 29, 1), SHADOW);
     canvas.rect((x + 2, top, 1, rows), EDGE);
     canvas.rect((x + 3, top, 2, rows), GROOVE);
-    // The top lip: the dark runs across for two rows.
+    canvas.rect((x + 3, top, 28, 1), LIP);
     canvas.rect((x + 3, top + 1, 28, 2), GROOVE);
+    canvas.rect((x + 5, top + 3, 26, 1), [40, 40, 40, 255]);
     // The groove down the middle, 2 wide, with its edges.
-    canvas.rect((x + 15, top + 3, 1, rows - 3), SHADOW);
-    canvas.rect((x + 16, top + 3, 2, rows - 3), GROOVE);
-    canvas.rect((x + 18, top + 3, 1, rows - 3), HIGHLIGHT);
+    canvas.rect((x + 15, top + 4, 1, rows - 4), SHADOW);
+    canvas.rect((x + 16, top + 4, 2, rows - 4), GROOVE);
+    canvas.rect((x + 18, top + 4, 1, rows - 4), HIGHLIGHT);
     // The right edge, and the bottom's shadow and highlight.
     canvas.rect((x + 31, top + 2, 1, rows - 2), SHADOW);
     canvas.rect((x + 32, top + 2, 1, rows - 1), HIGHLIGHT);
@@ -491,6 +498,19 @@ mod tests {
         assert_eq!(at(&pixels, 100 + 18, 50 + 80), [113; 3]);
         assert_eq!(at(&pixels, 100 + 31, 50 + 60), [57; 3]);
         assert_eq!(at(&pixels, 100 + 25, 50 + 60), [81; 3]);
+        // The slot's top is one bar that runs into the left wall: no wall
+        // sticks up above it as a lip (John, 2026-10-09), and the bar is as
+        // deep at the corner as along the top.
+        for row in [2, 3, 4] {
+            assert_eq!(
+                at(&pixels, 100 + 3, 50 + row),
+                at(&pixels, 100 + 12, 50 + row),
+                "row {row}"
+            );
+        }
+        assert_eq!(at(&pixels, 100 + 3, 50 + 1), [57; 3], "the bevel line");
+        assert_eq!(at(&pixels, 100 + 3, 50 + 2), [32; 3]);
+        assert_eq!(at(&pixels, 100 + 3, 50 + 3), [12; 3]);
         // The knob is the retail piece.
         assert_eq!(at(&pixels, 110, 60), tone_of(&kit, "SLIDERV"));
         // Nothing past the rectangle.
