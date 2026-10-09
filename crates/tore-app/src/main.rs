@@ -1310,6 +1310,10 @@ impl App {
             "master-arm" => Command::None, // Retired binding in older profiles.
             "jettison" => Command::Combat(tore_sim::combat::live::Command::Jettison),
             "range-target" => Command::RangeReset,
+            "sight-designate" => Command::SightDesignate,
+            "sight-pin" => Command::SightPinGround,
+            "sight-zoom-in" => Command::SightZoom(1),
+            "sight-zoom-out" => Command::SightZoom(-1),
             "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
             "fail-station" => Command::Combat(tore_sim::combat::live::Command::FailStation),
             "damage-report" => Command::DamageReport,
@@ -1697,6 +1701,51 @@ impl App {
             }
             Command::RangeReset => {
                 self.queue(seats::SeatCommand::RangeReset);
+                Action::None
+            }
+            // Retail's Backslash designates the IR/laser target, which only
+            // the AC-130's gunsight has here; the other aircraft say so like
+            // the other retail keys whose feature is missing. The pin key
+            // and the zoom keys are the same on every aircraft but act on
+            // the gunsight alone.
+            Command::SightDesignate | Command::SightPinGround if !self.input.gunsight() => {
+                self.flight_ui
+                    .message(if command == Command::SightDesignate {
+                        "IR/laser designate: not implemented yet"
+                    } else {
+                        "Pin ground point: AC-130 gunsight only"
+                    });
+                Action::Click
+            }
+            Command::SightZoom(_) if !self.input.gunsight() => {
+                self.flight_ui
+                    .message("Bomb camera zoom: not implemented yet");
+                Action::Click
+            }
+            Command::SightDesignate | Command::SightPinGround => {
+                // S5 completion, after S1 merges: queue the sim command, as
+                // the Combat arm does for the other designations:
+                //     self.queue(seats::SeatCommand::Combat(match command {
+                //         Command::SightDesignate => Live::SightDesignate,
+                //         _ => Live::SightPinGround,
+                //     }));
+                // with `use tore_sim::combat::live::Command as Live;`.
+                Action::None
+            }
+            Command::SightZoom(steps) => {
+                let before = self.input.sight().1;
+                let zoom = self.input.zoom_sight(steps);
+                if zoom == before {
+                    self.flight_ui.message(format!(
+                        "Gunsight zoom {zoom} of {}, the limit",
+                        tore_input::sight::ZOOM_STEPS
+                    ));
+                } else {
+                    self.flight_ui.message(format!(
+                        "Gunsight zoom {zoom} of {}",
+                        tore_input::sight::ZOOM_STEPS
+                    ));
+                }
                 Action::None
             }
             Command::SoundOpen => {
