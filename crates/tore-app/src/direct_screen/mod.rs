@@ -1104,6 +1104,9 @@ impl DirectScreen {
         ] {
             button.pointer_move(point);
         }
+        if let Some(p) = self.pointer {
+            self.messages.drag(p);
+        }
     }
 
     /// The left mouse button went down or up at the pointer.
@@ -1166,6 +1169,7 @@ impl DirectScreen {
         }
         // Released.
         self.games.release(now);
+        self.messages.release();
         if self.full.release(p, now) == Wo::Changed {
             self.rebuild_games();
             self.save();
@@ -1199,6 +1203,7 @@ impl DirectScreen {
         let off = (-1, -1);
         let now = Instant::now();
         self.games.release(now);
+        self.messages.release();
         self.full.release(off, now);
         for button in [
             &mut self.new,

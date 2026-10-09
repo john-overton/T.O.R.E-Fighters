@@ -1269,6 +1269,9 @@ impl InternetScreen {
         ] {
             button.pointer_move(point);
         }
+        if let Some(p) = self.pointer {
+            self.messages.drag(p);
+        }
     }
 
     /// The left mouse button went down or up at the pointer.
@@ -1332,6 +1335,7 @@ impl InternetScreen {
         }
         // Released.
         self.games.release(now);
+        self.messages.release();
         if self.full.release(p, now) == Wo::Changed || self.other.release(p, now) == Wo::Changed {
             self.filters_changed();
         }
@@ -1361,6 +1365,7 @@ impl InternetScreen {
         let off = (-1, -1);
         let now = Instant::now();
         self.games.release(now);
+        self.messages.release();
         self.full.release(off, now);
         self.other.release(off, now);
         for button in [
