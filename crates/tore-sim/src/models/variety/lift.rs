@@ -26,16 +26,11 @@ pub enum LiftKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PoweredLift {
     pub kind: LiftKind,
-    // The fitted attitude-hold law of the variety import (docs/spec/
-    // variety-flight.md, "Powered lift and controls"). Slices P2 and P4
-    // replace that law and retire these fields.
+    /// Share of the PT's military thrust the airborne-start collective
+    /// assumes (the variety import's fitted lift; the force laws of the
+    /// slices since carry their own power). The attitude-hold law's other
+    /// fields were retired by slice P8b.
     pub efficiency: f64,
-    pub additional_lift_lbf: f64,
-    pub response_seconds: f64,
-    pub pitch_degrees: f64,
-    pub bank_degrees: f64,
-    pub yaw_degrees_per_second: f64,
-    pub horizontal_damping: f64,
     /// The rigid body every kind flies on.
     pub body: BodyParameters,
     /// The rotor system: helicopters and the V-22.
@@ -368,33 +363,18 @@ impl PoweredLift {
     /// configuration built from it.
     pub fn for_aircraft(a: &Aircraft, c: &Configuration) -> Option<Self> {
         use AircraftId::*;
-        let (
-            kind,
-            efficiency,
-            additional_lift_lbf,
-            response_seconds,
-            pitch_degrees,
-            bank_degrees,
-            yaw_degrees_per_second,
-            horizontal_damping,
-        ) = match a.id {
-            Av8 => (LiftKind::VectorJet, 1., 0., 0.35, 20., 25., 35., 0.06),
-            Yak141 => (LiftKind::VectorJet, 1., 18000., 0.45, 20., 25., 30., 0.07),
-            V22 => (LiftKind::Tiltrotor, 1.10, 0., 0.65, 20., 25., 30., 0.10),
-            Ah64 => (LiftKind::Helicopter, 0.98, 0., 0.45, 20., 30., 45., 0.14),
-            Mi24 => (LiftKind::Helicopter, 0.84, 0., 0.60, 18., 25., 35., 0.12),
-            Ch47 => (LiftKind::Helicopter, 0.245, 0., 0.85, 15., 20., 25., 0.10),
+        let (kind, efficiency) = match a.id {
+            Av8 => (LiftKind::VectorJet, 1.),
+            Yak141 => (LiftKind::VectorJet, 1.),
+            V22 => (LiftKind::Tiltrotor, 1.10),
+            Ah64 => (LiftKind::Helicopter, 0.98),
+            Mi24 => (LiftKind::Helicopter, 0.84),
+            Ch47 => (LiftKind::Helicopter, 0.245),
             _ => return None,
         };
         Some(Self {
             kind,
             efficiency,
-            additional_lift_lbf,
-            response_seconds,
-            pitch_degrees,
-            bank_degrees,
-            yaw_degrees_per_second,
-            horizontal_damping,
             body: body(a.id)?,
             rotor: rotor(a.id, c),
             jet: jet(a),

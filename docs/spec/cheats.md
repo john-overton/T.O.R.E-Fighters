@@ -131,23 +131,38 @@ punish a careless pilot removed. Fixed-wing aircraft ignore it. It turns off:
 
 | Hazard | With the cheat on |
 | --- | --- |
-| Main rotor torque | Torque and the tail rotor's imbalance cancel; a collective change does not yaw the aircraft |
+| Main rotor torque | Torque and the tail rotor's imbalance cancel; a collective change does not yaw the aircraft. The CH-47's two rotors and the V-22's two proprotors turn opposite ways and cancel anyway, so for them nothing changes |
 | Vortex ring state | Momentum inflow only: no extra sink, no buffet, no loss of cyclic authority, so full collective arrests a vertical descent |
 | Retreating blade stall | No pitch-up, roll or thrust loss past the never-exceed speed; the vibration cue (shake and `blade_stall` warning) stays |
-| Rotor stall | Rotor speed cannot fall below 85 percent in flight, so an engine failure never makes the rotor unrecoverable (autorotation still needs the collective down to keep lift); on the ground it is not held |
+| Rotor stall | Rotor speed cannot fall below 85 percent in flight (the V-22 on its downstops flies at 84 percent, so its floor is 84), so an engine failure never makes the rotor unrecoverable (autorotation still needs the collective down to keep lift); on the ground it is not held |
 | Harrier and Yak-141 low-speed roll-off | The intake momentum drag's yawing moment and the jet-induced dihedral are removed |
 | Undamped puffers at stability level Off | A jet at Off gets the Damper's rate damping on its puffers (hydraulics permitting). Helicopters at Off stay at Off |
 | Dynamic rollover | Off; tipping on the ground follows the normal contact rules |
 
+Measured on the starting values (design document, P8 and P8b notes). With the
+cheat on, a 30 percent collective step with the pedals fixed turns the CH-47
+under 1 degree a second (0.4 without the cheat at Off, the two rotors' torques
+cancel either way) and the AH-64 under 1 (against 26). Full collective stops a
+vertical descent at one hover induced velocity in 0.6 s (CH-47), 2.4 s (V-22)
+and 1.9 s (Mi-24), against more than 3 s with the hazard; the AH-64 takes 5.9
+s because its rotor responds slowly. A CH-47 dived past its never-exceed speed
+pitches up 7 degrees in 2 s with the cheat against 23 without. Level top
+speed, climb rate and the loaded-jet hover limit are the same with the cheat
+on (within 1 percent for the CH-47 and V-22 top speeds, within 2 percent for
+their climb rates).
+
 It also gives the helicopters, and the V-22 in proportion to its helicopter
 mode, a weak **attitude retention** at stability levels Damper and Off
 (opinionated, John, 2026-10-08; fitted). Release the stick and pitch and roll
-slowly return to the trim attitude: the Attitude level's hold at 0.6 of its
+slowly return to the trim attitude. The V-22's share of it is full with the
+nacelles at 75 degrees and above, fades out to nothing by 30 degrees and is
+absent in airplane mode (which has its own handling). Where it acts it is the Attitude level's hold at 0.6 of its
 gain and limited to 10 percent of travel (the Damper's cap is 20), so a few
 taps of forward cyclic trim (Ctrl+Up) settle the aircraft in steady forward
 flight hands-off. With the cheat on the cyclic trim keys move the cyclic and
 the attitude it returns to together (10 percent of trim is 5 degrees of
-pitch), and Trim set captures the current attitude. It holds nothing else:
+pitch), and Trim set captures the current attitude. A CH-47 with 10 percent
+of forward trim settles at about 130 kt at Off and 157 at Damper. It holds nothing else:
 no speed, height, position or heading, and it does not hover the aircraft.
 The Damper itself stays rate damping only, and with the cheat off nothing
 changes. The AH-64 with 10 percent of forward trim settles at about 90 kt.
