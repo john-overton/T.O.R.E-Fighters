@@ -6,7 +6,8 @@
 //! revival may retire), the retired planes' roster entries (the results keep
 //! a row for each), the planes revivals added (which the mission identity
 //! leaves out), and each added plane's lineage root (slice R1's AI respawn).
-//! The lists keep their order: the oldest wreck is the first retired.
+//! The lists keep their order: the oldest wreck is the first retired. The
+//! lead hold (slice R2) follows them, coded in `lead_hold_checkpoint.rs`.
 
 use super::{Book, LostPlane};
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
@@ -24,11 +25,14 @@ impl Checkpoint for Book {
             retired,
             added,
             roots,
+            lead_hold,
         } = self;
         lost.save(s, None)?;
         retired.save(s, None)?;
         added.save(s, None)?;
-        roots.save(s, None)
+        roots.save(s, None)?;
+        // The lead hold (slice R2), after the lists.
+        lead_hold.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -37,6 +41,7 @@ impl Checkpoint for Book {
             retired: Checkpoint::load(l, None)?,
             added: Checkpoint::load(l, None)?,
             roots: Checkpoint::load(l, None)?,
+            lead_hold: Checkpoint::load(l, None)?,
         };
         // A plane is abandoned once and retired once, and a retired plane is
         // no longer abandoned: damaged bytes that break this are refused.
@@ -113,6 +118,7 @@ mod tests {
             roots: [(12, 0), (13, 0), (14, 4)]
                 .map(|(plane, root)| (PlaneId(plane), PlaneId(root)))
                 .into(),
+            lead_hold: Default::default(),
         }
     }
 

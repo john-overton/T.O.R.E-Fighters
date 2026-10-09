@@ -1814,6 +1814,9 @@ flight re-forms on the new leader.
   whether the previous leader's pilot is alive: ejected and unhurt) becomes a
   `Chatter::Leadership` event, and the radio journals it (`Cause::Leadership`).
   For an AI new leader that is all there is.
+- In a game with revival the lead hold (the lobby pass's slice R2) keeps a
+  human lead's lead while it is down and gives it back on revival; see
+  "The lead hold" under "Death, revival and lives".
 
 *Mission of opportunity (aircraft pass, John's decision of 2026-09-30).* When
 a human's lead passes to an AI aircraft, `refresh_leaders` starts an
@@ -6366,6 +6369,66 @@ a wingman of its current lead). Agent decisions unless marked:
   `lineage_heads` and `head_lost` give a flight's original members and when
   one is dead or respawning; `Host::lineage_holder` gives the seat that
   holds a member.
+
+**The lead hold** (the lobby pass's slice R2, *built 2026-10-09*; John's
+rules of 2026-10-09: a human lead keeps the flight's lead while dead,
+respawning or travelling back, a stand-in leads meanwhile and the lead returns
+on revival; when the lead leaves the game it goes to the next human in the
+flight, else the AI loop goes on; AI wingmen re-form on a returning lead
+unless engaged in combat, and engaged ones finish their fight first). The
+behaviour is in the [AI spec](spec/ai.md#lead-hold-in-games-with-revival);
+the rest is agent decisions unless marked:
+
+- **On and off.** The host turns the mission core's hold on
+  (`MissionCommand::LeadHold { on }`, journal variant 7) while the King's
+  `respawn` is not `none`, co-op and PvP alike. Single player has no host and
+  never turns it on, so its succession, ticks and fingerprints are today's.
+- **Owners** (`world/lead_hold.rs`, coded after the book in the revival
+  section). A wing's owner is a seat (`LeadOwner::Seat`), or the plane the AI
+  flies for an away or dropped player (`LeadOwner::Away`), with the owner's
+  newest plane in the wing and whether it has led since it became owner. A
+  wing gains an owner after an AI step when a human flies its leading plane
+  (the start, a handoff, a succession), or when its AI lead is lost while the
+  only humans in the flight wait to revive (the lowest by member, then seat).
+  A stand-in is never made owner.
+- **Claims** (`tore_sim::ai::mission::LeadClaim`). Before each AI step the
+  world hands the mission every owned wing's claim: the owner's current
+  plane in the wing, lost or flying, or none, and whether the owner has led.
+  `refresh_leaders` crowns a claimed plane that flies and does not lead
+  (`AiMission::reclaim`): the mission of opportunity ends, the flight
+  re-forms in member order, each AI wingman flies back into formation, and
+  one with a target is put on `reform_after` and re-forms once its fight is
+  over (John, 2026-10-09). Any other leader of a claimed wing is a stand-in
+  (`WingLeader::acting`). With no claims the code path is today's.
+- **Leaving.** A GiveBack makes a seat owner an away owner of the plane,
+  which keeps its lead; taking it back (Take) or reviving from it
+  (ReviveLost) makes the taker's seat the owner again. Each tick the host
+  sends `MissionCommand::LeadLeft { owner }` (journal variant 8) for each
+  owner no player in the game holds: a seat no peer (not closing) flies,
+  takes, has held or has pending, or an away plane `Host::lineage_holder`
+  gives to the AI. A plane given back this tick waits a tick. The world
+  passes each of its wings to the next human in the flight (by member, then
+  seat), else clears the owner and the current leader leads as an ordinary
+  one. An owner whose seat flies in another wing now (an `ai-slot` revival
+  elsewhere) has left the flight the same way. A player who leaves the
+  flight for the lobby with a living plane has left it too; one who leaves
+  with a lost plane keeps its held seat and the lead.
+- **HUD lines** (`radio_calls.rs`, text only): a human stand-in reads "You
+  lead the flight until Red one flies again." (the owner's newest plane by
+  its radio label: the mission core has no callsigns), an owner given the
+  lead back "You lead your flight again."; neither hears "You're the
+  Wingleader now" (`Chatter::Leadership` is not raised for either). A new
+  owner taking the lead hears today's call.
+- **The log**: "Blue 1 lead belongs to Viper", "Blue 1 lead passes to plane
+  1 (AI), standing in for Viper", "Blue 1 lead goes back to Viper in plane
+  12", "Blue 1 lead is kept for Viper (away), the AI flying plane 0", "Blue 1
+  lead's owner, Viper, has left the game: the lead passes on", "Blue 1 lead
+  has no owner now: the flight's own succession leads it" (`LobbyEvent::Lead`).
+- **Checkpoints and the journal.** The hold and its owners (revival
+  section), the mission's claims, `reform_after` and each leader's `acting`
+  (AI wings section) are exact-coded; the host's state needs nothing new (a
+  scratch list of the owners before a step, for the log). A standby replays
+  the two commands.
 
 ##### Scoring
 

@@ -407,3 +407,7 @@ fn a_late_joiner_is_told_of_every_spawned_plane() {
 // The lobby pass's slice R1: AI respawn, on this file's rig.
 #[path = "ai_respawn_tests.rs"]
 mod ai_respawn_tests;
+
+// The lobby pass's slice R2: the lead hold, on this file's rig.
+#[path = "lead_hold_tests.rs"]
+mod lead_hold_tests;

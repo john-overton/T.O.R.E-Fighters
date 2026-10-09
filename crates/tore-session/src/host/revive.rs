@@ -37,6 +37,15 @@
 //!   plane the AI flew for an away or dropped player is that player's
 //!   revival, never the AI's. Human revivals come first each tick; an AI
 //!   respawn waits for room.
+//! - **The lead hold** (the lobby pass's slice R2, John 2026-10-09): in a
+//!   game whose `respawn` is not `none` the host turns the mission core's
+//!   lead hold on ([`MissionCommand::LeadHold`]), so a human lead keeps its
+//!   flight's lead while dead, reviving or flying back
+//!   (`tore_world::world::lead_hold`). Each tick it tells the world of every
+//!   owner who has left the game ([`MissionCommand::LeadLeft`]): a seat no
+//!   player in the game holds any more, or a plane the AI flew for a player
+//!   that no player is kept for now. The log says who leads and who owns
+//!   each flight's lead as it changes.
 
 use super::{ConnectionId, Host, Life, LobbyEvent, Stage, TICKS_PER_SECOND, aircraft_of};
 use crate::settings::Respawn;
@@ -45,6 +54,7 @@ use std::collections::BTreeMap;
 use tore_sim::ai::launch::Side;
 use tore_sim::sensors::FEET_PER_NAUTICAL_MILE;
 use tore_world::seats::{Pilot, PlaneId, SeatId};
+use tore_world::world::lead_hold::{LeadOwner, Owned};
 use tore_world::world::revive::{NewPlane, Spawn};
 use tore_world::world::{MissionCommand, TickOutput};
 
@@ -139,6 +149,9 @@ pub(super) struct Revivals {
     /// The AI respawns this tick's commands make, by root, with their spawn:
     /// scratch, as `making`.
     respawning: Vec<(PlaneId, Spawn)>,
+    /// The lead hold's owners before this tick's step, for the log of what
+    /// changed (slice R2): scratch, as `making`.
+    pub(super) lead_before: Vec<Owned>,
 }
 
 fn side_index(side: Side) -> usize {
@@ -528,6 +541,8 @@ impl Host {
         }
         // Then the AI's respawns, with the room the humans left (slice R1).
         self.ai_respawn_commands(tick, commands);
+        // The lead hold, after the abandons of players gone (slice R2).
+        self.lead_hold_commands(commands);
     }
 
     /// A revival's new plane at the next tick, or the player told why not
@@ -734,6 +749,8 @@ impl Host {
         }
         // The AI's respawns (slice R1).
         self.ai_respawn_after(tick);
+        // The lead hold's changes, for the log (slice R2).
+        self.lead_hold_after();
         // Retired planes leave the list a joiner is sent.
         let roster = &self.world.roster;
         self.revival
@@ -1016,6 +1033,170 @@ impl Host {
             nm(bounds.min[1]),
             nm(bounds.max[1]),
         )
+    }
+}
+
+/// "Blue 1": a wing as the logs name it (slice R2).
+fn wing_label(wing: tore_sim::ai::launch::WingId) -> String {
+    let side = match wing.side {
+        Side::Friendly => "Blue",
+        Side::Enemy => "Red",
+    };
+    format!("{side} {}", u32::from(wing.index) + 1)
+}
+
+impl Host {
+    /// The lead hold's commands for the tick (the lobby pass's slice R2): on
+    /// while the King's `respawn` is not `none`, off otherwise (single
+    /// player has no host and never has it); and each owner who has left the
+    /// game is told to the world, which passes its lead on.
+    fn lead_hold_commands(&mut self, commands: &mut Vec<MissionCommand>) {
+        self.revival.lead_before = self.world.lead_owners().to_vec();
+        let on = self.settings.respawn() != Respawn::None;
+        if self.world.lead_hold() != on {
+            commands.push(MissionCommand::LeadHold { on });
+        }
+        if !self.world.lead_hold() {
+            return;
+        }
+        for owned in self.world.lead_owners().to_vec() {
+            // A seat whose plane goes back to the AI this tick: the world
+            // keeps the lead for the plane's player, and the next tick asks
+            // again whether anyone is kept for it.
+            let given_back = commands.iter().any(|command| {
+                matches!((command, owned.owner),
+                    (MissionCommand::GiveBack { seat }, LeadOwner::Seat(owner)) if *seat == owner)
+            });
+            if given_back || self.lead_owner_here(owned.owner) {
+                continue;
+            }
+            let words = format!(
+                "lead's owner, {}, has left the game: the lead passes on",
+                self.owner_words(owned.owner)
+            );
+            self.lobby_log(wing_label(owned.wing), LobbyEvent::Lead(words));
+            commands.push(MissionCommand::LeadLeft { owner: owned.owner });
+        }
+    }
+
+    /// Whether the player behind a lead `owner` is still in the game: a
+    /// player (not closing) flies from, takes with, or has held or pending
+    /// the seat; or a player is still kept for the plane the AI flies (an
+    /// away or dropped player, or one back to revive from it).
+    fn lead_owner_here(&self, owner: LeadOwner) -> bool {
+        match owner {
+            LeadOwner::Seat(seat) => {
+                self.peers.values().any(|peer| match peer.stage {
+                    Stage::Closing { .. } => false,
+                    Stage::Taking { seat: taking, .. } => taking == seat,
+                    _ => peer.seat == Some(seat),
+                }) || self.revival.held_seats().any(|held| held == seat)
+                    || self.revival.pending_seats().any(|pending| pending == seat)
+            }
+            LeadOwner::Away(plane) => !matches!(self.lineage_holder(plane), Holder::Ai),
+        }
+    }
+
+    /// The player behind a lead owner, for the log.
+    fn owner_words(&self, owner: LeadOwner) -> String {
+        match owner {
+            LeadOwner::Seat(seat) => self
+                .peers
+                .values()
+                .find(|peer| peer.seat == Some(seat))
+                .map(|peer| peer.callsign.clone())
+                .or_else(|| self.held_callsign(seat))
+                .unwrap_or_else(|| format!("the player of seat {}", seat.0)),
+            LeadOwner::Away(plane) => match self.reserved_for(plane) {
+                Some(callsign) => format!("{callsign} (away)"),
+                None => format!("the player of plane {}", plane.0),
+            },
+        }
+    }
+
+    /// A plane as the lead hold's log names it: its player and the plane,
+    /// or the plane and the AI.
+    fn leader_words(&self, plane: PlaneId) -> String {
+        match self.world.roster.seat_of(plane) {
+            Some(seat) => format!(
+                "{} in plane {}",
+                self.owner_words(LeadOwner::Seat(seat)),
+                plane.0
+            ),
+            None => format!("plane {} (AI)", plane.0),
+        }
+    }
+
+    /// After the step (slice R2): each lead change of the tick and each
+    /// change of a wing's owner, for the log. Nothing with the hold off.
+    fn lead_hold_after(&mut self) {
+        let before = std::mem::take(&mut self.revival.lead_before);
+        if !self.world.lead_hold() {
+            return;
+        }
+        let changes = self
+            .world
+            .ai_wings
+            .as_ref()
+            .map(|wings| wings.last_output().leadership.clone())
+            .unwrap_or_default();
+        for change in changes {
+            let wing = tore_sim::ai::launch::WingId {
+                side: if change.side == tore_world::ai_wings::ENEMY_SIDE {
+                    Side::Enemy
+                } else {
+                    Side::Friendly
+                },
+                index: change.wing,
+            };
+            let leader = self.leader_words(PlaneId(change.leader));
+            let words = if change.reclaimed {
+                format!("lead goes back to {leader}")
+            } else if change.acting {
+                let owner = self
+                    .world
+                    .lead_owner(wing)
+                    .map_or_else(|| "its owner".to_owned(), |o| self.owner_words(o));
+                format!("lead passes to {leader}, standing in for {owner}")
+            } else {
+                format!("lead passes to {leader}")
+            };
+            self.lobby_log(wing_label(wing), LobbyEvent::Lead(words));
+        }
+        let after = self.world.lead_owners().to_vec();
+        for owned in &after {
+            let was = before
+                .iter()
+                .find(|b| b.wing == owned.wing)
+                .map(|b| b.owner);
+            if was == Some(owned.owner) {
+                continue;
+            }
+            let words = match owned.owner {
+                LeadOwner::Seat(_) => {
+                    format!("lead belongs to {}", self.owner_words(owned.owner))
+                }
+                // Kept for an away or dropped player; a plane nobody is kept
+                // for is told as left at the next tick.
+                LeadOwner::Away(plane) if self.reserved_for(plane).is_some() => format!(
+                    "lead is kept for {}, the AI flying plane {}",
+                    self.owner_words(owned.owner),
+                    plane.0
+                ),
+                LeadOwner::Away(_) => continue,
+            };
+            self.lobby_log(wing_label(owned.wing), LobbyEvent::Lead(words));
+        }
+        for was in &before {
+            if !after.iter().any(|owned| owned.wing == was.wing) {
+                self.lobby_log(
+                    wing_label(was.wing),
+                    LobbyEvent::Lead(
+                        "lead has no owner now: the flight's own succession leads it".into(),
+                    ),
+                );
+            }
+        }
     }
 }
 

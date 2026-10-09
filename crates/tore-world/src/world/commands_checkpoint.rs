@@ -1,5 +1,7 @@
 //! The coders of the mission's commands and what they carry: the settings,
-//! a revival's spawn and its loadout (stage K slice K0).
+//! a revival's spawn and its loadout (stage K slice K0), and the lead hold's
+//! two (the lobby pass's slice R2; the owner's coder is in
+//! `lead_hold_checkpoint.rs`).
 //!
 //! The host's journal records each tick's mission commands as given, and a
 //! standby replays them (docs/ARCHITECTURE.md, "The journal: one door into
@@ -77,6 +79,14 @@ impl Checkpoint for MissionCommand {
                 root.save(s, None)?;
                 spawn.save(s, None)
             }
+            MissionCommand::LeadHold { on } => {
+                s.writer().write_varint(7);
+                on.save(s, None)
+            }
+            MissionCommand::LeadLeft { owner } => {
+                s.writer().write_varint(8);
+                owner.save(s, None)
+            }
         }
     }
 
@@ -106,6 +116,12 @@ impl Checkpoint for MissionCommand {
                 root: Checkpoint::load(l, None)?,
                 spawn: Checkpoint::load(l, None)?,
             },
+            7 => MissionCommand::LeadHold {
+                on: Checkpoint::load(l, None)?,
+            },
+            8 => MissionCommand::LeadLeft {
+                owner: Checkpoint::load(l, None)?,
+            },
             other => return invalid(format!("a mission command has no variant {other}")),
         })
     }
@@ -115,6 +131,7 @@ impl Checkpoint for MissionCommand {
 mod tests {
     use super::*;
     use crate::seats::{PlaneId, SeatId};
+    use crate::world::lead_hold::LeadOwner;
     use tore_sim::checkpoint::{Models, from_bytes, round_trip, to_bytes};
 
     fn spawn() -> Spawn {
@@ -180,6 +197,14 @@ mod tests {
                 root: PlaneId(9),
                 spawn: Box::new(spawn()),
             },
+            MissionCommand::LeadHold { on: true },
+            MissionCommand::LeadHold { on: false },
+            MissionCommand::LeadLeft {
+                owner: LeadOwner::Seat(SeatId(4)),
+            },
+            MissionCommand::LeadLeft {
+                owner: LeadOwner::Away(PlaneId(12)),
+            },
         ]
     }
 
@@ -213,9 +238,9 @@ mod tests {
         let body = s.finish_section();
         let mut l = Loader::new(&body, &[], &models);
         assert!(MissionCommand::load(&mut l, None).is_err());
-        // No variant 7.
+        // No variant 9.
         let mut s = Saver::new();
-        s.writer().write_varint(7);
+        s.writer().write_varint(9);
         let body = s.finish_section();
         let mut l = Loader::new(&body, &[], &models);
         assert!(MissionCommand::load(&mut l, None).is_err());
