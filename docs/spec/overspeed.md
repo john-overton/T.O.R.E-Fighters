@@ -26,7 +26,7 @@ is a performance figure fitted to its published level speed (the AH-64's 158 kt,
 the Mi-24's 178 kt), well under the speed at which its airframe is at risk. For
 the aircraft whose rotor table sets a structural speed, the limit is that speed
 instead, in true airspeed, with everything else in this document unchanged: the
-AH-64 at 197 kt and the Mi-24 at 190 kt, their never-exceed speeds (Vne). The
+AH-64 at 197 kt, the Mi-24 at 190 kt and the CH-47 at 190 kt (fitted), their never-exceed speeds (Vne). The
 rotor's retreating blade stall starts at the same speed at the reference blade
 loading, and earlier when the blades are loaded harder or the air is thin, so a
 dive toward Vne shows the stall (vibration, nose up, roll toward the retreating
@@ -34,7 +34,7 @@ blade) before the five safe seconds begin. The envelope still supplies the
 ceiling rule: above the top of the 1 G polygon there is no limit and the timer
 resets. The speed is `structural_kt` in the rotor table of
 `crates/tore-sim/src/models/variety/lift.rs`; `None` keeps the envelope's top
-speed, which is what the CH-47 and V-22 do until their own slices set a value.
+speed, which is what the V-22 does until its own slice sets a value.
 It applies on the hybrid adapter only, so the legacy adapter, the restricted
 native path and every fixed-wing aircraft are unchanged.
 

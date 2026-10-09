@@ -10,8 +10,9 @@
 //!   player's restart, an AI actor put on the hybrid model (which is what a
 //!   multiplayer seat is until a human takes it) and a revival.
 //!   - A single-rotor helicopter gets the trim of
-//!     [`State::trim_single_rotor`]: collective, cyclic and pedals, the
-//!     rotor governed at 100 percent, the body at rest.
+//!     [`State::trim_single_rotor`], the CH-47 that of [`State::trim_tandem`]:
+//!     collective, cyclic and pedals, the rotors governed at 100 percent,
+//!     the body at rest.
 //!   - A vectoring jet gets its nozzles at 0, its lift engines off and a
 //!     wingborne trim: the throttle that balances its drag and the pitch
 //!     that makes its wing carry its weight, both found by probing the
@@ -25,14 +26,15 @@
 //!   nowhere else); a jet has its nozzles at 0 and its engine at idle. No
 //!   cold start.
 //!
-//! The CH-47 and the V-22 still fly the old fitted law (slices P3 and P5
-//! replace it), so they keep their hover start; their hooks are marked
-//! `TODO(P3)` and `TODO(P5)`.
+//! The V-22 still flies the old fitted law (slice P5 replaces it), so it
+//! keeps its hover start; its hooks are marked `TODO(P5)`. The CH-47 starts
+//! like the single-rotor helicopters ([`State::trim_tandem`]).
 
 use super::{
     helicopter::{Instant, SingleRotor},
     rotor::{self, Hazards},
     state::Rotor,
+    tandem::{self, Tandem},
 };
 use crate::{
     attitude::{Basis, dot, unit},
@@ -42,13 +44,12 @@ use crate::{
 };
 
 /// Whether an aircraft starts airborne in trimmed forward flight now: the
-/// single-rotor helicopters and the vectoring jets.
+/// helicopters (single-rotor and the tandem CH-47) and the vectoring jets.
 ///
-/// TODO(P3): the CH-47 joins this when its tandem law lands.
 /// TODO(P5): the V-22 joins this when its tiltrotor law lands (airplane
 /// mode at about 180 KCAS with the nacelles on the downstops).
 pub fn starts_in_forward_flight(lift: &PoweredLift, c: &Configuration) -> bool {
-    lift.jet.is_some() || SingleRotor::new(lift, c).is_some()
+    lift.jet.is_some() || SingleRotor::new(lift, c).is_some() || Tandem::new(lift, c).is_some()
 }
 
 /// The V-22's nacelle angle on the ground, degrees (design section 7: the
@@ -78,8 +79,8 @@ impl State {
     /// documentation), after its final mass, altitude and heading are set.
     /// `wind` is the wind the velocity is ground-relative to. Returns true
     /// when the aircraft was trimmed; false when it is not a powered-lift
-    /// aircraft that trims yet (the V-22 and the CH-47 get a hover on the
-    /// old law's collective), is not on the hybrid model, has flown, is on
+    /// aircraft that trims yet (the V-22 gets a hover on the old law's
+    /// collective), is not on the hybrid model, has flown, is on
     /// the ground, or no trim exists within the controls' travel (a helicopter
     /// then tries a hover, then falls back to full collective).
     pub fn start_airborne(&mut self, wind: [f64; 3]) -> bool {
@@ -100,10 +101,13 @@ impl State {
         if SingleRotor::new(&lift, c).is_some() {
             return self.start_single_rotor(wind);
         }
+        if Tandem::new(&lift, c).is_some() {
+            return self.start_tandem(wind);
+        }
         if lift.jet.is_some() {
             return self.start_jet(wind);
         }
-        // TODO(P3), TODO(P5): the CH-47 and the V-22 trim on their own laws.
+        // TODO(P5): the V-22 trims on its own law.
         // Until then the old law's hover, as `initialize_airborne_hover` did.
         self.hover_on_the_old_law(&lift);
         false
@@ -124,6 +128,24 @@ impl State {
         if !self.trim_single_rotor(airspeed) {
             // No trim at that speed: try the hover, then the full collective.
             if !self.trim_single_rotor(0.) {
+                self.throttle = 1.;
+                self.lift_controls.collective = 1.;
+                self.lift_controls.collective_actual = 1.;
+            }
+            self.velocity = self.velocity.map(|_| 0.);
+            self.speed = 0.;
+        }
+        self.add_wind_to_start(wind);
+        self.speed > 0.
+    }
+
+    /// The tandem CH-47 in the trim of [`State::trim_tandem`]: as the
+    /// single-rotor helicopters, forward flight, then a hover, then full
+    /// collective.
+    fn start_tandem(&mut self, wind: [f64; 3]) -> bool {
+        let airspeed = self.start_airspeed().unwrap_or(0.);
+        if !self.trim_tandem(airspeed) {
+            if !self.trim_tandem(0.) {
                 self.throttle = 1.;
                 self.lift_controls.collective = 1.;
                 self.lift_controls.collective_actual = 1.;
@@ -302,14 +324,15 @@ impl State {
             return true;
         }
         let c = self.model().configuration();
-        if SingleRotor::new(&lift, c).is_none() {
+        let single = SingleRotor::new(&lift, c).is_some();
+        if !single && Tandem::new(&lift, c).is_none() {
             return false;
         }
         // At rest in the air: a hover keeps the velocity it has.
         let (velocity, speed) = (self.velocity, self.speed);
         self.velocity = [0.; 3];
         self.speed = 0.;
-        if self.trim_single_rotor(0.) {
+        if (single && self.trim_single_rotor(0.)) || (!single && self.trim_tandem(0.)) {
             return true;
         }
         (self.velocity, self.speed) = (velocity, speed);
@@ -327,6 +350,7 @@ impl State {
         };
         let c = self.model().configuration();
         let heli = SingleRotor::new(&lift, c);
+        let tandem = Tandem::new(&lift, c);
         let density = rotor::air_density(self.position[1]);
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
         let controls = &mut self.lift_controls;
@@ -373,7 +397,27 @@ impl State {
             };
             controls.drive.engine_output[0] = heli.loads(&instant).power.max(0.);
         }
-        // TODO(P3): the CH-47's tandem drive idles the same way.
+        if let Some(model) = tandem {
+            // The same for the tandem's two flat-pitch rotors.
+            let instant = tandem::Instant {
+                basis,
+                air_velocity: [0.; 3],
+                body_rates: [0.; 3],
+                density,
+                rotor_speed: 1.,
+                rotors: [Rotor::default(); 2],
+                engine_power: 0.,
+                collective: 0.,
+                controls: [0.; 3],
+                longitudinal_trim: 0.,
+                hub_height_agl_ft: [None; 2],
+                seconds: 0.,
+                hazards: Hazards::ALL,
+                drag_factor: 1.,
+                lift_factor: 1.,
+            };
+            controls.drive.engine_output[0] = model.loads(&instant).power.max(0.);
+        }
         // TODO(P5): the V-22's nacelles go to V22_GROUND_NACELLE_DEGREES of
         // the 97.5-degree travel, `conversion` and `conversion_actual`.
         self.throttle = 1.;
@@ -415,6 +459,7 @@ mod tests {
     fn aircraft(id: AircraftId) -> Aircraft {
         match id {
             AircraftId::Ah64 | AircraftId::Mi24 => pt_aircraft(id),
+            AircraftId::Ch47 => super::super::tandem::tests::pt_aircraft(),
             _ => fixture(id),
         }
     }
@@ -428,9 +473,10 @@ mod tests {
         s
     }
 
-    const FINISHED: [AircraftId; 4] = [
+    const FINISHED: [AircraftId; 5] = [
         AircraftId::Ah64,
         AircraftId::Mi24,
+        AircraftId::Ch47,
         AircraftId::Av8,
         AircraftId::Yak141,
     ];
@@ -537,8 +583,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::single_element_loop)] // The CH-47 trims since slice P3.
     fn the_aircraft_without_a_trim_yet_keep_the_old_hover() {
-        for id in [AircraftId::Ch47, AircraftId::V22] {
+        for id in [AircraftId::V22] {
             let mut s = State::new(
                 &crate::models::variety::tests::synthetic(id),
                 [0., 5_000., 0.],

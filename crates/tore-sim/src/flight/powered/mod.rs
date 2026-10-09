@@ -25,6 +25,8 @@
 //!   [`fuselage`]: the helicopters' fuselage and fixed surfaces (P2);
 //!   [`helicopter`]: the single-rotor AH-64 and Mi-24 force law, its drive
 //!   and its trim (P2).
+//! - [`drive`]: the rotor speed, governor and engines shared by every
+//!   rotorcraft, for any number of rotors on one interconnected drive.
 //! - [`jet`] and [`aero`]: the vectoring jets and their wing (P4).
 //! - [`trim`]: the airborne and ground starts (P7), which replace the old
 //!   hover start.
@@ -37,6 +39,7 @@
 //! it records them in the state's body rates.
 pub mod aero;
 pub mod body;
+pub mod drive;
 pub mod fuselage;
 pub mod helicopter;
 pub mod jet;
@@ -44,6 +47,7 @@ pub mod readout;
 pub mod rotor;
 pub mod sas;
 pub mod state;
+pub mod tandem;
 pub mod trim;
 
 #[cfg(test)]
@@ -142,6 +146,21 @@ impl State {
             self.step_single_rotor(
                 lift,
                 heli,
+                c,
+                stick,
+                initial_surface,
+                runway_wind_fraction,
+                t,
+                ground,
+                fuel_rate,
+            );
+            return;
+        }
+        // The tandem CH-47 flies its two rotors (P3).
+        if let Some(model) = tandem::Tandem::new(&lift, c) {
+            self.step_tandem(
+                lift,
+                model,
                 c,
                 stick,
                 initial_surface,
@@ -436,21 +455,18 @@ mod tests {
     /// The synthetic record of `id`; the single-rotor helicopters carry
     /// their PT's flight numbers, since their rotors size their power.
     fn fixture(id: AircraftId) -> tore_formats::aircraft::Aircraft {
-        if matches!(id, AircraftId::Ah64 | AircraftId::Mi24) {
+        if id == AircraftId::Ch47 {
+            tandem::tests::pt_aircraft()
+        } else if matches!(id, AircraftId::Ah64 | AircraftId::Mi24) {
             helicopter::tests::pt_aircraft(id)
         } else {
             crate::models::variety::tests::synthetic(id)
         }
     }
-    /// The rotorcraft: the V-22 and CH-47 on the old attitude-hold law, the
-    /// AH-64 and Mi-24 on their rotors since slice P2 (the jets have their
+    /// The rotorcraft: the V-22 on the old attitude-hold law, the AH-64 and
+    /// Mi-24 on their rotors since slice P2 and the CH-47 on its two since P3 (the jets have their
     /// own physics since slice P4, tested in `jet.rs`).
-    const OLD_LAW: [AircraftId; 4] = [
-        AircraftId::V22,
-        AircraftId::Ah64,
-        AircraftId::Mi24,
-        AircraftId::Ch47,
-    ];
+    const OLD_LAW: [AircraftId; 3] = [AircraftId::V22, AircraftId::Ah64, AircraftId::Mi24];
     fn hover(id: AircraftId, height: f64) -> State {
         let aircraft = fixture(id);
         let mut s = State::new(&aircraft, [0., height, 0.]).unwrap();
@@ -465,6 +481,10 @@ mod tests {
         let c = s.model().configuration();
         if helicopter::SingleRotor::new(&lift, c).is_some() {
             assert!(s.trim_single_rotor(0.), "{id:?}");
+            return s;
+        }
+        if tandem::Tandem::new(&lift, c).is_some() {
+            assert!(s.trim_tandem(0.), "{id:?}");
             return s;
         }
         let weight = c.mass.empty_lbs + s.fuel;
@@ -487,46 +507,6 @@ mod tests {
         for _ in 0..ticks {
             s.step_surface(input, |_, _| crate::research::Surface::runway(0.));
         }
-    }
-    #[test]
-    fn a_helicopter_reaches_nearly_its_top_speed_at_full_forward_stick() {
-        // Before 2026-10-08 the low-speed damping acted at every speed and the
-        // drag was scaled to full rotor thrust, so helicopters topped out near
-        // 40 kt whatever their envelope said. Synthetic 166 kt envelope. The
-        // CH-47 still flies this law; the AH-64 and Mi-24 fly their rotors.
-        let mut aircraft = crate::models::variety::tests::synthetic(AircraftId::Ch47);
-        for e in &mut aircraft.envelopes {
-            e.points = vec![[60., 0.], [70., 7_000.], [260., 7_000.], [280., 0.]];
-        }
-        let mut s = State::new(&aircraft, [0., 1_000., 0.]).unwrap();
-        s.enable_research(1).unwrap();
-        s.cheats.unlimited_fuel = true;
-        let top = 280. - 20. * 1_000. / 7_000.;
-        let mut collective = s.lift_controls.collective;
-        let mut speeds = Vec::new();
-        for stick in [0.25, 0.5, 1.] {
-            for _ in 0..120 * 120 {
-                collective = (collective
-                    + (-0.0005 * s.velocity[1] + 0.00005 * (1_000. - s.position[1])))
-                    .clamp(0., 1.);
-                let input = PilotInput {
-                    pitch: -stick,
-                    roll: (-2. * s.bank).clamp(-1., 1.),
-                    throttle: Some(1.),
-                    collective: Some(collective),
-                    ..Default::default()
-                };
-                run(&mut s, &input, 1);
-            }
-            assert!((s.position[1] - 1_000.).abs() < 200., "{}", s.position[1]);
-            speeds.push(s.speed);
-        }
-        assert!(speeds.windows(2).all(|w| w[1] > w[0]), "{speeds:?}");
-        assert!(
-            speeds[2] > 0.9 * top && speeds[2] < 1.001 * top,
-            "{} of {top}",
-            speeds[2]
-        );
     }
     #[test]
     fn afterburner_jets_are_held_to_their_top_speed_by_drag() {
@@ -795,25 +775,10 @@ mod tests {
         assert_eq!(s.lift_controls.collective, collective);
         run(&mut s, &Default::default(), 600);
         assert!(s.position[1] < 14990.);
-        let mut overloaded = hover(AircraftId::Ch47, 5000.);
-        overloaded.position[1] = 15000.;
-        overloaded.fuel = 500.;
-        overloaded.set_payload(1500.).unwrap();
-        overloaded.start_airborne([0.; 3]);
-        assert_eq!(overloaded.lift_controls.collective, 1.);
-        assert!(overloaded.lift_controls.thrust_lbf < 12000.);
-        run(&mut overloaded, &Default::default(), 600);
-        assert!(overloaded.position[1] < 14970.);
     }
 
     #[test]
     fn loaded_rotorcraft_and_reduced_power_have_no_automatic_hover_support() {
-        let mut loaded = hover(AircraftId::Ch47, 500.);
-        loaded.set_payload(3000.).unwrap();
-        loaded.lift_controls.collective = 1.;
-        loaded.lift_controls.collective_actual = 1.;
-        run(&mut loaded, &Default::default(), 600);
-        assert!(loaded.position[1] < 470. && loaded.vertical_speed < -5.);
         let mut damaged = hover(AircraftId::Ah64, 500.);
         damaged.throttle *= 0.5;
         // The rotor's speed sags first, then the aircraft.

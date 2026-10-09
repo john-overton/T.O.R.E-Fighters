@@ -18,6 +18,7 @@
 use super::{
     helicopter::{Instant, SingleRotor},
     rotor::{self, Hazards},
+    tandem::{self, Tandem},
 };
 use crate::{
     attitude::Basis,
@@ -106,10 +107,10 @@ impl State {
     /// Torque TQ, percent of the rated power: the shaft power the engines
     /// deliver over the rated sea-level power and the rotor speed. Above 100
     /// is over the limit. For the aircraft that fly the old fitted law (the
-    /// CH-47 and the V-22) the engines are not modelled yet, so the share of
-    /// the rotors' maximum thrust stands in.
+    /// V-22) the engines are not modelled yet, so the share of the rotors'
+    /// maximum thrust stands in.
     ///
-    /// TODO(P3, P5): read the tandem and tiltrotor drives' power.
+    /// TODO(P5): read the tiltrotor drive's power.
     pub fn torque_percent(&self) -> Option<f64> {
         let lift = self.model().powered_lift()?;
         let rotor = lift.rotor?;
@@ -119,7 +120,15 @@ impl State {
         if let Some(heli) = SingleRotor::new(&lift, self.model().configuration()) {
             let nr = self.lift_controls.drive.rotor_speed.max(0.5);
             return Some(
-                (self.lift_controls.drive.engine_output[0] / (heli.rated_power * nr)).max(0.)
+                (self.lift_controls.drive.engine_output[0] / (heli.drive.rated_power * nr)).max(0.)
+                    * 100.,
+            );
+        }
+        if let Some(model) = Tandem::new(&lift, self.model().configuration()) {
+            let nr = self.lift_controls.drive.rotor_speed.max(0.5);
+            return Some(
+                (self.lift_controls.drive.engine_output[0] / (model.drive.rated_power * nr))
+                    .max(0.)
                     * 100.,
             );
         }
@@ -207,12 +216,42 @@ impl State {
         let Some(lift) = self.model().powered_lift() else {
             return 0.;
         };
-        let Some(heli) = SingleRotor::new(&lift, self.model().configuration()) else {
-            return 0.;
-        };
-        if self.crashed || self.lift_controls.drive.rotor_speed <= 0. {
+        let single = SingleRotor::new(&lift, self.model().configuration());
+        let tandem = Tandem::new(&lift, self.model().configuration());
+        if (single.is_none() && tandem.is_none())
+            || self.crashed
+            || self.lift_controls.drive.rotor_speed <= 0.
+        {
             return 0.;
         }
+        if let Some(model) = tandem {
+            // The deeper of the two rotors.
+            let instant = tandem::Instant {
+                basis: Basis::new(self.yaw, self.pitch, self.bank),
+                air_velocity: self.velocity,
+                body_rates: self.lift_controls.body_rates,
+                density: rotor::air_density(self.position[1]),
+                rotor_speed: self.lift_controls.drive.rotor_speed,
+                rotors: self.lift_controls.rotors,
+                engine_power: self.lift_controls.drive.engine_output[0],
+                collective: self.lift_controls.collective_actual,
+                controls: [0.; 3],
+                longitudinal_trim: 0.,
+                hub_height_agl_ft: [None; 2],
+                seconds: self.ticks as f64 * DT,
+                hazards: Hazards::ALL,
+                drag_factor: 1.,
+                lift_factor: 1.,
+            };
+            return model
+                .loads(&instant)
+                .rotors
+                .iter()
+                .map(|o| o.vortex_ring.max(o.blade_stall))
+                .fold(0., f64::max)
+                .clamp(0., 1.);
+        }
+        let heli = single.expect("a single-rotor helicopter");
         let instant = Instant {
             basis: Basis::new(self.yaw, self.pitch, self.bank),
             air_velocity: self.velocity,

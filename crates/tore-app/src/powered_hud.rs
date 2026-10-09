@@ -411,6 +411,7 @@ mod tests {
             s.model().configuration(),
         )
         .unwrap()
+        .drive
         .rated_power;
         s.lift_controls.drive.engine_output[0] = 1.1 * rated;
         s.ticks = 0;
