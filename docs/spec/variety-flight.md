@@ -94,9 +94,10 @@ throttle, pitch and small pitch trim found by probing the force law one tick at
 a time, so that hands off it holds height within 10 feet and speed within 2
 knots for ten seconds (acceptance S1). A start above a helicopter's ceiling
 tries a hover and then falls back to full collective; it never invents support.
-The CH-47 and the V-22 still start level at zero speed with full engine power
-and the collective that balances the configured mass and altitude lapse
-(capped at full collective), until their slices land. After the first tick,
+The V-22 still starts level at zero speed with full engine power and the
+collective that balances the configured mass and altitude lapse (capped at
+full collective), until its slice lands; the CH-47 starts like the
+single-rotor helicopters. After the first tick,
 mass changes never retrim anything.
 
 Ground starts match the fixed-wing ones: stationary, engine running at idle,
@@ -302,7 +303,8 @@ V22's mass, fuel and thrust, which are also the AH-64's.
 ### Helicopter power and structural speed (VTOL overhaul P2-fix, 2026-10-08)
 
 All agent decisions. They apply to the AH64 and MI24 on the hybrid adapter,
-which fly the rotor physics; the CH47 and V22 are left to their slices.
+which fly the rotor physics; the CH47 has its own section below and the V22 is
+left to its slice.
 
 **Overspeed at Vne.** The overspeed rule uses each helicopter's never-exceed
 speed, not the envelope's top speed above: AH64 197 kt (Wikipedia, AH-64
@@ -369,6 +371,63 @@ published range. Climb: 3,602 ft/min best, against 3,240 ft/min maximum and
 2,500 ft/min vertical published. Level speed 151 kt against 158. Not
 adjusted. The 10,200 ft at 17,650 lb quoted for the -701C could not be found
 in a source.
+
+### Tandem rotors: the CH-47 (VTOL overhaul P3, 2026-10-09)
+
+All agent decisions; the numbers are fitted unless a line cites a source. The
+CH47 flies two counter-rotating 60 ft rotors 38.9 ft apart on the overhaul's
+rotor physics (the same rotor model as the AH-64 and Mi-24) and one
+cross-shafted drive with one governor.
+
+- **Controls.** Aft stick adds blade pitch to the front rotor and takes it
+  from the rear (differential collective, 1.2 degrees at full stick); lateral
+  stick tilts both disks together; the pedals tilt them apart (front right,
+  rear left, 0.85 of the lateral range at full pedal). The collective is
+  common. There is no tail rotor.
+- **Torque** cancels: the two rotors turn opposite ways, so the airframe
+  feels only the difference between their powers. A 30 percent collective
+  step with the pedals fixed yaws under 1 deg/s at Off and at Damper.
+- **Rear rotor in the front rotor's wake.** The rear rotor's air gains 0.3
+  times the front rotor's induced velocity along the front disk's normal,
+  fading out by 40 kt, so the rear rotor needs more collective in a hover and
+  the hover takes about 10 percent more power than without the wake.
+- **Longitudinal trim.** The stability law's CH-47 schedule (none below 40 kt,
+  all of it at 140 kt, Damper and Attitude only) tilts both disks forward by up
+  to 2.5 degrees, so the fuselage flies about 2 degrees more level than at Off.
+- **Power.** The PT thrust (135,795 lbf, 4.7 times the maximum takeoff weight)
+  is implausible and set aside. The rated power is the CH-47F's two T55-GA-714A
+  at 4,733 shp each ([Wikipedia, CH-47
+  Chinook](https://en.wikipedia.org/wiki/Boeing_CH-47_Chinook), read
+  2026-10-08), at its 54,000 lb maximum gross weight, scaled to the PT's
+  28,660 lb maximum by the 3/2 power of the weight ratio (hover power follows
+  the weight to the 3/2) and times 0.82 (about 8 percent transmission and
+  installation loss, the rest fitted to the full-collective climb): 3,001 hp
+  at the rotors. The design's first draft (1.25 times the maximum takeoff
+  weight in thrust) corresponds to 3,270 hp, 9 percent more; the model's
+  maximum static thrust is now what 3,001 hp hovers at, 1.17 times the PT
+  maximum takeoff weight. The PT mass, fuel and
+  stores are kept (the PT weights are 53 percent of the real aircraft's).
+- **Vne.** 190 kt, fitted: the published maximum speed is 170 kt but no Vne was
+  found in a reliable source. The overspeed rule and the retreating blade
+  stall onset both use it.
+- **Results** against the PT (standard day, sea level, gross weight 21,385
+  lb): hover margin 60 percent; hover ceiling out of ground effect 15,700 ft
+  at gross and 4,600 ft at the 28,660 lb maximum (published service ceiling
+  20,000 ft); level top speed 165 kt with the Damper's trim schedule
+  (published 170 kt); least power 1,023 hp at 59 kt; vertical climb at full
+  collective 2,925 ft/min with the rotor at 84 percent; engine cut in the hover,
+  rotor below 80 percent after 2.4 s; autorotation 1,294 ft/min at 81 kt with
+  the rotor at 96 to 102 percent; full-stick hover rates at Damper pitch 23,
+  roll 41, yaw 42 deg/s (targets 25, 45, 45). Autorotation is slower than
+  the single-rotor helicopters' 1,500 to 2,500 ft/min because the disk loading
+  is a third of theirs.
+- **Known differences.** Hands-off forward trim at the Attitude level settles
+  near 130 kt (the single-rotor helicopters 60 to 100): the tandem's pitch is
+  held by differential collective and its speed stability is weak. The
+  retreating blade stall shows from about 155 kt at gross weight in a dive
+  and pitches the rotors' thrust back, but gives no roll (the two rotors'
+  roll tendencies oppose).
+
 
 ## Unknown evidence
 

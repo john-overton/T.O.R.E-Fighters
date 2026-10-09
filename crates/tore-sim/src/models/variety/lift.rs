@@ -440,7 +440,7 @@ const CH47_REAL_MAX_LB: f64 = 54_000.;
 /// The CH-47's maximum static thrust per pound of PT maximum takeoff weight:
 /// what [`CH47_RATED_HP_AT_MAX`] hovers at at sea level by the 4.4 power law
 /// (Derived, Fit). Reported by the trace; the power sets the flight.
-const CH47_MAX_THRUST_PER_LB: f64 = 1.63;
+const CH47_MAX_THRUST_PER_LB: f64 = 1.17;
 
 fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
     use AircraftId::*;
@@ -858,7 +858,7 @@ mod tests {
         // weight 15,000 lb.
         let thrust = |id| lift(id).unwrap().rotor.unwrap().max_thrust_lbf;
         assert_eq!(thrust(AircraftId::Ah64), 50_000.);
-        assert_eq!(thrust(AircraftId::Ch47), 1.63 * 15_000.);
+        assert_eq!(thrust(AircraftId::Ch47), 1.17 * 15_000.);
         let ah64 = lift(AircraftId::Ah64).unwrap().rotor.unwrap();
         assert_eq!(
             ah64.layout,

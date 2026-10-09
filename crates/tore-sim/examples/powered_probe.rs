@@ -1,16 +1,16 @@
-//! Probe of the single-rotor helicopters (VTOL overhaul slice P2) against
-//! user-owned PT records: power, hover margin and ceilings, level top speed,
+//! Probe of the helicopters (VTOL overhaul slices P2 and P3: the single-rotor
+//! AH-64 and Mi-24 and the tandem CH-47) against user-owned PT records: power, hover margin and ceilings, level top speed,
 //! climb, autorotation, rotor droop and hover rates. No retail fixtures;
 //! prints a table for the baseline.
 //!
-//! Usage: `powered_probe AH64.PT [MI24.PT ...]`
+//! Usage: `powered_probe AH64.PT [MI24.PT CH47.PT ...]`
 use std::{env, fs::File, io::Read};
 use tore_formats::aircraft::Aircraft;
 use tore_input::StabilityLevel;
 use tore_sim::{
     flight::{
         DT, PilotCommand, PilotInput, State, Switch,
-        powered::{helicopter::SingleRotor, rotor},
+        powered::{helicopter::SingleRotor, rotor, tandem::Tandem},
     },
     models::FlightModel,
     research::Surface,
@@ -18,6 +18,91 @@ use tore_sim::{
 
 const KT: f64 = 1.687_81;
 const HP: f64 = 550.;
+
+/// A level trim, as the probe reports it.
+struct LevelTrim {
+    engine_power: f64,
+    collective: f64,
+    pitch: f64,
+    bank: f64,
+}
+
+/// The helicopter model the probe flies: one main rotor or the tandem pair.
+enum Craft {
+    Single(SingleRotor),
+    Tandem(Tandem),
+}
+
+impl Craft {
+    fn new(
+        lift: &tore_sim::models::variety::PoweredLift,
+        c: &tore_sim::models::config::Configuration,
+    ) -> Option<Self> {
+        SingleRotor::new(lift, c)
+            .map(Self::Single)
+            .or_else(|| Tandem::new(lift, c).map(Self::Tandem))
+    }
+    fn rated_power(&self) -> f64 {
+        match self {
+            Self::Single(h) => h.drive.rated_power,
+            Self::Tandem(h) => h.drive.rated_power,
+        }
+    }
+    fn max_thrust(&self) -> f64 {
+        match self {
+            Self::Single(h) => h.max_thrust,
+            Self::Tandem(h) => h.max_thrust,
+        }
+    }
+    fn radius_ft(&self) -> f64 {
+        match self {
+            Self::Single(h) => h.rotor.radius_ft,
+            Self::Tandem(h) => h.rotors[0].radius_ft,
+        }
+    }
+    fn tip_speed_fps(&self) -> f64 {
+        match self {
+            Self::Single(h) => h.rotor.tip_speed_fps,
+            Self::Tandem(h) => h.rotors[0].tip_speed_fps,
+        }
+    }
+    fn available_power(&self, density: f64) -> f64 {
+        match self {
+            Self::Single(h) => h.available_power(density, 1., 1.),
+            Self::Tandem(h) => h.available_power(density, 1., 1.),
+        }
+    }
+    /// The level trim at `kt` (cruise speeds use the cruise level).
+    fn trim(&self, weight: f64, density: f64, kt: f64, level: StabilityLevel) -> Option<LevelTrim> {
+        let level = if kt > 0. { self.cruise_level() } else { level };
+        match self {
+            Self::Single(h) => h
+                .trim(weight, 0., kt * KT, density, 1., level)
+                .map(|t| LevelTrim {
+                    engine_power: t.engine_power,
+                    collective: t.collective,
+                    pitch: t.pitch,
+                    bank: t.bank,
+                }),
+            Self::Tandem(h) => h
+                .trim(weight, 0., kt * KT, density, 1., level)
+                .map(|t| LevelTrim {
+                    engine_power: t.engine_power,
+                    collective: t.collective,
+                    pitch: t.pitch,
+                    bank: t.bank,
+                }),
+        }
+    }
+    /// The stability level a cruise is trimmed at: the tandem's longitudinal
+    /// trim schedule belongs to Damper.
+    fn cruise_level(&self) -> StabilityLevel {
+        match self {
+            Self::Single(_) => StabilityLevel::Off,
+            Self::Tandem(_) => StabilityLevel::Damper,
+        }
+    }
+}
 
 fn load(path: &str) -> Result<Aircraft, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
@@ -48,7 +133,8 @@ fn trimmed(a: &Aircraft, height: f64, airspeed: f64, level: StabilityLevel) -> S
     s.velocity = [0.; 3];
     s.speed = 0.;
     s.lift_controls.aids.stability = level;
-    assert!(s.trim_single_rotor(airspeed), "{} trims", a.name);
+    let trimmed = s.trim_single_rotor(airspeed) || s.trim_tandem(airspeed);
+    assert!(trimmed, "{} trims", a.name);
     s
 }
 
@@ -78,32 +164,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let base = trimmed(&a, 0., 0., StabilityLevel::Off);
         let c = base.model().configuration();
         let lift = base.model().powered_lift().ok_or("not powered lift")?;
-        let Some(h) = SingleRotor::new(&lift, c) else {
-            println!("{}: not a single-rotor helicopter", a.name);
+        let Some(h) = Craft::new(&lift, c) else {
+            println!("{}: not a helicopter", a.name);
             continue;
         };
         let gross = c.mass.empty_lbs + c.mass.internal_fuel_lbs;
         let maximum = c.mass.max_takeoff_lbs;
         let rho0 = rotor::air_density(0.);
-        let available = h.available_power(rho0, 1., 1.);
+        let available = h.available_power(rho0);
         println!("== {} ({path})", a.name);
         println!(
-            "weights: empty {:.0} lb, gross {gross:.0} lb, maximum {maximum:.0} lb; PT thrust {:.0} lbf",
-            c.mass.empty_lbs, h.max_thrust
+            "weights: empty {:.0} lb, gross {gross:.0} lb, maximum {maximum:.0} lb; model maximum rotor thrust {:.0} lbf",
+            c.mass.empty_lbs,
+            h.max_thrust()
         );
         println!(
             "rotor: radius {:.1} ft, tip {:.0} ft/s; rated power {:.0} hp at sea level",
-            h.rotor.radius_ft,
-            h.rotor.tip_speed_fps,
-            h.drive.rated_power / HP
+            h.radius_ft(),
+            h.tip_speed_fps(),
+            h.rated_power() / HP
         );
         let level = |weight: f64, altitude: f64, kt: f64| {
             h.trim(
                 weight,
-                0.,
-                kt * KT,
                 rotor::air_density(altitude),
-                1.,
+                kt,
                 StabilityLevel::Off,
             )
         };
@@ -122,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(f64::from)
                 .take_while(|altitude| {
                     level(weight, *altitude, 0.).is_some_and(|t| {
-                        t.engine_power <= h.available_power(rotor::air_density(*altitude), 1., 1.)
+                        t.engine_power <= h.available_power(rotor::air_density(*altitude))
                     })
                 })
                 .last()
@@ -165,6 +250,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // takeoff weights (24,250 and 26,455 lb, Aerospaceweb).
         let published: &[f64] = if a.name.contains("AH-64") {
             &[17_650.]
+        } else if a.name.contains("47") {
+            // The CH-47's PT weights are 53 percent of the real aircraft's;
+            // its maximum is printed above.
+            &[]
         } else {
             &[24_250., 26_455.]
         };
@@ -177,7 +266,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(t) => format!(
                     "needs {:.0} hp, has {:.0} hp",
                     t.engine_power / HP,
-                    h.available_power(rotor::air_density(above), 1., 1.) / HP
+                    h.available_power(rotor::air_density(above)) / HP
                 ),
             };
             println!("  100 ft above it: {why}");
