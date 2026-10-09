@@ -4,7 +4,7 @@
 use super::chat::{ChatFrom, ChatLine, ChatSend, Quick, Receiver, Standing};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
-    EntityState, Motion, PilotState, ProjectileState, Status,
+    EntityState, Motion, PilotState, ProjectileState, RotorState, Status,
 };
 use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
@@ -234,6 +234,7 @@ pub fn entities() -> Vec<Entity> {
                     crashed: false,
                     wreck: None,
                 },
+                rotor: None,
             }),
         },
         Entity {
@@ -254,6 +255,35 @@ pub fn entities() -> Vec<Entity> {
                     crashed: true,
                     wreck: Some(wreck::Phase::Grounded),
                 },
+                rotor: None,
+            }),
+        },
+        // A rotorcraft: its rotor speed and disk tilts (slice P7b).
+        Entity {
+            id: 10,
+            state: EntityState::Aircraft(AircraftState {
+                aircraft: Some(AircraftId::Ch47),
+                motion: motion(10),
+                attitude: [4_000, 300, 65_200],
+                devices: None,
+                engine: EngineState {
+                    lit: true,
+                    ..EngineState::default()
+                },
+                damage: DamageState {
+                    hp: 200,
+                    initial_hp: 200,
+                    ..DamageState::default()
+                },
+                status: Status {
+                    airborne: true,
+                    crashed: false,
+                    wreck: None,
+                },
+                rotor: Some(RotorState {
+                    speed: 987,
+                    tilt: [[12, -3], [-127, 127]],
+                }),
             }),
         },
         Entity {

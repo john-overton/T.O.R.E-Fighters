@@ -28,6 +28,15 @@ pub const VELOCITY_STEP: f64 = 1. / 64.;
 pub const SPEED_STEP: f64 = 0.25;
 /// Thrust-vectoring rates: 1/4096 rad/s.
 pub const RATE_STEP: f64 = 1. / 4096.;
+/// A rotorcraft's rotor speed: a thousandth of 100 percent, as replays
+/// record it.
+pub const ROTOR_SPEED_STEP: f64 = 1. / 1000.;
+/// The largest rotor speed the wire carries, in [`ROTOR_SPEED_STEP`]s (200
+/// percent; the flight holds it within 150).
+pub const ROTOR_SPEED_MAX: u16 = 2000;
+/// A rotor's disk tilt: 1/256 rad (about 0.22 degrees), up to 127 steps
+/// either way (the flight limits it to 0.45 rad).
+pub const ROTOR_TILT_STEP: f64 = 1. / 256.;
 /// Simulation ticks a second, which the prediction divides by.
 pub const TICKS_PER_SECOND: i128 = 120;
 
@@ -169,6 +178,18 @@ pub struct EngineState {
     pub rates: [i32; 3],
 }
 
+/// A rotorcraft's rotors (protocol 19, VTOL overhaul slice P7b): what the
+/// client needs to draw and hear them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RotorState {
+    /// Rotor speed in [`ROTOR_SPEED_STEP`]s, 0 to [`ROTOR_SPEED_MAX`].
+    pub speed: u16,
+    /// Each main rotor's disk tilt [longitudinal, lateral] in signed
+    /// [`ROTOR_TILT_STEP`]s: the front or main rotor, then the CH-47's rear
+    /// rotor or the V-22's right proprotor.
+    pub tilt: [[i8; 2]; 2],
+}
+
 /// Damage as whole numbers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DamageState {
@@ -198,6 +219,8 @@ pub struct AircraftState {
     pub engine: EngineState,
     pub damage: DamageState,
     pub status: Status,
+    /// A rotorcraft's rotors; none on every other aircraft.
+    pub rotor: Option<RotorState>,
 }
 
 /// A missile, bomb or rocket in flight.
@@ -442,6 +465,14 @@ const DAMAGE: &[Field] = &[
     Field::Unsigned(3, DAMAGE_SECTIONS as i64),
 ];
 const STATUS: &[Field] = &[BIT, BIT, Field::Unsigned(2, 3)];
+const ROTOR: &[Field] = &[
+    BIT,
+    Field::Unsigned(11, ROTOR_SPEED_MAX as i64),
+    SURFACE,
+    SURFACE,
+    SURFACE,
+    SURFACE,
+];
 const PILOT: &[Field] = &[Field::Unsigned(3, 5)];
 
 /// A group of slow fields, sent only when one of them changed.
@@ -467,6 +498,10 @@ const AIRCRAFT_GROUPS: &[Group] = &[
     group(ENGINE),
     group(DAMAGE),
     group(STATUS),
+    Group {
+        fields: ROTOR,
+        gated: true,
+    },
 ];
 const PILOT_GROUPS: &[Group] = &[group(PILOT)];
 
@@ -666,11 +701,14 @@ impl EntityState {
                     flag(s.status.crashed),
                     wreck_code(s.status.wreck),
                 ];
+                let r = s.rotor.unwrap_or_default();
+                let mut rotor = vec![flag(s.rotor.is_some()), i64::from(r.speed)];
+                rotor.extend(r.tilt.iter().flatten().map(|&v| i64::from(v)));
                 Flat {
                     motion: s.motion,
                     angles: s.attitude,
                     fast: [i64::from(d.speed)],
-                    groups: vec![devices, engine, damage, status],
+                    groups: vec![devices, engine, damage, status, rotor],
                 }
             }
             Self::Projectile(s) => Flat {
@@ -715,6 +753,15 @@ impl EntityState {
                 {
                     return Err(WireError::Invalid("devices of an aircraft without them"));
                 }
+                let rotor = (g(4, 0) == 1).then(|| RotorState {
+                    speed: g(4, 1) as u16,
+                    tilt: std::array::from_fn(|k| {
+                        std::array::from_fn(|i| g(4, 2 + 2 * k + i) as i8)
+                    }),
+                });
+                if rotor.is_none() && flat.groups[4][1..].iter().any(|&v| v != 0) {
+                    return Err(WireError::Invalid("rotors of an aircraft without them"));
+                }
                 Self::Aircraft(AircraftState {
                     aircraft,
                     motion: flat.motion,
@@ -743,6 +790,7 @@ impl EntityState {
                             code => Some(WRECKS[code as usize - 1]),
                         },
                     },
+                    rotor,
                 })
             }
             Identity::Projectile {
@@ -800,6 +848,12 @@ impl EntityState {
                 || d.gun_group > 7)
         {
             return Err(WireError::Invalid("control surface"));
+        }
+        if let Self::Aircraft(a) = self
+            && let Some(r) = a.rotor
+            && (r.speed > ROTOR_SPEED_MAX || r.tilt.iter().flatten().any(|&v| v == i8::MIN))
+        {
+            return Err(WireError::Invalid("rotor"));
         }
         Ok(())
     }
