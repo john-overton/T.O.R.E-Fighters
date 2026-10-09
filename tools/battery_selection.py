@@ -682,6 +682,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/ai.py", LANE_SMOKE["ai"], "AI scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/_ai_fuzz.py", LANE_SMOKE["ai"], "AI fuzz scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/_ai_fuzz_cmd.py", LANE_SMOKE["ai"], "AI fuzz command", unit_tests=("test_battery_ai",)),
+    _r("tools/battery_scenarios/_debrief.py", LANE_SMOKE["ai"] + LANE_SMOKE["flight"], "the debrief kill and hit check shared by the AI and flight lanes", unit_tests=("test_battery_ai", "test_battery_flight")),
     _r("tools/battery_scenarios/_strips.py", LANE_SMOKE["ai"] + ("flight-takeoff",), "short strip helper", unit_tests=("test_battery_ai", "test_battery_flight")),
     _r("tools/test_battery_ai.py", (), "AI scenario tests", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/menus.py", LANE_SMOKE["menus"], "menu scenarios", unit_tests=("test_battery_menus",)),

@@ -37,6 +37,7 @@ crate::checkpoint_struct!(Kill {
 
 crate::checkpoint_struct!(Ledger {
     open,
+    decoyed,
     aims,
     tallies,
     kills,
@@ -106,6 +107,8 @@ mod tests {
         for ledger in [&mut a, &mut b] {
             ledger.resolve(5, Resolution::Hit(30));
             ledger.resolve(5, Resolution::Missed);
+            // The spoofed missile is remembered and strikes late.
+            ledger.resolve(1, Resolution::Hit(60));
             ledger.launch(11, 0, None, ShotKind::Gun);
         }
         assert_eq!(a, b);

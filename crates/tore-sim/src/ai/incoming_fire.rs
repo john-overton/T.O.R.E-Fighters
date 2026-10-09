@@ -119,7 +119,8 @@ impl Service {
                 continue;
             }
             let delta = sub(round.position, own.position);
-            let bearing = delta[0].atan2(delta[2]).to_degrees().rem_euclid(360.);
+            // Worked out only for a round that raises a cue.
+            let bearing = || delta[0].atan2(delta[2]).to_degrees().rem_euclid(360.);
             // Swept relative separation catches a round crossing between ticks.
             let start = std::array::from_fn(|i| {
                 round.previous[i] - own.position[i] + own.velocity[i] / 120.
@@ -139,7 +140,7 @@ impl Service {
                     round: Some(round.id),
                     observed_tick: tick,
                     time_to_danger_s: 0.,
-                    bearing_world_deg: Some(bearing),
+                    bearing_world_deg: Some(bearing()),
                 });
             }
             if !round.tracer || !visible(round.position) {
@@ -160,7 +161,7 @@ impl Service {
                     round: Some(round.id),
                     observed_tick: tick,
                     time_to_danger_s: time,
-                    bearing_world_deg: Some(bearing),
+                    bearing_world_deg: Some(bearing()),
                 });
             }
         }

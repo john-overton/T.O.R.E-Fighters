@@ -26,6 +26,7 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
     (*state % u32::from(bound)) as u16
 }
 
+mod broad;
 #[cfg(test)]
 mod gunship_tests;
 mod handoff;
@@ -37,7 +38,10 @@ mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
 pub mod rewind;
 
-pub const MAX_PROJECTILES: usize = 256;
+/// Rounds, missiles and bombs in flight at once. John, 2026-10-09: 5,000,
+/// up from 256, so a crowded gunfight never loses a burst. What a full sky
+/// costs is measured in `docs/baselines/projectile-cap-2026-10-09.md`.
+pub const MAX_PROJECTILES: usize = 5000;
 pub use crate::ai::targeting::Side;
 /// The side of nothing: ground objects, fixtures and rounds nobody owns. It is
 /// never friendly to anything, so friendly fire never spares it.
@@ -4049,6 +4053,43 @@ impl State {
         // Jammer deception on target hits takes the first ownship's ECM record.
         let fixture_ecm = ships.first().map(|own| own.config.ecm);
         let friendly_fire_off = self.friendly_fire == FriendlyFire::Off;
+        // The first pass of the contact search: which targets and ownship
+        // rows a round's segment can reach this tick at all.
+        let body = |t: &Target, previous: Vector| broad::Body {
+            previous,
+            position: t.position,
+            basis: t.basis,
+            radius: t.radius,
+            solid: self
+                .ground_bounds
+                .get(&t.id)
+                .map(|bounds| (bounds.center, bounds.half)),
+        };
+        let target_broad = broad::Broad::new(
+            self.targets
+                .iter()
+                .zip(&old_targets)
+                .map(|(t, previous)| body(t, *previous)),
+        );
+        let row_bounds: Vec<Option<broad::Bounds>> = rows
+            .iter()
+            .map(|r| {
+                broad::Body {
+                    solid: None,
+                    ..body(&r.target, r.previous)
+                }
+                .bounds()
+            })
+            .collect();
+        // Each aircraft's side, the first row of an id answering, for the
+        // friendly fire rule.
+        let mut target_sides: BTreeMap<u32, Side> = BTreeMap::new();
+        if friendly_fire_off {
+            for t in &self.targets {
+                target_sides.entry(t.id).or_insert(t.side);
+            }
+        }
+        let mut candidates: Vec<usize> = Vec::new();
         self.projectiles.retain_mut(|p| {
             let owned = p.weapon.clone();
             let w = owned.as_ref().unwrap_or_else(|| {
@@ -4236,24 +4277,36 @@ impl State {
             let mut first: Option<(f64, Option<Hit>)> = None;
             // With friendly fire off, no round damages an aircraft of its
             // shooter's own side, the shooter included.
-            let shooter_side = ships
-                .iter()
-                .find(|o| o.aircraft == p.owner)
-                .map(|o| o.side)
-                .or_else(|| {
-                    self.targets
-                        .iter()
-                        .find(|t| t.id == p.owner)
-                        .map(|t| t.side)
-                })
-                .unwrap_or(NO_SIDE);
+            let shooter_side = if friendly_fire_off {
+                ships
+                    .iter()
+                    .find(|o| o.aircraft == p.owner)
+                    .map(|o| o.side)
+                    .or_else(|| target_sides.get(&p.owner).copied())
+                    .unwrap_or(NO_SIDE)
+            } else {
+                NO_SIDE
+            };
             let spares =
                 |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
+            // The round's swept segment widened by its fuze, for the first
+            // pass; a round tested against past volumes skips it.
+            let reach = if rewind.is_none() {
+                let fuze = f64::from(w.damage.fuze_radius.max(0));
+                broad::Bounds::segment(p.previous, p.position, fuze)
+            } else {
+                None
+            };
             // One search over every aircraft row and every ownship. A gun round
             // can hit any aircraft but the one that fired it; a missile or bomb
             // can hit any aircraft once its fuze has armed, even its launcher.
             if armed {
                 for (n, r) in rows.iter().enumerate() {
+                    if let (Some(reach), Some(Some(row))) = (reach, row_bounds.get(n))
+                        && !row.overlaps(&reach)
+                    {
+                        continue;
+                    }
                     let t = &r.target;
                     // Easy aiming widens the volume of the aircraft it shoots at,
                     // never the shooter's own.
@@ -4289,11 +4342,15 @@ impl State {
                 }
             }
             if armed {
-                for (i, t) in self.targets.iter().enumerate().filter(|(_, t)| {
-                    t.body_present()
+                target_broad.candidates(reach, &mut candidates);
+                for &i in &candidates {
+                    let t = &self.targets[i];
+                    if !(t.body_present()
                         && (!is_gun(w) || t.id != p.owner)
-                        && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side))
-                }) {
+                        && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side)))
+                    {
+                        continue;
+                    }
                     if t.hp > 0 && p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
                         continue;
                     }
@@ -4480,7 +4537,11 @@ impl State {
                         category: t.category,
                         aircraft: t.role == TargetRole::Aircraft,
                     };
-                    self.ledger.damaged(credit);
+                    // Only a hit that did damage makes its shooter the last
+                    // attacker, as for an ownship below.
+                    if applied > 0 {
+                        self.ledger.damaged(credit);
+                    }
                     events.push(Event::Hit(t.id));
                     strikes.push(Strike {
                         owner: p.owner,
@@ -9562,6 +9623,102 @@ mod hit_rule_tests {
         let events = run(&mut s, 30);
         assert!(events.contains(&Event::Hit(6)), "{events:?}");
         assert!(!damaged(&events));
+    }
+
+    /// Flies `round` one tick, resolves it as spoofed the way the decoy
+    /// code does, then lets it coast on: it keeps flying but no longer seeks.
+    fn decoyed_then_coasting(s: &mut State, mut round: Projectile) -> Vec<Event> {
+        round.target = None;
+        let id = round.id;
+        s.projectiles.push(round);
+        let mut events = run(s, 1);
+        s.ledger.resolve(id, Resolution::Spoofed);
+        events.extend(run(s, 30));
+        events
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_kills_an_aircraft_after_all_is_a_recorded_hit() {
+        let mut s = scene();
+        s.targets.push(target(6, [0., 1000., 900.], 5, 0x8000));
+        let round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        let events = decoyed_then_coasting(&mut s, round);
+        assert!(events.contains(&Event::Destroyed(6)), "{events:?}");
+        // The kill is backed by a hit, with its damage, and the spoof is
+        // withdrawn: the missile resolved once.
+        let tally = s.ledger.total(|k| k.owner == 0);
+        assert_eq!(
+            (tally.launched, tally.hit, tally.spoofed, tally.failed()),
+            (1, 1, 0, 0)
+        );
+        assert_eq!(tally.damage, 5);
+        let kills = s.ledger.kills();
+        assert_eq!(kills.len(), 1, "{kills:?}");
+        assert_eq!((kills[0].owner, kills[0].victim), (0, 6));
+        assert_eq!(s.own().hits, 1);
+        // The wreck is not hit again for another kill or another hit.
+        let events = run(&mut s, 30);
+        assert!(!events.contains(&Event::Destroyed(6)));
+        assert_eq!(s.ledger.kills().len(), 1);
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_only_damages_an_aircraft_is_its_last_attacker() {
+        let mut s = scene();
+        s.targets.push(target(6, [0., 1000., 900.], 500, 0x8000));
+        let round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        decoyed_then_coasting(&mut s, round);
+        assert!(s.targets[0].hp < 500);
+        let tally = s.ledger.total(|k| k.owner == 0);
+        assert_eq!((tally.hit, tally.spoofed), (1, 0));
+        assert!(s.ledger.kills().is_empty());
+        // Lost another way, the aircraft goes to the shooter whose recorded
+        // hit damaged it.
+        let credit = s.ledger.credit(6).expect("the hit that damaged it");
+        assert_eq!((credit.owner, credit.victim), (0, 6));
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_kills_the_ownship_is_a_recorded_hit() {
+        let mut s = scene();
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x8000));
+        s.ownship_mut(0).unwrap().hp = 1;
+        let round = shell(&s, 5, [0., 1000., 300.], [0., 1000., 0.], Some(0), 0);
+        let events = decoyed_then_coasting(&mut s, round);
+        assert!(events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
+        let tally = s.ledger.total(|k| k.owner == 5);
+        assert_eq!((tally.launched, tally.hit, tally.spoofed), (1, 1, 0));
+        let kills = s.ledger.kills();
+        assert_eq!(kills.len(), 1, "{kills:?}");
+        assert_eq!((kills[0].owner, kills[0].victim), (5, 0));
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_only_touches_a_wreck_stays_spoofed() {
+        let mut s = scene();
+        let mut wreck = target(6, [0., 1000., 900.], 100, 0x8000);
+        wreck.hp = 0;
+        s.targets.push(wreck);
+        let round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        decoyed_then_coasting(&mut s, round);
+        let tally = s.ledger.total(|k| k.owner == 0);
+        assert_eq!((tally.hit, tally.spoofed), (0, 1));
+        assert!(s.ledger.kills().is_empty());
+        assert!(s.ledger.credit(6).is_none());
+    }
+
+    #[test]
+    fn a_hit_that_does_no_damage_is_a_hit_but_not_the_last_attacker() {
+        let mut s = scene();
+        s.targets.push(target(6, [0., 1000., 900.], 100, 0x8000));
+        let mut round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        round.weapon.as_mut().unwrap().damage.by_class = Default::default();
+        s.projectiles.push(round);
+        run(&mut s, 30);
+        assert_eq!(s.targets[0].hp, 100);
+        assert_eq!(s.ledger.total(|k| k.owner == 0).hit, 1);
+        assert!(s.ledger.credit(6).is_none());
+        assert!(s.ledger.kills().is_empty());
     }
 
     #[test]

@@ -65,6 +65,9 @@ const QUEUE_FRAMES: usize = 240;
 /// Knots per foot per second.
 const KT_PER_FPS: f64 = 1. / 1.687_81;
 
+// A recording keeps every round the simulation can have in flight.
+const _: () = assert!(replay::limits::MAX_PROJECTILES >= live::MAX_PROJECTILES);
+
 enum Message {
     Aircraft(Box<replay::AircraftInfo>),
     Weapon(Box<replay::WeaponInfo>),
@@ -2079,7 +2082,7 @@ mod tests {
         use tore_replay::limits::{MAX_EVENTS_PER_TICK, MAX_PROJECTILES, MAX_STRING_BYTES};
         let mut frame = Frame {
             tick: 5,
-            projectiles: (0..1100)
+            projectiles: (0..MAX_PROJECTILES as u32 + 76)
                 .map(|id| replay::ProjectileState {
                     id,
                     direction: [0., 0., 1.],

@@ -360,7 +360,10 @@ than reconstructing the original executable's combat tick.
 `combat::ledger` records every projectile from its first step to its outcome
 (hit with damage, missed, spoofed by a decoy, jammed), keyed by shooter,
 intended target and retail weapon class, plus credited kills and each target's
-last attacker. Nothing in flight reads it. The evaluator in `tore_world::debrief`
+last attacker. A missile resolves once, except that a spoofed one is remembered
+and, if it strikes an aircraft after all, becomes that hit, so a kill or last
+attacker always has a recorded hit behind it (spec: [debrief kills](spec/debrief.md#kills)).
+Nothing in flight reads it. The evaluator in `tore_world::debrief`
 turns it into a report, and the app's `debrief.rs` keeps the screen that draws
 the post-mission pages; `ai_wings.rs` (in `tore-world`) supplies the intended target of AI gun rounds and
 reports decoyed missiles. See the [debrief spec](spec/debrief.md).
@@ -8691,6 +8694,31 @@ composition path. The original filter remains for scaling, fractional placement
 and clipping. Independent pixel tests cover every source/destination alpha pair.
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
+
+### Projectiles in flight
+
+John raised the cap on rounds, missiles and bombs in flight from 256 to 5,000
+on 2026-10-09 (`live::MAX_PROJECTILES`), after a fight of four MiG-21s threw
+away 29 cannon rounds. Every limit that follows it was raised with it: an AI
+gun's queued rounds, a network player's drawn rounds, and a recording's frame
+(8,192, `tore_replay::limits`, checked at compile time to stay above the
+simulation's). A snapshot's 256 projectile records are per packet and stay;
+gun rounds never travel as records. Three shortcuts keep a full sky
+affordable, each an agent decision that changes no answer:
+
+- **The contact search** (`combat/live/broad.rs`) first skips the targets a
+  round's swept segment cannot reach this tick: each target's box over its
+  move, widened by its largest volume, kept in order along x. The targets it
+  keeps are tested exactly as before, in the same order.
+- **The AI's sight lines to tracers** skip sampling the ground when the whole
+  line is above the highest ground under it (`tore_sim::ground_ceiling`, built
+  once from the terrain grid and runways by `Terrain::ground_ceiling`).
+- **The runway lookup** skips the trigonometry for runways nowhere near the
+  point (`OrientedBox::contains_horizontal`).
+
+What remains grows with the AI aircraft times the rounds: each AI aircraft
+still looks at every round for incoming fire. The
+[baseline](baselines/projectile-cap-2026-10-09.md) has the numbers.
 
 ### Measurement rules
 

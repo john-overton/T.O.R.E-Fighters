@@ -9,6 +9,9 @@ const MAX_PENDING_AIMS: usize = 4096;
 /// Shot outcomes kept between drains; the oldest are dropped first, so a
 /// host that never drains them still uses bounded memory.
 pub const MAX_OUTCOMES: usize = 1024;
+/// Decoyed missiles still flying that the ledger remembers, so a late strike
+/// can still be counted. The oldest id is forgotten first.
+const MAX_DECOYED: usize = 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShotKind {
@@ -104,6 +107,10 @@ pub struct Kill {
 pub struct Ledger {
     /// Projectiles in flight, keyed by id.
     open: BTreeMap<u32, Key>,
+    /// Missiles resolved as spoofed that may still be flying: a decoyed
+    /// missile coasts on and can strike an aircraft after all, which then
+    /// counts as its hit (see [`Ledger::resolve`]).
+    decoyed: BTreeMap<u32, Key>,
     aims: BTreeMap<u32, u32>,
     tallies: BTreeMap<Key, Tally>,
     kills: Vec<Kill>,
@@ -132,12 +139,25 @@ impl Ledger {
             self.tallies.entry(key).or_default().launched += 1;
         }
     }
-    /// Closes an open projectile. A decoyed missile is resolved when it is
-    /// spoofed, so its later ground impact or expiry does not count twice.
+    /// Closes an open projectile. A missile resolves once, by what finally
+    /// happened to it, with one exception: a missile resolved as spoofed
+    /// keeps flying, and if it then damages an aircraft the spoof is
+    /// withdrawn and the strike is its hit, with its damage. Without that the
+    /// aircraft would lose hit points and the shooter be credited with the
+    /// kill (see [`Ledger::damaged`]) that no hit in the tally accounts for.
+    /// Its later ground impact, expiry, jamming or contact with a wreck leave
+    /// the spoof as it was and do not count twice.
     pub fn resolve(&mut self, projectile: u32, resolution: Resolution) {
         let Some(key) = self.open.remove(&projectile) else {
+            self.resolve_decoyed(projectile, resolution);
             return;
         };
+        if resolution == Resolution::Spoofed {
+            if self.decoyed.len() == MAX_DECOYED {
+                self.decoyed.pop_first();
+            }
+            self.decoyed.insert(projectile, key);
+        }
         let tally = self.tallies.entry(key).or_default();
         match resolution {
             Resolution::Hit(damage) => {
@@ -148,6 +168,25 @@ impl Ledger {
             Resolution::Spoofed => tally.spoofed += 1,
             Resolution::Jammed => tally.jammed += 1,
         }
+        self.report(projectile, key, resolution);
+    }
+    /// The end of a missile that was resolved as spoofed: only damage turns
+    /// it into a hit.
+    fn resolve_decoyed(&mut self, projectile: u32, resolution: Resolution) {
+        let Some(key) = self.decoyed.remove(&projectile) else {
+            return;
+        };
+        if let Resolution::Hit(damage) = resolution
+            && damage > 0
+        {
+            let tally = self.tallies.entry(key).or_default();
+            tally.spoofed = tally.spoofed.saturating_sub(1);
+            tally.hit += 1;
+            tally.damage = tally.damage.saturating_add(damage);
+            self.report(projectile, key, resolution);
+        }
+    }
+    fn report(&mut self, projectile: u32, key: Key, resolution: Resolution) {
         if self.outcomes.len() == MAX_OUTCOMES {
             self.outcomes.pop_front();
         }
@@ -161,7 +200,9 @@ impl Ledger {
     pub fn take_outcomes(&mut self) -> Vec<Outcome> {
         self.outcomes.drain(..).collect()
     }
-    /// Remembers who last damaged `victim`.
+    /// Remembers who last damaged `victim`. Combat calls it only for a strike
+    /// that did damage, right after [`Ledger::resolve`] tallied that same hit,
+    /// so the last attacker always has a recorded hit behind it.
     pub fn damaged(&mut self, hit: Kill) {
         if !self.uncredited.contains(&hit.victim) {
             self.last_hit.insert(hit.victim, hit);
@@ -296,6 +337,63 @@ mod tests {
         }
         assert_eq!(ledger.aims.len(), MAX_PENDING_AIMS);
     }
+    #[test]
+    fn a_spoofed_missile_that_strikes_after_all_is_counted_as_a_hit_once() {
+        let mut ledger = Ledger::default();
+        for id in [1, 2, 3, 4] {
+            ledger.launch(id, 0, Some(7), ShotKind::AirToAir);
+        }
+        ledger.resolve(1, Resolution::Spoofed);
+        ledger.resolve(2, Resolution::Spoofed);
+        ledger.resolve(3, Resolution::Spoofed);
+        ledger.resolve(4, Resolution::Spoofed);
+        ledger.take_outcomes();
+        // It coasts on and damages the aircraft: the spoof is withdrawn.
+        ledger.resolve(1, Resolution::Hit(140));
+        ledger.resolve(1, Resolution::Hit(140));
+        // Nothing else that happens to a spoofed missile changes the tally:
+        // a miss, a jam, or touching a wreck (a hit that did no damage).
+        ledger.resolve(2, Resolution::Missed);
+        ledger.resolve(2, Resolution::Hit(50));
+        ledger.resolve(3, Resolution::Hit(0));
+        ledger.resolve(3, Resolution::Hit(50));
+        ledger.resolve(4, Resolution::Jammed);
+        let missiles = ledger.total(|k| k.owner == 0);
+        assert_eq!(
+            missiles,
+            Tally {
+                launched: 4,
+                hit: 1,
+                damage: 140,
+                spoofed: 3,
+                ..Tally::default()
+            }
+        );
+        // Resolved once each: launches never fall short of their outcomes.
+        assert_eq!(missiles.failed(), 0);
+        // The recording hears of the late strike, as a hit on the same key.
+        let outcomes = ledger.take_outcomes();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].projectile, 1);
+        assert_eq!(outcomes[0].resolution, Resolution::Hit(140));
+        assert_eq!(outcomes[0].key.aim, Some(7));
+    }
+
+    #[test]
+    fn the_spoofed_missiles_remembered_are_bounded() {
+        let mut ledger = Ledger::default();
+        for id in 0..(MAX_DECOYED as u32 + 10) {
+            ledger.launch(id, 0, None, ShotKind::AirToAir);
+            ledger.resolve(id, Resolution::Spoofed);
+        }
+        assert_eq!(ledger.decoyed.len(), MAX_DECOYED);
+        // The oldest was forgotten, the newest is kept.
+        ledger.resolve(0, Resolution::Hit(10));
+        ledger.resolve(MAX_DECOYED as u32 + 9, Resolution::Hit(10));
+        let total = ledger.total(|_| true);
+        assert_eq!((total.hit, total.damage), (1, 10));
+    }
+
     #[test]
     fn a_victim_is_credited_once() {
         let mut ledger = Ledger::default();

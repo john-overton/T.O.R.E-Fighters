@@ -819,6 +819,25 @@ impl Terrain {
         position
     }
 
+    /// The highest [`Self::height`] or [`Self::surface`] answers over each
+    /// square of the terrain grid: the square's highest corner cell (heights
+    /// blend them) or the highest runway surface over it.
+    pub fn ground_ceiling(&self) -> tore_sim::ground_ceiling::GroundCeiling {
+        let theater = &self.theater;
+        let mut ceiling = tore_sim::ground_ceiling::GroundCeiling::from_grid(
+            theater.cols,
+            theater.rows,
+            f64::from(CELL_FEET),
+            |col, row| f64::from(f32::from(theater.cell(col, row).elevation) * HEIGHT_FEET),
+        );
+        for runway in &self.airport_scene.runways {
+            if let Some((lo, hi, top)) = runway.surface_extent() {
+                ceiling.raise(lo, hi, top);
+            }
+        }
+        ceiling
+    }
+
     pub fn height(&self, x: f32, z: f32) -> f32 {
         let fx = (x / CELL_FEET).clamp(0.0, (self.theater.cols - 1) as f32 - 0.001);
         let fy = (z / CELL_FEET).clamp(0.0, (self.theater.rows - 1) as f32 - 0.001);
@@ -1047,5 +1066,94 @@ mod tests {
         let w = world();
         assert_eq!(w.height(0.0, 0.0), 0.0);
         assert!((w.height(CELL_FEET / 2.0, CELL_FEET / 2.0) - 1536.0).abs() < 0.01);
+    }
+
+    /// Wherever the ceiling calls a sight line clear, every point of it is
+    /// above the ground the AI is given, on and off the grid and over a
+    /// sloped runway.
+    #[test]
+    fn the_ground_ceiling_never_clears_a_line_through_the_ground() {
+        use tore_formats::theater::TerrainCell;
+        use tore_sim::airport::{OrientedBox, Runway};
+        let mut seed = 0x51_7cc1_b727_220a_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut w = world();
+        let (cols, rows) = (12, 9);
+        w.theater.cols = cols;
+        w.theater.rows = rows;
+        w.theater.cells = (0..cols * rows)
+            .map(|_| TerrainCell {
+                color: 100,
+                class: 2,
+                elevation: (next() % 32) as u8,
+            })
+            .collect();
+        let surface = OrientedBox {
+            center: [
+                3.3 * f64::from(CELL_FEET),
+                9_000.,
+                4.1 * f64::from(CELL_FEET),
+            ],
+            half: [150., 20., 6_000.],
+            heading: 0.6,
+            pitch: 0.03,
+            bank: 0.01,
+        };
+        w.airport_scene.runways.push(Runway {
+            object: 1,
+            airport: 1,
+            name: "R".into(),
+            surface,
+            approach_center: surface.center,
+            elevation_ft: 9_000.,
+            heading: 0.6,
+            length_ft: 12_000.,
+        });
+        let ceiling = w.ground_ceiling();
+        // Only the runway, standing above the highest hill (31 steps of 256
+        // feet), keeps this line from being clear.
+        let over = |height: f64| {
+            let c = surface.center;
+            ceiling.clear_above([c[0] - 100., height, c[2]], [c[0] + 100., height, c[2]])
+        };
+        assert!(!over(8_500.));
+        assert!(over(9_500.));
+        let span = f64::from(CELL_FEET) * 14.;
+        let mut cleared = 0;
+        for _ in 0..20_000 {
+            let mut point = || {
+                [
+                    (next() % 1_000_000) as f64 / 1e6 * span - f64::from(CELL_FEET),
+                    (next() % 12_000) as f64,
+                    (next() % 1_000_000) as f64 / 1e6 * span - f64::from(CELL_FEET),
+                ]
+            };
+            let a = point();
+            let mut b = point();
+            // Mostly short lines, as a pilot sees a tracer nearby.
+            if next() % 4 != 0 {
+                b = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * 0.05);
+            }
+            if !ceiling.clear_above(a, b) {
+                continue;
+            }
+            cleared += 1;
+            for step in 0..=64 {
+                let t = f64::from(step) / 64.;
+                let p: [f64; 3] = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
+                let terrain = f64::from(w.height(p[0] as f32, p[2] as f32));
+                let ground = w.surface(p[0], p[2]).height;
+                assert!(p[1] > terrain && p[1] > ground, "{a:?} {b:?} at {t}");
+            }
+        }
+        assert!(
+            cleared > 1_000,
+            "too few lines cleared to mean anything: {cleared}"
+        );
     }
 }

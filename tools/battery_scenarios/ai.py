@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from battery import ROOT, Scenario
 
 from battery_scenarios import _ai_fuzz
+from battery_scenarios._debrief import kill_hit_problems
 from battery_scenarios._strips import ground_airport
 
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
@@ -111,6 +112,7 @@ def probe_problems(
     totals = TOTALS.search(output)
     if totals and int(totals.group(4)) > 0:
         problems.append(f"dropped launches: {totals.group(4)}")
+    problems.extend(kill_hit_problems(output))
     debrief = DEBRIEF.search(output)
     attack = ATTACK.search(output)
     if debrief and attack:
@@ -718,6 +720,15 @@ def scenarios() -> list[Scenario]:
                                                        "--probe-guns", "--probe-ai-guns-only", "--separation", "2", *attack), ticks=9600))
         out.append(probe(f"guns-ai-only-{fa}-vs-{ea}", ["--aircraft", fa, "--probe-enemy-aircraft", ea, "--probe-ai-guns-only",
                                                         "--probe-geometry", "rear", "--separation", "1"], ticks=6000))
+    # Four MiG-21s firing long bursts (fuzz seed 317): with 256 rounds in
+    # flight at most they threw 29 away as "dropped launches" (lane doc).
+    out.append(probe("guns-mig21-pack", ["--theater", "~FRA0", "--probe-fight", "1:4", "--aircraft", "a4e",
+                                         "--probe-friendly-aircraft", "su25", "--probe-enemy-aircraft", "mig21",
+                                         "--probe-enemy-skill", "experienced", "--ai-mission", "intercept", "--probe-geometry", "side",
+                                         "--separation", "5", "--probe-flight-model", "researched", "--probe-attack", "720:20",
+                                         "--probe-ai-guns-only", "--probe-wing-order", "6540:attack-on-contact",
+                                         "--probe-wing-order", "1440:attack-on-contact", "--probe-wing-order", "3000:land-selected"],
+                     ticks=14400))
 
     # 8. Fault injection into the first enemy, every index, and controlled threats.
     for index in range(45):

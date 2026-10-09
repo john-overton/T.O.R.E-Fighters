@@ -346,6 +346,7 @@ list fillers called from `0x4880d0`'s callers.
 | REVIVAL WEAPONS | WITH MISSILES; WITHOUT MISSILES (keeps air-to-ground missiles); WITH BULLETS (guns only); HALF BULLETS (guns only, half the usual rounds) | p. 43 |
 | Scored targets | Aeroplanes and helicopters only; ships, tanks and ground targets do not count | p. 43 |
 | Kill before ejection | Counts as two kills | p. 43 |
+| Who is credited with a kill | The shooter whose recorded hit destroyed the plane, else the last shooter whose hit damaged it before it was lost another way (ejection, crash); nobody for a plane lost with no shooter. The score and the kill limit use the debrief's rule ([debrief spec](debrief.md#kills)) | agent decision, 2026-10-09 |
 | `CHAT.TXT` | Up to 12 lines, F1 to F12; text 50 characters, sound name 12 | p. 46; S |
 
 ## Airbase Assault

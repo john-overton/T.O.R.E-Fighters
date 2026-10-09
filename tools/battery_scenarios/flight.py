@@ -11,6 +11,7 @@ import re
 import time
 
 from battery import Scenario
+from battery_scenarios._debrief import kill_hit_problems
 from battery_scenarios._powered import powered_scenarios
 
 # Original roster covered by the established fixed-wing maneuver battery.
@@ -1868,6 +1869,7 @@ def check_passive_fight(output: str) -> list[str]:
     anomalies = [a for a in re.findall(r"^AI probe anomaly: (.*)$", output, re.M) if "mid-air collision" not in a]
     if anomalies:
         problems.append(f"{len(anomalies)} probe anomalies: {anomalies[0][:120]}")
+    problems.extend(kill_hit_problems(output))
     if aam_hits > aam_shots or gun_hits > gun_shots:
         problems.append(f"the debrief counts more hits than shots (missiles {aam_hits}/{aam_shots}, guns {gun_hits}/{gun_shots})")
     if status == "Dead":
@@ -1916,10 +1918,6 @@ ATTACK_LINE = re.compile(
 )
 
 
-# Aircraft whose seeded fight shows the debrief crediting more kills than hits.
-DEBRIEF_KILL_MISMATCH = {"su27", "su35"}
-
-
 def check_attacking_fight(output: str, ac: str = "") -> list[str]:
     """The scripted leader designates, selects a weapon and fires through the
     player's own controls in a 5 v 5. What it did, what the debrief says it did
@@ -1931,15 +1929,11 @@ def check_attacking_fight(output: str, ac: str = "") -> list[str]:
         return problems + ["missing attack or debrief line"]
     clicks, steps, presses, missiles, bursts, rounds, hits, kills = (int(a.group(i)) for i in range(1, 9))
     alive = a.group(9) == "true"
-    kill_list = sum(int(v) for v in d.group(2).split(","))
     a2a_hits, a2a_shots, damage_dealt, gun_hits, gun_shots = (int(d.group(i)) for i in (3, 4, 5, 6, 7))
     if clicks < 1:
         problems.append("the leader never designated a target")
-    # A kill needs a recorded hit by the player. Known not to hold today with the
-    # Su-27 and Su-35: the debrief credits two kills against one recorded hit
-    # (see "Bugs found" in the lane page), so those two skip this one check.
-    if kill_list > a2a_hits + gun_hits and ac not in DEBRIEF_KILL_MISMATCH:
-        problems.append(f"the debrief lists {kill_list} kills but only {a2a_hits + gun_hits} recorded hits")
+    # A kill needs a recorded hit by the player: check_passive_fight holds both
+    # columns to it (docs/spec/debrief.md, "Kills"), with no aircraft exempt.
     if kills > hits:
         problems.append(f"the probe counts {kills} kills from {hits} hits")
     if a2a_hits > a2a_shots or gun_hits > gun_shots:
