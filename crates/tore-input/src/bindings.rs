@@ -30,6 +30,11 @@ pub enum Axis {
     TrimPitchRate,
     TrimRollRate,
     TrimPedalRate,
+    /// The AC-130 gunsight's slew, right positive. Presentation-side like
+    /// look: [`Resolver::sight`] reads it, it never reaches [`PilotInput`].
+    SightX,
+    /// The AC-130 gunsight's slew, up positive.
+    SightY,
 }
 impl Axis {
     /// The trim rate axes in [`TrimAxis`] order.
@@ -134,6 +139,8 @@ impl Action {
             "trim-pitch-rate" => Some(Axis::TrimPitchRate),
             "trim-roll-rate" => Some(Axis::TrimRollRate),
             "trim-pedal-rate" => Some(Axis::TrimPedalRate),
+            "sight-x" => Some(Axis::SightX),
+            "sight-y" => Some(Axis::SightY),
             _ => None,
         };
         if let Some(axis) = axis {
@@ -230,6 +237,14 @@ impl Action {
                 | "fail-station"
                 | "damage-report"
                 | "damage-player"
+                | "sight-designate"
+                | "sight-pin"
+                | "sight-zoom-in"
+                | "sight-zoom-out"
+                | "sight-left"
+                | "sight-right"
+                | "sight-up"
+                | "sight-down"
                 | "target-jammer"
                 | "chaff"
                 | "flare"
@@ -379,6 +394,10 @@ impl Calibration {
             * self.scale
     }
 }
+/// Ticks a [`Mode::Tap`] or [`Mode::Long`] control must be held to count as
+/// a long press: half a second at the fixed 120 Hz (John, 2026-10-09, for
+/// the gunsight's pin gesture).
+pub const LONG_PRESS_TICKS: u32 = 60;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Axis,
@@ -388,6 +407,12 @@ pub enum Mode {
     HoldState,
     Press,
     Release,
+    /// Fires on release when the control was held less than
+    /// [`LONG_PRESS_TICKS`]; the short half of a press that also has a
+    /// [`Mode::Long`] action.
+    Tap,
+    /// Fires once when the control has been held [`LONG_PRESS_TICKS`] ticks.
+    Long,
     Switch,
     Follow,
     Position(i32),
@@ -586,6 +611,8 @@ impl Profile {
                             "hold" => Mode::HoldState,
                             "press" => Mode::Press,
                             "release" => Mode::Release,
+                            "tap" => Mode::Tap,
+                            "long" => Mode::Long,
                             "switch" => Mode::Switch,
                             "follow" => Mode::Follow,
                             "delta" => Mode::Delta,
@@ -631,7 +658,7 @@ impl Profile {
                                         | Axis::Collective
                                 )
                             ),
-                            Mode::HoldState if matches!(&action, Action::Ui(name) if name == "fire" || matches!(name.as_str(), "drone-forward" | "drone-backward" | "drone-left" | "drone-right" | "drone-up" | "drone-down" | "drone-boost" | "drone-look")) => {
+                            Mode::HoldState if matches!(&action, Action::Ui(name) if name == "fire" || matches!(name.as_str(), "drone-forward" | "drone-backward" | "drone-left" | "drone-right" | "drone-up" | "drone-down" | "drone-boost" | "drone-look" | "sight-left" | "sight-right" | "sight-up" | "sight-down")) => {
                                 true
                             }
                             Mode::Switch | Mode::Follow | Mode::HoldState => {
@@ -682,6 +709,8 @@ struct Contribution {
     pickup: bool,
     previous: f64,
     override_at: Option<f64>,
+    /// Ticks a tap or long-press control has been held.
+    held: u32,
 }
 /// Physical baseline events initialize state without producing synthetic presses.
 #[derive(Clone, Debug)]
@@ -834,6 +863,7 @@ impl Resolver {
             }
             s.previous = s.value;
             s.pickup = false;
+            s.held = 0;
         }
     }
     /// Modifier-first chords use `MODIFIER+CONTROL`, with up to two modifiers.
@@ -1105,6 +1135,31 @@ impl Resolver {
                         }
                     }
                 }
+                Mode::Tap | Mode::Long => {
+                    // `value` is 1 while the press is being timed; the
+                    // resolver's frames count it (see `Resolver::frame`).
+                    let active = event.value != 0.;
+                    if initial || !allowed {
+                        s.armed = !active;
+                        s.value = 0.;
+                        s.held = 0;
+                    } else if active {
+                        if s.armed && s.value == 0. {
+                            s.value = 1.;
+                            s.held = 0;
+                            s.armed = false;
+                        }
+                    } else {
+                        if b.mode == Mode::Tap && s.value != 0. && s.held < LONG_PRESS_TICKS {
+                            output = Some(b.action.clone());
+                        }
+                        s.value = 0.;
+                        s.held = 0;
+                    }
+                    if !active {
+                        s.armed = true;
+                    }
+                }
                 Mode::Press | Mode::Release | Mode::Position(_) => {
                     let active = match b.mode {
                         Mode::Position(n) => event.value == n as f64,
@@ -1268,6 +1323,7 @@ impl Resolver {
         if self.paused || !self.focused {
             return (PilotInput::default(), [0.; 2]);
         }
+        self.time_presses();
         let throttle_rate = self.axis(Axis::ThrottleRate, throttle);
         if throttle_rate != 0. {
             self.override_throttle();
@@ -1357,6 +1413,32 @@ impl Resolver {
         };
         let look = self.look();
         (input, look)
+    }
+    /// One tick of every timed press: a [`Mode::Long`] control fires the
+    /// tick it has been held [`LONG_PRESS_TICKS`]. A tap's timing ends at
+    /// its release, in [`Self::resolve_event`].
+    fn time_presses(&mut self) {
+        let mut fired = Vec::new();
+        for ((index, device), s) in &mut self.states {
+            let b = &self.profile.bindings[*index];
+            if !matches!(b.mode, Mode::Tap | Mode::Long) || s.value == 0. {
+                continue;
+            }
+            s.held = s.held.saturating_add(1);
+            if b.mode == Mode::Long && s.held == LONG_PRESS_TICKS {
+                fired.push((device.clone(), b.action.clone()));
+            }
+        }
+        self.events.extend(fired);
+    }
+    /// The gunsight slew axes, each -1..1 with right and up positive: the
+    /// analog `sight-x` and `sight-y` sources only. The keyboard and button
+    /// holds (`sight-left` and the rest) join them in [`SightSlew::step`].
+    pub fn sight_axes(&mut self) -> [f64; 2] {
+        if self.paused || !self.focused {
+            return [0.; 2];
+        }
+        [self.axis(Axis::SightX, 0.), self.axis(Axis::SightY, 0.)]
     }
     /// Presentation-only look resolution cannot acquire throttle/flight-axis ownership.
     pub fn look(&mut self) -> [f32; 2] {

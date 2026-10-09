@@ -162,13 +162,29 @@ impl Round {
         tracer: bool,
     ) -> Option<Self> {
         let [id, owner, station] = seed;
+        let direction = projectile_launch_direction(weapon, forward, id, owner, station as usize);
+        let mut round = Self::aimed(weapon, muzzle, direction, speed_fps, tick)?;
+        round.tracer = tracer;
+        Some(round)
+    }
+
+    /// A round let go along exactly `direction`, with no spread: the centre of
+    /// the gun's dispersion cone, which is where a pipper points. Otherwise as
+    /// [`Round::release`].
+    pub fn aimed(
+        weapon: &Weapon,
+        muzzle: Vector,
+        direction: Vector,
+        speed_fps: f64,
+        tick: u64,
+    ) -> Option<Self> {
         let speed = launch_speed(&weapon.movement, (speed_fps * 256.) as i32).ok()? * 256;
         Some(Self {
             weapon: weapon.source.clone(),
-            tracer,
+            tracer: false,
             position: muzzle,
             previous: muzzle,
-            direction: projectile_launch_direction(weapon, forward, id, owner, station as usize),
+            direction,
             speed_f8: speed,
             movement: weapon.movement,
             flags: weapon.flags,
@@ -177,13 +193,24 @@ impl Round {
         })
     }
 
+    /// Whether the round's life is over at the step beginning at `tick`: the
+    /// check [`Round::step`] makes first, before it moves the round.
+    pub fn expired(&self, tick: u64) -> bool {
+        removal_due(
+            &self.movement,
+            (tick / 30) as u16,
+            self.launched_t,
+            (self.position[1] * 256.) as i32,
+        )
+    }
+
     /// Flies the round one tick, the one starting at `tick`, over `ground`
     /// (height by x and z). `false` once its life is over, or it is in the
     /// ground.
     pub fn step(&mut self, tick: u64, ground: &impl Fn(f64, f64) -> f64) -> bool {
         let now = (tick / 30) as u16;
         let m = &self.movement;
-        if removal_due(m, now, self.launched_t, (self.position[1] * 256.) as i32) {
+        if self.expired(tick) {
             return false;
         }
         self.previous = self.position;

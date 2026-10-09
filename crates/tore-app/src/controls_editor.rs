@@ -1812,8 +1812,12 @@ impl Editor {
                     if entry.kind == Row::Head {
                         calibration.deadzone = 0.;
                     } else if entry.kind == Row::Axis {
-                        // Pushing a stick forward to look up reads negative.
-                        let sign = if entry.action == "look-y" { -1. } else { 1. };
+                        // Pushing a stick forward to look or slew up reads negative.
+                        let sign = if matches!(entry.action, "look-y" | "sight-y") {
+                            -1.
+                        } else {
+                            1.
+                        };
                         calibration.scale = sensitivity * sign;
                     }
                     binding.calibration = calibration;

@@ -554,6 +554,72 @@ pub const ENTRIES: &[Entry] = &[
         Weapons,
         &["Ctrl-8"],
     ),
+    cmd(
+        "sight-designate",
+        "Gunsight: designate under crosshair (AC-130)",
+        Weapons,
+        &["\\"],
+    ),
+    cmd(
+        "sight-pin",
+        "Gunsight: pin ground point (AC-130)",
+        Weapons,
+        &["Shift-\\"],
+    ),
+    cmd(
+        "sight-zoom-in",
+        "Gunsight: zoom in (AC-130)",
+        Weapons,
+        &["Shift-'"],
+    ),
+    cmd(
+        "sight-zoom-out",
+        "Gunsight: zoom out (AC-130)",
+        Weapons,
+        &["Shift-;"],
+    ),
+    e(
+        "sight-x",
+        "Gunsight: slew left/right (AC-130)",
+        Weapons,
+        Axis,
+        &[],
+    ),
+    e(
+        "sight-y",
+        "Gunsight: slew up/down (AC-130)",
+        Weapons,
+        Axis,
+        &[],
+    ),
+    e(
+        "sight-left",
+        "Gunsight: slew left (AC-130)",
+        Weapons,
+        Hold,
+        &["Alt-ArrowLeft"],
+    ),
+    e(
+        "sight-right",
+        "Gunsight: slew right (AC-130)",
+        Weapons,
+        Hold,
+        &["Alt-ArrowRight"],
+    ),
+    e(
+        "sight-up",
+        "Gunsight: slew up (AC-130)",
+        Weapons,
+        Hold,
+        &["Alt-ArrowUp"],
+    ),
+    e(
+        "sight-down",
+        "Gunsight: slew down (AC-130)",
+        Weapons,
+        Hold,
+        &["Alt-ArrowDown"],
+    ),
     cmd("designate", "Next radar target", Weapons, &["t"]),
     cmd(
         "designate-previous",
@@ -587,7 +653,12 @@ pub const ENTRIES: &[Entry] = &[
         Weapons,
         &["Shift-k"],
     ),
-    cmd("range-target", "Reset range target", Weapons, &["\\"]),
+    cmd(
+        "range-target",
+        "Reset range target",
+        Weapons,
+        &["Ctrl-Shift-\\"],
+    ),
     cmd("key:u", "IFF squawk on the target", Weapons, &["u"]),
     cmd(
         "incoming",
@@ -1452,7 +1523,14 @@ mod tests {
                     .bindings
                     .iter()
                     .filter(|b| entry.bindable() && entry.matches(b))
-                    .map(|b| control_label(&b.device, &b.control, b.mode, true))
+                    .map(|b| {
+                        let label = control_label(&b.device, &b.control, b.mode, true);
+                        match b.mode {
+                            Mode::Tap => format!("{label} (tap)"),
+                            Mode::Long => format!("{label} (hold half a second)"),
+                            _ => label,
+                        }
+                    })
                     .collect();
                 out.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
@@ -1488,6 +1566,69 @@ mod tests {
             current == generated,
             "docs/CONTROLS.md is out of date; run TORE_UPDATE_CONTROLS_DOC=1 cargo test -p tore-app controls_doc"
         );
+    }
+    /// The gunsight's keys (John, 2026-10-09): each is its entry's only
+    /// stock owner, none is a retail key (retail's Backslash is the IR/laser
+    /// designate this key now does on the AC-130), and the live-fire range
+    /// reset moved to Ctrl+Shift+Backslash to make room.
+    #[test]
+    fn the_gunsight_keys_are_their_own() {
+        let owners = |key: &str| -> Vec<&str> {
+            ENTRIES
+                .iter()
+                .filter(|e| e.keys.contains(&key))
+                .map(|e| e.action)
+                .collect()
+        };
+        assert_eq!(owners("\\"), ["sight-designate"]);
+        assert_eq!(owners("Shift-\\"), ["sight-pin"]);
+        assert_eq!(owners("Ctrl-Shift-\\"), ["range-target"]);
+        assert_eq!(owners("Shift-'"), ["sight-zoom-in"]);
+        assert_eq!(owners("Shift-;"), ["sight-zoom-out"]);
+        for (key, action) in [
+            ("Alt-ArrowLeft", "sight-left"),
+            ("Alt-ArrowRight", "sight-right"),
+            ("Alt-ArrowUp", "sight-up"),
+            ("Alt-ArrowDown", "sight-down"),
+        ] {
+            assert_eq!(owners(key), [action], "{key}");
+        }
+        // The keys they sit beside keep their own meaning: the plain
+        // apostrophe and semicolon still pick and clear a target, Shift+L is
+        // still the landing request, and no other Alt+arrow is stock.
+        assert_eq!(owners("'"), ["designate-visual"]);
+        assert_eq!(owners(";"), ["clear-designation"]);
+        assert_eq!(owners("l"), ["clear-designation"]);
+        assert!(
+            ENTRIES
+                .iter()
+                .flat_map(|e| e.keys)
+                .filter(|k| k.starts_with("Alt-Arrow"))
+                .all(|k| owners(k).len() == 1)
+        );
+        // None of them is a protected desktop-style key, and every gunsight
+        // action is bindable and parses, so the controls screen can rebind it.
+        for entry in ENTRIES.iter().filter(|e| e.action.starts_with("sight-")) {
+            assert!(
+                entry.bindable() && entry.parsed().is_some(),
+                "{}",
+                entry.label
+            );
+            assert!(!entry.keys.iter().any(|k| PROTECTED_KEYS.contains(k)));
+            assert_eq!(entry.group, Weapons);
+        }
+        // The slew has an axis row for sticks and four hold rows for keys and
+        // buttons; the captured control of each decides how it is bound.
+        let kinds = |action: &str| -> Vec<Kind> {
+            ENTRIES
+                .iter()
+                .filter(|e| e.action == action)
+                .map(|e| e.kind)
+                .collect()
+        };
+        assert_eq!(kinds("sight-x"), [Kind::Axis]);
+        assert_eq!(kinds("sight-y"), [Kind::Axis]);
+        assert_eq!(kinds("sight-left"), [Kind::Hold]);
     }
     #[test]
     fn scope_range_keys_follow_the_manual() {

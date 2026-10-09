@@ -25,6 +25,13 @@ pub enum Command {
     /// Enter: the visible sensor contact nearest the nose.
     TargetVisual,
     RangeReset,
+    /// Backslash: designate whatever is under the AC-130 gunsight's
+    /// crosshair, an object or else the ground.
+    SightDesignate,
+    /// Shift-Backslash: pin the ground point under the crosshair.
+    SightPinGround,
+    /// Shift-' (in) and Shift-; (out): the gunsight's zoom, by steps.
+    SightZoom(i8),
     DamageReport,
     Eject,
     Combat(tore_sim::combat::live::Command),
@@ -862,6 +869,10 @@ impl FlightUi {
             if key == "b" && !shift {
                 return Command::Bookmark;
             }
+            // Range fixture, off Backslash for the gunsight's designate.
+            if key == "\\" && shift {
+                return Command::RangeReset;
+            }
             // Retail's Show Target Info key, the Pref row's accelerator.
             if key == "t" && !shift {
                 return self.activate("Show target info?", "Ctrl-T");
@@ -995,7 +1006,6 @@ impl FlightUi {
             "[" => Command::PreviousWeapon,
 
             "t" => Command::Target,
-            "\\" => Command::RangeReset,
             "w" => Command::Waypoint(true),
             "u" => Command::Iff,
             "k" => Command::ScoreBoard,
@@ -2014,6 +2024,27 @@ mod tests {
             ui.key("i", true, true, false, &tree),
             Command::Combat(C::Incoming)
         );
+    }
+    /// The live-fire range reset left Backslash (the gunsight's designate
+    /// key, claimed by the stock key bindings before this table) for
+    /// Ctrl+Shift+Backslash, John 2026-10-09.
+    #[test]
+    fn the_range_reset_is_ctrl_shift_backslash() {
+        let tree = tree();
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.key("\\", true, true, false, &tree), Command::RangeReset);
+        for (shift, ctrl, alt) in [
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (true, true, true),
+        ] {
+            assert_eq!(
+                ui.key("\\", shift, ctrl, alt, &tree),
+                Command::None,
+                "shift {shift} ctrl {ctrl} alt {alt}"
+            );
+        }
     }
     #[test]
     fn manual_combat_commands_preserve_modifier_and_menu_isolation() {

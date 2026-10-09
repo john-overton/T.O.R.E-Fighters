@@ -6,9 +6,11 @@ pub use pilot::{
 };
 pub mod bindings;
 pub use bindings::{
-    Action, Axis, Binding, Calibration, Event, Mode, Profile, Resolver, chord_parts, token_base,
-    token_value,
+    Action, Axis, Binding, Calibration, Event, LONG_PRESS_TICKS, Mode, Profile, Resolver,
+    chord_parts, token_base, token_value,
 };
+pub mod sight;
+pub use sight::SightSlew;
 pub mod feedback;
 pub mod recording;
 #[cfg(test)]

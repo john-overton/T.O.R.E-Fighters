@@ -321,6 +321,8 @@ impl App {
                     session.ended = None;
                 }
                 log::info!("Network: seated in plane {plane}");
+                // A new plane starts with the gunsight's default zoom.
+                self.input.reset_sight();
                 // Seated again in flight (a revival, slice F2-V): this
                 // flight is put away and the next turn starts the new one,
                 // as a player who left its flight and joined again starts.
