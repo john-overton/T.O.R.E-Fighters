@@ -302,6 +302,18 @@ impl Roster {
         (self.planes[at].pilot == Pilot::Lost).then(|| self.planes.remove(at))
     }
 
+    /// Takes an AI wreck out of the roster for good (the lobby pass's slice
+    /// R1: an AI wreck whose lineage respawned, retired to make room). The
+    /// entry comes back with nobody as its pilot ([`Pilot::Lost`]).
+    pub(crate) fn remove_ai_plane(&mut self, plane: PlaneId) -> Option<Plane> {
+        let at = self.planes.binary_search_by_key(&plane, |p| p.id).ok()?;
+        (self.planes[at].pilot == Pilot::Ai).then(|| {
+            let mut entry = self.planes.remove(at);
+            entry.pilot = Pilot::Lost;
+            entry
+        })
+    }
+
     /// The seat flying `plane`, if a human flies it.
     pub fn seat_of(&self, plane: PlaneId) -> Option<SeatId> {
         match self.plane(plane)?.pilot {

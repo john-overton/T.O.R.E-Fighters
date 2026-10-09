@@ -280,7 +280,13 @@ fn a_revived_plane_takes_the_spawn_in_the_old_planes_wing_by_the_handoff() {
     let spawn = world
         .revival_spawn(SeatId(0), start, 10. * NM, None, RevivalWeapons::Missiles)
         .unwrap();
-    let (position, heading) = point(&world.living_aircraft(), start, 10. * NM, 10_000.);
+    // On the small synthetic map the point lies past the east edge, so it
+    // is walked back onto the map towards the battle (slice R1).
+    let (centre, position, heading) =
+        point_from_centre(&world.living_aircraft(), start, 10. * NM, 10_000.);
+    let bounds = world.map_bounds();
+    assert!(position[0] > bounds.max[0], "the point is off the map");
+    let position = onto_map(position, centre, &bounds);
     assert_eq!(
         [spawn.position[0], spawn.position[2]],
         [position[0], position[2]]

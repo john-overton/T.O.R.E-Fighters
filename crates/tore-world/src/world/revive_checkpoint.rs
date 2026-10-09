@@ -4,9 +4,9 @@
 //! `World::revival` is the [`Book`]: each abandoned plane with the tick it
 //! was abandoned and the tick its wreck came to rest (which decide what a
 //! revival may retire), the retired planes' roster entries (the results keep
-//! a row for each), and the planes revivals added (which the mission
-//! identity leaves out). The lists keep their order: the oldest wreck is the
-//! first retired.
+//! a row for each), the planes revivals added (which the mission identity
+//! leaves out), and each added plane's lineage root (slice R1's AI respawn).
+//! The lists keep their order: the oldest wreck is the first retired.
 
 use super::{Book, LostPlane};
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
@@ -23,10 +23,12 @@ impl Checkpoint for Book {
             lost,
             retired,
             added,
+            roots,
         } = self;
         lost.save(s, None)?;
         retired.save(s, None)?;
-        added.save(s, None)
+        added.save(s, None)?;
+        roots.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -34,6 +36,7 @@ impl Checkpoint for Book {
             lost: Checkpoint::load(l, None)?,
             retired: Checkpoint::load(l, None)?,
             added: Checkpoint::load(l, None)?,
+            roots: Checkpoint::load(l, None)?,
         };
         // A plane is abandoned once and retired once, and a retired plane is
         // no longer abandoned: damaged bytes that break this are refused.
@@ -60,6 +63,13 @@ impl Checkpoint for Book {
             .any(|p| p.pilot != crate::seats::Pilot::Lost)
         {
             return invalid("the revival book retired a plane someone flies");
+        }
+        // A root belongs to an added plane, and is itself one the mission
+        // started with (slice R1).
+        if book.roots.iter().any(|(plane, root)| {
+            added.binary_search(plane).is_err() || added.binary_search(root).is_ok()
+        }) {
+            return invalid("the revival book roots a lineage in an added plane");
         }
         Ok(book)
     }
@@ -100,6 +110,9 @@ mod tests {
                 pilot: Pilot::Lost,
             }],
             added: vec![PlaneId(12), PlaneId(13), PlaneId(14)],
+            roots: [(12, 0), (13, 0), (14, 4)]
+                .map(|(plane, root)| (PlaneId(plane), PlaneId(root)))
+                .into(),
         }
     }
 
@@ -130,6 +143,12 @@ mod tests {
         let mut book = lived_in();
         book.added.push(PlaneId(12));
         refused(&book, "added twice");
+        let mut book = lived_in();
+        book.roots.insert(PlaneId(11), PlaneId(0));
+        refused(&book, "a root for a plane never added");
+        let mut book = lived_in();
+        book.roots.insert(PlaneId(14), PlaneId(12));
+        refused(&book, "an added plane as a root");
     }
 
     #[test]

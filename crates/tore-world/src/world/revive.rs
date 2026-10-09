@@ -18,8 +18,19 @@
 //! - **Room**: at most [`MAX_PLANES`] planes at once. A revival that would
 //!   pass it first retires the oldest abandoned wreck that has rested on the
 //!   ground for [`RETIRE_AFTER_TICKS`] ([`World::retire_plane`]).
-//! - **The revival point** ([`point`]) and **the weapons rule**
-//!   ([`RevivalWeapons::cut`]), which the host reads to choose a [`Spawn`].
+//! - **The revival point** ([`point`], walked back onto the map by
+//!   [`onto_map`]) and **the weapons rule** ([`RevivalWeapons::cut`]), which
+//!   the host reads to choose a [`Spawn`].
+//!
+//! Slice R1 of the lobby pass adds **lineages** and **AI respawn**: every
+//! plane the mission was built with roots a lineage, and each plane a
+//! revival or a respawn adds continues the lineage of the plane it replaces
+//! ([`Book::root_of`]). A lineage whose newest plane is lost and that no
+//! human holds is the AI's to respawn ([`World::lineage_lost`]): the host's
+//! [`super::MissionCommand::Respawn`] adds a new AI plane in its wing at a
+//! spawn the host chose ([`World::respawn_spawn`], the lineage's original
+//! spawn point), and the replaced AI wreck joins the wrecks a later revival
+//! or respawn may retire once it has rested.
 //!
 //! The bookkeeping ([`Book`]) is mutable mission state a checkpoint must
 //! carry; single player never abandons a plane, so its book stays empty.
@@ -30,11 +41,13 @@ use crate::{
     ai_wings::{self, ENEMY_SIDE, FRIENDLY_SIDE},
     combat,
     mission::{LoadoutSpec, StationLoad},
+    mission_layout::MapBounds,
     seats::{Pilot, Plane, PlaneId, SeatId, Slot},
 };
+use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
-    ai::launch::Side,
+    ai::launch::{Side, WingId, WingLaunch},
     attitude::Basis,
     combat::{ledger::ShotKind, live},
     ejection::Phase,
@@ -58,6 +71,16 @@ pub const RETIRE_AFTER_TICKS: u64 = 30 * 120;
 /// are in the battle, whose centre the revival point is measured from
 /// (fitted; retail says only "just outside the battle zone").
 pub const BATTLE_RANGE_NM: f64 = 20.;
+
+/// A respawn's original spawn point counts as taken while a living aircraft
+/// is within this many feet of it (agent decision, fitted; slice R1).
+pub const RESPAWN_CLEAR_FT: f64 = 2_000.;
+
+/// How far a taken respawn point steps back along the reverse of its spawn
+/// heading, nautical miles, and how many times at most (agent decision,
+/// fitted; slice R1).
+pub const RESPAWN_STEP_NM: f64 = 1.;
+pub const RESPAWN_STEPS: u32 = 5;
 
 /// Where and how a revived plane appears, which the host chooses and every
 /// client's copy of the mission repeats: the host's
@@ -169,12 +192,31 @@ pub struct Book {
     retired: Vec<Plane>,
     /// Every plane [`World::add_plane`] added, in order.
     added: Vec<PlaneId>,
+    /// The lineage root of every plane a revival or a respawn added (slice
+    /// R1): the plane the mission started with that it continues. A plane a
+    /// client's copy adds from the Spawned message has none, as only the
+    /// host decides by lineage.
+    roots: BTreeMap<PlaneId, PlaneId>,
 }
 
 impl Book {
-    /// The abandoned planes still in the mission, oldest first.
+    /// The wrecks waiting to retire, oldest first: the abandoned planes
+    /// still in the mission, and the AI wrecks whose lineage respawned
+    /// (slice R1).
     pub fn lost(&self) -> &[LostPlane] {
         &self.lost
+    }
+
+    /// The root of `plane`'s lineage: the plane the mission started with
+    /// that it continues, or `plane` itself for one the mission started
+    /// with.
+    pub fn root_of(&self, plane: PlaneId) -> PlaneId {
+        self.roots.get(&plane).copied().unwrap_or(plane)
+    }
+
+    /// Every added plane's lineage root, by added plane.
+    pub fn roots(&self) -> &BTreeMap<PlaneId, PlaneId> {
+        &self.roots
     }
 
     /// The planes retired to make room, oldest first, as the roster held
@@ -209,6 +251,41 @@ fn horizontal(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
 
+/// `position` walked back towards `centre` along the line between them
+/// until it lies in `bounds` (agent decision, fitted; slice R1): a revival
+/// point far from a battle near an edge would otherwise fall off the map,
+/// where a plane is warned and then destroyed. A centre itself off the map
+/// is clamped into it first. Altitude is kept. A point already on the map
+/// is returned unchanged.
+pub fn onto_map(position: [f64; 3], centre: [f64; 3], bounds: &MapBounds) -> [f64; 3] {
+    let inside = |x: f64, z: f64| {
+        (bounds.min[0]..=bounds.max[0]).contains(&x) && (bounds.min[1]..=bounds.max[1]).contains(&z)
+    };
+    if inside(position[0], position[2]) {
+        return position;
+    }
+    let clamp =
+        |v: f64, axis: usize| v.clamp(bounds.min[axis], bounds.max[axis].max(bounds.min[axis]));
+    let centre = [clamp(centre[0], 0), centre[1], clamp(centre[2], 1)];
+    // The largest share `t` of the way from the centre that stays inside on
+    // both axes.
+    let mut t: f64 = 1.;
+    for (axis, index) in [(0, 0), (1, 2)] {
+        let delta = position[index] - centre[index];
+        if delta > 0. {
+            t = t.min((bounds.max[axis] - centre[index]) / delta);
+        } else if delta < 0. {
+            t = t.min((bounds.min[axis] - centre[index]) / delta);
+        }
+    }
+    let t = t.clamp(0., 1.);
+    [
+        clamp(centre[0] + (position[0] - centre[0]) * t, 0),
+        position[1],
+        clamp(centre[2] + (position[2] - centre[2]) * t, 1),
+    ]
+}
+
 /// The revival point (fitted; docs/ARCHITECTURE.md, "Death, revival and
 /// lives"). The battle's centre is the mean position of the living
 /// `aircraft` (side and position) that have an aircraft of the other side
@@ -225,6 +302,17 @@ pub fn point(
     distance_ft: f64,
     altitude_ft: f64,
 ) -> ([f64; 3], f64) {
+    let (_, position, heading) = point_from_centre(aircraft, start, distance_ft, altitude_ft);
+    (position, heading)
+}
+
+/// [`point`] with the battle's centre it measured from first.
+fn point_from_centre(
+    aircraft: &[(Side, [f64; 3])],
+    start: [f64; 3],
+    distance_ft: f64,
+    altitude_ft: f64,
+) -> ([f64; 3], [f64; 3], f64) {
     let range = BATTLE_RANGE_NM * FEET_PER_NAUTICAL_MILE;
     let fighting: Vec<[f64; 3]> = aircraft
         .iter()
@@ -260,7 +348,7 @@ pub fn point(
     ];
     // Basis forward is (sin yaw, 0, cos yaw): head back along the bearing.
     let heading = (-ux).atan2(-uz);
-    (position, heading)
+    (centre, position, heading)
 }
 
 /// A side of the AI's launch as combat's rows carry it.
@@ -626,8 +714,30 @@ impl World {
             .aircraft_of(plane)
             .ok_or_else(|| format!("plane {} has no aircraft", plane.0))?;
         let altitude = self.setup.mission.map_or(10_000., |(altitude, _)| altitude);
-        let (mut position, heading_rad) =
-            point(&self.living_aircraft(), start, distance_ft, altitude);
+        let (centre, position, heading_rad) =
+            point_from_centre(&self.living_aircraft(), start, distance_ft, altitude);
+        // On the map (slice R1): far revival distances near an edge.
+        let position = onto_map(position, centre, &self.map_bounds());
+        self.spawn_at(aircraft, position, heading_rad, chosen, weapons)
+    }
+
+    /// The usable map for starting aircraft: the terrain less one cell each
+    /// side, as the mission's own placement uses.
+    pub fn map_bounds(&self) -> MapBounds {
+        crate::mission_layout::map_bounds(&self.terrain)
+    }
+
+    /// A spawn of `aircraft` at `position` (raised clear of the ground as the
+    /// mission's airborne spawns are), heading `heading_rad`, at the
+    /// aircraft's airborne start speed, with [`Self::revival_loadout`].
+    fn spawn_at(
+        &self,
+        aircraft: AircraftId,
+        mut position: [f64; 3],
+        heading_rad: f64,
+        chosen: Option<&LoadoutSpec>,
+        weapons: RevivalWeapons,
+    ) -> WorldResult<Spawn> {
         let floor = combat::SPAWN_MIN_MSL_FT.max(
             f64::from(self.terrain.height(position[0] as f32, position[2] as f32))
                 + combat::SPAWN_MIN_AGL_FT,
@@ -750,11 +860,14 @@ impl World {
     /// nothing. Returns the new plane.
     pub fn revive_plane(&mut self, seat: SeatId, spawn: &Spawn) -> WorldResult<PlaneId> {
         let Plan { new, retire } = self.revival_check(seat, spawn)?;
+        let index = self.lost_cockpit_of(seat)?;
+        let root = self.revival.root_of(self.cockpits[index].plane);
         if let Some(wreck) = retire {
             self.retire_plane(wreck)?;
         }
         self.abandon_plane(seat)?;
         self.add_plane(&new)?;
+        self.revival.roots.insert(new.plane, root);
         self.take_plane(seat, new.plane)?;
         Ok(new.plane)
     }
@@ -776,10 +889,12 @@ impl World {
             return Err(format!("seat {} already flies a plane", seat.0).into());
         }
         let Plan { new, retire } = self.revival_check_from(plane, spawn)?;
+        let root = self.revival.root_of(plane);
         if let Some(wreck) = retire {
             self.retire_plane(wreck)?;
         }
         self.add_plane(&new)?;
+        self.revival.roots.insert(new.plane, root);
         self.take_plane(seat, new.plane)?;
         Ok(new.plane)
     }
@@ -788,6 +903,293 @@ impl World {
     /// and aircraft, for the host's Spawned message.
     pub fn revival_plane_from(&self, plane: PlaneId, spawn: &Spawn) -> WorldResult<NewPlane> {
         self.revival_check_from(plane, spawn).map(|plan| plan.new)
+    }
+
+    /// The wing launch the mission built `wing` from.
+    fn launch_of(&self, wing: WingId) -> Option<&WingLaunch> {
+        self.setup
+            .ai
+            .as_ref()?
+            .wings
+            .iter()
+            .find(|launch| launch.wing == wing)
+    }
+
+    /// `plane`'s roster entry, or a retired plane's last one.
+    fn plane_entry(&self, plane: PlaneId) -> Option<&Plane> {
+        self.roster
+            .plane(plane)
+            .or_else(|| self.revival.retired.iter().find(|p| p.id == plane))
+    }
+
+    /// Every lineage's root (slice R1): the planes the mission started
+    /// with, retired ones included, in id order. A hook for the lead hold
+    /// (R2): a wing's original members are the roots in its wing.
+    pub fn lineage_roots(&self) -> Vec<PlaneId> {
+        let added: std::collections::BTreeSet<PlaneId> =
+            self.revival.added.iter().copied().collect();
+        let mut roots: Vec<PlaneId> = self
+            .roster
+            .planes()
+            .iter()
+            .chain(&self.revival.retired)
+            .map(|plane| plane.id)
+            .filter(|plane| !added.contains(plane))
+            .collect();
+        roots.sort();
+        roots
+    }
+
+    /// The planes of `root`'s lineage, oldest first: the root, then each
+    /// plane a revival or a respawn added to it.
+    pub fn lineage(&self, root: PlaneId) -> Vec<PlaneId> {
+        std::iter::once(root)
+            .chain(
+                self.revival
+                    .added
+                    .iter()
+                    .copied()
+                    .filter(|plane| self.revival.roots.get(plane) == Some(&root)),
+            )
+            .collect()
+    }
+
+    /// Every lineage's newest plane, by root, in one pass over the added
+    /// planes.
+    pub fn lineage_heads(&self) -> BTreeMap<PlaneId, PlaneId> {
+        let mut heads: BTreeMap<PlaneId, PlaneId> = self
+            .lineage_roots()
+            .into_iter()
+            .map(|root| (root, root))
+            .collect();
+        for plane in &self.revival.added {
+            if let Some(root) = self.revival.roots.get(plane)
+                && let Some(head) = heads.get_mut(root)
+            {
+                *head = *plane;
+            }
+        }
+        heads
+    }
+
+    /// The newest plane of `root`'s lineage.
+    pub fn lineage_head(&self, root: PlaneId) -> PlaneId {
+        self.lineage(root).last().copied().unwrap_or(root)
+    }
+
+    /// Whether the lineage whose newest plane is `head` has lost it and no
+    /// human holds it (slice R1): the plane is retired, abandoned (its pilot
+    /// [`Pilot::Lost`]) or an AI aircraft gone for good. A human's lost
+    /// plane, flown or held for it, is the human's revival. Whether the
+    /// loss is the AI's to respawn (a plane the AI flew for an away player
+    /// is not) is the host's to judge.
+    pub fn head_lost(&self, head: PlaneId) -> bool {
+        match self.roster.plane(head).map(|entry| entry.pilot) {
+            None => self.revival.retired.iter().any(|plane| plane.id == head),
+            Some(Pilot::Human(_)) => false,
+            // Abandoned: lost by the abandon's own rule.
+            Some(Pilot::Lost) => true,
+            Some(Pilot::Ai) => self.ai_plane_gone(head),
+        }
+    }
+
+    /// Whether the AI's `plane` is gone for good: the tests the handoff
+    /// refuses an AI aircraft by ([`Self::can_take`]), without building what
+    /// a take needs, as the host asks it of every lineage each tick.
+    fn ai_plane_gone(&self, plane: PlaneId) -> bool {
+        let Some(actor) = self
+            .ai_wings
+            .as_ref()
+            .and_then(|wings| wings.mission().actor(plane.0))
+        else {
+            return true;
+        };
+        let flight = actor.flight();
+        let pilot = &flight.systems.pilot;
+        !actor.alive()
+            || flight.crashed
+            || flight.escape.is_some()
+            || pilot.dead
+            || pilot.ejected
+            || self
+                .combat
+                .state
+                .targets
+                .iter()
+                .find(|target| target.id == plane.0)
+                .is_none_or(|target| target.hp <= 0)
+    }
+
+    /// [`Self::head_lost`] for `root`'s lineage.
+    pub fn lineage_lost(&self, root: PlaneId) -> bool {
+        self.head_lost(self.lineage_head(root))
+    }
+
+    /// Where `plane` is and its heading, radians: a human's from its
+    /// cockpit, an AI aircraft's from its actor. What a host records at the
+    /// mission's first tick as each lineage's original spawn.
+    pub fn plane_pose(&self, plane: PlaneId) -> Option<([f64; 3], f64)> {
+        if let Some(cockpit) = self.cockpits.iter().find(|c| c.plane == plane) {
+            return Some((cockpit.flight.position, cockpit.flight.yaw));
+        }
+        let actor = self.ai_wings.as_ref()?.mission().actor(plane.0)?;
+        Some((actor.flight().position, actor.flight().yaw))
+    }
+
+    /// The wing and aircraft of `root`'s lineage: the root's wing, and the
+    /// aircraft its newest plane (or any plane of it) is, else the wing's
+    /// launch.
+    fn lineage_kind(&self, root: PlaneId) -> WorldResult<(WingId, AircraftId)> {
+        let wing = self
+            .plane_entry(root)
+            .ok_or_else(|| format!("plane {} is not in the mission", root.0))?
+            .slot
+            .wing;
+        let aircraft = self
+            .lineage(root)
+            .into_iter()
+            .rev()
+            .find_map(|plane| self.aircraft_of(plane))
+            .or_else(|| self.launch_of(wing).map(|launch| launch.aircraft))
+            .ok_or_else(|| format!("the lineage of plane {} has no aircraft", root.0))?;
+        Ok((wing, aircraft))
+    }
+
+    /// Where an AI respawn of `root`'s lineage appears and what it carries
+    /// (slice R1): at `origin`, the lineage's original spawn point, heading
+    /// `heading_rad`, raised clear of the ground, at the aircraft's airborne
+    /// start speed, with [`Self::revival_loadout`] of `chosen` (the root's
+    /// lobby loadout) cut by `weapons`. A point a living aircraft, or one of
+    /// `taken` (respawns already placed this tick), is within
+    /// [`RESPAWN_CLEAR_FT`] of steps back [`RESPAWN_STEP_NM`] along the
+    /// reverse of the heading, at most [`RESPAWN_STEPS`] times and never off
+    /// the map. The mission's original spawns are on the map already.
+    pub fn respawn_spawn(
+        &self,
+        root: PlaneId,
+        origin: [f64; 3],
+        heading_rad: f64,
+        taken: &[[f64; 3]],
+        chosen: Option<&LoadoutSpec>,
+        weapons: RevivalWeapons,
+    ) -> WorldResult<Spawn> {
+        let (_, aircraft) = self.lineage_kind(root)?;
+        let living = self.living_aircraft();
+        let clear = |at: [f64; 3]| {
+            living
+                .iter()
+                .map(|(_, there)| *there)
+                .chain(taken.iter().copied())
+                .all(|there| {
+                    let d: f64 = (0..3).map(|i| (at[i] - there[i]).powi(2)).sum();
+                    d.sqrt() > RESPAWN_CLEAR_FT
+                })
+        };
+        let forward = Basis::new(heading_rad, 0., 0.).forward;
+        let step = RESPAWN_STEP_NM * FEET_PER_NAUTICAL_MILE;
+        let bounds = self.map_bounds();
+        let mut position = origin;
+        for _ in 0..RESPAWN_STEPS {
+            let back = [
+                position[0] - forward[0] * step,
+                position[1],
+                position[2] - forward[2] * step,
+            ];
+            // A step never takes a point on the map off it.
+            let on_map = |at: [f64; 3]| onto_map(at, at, &bounds) == at;
+            if clear(position) || (on_map(position) && !on_map(back)) {
+                break;
+            }
+            position = back;
+        }
+        self.spawn_at(aircraft, position, heading_rad, chosen, weapons)
+    }
+
+    /// The checks of an AI respawn of `root`'s lineage at `spawn`.
+    fn respawn_check(&self, root: PlaneId, spawn: &Spawn) -> WorldResult<Plan> {
+        if self.revival.added.contains(&root) {
+            return Err(format!("plane {} roots no lineage", root.0).into());
+        }
+        let (wing, aircraft) = self.lineage_kind(root)?;
+        if !self.lineage_lost(root) {
+            return Err(format!("the lineage of plane {} still flies", root.0).into());
+        }
+        let retire = if self.roster.planes().len() < MAX_PLANES {
+            None
+        } else {
+            Some(
+                self.retirable()
+                    .ok_or("no room for another aircraft: no wreck may be retired yet")?,
+            )
+        };
+        let new = NewPlane {
+            plane: self.next_plane_id()?,
+            slot: Slot {
+                wing,
+                member: self.next_member(wing)?,
+            },
+            aircraft,
+            spawn: spawn.clone(),
+        };
+        self.add_check(&new)?;
+        Ok(Plan { new, retire })
+    }
+
+    /// Whether `root`'s lineage can respawn at `spawn` now.
+    pub fn can_respawn(&self, root: PlaneId, spawn: &Spawn) -> WorldResult<()> {
+        self.respawn_check(root, spawn).map(|_| ())
+    }
+
+    /// What [`Self::respawn_plane`] would add: the new plane's id, slot and
+    /// aircraft, for the host's Spawned message.
+    pub fn respawn_new(&self, root: PlaneId, spawn: &Spawn) -> WorldResult<NewPlane> {
+        self.respawn_check(root, spawn).map(|plan| plan.new)
+    }
+
+    /// An AI respawn (slice R1, [`super::MissionCommand::Respawn`]): retires
+    /// a wreck first if the mission is full, then adds a new AI plane of the
+    /// lineage's aircraft in its wing at `spawn`, the next plane id and
+    /// member number, and records its root. The AI wreck it replaces joins
+    /// the wrecks that retire once rested. Everything is checked first; a
+    /// refusal changes nothing. Returns the new plane.
+    pub fn respawn_plane(&mut self, root: PlaneId, spawn: &Spawn) -> WorldResult<PlaneId> {
+        let Plan { new, retire } = self.respawn_check(root, spawn)?;
+        let head = self.lineage_head(root);
+        let dummy = self.launch_of(new.slot.wing).is_some_and(|wing| wing.dummy);
+        if let Some(wreck) = retire {
+            self.retire_plane(wreck)?;
+        }
+        self.add_plane_as(&new, dummy)?;
+        self.revival.roots.insert(new.plane, root);
+        if self
+            .roster
+            .plane(head)
+            .is_some_and(|p| p.pilot == Pilot::Ai)
+            && !self.revival.lost.iter().any(|lost| lost.plane == head)
+        {
+            self.revival.lost.push(LostPlane {
+                plane: head,
+                abandoned: self.tick(),
+                resting_since: None,
+            });
+        }
+        Ok(new.plane)
+    }
+
+    /// How many more planes the mission has room for now: the free places
+    /// under [`MAX_PLANES`] and the wrecks rested long enough to retire.
+    pub fn room(&self) -> usize {
+        let now = self.tick();
+        let rested = self
+            .revival
+            .lost
+            .iter()
+            .filter(|lost| {
+                lost.resting_since
+                    .is_some_and(|since| now.saturating_sub(since) >= RETIRE_AFTER_TICKS)
+            })
+            .count();
+        MAX_PLANES.saturating_sub(self.roster.planes().len()) + rested
     }
 
     /// The checks of [`Self::add_plane`].
@@ -844,6 +1246,12 @@ impl World {
     /// inside [`Self::revive_plane`]. Refuses an id the mission has had,
     /// changing nothing.
     pub fn add_plane(&mut self, new: &NewPlane) -> WorldResult<()> {
+        self.add_plane_as(new, false)
+    }
+
+    /// [`Self::add_plane`], the new aircraft a training target (a straight,
+    /// level 400 knots) when `dummy`: an AI respawn in a dummy wing.
+    fn add_plane_as(&mut self, new: &NewPlane, dummy: bool) -> WorldResult<()> {
         let (config, quantities, flight) = self.add_check(new)?;
         let id = new.plane.0;
         let side = new.slot.wing.side;
@@ -867,6 +1275,10 @@ impl World {
             .targets
             .partition_point(|target| target.id < id);
         self.combat.state.targets.insert(at, row);
+        // The wing's own skill, as the mission launched it (slice R1).
+        let experience = self
+            .launch_of(new.slot.wing)
+            .and_then(|wing| wing.members.first().map(|member| member.experience));
         let wings = self.ai_wings.as_mut().ok_or("no AI flies this mission")?;
         if let Err(error) = wings.insert_new(ai_wings::NewAircraft {
             id,
@@ -878,6 +1290,8 @@ impl World {
             fuel_lbs: new.spawn.loadout.fuel_lbs,
             flight,
             guns_only,
+            experience,
+            dummy,
         }) {
             self.combat.state.targets.remove(at);
             return Err(error);
@@ -897,14 +1311,30 @@ impl World {
     /// Retires an abandoned wreck to make room: it leaves combat, the
     /// snapshots and the roster (its cockpit goes), and keeps its ledger
     /// entries; [`Book::retired`] keeps its roster entry for the results.
+    ///
+    /// An AI wreck whose lineage respawned (slice R1) retires the same way:
+    /// its AI actor goes too, and the retired entry names nobody as its
+    /// pilot ([`Pilot::Lost`]).
     pub fn retire_plane(&mut self, plane: PlaneId) -> WorldResult<()> {
-        if self.roster.plane(plane).map(|p| p.pilot) != Some(Pilot::Lost) {
+        let ai_wreck = self.revival.lost.iter().any(|lost| lost.plane == plane)
+            && self.roster.plane(plane).map(|p| p.pilot) == Some(Pilot::Ai);
+        if self.roster.plane(plane).map(|p| p.pilot) != Some(Pilot::Lost) && !ai_wreck {
             return Err(format!("plane {} is not an abandoned wreck", plane.0).into());
         }
-        let entry = self
-            .roster
-            .remove_plane(plane)
-            .ok_or_else(|| format!("plane {} is not an abandoned wreck", plane.0))?;
+        let entry = if ai_wreck {
+            let entry = self
+                .roster
+                .remove_ai_plane(plane)
+                .ok_or_else(|| format!("plane {} is not an AI wreck", plane.0))?;
+            if let Some(wings) = self.ai_wings.as_mut() {
+                wings.retire_actor(plane.0);
+            }
+            entry
+        } else {
+            self.roster
+                .remove_plane(plane)
+                .ok_or_else(|| format!("plane {} is not an abandoned wreck", plane.0))?
+        };
         self.cockpits.retain(|cockpit| cockpit.plane != plane);
         self.combat.remove_ownship(plane.0);
         self.combat
@@ -939,22 +1369,44 @@ impl World {
             return;
         }
         let tick = self.tick();
+        let landed = |escape: &Option<tore_sim::ejection::Escape>| {
+            escape
+                .as_ref()
+                .is_none_or(|escape| matches!(escape.phase, Phase::Landed | Phase::Impact))
+        };
         for lost in &mut self.revival.lost {
-            let resting = self
+            let resting = match self
                 .cockpits
                 .iter()
                 .find(|cockpit| cockpit.plane == lost.plane)
-                .is_none_or(|cockpit| {
+            {
+                Some(cockpit) => {
                     let flight = &cockpit.flight;
                     flight.crashed
                         && flight
                             .wreck
                             .as_ref()
                             .is_none_or(|wreck| wreck.phase != tore_sim::wreck::Phase::Falling)
-                        && flight.escape.as_ref().is_none_or(|escape| {
-                            matches!(escape.phase, Phase::Landed | Phase::Impact)
-                        })
-                });
+                        && landed(&flight.escape)
+                }
+                // An AI wreck (slice R1): combat flies its falling wreck,
+                // the AI its pilot's escape.
+                None => {
+                    let fallen = self
+                        .combat
+                        .state
+                        .targets
+                        .iter()
+                        .find(|target| target.id == lost.plane.0)
+                        .is_none_or(|target| !target.airborne);
+                    let escaped = self
+                        .ai_wings
+                        .as_ref()
+                        .and_then(|wings| wings.mission().actor(lost.plane.0))
+                        .is_none_or(|actor| landed(&actor.flight().escape));
+                    fallen && escaped
+                }
+            };
             if !resting {
                 lost.resting_since = None;
             } else if lost.resting_since.is_none() {
@@ -977,6 +1429,11 @@ mod revive_tests;
 #[cfg(test)]
 #[path = "revive_lost_tests.rs"]
 mod revive_lost_tests;
+
+// The world tests of lineages and AI respawn (the lobby pass's slice R1).
+#[cfg(test)]
+#[path = "ai_respawn_tests.rs"]
+mod ai_respawn_tests;
 
 #[cfg(test)]
 mod tests {

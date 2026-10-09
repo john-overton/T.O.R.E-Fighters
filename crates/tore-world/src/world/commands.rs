@@ -46,6 +46,14 @@ pub enum MissionCommand {
         plane: PlaneId,
         spawn: Box<super::revive::Spawn>,
     },
+    /// The lobby pass's slice R1: the AI respawns the lineage rooted at
+    /// `root` (a plane the mission started with), whose newest plane is
+    /// lost and held by no human, in a new AI plane of its wing at `spawn`
+    /// ([`World::respawn_plane`]). No seat flies it.
+    Respawn {
+        root: PlaneId,
+        spawn: Box<super::revive::Spawn>,
+    },
 }
 
 /// What became of a wing order the step applied.
@@ -107,6 +115,10 @@ impl World {
             }
             MissionCommand::ReviveLost { seat, plane, spawn } => {
                 self.revive_lost_plane(*seat, *plane, spawn)?;
+            }
+            // The lobby pass's AI respawn (slice R1; world/revive.rs).
+            MissionCommand::Respawn { root, spawn } => {
+                self.respawn_plane(*root, spawn)?;
             }
         }
         Ok(())

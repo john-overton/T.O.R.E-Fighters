@@ -8,7 +8,8 @@
 //! rest and the state each scenario asserts at tick N (`expect`), so the
 //! whole-world test is known to exercise the state it is meant to: a
 //! restore that drops a field nothing reads would otherwise pass. Every
-//! scenario is built from synthetic fixtures; none reads retail data.
+//! scenario is built from synthetic fixtures; none reads retail data. The
+//! lobby pass's slice R1 added the AI respawns, with one pending at N.
 
 use super::{World, crowd, tick_tests};
 use crate::{
@@ -82,6 +83,7 @@ pub(super) fn all() -> Vec<Scenario> {
         revivals(),
         lead_order(),
         crew_ejection(),
+        ai_respawns(),
     ]
 }
 
@@ -295,7 +297,8 @@ pub(super) fn open_handoffs() -> Scenario {
                 MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
                 MissionCommand::Settings(_)
                 | MissionCommand::Abandon { .. }
-                | MissionCommand::Revive { .. } => {}
+                | MissionCommand::Revive { .. }
+                | MissionCommand::Respawn { .. } => {}
             }
         }
         let tick = world.tick();
@@ -370,7 +373,8 @@ fn flying_after(world: &World, commands: &[MissionCommand]) -> Vec<SeatId> {
             MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
             MissionCommand::Settings(_)
             | MissionCommand::Abandon { .. }
-            | MissionCommand::Revive { .. } => {}
+            | MissionCommand::Revive { .. }
+            | MissionCommand::Respawn { .. } => {}
         }
     }
     flying.sort();
@@ -1239,6 +1243,120 @@ pub(super) fn crew_ejection() -> Scenario {
         drive,
         at: 900,
         then: 600,
+        expect,
+        after: Some(after),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The lobby pass's slice R1.
+
+/// An open mission, three against three, with AI respawn: seat 0 flies plane
+/// 0; the AI's friendly wingman (plane 1) is shot down (step 100) and
+/// respawned (110) as plane 6, which is shot down in turn (200) and
+/// respawned (210) as plane 7; the enemy's AI plane 4 is shot down (300) and
+/// is still waiting for its respawn at the checkpoint (400), which comes
+/// after it (450). The checkpoint's book then holds two lineage roots, the
+/// AI wrecks waiting to retire and a lineage lost with its respawn pending;
+/// the restored copy must make the same plane of it.
+pub(super) fn ai_respawns() -> Scenario {
+    use super::revive::RevivalWeapons;
+    use tore_sim::ai::launch::Side;
+    fn build() -> World {
+        let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+        spec.wings[0].count = 3;
+        spec.wings[3].count = 3;
+        spec.wings[3].skill = Skill::Average;
+        spec.separation_nm = 10;
+        spec.start = Start::Airborne {
+            altitude_ft: 10_000,
+        };
+        World::new(&spec, &resources(), Seating::Open).unwrap()
+    }
+    fn destroy(world: &mut World, plane: u32) {
+        world
+            .combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == plane)
+            .unwrap()
+            .hp = 0;
+    }
+    /// The respawn of `root`'s lineage at its side's mean place now (a
+    /// stand-in for the original spawn a host records: it depends only on
+    /// the world, so both copies are driven alike).
+    fn respawn(world: &World, root: u32) -> MissionCommand {
+        let root = PlaneId(root);
+        let side = world.roster.plane(root).unwrap().slot.wing.side;
+        let at = world.side_mean(side).unwrap();
+        let heading = if side == Side::Friendly { 0. } else { 3.0 };
+        let spawn = world
+            .respawn_spawn(root, at, heading, &[], None, RevivalWeapons::NoMissiles)
+            .unwrap();
+        MissionCommand::Respawn {
+            root,
+            spawn: Box::new(spawn),
+        }
+    }
+    fn drive(world: &mut World, step: u64) -> Step {
+        match step {
+            100 => destroy(world, 1),
+            200 => destroy(world, 6),
+            300 => destroy(world, 4),
+            _ => {}
+        }
+        let commands = match step {
+            60 => vec![MissionCommand::Take {
+                seat: SeatId(0),
+                plane: PlaneId(0),
+            }],
+            110 | 210 => vec![respawn(world, 1)],
+            450 => vec![respawn(world, 4)],
+            _ => Vec::new(),
+        };
+        let flying = flying_after(world, &commands);
+        let inputs = inputs_for(world, flying, |_| SeatInput {
+            pilot: PilotInput {
+                pitch: 0.05,
+                roll: if step % 480 < 240 { 0.2 } else { -0.2 },
+                ..PilotInput::default()
+            },
+            ..SeatInput::default()
+        });
+        (commands, inputs)
+    }
+    fn expect(world: &World) -> String {
+        use crate::seats::Pilot;
+        let book = &world.revival;
+        assert_eq!(book.added(), [PlaneId(6), PlaneId(7)]);
+        assert_eq!(book.root_of(PlaneId(6)), PlaneId(1));
+        assert_eq!(book.root_of(PlaneId(7)), PlaneId(1));
+        assert_eq!(
+            world.lineage(PlaneId(1)),
+            [PlaneId(1), PlaneId(6), PlaneId(7)]
+        );
+        let waiting: Vec<u32> = book.lost().iter().map(|l| l.plane.0).collect();
+        assert_eq!(waiting, [1, 6], "the replaced AI wrecks wait to retire");
+        assert_eq!(world.roster.plane(PlaneId(7)).unwrap().pilot, Pilot::Ai);
+        // The enemy's lineage is lost, its respawn pending.
+        assert!(world.lineage_lost(PlaneId(4)));
+        assert!(!world.lineage_lost(PlaneId(1)));
+        format!("{waiting:?}")
+    }
+    fn after(world: &World, _: &str) {
+        // The pending respawn made plane 8 on both copies.
+        assert_eq!(world.lineage_head(PlaneId(4)), PlaneId(8));
+        assert!(!world.lineage_lost(PlaneId(4)));
+        let entry = world.roster.plane(PlaneId(8)).unwrap();
+        assert_eq!((entry.slot.wing.side, entry.slot.member), (Side::Enemy, 3));
+    }
+    Scenario {
+        name: "AI respawns, one pending",
+        build,
+        drive,
+        at: 400,
+        then: 300,
         expect,
         after: Some(after),
     }

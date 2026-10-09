@@ -1670,40 +1670,34 @@ impl AiMission {
         actor.return_to_formation(self.tick);
         actor.formation_order_tick = None;
         // It joins its wing as it stands: leading if the wing's leader is its
-        // id (a human leader handing its aircraft to the AI), and in the slot
-        // its member number gives, or its rank behind the leader once the
-        // wing has re-formed.
-        let (side, wing, member) = (
-            actor.identity.side,
-            actor.identity.wing,
-            actor.identity.member,
-        );
-        if let Some(entry) = self
+        // id (a human leader handing its aircraft to the AI), else as a
+        // wingman in the lowest formation slot no living AI wingman of the
+        // wing holds (slice R1 of the lobby pass, agent decision): that is
+        // its rank behind the leader in a wing whose slots have no gaps, it
+        // never shares a slot, and it never passes the wing's living members,
+        // where its member number alone (which grows with every revival and
+        // respawn) could pass slot 9 and fail the step.
+        let (side, wing) = (actor.identity.side, actor.identity.wing);
+        let leader = self
             .leaders
             .iter()
             .find(|l| l.side == side && l.wing == wing)
-            .copied()
-        {
-            actor.set_leads(entry.leader == actor.id());
-            if entry.reformed && entry.leader != actor.id() {
-                let earlier = self
-                    .actors
-                    .iter()
-                    .filter(|a| a.identity.side == side && a.identity.wing == wing)
-                    .filter(|a| a.id() != entry.leader && a.alive())
-                    .map(|a| a.identity.member)
-                    .chain(
-                        self.humans
-                            .iter()
-                            .filter(|h| h.side == side && h.wing == wing)
-                            .filter(|h| h.id != entry.leader && h.id != actor.id())
-                            .filter(|h| self.humans_flying.contains(&h.id))
-                            .map(|h| h.member),
-                    )
-                    .filter(|m| *m < member)
-                    .count();
-                actor.wing_slot = earlier as u8 + 1;
-            }
+            .map(|l| l.leader);
+        if let Some(leader) = leader {
+            actor.set_leads(leader == actor.id());
+        }
+        if leader != Some(actor.id()) {
+            let held: Vec<u8> = self
+                .actors
+                .iter()
+                .filter(|a| a.identity.side == side && a.identity.wing == wing)
+                .filter(|a| Some(a.id()) != leader && a.alive())
+                .map(|a| a.wing_slot)
+                .collect();
+            let free = (1..=super::wing::MAX_WINGMAN_SLOT)
+                .find(|slot| !held.contains(slot))
+                .unwrap_or(super::wing::MAX_WINGMAN_SLOT);
+            actor.wing_slot = free;
         }
         let index = self.actors.partition_point(|a| a.id() < actor.id());
         self.actors.insert(index, actor);
