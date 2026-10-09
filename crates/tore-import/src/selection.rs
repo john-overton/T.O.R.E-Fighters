@@ -53,6 +53,13 @@ pub const MENU_ART: &[&str] = &[
     "TOGGLE03.PIC",
     "TOGGLE04.PIC",
 ];
+/// The scroll bar's track, kept from `FA_1.LIB` with the menu art but not
+/// required: the lobby pass added them after imports had been made, and the
+/// scroll bar draws a flat track when a pack lacks them, so nobody has to
+/// re-import for it. They are the Sound Prefs slider's `SLIDETOP` (34 by 9),
+/// `SLIDEMID` (34 by 8) and `SLIDEBOT` (34 by 15). The knob, `SLIDERV`, is in
+/// [`MENU_ART`].
+pub const SLIDER_ART: &[&str] = &["SLIDETOP.PIC", "SLIDEMID.PIC", "SLIDEBOT.PIC"];
 /// Menu data and sounds kept from `FA_2.LIB`.
 pub const MENU_DATA: &[&str] = &[
     "CHOOSEAC.DLG",
@@ -200,6 +207,7 @@ mod tests {
             DEBRIEF_DATA,
             MULTIPLAYER_ART,
             MULTIPLAYER_DATA,
+            SLIDER_ART,
         ];
         for list in lists {
             let unique: BTreeSet<_> = list.iter().collect();

@@ -364,6 +364,46 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
   `LISTHI` (24 by 12): see the table above. The `LISTMID` rows are: row 0 a
   light edge (73), rows 1 and 2 dark, rows 3 to 13 near black (12), rows 14 to 16
   a light bevel.
+- **Scroll bar** (lobby pass L1, 2026-10-09): retail has no list scroll bar, its
+  lists page with the PREV/NEXT rocker. The red bar John remembers is the Sound
+  Prefs slider (`docs/spec/sound-prefs.md`, "Each slider is a track and a
+  knob"), and the kit reuses it as a scroll bar (*opinionated*, requested by
+  John). The pieces are `SLIDETOP` (34 by 9, 468 bytes), `SLIDEMID` (34 by 8,
+  743) and `SLIDEBOT` (34 by 15, 636) for the track and `SLIDERV` (26 by 30,
+  1,158) for the knob, all in `FA_1.LIB`. Recipe (`_DrawSliderVert`, `0x48bc60`,
+  as the Sound Prefs notes record it): the top cap at the track's first row, the
+  middle tiles from 8 rows down to where the bottom cap starts (the last tile cut
+  short), the bottom cap 15 rows above the track's end, the knob 6 pixels in
+  from the left. The track is the Sound screen's 90 pixels at its tallest; the
+  kit stretches it to any height of at least 41 by tiling `SLIDEMID` (so a list's
+  89 pixels and a Messages box's 76 to 86 work). The knob is never stretched.
+  What the kit adds (*agent decisions*):
+  - Knob travel is the track's height less 41: 6 pixels of margin above the knob
+    and 5 below, which is retail's 49 pixels on a 90 pixel track. The knob's top
+    is `top + travel * first / (total - visible)`, rounded to the nearest pixel,
+    where `first` is the first line shown; a pointer position maps back by
+    rounding to the nearest line.
+  - A press on the knob holds it at the grip's offset (the knob does not jump to
+    the pointer, unlike the Sound screen's track click) and it follows the
+    pointer's height, also outside the bar; a press on the track above or below
+    the knob pages toward the press (a list's window, a Messages box's page less a
+    line); the wheel is the owner's (a list slides its window a row a notch, a
+    Messages box three lines).
+  - With everything on one page the track is drawn and the knob is not, and the
+    track does not react, so the layout never shifts.
+  - **Flat fallback.** `SLIDETOP`, `SLIDEMID` and `SLIDEBOT` are not in any
+    required import list (`selection::SLIDER_ART`, kept from `FA_1.LIB` with the
+    menu art, 1,847 bytes in all), so a pack imported before the lobby pass still
+    loads: the kit skips a missing piece (`kit::OPTIONAL_PIECES`) and the bar
+    draws the same layout flat, from the greys measured on a middle row of the
+    pieces: the panel's 81 for the face, a slot with a 12 groove 2 pixels wide
+    down the middle (57 on its left, 113 on its right) and a 24 then 12 left
+    edge, a 57 and 113 right edge. The knob (`SLIDERV`) is a menu piece every
+    import has. A re-import adds the real track; nobody is forced to.
+  - Where it is used: the Messages box on every connection screen (inside the box's
+    frame, flush right, 34 wide; the text stops 3 pixels short of it, so a 549
+    wide box has 507 for text), and the kit's `List` in its scrolling mode (the
+    lobby's slots and players lists, by slice L2).
 - **Check box** `CHECK00` to `CHECK06` (28 to 33 square). Frame order (S, `0x48b320`):
   `CHECK00` is the box off at rest, `CHECK06` the box on at rest. When the
   animation is on, switching on plays `CHECK01` to `CHECK06` and switching off plays
@@ -413,6 +453,7 @@ about 1.44 MB (1,438,167 bytes of resources) on a 178 MB pack, 63 resources incl
 | Backgrounds | `MODEM3`, `NETIPX3` (each 309,952) |
 | Panel kit | `PANEL` 309,184; `EDGETL` 810; `EDGETR` 562; `EDGEBL` 552; `EDGEBR` 810; `EDGELR` 280; `EDGETB` 272 |
 | Lists, fields | `LISTLFT` 740; `LISTMID` 484; `LISTRT` 756; `LISTHI` 400; `EDITL` 506; `EDITM` 640; `EDITR` 506; `PAGEBOX` 1,092 |
+| Scroll bar track (optional, `SLIDER_ART`) | `SLIDETOP` 468; `SLIDEMID` 743; `SLIDEBOT` 636 (the knob, `SLIDERV` 1,158, is menu art) |
 | Check boxes | `CHECK00` 1,234; `CHECK01` 1,138; `CHECK02` 1,022; `CHECK03` 944; `CHECK04` 1,022; `CHECK05` 1,138; `CHECK06` 1,234 |
 | Fonts | `PANELFND` 10,944; `FONTDFT` 14,432; `FONTDFD` 14,432; `MPFONT` 9,360; `WHEELFNT` 23,536 |
 | Disabled default button | `ACTDFD0L` 1,146; `ACTDFD0M` 650; `ACTDFD0R` 1,300; `ACTDFLD` 1,154 |

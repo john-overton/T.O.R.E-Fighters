@@ -44,9 +44,9 @@
 //!
 //! # Look
 //!
-//! Everything is retail pieces except the focus mark, the row icons and the
-//! message box's scroll bar, which are authored (*agent decisions*, in the
-//! modules that draw them). No retail bytes are in the code: the kit decodes
+//! Everything is retail pieces except the focus mark and the row icons, which
+//! are authored (*agent decisions*, in the modules that draw them). The scroll
+//! bar is retail's Sound Prefs slider put to a new use (`scroll_bar`). No retail bytes are in the code: the kit decodes
 //! the imported pictures at runtime, and the tests use synthetic pieces.
 //!
 //! The kit is not used by a screen yet: EF7 (Direct Connection) and EF8 (the
@@ -65,6 +65,7 @@ mod list;
 mod message_box;
 mod panel;
 mod png_read;
+mod scroll_bar;
 mod text_field;
 
 #[cfg(test)]

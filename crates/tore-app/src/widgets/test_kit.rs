@@ -1,6 +1,9 @@
 //! A kit of synthetic pieces for the tests: the retail names and sizes, flat
 //! colours, fonts of fixed width. No retail bytes.
-use super::{Kit, kit::BACKGROUNDS, kit::PIECES};
+use super::{
+    Kit,
+    kit::{BACKGROUNDS, OPTIONAL_PIECES, PIECES},
+};
 use crate::menu::Sprite;
 use std::collections::BTreeMap;
 
@@ -49,6 +52,10 @@ fn size(name: &str) -> (usize, usize) {
         "PAGEBOX" => (50, 17),
         n if n.starts_with("CHECK") => (28, 28),
         n if n.starts_with("ROCKER") => (27, 40),
+        "SLIDETOP" => (34, 9),
+        "SLIDEMID" => (34, 8),
+        "SLIDEBOT" => (34, 15),
+        "SLIDERV" => (26, 30),
         _ => (8, 8),
     }
 }
@@ -56,7 +63,11 @@ fn size(name: &str) -> (usize, usize) {
 /// Every piece the kit names, synthetic.
 pub fn kit() -> Kit {
     let mut sprites = BTreeMap::new();
-    for name in PIECES.iter().chain(BACKGROUNDS.iter()) {
+    for name in PIECES
+        .iter()
+        .chain(OPTIONAL_PIECES)
+        .chain(BACKGROUNDS.iter())
+    {
         let sprite = match *name {
             "PANELFNT" => font(5, 10),
             "PANELFND" => font_in(5, 10, 150),

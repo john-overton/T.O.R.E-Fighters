@@ -54,12 +54,14 @@ fn check_multiplayer_art(resources: &tore_import::Resources) -> AppResult<()> {
 }
 
 /// True for what the multiplayer slice (EF1) added to the pack: the pieces in
-/// `MULTIPLAYER_ART` and `MULTIPLAYER_DATA`, the quick-message file and the
+/// `MULTIPLAYER_ART` and `MULTIPLAYER_DATA`, the scroll bar's track
+/// (`SLIDER_ART`, optional), the quick-message file and the
 /// marker, and the import's source entry (slice L1: the build and importer,
 /// which no flight depends on).
 fn is_multiplayer_resource(name: &str) -> bool {
-    use tore_import::selection::{CHAT_RESOURCE, MULTIPLAYER_ART, MULTIPLAYER_DATA};
+    use tore_import::selection::{CHAT_RESOURCE, MULTIPLAYER_ART, MULTIPLAYER_DATA, SLIDER_ART};
     MULTIPLAYER_ART.contains(&name)
+        || SLIDER_ART.contains(&name)
         || MULTIPLAYER_DATA.contains(&name)
         || name == CHAT_RESOURCE
         || name == tore_import::pack::MULTIPLAYER_MARKER
@@ -328,6 +330,11 @@ mod tests {
         {
             assert!(is_multiplayer_resource(name), "{name}");
         }
+        // The scroll bar's track is one, and no pack is refused for lacking it.
+        for name in selection::SLIDER_ART {
+            assert!(is_multiplayer_resource(name), "{name}");
+            assert!(!selection::MULTIPLAYER_ART.contains(name), "{name}");
+        }
         assert!(is_multiplayer_resource(selection::CHAT_RESOURCE));
         assert!(is_multiplayer_resource("TORE_MULTIPLAYER_V1"));
         assert!(is_multiplayer_resource(tore_import::source::RESOURCE));
@@ -388,5 +395,9 @@ mod tests {
             }
         }
         check_multiplayer_art(&resources).unwrap();
+        // The scroll bar's track is in the archive too (optional in a pack).
+        for name in selection::SLIDER_ART {
+            Pic::parse(&art.read(name).unwrap()).unwrap();
+        }
     }
 }

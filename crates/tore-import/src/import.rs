@@ -12,7 +12,7 @@ use crate::{
     },
     selection::{
         CHAT_FILE, CHAT_RESOURCE, DEBRIEF_ART, DEBRIEF_DATA, MENU_ART, MENU_DATA, MULTIPLAYER_ART,
-        MULTIPLAYER_DATA,
+        MULTIPLAYER_DATA, SLIDER_ART,
     },
     source::{Build, RESOURCE as SOURCE_RESOURCE, Source},
 };
@@ -129,6 +129,7 @@ pub fn import_with_progress<T>(
                 names.contains(&n.as_str())
                     || debrief.contains(&n.as_str())
                     || multiplayer.contains(&n.as_str())
+                    || SLIDER_ART.contains(&n.as_str())
                     || n.as_str() == "MCICONS.PIC"
                     || aircraft_names.contains(*n)
                     || scene_names.contains(*n)

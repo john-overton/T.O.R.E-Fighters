@@ -610,7 +610,10 @@ fn a_change_of_state_is_said_in_messages() {
 fn the_screen_tells_a_player_whose_own_game_cannot_play_the_mission() {
     let state = sample(2);
     let mut screen = screen_of(&state, false);
-    let words = "Your game has no Su-27, which this mission flies. Re-import Fighters Anthology (Pref, Re-import) to add it.";
+    // Short enough for one line of the Messages box, whose text stops short
+    // of its scroll bar (a longer line is wrapped, and then no one line is the
+    // words).
+    let words = "Your game has no Su-27, which this mission flies. Re-import to add it.";
     screen.update(Some(&state), Some(words));
     // The player's own words are said and shown as they are, once.
     assert_eq!(

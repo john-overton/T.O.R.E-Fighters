@@ -989,6 +989,9 @@ impl LobbyScreen {
         for id in Id::BUTTONS {
             self.button_mut(id).pointer_move(point);
         }
+        if let Some(p) = self.pointer {
+            self.chat.messages.drag(p);
+        }
     }
 
     /// The left mouse button went down or up at the pointer.
@@ -1018,6 +1021,7 @@ impl LobbyScreen {
         }
         // Released.
         self.slots.release(now);
+        self.chat.messages.release();
         let mut fired = None;
         let blocked = self.blocked.take();
         for id in self.shown_buttons() {
@@ -1089,6 +1093,7 @@ impl LobbyScreen {
     pub fn cancel_press(&mut self) {
         let off = (-1, -1);
         self.slots.release(Instant::now());
+        self.chat.messages.release();
         for id in Id::BUTTONS {
             let button = self.button_mut(id);
             button.release(off);
