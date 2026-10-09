@@ -159,8 +159,10 @@ pub fn buttons(facts: &Facts, target: bool) -> Buttons {
     let king_only = |show: Show| if facts.king { show } else { Show::Hidden };
     let may_play = facts.connected && facts.unable.is_none() && !facts.flying;
     Buttons {
-        // The mission changes only in the lobby.
-        mission: king_only(on(facts.connected && lobby_phase)),
+        // Everyone can open the mission page (John, 2026-10-09): the King edits
+        // it in the lobby, anyone else reads it, and so does the King while the
+        // mission flies (it changes only in the lobby).
+        mission: on(facts.connected),
         // Every player sees the settings (greyed unless the King's).
         settings: on(facts.connected),
         players: king_only(on(facts.connected && target)),

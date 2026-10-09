@@ -25,12 +25,13 @@
 //!   selected player's line says how it connected (slice J6).
 //! - **Messages and the chat line** (EF6's [`LobbyChat`]): the game's words
 //!   and chat; Enter in the line sends to All.
-//! - **Buttons**: Mission..., Players... and Fly (the King; Fly reads End
+//! - **Buttons**: Mission... (everyone: the King edits the mission in the
+//!   lobby, anyone else reads it), Players... and Fly (the King; Fly reads End
 //!   Mission while the mission flies), Settings... (everyone; greyed rows
 //!   unless the King's), Loadout (Watch while the mission flies), Ready (Join
 //!   while the mission flies) and Leave. A dedicated server's lobby has no
-//!   King, so it shows only Settings..., Loadout, Ready and Leave. A button
-//!   that cannot be pressed says why when it is clicked.
+//!   King, so it shows only Mission..., Settings..., Loadout, Ready and
+//!   Leave. A button that cannot be pressed says why when it is clicked.
 //! - **Panels**: Settings... (four pages of the King's settings, see
 //!   [`settings_panel`]), Players... (the King's Give crown and Kick for the
 //!   player selected in Players, see [`players_panel`]), Kick (with the
@@ -148,7 +149,8 @@ pub enum Request {
     Watch,
     /// Stop watching.
     StopWatch,
-    /// Open the Quick Mission creator in Accept mode (the King).
+    /// Open the Quick Mission creator: in Accept mode for the King in the
+    /// lobby, read-only for everyone else.
     Mission,
     /// Open Load Ordnance for the player's own slot.
     Loadout,
@@ -597,7 +599,7 @@ impl LobbyScreen {
             .set_default(self.default == Some(DefaultButton::Ready));
         // The buttons shown fill the row from the left for the King and from
         // the right for the others, so Leave is always in the last place.
-        let places: &[(Id, usize)] = if b.mission.is_shown() {
+        let places: &[(Id, usize)] = if b.players.is_shown() {
             &[
                 (Id::Mission, 0),
                 (Id::Settings, 1),
@@ -609,6 +611,7 @@ impl LobbyScreen {
             ]
         } else {
             &[
+                (Id::Mission, 2),
                 (Id::Settings, 3),
                 (Id::Loadout, 4),
                 (Id::Ready, 5),
@@ -664,7 +667,7 @@ impl LobbyScreen {
     /// Which buttons are drawn, and so can be reached.
     fn shown(&self, id: Id) -> bool {
         match id {
-            Id::Mission | Id::PlayersPanel | Id::Fly => self.buttons.mission.is_shown(),
+            Id::PlayersPanel | Id::Fly => self.buttons.players.is_shown(),
             _ => true,
         }
     }
