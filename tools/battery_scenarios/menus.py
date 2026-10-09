@@ -408,7 +408,7 @@ def scenarios() -> list[Scenario]:
                     expect=[r"AI probe totals:"],
                 )
             )
-    for sep in (1, 2, 5, 10, 20, 50, 100, 150, 200, 300):
+    for sep in (1, 2, 5, 10, 20, 50, 75, 100, 150, 200, 300):
         for theater in ("UKR", "CUB"):
             out.append(
                 Scenario(

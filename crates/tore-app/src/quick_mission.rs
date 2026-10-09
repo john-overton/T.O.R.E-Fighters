@@ -224,7 +224,7 @@ impl QuickMission {
             options.fields[field].truncate(4);
             options.fields[field].push("Dummy (400 KTS)".into());
         }
-        // The retail list ends at 50; 100, 150, 200 and 300 are host entries
+        // The retail list ends at 50; 75, 100, 150, 200 and 300 are host entries
         // in the retail label style (John, 2026-09-23). Every entry is read as
         // nautical miles, as the manual states.
         options.fields[17].truncate(RETAIL_SEPARATIONS);
@@ -3044,13 +3044,19 @@ mod tests {
         assert_eq!(legacy_pairs(&wings), q.dummy_wings());
     }
     #[test]
-    fn separation_lists_ten_nautical_choices_and_never_panics() {
+    fn separation_lists_eleven_nautical_choices_and_never_panics() {
         let mut q = setup();
         let labels = q.values(17).to_vec();
-        assert_eq!(labels.len(), 10);
+        assert_eq!(labels.len(), 11);
         assert_eq!(
             &labels[6..],
-            ["100 miles", "150 miles", "200 miles", "300 miles"]
+            [
+                "75 miles",
+                "100 miles",
+                "150 miles",
+                "200 miles",
+                "300 miles"
+            ]
         );
         for (index, nm) in SEPARATION_NM.into_iter().enumerate() {
             q.apply(17, index);
@@ -3063,13 +3069,25 @@ mod tests {
         assert_eq!(q.separation_feet(), 5. * FEET_PER_NM);
         // Clicking cycles through the host entries and wraps.
         q.draft.values[17] = 5;
-        for expected in ["100 miles", "150 miles", "200 miles", "300 miles"] {
+        for expected in [
+            "75 miles",
+            "100 miles",
+            "150 miles",
+            "200 miles",
+            "300 miles",
+        ] {
             q.activate(17);
             assert_eq!(q.value(17), expected);
         }
         q.activate(17);
         assert_eq!(q.draft.values[17], 0);
-        for expected in ["300 miles", "200 miles", "150 miles", "100 miles"] {
+        for expected in [
+            "300 miles",
+            "200 miles",
+            "150 miles",
+            "100 miles",
+            "75 miles",
+        ] {
             right_click(&mut q, 17);
             assert_eq!(q.value(17), expected);
         }
