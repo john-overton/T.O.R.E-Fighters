@@ -1809,6 +1809,14 @@ removing it would need a new protocol version, so it waits for one.
   heading); the checkpoint's revival section gains each added plane's root.
   Every connection is sent Spawned (message 30, unchanged) for an AI respawn
   as for a revival.
+- **The lead hold** (the lobby pass's slice R2, under protocol 20): the
+  journal codes `MissionCommand::LeadHold { on }` as mission command variant
+  7 (one bit) and `MissionCommand::LeadLeft { owner }` as variant 8 (the
+  owner's kind as a varint, 0 a seat and 1 an away player's plane, then the
+  seat or the plane); the checkpoint's revival section gains the hold and its
+  owners, and the AI wings section the claims, the wingmen waiting to re-form
+  and each leader's stand-in flag. No message, packet or golden sample
+  changed: leadership stays host-side.
 
 ## Limits of stage L
 

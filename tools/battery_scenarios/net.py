@@ -789,6 +789,38 @@ def drive_revive_150(d: Drive) -> None:
             d.problem(f"the revival at x {x} nm, z {z} nm is not at the map's edge: 150 nm did not reach it")
 
 
+LEAD_HOLD_STEPS = (
+    r"Blue 1 lead belongs to Phoenix$",
+    r"Blue 1 lead passes to plane [1-3] \(AI\), standing in for Phoenix$",
+    r"Blue 1 lead goes back to Phoenix in plane 12$",
+    r"Blue 1 lead's owner, .+, has left the game: the lead passes on$",
+    r"Blue 1 lead has no owner now: the flight's own succession leads it$",
+)
+
+
+def drive_lead_hold(d: Drive) -> None:
+    """The lead hold (the lobby pass's slice R2): `respawn revive` and `ai-respawn off` on the guide's mission; one
+    `tore-bot --revive 8` leads Friendly Wing 1 (plane 0) with its three AI wingmen, ejects 8 seconds in and flies
+    again in plane 12. The server's log says, in order: the bot owns the flight's lead, an AI wingman stands in for it
+    while it is down, the lead goes back to its new plane, and when the bot leaves the game its lead passes on and,
+    with no other player in the flight, the flight's own succession leads it again (the AI loop)."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(), respawn="revive", ai_respawn="off")
+    bot = start_bots(d, port, "bot", 40, "--callsign", "Phoenix", "--revive", "8")
+    bot.finish(90, 0)
+    server.finish(40, 0)
+    for problem in revive_problems(bot.text(), "Phoenix", 12):
+        d.problem(problem)
+    bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+    log = server_log(d)
+    log_must(d, log, *LEAD_HOLD_STEPS, forbid=NET_BAD)
+    found = [re.search(step, log, re.M) for step in LEAD_HOLD_STEPS]
+    starts = [m.start() for m in found if m]
+    if len(starts) == len(LEAD_HOLD_STEPS) and starts != sorted(starts):
+        d.problem("server log: the lead hold's lines came out of order")
+
+
 def drive_replies(d: Drive) -> None:
     """Orders to human wingmen and their replies (slice F2-R): two bots in the first friendly wing of the guide's
     mission, the AI on weapons hold. The lead bot (plane 0) orders "break left" and, later, presses a reply key, which
@@ -2237,6 +2269,12 @@ def scenarios() -> list[Scenario]:
             timeout=200,
             notes="`revive-distance 150` on the guide's mission: a bot ejects and flies again on the map's edge, the "
             "revival point walked back onto the map (lobby pass R1)",
+        ),
+        Scenario(
+            name="net-server-lead-hold", lane="net", args=[], driver=drive_lead_hold, uses=("server", "bot"),
+            timeout=200,
+            notes="the lead hold: a bot leading Friendly Wing 1 ejects, an AI wingman stands in, the lead goes back "
+            "to its revived plane, and when it leaves the flight's own succession leads again (lobby pass R2)",
         ),
         Scenario(
             name="net-server-replies", lane="net", args=[], driver=drive_replies, uses=("server", "bot"), timeout=300,
