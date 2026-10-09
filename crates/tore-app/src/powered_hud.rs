@@ -17,8 +17,7 @@
 //! `NR` flashes below 90 and above 105 percent, `TQ` above 100.
 //!
 //! The autopilot label's `AUTO` above `HOVER` is the existing label slot of
-//! `hud::draw`: slice P9's hover hold mode only has to give its autopilot
-//! label the word `HOVER`. TODO(P9).
+//! `hud::draw`, filled by the hover hold mode's autopilot label.
 
 use crate::hud::Paint;
 use tore_formats::font::Font;

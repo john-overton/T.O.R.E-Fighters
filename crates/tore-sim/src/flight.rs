@@ -11,6 +11,9 @@ pub use trace::FlightTrace;
 pub const DT: f64 = 1.0 / 120.0;
 /// The message shown when the gear key is pressed with weight on the wheels.
 pub const GROUND_SENSOR_MESSAGE: &str = "Ground sensor preventing gear retraction";
+/// Hover hold's announcements (VTOL overhaul design 5.4).
+pub const HOVER_HOLD_ENGAGED: &str = "Hover hold engaged";
+pub const HOVER_HOLD_OFF: &str = "Hover hold off";
 /// Share of its top speed at which the cockpit starts to shake, and the share at
 /// which the shake is at its clear maximum (agent decisions on numbers John
 /// asked for, 2026-09-29).
@@ -714,11 +717,16 @@ impl State {
         {
             return;
         }
-        // Hover hold arrives with slice P9 of the VTOL overhaul.
-        if switch == Switch::HoverHold {
-            return;
-        }
-        if matches!(switch, Switch::Autopilot | Switch::WaypointAutopilot) {
+        if matches!(
+            switch,
+            Switch::Autopilot | Switch::WaypointAutopilot | Switch::HoverHold
+        ) {
+            // Hover hold and the rotorcraft and jet A modes have conditions
+            // of their own (VTOL overhaul slice P9, docs/spec/autopilot.md).
+            if let Some(refusal) = self.autopilot_refusal(switch, setting) {
+                self.systems.notify(refusal);
+                return;
+            }
             if !self.systems.autopilot_available()
                 || self.damage_regions[3..].iter().any(|v| *v > 0.)
                 || (switch == Switch::WaypointAutopilot && self.systems.has(33))
@@ -727,8 +735,12 @@ impl State {
                 self.autopilot.disengage();
                 return;
             }
+            let hovering = self.autopilot.mode() == crate::autopilot::Mode::Hover;
             self.autopilot
                 .select(switch, setting, self.yaw, self.position[1]);
+            if !hovering && self.autopilot.mode() == crate::autopilot::Mode::Hover {
+                self.systems.notify(HOVER_HOLD_ENGAGED);
+            }
             return;
         }
         // The ground sensor: with weight on the wheels the gear cannot be
@@ -1160,7 +1172,11 @@ impl State {
             self.gear_down = true;
             self.gear = 1.;
         }
+        let hovering = self.autopilot.mode() == crate::autopilot::Mode::Hover;
         self.step_once(input, ground);
+        if hovering && self.autopilot.mode() != crate::autopilot::Mode::Hover {
+            self.systems.notify(HOVER_HOLD_OFF);
+        }
         self.trace.0.tick = self.ticks;
     }
     fn step_once(
@@ -1234,13 +1250,22 @@ impl State {
             }
             if matches!(
                 command,
-                PilotCommand::Toggle(Switch::Autopilot | Switch::WaypointAutopilot)
-                    | PilotCommand::Set(Switch::Autopilot | Switch::WaypointAutopilot, _)
+                PilotCommand::Toggle(
+                    Switch::Autopilot | Switch::WaypointAutopilot | Switch::HoverHold
+                ) | PilotCommand::Set(
+                    Switch::Autopilot | Switch::WaypointAutopilot | Switch::HoverHold,
+                    _
+                )
             ) {
                 self.command(*command);
                 false
             } else {
-                true
+                // Hover hold takes the cyclic trim keys as nudges of its
+                // point, and the rotorcraft modes drop Trim set (slice P9).
+                let mut autopilot = std::mem::take(&mut self.autopilot);
+                let taken = autopilot.intercept(*command, self);
+                self.autopilot = autopilot;
+                !taken
             }
         });
         use crate::autopilot::Mode;
@@ -1258,15 +1283,20 @@ impl State {
             self.autopilot.disengage();
         }
         let pilot = [input.pitch, input.roll, input.yaw];
-        let height = ground(self.position[0], self.position[2]).height;
+        let surface = ground(self.position[0], self.position[2]);
+        let height = surface.height;
         let mut autopilot = std::mem::take(&mut self.autopilot);
-        autopilot.apply(self, height, &mut input);
+        let let_go = autopilot.apply_over(self, &surface, &mut input);
         self.autopilot = autopilot;
+        if let_go == Some(trace::Release::TooSlow) {
+            self.systems.notify("Autopilot off: too slow");
+        }
         if engaged != Mode::Off {
             let clearance = self.model.configuration().equipment.ground_clearance_ft;
             // `Autopilot::apply` lets go on the ground, when crashed, or when
-            // the pilot moves the stick.
-            let released = release.or_else(|| {
+            // the pilot moves the stick (and, in hover hold, the collective,
+            // or on an engine or hydraulic failure).
+            let released = release.or(let_go).or_else(|| {
                 (self.autopilot.mode() == Mode::Off).then_some(
                     if self.crashed || self.position[1] <= height + clearance {
                         trace::Release::Ground
@@ -1279,6 +1309,11 @@ impl State {
                 mode: engaged,
                 pilot,
                 commanded: [input.pitch, input.roll, input.yaw],
+                collective: if self.autopilot.mode() == Mode::Off {
+                    None
+                } else {
+                    input.collective
+                },
                 released,
             });
         }
