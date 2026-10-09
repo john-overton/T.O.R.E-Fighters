@@ -11488,7 +11488,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if weapon_slot == 0 || weapon_slot > combat.state.own().ammo.len() {
             return Err("weapon slot outside this aircraft's PT loadout".into());
         }
-        while combat.state.own().selected != weapon_slot - 1 {
+        // The cycle skips a station that was never loaded (a retained
+        // selection station), so it may never land on the one asked for: one
+        // full turn of the ring (the stations and NAV) is the limit.
+        for _ in 0..=combat.state.own().ammo.len() {
+            if combat.state.own().selected == weapon_slot - 1 {
+                break;
+            }
             combat.command(
                 tore_sim::combat::live::Command::NextWeapon,
                 combat::launcher(&flight),
