@@ -1944,6 +1944,96 @@ def drive_content_missing(d: Drive) -> None:
     )
 
 
+# The network problems of NET_BAD without its refusals: Autobalance's own refusal is part of the test.
+NET_BAD_BUT_REFUSALS = (
+    r"a protocol error|too many bad packets|no packets for 5 seconds|the game data differs|"
+    r"No answer from the server|\bfault\b|silent"
+)
+
+
+def slot_takes(text: str) -> dict[str, list[int]]:
+    """Each callsign's lobby slots in the order the server's lobby lines gave them ("Bravo took the slot of plane
+    6")."""
+    taken: dict[str, list[int]] = {}
+    for m in re.finditer(r"(?m)\b(\w+) took the slot of plane (\d+)\b", text):
+        taken.setdefault(m.group(1), []).append(int(m.group(2)))
+    return taken
+
+
+def balance_problems(text: str, expected: dict[str, list[int]]) -> list[str]:
+    """Problems for any callsign whose lobby slots differ from `expected` (every slot it was given, in order: a
+    re-deal would add one)."""
+    taken = slot_takes(text)
+    return [
+        f"{name} held the slots {taken.get(name, [])}, not {planes}"
+        for name, planes in expected.items()
+        if taken.get(name, []) != planes
+    ]
+
+
+def drive_autobalance(d: Drive) -> None:
+    """Autobalance (the lobby pass, slice A1): a PvP server with `lock-sides balanced` and the guide's mission (planes
+    0 to 5 Bluefor, 6 to 11 Redfor), its AI on weapons hold 50 nm apart. Alpha joins the lobby and is seated on
+    Bluefor's plane 0 and flies; Bravo, Charlie and Delta join the flying mission one by one and are seated on the
+    side with fewer humans (Redfor 6, Bluefor 1 on the tie, Redfor 7): sides two and two. Charlie asks for Redfor
+    (`tore-bot --side red`) and is refused. Alpha is kicked: nobody is moved (no re-deal), and Echo, the next joiner,
+    goes to Bluefor, the smaller side, in its lowest free aircraft, plane 0."""
+    port = d.port()
+    server = start_server(
+        d, port, weapons_hold(guide_mission(separation_nm=50)), mode="pvp", lock_sides="balanced",
+    )
+    seats: dict[str, str] = {}
+
+    def flies(name: str, plane: int) -> None:
+        if not server.wait_for(rf"seat \d+ {name} took plane {plane}\b", 90):
+            raise DriveError(f"{name} never flew plane {plane}")
+        m = re.search(rf"seat (\d+) {name} took plane {plane}\b", server.text())
+        seats[name] = m.group(1) if m else "?"
+
+    alpha = start_bots(d, port, "alpha", 240, "--callsign", "Alpha")
+    flies("Alpha", 0)
+    bravo = start_bots(d, port, "bravo", 240, "--callsign", "Bravo")
+    flies("Bravo", 6)
+    charlie = start_bots(d, port, "charlie", 240, "--callsign", "Charlie", "--side", "red")
+    flies("Charlie", 1)
+    delta = start_bots(d, port, "delta", 240, "--callsign", "Delta")
+    flies("Delta", 7)
+    d.sleep(2)
+    server.send(f"kick {seats['Alpha']}")
+    if not server.wait_for(rf"seat {seats['Alpha']} Alpha \(plane 0\) left: kicked", 30):
+        raise DriveError("the console's kick of Alpha did not take")
+    d.sleep(2)
+    echo = start_bots(d, port, "echo", 240, "--callsign", "Echo")
+    flies("Echo", 0)
+    d.sleep(3)
+    stop_server(d, server)
+    for bot in (alpha, bravo, charlie, delta, echo):
+        bot.finish(40, None)
+    text = server.text()
+    for problem in balance_problems(
+        text, {"Alpha": [0], "Bravo": [6], "Charlie": [1], "Delta": [7], "Echo": [0]},
+    ):
+        d.problem(problem)
+    alpha_slot = text.find("Alpha took the slot of plane 0")
+    started = text.find("mission started")
+    if alpha_slot < 0 or started < 0 or alpha_slot > started:
+        d.problem("Alpha was not seated in the lobby before the mission started")
+    for bot, name, side in (
+        (alpha, "Alpha", "Bluefor"), (bravo, "Bravo", "Redfor"), (charlie, "Charlie", "Bluefor"),
+        (delta, "Delta", "Redfor"), (echo, "Echo", "Bluefor"),
+    ):
+        bot.expect(rf"^{name}: Autobalance put you on {side}\.$", f"{name}'s side")
+        bot.forbid(r"Autobalance moved you", "a re-deal")
+        bot.forbid(NET_BAD_BUT_REFUSALS, "a network problem")
+    charlie.expect(r"^Charlie: asking for Redfor$", "the side request")
+    charlie.expect(r"^Charlie: refused: Autobalance picks the sides\.$", "the side request refused")
+    server.forbid(NET_BAD_BUT_REFUSALS, "a network problem")
+    log_must(
+        d, server_log(d), r"Charlie was refused .*: Autobalance picks the sides\.", r"Echo took plane 0\b",
+        forbid=NET_BAD_BUT_REFUSALS,
+    )
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -2030,6 +2120,13 @@ def scenarios() -> list[Scenario]:
             name="net-server-rejoin", lane="net", args=[], driver=drive_rejoin, uses=("server", "bot"), timeout=300,
             notes="a bot killed in flight is dropped, its plane kept for it; started again with its token file it is "
             "back in that plane (slice K5)",
+        ),
+        Scenario(
+            name="net-server-autobalance", lane="net", args=[], driver=drive_autobalance, uses=("server", "bot"),
+            timeout=420,
+            notes="`lock-sides balanced` in PvP: five bots are seated on the side with fewer humans (the lobby and the "
+            "flying mission), a side request for the other side is refused, a kick re-deals nothing, and the next "
+            "joiner fills the smaller side (the lobby pass, slice A1)",
         ),
         Scenario(
             name="net-migrate-kill", lane="net", args=[], driver=drive_migrate_kill, uses=("bot",), timeout=420,
