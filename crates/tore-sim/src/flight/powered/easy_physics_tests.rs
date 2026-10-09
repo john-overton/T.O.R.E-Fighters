@@ -1,8 +1,8 @@
 //! Acceptance tests E1 and E2 of the VTOL overhaul design (section 10) for
-//! the Easy flight physics cheat (slice P8), on the AH-64, Mi-24, AV-8 and
-//! Yak-141 (the CH-47 and V-22 join when their slices merge), plus the exact
-//! state round trip with the cheat on and the proof that fixed-wing flight
-//! does not notice it. The menu and session rules (E3) are tested where they
+//! the Easy flight physics cheat (slices P8 and P8b), on the AH-64, Mi-24,
+//! AV-8, Yak-141, CH-47 and V-22, plus the exact state round trip with the
+//! cheat on and the proof that fixed-wing flight does not notice it. The
+//! CH-47 and V-22 tests are in the second half of the file. The menu and session rules (E3) are tested where they
 //! live, in `tore-app` and `tore-world`.
 //!
 //! Each E1 test flies the same scenario with the hazards and with the cheat
@@ -59,9 +59,14 @@ fn degrees(rate: f64) -> f64 {
 /// Stick and pedals that hold the attitude level and the heading north,
 /// with `collective` as the lever.
 fn hold(s: &State, collective: f64) -> PilotInput {
+    hold_pitch(s, collective, 0.)
+}
+
+/// `hold` with the pitch attitude held at `pitch` radians instead of level.
+fn hold_pitch(s: &State, collective: f64, pitch: f64) -> PilotInput {
     let [p, q, r] = s.lift_controls.body_rates;
     PilotInput {
-        pitch: (2.5 * (0. - s.pitch) - 1.2 * q).clamp(-1., 1.),
+        pitch: (2.5 * (pitch - s.pitch) - 1.2 * q).clamp(-1., 1.),
         roll: (2.5 * (0. - s.bank) - 0.4 * p).clamp(-1., 1.),
         yaw: (2. * wrap(0. - s.yaw) - 1.5 * r).clamp(-1., 1.),
         collective: Some(collective),
@@ -734,4 +739,809 @@ fn without_the_cheat_the_trim_keys_move_the_cyclic_only() {
     )));
     let moved = easy.lift_controls.aids.attitude_reference[0] - reference[0];
     assert!((moved.to_degrees() + 5.).abs() < 1e-9, "{moved}");
+}
+
+// ---------------------------------------------------------------------
+// Slice P8b: the CH-47 and the V-22.
+
+/// The CH-47 and V-22 fixtures and helpers the tandem and tiltrotor tests
+/// share with the rest of the crate.
+mod heavy {
+    pub(super) use super::super::tandem::tests as tandem;
+    pub(super) use super::super::tiltrotor::acceptance as tilt;
+}
+
+use heavy::{tandem as ch47, tilt as v22};
+
+/// A CH-47 trimmed level at `airspeed_fps` and `height` at stability level
+/// `level`, heading north, with the cheat set before the trim (as a start
+/// or the trim routine under the cheat would do it) or not.
+fn tandem_state(height: f64, airspeed_fps: f64, level: StabilityLevel, easy: bool) -> State {
+    let mut s = State::new(&ch47::pt_aircraft(), [0., height, 0.]).unwrap();
+    s.enable_research(1).unwrap();
+    s.cheats.unlimited_fuel = true;
+    s.cheats.easy_physics = easy;
+    s.yaw = 0.;
+    s.pitch = 0.;
+    s.bank = 0.;
+    s.velocity = [0.; 3];
+    s.speed = 0.;
+    s.lift_controls.aids.stability = level;
+    assert!(s.trim_tandem(airspeed_fps), "CH-47 trims");
+    s
+}
+
+/// A V-22 trimmed level at `airspeed_fps` and `height` with the nacelles at
+/// `nacelle_degrees`, the cheat set before the trim or not.
+fn tilt_state(
+    height: f64,
+    airspeed_fps: f64,
+    nacelle_degrees: f64,
+    level: StabilityLevel,
+    easy: bool,
+) -> State {
+    let mut s = State::new(&v22::pt_v22(), [0., height, 0.]).unwrap();
+    s.enable_research(1).unwrap();
+    s.cheats.unlimited_fuel = true;
+    s.cheats.easy_physics = easy;
+    s.yaw = 0.;
+    s.pitch = 0.;
+    s.bank = 0.;
+    s.velocity = [0.; 3];
+    s.speed = 0.;
+    s.gear = 0.;
+    s.gear_down = false;
+    s.lift_controls.aids.stability = level;
+    assert!(
+        s.trim_tiltrotor(airspeed_fps, nacelle_degrees),
+        "V-22 trims at {airspeed_fps} ft/s, {nacelle_degrees} degrees"
+    );
+    s
+}
+
+/// E1 / H9b for the CH-47 and the V-22 in the hover: an engine cut with the
+/// lever held drops the rotor below 70 percent with the hazard, and with the
+/// cheat never below 85 percent in flight.
+#[test]
+fn e1_h9b_the_heavy_rotors_never_fall_below_85_percent_with_the_cheat() {
+    type Maker = fn(bool) -> State;
+    let cases: [(&str, Maker); 2] = [
+        ("CH-47", |easy| {
+            tandem_state(3_000., 0., StabilityLevel::Off, easy)
+        }),
+        ("V-22", |easy| {
+            tilt_state(3_000., 0., 87., StabilityLevel::Off, easy)
+        }),
+    ];
+    for (name, make) in cases {
+        let lowest = |easy: bool| {
+            let mut s = make(easy);
+            let held = s.lift_controls.collective;
+            s.command(PilotCommand::Set(Switch::Engine, false));
+            let mut low: f64 = 1.;
+            fly(&mut s, 120 * 8, |s| {
+                low = low.min(s.lift_controls.drive.rotor_speed);
+                PilotInput {
+                    collective: Some(held),
+                    ..Default::default()
+                }
+            });
+            assert!(!s.crashed, "{name}");
+            low
+        };
+        assert!(lowest(false) < 0.7, "{name}");
+        let held = lowest(true);
+        assert!((0.85..0.86).contains(&held), "{name} lever held {held}");
+    }
+}
+
+/// The CH-47's sink at one hover induced velocity below 10 kt, after a
+/// second at the hover collective and then up to `seconds` of full
+/// collective with the attitude held: the sink when it began, after 3 s, and
+/// the time it took to stop sinking.
+fn tandem_vortex_ring(easy: bool, seconds: usize) -> (f64, f64, Option<f64>) {
+    let mut s = tandem_state(4_000., 0., StabilityLevel::Off, easy);
+    let m = ch47::model(&s);
+    let weight = s.model().configuration().mass.empty_lbs + s.fuel;
+    let vh = (weight / 2. / (2. * rotor::air_density(4_000.) * m.rotors[0].area_ft2)).sqrt();
+    s.velocity[1] = -vh;
+    let lever = s.lift_controls.collective;
+    fly(&mut s, 120, |s| hold(s, lever));
+    let start = s.vertical_speed;
+    let mut arrested = None;
+    let mut after = start;
+    for tick in 0..120 * seconds {
+        fly(&mut s, 1, |s| hold(s, 1.));
+        if s.vertical_speed >= 0. && arrested.is_none() {
+            arrested = Some((tick + 1) as f64 / 120.);
+        }
+        if tick + 1 == 3 * 120 {
+            after = s.vertical_speed;
+        }
+    }
+    (start, after, arrested)
+}
+
+/// E1 / H10 for the CH-47: full collective does not arrest the vortex ring
+/// sink in 3 s with the hazard; with the cheat it does.
+#[test]
+fn e1_h10_the_cheat_arrests_the_tandems_vortex_ring_sink() {
+    let (start, ring, ring_arrested) = tandem_vortex_ring(false, 8);
+    let (easy_start, easy, easy_arrested) = tandem_vortex_ring(true, 8);
+    println!("H10 CH-47 {start} {ring} {ring_arrested:?} | {easy_start} {easy} {easy_arrested:?}");
+    assert!(start < -15. && easy_start < -15.);
+    assert!(ring_arrested.is_none_or(|t| t > 3.), "{ring_arrested:?}");
+    let seconds = easy_arrested.expect("never arrested");
+    assert!(seconds <= 3., "arrested in {seconds} s");
+    assert!(easy > ring + 10., "{easy} against {ring}");
+}
+
+/// E1 / H11 for the CH-47: past the never-exceed speed with the stick
+/// frozen, the hazard adds nose-up pitch and the cheat does not; the
+/// vibration cue stays. (The counter-rotating pair's roll tendencies oppose,
+/// so, as in the tandem's own H11, roll is not asked of it.)
+#[test]
+fn e1_h11_the_tandem_does_not_pitch_up_past_vne_with_the_cheat() {
+    let dive = |easy: bool| {
+        let mut s = tandem_state(4_000., 120. * KT, StabilityLevel::Off, easy);
+        s.cheats.damage = crate::cheats::Damage::Invulnerable;
+        s.velocity = [0., 0., 215. * KT];
+        s.speed = 215. * KT;
+        let pitch = s.pitch;
+        let lever = s.lift_controls.collective;
+        let mut cue = 0;
+        fly(&mut s, 240, |s| {
+            cue = cue.max(s.lift_controls.warnings.blade_stall);
+            PilotInput {
+                collective: Some(lever),
+                ..Default::default()
+            }
+        });
+        (degrees(s.pitch - pitch), degrees(s.bank), cue)
+    };
+    let (stall_pitch, stall_bank, stall_cue) = dive(false);
+    let (pitch, bank, cue) = dive(true);
+    println!("H11 CH-47 {stall_pitch} {stall_bank} {stall_cue} | {pitch} {bank} {cue}");
+    assert!(stall_cue > 0 && cue > 0, "the vibration cue stays");
+    assert!(
+        pitch < stall_pitch - 1.,
+        "pitch {pitch} against {stall_pitch}"
+    );
+    assert!(bank.abs() <= stall_bank.abs() + 1., "{bank} {stall_bank}");
+}
+
+/// E1 / H12 for the CH-47: a 30 percent collective step with the pedals
+/// fixed turns the nose less than 1 deg/s with the cheat, at Off and
+/// Damper (the two torques cancel with or without it).
+#[test]
+fn e1_h12_collective_does_not_yaw_the_tandem_with_the_cheat() {
+    for level in [StabilityLevel::Off, StabilityLevel::Damper] {
+        let swing = |easy: bool| {
+            let mut s = tandem_state(3_000., 0., level, easy);
+            let lever = s.lift_controls.collective + 0.3;
+            let mut fastest: f64 = 0.;
+            fly(&mut s, 240, |s| {
+                fastest = fastest.max(s.lift_controls.body_rates[2].abs());
+                PilotInput {
+                    collective: Some(lever),
+                    ..Default::default()
+                }
+            });
+            degrees(fastest)
+        };
+        let (plain, easy) = (swing(false), swing(true));
+        println!("H12 CH-47 {level:?} {plain} {easy}");
+        assert!(easy < 1., "{level:?} {easy} deg/s");
+    }
+}
+
+/// A CH-47 on the runway, rotors turning, 20 degrees banked with the
+/// collective at 0.8 of the hover lever and the thrust leaning the way it
+/// is banked.
+fn tandem_banked_on_the_ground(easy: bool) -> State {
+    let mut s = State::new(&ch47::pt_aircraft(), [0., 0., 0.]).unwrap();
+    s.enable_research(1).unwrap();
+    s.cheats.unlimited_fuel = true;
+    s.cheats.easy_physics = easy;
+    s.start_on_runway([0., 0., 0.], 0.).unwrap();
+    s.throttle = 1.;
+    s.gear_down = true;
+    s.gear = 1.;
+    fly(&mut s, 120, |_| PilotInput::default());
+    assert!(s.weight_on_wheels() && !s.crashed);
+    let lever = tandem_state(0., 0., StabilityLevel::Off, false)
+        .lift_controls
+        .collective;
+    s.lift_controls.collective = 0.8 * lever;
+    s.lift_controls.collective_actual = 0.8 * lever;
+    s.bank = 20_f64.to_radians();
+    s.lift_controls.rotors[0].tilt[1] = 0.02;
+    s.lift_controls.rotors[1].tilt[1] = 0.02;
+    s
+}
+
+/// E1 / H14 for the CH-47: 20 degrees of bank under thrust is a crash on
+/// the first tick with the hazard and is not with the cheat (the normal
+/// contact rules still hold a banked touchdown to the landing limits).
+#[test]
+fn e1_h14_the_tandem_does_not_roll_over_with_the_cheat() {
+    let mut s = tandem_banked_on_the_ground(false);
+    fly(&mut s, 1, |_| PilotInput::default());
+    assert!(s.crashed, "with the hazard");
+    let mut s = tandem_banked_on_the_ground(true);
+    fly(&mut s, 30, |_| PilotInput::default());
+    assert!(!s.crashed, "with the cheat");
+}
+
+/// The V-22 hover at 87 degrees sinking at one hover induced velocity,
+/// after a second at the hover lever and then up to `seconds` of full lever
+/// with the attitude held: the sink when it began and the time it took to
+/// stop sinking.
+fn tilt_vortex_ring(easy: bool, seconds: usize) -> (f64, Option<f64>) {
+    let mut s = tilt_state(4_000., 0., 87., StabilityLevel::Off, easy);
+    let weight = s.model().configuration().mass.empty_lbs + s.fuel;
+    let m = tiltrotor::Tiltrotor::new(
+        &s.model().powered_lift().unwrap(),
+        s.model().configuration(),
+    )
+    .unwrap();
+    let vh = (weight / 2. / (2. * rotor::air_density(4_000.) * m.rotors[0].area_ft2)).sqrt();
+    s.velocity[1] = -vh;
+    let lever = s.lift_controls.collective;
+    fly(&mut s, 120, |s| hold(s, lever));
+    let start = s.vertical_speed;
+    let mut arrested = None;
+    for tick in 0..120 * seconds {
+        fly(&mut s, 1, |s| hold(s, 1.));
+        if s.vertical_speed >= 0. {
+            arrested = Some((tick + 1) as f64 / 120.);
+            break;
+        }
+    }
+    (start, arrested)
+}
+
+/// E1 / H10 for the V-22 in helicopter mode: the hazard keeps the sink
+/// beyond 3 s at full lever, the cheat arrests it.
+#[test]
+fn e1_h10_the_cheat_arrests_the_tiltrotors_vortex_ring_sink() {
+    let (start, ring) = tilt_vortex_ring(false, 8);
+    let (easy_start, easy) = tilt_vortex_ring(true, 8);
+    println!("H10 V-22 {start} {ring:?} | {easy_start} {easy:?}");
+    assert!(start < -15. && easy_start < -15.);
+    assert!(ring.is_none_or(|t| t > 3.), "{ring:?}");
+    assert!(easy.expect("never arrested") <= 3.);
+}
+
+/// E1 / H2b for the CH-47 with the cheat: the attitude retention. Two taps
+/// of forward cyclic trim from a hover, the stick let go and the height held
+/// by collective, settle in steady forward flight and keep it for 60 s, at
+/// Damper and at Off. Without the retention the tandem's weak speed
+/// stability would let it wander.
+#[test]
+fn e1_h2b_the_tandem_settles_hands_off_with_the_cheat() {
+    for level in [StabilityLevel::Damper, StabilityLevel::Off] {
+        let mut s = tandem_state(2_000., 0., level, true);
+        for _ in 0..2 {
+            s.command(PilotCommand::Lift(tore_input::LiftCommand::TrimAdjust(
+                tore_input::TrimAxis::Pitch,
+                -0.05,
+            )));
+        }
+        fly(&mut s, 120 * 90, |s| height_hold(s, 2_000.));
+        let (mut slowest, mut fastest) = (f64::MAX, 0_f64);
+        let (mut least, mut most) = (f64::MAX, f64::MIN);
+        for _ in 0..60 {
+            fly(&mut s, 120, |s| height_hold(s, 2_000.));
+            let speed = s.speed / KT;
+            slowest = slowest.min(speed);
+            fastest = fastest.max(speed);
+            least = least.min(s.pitch.to_degrees());
+            most = most.max(s.pitch.to_degrees());
+        }
+        println!("H2b CH-47 {level:?} {slowest} to {fastest} kt, pitch {least} to {most}");
+        assert!(
+            slowest >= 60. && fastest <= 160.,
+            "{level:?} {slowest} to {fastest} kt"
+        );
+        assert!(
+            fastest - slowest < 3.,
+            "{level:?} still moving {slowest} {fastest}"
+        );
+        assert!(most - least < 1., "{level:?} pitch {least} to {most}");
+        assert!((s.position[1] - 2_000.).abs() < 50., "{level:?}");
+        assert!(!s.crashed);
+    }
+}
+
+/// E2 / H3 for the CH-47: power still sets the level top speed. The Damper
+/// trim's top speed is the same with and without the hazards within 1
+/// percent (the rotors never reach retreating blade stall below it).
+#[test]
+fn e2_h3_power_still_sets_the_tandems_top_speed() {
+    let top = |hazards: rotor::Hazards| {
+        let s = tandem_state(0., 0., StabilityLevel::Damper, false);
+        let m = ch47::model(&s);
+        let weight = s.model().configuration().mass.empty_lbs + s.fuel;
+        let rho = rotor::air_density(0.);
+        let available = m.available_power(rho, 1., 1.);
+        (60..260)
+            .step_by(2)
+            .map(f64::from)
+            .take_while(|kt| {
+                m.trim_with(
+                    hazards,
+                    weight,
+                    0.,
+                    kt * KT,
+                    rho,
+                    1.,
+                    StabilityLevel::Damper,
+                )
+                .is_some_and(|t| t.engine_power <= available)
+            })
+            .last()
+            .unwrap()
+    };
+    let (hazard, easy) = (top(rotor::Hazards::ALL), top(rotor::Hazards::NONE));
+    println!("H3 CH-47 {hazard} {easy}");
+    assert!((160. ..=170.).contains(&easy), "{easy}");
+    assert!((hazard - easy).abs() <= 0.01 * hazard, "{hazard} {easy}");
+}
+
+/// The climb rate, ft/s, after 20 s of `extra` above the hover lever with
+/// the attitude held at `pitch` (the V-22 needs a few degrees nose up to
+/// stay over one spot), for the CH-47 and the V-22.
+fn climb_after(mut s: State, extra: f64, pitch: f64) -> f64 {
+    let lever = s.lift_controls.collective + extra;
+    fly(&mut s, 120 * 20, |s| hold_pitch(s, lever, pitch));
+    s.vertical_speed
+}
+
+/// E2 / H6 for the CH-47 and the V-22: the collective still sets a climb
+/// rate, the same with the cheat within 2 percent (neither has a torque
+/// reaction to take away).
+#[test]
+fn e2_h6_the_heavy_rotorcrafts_collective_still_sets_a_climb_rate() {
+    for (name, plain, easy) in [
+        (
+            "CH-47",
+            climb_after(
+                tandem_state(1_000., 0., StabilityLevel::Damper, false),
+                0.1,
+                0.,
+            ),
+            climb_after(
+                tandem_state(1_000., 0., StabilityLevel::Damper, true),
+                0.1,
+                0.,
+            ),
+        ),
+        (
+            "V-22",
+            climb_after(
+                tilt_state(1_000., 0., 87., StabilityLevel::Damper, false),
+                0.1,
+                0.05,
+            ),
+            climb_after(
+                tilt_state(1_000., 0., 87., StabilityLevel::Damper, true),
+                0.1,
+                0.05,
+            ),
+        ),
+    ] {
+        println!("H6 {name} {plain} {easy}");
+        assert!(plain > 3., "{name}");
+        assert!(
+            (easy / plain - 1.).abs() < 0.02,
+            "{name} {easy} against {plain}"
+        );
+    }
+}
+
+/// E2 / T4 for the V-22: power still sets the airplane-mode top speed, the
+/// same with the cheat within 1 percent (260 to 275 kt).
+#[test]
+fn e2_t4_power_still_sets_the_tiltrotors_top_speed() {
+    let top = |easy: bool| {
+        let mut s = State::new(&v22::pt_v22(), [0., 0., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.cheats.unlimited_fuel = true;
+        s.cheats.easy_physics = easy;
+        s.lift_controls.aids.stability = StabilityLevel::Damper;
+        (200..330)
+            .map(f64::from)
+            .take_while(|kt| s.clone().trim_tiltrotor(kt * KT, 0.))
+            .last()
+            .unwrap_or(0.)
+    };
+    let (hazard, easy) = (top(false), top(true));
+    println!("T4 V-22 {hazard} {easy}");
+    assert!((260. ..=275.).contains(&easy), "{easy}");
+    assert!((hazard - easy).abs() <= 0.01 * hazard, "{hazard} {easy}");
+}
+
+fn true_airspeed(kcas: f64, height: f64) -> f64 {
+    kcas * KT / (rotor::air_density(height) / rotor::sea_level_density()).sqrt()
+}
+
+/// E1 / T3 with the cheat, side by side with the hazard case: commanding the
+/// helicopter preset at 180 KCAS, protection acts exactly as it does without
+/// the cheat (the nacelles stop at the upper edge, CONV shows, the demand is
+/// kept), and the nacelle paths agree to a degree.
+#[test]
+fn e1_t3_corridor_protection_acts_the_same_with_the_cheat() {
+    let aft = |easy: bool| {
+        let mut s = tilt_state(
+            3_000.,
+            true_airspeed(180., 3_000.),
+            0.,
+            StabilityLevel::Damper,
+            easy,
+        );
+        let corridor = tiltrotor::Tiltrotor::new(
+            &s.model().powered_lift().unwrap(),
+            s.model().configuration(),
+        )
+        .unwrap()
+        .tilt
+        .corridor;
+        let lever = s.lift_controls.collective;
+        let mut protecting = false;
+        for _ in 0..120 * 10 {
+            fly(&mut s, 1, |s| PilotInput {
+                collective: Some(lever),
+                conversion: Some(87. / 97.5),
+                ..hold(s, lever)
+            });
+            let kcas = tiltrotor::kcas(s.speed, rotor::air_density(s.position[1]));
+            let limit = tiltrotor::aft_limit_degrees(corridor, 97.5, kcas);
+            assert!(s.nacelle_degrees() <= limit + 0.5, "easy {easy}");
+            protecting |= s.lift_controls.corridor_hold.is_some();
+        }
+        assert!(protecting && s.conversion_corridor().unwrap().protecting);
+        assert_eq!(s.lift_controls.conversion, 87. / 97.5, "the demand is kept");
+        s.nacelle_degrees()
+    };
+    let (hazard, easy) = (aft(false), aft(true));
+    println!("T3 V-22 aft {hazard} {easy}");
+    assert!((hazard - easy).abs() < 1., "{hazard} {easy}");
+    assert!(easy < 60., "stopped at the edge, not driven aft: {easy}");
+}
+
+/// E1 / T6 with the cheat: a rolling landing with the nacelles left at 45
+/// degrees strikes once it slows below 10 kt, cheat or not (the rotor
+/// strike is a contact rule, not a hazard).
+#[test]
+fn e1_t6_the_rotor_strike_still_happens_with_the_cheat() {
+    for easy in [false, true] {
+        let mut s = State::new(&v22::pt_v22(), [0., 0., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.cheats.unlimited_fuel = true;
+        s.cheats.easy_physics = easy;
+        s.lift_controls.aids.stability = StabilityLevel::Damper;
+        s.start_on_runway([0., 0., 0.], 0.).unwrap();
+        s.gear_down = true;
+        s.gear = 1.;
+        s.throttle = 1.;
+        s.lift_controls.conversion = 87. / 97.5;
+        s.lift_controls.conversion_actual = 87. / 97.5;
+        fly(&mut s, 120, |_| PilotInput {
+            collective: Some(0.),
+            ..Default::default()
+        });
+        assert!(s.weight_on_wheels() && !s.crashed, "easy {easy}");
+        let speed = 60. * KT;
+        s.velocity = [0., 0., speed];
+        s.speed = speed;
+        s.lift_controls.conversion = 45. / 97.5;
+        s.lift_controls.conversion_actual = 45. / 97.5;
+        let mut struck_at = None;
+        for _ in 0..120 * 60 {
+            let before = s.velocity[0].hypot(s.velocity[2]);
+            fly(&mut s, 1, |_| PilotInput {
+                collective: Some(0.),
+                ..Default::default()
+            });
+            if s.crashed {
+                struck_at = Some(before);
+                break;
+            }
+        }
+        let struck_at = struck_at.expect("rotor strike") / KT;
+        assert!(
+            (9. ..10.5).contains(&struck_at),
+            "easy {easy}: {struck_at} kt"
+        );
+    }
+}
+
+/// E1 / H9b, the floor itself, with the rotor speed forced low: the floor is
+/// 85 percent or the aircraft's rotor speed reference if that is lower, so
+/// on the downstops (reference 84 percent) a rotor knocked down to 70 percent
+/// with the engines out is lifted to 84, not to 85, and in the hover to 85.
+/// Without the cheat nothing lifts it. On the wheels the floor does not
+/// apply.
+#[test]
+fn e1_the_floor_is_the_lower_of_85_percent_and_the_reference() {
+    let after_one_tick = |nacelle: f64, speed: f64, easy: bool| {
+        let mut s = tilt_state(3_000., speed, nacelle, StabilityLevel::Damper, easy);
+        s.command(PilotCommand::Set(Switch::Engine, false));
+        let reference = s.lift_controls.drive.rotor_speed_reference;
+        s.lift_controls.drive.rotor_speed = 0.70;
+        fly(&mut s, 1, |s| hold(s, s.lift_controls.collective));
+        (reference, s.lift_controls.drive.rotor_speed)
+    };
+    let airplane = true_airspeed(200., 3_000.);
+    let (reference, floored) = after_one_tick(0., airplane, true);
+    assert!((reference - 0.84).abs() < 0.005, "{reference}");
+    assert!((floored - reference.min(0.85)).abs() < 1e-9, "{floored}");
+    let (_, plain) = after_one_tick(0., airplane, false);
+    assert!(plain < 0.72, "{plain}");
+    let (reference, floored) = after_one_tick(87., 0., true);
+    assert!((reference - 1.).abs() < 1e-9);
+    assert!((floored - 0.85).abs() < 1e-9, "{floored}");
+    let (_, plain) = after_one_tick(87., 0., false);
+    assert!(plain < 0.72, "{plain}");
+}
+
+/// What the cheat's attitude retention adds to the pitch and bank
+/// augmentation of a V-22 with the nacelles at `nacelle_degrees` and the
+/// attitude `error` rad off the reference, at `level`: the same state's
+/// augmentation with the cheat on less the one without.
+fn retention_added(nacelle_degrees: f64, level: StabilityLevel, error: f64) -> [f64; 2] {
+    let sensed = sas::Sensed::default();
+    let make = |easy: bool| {
+        // Only the stability law is asked, so the nacelles may sit where no
+        // hover trim exists.
+        let mut s = tilt_state(3_000., 0., 87., level, easy);
+        s.lift_controls.conversion = nacelle_degrees / 97.5;
+        s.lift_controls.conversion_actual = nacelle_degrees / 97.5;
+        s.pitch += error;
+        s.bank -= error;
+        s
+    };
+    let lift = make(false).model().powered_lift().unwrap();
+    let on = make(true).augment(&lift, [0.; 3], sensed).augmentation;
+    let off = make(false).augment(&lift, [0.; 3], sensed).augmentation;
+    [on[0] - off[0], on[1] - off[1]]
+}
+
+/// The retention follows the V-22's helicopter mode: the full weak
+/// retention from 75 degrees up (limited to the cheat's authority, below the
+/// Damper's), exactly the helicopter share of it in between, none from 30
+/// degrees down. The Attitude level has its own and takes none.
+#[test]
+fn the_tiltrotors_retention_is_full_in_helicopter_mode_and_fades_to_nothing() {
+    for level in [StabilityLevel::Damper, StabilityLevel::Off] {
+        // Far off the reference: pinned at the cap, pitch and bank opposed.
+        let hover = retention_added(87., level, 0.6);
+        assert!(
+            (hover[0] + sas::EASY_RETENTION_AUTHORITY).abs() < 1e-9
+                && (hover[1] - sas::EASY_RETENTION_AUTHORITY).abs() < 1e-9,
+            "{level:?} {hover:?}"
+        );
+        // A small error, inside the cap: gain times error, scaled by the share.
+        let small = 0.05;
+        let full = retention_added(87., level, small);
+        assert!(
+            full[0] < 0.
+                && full[1] > 0.
+                && full
+                    .iter()
+                    .all(|v| v.abs() < sas::EASY_RETENTION_AUTHORITY - 0.01),
+            "{level:?} {full:?}"
+        );
+        let at_75 = retention_added(75., level, small);
+        assert!(
+            (at_75[0] - full[0]).abs() < 1e-12 && (at_75[1] - full[1]).abs() < 1e-12,
+            "{level:?} full at 75: {at_75:?}"
+        );
+        for degrees in [40., 52., 65.] {
+            let share = tiltrotor::helicopter_share(degrees);
+            assert!(share > 0. && share < 1., "{degrees}");
+            let part = retention_added(degrees, level, small);
+            assert!(
+                (part[0] - share * full[0]).abs() < 1e-9
+                    && (part[1] - share * full[1]).abs() < 1e-9,
+                "{level:?} {degrees}: {part:?} against {share} of {full:?}"
+            );
+        }
+        assert_eq!(
+            retention_added(30., level, small),
+            [0.; 2],
+            "{level:?} none at 30"
+        );
+        assert_eq!(
+            retention_added(0., level, 0.6),
+            [0.; 2],
+            "{level:?} none in airplane mode"
+        );
+    }
+    assert_eq!(retention_added(87., StabilityLevel::Attitude, 0.6), [0.; 2]);
+}
+
+/// In helicopter mode the retention pulls a disturbed attitude back toward
+/// the trim: a 10 degree nose-up, hands off at Off, is smaller 4 s later
+/// with the cheat than without. In airplane mode the cheat changes nothing
+/// about how the aircraft flies the same disturbance.
+#[test]
+fn the_retention_pulls_the_tiltrotor_back_in_helicopter_mode_only() {
+    let error_after = |nacelle: f64, speed: f64, easy: bool| {
+        let mut s = tilt_state(3_000., speed, nacelle, StabilityLevel::Off, easy);
+        s.pitch += 10_f64.to_radians();
+        s.bank += 10_f64.to_radians();
+        let lever = s.lift_controls.collective;
+        let (pitch, bank) = (s.pitch - 10_f64.to_radians(), s.bank - 10_f64.to_radians());
+        fly(&mut s, 120 * 4, |_| PilotInput {
+            collective: Some(lever),
+            ..Default::default()
+        });
+        degrees((s.pitch - pitch).abs().max((s.bank - bank).abs()))
+    };
+    let (plain, easy) = (error_after(87., 0., false), error_after(87., 0., true));
+    println!("retention V-22 hover {plain} {easy}");
+    assert!(easy < plain - 1., "helicopter mode {easy} against {plain}");
+    let speed = true_airspeed(200., 3_000.);
+    let (plain, easy) = (error_after(0., speed, false), error_after(0., speed, true));
+    println!("retention V-22 airplane {plain} {easy}");
+    assert!(
+        (easy - plain).abs() < 0.1,
+        "airplane mode {easy} against {plain}"
+    );
+}
+
+/// A V-22 mid-conversion with the cheat on (protection holding the
+/// nacelles) and one in a hover restore exactly from the wire's exact coding
+/// and fly on bit for bit; the cheat is part of the coding.
+#[test]
+fn a_tiltrotor_with_the_cheat_restores_exactly_mid_flight() {
+    let mut converting = tilt_state(1_000., 0., 87., StabilityLevel::Damper, true);
+    let lever = converting.lift_controls.collective;
+    fly(&mut converting, 120 * 6, |s| PilotInput {
+        conversion_rate: -1.,
+        pitch: -0.15,
+        collective: Some(lever),
+        ..hold(s, lever)
+    });
+    assert!((10. ..85.).contains(&converting.nacelle_degrees()));
+    let hovering = tilt_state(800., 0., 87., StabilityLevel::Off, true);
+    let model = crate::models::AircraftModel::for_aircraft(&v22::pt_v22()).unwrap();
+    for s in [converting, hovering] {
+        let mut writer = tore_codec::BitWriter::new();
+        s.write_exact(&mut writer, None).unwrap();
+        let mut restored = State::read_exact(
+            &mut tore_codec::BitReader::new(writer.as_bytes()),
+            None,
+            &model,
+        )
+        .unwrap();
+        assert_eq!(s, restored);
+        assert!(restored.cheats.easy_physics);
+        let mut plain = s.clone();
+        plain.cheats.easy_physics = false;
+        let mut other = tore_codec::BitWriter::new();
+        plain.write_exact(&mut other, None).unwrap();
+        assert_ne!(writer.as_bytes(), other.as_bytes());
+        let mut original = s.clone();
+        for tick in 0..1_200 {
+            let input = PilotInput {
+                pitch: (tick as f64 / 90.).sin() * 0.2,
+                roll: (tick as f64 / 70.).cos() * 0.1,
+                yaw: 0.1,
+                collective: Some(0.6 + 0.2 * (tick as f64 / 200.).sin()),
+                conversion_rate: if tick < 600 { -1. } else { 1. },
+                ..Default::default()
+            };
+            for state in [&mut original, &mut restored] {
+                state.step_surface(&input, |_, _| crate::research::Surface::runway(0.));
+            }
+            assert_eq!(original, restored, "tick {tick}");
+        }
+    }
+}
+
+/// A CH-47 mid-hover and mid-autorotation with the cheat on restores
+/// exactly from the wire's exact coding and flies on bit for bit; the cheat
+/// is part of the coding.
+#[test]
+fn a_tandem_with_the_cheat_restores_exactly_mid_flight() {
+    let mut hovering = tandem_state(800., 0., StabilityLevel::Damper, true);
+    fly(&mut hovering, 120, |s| PilotInput {
+        roll: 0.1,
+        yaw: -0.2,
+        collective: Some(s.lift_controls.collective + 0.05),
+        ..Default::default()
+    });
+    let mut autorotating = tandem_state(2_000., 80. * KT, StabilityLevel::Damper, true);
+    autorotating.command(PilotCommand::Set(Switch::Engine, false));
+    fly(&mut autorotating, 360, |_| PilotInput {
+        collective: Some(0.1),
+        pitch: 0.05,
+        ..Default::default()
+    });
+    assert!(autorotating.lift_controls.drive.engine_output[0] == 0.);
+    let model = crate::models::AircraftModel::for_aircraft(&ch47::pt_aircraft()).unwrap();
+    for s in [hovering, autorotating] {
+        let mut writer = tore_codec::BitWriter::new();
+        s.write_exact(&mut writer, None).unwrap();
+        let mut restored = State::read_exact(
+            &mut tore_codec::BitReader::new(writer.as_bytes()),
+            None,
+            &model,
+        )
+        .unwrap();
+        assert_eq!(s, restored);
+        assert!(restored.cheats.easy_physics);
+        let mut plain = s.clone();
+        plain.cheats.easy_physics = false;
+        let mut other = tore_codec::BitWriter::new();
+        plain.write_exact(&mut other, None).unwrap();
+        assert_ne!(writer.as_bytes(), other.as_bytes());
+        let mut original = s.clone();
+        for tick in 0..1_200 {
+            let input = PilotInput {
+                pitch: (tick as f64 / 90.).sin() * 0.2,
+                roll: (tick as f64 / 70.).cos() * 0.1,
+                yaw: 0.1,
+                collective: Some(0.3 + 0.2 * (tick as f64 / 200.).sin()),
+                ..Default::default()
+            };
+            for state in [&mut original, &mut restored] {
+                state.step_surface(&input, |_, _| crate::research::Surface::runway(0.));
+            }
+            assert_eq!(original, restored, "tick {tick}");
+        }
+    }
+}
+
+/// A V-22 on the runway, nacelles at the helicopter preset, rotors turning,
+/// 20 degrees banked with the lever at 0.8 of the hover lever and the thrust
+/// leaning the way it is banked.
+fn tilt_banked_on_the_ground(easy: bool) -> State {
+    let mut s = State::new(&v22::pt_v22(), [0., 0., 0.]).unwrap();
+    s.enable_research(1).unwrap();
+    s.cheats.unlimited_fuel = true;
+    s.cheats.easy_physics = easy;
+    s.lift_controls.aids.stability = StabilityLevel::Off;
+    s.start_on_runway([0., 0., 0.], 0.).unwrap();
+    s.gear_down = true;
+    s.gear = 1.;
+    s.throttle = 1.;
+    s.lift_controls.conversion = 87. / 97.5;
+    s.lift_controls.conversion_actual = 87. / 97.5;
+    fly(&mut s, 120, |_| PilotInput {
+        collective: Some(0.),
+        ..Default::default()
+    });
+    assert!(s.weight_on_wheels() && !s.crashed);
+    let lever = tilt_state(0., 0., 87., StabilityLevel::Off, false)
+        .lift_controls
+        .collective;
+    s.lift_controls.collective = 0.8 * lever;
+    s.lift_controls.collective_actual = 0.8 * lever;
+    s.bank = 20_f64.to_radians();
+    s.lift_controls.rotors[0].tilt[1] = 0.02;
+    s.lift_controls.rotors[1].tilt[1] = 0.02;
+    s
+}
+
+/// E1 / H14 for the V-22: dynamic rollover is gated by the cheat. 20 degrees
+/// of bank under thrust is a crash on the first tick with the hazard and is
+/// not with the cheat.
+#[test]
+fn e1_h14_the_tiltrotor_does_not_roll_over_with_the_cheat() {
+    let mut s = tilt_banked_on_the_ground(false);
+    fly(&mut s, 1, |s| PilotInput {
+        collective: Some(s.lift_controls.collective),
+        ..Default::default()
+    });
+    assert!(s.crashed, "with the hazard");
+    let mut s = tilt_banked_on_the_ground(true);
+    fly(&mut s, 30, |s| PilotInput {
+        collective: Some(s.lift_controls.collective),
+        ..Default::default()
+    });
+    assert!(!s.crashed, "with the cheat");
 }
