@@ -705,6 +705,11 @@ mod tests {
                     ..Default::default()
                 },
                 rotor_speed: if id == 0 { rotor_speed(tick) } else { 0. },
+                disk_tilt: if id == 0 {
+                    disk_tilt(tick)
+                } else {
+                    [[0.; 2]; 2]
+                },
                 hp: 100,
                 max_hp: 100,
                 ..Default::default()
@@ -725,6 +730,52 @@ mod tests {
     fn rotor_speed(tick: u64) -> f64 {
         let droop = (tick as f64 / 100.).min(1.) * 0.2;
         ((1. - droop + if tick > 150 { 0.15 } else { 0. }) * 1000.).round() / 1000.
+    }
+
+    /// The test rotorcraft's disk tilt at `tick`: leaning forward more as the
+    /// flight goes on, with a steady lateral lean.
+    fn disk_tilt(tick: u64) -> [[f64; 2]; 2] {
+        [[0.02 + tick as f64 * 0.002, -0.02], [0., 0.]]
+    }
+
+    #[test]
+    fn replayed_disks_tilt_as_recorded_and_blend_between_ticks() {
+        let dir = TempDir::new("playback-tilts");
+        let recording = Arc::new(rotorcraft_recording(&dir));
+        let tilt = |picture: &RenderSnapshot, id: u32| {
+            std::iter::once(&picture.player)
+                .chain(&picture.targets)
+                .find(|pose| pose.id == id)
+                .unwrap()
+                .engine
+                .rotor_tilt
+        };
+        let step = tore_replay::precision::DISK_TILT;
+        let mut playback = Playback::new(Arc::clone(&recording));
+        for tick in (0..=200).step_by(3) {
+            let picture = playback.picture(tick, 1.);
+            let read = tilt(&picture, 0);
+            let truth = disk_tilt(tick);
+            for (rotor, axis) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+                assert!(
+                    (read[rotor][axis] - truth[rotor][axis]).abs() <= step / 2. + 1e-9,
+                    "tick {tick}: {read:?} against {truth:?}"
+                );
+            }
+            // The aircraft without rotors stays level.
+            assert_eq!(tilt(&picture, 1), [[0.; 2]; 2]);
+        }
+        // Played backwards, and between ticks, the disk is where the
+        // recording had it, blended as live flight blends two ticks.
+        let half = playback.picture(120, 0.5);
+        let blended = tilt(&half, 0)[0][0];
+        let expected = (disk_tilt(119)[0][0] + disk_tilt(120)[0][0]) / 2.;
+        assert!(
+            (blended - expected).abs() <= step + 1e-9,
+            "{blended} {expected}"
+        );
+        let back = playback.picture(37, 1.);
+        assert!((tilt(&back, 0)[0][0] - disk_tilt(37)[0][0]).abs() <= step / 2. + 1e-9);
     }
 
     #[test]

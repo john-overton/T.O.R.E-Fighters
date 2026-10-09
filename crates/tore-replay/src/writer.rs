@@ -561,6 +561,14 @@ fn validate(frame: &Frame) -> Result<usize> {
         {
             return Err(invalid("rotor speed must be a finite share from 0 to 60"));
         }
+        if aircraft
+            .disk_tilt
+            .iter()
+            .flatten()
+            .any(|tilt| !tilt.is_finite() || tilt.abs() > crate::tilts::MAX_DISK_TILT)
+        {
+            return Err(invalid("disk tilt must be finite and within 1.6 rad"));
+        }
     }
     let mut bound = 64;
     bound += frame.aircraft.len() * 512;

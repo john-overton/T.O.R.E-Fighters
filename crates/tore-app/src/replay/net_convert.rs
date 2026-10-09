@@ -483,7 +483,7 @@ mod tests {
                 rates: [0.1, 0.2, 0.3],
                 rotor: 1.043,
                 rotor_turns: 0.,
-                rotor_tilt: [[0.; 2]; 2],
+                rotor_tilt: [[0.04, -0.0123], [-0.2, 0.6]],
                 flame: true,
             },
             damage: Damage {

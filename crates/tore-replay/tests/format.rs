@@ -81,6 +81,13 @@ fn check_aircraft(truth: &AircraftState, read: &AircraftState, worst: &mut Worst
     }
     let e = (truth.rotor_speed - read.rotor_speed).abs();
     assert!(e <= ROTOR_SPEED / 2. + EPS, "rotor speed error {e}");
+    for (rotor, axis) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+        let e = (truth.disk_tilt[rotor][axis] - read.disk_tilt[rotor][axis]).abs();
+        assert!(
+            e <= DISK_TILT / 2. + EPS,
+            "disk tilt {rotor}/{axis} error {e}"
+        );
+    }
     assert_eq!(truth.flags, read.flags);
     assert_eq!(truth.wreck_phase, read.wreck_phase);
     assert_eq!(
@@ -591,6 +598,22 @@ fn limits_are_refused_and_the_writer_keeps_going() {
             tick: 11,
             aircraft: vec![AircraftState {
                 rotor_speed: 61.,
+                ..plane(1)
+            }],
+            ..Frame::default()
+        },
+        Frame {
+            tick: 11,
+            aircraft: vec![AircraftState {
+                disk_tilt: [[f64::NAN, 0.], [0.; 2]],
+                ..plane(1)
+            }],
+            ..Frame::default()
+        },
+        Frame {
+            tick: 11,
+            aircraft: vec![AircraftState {
+                disk_tilt: [[0.; 2], [0., -1.7]],
                 ..plane(1)
             }],
             ..Frame::default()
@@ -1112,5 +1135,73 @@ fn rotor_speed_round_trips_in_its_own_section_and_holds_between_changes() {
             .rotor_speed,
         0.
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn disk_tilt_round_trips_in_its_own_section_and_holds_between_changes() {
+    let dir = temp_dir("tilts");
+    let path = dir.join("tilts.tore-replay");
+    let mut writer = Writer::create(&path, &header("UKR")).unwrap();
+    // Aircraft 1 is a single-rotor helicopter whose disk leans forward and
+    // wobbles, 2 has no rotor, 3 is a tandem whose two rotors tilt apart and
+    // leaves the picture for a while, then comes back.
+    let tilt_one = |tick: u64| match tick {
+        0..=99 => [[0.; 2]; 2],
+        100..=299 => [[0.05 + (tick - 99) as f64 * 0.001, -0.02], [0.; 2]],
+        _ => [[0.25, 0.01 * ((tick - 299) as f64 * 0.05).sin()], [0.; 2]],
+    };
+    let states = |tick: u64| {
+        let plane = |id: u32, disk_tilt: [[f64; 2]; 2]| AircraftState {
+            id,
+            disk_tilt,
+            position: [tick as f64, 100., 0.],
+            ..AircraftState::default()
+        };
+        let mut aircraft = vec![plane(1, tilt_one(tick)), plane(2, [[0.; 2]; 2])];
+        if !(150..450).contains(&tick) {
+            aircraft.push(plane(3, [[0.03, 0.], [-0.03, 0.12]]));
+        }
+        aircraft
+    };
+    // Several chunks: each starts from nothing.
+    for tick in 0..900u64 {
+        writer
+            .push(&Frame {
+                tick,
+                aircraft: states(tick),
+                ..Frame::default()
+            })
+            .unwrap();
+    }
+    let path = writer.finish(&Footer::default()).unwrap();
+    let reader = Recording::open(&path).unwrap();
+    let mut seen = 0;
+    for frame in reader.frames(0, 899) {
+        let frame = frame.unwrap();
+        for (truth, read) in states(frame.tick).iter().zip(&frame.aircraft) {
+            assert_eq!(truth.id, read.id);
+            for (rotor, axis) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+                let e = (truth.disk_tilt[rotor][axis] - read.disk_tilt[rotor][axis]).abs();
+                assert!(
+                    e <= DISK_TILT / 2. + EPS,
+                    "tick {} aircraft {} rotor {rotor} axis {axis}: {} read as {}",
+                    frame.tick,
+                    truth.id,
+                    truth.disk_tilt[rotor][axis],
+                    read.disk_tilt[rotor][axis]
+                );
+            }
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 900 * 2 + 900 - 300);
+    // Aircraft without a rotor, and a rotorcraft before its disk leaned, read
+    // exactly level.
+    let frame = reader.frames(50, 50).next().unwrap().unwrap();
+    for id in [1, 2] {
+        let level = frame.aircraft.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(level.disk_tilt, [[0.; 2]; 2], "aircraft {id}");
+    }
     let _ = std::fs::remove_dir_all(dir);
 }

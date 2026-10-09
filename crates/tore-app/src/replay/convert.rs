@@ -184,6 +184,12 @@ pub fn aircraft_state(pose: &AircraftPose, data: &FlightData) -> replay::Aircraf
         controls: data.controls,
         auxiliary_rates: pose.engine.rates,
         rotor_speed: pose.engine.rotor,
+        // Real disks stay under 0.6 rad; the clamp keeps a runaway number
+        // from making the writer refuse the whole frame.
+        disk_tilt: pose
+            .engine
+            .rotor_tilt
+            .map(|tilt| tilt.map(|v| v.clamp(-1.5, 1.5))),
         hp: pose.damage.hp,
         max_hp: pose.damage.initial_hp,
         sections: pose.damage.sections,
@@ -226,10 +232,10 @@ pub fn aircraft_pose(
             afterburner: state.flags.afterburner,
             rates: state.auxiliary_rates,
             rotor: state.rotor_speed,
-            // The replay records the rotor speed only: playback integrates
-            // it into the blade angle, and the disk tilt is not recorded.
+            // Playback integrates the recorded rotor speed into the blade
+            // angle; the disk tilt is recorded as it was flown.
             rotor_turns: 0.,
-            rotor_tilt: [[0.; 2]; 2],
+            rotor_tilt: state.disk_tilt,
             flame: state.flags.flame,
         },
         damage: Damage {
@@ -815,6 +821,7 @@ mod tolerance {
     pub const SPEED: f64 = SPEED_FPS / 2. + SLACK;
     pub const RATE: f64 = RATE_RAD_S / 2. + SLACK;
     pub const ROTOR: f64 = ROTOR_SPEED / 2. + SLACK;
+    pub const TILT: f64 = DISK_TILT / 2. + SLACK;
     /// Direction components, from the two quantized direction angles.
     pub const DIRECTION: f64 = 2e-5;
     /// Speed in the simulation's 1/256 ft/s steps, after rounding back.
@@ -891,6 +898,13 @@ fn aircraft_difference(live: &AircraftPose, replayed: &AircraftPose) -> Option<S
         || live.engine.flame != replayed.engine.flame
         || far(live.engine.rates, replayed.engine.rates, tolerance::RATE)
         || (live.engine.rotor - replayed.engine.rotor).abs() > tolerance::ROTOR
+        || live
+            .engine
+            .rotor_tilt
+            .iter()
+            .flatten()
+            .zip(replayed.engine.rotor_tilt.iter().flatten())
+            .any(|(live, replayed)| (live - replayed).abs() > tolerance::TILT)
     {
         return Some(format!(
             "{who} has engine {:?}, recorded {:?}",
@@ -1518,9 +1532,9 @@ mod tests {
                 lit: true,
                 afterburner: true,
                 rates: [0.1, -0.4, 0.2],
-                rotor: 0.0,
+                rotor: 1.043,
                 rotor_turns: 0.,
-                rotor_tilt: [[0.; 2]; 2],
+                rotor_tilt: [[0.04, -0.0123], [-0.2, 0.6]],
                 flame: true,
             },
             damage: Damage {

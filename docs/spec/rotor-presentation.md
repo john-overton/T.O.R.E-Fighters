@@ -120,8 +120,9 @@ rigid and keep each mast centre fixed at every rotor phase.
 
 The stick no longer tilts a disk directly: before the overhaul the disks
 followed the smoothed stick at a fitted 0.10 rad (CH-47 0.03 pitch, 0.08 roll,
-0.02 pedal). A replay records no disk tilt, so replayed disks stay level; the
-multiplayer entity record carries it.
+0.02 pedal). The multiplayer entity record carries each disk's tilt, and a
+replay records it in a chunk section of its own (to 1/256 rad, the entity
+record's step), so replayed disks tilt as the flight tilted them.
 
 The original rotor art is a flat blade/blur image rather than separately
 feathering blade meshes. Collective and AH-64/Mi-24 tail-rotor pedal changes
@@ -148,8 +149,8 @@ faces unchanged, verify the V-22's nacelle at 0, 45, 87, 90 and 97.5 degrees
 and its transformed normal, the rotor tables' speeds, a blade angle that turns
 by exactly each tick's rotor speed through spool-up, droop and overspeed with
 the engine off, the directions against the rotor tables, CH-47 counter-rotation
-about its existing separate masts, disk tilt against the flight's tilt, the
-tandem bounds, and the proprotor tilt in the nacelle frame. The animation
+about its existing separate masts, disk tilt against the flight's tilt (and, for a replay, against the
+recorded tilt), the tandem bounds, and the proprotor tilt in the nacelle frame. The animation
 probe's `moving-parts.ppm` sheet draws the V-22 at 0, 45 and 90 degrees, the
 AV-8 and Yak-141 nozzles at 0, 90 and 100, and each helicopter's disks level,
 forward and right.

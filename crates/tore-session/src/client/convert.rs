@@ -982,6 +982,7 @@ pub fn pose_state(
         controls: data.controls,
         auxiliary_rates: pose.engine.rates,
         rotor_speed: pose.engine.rotor,
+        disk_tilt: pose.engine.rotor_tilt,
         hp: pose.damage.hp,
         max_hp: pose.damage.initial_hp,
         sections: pose.damage.sections,

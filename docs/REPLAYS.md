@@ -510,7 +510,8 @@ length and the bytes, so a reader skips sections it does not know:
 | Events | Everything that happened, tick by tick |
 | Trees | Display tree samples (AI thinking, telemetry, missile guidance) |
 | Checksums | The once-per-second state checksums |
-| Rotors | Each rotorcraft's rotor speed, a share of its governed 100 percent: an entry names a frame and the aircraft whose speed changed on it. The chunk's first value of an aircraft is exact, later changes are quantized to a thousandth. Aircraft without a rotor read zero, and files from before it have no such section. Playback turns the drawn blades by this speed summed frame by frame from the recording's start, so a tick shows the same blade angle however the playhead reached it; disk tilt is not recorded, so replayed rotor disks stay level ([rotor presentation](spec/rotor-presentation.md#rotor-speed-and-blade-angle)) |
+| Rotors | Each rotorcraft's rotor speed, a share of its governed 100 percent: an entry names a frame and the aircraft whose speed changed on it. The chunk's first value of an aircraft is exact, later changes are quantized to a thousandth. Aircraft without a rotor read zero, and files from before it have no such section. Playback turns the drawn blades by this speed summed frame by frame from the recording's start, so a tick shows the same blade angle however the playhead reached it ([rotor presentation](spec/rotor-presentation.md#rotor-speed-and-blade-angle)) |
+| Disk tilt | Each rotorcraft's rotor disk tilts from its shaft, in radians: longitudinal then lateral for the first rotor, then for the second (the CH-47's rear rotor, the V-22's right proprotor). An entry names a frame and the aircraft whose tilt changed on it. The chunk's first nonzero value of an aircraft is exact, later changes are quantized to 1/256 rad (the network entity record's step) and stored as absolute step counts, so nothing accumulates. Aircraft without a rotor read level, and files from before it have no such section, so their rotorcraft are drawn with level disks. Playback draws the disk tilt as recorded and blends it between ticks as live flight does |
 
 Spawns, events and trees sit in their own sections so the viewer can
 rebuild smoke, and a reader can list every event, without decoding the
@@ -580,6 +581,7 @@ these bounds on every tick, with no drift.
 | Pilot controls | 1/1024 | 1/2048 |
 | Auxiliary body rates | 1/4096 rad/s | 1/8192 rad/s |
 | Rotor speed (a share of the governed 100 percent, in its own section) | 1/1000 | 1/2000 |
+| Rotor disk tilt (in its own section) | 1/256 rad | 1/512 rad |
 | Fuel | 1/16 lb | 1/32 lb |
 | Ids, flags, hit points, regional damage, wreck phase, seeker, events, trees, checksums | exact | none |
 

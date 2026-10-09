@@ -21,6 +21,7 @@ mod reader;
 mod rotors;
 mod spawns;
 mod strings;
+mod tilts;
 mod trees;
 pub mod vocab;
 mod writer;
