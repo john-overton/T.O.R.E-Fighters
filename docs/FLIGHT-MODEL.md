@@ -94,32 +94,39 @@ The [variety flight contract](spec/variety-flight.md) covers seventeen additiona
 conventional aircraft and six powered-lift aircraft. Every exact identity owns
 its source mass, fuel, thrust, controls and envelopes. The four F-4 variants
 share algorithms while preserving their own source configuration. Conventional
-variety aircraft use the established hybrid solver. AV8 and YAK141 use fitted
-vector thrust, V22 flies two proprotors on nacelles under always-on conversion
-corridor protection (VTOL overhaul slice P5), AH64 and MI24 fly a main rotor
-and tail rotor on the overhaul's rotor physics, and CH47 flies two
-counter-rotating rotors on one drive (differential collective for pitch,
-differential lateral cyclic for yaw; see the
-[variety flight contract](spec/variety-flight.md)). Ordinary throttle remains engine power.
-Apache and Chinook gear stays down from initialization through simulation and
-commands, matching their visible fixed wheels. Hind gear remains retractable.
-The fits, travel rates, initial clearance and known limits have one home in the
-linked contract, including the fitted top-speed corrections for six aircraft
-and the level-speed fraction (drag reaches full thrust at 96 percent of the top
-speed) that keeps the transports and airliners out of the overspeed shake. Ground contact uses the complete deployed gear, including
-AV8 central pieces already present in the neutral shape; counting only a switched
-branch missed its lowest nose wheel. These are working approximations, not
-measured retail parity.
+variety aircraft use the established hybrid solver. The fitted top speeds, the
+level-speed fraction (drag reaches full thrust at 96 percent of the top speed,
+which keeps the transports and airliners out of the overspeed shake) and the
+ground-contact rules (the complete deployed gear, including the AV8's central
+pieces) have one home in that contract.
 
-Powered controls operate only in the hybrid adapter. Legacy compatibility and
-restricted native research remain separate. Actuator positions and lagged lift
-are tick-owned and included in exact snapshots, so replay and seat transfer
-continue the same flight. The source-backed acceptance probe reads user-owned
-PT files at runtime and checks conventional flight or hover, vertical landing,
-departure, stick/yaw response and forward conversion:
+The six powered-lift aircraft (AV8, YAK141, V22, AH64, MI24, CH47) fly their own
+physics since the VTOL and helicopter overhaul, specified in
+[powered-lift flight](spec/powered-lift-flight.md): a six-degree-of-freedom rigid
+body whose angular rates are state, with rotors (momentum theory, a rotor-speed
+state, translational lift, ground effect, autorotation, the vortex ring state,
+torque, retreating blade stall), vectored nozzles with puffer jets, nacelles
+with an always-on conversion corridor and an angle-of-attack wing. They share
+the conventional solver's envelope, drag, systems and contact pieces, so a
+fixed-wing aircraft is untouched (every golden fingerprint is unchanged). The
+module map is in [architecture](ARCHITECTURE.md#powered-lift-flight-modules).
+
+Powered controls operate only in the hybrid adapter; the legacy adapter and the
+restricted native research path stay separate. All of the powered-lift state
+(body rates, rotor speed, induced velocity, disk tilt, engine output, trim,
+stability level, warnings and the corridor's held demand) is tick-owned and in the
+exact flight state, so snapshots, checkpoints, prediction and seat handoff
+continue the same flight. The unit tests are synthetic; the source-backed
+probes read user-owned PT files at runtime. `variety_flight` checks conventional
+flight or hover, vertical landing, departure, stick and yaw response and forward
+conversion; `powered_probe` (helicopters and the V-22) and `jet_probe` (the
+jets, against the conventional model on the same PT) print the tables recorded in
+the [overhaul baseline](baselines/vtol-overhaul.md):
 
 ```sh
 cargo run --locked -p tore-sim --example variety_flight -- PATH/FA_2.LIB/AV8.PT PATH/FA_2.LIB/AH64.PT
+cargo run --release --locked -p tore-sim --example powered_probe -- PATH/FA_2.LIB/AH64.PT PATH/FA_2.LIB/V22.PT
+cargo run --release --locked -p tore-sim --example jet_probe -- PATH/FA_2.LIB/AV8.PT --compare PATH/FA_2.LIB/F16C.PT
 ```
 
 ## Data and implementation boundaries

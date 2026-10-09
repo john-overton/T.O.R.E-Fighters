@@ -18,8 +18,10 @@ below were agent proposals; John requested starting this batch on 2026-10-05.
 The initial imports now have exact source identities, aircraft-owned hybrid
 configurations, source cockpits and initial exterior rigs. All 23 have passed
 source-backed flight checks and application headless loading/flight. The six
-powered-lift types have fitted hover and control laws with separate vertical
-landing and conversion checks. The intended result remains validated aircraft
+powered-lift types fly the VTOL overhaul's rigid-body physics (rotors, nozzles,
+puffer jets, nacelles and an angle-of-attack wing), with separate vertical
+landing, conversion, hover hold and start checks
+([spec](powered-lift-flight.md), [baseline](../baselines/vtol-overhaul.md)). The intended result remains validated aircraft
 plus a repeatable procedure for subsequent agents. Complete moving-surface,
 special-system and multiplayer acceptance is tracked separately below. Milestones live in the
 [roadmap](../ROADMAP.md#aircraft-variety-import); the reusable procedure lives in
@@ -39,12 +41,12 @@ in the catalog.
 | E-3 Sentry | `E3.PT` | BLUFOR airborne radar | Radar coverage, player sensor controls and sharing contacts |
 | IL-76 Mainstay, retail name | `IL76.PT` | REDFOR airborne radar | Its own radar profile, controls and sharing contacts |
 | E-2C Hawkeye | `E2.PT` | Carrier airborne radar | Turboprop handling, radar, hook and carrier limits |
-| AV-8B Harrier II | `AV8.PT` | VTOL jet | Source-informed forces, fitted hover/transition and mapped nozzle controls |
-| Yak-141 Freestyle-A | `YAK141.PT` | VTOL jet | Its own lift arrangement, fitted limits and mapped transition controls |
-| V-22 Osprey | `V22.PT` | Tiltrotor | Source-informed lift, nacelle animation and mapped conversion controls |
-| AH-64 Apache | `AH64.PT` | Attack helicopter | Simple believable rotor flight, collective/power controls, gun and stores |
-| Mi-24 Hind-D | `MI24.PT` | Attack helicopter | Its own fitted rotor handling, mapped controls, gun and stores |
-| CH-47 Chinook | `CH47.PT` | Transport helicopter | Simple believable tandem-rotor flight, animation and mapped controls |
+| AV-8B Harrier II | `AV8.PT` | VTOL jet | Source-informed forces, vectored thrust with puffer jets and the manual's nozzle keys, wing matched to the conventional model |
+| Yak-141 Freestyle-A | `YAK141.PT` | VTOL jet | Its own lift arrangement (nozzle and lift engines), fitted limits and the same nozzle keys |
+| V-22 Osprey | `V22.PT` | Tiltrotor | Two proprotors, always-on conversion corridor protection, nacelle animation and mapped conversion controls |
+| AH-64 Apache | `AH64.PT` | Attack helicopter | Rotor physics with torque, autorotation and hover hold, collective on the throttle controls, gun and stores |
+| Mi-24 Hind-D | `MI24.PT` | Attack helicopter | Its own rotor physics (published power, stub wings), mapped controls, gun and stores |
+| CH-47 Chinook | `CH47.PT` | Transport helicopter | Tandem-rotor physics (no tail rotor), animation and mapped controls |
 | MiG-17F Fresco | `MIG17F.PT` | Early jet fighter | Source handling, gun aiming and equipment limits |
 | F-4B Phantom II | `F4B.PT` | Carrier fighter | Earlier sensor and weapons configuration |
 | F-4J Phantom II | `F4J.PT` | Carrier fighter | Radar differences and source gun-pod loadout |
@@ -179,21 +181,24 @@ John requested the same source-informed and fitted approach for helicopters,
 with a relatively simple but believable model. All three helicopters must be
 human-playable. Reuse supported stock controls, and add collective, power/thrust
 or other axes where the player needs independent control that retail did not
-provide. New axes and their defaults are authorized. The initial mappings and fitted
-response curves are now recorded in the [input guide](../INPUT.md) and
-[flight contract](variety-flight.md).
+provide. New axes and their defaults are authorized. The mappings are recorded
+in the [input guide](../INPUT.md) and the physics in
+[powered-lift flight](powered-lift-flight.md).
 
-The implemented fitted model makes rotor lift respond to collective and
-available power, pitch/roll tilt the lift direction, yaw has bounded authority,
-and drag/damping allow controllable hover and forward flight. Specify ground
-contact and power-limited climb/descent. These are fitted laws, not
-claims about the original game or a detailed rotorcraft engineering model.
-Keep mass, fuel and reviewed aircraft limits specific to each helicopter;
-do not treat them as jets with a low stall speed. Review differences needed
-for the Chinook's tandem rotors rather than assuming tail-rotor behavior.
+The implemented model (the VTOL overhaul, October 2026) flies a rigid body on
+momentum-theory rotors with a rotor-speed state, so the rotor lift responds to
+collective and available power, the disk tilt (cyclic) tilts the lift
+direction, and translational lift, ground effect, power-limited climb and top
+speed, autorotation, the vortex ring state, torque and retreating blade stall
+all appear. It is a lumped-parameter model, fitted where no public figure
+exists, not a claim about the original game or a blade-element engineering
+model. Mass, fuel and reviewed aircraft limits are specific to each helicopter;
+they are not jets with a low stall speed, and the Chinook's tandem rotors have
+no tail-rotor torque.
 
-The ordinary throttle supplies engine power separately from collective.
-Give every supported
+On helicopters and the V-22 the throttle controls drive the collective and the
+engines are governed (John, 2026-10-08), so the ordinary throttle no longer
+supplies engine power separately. Give every supported
 action a usable default mapping or button alternative and expose any additional
 axis in the input editor. Do not require a particular joystick to take off,
 hover, turn, translate, land or shut down.
@@ -293,8 +298,8 @@ carrier launch/arrestment remains a separate capability review.
 
 | Area | Missing contract | Next review |
 | --- | --- | --- |
-| VTOL and tiltrotor | Broader handling acceptance and retail force evidence | Keep the tested [fits](variety-flight.md); extend payload, weather and human control checks before changing constants |
-| Helicopters | Human handling review and richer rotor effects | Validate the documented simple model across controller hardware and weather; ground effect, autorotation and detailed rotor dynamics remain outside the initial fit |
+| VTOL and tiltrotor | Human handling review and retail force evidence (none exists: retail never flew rotorcraft; the jets' hover was never measured) | Keep the tested [fits](powered-lift-flight.md#data-sources-and-fitted-values); John flies them and tunes the Easy flight physics numbers, then extend payload, weather and human control checks before changing constants |
+| Helicopters | Human handling review across controller hardware and weather | Rotor effects (ground effect, autorotation, vortex ring, torque, retreating blade stall) are modelled; blade element and flapping dynamics stay outside the fit ([left out on purpose](powered-lift-flight.md#left-out-on-purpose)) |
 | Input | Physical controller acceptance | Defaults, remapping and the fifth map sheet are implemented; verify actual HOTAS/gamepad operation in addition to synthetic input tests |
 | AC-130 | Live aiming usability and wider engagement cases | Validate linked fire, barrel/muzzle agreement and blocked-gun feedback against the [contract](ac130-linked-guns.md); review a gunner view separately |
 | Radar and shared contacts | AWACS sharing/operator behavior beyond existing sensors | Installed/absent profiles are reviewed; additional shared-contact behavior needs its own contract and acceptance |

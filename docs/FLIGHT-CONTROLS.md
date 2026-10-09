@@ -72,13 +72,10 @@ keys change with the aircraft ([the full table](INPUT.md#vtol-tiltrotor-and-heli
 
 A stick button bound to **Trim set** makes the current stick plus trim the new
 trim and ignores the stick until it is back near centre, which turns a
-spring-centred stick into a force-trim cyclic. The stability levels act
-through the VTOL overhaul's new flight model; until its rotor and jet physics
-are in, the level is kept and shown but these aircraft fly the earlier fitted
-law, which already takes the trim and the nozzle keys. The controls editor
-exposes the lift demands, the trim axes and every new command as bindable
-rows. Source evidence, fitted rates and aircraft applicability belong in the
-[flight variety behaviour spec](spec/variety-flight.md).
+spring-centred stick into a force-trim cyclic. The controls editor exposes the
+lift demands, the trim axes and every new command as bindable rows. What each
+aircraft does, the stability levels, the Easy flight physics cheat, the numbers
+and their sources are in [powered-lift flight](spec/powered-lift-flight.md).
 
 The Apache and Chinook keep their fixed landing gear down; G reports that the
 gear is fixed. The Hind retains retractable gear. This is an explicit
