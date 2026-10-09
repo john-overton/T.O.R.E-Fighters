@@ -109,3 +109,22 @@ would fill a recording's 1 GiB file limit in about five minutes, and adds about
   runway, on and off the grid (`terrain.rs`).
 - The four fights above, and the full-sky runs with the shortcuts added one at
   a time, print the same output before and after each shortcut.
+- Linux golden fingerprints: all 428 lines of `TORE_GOLDEN_VERBOSE=1` from
+  `tore-sim`'s golden tests and `tore-world`'s tick tests are the same before
+  and after. None of their scenarios reached 256 rounds.
+- Checks: formatting, clippy with warnings as errors, the workspace tests
+  (4,745 passed, 69 ignored), the tools' Python tests, the documentation and
+  asset checks.
+- Battery, debug build: `--changed 95d402a0` 48 of 48; the 100 seeds
+  `ai-fuzz-03*` (`TORE_AI_FUZZ=all`) with `ai-long-*`, `ai-big-*`,
+  `ai-record-*`, `replay-rec-*`, `replay-tape*` and `replay-combat-smoke*`,
+  250 of 250, no dropped launch in any of their 235 probes.
+- Battery, release builds, all 400 fuzz seeds with `ai-long-*`, `ai-big-*`,
+  `ai-record-*` and `ai-guns-*`: before, 438 of 440, and only seed 317 and
+  its copy `ai-guns-mig21-pack` dropped rounds (29 each); after, every fuzz
+  seed and `ai-guns-*` 411 of 411, none dropped.
+
+Not run: windowed scenarios, the net lane and network loopback tests (no
+wire change), Windows and macOS (the golden values recorded on Apple silicon
+should not move, since the Linux ones did not), and a full sky in a networked
+game.
