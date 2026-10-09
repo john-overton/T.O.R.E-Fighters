@@ -26,7 +26,7 @@ use tore_input::StabilityLevel;
 use tore_sim::{
     flight::{
         State,
-        powered::readout::{HoverDisplay, NACELLE_TRAVEL_DEGREES},
+        powered::{readout::HoverDisplay, tiltrotor::Corridor},
     },
     models::variety::LiftKind,
 };
@@ -69,8 +69,10 @@ pub const BARS_HALF_HEIGHT: f64 = 40.;
 pub const PIXELS_PER_FPS: f64 = 1.6;
 /// Radar height is shown below this many feet above the ground.
 pub const RADAR_HEIGHT_FT: f64 = 1_000.;
-/// NR flashes below and above these percentages, TQ above its limit.
-pub const NR_FLASH: [f64; 2] = [90., 105.];
+/// NR flashes this far below and above its governed reference (percentage
+/// points: below 90 and above 105 percent when the reference is 100), TQ
+/// above its limit.
+pub const NR_FLASH: [f64; 2] = [-10., 5.];
 pub const TQ_FLASH: f64 = 100.;
 /// A flashing row is on for this many ticks, then off for as many.
 const FLASH_TICKS: u64 = 30;
@@ -140,7 +142,10 @@ pub fn marks(s: &State, agl_ft: f64, weapons: bool) -> Vec<Mark> {
     }
     let flash = flash_on(s);
     if let Some(nr) = s.rotor_speed_percent() {
-        let off = !(NR_FLASH[0]..=NR_FLASH[1]).contains(&nr);
+        // Against the governed reference: the V-22's 84 percent on the
+        // downstops is normal.
+        let reference = s.rotor_speed_reference_percent().unwrap_or(100.);
+        let off = !(reference + NR_FLASH[0]..=reference + NR_FLASH[1]).contains(&nr);
         if !off || flash {
             text(&mut marks, format!("NR {nr:.0}"), LEFT_X, NR_Y);
         }
@@ -164,8 +169,8 @@ pub fn marks(s: &State, agl_ft: f64, weapons: bool) -> Vec<Mark> {
     if lift.kind == LiftKind::VectorJet {
         nozzle(s, &mut marks);
     }
-    if let Some([actual, demand]) = s.nacelle_degrees() {
-        nacelle(s, actual, demand, &mut marks);
+    if let (Some(corridor), Some(range)) = (s.conversion_corridor(), s.nacelle_range_degrees()) {
+        nacelle(&corridor, range, &mut marks);
     }
     if !weapons && let Some(hover) = s.hover_display() {
         hover_display(&hover, &mut marks);
@@ -199,59 +204,50 @@ fn nozzle(s: &State, marks: &mut Vec<Mark>) {
     }
 }
 
-/// Where the nacelle tape puts `degrees`: 0 at the bottom.
-fn tape_y(degrees: f64) -> f64 {
-    f64::from(TAPE_TOP) + TAPE_HEIGHT
-        - degrees.clamp(0., NACELLE_TRAVEL_DEGREES) / NACELLE_TRAVEL_DEGREES * TAPE_HEIGHT
+/// Where the nacelle tape puts `degrees` of a `range`-degree travel: 0 at the
+/// bottom.
+fn tape_y(degrees: f64, range: f64) -> f64 {
+    f64::from(TAPE_TOP) + TAPE_HEIGHT - degrees.clamp(0., range) / range * TAPE_HEIGHT
 }
 
 /// The V-22: `NAC 75`, a tape with the nacelle and its demand, the corridor
-/// bracket when the tiltrotor law supplies one, and `CONV` while the
-/// conversion protection moves or holds the nacelles.
-fn nacelle(s: &State, actual: f64, demand: f64, marks: &mut Vec<Mark>) {
+/// bracket (the nacelle angles the conversion corridor allows at this
+/// indicated airspeed) and `CONV` while the protection moves or holds the
+/// nacelles.
+fn nacelle(c: &Corridor, range: f64, marks: &mut Vec<Mark>) {
+    let (actual, demand) = (c.nacelle_degrees, c.demand_degrees);
     text(marks, format!("NAC {actual:.0}"), RIGHT_X, ANGLE_Y);
     let x = f64::from(TAPE_X);
-    line(marks, (x, tape_y(0.)), (x, tape_y(NACELLE_TRAVEL_DEGREES)));
+    let at = |degrees: f64| tape_y(degrees, range);
+    line(marks, (x, at(0.)), (x, at(range)));
     for degrees in [0., 30., 60., 90.] {
-        line(marks, (x - 2., tape_y(degrees)), (x + 2., tape_y(degrees)));
+        line(marks, (x - 2., at(degrees)), (x + 2., at(degrees)));
     }
     // The nacelle: a pointer on the left of the tape.
-    let y = tape_y(actual);
+    let y = at(actual);
     line(marks, (x - 3., y), (x - 8., y - 3.));
     line(marks, (x - 8., y - 3.), (x - 8., y + 3.));
     line(marks, (x - 8., y + 3.), (x - 3., y));
     // The pilot's demand: a caret on the right, when it differs.
     if (demand - actual).abs() > 1. {
-        let y = tape_y(demand);
+        let y = at(demand);
         line(marks, (x + 3., y), (x + 8., y - 3.));
         line(marks, (x + 8., y - 3.), (x + 8., y + 3.));
         line(marks, (x + 8., y + 3.), (x + 3., y));
     }
-    // TODO(P5): the corridor bracket for the current indicated airspeed,
-    // from the tiltrotor law's corridor (design 4.8): two short bars on the
-    // far side of the tape at the lowest and the highest nacelle angle the
-    // corridor allows at this speed.
-    if let Some([low, high]) = corridor_bracket(s) {
-        let bar = |marks: &mut Vec<Mark>, degrees: f64| {
-            let y = tape_y(degrees);
-            line(marks, (x + 11., y), (x + 16., y));
-        };
-        bar(marks, low);
-        bar(marks, high);
-        line(marks, (x + 16., tape_y(low)), (x + 16., tape_y(high)));
+    // The corridor bracket: bars on the far side of the tape at the lowest
+    // and the highest nacelle angle the corridor allows at this airspeed.
+    let [low, high] = [
+        c.allowed_degrees[0].min(c.allowed_degrees[1]),
+        c.allowed_degrees[0].max(c.allowed_degrees[1]),
+    ];
+    for degrees in [low, high] {
+        line(marks, (x + 11., at(degrees)), (x + 16., at(degrees)));
     }
-    if s.lift_controls.corridor_hold.is_some() {
+    line(marks, (x + 16., at(low)), (x + 16., at(high)));
+    if c.protecting {
         text(marks, "CONV", RIGHT_X, CUE_Y);
     }
-}
-
-/// The lowest and highest nacelle angle, degrees, the conversion corridor
-/// allows at the aircraft's indicated airspeed, or none until the tiltrotor
-/// law defines the corridor.
-///
-/// TODO(P5): invert the corridor table of design 4.8 for the current KCAS.
-pub fn corridor_bracket(_s: &State) -> Option<[f64; 2]> {
-    None
 }
 
 /// The retail manual's hover display: the horizontal velocity circle against
@@ -552,37 +548,61 @@ mod tests {
     }
 
     #[test]
-    fn the_v22_shows_its_nacelles_against_a_tape_and_the_conversion_cue() {
+    fn the_v22_shows_its_nacelles_corridor_and_rotor_rows() {
+        let lines = |m: &[Mark]| m.iter().filter(|m| matches!(m, Mark::Line { .. })).count();
+        // In a hover at the 87-degree preset.
         let mut v22 = state(AircraftId::V22);
-        v22.lift_controls.conversion = 87. / NACELLE_TRAVEL_DEGREES;
-        v22.lift_controls.conversion_actual = 75. / NACELLE_TRAVEL_DEGREES;
-        let m = marks(&v22, 3_000., false);
-        assert_eq!(at(&m, "NAC"), Some(("NAC 75".into(), RIGHT_X, ANGLE_Y)));
-        assert!(!has(&m, "CONV"));
-        // The tape: a mark for the nacelle and one for the demand.
-        let steady = {
-            let mut still = v22.clone();
-            still.lift_controls.conversion = still.lift_controls.conversion_actual;
-            marks(&still, 3_000., false)
-                .iter()
-                .filter(|m| matches!(m, Mark::Line { .. }))
-                .count()
-        };
+        assert!(v22.trim_tiltrotor(0., 87.));
+        let hover = marks(&v22, 3_000., false);
+        assert_eq!(at(&hover, "NAC"), Some(("NAC 87".into(), RIGHT_X, ANGLE_Y)));
+        assert!(!has(&hover, "CONV"));
+        assert!(has(&hover, "NR 100"));
+        assert!(at(&hover, "TQ ").is_some());
+        assert!(collective_label(&v22).unwrap().starts_with("COL "));
+        // The tape's demand caret shows only when the demand differs.
+        let steady = lines(&hover);
+        v22.lift_controls.conversion = 0.5;
+        assert_eq!(lines(&marks(&v22, 3_000., false)), steady + 3);
+        // The corridor bracket: bars at the angles the corridor allows at the
+        // airspeed (none of the aft limit below 200 kt: the bracket spans the
+        // forward limit up to the aft edge).
+        let corridor = v22.conversion_corridor().unwrap();
+        assert!(corridor.allowed_degrees[0] <= corridor.allowed_degrees[1]);
+        // Airplane mode: nacelles on the downstops, the rotor at its 84
+        // percent reference, which is normal and does not flash.
+        let mut plane = state(AircraftId::V22);
+        assert!(plane.start_airborne([0.; 3]));
+        for _ in 0..600 {
+            plane.step_surface(&tore_sim::flight::PilotInput::default(), |_, _| {
+                tore_sim::research::Surface::runway(0.)
+            });
+        }
+        assert_eq!(plane.nacelle_degrees(), 0.);
+        plane.ticks = FLASH_TICKS;
+        let cruise = marks(&plane, 3_000., false);
+        assert!(has(&cruise, "NAC 0"));
+        let nr = plane.rotor_speed_percent().unwrap();
+        assert!((nr - 84.).abs() < 2., "NR {nr}");
+        assert!(at(&cruise, "NR ").is_some(), "84 percent is not flashed");
+        // Far below its reference the rotor row flashes.
+        plane.lift_controls.drive.rotor_speed = 0.7;
+        assert!(at(&marks(&plane, 3_000., false), "NR ").is_none());
+        // Protection moving the nacelles shows CONV: a fast helicopter-mode
+        // V-22 is driven forward.
+        let mut fast = state(AircraftId::V22);
+        assert!(fast.trim_tiltrotor(0., 87.));
+        fast.velocity = [0., 0., 140. * KT];
+        fast.speed = 140. * KT;
+        for _ in 0..30 {
+            fast.step_surface(&tore_sim::flight::PilotInput::default(), |_, _| {
+                tore_sim::research::Surface::runway(-50_000.)
+            });
+        }
+        assert!(fast.conversion_corridor().unwrap().protecting);
         assert_eq!(
-            m.iter().filter(|m| matches!(m, Mark::Line { .. })).count(),
-            steady + 3
-        );
-        // The protection moving or holding the nacelles shows CONV.
-        v22.lift_controls.corridor_hold = Some(0.5);
-        assert_eq!(
-            at(&marks(&v22, 3_000., false), "CONV"),
+            at(&marks(&fast, 3_000., false), "CONV"),
             Some(("CONV".into(), RIGHT_X, CUE_Y))
         );
-        // The rotor rows are the same as the helicopters'.
-        assert!(at(&m, "NR ").is_some() && at(&m, "TQ ").is_some());
-        assert!(collective_label(&v22).is_some());
-        // No corridor bracket until the tiltrotor law defines the corridor.
-        assert_eq!(corridor_bracket(&v22), None);
     }
 
     #[test]

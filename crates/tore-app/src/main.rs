@@ -8037,8 +8037,20 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
                 return Err("this aircraft has no hover to show".into());
             }
         }
+        // A tiltrotor in a hover that is going too fast for its nacelles: the
+        // conversion protection drives them forward (the CONV cue).
+        "converting" => {
+            if !flight.trim_hover() {
+                return Err("this aircraft has no hover to show".into());
+            }
+            flight.velocity = [0., 0., 140. * 1.687_81];
+            flight.speed = flight.velocity[2];
+        }
         other => {
-            return Err(format!("unknown HUD snapshot state {other}; use forward or hover").into());
+            return Err(format!(
+                "unknown HUD snapshot state {other}; use forward, hover or converting"
+            )
+            .into());
         }
     }
     // A second of flight over a flat plain 3,000 feet below.
@@ -9041,7 +9053,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 hud_snapshot = Some(args.next().ok_or("--hud-snapshot needs output path")?)
             }
             "--hud-snapshot-state" => {
-                hud_snapshot_state = args.next().ok_or("--hud-snapshot-state needs forward or hover")?
+                hud_snapshot_state = args.next().ok_or("--hud-snapshot-state needs forward, hover or converting")?
             }
             "--viewer" => initial_screen = Screen::Viewer,
             "--connect" => {

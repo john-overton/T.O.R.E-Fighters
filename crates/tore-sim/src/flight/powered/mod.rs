@@ -2,10 +2,10 @@
 //! tiltrotor and the AH-64, Mi-24 and CH-47 helicopters. Only the hybrid
 //! adapter calls this solver.
 //!
-//! The VTOL overhaul replaces the fitted attitude-hold law below,
-//! [`State::step_powered`], with a rigid body and physical rotors, nozzles
-//! and wings, one slice at a time (its design moves into
-//! docs/FLIGHT-MODEL.md when the project ships):
+//! The VTOL overhaul replaced the fitted attitude-hold law of the variety
+//! import with a rigid body and physical rotors, nozzles and wings, one slice
+//! at a time (its design is in docs/FLIGHT-MODEL.md). Every aircraft here has
+//! its own force law; [`State::step_powered`] only dispatches:
 //!
 //! - [`body`]: the rigid body (P1). Force laws build a
 //!   [`body::Moments`] from their rotors, puffers and surfaces, take the
@@ -24,19 +24,15 @@
 //! - [`rotor`]: one lifting rotor, reusable by every rotorcraft (P2);
 //!   [`fuselage`]: the helicopters' fuselage and fixed surfaces (P2);
 //!   [`helicopter`]: the single-rotor AH-64 and Mi-24 force law, its drive
-//!   and its trim (P2).
+//!   and its trim (P2); [`tandem`]: the CH-47's two rotors (P3).
 //! - [`drive`]: the rotor speed, governor and engines shared by every
 //!   rotorcraft, for any number of rotors on one interconnected drive.
 //! - [`jet`] and [`aero`]: the vectoring jets and their wing (P4).
-//! - [`trim`]: the airborne and ground starts (P7), which replace the old
-//!   hover start.
-//! - Still to come, each in its own file: the CH-47's tandem mixer (P3) and
-//!   `tiltrotor.rs` (P5). The parameters are in
-//!   [`crate::models::variety::PoweredLift`].
+//! - [`trim`]: the airborne and ground starts (P7).
+//! - [`tiltrotor`]: the V-22's nacelle rotors, mixer and corridor
+//!   protection (P5).
 //!
-//! The CH-47 and the V-22 still fly the fitted law of the variety import,
-//! `step_powered` below: its body rates are commanded, not integrated, and
-//! it records them in the state's body rates.
+//! The parameters are in [`crate::models::variety::PoweredLift`].
 pub mod aero;
 pub mod body;
 pub mod drive;
@@ -48,25 +44,17 @@ pub mod rotor;
 pub mod sas;
 pub mod state;
 pub mod tandem;
+pub mod tiltrotor;
 pub mod trim;
 
 #[cfg(test)]
 mod easy_physics_tests;
 
 use super::{DT, FlightAxis, PilotInput, State, airframe, trace};
-use crate::{
-    attitude::{Basis, dot, unit},
-    models::{
-        FlightModel,
-        variety::{LiftKind, PoweredLift},
-    },
-};
+#[cfg(test)]
+use crate::models::FlightModel;
+use crate::models::variety::{LiftKind, PoweredLift};
 pub use state::{Drive, LiftState, PilotAids, Rotor, TrimLatch, Warnings};
-
-/// Airspeed, ft/s, above which the low-speed horizontal damping force stops
-/// growing (fitted, agent decision 2026-10-08). Below it the damping rate is
-/// the aircraft's own; well above it the force is about rate x 10 ft/s.
-const LOW_SPEED_DAMPING_FPS: f64 = 10.;
 
 impl State {
     pub fn flight_axis_available(&self, axis: FlightAxis) -> bool {
@@ -96,6 +84,15 @@ impl State {
         *current = (if adjust { *current + value } else { value }).clamp(minimum, 1.);
     }
     pub(super) fn update_lift_demands(&mut self, input: &PilotInput) {
+        // A held conversion key moves the V-22's nacelle demand at the
+        // nacelles' own rate (slice P5).
+        let conversion_speed = self
+            .model()
+            .powered_lift()
+            .and_then(|lift| lift.tiltrotor)
+            .map_or(0.25, |t| {
+                t.nacelle_rate_degrees_per_second / t.nacelle_range_degrees
+            });
         for (axis, position, rate, speed) in [
             (
                 FlightAxis::VectorPitch,
@@ -113,7 +110,7 @@ impl State {
                 FlightAxis::Conversion,
                 input.conversion,
                 input.conversion_rate,
-                0.25,
+                conversion_speed,
             ),
             (
                 FlightAxis::Collective,
@@ -136,11 +133,26 @@ impl State {
         stick: [f64; 3],
         initial_surface: crate::research::Surface,
         runway_wind_fraction: f64,
-        mut t: trace::AdapterTrace,
+        t: trace::AdapterTrace,
         ground: impl Fn(f64, f64) -> crate::research::Surface,
         afterburner: bool,
         fuel_rate: f64,
     ) {
+        // The V-22 flies its proprotors, nacelles and wing (P5).
+        if let Some(model) = tiltrotor::Tiltrotor::new(&lift, c) {
+            self.step_tiltrotor(
+                lift,
+                model,
+                c,
+                stick,
+                initial_surface,
+                runway_wind_fraction,
+                t,
+                ground,
+                fuel_rate,
+            );
+            return;
+        }
         // The single-rotor helicopters fly their rotor physics (P2).
         if let Some(heli) = helicopter::SingleRotor::new(&lift, c) {
             self.step_single_rotor(
@@ -185,258 +197,8 @@ impl State {
                 fuel_rate,
             );
         }
-        const GRAVITY: f64 = 32.174;
-        self.lift_controls
-            .advance(self.systems.fluids.hydraulic > 0.);
-        let hover = self.lift_controls.hover_fraction(lift.kind);
-        let angle = hover * std::f64::consts::FRAC_PI_2;
-        let carried = self.carried_lbs();
-        let weight = c.mass.empty_lbs + self.fuel + carried;
-        let envelope = c.aerodynamics.envelopes.iter().find(|e| e.g == 1).unwrap();
-        let ceiling = envelope.points.iter().map(|p| p[1]).fold(0., f64::max);
-        let (clean_stall, top_speed) = envelope
-            .speeds(self.position[1].min(ceiling))
-            .unwrap_or((200., 600.));
-        let stall = clean_stall * (1. - self.flaps * 0.25);
-        let basis_before = Basis::new(self.yaw, self.pitch, self.bank);
-        let forward_speed = dot(self.velocity, basis_before.forward).max(0.);
-        let wing_authority = if lift.kind == LiftKind::Helicopter {
-            0.
-        } else {
-            (forward_speed / stall.max(1.)).powi(2).clamp(0., 1.)
-                * super::ceiling_lift_ratio(self.position[1], ceiling)
-        };
-        // Low-speed attitude targets preserve cyclic control in hover. The
-        // same commands gain ordinary rate control as forward airflow grows.
-        let forward_controls = (1. - hover) * wing_authority;
-        let available_power = if self.engine {
-            (self.lift_controls.thrust_lbf / weight).clamp(0., 1.) * self.systems.power_available()
-        } else {
-            0.
-        };
-        let hover_control = available_power.clamp(0., 1.) * (1. - forward_controls);
-        let target_pitch = stick[0] * lift.pitch_degrees.to_radians();
-        let target_bank = stick[1] * lift.bank_degrees.to_radians();
-        let max_rate = 45_f64.to_radians();
-        let powered_rate = |rate: f64, axis: usize| {
-            c.controls.map_or(rate, |controls| {
-                rate.clamp(
-                    f64::from(controls.auxiliary[axis].minimum).to_radians(),
-                    f64::from(controls.auxiliary[axis].maximum).to_radians(),
-                )
-            })
-        };
-        let hover_pitch_rate = powered_rate(
-            ((target_pitch - self.pitch) * 2.).clamp(-max_rate, max_rate),
-            1,
-        );
-        let hover_roll_rate = powered_rate(
-            ((target_bank - self.bank) * 2.).clamp(-max_rate, max_rate),
-            0,
-        );
-        self.pitch_rate = hover_pitch_rate * hover_control + stick[0] * 0.25 * forward_controls;
-        self.roll_rate = hover_roll_rate * hover_control
-            + stick[1] * c.aerodynamics.roll_limit_rad_per_second * forward_controls;
-        let turn = self.bank.sin() * GRAVITY / self.speed.max(stall.max(1.)) * forward_controls;
-        let yaw_rate = powered_rate(stick[2] * lift.yaw_degrees_per_second.to_radians(), 2)
-            * hover_control
-            + turn;
-        // Commanded rates, not integrated ones: the old law has no inertia.
-        let rates = [self.roll_rate, self.pitch_rate, yaw_rate];
-        self.lift_controls.body_rates = rates;
-        let basis = basis_before.rotated(body::rotation(&basis_before, rates, DT));
-        [self.yaw, self.pitch, self.bank] = basis.angles();
-        let lapse = self
-            .model()
-            .response(crate::models::Conditions {
-                altitude_msl_ft: self.position[1],
-                tas_fps: self.speed,
-                load_factor: self.g,
-            })
-            .thrust_lapse;
-        let collective = if lift.kind == LiftKind::VectorJet {
-            1.
-        } else {
-            self.lift_controls.collective_actual
-        };
-        let rated = if self.engine {
-            (if afterburner {
-                c.propulsion.afterburner_thrust_lbf
-            } else {
-                c.propulsion.military_thrust_lbf * self.throttle
-            }) * lift.efficiency
-                * collective
-                + lift.additional_lift_lbf * self.throttle * angle.sin()
-        } else {
-            0.
-        };
-        let target_thrust = rated * lapse * self.systems.power_available();
-        self.lift_controls.thrust_lbf +=
-            (target_thrust - self.lift_controls.thrust_lbf) * (DT / lift.response_seconds).min(1.);
-        let thrust = self.lift_controls.thrust_lbf;
-        let vector_yaw = if lift.kind == LiftKind::VectorJet {
-            self.lift_controls.vector_yaw_actual * 15_f64.to_radians()
-        } else {
-            0.
-        };
-        let thrust_direction: [f64; 3] = std::array::from_fn(|i| {
-            basis.forward[i] * angle.cos() * vector_yaw.cos()
-                + basis.up[i] * angle.sin() * vector_yaw.cos()
-                + basis.right[i] * vector_yaw.sin()
-        });
-        let loading = (self.fuel + carried) / c.mass.empty_lbs;
-        let max_g = c
-            .aerodynamics
-            .envelopes
-            .iter()
-            .filter(|e| {
-                e.speeds(self.position[1])
-                    .is_some_and(|(low, high)| self.speed >= low && self.speed <= high)
-            })
-            .map(|e| f64::from(e.g))
-            .fold(1., f64::max)
-            .max(
-                super::fast_side_hold(&c.aerodynamics.envelopes, self.position[1], self.speed)
-                    .map_or(1., |hold| hold.g),
-            )
-            / (1. + loading * c.aerodynamics.loaded_elevator_percent / 100.);
-        let requested_g = (1. + stick[0] * (max_g.max(1.) - 1.)).clamp(-1., max_g.max(1.));
-        let wing_g = requested_g * wing_authority * t.regional.effects.lift;
-        // Forward drag reaches the reference force at the envelope's top speed.
-        // Jets and the tiltrotor: their full rated thrust, with the afterburner
-        // when they have one, as the fixed-wing adapter does. Helicopters fly
-        // forward by tilting their rotor thrust, so their reference is the
-        // forward force at their full attitude target while holding their
-        // weight, less the saturated low-speed damping. Fitted, agent
-        // decision 2026-10-08 (docs/spec/variety-flight.md).
-        let reference = if lift.kind == LiftKind::Helicopter {
-            weight
-                * (lift.pitch_degrees.to_radians().tan()
-                    - lift.horizontal_damping * LOW_SPEED_DAMPING_FPS / GRAVITY)
-                    .max(0.05)
-        } else {
-            c.propulsion
-                .military_thrust_lbf
-                .max(c.propulsion.afterburner_thrust_lbf)
-                * lift.efficiency
-                * lapse
-        };
-        let drag = reference
-            * (self.speed / top_speed.max(100.)).powi(2)
-            * (1. + loading * c.aerodynamics.loaded_drag_percent / 100.)
-            * (1. + t.regional.effects.drag_percent / 100.);
-        let drag = drag.min(weight * self.speed / GRAVITY / DT);
-        let direction = unit(self.velocity);
-        let support = thrust_direction[1] * thrust / weight + basis.up[1] * wing_g;
-        let wheel_load = (1. - support).clamp(0., 1.);
-        self.g = dot(thrust_direction, basis.up) * thrust / weight + wing_g;
-        self.lift_g = wing_g;
-        self.maneuver = crate::telemetry::Maneuver {
-            tick: self.ticks,
-            commanded_g: requested_g,
-            lift_g: wing_g,
-            achieved_g: self.g,
-            body_rates_rad_per_second: [self.roll_rate, self.pitch_rate, yaw_rate],
-            rudder_command: stick[2],
-            rudder_deflection: self.rudder,
-            effective_rudder: stick[2],
-            ..Default::default()
-        };
-        for (i, velocity) in self.velocity.iter_mut().enumerate() {
-            let damping = if i == 1 {
-                0.35 * hover + 0.5 * wing_authority
-            } else {
-                // Low-speed damping: its force stops growing above about
-                // 10 ft/s, so forward flight is left to the drag above.
-                lift.horizontal_damping * hover / (1. + self.speed / LOW_SPEED_DAMPING_FPS)
-            };
-            *velocity += (thrust_direction[i] * thrust / weight * GRAVITY
-                + basis.up[i] * wing_g * GRAVITY
-                - direction[i] * drag / weight * GRAVITY
-                - *velocity * damping
-                - if i == 1 { GRAVITY } else { 0. })
-                * DT;
-        }
-        self.speed = dot(self.velocity, self.velocity).sqrt();
-        if self.speed > 6000. {
-            self.velocity = self.velocity.map(|v| v * 6000. / self.speed);
-            self.speed = 6000.;
-        }
-        t.power = trace::PowerTrace {
-            engine: self.engine,
-            fuel_starved: self.fuel + self.systems.external_lbs() <= 0.,
-            afterburner,
-            burner_blocked: self.burner_block(),
-            throttle: self.throttle,
-            afterburner_throttle: c.equipment.afterburner_throttle,
-            fuel_flow_lbs_per_second: if self.engine { fuel_rate } else { 0. },
-            unlimited_fuel: self.cheats.unlimited_fuel,
-            rated_thrust_lbf: rated,
-            lapse,
-            power_available: self.systems.power_available(),
-            thrust_lbf: thrust,
-        };
-        t.forces = trace::ForceTrace {
-            weight_lbs: weight,
-            carried_lbs: carried,
-            payload_lbs: self.payload_lbs,
-            ignore_weapon_weights: self.cheats.ignore_weapon_weights,
-            drag: trace::DragTrace {
-                total_lbf: drag,
-                airframe_lbf: drag,
-                ..Default::default()
-            },
-            achieved_g: self.g,
-            support_g: support,
-            wheel_load,
-            ..Default::default()
-        };
-        t.envelope.clean_stall_fps = clean_stall;
-        t.envelope.stall_fps = stall;
-        t.envelope.top_speed_fps = top_speed;
-        t.envelope.authority = wing_authority;
-        t.envelope.limits_g = [-1., max_g];
-        t.lift.commanded_g = requested_g;
-        self.trace.0.adapter = Some(t);
-        for (velocity, wind) in self.velocity.iter_mut().zip(initial_surface.wind) {
-            *velocity += wind;
-        }
-        self.vertical_speed = self.velocity[1];
-        let previous_position = self.advance_position();
-        let surface = ground(self.position[0], self.position[2]);
-        let mut research = self.research.take().expect("hybrid powered lift");
-        if lift.kind != LiftKind::Helicopter && hover <= 0.5 {
-            let departure = research.advance(
-                c,
-                self.speed,
-                stall,
-                self.pitch,
-                stick[2],
-                self.throttle,
-                self.bank,
-                self.roll_rate,
-                dot(unit(self.velocity), basis.forward),
-                false,
-            );
-            self.trace.0.adapter.as_mut().unwrap().departure = Some(departure);
-        } else {
-            research.departure = Default::default();
-            research.spinning = 0;
-            research.spin_rate = 0.;
-            research.severity_f8 = 0;
-            research.stall_active = false;
-        }
-        self.finish_contact(
-            Some(research),
-            c,
-            surface,
-            airframe::ContactInputs {
-                wheel_load,
-                runway_wind_fraction,
-                previous_position,
-                parked_in_wind: None,
-            },
-        );
+        // Every powered-lift aircraft has its own force law above.
+        unreachable!("{:?} has no force law", lift.kind)
     }
 }
 
@@ -452,13 +214,16 @@ mod tests {
         AircraftId::Mi24,
         AircraftId::Ch47,
     ];
-    /// The synthetic record of `id`; the single-rotor helicopters carry
-    /// their PT's flight numbers, since their rotors size their power.
+    /// The synthetic record of `id`; the single-rotor helicopters and the
+    /// V-22 carry their PT's flight numbers, since their rotors size their
+    /// power.
     fn fixture(id: AircraftId) -> tore_formats::aircraft::Aircraft {
         if id == AircraftId::Ch47 {
             tandem::tests::pt_aircraft()
         } else if matches!(id, AircraftId::Ah64 | AircraftId::Mi24) {
             helicopter::tests::pt_aircraft(id)
+        } else if id == AircraftId::V22 {
+            tiltrotor::acceptance::pt_v22()
         } else {
             crate::models::variety::tests::synthetic(id)
         }
@@ -487,20 +252,12 @@ mod tests {
             assert!(s.trim_tandem(0.), "{id:?}");
             return s;
         }
-        let weight = c.mass.empty_lbs + s.fuel;
-        let lapse = (-height / c.tuning.thrust_lapse_feet).exp();
-        let fraction = weight
-            / ((c.propulsion.military_thrust_lbf * lift.efficiency + lift.additional_lift_lbf)
-                * lapse);
-        if lift.kind == LiftKind::VectorJet {
-            jet::trim_hover(&mut s);
+        if let Some(tilt) = lift.tiltrotor {
+            assert!(s.trim_tiltrotor(0., tilt.helicopter_nacelle_degrees));
             return s;
-        } else {
-            s.throttle = 1.;
-            s.lift_controls.collective = fraction;
-            s.lift_controls.collective_actual = fraction;
         }
-        s.lift_controls.thrust_lbf = weight;
+        assert!(lift.jet.is_some(), "{id:?} has a force law of its own");
+        jet::trim_hover(&mut s);
         s
     }
     fn run(s: &mut State, input: &PilotInput, ticks: usize) {
@@ -604,7 +361,10 @@ mod tests {
             // The old law holds attitude; a rotor without stability
             // augmentation keeps the attitude it was left at.
             let lift = s.model().powered_lift().unwrap();
-            if helicopter::SingleRotor::new(&lift, s.model().configuration()).is_none() {
+            let c = s.model().configuration();
+            if helicopter::SingleRotor::new(&lift, c).is_none()
+                && tiltrotor::Tiltrotor::new(&lift, c).is_none()
+            {
                 assert!(s.pitch.abs() < 0.01 && s.bank.abs() < 0.01, "{id:?}");
             }
             assert!(!s.crashed);
@@ -628,6 +388,9 @@ mod tests {
         assert_eq!(jet.lift_controls.vector_pitch_actual, 0.);
         assert_eq!(jet.lift_controls.vector_yaw, 0.);
         assert_eq!(jet.lift_controls.vector_yaw_actual, 0.);
+        // A held conversion key moves the V-22's nacelle demand at the
+        // nacelles' 8 degrees a second; in a hover the corridor stops the
+        // nacelles at its edge, 85 degrees at rest (slice P5).
         let mut tilt = hover(AircraftId::V22, 500.);
         run(
             &mut tilt,
@@ -637,8 +400,12 @@ mod tests {
             },
             120,
         );
-        assert!((tilt.lift_controls.conversion - 0.75).abs() < 1e-12);
-        assert!((tilt.lift_controls.conversion_actual - 0.75).abs() < 1e-12);
+        assert!((tilt.lift_controls.conversion * 97.5 - 79.).abs() < 1e-9);
+        assert!(
+            (tilt.nacelle_degrees() - 85.).abs() < 1.,
+            "{}",
+            tilt.nacelle_degrees()
+        );
         assert!(tilt.position.iter().all(|v| v.is_finite()));
         let mut rotor = hover(AircraftId::Ah64, 100.);
         let before = rotor.lift_controls;
@@ -653,13 +420,21 @@ mod tests {
         let mut s = hover(AircraftId::V22, 5000.);
         let collective = s.lift_controls.collective;
         let throttle = s.throttle;
+        let start = s.lift_controls.conversion_actual;
         s.command(super::super::PilotCommand::NeutralVector);
         assert_eq!(s.lift_controls.conversion, 0.);
-        assert_eq!(s.lift_controls.conversion_actual, 1.);
+        assert_eq!(s.lift_controls.conversion_actual, start);
         assert_eq!(s.lift_controls.collective, collective);
         assert_eq!(s.throttle, throttle);
+        // In a hover the corridor holds the nacelles at its edge, 85
+        // degrees at rest (slice P5).
         run(&mut s, &Default::default(), 120);
-        assert!((s.lift_controls.conversion_actual - 0.75).abs() < 1e-12);
+        assert!(
+            (s.nacelle_degrees() - 85.).abs() < 1.,
+            "{}",
+            s.nacelle_degrees()
+        );
+        assert!(s.lift_controls.corridor_hold.is_some());
     }
 
     #[test]
@@ -758,23 +533,26 @@ mod tests {
     }
     #[test]
     fn airborne_start_uses_final_mass_and_altitude_without_later_retrim() {
-        // The old law's start (the single-rotor helicopters trim on their
-        // rotor physics: helicopter::tests).
+        // The V-22 trims into wingborne forward flight on its own physics
+        // (slices P5 and P7; the helicopters: helicopter::tests and
+        // tandem::tests).
         let mut s = hover(AircraftId::V22, 5000.);
-        s.position[1] = 15000.;
+        s.position[1] = 3000.;
         s.fuel = 500.;
         s.set_payload(1500.).unwrap();
-        s.start_airborne([0.; 3]);
-        let weight = s.model().configuration().mass.empty_lbs + s.fuel + s.carried_lbs();
-        assert!((s.lift_controls.thrust_lbf - weight).abs() < 1e-8);
+        assert!(s.start_airborne([0.; 3]));
+        assert!(s.speed > 100., "forward flight, not a hover");
         run(&mut s, &Default::default(), 1200);
-        assert!((s.position[1] - 15000.).abs() < 0.01);
+        assert!((s.position[1] - 3000.).abs() < 10., "{}", s.position[1]);
         let collective = s.lift_controls.collective;
         s.set_payload(2500.).unwrap();
         s.start_airborne([0.; 3]);
         assert_eq!(s.lift_controls.collective, collective);
+        let height = s.position[1];
         run(&mut s, &Default::default(), 600);
-        assert!(s.position[1] < 14990.);
+        // A heavier aircraft is not retrimmed: it sinks relative to where it
+        // was (the wing carries most of a wingborne V-22's weight).
+        assert!(s.position[1] < height - 0.5, "{} {height}", s.position[1]);
     }
 
     #[test]
@@ -789,43 +567,6 @@ mod tests {
             damaged.position[1],
             damaged.vertical_speed
         );
-    }
-    #[test]
-    #[allow(clippy::single_element_loop)] // The jets left for `jet.rs`; P5 takes the V-22.
-    fn conversion_gains_forward_motion_and_recovers_vertical_velocity() {
-        for id in [AircraftId::V22] {
-            let mut s = hover(id, 5000.);
-            run(
-                &mut s,
-                &PilotInput {
-                    throttle: Some(1.),
-                    conversion_rate: -1.,
-                    vector_pitch_rate: -1.,
-                    ..Default::default()
-                },
-                480,
-            );
-            assert!(
-                s.lift_controls
-                    .hover_fraction(s.model().powered_lift().unwrap().kind)
-                    < DT
-            );
-            run(
-                &mut s,
-                &PilotInput {
-                    throttle: Some(1.),
-                    ..Default::default()
-                },
-                4800,
-            );
-            assert!(
-                !s.crashed && s.position[1] > 1000.,
-                "{id:?} {}",
-                s.position[1]
-            );
-            assert!(s.velocity[0].hypot(s.velocity[2]) > 200., "{id:?}");
-            assert!(s.vertical_speed.abs() < 5., "{id:?} {}", s.vertical_speed);
-        }
     }
     #[test]
     fn legacy_powered_aircraft_ignore_new_demands_and_native_stays_restricted() {

@@ -82,7 +82,7 @@ altitude is the mission's: a single-player or multiplayer airborne start picks
 the speed after the selected altitude is applied, and AI aircraft pick it at
 their own spawn altitude. Ported fighters keep their fixed 450 knots.
 
-The AH-64, Mi-24, AV-8 and Yak-141 (VTOL overhaul decision 8, slice P7) start in
+The AH-64, Mi-24, V-22, AV-8 and Yak-141 (VTOL overhaul decision 8, slice P7) start in
 **trimmed forward flight** at that speed, not a hover, on every spawn path:
 single player's restart, an AI actor put on the hybrid model (a multiplayer seat
 is one until a human takes it) and a revival. One trim routine
@@ -94,18 +94,18 @@ throttle, pitch and small pitch trim found by probing the force law one tick at
 a time, so that hands off it holds height within 10 feet and speed within 2
 knots for ten seconds (acceptance S1). A start above a helicopter's ceiling
 tries a hover and then falls back to full collective; it never invents support.
-The V-22 still starts level at zero speed with full engine power and the
-collective that balances the configured mass and altitude lapse (capped at
-full collective), until its slice lands; the CH-47 starts like the
-single-rotor helicopters. After the first tick,
-mass changes never retrim anything.
+The V-22 starts wingborne with its nacelles on the downstops (its own trim,
+refined by the same probing so it holds height hands-off), or in a hover at its
+87-degree helicopter preset where no airplane-mode trim exists. The CH-47
+starts like the single-rotor helicopters. After the first tick, mass changes
+never retrim anything.
 
 Ground starts match the fixed-wing ones: stationary, engine running at idle,
 gear and flaps down, brakes on, autopilot off. A helicopter has its rotor at the
 governed speed with the collective down and its engines at 100 percent (the
 throttle keys drive the collective, so the engine throttle is set at the start),
 a jet has its nozzles at 0 and its lift engines off. There is no cold start. The
-V-22's nacelles will start at the 87-degree helicopter preset with its slice.
+V-22's nacelles start at the 87-degree helicopter preset.
 
 ## Powered lift and controls
 
@@ -120,8 +120,9 @@ make the low-speed roll-off, suck-down takes up to 6 percent near the ground,
 and an angle-of-attack wing matched to the conventional model on the same PT
 carries the aircraft in forward flight. The overhaul's final pass rewrites this
 section; until then the paragraphs below describe the V22 and the helicopters
-(the jets' parts of them are history), and the jets' rules are in
-`crates/tore-sim/src/flight/powered/jet.rs` and `aero.rs`.
+(the jets' and the V22's parts of them are history), the jets' rules are in
+`crates/tore-sim/src/flight/powered/jet.rs` and `aero.rs`, and the V22's in
+[V-22 tiltrotor](#v-22-tiltrotor-vtol-overhaul-p5-2026-10-08) below.
 
 AV8 and YAK141 nozzle pitch is normalized 0 (forward) to 1 (90 degrees down),
 with signed yaw producing up to 15 degrees of lateral thrust. Neutral resets
@@ -428,6 +429,66 @@ cross-shafted drive with one governor.
   and pitches the rotors' thrust back, but gives no roll (the two rotors'
   roll tendencies oppose).
 
+### V-22 tiltrotor (VTOL overhaul P5, 2026-10-08)
+
+All agent decisions unless a figure says Pub. The V22 on the hybrid adapter no
+longer flies the fitted law above; the rules are in
+`crates/tore-sim/src/flight/powered/tiltrotor.rs`.
+
+- **Rotors and drive.** Two 38 ft 1 in proprotors 46.5 ft apart (Pub,
+  Derived) on nacelles, each the shared rotor model with the nacelle axis as
+  its shaft, on one interconnected drive. Rated power is two AE 1107C at
+  6,150 shp (Pub) times 0.42, about 8 percent losses times the PT's maximum
+  takeoff weight over the published 52,600 lb vertical maximum, so the
+  aircraft, about 40 percent of the real one's weight, keeps its power
+  loading: 5,122 hp. Rotor speed 100 percent (397 rpm, Pub) with the nacelles
+  up and 84 percent on the downstops (Pub), moving at 6 percent a second.
+- **Nacelles.** 0 to 97.5 degrees at 8 degrees per second (Pub); the
+  helicopter preset is 87. The conversion keys move the demand at the same
+  rate; `0` asks for the downstops.
+- **Conversion corridor.** Indicated airspeed limits against nacelle angle
+  (design table: no minimum and 100 KCAS from 85 degrees up, 30 to 130 at
+  80, 60 to 160 at 60, 75 to 180 at 45, 90 to 200 at 30, 100 to 200 at 15,
+  110 to 280 on the downstops; mid-points and the 200 KCAS aft lock Pub, edges
+  fitted). Protection is always on, at every stability level and with the
+  Easy flight physics cheat on: past the upper edge the nacelles go forward
+  at the full rate to 5 KCAS inside it; aft motion stops at the upper edge
+  and above 200 KCAS; forward motion stops at the lower edge; both slow
+  within 5 degrees of the edge, to a quarter of the rate. The nacelles are
+  never raised for the pilot, and the pilot's demand is kept.
+- **Controls.** Rotor terms scale with the sine of the nacelle angle: lateral
+  stick is 2 degrees of differential collective, longitudinal stick 8 degrees
+  of cyclic on both rotors, the pedals 4 degrees of differential cyclic. The
+  wing's surfaces fly the pilot's command through the angle-of-attack wing
+  (110 KCAS 1 G stall at the PT gross weight, Pub; 45 degrees per second of
+  roll). The thrust control lever is the collective in the hover; from 75
+  degrees down to 30 it becomes a power lever (full lever, full power at any
+  airspeed), and the flight computers add the blade pitch that the airspeed
+  through the disks needs. Midway they take pitch off when the rotor speed
+  droops.
+- **Download** 10 percent of the rotor thrust at 90 degrees, fading with the
+  nacelle angle and with airspeed. **Drag** a 22.5 ft² forward flat plate
+  (fitted to the published 275 kt) and the PT's gear, flap and G-pull terms.
+- **Warnings.** Stall warning only below 35 degrees of nacelle, below the
+  corridor's lower edge (110 KCAS on the downstops); GEAR SPEED with the gear
+  down above 140 KCAS (Pub limit). Retreating blade stall only in edgewise
+  flight (nacelles at 60 degrees and up).
+- **Overspeed** at 280 KCAS, or the corridor maximum with the nacelles up
+  ([overspeed](overspeed.md)).
+- **Ground.** Nacelles below 60 degrees on the wheels below 10 kt of ground
+  speed is a rotor strike (a crash), whatever the cheat; a rolling takeoff
+  or landing with the nacelles low is not, until it slows. Dynamic rollover
+  as on the helicopters.
+
+Measured on the real PT (local probe, `examples/powered_probe.rs`): hover out
+of ground effect at gross weight on 2,664 hp, 92 percent margin, lever 73
+percent; hover ceiling 13,900 ft at gross, 8,900 ft at maximum weight; full
+stick for 2 s from a hover at Damper 28 / 48 / 33 deg/s pitch, roll, yaw;
+engine cut in the hover, rotor below 80 percent in 1.57 s; conversion with
+the keys held at 85 percent lever from a 1,000 ft hover: on the downstops in
+16 s, 200 KCAS in 27 s, height within 124 ft, never outside the corridor;
+airplane-mode top speed 273 kt at sea level; slowest wingborne level flight
+117 kt; stall warning at 110 KCAS.
 
 ## Unknown evidence
 

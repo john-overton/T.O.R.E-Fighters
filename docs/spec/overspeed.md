@@ -34,7 +34,12 @@ blade) before the five safe seconds begin. The envelope still supplies the
 ceiling rule: above the top of the 1 G polygon there is no limit and the timer
 resets. The speed is `structural_kt` in the rotor table of
 `crates/tore-sim/src/models/variety/lift.rs`; `None` keeps the envelope's top
-speed, which is what the V-22 does until its own slice sets a value.
+speed, which is what no powered-lift aircraft does now. The
+V-22's value is calibrated airspeed: 280 KCAS, its published airplane-mode
+never-exceed speed, or with the nacelles up the conversion corridor's maximum
+at their angle (100 KCAS in the hover band), whichever is lower, turned into
+true airspeed at the current altitude (VTOL overhaul slice P5, agent
+decision 2026-10-08).
 It applies on the hybrid adapter only, so the legacy adapter, the restricted
 native path and every fixed-wing aircraft are unchanged.
 

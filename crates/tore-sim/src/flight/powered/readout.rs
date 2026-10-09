@@ -19,6 +19,7 @@ use super::{
     helicopter::{Instant, SingleRotor},
     rotor::{self, Hazards},
     tandem::{self, Tandem},
+    tiltrotor::Tiltrotor,
 };
 use crate::{
     attitude::Basis,
@@ -27,12 +28,6 @@ use crate::{
 };
 
 const KNOTS_TO_FPS: f64 = 1.687_81;
-
-/// The V-22 nacelles' travel, degrees: 0 on the downstops (airplane mode) to
-/// 97.5 (design 4.8).
-///
-/// TODO(P5): the tiltrotor law owns this constant; use it from there.
-pub const NACELLE_TRAVEL_DEGREES: f64 = 97.5;
 
 /// The ground speed below which a rotorcraft shows the hover display, kt
 /// (design section 6).
@@ -106,48 +101,37 @@ impl State {
 
     /// Torque TQ, percent of the rated power: the shaft power the engines
     /// deliver over the rated sea-level power and the rotor speed. Above 100
-    /// is over the limit. For the aircraft that fly the old fitted law (the
-    /// V-22) the engines are not modelled yet, so the share of the rotors'
-    /// maximum thrust stands in.
-    ///
-    /// TODO(P5): read the tiltrotor drive's power.
+    /// is over the limit. Every rotorcraft reads its own drive's rated power.
     pub fn torque_percent(&self) -> Option<f64> {
         let lift = self.model().powered_lift()?;
-        let rotor = lift.rotor?;
+        lift.rotor?;
         if lift.kind == LiftKind::VectorJet {
             return None;
         }
-        if let Some(heli) = SingleRotor::new(&lift, self.model().configuration()) {
-            let nr = self.lift_controls.drive.rotor_speed.max(0.5);
-            return Some(
-                (self.lift_controls.drive.engine_output[0] / (heli.drive.rated_power * nr)).max(0.)
-                    * 100.,
-            );
-        }
-        if let Some(model) = Tandem::new(&lift, self.model().configuration()) {
-            let nr = self.lift_controls.drive.rotor_speed.max(0.5);
-            return Some(
-                (self.lift_controls.drive.engine_output[0] / (model.drive.rated_power * nr))
-                    .max(0.)
-                    * 100.,
-            );
-        }
-        Some((self.lift_controls.thrust_lbf / rotor.max_thrust_lbf.max(1.)).max(0.) * 100.)
+        let c = self.model().configuration();
+        let rated = SingleRotor::new(&lift, c)
+            .map(|heli| heli.drive.rated_power)
+            .or_else(|| Tandem::new(&lift, c).map(|model| model.drive.rated_power))
+            .or_else(|| Tiltrotor::new(&lift, c).map(|model| model.drive.rated_power))?;
+        let nr = self.lift_controls.drive.rotor_speed.max(0.5);
+        Some((self.lift_controls.drive.engine_output[0] / (rated * nr)).max(0.) * 100.)
     }
 
-    /// The V-22's nacelle angle, degrees from the downstops, and the angle
-    /// the pilot's demand asks for.
-    ///
-    /// TODO(P5): the tiltrotor law's own nacelle state replaces the
-    /// conversion axis' reading here.
-    pub fn nacelle_degrees(&self) -> Option<[f64; 2]> {
-        (self.model().powered_lift()?.kind == LiftKind::Tiltrotor).then(|| {
-            [
-                self.lift_controls.conversion_actual,
-                self.lift_controls.conversion,
-            ]
-            .map(|axis| axis.clamp(0., 1.) * NACELLE_TRAVEL_DEGREES)
-        })
+    /// The governed rotor speed the drive aims at, percent: 100, or the
+    /// V-22's 84 on the downstops; the rotor speed row flashes against it.
+    pub fn rotor_speed_reference_percent(&self) -> Option<f64> {
+        self.is_rotorcraft()
+            .then_some(self.lift_controls.drive.rotor_speed_reference * 100.)
+    }
+
+    /// The V-22's nacelle travel, degrees (0 on the downstops to 97.5).
+    pub fn nacelle_range_degrees(&self) -> Option<f64> {
+        Some(
+            self.model()
+                .powered_lift()?
+                .tiltrotor?
+                .nacelle_range_degrees,
+        )
     }
 
     /// The nozzle demand, degrees: where the nozzles are heading.
@@ -304,7 +288,7 @@ mod tests {
         assert_eq!(jet.rotor_speed_percent(), None);
         assert_eq!(jet.torque_percent(), None);
         assert_eq!(jet.collective_percent(), None);
-        assert_eq!(jet.nacelle_degrees(), None);
+        assert_eq!(jet.conversion_corridor(), None);
     }
 
     #[test]

@@ -95,8 +95,9 @@ conventional aircraft and six powered-lift aircraft. Every exact identity owns
 its source mass, fuel, thrust, controls and envelopes. The four F-4 variants
 share algorithms while preserving their own source configuration. Conventional
 variety aircraft use the established hybrid solver. AV8 and YAK141 use fitted
-vector thrust, V22 uses fitted nacelle conversion, AH64 and MI24 fly a main
-rotor and tail rotor on the overhaul's rotor physics, and CH47 flies two
+vector thrust, V22 flies two proprotors on nacelles under always-on conversion
+corridor protection (VTOL overhaul slice P5), AH64 and MI24 fly a main rotor
+and tail rotor on the overhaul's rotor physics, and CH47 flies two
 counter-rotating rotors on one drive (differential collective for pitch,
 differential lateral cyclic for yaw; see the
 [variety flight contract](spec/variety-flight.md)). Ordinary throttle remains engine power.

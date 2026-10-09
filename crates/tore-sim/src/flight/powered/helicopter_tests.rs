@@ -1229,30 +1229,12 @@ fn h11b_overspeed_is_judged_against_vne() {
     }
 }
 
-/// An aircraft whose rotor table sets no structural speed, and the legacy
-/// adapter, keep the envelope's top speed as the overspeed limit.
+/// The legacy adapter keeps the envelope's top speed as the overspeed limit.
+/// (Every rotorcraft's rotor table sets a structural speed now: the V-22's is
+/// calibrated and follows its nacelles, tiltrotor tests; the CH-47's is
+/// 190 kt, lift.rs tests.)
 #[test]
-#[allow(clippy::single_element_loop)] // The tandem sets a structural speed.
-fn h11c_without_a_structural_speed_the_envelope_is_the_limit() {
-    // The tandem CH-47 sets one since slice P3 (lift.rs tests).
-    for id in [AircraftId::V22] {
-        let aircraft = crate::models::variety::tests::synthetic(id);
-        let mut s = State::new(&aircraft, [0., 3_000., 0.]).unwrap();
-        s.enable_research(1).unwrap();
-        let top = s
-            .model()
-            .configuration()
-            .aerodynamics
-            .envelopes
-            .iter()
-            .find(|e| e.g == 1)
-            .and_then(|e| e.speeds(s.position[1]))
-            .unwrap()
-            .1;
-        assert_eq!(s.structural_speed_fps(), None, "{id:?}");
-        assert_eq!(s.overspeed_limit_fps(), Some(top), "{id:?}");
-    }
-    // The legacy adapter flies the old law and keeps the old limit.
+fn h11c_the_legacy_adapter_keeps_the_envelope_as_the_limit() {
     let legacy = State::new(&super::tests::pt_aircraft(Ah64), [0., 3_000., 0.]).unwrap();
     assert_eq!(legacy.structural_speed_fps(), None);
 }

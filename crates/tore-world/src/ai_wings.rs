@@ -4591,6 +4591,7 @@ mod tests {
         for id in [
             AircraftId::Ah64,
             AircraftId::Mi24,
+            AircraftId::V22,
             AircraftId::Av8,
             AircraftId::Yak141,
         ] {

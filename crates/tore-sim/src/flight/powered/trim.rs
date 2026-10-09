@@ -13,6 +13,10 @@
 //!     [`State::trim_single_rotor`], the CH-47 that of [`State::trim_tandem`]:
 //!     collective, cyclic and pedals, the rotors governed at 100 percent,
 //!     the body at rest.
+//!   - The V-22 starts wingborne with its nacelles on the downstops at the
+//!     start rule's speed ([`State::trim_tiltrotor`]); where no airplane-mode
+//!     trim exists it hovers at its 87-degree helicopter preset, then falls
+//!     back to the full lever.
 //!   - A vectoring jet gets its nozzles at 0, its lift engines off and a
 //!     wingborne trim: the throttle that balances its drag and the pitch
 //!     that makes its wing carry its weight, both found by probing the
@@ -26,9 +30,8 @@
 //!   nowhere else); a jet has its nozzles at 0 and its engine at idle. No
 //!   cold start.
 //!
-//! The V-22 still flies the old fitted law (slice P5 replaces it), so it
-//! keeps its hover start; its hooks are marked `TODO(P5)`. The CH-47 starts
-//! like the single-rotor helicopters ([`State::trim_tandem`]).
+//! Every powered-lift aircraft has a trim of its own; nothing starts on the
+//! old fitted law any more.
 
 use super::{
     helicopter::{Instant, SingleRotor},
@@ -44,20 +47,14 @@ use crate::{
 };
 
 /// Whether an aircraft starts airborne in trimmed forward flight now: the
-/// helicopters (single-rotor and the tandem CH-47) and the vectoring jets.
-///
-/// TODO(P5): the V-22 joins this when its tiltrotor law lands (airplane
-/// mode at about 180 KCAS with the nacelles on the downstops).
+/// helicopters (single-rotor and the tandem CH-47), the V-22 and the
+/// vectoring jets.
 pub fn starts_in_forward_flight(lift: &PoweredLift, c: &Configuration) -> bool {
-    lift.jet.is_some() || SingleRotor::new(lift, c).is_some() || Tandem::new(lift, c).is_some()
+    lift.jet.is_some()
+        || SingleRotor::new(lift, c).is_some()
+        || Tandem::new(lift, c).is_some()
+        || (lift.tiltrotor.is_some() && super::tiltrotor::Tiltrotor::new(lift, c).is_some())
 }
-
-/// The V-22's nacelle angle on the ground, degrees (design section 7: the
-/// helicopter preset).
-///
-/// TODO(P5): the ground start sets the nacelle demand to this share of the
-/// 97.5-degree travel once the tiltrotor law reads it.
-pub const V22_GROUND_NACELLE_DEGREES: f64 = 87.;
 
 /// Newton iterations, finite-difference steps and the residual (in G) a jet
 /// trim accepts.
@@ -70,6 +67,8 @@ const JET_TRIM_TOLERANCE_G: f64 = 2e-5;
 const JET_PITCH_GUESS: f64 = 0.06;
 /// The pitch rate residual's weight against the G ones.
 const PITCH_RATE_SCALE: f64 = 10.;
+/// Ticks a rotorcraft's idle is flown for on the ground.
+const IDLE_SETTLE_TICKS: usize = 240;
 /// How far below the jet the probe's ground is, ft: out of ground effect.
 const PROBE_GROUND_DEPTH_FT: f64 = 100_000.;
 
@@ -79,8 +78,7 @@ impl State {
     /// documentation), after its final mass, altitude and heading are set.
     /// `wind` is the wind the velocity is ground-relative to. Returns true
     /// when the aircraft was trimmed; false when it is not a powered-lift
-    /// aircraft that trims yet (the V-22 gets a hover on the old law's
-    /// collective), is not on the hybrid model, has flown, is on
+    /// aircraft that trims yet, is not on the hybrid model, has flown, is on
     /// the ground, or no trim exists within the controls' travel (a helicopter
     /// then tries a hover, then falls back to full collective).
     pub fn start_airborne(&mut self, wind: [f64; 3]) -> bool {
@@ -107,10 +105,60 @@ impl State {
         if lift.jet.is_some() {
             return self.start_jet(wind);
         }
-        // TODO(P5): the V-22 trims on its own law.
-        // Until then the old law's hover, as `initialize_airborne_hover` did.
-        self.hover_on_the_old_law(&lift);
+        if let Some(tilt) = lift.tiltrotor
+            && super::tiltrotor::Tiltrotor::new(&lift, c).is_some()
+        {
+            return self.start_tiltrotor(wind, tilt.helicopter_nacelle_degrees);
+        }
         false
+    }
+
+    /// The V-22 starts wingborne with the nacelles on the downstops at the
+    /// start rule's airspeed; where no airplane-mode trim exists it hovers
+    /// at its helicopter preset, then falls back to the full lever.
+    fn start_tiltrotor(&mut self, wind: [f64; 3], helicopter_nacelle_degrees: f64) -> bool {
+        let airspeed = self.start_airspeed().unwrap_or(0.);
+        if !self.trim_tiltrotor(airspeed, 0.) {
+            if !self.trim_tiltrotor(0., helicopter_nacelle_degrees) {
+                self.throttle = 1.;
+                self.lift_controls.collective = 1.;
+                self.lift_controls.collective_actual = 1.;
+            }
+            self.velocity = self.velocity.map(|_| 0.);
+            self.speed = 0.;
+        }
+        if self.speed > 0. {
+            self.refine_tiltrotor_trim();
+        }
+        self.add_wind_to_start(wind);
+        self.speed > 0.
+    }
+
+    /// The tiltrotor's own trim leaves out the conventional drag terms of
+    /// the step (gear, flaps, the G pull), so a wingborne start sinks and
+    /// pitches over hands-off. Probing the real force law the way the jets'
+    /// start does settles the lever, the pitch and the pitch trim.
+    fn refine_tiltrotor_trim(&mut self) {
+        let x0 = [
+            self.lift_controls.collective_actual,
+            self.pitch,
+            self.lift_controls.aids.trim[0],
+        ];
+        let x = self.probe_newton(
+            x0,
+            [0.002, JET_PITCH_STEP, JET_TRIM_STEP],
+            [0.05, 0.05, 0.1],
+            |probe, [lever, pitch, trim]| {
+                probe.lift_controls.collective = lever;
+                probe.lift_controls.collective_actual = lever;
+                probe.pitch = pitch;
+                probe.lift_controls.aids.trim[0] = trim;
+            },
+        );
+        self.lift_controls.collective = x[0].clamp(0., 1.);
+        self.lift_controls.collective_actual = x[0].clamp(0., 1.);
+        self.pitch = x[1].clamp(-0.3, 0.6);
+        self.lift_controls.aids.trim[0] = x[2].clamp(-1., 1.);
     }
 
     /// The airspeed an airborne start flies at: the speed it holds, or the
@@ -194,35 +242,20 @@ impl State {
         // real force law. The wing's neutral-stick command is a G the thrust
         // and the intakes' moment do not quite leave in balance, so the jet
         // also gets a small pitch trim, as any aircraft does.
-        let mut x = [self.throttle, self.pitch, 0.];
-        let mut residual = self.jet_residual(x);
-        for _ in 0..JET_TRIM_ITERATIONS {
-            if residual.iter().all(|r| r.abs() < JET_TRIM_TOLERANCE_G) {
-                break;
-            }
-            let mut jacobian = [[0.; 3]; 3];
-            for (j, step) in [JET_THROTTLE_STEP, JET_PITCH_STEP, JET_TRIM_STEP]
-                .into_iter()
-                .enumerate()
-            {
-                let mut moved = x;
-                moved[j] += step;
-                let r = self.jet_residual(moved);
-                for i in 0..3 {
-                    jacobian[i][j] = (r[i] - residual[i]) / step;
-                }
-            }
-            let Some(delta) = solve3(jacobian, residual.map(|r| -r)) else {
-                break;
-            };
-            x[0] = (x[0] + delta[0].clamp(-0.3, 0.3)).clamp(0., 1.);
-            x[1] = (x[1] + delta[1].clamp(-0.05, 0.05)).clamp(-0.3, 0.6);
-            x[2] = (x[2] + delta[2].clamp(-0.1, 0.1)).clamp(-1., 1.);
-            residual = self.jet_residual(x);
-        }
-        self.throttle = x[0];
-        self.pitch = x[1];
-        self.lift_controls.aids.trim = [x[2], 0., 0.];
+        let x = self.probe_newton(
+            [self.throttle, self.pitch, 0.],
+            [JET_THROTTLE_STEP, JET_PITCH_STEP, JET_TRIM_STEP],
+            [0.3, 0.05, 0.1],
+            |probe, [throttle, pitch, trim]| {
+                probe.throttle = throttle;
+                probe.pitch = pitch;
+                probe.lift_controls.aids.trim = [trim, 0., 0.];
+                probe.set_jet_engine(throttle);
+            },
+        );
+        self.throttle = x[0].clamp(0., 1.);
+        self.pitch = x[1].clamp(-0.3, 0.6);
+        self.lift_controls.aids.trim = [x[2].clamp(-1., 1.), 0., 0.];
         self.set_jet_engine(x[0]);
         self.add_wind_to_start(wind);
         true
@@ -248,23 +281,58 @@ impl State {
         self.lift_controls.thrust_lbf = output;
     }
 
+    /// Newton's method on three unknowns `x` for no acceleration along the
+    /// flight path or across it and no pitch rate, from one-tick probes of
+    /// the real force law: `apply` sets a copy of the state to `x`. Ten fixed
+    /// iterations (no clock, no tolerance loop in the live state), each
+    /// unknown stepped by `steps` for the finite differences and moved at
+    /// most `limits` at a time. Returns the best `x` found.
+    fn probe_newton(
+        &self,
+        mut x: [f64; 3],
+        steps: [f64; 3],
+        limits: [f64; 3],
+        apply: impl Fn(&mut State, [f64; 3]),
+    ) -> [f64; 3] {
+        let residual = |x: [f64; 3]| self.probe_residual(x, &apply);
+        let mut r = residual(x);
+        for _ in 0..JET_TRIM_ITERATIONS {
+            if r.iter().all(|v| v.abs() < JET_TRIM_TOLERANCE_G) {
+                break;
+            }
+            let mut jacobian = [[0.; 3]; 3];
+            for j in 0..3 {
+                let mut moved = x;
+                moved[j] += steps[j];
+                let rj = residual(moved);
+                for i in 0..3 {
+                    jacobian[i][j] = (rj[i] - r[i]) / steps[j];
+                }
+            }
+            let Some(delta) = solve3(jacobian, r.map(|v| -v)) else {
+                break;
+            };
+            for j in 0..3 {
+                x[j] += delta[j].clamp(-limits[j], limits[j]);
+            }
+            r = residual(x);
+        }
+        x
+    }
+
     /// The acceleration, in G, along the flight path and across it (up
-    /// positive, gravity included) and the pitch rate (rad/s, scaled) of
-    /// this start at `[throttle, pitch, pitch trim]`, after one tick of the
+    /// positive, gravity included) and the pitch rate (rad/s, scaled) of this
+    /// start with its unknowns set to `x` by `apply`, after one tick of the
     /// real force law.
-    fn jet_residual(&self, [throttle, pitch, trim]: [f64; 3]) -> [f64; 3] {
+    fn probe_residual(&self, x: [f64; 3], apply: &impl Fn(&mut State, [f64; 3])) -> [f64; 3] {
         let mut probe = self.clone();
-        probe.throttle = throttle;
-        probe.pitch = pitch;
-        probe.lift_controls.aids.trim = [trim, 0., 0.];
-        probe.set_jet_engine(throttle);
+        apply(&mut probe, x);
         let before = probe.velocity;
         let along = unit(before);
         let floor = probe.position[1] - PROBE_GROUND_DEPTH_FT;
         probe.step_surface(&PilotInput::default(), |_, _| Surface::runway(floor));
         let dv: [f64; 3] = std::array::from_fn(|i| probe.velocity[i] - before[i]);
         let g = super::body::GRAVITY * DT;
-        // The pitch rate one tick of the moment leaves, scaled to G-like units.
         [
             dot(dv, along) / g,
             dv[1] / g,
@@ -272,28 +340,11 @@ impl State {
         ]
     }
 
-    /// The old law's hover for the aircraft that have no trim of their own
-    /// yet: full engine, the collective that holds the weight.
-    fn hover_on_the_old_law(&mut self, lift: &PoweredLift) {
-        let c = self.model().configuration();
-        let weight = c.mass.empty_lbs + self.fuel + self.carried_lbs();
-        let capacity = c.propulsion.military_thrust_lbf
-            * lift.efficiency
-            * (-self.position[1].max(0.) / c.tuning.thrust_lapse_feet).exp();
-        let collective = (weight / capacity).clamp(0., 1.);
-        self.throttle = 1.;
-        self.lift_controls.conversion = 1.;
-        self.lift_controls.conversion_actual = 1.;
-        self.lift_controls.collective = collective;
-        self.lift_controls.collective_actual = collective;
-        self.lift_controls.thrust_lbf = capacity * collective;
-    }
-
     /// The jets and helicopters in a hover, at rest in the air: a jet with
     /// its nozzles vertical and its engines spooled to just hold its weight,
-    /// a helicopter in the trim of [`State::trim_single_rotor`]. For tools
-    /// and tests that want the hover display; no start uses it. False for
-    /// the aircraft with no hover trim yet.
+    /// a helicopter in the trim of [`State::trim_single_rotor`] or
+    /// [`State::trim_tandem`], the V-22 at its helicopter preset. For tools
+    /// and tests that want the hover display; no start uses it.
     pub fn trim_hover(&mut self) -> bool {
         let Some(lift) = self.model().powered_lift() else {
             return false;
@@ -325,14 +376,23 @@ impl State {
         }
         let c = self.model().configuration();
         let single = SingleRotor::new(&lift, c).is_some();
-        if !single && Tandem::new(&lift, c).is_none() {
+        let tandem = Tandem::new(&lift, c).is_some();
+        let tiltrotor = lift
+            .tiltrotor
+            .filter(|_| super::tiltrotor::Tiltrotor::new(&lift, c).is_some());
+        if !single && !tandem && tiltrotor.is_none() {
             return false;
         }
         // At rest in the air: a hover keeps the velocity it has.
         let (velocity, speed) = (self.velocity, self.speed);
         self.velocity = [0.; 3];
         self.speed = 0.;
-        if (single && self.trim_single_rotor(0.)) || (!single && self.trim_tandem(0.)) {
+        let trimmed = match tiltrotor {
+            Some(tilt) => self.trim_tiltrotor(0., tilt.helicopter_nacelle_degrees),
+            None if tandem => self.trim_tandem(0.),
+            None => self.trim_single_rotor(0.),
+        };
+        if trimmed {
             return true;
         }
         (self.velocity, self.speed) = (velocity, speed);
@@ -418,9 +478,36 @@ impl State {
             };
             controls.drive.engine_output[0] = model.loads(&instant).power.max(0.);
         }
-        // TODO(P5): the V-22's nacelles go to V22_GROUND_NACELLE_DEGREES of
-        // the 97.5-degree travel, `conversion` and `conversion_actual`.
         self.throttle = 1.;
+        if let Some(tilt) = lift.tiltrotor
+            && let Some(model) =
+                super::tiltrotor::Tiltrotor::new(&lift, self.model().configuration())
+        {
+            // The V-22 stands with its nacelles at the helicopter preset
+            // (87 degrees), on the demand and as they are.
+            let share = tilt.helicopter_nacelle_degrees / tilt.nacelle_range_degrees;
+            let controls = &mut self.lift_controls;
+            controls.conversion = share;
+            controls.conversion_actual = share;
+            controls.drive.rotor_speed_reference =
+                model.rotor_speed_target(tilt.helicopter_nacelle_degrees);
+            controls.drive.rotor_speed = controls.drive.rotor_speed_reference;
+            self.settle_idle_drive();
+        }
+    }
+
+    /// Finds the idle state of a rotorcraft on the wheels by flying a copy
+    /// two seconds hands-off (the governor needs the flat-pitch power; no
+    /// closed form is kept for the tiltrotor's mixer): the engine output and
+    /// the rotors' inflow come back from the copy, the rest is untouched.
+    fn settle_idle_drive(&mut self) {
+        let mut copy = self.clone();
+        let floor = copy.position[1] - copy.model().configuration().equipment.ground_clearance_ft;
+        for _ in 0..IDLE_SETTLE_TICKS {
+            copy.step_surface(&PilotInput::default(), |_, _| Surface::runway(floor));
+        }
+        self.lift_controls.drive.engine_output = copy.lift_controls.drive.engine_output;
+        self.lift_controls.rotors = copy.lift_controls.rotors;
     }
 }
 
@@ -460,6 +547,7 @@ mod tests {
         match id {
             AircraftId::Ah64 | AircraftId::Mi24 => pt_aircraft(id),
             AircraftId::Ch47 => super::super::tandem::tests::pt_aircraft(),
+            AircraftId::V22 => super::super::tiltrotor::acceptance::pt_v22(),
             _ => fixture(id),
         }
     }
@@ -473,10 +561,11 @@ mod tests {
         s
     }
 
-    const FINISHED: [AircraftId; 5] = [
+    const FINISHED: [AircraftId; 6] = [
         AircraftId::Ah64,
         AircraftId::Mi24,
         AircraftId::Ch47,
+        AircraftId::V22,
         AircraftId::Av8,
         AircraftId::Yak141,
     ];
@@ -583,23 +672,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::single_element_loop)] // The CH-47 trims since slice P3.
-    fn the_aircraft_without_a_trim_yet_keep_the_old_hover() {
-        for id in [AircraftId::V22] {
-            let mut s = State::new(
-                &crate::models::variety::tests::synthetic(id),
-                [0., 5_000., 0.],
-            )
-            .unwrap();
-            s.enable_research(1).unwrap();
-            assert_eq!(s.speed, 0., "{id:?} starts at rest");
-            assert!(!s.start_airborne([0.; 3]));
-            assert_eq!(s.throttle, 1.);
-            assert!(s.lift_controls.collective > 0.);
-        }
-    }
-
-    #[test]
     fn s2_ground_starts_match_the_fixed_wing_ones() {
         for id in FINISHED {
             let mut s = start(id, 0.);
@@ -615,6 +687,13 @@ mod tests {
                 assert_eq!(s.lift_controls.collective_actual, 0., "{id:?} collective");
                 assert_eq!(s.lift_controls.drive.rotor_speed, 1., "{id:?} rotor");
                 assert_eq!(s.throttle, 1., "{id:?} engine at 100 percent");
+                if id == AircraftId::V22 {
+                    assert!((s.nacelle_degrees() - 87.).abs() < 1e-9, "nacelles at 87");
+                    assert_eq!(
+                        s.lift_controls.conversion,
+                        s.lift_controls.conversion_actual
+                    );
+                }
             } else {
                 assert_eq!(s.throttle, 0., "{id:?} idling");
             }
@@ -636,7 +715,7 @@ mod tests {
 
     #[test]
     fn the_ground_start_idles_a_rotor_without_sagging_it() {
-        for id in [AircraftId::Ah64, AircraftId::Mi24] {
+        for id in [AircraftId::Ah64, AircraftId::Mi24, AircraftId::V22] {
             let mut s = start(id, 0.);
             s.start_on_runway([0.; 3], 0.).unwrap();
             let mut low = 1_f64;
@@ -648,10 +727,5 @@ mod tests {
             }
             assert!(low > 0.985 && high < 1.015, "{id:?} {low} {high}");
         }
-    }
-
-    #[test]
-    fn the_v22_ground_nacelle_hook_is_the_helicopter_preset() {
-        assert_eq!(V22_GROUND_NACELLE_DEGREES, 87.);
     }
 }

@@ -1452,7 +1452,7 @@ optical composition. Both tests use no retail media.
 
 ## Powered-lift HUD fixtures
 
-`--hud-snapshot PATH --aircraft ah64 --hud-snapshot-state hover` (or `forward`)
+`--hud-snapshot PATH --aircraft ah64 --hud-snapshot-state hover` (or `forward`, or `converting`: a V-22 hovering at 140 knots, so its conversion protection is driving the nacelles forward)
 draws the HUD of the selected aircraft headless, as a PPM over a flat sky and
 ground split at the horizon. A powered-lift aircraft is started in trimmed
 forward flight or in a hover, 3,000 feet over a plain, and flown a second.

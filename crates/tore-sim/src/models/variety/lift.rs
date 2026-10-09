@@ -141,7 +141,10 @@ pub struct RotorParameters {
     /// limit of an airframe whose envelope row is a performance figure, not
     /// a limit. Retreating blade stall begins at `never_exceed_kt`, so at or
     /// below this speed the aircraft shows the stall before it risks
-    /// break-up. `None` keeps the envelope's top speed.
+    /// break-up. `None` keeps the envelope's top speed. On the tiltrotor it
+    /// is calibrated airspeed, the airplane-mode never-exceed speed, and the
+    /// conversion corridor's maximum lowers it with the nacelles up (slice
+    /// P5).
     pub structural_kt: Option<f64>,
     /// Blade collective pitch at the bottom and the top of the lever,
     /// degrees (Fit).
@@ -337,6 +340,17 @@ pub struct TiltrotorParameters {
     pub wing_download: f64,
     /// The corridor, nacelle angles descending from the stop.
     pub corridor: &'static [CorridorPoint],
+    /// Blade pitch each rotor adds (and the other takes away) at full
+    /// lateral stick in a hover: the differential collective that rolls the
+    /// aircraft, degrees (Fit to the hover roll rate, design 8.2).
+    pub differential_collective_degrees: f64,
+    /// Longitudinal disk tilt each rotor takes, in opposite directions, at
+    /// full pedal in a hover: the differential cyclic that yaws the aircraft,
+    /// degrees (Fit to the hover yaw rate).
+    pub differential_cyclic_degrees: f64,
+    /// Wingborne roll acceleration and release, degrees per second squared
+    /// (Fit; the PT's are the AH-64's).
+    pub wingborne_roll_acceleration_degrees: f64,
 }
 
 /// Handling numbers a player can measure, which the stability levels and
@@ -425,6 +439,17 @@ const MI24_RATED_HP: f64 = 2. * 2_225. * MI24_ROTOR_POWER_SHARE;
 /// the gross weight) would have it hover to 17,700 ft. See the P2-fix
 /// notes and docs/spec/variety-flight.md.
 const MI24_ROTOR_POWER_SHARE: f64 = 0.745;
+/// The V-22's rated power at the proprotors, hp: two AE 1107C at 6,150 shp
+/// each (Pub W-V22) times the share the PT aircraft gets (slice P5).
+const V22_RATED_HP: f64 = 2. * 6_150. * V22_ROTOR_POWER_SHARE;
+/// Share of the published shaft power the PT V-22 gets (Fit): about 8
+/// percent transmission and installation losses, times the PT's maximum
+/// takeoff weight over the published 52,600 lb vertical takeoff maximum
+/// (23,810 / 52,600), so the PT aircraft, which weighs about 40 percent of
+/// the real one, keeps the real one's power loading. About 5,100 hp: the
+/// PT thrust's own power (about 3,200 hp) left it unable to accelerate
+/// from the conversion to 200 KCAS in 30 s (design T2).
+const V22_ROTOR_POWER_SHARE: f64 = 0.92 * 23_810. / 52_600.;
 
 /// The CH-47's rated power at the rotors per pound of maximum takeoff
 /// weight, hp/lb: the CH-47F's two T55-GA-714A at 4,733 shp each (Pub
@@ -595,25 +620,36 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rotor_speed_rpm: 397.,
             solidity: 0.105,
             max_thrust_lbf: pt_thrust,
-            rated_power_hp: None,
-            energy_seconds: 1.5,
+            rated_power_hp: Some(V22_RATED_HP),
+            energy_seconds: 1.6,
             never_exceed_kt: 280.,
-            structural_kt: None,
-            // Starting values for slice P5; the V-22 still flies the old
-            // powered law. Proprotor blade pitch reaches about 50 degrees
-            // to absorb full power at cruise (design 4.8).
-            collective_degrees: [0., 50.],
+            // Calibrated, not true, on the tiltrotor, and the conversion
+            // corridor's maximum with the nacelles up (`tiltrotor.rs`).
+            structural_kt: Some(280.),
+            // Slice P5 (`powered/tiltrotor.rs`). The lever's blade pitch
+            // hovers the PT gross weight near 75 percent (design 5.5); the
+            // flight computers add the pitch the airspeed along the shaft
+            // needs, so the proprotor absorbs full power at cruise (the
+            // design's "about 50 degrees", reached in the linear thrust law
+            // as a scheduled pitch, not by the lever). The hub height is the
+            // mast: from the centre of gravity, which the nacelle pivots sit
+            // beside, out along the shaft to the hub. A gimballed hub, so
+            // little stiffness of its own.
+            collective_degrees: [0., 12.],
             cyclic_degrees: [8., 8.],
             blowback: 0.1,
             lock_number: 4.,
-            hub_height_ft: 0.,
-            hub_stiffness: 1.,
+            hub_height_ft: 8.,
+            hub_stiffness: 0.2,
             profile_drag: 0.008,
             ground_effect_constant: 2.7,
             vortex_ring_rise: 1.3,
             tail_rotor: None,
+            // The wing, tail and fin are the angle-of-attack wing's
+            // (`powered/aero.rs`); the fuselage keeps only its flat-plate
+            // drag, the forward area fitted to the published 275 kt.
             airframe: RotorcraftAirframe {
-                flat_plate_ft2: [30., 200., 500.],
+                flat_plate_ft2: [22.5, 200., 400.],
                 tail_pitch_ft3: 0.,
                 tail_trim_degrees: 0.,
                 fin_yaw_ft3: 0.,
@@ -720,19 +756,25 @@ const V22_CORRIDOR: [CorridorPoint; 7] = [
     },
 ];
 
+/// The V-22's nacelle travel, degrees (Pub W-V22, VM-V22).
+pub const V22_NACELLE_RANGE_DEGREES: f64 = 97.5;
+
 fn tiltrotor(id: AircraftId) -> Option<TiltrotorParameters> {
     (id == AircraftId::V22).then_some(TiltrotorParameters {
-        nacelle_range_degrees: 97.5,
+        nacelle_range_degrees: V22_NACELLE_RANGE_DEGREES,
         nacelle_rate_degrees_per_second: 8.,
         helicopter_nacelle_degrees: 87.,
         airplane_rotor_speed: 0.84,
-        rotor_speed_rate: 0.05,
+        rotor_speed_rate: 0.06,
         wing_stall_kt: 110.,
         wingborne_roll_degrees_per_second: 45.,
         aft_lock_kcas: 200.,
         gear_limit_kcas: 140.,
         wing_download: 0.1,
         corridor: &V22_CORRIDOR,
+        differential_collective_degrees: 2.,
+        differential_cyclic_degrees: 4.,
+        wingborne_roll_acceleration_degrees: 90.,
     })
 }
 
@@ -824,9 +866,7 @@ mod tests {
         // losses, below the engines' sum and above half of it.
         let hp = rotor(Mi24).rated_power_hp.unwrap();
         assert!((0.5 * 4_450. ..4_450.).contains(&hp), "{hp}");
-        for id in [Ah64, V22] {
-            assert_eq!(rotor(id).rated_power_hp, None, "{id:?}");
-        }
+        assert_eq!(rotor(Ah64).rated_power_hp, None);
         // The CH-47's is the CH-47F's two T55 at 4,733 shp less 8 percent,
         // per pound of weight: 15,000 lb of maximum weight in the fixture.
         let hp = rotor(Ch47).rated_power_hp.unwrap();
@@ -834,9 +874,12 @@ mod tests {
             (hp - 2. * 4_733. * 0.82 * (15_000_f64 / 54_000.).powf(1.5)).abs() < 1e-6,
             "{hp}"
         );
+        // The V-22's two AE 1107C at 6,150 shp, at the PT aircraft's share
+        // (slice P5).
+        let hp = rotor(V22).rated_power_hp.unwrap();
+        assert!((0.3 * 12_300. ..0.5 * 12_300.).contains(&hp), "{hp}");
         // The helicopters' overspeed rule uses their never-exceed speed
-        // (197, 190 and 190 kt); the tiltrotor keeps the envelope until its
-        // own slice sets one.
+        // (197, 190 and 190 kt); the tiltrotor's 280 is calibrated (slice P5).
         for id in [Ah64, Mi24, Ch47] {
             let rotor = rotor(id);
             assert_eq!(rotor.structural_kt, Some(rotor.never_exceed_kt), "{id:?}");
@@ -844,7 +887,7 @@ mod tests {
         assert_eq!(rotor(Ah64).structural_kt, Some(197.));
         assert_eq!(rotor(Mi24).structural_kt, Some(190.));
         assert_eq!(rotor(Ch47).structural_kt, Some(190.));
-        assert_eq!(rotor(V22).structural_kt, None);
+        assert_eq!(rotor(V22).structural_kt, Some(280.));
     }
 
     #[test]

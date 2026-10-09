@@ -11,7 +11,7 @@ pub use lift::{
     BodyParameters, CorridorPoint, HandlingTargets, JetParameters, LiftEngines, LiftKind,
     PoweredLift, RotorLayout, RotorParameters, RotorRotation, TiltrotorParameters,
 };
-pub use lift::{RotorcraftAirframe, StubWing, TailRotorParameters};
+pub use lift::{RotorcraftAirframe, StubWing, TailRotorParameters, V22_NACELLE_RANGE_DEGREES};
 #[derive(Clone, Debug, PartialEq)]
 pub struct VarietyFlightModel {
     pub id: AircraftId,

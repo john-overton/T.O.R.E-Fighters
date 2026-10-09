@@ -41,37 +41,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config.joined_native().is_err(),
                 "powered lift remains outside restricted native research"
             );
-            let weight = config.mass.empty_lbs + state.fuel;
-            let lapse = (-1000. / config.tuning.thrust_lapse_feet).exp();
-            // The jets hover on their nozzles' vertical efficiency and lift
-            // engines (VTOL overhaul slice P4); the others on the old law.
+            // Every one of the six hovers on its own physics, trimmed by the
+            // start module (VTOL overhaul slices P2 to P5 and P7).
             let jet = lift.jet;
-            let capacity = jet.map_or(
-                config.propulsion.military_thrust_lbf * lift.efficiency + lift.additional_lift_lbf,
-                |jet| {
-                    config.propulsion.military_thrust_lbf * jet.vertical_efficiency
-                        + jet.lift_engines.map_or(0., |e| e.thrust_lbf)
-                },
+            assert!(
+                state.trim_hover(),
+                "{} cannot hover at this mass",
+                aircraft.name
             );
-            let fraction = weight / (capacity * lapse);
-            let military = config.propulsion.military_thrust_lbf;
-            assert!(fraction < 1., "{} cannot hover at this mass", aircraft.name);
-            if let Some(jet) = jet {
-                let vertical = 90. / jet.nozzle_range_degrees;
-                state.throttle = fraction;
-                state.lift_controls.vector_pitch = vertical;
-                state.lift_controls.vector_pitch_actual = vertical;
-                state.lift_controls.drive.engine_output = [
-                    military * fraction * lapse,
-                    jet.lift_engines.map_or(0., |e| e.thrust_lbf) * fraction * lapse,
-                ];
-                state.lift_controls.drive.lift_engine_spool = f64::from(jet.lift_engines.is_some());
-            } else {
-                state.throttle = 1.;
-                state.lift_controls.collective = fraction;
-                state.lift_controls.collective_actual = fraction;
-            }
-            state.lift_controls.thrust_lbf = weight;
+            assert!(
+                jet.is_none() || state.throttle < 1.,
+                "{} cannot hover at this mass",
+                aircraft.name
+            );
             let mut copy = state.clone();
             run(&mut state, &Default::default(), 1200);
             run(&mut copy, &Default::default(), 1200);
@@ -119,16 +101,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 state.position[1] = 5000.;
                 state.pitch = 0.;
                 state.bank = 0.;
-                run(
-                    &mut state,
-                    &PilotInput {
-                        conversion_rate: -1.,
-                        vector_pitch_rate: -1.,
-                        throttle: Some(1.),
-                        ..Default::default()
-                    },
-                    480,
-                );
+                // The V-22's nacelles turn at 8 degrees a second and its corridor
+                // protection keeps them from running ahead of the airspeed:
+                // it needs a push forward until it flies (then a neutral stick)
+                // and half a minute.
+                let tiltrotor = lift.kind == LiftKind::Tiltrotor;
+                for _ in 0..if tiltrotor { 3600 } else { 480 } {
+                    let pushing = tiltrotor && state.speed < 70. * 1.687_81;
+                    run(
+                        &mut state,
+                        &PilotInput {
+                            conversion_rate: -1.,
+                            vector_pitch_rate: -1.,
+                            throttle: Some(1.),
+                            pitch: if pushing { -0.3 } else { 0. },
+                            ..Default::default()
+                        },
+                        1,
+                    );
+                }
                 assert!(state.position.iter().all(|v| v.is_finite()) && !state.crashed);
                 assert!(state.lift_controls.hover_fraction(lift.kind) < DT);
                 assert!(
