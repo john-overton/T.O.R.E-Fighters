@@ -509,6 +509,21 @@ fn messages_round_trip() {
 }
 
 #[test]
+fn the_lobbys_mission_locked_flag_round_trips_both_ways() {
+    for locked in [false, true] {
+        let mut lobby = samples::lobby();
+        lobby.mission_locked = locked;
+        let message = Message::Lobby(Box::new(lobby));
+        let bytes = message.encode().unwrap();
+        assert_eq!(
+            Message::decode(message.kind(), &bytes).unwrap(),
+            message,
+            "{locked}"
+        );
+    }
+}
+
+#[test]
 fn every_lobby_platform_round_trips_and_an_unknown_code_is_invalid() {
     use super::{Platform, WireError};
     let with = |platform: Platform| {

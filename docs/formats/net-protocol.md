@@ -1375,7 +1375,12 @@ host left the game (4); the King's End mission is reason 3.
   slots in plane order (a count, then each: plane
   varint, side 1 bit, wing 2, member 8, aircraft 6, a presence bit and the
   holder's id) and the King's settings (a count, then each a number of 8
-  bits and a varint value; none in phase 1).
+  bits and a varint value; none in phase 1) and, since protocol 20 (the
+  lobby pass's slice K1), one last bit: the mission is locked. A dedicated
+  server whose file says `king-mission locked` sets it; a game a player
+  hosts never does. The lobby screen then opens the King's Mission... read
+  only, with "This server's mission is fixed.". The host's refusals of the
+  King's mission and settings changes are unchanged.
 - **Refused** is the request's kind (8 bits) and the reason (a string).
   **Goodbye** is 2 bits (kicked 0, then the reason as a string; the host
   left 1). **Flight loadouts** is a count, then each plane (varint) and its

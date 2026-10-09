@@ -163,6 +163,7 @@ pub(crate) fn sample(you: u8) -> LobbyState {
         slots: slots(&[(0, 1), (1, 2)]),
         settings: tore_session::settings::Store::defaults(tore_session::settings::Mode::Coop)
             .lobby_list(),
+        mission_locked: false,
     }
 }
 

@@ -62,6 +62,9 @@ const AS_THE_KINGS: &str = "as the King's";
 pub const VIEW_REFUSAL: &str = "Only the King changes the mission.";
 /// Said when the King opens the creator while the mission flies.
 pub const VIEW_FLYING: &str = "The mission can change only in the lobby.";
+/// Said when the King opens the creator on a server whose mission is locked
+/// (`king-mission locked`).
+pub const VIEW_FIXED: &str = "This server's mission is fixed.";
 /// Said when the read-only creator opens.
 pub const VIEW_NOTICE: &str = "View only: this is the lobby's mission. Back returns to the lobby.";
 /// Said when the read-only creator redraws from a new mission.
@@ -74,6 +77,8 @@ pub enum ViewKind {
     Reader,
     /// The King, while the mission flies.
     Flying,
+    /// The King, on a dedicated server whose file locks the mission.
+    Fixed,
 }
 
 impl ViewKind {
@@ -82,6 +87,7 @@ impl ViewKind {
         match self {
             Self::Reader => VIEW_REFUSAL,
             Self::Flying => VIEW_FLYING,
+            Self::Fixed => VIEW_FIXED,
         }
     }
 }
@@ -984,6 +990,7 @@ impl QuickMission {
             self.notice = Some(match kind {
                 ViewKind::Reader => VIEW_NOTICE.into(),
                 ViewKind::Flying => format!("{VIEW_NOTICE} {VIEW_FLYING}"),
+                ViewKind::Fixed => format!("{VIEW_NOTICE} {VIEW_FIXED}"),
             });
         }
         Ok(())
@@ -1258,6 +1265,8 @@ impl QuickMission {
         }
         let kind = if name.ends_with("-flying") {
             ViewKind::Flying
+        } else if name.ends_with("-locked") {
+            ViewKind::Fixed
         } else {
             ViewKind::Reader
         };
@@ -1315,7 +1324,8 @@ impl QuickMission {
             | "lobby-creator-view-gaps"
             | "lobby-creator-view-click"
             | "lobby-creator-view-changed"
-            | "lobby-creator-view-flying" => self.preview_view(name)?,
+            | "lobby-creator-view-flying"
+            | "lobby-creator-view-locked" => self.preview_view(name)?,
             "lobby-ordnance" | "lobby-ordnance-refused" | "lobby-ordnance-cheat" => {}
             "lobby-ordnance-gaps" => {
                 if let Some(ordnance) = &mut self.ordnance {
@@ -3370,6 +3380,16 @@ mod tests {
         q.open_lobby_mission(&spec, Some(ViewKind::Flying)).unwrap();
         q.activate(17);
         assert_eq!(q.notice.as_deref(), Some(VIEW_FLYING));
+    }
+    #[test]
+    fn the_kings_view_on_a_locked_server_says_the_missions_fixed() {
+        let spec = MissionSpec::new("UKR", AircraftId::F18);
+        let mut q = lobby_creator();
+        q.open_lobby_mission(&spec, Some(ViewKind::Fixed)).unwrap();
+        assert!(q.notice.as_deref().unwrap().ends_with(VIEW_FIXED));
+        q.activate(17);
+        assert_eq!(q.notice.as_deref(), Some(VIEW_FIXED));
+        assert_eq!(q.activate(CANCEL), Action::Back);
     }
     #[test]
     fn what_the_mission_does_not_carry_reads_as_the_kings_and_a_new_mission_redraws() {

@@ -167,7 +167,7 @@ start, so a typo never passes silently.
 | `telemetry` | `on` | While broadcasting, send the master anonymous statistics at the end of each mission (John, 2026-10-05: on by default); `off` sends none |
 | `port-mapping` | `off` | `on` asks the router to forward the game port when the server starts, by UPnP, NAT-PMP or PCP, and removes it when the server stops ([ports](#ports-and-firewalls)). Off by default, since a server's port is normally forwarded by its owner |
 | `king` | `none` | `first-player`: the first player to join wears the crown, and when the King leaves the longest-connected player does; the King changes the mission and the settings below, locks slots, starts, ends, kicks and passes the crown ([the King](#the-kings-settings-and-a-king)). `none` (John, 2026-10-05: the default): nobody is King |
-| `king-mission` | `open` | `locked`: the King may not change the mission or the settings; start, kick, slot locks and the crown still work. Needs `king first-player` |
+| `king-mission` | `open` | `locked`: the King may not change the mission or the settings; start, kick, slot locks and the crown still work. The lobby tells every player, so the King's Mission... opens read only with "This server's mission is fixed." (protocol 20). Needs `king first-player` |
 
 The King's settings ([architecture](ARCHITECTURE.md#the-kings-settings)) take
 the same names in the file, so a server without a King can still run a PvP game
