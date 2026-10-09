@@ -156,6 +156,8 @@ fn side_requests_are_refused_in_co_op_and_while_the_host_balances_the_sides() {
     assert!(rig.refused(viper, kind::SLOT, SIDES_PVP_ONLY));
     assert_eq!(slot(&rig, viper), None);
 
+    // Autobalance (slice A1) seats Viper on Bluefor as it joins: its own
+    // side is no change, the other is refused.
     let mut rig = pvp(2, 2, &[(number::LOCK_SIDES, 2)]);
     let viper = rig.join("Viper");
     rig.gather(&[viper]);
@@ -168,8 +170,8 @@ fn side_requests_are_refused_in_co_op_and_while_the_host_balances_the_sides() {
         .iter()
         .filter(|(k, r)| *k == kind::SLOT && r == SIDES_BALANCED)
         .count();
-    assert_eq!(balanced, 2, "{:?}", rig.refusals(viper));
-    assert_eq!(slot(&rig, viper), None);
+    assert_eq!(balanced, 1, "{:?}", rig.refusals(viper));
+    assert_eq!(slot(&rig, viper), Some(0));
 }
 
 #[test]

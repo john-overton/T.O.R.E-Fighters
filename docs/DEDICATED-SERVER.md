@@ -179,7 +179,7 @@ or a delayed observer. Each value is one of the setting's words or a number:
 | `join-in-progress` | `on` | `off` refuses every seating once the mission has flown its first tick |
 | `visibility` | `local` | `local` answers the local network's search, `hidden` does not; a server lists itself on the Internet Lobby only with `broadcast on`, so `public` is refused |
 | `friendly-fire` | `on` | `off`: no round damages an aircraft of its shooter's side |
-| `lock-sides` | `off`, `on` | PvP only. `on` keeps each player on the side of the first plane it flew in a mission; `balanced` (Autobalance, John 2026-10-09) has the host pick each player's side, refuses the players' own choice of side and keeps the sides fixed in flight (*in progress:* the file and the lobby take it and it refuses the side boxes; the host's seating rule is not built yet); `off` lets players change side |
+| `lock-sides` | `off`, `on` | PvP only. `on` keeps each player on the side of the first plane it flew in a mission; `balanced` (Autobalance, John 2026-10-09) has the host seat each player on the side with fewer humans, refuses the players' own choice of side and keeps the sides fixed in flight ([the rule](ARCHITECTURE.md#autobalance-as-built-a1)); `off` lets players change side |
 | `loadouts` | `own` | `any` allows the loadout page's Cheat loading |
 | `respawn` | `none`, `revive` | `none`, `ai-slot` or `revive` |
 | `lives` | `unlimited` | 0 to 10 or `unlimited` |

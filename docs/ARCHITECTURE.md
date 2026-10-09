@@ -5926,11 +5926,59 @@ of the game. Phase 2 separates the two roles the guide already names:
 - **Lock sides** keeps each player on the side of the first plane it flew in
   this mission: taking a plane or a revival on the other side is refused, "Sides
   are locked until the mission ends."
+- **Autobalance** (lock sides' third value, `balanced`; John 2026-10-09):
+  the host gives each player its side and players cannot change it. The rule
+  is in [Autobalance as built](#autobalance-as-built-a1).
 - **Max players** lowers or raises the capacity the handshake checks (the
   lesser of it and the open slots, as built); the password and the visibility
   apply to the next joins and the next search answers: `hidden` answers no
   search, `local` answers the local network's, and the lock shows whenever a
   password is set.
+
+##### Autobalance as built (A1)
+
+*Built (the lobby pass, slice A1, 2026-10-09)* in `host/balance.rs`, from
+the plan's rule; John's rules are marked, everything else is an agent
+decision. Nothing is kept beyond the lobby's slots and lock sides' record of
+the side each player first flew, so exact checkpoints carry nothing new.
+
+- **Who counts** (per side): every human holding a slot in the lobby, or
+  taking or flying a plane; in flight also a player back in the lobby whose
+  first plane fixed its side. Observers and players whose game cannot play
+  the mission are neither counted nor seated.
+- **Seating.** A player without a slot goes to the side with fewer humans
+  (John); on a tie, the side with more slots free to it; on a tie, Bluefor.
+  A side with no free slot is skipped, so uneven sides fill (John): with 2
+  Bluefor and 10 Redfor slots six players sit 2 and 4. It takes that side's
+  lowest-numbered free slot, not ready, and is told "Autobalance put you on
+  Redfor." A player who fits nowhere (every slot held, closed or kept for
+  someone else) waits without a slot, told "Both sides are full." once as it
+  joins, and is seated when a slot frees. The host seats before every lobby
+  state goes out, so a joiner's first lobby state shows its slot.
+- **Players cannot change side** (John): a side request or a slot of the
+  other side is refused "Autobalance picks the sides.", and so is leaving
+  the slot (it would only seat the player again). A free slot of its own
+  side is still the player's to take, and stage D's Ready naming a plane of
+  the other side is refused, so such a game asks for any plane: its own.
+- **Turning it on** (in the lobby, as every lobby setting) re-deals with the
+  fewest moves: players without a slot are seated first; then, while one side
+  has two humans or more than the other, a player of the larger side moves to
+  the smaller side's lowest free slot, the most recently joined first, the
+  King and the house last (John: the King moves last; only when nobody else
+  can). A mover is told "Autobalance moved you to Redfor." and loses its
+  ready mark, and its loadout when the new slot's aircraft differs. Unlike
+  any other change of lock sides, the ready marks of players who did not
+  move stand. Turning it off clears every ready mark, as before.
+- **A player leaving** moves nobody (John): the next joiner goes to the
+  smaller side, and the King re-deals by turning Autobalance off and on.
+- **A mission change** keeps the slots that survive it, whatever side they
+  are now; a player it frees is seated again by the rule.
+- **In flight** a late joiner is seated the same way on a free AI aircraft
+  of the side, for Join; a waiting joiner whose aircraft is no longer free
+  (the AI lost it, say) is seated again by the rule. A player whose first plane fixed its side keeps it, as
+  lock sides does, and its revivals follow lock sides' rule. With join in
+  progress off nobody new is seated.
+- **Co-op** has no Autobalance: setting 7 is PvP only.
 
 ##### Loadout rule, friendly fire and realism
 
