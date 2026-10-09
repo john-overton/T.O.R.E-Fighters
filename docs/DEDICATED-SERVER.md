@@ -179,7 +179,7 @@ or a delayed observer. Each value is one of the setting's words or a number:
 | `join-in-progress` | `on` | `off` refuses every seating once the mission has flown its first tick |
 | `visibility` | `local` | `local` answers the local network's search, `hidden` does not; a server lists itself on the Internet Lobby only with `broadcast on`, so `public` is refused |
 | `friendly-fire` | `on` | `off`: no round damages an aircraft of its shooter's side |
-| `lock-sides` | `off`, `on` | PvP only. `on` keeps each player on the side of the first plane it flew in a mission; `balanced` (Autobalance, John 2026-10-09) has the host seat each player on the side with fewer humans, refuses the players' own choice of side and keeps the sides fixed in flight ([the rule](ARCHITECTURE.md#autobalance-as-built-a1)); `off` lets players change side |
+| `lock-sides` | `off`, `on` | PvP only (refused in co-op). `off` lets players choose and change side; `on` (locked once flown) keeps each player on the side of the first plane it flew in a mission; `balanced` (Autobalance, John 2026-10-09) has the host seat each player on the side with fewer humans, refuses the players' own choice of side and keeps the sides fixed in flight ([the rule](ARCHITECTURE.md#autobalance-as-built-a1)). The lobby calls the setting Sides |
 | `loadouts` | `own` | `any` allows the loadout page's Cheat loading |
 | `respawn` | `none`, `revive` | `none`, `ai-slot` or `revive` |
 | `lives` | `unlimited` | 0 to 10 or `unlimited` |
@@ -360,8 +360,9 @@ it changes. The design is the architecture's
 [lobby](ARCHITECTURE.md#the-lobby); a game a player hosts has a King, a
 dedicated server has none. *The dedicated server's rules, agent decisions:*
 
-- **The mission** is the mission file's, always: nobody can change it. A
-  player whose import cannot play it is told why and stays connected in the
+- **The mission** is the mission file's, always: nobody can change it, and
+  every player's **Mission...** button shows it read only (the lobby pass,
+  John 2026-10-09). A player whose import cannot play it is told why and stays connected in the
   lobby, marked unable, and cannot take a slot.
 - **Slots** are the planes `open-planes` opens (every friendly plane by
   default, every plane with `mode pvp`), one player a slot, held from the lobby across missions until the
@@ -414,7 +415,10 @@ player sees them in the lobby. With `king first-player` (John, 2026-10-05):
   crown.
 - **`king-mission locked`** keeps the file's mission and settings: the King's
   changes are refused "This server's mission and settings are its
-  operator's."; start, kick, slot locks and the crown still work.
+  operator's."; start, kick, slot locks and the crown still work. The lobby
+  tells every player (protocol 20, slice K1), so the King's Mission... opens
+  the read-only page, "This server's mission is fixed.", instead of an editor
+  whose Accept would be refused.
 - **Empty again.** Once the last player has been gone for the `empty-timeout`
   and the server is in its lobby, it goes back to its file's mission and
   settings and opens every slot, so a public server does not keep a
@@ -712,7 +716,13 @@ mission's end, every chat line a player sends (*built, EF6*: `chat: Viper to
 friendlies (2 heard): Form up`, with the sender, the receiver and how many
 others heard it; a line the host refuses is a refusal line), what each
 player's import holds and what not everyone can use (*built, L3*: below),
-and once a minute each player's figures: the same round trip,
+the lobby pass's lines about the AI and the lead (*built, R1 and R2*: "Red
+2-3 lost plane 7: the AI respawns it in 0:30", "Red 2-5 respawned in plane 14
+at its original spawn, x 81.2 nm, z 40.0 nm", "waits for room to respawn", "no
+lives left"; "Blue 1 lead belongs to Viper", "passes to plane 1 (AI), standing
+in for Viper", "goes back to Viper in plane 12", "has no owner now"; and
+Autobalance's seating, "Alpha took the slot of plane 6"), and once a minute
+each player's figures: the same round trip,
 loss, snapshot arrival spread, input margin, inputs repeated and bytes each
 way that a player's game writes to its own
 [diagnostics log](ARCHITECTURE.md#recordings-and-diagnostics).

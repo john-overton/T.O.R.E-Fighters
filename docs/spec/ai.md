@@ -510,6 +510,36 @@ plane for it), or flying back after a revival. Single player, and a game with
   wingman of the current lead, so the loop goes on for as long as the
   mission does.
 
+### AI respawn in networked games
+
+**Opinionated: the rules are John's of 2026-10-09 (the lobby pass); the
+2,000 ft step back, the room rule and the retiring of AI wrecks are fitted
+or agent decisions, recorded in the
+[architecture guide](../ARCHITECTURE.md#death-revival-and-lives).** In a
+networked game, co-op or PvP, whose respawn rule is not `none` and whose King
+has AI respawn on (the default), a lost AI aircraft that no player holds comes
+back. Single player never respawns.
+
+- **When.** After the same delay as a human's revival, and while the original
+  aircraft's lineage has lives left (lives count per original aircraft, since
+  an AI aircraft has no player; unlimited by default). A delay of 0 respawns on
+  the next tick. An aircraft the AI flies for an away or dropped player is that
+  player's own revival, not an AI respawn.
+- **Where.** At the flight's original spawn point (the aircraft's own start
+  position and heading), not near the lead and not at the revival distance. If
+  a living aircraft is within 2,000 ft of the point, the point steps back 1 nm
+  along the reverse of the heading, up to five times, and never off the map.
+- **What.** The same aircraft with full fuel, the loadout the lobby gave that
+  slot (else the standard load) cut by the revival weapons setting, the
+  flight's own skill and the flight's orders. It gets a fresh decision stream
+  of its own.
+- **Joining the flight.** It is the flight's last wingman: it takes the lowest
+  formation slot no living wingman holds (never above slot 9) and flies to its
+  lead; a flight in a mission of opportunity gives it free engagement like the
+  rest. Its member number is one past the flight's highest, so it is last in
+  line for the lead.
+- **Silent.** No radio call and no HUD line for an AI respawn.
+
 ### Mission of opportunity after a lost human leader
 
 **Opinionated: the rule is John's of 2026-09-30; every number and edge below

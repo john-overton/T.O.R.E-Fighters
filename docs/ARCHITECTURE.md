@@ -5219,7 +5219,10 @@ it starts as its `start` setting says. *Agent decisions.*
   its game said it runs on when it joined: Windows, macOS, Linux or unknown,
   John 2026-10-05), and the slots: the planes open to
   players (every friendly plane by default; a server's `open-planes`), each
-  with its wing, member, aircraft and holder. A slot is held without seating
+  with its wing, member, aircraft and holder, the King's settings and, since
+  protocol 20, whether the mission is locked (a server's `king-mission locked`,
+  which the lobby screen turns into a read-only Mission..., see "The creator
+  read only" below). A slot is held without seating
   anyone; one holder a slot. The state goes out only when something changed,
   and changes in quick succession go together: a player in the lobby gets at
   most one state every 250 ms, a flying one at most one a second, since its
@@ -5372,27 +5375,28 @@ Messages, and the search starts again. The window title reads "Lobby".
 | Element | Place | Notes |
 | --- | --- | --- |
 | Game, Rules | two lines at (45, 102) and (45, 115) | The game's name; the King's settings in a line (the lobby pass, John 2026-10-09, removed the Mission line and the start rule line: the mission is read on Mission..., and the rule moved into the ready hint) |
-| Slots | heading (45, 140); frame (40, 164), 335 by 97; list (45, 168), 286 wide, five rows, scrolling; red scroll bar at (336, 168) | Own mark, "Wing 1 #3", aircraft, holder or AI, the holder's ready tick. Another player's slot is dimmed, your own green with the blue arrow. Room is kept on the heading's row, x 100 to 375 and y 128 to 156, for slice L3's PvP side boxes |
+| Slots | heading (45, 140); frame (40, 164), 335 by 97; list (45, 168), 286 wide, five rows, scrolling; red scroll bar at (336, 168) | Own mark, "Wing 1 #3" ("Blue 1 #3" and "Red 1 #3" in PvP), aircraft, holder or AI, the holder's ready tick. Another player's slot is dimmed, your own green with the blue arrow (in PvP the colours below). In PvP the Bluefor and Redfor check boxes sit on the heading's row (lamps at (100, 128) and (215, 128), labels at y 140, inside x 100 to 375 and y 128 to 156) |
 | Players | heading (380, 140); box (380, 165), 224 by 95; list (384, 168), 186 wide, five rows, scrolling; red scroll bar at (570, 168) | Crown (the King), house (the machine that runs the game), ready tick or red cross (unable), callsign (your own row green), status word (Armed, Ready, Flying, Unable, Slot) |
 | Hint line | (45, 266) | What to do next, or the reason a selected player is unable |
 | Messages and chat line | box (45, 294), 549 by 78, red scroll bar flush right inside; line (45, 377), 549 by 18 | EF6's `LobbyChat`: the game's words and chat in the Messages colours |
 | Ready hint | (45, 400), dim face, up to 549 wide | What this player does next so the King can start: "Press Ready so the King can start the mission.", "You are ready. The King starts the mission with Fly.", "Press Fly when everyone holding a slot is ready.", and the flying, server and cannot-play variants (`facts::ready_hint`) |
-| Buttons | y 419, 85 wide, places at x 45, 138, 231, 324, 417, 510 | King: Mission..., Loadout, Ready, Kick, Fly, Leave. Everyone else: Loadout, Ready, Leave in the last three places |
+| Buttons | y 419, 75 wide on a 79 pitch, seven places at x 45, 124, 203, 282, 361, 440, 519 | King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Everyone else: Mission..., Settings..., Loadout, Ready, Leave in the last five places (Leave is always last) |
 
 **Who may press what** (`facts::buttons`, tested):
 
 | Button | Offered to | Enabled when |
 | --- | --- | --- |
-| Mission... | the King (never on a server) | connected, mission not flying |
-| Loadout | everyone | a slot is held, the player's game can play the mission, mission not flying |
+| Mission... | everyone (lobby pass, John 2026-10-09) | connected, in every phase. The King in the lobby edits (the creator); everyone else, and the King while the mission flies or on a server whose mission is locked, reads the same page ("The creator read only", below) |
+| Settings... | everyone | connected; the rows are greyed unless the King's ([the lobby panels](#the-lobby-panels-as-built-f2-l)) |
+| Players... | the King | a player other than the King is selected in Players (gives the crown or kicks) |
+| Loadout | everyone | a slot is held, the player's game can play the mission, mission not flying; reads **Watch** while the mission flies |
 | Ready | everyone | a slot is held, the game can play the mission, not flying; reads **Not Ready** when ready and **Join** while the mission flies |
-| Kick | the King | a player other than the King is selected in Players |
 | Fly | the King | every player holding a slot is ready (and one holds one); reads **End Mission** while the mission flies and ends it for everyone (a King who never joined the flight would otherwise have no way to stop it) |
 | Leave | everyone | always |
 
 A button that cannot be pressed stays drawn disabled; clicking it says why in
 Messages ("Not ready: Hawk, Viper.", "Nobody holds a slot.", "Take a slot
-first.", "Select another player in Players to kick.", the unable reason). Fly's
+first.", "Select another player in Players first.", the unable reason). Fly's
 text for the unready is the host's own ("Not ready: ..."). The blue default
 button, and so Enter (in the chat line only when it is empty), is Fly when it
 can be pressed, else Ready once a slot is held and not marked.
@@ -5419,8 +5423,9 @@ connected, slots and loadouts kept (the Players list shows Armed again) and
 ready cleared. The King's End Mission ends it for everyone; a joiner's returns
 that player alone.
 
-**A dedicated server's lobby** has no King: no Mission..., Kick or Fly, the
-crown column is empty, and the start rule is in the head. Leave never asks.
+**A dedicated server's lobby** has no King (unless its file says `king
+first-player`): no Players... or Fly, the crown column is empty, Mission... is
+read only, and the start rule is in the ready hint. Leave never asks.
 
 **The creator in Accept mode** (the King's Mission...). The single-player
 creator opened on `Screen::Quick` with `QuickMission::lobby` set: its OK button
@@ -5437,6 +5442,51 @@ the creator's notice and stays. Cancel or Esc puts the draft back as it was
 and sends nothing. Single player's creator is unchanged (the flag is off:
 its OK, its Start, its notice and its drawing are as before, and a test covers
 both).
+
+**The creator read only (L4 and K1).** *Built (the lobby pass, slices L4 and K1,
+2026-10-09; John's D4 and the locked-server decision, the rest agent
+decisions).* Mission... is every player's button, and `creator_view` in
+`lobby_screen/app.rs` picks the page's kind: the King in the lobby edits (no
+view kind); anyone else, and a server's lobby, reads (`ViewKind::Reader`); the King while the
+mission is not in the lobby reads (`ViewKind::Flying`, click words "The mission
+can change only in the lobby."); and the King of a server whose lobby says
+`mission_locked` reads (`ViewKind::Fixed`, "This server's mission is fixed."),
+which wins over `Flying` since the lock is the lasting reason.
+
+- **Built from the lobby's mission.** `Draft::from_spec(spec, &QuickMission)`
+  reads a `MissionSpec` back into a draft: the theater, altitude, weather,
+  separation, load, guns only, every wing's count, skill and aircraft, the
+  objectives and the survival flags. It takes the creator for its lists (a
+  draft holds indexes into them) and is strict: an aircraft this game lacks, a
+  count past the list, an unknown theater or distance is an error.
+  `QuickMission::load_spec(spec, exact)` also sets the groups' orders and the
+  mission-wide setting; with `exact` false it keeps values the lists cannot hold
+  (`shown`), which the view draws as they are (a missing aircraft by its label,
+  dimmed; a count past the list as the number). A ground start reads as
+  airborne, as the lobby never has one. `from_spec` then `lobby_spec` returns
+  the same spec for every spec the creator can make, tested over 400 generated
+  specs and every value of every choice.
+- **The page.** "View only" at the right of the title bar; OK's place reads
+  Back and there is no Cancel; Enter, Esc and Back close it; any left or right
+  click on a field (the era filter too) puts the kind's words in the notice
+  box; the help menu still works. The nationalities and the situation, which
+  the spec does not carry, read "as the King's", dimmed in a darker well (the
+  lists' gap tint is the same grey as a field and would not show). Items the
+  reader's import lacks keep the stage L gap tint. The page keeps the spec it
+  shows: when the client's spec differs it reloads and says "The King changed
+  the mission."
+- **The King's editor opens on the lobby's mission**, not on the King's last
+  single-player draft, which fixes a King who received the crown editing a
+  stale one. The player's own single-player draft is put back on close, so the
+  lobby's mission never overwrites it. Accept lays the creator's fields over
+  the lobby's spec (`QuickMission::lay_over`): the cheats, weather overrides
+  and flight models of the lobby's mission stay, and loadouts are cleared.
+- **Locked servers.** The flag is one bit at the end of the lobby message,
+  set by the host from `config.mission_locked` (a dedicated server's
+  `king-mission locked`; a hosted game never sets it). The King's notice on
+  opening reads "View only: this is the lobby's mission. Back returns to the
+  lobby. This server's mission is fixed.". The host's refusals of a King's
+  mission and settings changes are unchanged.
 
 **Load Ordnance in lobby mode** (Loadout). The single-player page for the
 aircraft of the held slot (`Ordnance::lobby`): Fly reads **Accept** and Select
@@ -5935,12 +5985,16 @@ of the game. Phase 2 separates the two roles the guide already names:
 - **Join in progress off** refuses every seating after the mission's first
   tick, except a player's own revival: "This game takes no new pilots once the
   mission flies." Players in the lobby watch instead. On, the EF4 rules stand.
-- **Lock sides** keeps each player on the side of the first plane it flew in
-  this mission: taking a plane or a revival on the other side is refused, "Sides
-  are locked until the mission ends."
-- **Autobalance** (lock sides' third value, `balanced`; John 2026-10-09):
-  the host gives each player its side and players cannot change it. The rule
-  is in [Autobalance as built](#autobalance-as-built-a1).
+- **Sides** (setting 7, `lock-sides`; PvP only since the lobby pass) has three
+  values. `off`: players choose and change side freely. `on`, **locked once
+  flown**: each player stays on the side of the first plane it flew in this
+  mission, and taking a plane or a revival on the other side is refused, "Sides
+  are locked until the mission ends." `balanced`, **Autobalance** ([the rule](#autobalance-as-built-a1)): the host
+  gives each player its side and players cannot change it (John 2026-10-09).
+  The lobby screen shows the side as the Bluefor and Redfor check boxes ([PvP
+  sides in the lobby](#pvp-sides-in-the-lobby-as-built-l3)); the wire's
+  request for a side's first free slot is in
+  [side requests](formats/net-protocol.md#side-requests).
 - **Max players** lowers or raises the capacity the handshake checks (the
   lesser of it and the open slots, as built); the password and the visibility
   apply to the next joins and the next search answers: `hidden` answers no
@@ -6294,6 +6348,33 @@ build settled, each an agent decision unless the design above says it:
   the new one, as a player who joins again does, and every copy of the
   mission the game builds gets the spawned planes.
 
+**How the lobby pass's pieces fit.** Revival, AI respawn and the lead hold
+share one book, the lineages, and one rule for who owns a lost aircraft. The
+host decides *when* (it owns the clocks, the lives and the room); the world
+does the work through journaled mission commands, so a standby replays them;
+the AI mission only ever sees a leader and a claim.
+
+```mermaid
+flowchart TD
+    H[Host each tick: host/revive.rs] -->|a human's lost plane| R[MissionCommand::Revive]
+    H -->|an AI lineage's delay has passed, lives left, room| S[MissionCommand::Respawn]
+    H -->|hold on while respawn is not none| LH[MissionCommand::LeadHold]
+    H -->|an owner no player holds| LL[MissionCommand::LeadLeft]
+    R --> W[World: revive.rs]
+    S --> W
+    LH --> LHW[World: lead_hold.rs]
+    LL --> LHW
+    W -->|new plane in the lineage| AW[AiWings::insert_new, insert_actor]
+    LHW -->|claims, before each AI step| AM[AiMission::refresh_leaders]
+    AW --> AM
+    AM -->|leader, acting, reclaimed| HUD[HUD lines, log]
+```
+
+The three rules are: a **human's** lost plane is the human's revival; an AI
+plane nobody holds is the AI's **respawn**; and a human **lead** keeps the lead
+while its plane is lost. Single player never turns any of it on (no host, no
+lead hold, no respawn), so its fingerprints do not move.
+
 **AI respawn** (the lobby pass's slice R1, *built 2026-10-09*; John's rules
 of 2026-10-09: AI respawn applies in co-op and PvP, under the same lives and
 delay as humans, at the flight's original spawn point, joining the flight as
@@ -6377,7 +6458,35 @@ on revival; when the lead leaves the game it goes to the next human in the
 flight, else the AI loop goes on; AI wingmen re-form on a returning lead
 unless engaged in combat, and engaged ones finish their fight first). The
 behaviour is in the [AI spec](spec/ai.md#lead-hold-in-games-with-revival);
-the rest is agent decisions unless marked:
+the rest is agent decisions unless marked. A wing is in one of four states
+(the owner is the human who holds the flight's lead, the stand-in the member
+that leads while the owner is out):
+
+```mermaid
+flowchart TD
+    AI(["AiLed"]) -->|"lead lost, a human in the flight is flying"| HU(["HumanLed"])
+    AI -->|"lead lost, the humans only wait to revive"| HE(["HeldLead"])
+    AI -->|"lead lost, nobody flying, no human"| EM(["Empty"])
+    AI -->|"a human takes the leading plane"| HU
+    HU -->|"owner's plane lost, or owner leaves and the next human waits"| HE
+    HE -->|"owner's new plane joins, or owner leaves and the next human flies"| HU
+    HU -->|"owner leaves, no other human"| AI
+    HE -->|"owner leaves, no other human"| AI
+    EM -->|"the first AI respawn arrives"| AI
+    EM -->|"a human revives into the flight"| HU
+```
+
+The loops are not drawn. In `AiLed` a lost lead passes to the next AI member
+by member number. In `HeldLead` a lost stand-in passes to the next stand-in
+(a human first). In `HumanLed` an owner who leaves while the next human flies
+makes that human the new owner, and an owner who is away (the AI flies the
+same plane) is kept. When the owner leaves with no other human in the flight,
+the AI keeps the plane and the lead (`HumanLed`) or the stand-in becomes the
+ordinary lead (`HeldLead`).
+
+With `respawn none` the hold is off and "Lead succession" above applies
+unchanged: a lost human never returns, so holding the lead would strand the
+flight.
 
 - **On and off.** The host turns the mission core's hold on
   (`MissionCommand::LeadHold { on }`, journal variant 7) while the King's
@@ -7276,13 +7385,15 @@ build settled:
 
 - **Buttons.** The King: Mission..., Settings..., Players..., Loadout, Ready,
   Fly, Leave, seven at 75 wide on a 79 pitch across the 549-wide row. Everyone
-  else: Settings..., Loadout, Ready, Leave. While the mission flies Loadout
-  reads **Watch**.
+  else: Mission... (read only), Settings..., Loadout, Ready, Leave in the last
+  five places (the lobby pass; before it Mission... was the King's). While the
+  mission flies Loadout reads **Watch**.
 - **Settings...** opens a panel over the lobby with the registry's rows as the
   creator's text buttons (left click forward, right click back), on four pages
   behind the rocker: Game (mode, players, join in progress, visibility, password,
-  friendly fire, lock sides, loadouts, idle aircraft, observer delay), Revival
-  (respawn, lives, delay, distance, weapons), Scoring (fight, tally, time limit,
+  friendly fire, sides (Free, Locked once flown, Balanced by the host; PvP only),
+  loadouts, idle aircraft, observer delay), Revival
+  (respawn, AI respawn, lives, delay, distance, weapons), Scoring (fight, tally, time limit,
   kill limit, kill owner) and Realism (the mission's cheats). Every player sees
   it; for anyone but the King every row is greyed, as retail greys a client's
   settings. A row that does not apply (scoring in co-op) is greyed for the King
@@ -7292,9 +7403,10 @@ build settled:
 - **Slot locks.** The King's right click on a slot cycles open and closed;
   with a player selected in Players it reserves the slot for that player. A
   closed slot reads "Closed (AI)", a reserved one "Reserved: Hawk".
-- **The head line** summarises the settings in words under the start rule:
+- **The head line** (the Rules line) summarises the settings in words:
   "Co-op, friendly fire on, no revival" or "PvP by sides, 5 kills or 10
-  minutes, revival with unlimited lives".
+  minutes, revival with unlimited lives, sides locked". It sat under the start
+  rule until the lobby pass moved the rule into the ready hint.
 
 ##### The lobby panels as built (F2-L)
 
@@ -7305,8 +7417,8 @@ otherwise.
 
 - **The seven buttons.** The King: Mission..., Settings..., Players...,
   Loadout, Ready, Fly, Leave, 75 wide on a 79 pitch from x 45; everyone else:
-  Settings..., Loadout, Ready, Leave in the last four places (Leave is always
-  in the last). **Kick** moved from its own button into the Players panel, as
+  Mission... (read only since the lobby pass), Settings..., Loadout, Ready,
+  Leave in the last five places (Leave is always in the last). **Kick** moved from its own button into the Players panel, as
   the design says. Settings... is for everyone while the lobby's state is
   here; Players... is the King's, enabled when a player other than the King's
   own row is selected in Players ("Select another player in Players first."
@@ -7327,8 +7439,8 @@ otherwise.
   listed value in the direction asked. The Game page is the game's name and
   the password as two text lines (the King's: type, press Enter; an empty
   password line with a password set takes it away), then game type, players,
-  join in progress, who can find it, friendly fire, lock sides, loadouts, how
-  long before the AI flies an idle aircraft, the snapshot rate (slice R1:
+  join in progress, who can find it, friendly fire, sides (Lock sides until the
+  lobby pass), loadouts, how long before the AI flies an idle aircraft, the snapshot rate (slice R1:
   read-only on a dedicated server) and the Host row (observer delay moved to
   the Scoring page in R1, with the other PvP-only rows).
 - **Greying** (`settings_panel::row_state`, tested for every row): for anyone

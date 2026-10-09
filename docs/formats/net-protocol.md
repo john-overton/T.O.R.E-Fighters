@@ -149,7 +149,7 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (19), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (20), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
 | Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
@@ -1660,7 +1660,6 @@ value's coding. The names are the configuration file's and the logs'.
 | 20 | `idle-ai` | seconds: 0 never, 60, 120, 300 or 600 (default 300; John, 2026-10-06, slice F2-O4; no wire change: the value is the same u32, only its list and default moved) |
 | 21 | `host` | 0 calculated, or 1 plus the lobby id of the player the King pinned (stage K, [designed](#host-migration-and-rejoin-stage-k)) |
 | 22 | `snapshot-rate` | snapshots a second: 60, 30 or 20 from the King of a game a player hosts (default 60); a dedicated server's file may give 10, 12, 15, 20, 24, 30, 40 or 60, which the lobby state carries as given and the King may not change (slice R1, protocol 17: [what the rate sets](#connecting)) |
-
 | 23 | `ai-respawn` | 0 off, 1 on (default on in both modes): a lost AI aircraft respawns under the revival rules; no effect while `respawn` is none (protocol 20; John, 2026-10-09; the respawn itself is the lobby pass's slice R1) |
 
 A number the host does not know, or a value outside its list, is refused with
@@ -2319,7 +2318,14 @@ again with an observer; the capture format did not change for it.
   hover hold as switch 11, and the aircraft record's rotor group, 20 since
   the lobby pass: the Slot request's [side](#side-requests), setting 7's
   `balanced`, setting 12's 50 to 150 nautical miles and setting 23,
-  `ai-respawn`, in the lobby state's list, W0; 11 was never used).
+  `ai-respawn`, in the lobby state's list (W0), and the lobby state's last bit,
+  whether the mission is locked (K1); 11 was never used). Protocol 20 is the
+  whole lobby pass's one bump. Its other slices add no bytes to a message:
+  Autobalance (A1) works through the existing slot requests and lobby state,
+  and the AI respawn and lead hold commands (R1, R2) are build-exact codings
+  of the journal, the checkpoint and the session's state parts, which the wire
+  golden does not sample (the journal's codings are listed under
+  [Rejoin as built](#rejoin-as-built-k5), beside revival's).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

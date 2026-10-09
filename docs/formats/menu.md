@@ -640,13 +640,14 @@ template):
 | Item | Rectangle or position | Notes |
 | --- | --- | --- |
 | Title | "Lobby" centred on the panel at y 87 | |
-| Game, Mission, start rule, rules | `PANELFNT` lines at (45, 102), (45, 115), (45, 128) and (45, 141), up to 549 wide; the start rule in `PANELFND` | The game's name, the mission's summary, the start rule in words and, since F2-L, "Rules: " and the King's settings in words (they were at 106, 120, 134 before) |
-| Slots | heading (45, 152); list (45, 168), 286 wide, five rows; frame (40, 164, 355, 97) | Columns from the text origin: own mark, or the lock mark of a plane kept for a player who dropped (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 100), ready tick (x 258, 12) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242). Pager: PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240) |
-| Players | heading (400, 152); list (404, 168), 186 wide, five rows, no pager; grey box (400, 165, 194, 95) | Columns (J6): crown (x 0, 12), house, or the outlined standby house of a game that stands by to host (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 60), state word (x 128, 40). The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
+| Game, Rules | `PANELFNT` lines at (45, 102) and (45, 115), up to 549 wide | The game's name and, since F2-L, "Rules: " and the King's settings in words. EF8 also drew the mission's summary at (45, 115) and the start rule in `PANELFND` at (45, 128), with Rules at (45, 141); the lobby pass (John, 2026-10-09) removed both lines, so the mission is read on Mission... and the start rule is in the ready hint |
+| Slots | heading (45, 140); list (45, 168), 286 wide, five rows, scrolling; frame (40, 164, 335, 97); scroll bar art (336, 168), 34 wide; PvP side boxes on the heading's row (lamps (100, 128) and (215, 128), 28 pixel art, labels at y 140) | Columns from the text origin: own mark, or the lock mark of a plane kept for a player who dropped (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 100), ready tick (x 258, 12) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242). EF8's pager (PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240)) was replaced by the scroll bar in the lobby pass; the wing cell reads "Blue 1 #2" or "Red 1 #2" in PvP |
+| Players | heading (380, 140); list (384, 168), 186 wide, five rows, scrolling; grey box (380, 165, 224, 95), frame (379, 164, 226, 97); scroll bar art (570, 168) | Columns (J6): crown (x 0, 12), house, or the outlined standby house of a game that stands by to host (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 60), state word (x 128, 40). The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
 | Hint line | `PANELFNT` at (45, 266), up to 549 wide | |
-| Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | |
+| Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | The scroll bar sits flush right inside the box's frame (34 wide); the text is 507 wide |
 | Chat line | grey box (45, 377), 549 by 18 | Hint "type a message, Enter sends to all"; 80 characters |
-| Buttons | y 419, 75 wide, x 45, 124, 203, 282, 361, 440, 519 (a 79 pitch; EF8 had six 85 wide at 45 to 510) | King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Others: Settings... (282), Loadout (361), Ready (440), Leave (519). While the mission flies Loadout reads Watch (Stop Watch while watching). Kick moved into the Players panel |
+| Ready hint | `PANELFND` at (45, 400), up to 549 wide | The lobby pass's line of what to do next ("Press Ready so the King can start the mission."); it ends above the blue button's raised top at 416 |
+| Buttons | y 419, 75 wide, x 45, 124, 203, 282, 361, 440, 519 (a 79 pitch; EF8 had six 85 wide at 45 to 510) | King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Others: Mission... (203), Settings... (282), Loadout (361), Ready (440), Leave (519). While the mission flies Loadout reads Watch (Stop Watch while watching). Kick moved into the Players panel |
 | Settings panel | panel (45, 100), 550 by 362, over the screen | Title; four page buttons at y 132 (x 67, 159, 251, 343, 88 wide); rows from y 166 on a 21 pitch (19 on the Game page, which has twelve rows since the Host row of K7b), the label at x 69 and the value box (x 295, 270 wide, 18 high; the Game page's name and password are grey text lines there); Realism is two columns of eight (labels x 67 and 329, 160 wide, value boxes 88 wide); the notice or the selected row's reason at y 400; Close (278, 422) |
 | Players panel | panel (110, 150), 420 by 180 (Kick's place) | Two lines of words; Give crown (150, 282, 105 wide), Kick... (270, 282) and Close (370, 282, blue, the keyboard) |
 | Kick and Leave panels | panel (110, 150), 420 by 180, over the screen | Kick: a grey line (132, 234), 376 by 18, for the reason (60 characters); Kick (210, 282) and Cancel (345, 282). Leave: Leave (210, 270) and Cancel (345, 270), Cancel has the blue face and the keyboard |
@@ -655,7 +656,7 @@ New pixel icons (authored, no retail art): the house (9 by 8), the player's own
 arrow (7 by 7) and the unable cross (7 by 7), beside the crown, lock and ready
 tick of EF2.
 
-**The creator in Accept mode** (the King's Mission...) is the creator page of
+**The creator in Accept mode** (the King's Mission... in the lobby) is the creator page of
 this file's Quick Mission notes with one change of label and one of lock:
 OK (387, 419) reads **Accept**, Start (field 33) and its airport (34) cannot be
 changed (a click, left or right, says "Multiplayer: everyone starts airborne,
@@ -664,7 +665,12 @@ the notice box sits at the lower left (30, 438 less its height), 340 wide and
 up to three lines, so it does not cover the Start line. **Load Ordnance in
 lobby mode** reads **Accept** on Fly (493, 414) and **Cancel** on Select Plane
 (363, 414), and its menu's Cheat row reads "Cheat  Off (not allowed)". Single
-player's two pages draw and behave as before.
+player's two pages draw and behave as before. **The creator read only** (everyone
+else's Mission..., the King's while the mission flies or on a locked server;
+lobby pass L4 and K1): the same page with "View only" at the right of the title
+bar, OK's place reading **Back** and no Cancel, the nationalities and the
+situation dimmed in a darker well (158, 165, 167 text on 58, 63, 65) reading "as
+the King's", and every click on a field answering in the notice box.
 
 Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
 `lobby-unable`, `lobby-flying`, `lobby-server`, `lobby-kick`, `lobby-leave` and
@@ -687,4 +693,14 @@ second player's game differs from the host's), and with
 `lobby-creator-gap-notice` (a choice of one refused, with the host's words in the
 notice), `lobby-creator-gap-theaters` and `lobby-ordnance-gaps` (weapon cards darkened, the
 first one refused)
-(`.local/mp-notes/stage-ef/ef8/`).
+(`.local/mp-notes/stage-ef/ef8/`). The lobby pass added `lobby-scroll`,
+`lobby-scroll-top` (more rows than show, scrolled and at the top),
+`lobby-king-hint`, `lobby-joiner-noslot-hint`, `lobby-joiner-hint`,
+`lobby-joiner-ready-hint`, `lobby-pvp-hint` and `lobby-coop-hint` (the ready
+hint), `lobby-pvp-colours`, `lobby-pvp-colours-red`, `lobby-pvp-bluefor`,
+`lobby-pvp-redfor`, `lobby-pvp-open`, `lobby-pvp-full`, `lobby-pvp-locked`,
+`lobby-balanced`, `lobby-pvp-balanced-wait` and `lobby-pvp-unable` (the sides
+and the side boxes in each state), and with `--quick-mission`
+`lobby-creator-view`, `lobby-creator-view-gaps`, `lobby-creator-view-click`,
+`lobby-creator-view-changed`, `lobby-creator-view-flying` and
+`lobby-creator-view-locked` (the read-only page).
