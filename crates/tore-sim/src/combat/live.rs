@@ -4480,7 +4480,11 @@ impl State {
                         category: t.category,
                         aircraft: t.role == TargetRole::Aircraft,
                     };
-                    self.ledger.damaged(credit);
+                    // Only a hit that did damage makes its shooter the last
+                    // attacker, as for an ownship below.
+                    if applied > 0 {
+                        self.ledger.damaged(credit);
+                    }
                     events.push(Event::Hit(t.id));
                     strikes.push(Strike {
                         owner: p.owner,
@@ -9562,6 +9566,102 @@ mod hit_rule_tests {
         let events = run(&mut s, 30);
         assert!(events.contains(&Event::Hit(6)), "{events:?}");
         assert!(!damaged(&events));
+    }
+
+    /// Flies `round` one tick, resolves it as spoofed the way the decoy
+    /// code does, then lets it coast on: it keeps flying but no longer seeks.
+    fn decoyed_then_coasting(s: &mut State, mut round: Projectile) -> Vec<Event> {
+        round.target = None;
+        let id = round.id;
+        s.projectiles.push(round);
+        let mut events = run(s, 1);
+        s.ledger.resolve(id, Resolution::Spoofed);
+        events.extend(run(s, 30));
+        events
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_kills_an_aircraft_after_all_is_a_recorded_hit() {
+        let mut s = scene();
+        s.targets.push(target(6, [0., 1000., 900.], 5, 0x8000));
+        let round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        let events = decoyed_then_coasting(&mut s, round);
+        assert!(events.contains(&Event::Destroyed(6)), "{events:?}");
+        // The kill is backed by a hit, with its damage, and the spoof is
+        // withdrawn: the missile resolved once.
+        let tally = s.ledger.total(|k| k.owner == 0);
+        assert_eq!(
+            (tally.launched, tally.hit, tally.spoofed, tally.failed()),
+            (1, 1, 0, 0)
+        );
+        assert_eq!(tally.damage, 5);
+        let kills = s.ledger.kills();
+        assert_eq!(kills.len(), 1, "{kills:?}");
+        assert_eq!((kills[0].owner, kills[0].victim), (0, 6));
+        assert_eq!(s.own().hits, 1);
+        // The wreck is not hit again for another kill or another hit.
+        let events = run(&mut s, 30);
+        assert!(!events.contains(&Event::Destroyed(6)));
+        assert_eq!(s.ledger.kills().len(), 1);
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_only_damages_an_aircraft_is_its_last_attacker() {
+        let mut s = scene();
+        s.targets.push(target(6, [0., 1000., 900.], 500, 0x8000));
+        let round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        decoyed_then_coasting(&mut s, round);
+        assert!(s.targets[0].hp < 500);
+        let tally = s.ledger.total(|k| k.owner == 0);
+        assert_eq!((tally.hit, tally.spoofed), (1, 0));
+        assert!(s.ledger.kills().is_empty());
+        // Lost another way, the aircraft goes to the shooter whose recorded
+        // hit damaged it.
+        let credit = s.ledger.credit(6).expect("the hit that damaged it");
+        assert_eq!((credit.owner, credit.victim), (0, 6));
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_kills_the_ownship_is_a_recorded_hit() {
+        let mut s = scene();
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x8000));
+        s.ownship_mut(0).unwrap().hp = 1;
+        let round = shell(&s, 5, [0., 1000., 300.], [0., 1000., 0.], Some(0), 0);
+        let events = decoyed_then_coasting(&mut s, round);
+        assert!(events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
+        let tally = s.ledger.total(|k| k.owner == 5);
+        assert_eq!((tally.launched, tally.hit, tally.spoofed), (1, 1, 0));
+        let kills = s.ledger.kills();
+        assert_eq!(kills.len(), 1, "{kills:?}");
+        assert_eq!((kills[0].owner, kills[0].victim), (5, 0));
+    }
+
+    #[test]
+    fn a_decoyed_missile_that_only_touches_a_wreck_stays_spoofed() {
+        let mut s = scene();
+        let mut wreck = target(6, [0., 1000., 900.], 100, 0x8000);
+        wreck.hp = 0;
+        s.targets.push(wreck);
+        let round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        decoyed_then_coasting(&mut s, round);
+        let tally = s.ledger.total(|k| k.owner == 0);
+        assert_eq!((tally.hit, tally.spoofed), (0, 1));
+        assert!(s.ledger.kills().is_empty());
+        assert!(s.ledger.credit(6).is_none());
+    }
+
+    #[test]
+    fn a_hit_that_does_no_damage_is_a_hit_but_not_the_last_attacker() {
+        let mut s = scene();
+        s.targets.push(target(6, [0., 1000., 900.], 100, 0x8000));
+        let mut round = shell(&s, 0, [0., 1000., 600.], [0., 1000., 900.], Some(6), 0);
+        round.weapon.as_mut().unwrap().damage.by_class = Default::default();
+        s.projectiles.push(round);
+        run(&mut s, 30);
+        assert_eq!(s.targets[0].hp, 100);
+        assert_eq!(s.ledger.total(|k| k.owner == 0).hit, 1);
+        assert!(s.ledger.credit(6).is_none());
+        assert!(s.ledger.kills().is_empty());
     }
 
     #[test]
