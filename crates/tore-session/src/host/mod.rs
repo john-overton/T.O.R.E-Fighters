@@ -2718,6 +2718,9 @@ impl Host {
                 })
                 .collect(),
             settings: self.settings.lobby_list(),
+            // A dedicated server's `king-mission locked` (a hosted game's
+            // config never sets it): the King's Mission... reads only.
+            mission_locked: self.config.mission_locked,
         }
     }
 

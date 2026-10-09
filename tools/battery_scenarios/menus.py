@@ -47,7 +47,7 @@ QUICK_STATES = [
     "lobby-creator-gaps", "lobby-creator-gap-notice", "lobby-creator-gap-theaters", "lobby-ordnance-gaps",
     # Lobby pass (slice L4): the mission page read-only, for a player who is not the King.
     "lobby-creator-view", "lobby-creator-view-gaps", "lobby-creator-view-click", "lobby-creator-view-changed",
-    "lobby-creator-view-flying",
+    "lobby-creator-view-flying", "lobby-creator-view-locked",
 ]
 THEATERS = ["BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU", "NSK", "WTA", "UKR", "VLA"]
 VARIANT_THEATERS = [f"~{code}{n}" for code in ("UKR", "VLA") for n in range(1, 9)] + ["~UKRF", "~VLAF", "~WTAF"]

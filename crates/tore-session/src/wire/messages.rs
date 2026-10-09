@@ -752,6 +752,11 @@ pub struct LobbyState {
     pub slots: Vec<LobbySlot>,
     /// The King's settings by number (phase 2); empty now.
     pub settings: Vec<(u8, u32)>,
+    /// Whether the game is a dedicated server whose file sets
+    /// `king-mission locked` (protocol 20): the King may not change the
+    /// mission, so the lobby shows the King the mission read-only. Always
+    /// false in a game a player hosts.
+    pub mission_locked: bool,
 }
 
 impl LobbyState {
@@ -1248,6 +1253,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         players,
         slots,
         settings,
+        mission_locked,
     } = lobby;
     for (count, limit, what) in [
         (players.len(), PLAYERS_LIMIT, "players"),
@@ -1338,6 +1344,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         let _ = w.write_bits(u64::from(*key), 8);
         w.write_varint(u64::from(*value));
     }
+    w.write_bool(*mission_locked);
     Ok(())
 }
 
@@ -1416,6 +1423,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
     for _ in 0..count {
         settings.push((read_id(r)?, read_u32(r)?));
     }
+    let mission_locked = r.read_bool()?;
     Ok(LobbyState {
         name,
         summary,
@@ -1428,6 +1436,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
         players,
         slots,
         settings,
+        mission_locked,
     })
 }
 

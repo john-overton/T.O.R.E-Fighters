@@ -585,9 +585,11 @@ impl App {
 }
 
 /// How the creator opens for a player: `None` edits (the King, in the lobby),
-/// otherwise it only reads, and says why.
+/// otherwise it only reads, and says why. A server that locks the mission
+/// (`king-mission locked`) makes the King read it too.
 fn creator_view(lobby: &LobbyState) -> Option<ViewKind> {
     match (lobby.is_king(), lobby.phase) {
+        (true, _) if lobby.mission_locked => Some(ViewKind::Fixed),
         (true, LobbyPhase::Lobby) => None,
         (true, _) => Some(ViewKind::Flying),
         (false, _) => Some(ViewKind::Reader),
@@ -620,5 +622,21 @@ mod tests {
         let mut flying_joiner = sample(2);
         flying_joiner.phase = LobbyPhase::Flying;
         assert_eq!(creator_view(&flying_joiner), Some(ViewKind::Reader));
+    }
+
+    #[test]
+    fn a_king_on_a_server_that_locks_the_mission_reads_it_and_joiners_are_unchanged() {
+        let mut locked_king = sample(1);
+        locked_king.mission_locked = true;
+        assert_eq!(creator_view(&locked_king), Some(ViewKind::Fixed));
+        // The reason holds in every phase.
+        locked_king.phase = LobbyPhase::Flying;
+        assert_eq!(creator_view(&locked_king), Some(ViewKind::Fixed));
+        // Not locked: the editor, as before.
+        assert_eq!(creator_view(&sample(1)), None);
+        // A joiner reads either way, with its own reason.
+        let mut locked_joiner = sample(2);
+        locked_joiner.mission_locked = true;
+        assert_eq!(creator_view(&locked_joiner), Some(ViewKind::Reader));
     }
 }

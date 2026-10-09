@@ -797,6 +797,28 @@ fn a_locked_servers_king_starts_kicks_and_passes_but_changes_nothing() {
 }
 
 #[test]
+fn a_locked_server_tells_every_lobby_so_and_a_hosted_game_never_does() {
+    let mut rig = Rig::new(spec(3, 1), |config| {
+        config.crown = CrownRule::FirstPlayer;
+        config.mission_locked = true;
+    });
+    let viper = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[viper, cobra]);
+    assert!(rig.lobby(viper).unwrap().mission_locked, "the King's lobby");
+    assert!(rig.lobby(cobra).unwrap().mission_locked, "a joiner's lobby");
+    // An open server and a game a player hosts say nothing of the kind.
+    let mut rig = Rig::new(spec(3, 1), |config| config.crown = CrownRule::FirstPlayer);
+    let viper = rig.join("Viper");
+    rig.gather(&[viper]);
+    assert!(!rig.lobby(viper).unwrap().mission_locked);
+    let mut rig = Rig::hosted(spec(3, 1));
+    let viper = rig.join("Viper");
+    rig.gather(&[viper]);
+    assert!(!rig.lobby(viper).unwrap().mission_locked);
+}
+
+#[test]
 fn a_crowned_server_left_empty_goes_back_to_its_file() {
     let mut rig = Rig::new(spec(2, 2), |config| {
         config.crown = CrownRule::FirstPlayer;

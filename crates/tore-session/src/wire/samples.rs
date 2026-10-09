@@ -1137,6 +1137,7 @@ pub fn lobby() -> LobbyState {
                 )
             })
             .collect(),
+        mission_locked: true,
     }
 }
 
