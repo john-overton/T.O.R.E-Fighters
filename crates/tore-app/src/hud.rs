@@ -339,21 +339,8 @@ pub fn draw(
     if s.afterburner_active() {
         p.text(font, "AFT", 235, 150);
     }
-    for (label, y, value) in [
-        ("GEAR", 140, s.gear),
-        ("FLAP", 151, s.flaps),
-        ("BRAKE", 162, s.brake),
-        ("HOOK", 184, s.hook),
-        // Manual p. 79: BAY shows while the weapons bay is open.
-        (
-            "BAY",
-            BAY_LABEL_Y,
-            if s.bay_available() { s.bay } else { 0. },
-        ),
-    ] {
-        if value > 0.01 {
-            p.text(font, label, STATUS_LABEL_X, y);
-        }
+    for (label, y) in status_labels(s) {
+        p.text(font, label, STATUS_LABEL_X, y);
     }
     if let Some(label) = nosewheel_label(s.nosewheel_authority()) {
         p.text(font, &label, STATUS_LABEL_X, NSW_LABEL_Y);
@@ -443,6 +430,30 @@ pub fn draw(
     }
 }
 
+/// The device labels of the status column shown for `s`, with their rows.
+/// An aircraft whose gear is fixed down (the AH-64 and CH-47) shows no
+/// `GEAR`: the cue says the gear is out of the airflow's way or not, and a
+/// fixed gear never is (VTOL overhaul slice P7b).
+fn status_labels(s: &State) -> Vec<(&'static str, i32)> {
+    let gear = if s.model().fixed_gear() { 0. } else { s.gear };
+    [
+        ("GEAR", 140, gear),
+        ("FLAP", 151, s.flaps),
+        ("BRAKE", 162, s.brake),
+        ("HOOK", 184, s.hook),
+        // Manual p. 79: BAY shows while the weapons bay is open.
+        (
+            "BAY",
+            BAY_LABEL_Y,
+            if s.bay_available() { s.bay } else { 0. },
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, _, value)| *value > 0.01)
+    .map(|(label, y, _)| (label, y))
+    .collect()
+}
+
 fn nosewheel_label(authority: f64) -> Option<String> {
     let percent = (authority.clamp(0., 1.) * 100.).round() as u32;
     (percent > 0).then(|| format!("NSW {percent}%"))
@@ -476,6 +487,41 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_fixed_gear_shows_no_gear_label() {
+        use tore_formats::aircraft::AircraftId;
+        let state = |id: Option<AircraftId>| {
+            let profile = id.map_or_else(tore_world::test_support::profile, |id| {
+                tore_world::test_support::powered_profile(id)
+            });
+            let mut s = State::new(&profile, [0., 3_000., 0.]).unwrap();
+            s.gear = 1.;
+            s.gear_down = true;
+            s
+        };
+        for id in [AircraftId::Ah64, AircraftId::Ch47] {
+            let s = state(Some(id));
+            assert!(s.model().fixed_gear(), "{id:?}");
+            assert!(
+                !status_labels(&s).iter().any(|(l, _)| *l == "GEAR"),
+                "{id:?}"
+            );
+        }
+        // Retracting gear keeps its cue: the Mi-24, the V-22, the AV-8 and a
+        // fighter.
+        for id in [
+            Some(AircraftId::Mi24),
+            Some(AircraftId::V22),
+            Some(AircraftId::Av8),
+            None,
+        ] {
+            assert_eq!(status_labels(&state(id))[0], ("GEAR", 140), "{id:?}");
+        }
+        let mut up = state(None);
+        up.gear = 0.;
+        assert!(status_labels(&up).is_empty());
+    }
+
     #[test]
     fn inactive_nosewheel_authority_has_no_hud_label() {
         assert_eq!(nosewheel_label(0.), None);
