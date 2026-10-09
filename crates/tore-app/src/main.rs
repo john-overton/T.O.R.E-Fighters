@@ -1723,13 +1723,11 @@ impl App {
                 Action::Click
             }
             Command::SightDesignate | Command::SightPinGround => {
-                // S5 completion, after S1 merges: queue the sim command, as
-                // the Combat arm does for the other designations:
-                //     self.queue(seats::SeatCommand::Combat(match command {
-                //         Command::SightDesignate => Live::SightDesignate,
-                //         _ => Live::SightPinGround,
-                //     }));
-                // with `use tore_sim::combat::live::Command as Live;`.
+                use tore_sim::combat::live::Command as Live;
+                self.queue(seats::SeatCommand::Combat(match command {
+                    Command::SightDesignate => Live::SightDesignate,
+                    _ => Live::SightPinGround,
+                }));
                 Action::None
             }
             Command::SightZoom(steps) => {
@@ -3876,6 +3874,7 @@ impl ApplicationHandler for App {
                             }
                             // The commands given since the last tick, in order.
                             let commands = std::mem::take(&mut self.seat_commands);
+                            let (sight, sight_zoom) = self.input.sight();
                             let input = seats::SeatInput {
                                 seat: SEAT,
                                 tick: self.world.tick(),
@@ -3885,10 +3884,10 @@ impl ApplicationHandler for App {
                                 // player controls, part of the tick's input so
                                 // a recording reproduces every change.
                                 sensors: self.instruments.controls(),
-                                // The AC-130 gunsight slew and zoom: plan
-                                // slice S5 fills them from the bound keys.
-                                sight: [0; 2],
-                                sight_zoom: 0,
+                                // The AC-130 gunsight's slew and zoom step,
+                                // from the bound keys and axes.
+                                sight,
+                                sight_zoom,
                                 commands,
                                 // A local seat: no lag compensation.
                                 view: None,

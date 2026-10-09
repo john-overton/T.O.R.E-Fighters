@@ -195,7 +195,12 @@ impl App {
         let mut controls = if flying && !self.flight_ui.frozen() && self.focused {
             self.session_controls(sensors)
         } else {
-            Controls::neutral(sensors)
+            // A paused game keeps its gunsight zoom, as the host's stall
+            // rule does.
+            Controls {
+                sight_zoom: self.input.sight().1,
+                ..Controls::neutral(sensors)
+            }
         };
         if flying {
             controls.commands = std::mem::take(&mut self.seat_commands);
@@ -263,10 +268,13 @@ impl App {
             .input
             .throttle_reference(flight.throttle, flight.lift_controls.collective);
         let (pilot, _) = self.input.frame(&self.camera.keys, lever);
+        let (sight, sight_zoom) = self.input.sight();
         Controls {
             pilot,
             trigger: self.input.resolver.held("fire"),
             sensors,
+            sight,
+            sight_zoom,
             commands: Vec::new(),
             view_subject: None,
         }

@@ -873,8 +873,6 @@ impl Input {
     /// [`Self::frame`] resolved it, and the zoom step: the seat input's
     /// `sight` and `sight_zoom`. The sim ignores both on every aircraft but
     /// the AC-130.
-    // S5 completion: read by the SeatInput fill once S1 adds the fields.
-    #[allow(dead_code)]
     pub fn sight(&self) -> ([i8; 2], u8) {
         (self.sight_deflection, self.sight_zoom)
     }
