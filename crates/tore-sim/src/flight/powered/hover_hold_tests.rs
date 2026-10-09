@@ -473,12 +473,15 @@ fn a3_hover_hold_cancels_on_that_tick() {
         trim(TrimAxis::Roll, 0.02),
         trim(TrimAxis::Pedal, 0.02),
         command(PilotCommand::Lift(LiftCommand::TrimCentre)),
+        command(PilotCommand::Lift(LiftCommand::TrimSet)),
         stick(0.15, -0.15, 0.15),
     ] {
         kept.step_surface(&input, steady(CALM));
         assert_eq!(kept.autopilot.mode(), Mode::Hover, "{input:?}");
     }
     assert_eq!(messages(&kept, HOVER_HOLD_OFF), 0);
+    // Trim set is dropped while it holds: its latch would mask the stick.
+    assert_eq!(kept.lift_controls.aids.trim_latch, TrimLatch::Free);
 }
 
 /// The cyclic trim keys nudge the held point 10 ft a tap along and across
