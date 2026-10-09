@@ -301,12 +301,6 @@ impl State {
             throttle = 1.;
             lift_controls.conversion = 1.;
             lift_controls.conversion_actual = 1.;
-            let capacity = model.configuration().propulsion.military_thrust_lbf * lift.efficiency;
-            let lapse = (-position[1].max(0.) / model.tuning().thrust_lapse_feet).exp();
-            lift_controls.collective =
-                ((model.configuration().mass.empty_lbs + fuel) / (capacity * lapse)).clamp(0., 1.);
-            lift_controls.collective_actual = lift_controls.collective;
-            lift_controls.thrust_lbf = capacity * lift_controls.collective * lapse;
             // The aircraft that trim into forward flight start at the
             // variety rule's speed (slice P7); the others still hover.
             if powered::trim::starts_in_forward_flight(&lift, model.configuration()) {
@@ -323,7 +317,7 @@ impl State {
             lift_controls.thrust_lbf = lift_controls.drive.engine_output[0];
         }
         let fixed_gear = model.fixed_gear();
-        Self {
+        let mut state = Self {
             model,
             research: None,
             raw_envelopes: None,
@@ -392,7 +386,26 @@ impl State {
             cheats: Default::default(),
             jolt: [0.; 3],
             trace: Default::default(),
+        };
+        // A rotorcraft is built with the collective and lift of the hover its
+        // rotors trim to (the airborne start, `start_airborne`, trims it again
+        // for forward flight). With no trim in the controls' travel (a
+        // hopelessly heavy aircraft) the collective is full.
+        if lift.is_some_and(|lift| lift.kind != crate::models::variety::LiftKind::VectorJet) {
+            let mut hover = state.clone();
+            let (collective, thrust) = if hover.trim_hover() {
+                (
+                    hover.lift_controls.collective_actual,
+                    hover.lift_controls.thrust_lbf,
+                )
+            } else {
+                (1., 0.)
+            };
+            state.lift_controls.collective = collective;
+            state.lift_controls.collective_actual = collective;
+            state.lift_controls.thrust_lbf = thrust;
         }
+        state
     }
     /// What the last step used and applied, with the inputs that caused each
     /// effect, for the telemetry panel and replay logs. Nothing in the

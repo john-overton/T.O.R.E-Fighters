@@ -26,11 +26,6 @@ pub enum LiftKind {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PoweredLift {
     pub kind: LiftKind,
-    /// Share of the PT's military thrust the airborne-start collective
-    /// assumes (the variety import's fitted lift; the force laws of the
-    /// slices since carry their own power). The attitude-hold law's other
-    /// fields were retired by slice P8b.
-    pub efficiency: f64,
     /// The rigid body every kind flies on.
     pub body: BodyParameters,
     /// The rotor system: helicopters and the V-22.
@@ -363,18 +358,14 @@ impl PoweredLift {
     /// configuration built from it.
     pub fn for_aircraft(a: &Aircraft, c: &Configuration) -> Option<Self> {
         use AircraftId::*;
-        let (kind, efficiency) = match a.id {
-            Av8 => (LiftKind::VectorJet, 1.),
-            Yak141 => (LiftKind::VectorJet, 1.),
-            V22 => (LiftKind::Tiltrotor, 1.10),
-            Ah64 => (LiftKind::Helicopter, 0.98),
-            Mi24 => (LiftKind::Helicopter, 0.84),
-            Ch47 => (LiftKind::Helicopter, 0.245),
+        let kind = match a.id {
+            Av8 | Yak141 => LiftKind::VectorJet,
+            V22 => LiftKind::Tiltrotor,
+            Ah64 | Mi24 | Ch47 => LiftKind::Helicopter,
             _ => return None,
         };
         Some(Self {
             kind,
-            efficiency,
             body: body(a.id)?,
             rotor: rotor(a.id, c),
             jet: jet(a),
