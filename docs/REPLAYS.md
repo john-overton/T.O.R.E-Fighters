@@ -613,7 +613,7 @@ beyond them.
 | Limit | Value |
 | --- | --- |
 | Aircraft per frame | 64 |
-| Projectiles per frame | 1,024 |
+| Projectiles per frame | 8,192 (1,024 before 2026-10-09): above the simulation's 5,000 in flight, so no round is cut; older builds refuse a frame with more than 1,024 |
 | Debris pieces per frame | 256 |
 | Ejected pilots per frame | 64 |
 | New effects per frame | 64 |

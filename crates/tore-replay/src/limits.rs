@@ -1,13 +1,18 @@
 //! Hard limits. The writer rejects input beyond them with a clear message and
 //! writes nothing for that frame; the reader rejects files beyond them.
 //! Agent decisions (2026-09-26), sized well above what the simulation can
-//! produce: it caps live projectiles at 256, effects at 64 and smoke puffs at
-//! 8,192, and Quick Mission flies at most 30 aircraft.
+//! produce: it caps live projectiles at 5,000 (256 before 2026-10-09),
+//! effects at 64 and smoke puffs at 8,192, and Quick Mission flies at most 30
+//! aircraft.
 
 /// Aircraft in one frame.
 pub const MAX_AIRCRAFT: usize = 64;
-/// Live projectiles in one frame.
-pub const MAX_PROJECTILES: usize = 1024;
+/// Live projectiles in one frame: above the simulation's 5,000, so a
+/// recording never drops a round in flight, with room for a network
+/// player's own drawn gun rounds beside the host's (agent decision,
+/// 2026-10-09; 1,024 before). The count is a variable-length number, so the
+/// file's bytes do not change.
+pub const MAX_PROJECTILES: usize = 8192;
 /// Debris pieces in one frame.
 pub const MAX_DEBRIS: usize = 256;
 /// Ejected pilots in one frame.

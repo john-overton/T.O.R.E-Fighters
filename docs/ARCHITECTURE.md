@@ -8512,6 +8512,31 @@ and clipping. Independent pixel tests cover every source/destination alpha pair.
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 
+### Projectiles in flight
+
+John raised the cap on rounds, missiles and bombs in flight from 256 to 5,000
+on 2026-10-09 (`live::MAX_PROJECTILES`), after a fight of four MiG-21s threw
+away 29 cannon rounds. Every limit that follows it was raised with it: an AI
+gun's queued rounds, a network player's drawn rounds, and a recording's frame
+(8,192, `tore_replay::limits`, checked at compile time to stay above the
+simulation's). A snapshot's 256 projectile records are per packet and stay;
+gun rounds never travel as records. Three shortcuts keep a full sky
+affordable, each an agent decision that changes no answer:
+
+- **The contact search** (`combat/live/broad.rs`) first skips the targets a
+  round's swept segment cannot reach this tick: each target's box over its
+  move, widened by its largest volume, kept in order along x. The targets it
+  keeps are tested exactly as before, in the same order.
+- **The AI's sight lines to tracers** skip sampling the ground when the whole
+  line is above the highest ground under it (`tore_sim::ground_ceiling`, built
+  once from the terrain grid and runways by `Terrain::ground_ceiling`).
+- **The runway lookup** skips the trigonometry for runways nowhere near the
+  point (`OrientedBox::contains_horizontal`).
+
+What remains grows with the AI aircraft times the rounds: each AI aircraft
+still looks at every round for incoming fire. The
+[baseline](baselines/projectile-cap-2026-10-09.md) has the numbers.
+
 ### Measurement rules
 
 Before and after use the same release compiler, profile content, workload,
