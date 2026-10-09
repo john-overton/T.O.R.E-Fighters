@@ -42,6 +42,17 @@ pub struct Preferences {
     /// row.
     // TODO: add a Pref row that toggles `Preferences::fullscreen`.
     pub fullscreen: bool,
+    /// The powered-lift aircraft's stability level (VTOL overhaul, design
+    /// 5.2): Damper unless chosen in Pref or with Ctrl+Shift+A.
+    pub stability: tore_input::StabilityLevel,
+}
+/// The preference file's word for a stability level.
+fn stability_word(level: tore_input::StabilityLevel) -> &'static str {
+    match level {
+        tore_input::StabilityLevel::Off => "off",
+        tore_input::StabilityLevel::Damper => "damper",
+        tore_input::StabilityLevel::Attitude => "attitude",
+    }
 }
 impl Preferences {
     pub fn capture(ui: &FlightUi, i: &Instruments, fullscreen: bool) -> Self {
@@ -67,6 +78,7 @@ impl Preferences {
             debug_panels: ui.debug_panels,
             brightness: ui.brightness,
             fullscreen,
+            stability: ui.stability,
         }
     }
     pub fn apply(&self, ui: &mut FlightUi, i: &mut Instruments) {
@@ -94,6 +106,7 @@ impl Preferences {
         ui.weapon_diagnostics = self.weapon_diagnostics;
         ui.debug_panels = self.debug_panels;
         ui.brightness = self.brightness;
+        ui.stability = self.stability;
     }
     pub fn text(&self) -> String {
         fn pages(p: &[u8]) -> String {
@@ -104,7 +117,7 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 7\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nfullscreen {}\n",
+            "tore-preferences 8\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nfullscreen {}\nstability {}\n",
             self.zoom,
             self.radar_range,
             self.rcs_range,
@@ -120,7 +133,8 @@ impl Preferences {
             self.weapon_diagnostics,
             self.debug_panels,
             self.brightness,
-            self.fullscreen
+            self.fullscreen,
+            stability_word(self.stability)
         )
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -137,6 +151,7 @@ impl Preferences {
             Some("tore-preferences 5") => 5,
             Some("tore-preferences 6") => 6,
             Some("tore-preferences 7") => 7,
+            Some("tore-preferences 8") => 8,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -182,7 +197,9 @@ impl Preferences {
             6 => 18,
             // Version 7 moved Music and Effects to the Sound/Music Prefs
             // settings file.
-            _ => 16,
+            7 => 16,
+            // Version 8 added the stability level.
+            _ => 17,
         };
         if values.len() != expected {
             return Err("unknown preference".into());
@@ -276,6 +293,15 @@ impl Preferences {
             } else {
                 boolean("fullscreen")?
             },
+            // Older files predate the level: Damper, the default.
+            stability: if version < 8 {
+                tore_input::StabilityLevel::Damper
+            } else {
+                tore_input::StabilityLevel::ALL
+                    .into_iter()
+                    .find(|level| stability_word(*level) == get("stability").unwrap_or(""))
+                    .ok_or("invalid stability")?
+            },
         })
     }
 }
@@ -347,13 +373,34 @@ mod tests {
             debug_panels: true,
             brightness: 3,
             fullscreen: false,
+            stability: tore_input::StabilityLevel::Damper,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        assert!(p.text().starts_with("tore-preferences 7\n"));
+        assert!(p.text().starts_with("tore-preferences 8\n"));
         assert_eq!(legacy_sound(&p.text()), None);
+        // Version 7 predates the stability level: Damper.
+        let seven = p
+            .text()
+            .replace("tore-preferences 8", "tore-preferences 7")
+            .replace("stability damper\n", "");
+        assert_eq!(Preferences::parse(&seven).unwrap(), p);
+        assert!(Preferences::parse(&(seven.clone() + "stability off\n")).is_err());
+        for level in tore_input::StabilityLevel::ALL {
+            let chosen = Preferences {
+                stability: level,
+                ..p.clone()
+            };
+            assert_eq!(Preferences::parse(&chosen.text()).unwrap(), chosen);
+        }
+        for broken in [
+            p.text().replace("stability damper\n", ""),
+            p.text().replace("stability damper", "stability full"),
+        ] {
+            assert!(Preferences::parse(&broken).is_err(), "{broken}");
+        }
         // Version 6 still carries Music and Effects, which move to the
         // sound settings.
-        let six = p.text().replace("tore-preferences 7", "tore-preferences 6")
+        let six = seven.replace("tore-preferences 7", "tore-preferences 6")
             + "music false\neffects true\n";
         assert_eq!(Preferences::parse(&six).unwrap(), p);
         assert_eq!(legacy_sound(&six), Some((false, true)));
@@ -395,7 +442,7 @@ mod tests {
         // with the panel hidden.
         let early = five.replace("weapon-diagnostics true\n", "");
         assert_eq!(Preferences::parse(&early).unwrap(), hidden);
-        // Saving writes version 7, with both switches off.
+        // Saving writes version 8, with both switches off.
         assert!(
             hidden
                 .text()

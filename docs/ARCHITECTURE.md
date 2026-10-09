@@ -423,6 +423,68 @@ launch eligibility. Exterior canopy grading is a mesh material, independent
 of cockpit artwork and world-view rendering. Its nearest surface is resolved
 in a depth-only pass, then blended at 75% opacity over the opaque scene.
 
+### Powered-lift flight modules
+
+The six powered-lift aircraft (AV8, YAK141, V22, AH64, MI24, CH47) run on the
+hybrid adapter's `State::step_powered`, which dispatches by aircraft to its own
+force law. The behaviour is specified in
+[powered-lift flight](spec/powered-lift-flight.md); this is where the code is.
+Everything lives in `tore-sim`, so formats, simulation and synthesis stay
+independent of the renderer; the app, world, session and replay crates only read
+the state.
+
+| Module (`crates/tore-sim/src/`) | Owns |
+| --- | --- |
+| `flight/airframe.rs` | The conventional step's pieces shared with every powered law: `envelope_limits`, `airframe_drag`, `advance_position`, `finish_contact` |
+| `flight/powered/mod.rs` | `State::step_powered`, the dispatcher |
+| `flight/powered/state.rs` | `LiftState`: everything a powered-lift aircraft adds to the exact flight state (body rates, `Drive`, per-rotor induced velocity and disk tilt, `PilotAids`, warnings, corridor hold) and the powered-lift commands |
+| `flight/powered/body.rs` | The rigid body: inertia from the radii of gyration, moments, the attitude integrator that conserves angular momentum |
+| `flight/powered/rotor.rs` | One lifting rotor: thrust, inflow, vortex ring state, ground effect, power, blade stall, the `Hazards` switches |
+| `flight/powered/drive.rs` | Rotor speed, governor and engines for any number of rotors on one drive |
+| `flight/powered/fuselage.rs` | Helicopter fuselage drag, tail surfaces, fin and stub wings |
+| `flight/powered/helicopter.rs` | The single-rotor AH-64 and Mi-24: rotor, tail rotor, trim |
+| `flight/powered/tandem.rs` | The CH-47's two rotors, wake interference, mixer, trim |
+| `flight/powered/tiltrotor.rs` | The V-22: nacelle rotors, mixer, rotor speed schedule, wing download, rotor strike, conversion corridor protection |
+| `flight/powered/jet.rs`, `aero.rs` | The AV-8 and Yak-141: nozzles, puffer jets, lift engines, intake drag, suck-down; the angle-of-attack wing shared with the V-22 and the Mi-24's stub wings |
+| `flight/powered/sas.rs` | The stability levels (Off, Damper, Attitude), trim and the trim-set latch, applied before every force law |
+| `flight/powered/trim.rs` | Airborne starts in trimmed forward flight and ground starts |
+| `flight/powered/readout.rs` | Pure cockpit readings (NR, TQ, nacelle, hover display, buffet) for the HUD, sound and camera |
+| `autopilot.rs` | Hover hold and the A modes on the powered-lift aircraft (`Mode::Hover`, `Loops`) |
+| `cheats.rs` | `easy_physics`, read through `State::rotor_hazards()` and `State::jet_hazards()` |
+| `models/variety/lift.rs` | `PoweredLift`: every aircraft's parameters and where each comes from |
+
+Outside `tore-sim`: `tore-input` carries the commands (`LiftCommand`,
+`StabilityLevel`, `Switch::HoverHold`, `tore-pilot 3` tapes); `tore-session`
+codes the commands and the state on the wire (protocol 19); `tore-replay` has the
+rotor speed and disk tilt chunk sections; `tore-world` carries rotor speed, rotor
+phase and disk tilt in the drawn pose; `tore-app` has the HUD cluster
+(`powered_hud.rs`), the moving parts (`variety_rotors.rs`, the nozzle and nacelle
+animations), the warning tones and rotor sound, the contextual keys
+(`input_catalog.rs`) and the Cheat row (`flight_ui.rs`).
+
+```mermaid
+flowchart TD
+  STEP["step_powered<br/>flight/powered/mod.rs"] --> HELI["helicopter.rs<br/>AH-64, Mi-24"]
+  STEP --> TAND["tandem.rs<br/>CH-47"]
+  STEP --> TILT["tiltrotor.rs<br/>V-22"]
+  STEP --> JET["jet.rs<br/>AV-8, Yak-141"]
+  HELI --> ROTOR["rotor.rs + drive.rs"]
+  TAND --> ROTOR
+  TILT --> ROTOR
+  HELI --> FUS["fuselage.rs"]
+  TAND --> FUS
+  TILT --> FUS
+  TILT --> AERO["aero.rs<br/>wing"]
+  JET --> AERO
+  HELI --> SAS["sas.rs"]
+  TAND --> SAS
+  TILT --> SAS
+  JET --> SAS
+  ROTOR --> BODY["body.rs<br/>rigid body"]
+  AERO --> BODY
+  BODY --> AIR["airframe.rs<br/>drag, envelope, contact"]
+```
+
 ## Shared sensor boundary
 
 `tore-sim::sensors` is one component serving all twelve imported aircraft. There

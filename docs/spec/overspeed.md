@@ -16,9 +16,32 @@ retail behaviour. The manual (p. 90) says air resistance eventually tears off th
 wings beyond the structural limit, but supplies no timing or probabilities.
 
 The limit is the aircraft's top speed at its current altitude: the right edge
-of its 1 G envelope, also used by the envelope window. Above the envelope's
+of its 1 G envelope, also used by the envelope window (rotorcraft with a
+structural speed are the exception below). Above the envelope's
 ceiling there is no speed range, so the timer resets. The native-table research
 adapter remains outside this rule.
+
+**Rotorcraft (agent decision, 2026-10-08).** A helicopter's envelope top speed
+is a performance figure fitted to its published level speed (the AH-64's 158 kt,
+the Mi-24's 178 kt), well under the speed at which its airframe is at risk. For
+the aircraft whose rotor table sets a structural speed, the limit is that speed
+instead, in true airspeed, with everything else in this document unchanged: the
+AH-64 at 197 kt, the Mi-24 at 190 kt and the CH-47 at 190 kt (fitted), their never-exceed speeds (Vne). The
+rotor's retreating blade stall starts at the same speed at the reference blade
+loading, and earlier when the blades are loaded harder or the air is thin, so a
+dive toward Vne shows the stall (vibration, nose up, roll toward the retreating
+blade) before the five safe seconds begin. The envelope still supplies the
+ceiling rule: above the top of the 1 G polygon there is no limit and the timer
+resets. The speed is `structural_kt` in the rotor table of
+`crates/tore-sim/src/models/variety/lift.rs`; `None` keeps the envelope's top
+speed, which is what no powered-lift aircraft does now. The
+V-22's value is calibrated airspeed: 280 KCAS, its published airplane-mode
+never-exceed speed, or with the nacelles up the conversion corridor's maximum
+at their angle (100 KCAS in the hover band), whichever is lower, turned into
+true airspeed at the current altitude (VTOL overhaul slice P5, agent
+decision 2026-10-08).
+It applies on the hybrid adapter only, so the legacy adapter, the restricted
+native path and every fixed-wing aircraft are unchanged.
 
 | Condition | Behavior |
 | --- | --- |

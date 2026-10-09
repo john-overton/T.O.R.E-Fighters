@@ -1077,7 +1077,7 @@ helicopters, fighters including all four retail F-4s, and two airliners. Exact
 variant choices are recorded as agent choices; 20 was not a hard limit.
 
 Initial ports are implemented: reviewed source imports, aircraft-owned hybrid
-configurations, fitted powered-lift forces, playable controls, cockpits and
+configurations, powered-lift flight, playable controls, cockpits and
 initial device rigs. AC-130 selected-target tracking and linked gun groups are
 connected to simulation, rendering and recordings. The
 [flight baseline](baselines/variety-flight.md) distinguishes tested behavior
@@ -1095,6 +1095,19 @@ worked transport, F-4 family and powered-lift/system examples. Next: human
 handling review, remaining moving surfaces and cockpit mirrors, fuller AWACS
 sharing/operator behavior, tank visuals/jettison and wider platform/controller
 acceptance. Keep per-aircraft status and evidence in the matrix.
+
+**VTOL and helicopter overhaul.** Designed with John's twelve decisions of
+2026-10-08, after the fitted attitude-hold law proved unflyable (an AH-64 topped
+out at 34 kt). Player
+flight is built: the six powered-lift aircraft fly a rigid body on rotors, nozzles
+with puffer jets, nacelles and an angle-of-attack wing; the stability levels,
+trim, the nozzle and collective keys, the HUD cluster, hover hold, the Easy flight
+physics cheat, trimmed airborne starts and the moving parts follow. It is
+specified in [powered-lift flight](spec/powered-lift-flight.md) and measured in
+the [overhaul baseline](baselines/vtol-overhaul.md). It awaits John's flight test
+and the windowed battery. The second project, AI wingmen flying these aircraft
+through the same inputs (decision 7), has not started; the AI still does not fly
+them.
 
 ## Milestone 2: Multiplayer
 

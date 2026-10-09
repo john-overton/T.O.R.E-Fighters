@@ -72,12 +72,20 @@ pub fn roster_probe(
                         .stations()
                         .iter()
                         .zip(&config.stations)
-                        .any(|(station, imported)| {
+                        .enumerate()
+                        .any(|(index, (station, imported))| {
+                            // A gun pod's count is pods; the AI counts rounds.
+                            let pod_rounds = config
+                                .gun_pods
+                                .iter()
+                                .find(|pod| pod.station == index)
+                                .filter(|_| imported.weapon.source == "SUU16.JT")
+                                .map_or(1, |pod| u32::from(pod.rounds_per_pod));
                             station.employment_zone != Some(imported.weapon.seeker.zones[1])
                                 || station.rounds()
-                                    != tore_sim::ai::weapon_service::Rounds::Finite(u32::from(
-                                        imported.count,
-                                    ))
+                                    != tore_sim::ai::weapon_service::Rounds::Finite(
+                                        u32::from(imported.count) * pod_rounds,
+                                    )
                         })
                 {
                     return Err(format!("AI inventory/envelope mismatch for {}", id.pt()).into());

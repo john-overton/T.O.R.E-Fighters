@@ -37,6 +37,8 @@ pub(crate) const SECTION_SPAWNS: u64 = 4;
 pub(crate) const SECTION_EVENTS: u64 = 5;
 pub(crate) const SECTION_TREES: u64 = 6;
 pub(crate) const SECTION_CHECKSUMS: u64 = 7;
+pub(crate) const SECTION_ROTORS: u64 = 8;
+pub(crate) const SECTION_DISK_TILT: u64 = 9;
 
 pub(crate) fn prelude() -> Vec<u8> {
     let mut buf = MAGIC.to_vec();
@@ -130,7 +132,7 @@ pub(crate) fn read_sections(body: &[u8]) -> Result<Vec<(u64, &[u8])>> {
         let id = input.uv()?;
         let n = input.count(body.len(), "section bytes")?;
         let payload = input.bytes(n)?;
-        if (SECTION_STRINGS..=SECTION_CHECKSUMS).contains(&id) && out.iter().any(|(i, _)| *i == id)
+        if (SECTION_STRINGS..=SECTION_DISK_TILT).contains(&id) && out.iter().any(|(i, _)| *i == id)
         {
             return Err(corrupt(format!("section {id} appears twice in one chunk")));
         }

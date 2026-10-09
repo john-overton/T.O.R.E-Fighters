@@ -281,11 +281,13 @@ loadout serialization.
 
 ### Powered lift and special systems
 
-The [powered-flight contract](spec/variety-flight.md) supplies the initial
-VTOL, tiltrotor and helicopter laws and all fitted constants. Use source
-limits where reviewed and fit missing values explicitly. Hover initialization
-uses final mission altitude, fuel and payload; it is not an automatic pilot.
-The source probe exercises hover, landing, lift-off and applicable conversion.
+The [powered-lift flight spec](spec/powered-lift-flight.md) supplies the VTOL,
+tiltrotor and helicopter laws and all fitted constants. Use source limits where
+reviewed and fit missing values explicitly. Airborne starts are trimmed forward
+flight (a hover only for the probes), computed from the final mission altitude,
+fuel and payload; hover hold is an autopilot mode the pilot chooses. The source
+probes (`variety_flight`, `powered_probe`, `jet_probe`) exercise hover, landing,
+lift-off, conversion and the transition.
 
 New controls must be available in the in-game editor, saved profiles, input
 tapes and network input. Put actual device positions into snapshots and

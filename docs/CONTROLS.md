@@ -36,8 +36,19 @@ forward nozzle/nacelle neutral. AC-130 View+right-stick gestures control its gun
 group. Other aircraft keep their original modifier look/rudder/fixture mappings.
 The full profile remains visible in Controls. See [input contexts](INPUT.md).
 
+**Keys that depend on the aircraft.** On the AV-8 and Yak-141, Z and X step the
+nozzles and Shift+Z and Shift+X are the nozzle presets, as in the retail manual;
+on every other aircraft they stay a rudder pair. On the helicopters and the V-22
+Ctrl with the arrows is the cyclic trim and the throttle keys set the
+collective, and on the helicopters 0 recentres the trim. Ctrl+Shift+A cycles
+the powered-lift stability level and Ctrl+Alt+A is hover hold. A cell such as
+"Z (not on AV-8 / Yak-141)" names where a key acts; the full table is in
+[input](INPUT.md#vtol-tiltrotor-and-helicopter-controls). On some European
+layouts Windows reports AltGr as Ctrl+Alt, so AltGr+A also reaches hover hold.
+
 **macOS and laptop keyboards.** The powered-lift keyboard defaults use Ctrl with
-the arrow keys (nozzle pitch and yaw) and Ctrl with Home, End, Page Up and Page
+the arrow keys (nozzle pitch on the vectoring jets, cyclic trim on the
+helicopters and the V-22) and Ctrl with Home, End, Page Up and Page
 Down (collective and nacelle conversion). On a Mac, macOS claims Ctrl+Up for
 Mission Control, Ctrl+Down for App Exposé and Ctrl+Left and Ctrl+Right to switch
 Spaces, so those presses may never reach the game unless you turn the shortcuts
@@ -61,16 +72,16 @@ and a gamepad's View+stick defaults avoid the problem.
 | Roll left | Left | - | - |
 | Roll right | Right | - | - |
 | Rudder (yaw) | - | - | - |
-| Rudder left | End or Z | - | LT |
-| Rudder right | Page Down or X | - | RT |
+| Rudder left | End or Z (not on AV-8 / Yak-141) | - | LT |
+| Rudder right | Page Down or X (not on AV-8 / Yak-141) | - | RT |
 | Nozzle pitch (VTOL) lever | - | - | - |
 | Nozzle pitch (VTOL) rate axis | - | - | View + Right stick Y |
-| Nozzle pitch (VTOL): decrease | Ctrl+Up | - | - |
-| Nozzle pitch (VTOL): increase | Ctrl+Down | - | - |
+| Nozzle pitch (VTOL): decrease | Ctrl+Up (fixed-wing and AV-8 / Yak-141 only) | - | - |
+| Nozzle pitch (VTOL): increase | Ctrl+Down (fixed-wing and AV-8 / Yak-141 only) | - | - |
 | Nozzle yaw (VTOL) lever | - | - | - |
 | Nozzle yaw (VTOL) rate axis | - | - | View + Right stick X |
-| Nozzle yaw (VTOL): decrease | Ctrl+Left | - | - |
-| Nozzle yaw (VTOL): increase | Ctrl+Right | - | - |
+| Nozzle yaw (VTOL): decrease | Ctrl+Left (fixed-wing only) | - | - |
+| Nozzle yaw (VTOL): increase | Ctrl+Right (fixed-wing only) | - | - |
 | Nacelle conversion (V-22) lever | - | - | - |
 | Nacelle conversion (V-22) rate axis | - | - | View + Right stick X |
 | Nacelle conversion (V-22): decrease | Ctrl+Page Up | - | - |
@@ -79,7 +90,26 @@ and a gamepad's View+stick defaults avoid the problem.
 | Collective (helicopters / V-22) rate axis | - | - | View + Right stick Y |
 | Collective (helicopters / V-22): decrease | Ctrl+End | - | - |
 | Collective (helicopters / V-22): increase | Ctrl+Home | - | - |
-| Nozzles/nacelles: forward neutral | 0 | - | View + D-pad up |
+| Nozzles/nacelles: forward neutral | 0 (not on helicopters) | - | View + D-pad up |
+| Nozzles up (aft) 10 degrees (AV-8, Yak-141) | Z (AV-8 / Yak-141 only) | - | - |
+| Nozzles down 10 degrees (AV-8, Yak-141) | X (AV-8 / Yak-141 only) | - | - |
+| Nozzles to 0, or braking stop to vertical (AV-8, Yak-141) | Shift+Z (AV-8 / Yak-141 only) | - | - |
+| Nozzles vertical, again to the braking stop (AV-8, Yak-141) | Shift+X (AV-8 / Yak-141 only) | - | - |
+| Cyclic trim fore/aft (helicopters / V-22) rate axis | - | - | - |
+| Cyclic trim forward (helicopters / V-22) | Ctrl+Up (V-22 and helicopters only) | - | - |
+| Cyclic trim aft (helicopters / V-22) | Ctrl+Down (V-22 and helicopters only) | - | - |
+| Cyclic trim left/right (helicopters / V-22) rate axis | - | - | - |
+| Cyclic trim left (helicopters / V-22) | Ctrl+Left (V-22 and helicopters only) | - | - |
+| Cyclic trim right (helicopters / V-22) | Ctrl+Right (V-22 and helicopters only) | - | - |
+| Pedal trim (helicopters / V-22) rate axis | - | - | - |
+| Pedal trim left (helicopters / V-22) | - | - | - |
+| Pedal trim right (helicopters / V-22) | - | - | - |
+| Trim set / force trim release (helicopters / V-22) | - | - | - |
+| Trim to centre (helicopters) | 0 (helicopters only) | - | - |
+| Stability level: Off, Damper, Attitude (VTOL) | Ctrl+Shift+A (not on fixed-wing) | - | - |
+| Stability level Off (VTOL) | - | - | - |
+| Stability level Damper (VTOL) | - | - | - |
+| Stability level Attitude (VTOL) | - | - | - |
 | Throttle / engine power lever | - | - | - |
 | Throttle rate (axis) | - | - | - |
 | Throttle up | - | - | RB |
@@ -95,6 +125,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Afterburner | Shift+B | - | Y |
 | Autopilot (heading/altitude) | A | - | - |
 | Waypoint autopilot | Ctrl+A | - | - |
+| Hover hold autopilot (helicopters / V-22) | Ctrl+Alt+A | - | - |
 
 ### Systems
 

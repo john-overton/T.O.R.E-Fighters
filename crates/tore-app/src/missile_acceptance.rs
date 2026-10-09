@@ -16,6 +16,11 @@ pub fn run(config: Configuration) -> AppResult<()> {
     );
     let mut seen = std::collections::BTreeSet::new();
     for (station, store) in config.stations.iter().enumerate() {
+        // A pylon the default load leaves empty cannot launch, so it has no
+        // table (the combat smoke skips these retained selection stations too).
+        if store.count == 0 {
+            continue;
+        }
         let Some(profile) = missiles::Profile::for_weapon(&store.weapon) else {
             continue;
         };

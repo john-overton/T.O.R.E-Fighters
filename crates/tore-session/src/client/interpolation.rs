@@ -11,11 +11,19 @@
 //! through two states' positions and velocities, attitudes turn the short
 //! way, devices blend; the rest is the earlier state's. Past its newest state
 //! an entity continues along its last velocity for up to 250 ms, then holds.
+//!
+//! A rotorcraft's rotor speed and disk tilts blend too, and its blade angle
+//! is the rotor speed integrated over the drawn time (slice P7b): exactly,
+//! through the received states taken as straight lines between ticks, from
+//! the entity's first state, where it starts as if the rotor had turned at
+//! 100 percent since tick 0. So it is continuous, the same whatever the
+//! frame rate, and the same for a given stream of states; it is the client's
+//! own, not the host's blade angle, which no player can compare.
 
 use super::clock::{ExtraDelay, JUMP_TICKS, TICKS_PER_SECOND, ticks_of};
 use crate::wire::entity::{
     AircraftState, DebrisState, EntityKey, EntityKind, EntityState, PilotState, ProjectileState,
-    RATE_STEP, SPEED_STEP, radians,
+    RATE_STEP, ROTOR_SPEED_STEP, ROTOR_TILT_STEP, SPEED_STEP, radians,
 };
 use crate::wire::names::NameIndex;
 use crate::wire::priority::{far_interval_ticks, far_snapshots};
@@ -57,11 +65,73 @@ struct Track {
     gaps: VecDeque<f64>,
     /// The entity has been drawn: its extra delay now only slides.
     drawn: bool,
+    /// A rotorcraft's blade angle at a tick, seconds at 100 percent rotor
+    /// speed: the anchor its drawn angle integrates from. It moves on with
+    /// the oldest kept state.
+    turns: Option<(u32, f64)>,
+}
+
+/// An entity state's rotor speed, a share of 100 percent; zero without
+/// rotors.
+fn rotor_speed(state: &EntityState) -> f64 {
+    match state {
+        EntityState::Aircraft(a) => a
+            .rotor
+            .map_or(0., |r| f64::from(r.speed) * ROTOR_SPEED_STEP),
+        _ => 0.,
+    }
 }
 
 impl Track {
     fn newest(&self) -> Option<u32> {
         self.states.back().map(|(t, _)| *t)
+    }
+
+    /// The rotors' turns at drawn tick `at`: the anchor's, plus the rotor
+    /// speed integrated from the anchor through the kept states, each span
+    /// a straight line, held past the newest.
+    fn turns_at(&self, at: f64) -> f64 {
+        let Some((anchor, mut turns)) = self.turns else {
+            return 0.;
+        };
+        let mut from = f64::from(anchor);
+        if at <= from {
+            return turns;
+        }
+        let dt = tore_sim::flight::DT;
+        let mut previous: Option<(f64, f64)> = None;
+        for (tick, state) in &self.states {
+            let (t, nr) = (f64::from(*tick), rotor_speed(state));
+            if let Some((t0, n0)) = previous
+                && t > from
+            {
+                let speed = |x: f64| n0 + (nr - n0) * (x - t0) / (t - t0);
+                let to = at.min(t);
+                let start = from.max(t0);
+                if to > start {
+                    turns += (to - start) * (speed(start) + speed(to)) / 2. * dt;
+                    from = to;
+                }
+                if at <= t {
+                    return turns;
+                }
+            }
+            previous = Some((t, nr));
+        }
+        // Past the newest state, at its rotor speed.
+        let held = self.states.back().map_or(0., |(_, s)| rotor_speed(s));
+        turns + (at - from).max(0.) * held * dt
+    }
+
+    /// Drops the oldest kept state, first moving the turns anchor up to the
+    /// next one.
+    fn pop_front(&mut self) {
+        if let (Some((anchor, _)), Some((next, _))) = (self.turns, self.states.get(1))
+            && *next > anchor
+        {
+            self.turns = Some((*next, self.turns_at(f64::from(*next))));
+        }
+        self.states.pop_front();
     }
 
     fn insert(&mut self, tick: u32, state: EntityState, ticks_per_snapshot: u32, far_gap: f64) {
@@ -71,8 +141,11 @@ impl Track {
             Some(i) => self.states.insert(i, (tick, state)),
             None => self.states.push_back((tick, state)),
         }
+        if self.turns.is_none() {
+            self.turns = Some((tick, f64::from(tick) * tore_sim::flight::DT));
+        }
         while self.states.len() > KEPT {
-            self.states.pop_front();
+            self.pop_front();
         }
         if self.removed.is_some_and(|removed| removed < tick) {
             self.removed = None;
@@ -225,7 +298,7 @@ impl Interpolator {
                     .get(1)
                     .is_some_and(|(t, _)| f64::from(*t) <= at)
             {
-                track.states.pop_front();
+                track.pop_front();
             }
             !(track.states.is_empty() && track.removed.is_none())
         });
@@ -276,7 +349,10 @@ impl Interpolator {
             }
             let id = key.id;
             match (key.kind, sample) {
-                (EntityKind::Aircraft, Sample::Aircraft(pose)) => {
+                (EntityKind::Aircraft, Sample::Aircraft(mut pose)) => {
+                    if pose.engine.rotor > 0. {
+                        pose.engine.rotor_turns = track.turns_at(at);
+                    }
                     drawn.aircraft.push(AircraftPose { id, ..pose });
                 }
                 (EntityKind::Projectile, Sample::Projectile(p, pos, vel, dir)) => {
@@ -314,7 +390,10 @@ impl Interpolator {
     }
 }
 
-/// One entity at the drawn time.
+/// One entity at the drawn time. Aircraft are the common case and a drawn
+/// pose is plain data, so the other variants stay unboxed (the pose grew by
+/// the rotor speed past clippy's size gap).
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Sample {
     Aircraft(AircraftPose),
     Projectile(ProjectileState, [f64; 3], [f64; 3], [f64; 2]),
@@ -368,14 +447,26 @@ pub(crate) fn blend_attitude(a: [u16; 3], b: [u16; 3], s: f64) -> [f64; 3] {
         .angles()
 }
 
+/// A rotorcraft's rotor speed and disk tilts in the picture's units (zero
+/// without rotors).
+pub fn rotor_of(state: &AircraftState) -> (f64, [[f64; 2]; 2]) {
+    state.rotor.map_or((0., [[0.; 2]; 2]), |r| {
+        (
+            f64::from(r.speed) * ROTOR_SPEED_STEP,
+            r.tilt.map(|t| t.map(|v| f64::from(v) * ROTOR_TILT_STEP)),
+        )
+    })
+}
+
 /// An aircraft state's pose at `position`, `velocity` and `attitude`, with
-/// the devices given (already blended).
+/// the devices and the rotor speed and disk tilts given (already blended).
 pub fn aircraft_pose(
     state: &AircraftState,
     position: [f64; 3],
     velocity: [f64; 3],
     attitude: [f64; 3],
     devices: Option<[f64; tore_world::snapshot::DEVICES]>,
+    rotor: (f64, [[f64; 2]; 2]),
 ) -> AircraftPose {
     AircraftPose {
         id: 0,
@@ -389,6 +480,10 @@ pub fn aircraft_pose(
             lit: state.engine.lit,
             afterburner: state.engine.afterburner,
             rates: state.engine.rates.map(|r| f64::from(r) * RATE_STEP),
+            rotor: rotor.0,
+            // The drawing integrates the rotor speed into the blade angle.
+            rotor_turns: 0.,
+            rotor_tilt: rotor.1,
             flame: state.engine.flame,
         },
         damage: Damage {
@@ -453,12 +548,25 @@ pub(crate) fn between(a: &EntityState, b: &EntityState, h: f64, s: f64) -> Sampl
                 })),
                 (d0, _) => d0,
             };
+            let rotor = match (x.rotor, y.rotor) {
+                (Some(_), Some(_)) => {
+                    let ((n0, t0), (n1, t1)) = (rotor_of(x), rotor_of(y));
+                    (
+                        n0 + (n1 - n0) * s,
+                        std::array::from_fn(|k| {
+                            std::array::from_fn(|i| t0[k][i] + (t1[k][i] - t0[k][i]) * s)
+                        }),
+                    )
+                }
+                _ => rotor_of(x),
+            };
             Sample::Aircraft(aircraft_pose(
                 x,
                 position,
                 velocity,
                 blend_attitude(x.attitude, y.attitude, s),
                 devices,
+                rotor,
             ))
         }
         (EntityState::Projectile(x), EntityState::Projectile(y)) => {
@@ -492,6 +600,7 @@ pub(crate) fn beyond(state: &EntityState, ahead: f64) -> Sample {
             v,
             attitude(x.attitude),
             devices_of(x),
+            rotor_of(x),
         )),
         EntityState::Projectile(x) => Sample::Projectile(
             *x,
@@ -735,5 +844,137 @@ mod tests {
     fn angles_turn_the_short_way() {
         let a = angle_between(PI - 0.1, -PI + 0.1, 0.5);
         assert!((a.abs() - PI).abs() < 1e-9);
+    }
+
+    /// A CH-47 at `tick` with rotor speed `speed` (thousandths) and tilts.
+    fn rotorcraft(tick: u32, speed: u16, tilt: [[i8; 2]; 2]) -> EntityState {
+        EntityState::Aircraft(AircraftState {
+            aircraft: Some(tore_formats::aircraft::AircraftId::Ch47),
+            motion: Motion::of([f64::from(tick), 500., 0.], [120., 0., 0.]),
+            rotor: Some(crate::wire::entity::RotorState { speed, tilt }),
+            ..AircraftState::default()
+        })
+    }
+
+    /// The rotor speed (a share) the test's states give at drawn tick `t`.
+    fn speed_at(t: f64) -> f64 {
+        // A droop from 100 to 80 percent over the first 40 ticks, then
+        // steady: states every 4 ticks carry it in thousandths.
+        (1000. - 200. * (t / 40.).min(1.)).round() / 1000.
+    }
+
+    fn droop(interp: &mut Interpolator, to: u32) {
+        for tick in (0..=to).step_by(4) {
+            let speed = (speed_at(f64::from(tick)) * 1000.).round() as u16;
+            let tilt = [[(tick / 4) as i8, -3], [5, -((tick / 4) as i8)]];
+            interp.receive(&snapshot(tick, &[(7, rotorcraft(tick, speed, tilt))]));
+        }
+    }
+
+    #[test]
+    fn remote_rotors_carry_their_speed_and_tilt_between_states() {
+        let mut interp = Interpolator::new(4);
+        droop(&mut interp, 80);
+        let pose = &interp.draw(6., 0, &no_names).aircraft[0];
+        // Halfway from tick 4 to tick 8.
+        let expected = (speed_at(4.) + speed_at(8.)) / 2.;
+        assert!((pose.engine.rotor - expected).abs() < 1e-12);
+        let step = crate::wire::entity::ROTOR_TILT_STEP;
+        assert!((pose.engine.rotor_tilt[0][0] - 1.5 * step).abs() < 1e-12);
+        assert!((pose.engine.rotor_tilt[1][1] + 1.5 * step).abs() < 1e-12);
+        assert!((pose.engine.rotor_tilt[0][1] + 3. * step).abs() < 1e-12);
+        // A fixed-wing aircraft carries none.
+        let mut plain = Interpolator::new(4);
+        plain.receive(&snapshot(0, &[(1, aircraft([0.; 3], [0.; 3]))]));
+        plain.receive(&snapshot(4, &[(1, aircraft([0.; 3], [0.; 3]))]));
+        let engine = plain.draw(2., 0, &no_names).aircraft[0].engine;
+        assert_eq!(
+            (engine.rotor, engine.rotor_turns, engine.rotor_tilt),
+            (0., 0., [[0.; 2]; 2])
+        );
+    }
+
+    #[test]
+    fn remote_blades_turn_by_the_integrated_rotor_speed_whatever_the_frame_rate() {
+        let dt = tore_sim::flight::DT;
+        // The exact integral of the states' straight lines from tick 0,
+        // where the blades start as if turning at 100 percent since tick 0.
+        let exact = |at: f64| {
+            let mut turns = 0.;
+            let mut t = 0.;
+            while t < at {
+                let next = (t + 4.).min(at);
+                let (a, b) = (speed_at(t), speed_at(t + 4.));
+                let end = a + (b - a) * (next - t) / 4.;
+                turns += (next - t) * (a + end) / 2. * dt;
+                t = next;
+            }
+            turns
+        };
+        // One client draws at 144 frames a second, another at 30, a third
+        // jumps straight to the end; all three agree at every shared time.
+        let mut results = Vec::new();
+        for frame in [120. / 144., 4., 77.] {
+            let mut interp = Interpolator::new(4);
+            droop(&mut interp, 80);
+            let mut render = 1.;
+            let mut last: Option<f64> = None;
+            while render < 77. {
+                let turns = interp.draw(render, 0, &no_names).aircraft[0]
+                    .engine
+                    .rotor_turns;
+                assert!((turns - exact(render)).abs() < 1e-9, "{frame}: {render}");
+                if let Some(last) = last {
+                    // Never backwards, never a jump of more than the frame's
+                    // turning at 100 percent.
+                    assert!(turns >= last && turns - last <= frame * dt + 1e-12);
+                }
+                last = Some(turns);
+                render += frame;
+            }
+            results.push(
+                interp.draw(77., 0, &no_names).aircraft[0]
+                    .engine
+                    .rotor_turns,
+            );
+        }
+        assert!(
+            results.windows(2).all(|w| (w[0] - w[1]).abs() < 1e-12),
+            "{results:?}"
+        );
+        assert!((results[0] - exact(77.)).abs() < 1e-9);
+        // Past the newest state the rotor goes on at its last speed.
+        let mut interp = Interpolator::new(4);
+        droop(&mut interp, 80);
+        let at = 90.;
+        let turns = interp.draw(at, 0, &no_names).aircraft[0].engine.rotor_turns;
+        assert!((turns - (exact(80.) + 10. * 0.8 * dt)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_blade_angle_anchor_moves_with_the_kept_states_without_a_jump() {
+        // Far more states than are kept, drawn as time goes on, so the
+        // oldest are dropped all along: the angle stays the exact integral.
+        let dt = tore_sim::flight::DT;
+        let mut interp = Interpolator::new(4);
+        let mut previous = None;
+        for tick in (0..2_000u32).step_by(4) {
+            let speed = 900 + (tick % 200) as u16;
+            interp.receive(&snapshot(
+                tick,
+                &[(7, rotorcraft(tick, speed, [[0; 2]; 2]))],
+            ));
+            if tick >= 8 {
+                let render = f64::from(tick) - 6.;
+                let turns = interp.draw(render, 0, &no_names).aircraft[0]
+                    .engine
+                    .rotor_turns;
+                if let Some((at, before)) = previous {
+                    let step: f64 = render - at;
+                    assert!(turns > before && turns - before < step * 1.2 * dt);
+                }
+                previous = Some((render, turns));
+            }
+        }
     }
 }

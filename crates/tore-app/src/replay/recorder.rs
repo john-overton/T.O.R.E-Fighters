@@ -1383,7 +1383,7 @@ impl Recorder {
             events.push(event);
             self.tone = tone;
         }
-        let stall = crate::audio::stall_cue(flight.stall_alert(player_ground));
+        let stall = crate::audio::warning_cue(flight, player_ground);
         if stall != self.stall {
             let mut event = Event::new(kind::AUDIO_STALL_WARNING)
                 .with_subject(player)
@@ -1602,9 +1602,9 @@ fn fit(frame: &mut Frame) {
 fn cheat_changes(
     before: &tore_sim::cheats::Cheats,
     after: &tore_sim::cheats::Cheats,
-) -> [(&'static str, bool, bool); 16] {
+) -> [(&'static str, bool, bool); 17] {
     type Switch = fn(&tore_sim::cheats::Cheats) -> bool;
-    let list: [(&'static str, Switch); 16] = [
+    let list: [(&'static str, Switch); 17] = [
         ("invulnerable", |c| c.invulnerable()),
         ("realistic_damage", |c| c.system_damage()),
         ("unlimited_ammo", |c| c.unlimited_ammo),
@@ -1621,6 +1621,7 @@ fn cheat_changes(
         ("ignore_midair_collisions", |c| c.ignore_midair_collisions),
         ("easy_targeting", |c| c.easy_targeting),
         ("guns_only", |c| c.guns_only),
+        ("easy_physics", |c| c.easy_physics),
     ];
     list.map(|(name, switch)| (name, switch(before), switch(after)))
 }

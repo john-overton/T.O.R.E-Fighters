@@ -344,6 +344,105 @@ pub fn aircraft() -> Aircraft {
     crate::test_support::profile()
 }
 
+/// A synthetic record under the identity of one of the six powered-lift
+/// aircraft (AH-64, Mi-24, CH-47, V-22, AV-8, Yak-141), carrying the
+/// PT's own flight numbers as plain constants (VTOL overhaul design 8.2): no
+/// retail data. The speed envelopes are synthetic polygons with the PTs'
+/// stall and top speeds.
+pub fn powered_profile(id: AircraftId) -> Aircraft {
+    let mut a = profile();
+    let (name, shape) = tore_sim::models::variety::VarietyFlightModel::identity(id)
+        .expect("a powered-lift identity");
+    a.id = id;
+    a.name = name.into();
+    a.shape = shape.into();
+    let set = |a: &mut Aircraft, key: &str, value: i64| {
+        a.fields.insert(
+            key.into(),
+            Token {
+                kind: "dword".into(),
+                value: value.to_string(),
+                scaled: false,
+            },
+        );
+    };
+    const KT: f64 = 1.687_81;
+    // Empty, fuel, thrust, afterburner, maximum takeoff weight, slow and
+    // fast edges of the 1 G row in ft/s.
+    let (empty, fuel, thrust, afterburner, maximum, slow, fast) = match id {
+        AircraftId::Ah64 => (18_298, 2_000, 26_280, 0, 23_810, 36. * KT, 130. * KT),
+        // The V-22's record carries the AH-64's flight fields; the CH-47's
+        // shares the Mi-24's mass and envelope with a thrust 4.7 times its
+        // maximum weight (design 2).
+        AircraftId::V22 => (18_298, 2_000, 26_280, 0, 23_810, 36. * KT, 130. * KT),
+        AircraftId::Mi24 => (18_078, 3_307, 35_691, 0, 28_660, 53. * KT, 178. * KT),
+        AircraftId::Ch47 => (18_078, 3_307, 135_795, 0, 28_660, 53. * KT, 178. * KT),
+        AircraftId::Av8 => (13_968, 7_759, 33_800, 0, 31_000, 170., 980.),
+        AircraftId::Yak141 => (25_685, 9_700, 19_840, 34_170, 42_990, 110., 1_140.),
+        _ => panic!("not a powered-lift aircraft"),
+    };
+    for (key, value) in [
+        ("weight", empty),
+        ("internalFuel", fuel),
+        ("thrust", thrust),
+        ("aftThrust", afterburner),
+        ("aftFuelConsumption", if afterburner > 0 { 17 } else { 0 }),
+        ("maxTakeoffWeight", maximum),
+    ] {
+        set(&mut a, key, value);
+    }
+    if matches!(id, AircraftId::Av8 | AircraftId::Yak141) {
+        for (key, value) in [
+            ("loadedElevator", 43),
+            ("loadedDrag", 45),
+            ("_gpullDrag", 33),
+        ] {
+            set(&mut a, key, value);
+        }
+        for (axis, [max, acc, dacc]) in [
+            ("_brv.x", [225, 286, 571]),
+            ("puffRot.x", [50, 60, 20]),
+            ("puffRot.y", [20, 20, 8]),
+            ("puffRot.z", [20, 20, 8]),
+        ] {
+            for (suffix, value) in [("min", -max), ("max", max), ("acc", acc), ("dacc", dacc)] {
+                set(&mut a, &format!("{axis}.{suffix}"), i64::from(value));
+            }
+        }
+        a.envelopes = (-3..=7)
+            .map(|g: i32| {
+                let k = f64::from(g.abs().max(1) - 1);
+                let low = if g == 0 {
+                    0.7 * slow
+                } else {
+                    slow * (1. + 0.45 * k)
+                };
+                let high = fast * (1. - 0.04 * k);
+                let ceiling = 50_000. * (1. - k / 8.);
+                Envelope {
+                    g,
+                    points: vec![
+                        [low, 0.],
+                        [low * 2.5, ceiling],
+                        [high * 0.75, ceiling],
+                        [high, 0.],
+                    ],
+                }
+            })
+            .collect();
+    } else {
+        for e in &mut a.envelopes {
+            e.points = vec![
+                [slow, 0.],
+                [slow + 10., 7_000.],
+                [fast - 20., 7_000.],
+                [fast, 0.],
+            ];
+        }
+    }
+    a
+}
+
 /// Two friendly aircraft in wing 2 and two enemy aircraft in wing 1, the
 /// same shape `--ai-probe-ticks` flies.
 pub fn payload(enemy_override: Option<EnemySkillOverride>) -> Vec<WingLaunch> {

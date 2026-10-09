@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from battery_scenarios import flight  # noqa: E402
+from battery_scenarios import _powered, flight  # noqa: E402
 
 EXTREMES = (
     "extremes: samples=7200 non_finite=0 max_speed_kt=450.0 max_g=7.64 min_g=1.05 min_altitude_ft=4326.6 "
@@ -250,3 +250,41 @@ class ScenarioListTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PoweredTapeTests(unittest.TestCase):
+    """The powered-lift scenarios' tapes (tools/battery_scenarios/_powered.py)."""
+
+    def test_a_tape_has_one_numbered_line_per_tick_and_its_commands(self):
+        text = _powered.tape_text(
+            4, [(2, 3, {"pitch": -0.5, "collective": 0.85, "conversion": -1})], {1: ["toggle:hover-hold"], 3: ["a", "b"]}
+        )
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "tore-pilot 3")
+        self.assertEqual(len(lines), 5)
+        self.assertEqual(lines[1], "1 0.0 0.0 0.0 0 - toggle:hover-hold")
+        self.assertEqual(lines[2], "2 -0.5 0.0 0.0 0 - lift:collective:0:0.85 lift:conversion:-1:-")
+        self.assertEqual(lines[3], "3 -0.5 0.0 0.0 0 - lift:collective:0:0.85 lift:conversion:-1:- a b")
+        self.assertEqual(lines[4], "4 0.0 0.0 0.0 0 -")
+
+    def test_every_scenario_tape_is_defined_for_its_aircraft(self):
+        for scenario in _powered.powered_scenarios():
+            self.assertTrue(scenario.name.startswith("flight-powered-"), scenario.name)
+            self.assertEqual(scenario.lane, "flight")
+        for ac in _powered.POWERED:
+            for kind in ("quiet", "transition"):
+                ticks, _, _ = _powered.spec(kind, ac)
+                self.assertGreater(ticks, 0)
+        for ac in _powered.ROTORCRAFT:
+            self.assertEqual(_powered.spec("hold", ac)[2][420], ["toggle:hover-hold"])
+
+    def test_the_result_line_is_read_and_the_checks_name_each_problem(self):
+        flight_line = "ticks=1800 speed_kt=0.4 altitude_ft=5000.1 fuel_lb=1900.0 crashed=false\n"
+        extremes = "extremes: samples=1800 non_finite=0 max_speed_kt=1.0\n"
+        output = "\n$ then 1: x\n\n$ then 2: y\n" + flight_line + extremes
+        self.assertEqual(_powered.check_hover(output), [])
+        drifting = output.replace("speed_kt=0.4", "speed_kt=12.0")
+        self.assertTrue(any("drifted" in p for p in _powered.check_hover(drifting)))
+        crashed = output.replace("crashed=false", "crashed=true")
+        self.assertTrue(any("crashed" in p for p in _powered.check_hover(crashed)))
+        self.assertTrue(any("no result" in p for p in _powered.check_hover("\n$ then 2: y\nnothing\n")))

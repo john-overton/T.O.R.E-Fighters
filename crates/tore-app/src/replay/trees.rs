@@ -2011,6 +2011,10 @@ pub fn effect_line(effect: &Effect) -> EffectLine {
                 Release::NavigationFailed => "navigation failed",
                 Release::PilotOverride => "the pilot moved the stick",
                 Release::Ground => "on the ground or crashed",
+                Release::PilotCollective => "the pilot moved the collective",
+                Release::EngineFailure => "engine failure",
+                Release::HydraulicsLost => "hydraulics lost",
+                Release::TooSlow => "too slow for the mode",
             }
             .into(),
         ),

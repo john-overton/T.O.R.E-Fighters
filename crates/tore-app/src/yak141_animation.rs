@@ -1,10 +1,7 @@
 //! Yak141 source surfaces and original nozzle shell with explicit fitted laws.
 //! No imported instructions execute; source endpoints and memberships are guarded.
 use crate::{AppResult, additional_animation::turn, flight::State};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    f64::consts::FRAC_PI_2,
-};
+use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::shape::{Face, Shape};
 const WORDS: [usize; 3] = [0x6270, 0x627c, 0x6282];
 const FIN: [usize; 4] = [0x42b7, 0x430a, 0x4342, 0x4366];
@@ -298,17 +295,13 @@ impl Rig {
                 update_normal(source, &mut result);
             }
         } else if SHELL.contains(&a) || a == OUTLET {
-            turn(
-                &mut result,
-                NOZZLE_PIVOT,
-                [0., 0., 1.],
-                -15f64.to_radians() * state.lift_controls.vector_yaw_actual.clamp(-1., 1.),
-            );
+            // The simulated nozzle angle, braking stop included; neither jet
+            // vectors sideways (VTOL overhaul slice P4).
             turn(
                 &mut result,
                 NOZZLE_PIVOT,
                 [1., 0., 0.],
-                FRAC_PI_2 * state.lift_controls.vector_pitch_actual.clamp(0., 1.),
+                state.nozzle_degrees().to_radians(),
             );
             if a != OUTLET {
                 for (p, old) in result.positions.iter_mut().zip(&source.positions) {
@@ -465,8 +458,10 @@ mod tests {
                 [1., -53., 2.],
             ],
         );
-        for pitch in [0., 0.25, 0.5, 0.75, 1.] {
-            for yaw in [-1., -0.5, 0., 0.5, 1.] {
+        // 0..1 of the PT travel: 0 to 90 (vertical) and 100 (the braking
+        // stop) degrees. The vector yaw no longer moves the nozzle.
+        for pitch in [0., 0.25, 0.5, 0.75, 0.9, 1.] {
+            for yaw in [0., 1.] {
                 state.lift_controls.vector_pitch_actual = pitch;
                 state.lift_controls.vector_yaw_actual = yaw;
                 let out = rig.animate(&outlet, &state).unwrap();
@@ -490,10 +485,25 @@ mod tests {
                         assert_eq!(*q, out.positions[i]);
                     }
                 }
-                if pitch == 0. && yaw == 0. {
+                if pitch == 0. {
                     assert_eq!(out.positions, outlet.positions);
                     assert_eq!(sh.positions, shell.positions);
                 }
+                // The outlet turns by the simulated nozzle angle about the
+                // pivot's lateral axis: a point straight below the pivot
+                // swings aft-up by that angle.
+                let below = [NOZZLE_PIVOT[0], NOZZLE_PIVOT[1], NOZZLE_PIVOT[2] - 4.];
+                let mut probe = outlet.clone();
+                probe.positions[0] = below;
+                let turned = rig.animate(&probe, &state).unwrap().positions[0];
+                let drawn = f64::from(turned[2] - NOZZLE_PIVOT[2])
+                    .atan2(f64::from(turned[1] - NOZZLE_PIVOT[1]))
+                    .to_degrees()
+                    + 90.;
+                assert!(
+                    (drawn - state.nozzle_degrees()).abs() < 1e-3,
+                    "{drawn} {pitch}"
+                );
             }
         }
     }

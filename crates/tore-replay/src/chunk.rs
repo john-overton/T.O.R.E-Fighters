@@ -7,14 +7,17 @@ use crate::codec::{In, put_uv};
 use crate::error::{Result, corrupt};
 use crate::events::{ChecksumCoder, EventCoder, get_checksums, get_events};
 use crate::format::{
-    KIND_DATA, SECTION_CHECKSUMS, SECTION_ENTITIES, SECTION_EVENTS, SECTION_FRAMES, SECTION_SPAWNS,
-    SECTION_STRINGS, SECTION_TREES, chunk, put_section, section,
+    KIND_DATA, SECTION_CHECKSUMS, SECTION_DISK_TILT, SECTION_ENTITIES, SECTION_EVENTS,
+    SECTION_FRAMES, SECTION_ROTORS, SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES, chunk,
+    put_section, section,
 };
 use crate::frames::FrameCoder;
 use crate::limits::MAX_REGISTERED;
 use crate::model::{AircraftInfo, Frame, Side, WeaponClass, WeaponInfo};
+use crate::rotors::{RotorCoder, apply_rotors, get_rotors};
 use crate::spawns::{SpawnCoder, get_spawns};
 use crate::strings::{Interner, StringTable};
+use crate::tilts::{TiltCoder, apply_tilts, get_tilts};
 use crate::trees::{TreeCoder, get_trees};
 
 /// Writer state for the chunk being filled.
@@ -28,6 +31,8 @@ pub(crate) struct ChunkEncoder {
     events: EventCoder,
     trees: TreeCoder,
     checksums: ChecksumCoder,
+    rotors: RotorCoder,
+    tilts: TiltCoder,
     aircraft: Vec<u8>,
     aircraft_count: u64,
     weapons: Vec<u8>,
@@ -45,6 +50,8 @@ impl ChunkEncoder {
         self.events.put(index, &frame.events, strings);
         self.trees.put(index, &frame.trees, strings);
         self.checksums.put(index, frame.checksum);
+        self.rotors.put(index, &frame.aircraft);
+        self.tilts.put(index, &frame.aircraft);
         self.frames += 1;
     }
 
@@ -89,6 +96,8 @@ impl ChunkEncoder {
             + self.spawns.len()
             + self.events.len()
             + self.trees.len()
+            + self.rotors.len()
+            + self.tilts.len()
             + self.aircraft.len()
             + self.weapons.len()
             + 16 * self.frames as usize
@@ -124,6 +133,12 @@ impl ChunkEncoder {
         }
         if let Some(payload) = self.checksums.section() {
             put_section(&mut body, SECTION_CHECKSUMS, &payload);
+        }
+        if let Some(payload) = self.rotors.section() {
+            put_section(&mut body, SECTION_ROTORS, &payload);
+        }
+        if let Some(payload) = self.tilts.section() {
+            put_section(&mut body, SECTION_DISK_TILT, &payload);
         }
         chunk(
             KIND_DATA,
@@ -238,6 +253,12 @@ pub(crate) fn decode_frames(
         for (i, checksum) in get_checksums(payload, frames)? {
             out[i as usize].checksum = Some(checksum);
         }
+    }
+    if let Some(payload) = section(sections, SECTION_ROTORS) {
+        apply_rotors(&mut out, get_rotors(payload, frames)?);
+    }
+    if let Some(payload) = section(sections, SECTION_DISK_TILT) {
+        apply_tilts(&mut out, get_tilts(payload, frames)?);
     }
     Ok(out)
 }

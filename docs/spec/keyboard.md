@@ -58,6 +58,14 @@ afterburner off, so 7 from afterburner gives 96 percent.
 The keyboard throttle and rudder keys work only while Keyboard is the chosen
 throttle or rudder device in the Control menu.
 
+On the AV-8 and Yak-141 the manual (pp. 62 and 70 to 71) gives Z and X as the
+nozzles' 10-degree steps up and down, Shift+X as vertical (a second press is the
+100-degree braking stop) and Shift+Z as aft (or back to vertical from the
+stop). The handler review above found one variable-geometry handler, so the
+sweep and nozzle meanings are most likely the same keys acting on whatever the
+aircraft can move. T.O.R.E follows the manual on those two jets and keeps Z and
+X as a rudder pair elsewhere ([key placement](../INPUT.md#key-placement)).
+
 ## Weapons and countermeasures
 
 | Key | Action | Confidence |

@@ -234,6 +234,23 @@ impl Flier {
             } else {
                 [0.; 3]
             },
+            // A rotor speed on the violent flights only, wandering about the
+            // governed 100 percent, so a busy and an idle channel both run.
+            rotor_speed: if self.violent {
+                1. + 0.12 * (t * 0.3).sin() + 0.05 * (t * 2.1).sin()
+            } else {
+                0.
+            },
+            // Disk tilts to match, wandering about a few degrees on the
+            // violent flights, so a busy and a level channel both run.
+            disk_tilt: if self.violent {
+                [
+                    [0.08 * (t * 0.7).sin(), 0.05 * (t * 1.3).cos()],
+                    [-0.03 * (t * 0.4).sin(), 0.02 * (t * 2.9).sin()],
+                ]
+            } else {
+                [[0.; 2]; 2]
+            },
             hp: self.hp,
             max_hp: 1_000,
             sections: [0, (1_000 - self.hp) / 2, 0, 0, 0, 0],

@@ -9,6 +9,7 @@ use crate::aircraft::Airframe;
 use crate::flight;
 use crate::replay::convert::{self, EFFECT_LOOKBACK_TICKS, Identities, Presentation};
 use crate::snapshot::{self, RenderSnapshot, set_devices};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tore_replay::{AircraftState, Frame, LAYER_CONTRAILS, PuffKind, Recording};
 use tore_sim::combat::smoke::{Kind, Puff, Smoke};
@@ -19,6 +20,16 @@ use tore_sim::vapor::{COMMIT_TICKS, Vapor};
 const CHUNK_CACHE: usize = 8;
 /// Ticks of recorded poses the wing vapor is rebuilt from.
 pub const VAPOR_TICKS: u64 = 250;
+
+/// Adds a tick of each aircraft's recorded rotor speed per frame to its
+/// blade angle (seconds at 100 percent).
+fn add_rotor_turns(turns: &mut BTreeMap<u32, f64>, frames: &[Frame]) {
+    for aircraft in frames.iter().flat_map(|frame| &frame.aircraft) {
+        if aircraft.rotor_speed > 0. {
+            *turns.entry(aircraft.id).or_default() += aircraft.rotor_speed * flight::DT;
+        }
+    }
+}
 
 /// The weather clock's native ticks after `tick` simulation ticks: 256 a
 /// second, counted as the fixed clock counts them.
@@ -74,6 +85,12 @@ pub struct Playback {
     commits: Vec<u64>,
     /// Every crater and fire the recording started.
     marks: Vec<(u64, tore_replay::EffectSpawn)>,
+    /// Each rotorcraft's blade angle (seconds at 100 percent rotor speed) at
+    /// the start of every chunk summed so far, in chunk order: the recorded
+    /// rotor speed integrated frame by frame from the recording's start
+    /// (slice P7b). A cache of the recording alone, so the blade angle at a
+    /// tick does not depend on how the playhead got there.
+    rotor_starts: Vec<BTreeMap<u32, f64>>,
 }
 
 impl Playback {
@@ -92,6 +109,7 @@ impl Playback {
             pair: None,
             smoke: None,
             vapor: None,
+            rotor_starts: Vec::new(),
         }
     }
 
@@ -183,7 +201,45 @@ impl Playback {
         };
         let mut snapshot = convert::snapshot(frame, &playing, &self.presentation, &self.identities);
         snapshot.marks = convert::marks_at(&self.marks, frame.tick);
+        if let Some(turns) = self.rotor_turns(tick) {
+            for pose in std::iter::once(&mut snapshot.player).chain(&mut snapshot.targets) {
+                if pose.engine.rotor > 0.
+                    && let Some(t) = turns.get(&pose.id)
+                {
+                    pose.engine.rotor_turns = *t;
+                }
+            }
+        }
         Some(snapshot)
+    }
+
+    /// Every rotorcraft's blade angle at the frame drawn at `tick`: the
+    /// recorded rotor speed summed over every frame up to it, a tick each.
+    /// None in a recording without rotor speeds, which costs nothing.
+    fn rotor_turns(&mut self, tick: u64) -> Option<BTreeMap<u32, f64>> {
+        let (frames, at) = self.frame(tick)?;
+        if !frames[at].aircraft.iter().any(|a| a.rotor_speed > 0.) {
+            return None;
+        }
+        let chunks = self.recording.chunks();
+        let index = chunks
+            .partition_point(|c| c.first_tick <= tick)
+            .checked_sub(1)?;
+        while self.rotor_starts.len() <= index {
+            let next = match self.rotor_starts.len().checked_sub(1) {
+                None => BTreeMap::new(),
+                Some(before) => {
+                    let mut turns = self.rotor_starts[before].clone();
+                    let frames = self.chunk(before)?;
+                    add_rotor_turns(&mut turns, &frames);
+                    turns
+                }
+            };
+            self.rotor_starts.push(next);
+        }
+        let mut turns = self.rotor_starts[index].clone();
+        add_rotor_turns(&mut turns, &frames[..=at]);
+        Some(turns)
     }
 
     /// The craters and fires alive at `tick`.
@@ -613,5 +669,168 @@ mod tests {
         assert_eq!(grown.marks_at(newest).len(), 2);
         assert_eq!(grown.commits, commit_ticks(newest));
         assert!(grown.identities.aircraft.contains_key(&9));
+    }
+
+    /// A recording of a rotorcraft (id 0) whose rotor droops and recovers
+    /// across several 40-tick chunks, beside an aircraft without rotors.
+    fn rotorcraft_recording(dir: &TempDir) -> Recording {
+        use tore_replay::{AircraftFlags, AircraftInfo, Frame, Writer, WriterOptions};
+        let path = dir.path().join("rotors.tore-replay");
+        let mut writer = Writer::create_with(
+            &path,
+            &tore_replay::Header::default(),
+            WriterOptions {
+                chunk_ticks: 40,
+                sync_ticks: 3_600,
+            },
+        )
+        .unwrap();
+        for (id, pt) in [(0, "AH64.PT"), (1, "F18.PT")] {
+            writer
+                .register_aircraft(&AircraftInfo {
+                    id,
+                    pt: pt.into(),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        for tick in 0..=200 {
+            let aircraft = [0, 1].map(|id| AircraftState {
+                id,
+                position: [f64::from(id) * 500., 3_000., tick as f64],
+                flags: AircraftFlags {
+                    engine_on: true,
+                    airborne: true,
+                    alive: true,
+                    ..Default::default()
+                },
+                rotor_speed: if id == 0 { rotor_speed(tick) } else { 0. },
+                disk_tilt: if id == 0 {
+                    disk_tilt(tick)
+                } else {
+                    [[0.; 2]; 2]
+                },
+                hp: 100,
+                max_hp: 100,
+                ..Default::default()
+            });
+            writer
+                .push(&Frame {
+                    tick,
+                    aircraft: aircraft.into(),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let path = writer.finish(&tore_replay::Footer::default()).unwrap();
+        Recording::open(path).unwrap()
+    }
+
+    /// The test rotorcraft's rotor speed at `tick`, in recorded thousandths.
+    fn rotor_speed(tick: u64) -> f64 {
+        let droop = (tick as f64 / 100.).min(1.) * 0.2;
+        ((1. - droop + if tick > 150 { 0.15 } else { 0. }) * 1000.).round() / 1000.
+    }
+
+    /// The test rotorcraft's disk tilt at `tick`: leaning forward more as the
+    /// flight goes on, with a steady lateral lean.
+    fn disk_tilt(tick: u64) -> [[f64; 2]; 2] {
+        [[0.02 + tick as f64 * 0.002, -0.02], [0., 0.]]
+    }
+
+    #[test]
+    fn replayed_disks_tilt_as_recorded_and_blend_between_ticks() {
+        let dir = TempDir::new("playback-tilts");
+        let recording = Arc::new(rotorcraft_recording(&dir));
+        let tilt = |picture: &RenderSnapshot, id: u32| {
+            std::iter::once(&picture.player)
+                .chain(&picture.targets)
+                .find(|pose| pose.id == id)
+                .unwrap()
+                .engine
+                .rotor_tilt
+        };
+        let step = tore_replay::precision::DISK_TILT;
+        let mut playback = Playback::new(Arc::clone(&recording));
+        for tick in (0..=200).step_by(3) {
+            let picture = playback.picture(tick, 1.);
+            let read = tilt(&picture, 0);
+            let truth = disk_tilt(tick);
+            for (rotor, axis) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+                assert!(
+                    (read[rotor][axis] - truth[rotor][axis]).abs() <= step / 2. + 1e-9,
+                    "tick {tick}: {read:?} against {truth:?}"
+                );
+            }
+            // The aircraft without rotors stays level.
+            assert_eq!(tilt(&picture, 1), [[0.; 2]; 2]);
+        }
+        // Played backwards, and between ticks, the disk is where the
+        // recording had it, blended as live flight blends two ticks.
+        let half = playback.picture(120, 0.5);
+        let blended = tilt(&half, 0)[0][0];
+        let expected = (disk_tilt(119)[0][0] + disk_tilt(120)[0][0]) / 2.;
+        assert!(
+            (blended - expected).abs() <= step + 1e-9,
+            "{blended} {expected}"
+        );
+        let back = playback.picture(37, 1.);
+        assert!((tilt(&back, 0)[0][0] - disk_tilt(37)[0][0]).abs() <= step / 2. + 1e-9);
+    }
+
+    #[test]
+    fn replayed_blades_turn_by_the_recorded_rotor_speed_wherever_playback_starts() {
+        let dir = TempDir::new("playback-rotors");
+        let recording = Arc::new(rotorcraft_recording(&dir));
+        let turns = |playback: &mut Playback, tick: u64| {
+            let picture = playback.picture(tick, 1.);
+            let player = std::iter::once(&picture.player)
+                .chain(&picture.targets)
+                .find(|pose| pose.id == 0)
+                .unwrap()
+                .clone();
+            (player.engine.rotor, player.engine.rotor_turns)
+        };
+        // The recorded rotor speed, a tick at a time from the first frame.
+        let exact = |tick: u64| (0..=tick).map(rotor_speed).sum::<f64>() * flight::DT;
+        let mut forward = Playback::new(Arc::clone(&recording));
+        let mut last = 0.;
+        for tick in 0..=200 {
+            let (rotor, turns) = turns(&mut forward, tick);
+            assert!((rotor - rotor_speed(tick)).abs() < 1e-9, "{tick}");
+            assert!((turns - exact(tick)).abs() < 1e-9, "{tick}: {turns}");
+            // Across chunk boundaries too, a tick turns the blades by that
+            // tick's rotor speed.
+            if tick > 0 {
+                let step = turns - last;
+                assert!(
+                    (step - rotor_speed(tick) * flight::DT).abs() < 1e-9,
+                    "{tick}"
+                );
+            }
+            last = turns;
+        }
+        // Played backwards, or opened straight at a late tick, the blades
+        // stand where forward play had them.
+        let mut backward = Playback::new(Arc::clone(&recording));
+        for tick in (0..=200).rev().step_by(7) {
+            assert!((turns(&mut backward, tick).1 - exact(tick)).abs() < 1e-9);
+        }
+        let mut late = Playback::new(Arc::clone(&recording));
+        assert!((turns(&mut late, 185).1 - exact(185)).abs() < 1e-9);
+        // Between ticks the picture blends them.
+        let half = forward.picture(120, 0.5);
+        let pose = std::iter::once(&half.player)
+            .chain(&half.targets)
+            .find(|pose| pose.id == 0)
+            .unwrap();
+        assert!((pose.engine.rotor_turns - (exact(119) + exact(120)) / 2.).abs() < 1e-9);
+        // The aircraft without rotors has none.
+        let picture = forward.picture(100, 1.);
+        let other = std::iter::once(&picture.player)
+            .chain(&picture.targets)
+            .find(|pose| pose.id == 1)
+            .unwrap();
+        assert_eq!((other.engine.rotor, other.engine.rotor_turns), (0., 0.));
     }
 }

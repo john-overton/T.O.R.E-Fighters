@@ -45,6 +45,10 @@ pub mod precision {
     pub const FUEL_LB: f64 = 1. / 16.;
     /// Auxiliary body rates, radians per second.
     pub const RATE_RAD_S: f64 = 1. / 4096.;
+    /// Rotor speed, a share of the governed 100 percent: a thousandth.
+    pub const ROTOR_SPEED: f64 = 1. / 1000.;
+    /// Rotor disk tilt, radians: 1/256, the network protocol's step.
+    pub const DISK_TILT: f64 = 1. / 256.;
 }
 
 use precision::{
@@ -365,6 +369,8 @@ impl AircraftPred {
             fuel_lb: self.fuel.value(FUEL),
             controls: from_fn(|i| self.controls[i].value(CONTROL)),
             auxiliary_rates: from_fn(|i| self.rates[i].value(RATE)),
+            rotor_speed: 0.,
+            disk_tilt: [[0.; 2]; 2],
             hp: self.hp,
             max_hp: self.max_hp,
             sections: self.sections,
@@ -466,6 +472,9 @@ fn get_aircraft_key(input: &mut In, device_count: usize) -> Result<AircraftState
         fuel_lb,
         controls,
         auxiliary_rates,
+        // Carried by their own chunk sections (crate::rotors, crate::tilts).
+        rotor_speed: 0.,
+        disk_tilt: [[0.; 2]; 2],
         hp,
         max_hp,
         sections,

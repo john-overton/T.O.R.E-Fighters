@@ -556,6 +556,12 @@ the isolated flight-model probe, not a complete rendered mission. Keep the
 default researched flight adapter unless the task explicitly concerns another
 adapter. Use `--aircraft rafale` for the exact Rafale C identity.
 
+The powered-lift aircraft (`av8`, `yak141`, `v22`, `ah64`, `mi24`, `ch47`) start in
+trimmed forward flight. `--maneuver hover` starts one at rest in the air in its own
+hover trim (hands off it holds), and `--replay-input TAPE` flies a `tore-pilot 3`
+tape from there; the battery's `flight-powered-*` scenarios do exactly this
+([flight lane](testing/lane-flight.md#powered-lift-scenarios-vtol-overhaul)).
+
 For an individual aircraft's actual surface geometry, before broad integration
 checks:
 
@@ -721,7 +727,7 @@ every that many ticks. These are development harness options, not game behaviour
 - `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies a system fault to the player's
   aircraft at that tick through the normal fault path and adds a `systems:` line.
 - `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-g-effects`, `no-spins`, `no-crashes`,
-  `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
+  `unlimited-fuel`, `unlimited-ammo`, `easy-physics`, `invulnerable` or `realistic-damage`. It also applies to
   `--live-fire` captures.
 - `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
 - `--loadout none|guns` now also applies to a headless ground start (payload and fuel systems follow
@@ -1449,6 +1455,14 @@ shadows versus distant casters, and a five-second low-sun stability sequence
 with small camera movements and sunglare disabled. The glare test checks
 every channel of a synthetic gradient under two flare circles against continuous
 optical composition. Both tests use no retail media.
+
+## Powered-lift HUD fixtures
+
+`--hud-snapshot PATH --aircraft ah64 --hud-snapshot-state hover` (or `forward`, or `converting`: a V-22 hovering at 140 knots, so its conversion protection is driving the nacelles forward, or `low`: the hover 45 feet over the ground at stability Off, which shows the radar height and the stability label)
+draws the HUD of the selected aircraft headless, as a PPM over a flat sky and
+ground split at the horizon. A powered-lift aircraft is started in trimmed
+forward flight or in a hover, 3,000 feet over a plain, and flown a second.
+Layout is in the [HUD layout spec](spec/hud-layout.md#powered-lift-cluster).
 
 ## Systems instrument fixtures
 

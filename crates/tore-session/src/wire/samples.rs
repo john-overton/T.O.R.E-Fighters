@@ -4,7 +4,7 @@
 use super::chat::{ChatFrom, ChatLine, ChatSend, Quick, Receiver, Standing};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
-    EntityState, Motion, PilotState, ProjectileState, Status,
+    EntityState, Motion, PilotState, ProjectileState, RotorState, Status,
 };
 use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
@@ -30,6 +30,7 @@ use super::{Path, Platform};
 use crate::journal;
 use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
 use tore_formats::aircraft::AircraftId;
+use tore_input::pilot::{LiftCommand, NozzlePreset, StabilityLevel, TrimAxis};
 use tore_net::master::{Candidate, CandidateKind, MappingType};
 use tore_sim::acoustics;
 use tore_sim::ai::launch::{Side, WingId};
@@ -113,6 +114,22 @@ pub fn commands() -> Vec<Command> {
         Command::Pilot(PilotCommand::NeutralVector),
         Command::Seat(S::Combat(live::Command::NextGunGroup)),
         Command::Seat(S::Combat(live::Command::ToggleGunGroup)),
+        // Protocol 19: hover hold and every powered-lift sub-code.
+        Command::Pilot(PilotCommand::Toggle(Switch::HoverHold)),
+        Command::Pilot(PilotCommand::Lift(LiftCommand::SetStability(
+            StabilityLevel::Attitude,
+        ))),
+        Command::Pilot(PilotCommand::Lift(LiftCommand::CycleStability)),
+        Command::Pilot(PilotCommand::Lift(LiftCommand::TrimSet)),
+        Command::Pilot(PilotCommand::Lift(LiftCommand::TrimAdjust(
+            TrimAxis::Roll,
+            -0.02,
+        ))),
+        Command::Pilot(PilotCommand::Lift(LiftCommand::TrimCentre)),
+        Command::Pilot(PilotCommand::Lift(LiftCommand::NozzleStep { down: true })),
+        Command::Pilot(PilotCommand::Lift(LiftCommand::NozzlePreset(
+            NozzlePreset::Vertical,
+        ))),
     ]
 }
 
@@ -217,6 +234,7 @@ pub fn entities() -> Vec<Entity> {
                     crashed: false,
                     wreck: None,
                 },
+                rotor: None,
             }),
         },
         Entity {
@@ -237,6 +255,35 @@ pub fn entities() -> Vec<Entity> {
                     crashed: true,
                     wreck: Some(wreck::Phase::Grounded),
                 },
+                rotor: None,
+            }),
+        },
+        // A rotorcraft: its rotor speed and disk tilts (slice P7b).
+        Entity {
+            id: 10,
+            state: EntityState::Aircraft(AircraftState {
+                aircraft: Some(AircraftId::Ch47),
+                motion: motion(10),
+                attitude: [4_000, 300, 65_200],
+                devices: None,
+                engine: EngineState {
+                    lit: true,
+                    ..EngineState::default()
+                },
+                damage: DamageState {
+                    hp: 200,
+                    initial_hp: 200,
+                    ..DamageState::default()
+                },
+                status: Status {
+                    airborne: true,
+                    crashed: false,
+                    wreck: None,
+                },
+                rotor: Some(RotorState {
+                    speed: 987,
+                    tilt: [[12, -3], [-127, 127]],
+                }),
             }),
         },
         Entity {

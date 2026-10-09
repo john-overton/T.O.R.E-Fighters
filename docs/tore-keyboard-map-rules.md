@@ -55,7 +55,11 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   Fly & Fight; keypad 5 (center) and plus and minus (zoom) on Cockpit & View;
   keypad 7, 8, 9, 4, 6, 1, 2 and 3 (playback), 5 (center) and plus and minus
   (zoom) on Replay. The VTOL / Helicopters sheet also shows the Ctrl variants on
-  keypad 7/1 (collective), 9/3 (conversion), 8/2 (nozzle pitch) and 4/6 (nozzle yaw).
+  keypad 7/1 (collective), 9/3 (conversion), 8/2 (nozzle pitch on the
+  vectoring jets, cyclic trim on rotorcraft) and 4/6 (cyclic trim). On that
+  sheet the 1 to 8 caps carry a second `COLL` row, because on the helicopters
+  and the V-22 the throttle keys set the collective, and the A cap shows the
+  autopilot beside hover hold and the stability level.
 - Identify context or capability limits in the key label, tooltip or callout.
   Examples include F-22 weapon bays and Home while the live map is open.
   Instrument button letters are not automatically global keyboard bindings.
@@ -87,6 +91,7 @@ Retain the existing badge conventions:
 | A | Alt |
 | CS | Ctrl and Shift together |
 | AS | Alt and Shift together |
+| CA | Ctrl and Alt together |
 | S/C | Either Shift or Ctrl, not both required |
 
 Keep modifiers on the command row they modify. Do not make Shift+E look like

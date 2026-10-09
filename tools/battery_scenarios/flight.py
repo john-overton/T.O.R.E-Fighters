@@ -11,6 +11,7 @@ import re
 import time
 
 from battery import Scenario
+from battery_scenarios._powered import powered_scenarios
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
@@ -34,18 +35,20 @@ BASE_THEATERS = [t for t in AIRPORTS if not t.startswith("~")]
 VARIANT_THEATERS = [t for t in AIRPORTS if t.startswith("~")]
 
 # Gun capacity and the other station capacities of each aircraft's default load,
-# in the order `--weapon-slot 1..N` selects them (from the combat smoke).
+# in the order `--weapon-slot 1..N` selects them (from the combat smoke). A trailing 0 is a
+# retained selection station the variety import added: configured but never loaded, so the
+# weapon cycle skips it (docs/formats/aircraft-ordnance.md).
 STATIONS = {
     "f18": [570, 2, 4, 4, 2],
     "rafale": [250, 4, 2, 2, 2],
     "f14": [675, 4, 2, 2],
-    "a4e": [400, 4, 2],
-    "x31": [740, 2, 2, 2],
+    "a4e": [400, 4, 2, 0],
+    "x31": [740, 2, 2, 2, 0],
     "mig29": [150, 2, 2, 2],
     "su27": [150, 2, 2, 4, 2],
-    "mig21": [200, 2, 2],
-    "su25": [250, 2, 4, 4],
-    "mig23": [200, 2, 2, 2],
+    "mig21": [200, 2, 2, 0],
+    "su25": [250, 2, 4, 4, 0],
+    "mig23": [200, 2, 2, 2, 0],
     "su35": [150, 1, 2, 4, 2],
     "f22": [750, 2, 2, 4],
 }
@@ -819,6 +822,18 @@ def check_slot(ac: str, slot: int):
         for index, (left, cap) in enumerate(zip(ammo, capacity)):
             if left < 0 or left > cap:
                 problems.append(f"station {index + 1} ammo {left} outside 0..{cap}")
+        if capacity[slot - 1] == 0:
+            # A never-loaded station cannot be selected: the run starts on NAV
+            # and the probe fires whatever the cycle reaches, so this slot only
+            # proves the harness does not hang and the station stays empty.
+            if ammo[slot - 1] != 0:
+                problems.append(f"the never-loaded station {slot} holds {ammo[slot - 1]}")
+            used = sum(cap - left for left, cap in zip(ammo, capacity))
+            if used != shots:
+                problems.append(f"{shots} shots but the stations used {used}")
+            if hits > shots or kills > hits:
+                problems.append(f"impossible tally shots={shots} hits={hits} kills={kills}")
+            return problems
         if refused and shots != 0:
             problems.append(f"a surface weapon fired at the practice aircraft ({shots} shots)")
         if not refused and shots == 0:
@@ -906,6 +921,8 @@ def jettison_scenarios() -> list[Scenario]:
         if ac in {"f22n", "faxx"}:
             continue
         for slot in range(2, len(capacity) + 1):
+            if capacity[slot - 1] == 0:
+                continue  # nothing is loaded there to jettison
             out.append(
                 Scenario(
                     name=f"flight-jettison-{ac}-slot{slot}",
@@ -2105,4 +2122,5 @@ def scenarios() -> list[Scenario]:
         + sprint_scenarios()
         + variety_scenarios()
         + heavy_gcurve_scenarios()
+        + powered_scenarios()
     )

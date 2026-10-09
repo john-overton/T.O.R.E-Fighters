@@ -30,6 +30,29 @@ class MapTests(unittest.TestCase):
         fams = self.families("crates/tore-sim/src/flight.rs")
         self.assertTrue({"flight-stall", "flight-takeoff", "flight-landing", "flight-maneuvers"} <= fams)
 
+    def test_powered_lift_code_selects_the_powered_scenarios(self):
+        for path in [
+            "crates/tore-sim/src/flight/powered/helicopter.rs",
+            "crates/tore-sim/src/flight/powered/jet.rs",
+            "crates/tore-sim/src/flight/powered/tiltrotor.rs",
+            "crates/tore-sim/src/flight/powered/sas.rs",
+            "crates/tore-sim/src/flight/powered/trim.rs",
+            "crates/tore-sim/src/models/variety/lift.rs",
+            "crates/tore-sim/src/flight.rs",
+            "crates/tore-sim/src/autopilot.rs",
+            "crates/tore-sim/src/cheats.rs",
+            "crates/tore-input/src/recording.rs",
+            "tools/battery_scenarios/_powered.py",
+        ]:
+            self.assertIn("flight-powered", self.families(path), path)
+        names = [f"flight-powered-{what}-{ac}" for what in ("hover", "transition", "easy") for ac in ("av8", "yak141", "v22", "ah64", "mi24", "ch47")]
+        names += [f"flight-powered-hover-hold-{ac}" for ac in ("v22", "ah64", "mi24", "ch47")]
+        names += ["flight-powered-corridor-v22", "flight-powered-autorotation-ah64", "flight-powered-vrs-ah64"]
+        for name in names:
+            self.assertTrue(bs.family_matches("flight-powered", name), name)
+        chosen = plan(["crates/tore-sim/src/flight/powered/helicopter.rs"], [sc(n, lane="flight") for n in names]).families
+        self.assertIn("flight-powered", chosen)
+
     def test_stall_table_reaches_stall_and_takeoff(self):
         fams = self.families("crates/tore-sim/src/models/mod.rs")
         self.assertTrue({"flight-stall", "flight-takeoff"} <= fams)

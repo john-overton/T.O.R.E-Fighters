@@ -41,23 +41,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config.joined_native().is_err(),
                 "powered lift remains outside restricted native research"
             );
-            let weight = config.mass.empty_lbs + state.fuel;
-            let lapse = (-1000. / config.tuning.thrust_lapse_feet).exp();
-            let fraction = weight
-                / ((config.propulsion.military_thrust_lbf * lift.efficiency
-                    + lift.additional_lift_lbf)
-                    * lapse);
-            assert!(fraction < 1., "{} cannot hover at this mass", aircraft.name);
-            if lift.kind == LiftKind::VectorJet {
-                state.throttle = fraction;
-                state.lift_controls.vector_pitch = 1.;
-                state.lift_controls.vector_pitch_actual = 1.;
-            } else {
-                state.throttle = 1.;
-                state.lift_controls.collective = fraction;
-                state.lift_controls.collective_actual = fraction;
-            }
-            state.lift_controls.thrust_lbf = weight;
+            // Every one of the six hovers on its own physics, trimmed by the
+            // start module (VTOL overhaul slices P2 to P5 and P7).
+            let jet = lift.jet;
+            assert!(
+                state.trim_hover(),
+                "{} cannot hover at this mass",
+                aircraft.name
+            );
+            assert!(
+                jet.is_none() || state.throttle < 1.,
+                "{} cannot hover at this mass",
+                aircraft.name
+            );
             let mut copy = state.clone();
             run(&mut state, &Default::default(), 1200);
             run(&mut copy, &Default::default(), 1200);
@@ -75,6 +71,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 aircraft.name
             );
             if lift.kind == LiftKind::VectorJet {
+                // A fully fuelled Yak-141 hovers with 2.5 percent to spare,
+                // less than its suck-down on the ground: it lifts off
+                // vertically only lighter, as the real aircraft did.
+                state.fuel *= 0.5;
                 state.command(PilotCommand::AdjustThrottle(0.15));
             } else {
                 state.command(PilotCommand::AdjustAxis(FlightAxis::Collective, 0.15));
@@ -101,16 +101,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 state.position[1] = 5000.;
                 state.pitch = 0.;
                 state.bank = 0.;
-                run(
-                    &mut state,
-                    &PilotInput {
-                        conversion_rate: -1.,
-                        vector_pitch_rate: -1.,
-                        throttle: Some(1.),
-                        ..Default::default()
-                    },
-                    480,
-                );
+                // The V-22's nacelles turn at 8 degrees a second and its corridor
+                // protection keeps them from running ahead of the airspeed:
+                // it needs a push forward until it flies (then a neutral stick)
+                // and half a minute.
+                let tiltrotor = lift.kind == LiftKind::Tiltrotor;
+                for _ in 0..if tiltrotor { 3600 } else { 480 } {
+                    let pushing = tiltrotor && state.speed < 70. * 1.687_81;
+                    run(
+                        &mut state,
+                        &PilotInput {
+                            conversion_rate: -1.,
+                            vector_pitch_rate: -1.,
+                            throttle: Some(1.),
+                            pitch: if pushing { -0.3 } else { 0. },
+                            ..Default::default()
+                        },
+                        1,
+                    );
+                }
                 assert!(state.position.iter().all(|v| v.is_finite()) && !state.crashed);
                 assert!(state.lift_controls.hover_fraction(lift.kind) < DT);
                 assert!(

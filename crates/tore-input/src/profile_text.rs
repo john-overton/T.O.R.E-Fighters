@@ -18,6 +18,9 @@ pub fn action_name(action: &Action) -> String {
             format!("{}-step={value}", flight_axis_name(*axis))
         }
         Action::Pilot(PilotCommand::Eject) => "eject".into(),
+        Action::Pilot(PilotCommand::Lift(command)) => crate::bindings::lift_action_name(*command)
+            .unwrap_or("unsupported")
+            .into(),
         Action::Axis(a) => match a {
             Axis::Pitch => "pitch",
             Axis::Roll => "roll",
@@ -36,6 +39,9 @@ pub fn action_name(action: &Action) -> String {
             Axis::LookY => "look-y",
             Axis::HeadYaw => "head-yaw",
             Axis::HeadPitch => "head-pitch",
+            Axis::TrimPitchRate => "trim-pitch-rate",
+            Axis::TrimRollRate => "trim-roll-rate",
+            Axis::TrimPedalRate => "trim-pedal-rate",
         }
         .into(),
         Action::Pilot(PilotCommand::Toggle(s)) => match s {
@@ -50,6 +56,7 @@ pub fn action_name(action: &Action) -> String {
             Switch::Jammer => "jammer",
             Switch::Autopilot => "autopilot",
             Switch::WaypointAutopilot => "waypoint-autopilot",
+            Switch::HoverHold => "hover-hold",
         }
         .into(),
         Action::Pilot(PilotCommand::Throttle(v)) => format!("throttle={v}"),

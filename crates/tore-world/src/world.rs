@@ -393,8 +393,11 @@ impl World {
         if !open && self.combat.uses_normal_startup_defaults() {
             self.combat.apply_startup_weapons();
         }
+        // An airborne start of a powered-lift aircraft is trimmed forward
+        // flight, after its final mass, altitude and heading (VTOL overhaul,
+        // decision 8). Every other aircraft is untouched.
         if !open && self.setup.ground_start.is_none() {
-            lead.initialize_airborne_hover();
+            lead.start_airborne(self.terrain.wind());
         }
         let ground_airport = match self.setup.ground_start {
             Some(object) => Some(match &parked {

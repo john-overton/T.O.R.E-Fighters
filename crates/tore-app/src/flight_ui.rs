@@ -163,7 +163,7 @@ fn flight_help(tree: &[MenuNode]) -> Vec<String> {
         "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
         "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
         "T/Shift-T: radar target | Enter/apostrophe: visual target | Space: fire".into(),
-        "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
+        "A: heading/altitude | Ctrl-A: waypoint | Ctrl-Alt-A: hover hold".into(),
         "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
         "N: NAV/ILS mode | W/Shift-W: next/previous waypoint".into(),
         "Insert: chaff | Delete: flare (keypad 0 and . also work)".into(),
@@ -218,6 +218,17 @@ pub const WEAPON_DIAGNOSTICS: &str = "Weapon diagnostics?";
 /// panels. Not in the retail menu; opinionated, requested by John on
 /// 2026-09-26 (the label is an agent choice).
 pub const DEBUG_PANELS: &str = "Debug panels?";
+/// The authored Pref row choosing the powered-lift aircraft's stability
+/// level (VTOL overhaul, design 5.2 and 5.7); retail has no such row.
+pub const STABILITY_LEVEL: &str = "Stability level";
+/// The name a stability level is shown and announced by.
+pub fn stability_name(level: tore_input::StabilityLevel) -> &'static str {
+    match level {
+        tore_input::StabilityLevel::Off => "Off",
+        tore_input::StabilityLevel::Damper => "Damper",
+        tore_input::StabilityLevel::Attitude => "Attitude",
+    }
+}
 /// Whether a Pref row is retail's Show Target Info (Ctrl+T).
 pub fn is_target_info(label: &str) -> bool {
     label
@@ -225,19 +236,33 @@ pub fn is_target_info(label: &str) -> bool {
         .trim_end_matches('?')
         .eq_ignore_ascii_case("show target info")
 }
-/// Append the authored rows to the imported menu tree. The retail rows and
-/// their order are unchanged.
+/// The authored Cheat row that removes the powered-lift aircraft's flight
+/// hazards (VTOL overhaul, design 4.12). Retail has no such row; opinionated,
+/// requested by John on 2026-10-08 (the label is the design's).
+pub const EASY_PHYSICS: &str = "Easy flight physics?";
+/// Append the authored rows to the imported menu tree: three to Pref and the
+/// Easy flight physics row after the imported Cheat rows. The retail rows
+/// and their order are unchanged.
 pub fn add_authored_rows(tree: &mut [MenuNode]) {
-    let Some(pref) = tree.iter_mut().find(|node| node.label == "Pref") else {
-        return;
-    };
-    for label in [WEAPON_DIAGNOSTICS, DEBUG_PANELS] {
-        if !pref.children.iter().any(|row| row.label == label) {
-            pref.children.push(MenuNode {
-                label: label.into(),
-                shortcut: String::new(),
-                children: vec![],
-            });
+    let authored = [
+        (
+            "Pref",
+            &[WEAPON_DIAGNOSTICS, DEBUG_PANELS, STABILITY_LEVEL][..],
+        ),
+        ("Cheat", &[EASY_PHYSICS][..]),
+    ];
+    for (menu, labels) in authored {
+        let Some(menu) = tree.iter_mut().find(|node| node.label == menu) else {
+            continue;
+        };
+        for label in labels {
+            if !menu.children.iter().any(|row| row.label == *label) {
+                menu.children.push(MenuNode {
+                    label: (*label).into(),
+                    shortcut: String::new(),
+                    children: vec![],
+                });
+            }
         }
     }
 }
@@ -258,6 +283,10 @@ pub struct FlightUi {
     pub target_info: bool,
     /// Session-only cheats; they survive Restart but are not saved.
     pub cheats: tore_sim::cheats::Cheats,
+    /// The stability level the powered-lift aircraft fly at, a saved
+    /// preference: Pref's row or Ctrl+Shift+A changes it, and the flight
+    /// follows it (VTOL overhaul, design 5.2).
+    pub stability: tore_input::StabilityLevel,
     pub brightness: i16,
     pub zoom: f32,
     pub look: [f32; 2],
@@ -287,6 +316,7 @@ impl Default for FlightUi {
             ladder: true,
             weapon_diagnostics: false,
             debug_panels: false,
+            stability: tore_input::StabilityLevel::Damper,
             target_info: false,
             cheats: Default::default(),
             brightness: 0,
@@ -383,6 +413,7 @@ fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Op
         "Easy targeting?" => &mut cheats.easy_targeting,
         "Air combat guns only?" => &mut cheats.guns_only,
         "No screen-shaking?" => &mut cheats.no_screen_shake,
+        EASY_PHYSICS => &mut cheats.easy_physics,
         _ => return None,
     })
 }
@@ -406,6 +437,9 @@ impl FlightUi {
     /// On/Off for a working cheat row or an authored diagnostics row; the
     /// selected Damage choice reads On.
     fn cheat_state(&self, label: &str) -> Option<&'static str> {
+        if label == STABILITY_LEVEL {
+            return Some(stability_name(self.stability));
+        }
         let mut cheats = self.cheats;
         let on = match label {
             WEAPON_DIAGNOSTICS => self.weapon_diagnostics,
@@ -619,6 +653,11 @@ impl FlightUi {
                 } else {
                     "Show target info: off"
                 });
+                Command::Click
+            }
+            STABILITY_LEVEL => {
+                self.stability = self.stability.next();
+                self.message(format!("Stability: {}", stability_name(self.stability)));
                 Command::Click
             }
             DEBUG_PANELS => {
@@ -1500,7 +1539,12 @@ mod tests {
         let rows: Vec<_> = t[1].children.iter().map(|n| n.label.as_str()).collect();
         assert_eq!(
             rows,
-            ["HUD pitch ladder?", WEAPON_DIAGNOSTICS, DEBUG_PANELS]
+            [
+                "HUD pitch ladder?",
+                WEAPON_DIAGNOSTICS,
+                DEBUG_PANELS,
+                STABILITY_LEVEL
+            ]
         );
         // Other roots are untouched.
         assert_eq!(t[0].children.len(), 1);
@@ -1575,6 +1619,85 @@ mod tests {
         ui.debug_panels = true;
         ui.reset_for_flight();
         assert!(!ui.debug_panels);
+    }
+
+    #[test]
+    fn stability_row_cycles_the_level_with_a_message() {
+        let mut t = tree();
+        t.push(MenuNode {
+            label: "Pref".into(),
+            shortcut: String::new(),
+            children: vec![],
+        });
+        add_authored_rows(&mut t);
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.cheat_state(STABILITY_LEVEL), Some("Damper"));
+        for (expected, shown_name) in [
+            (tore_input::StabilityLevel::Attitude, "Attitude"),
+            (tore_input::StabilityLevel::Off, "Off"),
+            (tore_input::StabilityLevel::Damper, "Damper"),
+        ] {
+            assert_eq!(ui.activate(STABILITY_LEVEL, ""), Command::Click);
+            assert_eq!(ui.stability, expected);
+            assert_eq!(ui.cheat_state(STABILITY_LEVEL), Some(shown_name));
+            assert_eq!(
+                *shown(&ui).last().unwrap(),
+                format!("Stability: {shown_name}")
+            );
+        }
+    }
+
+    /// E3: the Easy flight physics row follows the imported Cheat rows,
+    /// toggles mid-flight, survives Restart and is the server's in a session.
+    #[test]
+    fn easy_physics_row_is_authored_after_the_cheat_rows_and_is_the_servers_in_a_session() {
+        let mut t = retail_tree();
+        let imported = labels(&t);
+        let imported_cheat = labels(&t.iter().find(|n| n.label == "Cheat").unwrap().children);
+        add_authored_rows(&mut t);
+        add_authored_rows(&mut t);
+        let cheat = t.iter().find(|n| n.label == "Cheat").unwrap();
+        let rows: Vec<_> = cheat.children.iter().map(|n| n.label.as_str()).collect();
+        assert_eq!(rows.last(), Some(&EASY_PHYSICS), "after the imported rows");
+        assert_eq!(rows.iter().filter(|r| **r == EASY_PHYSICS).count(), 1);
+        // Nothing imported moved or went from the Cheat menu; only the row
+        // was added at its end.
+        let mut before_the_row = labels(&cheat.children);
+        assert_eq!(before_the_row.pop().as_deref(), Some(EASY_PHYSICS));
+        assert_eq!(before_the_row, imported_cheat);
+        assert!(imported.iter().all(|label| authored_has(&t, label)));
+        // Off to start; a toggle takes effect at once, with a line.
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.cheat_state(EASY_PHYSICS), Some("Off"));
+        assert!(!ui.cheats.easy_physics);
+        assert_eq!(ui.activate(EASY_PHYSICS, ""), Command::Click);
+        assert!(ui.cheats.easy_physics);
+        assert_eq!(ui.cheat_state(EASY_PHYSICS), Some("On"));
+        assert_eq!(*shown(&ui).last().unwrap(), "Easy flight physics: on");
+        // It lasts for the session: a new flight keeps it.
+        ui.reset_for_flight();
+        assert!(ui.cheats.easy_physics);
+        assert_eq!(ui.activate(EASY_PHYSICS, ""), Command::Click);
+        assert!(!ui.cheats.easy_physics);
+        assert_eq!(*shown(&ui).last().unwrap(), "Easy flight physics: off");
+        // In a session it changes the simulation, so the server alone sets
+        // it: refused with the usual line, gone from the session's menu, and
+        // not carried in from single player.
+        assert_eq!(
+            session_refusal(EASY_PHYSICS),
+            Some("The server sets the cheats in a multiplayer flight")
+        );
+        assert!(!labels(&session_menu(&t)).contains(&EASY_PHYSICS.to_string()));
+        ui.cheats.easy_physics = true;
+        ui.enter_session();
+        assert!(!ui.cheats.easy_physics, "single player's choice stays out");
+        assert_eq!(ui.activate(EASY_PHYSICS, ""), Command::Click);
+        assert!(!ui.cheats.easy_physics, "a client cannot turn it on");
+        assert!(
+            ui.notices
+                .iter()
+                .any(|(line, _)| line == "The server sets the cheats in a multiplayer flight")
+        );
     }
 
     #[test]
@@ -1687,6 +1810,9 @@ mod tests {
             ),
             node("Pos", "", vec![node("40,000 feet", "", vec![])]),
         ]
+    }
+    fn authored_has(tree: &[MenuNode], label: &str) -> bool {
+        labels(tree).iter().any(|l| l == label)
     }
     fn labels(tree: &[MenuNode]) -> Vec<String> {
         tree.iter()

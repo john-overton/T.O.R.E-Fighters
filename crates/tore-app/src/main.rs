@@ -82,6 +82,7 @@ mod ordnance;
 mod ordnance_audit;
 mod pause_menu;
 mod performance;
+mod powered_hud;
 mod preferences;
 mod probe_invariants;
 mod quick_mission;
@@ -233,6 +234,25 @@ enum Screen {
     Flight,
     /// The mission replay viewer; see replay/viewer.rs.
     Replay,
+}
+/// Keeps the own powered-lift aircraft `flight` at the preferred stability
+/// level `wanted` (VTOL overhaul, design 5.2): a flight, a restart or a seat
+/// taken over starts at Damper, and the level the player chose in Pref or
+/// with Ctrl+Shift+A follows as a pilot command, so it reaches the host,
+/// recordings and pilot tapes like any other.
+fn sync_stability(
+    flight: &tore_sim::flight::State,
+    input: &mut input::Input,
+    wanted: tore_input::StabilityLevel,
+) {
+    if flight.crashed || flight.stability_in_effect().is_none() {
+        return;
+    }
+    if input.pending_stability(flight.lift_controls.aids.stability) != wanted {
+        input.queue(tore_input::PilotCommand::Lift(
+            tore_input::LiftCommand::SetStability(wanted),
+        ));
+    }
 }
 struct App {
     preference_path: Option<PathBuf>,
@@ -1116,6 +1136,28 @@ impl App {
         }
     }
 
+    /// `Stability: Damper` and so on for a stability-level command on a
+    /// powered-lift aircraft (VTOL overhaul, design 5.2). The level becomes
+    /// the preference, which [`sync_stability`] keeps the flight at.
+    fn announce_stability(&mut self, command: tore_input::PilotCommand) {
+        use tore_input::{LiftCommand, PilotCommand};
+        if !matches!(
+            command,
+            PilotCommand::Lift(LiftCommand::SetStability(_) | LiftCommand::CycleStability)
+        ) {
+            return;
+        }
+        let flight = &self.world.cockpits[OWN].flight;
+        if flight.stability_in_effect().is_none() {
+            return;
+        }
+        let level = self
+            .input
+            .pending_stability(flight.lift_controls.aids.stability);
+        self.flight_ui.stability = level;
+        self.flight_ui
+            .message(format!("Stability: {}", flight_ui::stability_name(level)));
+    }
     fn input_action(&mut self, action: tore_input::Action) -> Action {
         use flight_ui::Command;
         let name = match action {
@@ -1136,6 +1178,7 @@ impl App {
                         self.instruments.channel = 0;
                     } else {
                         self.input.queue(command);
+                        self.announce_stability(command);
                     }
                 }
                 return Action::None;
@@ -1816,6 +1859,12 @@ impl App {
                     tore_input::Switch::Burner,
                     burner,
                 ));
+                Action::None
+            }
+            // On the helicopters and the V-22 the step moves the collective.
+            Command::ThrottleStep(delta) if self.input.collective_role() => {
+                self.input
+                    .queue(tore_input::PilotCommand::AdjustThrottle(delta));
                 Action::None
             }
             Command::ThrottleStep(delta) => {
@@ -3754,8 +3803,16 @@ impl ApplicationHandler for App {
                                     );
                                 }
                             }
-                            let (pilot, _) =
-                                self.input.frame(&self.camera.keys, start.flight.throttle);
+                            sync_stability(
+                                &self.world.cockpits[OWN].flight,
+                                &mut self.input,
+                                self.flight_ui.stability,
+                            );
+                            let lever = self.input.throttle_reference(
+                                start.flight.throttle,
+                                start.flight.lift_controls.collective,
+                            );
+                            let (pilot, _) = self.input.frame(&self.camera.keys, lever);
                             if let Some(recording) = &mut self.input_recording {
                                 self.recorded_ticks += 1;
                                 if let Err(error) = tore_input::recording::write_frame(
@@ -3967,6 +4024,16 @@ impl ApplicationHandler for App {
                             if let Some(ratio) = presented.overspeed_ratio() {
                                 let over = tore_sim::g_effects::overspeed_shake(ratio, seconds);
                                 shake = [shake[0] + over[0], shake[1] + over[1]];
+                            }
+                            // A helicopter's rotor buffets in the vortex ring
+                            // state and in retreating blade stall: the cockpit
+                            // shakes (no message, as in the real aircraft).
+                            if self.view_rig.cockpit(self.flight_view) {
+                                let buffet = tore_sim::g_effects::rotor_buffet_shake(
+                                    presented.rotor_buffet(),
+                                    seconds,
+                                );
+                                shake = [shake[0] + buffet[0], shake[1] + buffet[1]];
                             }
                             if shake != [0.; 2] {
                                 look::apply(
@@ -4937,7 +5004,7 @@ fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
 }
 
 /// The `--flight-cheat` names, for headless probes and live-fire captures.
-const PROBE_CHEATS: [&str; 8] = [
+const PROBE_CHEATS: [&str; 9] = [
     "extra-g",
     "no-g-effects",
     "no-spins",
@@ -4946,6 +5013,7 @@ const PROBE_CHEATS: [&str; 8] = [
     "unlimited-ammo",
     "invulnerable",
     "realistic-damage",
+    "easy-physics",
 ];
 
 fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
@@ -4957,6 +5025,7 @@ fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
         "no-crashes" => cheats.no_crashes = true,
         "unlimited-fuel" => cheats.unlimited_fuel = true,
         "unlimited-ammo" => cheats.unlimited_ammo = true,
+        "easy-physics" => cheats.easy_physics = true,
         "invulnerable" => cheats.damage = Damage::Invulnerable,
         _ => cheats.damage = Damage::Realistic,
     }
@@ -7947,6 +8016,101 @@ fn locate_shell(
     }
 }
 
+/// `--hud-snapshot PATH [--hud-snapshot-state forward|hover|converting|low]`:
+/// the HUD of the selected aircraft over a flat background, headless, as a
+/// PPM. Powered-lift aircraft start in trimmed forward flight (`forward`) or
+/// in a hover (`hover`: a jet with its nozzles vertical, a helicopter trimmed
+/// at rest), 3,000 feet over flat ground, and fly a second so the rotor and
+/// engines are settled; any other aircraft is shown as it starts. `low` is the
+/// hover 45 feet over the ground at stability Off, which shows the radar
+/// height and the stability label (VTOL overhaul design section 6).
+fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> AppResult<()> {
+    use std::io::Write;
+    let mut flight = flight::State::new(&hornet.profile, [0., 3000., 0.])?;
+    flight.enable_research(1)?;
+    flight.cheats.unlimited_fuel = true;
+    flight.yaw = 0.;
+    let mut ground = 0.;
+    match state {
+        "forward" => {
+            flight.start_airborne([0.; 3]);
+        }
+        "hover" => {
+            if !flight.trim_hover() {
+                return Err("this aircraft has no hover to show".into());
+            }
+        }
+        // A tiltrotor in a hover that is going too fast for its nacelles: the
+        // conversion protection drives them forward (the CONV cue).
+        "converting" => {
+            if !flight.trim_hover() {
+                return Err("this aircraft has no hover to show".into());
+            }
+            flight.velocity = [0., 0., 140. * 1.687_81];
+            flight.speed = flight.velocity[2];
+        }
+        // The hover low over the ground at stability Off.
+        "low" => {
+            if !flight.trim_hover() {
+                return Err("this aircraft has no hover to show".into());
+            }
+            flight.command(tore_input::PilotCommand::Lift(
+                tore_input::LiftCommand::SetStability(tore_input::StabilityLevel::Off),
+            ));
+            ground = flight.position[1] - 45.;
+        }
+        other => {
+            return Err(format!(
+                "unknown HUD snapshot state {other}; use forward, hover, converting or low"
+            )
+            .into());
+        }
+    }
+    // A second of flight over a flat plain 3,000 feet below (45 for `low`).
+    for _ in 0..120 {
+        flight.step_surface(&tore_input::PilotInput::default(), |_, _| {
+            tore_sim::research::Surface::runway(ground)
+        });
+    }
+    let color = hornet.daylight_palette()[usize::from(hornet.hud.primary_color)];
+    let mut pixels = vec![0u8; menu::WIDTH * menu::HEIGHT * 4];
+    hud::draw(
+        &mut pixels,
+        &flight,
+        &hornet.hud_font,
+        ground,
+        None,
+        true,
+        false,
+        color,
+        1.,
+        None,
+        None,
+        (flight.bank, 1.),
+    );
+    // Over a plain sky and ground split at the horizon of the camera.
+    let horizon = hud::project(flight.pitch, flight.bank, 0., 0., 1.)
+        .map_or(240., |(_, y)| y)
+        .clamp(0., menu::HEIGHT as f64);
+    let mut file = std::fs::File::create(path)?;
+    write!(file, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
+    for (index, pixel) in pixels.chunks_exact(4).enumerate() {
+        let y = (index / menu::WIDTH) as f64;
+        let back: [u8; 3] = if y < horizon {
+            [52, 88, 140]
+        } else {
+            [64, 84, 52]
+        };
+        let rgb = if pixel[3] == 0 {
+            back
+        } else {
+            [pixel[0], pixel[1], pixel[2]]
+        };
+        file.write_all(&rgb)?;
+    }
+    Ok(())
+}
+
 /// Headless locate-screen preview (`--snapshot PATH --snapshot-state locate`,
 /// `locate-starting`, `locate-importing` or `locate-done`). The candidate list and the import
 /// figures are fixed so the layout is reviewable on any machine, with or
@@ -8178,6 +8342,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut countermeasure_preview = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
+    let mut hud_snapshot: Option<String> = None;
+    let mut hud_snapshot_state = String::from("forward");
     let mut systems_preview: Vec<usize> = Vec::new();
     let mut validate_creator = false;
     let mut validate_tanks = false;
@@ -8779,9 +8945,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 flight_fuel = Some(pounds);
             }
             "--flight-cheat" => {
-                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage")?;
+                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, easy-physics, invulnerable or realistic-damage")?;
                 if !PROBE_CHEATS.contains(&name.as_str()) {
-                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage".into());
+                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, easy-physics, invulnerable or realistic-damage".into());
                 }
                 flight_cheats.push(name);
             }
@@ -8834,7 +9000,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--maneuver" => {
                 maneuver = args.next().ok_or(
-                    "--maneuver needs level, takeoff, pull, loop, roll, stall, spin, bank-left or bank-right",
+                    "--maneuver needs level, takeoff, pull, loop, roll, stall, spin, bank-left, bank-right or hover",
                 )?;
                 if ![
                     "level",
@@ -8866,6 +9032,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "land-off-runway",
                     "bank-left",
                     "bank-right",
+                    "hover",
                 ]
                 .contains(&maneuver.as_str())
                 {
@@ -8895,6 +9062,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--panel-snapshot" => {
                 panel_snapshot = Some(args.next().ok_or("--panel-snapshot needs output path")?)
+            }
+            "--hud-snapshot" => {
+                hud_snapshot = Some(args.next().ok_or("--hud-snapshot needs output path")?)
+            }
+            "--hud-snapshot-state" => {
+                hud_snapshot_state = args.next().ok_or("--hud-snapshot-state needs forward, hover, converting or low")?
             }
             "--viewer" => initial_screen = Screen::Viewer,
             "--connect" => {
@@ -9112,7 +9285,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -9421,9 +9594,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if frames.is_empty()
             || headless_ticks.is_some()
             || record_input.is_some()
-            || maneuver != "level"
+            || !matches!(maneuver.as_str(), "level" | "hover")
         {
-            return Err("--replay-input requires a nonempty tape, default maneuver, and no --headless-flight/--record-input".into());
+            return Err("--replay-input requires a nonempty tape, the level or hover maneuver, and no --headless-flight/--record-input".into());
         }
         headless_ticks = Some(frames.len());
         Some(frames)
@@ -9466,6 +9639,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && snapshot.is_none()
         && replay_combat.is_none()
         && panel_snapshot.is_none()
+        && hud_snapshot.is_none()
         && headless_ticks.is_none()
         && ai_probe.is_none()
         && !sensor_summary
@@ -9493,7 +9667,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             smoke_test
                 || capture_terrain.is_some()
                 || snapshot.is_some()
-                || panel_snapshot.is_some(),
+                || panel_snapshot.is_some()
+                || hud_snapshot.is_some(),
             preference,
         )
         .fullscreen(),
@@ -9849,6 +10024,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 keys.yaw = 1.;
             }
             "eject-low" => state.position[1] = 250.,
+            "hover" => {
+                // A powered-lift aircraft at rest in the air, in the hover its
+                // own rotors, nozzles or nacelles trim to (VTOL overhaul).
+                // Hands off it holds; a tape flies the rest.
+                state.trim_hover();
+            }
             "waypoint" => {
                 // Waypoint 1 lies 60,000 feet away, 60 degrees right of north.
                 state.autopilot.set_navigation_target(Some(
@@ -9978,6 +10159,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .forward
                     .map(|v| v * state.speed);
             }
+        }
+        // A powered-lift aircraft starts in trimmed forward flight, as in a
+        // mission (VTOL overhaul decision 8); a ground start below replaces it.
+        if state.research.is_some() {
+            state.start_airborne(replay_world.as_ref().map_or([0.; 3], |w| w.wind()));
         }
         println!(
             "flight_model={}",
@@ -10109,6 +10295,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             );
         }
         let keys = setup_maneuver(&mut state);
+        if maneuver == "hover" && state.model().powered_lift().is_none() {
+            return Err(
+                "--maneuver hover needs a powered-lift aircraft (av8, yak141, v22, ah64, mi24 or ch47)"
+                    .into(),
+            );
+        }
         if maneuver == "gcurve" {
             // The loaded positive G limit at each speed at 5,000 feet and the
             // aircraft's own weight: what a full back stick can pull.
@@ -10451,6 +10643,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 println!("two_seater=true");
             }
         }
+        return Ok(Outcome::Done);
+    }
+    if let Some(path) = hud_snapshot {
+        write_hud_snapshot(&hornet, &hud_snapshot_state, &path)?;
         return Ok(Outcome::Done);
     }
     if let Some(path) = panel_snapshot {
@@ -10997,6 +11193,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     flight.jammer = jammer_on;
     if researched_flight {
         flight.enable_research(1)?;
+        if ground_start.is_none() {
+            flight.start_airborne(world.wind());
+        }
     }
     if let Some(tables) = &native_tables {
         flight.enable_native(tables.clone(), 1)?;
@@ -11289,7 +11488,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if weapon_slot == 0 || weapon_slot > combat.state.own().ammo.len() {
             return Err("weapon slot outside this aircraft's PT loadout".into());
         }
-        while combat.state.own().selected != weapon_slot - 1 {
+        // The cycle skips a station that was never loaded (a retained
+        // selection station), so it may never land on the one asked for: one
+        // full turn of the ring (the stations and NAV) is the limit.
+        for _ in 0..=combat.state.own().ammo.len() {
+            if combat.state.own().selected == weapon_slot - 1 {
+                break;
+            }
             combat.command(
                 tore_sim::combat::live::Command::NextWeapon,
                 combat::launcher(&flight),

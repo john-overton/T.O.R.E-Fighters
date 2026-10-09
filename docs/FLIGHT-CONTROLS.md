@@ -35,20 +35,47 @@ or has lost its target does not fire. These are player-directed controls;
 
 ## VTOL, tiltrotors and helicopters
 
-Use the ordinary arrow stick, End/Page Down rudder, E engine switch and 1-8
-power controls. Ctrl+Up/Down moves VTOL nozzles toward forward/vertical thrust;
-Ctrl+Left/Right requests nozzle yaw. **0** returns nozzles and V-22 nacelles to
-forward neutral. V-22 conversion uses Ctrl+Page Up for airplane mode and
-Ctrl+Page Down for helicopter mode. Ctrl+Home increases collective and Ctrl+End
-reduces it on rotorcraft. Rate controls retain the position when released.
+Use the ordinary arrow stick, End / Page Down rudder and E engine switch. Some
+keys change with the aircraft ([the full table](INPUT.md#vtol-tiltrotor-and-helicopter-controls)):
 
-Set power independently of collective. In helicopter mode the collective
-controls lift and pitch/roll tilts the lift direction. The controls editor
-exposes all four added demands as bindable absolute axes, rate axes and button
-alternatives. The [input guide](INPUT.md#vtol-tiltrotor-and-helicopter-controls)
-lists gamepad defaults, axis calibration and modifier behaviour. Source evidence,
-fitted rates and aircraft applicability belong in the
-[flight variety behaviour spec](spec/variety-flight.md).
+- **AV-8 and Yak-141**, the retail keys: **X** turns the nozzles down 10
+  degrees and **Z** up 10. **Shift+X** puts them vertical (90 degrees), and a
+  second press to the 100-degree braking stop; **Shift+Z** puts them aft (0),
+  or from the braking stop back to vertical. Ctrl+Up / Ctrl+Down slew them,
+  **0** sends them aft. Z and X are not rudder keys on these two; use End and
+  Page Down. 1-8 set engine power as on any jet. Per the manual: Shift+X and
+  full power to lift off, Z three times at 500 ft, Shift+Z past 80 to 90 kt;
+  for a short takeoff, X four times (40 degrees) at 80 to 90 kt.
+- **Helicopters (AH-64, Mi-24, CH-47) and the V-22**: the throttle keys 1-8
+  (and a throttle lever or the gamepad throttle buttons) set the
+  **collective**; the engines are governed. Ctrl+Home / Ctrl+End still move
+  the collective. **Ctrl+arrows trim the cyclic**: a tap moves the trim 2
+  percent of travel, a held key 10 percent a second, so a few taps of
+  Ctrl+Up and the aircraft flies forward hands off. **0** recentres the trim on
+  the helicopters; on the V-22 it still sends the nacelles forward. V-22
+  conversion uses Ctrl+Page Up toward airplane mode and Ctrl+Page Down toward
+  helicopter mode. Z and X stay rudder keys.
+- **All six**: **Ctrl+Shift+A** cycles the stability level, announced as
+  `Stability: Off`, `Damper` or `Attitude`; Pref → Stability level does the
+  same and the choice is kept for later flights. **Damper** (the default)
+  stops the aircraft rotating when you let go of the stick and leaves it at
+  the attitude you left it; **Attitude** also returns it to the trimmed
+  attitude, and at the Attitude level Ctrl+arrows move that attitude
+  instead of the trim; **Off** adds nothing. No level limits the attitude:
+  full stick always wins. **Ctrl+Alt+A** is hover hold on the helicopters
+  and the V-22 below 40 kt: it stops the drift, then holds the spot, the
+  heading and the height above the ground, through the controls. Any stick,
+  pedal or collective input cancels it; Ctrl+arrows move the held spot 10 ft
+  a tap. At 40 kt and above, **A** and **Ctrl+A** fly the helicopters and the
+  V-22 (height on the collective, speed on the cyclic, Ctrl+Up / Ctrl+Down
+  2 kt faster or slower). See [hover hold](spec/autopilot.md#hover-hold-helicopters-and-the-v-22).
+
+A stick button bound to **Trim set** makes the current stick plus trim the new
+trim and ignores the stick until it is back near centre, which turns a
+spring-centred stick into a force-trim cyclic. The controls editor exposes the
+lift demands, the trim axes and every new command as bindable rows. What each
+aircraft does, the stability levels, the Easy flight physics cheat, the numbers
+and their sources are in [powered-lift flight](spec/powered-lift-flight.md).
 
 The Apache and Chinook keep their fixed landing gear down; G reports that the
 gear is fixed. The Hind retains retractable gear. This is an explicit
@@ -99,6 +126,7 @@ gear is fixed. The Hind retains retractable gear. This is an explicit
 | Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
 | C / Shift-C | Cycle 1×/2×/4×/8× time / select 0.5× slow motion | FA keys; fixed 120 Hz ticks, authored adapter time scaling |
 | A / Ctrl-A | Toggle heading/altitude hold / waypoint autopilot | [Autopilot behavior](spec/autopilot.md), requested USNF-ATF modes |
+| Ctrl-Alt-A | Toggle hover hold (helicopters and V-22, below 40 kt) | [Hover hold](spec/autopilot.md#hover-hold-helicopters-and-the-v-22), requested 2026-10-08 |
 | Ctrl-P | Pause/resume | FA menu |
 | Escape | Open/close in-flight menu; return one level from submenus/help | FA menu/manual |
 | Ctrl-Q | End mission and return to creator | FA menu; does not quit the application |
@@ -449,6 +477,7 @@ are not saved to disk. Behaviour: [cheats specification](spec/cheats.md).
 | Enemy AI? → Novice / Average / Unchanged | Every enemy aircraft flies at that skill from now on; Unchanged restores each one's mission skill. Friendly aircraft are unaffected. |
 | Air combat guns only? | Every aircraft may fire only its gun. The player's weapon keys skip the other stations and a selected missile switches to the gun; AI aircraft stop choosing their other stores. Turning it off restores them. |
 | Ignore midair collisions? | Aircraft pass through each other. With it off, two aircraft whose 28 ft contact spheres touch are both destroyed and nobody is credited with a kill; an Invulnerable player survives. |
+| Easy flight physics? | Appended after the imported rows. The AV-8, Yak-141, V-22, AH-64, Mi-24 and CH-47 lose the hazards of their physics: rotor torque, the vortex ring state, retreating blade stall, an unrecoverable rotor stall (rotor speed holds at 85 percent or more in flight), the jets' low-speed roll-off and undamped puffers at stability level Off, and dynamic rollover. The helicopters (and the V-22 in helicopter mode) also get a weak attitude retention at Damper and Off, so a few taps of forward cyclic trim settle them in forward flight hands-off. Weight, power, the loaded jet's inability to hover and the V-22's corridor protection stay. Fixed-wing aircraft ignore it. In a session only the server sets it. |
 
 Every missile or bomb burst on an aircraft, the player's or an AI's, now jolts
 it: a fading roll, pitch and push away from the burst, even with Invulnerable
