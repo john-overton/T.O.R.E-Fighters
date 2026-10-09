@@ -35,6 +35,17 @@ Each chaff cartridge or flare released plays `&CHAFF.5K` or `&FLARE.5K`, for
 the player and AI alike. Its level, distances and cockpit rule are in the
 [countermeasures spec](countermeasures.md#release-sound).
 
+Rotorcraft: the engine loop plays at the rotor's speed, a share of its
+governed 100 percent, so a rotor that bleeds drops in pitch and an
+overspeeding one rises (the V-22 sits at 84 percent in airplane mode); the
+vortex ring state and retreating blade stall add a warble of up to 4 percent.
+LOW ROTOR plays the stall horn and ROTOR OVERSPEED and the V-22's GEAR SPEED
+play the stall warning, each after the condition has held a quarter second,
+with their cockpit messages repeating every four seconds. The same pitch is
+heard from another rotorcraft's engine and in a replay, which records the rotor
+speed ([replays](../REPLAYS.md)). Opinionated (VTOL overhaul slice P7, agent
+decisions): the sizes and the choice of recordings are not retail.
+
 ## Numbers and boundaries
 
 | Component | Established value |

@@ -101,10 +101,11 @@ pub enum Flag {
     EasyAiming,
     IgnoreCollisions,
     EasyTargeting,
+    EasyPhysics,
 }
 
 impl Flag {
-    pub const ALL: [Flag; 13] = [
+    pub const ALL: [Flag; 14] = [
         Flag::UnlimitedAmmo,
         Flag::UnlimitedFuel,
         Flag::NoSpins,
@@ -118,6 +119,7 @@ impl Flag {
         Flag::EasyAiming,
         Flag::IgnoreCollisions,
         Flag::EasyTargeting,
+        Flag::EasyPhysics,
     ];
 
     pub fn label(self) -> &'static str {
@@ -135,6 +137,7 @@ impl Flag {
             Flag::EasyAiming => "Easy aiming",
             Flag::IgnoreCollisions => "Ignore midair collisions",
             Flag::EasyTargeting => "Easy targeting",
+            Flag::EasyPhysics => "Easy flight physics",
         }
     }
 
@@ -153,6 +156,7 @@ impl Flag {
             Flag::EasyAiming => &mut cheats.easy_aiming,
             Flag::IgnoreCollisions => &mut cheats.ignore_midair_collisions,
             Flag::EasyTargeting => &mut cheats.easy_targeting,
+            Flag::EasyPhysics => &mut cheats.easy_physics,
         }
     }
 

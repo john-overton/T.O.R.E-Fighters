@@ -370,12 +370,45 @@ impl Tandem {
         drag_factor: f64,
         level: tore_input::StabilityLevel,
     ) -> Option<Trim> {
+        self.trim_with(
+            Hazards::ALL,
+            weight,
+            heading,
+            airspeed_fps,
+            density,
+            drag_factor,
+            level,
+        )
+    }
+
+    /// [`Tandem::trim`] under the given `hazards` (the Easy flight physics
+    /// cheat's none leaves no torque residual to trim out).
+    #[allow(clippy::too_many_arguments)] // The trim's inputs, plus the hazards in force.
+    pub fn trim_with(
+        &self,
+        hazards: Hazards,
+        weight: f64,
+        heading: f64,
+        airspeed_fps: f64,
+        density: f64,
+        drag_factor: f64,
+        level: tore_input::StabilityLevel,
+    ) -> Option<Trim> {
         let steps = (airspeed_fps / TRIM_CONTINUATION_FPS).ceil().max(1.) as usize;
         let mut guess = None;
         let mut result = None;
         for step in 1..=steps {
             let speed = airspeed_fps * step as f64 / steps as f64;
-            result = self.trim_from(weight, heading, speed, density, drag_factor, level, guess);
+            result = self.trim_from(
+                hazards,
+                weight,
+                heading,
+                speed,
+                density,
+                drag_factor,
+                level,
+                guess,
+            );
             guess = Some(result?);
         }
         result
@@ -401,7 +434,7 @@ impl Tandem {
             longitudinal_trim: 0.,
             hub_height_agl_ft: [None; 2],
             seconds: 0.,
-            hazards: Hazards::ALL,
+            hazards: c.hazards,
             drag_factor: c.drag_factor,
             lift_factor: 1.,
         };
@@ -442,6 +475,7 @@ impl Tandem {
     #[allow(clippy::too_many_arguments)] // The trim's own conditions.
     fn trim_from(
         &self,
+        hazards: Hazards,
         weight: f64,
         heading: f64,
         airspeed_fps: f64,
@@ -481,6 +515,7 @@ impl Tandem {
             |g| g.rotors,
         );
         let conditions = TrimConditions {
+            hazards,
             heading,
             airspeed_fps,
             density,
@@ -536,6 +571,7 @@ impl Tandem {
 /// The conditions of a trim.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TrimConditions {
+    hazards: Hazards,
     heading: f64,
     airspeed_fps: f64,
     density: f64,
@@ -582,8 +618,16 @@ impl State {
         let level = self
             .stability_in_effect()
             .unwrap_or(tore_input::StabilityLevel::Off);
-        let Some(trim) = model.trim(weight, self.yaw, airspeed_fps, density, drag_factor, level)
-        else {
+        let hazards = self.rotor_hazards();
+        let Some(trim) = model.trim_with(
+            hazards,
+            weight,
+            self.yaw,
+            airspeed_fps,
+            density,
+            drag_factor,
+            level,
+        ) else {
             return false;
         };
         self.pitch = trim.pitch;

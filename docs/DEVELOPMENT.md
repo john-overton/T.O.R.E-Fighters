@@ -721,7 +721,7 @@ every that many ticks. These are development harness options, not game behaviour
 - `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies a system fault to the player's
   aircraft at that tick through the normal fault path and adds a `systems:` line.
 - `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-g-effects`, `no-spins`, `no-crashes`,
-  `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
+  `unlimited-fuel`, `unlimited-ammo`, `easy-physics`, `invulnerable` or `realistic-damage`. It also applies to
   `--live-fire` captures.
 - `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
 - `--loadout none|guns` now also applies to a headless ground start (payload and fuel systems follow
@@ -1449,6 +1449,14 @@ shadows versus distant casters, and a five-second low-sun stability sequence
 with small camera movements and sunglare disabled. The glare test checks
 every channel of a synthetic gradient under two flare circles against continuous
 optical composition. Both tests use no retail media.
+
+## Powered-lift HUD fixtures
+
+`--hud-snapshot PATH --aircraft ah64 --hud-snapshot-state hover` (or `forward`)
+draws the HUD of the selected aircraft headless, as a PPM over a flat sky and
+ground split at the horizon. A powered-lift aircraft is started in trimmed
+forward flight or in a hover, 3,000 feet over a plain, and flown a second.
+Layout is in the [HUD layout spec](spec/hud-layout.md#powered-lift-cluster).
 
 ## Systems instrument fixtures
 

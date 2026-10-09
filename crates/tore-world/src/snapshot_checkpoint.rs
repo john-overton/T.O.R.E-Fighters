@@ -74,6 +74,7 @@ tore_sim::checkpoint_struct!(Engine {
     lit,
     afterburner,
     rates,
+    rotor,
     flame,
 });
 
@@ -203,6 +204,7 @@ mod tests {
                 lit: true,
                 afterburner: id % 2 == 1,
                 rates: [0.1, -0.2, f64::MIN_POSITIVE],
+                rotor: 0.93,
                 flame: id == 4,
             },
             damage: Damage {

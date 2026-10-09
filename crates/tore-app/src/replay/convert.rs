@@ -183,6 +183,7 @@ pub fn aircraft_state(pose: &AircraftPose, data: &FlightData) -> replay::Aircraf
         fuel_lb: data.fuel_lb,
         controls: data.controls,
         auxiliary_rates: pose.engine.rates,
+        rotor_speed: pose.engine.rotor,
         hp: pose.damage.hp,
         max_hp: pose.damage.initial_hp,
         sections: pose.damage.sections,
@@ -224,6 +225,7 @@ pub fn aircraft_pose(
             lit: state.flags.engine_on,
             afterburner: state.flags.afterburner,
             rates: state.auxiliary_rates,
+            rotor: state.rotor_speed,
             flame: state.flags.flame,
         },
         damage: Damage {
@@ -808,6 +810,7 @@ mod tolerance {
     pub const SIGNED_DEVICE: f64 = SIGNED / 2. + SLACK;
     pub const SPEED: f64 = SPEED_FPS / 2. + SLACK;
     pub const RATE: f64 = RATE_RAD_S / 2. + SLACK;
+    pub const ROTOR: f64 = ROTOR_SPEED / 2. + SLACK;
     /// Direction components, from the two quantized direction angles.
     pub const DIRECTION: f64 = 2e-5;
     /// Speed in the simulation's 1/256 ft/s steps, after rounding back.
@@ -883,6 +886,7 @@ fn aircraft_difference(live: &AircraftPose, replayed: &AircraftPose) -> Option<S
         || live.engine.afterburner != replayed.engine.afterburner
         || live.engine.flame != replayed.engine.flame
         || far(live.engine.rates, replayed.engine.rates, tolerance::RATE)
+        || (live.engine.rotor - replayed.engine.rotor).abs() > tolerance::ROTOR
     {
         return Some(format!(
             "{who} has engine {:?}, recorded {:?}",
@@ -1510,6 +1514,7 @@ mod tests {
                 lit: true,
                 afterburner: true,
                 rates: [0.1, -0.4, 0.2],
+                rotor: 0.0,
                 flame: true,
             },
             damage: Damage {

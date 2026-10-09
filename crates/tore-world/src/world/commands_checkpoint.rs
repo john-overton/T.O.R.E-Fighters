@@ -146,6 +146,7 @@ mod tests {
     fn every_command() -> Vec<MissionCommand> {
         let cheats = tore_sim::cheats::Cheats {
             unlimited_ammo: true,
+            easy_physics: true,
             ..Default::default()
         };
         vec![

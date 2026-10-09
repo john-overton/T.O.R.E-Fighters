@@ -68,6 +68,14 @@ pub const ATTITUDE_AUTHORITY: f64 = 0.35;
 /// The damper reaches its authority at this share of the aircraft's
 /// full-stick hover rate (fitted).
 const DAMPER_SATURATION: f64 = 0.25;
+/// The Easy flight physics cheat's attitude retention on the rotorcraft at
+/// Damper and Off (design 4.12, John 2026-10-08): the Attitude level's hold
+/// at this share of its gain, limited to this share of travel on pitch and
+/// roll, about the trim attitude. Weak on purpose: it settles the phugoid of
+/// a trimmed forward flight and nothing else (no speed, height, position or
+/// heading hold). Fitted.
+pub const EASY_RETENTION_GAIN: f64 = 0.6;
+pub const EASY_RETENTION_AUTHORITY: f64 = 0.1;
 /// Attitude per full travel at the Attitude level, [pitch, bank], degrees
 /// (design 5.2: 30 and 45 at full stick).
 const ATTITUDE_PER_TRAVEL_DEGREES: [f64; 2] = [30., 45.];
@@ -170,6 +178,17 @@ pub fn reference_of(attitude: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+/// The attitude hold's pitch and bank terms, in travel per axis: the error
+/// from the reference over the full-stick attitudes (the Attitude level's
+/// law, and the Easy flight physics retention's at reduced gain).
+fn attitude_hold(aids: &PilotAids, pitch: f64, bank: f64) -> [f64; 2] {
+    let [pitch_span, bank_span] = ATTITUDE_PER_TRAVEL_DEGREES.map(f64::to_radians);
+    [
+        (aids.attitude_reference[0] - pitch) / pitch_span,
+        wrap(aids.attitude_reference[1] - bank) / bank_span,
+    ]
+}
+
 /// Moves the Attitude level's reference for a trim adjustment of `amount`
 /// travel on the pitch (0) or roll (1) axis, within the full-stick
 /// attitudes.
@@ -211,9 +230,7 @@ pub fn augment(
         let jet = lift.kind == LiftKind::VectorJet;
         let mut hold = [0.; 3];
         if level == StabilityLevel::Attitude {
-            let [pitch_span, bank_span] = ATTITUDE_PER_TRAVEL_DEGREES.map(f64::to_radians);
-            hold[0] = (aids.attitude_reference[0] - pitch) / pitch_span;
-            hold[1] = wrap(aids.attitude_reference[1] - bank) / bank_span;
+            [hold[0], hold[1]] = attitude_hold(aids, pitch, bank);
             if holding {
                 hold[2] = (1. - coordinated) * wrap(aids.attitude_reference[2] - heading)
                     / HEADING_PER_TRAVEL_DEGREES.to_radians();
@@ -315,13 +332,14 @@ impl State {
             return stick;
         }
         let attitude = [self.pitch, self.bank, self.yaw];
+        let retains = self.cheats.easy_physics;
         let aids = &mut self.lift_controls.aids;
         let centred = stick.iter().all(|v| v.abs() <= LATCH_CENTRE);
         let stick = match aids.trim_latch {
             TrimLatch::Free => stick,
             TrimLatch::Capture => {
                 aids.trim = std::array::from_fn(|i| (aids.trim[i] + stick[i]).clamp(-1., 1.));
-                if aids.stability == StabilityLevel::Attitude {
+                if aids.stability == StabilityLevel::Attitude || retains {
                     aids.attitude_reference = reference_of(attitude);
                 }
                 aids.trim_latch = if centred {
@@ -352,14 +370,37 @@ impl State {
             attitude: [self.pitch, self.bank, self.yaw],
             rates: self.lift_controls.body_rates,
         };
-        augment(
+        let mut augmented = augment(
             lift,
             level,
             &mut self.lift_controls.aids,
             pilot,
             body,
             sensed,
-        )
+        );
+        if self.easy_retention(lift, level) {
+            let weight = self.lift_controls.hover_fraction(lift.kind);
+            let hold = attitude_hold(&self.lift_controls.aids, body.attitude[0], body.attitude[1]);
+            for (axis, hold) in hold.into_iter().enumerate() {
+                let extra = (EASY_RETENTION_GAIN * weight * hold)
+                    .clamp(-EASY_RETENTION_AUTHORITY, EASY_RETENTION_AUTHORITY);
+                augmented.augmentation[axis] += extra;
+                augmented.controls[axis] =
+                    (pilot[axis] + augmented.augmentation[axis]).clamp(-1., 1.);
+            }
+        }
+        augmented
+    }
+
+    /// Whether the Easy flight physics attitude retention acts: the cheat on,
+    /// a helicopter or the V-22 (in proportion to its helicopter mode) at
+    /// Damper or Off with hydraulics. The Attitude level has its own, full
+    /// one; the jets none.
+    pub fn easy_retention(&self, lift: &PoweredLift, level: StabilityLevel) -> bool {
+        self.cheats.easy_physics
+            && lift.kind != LiftKind::VectorJet
+            && level != StabilityLevel::Attitude
+            && self.systems.fluids.hydraulic > 0.
     }
 }
 

@@ -510,6 +510,7 @@ length and the bytes, so a reader skips sections it does not know:
 | Events | Everything that happened, tick by tick |
 | Trees | Display tree samples (AI thinking, telemetry, missile guidance) |
 | Checksums | The once-per-second state checksums |
+| Rotors | Each rotorcraft's rotor speed, a share of its governed 100 percent: an entry names a frame and the aircraft whose speed changed on it. The chunk's first value of an aircraft is exact, later changes are quantized to a thousandth. Aircraft without a rotor read zero, and files from before it have no such section |
 
 Spawns, events and trees sit in their own sections so the viewer can
 rebuild smoke, and a reader can list every event, without decoding the
@@ -578,6 +579,7 @@ these bounds on every tick, with no drift.
 | Elevator, aileron and rudder | 1/127 | 1/254, kept within -1 to 1 |
 | Pilot controls | 1/1024 | 1/2048 |
 | Auxiliary body rates | 1/4096 rad/s | 1/8192 rad/s |
+| Rotor speed (a share of the governed 100 percent, in its own section) | 1/1000 | 1/2000 |
 | Fuel | 1/16 lb | 1/32 lb |
 | Ids, flags, hit points, regional damage, wreck phase, seeker, events, trees, checksums | exact | none |
 

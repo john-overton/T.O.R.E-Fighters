@@ -525,6 +525,9 @@ impl ReplaySound {
                 running: flags.engine_on && aboard,
                 throttle: state.controls[control::THROTTLE].clamp(0., 1.),
                 afterburner: flags.afterburner,
+                // Only a recorded rotor has a speed; the rest keep the
+                // recording's pitch.
+                rotor_speed: (state.rotor_speed > 0.).then_some(state.rotor_speed),
             });
         }
         self.engine = watched.map(|state| (state.id, state.flags.engine_on));

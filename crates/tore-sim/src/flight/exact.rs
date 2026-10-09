@@ -285,6 +285,7 @@ exact_struct!(Cheats {
     ignore_midair_collisions,
     easy_targeting,
     guns_only,
+    easy_physics,
     enemy_ai,
 });
 

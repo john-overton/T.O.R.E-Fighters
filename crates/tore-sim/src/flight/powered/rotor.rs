@@ -237,7 +237,9 @@ pub struct RotorOutput {
     pub induced_target_fps: f64,
     pub tilt_target: [f64; 2],
     /// How deep in the vortex ring state, retreating blade stall and rotor
-    /// stall the rotor is, 0..1 each.
+    /// stall the rotor is, 0..1 each. The blade stall depth is the
+    /// vibration cue and is reported even with its hazard off; its thrust
+    /// loss and tilt apply only with the hazard on.
     pub vortex_ring: f64,
     pub blade_stall: f64,
     pub rotor_stall: f64,
@@ -344,8 +346,15 @@ impl RotorModel {
         let airspeed_mu = dot(v, v).sqrt() / tip;
         let onset = self.never_exceed_mu
             * (1. - 0.5 * (loading / self.reference_loading - 1.)).clamp(0.5, 1.);
-        let blade_stall = if i.hazards.blade_stall && thrust > 0. {
+        let stall_depth = if thrust > 0. {
             smoothstep((airspeed_mu - onset) / BLADE_STALL_WIDTH)
+        } else {
+            0.
+        };
+        // With the hazard off (Easy flight physics) the blades still shake
+        // the airframe, the cue, but lose no thrust and tilt nothing.
+        let blade_stall = if i.hazards.blade_stall {
+            stall_depth
         } else {
             0.
         };
@@ -432,7 +441,7 @@ impl RotorModel {
             induced_target_fps: induced_target,
             tilt_target,
             vortex_ring,
-            blade_stall,
+            blade_stall: stall_depth,
             rotor_stall,
             tilt_stiffness,
             rate_lag_seconds: 16. / (self.lock_number * self.omega * nr.max(0.05)),

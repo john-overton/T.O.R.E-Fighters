@@ -486,6 +486,11 @@ pub struct AircraftState {
     /// Thrust-vectoring paddles and plumes are drawn from them; zero for
     /// aircraft without them.
     pub auxiliary_rates: [f64; 3],
+    /// A rotorcraft's rotor speed, a share of its governed 100 percent (the
+    /// rotor sound follows it); zero for aircraft without a rotor. Stored in
+    /// its own chunk section, to a thousandth, so files from before it read
+    /// as zero and older readers skip it.
+    pub rotor_speed: f64,
     /// Hit points, exact.
     pub hp: i32,
     pub max_hp: i32,

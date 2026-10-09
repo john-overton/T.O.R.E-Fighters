@@ -82,6 +82,7 @@ mod ordnance;
 mod ordnance_audit;
 mod pause_menu;
 mod performance;
+mod powered_hud;
 mod preferences;
 mod probe_invariants;
 mod quick_mission;
@@ -4024,6 +4025,16 @@ impl ApplicationHandler for App {
                                 let over = tore_sim::g_effects::overspeed_shake(ratio, seconds);
                                 shake = [shake[0] + over[0], shake[1] + over[1]];
                             }
+                            // A helicopter's rotor buffets in the vortex ring
+                            // state and in retreating blade stall: the cockpit
+                            // shakes (no message, as in the real aircraft).
+                            if self.view_rig.cockpit(self.flight_view) {
+                                let buffet = tore_sim::g_effects::rotor_buffet_shake(
+                                    presented.rotor_buffet(),
+                                    seconds,
+                                );
+                                shake = [shake[0] + buffet[0], shake[1] + buffet[1]];
+                            }
                             if shake != [0.; 2] {
                                 look::apply(
                                     &mut self.camera,
@@ -4993,7 +5004,7 @@ fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
 }
 
 /// The `--flight-cheat` names, for headless probes and live-fire captures.
-const PROBE_CHEATS: [&str; 8] = [
+const PROBE_CHEATS: [&str; 9] = [
     "extra-g",
     "no-g-effects",
     "no-spins",
@@ -5002,6 +5013,7 @@ const PROBE_CHEATS: [&str; 8] = [
     "unlimited-ammo",
     "invulnerable",
     "realistic-damage",
+    "easy-physics",
 ];
 
 fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
@@ -5013,6 +5025,7 @@ fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
         "no-crashes" => cheats.no_crashes = true,
         "unlimited-fuel" => cheats.unlimited_fuel = true,
         "unlimited-ammo" => cheats.unlimited_ammo = true,
+        "easy-physics" => cheats.easy_physics = true,
         "invulnerable" => cheats.damage = Damage::Invulnerable,
         _ => cheats.damage = Damage::Realistic,
     }
@@ -8003,6 +8016,76 @@ fn locate_shell(
     }
 }
 
+/// `--hud-snapshot PATH [--hud-snapshot-state forward|hover]`: the HUD of the
+/// selected aircraft over a flat background, headless, as a PPM. Powered-lift
+/// aircraft start in trimmed forward flight (`forward`) or in a hover
+/// (`hover`: a jet with its nozzles vertical, a helicopter trimmed at rest),
+/// 3,000 feet over flat ground, and fly a second so the rotor and engines
+/// are settled; any other aircraft is shown as it starts.
+fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> AppResult<()> {
+    use std::io::Write;
+    let mut flight = flight::State::new(&hornet.profile, [0., 3000., 0.])?;
+    flight.enable_research(1)?;
+    flight.cheats.unlimited_fuel = true;
+    flight.yaw = 0.;
+    match state {
+        "forward" => {
+            flight.start_airborne([0.; 3]);
+        }
+        "hover" => {
+            if !flight.trim_hover() {
+                return Err("this aircraft has no hover to show".into());
+            }
+        }
+        other => {
+            return Err(format!("unknown HUD snapshot state {other}; use forward or hover").into());
+        }
+    }
+    // A second of flight over a flat plain 3,000 feet below.
+    for _ in 0..120 {
+        flight.step_surface(&tore_input::PilotInput::default(), |_, _| {
+            tore_sim::research::Surface::runway(0.)
+        });
+    }
+    let color = hornet.daylight_palette()[usize::from(hornet.hud.primary_color)];
+    let mut pixels = vec![0u8; menu::WIDTH * menu::HEIGHT * 4];
+    hud::draw(
+        &mut pixels,
+        &flight,
+        &hornet.hud_font,
+        0.,
+        None,
+        true,
+        false,
+        color,
+        1.,
+        None,
+        None,
+        (flight.bank, 1.),
+    );
+    // Over a plain sky and ground split at the horizon of the camera.
+    let horizon = hud::project(flight.pitch, flight.bank, 0., 0., 1.)
+        .map_or(240., |(_, y)| y)
+        .clamp(0., menu::HEIGHT as f64);
+    let mut file = std::fs::File::create(path)?;
+    write!(file, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
+    for (index, pixel) in pixels.chunks_exact(4).enumerate() {
+        let y = (index / menu::WIDTH) as f64;
+        let back: [u8; 3] = if y < horizon {
+            [52, 88, 140]
+        } else {
+            [64, 84, 52]
+        };
+        let rgb = if pixel[3] == 0 {
+            back
+        } else {
+            [pixel[0], pixel[1], pixel[2]]
+        };
+        file.write_all(&rgb)?;
+    }
+    Ok(())
+}
+
 /// Headless locate-screen preview (`--snapshot PATH --snapshot-state locate`,
 /// `locate-starting`, `locate-importing` or `locate-done`). The candidate list and the import
 /// figures are fixed so the layout is reviewable on any machine, with or
@@ -8234,6 +8317,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut countermeasure_preview = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
+    let mut hud_snapshot: Option<String> = None;
+    let mut hud_snapshot_state = String::from("forward");
     let mut systems_preview: Vec<usize> = Vec::new();
     let mut validate_creator = false;
     let mut validate_tanks = false;
@@ -8835,9 +8920,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 flight_fuel = Some(pounds);
             }
             "--flight-cheat" => {
-                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage")?;
+                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, easy-physics, invulnerable or realistic-damage")?;
                 if !PROBE_CHEATS.contains(&name.as_str()) {
-                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage".into());
+                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, easy-physics, invulnerable or realistic-damage".into());
                 }
                 flight_cheats.push(name);
             }
@@ -8951,6 +9036,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--panel-snapshot" => {
                 panel_snapshot = Some(args.next().ok_or("--panel-snapshot needs output path")?)
+            }
+            "--hud-snapshot" => {
+                hud_snapshot = Some(args.next().ok_or("--hud-snapshot needs output path")?)
+            }
+            "--hud-snapshot-state" => {
+                hud_snapshot_state = args.next().ok_or("--hud-snapshot-state needs forward or hover")?
             }
             "--viewer" => initial_screen = Screen::Viewer,
             "--connect" => {
@@ -9522,6 +9613,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && snapshot.is_none()
         && replay_combat.is_none()
         && panel_snapshot.is_none()
+        && hud_snapshot.is_none()
         && headless_ticks.is_none()
         && ai_probe.is_none()
         && !sensor_summary
@@ -9549,7 +9641,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             smoke_test
                 || capture_terrain.is_some()
                 || snapshot.is_some()
-                || panel_snapshot.is_some(),
+                || panel_snapshot.is_some()
+                || hud_snapshot.is_some(),
             preference,
         )
         .fullscreen(),
@@ -10035,6 +10128,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .map(|v| v * state.speed);
             }
         }
+        // A powered-lift aircraft starts in trimmed forward flight, as in a
+        // mission (VTOL overhaul decision 8); a ground start below replaces it.
+        if state.research.is_some() {
+            state.start_airborne(replay_world.as_ref().map_or([0.; 3], |w| w.wind()));
+        }
         println!(
             "flight_model={}",
             if native_tables.is_some() {
@@ -10507,6 +10605,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 println!("two_seater=true");
             }
         }
+        return Ok(Outcome::Done);
+    }
+    if let Some(path) = hud_snapshot {
+        write_hud_snapshot(&hornet, &hud_snapshot_state, &path)?;
         return Ok(Outcome::Done);
     }
     if let Some(path) = panel_snapshot {
@@ -11053,6 +11155,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     flight.jammer = jammer_on;
     if researched_flight {
         flight.enable_research(1)?;
+        if ground_start.is_none() {
+            flight.start_airborne(world.wind());
+        }
     }
     if let Some(tables) = &native_tables {
         flight.enable_native(tables.clone(), 1)?;

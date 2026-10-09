@@ -11,7 +11,7 @@
 //! attitude, heading and climb holds that fly the aircraft through its
 //! stick, pedals and collective as a player would.
 
-use super::drive::LOW_ROTOR;
+use super::drive::{EASY_ROTOR_FLOOR, LOW_ROTOR};
 use super::tests::{fly, model, pt_aircraft, trimmed_at};
 use super::*;
 use crate::attitude::Basis;
@@ -1062,7 +1062,10 @@ fn each_hazard_switches_off_at_the_rotors() {
     let stalled = m.loads(&fast);
     fast.hazards.blade_stall = false;
     let clean = m.loads(&fast);
-    assert!(stalled.rotors[0].blade_stall > 0.5 && clean.rotors[0].blade_stall == 0.);
+    // The cue stays; the effect goes.
+    assert!(stalled.rotors[0].blade_stall > 0.5);
+    assert_eq!(clean.rotors[0].blade_stall, stalled.rotors[0].blade_stall);
+    assert!(stalled.rotors[0].tilt_target[0] < clean.rotors[0].tilt_target[0]);
     assert!(stalled.thrust_lbf < clean.thrust_lbf);
     // A rotor at 65 percent.
     let mut slow = instant_of(&s);
@@ -1074,18 +1077,27 @@ fn each_hazard_switches_off_at_the_rotors() {
     assert!(stalled.thrust_lbf < 0.5 * clean.thrust_lbf);
 }
 
-/// An airborne start high above the hover ceiling trims on the lever alone,
-/// and the engines cannot hold it: the aircraft sinks.
+/// S1: an airborne start is trimmed forward flight at the start rule's
+/// speed: height within 10 ft and speed within 2 kt over 10 s hands-off at
+/// Damper. And the ground start leaves the rotors at the governed speed with
+/// the collective down and the engines at the power the flat-pitch rotors
+/// need.
 #[test]
-fn an_overloaded_airborne_start_has_no_hover_support() {
-    let mut overloaded = trimmed(5_000., 0.);
-    overloaded.position[1] = 24_000.;
-    overloaded.ticks = 0;
-    overloaded.lift_controls.thrust_lbf = 0.;
-    overloaded.set_payload(1_500.).unwrap();
-    overloaded.initialize_airborne_hover();
-    fly(&mut overloaded, 600, |_| PilotInput::default());
-    assert!(overloaded.position[1] < 23_990.);
+fn starts_are_trimmed_forward_flight_and_a_governed_ground_idle() {
+    let mut s = State::new(&pt_aircraft(), [0., 3_000., 0.]).unwrap();
+    s.enable_research(1).unwrap();
+    s.cheats.unlimited_fuel = true;
+    s.yaw = 0.;
+    assert!(s.start_airborne([0.; 3]));
+    let start = (s.position[1], s.speed);
+    assert!(start.1 > 80. * KT, "{} kt", start.1 / KT);
+    fly(&mut s, 1200, |_| PilotInput::default());
+    assert!((s.position[1] - start.0).abs() < 10., "{}", s.position[1]);
+    assert!((s.speed - start.1).abs() < 2. * KT, "{}", s.speed / KT);
+    let ground = on_the_ground();
+    assert_eq!(ground.lift_controls.drive.rotor_speed.round(), 1.);
+    assert!(ground.lift_controls.collective_actual < 0.01);
+    assert!(ground.torque_percent().unwrap() > 1.);
 }
 
 /// Reduced power takes the hover away: with the engines at half power the
@@ -1101,4 +1113,44 @@ fn reduced_power_has_no_automatic_hover_support() {
         damaged.position[1],
         damaged.vertical_speed
     );
+}
+
+/// E1 for the tandem: the Easy flight physics cheat takes the hazards away
+/// through `State::rotor_hazards`. An engine cut in the hover never drops
+/// the rotor speed below 85 percent in flight, and the dynamic rollover that
+/// crashes the aircraft on the ground does not.
+#[test]
+fn the_easy_flight_physics_cheat_removes_the_tandem_hazards() {
+    let mut s = trimmed(3_000., 0.);
+    s.cheats.easy_physics = true;
+    let lever = s.lift_controls.collective;
+    s.command(PilotCommand::Set(Switch::Engine, false));
+    let mut lowest: f64 = 1.;
+    fly(&mut s, 120 * 3, |s| {
+        lowest = lowest.min(s.lift_controls.drive.rotor_speed);
+        PilotInput {
+            collective: Some(lever),
+            ..Default::default()
+        }
+    });
+    assert!(lowest >= EASY_ROTOR_FLOOR - 1e-9, "{lowest}");
+    // The rollover of H14 is not a crash with the cheat on.
+    let mut g = on_the_ground();
+    g.cheats.easy_physics = true;
+    let lever = trimmed(0., 0.).lift_controls.collective;
+    g.lift_controls.collective = 0.8 * lever;
+    g.lift_controls.collective_actual = 0.8 * lever;
+    g.bank = 20_f64.to_radians();
+    g.lift_controls.rotors[0].tilt[1] = 0.02;
+    g.lift_controls.rotors[1].tilt[1] = 0.02;
+    fly(&mut g, 1, |_| PilotInput::default());
+    assert!(!g.crashed);
+    // Trimmed under the cheat, the hover needs no pedal for the torque
+    // residual (Damper feeds it forward anyway: Off shows it).
+    let mut easy = State::new(&pt_aircraft(), [0., 1_000., 0.]).unwrap();
+    easy.enable_research(1).unwrap();
+    easy.cheats.easy_physics = true;
+    easy.lift_controls.aids.stability = StabilityLevel::Off;
+    assert!(easy.trim_tandem(0.));
+    assert!(easy.lift_controls.aids.trim[2].abs() < 1e-3);
 }

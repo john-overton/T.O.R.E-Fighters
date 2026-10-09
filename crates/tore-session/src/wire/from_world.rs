@@ -203,6 +203,7 @@ fn targets_picture(world: &World) -> RenderSnapshot {
                     lit: true,
                     afterburner: false,
                     rates: [0.; 3],
+                    rotor: 0.,
                     flame: t.airborne && t.hp > 0 && burning.contains(&t.id),
                 },
                 damage: Damage {

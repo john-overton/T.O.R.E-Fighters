@@ -314,7 +314,10 @@ impl Interpolator {
     }
 }
 
-/// One entity at the drawn time.
+/// One entity at the drawn time. Aircraft are the common case and a drawn
+/// pose is plain data, so the other variants stay unboxed (the pose grew by
+/// the rotor speed past clippy's size gap).
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Sample {
     Aircraft(AircraftPose),
     Projectile(ProjectileState, [f64; 3], [f64; 3], [f64; 2]),
@@ -389,6 +392,8 @@ pub fn aircraft_pose(
             lit: state.engine.lit,
             afterburner: state.engine.afterburner,
             rates: state.engine.rates.map(|r| f64::from(r) * RATE_STEP),
+            // The wire's entity record carries no rotor speed (protocol 19).
+            rotor: 0.,
             flame: state.engine.flame,
         },
         damage: Damage {
