@@ -11,6 +11,8 @@ use std::time::Instant;
 const HIT: i32 = 19;
 /// The frame the lamp is lit from and the last frame.
 const ON: usize = 6;
+/// How bright a disabled lamp is drawn when the box dims it.
+const DISABLED_GAIN: f32 = 0.5;
 
 /// A check box at `at` with an optional label to its right in `PANELFNT`.
 ///
@@ -30,6 +32,9 @@ pub struct CheckBox {
     animate: bool,
     pressed: bool,
     enabled: bool,
+    /// Draw the lamp dimmer while the box is disabled (lobby pass L3's side
+    /// boxes); off, a disabled box keeps its art (the connection screens').
+    dim_when_disabled: bool,
 }
 
 impl CheckBox {
@@ -43,7 +48,13 @@ impl CheckBox {
             animate: true,
             pressed: false,
             enabled: true,
+            dim_when_disabled: false,
         }
+    }
+    /// A disabled box draws its lamp at half brightness.
+    pub fn dimmed_when_disabled(mut self) -> Self {
+        self.dim_when_disabled = true;
+        self
     }
     /// Turns the frame-by-frame lamp off or on (on by default).
     #[cfg(test)]
@@ -129,7 +140,12 @@ impl CheckBox {
 
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit, focused: bool) {
         let sprite = kit.sprite(&format!("CHECK0{}", self.frame));
-        canvas.blit(sprite, self.at, 0, sprite.width, 1.0);
+        let gain = if self.dim_when_disabled && !self.enabled {
+            DISABLED_GAIN
+        } else {
+            1.0
+        };
+        canvas.blit(sprite, self.at, 0, sprite.width, gain);
         if !self.label.is_empty() {
             let font = kit.sprite("PANELFNT");
             let font = if self.enabled {

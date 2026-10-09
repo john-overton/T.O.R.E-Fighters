@@ -19,7 +19,10 @@
 //! - **Slots**: every aircraft a player may take (wing, member, aircraft,
 //!   who holds it, or AI), in a list that scrolls with the red scroll bar.
 //!   Click a free slot to take it; click one's own again to free it. A slot
-//!   another player holds is dimmed and cannot be clicked.
+//!   another player holds is dimmed and cannot be clicked. In PvP the rows
+//!   wear their side ([`sides`]: light text for an open slot, a filled bar for
+//!   a taken one), and the Bluefor and Redfor check boxes beside the heading
+//!   join a side, leave it, and filter the list to it.
 //! - **Players**: callsigns, the King's crown, the house of the player whose
 //!   machine runs the game, a tick when ready, a red mark and the reason
 //!   when a player's game cannot play the mission, the platform's mark and,
@@ -62,6 +65,9 @@ mod phase2_tests;
 pub mod players_panel;
 pub mod preview;
 pub mod settings_panel;
+pub mod sides;
+#[cfg(test)]
+mod sides_tests;
 #[cfg(test)]
 mod tests;
 
@@ -69,17 +75,19 @@ use crate::menu::{Canvas, text_width};
 use crate::net::lobby_chat::LobbyChat;
 use crate::ui_text;
 use crate::widgets::{
-    Align, Backdrop, Background, Button, Column, Focus, Kit, List, Outcome as Wo, Point, Route,
-    Widget, draw_panel, fit, inside,
+    Align, Backdrop, Background, Button, CheckBox, Column, Focus, Kit, List, Outcome as Wo, Point,
+    Route, Widget, draw_panel, fit, inside,
 };
 use facts::{Buttons, DefaultButton, Facts, FlyAs, LoadoutAs, SlotClick};
 use modal::{Answer, Modal, Purpose};
 use players_panel::PlayersPanel;
 use settings_panel::{Context as SettingsContext, Edit, SettingsPanel};
+use sides::{BoxClick, SideBox};
 use std::sync::Arc;
 use std::time::Instant;
 use tore_session::wire::chat::ChatLine;
 use tore_session::wire::messages::{ContentGaps, LobbyState, Lock, SettingsChange};
+use tore_sim::ai::launch::Side;
 use tore_sim::cheats::Cheats;
 
 /// The screen's own frame lines: the colour measured on John's screenshot.
@@ -89,6 +97,9 @@ const LINE: [u8; 4] = [174, 174, 174, 255];
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Id {
     Slots,
+    /// The Bluefor and Redfor check boxes of a PvP lobby (lobby pass L3).
+    BlueBox,
+    RedBox,
     Players,
     Messages,
     Line,
@@ -105,7 +116,7 @@ pub enum Id {
 
 impl Id {
     /// How many controls Tab visits.
-    const COUNT: usize = 11;
+    const COUNT: usize = 13;
     /// The buttons, in the order of their places for the King.
     const BUTTONS: [Id; 7] = [
         Id::Mission,
@@ -126,6 +137,8 @@ pub enum Request {
     Take(u32),
     /// Free the slot held.
     LeaveSlot,
+    /// Take the first free slot of this side (a PvP lobby's side box).
+    Side(Side),
     /// Ready, or not ready.
     SetReady(bool),
     /// The King's Fly.
@@ -195,8 +208,14 @@ mod layout {
     /// "Bluefor 3/5" and "Redfor 5/5" labels) draw in, to the right of the
     /// Slots heading. Empty in co-op. Slice L3 draws here and nowhere else in
     /// the head.
-    #[allow(dead_code, reason = "slice L3 draws the side boxes in this room")]
     pub const SIDE_BOXES: Rect = (100, 128, 275, 28);
+    /// The Bluefor and Redfor check boxes' lamps (28 pixel art), and the row
+    /// their labels sit on: the Slots heading's. The labels start 29 pixels
+    /// right of the lamp, as a check box's own label does; Redfor's lamp is
+    /// placed so "Bluefor 12/12" still ends short of it.
+    pub const BOXES: [Point; 2] = [(100, 128), (215, 128)];
+    pub const BOX_LABEL_Y: i32 = 140;
+    pub const BOX_LABEL_DX: i32 = 29;
     /// The Players heading, on the Slots heading's row as the plan's mockup
     /// has it (agent decision: the plan's table said 152, which would leave
     /// the two headings on different lines).
@@ -237,6 +256,13 @@ pub struct LobbyScreen {
     hosting: bool,
     slots: List,
     players: List,
+    /// The Bluefor and Redfor check boxes' lamps (PvP only): their checked
+    /// state follows the slot held, never the click.
+    side_check: [CheckBox; 2],
+    /// What the boxes say and do now, `None` outside PvP.
+    side_boxes: Option<[SideBox; 2]>,
+    /// A press went down on this box (it acts on release).
+    side_pressed: Option<usize>,
     /// Messages and the chat line (slice EF6).
     pub chat: LobbyChat,
     mission: Button,
@@ -349,6 +375,8 @@ impl LobbyScreen {
         ];
         let order = vec![
             Id::Slots,
+            Id::BlueBox,
+            Id::RedBox,
             Id::Players,
             Id::Messages,
             Id::Line,
@@ -379,6 +407,9 @@ impl LobbyScreen {
                 .with_scroll_bar(layout::PLAYERS_BAR)
                 .with_wheel_rows(layout::WHEEL_ROWS)
                 .with_columns(player_columns),
+            side_check: layout::BOXES.map(|at| CheckBox::new(at, "", false).dimmed_when_disabled()),
+            side_boxes: None,
+            side_pressed: None,
             chat: LobbyChat::new(layout::MESSAGES, layout::CHAT_LINE, layout::TEXT_WIDTH),
             mission: button("Mission...", 0),
             settings: button("Settings...", 1),
@@ -419,6 +450,11 @@ impl LobbyScreen {
     #[cfg(test)]
     pub fn buttons(&self) -> Buttons {
         self.buttons
+    }
+    /// The side boxes, in a PvP lobby.
+    #[cfg(test)]
+    pub fn side_boxes(&self) -> Option<&[SideBox; 2]> {
+        self.side_boxes.as_ref()
     }
     /// A panel (Kick, or the King's Leave) is open.
     #[cfg(test)]
@@ -559,6 +595,9 @@ impl LobbyScreen {
         let at = Instant::now();
         self.slots.advance(at);
         self.players.advance(at);
+        for check in &mut self.side_check {
+            check.advance(at);
+        }
     }
 
     fn take(&mut self, lobby: Option<&LobbyState>, unable: Option<&str>) {
@@ -623,6 +662,7 @@ impl LobbyScreen {
         self.facts = Facts::of(self.state.as_ref(), self.unable.as_deref());
         self.buttons = facts::buttons(&self.facts, self.panel_target().is_some());
         self.default = facts::default_button(&self.facts, &self.buttons);
+        self.sync_side_boxes();
         let b = self.buttons;
         self.mission.set_enabled(b.mission.is_enabled());
         self.settings.set_enabled(b.settings.is_enabled());
@@ -670,6 +710,56 @@ impl LobbyScreen {
         }
     }
 
+    /// The side boxes from the lobby now: what they say, and each lamp
+    /// checked (walking its frames) when the player holds a slot there and
+    /// lit while it can be used.
+    fn sync_side_boxes(&mut self) {
+        let before = self.side_boxes.is_some();
+        self.side_boxes = self
+            .state
+            .as_ref()
+            .and_then(|state| sides::side_boxes(state, &self.facts));
+        let now = Instant::now();
+        for (i, check) in self.side_check.iter_mut().enumerate() {
+            let (checked, lit) = self
+                .side_boxes
+                .as_ref()
+                .map_or((false, false), |boxes| (boxes[i].checked, boxes[i].lit));
+            // A disabled lamp does not turn, so enable it for the walk.
+            check.set_enabled(true);
+            if check.checked() != checked {
+                if before {
+                    check.toggle(now);
+                } else {
+                    // The boxes just appeared: no walk through the frames.
+                    check.set_checked(checked);
+                }
+            }
+            check.set_enabled(lit);
+        }
+    }
+
+    /// The part of the screen a side box answers to: its lamp and label.
+    fn side_hit(&self, i: usize) -> crate::widgets::Rect {
+        let (x, y) = layout::BOXES[i];
+        let width = self.side_boxes.as_ref().map_or(0, |boxes| {
+            text_width(self.kit.sprite("PANELFNT"), &boxes[i].label)
+        });
+        (x, y, layout::BOX_LABEL_DX + width, 28)
+    }
+
+    /// A click, or Space, on side box `i`.
+    fn side_clicked(&mut self, i: usize) -> Option<Request> {
+        match self.side_boxes.as_ref()?.get(i)?.click.clone() {
+            BoxClick::Join(side) => Some(Request::Side(side)),
+            BoxClick::Leave => Some(Request::LeaveSlot),
+            BoxClick::Refused(why) => {
+                self.say(&why);
+                None
+            }
+        }
+    }
+
     fn button_mut(&mut self, id: Id) -> &mut Button {
         match id {
             Id::Mission => &mut self.mission,
@@ -699,6 +789,10 @@ impl LobbyScreen {
         let mut ok = [true; Id::COUNT];
         for id in Id::BUTTONS {
             ok[id as usize] = self.shown(id) && Widget::enabled(self.button_ref(id));
+        }
+        // A side box takes the focus while it can be used.
+        for (id, i) in [(Id::BlueBox, 0), (Id::RedBox, 1)] {
+            ok[id as usize] = self.side_boxes.as_ref().is_some_and(|boxes| boxes[i].lit);
         }
         ok
     }
@@ -966,6 +1060,13 @@ impl LobbyScreen {
                     }
                     _ => None,
                 },
+                Id::BlueBox | Id::RedBox => {
+                    if matches!(name, "Space" | " " | "Enter") {
+                        self.side_clicked(usize::from(id == Id::RedBox))
+                    } else {
+                        None
+                    }
+                }
                 Id::Players => {
                     if self.players.key(name) == Wo::Changed {
                         self.picked = Id::Players;
@@ -1073,6 +1174,12 @@ impl LobbyScreen {
         self.slots.release(now);
         self.players.release(now);
         self.chat.messages.release();
+        if let Some(i) = self.side_pressed.take()
+            && inside(self.side_hit(i), p)
+        {
+            self.focus.set([Id::BlueBox, Id::RedBox][i]);
+            return self.side_clicked(i);
+        }
         let mut fired = None;
         let blocked = self.blocked.take();
         for id in self.shown_buttons() {
@@ -1106,6 +1213,8 @@ impl LobbyScreen {
         // The rocker is outside the rows' rectangle: the list sorts out what
         // it was pressed on. A row clicked is a slot clicked, once (a
         // double-click's second press is not another click).
+        self.side_pressed =
+            (0..2).find(|&i| self.side_boxes.is_some() && inside(self.side_hit(i), p));
         let row = self.slots.row_at(p);
         let outcome = self.slots.press(p, now);
         self.refresh();
@@ -1153,6 +1262,7 @@ impl LobbyScreen {
         }
         self.pointer = None;
         self.blocked = None;
+        self.side_pressed = None;
     }
 
     /// A wheel step over the pointer's place. Positive is up.
@@ -1246,6 +1356,41 @@ impl LobbyScreen {
         }
     }
 
+    /// The Bluefor and Redfor boxes on the Slots heading's row: the lamp, then
+    /// the side's name and its taken and total slots in the side's light
+    /// colour (dimmed while the box is greyed), then, when the player cannot
+    /// choose, a short note if it fits before the Players heading.
+    fn draw_side_boxes(&self, canvas: &mut Canvas, blue_marked: bool, red_marked: bool) {
+        let Some(boxes) = &self.side_boxes else {
+            return;
+        };
+        let kit = &*self.kit;
+        let font = kit.sprite("PANELFNT");
+        let mut end = layout::SIDE_BOXES.0;
+        for (i, (side_box, marked)) in boxes.iter().zip([blue_marked, red_marked]).enumerate() {
+            let (x, _) = layout::BOXES[i];
+            self.side_check[i].draw(canvas, kit, marked);
+            let light = sides::light(side_box.side);
+            let tint = if side_box.lit {
+                light
+            } else {
+                light.map(|c| (u16::from(c) * 4 / 5) as u8)
+            };
+            let at = (x + layout::BOX_LABEL_DX, layout::BOX_LABEL_Y);
+            ui_text::text(canvas, kit, font, &side_box.label, at, None, Some(tint));
+            end = at.0 + text_width(font, &side_box.label);
+        }
+        let room = layout::SIDE_BOXES.0 + layout::SIDE_BOXES.2 - end - 14;
+        let dim = kit.sprite("PANELFND");
+        if let Some(words) = sides::note(&self.facts)
+            .iter()
+            .find(|words| text_width(dim, words) <= room)
+        {
+            let at = (end + 14, layout::BOX_LABEL_Y);
+            ui_text::text(canvas, kit, dim, words, at, None, None);
+        }
+    }
+
     fn draw_frame(&self, canvas: &mut Canvas) {
         let kit = &*self.kit;
         {
@@ -1318,6 +1463,7 @@ impl LobbyScreen {
             );
         }
         let marked = |id| self.focus.marked(id);
+        self.draw_side_boxes(canvas, marked(Id::BlueBox), marked(Id::RedBox));
         self.slots.draw(canvas, kit, marked(Id::Slots));
         self.players.draw(canvas, kit, marked(Id::Players));
         self.chat

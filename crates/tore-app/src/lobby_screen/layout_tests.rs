@@ -189,8 +189,9 @@ fn the_rules_line_stays_and_moves_up() {
         differing(&before, &after, rules_row) > 0,
         "the Rules line draws at its new place"
     );
-    // Nothing of it remains at its old place.
-    assert_eq!(differing(&before, &after, (45, 141, 549, 9)), 0);
+    // Nothing of it remains at its old place (only its first 54 pixels: PvP
+    // draws its side boxes on the Slots heading's row, beside the heading).
+    assert_eq!(differing(&before, &after, (45, 141, 54, 9)), 0);
 }
 
 // ---- the scroll bars ----

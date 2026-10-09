@@ -273,6 +273,7 @@ impl App {
         match request {
             Request::Take(plane) => client.take_slot(plane),
             Request::LeaveSlot => client.leave_slot(),
+            Request::Side(side) => client.take_side_slot(side),
             Request::SetReady(ready) => {
                 // A player who takes a plane stops watching first.
                 client.stop_watching();
