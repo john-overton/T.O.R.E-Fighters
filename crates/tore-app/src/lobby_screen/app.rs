@@ -11,13 +11,19 @@
 //! allow (the flag is off in single player, so those draw and behave as
 //! before):
 //!
-//! - **Mission...** (the King) opens the creator with `OK` reading **Accept**
-//!   and Start locked to Airborne. Accept checks the draft against what a
-//!   host takes ([`crate::quick_mission::QuickMission::lobby_spec`]), sends it
-//!   with `change_mission` and waits: the next lobby state with a new mission
-//!   number closes the page; the host's refusal (the build's own words) stays
-//!   in the creator's notice. Cancel (or Esc) puts the draft back as it was
-//!   and sends nothing.
+//! - **Mission...** opens the creator on **the lobby's current mission** (never
+//!   on the player's own last draft), for everyone. The King in the lobby gets
+//!   it editable, with `OK` reading **Accept** and Start locked to Airborne.
+//!   Accept checks the draft against what a host takes
+//!   ([`crate::quick_mission::QuickMission::lobby_spec`]), lays it over the
+//!   lobby's mission (so the cheats and what the creator does not carry stay),
+//!   sends it with `change_mission` and waits: the next lobby state with a new
+//!   mission number closes the page; the host's refusal (the build's own
+//!   words) stays in the creator's notice. Cancel (or Esc) sends nothing.
+//!   Everyone else, and the King while the mission flies, gets the same page
+//!   **view only**: every field drawn, none changeable, `OK` reading **Back**;
+//!   when the King changes the mission meanwhile it redraws from the new one.
+//!   Either way the player's own single-player draft is put back on close.
 //! - **Loadout** opens Load Ordnance for the aircraft of the slot the player
 //!   holds, with **Accept** and **Cancel**, the mission's Guns only already
 //!   applied, and Cheat loading refused on the page. Accept checks the
@@ -31,13 +37,13 @@ use super::{LobbyScreen, Request};
 use crate::aircraft_type::AircraftType;
 use crate::menu::Action;
 use crate::ordnance::Ordnance;
-use crate::quick_mission::Saved;
+use crate::quick_mission::{QuickMission, Saved, ViewKind};
 use crate::{App, Screen};
 use std::time::{Duration, Instant};
 use tore_session::wire::chat::Receiver;
-use tore_session::wire::messages::{ItemKind, LobbyPhase, kind};
+use tore_session::wire::messages::{ItemKind, LobbyPhase, LobbyState, kind};
 use tore_sim::combat::loadout::Loadout;
-use tore_world::mission::LoadoutSpec;
+use tore_world::mission::{LoadoutSpec, MissionSpec};
 
 /// How long Accept waits on Load Ordnance for a refusal before it takes the
 /// loadout as accepted (the host answers only a refusal).
@@ -49,10 +55,13 @@ const TAKEN_AGAIN: Duration = Duration::from_millis(300);
 /// The page open over the lobby.
 enum Page {
     /// The creator. `sent` is the mission number the lobby had when Accept
-    /// sent the mission; `saved` puts the draft back on Cancel.
+    /// sent the mission; `saved` puts the player's own draft back when it
+    /// closes; `shown` is the mission a read-only creator draws (`None` when
+    /// it edits).
     Creator {
         saved: Box<Saved>,
         sent: Option<u32>,
+        shown: Option<Box<MissionSpec>>,
     },
     /// Load Ordnance for `plane` of mission `mission`. `shelved` is single
     /// player's own page, put back when this one closes.
@@ -107,13 +116,13 @@ impl App {
     /// Closes the lobby (the session ended): any page goes, and single
     /// player's own page and creator come back as they were.
     pub(crate) fn close_lobby(&mut self) {
-        self.close_page(false);
+        self.close_page();
         self.lobby = Lobby::default();
     }
 
     /// A flight starts: a page open over the lobby is put away.
     pub(crate) fn close_lobby_page(&mut self) {
-        self.close_page(false);
+        self.close_page();
     }
 
     // ---- the turn ----
@@ -144,10 +153,19 @@ impl App {
         }
         // Stage L: what not every player has, on the page the King or the
         // player is choosing from.
-        match &self.lobby.page {
-            Some(Page::Creator { .. }) => self
-                .quick
-                .set_gaps(|kind, key| client.gap_refusal(kind, key)),
+        match &mut self.lobby.page {
+            Some(Page::Creator { shown, .. }) => {
+                // The King changed the mission while a player reads it: the
+                // page draws the new one and says so.
+                if let (Some(shown), Some(spec)) = (shown, client.spec())
+                    && **shown != *spec
+                    && self.quick.reload_view(spec).is_ok()
+                {
+                    **shown = spec.clone();
+                }
+                self.quick
+                    .set_gaps(|kind, key| client.gap_refusal(kind, key));
+            }
             Some(Page::Loadout { .. }) => {
                 if let Some(page) = self.quick.ordnance.as_mut() {
                     page.set_gaps(|source| client.gap_refusal(ItemKind::Weapon, source));
@@ -168,7 +186,7 @@ impl App {
                 sent: Some(number), ..
             }) if lobby.mission != *number => {
                 // The host took the mission: back to the lobby.
-                self.close_page(true);
+                self.close_page();
             }
             Some(Page::Loadout {
                 plane,
@@ -188,16 +206,16 @@ impl App {
                     || holds != Some(plane)
                     || lobby.mission != mission
                 {
-                    self.close_page(false);
+                    self.close_page();
                     if let Some(screen) = &mut self.lobby.screen {
                         screen.say("The mission or your slot changed; choose your loadout again.");
                     }
                 } else if closed {
-                    self.close_page(false);
+                    self.close_page();
                 } else if sent.is_some_and(|at| {
                     at.elapsed() >= if armed { TAKEN_AGAIN } else { ASSUME_TAKEN }
                 }) {
-                    self.close_page(true);
+                    self.close_page();
                     if let Some(screen) = &mut self.lobby.screen {
                         screen.say("Loadout sent.");
                     }
@@ -255,6 +273,7 @@ impl App {
         match request {
             Request::Take(plane) => client.take_slot(plane),
             Request::LeaveSlot => client.leave_slot(),
+            Request::Side(side) => client.take_side_slot(side),
             Request::SetReady(ready) => {
                 // A player who takes a plane stops watching first.
                 client.stop_watching();
@@ -323,15 +342,31 @@ impl App {
         }
     }
 
+    /// Mission...: the creator on the lobby's mission, editable for the King
+    /// in the lobby and read-only for everyone else.
     fn open_creator(&mut self) {
         if self.lobby.page.is_some() {
             return;
         }
+        let Some(session) = &self.net else {
+            return;
+        };
+        let (Some(lobby), Some(spec)) = (session.client.lobby(), session.client.spec()) else {
+            self.say("The mission has not arrived yet.");
+            return;
+        };
+        let view = creator_view(lobby);
+        let spec = spec.clone();
+        let saved = Box::new(self.quick.save());
+        if let Err(problem) = self.quick.open_lobby_mission(&spec, view) {
+            self.say(&format!("The mission cannot be shown here: {problem}"));
+            return;
+        }
         self.lobby.page = Some(Page::Creator {
-            saved: Box::new(self.quick.save()),
+            saved,
             sent: None,
+            shown: view.map(|_| Box::new(spec)),
         });
-        self.quick.enter_lobby();
         self.screen = Screen::Quick;
         self.menu.state.cancel();
     }
@@ -406,18 +441,16 @@ impl App {
         self.menu.state.cancel();
     }
 
-    /// Closes the open page and returns to the lobby. `keep` says the
-    /// creator's draft stays (Accept took it); otherwise it is put back as
-    /// it was. The loadout page is kept for the next visit either way.
-    fn close_page(&mut self, keep: bool) {
+    /// Closes the open page and returns to the lobby. The creator's draft is
+    /// the lobby's mission, not the player's own, so it is always put back as
+    /// it was, Accepted or not. The loadout page is kept for the next visit.
+    fn close_page(&mut self) {
         let Some(page) = self.lobby.page.take() else {
             return;
         };
         match page {
             Page::Creator { saved, .. } => {
-                if !keep {
-                    self.quick.restore(*saved);
-                }
+                self.quick.restore(*saved);
                 self.quick.leave_lobby();
             }
             Page::Loadout {
@@ -453,7 +486,7 @@ impl App {
                 Action::Click
             }
             (Some(Page::Creator { .. }), Action::Back) => {
-                self.close_page(false);
+                self.close_page();
                 Action::Click
             }
             (Some(Page::Loadout { .. }), Action::MissionFly) => {
@@ -467,15 +500,23 @@ impl App {
     /// Accept in the creator: the draft, checked against what a host takes,
     /// goes to the King's client.
     fn accept_mission(&mut self) {
+        if self.quick.is_view() {
+            return;
+        }
+        let Some(session) = &mut self.net else {
+            return;
+        };
         let spec = match self.quick.lobby_spec() {
-            Ok(spec) => spec,
+            // Over the lobby's mission: what the creator does not carry (the
+            // cheats, the weather overrides) stays as the lobby has it.
+            Ok(spec) => match session.client.spec() {
+                Some(lobby) => QuickMission::lay_over(lobby, spec),
+                None => spec,
+            },
             Err(problem) => {
                 self.quick.notice = Some(problem);
                 return;
             }
-        };
-        let Some(session) = &mut self.net else {
-            return;
         };
         let number = session.client.lobby().map(|l| l.mission);
         session.client.change_mission(&spec);
@@ -540,5 +581,62 @@ impl App {
             *sent = Some(Instant::now());
         }
         let _ = plane;
+    }
+}
+
+/// How the creator opens for a player: `None` edits (the King, in the lobby),
+/// otherwise it only reads, and says why. A server that locks the mission
+/// (`king-mission locked`) makes the King read it too.
+fn creator_view(lobby: &LobbyState) -> Option<ViewKind> {
+    match (lobby.is_king(), lobby.phase) {
+        (true, _) if lobby.mission_locked => Some(ViewKind::Fixed),
+        (true, LobbyPhase::Lobby) => None,
+        (true, _) => Some(ViewKind::Flying),
+        (false, _) => Some(ViewKind::Reader),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lobby_screen::preview::sample;
+
+    #[test]
+    fn only_the_king_in_the_lobby_edits_the_mission_and_everyone_else_reads_it() {
+        // Player 1 is the King in the sample lobby.
+        let king = sample(1);
+        assert_eq!(creator_view(&king), None);
+        let mut flying = sample(1);
+        flying.phase = LobbyPhase::Flying;
+        assert_eq!(creator_view(&flying), Some(ViewKind::Flying));
+        let mut ended = sample(1);
+        ended.phase = LobbyPhase::Ended;
+        assert_eq!(creator_view(&ended), Some(ViewKind::Flying));
+        let joiner = sample(2);
+        assert_eq!(creator_view(&joiner), Some(ViewKind::Reader));
+        // A dedicated server's lobby has no King: everyone reads.
+        let mut server = sample(2);
+        server.king = None;
+        server.host = None;
+        assert_eq!(creator_view(&server), Some(ViewKind::Reader));
+        let mut flying_joiner = sample(2);
+        flying_joiner.phase = LobbyPhase::Flying;
+        assert_eq!(creator_view(&flying_joiner), Some(ViewKind::Reader));
+    }
+
+    #[test]
+    fn a_king_on_a_server_that_locks_the_mission_reads_it_and_joiners_are_unchanged() {
+        let mut locked_king = sample(1);
+        locked_king.mission_locked = true;
+        assert_eq!(creator_view(&locked_king), Some(ViewKind::Fixed));
+        // The reason holds in every phase.
+        locked_king.phase = LobbyPhase::Flying;
+        assert_eq!(creator_view(&locked_king), Some(ViewKind::Fixed));
+        // Not locked: the editor, as before.
+        assert_eq!(creator_view(&sample(1)), None);
+        // A joiner reads either way, with its own reason.
+        let mut locked_joiner = sample(2);
+        locked_joiner.mission_locked = true;
+        assert_eq!(creator_view(&locked_joiner), Some(ViewKind::Reader));
     }
 }

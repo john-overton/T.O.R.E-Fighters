@@ -364,6 +364,60 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
   `LISTHI` (24 by 12): see the table above. The `LISTMID` rows are: row 0 a
   light edge (73), rows 1 and 2 dark, rows 3 to 13 near black (12), rows 14 to 16
   a light bevel.
+- **List row fill** (lobby pass L3, 2026-10-09): a taken PvP slot paints the well
+  of its bar in its side's colour (royal blue 36, 81, 186 or bright red 210, 36,
+  40) under white text. The fill covers rows 1 to 13 of the 17 row bar, between
+  the light edge (row 0) and the bevel (rows 14 to 16), and stops 2 pixels short
+  of each end. `Row::filled` carries it; the row's own text colour is unchanged.
+- **Check box in a list's heading row** (lobby pass L3): the PvP side boxes use
+  `CHECK00` to `CHECK06` at 28 pixels, the label drawn by the screen in the
+  side's light colour (134, 182, 223 or 206, 113, 121); a disabled lamp is
+  drawn at half brightness.
+- **Scroll bar** (lobby pass L1, 2026-10-09): retail has no list scroll bar, its
+  lists page with the PREV/NEXT rocker. The red bar John remembers is the Sound
+  Prefs slider (`docs/spec/sound-prefs.md`, "Each slider is a track and a
+  knob"), and the kit reuses it as a scroll bar (*opinionated*, requested by
+  John). The pieces are `SLIDETOP` (34 by 9, 468 bytes), `SLIDEMID` (34 by 8,
+  743) and `SLIDEBOT` (34 by 15, 636) for the track and `SLIDERV` (26 by 30,
+  1,158) for the knob, all in `FA_1.LIB`. Recipe (`_DrawSliderVert`, `0x48bc60`,
+  as the Sound Prefs notes record it): the top cap at the track's first row, the
+  middle tiles from 8 rows down to where the bottom cap starts (the last tile cut
+  short), the bottom cap 15 rows above the track's end, the knob 6 pixels in
+  from the left. The track is the Sound screen's 90 pixels at its tallest; the
+  kit stretches it to any height of at least 41 by tiling `SLIDEMID` (so a list's
+  89 pixels and a Messages box's 76 to 86 work). The knob is never stretched.
+  What the kit adds (*agent decisions*):
+  - Knob travel is the track's height less 41: 6 pixels of margin above the knob
+    and 5 below, which is retail's 49 pixels on a 90 pixel track. The knob's top
+    is `top + travel * first / (total - visible)`, rounded to the nearest pixel,
+    where `first` is the first line shown; a pointer position maps back by
+    rounding to the nearest line.
+  - A press on the knob holds it at the grip's offset (the knob does not jump to
+    the pointer, unlike the Sound screen's track click) and it follows the
+    pointer's height, also outside the bar; a press on the track above or below
+    the knob pages toward the press (a list's window, a Messages box's page less a
+    line); the wheel is the owner's (a list slides its window a row a notch, a
+    Messages box three lines).
+  - With everything on one page the track is drawn and the knob is not, and the
+    track does not react, so the layout never shifts.
+  - **Flat fallback.** `SLIDETOP`, `SLIDEMID` and `SLIDEBOT` are not in any
+    required import list (`selection::SLIDER_ART`, kept from `FA_1.LIB` with the
+    menu art, 1,847 bytes in all), so a pack imported before the lobby pass still
+    loads: the kit skips a missing piece (`kit::OPTIONAL_PIECES`) and the bar
+    draws the same layout flat, from the greys measured on a middle row of the
+    pieces: the panel's 81 for the face, a slot with a 12 groove 2 pixels wide
+    down the middle (57 on its left, 113 on its right) and a 24 then 12 left
+    edge, a 57 and 113 right edge. The slot's top is a bar four rows deep (a 57
+    bevel line, 32, 12, 12, a 40 fade) that joins the left wall in one corner,
+    as `SLIDETOP` does; until L5 the wall began a row above a two row bar and
+    showed as a small black lip at the top left. The same stepped corner is in
+    the retail art itself (the Sound Prefs picture and `SLIDETOP`), so with the
+    real pieces nothing was wrong. The knob (`SLIDERV`) is a menu piece every
+    import has. A re-import adds the real track; nobody is forced to.
+  - Where it is used: the Messages box on every connection screen (inside the box's
+    frame, flush right, 34 wide; the text stops 3 pixels short of it, so a 549
+    wide box has 507 for text), and the kit's `List` in its scrolling mode (the
+    lobby's slots and players lists, by slice L2).
 - **Check box** `CHECK00` to `CHECK06` (28 to 33 square). Frame order (S, `0x48b320`):
   `CHECK00` is the box off at rest, `CHECK06` the box on at rest. When the
   animation is on, switching on plays `CHECK01` to `CHECK06` and switching off plays
@@ -413,6 +467,7 @@ about 1.44 MB (1,438,167 bytes of resources) on a 178 MB pack, 63 resources incl
 | Backgrounds | `MODEM3`, `NETIPX3` (each 309,952) |
 | Panel kit | `PANEL` 309,184; `EDGETL` 810; `EDGETR` 562; `EDGEBL` 552; `EDGEBR` 810; `EDGELR` 280; `EDGETB` 272 |
 | Lists, fields | `LISTLFT` 740; `LISTMID` 484; `LISTRT` 756; `LISTHI` 400; `EDITL` 506; `EDITM` 640; `EDITR` 506; `PAGEBOX` 1,092 |
+| Scroll bar track (optional, `SLIDER_ART`) | `SLIDETOP` 468; `SLIDEMID` 743; `SLIDEBOT` 636 (the knob, `SLIDERV` 1,158, is menu art) |
 | Check boxes | `CHECK00` 1,234; `CHECK01` 1,138; `CHECK02` 1,022; `CHECK03` 944; `CHECK04` 1,022; `CHECK05` 1,138; `CHECK06` 1,234 |
 | Fonts | `PANELFND` 10,944; `FONTDFT` 14,432; `FONTDFD` 14,432; `MPFONT` 9,360; `WHEELFNT` 23,536 |
 | Disabled default button | `ACTDFD0L` 1,146; `ACTDFD0M` 650; `ACTDFD0R` 1,300; `ACTDFLD` 1,154 |
@@ -590,13 +645,14 @@ template):
 | Item | Rectangle or position | Notes |
 | --- | --- | --- |
 | Title | "Lobby" centred on the panel at y 87 | |
-| Game, Mission, start rule, rules | `PANELFNT` lines at (45, 102), (45, 115), (45, 128) and (45, 141), up to 549 wide; the start rule in `PANELFND` | The game's name, the mission's summary, the start rule in words and, since F2-L, "Rules: " and the King's settings in words (they were at 106, 120, 134 before) |
-| Slots | heading (45, 152); list (45, 168), 286 wide, five rows; frame (40, 164, 355, 97) | Columns from the text origin: own mark, or the lock mark of a plane kept for a player who dropped (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 100), ready tick (x 258, 12) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242). Pager: PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240) |
-| Players | heading (400, 152); list (404, 168), 186 wide, five rows, no pager; grey box (400, 165, 194, 95) | Columns (J6): crown (x 0, 12), house, or the outlined standby house of a game that stands by to host (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 60), state word (x 128, 40). The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
+| Game, Rules | `PANELFNT` lines at (45, 102) and (45, 115), up to 549 wide | The game's name and, since F2-L, "Rules: " and the King's settings in words. EF8 also drew the mission's summary at (45, 115) and the start rule in `PANELFND` at (45, 128), with Rules at (45, 141); the lobby pass (John, 2026-10-09) removed both lines, so the mission is read on Mission... and the start rule is in the ready hint |
+| Slots | heading (45, 140); list (45, 168), 286 wide, five rows, scrolling; frame (40, 164, 335, 97); scroll bar art (336, 168), 34 wide; PvP side boxes on the heading's row (lamps (100, 128) and (215, 128), 28 pixel art, labels at y 140) | Columns from the text origin: own mark, or the lock mark of a plane kept for a player who dropped (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 126) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242; the lobby pass slice L5 dropped the tick, the Players list carries it, and gave its room to the holder). EF8's pager (PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240)) was replaced by the scroll bar in the lobby pass; the wing cell reads "Blue 1 #2" or "Red 1 #2" in PvP |
+| Players | heading (380, 140); list (384, 168), 186 wide, five rows, scrolling; grey box (380, 165, 224, 95), frame (379, 164, 226, 97); scroll bar art (570, 168) | Columns (J6): crown (x 0, 12), house, or the outlined standby house of a game that stands by to host (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 118). The state words (Ready, Slot, Armed, Away and the rest) that followed the callsign until the lobby pass slice L5 are gone: the ticks, the cross, the dimmed or red row and the Slots list's "AI (Viper away)" say the same. The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
 | Hint line | `PANELFNT` at (45, 266), up to 549 wide | |
-| Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | |
+| Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | The scroll bar sits flush right inside the box's frame (34 wide); the text is 507 wide |
 | Chat line | grey box (45, 377), 549 by 18 | Hint "type a message, Enter sends to all"; 80 characters |
-| Buttons | y 419, 75 wide, x 45, 124, 203, 282, 361, 440, 519 (a 79 pitch; EF8 had six 85 wide at 45 to 510) | King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Others: Settings... (282), Loadout (361), Ready (440), Leave (519). While the mission flies Loadout reads Watch (Stop Watch while watching). Kick moved into the Players panel |
+| Ready hint | `PANELFND` at (45, 400), up to 549 wide | The lobby pass's line of what to do next ("Press Ready so the King can start the mission."); it ends above the blue button's raised top at 416 |
+| Buttons | y 419, 75 wide, x 45, 124, 203, 282, 361, 440, 519 (a 79 pitch; EF8 had six 85 wide at 45 to 510) | King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Others: Mission... (203), Settings... (282), Loadout (361), Ready (440), Leave (519). While the mission flies Loadout reads Watch (Stop Watch while watching). Kick moved into the Players panel |
 | Settings panel | panel (45, 100), 550 by 362, over the screen | Title; four page buttons at y 132 (x 67, 159, 251, 343, 88 wide); rows from y 166 on a 21 pitch (19 on the Game page, which has twelve rows since the Host row of K7b), the label at x 69 and the value box (x 295, 270 wide, 18 high; the Game page's name and password are grey text lines there); Realism is two columns of eight (labels x 67 and 329, 160 wide, value boxes 88 wide); the notice or the selected row's reason at y 400; Close (278, 422) |
 | Players panel | panel (110, 150), 420 by 180 (Kick's place) | Two lines of words; Give crown (150, 282, 105 wide), Kick... (270, 282) and Close (370, 282, blue, the keyboard) |
 | Kick and Leave panels | panel (110, 150), 420 by 180, over the screen | Kick: a grey line (132, 234), 376 by 18, for the reason (60 characters); Kick (210, 282) and Cancel (345, 282). Leave: Leave (210, 270) and Cancel (345, 270), Cancel has the blue face and the keyboard |
@@ -605,7 +661,7 @@ New pixel icons (authored, no retail art): the house (9 by 8), the player's own
 arrow (7 by 7) and the unable cross (7 by 7), beside the crown, lock and ready
 tick of EF2.
 
-**The creator in Accept mode** (the King's Mission...) is the creator page of
+**The creator in Accept mode** (the King's Mission... in the lobby) is the creator page of
 this file's Quick Mission notes with one change of label and one of lock:
 OK (387, 419) reads **Accept**, Start (field 33) and its airport (34) cannot be
 changed (a click, left or right, says "Multiplayer: everyone starts airborne,
@@ -614,7 +670,12 @@ the notice box sits at the lower left (30, 438 less its height), 340 wide and
 up to three lines, so it does not cover the Start line. **Load Ordnance in
 lobby mode** reads **Accept** on Fly (493, 414) and **Cancel** on Select Plane
 (363, 414), and its menu's Cheat row reads "Cheat  Off (not allowed)". Single
-player's two pages draw and behave as before.
+player's two pages draw and behave as before. **The creator read only** (everyone
+else's Mission..., the King's while the mission flies or on a locked server;
+lobby pass L4 and K1): the same page with "View only" at the right of the title
+bar, OK's place reading **Back** and no Cancel, the nationalities and the
+situation dimmed in a darker well (158, 165, 167 text on 58, 63, 65) reading "as
+the King's", and every click on a field answering in the notice box.
 
 Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
 `lobby-unable`, `lobby-flying`, `lobby-server`, `lobby-kick`, `lobby-leave` and
@@ -637,4 +698,14 @@ second player's game differs from the host's), and with
 `lobby-creator-gap-notice` (a choice of one refused, with the host's words in the
 notice), `lobby-creator-gap-theaters` and `lobby-ordnance-gaps` (weapon cards darkened, the
 first one refused)
-(`.local/mp-notes/stage-ef/ef8/`).
+(`.local/mp-notes/stage-ef/ef8/`). The lobby pass added `lobby-scroll`,
+`lobby-scroll-top` (more rows than show, scrolled and at the top),
+`lobby-king-hint`, `lobby-joiner-noslot-hint`, `lobby-joiner-hint`,
+`lobby-joiner-ready-hint`, `lobby-pvp-hint` and `lobby-coop-hint` (the ready
+hint), `lobby-pvp-colours`, `lobby-pvp-colours-red`, `lobby-pvp-bluefor`,
+`lobby-pvp-redfor`, `lobby-pvp-open`, `lobby-pvp-full`, `lobby-pvp-locked`,
+`lobby-balanced`, `lobby-pvp-balanced-wait` and `lobby-pvp-unable` (the sides
+and the side boxes in each state), and with `--quick-mission`
+`lobby-creator-view`, `lobby-creator-view-gaps`, `lobby-creator-view-click`,
+`lobby-creator-view-changed`, `lobby-creator-view-flying` and
+`lobby-creator-view-locked` (the read-only page).

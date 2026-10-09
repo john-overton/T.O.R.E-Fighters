@@ -238,6 +238,21 @@ class ParsingTests(unittest.TestCase):
         self.assertIn("wing enemy 2 SU27.PT 2 dummy\n", dummies)
         self.assertIn("wing friendly 1 F18.PT 4 experienced\n", dummies, "the friendly wings keep their skill")
 
+    def test_autobalance_slots_are_read_from_the_servers_lobby_lines(self):
+        text = (
+            "12:00:01 Alpha took the slot of plane 0\n"
+            "12:00:02 mission started\n"
+            "12:00:05 Bravo took the slot of plane 6\n"
+            "12:00:09 Charlie took the slot of plane 1\n"
+            "12:00:09 Charlie was refused slot: Autobalance picks the sides.\n"
+        )
+        self.assertEqual(net.slot_takes(text), {"Alpha": [0], "Bravo": [6], "Charlie": [1]})
+        self.assertEqual(net.balance_problems(text, {"Alpha": [0], "Bravo": [6], "Charlie": [1]}), [])
+        moved = text + "12:00:20 Bravo took the slot of plane 2\n"
+        problems = net.balance_problems(moved, {"Bravo": [6], "Echo": [0]})
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("Bravo held the slots [6, 2], not [6]", problems)
+
     def test_a_revival_is_read_from_the_bots_lines(self):
         good = (
             "Phoenix: seat 0, plane 0, at tick 3\n"

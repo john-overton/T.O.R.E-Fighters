@@ -616,6 +616,11 @@ pub(crate) struct NewAircraft {
     pub flight: flight::State,
     /// The creator's Guns only: every station but the gun starts empty.
     pub guns_only: bool,
+    /// Its wing's own skill as the mission launched it (slice R1), or
+    /// `None` to borrow a wingmate's.
+    pub experience: Option<tore_sim::ai::experience::ResolvedExperience>,
+    /// A training target (an AI respawn in a dummy wing, slice R1).
+    pub dummy: bool,
 }
 
 /// The live AI bridge for one mission.
@@ -712,9 +717,20 @@ struct PendingGun {
 /// the same run. The spec gives draw thresholds, never sequences, so any
 /// injective derivation satisfies it; this one is readable in a probe dump.
 pub fn actor_seed(side: launch::Side, wing: u8, member: u8) -> u64 {
-    const SALT: u64 = 0x5749_4E47_5F41_4900; // "WING_AI\0"
     let side = u64::from(side.is_enemy());
-    SALT ^ (side * 1_000_000 + u64::from(wing) * 1_000 + u64::from(member))
+    ACTOR_SEED_SALT ^ (side * 1_000_000 + u64::from(wing) * 1_000 + u64::from(member))
+}
+
+/// The salt of [`actor_seed`] and [`new_actor_seed`].
+const ACTOR_SEED_SALT: u64 = 0x5749_4E47_5F41_4900; // "WING_AI\0"
+
+/// `fitted` (slice R1): the decision seed of an aircraft the mission did not
+/// start with (a revival's or an AI respawn's new plane), from its plane id.
+/// Plane ids never repeat, and the values sit above every [`actor_seed`]
+/// value (at most 1,255,255 before the salt), so no two actors share a
+/// stream.
+pub fn new_actor_seed(id: u32) -> u64 {
+    ACTOR_SEED_SALT ^ (2_000_000 + u64::from(id))
 }
 
 fn side_of(side: launch::Side) -> Side {
@@ -1305,6 +1321,12 @@ impl AiWings {
     /// no human holds), fresh awareness and neutral. Its home is the nearest
     /// runway its side may use.
     pub fn insert_actor(&mut self, insert: ActorInsert) -> WorldResult<()> {
+        self.insert_actor_seeded(insert, None)
+    }
+
+    /// [`Self::insert_actor`] with the decision seed `seed` in place of the
+    /// roster's rule, when given.
+    fn insert_actor_seeded(&mut self, insert: ActorInsert, seed: Option<u64>) -> WorldResult<()> {
         if self.mission.actor(insert.id).is_some() {
             return Err(format!("aircraft {} is already flown by the AI", insert.id).into());
         }
@@ -1338,7 +1360,7 @@ impl AiWings {
                 role: MissionRole::AirToAir,
             },
             experience: insert.experience,
-            seed: actor_seed(insert.side, insert.wing, seed_member),
+            seed: seed.unwrap_or_else(|| actor_seed(insert.side, insert.wing, seed_member)),
             flight: insert.flight,
             sensors: insert.sensors,
             stations: insert.stations,
@@ -1426,9 +1448,14 @@ impl AiWings {
     /// Puts a new aircraft into the AI ([`NewAircraft`]): its stores, fuel
     /// and payload as the mission's build gives an aircraft with a lobby
     /// loadout, fresh sensors and missile warnings, the dispensers its
-    /// configuration fills, and a wingmate's skill (Average when the side
-    /// has no AI aircraft left: agent decision, F2-V). Then as
-    /// [`Self::insert_actor`].
+    /// configuration fills, and its wing's skill (a wingmate's when the
+    /// mission's is not given, Average when the side has no AI aircraft
+    /// left: agent decision, F2-V), the enemy skill cheat over it as over
+    /// every enemy. Then as [`Self::insert_actor`], seeded by its plane id
+    /// ([`new_actor_seed`], slice R1), and given the orders its wing flies
+    /// under: a wingmate's assignment, the leader's first (agent decision,
+    /// slice R1; a wing in a mission of opportunity is under free
+    /// engagement).
     pub(crate) fn insert_new(&mut self, new: NewAircraft) -> WorldResult<()> {
         let NewAircraft {
             id,
@@ -1440,40 +1467,91 @@ impl AiWings {
             fuel_lbs,
             mut flight,
             guns_only,
+            experience,
+            dummy,
         } = new;
         let stations = station_specs_loaded(&config, &quantities, guns_only);
         flight.fuel = fuel_lbs;
         flight.set_payload(payload_lbs(&config, &stations))?;
-        let experience = self.experience_for(id, side, wing).unwrap_or(
-            tore_sim::ai::experience::ResolvedExperience {
+        let own = experience
+            .or_else(|| self.experience_for(id, side, wing))
+            .unwrap_or(tore_sim::ai::experience::ResolvedExperience {
                 level: tore_sim::ai::Experience::Average,
                 origin: tore_sim::ai::experience::ExperienceOrigin::ExplicitPerObject,
+            });
+        let cheat = match self.enemy_skill {
+            Some(level) if side == launch::Side::Enemy && experience.is_some() && !dummy => {
+                Some(tore_sim::ai::experience::ResolvedExperience {
+                    level,
+                    origin: tore_sim::ai::experience::ExperienceOrigin::EnemyOverride,
+                })
+            }
+            _ => None,
+        };
+        // The wing's orders, read before the aircraft joins it.
+        let orders = {
+            let leader = self.mission.wing_leader(side_of(side), wing);
+            let wing_actors = || {
+                self.mission
+                    .actors()
+                    .iter()
+                    .filter(|a| a.identity().side == side_of(side) && a.identity().wing == wing)
+            };
+            wing_actors()
+                .find(|a| Some(a.id()) == leader && a.alive())
+                .or_else(|| wing_actors().find(|a| a.alive()))
+                .or_else(|| wing_actors().next())
+                .map(|a| a.assignment().clone())
+        };
+        self.insert_actor_seeded(
+            ActorInsert {
+                id,
+                side,
+                wing,
+                member,
+                aircraft: config.aircraft,
+                experience: cheat.unwrap_or(own),
+                flight,
+                sensors: Some(Sensors::new(config.sensors.clone())),
+                stations,
+                dispensers: vec![
+                    tore_sim::ai::threat::DispenserStore {
+                        class: SeekerClass::Infrared,
+                        count: u32::from(config.ecm.flare[0]),
+                    },
+                    tore_sim::ai::threat::DispenserStore {
+                        class: SeekerClass::Radar,
+                        count: u32::from(config.ecm.chaff[0]),
+                    },
+                ],
+                warnings: None,
+                equipment: EquipmentFaults::default(),
+                config: Some(config),
             },
-        );
-        self.insert_actor(ActorInsert {
-            id,
-            side,
-            wing,
-            member,
-            aircraft: config.aircraft,
-            experience,
-            flight,
-            sensors: Some(Sensors::new(config.sensors.clone())),
-            stations,
-            dispensers: vec![
-                tore_sim::ai::threat::DispenserStore {
-                    class: SeekerClass::Infrared,
-                    count: u32::from(config.ecm.flare[0]),
-                },
-                tore_sim::ai::threat::DispenserStore {
-                    class: SeekerClass::Radar,
-                    count: u32::from(config.ecm.chaff[0]),
-                },
-            ],
-            warnings: None,
-            equipment: EquipmentFaults::default(),
-            config: Some(config),
-        })
+            Some(new_actor_seed(id)),
+        )?;
+        if cheat.is_some() {
+            self.mission_skill.insert(id, own);
+        }
+        if let Some(actor) = self.mission.actor_mut(id) {
+            if let Some(orders) = orders
+                && &orders != actor.assignment()
+            {
+                actor.set_assignment(orders);
+            }
+            if dummy {
+                actor.set_dummy();
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes the wreck of AI aircraft `id` out of the AI for good (slice R1:
+    /// an AI wreck retired to make room). Returns whether the AI flew it.
+    pub(crate) fn retire_actor(&mut self, id: u32) -> bool {
+        let removed = self.remove_actor(id).is_some();
+        self.handed_over.remove(&id);
+        removed
     }
 
     /// Cuts what each station of AI aircraft `id` carries to what `keep`
@@ -1579,6 +1657,12 @@ impl AiWings {
 
     pub fn mission(&self) -> &AiMission {
         &self.mission
+    }
+
+    /// Hand the AI mission the lead hold's claims for the next step (the
+    /// lobby pass's slice R2; `world/lead_hold.rs`).
+    pub(crate) fn set_lead_claims(&mut self, claims: Vec<tore_sim::ai::mission::LeadClaim>) {
+        self.mission.set_lead_claims(claims);
     }
 
     /// Hand the AI what the flight data link holds for the next step, as
@@ -4522,6 +4606,55 @@ mod tests {
         assert!(!joined.identity().is_leader());
         assert_eq!(joined.wing_slot(), 2, "behind the leader and member 2");
         assert_eq!(wings.mission.actor(2).unwrap().wing_slot(), 1);
+    }
+
+    #[test]
+    fn an_aircraft_with_a_high_member_number_joins_in_a_free_slot_and_the_ai_steps() {
+        // Slice R1: an aircraft that joins a wing that has not re-formed
+        // with member 12 (a wing that revived and respawned for a while)
+        // takes the lowest formation slot no living wingman holds, never
+        // its member number, which would pass slot 9 and fail the step.
+        let (mut wings, mut targets) = led_wing(4, &[]);
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert_eq!(wings.mission.wing_leader(FRIENDLY_SIDE, 1), Some(1));
+        // Member 2 (aircraft 3, slot 2) is shot down; the lead stays.
+        targets.iter_mut().find(|t| t.id == 3).unwrap().hp = 0;
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert!(!wings.mission.actor(3).unwrap().alive());
+        wings.insert_actor(new_aircraft(&wings, 30, 12)).unwrap();
+        let joined = wings.mission.actor(30).unwrap();
+        assert!(!joined.identity().is_leader());
+        assert_eq!(joined.wing_slot(), 2, "the dead member's slot");
+        // Another with member 13 takes the next free slot, behind the rest.
+        wings.insert_actor(new_aircraft(&wings, 31, 13)).unwrap();
+        assert_eq!(wings.mission.actor(31).unwrap().wing_slot(), 4);
+        let slots: Vec<u8> = [2, 4, 30, 31]
+            .map(|id| wings.mission.actor(id).unwrap().wing_slot())
+            .to_vec();
+        assert_eq!(slots, [1, 3, 2, 4], "no two share a slot");
+        targets.push(target(30, [3000., 20000., 0.], 0.));
+        targets.push(target(31, [3600., 20000., 0.], 0.));
+        targets.sort_by_key(|t| t.id);
+        for _ in 0..120 {
+            fly_one_tick(&mut wings, &mut targets, vec![]);
+        }
+    }
+
+    #[test]
+    fn new_aircraft_seeds_never_meet_the_missions_or_each_other() {
+        // Slice R1: a revival's or respawn's aircraft is seeded by its plane
+        // id, apart from every seed the mission's own aircraft get.
+        let mut mission = std::collections::BTreeSet::new();
+        for side in [launch::Side::Friendly, launch::Side::Enemy] {
+            for wing in 0..=u8::MAX {
+                for member in 0..=u8::MAX {
+                    mission.insert(actor_seed(side, wing, member));
+                }
+            }
+        }
+        let new: std::collections::BTreeSet<u64> = (0..10_000).map(new_actor_seed).collect();
+        assert_eq!(new.len(), 10_000);
+        assert!(new.is_disjoint(&mission));
     }
 
     #[test]

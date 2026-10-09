@@ -147,9 +147,9 @@ Restart restores all six groups exactly as launched.
 Separation is in nautical miles (6,076.12 ft), as the manual states (p.19:
 "between 1 and 50 nautical miles"). John chose nautical miles for every entry
 on 2026-09-23. The retail list offers 1, 2, 5, 10, 20 and 50 miles; John
-requested 100, 150, 200 and 300 miles on 2026-09-23, and the host appends them in
-ascending order in the retail label style ("100 miles", "150 miles",
-"200 miles", "300 miles"). Every label means nautical
+requested 100, 150, 200 and 300 miles on 2026-09-23 and 75 miles on 2026-10-09,
+and the host appends them in ascending order in the retail label style ("75
+miles", "100 miles", "150 miles", "200 miles", "300 miles"). Every label means nautical
 miles. An out-of-range choice falls back to the 5 mile default instead of
 failing.
 

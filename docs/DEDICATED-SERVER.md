@@ -154,7 +154,7 @@ start, so a typo never passes silently.
 | `password` | none | A password players must give. It crosses the network as plain text |
 | `max-players` | `30` | 1 to 30 (John's default, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | `mission` | `mission.txt` | The [mission file](#the-mission-file), relative to the configuration file |
-| `open-planes` | `friendly` | Which planes humans may take: `friendly` (the mode's planes: the friendly ones in co-op, every plane with `mode pvp`), `all` or a list of plane numbers |
+| `open-planes` | `friendly` | Which planes humans may take: `friendly` (the mode's planes: the friendly ones in co-op, every plane with `mode pvp`), `all` or a list of plane numbers. A listed plane opens its whole lineage: a revival's or the AI's respawn of it is open too |
 | `snapshot-rate` | `60` | Snapshots a second to each player: 10, 12, 15, 20, 24, 30, 40 or 60 (John, 2026-10-06; 30 before). Aircraft far from a player update 4 times a second at most. Halving it roughly halves the server's upload ([performance](#performance)). It is the server's own: the lobby shows it and the King cannot turn it (a game a player hosts has the King's lobby setting of 60, 30 or 20 instead, slice R1) |
 | `start` | `first-player` | `first-player`: the lobby waits, the mission not flying, until the first player holding a slot is ready; `now`: it flies from the start ([the lobby](#the-lobby)) |
 | `time-limit` | `0` | Minutes after which the mission ends; 0 for none. The King's own time limit (below) replaces it until the server goes back to its file |
@@ -167,7 +167,7 @@ start, so a typo never passes silently.
 | `telemetry` | `on` | While broadcasting, send the master anonymous statistics at the end of each mission (John, 2026-10-05: on by default); `off` sends none |
 | `port-mapping` | `off` | `on` asks the router to forward the game port when the server starts, by UPnP, NAT-PMP or PCP, and removes it when the server stops ([ports](#ports-and-firewalls)). Off by default, since a server's port is normally forwarded by its owner |
 | `king` | `none` | `first-player`: the first player to join wears the crown, and when the King leaves the longest-connected player does; the King changes the mission and the settings below, locks slots, starts, ends, kicks and passes the crown ([the King](#the-kings-settings-and-a-king)). `none` (John, 2026-10-05: the default): nobody is King |
-| `king-mission` | `open` | `locked`: the King may not change the mission or the settings; start, kick, slot locks and the crown still work. Needs `king first-player` |
+| `king-mission` | `open` | `locked`: the King may not change the mission or the settings; start, kick, slot locks and the crown still work. The lobby tells every player, so the King's Mission... opens read only with "This server's mission is fixed." (protocol 20). Needs `king first-player` |
 
 The King's settings ([architecture](ARCHITECTURE.md#the-kings-settings)) take
 the same names in the file, so a server without a King can still run a PvP game
@@ -179,18 +179,19 @@ or a delayed observer. Each value is one of the setting's words or a number:
 | `join-in-progress` | `on` | `off` refuses every seating once the mission has flown its first tick |
 | `visibility` | `local` | `local` answers the local network's search, `hidden` does not; a server lists itself on the Internet Lobby only with `broadcast on`, so `public` is refused |
 | `friendly-fire` | `on` | `off`: no round damages an aircraft of its shooter's side |
-| `lock-sides` | `off`, `on` | `on` keeps each player on the side of the first plane it flew in a mission |
+| `lock-sides` | `off`, `on` | PvP only (refused in co-op). `off` lets players choose and change side; `on` (locked once flown) keeps each player on the side of the first plane it flew in a mission; `balanced` (Autobalance, John 2026-10-09) has the host seat each player on the side with fewer humans, refuses the players' own choice of side and keeps the sides fixed in flight ([the rule](ARCHITECTURE.md#autobalance-as-built-a1)). The lobby calls the setting Sides |
 | `loadouts` | `own` | `any` allows the loadout page's Cheat loading |
 | `respawn` | `none`, `revive` | `none`, `ai-slot` or `revive` |
 | `lives` | `unlimited` | 0 to 10 or `unlimited` |
 | `revive-delay` | `0` | Minutes: 0 to 5 (`none` is 0) |
-| `revive-distance` | `10` | Nautical miles: 1, 5, 10, 20 or 40 |
+| `revive-distance` | `10` | Nautical miles: 1, 5, 10, 20 or 40 (retail's), or 50, 75, 100 or 150 (John, 2026-10-09) |
 | `revive-weapons` | `missiles` | `missiles`, `no-missiles`, `guns` or `half-guns` |
 | `fight` | `sides` | PvP only: `sides` or `free-for-all` |
 | `tally` | `kills` | PvP only: `kills`, `damage` or `ratio` |
 | `kill-limit` | `none`, `5` | PvP only: `none`, 1, 2, 3, 5, 7 or 10 |
 | `kill-owner` | `side` | PvP only: `total`, `side` or `player` |
 | `observer-delay` | `0` | PvP only, seconds: 0 (`none`), 10, 30 or 60 |
+| `ai-respawn` | `on` | `off` or `on`: whether a lost AI aircraft comes back under the revival rules (`lives`, counted per original aircraft, and `revive-delay`), at its flight's original spawn point, as a wingman of its flight. No effect while `respawn` is `none` (John, 2026-10-09). The log has a line for each AI loss and respawn |
 | `idle-ai` | `5` | Minutes a player's game is away before the AI flies its aircraft: `never`, 1, 2, 5 or 10 (written in minutes, as `time-limit` is; John, 2026-10-06, slice F2-O4) |
 
 The player limit, the password and the time limit are the settings
@@ -256,7 +257,7 @@ twice.
 | `time-of-day HH:MM`, `wind HEADING FEET-PER-SECOND`, `cloud-deck FEET` | Optional weather overrides of the condition's own, as the game's `TORE_WEATHER_TIME`, `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set them: the wind is written as they write it, a heading of -360 to 360 degrees and a speed of 0 to 200 feet a second, and the cloud deck is 0 to 400,000 feet |
 | `start airborne FEET` | 5,000 (the default), 10,000, 20,000 or 40,000 ft, the creator's choices |
 | `start ground RUNWAY [FEET]` | A ground start from a runway object, by its number in the theater's layout (the object's id is 1,073,741,824 plus it; `--check` lists the theater's runways by number and airport name). The optional altitude is the creator's altitude setting, which a ground start keeps for its airborne aircraft to clear the ground (5,000 by default). A ground start needs the hybrid flight model for humans |
-| `separation-nm N` | 1, 2, 5 (the default), 10, 20, 50, 100, 150, 200 or 300, the creator's choices |
+| `separation-nm N` | 1, 2, 5 (the default), 10, 20, 50, 75, 100, 150, 200 or 300, the creator's choices |
 | `preset NAME` | The AI's standing orders: `free` (the default), `cap`, `intercept`, `escort`, `self-defense` or `hold` |
 | `guns-only yes/no` | The creator's air combat setting; `no` by default. With the standard load it leaves the guns loaded and unloads the missiles |
 | `wing SIDE N AIRCRAFT COUNT SKILL` | Up to three wings a side; `wing friendly 1` is required. The aircraft is its exact identity, one of `F18.PT` (the F/A-18D), `RAFALE.PT` (the Rafale C), `F14.PT`, `A4E.PT`, `F31.PT` (the X-31), `MIG29.PT`, `SU27.PT`, `MIG21.PT`, `SU25.PT`, `MIG23.PT`, `SU35.PT`, `F22.PT`, `F22N.PT` (the F-22N) or `faxx` (the F/A-XX); skills are `novice`, `average`, `experienced`, `ace` or `dummy`. Friendly wing 1 holds 1 to 5 aircraft, the others 0 to 5. A wing with no line has no aircraft. The other wings are flown by the AI, which cannot fly the helicopters, the V-22, the AV-8 or the Yak-141 yet, so a mission that puts one of them in a wing other than friendly wing 1 is refused ([AI wingmen](spec/variety-flight.md#ai-wingmen)) |
@@ -359,8 +360,9 @@ it changes. The design is the architecture's
 [lobby](ARCHITECTURE.md#the-lobby); a game a player hosts has a King, a
 dedicated server has none. *The dedicated server's rules, agent decisions:*
 
-- **The mission** is the mission file's, always: nobody can change it. A
-  player whose import cannot play it is told why and stays connected in the
+- **The mission** is the mission file's, always: nobody can change it, and
+  every player's **Mission...** button shows it read only (the lobby pass,
+  John 2026-10-09). A player whose import cannot play it is told why and stays connected in the
   lobby, marked unable, and cannot take a slot.
 - **Slots** are the planes `open-planes` opens (every friendly plane by
   default, every plane with `mode pvp`), one player a slot, held from the lobby across missions until the
@@ -413,7 +415,10 @@ player sees them in the lobby. With `king first-player` (John, 2026-10-05):
   crown.
 - **`king-mission locked`** keeps the file's mission and settings: the King's
   changes are refused "This server's mission and settings are its
-  operator's."; start, kick, slot locks and the crown still work.
+  operator's."; start, kick, slot locks and the crown still work. The lobby
+  tells every player (protocol 20, slice K1), so the King's Mission... opens
+  the read-only page, "This server's mission is fixed.", instead of an editor
+  whose Accept would be refused.
 - **Empty again.** Once the last player has been gone for the `empty-timeout`
   and the server is in its lobby, it goes back to its file's mission and
   settings and opens every slot, so a public server does not keep a
@@ -711,7 +716,13 @@ mission's end, every chat line a player sends (*built, EF6*: `chat: Viper to
 friendlies (2 heard): Form up`, with the sender, the receiver and how many
 others heard it; a line the host refuses is a refusal line), what each
 player's import holds and what not everyone can use (*built, L3*: below),
-and once a minute each player's figures: the same round trip,
+the lobby pass's lines about the AI and the lead (*built, R1 and R2*: "Red
+2-3 lost plane 7: the AI respawns it in 0:30", "Red 2-5 respawned in plane 14
+at its original spawn, x 81.2 nm, z 40.0 nm", "waits for room to respawn", "no
+lives left"; "Blue 1 lead belongs to Viper", "passes to plane 1 (AI), standing
+in for Viper", "goes back to Viper in plane 12", "has no owner now"; and
+Autobalance's seating, "Alpha took the slot of plane 6"), and once a minute
+each player's figures: the same round trip,
 loss, snapshot arrival spread, input margin, inputs repeated and bytes each
 way that a player's game writes to its own
 [diagnostics log](ARCHITECTURE.md#recordings-and-diagnostics).

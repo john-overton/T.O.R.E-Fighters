@@ -14,7 +14,7 @@
 //! `tore-sim` (combat's commands, the wing orders, the tower's commands) are
 //! coded variant by variant here for the same reason as the wing above.
 
-use super::{Pilot, Plane, Roster, Seat, SeatCommand, SeatInput, SeatView, Slot};
+use super::{Callsigns, Pilot, Plane, Roster, Seat, SeatCommand, SeatInput, SeatView, Slot};
 use crate::seats::{PlaneId, SeatId};
 use crate::world::AirportInput;
 use crate::world::replies::Reply;
@@ -83,16 +83,25 @@ tore_sim::checkpoint_struct!(Seat {
     wing_recipient,
 });
 
+// The players' callsigns (the lobby pass's follow-up F1), after the seats.
+tore_sim::checkpoint_struct!(Callsigns { seats, planes });
+
 impl Checkpoint for Roster {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
-        let Roster { planes, seats } = self;
+        let Roster {
+            planes,
+            seats,
+            callsigns,
+        } = self;
         planes.save(s, None)?;
-        seats.save(s, None)
+        seats.save(s, None)?;
+        callsigns.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
         let planes: Vec<Plane> = Checkpoint::load(l, None)?;
         let seats: Vec<Seat> = Checkpoint::load(l, None)?;
+        let callsigns: Callsigns = Checkpoint::load(l, None)?;
         // The roster binary-searches planes by id and finds seats by id, so
         // damaged bytes that break the order or a cross reference are refused
         // here instead of misleading a later tick.
@@ -116,7 +125,11 @@ impl Checkpoint for Roster {
         {
             return invalid("a seat flies a plane the roster does not hold");
         }
-        Ok(Roster { planes, seats })
+        Ok(Roster {
+            planes,
+            seats,
+            callsigns,
+        })
     }
 }
 
@@ -485,6 +498,9 @@ mod tests {
             ],
         );
         roster.set_wing_recipient(SeatId(0), Some(2));
+        // The players' callsigns (the lobby pass's follow-up F1).
+        roster.set_callsign(SeatId(0), "Viper".into());
+        roster.set_callsign(SeatId(7), "Hawk".into());
         // A seat that gave its plane back waits; another plane was lost.
         roster.take_plane(SeatId(7), PlaneId(1), None).unwrap();
         roster.release_plane(SeatId(7));
@@ -503,6 +519,7 @@ mod tests {
         assert!(roster.planes().iter().any(|p| p.pilot == Pilot::Lost));
         assert!(roster.seats().iter().any(|s| s.plane.is_none()));
         assert!(roster.seats().iter().any(|s| s.wing_recipient.is_some()));
+        assert_eq!(roster.plane_callsign(PlaneId(1)), Some("Hawk"));
         let copy = round_trip(&roster, &Models::default()).unwrap();
         assert_eq!(copy, roster);
         // The single-player and the open rosters too.

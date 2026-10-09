@@ -321,6 +321,9 @@ fn the_ai_slot_rule_takes_a_free_ai_aircraft_of_the_side_with_the_weapons_rule()
         &[
             respawn(Respawn::AiSlot),
             (number::REVIVE_WEAPONS, RevivalWeapons::Guns.value()),
+            // The AI does not refill the pool here (slice R1's AI respawn
+            // does; ai_respawn_tests.rs).
+            (number::AI_RESPAWN, 0),
         ],
     );
     // Friendly planes 0 to 2, enemy planes 3 and 4. The King has closed
@@ -400,3 +403,16 @@ fn a_late_joiner_is_told_of_every_spawned_plane() {
     assert_eq!(rig.clients[hawk].spawned, rig.clients[viper].spawned);
     assert_eq!(rig.host.revival.spawned.len(), 1);
 }
+
+// The lobby pass's slice R1: AI respawn, on this file's rig.
+#[path = "ai_respawn_tests.rs"]
+mod ai_respawn_tests;
+
+// The lobby pass's slice R2: the lead hold, on this file's rig.
+#[path = "lead_hold_tests.rs"]
+mod lead_hold_tests;
+
+// The lobby pass's follow-up F1: taking a lineage's aircraft and the
+// players' callsigns, on this file's rig.
+#[path = "lineage_take_tests.rs"]
+mod lineage_take_tests;

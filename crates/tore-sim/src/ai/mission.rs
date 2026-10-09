@@ -74,6 +74,11 @@ mod link_tests;
 #[path = "mission_leads_tests.rs"]
 mod leads_tests;
 
+// The lead hold's claims, stand-ins and re-forms (slice R2 of the lobby pass).
+#[cfg(test)]
+#[path = "mission_lead_hold_tests.rs"]
+mod lead_hold_tests;
+
 /// Fitted dispatch floor: smaller missions keep their observation state in
 /// place. The worker-count comparison probe covers preparation and joining.
 const MIN_PARALLEL_OBSERVATIONS: usize = 4;
@@ -221,6 +226,30 @@ pub struct LeadershipChange {
     pub previous: u32,
     /// The previous leader's pilot is alive, for example after ejecting.
     pub previous_pilot_alive: bool,
+    /// The new leader stands in for the wing's owner, a human whose claim
+    /// does not fly now (the lead hold, slice R2 of the lobby pass).
+    pub acting: bool,
+    /// The lead went back to the wing's owner, who led it before: a claimed
+    /// plane crowned that was not crowned for the first time.
+    pub reclaimed: bool,
+}
+
+/// The lead hold's claim on one wing (slice R2 of the lobby pass; John,
+/// 2026-10-09): the human owner of the wing's lead keeps it while dead,
+/// reviving or flying back. The host hands every owned wing's claim to
+/// [`AiMission::set_lead_claims`] before each step; single player hands
+/// none, which is today's succession rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeadClaim {
+    pub side: super::targeting::Side,
+    pub wing: u8,
+    /// The owner's current plane in the wing, lost or flying; `None` when
+    /// the owner has none there now. A claimed plane that flies and does not
+    /// lead is crowned; any other leader is a stand-in.
+    pub plane: Option<u32>,
+    /// The owner has not led the wing yet, so crowning its plane makes it
+    /// the new lead rather than giving the lead back.
+    pub fresh: bool,
 }
 
 /// The aircraft that currently leads one wing.
@@ -232,6 +261,8 @@ struct WingLeader {
     /// Lead has passed on at least once, so the followers' slots are ranks in
     /// member order rather than the numbers they started with.
     reformed: bool,
+    /// The leader stands in for the wing's owner under the lead hold.
+    acting: bool,
 }
 
 /// The mission's airfield decisions for one actor this tick (see
@@ -1437,6 +1468,12 @@ pub struct AiMission {
     /// Write-only journal of messages between aircraft. No decision reads
     /// it; the host drains it with [`Self::take_journal`].
     journal: thought::Journal,
+    /// The lead hold's claims, as the host last gave them
+    /// ([`Self::set_lead_claims`]); empty in single player.
+    lead_claims: Vec<LeadClaim>,
+    /// Wingmen that were fighting when their owner took the lead back: each
+    /// re-forms on the owner once its fight is over (John, 2026-10-09).
+    reform_after: Vec<u32>,
 }
 
 impl Default for AiMission {
@@ -1471,6 +1508,8 @@ impl AiMission {
             routes: Vec::new(),
             sort_clock: Vec::new(),
             journal: thought::Journal::default(),
+            lead_claims: Vec::new(),
+            reform_after: Vec::new(),
         }
     }
 
@@ -1538,6 +1577,52 @@ impl AiMission {
 
     pub fn set_human_assignment(&mut self, human: u32, assignment: engagement::Assignment) {
         self.human_assignments.insert(human, assignment);
+    }
+
+    /// Objectives follow lineages (the lobby pass's follow-up F1, agent
+    /// decision): `new`, a plane a respawn or a revival added, continues the
+    /// lineage of the planes `lineage`, oldest first. Every mission list that
+    /// names a plane of the lineage names `new` too: each actor's and each
+    /// human-flown plane's assignment ([`engagement::Assignment::join_lineage`],
+    /// changed in place, so no actor's engagement starts afresh) and each
+    /// survival list. `new` itself takes the newest plane of the lineage's
+    /// human assignment and survival list when it has none of its own, so
+    /// whoever flies it is asked what was asked of the lineage. Single player
+    /// never adds a plane, so nothing here runs there.
+    pub fn join_lineage(&mut self, new: u32, lineage: &[u32]) {
+        for actor in &mut self.actors {
+            actor.assignment.join_lineage(new, lineage);
+        }
+        for assignment in self.human_assignments.values_mut() {
+            assignment.join_lineage(new, lineage);
+        }
+        for ids in self.must_survive.values_mut() {
+            if ids.iter().any(|id| lineage.contains(id)) && !ids.contains(&new) {
+                ids.push(new);
+                ids.sort_unstable();
+            }
+        }
+        let elder = |plane: &&u32| **plane != new;
+        if !self.human_assignments.contains_key(&new)
+            && let Some(assignment) = lineage
+                .iter()
+                .rev()
+                .filter(elder)
+                .find_map(|plane| self.human_assignments.get(plane))
+                .cloned()
+        {
+            self.human_assignments.insert(new, assignment);
+        }
+        if !self.must_survive.contains_key(&new)
+            && let Some(ids) = lineage
+                .iter()
+                .rev()
+                .filter(elder)
+                .find_map(|plane| self.must_survive.get(plane))
+                .cloned()
+        {
+            self.must_survive.insert(new, ids);
+        }
     }
 
     /// Quick Mission startup permission is independent of its group objectives.
@@ -1686,40 +1771,34 @@ impl AiMission {
         actor.return_to_formation(self.tick);
         actor.formation_order_tick = None;
         // It joins its wing as it stands: leading if the wing's leader is its
-        // id (a human leader handing its aircraft to the AI), and in the slot
-        // its member number gives, or its rank behind the leader once the
-        // wing has re-formed.
-        let (side, wing, member) = (
-            actor.identity.side,
-            actor.identity.wing,
-            actor.identity.member,
-        );
-        if let Some(entry) = self
+        // id (a human leader handing its aircraft to the AI), else as a
+        // wingman in the lowest formation slot no living AI wingman of the
+        // wing holds (slice R1 of the lobby pass, agent decision): that is
+        // its rank behind the leader in a wing whose slots have no gaps, it
+        // never shares a slot, and it never passes the wing's living members,
+        // where its member number alone (which grows with every revival and
+        // respawn) could pass slot 9 and fail the step.
+        let (side, wing) = (actor.identity.side, actor.identity.wing);
+        let leader = self
             .leaders
             .iter()
             .find(|l| l.side == side && l.wing == wing)
-            .copied()
-        {
-            actor.set_leads(entry.leader == actor.id());
-            if entry.reformed && entry.leader != actor.id() {
-                let earlier = self
-                    .actors
-                    .iter()
-                    .filter(|a| a.identity.side == side && a.identity.wing == wing)
-                    .filter(|a| a.id() != entry.leader && a.alive())
-                    .map(|a| a.identity.member)
-                    .chain(
-                        self.humans
-                            .iter()
-                            .filter(|h| h.side == side && h.wing == wing)
-                            .filter(|h| h.id != entry.leader && h.id != actor.id())
-                            .filter(|h| self.humans_flying.contains(&h.id))
-                            .map(|h| h.member),
-                    )
-                    .filter(|m| *m < member)
-                    .count();
-                actor.wing_slot = earlier as u8 + 1;
-            }
+            .map(|l| l.leader);
+        if let Some(leader) = leader {
+            actor.set_leads(leader == actor.id());
+        }
+        if leader != Some(actor.id()) {
+            let held: Vec<u8> = self
+                .actors
+                .iter()
+                .filter(|a| a.identity.side == side && a.identity.wing == wing)
+                .filter(|a| Some(a.id()) != leader && a.alive())
+                .map(|a| a.wing_slot)
+                .collect();
+            let free = (1..=super::wing::MAX_WINGMAN_SLOT)
+                .find(|slot| !held.contains(slot))
+                .unwrap_or(super::wing::MAX_WINGMAN_SLOT);
+            actor.wing_slot = free;
         }
         let index = self.actors.partition_point(|a| a.id() < actor.id());
         self.actors.insert(index, actor);
@@ -1765,6 +1844,32 @@ impl AiMission {
             .iter()
             .find(|l| l.side == side && l.wing == wing)
             .map(|l| l.leader)
+    }
+
+    /// Hand the mission the lead hold's claims (slice R2 of the lobby pass),
+    /// replacing the last set: one per wing whose lead a human owns. The
+    /// host sets them before every step while the hold is on; with none the
+    /// succession rule is today's.
+    pub fn set_lead_claims(&mut self, claims: Vec<LeadClaim>) {
+        self.lead_claims = claims;
+    }
+
+    /// The lead hold's claims, as last set.
+    pub fn lead_claims(&self) -> &[LeadClaim] {
+        &self.lead_claims
+    }
+
+    /// Whether a wing's current leader stands in for its owner.
+    pub fn wing_acting(&self, side: super::targeting::Side, wing: u8) -> bool {
+        self.leaders
+            .iter()
+            .any(|l| l.side == side && l.wing == wing && l.acting)
+    }
+
+    /// The wingmen waiting to re-form on their owner once their fight is
+    /// over.
+    pub fn reform_after(&self) -> &[u32] {
+        &self.reform_after
     }
 
     /// The human-flown aircraft that leads a wing now, if a human does.
@@ -2392,6 +2497,12 @@ impl AiMission {
     /// to the lowest-numbered living AI member, and the flight re-forms on the
     /// new leader: its followers take formation slots 1, 2 and so on in
     /// member order. A wing with nobody left keeps its last leader.
+    ///
+    /// Under the lead hold (slice R2 of the lobby pass, John 2026-10-09) a
+    /// wing with a claim ([`Self::set_lead_claims`]) also crowns its claimed
+    /// plane whenever it flies and does not lead ([`Self::reclaim`]), and a
+    /// leader other than the claimed plane is a stand-in (`acting`). With no
+    /// claims this is today's rule exactly.
     fn refresh_leaders(&mut self, world: &[WorldObject], output: &mut MissionOutput) {
         self.humans_flying = self
             .humans
@@ -2399,6 +2510,7 @@ impl AiMission {
             .filter(|h| self.member_flying(h.id, world))
             .map(|h| h.id)
             .collect();
+        self.reform_finished();
         let mut wings: Vec<(super::targeting::Side, u8)> = Vec::new();
         for (side, wing) in self
             .actors
@@ -2437,12 +2549,47 @@ impl AiMission {
                     wing,
                     leader: first,
                     reformed: false,
+                    acting: false,
                 });
                 self.crown(side, wing, first, &members, world, false);
                 current = Some(first);
             }
             let Some(previous) = current else { continue };
+            let claim = self
+                .lead_claims
+                .iter()
+                .find(|c| c.side == side && c.wing == wing)
+                .copied();
+            // The lead hold: the owner's plane flies again and does not
+            // lead, so it takes the lead back.
+            if let Some(claim) = claim
+                && let Some(owner) = claim.plane
+                && owner != previous
+                && members.iter().any(|m| m.1 == owner)
+                && self.member_flying(owner, world)
+            {
+                self.reclaim(
+                    side,
+                    wing,
+                    owner,
+                    previous,
+                    claim.fresh,
+                    &members,
+                    world,
+                    output,
+                );
+                continue;
+            }
             if self.member_flying(previous, world) {
+                // A leader other than the owner's plane stands in for it.
+                let acting = claim.is_some_and(|c| c.plane != Some(previous));
+                if let Some(entry) = self
+                    .leaders
+                    .iter_mut()
+                    .find(|l| l.side == side && l.wing == wing)
+                {
+                    entry.acting = acting;
+                }
                 continue;
             }
             let flying = |&&(_, id, _): &&(u8, u32, bool)| self.member_flying(id, world);
@@ -2453,14 +2600,10 @@ impl AiMission {
                 .or_else(|| members.iter().filter(flying).find(|m| !m.2))
                 .map(|m| m.1);
             let Some(leader) = successor else { continue };
-            let previous_pilot_alive = match self.actor(previous) {
-                Some(actor) => actor.flight.escape.is_some() && !actor.flight.systems.pilot.dead,
-                None => self
-                    .humans
-                    .iter()
-                    .find(|h| h.id == previous)
-                    .is_some_and(|h| h.pilot_alive),
-            };
+            let previous_pilot_alive = self.pilot_alive(previous);
+            // A successor chosen while the owner's plane does not fly stands
+            // in for the owner (the lead hold).
+            let acting = claim.is_some_and(|c| c.plane != Some(leader));
             if let Some(entry) = self
                 .leaders
                 .iter_mut()
@@ -2468,6 +2611,7 @@ impl AiMission {
             {
                 entry.leader = leader;
                 entry.reformed = true;
+                entry.acting = acting;
             }
             self.crown(side, wing, leader, &members, world, true);
             // A human's lead passed to an AI aircraft: the wing flies a
@@ -2482,7 +2626,123 @@ impl AiMission {
                 leader,
                 previous,
                 previous_pilot_alive,
+                acting,
+                reclaimed: false,
             });
+        }
+    }
+
+    /// Whether the pilot of the leader `previous` is alive as it stops
+    /// leading: an AI pilot escaping alive, or a human's ejected unhurt.
+    fn pilot_alive(&self, previous: u32) -> bool {
+        match self.actor(previous) {
+            Some(actor) => actor.flight.escape.is_some() && !actor.flight.systems.pilot.dead,
+            None => self
+                .humans
+                .iter()
+                .find(|h| h.id == previous)
+                .is_some_and(|h| h.pilot_alive),
+        }
+    }
+
+    /// The lead hold gives a wing's lead to its owner's flying plane `owner`
+    /// (slice R2 of the lobby pass; John, 2026-10-09): the wing's mission of
+    /// opportunity ends, the flight re-forms on the owner in member order,
+    /// and each AI wingman flies back into formation, except one fighting,
+    /// which re-forms once its fight is over ([`Self::reform_finished`]).
+    /// A wingman landing, on the ground or bugged out is left to it. The
+    /// change says whether the owner led the wing before (`!fresh`).
+    #[allow(clippy::too_many_arguments)]
+    fn reclaim(
+        &mut self,
+        side: super::targeting::Side,
+        wing: u8,
+        owner: u32,
+        previous: u32,
+        fresh: bool,
+        members: &[(u8, u32, bool)],
+        world: &[WorldObject],
+        output: &mut MissionOutput,
+    ) {
+        let previous_pilot_alive = self.pilot_alive(previous);
+        if let Some(entry) = self
+            .leaders
+            .iter_mut()
+            .find(|l| l.side == side && l.wing == wing)
+        {
+            entry.leader = owner;
+            entry.reformed = true;
+            entry.acting = false;
+        }
+        self.crown(side, wing, owner, members, world, true);
+        self.opportunities
+            .retain(|o| o.side != side || o.wing != wing);
+        let tick = self.tick;
+        let mut fighting = Vec::new();
+        for actor in self.actors.iter_mut().filter(|a| {
+            a.identity.side == side && a.identity.wing == wing && a.id() != owner && a.alive()
+        }) {
+            if actor.bugged_out || actor.landing_order.is_some() || actor.airfield.is_some() {
+                continue;
+            }
+            if actor.controller.target().is_some() {
+                fighting.push(actor.id());
+            } else {
+                actor.return_to_formation(tick);
+            }
+        }
+        for id in fighting {
+            if !self.reform_after.contains(&id) {
+                self.reform_after.push(id);
+            }
+        }
+        output.leadership.push(LeadershipChange {
+            tick,
+            side,
+            wing,
+            leader: owner,
+            previous,
+            previous_pilot_alive,
+            acting: false,
+            reclaimed: !fresh,
+        });
+    }
+
+    /// Each wingman that was fighting when its owner took the lead back
+    /// re-forms once its fight is over, while the owner still leads; one
+    /// lost, bugged out, or whose owner no longer leads is let go.
+    fn reform_finished(&mut self) {
+        if self.reform_after.is_empty() {
+            return;
+        }
+        let tick = self.tick;
+        for id in std::mem::take(&mut self.reform_after) {
+            let Some(index) = self.actors.iter().position(|a| a.id() == id) else {
+                continue;
+            };
+            let (side, wing) = (
+                self.actors[index].identity.side,
+                self.actors[index].identity.wing,
+            );
+            let owner_leads =
+                self.leaders
+                    .iter()
+                    .find(|l| l.side == side && l.wing == wing)
+                    .is_some_and(|l| {
+                        !l.acting
+                            && self.lead_claims.iter().any(|c| {
+                                c.side == side && c.wing == wing && c.plane == Some(l.leader)
+                            })
+                    });
+            let actor = &mut self.actors[index];
+            if !owner_leads || !actor.alive() || actor.bugged_out {
+                continue;
+            }
+            if actor.controller.target().is_some() {
+                self.reform_after.push(id);
+            } else {
+                actor.return_to_formation(tick);
+            }
         }
     }
 
@@ -2509,7 +2769,11 @@ impl AiMission {
         {
             actor.set_leads(actor.id() == leader);
             if reform && let Some(index) = followers.iter().position(|id| *id == actor.id()) {
-                actor.wing_slot = index as u8 + 1;
+                // Never past the last formation slot (slice R2: a wing that
+                // respawns can hold more members than the slots).
+                actor.wing_slot = (index.min(255) as u8)
+                    .saturating_add(1)
+                    .min(super::wing::MAX_WINGMAN_SLOT);
             }
             // A member that was following the lost leader in to land stops
             // (the bug bash's rule of 2026-09-29), as the wing abort does: the

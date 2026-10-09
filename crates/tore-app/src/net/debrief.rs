@@ -523,6 +523,7 @@ mod tests {
             players: Vec::new(),
             slots: Vec::new(),
             settings: Vec::new(),
+            mission_locked: false,
         }
     }
 

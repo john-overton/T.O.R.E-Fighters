@@ -52,9 +52,13 @@ fn the_king_in_a_lobby_has_every_button_and_the_joiner_only_his_own() {
     );
 
     let joiner = facts::buttons(&Facts::of(Some(&sample(2)), None), true);
-    for hidden in [joiner.mission, joiner.players, joiner.fly] {
+    for hidden in [joiner.players, joiner.fly] {
         assert_eq!(hidden, Show::Hidden, "the King's buttons are not offered");
     }
+    assert!(
+        joiner.mission.is_enabled(),
+        "Mission... is everyone's: the joiner reads the mission"
+    );
     assert!(
         joiner.settings.is_enabled()
             && joiner.loadout.is_enabled()
@@ -121,8 +125,8 @@ fn while_the_mission_flies_fly_ends_it_and_ready_joins_it() {
     assert!(b.fly.is_enabled());
     assert_eq!(
         b.mission,
-        Show::Disabled,
-        "the mission changes only in the lobby"
+        Show::Enabled,
+        "the mission page opens while it flies, to read (it changes only in the lobby)"
     );
     assert_eq!(
         (b.loadout, b.loadout_as),
@@ -380,15 +384,22 @@ fn a_dedicated_servers_lobby_has_no_kings_controls_and_states_its_rule() {
     let b = facts::buttons(&facts, true);
     assert_eq!(
         [b.mission, b.players, b.fly],
-        [Show::Hidden, Show::Hidden, Show::Hidden]
+        [Show::Enabled, Show::Hidden, Show::Hidden],
+        "a server's players read its mission"
     );
     assert!(
         b.settings.is_enabled(),
         "a server's players see its settings too"
     );
-    assert!(facts::rule_text(&state).contains("first player holding a slot"));
+    assert!(
+        facts::ready_hint(&Facts::of(Some(&state), None))
+            .is_some_and(|hint| hint.contains("first player holding a slot"))
+    );
     state.start = StartRule::Flying;
-    assert!(facts::rule_text(&state).contains("always flying"));
+    assert!(
+        facts::ready_hint(&Facts::of(Some(&state), None))
+            .is_some_and(|hint| hint.contains("always flying"))
+    );
     // Leave never asks on a server.
     let mut screen = screen_of(&state, false);
     assert_eq!(click(&mut screen, button_centre(6)), Some(Request::Leave));
@@ -411,7 +422,8 @@ fn the_players_list_marks_the_crown_the_house_ready_and_unable() {
     assert_eq!(rows[0].cells[1], Cell::Icon(Icon::House));
     assert_eq!(rows[1].cells[2], Cell::Icon(Icon::Ready));
     assert_eq!(rows[2].cells[2], Cell::Icon(Icon::Unable));
-    assert_eq!(rows[2].cells[6], Cell::Text("Unable".into()));
+    // No state word follows the name: the ticks and the cross say it.
+    assert_eq!(rows[2].cells.len(), 6);
     // The platform sits beside the name: the sample players are on Linux
     // (id 1), Windows (2) and macOS (3), and an unnamed platform has no mark.
     assert_eq!(rows[0].cells[3], Cell::Icon(Icon::Linux));
@@ -436,7 +448,8 @@ fn the_slots_list_shows_who_holds_what_with_the_players_own_marked() {
     assert_eq!(rows[0].cells[3], Cell::Text("Maverick".into()));
     assert!(rows[0].dim, "another player's slot is dimmed");
     assert_eq!(rows[1].cells[0], Cell::Icon(Icon::You));
-    assert_eq!(rows[1].cells[4], Cell::Icon(Icon::Ready));
+    // The Players list carries the ready ticks, so the row ends at the holder.
+    assert_eq!(rows[1].cells.len(), 4);
     assert_eq!(rows[2].cells[3], Cell::Text("AI".into()));
     assert_eq!(rows[2].cells[1], Cell::Text("Wing 1 #3".into()));
     assert_eq!(rows[4].cells[2], Cell::Text("F/A-18D Hornet".into()));
@@ -605,7 +618,10 @@ fn a_change_of_state_is_said_in_messages() {
 fn the_screen_tells_a_player_whose_own_game_cannot_play_the_mission() {
     let state = sample(2);
     let mut screen = screen_of(&state, false);
-    let words = "Your game has no Su-27, which this mission flies. Re-import Fighters Anthology (Pref, Re-import) to add it.";
+    // Short enough for one line of the Messages box, whose text stops short
+    // of its scroll bar (a longer line is wrapped, and then no one line is the
+    // words).
+    let words = "Your game has no Su-27, which this mission flies. Re-import to add it.";
     screen.update(Some(&state), Some(words));
     // The player's own words are said and shown as they are, once.
     assert_eq!(

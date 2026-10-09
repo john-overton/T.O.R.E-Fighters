@@ -30,6 +30,9 @@ fn ai_catalog(files: &[String], names: &[String]) -> (Vec<String>, Vec<String>) 
         .unzip()
 }
 type Rect = (i32, i32, i32, i32);
+/// What a mission holds that the creator's lists cannot, by field: how the
+/// read-only creator draws it, and the words that say what it is.
+type Unshown = BTreeMap<usize, (String, String)>;
 const POPUP: Rect = (185, 100, 270, 370);
 const ROWS: usize = 15;
 const ROW_BASE: usize = 100;
@@ -48,6 +51,46 @@ const GROUND_SECTION_RECT: Rect = (334, 294, 278, 49);
 const GROUND_NOTICE_RECT: Rect = (166, 202, 308, 88);
 /// The tint of a list row the lobby's creator dims: what not everyone has.
 const GAP_TEXT: [u8; 3] = [104, 110, 112];
+/// The same dimming on a field's grey, where [`GAP_TEXT`] would not show.
+const GAP_FIELD_TEXT: [u8; 3] = [158, 165, 167];
+/// The fields the lobby's mission does not carry (the nationalities and the
+/// situation): the read-only creator says they are the King's.
+const NOT_CARRIED: [usize; 3] = [3, 16, 20];
+/// What those fields read in the read-only creator.
+const AS_THE_KINGS: &str = "as the King's";
+/// Said when a field of the read-only creator is clicked.
+pub const VIEW_REFUSAL: &str = "Only the King changes the mission.";
+/// Said when the King opens the creator while the mission flies.
+pub const VIEW_FLYING: &str = "The mission can change only in the lobby.";
+/// Said when the King opens the creator on a server whose mission is locked
+/// (`king-mission locked`).
+pub const VIEW_FIXED: &str = "This server's mission is fixed.";
+/// Said when the read-only creator opens.
+pub const VIEW_NOTICE: &str = "View only: this is the lobby's mission. Back returns to the lobby.";
+/// Said when the read-only creator redraws from a new mission.
+pub const VIEW_CHANGED: &str = "The King changed the mission.";
+
+/// Why the lobby's creator is read-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewKind {
+    /// The player is not the King (or the lobby is a server's, which has none).
+    Reader,
+    /// The King, while the mission flies.
+    Flying,
+    /// The King, on a dedicated server whose file locks the mission.
+    Fixed,
+}
+
+impl ViewKind {
+    /// What a click on a field says.
+    pub fn refusal(self) -> &'static str {
+        match self {
+            Self::Reader => VIEW_REFUSAL,
+            Self::Flying => VIEW_FLYING,
+            Self::Fixed => VIEW_FIXED,
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Draft {
     pub values: [usize; 35],
@@ -68,6 +111,23 @@ impl Default for Draft {
             values[id] = value;
         }
         Self { values }
+    }
+}
+impl Draft {
+    /// The draft of a mission spec, read against `lists` (the creator's own
+    /// lists of theaters and aircraft, which the draft indexes). It fails
+    /// when the spec holds something the lists cannot show: an aircraft this
+    /// game has no entry for, a count past the list's end, a theater or a
+    /// distance the creator does not offer. The fields the spec does not
+    /// carry (the nationalities, the situation, the load) keep the creator's
+    /// own values for the theater, and a ground start reads as airborne, as
+    /// the lobby's creator makes it.
+    pub fn from_spec(spec: &MissionSpec, lists: &QuickMission) -> Result<Draft, String> {
+        let (draft, unshown) = lists.read_spec(spec)?;
+        match unshown.into_values().next() {
+            Some((_, words)) => Err(format!("This creator cannot show {words}.")),
+            None => Ok(draft),
+        }
     }
 }
 pub struct QuickMission {
@@ -124,6 +184,13 @@ pub struct QuickMission {
     /// the host's words for why it cannot be chosen: aircraft by their
     /// selection key, theaters by their code. Empty outside a lobby.
     gaps: BTreeMap<(ItemKind, String), String>,
+    /// The creator is the lobby's mission read-only: every field is drawn as
+    /// the King set it, none can be changed, and OK reads Back.
+    view: Option<ViewKind>,
+    /// What the read-only creator shows where its lists have no entry for
+    /// the mission's value: an aircraft this game does not have (by field),
+    /// a wing count past the list's end. Empty outside the read-only page.
+    shown: BTreeMap<usize, String>,
 }
 /// What the creator keeps for the lobby's Cancel to put back: the draft and
 /// everything beside it that Accept would send.
@@ -163,7 +230,7 @@ impl QuickMission {
             options.fields[field].truncate(4);
             options.fields[field].push("Dummy (400 KTS)".into());
         }
-        // The retail list ends at 50; 100, 150, 200 and 300 are host entries
+        // The retail list ends at 50; 75, 100, 150, 200 and 300 are host entries
         // in the retail label style (John, 2026-09-23). Every entry is read as
         // nautical miles, as the manual states.
         options.fields[17].truncate(RETAIL_SEPARATIONS);
@@ -256,6 +323,8 @@ impl QuickMission {
             shift: false,
             lobby: false,
             gaps: BTreeMap::new(),
+            view: None,
+            shown: BTreeMap::new(),
         }
     }
     /// The ground-start airports of one theater layout (names and object ids),
@@ -358,8 +427,7 @@ impl QuickMission {
     }
     fn nationalities(&mut self) {
         self.draft.values[3] = 0;
-        self.draft.values[20] =
-            [10, 33, 14, 57, 3, 41, 23, 10, 20, 37, 34, 24, 9, 2, 10, 2][self.base_theater_index()];
+        self.draft.values[20] = enemy_nationality(self.base_theater_index());
     }
     /// Every imported string the creator can show, with where it comes from,
     /// for the `--validate-text` scan.
@@ -421,9 +489,14 @@ impl QuickMission {
         self.draft.values[19] == 0
     }
     fn base_theater_index(&self) -> usize {
+        self.base_theater_index_of(self.draft.values[13])
+    }
+    /// The base theater's place in the source list for the theater at
+    /// `index` in the creator's list.
+    fn base_theater_index_of(&self, index: usize) -> usize {
         let base = self
             .theater_codes
-            .get(self.draft.values[13])
+            .get(index)
             .and_then(|code| tore_formats::theater::base_theater(code));
         source_theaters()
             .iter()
@@ -452,6 +525,14 @@ impl QuickMission {
         }
     }
     fn value(&self, id: usize) -> String {
+        if self.view.is_some() {
+            if NOT_CARRIED.contains(&id) {
+                return AS_THE_KINGS.into();
+            }
+            if let Some(text) = self.shown.get(&id) {
+                return text.clone();
+            }
+        }
         if let Some(group) = id
             .checked_sub(OBJECTIVE_BASE)
             .filter(|group| *group < OBJECTIVE_COUNT)
@@ -804,6 +885,147 @@ impl QuickMission {
         self.aircraft_selection = self.draft.values[6];
         self.selection = self.theater_index();
     }
+    /// A spec's draft, and the values its lists cannot hold, by field, in
+    /// words (see [`Draft::from_spec`]). The creator's draft is untouched.
+    fn read_spec(&self, spec: &MissionSpec) -> Result<(Draft, Unshown), String> {
+        let mut draft = Draft::default();
+        let mut unshown = BTreeMap::new();
+        let v = &mut draft.values;
+        let theater = self
+            .theater_codes
+            .iter()
+            .position(|code| *code == spec.theater)
+            .ok_or_else(|| format!("This creator has no theater {}.", spec.theater))?;
+        v[13] = theater;
+        v[3] = 0;
+        v[20] = enemy_nationality(self.base_theater_index_of(theater));
+        v[15] = (0..6)
+            .find(|index| condition(*index).and_then(Condition::from_index) == Some(spec.condition))
+            .ok_or("This creator cannot show the mission's weather.")?;
+        v[14] = ALTITUDES_FT
+            .iter()
+            .position(|feet| *feet == spec.start.altitude_ft())
+            .ok_or("This creator has no such altitude.")?;
+        v[17] = SEPARATION_NM
+            .iter()
+            .position(|nm| *nm == f64::from(spec.separation_nm))
+            .ok_or_else(|| format!("This creator has no {} mile distance.", spec.separation_nm))?;
+        v[19] = usize::from(!spec.guns_only);
+        for (index, field) in [4, 7, 10, 21, 24, 27].into_iter().enumerate() {
+            let wing = spec.wings[index];
+            if wing.count < self.options.fields[field].len() {
+                v[field] = wing.count;
+            } else {
+                v[field] = usize::from(index == 0);
+                unshown.insert(
+                    field,
+                    (
+                        wing.count.to_string(),
+                        format!("a wing of {} aircraft", wing.count),
+                    ),
+                );
+            }
+            v[field + 1] = usize::try_from(wing.skill.level()).unwrap_or(0);
+            let aircraft_field = field + 2;
+            let files = if aircraft_field == 6 {
+                &self.aircraft_files
+            } else {
+                &self.wing_files
+            };
+            match files
+                .iter()
+                .position(|key| key == wing.aircraft.selection_key())
+            {
+                Some(at) => v[aircraft_field] = at,
+                None => {
+                    v[aircraft_field] = 0;
+                    unshown.insert(
+                        aircraft_field,
+                        (
+                            wing.aircraft.label().to_owned(),
+                            format!("the {}", wing.aircraft.label()),
+                        ),
+                    );
+                }
+            }
+        }
+        Ok((draft, unshown))
+    }
+    /// Puts a mission spec in the creator: the draft, the groups' orders and
+    /// the mission-wide setting. With `exact`, a spec the lists cannot show
+    /// is refused (an editable creator would send the wrong mission back);
+    /// without it those values are kept to be drawn as they are (the
+    /// read-only creator). Nothing changes when it fails.
+    pub fn load_spec(&mut self, spec: &MissionSpec, exact: bool) -> Result<(), String> {
+        let (draft, shown) = if exact {
+            (Draft::from_spec(spec, self)?, Unshown::new())
+        } else {
+            self.read_spec(spec)?
+        };
+        self.draft = draft;
+        self.shown = shown
+            .into_iter()
+            .map(|(field, (text, _))| (field, text))
+            .collect();
+        self.group_objectives = spec.objectives;
+        self.group_must_survive = spec.must_survive;
+        self.ai_mission = spec.preset;
+        self.aircraft_selection = self.draft.values[6];
+        self.selection = self.theater_index();
+        Ok(())
+    }
+    /// Opens the creator on the lobby's mission `spec`: the King's, which
+    /// edits it (`view` is `None`), or read-only (`view` says why). The
+    /// King's draft is the lobby's mission, not the King's last one.
+    pub fn open_lobby_mission(
+        &mut self,
+        spec: &MissionSpec,
+        view: Option<ViewKind>,
+    ) -> Result<(), String> {
+        self.load_spec(spec, view.is_none())?;
+        self.enter_lobby();
+        if let Some(kind) = view {
+            self.view = Some(kind);
+            self.focus = OK;
+            self.notice = Some(match kind {
+                ViewKind::Reader => VIEW_NOTICE.into(),
+                ViewKind::Flying => format!("{VIEW_NOTICE} {VIEW_FLYING}"),
+                ViewKind::Fixed => format!("{VIEW_NOTICE} {VIEW_FIXED}"),
+            });
+        }
+        Ok(())
+    }
+    /// `spec` (the creator's mission, [`QuickMission::lobby_spec`]) laid over
+    /// `lobby`, the mission the lobby has now: what the creator edits comes
+    /// from `spec`, the rest (the cheats, the weather overrides, the flight
+    /// models) stays as the lobby has it, so Accept does not undo it.
+    pub fn lay_over(lobby: &MissionSpec, spec: MissionSpec) -> MissionSpec {
+        let mut over = lobby.clone();
+        over.theater = spec.theater;
+        over.condition = spec.condition;
+        over.start = spec.start;
+        over.separation_nm = spec.separation_nm;
+        over.preset = spec.preset;
+        over.guns_only = spec.guns_only;
+        over.wings = spec.wings;
+        over.objectives = spec.objectives;
+        over.must_survive = spec.must_survive;
+        // A lobby's mission carries no loadouts: each player arms their own.
+        over.loadout = None;
+        over.plane_loadouts.clear();
+        over
+    }
+    /// The read-only creator redraws from the King's new mission and says so.
+    pub fn reload_view(&mut self, spec: &MissionSpec) -> Result<(), String> {
+        self.load_spec(spec, false)?;
+        self.cancel();
+        self.notice = Some(VIEW_CHANGED.into());
+        Ok(())
+    }
+    /// The creator is the lobby's mission read-only.
+    pub fn is_view(&self) -> bool {
+        self.view.is_some()
+    }
     /// Opens the creator for a multiplayer lobby (EF8): Start becomes
     /// Airborne and stays there (John, 2026-09-28: everyone starts airborne),
     /// and the notice says so.
@@ -819,6 +1041,8 @@ impl QuickMission {
     /// Closes the lobby's creator.
     pub fn leave_lobby(&mut self) {
         self.lobby = false;
+        self.view = None;
+        self.shown.clear();
         self.cancel();
         self.notice = None;
         self.gaps.clear();
@@ -977,6 +1201,92 @@ impl QuickMission {
         self.right_pressed = None;
         self.help = false;
     }
+    /// A mission to read in the previews: an aircraft from each end of the
+    /// lists, three wings to a side, orders and a survival flag.
+    fn preview_spec(&self) -> crate::AppResult<MissionSpec> {
+        let pick = |files: &[String], at: usize| {
+            files
+                .get(at % files.len().max(1))
+                .and_then(|key| AircraftId::parse(key).ok())
+                .ok_or("The preview needs imported aircraft.")
+        };
+        let player = pick(&self.aircraft_files, 1)?;
+        let theater = self
+            .theater_codes
+            .get(2)
+            .ok_or("The preview needs a theater.")?;
+        let mut spec = MissionSpec::new(theater, player);
+        spec.condition = Condition::Dawn;
+        spec.start = Start::Airborne {
+            altitude_ft: 20_000,
+        };
+        spec.separation_nm = 50;
+        spec.preset = crate::ai_wings::Preset::Cap;
+        let wings = [
+            (player, 3, Skill::Average),
+            (pick(&self.wing_files, 3)?, 2, Skill::Experienced),
+            (pick(&self.wing_files, 0)?, 0, Skill::Novice),
+            (pick(&self.wing_files, 2)?, 4, Skill::Ace),
+            (pick(&self.wing_files, 4)?, 2, Skill::Novice),
+            (pick(&self.wing_files, 5)?, 1, Skill::Dummy),
+        ];
+        for (slot, (aircraft, count, skill)) in spec.wings.iter_mut().zip(wings) {
+            *slot = WingSpec {
+                aircraft,
+                count,
+                skill,
+            };
+        }
+        spec.objectives[0] = GroupObjective::Intercept(WingId::new(Side::Enemy, 0)?);
+        spec.objectives[1] = GroupObjective::Escort(WingId::new(Side::Friendly, 0)?);
+        spec.objectives[3] = GroupObjective::Free;
+        spec.must_survive[0] = true;
+        spec.must_survive[3] = true;
+        Ok(spec)
+    }
+    /// The read-only creator as a player who is not the King sees it.
+    fn preview_view(&mut self, name: &str) -> crate::AppResult<()> {
+        let mut spec = self.preview_spec()?;
+        let gaps = name.ends_with("-gaps");
+        if gaps {
+            // This game lacks the last aircraft: the enemy's third wing
+            // flies it, and its field shows it dimmed.
+            spec.wings[5].aircraft = self
+                .wing_files
+                .last()
+                .and_then(|key| AircraftId::parse(key).ok())
+                .ok_or("The preview needs imported aircraft.")?;
+            let (file, label) = (
+                self.wing_files.pop().unwrap_or_default(),
+                self.wing_names.pop().unwrap_or_default(),
+            );
+            self.aircraft_files.retain(|f| *f != file);
+            self.aircraft_names.retain(|n| *n != label);
+        }
+        let kind = if name.ends_with("-flying") {
+            ViewKind::Flying
+        } else if name.ends_with("-locked") {
+            ViewKind::Fixed
+        } else {
+            ViewKind::Reader
+        };
+        self.open_lobby_mission(&spec, Some(kind))?;
+        if gaps {
+            self.preview_gaps();
+        }
+        match name {
+            "lobby-creator-view-click" => {
+                self.activate(14);
+            }
+            "lobby-creator-view-changed" => {
+                spec.separation_nm = 100;
+                spec.wings[3].count = 5;
+                self.reload_view(&spec)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" | "ordnance" => {}
@@ -1010,6 +1320,12 @@ impl QuickMission {
                 self.preview_gaps();
                 self.open(13);
             }
+            "lobby-creator-view"
+            | "lobby-creator-view-gaps"
+            | "lobby-creator-view-click"
+            | "lobby-creator-view-changed"
+            | "lobby-creator-view-flying"
+            | "lobby-creator-view-locked" => self.preview_view(name)?,
             "lobby-ordnance" | "lobby-ordnance-refused" | "lobby-ordnance-cheat" => {}
             "lobby-ordnance-gaps" => {
                 if let Some(ordnance) = &mut self.ordnance {
@@ -1148,6 +1464,11 @@ impl QuickMission {
         else {
             return Action::None;
         };
+        if let Some(kind) = self.view {
+            self.focus = id;
+            self.notice = Some(kind.refusal().into());
+            return Action::Click;
+        }
         if matches!(id, 30..=32 | GROUND_SECTION) {
             self.show_ground_notice();
             return Action::Click;
@@ -1224,7 +1545,25 @@ impl QuickMission {
         self.help = false;
         self.ground_notice = false;
     }
+    /// A press in the read-only creator: Back closes it, and a field says
+    /// that it cannot be changed. Nothing else happens.
+    fn activate_view(&mut self, kind: ViewKind, id: usize) -> Action {
+        match id {
+            0 => self.help = !self.help,
+            61 => return Action::Exit,
+            OK | CANCEL => return Action::Back,
+            3..=34 | 60 | OBJECTIVE_BASE..=GROUND_SECTION => {
+                self.focus = id;
+                self.notice = Some(kind.refusal().into());
+            }
+            _ => return Action::None,
+        }
+        Action::Click
+    }
     fn activate(&mut self, id: usize) -> Action {
+        if let Some(kind) = self.view {
+            return self.activate_view(kind, id);
+        }
         if self.ground_notice {
             return if id == GROUND_NOTICE_OK {
                 self.cancel();
@@ -1335,6 +1674,10 @@ impl QuickMission {
             return o.key(key);
         }
         self.shift = shift;
+        // Enter closes the read-only creator, as Back does.
+        if self.view.is_some() && key == "Enter" {
+            return Action::Back;
+        }
         if self.ground_notice {
             return if matches!(key, "Enter" | " " | "Escape") {
                 self.activate(GROUND_NOTICE_OK)
@@ -1587,14 +1930,22 @@ impl QuickMission {
                 x += width + text_width(font, " ") + if id.is_some() { 2 } else { 0 };
             }
         }
-        self.button(
-            &mut c,
-            sprites,
-            OK,
-            if self.lobby { "Accept" } else { "OK" },
-            (387, 419, 85, 24),
-        );
-        self.button(&mut c, sprites, CANCEL, "Cancel", (492, 419, 85, 24));
+        if self.view.is_some() {
+            // Read-only: one button, and the page says so in its header.
+            self.button(&mut c, sprites, OK, "Back", (492, 419, 85, 24));
+            let face = &sprites["MENUFONT.PIC"];
+            let words = "View only";
+            c.text(face, words, 604 - text_width(face, words), 38, None);
+        } else {
+            self.button(
+                &mut c,
+                sprites,
+                OK,
+                if self.lobby { "Accept" } else { "OK" },
+                (387, 419, 85, 24),
+            );
+            self.button(&mut c, sprites, CANCEL, "Cancel", (492, 419, 85, 24));
+        }
         if let Some(message) = &self.notice {
             if self.lobby {
                 lobby_notice(&mut c, &sprites["SMLFONT.PIC"], message);
@@ -1710,19 +2061,36 @@ impl QuickMission {
                     font.glyphs.iter().map(|g| g[2]).max().unwrap_or(9) as i32 + 2,
                 );
                 self.controls.push((*id, r));
+                // A dimmed field sits in a darker well, as the field is the
+                // same grey as the tint the lists dim with.
+                let dim = self.view_tint(*id).is_some();
                 c.rect(
                     r,
-                    if self.hover == Some(*id) {
-                        [127, 139, 144, 255]
-                    } else {
-                        [101, 107, 109, 255]
+                    match (dim, self.hover == Some(*id)) {
+                        (_, true) => [127, 139, 144, 255],
+                        (true, false) => [58, 63, 65, 255],
+                        (false, false) => [101, 107, 109, 255],
                     },
                 );
                 bevel(c, r, false);
             }
-            c.text(font, &text, x, y, None);
+            let tint = id.and_then(|id| self.view_tint(id));
+            c.text(font, &text, x, y, tint);
             x += width + if id.is_some() { 2 } else { 0 };
         }
+    }
+    /// The read-only creator dims what the mission does not carry and what
+    /// this game lacks (an aircraft or a theater not everyone has); the tint
+    /// the lobby's lists use for it.
+    fn view_tint(&self, id: usize) -> Option<[u8; 3]> {
+        self.view?;
+        let lacks = self.shown.contains_key(&id) && (id == 6 || AI_AIRCRAFT_FIELDS.contains(&id));
+        let gap = self
+            .draft
+            .values
+            .get(id)
+            .is_some_and(|index| self.gap_in(id, *index).is_some());
+        (NOT_CARRIED.contains(&id) || lacks || gap).then_some(GAP_FIELD_TEXT)
     }
     fn button(
         &mut self,
@@ -1766,6 +2134,11 @@ fn stripe(c: &mut Canvas, (x, y, w, h): Rect, selected: bool) {
             );
         }
     }
+}
+/// The enemy nationality field's value for a base theater (the first field,
+/// the friendly nationality, is always 0).
+fn enemy_nationality(base_theater: usize) -> usize {
+    [10, 33, 14, 57, 3, 41, 23, 10, 20, 37, 34, 24, 9, 2, 10, 2][base_theater]
 }
 fn source_theaters() -> [&'static str; 16] {
     tore_world::mission::THEATERS
@@ -2681,13 +3054,19 @@ mod tests {
         assert_eq!(legacy_pairs(&wings), q.dummy_wings());
     }
     #[test]
-    fn separation_lists_ten_nautical_choices_and_never_panics() {
+    fn separation_lists_eleven_nautical_choices_and_never_panics() {
         let mut q = setup();
         let labels = q.values(17).to_vec();
-        assert_eq!(labels.len(), 10);
+        assert_eq!(labels.len(), 11);
         assert_eq!(
             &labels[6..],
-            ["100 miles", "150 miles", "200 miles", "300 miles"]
+            [
+                "75 miles",
+                "100 miles",
+                "150 miles",
+                "200 miles",
+                "300 miles"
+            ]
         );
         for (index, nm) in SEPARATION_NM.into_iter().enumerate() {
             q.apply(17, index);
@@ -2700,13 +3079,25 @@ mod tests {
         assert_eq!(q.separation_feet(), 5. * FEET_PER_NM);
         // Clicking cycles through the host entries and wraps.
         q.draft.values[17] = 5;
-        for expected in ["100 miles", "150 miles", "200 miles", "300 miles"] {
+        for expected in [
+            "75 miles",
+            "100 miles",
+            "150 miles",
+            "200 miles",
+            "300 miles",
+        ] {
             q.activate(17);
             assert_eq!(q.value(17), expected);
         }
         q.activate(17);
         assert_eq!(q.draft.values[17], 0);
-        for expected in ["300 miles", "200 miles", "150 miles", "100 miles"] {
+        for expected in [
+            "300 miles",
+            "200 miles",
+            "150 miles",
+            "100 miles",
+            "75 miles",
+        ] {
             right_click(&mut q, 17);
             assert_eq!(q.value(17), expected);
         }
@@ -2737,5 +3128,351 @@ mod tests {
         q.apply(15, 1);
         q.apply(30, 1);
         assert!(q.unsupported().unwrap().contains("Ground"));
+    }
+    // ---- the lobby's mission read back, and read-only (lobby pass, L4) ----
+
+    /// A creator as a lobby opens it: every aircraft offered.
+    fn lobby_creator() -> QuickMission {
+        let mut q = full_catalog();
+        q.lobby = true;
+        q
+    }
+    /// A small deterministic generator for sweeping specs.
+    fn next(state: &mut u64) -> usize {
+        *state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (*state >> 33) as usize
+    }
+    /// A spec the creator could have made: any theater, weather, altitude,
+    /// distance, orders, wing sizes, skills and aircraft.
+    fn made_spec(q: &QuickMission, state: &mut u64) -> MissionSpec {
+        let id = |files: &[String], at: usize| AircraftId::parse(&files[at % files.len()]).unwrap();
+        let theater = q.theater_codes[next(state) % 16].clone();
+        let mut spec = MissionSpec::new(&theater, id(&q.aircraft_files, next(state)));
+        spec.condition = Condition::ALL[next(state) % 6];
+        spec.start = Start::Airborne {
+            altitude_ft: ALTITUDES_FT[next(state) % ALTITUDES_FT.len()],
+        };
+        spec.separation_nm = SEPARATION_NM[next(state) % SEPARATION_NM.len()] as u32;
+        spec.preset = [
+            crate::ai_wings::Preset::Free,
+            crate::ai_wings::Preset::Cap,
+            crate::ai_wings::Preset::SelfDefense,
+            crate::ai_wings::Preset::Hold,
+        ][next(state) % 4];
+        spec.guns_only = next(state).is_multiple_of(2);
+        for index in 0..6 {
+            let aircraft = if index == 0 {
+                spec.wings[0].aircraft
+            } else {
+                id(&q.wing_files, next(state))
+            };
+            spec.wings[index] = WingSpec {
+                aircraft,
+                count: (next(state) % 6).max(usize::from(index == 0)),
+                skill: Skill::ALL[next(state) % 5],
+            };
+            let choices = QuickMission::objective_choices(index);
+            spec.objectives[index] = choices[next(state) % choices.len()].1;
+            spec.must_survive[index] = next(state).is_multiple_of(2);
+        }
+        spec
+    }
+    #[test]
+    fn a_mission_read_into_the_creator_comes_back_as_the_same_mission() {
+        let mut q = lobby_creator();
+        let mut state = 7;
+        for case in 0..400 {
+            let spec = made_spec(&q, &mut state);
+            let draft = Draft::from_spec(&spec, &q).unwrap_or_else(|e| panic!("{case}: {e}"));
+            q.load_spec(&spec, true).unwrap();
+            assert_eq!(q.draft.values, draft.values, "case {case}");
+            let back = q
+                .lobby_spec()
+                .unwrap_or_else(|e| panic!("case {case}: {e}"));
+            assert_eq!(back, spec, "case {case}");
+        }
+    }
+    #[test]
+    fn every_value_of_every_choice_the_creator_offers_round_trips() {
+        let mut q = lobby_creator();
+        let mut state = 99;
+        let mut spec = made_spec(&q, &mut state);
+        for theater in q.theater_codes.clone() {
+            spec.theater = theater;
+            q.load_spec(&spec, true).unwrap();
+            assert_eq!(q.lobby_spec().unwrap(), spec);
+        }
+        for condition in Condition::ALL {
+            spec.condition = condition;
+            q.load_spec(&spec, true).unwrap();
+            assert_eq!(q.lobby_spec().unwrap(), spec);
+        }
+        for feet in ALTITUDES_FT {
+            spec.start = Start::Airborne { altitude_ft: feet };
+            q.load_spec(&spec, true).unwrap();
+            assert_eq!(q.lobby_spec().unwrap(), spec);
+        }
+        for nm in SEPARATION_NM {
+            spec.separation_nm = nm as u32;
+            q.load_spec(&spec, true).unwrap();
+            assert_eq!(q.lobby_spec().unwrap(), spec);
+        }
+        for wing in 0..6 {
+            for skill in Skill::ALL {
+                for count in 0..=5 {
+                    spec.wings[wing].skill = skill;
+                    spec.wings[wing].count = count.max(usize::from(wing == 0));
+                    q.load_spec(&spec, true).unwrap();
+                    assert_eq!(q.lobby_spec().unwrap(), spec);
+                }
+            }
+            for (_, objective) in QuickMission::objective_choices(wing) {
+                spec.objectives[wing] = objective;
+                q.load_spec(&spec, true).unwrap();
+                assert_eq!(q.lobby_spec().unwrap(), spec);
+            }
+        }
+        for id in AircraftId::SELECTABLE {
+            spec.wings[0].aircraft = id;
+            q.load_spec(&spec, true).unwrap();
+            assert_eq!(q.lobby_spec().unwrap(), spec);
+            if id.ai_flyable() {
+                spec.wings[3].aircraft = id;
+                q.load_spec(&spec, true).unwrap();
+                assert_eq!(q.lobby_spec().unwrap(), spec);
+            }
+        }
+    }
+    #[test]
+    fn the_default_mission_and_a_ground_start_read_as_airborne() {
+        let mut q = lobby_creator();
+        let spec = MissionSpec::new("UKR", AircraftId::F18);
+        q.load_spec(&spec, true).unwrap();
+        assert_eq!(q.lobby_spec().unwrap(), spec);
+        let mut ground = spec.clone();
+        ground.start = Start::Ground {
+            runway: 0x4000_0001,
+            altitude_ft: 10_000,
+        };
+        q.load_spec(&ground, true).unwrap();
+        assert!(!q.ground_start());
+        let mut airborne = spec;
+        airborne.start = Start::Airborne {
+            altitude_ft: 10_000,
+        };
+        assert_eq!(q.lobby_spec().unwrap(), airborne);
+    }
+    #[test]
+    fn a_mission_the_lists_cannot_show_is_refused_by_the_draft_and_drawn_by_the_view() {
+        let mut q = lobby_creator();
+        let mut spec = MissionSpec::new("UKR", AircraftId::F18);
+        spec.wings[3] = WingSpec {
+            aircraft: AircraftId::F14,
+            count: 1,
+            skill: Skill::Ace,
+        };
+        // This game has no F-14.
+        q.aircraft_files
+            .retain(|key| key != AircraftId::F14.selection_key());
+        q.aircraft_names
+            .retain(|name| name != AircraftId::F14.label());
+        q.refresh_wing_catalog();
+        let words = Draft::from_spec(&spec, &q).unwrap_err();
+        assert!(words.contains(AircraftId::F14.label()), "{words}");
+        let before = q.draft.clone();
+        assert!(q.load_spec(&spec, true).is_err());
+        assert_eq!(q.draft.values, before.values, "nothing changed");
+        // A theater the creator never offers cannot be shown at all.
+        let mut odd = spec.clone();
+        odd.theater = "NOWHERE".into();
+        assert!(q.load_spec(&odd, false).is_err());
+        // The view draws the aircraft it lacks, and counts past the list.
+        spec.wings[4].count = 99;
+        q.load_spec(&spec, false).unwrap();
+        q.view = Some(ViewKind::Reader);
+        assert_eq!(q.value(23), AircraftId::F14.label());
+        assert_eq!(q.value(24), "99");
+        assert!(q.view_tint(23).is_some() && q.view_tint(24).is_none());
+        let mut wide = spec;
+        wide.wings[4].count = 3;
+        q.load_spec(&wide, false).unwrap();
+        assert_eq!(q.value(24), "value", "a count the list holds is the list's");
+        assert_eq!(q.draft.values[24], 3);
+    }
+    /// Opens the read-only creator on `spec`.
+    fn viewer(spec: &MissionSpec) -> QuickMission {
+        let mut q = lobby_creator();
+        q.lobby = false;
+        q.open_lobby_mission(spec, Some(ViewKind::Reader)).unwrap();
+        q
+    }
+    #[test]
+    fn the_read_only_creator_changes_nothing_and_says_why() {
+        let mut state = 5;
+        let spec = {
+            let q = lobby_creator();
+            made_spec(&q, &mut state)
+        };
+        let mut q = viewer(&spec);
+        assert!(q.is_view() && q.lobby);
+        assert!(q.notice.as_deref().is_some_and(|n| n.contains("View only")));
+        let before = (q.draft.clone(), q.group_objectives, q.group_must_survive);
+        let fields: Vec<usize> = (3..=34)
+            .chain([60, GROUND_SECTION])
+            .chain(OBJECTIVE_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT)
+            .collect();
+        for id in &fields {
+            q.notice = None;
+            q.hover = Some(*id);
+            q.pressed = Some(*id);
+            assert_eq!(q.up(), Action::Click, "left click on {id}");
+            assert_eq!(q.notice.as_deref(), Some(VIEW_REFUSAL), "left {id}");
+            q.notice = None;
+            if (3..=34).contains(id) || *id >= OBJECTIVE_BASE {
+                q.hover = Some(*id);
+                assert_eq!(right_click(&mut q, *id), Action::Click);
+                assert_eq!(q.notice.as_deref(), Some(VIEW_REFUSAL), "right {id}");
+            }
+            assert!(
+                q.selector.is_none() && !q.ground_notice,
+                "{id} opened a pop-up"
+            );
+        }
+        for key in ["Tab", "ArrowDown", "ArrowUp", " ", "Home", "x"] {
+            q.key(key, false);
+        }
+        assert_eq!(
+            (
+                q.draft.clone().values,
+                q.group_objectives,
+                q.group_must_survive
+            ),
+            (before.0.values, before.1, before.2)
+        );
+        assert_eq!(q.lobby_spec().unwrap(), spec, "the mission is as it was");
+    }
+    #[test]
+    fn the_read_only_creator_closes_with_back_enter_or_escape_and_has_no_cancel() {
+        let spec = MissionSpec::new("UKR", AircraftId::F18);
+        let mut q = viewer(&spec);
+        q.hover = Some(OK);
+        q.pressed = Some(OK);
+        assert_eq!(q.up(), Action::Back, "the OK place reads Back");
+        assert_eq!(q.activate(CANCEL), Action::Back);
+        assert_eq!(q.key("Enter", false), Action::Back);
+        assert_eq!(q.key("Escape", false), Action::Back);
+        // Enter on a focused field closes it too; Space says it is read-only.
+        q.focus = 7;
+        assert_eq!(q.key("Enter", false), Action::Back);
+        assert_eq!(q.key(" ", false), Action::Click);
+        assert_eq!(q.notice.as_deref(), Some(VIEW_REFUSAL));
+        // The help menu still works.
+        assert_eq!(q.activate(0), Action::Click);
+        assert!(q.help);
+        assert_eq!(q.activate(61), Action::Exit);
+    }
+    #[test]
+    fn the_kings_view_while_the_mission_flies_says_it_changes_only_in_the_lobby() {
+        let spec = MissionSpec::new("UKR", AircraftId::F18);
+        let mut q = lobby_creator();
+        q.open_lobby_mission(&spec, Some(ViewKind::Flying)).unwrap();
+        q.activate(17);
+        assert_eq!(q.notice.as_deref(), Some(VIEW_FLYING));
+    }
+    #[test]
+    fn the_kings_view_on_a_locked_server_says_the_missions_fixed() {
+        let spec = MissionSpec::new("UKR", AircraftId::F18);
+        let mut q = lobby_creator();
+        q.open_lobby_mission(&spec, Some(ViewKind::Fixed)).unwrap();
+        assert!(q.notice.as_deref().unwrap().ends_with(VIEW_FIXED));
+        q.activate(17);
+        assert_eq!(q.notice.as_deref(), Some(VIEW_FIXED));
+        assert_eq!(q.activate(CANCEL), Action::Back);
+    }
+    #[test]
+    fn what_the_mission_does_not_carry_reads_as_the_kings_and_a_new_mission_redraws() {
+        let mut spec = MissionSpec::new("EGY", AircraftId::F18);
+        let mut q = viewer(&spec);
+        for field in NOT_CARRIED {
+            assert_eq!(q.value(field), AS_THE_KINGS);
+            assert!(q.view_tint(field).is_some());
+        }
+        assert!(
+            q.view_tint(17).is_none(),
+            "a carried field is drawn as it is"
+        );
+        assert_eq!(q.separation_nm(), 5.);
+        spec.separation_nm = 100;
+        spec.guns_only = true;
+        q.activate(7);
+        q.reload_view(&spec).unwrap();
+        assert_eq!(q.separation_nm(), 100.);
+        assert!(q.guns_only());
+        assert_eq!(q.notice.as_deref(), Some(VIEW_CHANGED));
+        assert!(q.is_view());
+        // Leaving the lobby ends the view and what it kept.
+        q.leave_lobby();
+        assert!(!q.is_view() && q.shown.is_empty());
+        assert_eq!(
+            q.value(3),
+            "value",
+            "the nationalities read as the creator's own"
+        );
+    }
+    #[test]
+    fn what_this_game_lacks_is_dimmed_in_the_read_only_creator() {
+        let spec = MissionSpec::new("UKR", AircraftId::F18);
+        let mut q = viewer(&spec);
+        let key = q.aircraft_files[q.draft.values[6]].clone();
+        let theater = q.theater_codes[q.draft.values[13]].clone();
+        q.set_gaps(|kind, k| {
+            ((kind, k) == (ItemKind::Aircraft, key.as_str())
+                || (kind, k) == (ItemKind::Theater, theater.as_str()))
+                .then(|| "Not everyone has it.".to_owned())
+        });
+        assert!(q.view_tint(6).is_some(), "the aircraft");
+        assert!(q.view_tint(13).is_some(), "the theater");
+        assert!(q.view_tint(14).is_none());
+    }
+    #[test]
+    fn the_kings_creator_opens_on_the_lobbys_mission_not_the_kings_last_draft() {
+        let mut q = lobby_creator();
+        // The King's last draft: something else entirely.
+        q.apply(13, 5);
+        q.apply(17, 6);
+        q.apply(4, 3);
+        let stale = q.lobby_spec().unwrap();
+        let mut state = 21;
+        let lobby = made_spec(&q, &mut state);
+        assert_ne!(lobby, stale);
+        let saved = q.save();
+        q.open_lobby_mission(&lobby, None).unwrap();
+        assert!(!q.is_view() && q.lobby);
+        assert_eq!(q.lobby_spec().unwrap(), lobby);
+        // A change of the draft is what Accept sends, laid over the lobby's.
+        q.apply(17, 2);
+        q.leave_lobby();
+        q.restore(saved);
+        assert_eq!(
+            q.lobby_spec().unwrap(),
+            stale,
+            "the King's own draft is back"
+        );
+    }
+    #[test]
+    fn accept_lays_the_drafts_mission_over_the_lobbys_so_the_cheats_stay() {
+        let mut lobby = MissionSpec::new("UKR", AircraftId::F18);
+        lobby.cheats.unlimited_fuel = true;
+        lobby.friendly_fire = false;
+        let mut edited = lobby.clone();
+        edited.cheats = Default::default();
+        edited.friendly_fire = true;
+        edited.separation_nm = 50;
+        edited.guns_only = true;
+        let sent = QuickMission::lay_over(&lobby, edited);
+        assert!(sent.cheats.unlimited_fuel && !sent.friendly_fire);
+        assert_eq!((sent.separation_nm, sent.guns_only), (50, true));
     }
 }

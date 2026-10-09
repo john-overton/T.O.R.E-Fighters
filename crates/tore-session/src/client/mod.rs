@@ -1196,6 +1196,14 @@ impl Client {
         self.slot_request(SlotRequest::Any);
     }
 
+    /// Hold the first free slot on `side` (a PvP lobby's Bluefor and Redfor
+    /// boxes), or keep the slot held there. The host refuses it in co-op,
+    /// under Autobalance, while the player holds a slot on the other side,
+    /// when lock sides fixed the side in flight, and when the side is full.
+    pub fn take_side_slot(&mut self, side: tore_sim::ai::launch::Side) {
+        self.slot_request(SlotRequest::Side(side));
+    }
+
     /// Hold no slot.
     pub fn leave_slot(&mut self) {
         self.slot_request(SlotRequest::Leave);

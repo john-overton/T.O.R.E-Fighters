@@ -8,7 +8,9 @@
 //! rest and the state each scenario asserts at tick N (`expect`), so the
 //! whole-world test is known to exercise the state it is meant to: a
 //! restore that drops a field nothing reads would otherwise pass. Every
-//! scenario is built from synthetic fixtures; none reads retail data.
+//! scenario is built from synthetic fixtures; none reads retail data. The
+//! lobby pass's slice R1 added the AI respawns, with one pending at N, and
+//! slice R2 a lead held for a lost human, given back after N.
 
 use super::{World, crowd, tick_tests};
 use crate::{
@@ -82,6 +84,8 @@ pub(super) fn all() -> Vec<Scenario> {
         revivals(),
         lead_order(),
         crew_ejection(),
+        ai_respawns(),
+        held_lead(),
     ]
 }
 
@@ -265,14 +269,29 @@ pub(super) fn open_handoffs() -> Scenario {
     fn drive(world: &mut World, step: u64) -> Step {
         let planes: Vec<PlaneId> = world.roster.planes().iter().map(|p| p.id).collect();
         let commands = match step {
-            60 => vec![MissionCommand::Take {
-                seat: SeatId(0),
-                plane: planes[0],
-            }],
-            61 => vec![MissionCommand::Take {
-                seat: SeatId(1),
-                plane: planes[planes.len() - 1],
-            }],
+            // Each seat's player is named before it is seated (the lobby
+            // pass's follow-up F1), so the roster's callsigns are in the
+            // checkpoint.
+            60 => vec![
+                MissionCommand::Callsign {
+                    seat: SeatId(0),
+                    callsign: "Viper".into(),
+                },
+                MissionCommand::Take {
+                    seat: SeatId(0),
+                    plane: planes[0],
+                },
+            ],
+            61 => vec![
+                MissionCommand::Callsign {
+                    seat: SeatId(1),
+                    callsign: "Hawk".into(),
+                },
+                MissionCommand::Take {
+                    seat: SeatId(1),
+                    plane: planes[planes.len() - 1],
+                },
+            ],
             500 => vec![MissionCommand::GiveBack { seat: SeatId(0) }],
             640 => vec![MissionCommand::Take {
                 seat: SeatId(2),
@@ -295,7 +314,11 @@ pub(super) fn open_handoffs() -> Scenario {
                 MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
                 MissionCommand::Settings(_)
                 | MissionCommand::Abandon { .. }
-                | MissionCommand::Revive { .. } => {}
+                | MissionCommand::Revive { .. }
+                | MissionCommand::Respawn { .. }
+                | MissionCommand::LeadHold { .. }
+                | MissionCommand::LeadLeft { .. }
+                | MissionCommand::Callsign { .. } => {}
             }
         }
         let tick = world.tick();
@@ -317,6 +340,9 @@ pub(super) fn open_handoffs() -> Scenario {
     }
     fn expect(world: &World) -> String {
         let plane = |seat| world.roster.seat(SeatId(seat)).and_then(|s| s.plane);
+        // The players' names: plane 0 keeps Viper's though Viper left it.
+        assert_eq!(world.roster.plane_callsign(PlaneId(0)), Some("Viper"));
+        assert_eq!(world.roster.seat_callsign(SeatId(1)), Some("Hawk"));
         // Seat 0 gave its plane back at step 500; seats 1 and 2 hold the
         // planes they took at steps 61 and 640.
         assert_eq!(plane(0), None);
@@ -370,7 +396,11 @@ fn flying_after(world: &World, commands: &[MissionCommand]) -> Vec<SeatId> {
             MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
             MissionCommand::Settings(_)
             | MissionCommand::Abandon { .. }
-            | MissionCommand::Revive { .. } => {}
+            | MissionCommand::Revive { .. }
+            | MissionCommand::Respawn { .. }
+            | MissionCommand::LeadHold { .. }
+            | MissionCommand::LeadLeft { .. }
+            | MissionCommand::Callsign { .. } => {}
         }
     }
     flying.sort();
@@ -1239,6 +1269,235 @@ pub(super) fn crew_ejection() -> Scenario {
         drive,
         at: 900,
         then: 600,
+        expect,
+        after: Some(after),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The lobby pass's slice R1.
+
+/// An open mission, three against three, with AI respawn: seat 0 flies plane
+/// 0; the AI's friendly wingman (plane 1) is shot down (step 100) and
+/// respawned (110) as plane 6, which is shot down in turn (200) and
+/// respawned (210) as plane 7; the enemy's AI plane 4 is shot down (300) and
+/// is still waiting for its respawn at the checkpoint (400), which comes
+/// after it (450). The checkpoint's book then holds two lineage roots, the
+/// AI wrecks waiting to retire and a lineage lost with its respawn pending;
+/// the restored copy must make the same plane of it.
+pub(super) fn ai_respawns() -> Scenario {
+    use super::revive::RevivalWeapons;
+    use tore_sim::ai::launch::Side;
+    fn build() -> World {
+        let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+        spec.wings[0].count = 3;
+        spec.wings[3].count = 3;
+        spec.wings[3].skill = Skill::Average;
+        spec.separation_nm = 10;
+        spec.start = Start::Airborne {
+            altitude_ft: 10_000,
+        };
+        World::new(&spec, &resources(), Seating::Open).unwrap()
+    }
+    fn destroy(world: &mut World, plane: u32) {
+        world
+            .combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == plane)
+            .unwrap()
+            .hp = 0;
+    }
+    /// The respawn of `root`'s lineage at its side's mean place now (a
+    /// stand-in for the original spawn a host records: it depends only on
+    /// the world, so both copies are driven alike).
+    fn respawn(world: &World, root: u32) -> MissionCommand {
+        let root = PlaneId(root);
+        let side = world.roster.plane(root).unwrap().slot.wing.side;
+        let at = world.side_mean(side).unwrap();
+        let heading = if side == Side::Friendly { 0. } else { 3.0 };
+        let spawn = world
+            .respawn_spawn(root, at, heading, &[], None, RevivalWeapons::NoMissiles)
+            .unwrap();
+        MissionCommand::Respawn {
+            root,
+            spawn: Box::new(spawn),
+        }
+    }
+    fn drive(world: &mut World, step: u64) -> Step {
+        match step {
+            100 => destroy(world, 1),
+            200 => destroy(world, 6),
+            300 => destroy(world, 4),
+            _ => {}
+        }
+        let commands = match step {
+            60 => vec![MissionCommand::Take {
+                seat: SeatId(0),
+                plane: PlaneId(0),
+            }],
+            110 | 210 => vec![respawn(world, 1)],
+            450 => vec![respawn(world, 4)],
+            _ => Vec::new(),
+        };
+        let flying = flying_after(world, &commands);
+        let inputs = inputs_for(world, flying, |_| SeatInput {
+            pilot: PilotInput {
+                pitch: 0.05,
+                roll: if step % 480 < 240 { 0.2 } else { -0.2 },
+                ..PilotInput::default()
+            },
+            ..SeatInput::default()
+        });
+        (commands, inputs)
+    }
+    fn expect(world: &World) -> String {
+        use crate::seats::Pilot;
+        let book = &world.revival;
+        assert_eq!(book.added(), [PlaneId(6), PlaneId(7)]);
+        assert_eq!(book.root_of(PlaneId(6)), PlaneId(1));
+        assert_eq!(book.root_of(PlaneId(7)), PlaneId(1));
+        assert_eq!(
+            world.lineage(PlaneId(1)),
+            [PlaneId(1), PlaneId(6), PlaneId(7)]
+        );
+        let waiting: Vec<u32> = book.lost().iter().map(|l| l.plane.0).collect();
+        assert_eq!(waiting, [1, 6], "the replaced AI wrecks wait to retire");
+        assert_eq!(world.roster.plane(PlaneId(7)).unwrap().pilot, Pilot::Ai);
+        // The enemy's lineage is lost, its respawn pending.
+        assert!(world.lineage_lost(PlaneId(4)));
+        assert!(!world.lineage_lost(PlaneId(1)));
+        format!("{waiting:?}")
+    }
+    fn after(world: &World, _: &str) {
+        // The pending respawn made plane 8 on both copies.
+        assert_eq!(world.lineage_head(PlaneId(4)), PlaneId(8));
+        assert!(!world.lineage_lost(PlaneId(4)));
+        let entry = world.roster.plane(PlaneId(8)).unwrap();
+        assert_eq!((entry.slot.wing.side, entry.slot.member), (Side::Enemy, 3));
+    }
+    Scenario {
+        name: "AI respawns, one pending",
+        build,
+        drive,
+        at: 400,
+        then: 300,
+        expect,
+        after: Some(after),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The lobby pass's slice R2.
+
+/// An open mission, a flight of four and one of one, with the lead hold on
+/// (step 0): seat 0 takes the flight's lead (60) and seat 1 its plane 2
+/// (61); the AI orders nothing. Seat 0's pilot is killed (150), so seat 1
+/// stands in for it while it waits; at the checkpoint (300) the lead is
+/// held. Seat 0 revives (400) in plane 5, which takes the lead back on both
+/// copies.
+pub(super) fn held_lead() -> Scenario {
+    use super::lead_hold::LeadOwner;
+    use super::revive::RevivalWeapons;
+    use crate::ai_wings::FRIENDLY_SIDE;
+    use tore_sim::ai::launch::{Side, WingId};
+    const WING: WingId = WingId {
+        side: Side::Friendly,
+        index: 0,
+    };
+    fn build() -> World {
+        let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+        spec.wings[0].count = 4;
+        spec.wings[1].count = 1;
+        spec.start = Start::Airborne {
+            altitude_ft: 10_000,
+        };
+        World::new(&spec, &resources(), Seating::Open).unwrap()
+    }
+    fn drive(world: &mut World, step: u64) -> Step {
+        if step == 150 {
+            world
+                .cockpits
+                .iter_mut()
+                .find(|c| c.plane == PlaneId(0))
+                .unwrap()
+                .flight
+                .systems
+                .pilot
+                .dead = true;
+        }
+        let commands = match step {
+            0 => vec![MissionCommand::LeadHold { on: true }],
+            60 => vec![MissionCommand::Take {
+                seat: SeatId(0),
+                plane: PlaneId(0),
+            }],
+            61 => vec![MissionCommand::Take {
+                seat: SeatId(1),
+                plane: PlaneId(2),
+            }],
+            400 => {
+                let start = world.side_mean(Side::Friendly).unwrap();
+                let spawn = world
+                    .revival_spawn(
+                        SeatId(0),
+                        start,
+                        10. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+                        None,
+                        RevivalWeapons::Missiles,
+                    )
+                    .unwrap();
+                vec![MissionCommand::Revive {
+                    seat: SeatId(0),
+                    spawn: Box::new(spawn),
+                }]
+            }
+            _ => Vec::new(),
+        };
+        let flying = flying_after(world, &commands);
+        let inputs = inputs_for(world, flying, |_| SeatInput {
+            pilot: PilotInput {
+                pitch: 0.05,
+                roll: if step % 480 < 240 { 0.2 } else { -0.2 },
+                ..PilotInput::default()
+            },
+            ..SeatInput::default()
+        });
+        (commands, inputs)
+    }
+    fn leader(world: &World) -> Option<u32> {
+        world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .wing_leader(FRIENDLY_SIDE, 0)
+    }
+    fn expect(world: &World) -> String {
+        assert!(world.lead_hold());
+        assert_eq!(world.lead_owner(WING), Some(LeadOwner::Seat(SeatId(0))));
+        // Seat 1's plane stands in for the lost owner.
+        assert_eq!(leader(world), Some(2));
+        assert!(world.lead_acting(WING));
+        let claims = world.ai_wings.as_ref().unwrap().mission().lead_claims();
+        assert_eq!(claims.len(), 1);
+        assert_eq!(claims[0].plane, Some(0));
+        format!("{:?}", world.lead_owners())
+    }
+    fn after(world: &World, _: &str) {
+        assert_eq!(leader(world), Some(5));
+        assert!(!world.lead_acting(WING));
+        let owned = world.lead_owners()[0];
+        assert_eq!(owned.owner, LeadOwner::Seat(SeatId(0)));
+        assert_eq!((owned.plane, owned.led), (PlaneId(5), true));
+    }
+    Scenario {
+        name: "a lead held for a lost human",
+        build,
+        drive,
+        at: 300,
+        then: 200,
         expect,
         after: Some(after),
     }

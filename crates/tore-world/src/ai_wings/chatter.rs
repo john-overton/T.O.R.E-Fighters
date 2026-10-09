@@ -373,6 +373,12 @@ impl AiWings {
             });
         }
         for change in &output.leadership {
+            // The lead hold (slice R2): a stand-in and an owner given the
+            // lead back read their own HUD lines (`World::lead_after_ai`)
+            // instead of "You're the Wingleader now".
+            if change.acting || change.reclaimed {
+                continue;
+            }
             events.push(Chatter::Leadership {
                 speaker: change.previous,
                 side: if change.side == ENEMY_SIDE {

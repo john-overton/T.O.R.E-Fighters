@@ -43,6 +43,9 @@
 // Stage F phase 2's parts (slice F2-0 adds them as hooks; each slice in
 // docs/ARCHITECTURE.md, "Phase 2 slices", fills its own).
 mod away;
+// The lobby pass's Autobalance (slice A1).
+mod balance;
+mod callsigns;
 mod chat;
 pub mod config;
 pub mod content;
@@ -53,6 +56,7 @@ pub mod inputs;
 mod king;
 #[cfg(test)]
 mod king_tests;
+mod lineage_take;
 mod lobby;
 mod observe;
 #[cfg(test)]
@@ -60,6 +64,7 @@ mod observe_tests;
 mod results;
 mod revive;
 mod score;
+mod sides;
 mod sorting;
 #[cfg(test)]
 mod tests;
@@ -1285,9 +1290,13 @@ impl Host {
     /// Whether `plane` is open to players: the open planes, which follow the
     /// King's mode by default (stage F phase 2).
     fn open(&self, plane: PlaneId) -> bool {
+        // A lineage is open by its root, the plane the mission started with
+        // (the lobby pass's follow-up F1): a respawn of a listed plane is
+        // open too.
+        let root = self.root_of(plane);
         self.world.roster.plane(plane).is_some_and(|p| {
             self.config.open_planes.allows_in(
-                plane.0,
+                root.0,
                 p.slot.wing.side == Side::Friendly,
                 self.settings.mode(),
             )
@@ -1985,10 +1994,12 @@ impl Host {
         if entry.pilot != Pilot::Ai || self.reserved(plane) {
             return Some(format!("Plane {} is flown by another player.", plane.0));
         }
-        if let Some(other) = self.holder(plane, connection) {
+        // A lineage's slot is its root's (the lobby pass's follow-up F1).
+        let root = self.root_of(plane);
+        if let Some(other) = self.holder(root, connection) {
             return Some(format!(
                 "{} holds plane {}.",
-                self.peers[&other].callsign, plane.0
+                self.peers[&other].callsign, root.0
             ));
         }
         // Stage F phase 2: the King's rules, then the revival rules.
@@ -2050,10 +2061,19 @@ impl Host {
         }
         let held = peer.lobby.slot;
         let wanted = match request {
+            // The lobby pass: under Autobalance a player keeps the side the
+            // host gave it, so it keeps a slot (slice A1).
+            SlotRequest::Leave if held.is_some() && self.settings.balanced() => {
+                return Err(sides::SIDES_BALANCED.into());
+            }
             SlotRequest::Leave => None,
             SlotRequest::Take(plane) => {
-                if !self.slots().iter().any(|slot| slot.id == plane) {
+                let Some(slot) = self.slots().into_iter().find(|slot| slot.id == plane) else {
                     return Err(format!("Plane {plane} is not a slot players may take."));
+                };
+                // The lobby pass: Autobalance's side (slice A1).
+                if let Some(why) = self.balance_side_refusal(connection, slot.wing.side) {
+                    return Err(why);
                 }
                 if let Some(other) = self.holder(PlaneId(plane), connection) {
                     return Err(format!(
@@ -2067,8 +2087,12 @@ impl Host {
                 }
                 Some(PlaneId(plane))
             }
+            // The lobby pass (slice W0): a side's first free slot.
+            SlotRequest::Side(side) => Some(self.side_slot(connection, side, held)?),
             SlotRequest::Any => match held {
                 Some(plane) => Some(plane),
+                // The lobby pass: the side Autobalance gives (slice A1).
+                None if self.settings.balanced() => Some(self.balance_any(connection)?),
                 None => Some(
                     self.slots()
                         .into_iter()
@@ -2267,9 +2291,31 @@ impl Host {
         };
         let wanted = wanted.or(held.map(|p| p.0));
         let chosen = match wanted {
-            Some(plane) => match self.refusal(seat, PlaneId(plane), connection) {
-                None => Ok(PlaneId(plane)),
-                Some(reason) => Err(reason),
+            // The lobby pass's follow-up F1: a lost plane's lineage, its
+            // newest plane or a wait for its respawn.
+            Some(plane) => match self.lineage_take(PlaneId(plane)) {
+                lineage_take::LineageTake::Wait(words) => {
+                    let root = self.root_of(PlaneId(plane));
+                    match self.lineage_wait_refusal(connection, root) {
+                        Some(reason) => Err(reason),
+                        None => {
+                            self.await_respawn(connection, root, words);
+                            return;
+                        }
+                    }
+                }
+                lineage_take::LineageTake::Head(head) => {
+                    match self.refusal(seat, head, connection) {
+                        None => Ok(head),
+                        Some(reason) => Err(reason),
+                    }
+                }
+                lineage_take::LineageTake::AsAsked => {
+                    match self.refusal(seat, PlaneId(plane), connection) {
+                        None => Ok(PlaneId(plane)),
+                        Some(reason) => Err(reason),
+                    }
+                }
             },
             None => {
                 // Friendly Wing 1's lead first: the roster is in wing order.
@@ -2291,13 +2337,16 @@ impl Host {
         };
         match chosen {
             Ok(plane) => {
-                let is_slot = self.slots().iter().any(|slot| slot.id == plane.0);
+                // The slot is the lineage's root (follow-up F1).
+                let root = self.root_of(plane);
+                let is_slot = self.slots().iter().any(|slot| slot.id == root.0);
+                self.revival.awaiting.remove(&connection);
                 if let Some(peer) = self.peers.get_mut(&connection) {
                     peer.stage = Stage::Taking { seat, plane };
                     peer.lobby.ready = true;
-                    if peer.lobby.slot != Some(plane) && is_slot {
+                    if peer.lobby.slot != Some(root) && is_slot {
                         peer.lobby.release();
-                        peer.lobby.slot = Some(plane);
+                        peer.lobby.slot = Some(root);
                         peer.lobby.ready = true;
                     }
                 }
@@ -2546,7 +2595,16 @@ impl Host {
                     peer.lobby.ready = false;
                 }
             }
-            Stage::Lobby | Stage::Leaving | Stage::Closing { .. } => {}
+            // A player waiting for a lineage's respawn gives up its wait,
+            // as a take is given up (the lobby pass's follow-up F1).
+            Stage::Lobby => {
+                if self.end_wait(connection)
+                    && let Some(peer) = self.peers.get_mut(&connection)
+                {
+                    peer.lobby.ready = false;
+                }
+            }
+            Stage::Leaving | Stage::Closing { .. } => {}
         }
         self.lobby_dirty = true;
     }
@@ -2702,6 +2760,9 @@ impl Host {
                 })
                 .collect(),
             settings: self.settings.lobby_list(),
+            // A dedicated server's `king-mission locked` (a hosted game's
+            // config never sets it): the King's Mission... reads only.
+            mission_locked: self.config.mission_locked,
         }
     }
 
@@ -2712,6 +2773,10 @@ impl Host {
     /// [`LOBBY_INTERVAL_FLYING`], since its messages share 256 bytes of each
     /// snapshot packet (agent decision, EF4 review).
     fn send_lobby(&mut self) {
+        // The lobby pass: Autobalance seats the players waiting for a side
+        // before any lobby state goes out, a joiner before its first (slice
+        // A1).
+        self.balance_update();
         // Stage L: the gaps, when they changed or a player's content came.
         self.send_gaps();
         self.send_stale_lobbies(false);
@@ -2949,6 +3014,8 @@ impl Host {
         // revivals and abandoned planes.
         self.away_commands(tick, &mut commands);
         self.revive_commands(tick, &mut commands);
+        // The lobby pass's follow-up F1: each seated player's callsign.
+        self.callsign_commands(&mut commands);
 
         // The tick as the journal records it (stage K): its mission
         // commands, and every flying seat's input with the number of the

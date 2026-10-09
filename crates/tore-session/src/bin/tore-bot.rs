@@ -10,11 +10,11 @@
 //! ```text
 //! tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME [--path auto|direct|relay])
 //!          [--data-dir DIR] [--count N] [--callsign NAME]
-//!          [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE]
-//!          [--token-file FILE]
+//!          [--slot PLANE] [--side blue|red] [--seconds S] [--password TEXT]
+//!          [--capture FILE] [--token-file FILE]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
-//!          [--revive SECONDS] [--away SECONDS,FOR]
+//!          [--revive SECONDS] [--away SECONDS,FOR] [--objectives]
 //!          [--order SECONDS,NAME]... [--reply SECONDS,KIND]...
 //!          [--drop-resource NAME]... [--expect-unable] [--standby on|off]
 //! tore-bot --host MISSION [--port N] [--name TEXT] [--password TEXT] [--standby on|off]
@@ -65,6 +65,13 @@
 //! aircraft in the last. An observer succeeds when it watched, drew frames
 //! with aircraft in them and left cleanly.
 //!
+//! `--side blue|red` (the lobby pass) makes every bot ask for the first
+//! free slot of Bluefor or Redfor (`SlotRequest::Side`, the lobby's side
+//! boxes) once its mission is loaded, then mark ready in whatever slot it
+//! holds, in place of the automatic ready. It prints the ask ("Bot: asking
+//! for Redfor"); a refusal prints as any other, and the bot keeps the slot
+//! it had (under Autobalance, the host's choice).
+//!
 //! `--king` makes a bot that wears the crown (stage F phase 2, slice F2-1: a
 //! game it hosts, or a server with `king first-player`) change the King's
 //! settings once, by their registry names and values (`mode=pvp,kill-limit=3`,
@@ -84,6 +91,13 @@
 //! it watches; FOR seconds later it says it is back and flies on in the same
 //! plane. It prints when the AI takes the plane and when it asks for it
 //! back, and succeeds only if it was seated again in that plane.
+//!
+//! `--objectives` (the lobby pass's follow-up F1) makes every bot designate
+//! each enemy aircraft in turn, one every two seconds while it flies, and
+//! print what its target window says the mission asks of each as it changes
+//! ("Bot: objective: plane 9 destroy", or `survive`, or `none`). Every bot
+//! prints its debrief's objective sentences ("Bot: debrief objective:
+//! Destroyed 2 of 4 targets.").
 //!
 //! `--order` and `--reply` (stage F phase 2, slice F2-R) give a seat command
 //! once, SECONDS after the bot is first seated: `--order` is a wing order from
@@ -173,17 +187,21 @@ use tore_session::client::{Race, ended_text};
 use tore_session::host::content::{GameContent, gaps_line, report_lines};
 use tore_session::settings::{self, Mode, Store};
 use tore_session::wire::chat::Receiver;
-use tore_session::wire::messages::{Goodbye, LobbyState, Observing, SettingsChange, Subject};
+use tore_session::wire::messages::{
+    DebriefObjective, Goodbye, LobbyPhase, LobbyState, Observing, SettingsChange, Subject,
+};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
+use tore_sim::ai::launch::Side;
+use tore_world::debrief::Objective;
 use tore_world::mission::MissionSpec;
 use tore_world::seats::SeatCommand;
 
 const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
 [--path auto|direct|relay] | --host MISSION [--port N] [--name TEXT] [--players N] \
 [--wait-standbys N]) [--standby on|off] [--data-dir DIR] [--count N] \
-[--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE] \
-[--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
-[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] \
+[--callsign NAME] [--slot PLANE] [--side blue|red] [--seconds S] [--password TEXT] \
+[--capture FILE] [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
+[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] [--objectives] \
 [--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
 [--drop-resource NAME]... [--expect-unable]\n       tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
@@ -236,10 +254,15 @@ struct Options {
     quick: Vec<(Duration, u8)>,
     /// `--observe`: watch instead of flying, the camera on this subject.
     observe: Option<Subject>,
+    /// `--side`: ask for the first free slot of this side, then ready.
+    side: Option<Side>,
     /// `--king`: as the King, these settings, then the start.
     king: Option<Vec<(u8, u32)>>,
     /// `--revive`: eject this long after the first seating and fly again.
     revive: Option<Duration>,
+    /// `--objectives`: designate each enemy in turn and print what the
+    /// target window says of it (follow-up F1).
+    objectives: bool,
     /// `--away`: away this long after the first seating, back the second
     /// span after the AI took the plane.
     away: Option<(Duration, Duration)>,
@@ -425,8 +448,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
         say: Vec::new(),
         quick: Vec::new(),
         observe: None,
+        side: None,
         king: None,
         revive: None,
+        objectives: false,
         away: None,
         commands: Vec::new(),
         drop: Vec::new(),
@@ -494,8 +519,16 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     ),
                 });
             }
+            "--side" => {
+                options.side = Some(match value()?.as_str() {
+                    "blue" => Side::Friendly,
+                    "red" => Side::Enemy,
+                    other => return Err(format!("--side is blue or red, not {other:?}")),
+                });
+            }
             "--king" => options.king = Some(king(&value()?)?),
             "--revive" => options.revive = Some(seconds(&value()?)?),
+            "--objectives" => options.objectives = true,
             "--away" => options.away = Some(away(&value()?)?),
             "--order" => options.commands.push(order(&value()?)?),
             "--reply" => options.commands.push(reply(&value()?)?),
@@ -820,6 +853,17 @@ struct Running {
     gaps: Option<String>,
     told: std::collections::BTreeSet<u8>,
     unable: bool,
+    /// `--side`'s progress.
+    side: SideAsk,
+}
+
+/// `--side`'s progress: the mission is loaded, the side was asked for, and
+/// when the bot last asked to be ready.
+#[derive(Default)]
+struct SideAsk {
+    loaded: bool,
+    asked: bool,
+    ready_asked: Option<std::time::Instant>,
 }
 
 impl Running {
@@ -868,6 +912,9 @@ impl Running {
         }
         if let Some(after) = options.revive {
             bot.revive_after(after);
+        }
+        if options.objectives {
+            bot.read_objectives();
         }
         if let Some((after, span)) = options.away {
             bot.away_after(after, span);
@@ -1020,6 +1067,35 @@ impl Running {
         if t.joiner.ask_relay(now) {
             println!("{name}: {why}; asking for the relay...");
         }
+    }
+}
+
+/// `--side`: once the mission is loaded, ask for the first free slot of
+/// `side` once; then, in the lobby or a flying mission's lobby, mark ready
+/// in the slot held (at most once a second until the mark shows).
+fn side_and_ready(name: &str, ask: &mut SideAsk, unable: bool, client: &mut Client, side: Side) {
+    let Some((phase, slot, ready, flying)) = client.lobby().and_then(|lobby| {
+        lobby
+            .me()
+            .map(|me| (lobby.phase, me.slot, me.ready, me.flying))
+    }) else {
+        return;
+    };
+    if !ask.loaded || unable || phase == LobbyPhase::Ended {
+        return;
+    }
+    if !ask.asked {
+        ask.asked = true;
+        println!("{name}: asking for {}", settings::side_name(side));
+        client.take_side_slot(side);
+        return;
+    }
+    let due = ask
+        .ready_asked
+        .is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
+    if slot.is_some() && !ready && !flying && due {
+        ask.ready_asked = Some(std::time::Instant::now());
+        client.set_ready(true);
     }
 }
 
@@ -1198,7 +1274,7 @@ fn main() -> ExitCode {
             password: options.password.clone(),
             plane: options.slot.map(|slot| slot + i as u32),
             entropy: Entropy::System,
-            auto_ready: options.observe.is_none(),
+            auto_ready: options.observe.is_none() && options.side.is_none(),
             content: Some(Arc::clone(&content)),
             ..ClientConfig::new(server, &name, build())
         };
@@ -1250,6 +1326,7 @@ fn main() -> ExitCode {
             gaps: None,
             told: std::collections::BTreeSet::new(),
             unable: false,
+            side: SideAsk::default(),
         };
         match (&options.target, &found) {
             (JoinBy::Host, _) => {
@@ -1513,6 +1590,9 @@ fn main() -> ExitCode {
             for line in std::mem::take(&mut bot.link_heard) {
                 println!("{}: link: {line}", r.name);
             }
+            for line in std::mem::take(&mut bot.objectives_read) {
+                println!("{}: objective: {line}", r.name);
+            }
             while let Some(event) = bot.client.poll_event() {
                 match event {
                     ClientEvent::Connected { .. } if r.through.is_some() => println!(
@@ -1521,7 +1601,10 @@ fn main() -> ExitCode {
                         path_words(bot.client.path())
                     ),
                     ClientEvent::Connected { .. } => println!("{}: joined", r.name),
-                    ClientEvent::MissionLoaded => println!("{}: mission loaded", r.name),
+                    ClientEvent::MissionLoaded => {
+                        r.side.loaded = true;
+                        println!("{}: mission loaded", r.name);
+                    }
                     ClientEvent::ContentRefused { names, reason } => {
                         r.unable = true;
                         println!("{}: {reason} ({})", r.name, names_text(&names));
@@ -1579,6 +1662,15 @@ fn main() -> ExitCode {
                                     });
                                 }
                             }
+                            if let Some(side) = options.side {
+                                side_and_ready(
+                                    &r.name,
+                                    &mut r.side,
+                                    r.unable,
+                                    &mut bot.client,
+                                    side,
+                                );
+                            }
                             // The King's start once the settings stand and
                             // everyone holding a slot is ready (not before,
                             // so a change that clears the ready marks does
@@ -1622,6 +1714,19 @@ fn main() -> ExitCode {
                             debrief.player.kills.iter().sum::<u32>(),
                             debrief.elapsed_seconds
                         );
+                        // The objective sentences, as the debrief screen
+                        // words them (follow-up F1).
+                        for objective in &debrief.objectives {
+                            let objective = match *objective {
+                                DebriefObjective::Destroy { destroyed, total } => {
+                                    Objective::Destroy { destroyed, total }
+                                }
+                                DebriefObjective::Protect { protected, total } => {
+                                    Objective::Protect { protected, total }
+                                }
+                            };
+                            println!("{}: debrief objective: {}", r.name, objective.sentence());
+                        }
                     }
                     ClientEvent::MissionEnded(ended) => {
                         println!("{}: {}", r.name, ended_text(&ended));
@@ -1803,7 +1908,18 @@ mod tests {
         .unwrap();
         assert!(matches!(o.target, JoinBy::Connect(a) if a.port() == 4000));
         assert_eq!((o.count, o.seconds, o.slot), (2, 5, Some(3)));
+        assert_eq!(o.side, None);
         assert_eq!(o.callsign, "Viper");
+        assert!(!o.objectives);
+        assert!(
+            parse(&args("--connect 127.0.0.1 --objectives"))
+                .unwrap()
+                .objectives
+        );
+        let side = |text: &str| parse(&args(&format!("--connect 127.0.0.1 --side {text}")));
+        assert_eq!(side("red").unwrap().side, Some(Side::Enemy));
+        assert_eq!(side("blue").unwrap().side, Some(Side::Friendly));
+        assert!(side("green").is_err());
         assert!(parse(&args("--count 2")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --count 0")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --bogus")).is_err());

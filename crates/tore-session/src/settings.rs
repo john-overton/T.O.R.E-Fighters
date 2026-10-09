@@ -44,6 +44,9 @@ pub mod number {
     pub const HOST: u8 = 21;
     /// Slice R1: the King's snapshot rate, snapshots a second.
     pub const SNAPSHOT_RATE: u8 = 22;
+    /// The lobby pass (slice W0): whether a lost AI aircraft respawns
+    /// while revival is on (John, 2026-10-09).
+    pub const AI_RESPAWN: u8 = 23;
 }
 
 /// Setting 21's value for the calculated host; a pinned player is 1 plus
@@ -58,6 +61,10 @@ pub const IDLE_AI_DEFAULT: u32 = 300;
 /// dedicated server's file may give any rate that divides 120
 /// ([`crate::host::config::SNAPSHOT_RATES`]).
 pub const KING_SNAPSHOT_RATES: [u32; 3] = [60, 30, 20];
+
+/// The revival distances the King may choose, nautical miles: retail's 1 to
+/// 40, then 50, 75, 100 and 150 (opinionated, John 2026-10-09).
+pub const REVIVE_DISTANCES: [u32; 9] = [1, 5, 10, 20, 40, 50, 75, 100, 150];
 
 /// The `lives` value that means no limit.
 pub const UNLIMITED_LIVES: u32 = 255;
@@ -103,6 +110,28 @@ pub enum Respawn {
     AiSlot,
     /// Retail's revival: a new aircraft just outside the battle.
     Revive,
+}
+
+/// How players choose their side in PvP (setting 7, `lock-sides`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Sides {
+    /// Each player picks a side and may change it, in flight too.
+    Free,
+    /// Each player picks a side; the first plane it flies in a mission
+    /// fixes it until the mission ends.
+    Locked,
+    /// The host picks each player's side (Autobalance, John 2026-10-09):
+    /// players cannot change it, and it stays fixed in flight.
+    Balanced,
+}
+
+/// A side's name, as players read it: "Bluefor" for the friendly side,
+/// "Redfor" for the enemy (the lobby pass, John 2026-10-09).
+pub fn side_name(side: tore_sim::ai::launch::Side) -> &'static str {
+    match side {
+        tore_sim::ai::launch::Side::Friendly => "Bluefor",
+        tore_sim::ai::launch::Side::Enemy => "Redfor",
+    }
 }
 
 /// Who fights whom, for scoring.
@@ -158,6 +187,7 @@ coded!(Mode: Coop = 0, Pvp = 1);
 coded!(Visibility: Hidden = 0, Local = 1, Public = 2);
 coded!(LoadoutRule: Own = 0, Any = 1);
 coded!(Respawn: None = 0, AiSlot = 1, Revive = 2);
+coded!(Sides: Free = 0, Locked = 1, Balanced = 2);
 coded!(Fight: Sides = 0, FreeForAll = 1);
 coded!(ScoreTally: Kills = 0, Damage = 1, Ratio = 2);
 coded!(KillOwner: Total = 0, Side = 1, Player = 2);
@@ -216,7 +246,7 @@ const OFF_ON: &[(u32, &str)] = &[(0, "off"), (1, "on")];
 const OFF_ON_VALUES: &[u32] = &[0, 1];
 
 /// Every setting, in number order: the registry.
-pub const REGISTRY: [Setting; 22] = [
+pub const REGISTRY: [Setting; 23] = [
     Setting {
         number: number::MODE,
         name: "mode",
@@ -286,13 +316,16 @@ pub const REGISTRY: [Setting; 22] = [
     Setting {
         number: number::LOCK_SIDES,
         name: "lock-sides",
-        allowed: Allowed::List(OFF_ON_VALUES),
+        // The lobby pass (slice W0) adds `balanced`, Autobalance (John,
+        // 2026-10-09), and makes it PvP's alone: co-op humans are always
+        // on the friendly side.
+        allowed: Allowed::List(&[0, 1, 2]),
         unit: Unit::Count,
-        words: OFF_ON,
+        words: &[(0, "off"), (1, "on"), (2, "balanced")],
         coop: 0,
         pvp: 1,
         change: Change::InLobby,
-        pvp_only: false,
+        pvp_only: true,
     },
     Setting {
         number: number::LOADOUTS,
@@ -341,7 +374,8 @@ pub const REGISTRY: [Setting; 22] = [
     Setting {
         number: number::REVIVE_DISTANCE,
         name: "revive-distance",
-        allowed: Allowed::List(&[1, 5, 10, 20, 40]),
+        // Retail's 1 to 40, then 50 to 150 (opinionated, John 2026-10-09).
+        allowed: Allowed::List(&REVIVE_DISTANCES),
         unit: Unit::NauticalMiles,
         words: &[],
         coop: 10,
@@ -471,6 +505,21 @@ pub const REGISTRY: [Setting; 22] = [
         words: &[],
         coop: crate::host::config::DEFAULT_SNAPSHOT_RATE,
         pvp: crate::host::config::DEFAULT_SNAPSHOT_RATE,
+        change: Change::InLobby,
+        pvp_only: false,
+    },
+    // The lobby pass (slice W0): whether a lost AI aircraft comes back,
+    // under the same lives and delay as a player (John, 2026-10-09: on by
+    // default, greyed while `respawn` is `none`). It has no effect while
+    // `respawn` is `none` ([`Store::ai_respawn`]).
+    Setting {
+        number: number::AI_RESPAWN,
+        name: "ai-respawn",
+        allowed: Allowed::List(OFF_ON_VALUES),
+        unit: Unit::Count,
+        words: OFF_ON,
+        coop: 1,
+        pvp: 1,
         change: Change::InLobby,
         pvp_only: false,
     },
@@ -758,8 +807,24 @@ impl Store {
         self.value(number::FRIENDLY_FIRE) != 0
     }
 
+    /// How players choose their side; always free in co-op, where the
+    /// setting does not apply.
+    pub fn sides(&self) -> Sides {
+        if self.mode() != Mode::Pvp {
+            return Sides::Free;
+        }
+        Sides::from_value(self.value(number::LOCK_SIDES)).unwrap_or(Sides::Locked)
+    }
+
+    /// Whether a player's side is fixed in flight: locked once flown, or
+    /// balanced by the host.
     pub fn lock_sides(&self) -> bool {
-        self.value(number::LOCK_SIDES) != 0
+        self.sides() != Sides::Free
+    }
+
+    /// Whether the host picks the sides (Autobalance).
+    pub fn balanced(&self) -> bool {
+        self.sides() == Sides::Balanced
     }
 
     pub fn loadouts(&self) -> LoadoutRule {
@@ -773,6 +838,12 @@ impl Store {
     /// Revivals a player has each mission; `None` for unlimited.
     pub fn lives(&self) -> Option<u32> {
         Some(self.value(number::LIVES)).filter(|&lives| lives != UNLIMITED_LIVES)
+    }
+
+    /// Whether a lost AI aircraft respawns: the `ai-respawn` setting, while
+    /// `respawn` is not `none` (slice W0; the respawn itself is slice R1's).
+    pub fn ai_respawn(&self) -> bool {
+        self.respawn() != Respawn::None && self.value(number::AI_RESPAWN) != 0
     }
 
     pub fn revive_delay_seconds(&self) -> u32 {

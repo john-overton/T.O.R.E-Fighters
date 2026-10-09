@@ -309,7 +309,12 @@ pub fn capture(world: &World, seat: SeatId) -> Option<Report> {
             }
             aircraft.push(actor_airframe(mission, slot.id, slot.side == side));
         }
-        requirements = Requirements::of(wings, plane.0, side);
+        requirements = Requirements::of(
+            wings,
+            plane.0,
+            side,
+            &world.revival.objective_lineages(&world.roster),
+        );
     }
     Some(report(&Ending {
         ledger: &state.ledger,

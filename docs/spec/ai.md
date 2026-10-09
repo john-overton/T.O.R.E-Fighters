@@ -460,7 +460,87 @@ callsign; the followers re-form behind the new leader in member order, taking
 formation slots 1, 2 and so on. A member that was following the lost leader in
 to land stops, as the wing abort does. When the AI takes the lead nothing is
 said; the radio call a human who takes the lead hears is in the
-[architecture guide](../ARCHITECTURE.md#lead-succession).
+[architecture guide](../ARCHITECTURE.md#lead-succession). In a networked game
+with revival the [lead hold](#lead-hold-in-games-with-revival) changes this
+for a human lead.
+
+### Lead hold in games with revival
+
+**Opinionated: the rules are John's of 2026-10-09 (the lobby pass); the
+ordering, the owner of a lead an AI lost while its humans wait, and the HUD
+lines are agent decisions.** In a networked game, co-op or PvP, whose respawn
+rule is not `none`, a human who leads a flight keeps its lead while dead,
+waiting to revive, in the lobby with its seat held, away (the AI flying its
+plane for it), or flying back after a revival. Single player, and a game with
+`respawn none`, keep the rule above unchanged.
+
+- **The owner.** A flight's lead belongs to the human who flies its leading
+  plane: from the start, by taking it, or by succeeding a lost AI lead. When
+  an AI lead is lost while every human in the flight waits to revive, the
+  lowest of them owns the lead. "Lowest" is the member number of the human's
+  current plane, then the seat, the order the rule above uses; a revived
+  human's new plane has a higher member number than its old one.
+- **The stand-in.** While the owner does not fly, the flight is led by a
+  stand-in chosen by the rule above (the lowest flying human, else the lowest
+  flying AI member). Everything that follows a leader follows the stand-in.
+  Under an AI stand-in the flight flies the
+  [mission of opportunity](#mission-of-opportunity-after-a-lost-human-leader);
+  a human stand-in may give wing orders. A stand-in that is lost passes the
+  stand-in's place on the same way. A human stand-in reads "You lead the
+  flight until Viper flies again." (the owner's player by callsign, the
+  lobby pass's follow-up F1; the owner's plane by its radio name, "Red one",
+  when the mission has no callsign for it), with no voice, instead of
+  "You're the Wingleader now". A stand-in never
+  becomes the owner while the owner is in the game.
+- **The lead given back.** As soon as the owner's new plane flies in the
+  flight, it leads: the mission of opportunity ends, the flight re-forms on
+  it in member order, and each AI wingman flies back into formation, except
+  one engaged in combat (holding a target), which finishes its fight first
+  and then re-forms (John, 2026-10-09). The owner reads "You lead your flight
+  again." with no voice. John accepts that the owner may be out of the fight
+  while it revives or flies back.
+- **The owner leaves the game** (it leaves, is kicked, or drops and is no
+  longer kept by the host): the lead goes to the next human in the flight,
+  who leads at once if flying (and hears "You're the Wingleader now"), or
+  owns the held lead if waiting to revive. With no human left the current
+  leader leads as an ordinary lead, and the AI's own succession goes on. A
+  human who leaves the flight for the lobby with a living plane, or whose
+  revival puts it in another flight, has left the flight the same way; one
+  who leaves with a lost plane keeps its held seat and the lead.
+- **AI-only flights** keep the rule above: the lead passes down the flight
+  as aircraft are lost, and an AI aircraft that respawns joins as the last
+  wingman of the current lead, so the loop goes on for as long as the
+  mission does.
+
+### AI respawn in networked games
+
+**Opinionated: the rules are John's of 2026-10-09 (the lobby pass); the
+2,000 ft step back, the room rule and the retiring of AI wrecks are fitted
+or agent decisions, recorded in the
+[architecture guide](../ARCHITECTURE.md#death-revival-and-lives).** In a
+networked game, co-op or PvP, whose respawn rule is not `none` and whose King
+has AI respawn on (the default), a lost AI aircraft that no player holds comes
+back. Single player never respawns.
+
+- **When.** After the same delay as a human's revival, and while the original
+  aircraft's lineage has lives left (lives count per original aircraft, since
+  an AI aircraft has no player; unlimited by default). A delay of 0 respawns on
+  the next tick. An aircraft the AI flies for an away or dropped player is that
+  player's own revival, not an AI respawn.
+- **Where.** At the flight's original spawn point (the aircraft's own start
+  position and heading), not near the lead and not at the revival distance. If
+  a living aircraft is within 2,000 ft of the point, the point steps back 1 nm
+  along the reverse of the heading, up to five times, and never off the map.
+- **What.** The same aircraft with full fuel, the loadout the lobby gave that
+  slot (else the standard load) cut by the revival weapons setting, the
+  flight's own skill and the flight's orders. It gets a fresh decision stream
+  of its own.
+- **Joining the flight.** It is the flight's last wingman: it takes the lowest
+  formation slot no living wingman holds (never above slot 9) and flies to its
+  lead; a flight in a mission of opportunity gives it free engagement like the
+  rest. Its member number is one past the flight's highest, so it is last in
+  line for the lead.
+- **Silent.** No radio call and no HUD line for an AI respawn.
 
 ### Mission of opportunity after a lost human leader
 

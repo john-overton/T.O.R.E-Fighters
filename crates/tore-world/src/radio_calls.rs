@@ -163,6 +163,24 @@ pub fn label(member: &Member) -> String {
     }
 }
 
+/// The lead hold's HUD line for an owner given its flight's lead back (the
+/// lobby pass's slice R2; agent decision: text only, no voice, in place of
+/// "You're the Wingleader now").
+pub const LEAD_AGAIN: &str = "You lead your flight again.";
+
+/// The lead hold's HUD line for a human who stands in for the flight's
+/// owner, named by the owner's callsign ("Viper", the host's name for the
+/// player, follow-up F1) or, with none, the radio label of the owner's newest
+/// plane ("Blue one"), or as the flight's lead when it has neither (the lobby
+/// pass's slice R2; agent decision: text only, no voice, in place of "You're
+/// the Wingleader now").
+pub fn stand_in_line(owner: Option<&str>) -> String {
+    match owner {
+        Some(owner) => format!("You lead the flight until {owner} flies again."),
+        None => "You lead the flight until its lead flies again.".to_owned(),
+    }
+}
+
 /// The recordings of the flight colours (the first five flights; the others
 /// have the words only), as the assignment call has them.
 const COLOUR_STEMS: [&str; 5] = ["^RED", "^BLUE", "^GREEN", "^BLACK", "^WHITE"];

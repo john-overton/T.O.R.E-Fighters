@@ -362,7 +362,7 @@ impl Config {
 
 /// Every setting's name, in the guide's order: the server's own, then the
 /// King's (stage F phase 2) by their registry names.
-pub const SETTINGS: [&str; 37] = [
+pub const SETTINGS: [&str; 38] = [
     "name",
     "port",
     "address",
@@ -400,6 +400,7 @@ pub const SETTINGS: [&str; 37] = [
     "kill-owner",
     "observer-delay",
     "idle-ai",
+    "ai-respawn",
 ];
 
 /// How many of the registry's units one of the file's is: `revive-delay` and
@@ -617,6 +618,48 @@ mod tests {
             "line 1: `king-mission` needs a King: add `king first-player`"
         );
         assert!(parse("king none\nking-mission open\nmode co-op\ntime-limit 90").is_ok());
+    }
+
+    /// The lobby pass (slice W0): `lock-sides balanced`, the revival
+    /// distances to 150 nautical miles and `ai-respawn`.
+    #[test]
+    fn the_lobby_pass_words_read() {
+        assert_eq!(
+            parse("mode pvp\nlock-sides balanced\nrevive-distance 150\nai-respawn off\n")
+                .unwrap()
+                .settings,
+            [
+                (number::MODE, 1),
+                (number::LOCK_SIDES, 2),
+                (number::REVIVE_DISTANCE, 150),
+                (number::AI_RESPAWN, 0),
+            ]
+        );
+        for distance in [50, 75, 100, 150] {
+            assert_eq!(
+                parse(&format!("revive-distance {distance}"))
+                    .unwrap()
+                    .settings,
+                [(number::REVIVE_DISTANCE, distance)]
+            );
+        }
+        assert_eq!(
+            parse("ai-respawn on").unwrap().settings,
+            [(number::AI_RESPAWN, 1)]
+        );
+        assert_eq!(
+            refused("revive-distance 60"),
+            "line 1: `revive-distance` must be 1, 5, 10, 20, 40, 50, 75, 100 or 150, not `60`"
+        );
+        assert_eq!(
+            refused("mode pvp\nlock-sides even"),
+            "line 2: `lock-sides` must be off, on or balanced, not `even`"
+        );
+        // Sides are PvP's alone now.
+        assert_eq!(
+            refused("lock-sides balanced"),
+            "line 1: `lock-sides` applies only in PvP: add `mode pvp`, or leave it out"
+        );
     }
 
     #[test]
@@ -857,6 +900,7 @@ mod tests {
             "kill-owner side",
             "observer-delay 0",
             "idle-ai 10",
+            "ai-respawn off",
         ];
         assert_eq!(samples.len(), SETTINGS.len());
         for (sample, name) in samples.iter().zip(SETTINGS) {

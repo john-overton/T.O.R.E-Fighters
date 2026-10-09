@@ -2,12 +2,14 @@
 //! docs/ARCHITECTURE.md, "What moves with the host"): lives and losses by
 //! player, the seats held for players whose plane is lost and the revivals
 //! asked for, both by player (join order) rather than connection, the sides'
-//! starts and the planes revivals added. Every field of [`Revivals`] is
+//! starts and the planes revivals added, (slice R1) the AI lineages'
+//! respawns and every lineage's original spawn, and (follow-up F1) the
+//! players waiting to take a lineage's respawn. Every field of [`Revivals`] is
 //! named, so a field added to it fails to compile here until it is coded or
 //! skipped with its class.
 
 use super::super::state::{Restoring, Result, Saving, load_side, save_side};
-use super::{Pending, Player, Revivals};
+use super::{Lineage, Pending, Player, Revivals};
 use crate::wire::messages::Spawned;
 use std::collections::BTreeMap;
 use tore_net::ConnectionId;
@@ -15,6 +17,8 @@ use tore_sim::ai::launch::WingId;
 use tore_sim::checkpoint::{Checkpoint, Loader, Saver, invalid};
 
 tore_sim::checkpoint_struct!(Player { used, lost });
+
+tore_sim::checkpoint_struct!(Lineage { used, lost, told });
 
 fn save_pending(s: &mut Saver, pending: Pending) -> Result<()> {
     match pending {
@@ -95,12 +99,20 @@ pub(in crate::host) fn save_revivals(
         // step and taken after it in the same tick (`revive_after`), so it
         // is empty between ticks, where parts are coded.
         making: _,
+        // Scratch as `making` is: the AI respawns of one tick (slice R1).
+        respawning: _,
+        // Scratch as `making` is: the lead hold's owners before one tick's
+        // step, for its log (slice R2).
+        lead_before: _,
         players,
         held,
         pending,
         waiting,
         starts,
         spawned,
+        lineages,
+        origins,
+        awaiting,
     } = revivals;
     players.save(s, None)?;
     by_order(saving, held.iter().map(|(c, seat)| (*c, *seat))).save(s, None)?;
@@ -117,7 +129,10 @@ pub(in crate::host) fn save_revivals(
     for spawned in spawned {
         save_spawned(s, spawned)?;
     }
-    Ok(())
+    lineages.save(s, None)?;
+    origins.save(s, None)?;
+    // The players waiting for a lineage's respawn (follow-up F1), by order.
+    by_order(saving, awaiting.iter().map(|(c, root)| (*c, *root))).save(s, None)
 }
 
 pub(in crate::host) fn load_revivals(
@@ -146,6 +161,13 @@ pub(in crate::host) fn load_revivals(
     for _ in 0..l.count()? {
         spawned.push(load_spawned(l)?);
     }
+    let lineages = Checkpoint::load(l, None)?;
+    let origins = Checkpoint::load(l, None)?;
+    let awaiting: BTreeMap<u64, tore_world::seats::PlaneId> = Checkpoint::load(l, None)?;
+    let awaiting = awaiting
+        .into_iter()
+        .map(|(order, root)| (restoring.connection(order), root))
+        .collect();
     Ok(Revivals {
         players,
         held,
@@ -154,6 +176,11 @@ pub(in crate::host) fn load_revivals(
         waiting,
         starts,
         spawned,
+        lineages,
+        origins,
+        respawning: Vec::new(),
+        lead_before: Vec::new(),
+        awaiting,
     })
 }
 
@@ -196,6 +223,24 @@ mod tests {
                 ),
             ]),
             making: Vec::new(),
+            respawning: Vec::new(),
+            lead_before: Vec::new(),
+            awaiting: BTreeMap::from([(c(8), PlaneId(2)), (c(99), PlaneId(5))]),
+            lineages: BTreeMap::from([
+                (
+                    PlaneId(2),
+                    Lineage {
+                        used: 3,
+                        lost: Some(1_200),
+                        told: true,
+                    },
+                ),
+                (PlaneId(5), Lineage::default()),
+            ]),
+            origins: BTreeMap::from([
+                (PlaneId(0), ([1.5, 20_000., -3e5], 0.25)),
+                (PlaneId(2), ([-4096., 20_000., 1.2e5], -3.0)),
+            ]),
             waiting: vec![c(8), c(7)],
             starts: [Some([1., -2.5, 3e5]), None],
             spawned: vec![Spawned {
@@ -257,6 +302,9 @@ mod tests {
         assert_eq!(restored.spawned, revivals.spawned);
         assert_eq!(restored.players[&1].used, 2);
         assert_eq!(restored.players[&1].lost, Some((PlaneId(3), 840)));
+        assert_eq!(restored.lineages, revivals.lineages);
+        assert_eq!(restored.origins, revivals.origins);
+        assert_eq!(restored.awaiting, BTreeMap::from([(c(102), PlaneId(2))]));
         let back = |connection: ConnectionId| Some(u64::from(connection.0 - 100));
         assert_eq!(
             to_bytes(|s| save_revivals(s, &Saving::new(&back), &restored)).unwrap(),

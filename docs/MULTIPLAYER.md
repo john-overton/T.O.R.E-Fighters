@@ -8,7 +8,10 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Planning, 2026-09-28. Nothing on this page is implemented yet.
+Status, 2026-10-09. This page began as the 2026-09-28 plan. Each section
+carries *Built* notes that say what Milestone 2 has delivered so far and which
+agent decisions the build settled; text marked *Designed* or *Planned* is not
+built yet.
 
 This is the design guide for Milestone 2 multiplayer. It is built from the
 feature spec John wrote on 2026-09-28 and his planning answers the same day.
@@ -31,7 +34,9 @@ it carries one of these marks:
 - [Goals](#goals)
 - [Roles and identity](#roles-and-identity)
 - [Lobby and Quick Mission flow](#lobby-and-quick-mission-flow)
+  - [The lobby since the lobby pass](#the-lobby-since-the-lobby-pass): layout, scroll bars, Mission... for everyone, the ready hint, PvP sides, Sides and Autobalance
 - [Slots, AI fill and handoff](#slots-ai-fill-and-handoff)
+  - [AI respawn](#ai-respawn), [revival distance and separation](#revival-distance-and-separation), [lead hold](#lead-hold)
 - [Rejoin and observers](#rejoin-and-observers)
 - [Comms and chat](#comms-and-chat)
 - [Flight data link](#flight-data-link)
@@ -112,14 +117,15 @@ builds a mission as usual, then opens its slots to humans.
 | Max human players | Default 30; the rest stays AI. Co-op can seat at most 15, see [slots](#slots-ai-fill-and-handoff) |
 | Host | Calculated (default) or pinned to a specific player |
 | Slot locks | Reserve or close specific slots, including lead |
-| Lock sides | PvP only: prevents switching sides mid-mission |
+| Sides | PvP only: Free, Locked once flown (prevents switching sides mid-mission) or Balanced by the host ([Autobalance](#autobalance)) |
 | Visibility | Public, private or password |
 | Join in progress | On or off |
 | Kick | Frees the slot back to AI |
 | Release reserved aircraft | Frees a disconnected player's aircraft for others |
 | Friendly fire | On or off |
 | Respawn rules | None, into an open AI slot, or back at a base |
-| Revival | Retail's settings apply to every respawn: lives (0 to 10, or unlimited), delay (0 to 5 minutes), distance from the battle (1 to 40 miles) and weapons (with missiles, without missiles, guns only, half guns) |
+| Revival | Retail's settings apply to every respawn: lives (0 to 10, or unlimited), delay (0 to 5 minutes), distance from the battle (1 to 40 miles as retail, up to 150 since the lobby pass) and weapons (with missiles, without missiles, guns only, half guns) |
+| AI respawn | On or off: whether a lost AI aircraft comes back under the revival rules; greyed while the respawn rule is None ([AI respawn](#ai-respawn)) |
 | Scoring | PvP: retail's fight type (sides or free for all), kill tally (total kills, total damage or kill ratio), time limit (1 to 30 minutes), kill limit (1 to 10) and kill owner (total, one side or one player) |
 | Difficulty and realism | Inherits the Quick Mission settings, locked for all humans |
 
@@ -148,31 +154,34 @@ never kept. A join or New opens the lobby (EF8, below). How it works:
 [architecture](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
 
 *Built (EF8, 2026-10-01): the lobby screen.* Join and New open the **lobby**
-(the screen reads "Lobby"). Its head shows the game's name, the mission's
-summary and the start rule in plain words. **Slots** lists every friendly
-aircraft (wing, member, aircraft, who holds it or AI, a tick when the holder is
-ready); a click on a free slot takes it, a click on one's own frees it, and a
-slot another player holds is dimmed and cannot be clicked. **Players** lists
+(the screen reads "Lobby"). Its head shows the game's name and the King's
+settings in a line (EF8 also showed the mission's summary and the start rule;
+the lobby pass moved those, [below](#the-lobby-since-the-lobby-pass)). **Slots**
+lists every aircraft players may take (wing, member, aircraft, who holds it or
+AI, a tick when the holder is ready); a click on a free slot takes it, a click on
+one's own frees it, and a slot another player holds is dimmed and cannot be
+clicked. **Players** lists
 the callsigns with the King's crown, the house of the player whose machine runs
 the game, a tick for ready and a red cross with the reason (shown under the
 lists) for a player whose game cannot play the mission. **Messages** is the
-chat box and its line (Enter sends to all). The buttons: **Mission...** (the
-King) opens the Quick Mission creator with its OK reading **Accept**, Start
+chat box and its line (Enter sends to all). The buttons: **Mission...** opens
+the Quick Mission creator, for the King with its OK reading **Accept**, Start
 locked to Airborne ("Multiplayer: everyone starts airborne") and what a host
-cannot take refused before anything is sent; **Loadout** opens Load Ordnance
+cannot take refused before anything is sent, and for everyone else read only
+(since the lobby pass); **Loadout** opens Load Ordnance
 for the player's own aircraft, with Accept and Cancel, the mission's Guns only
 applied and Cheat loading refused on the page; **Ready** toggles (a player who
 readies without choosing a loadout flies the standard stores, and Messages says
 so); **Fly** (the King, blue when everyone holding a slot is ready) starts the
 mission, and says "Not ready: Hawk." otherwise; **Kick** (the King, on a
-selected player) asks for the reason the player will see; **Leave** returns to
+selected player; since F2-L inside **Players...**) asks for the reason the player will see; **Leave** returns to
 Direct Connection, and asks "Leaving ends the game for everyone. Leave?" of the
 King. While a mission flies the lobby stays open to a late joiner or to a
 player who ended their flight: take a slot and press **Join** to fly at once,
 with the standard stores; the King's Fly then reads **End Mission**. After a
 mission each player reads the debrief and returns to the lobby, still
 connected, slots and loadouts kept and ready cleared. A dedicated server's
-lobby is the same without the King's buttons. How it works, the layout and
+lobby is the same without the King's buttons (its Mission... is read only). How it works, the layout and
 what was measured:
 [architecture](ARCHITECTURE.md#the-lobby-screen-as-built-ef8).
 
@@ -224,6 +233,178 @@ bearing of its side's start, with the revival weapons
 Join flies again, and the lost aircraft stays with its player until it flies
 again or leaves the game.
 
+### The lobby since the lobby pass
+
+*Built (the lobby pass, 2026-10-09).* John's requests of 2026-10-09 changed
+the lobby in five ways: the lists scroll, PvP shows its sides, the mission
+can be read by everyone, the host can balance the sides, and the screen
+says what to do next. His decisions and answers are in the
+[decisions table](#made-by-john-on-2026-10-09-for-the-lobby-pass); how each part
+works is in the [architecture](ARCHITECTURE.md#the-lobby-screen-as-built-ef8).
+This section is what a player sees.
+
+#### Layout
+
+From the top of the screen:
+
+| Part | What it shows |
+| --- | --- |
+| Game, Rules | The game's name, and the King's settings in one line ("PvP by sides, 5 kills or 10 minutes, revival with unlimited lives, sides locked"). The Mission line and the King line that used to sit between them are gone: the mission is read on **Mission...**, and the start rule moved into the ready hint |
+| Slots (left) | Every aircraft players may take, with a scroll bar. In PvP the **Bluefor** and **Redfor** boxes sit on its heading row |
+| Players (right) | Callsigns with the crown, the house, ready ticks and platforms, with a scroll bar |
+| Hint line | What to do next, or the reason the selected player cannot play |
+| Messages and chat line | The game's words and chat, with a scroll bar |
+| Ready hint | One dim line above the buttons that says what this player does next so the King can start (below) |
+| Buttons | The King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Everyone else: Mission..., Settings..., Loadout, Ready, Leave, filling the row from the right so Leave is always last |
+
+**Scroll bars.** Slots, Players and Messages scroll with retail's red slider
+knob (the Sound Prefs slider) in a grey slotted track, in place of the
+PREV, NEXT and PAGE buttons the Slots list had; Players, which had no way to
+show that more rows exist, gains one. Drag the knob, click the track above or
+below it to move a page, or turn the wheel (two rows a notch in a list, three
+lines in Messages). The arrow keys still move the selection and the list
+follows it. When everything fits the track is drawn empty, so nothing shifts.
+Direct Connection's and the Internet Lobby's Messages boxes use the same bar;
+their games lists keep the PREV and NEXT rocker. The track's three pieces
+(`SLIDETOP`, `SLIDEMID`, `SLIDEBOT`) are new to the import. A player whose
+import predates them sees a flat grey track under the red knob, and the log
+suggests a re-import; nothing is forced.
+
+#### Mission... for everyone
+
+**Mission...** is on every player's button row, enabled once connected and in
+every phase (John: no separate "Game info" button).
+
+| Who and when | What opens |
+| --- | --- |
+| The King, in the lobby | The Quick Mission creator, its OK reading **Accept**, as before, but opened on **the lobby's current mission**, not on the King's last local draft. Accept lays the creator's fields over the lobby's mission, so the cheats and weather overrides the King set in Settings are kept |
+| Anyone else, in any phase | The same page, **read only**: "View only" in its header, **Back** in OK's place (Enter and Esc close it too), and every click on a field, left or right, says "Only the King changes the mission." Fields the lobby's mission does not carry (the nationalities and the situation) read "as the King's", dimmed. An aircraft or theater the reader's game lacks is tinted as in the King's creator, so a player sees what they cannot fly. If the King changes the mission while the page is open, it redraws and says "The King changed the mission." |
+| The King, while the mission flies | Read only, as above; a click says "The mission can change only in the lobby." |
+| The King, on a dedicated server with `king-mission locked` | Read only. The server tells the lobby (protocol 20), so the page opens with "View only: this is the lobby's mission. Back returns to the lobby. This server's mission is fixed." and a click says "This server's mission is fixed." |
+
+The read-only page is built from the mission text the lobby already carries,
+and the creator reads it back to the same mission for every mission it can
+make (tested over every value and 400 generated missions).
+
+#### The ready hint
+
+The line above the buttons, in the dim face, says what this player does next:
+
+| Who and when | Text |
+| --- | --- |
+| Lobby, holds no slot | "Take a slot and press Ready so the King can start the mission." |
+| Lobby, holds a slot, not ready | "Press Ready so the King can start the mission." |
+| Lobby, ready, not the King | "You are ready. The King starts the mission with Fly." |
+| The King, not everyone ready | "Press Fly when everyone holding a slot is ready." |
+| The King, everyone ready | "Everyone is ready: press Fly to start the mission." |
+| A server with no King named | "The mission starts when the King presses Fly and everyone holding a slot is ready." |
+| A server that starts at the first ready player | "The mission starts as soon as the first player holding a slot is ready." |
+| A server whose mission is always flying | "This server's mission is always flying: take a slot and press Ready to join it." |
+| Mission flying, no slot | "The mission is flying: take a slot and press Join." |
+| Mission flying, holds a slot | "The mission is flying: press Join to take your aircraft in." |
+| Mission flying, in it, or watching | "You are flying the mission." or "You are watching the mission." |
+| The player's game cannot play the mission | "Your game cannot play this mission." (the reason itself is in the hint line above) |
+
+The hint line above it keeps its older job, the selected player's detail or
+how to take a slot. In PvP, with no side yet, it reads "Check Bluefor or
+Redfor to join a side, or click a free slot."
+
+#### PvP sides in the lobby
+
+In co-op every human is Bluefor, so none of this appears. In PvP:
+
+**Colours** (John, 2026-10-09).
+
+| Slot | Bluefor | Redfor |
+| --- | --- | --- |
+| Open (the AI flies it, anyone may take it) | Light blue text (134, 182, 223) | Light red text (206, 113, 121) |
+| Taken, including the reader's own | A solid royal blue bar (36, 81, 186) with the holder's name in white | A solid bright red bar (210, 36, 40) with the holder's name in white |
+| Held by the AI for an away player | The bar, with dimmed text | The bar, with dimmed text |
+| Closed, or kept for another player | Dimmed, as in co-op | Dimmed, as in co-op |
+
+The wing cell names the side too, "Blue 1 #2" and "Red 1 #2" (John), so the
+list reads without colour. In the
+Players list a player's callsign takes their side's light colour, and a player
+with no side stays plain. A player whose game cannot play the mission is
+dimmed rather than red, so red means Redfor only; the cross icon still marks
+them.
+
+**The Bluefor and Redfor boxes.** A player's side is the side of the slot they
+hold, and a player with no slot has no side. Each box is a retail check box
+labelled with its slots taken over its total ("Bluefor 3/5"); a side whose
+slots are all held, closed or kept for someone else reads full, as 5/5.
+
+| You | The box | A click |
+| --- | --- | --- |
+| Have no side, and the side has a free slot | Unchecked, lit | **Checks** the box: you take that side's lowest-numbered free slot (so the first humans on a side lead its flights), and the Slots list shows that side only |
+| Have no side, and the side is full | Unchecked, greyed | "Redfor is full." |
+| Are on this side | **Checked** | **Unchecks** it: you leave the slot, your ready mark clears and you have no side again |
+| Are on the other side | Unchecked, greyed | "Uncheck Bluefor first." Leave your side, then check the other (if it is not full) |
+| Are under Autobalance | Your assigned side checked, both greyed | "Autobalance picks the sides." |
+| Are flying with sides locked | The side you flew checked, both greyed | "Sides are locked until the mission ends." |
+| Cannot play the mission | Both greyed | The reason |
+
+```mermaid
+flowchart LR
+    N(["No side"]) -->|"check a box, or click a free slot"| S(["On a side"])
+    S -->|"uncheck the box, or click your own slot"| N
+```
+
+From a side, a click on another free slot of the same side only moves you
+inside it, and the other side's box stays greyed until you leave.
+
+With neither box checked the Slots list shows both sides, Bluefor first. A
+click on a slot row works as before inside what is shown: a free slot on your
+side moves you there, your own slot leaves it (and unchecks the box), and with
+no side any free slot joins its side and checks that box. The King's right
+click on a slot is unchanged, but a King on a side sees only that side, so
+closing a slot on the other side needs an uncheck first. Tab reaches a lit box
+after the Slots list, and Space or Enter presses it. A late joiner uses the
+boxes the same way, and a free AI aircraft on the side is theirs to Join.
+
+#### Sides: Free, Locked once flown, Balanced by the host
+
+The King's **Sides** row (Settings, Game page; `lock-sides` in a server's
+file) used to be Lock sides and now has three values. It is PvP only, and
+greyed in co-op.
+
+| Value | `lock-sides` | What it does |
+| --- | --- | --- |
+| Free | `off` | Players choose and change side whenever the boxes allow it |
+| Locked once flown | `on` (the PvP default) | A player may choose freely in the lobby, but once they fly a plane they keep that side until the mission ends: "Sides are locked until the mission ends." |
+| Balanced by the host | `balanced` | **Autobalance**: the host gives each player a side and players cannot change it. It also locks sides in flight |
+
+The Rules line says "sides locked" or "sides balanced".
+
+#### Autobalance
+
+*Built (the lobby pass, slice A1; John's rules marked).*
+
+- **Who it counts.** Humans holding a slot (in flight, a plane). Observers and
+  players whose game cannot play the mission are neither counted nor seated.
+- **Seating.** A player without a slot goes to the side with **fewer humans**
+  (John); on a tie, the side with more free slots; on a tie, Bluefor. The host
+  gives them that side's lowest-numbered free slot, not ready, and says
+  "Autobalance put you on Redfor." A side with no free slot is skipped, so
+  uneven sides fill: with 2 Bluefor and 10 Redfor slots, six players sit 2 and
+  4. A player who fits nowhere waits without a slot ("Both sides are full."),
+  and is seated when one frees.
+- **No changing side.** The boxes are greyed, a slot of the other side is
+  refused, and so is leaving the slot, with "Autobalance picks the sides." A
+  free slot of the player's own side can still be taken.
+- **Turning it on** re-deals with the fewest moves. Players keep their side
+  while the sides are within one human of each other; otherwise the host moves
+  players from the larger side, the most recently joined first and **the King
+  last** (John). A moved player is told "Autobalance moved you to Redfor." and
+  loses their ready mark, and their loadout if the new aircraft differs. The
+  ready marks of players who did not move stand.
+- **A player leaving moves nobody** (John). The next joiner goes to the smaller
+  side, and the King re-deals by turning Autobalance off and on.
+- **A mission change** keeps the slots that survive it, whatever side they
+  are on; anyone it frees is seated again by the rule.
+- **In flight** a late joiner is seated on a free AI aircraft of the side the
+  rule gives; a player's revival follows lock sides.
+
 ## Slots, AI fill and handoff
 
 The Quick Mission creator places up to two sides of three wings, with up to five
@@ -245,7 +426,8 @@ take over.
 can lock a slot: **closed** (the AI flies it and no human takes it, the lead
 included) or **reserved** for one callsign. With join in progress off, nobody
 takes an aircraft once the mission flies except to fly again after a loss; with
-lock sides on, a player stays on the side of the first aircraft it flew. A
+sides locked once flown (or balanced by the host), a player stays on the side of
+the first aircraft it flew. A
 revival adds a new aircraft to the player's wing; a mission holds at most 64
 aircraft at once, and the oldest wreck that has rested 30 seconds is retired to
 make room ([architecture](ARCHITECTURE.md#slots-sides-and-joining)).
@@ -261,7 +443,129 @@ re-forms on the new leader. The new leader hears the retail "You're the
 Wingleader now" call ([radio chatter](spec/radio-chatter.md#youre-the-wingleader-now)).
 Single player gains the same succession: the AI takes over from a player who is
 shot down. Built in stage B: the AI passes the lead (B3), and a human who takes
-it hears the call (B4).
+it hears the call (B4). In a game with revival a human lead keeps the lead
+instead while it is lost or waiting ([lead hold](#lead-hold)).
+
+### AI respawn
+
+*Built (the lobby pass, slice R1; John's rules of 2026-10-09 marked).* A shot
+down AI aircraft comes back, in co-op and PvP alike (John).
+
+- **The setting.** **AI respawn** is a row on the Settings panel's Revival page
+  (`ai-respawn`, setting 23): on by default, and greyed while Revival is
+  `none`, because then nothing comes back (John). With it off, humans still
+  revive and the AI does not.
+- **The rules are a human's** (John): the same revival delay, and the same
+  lives, counted per original aircraft, since an AI aircraft has no player. With
+  unlimited lives, the default, the count never shows. Under `ai-slot` an AI
+  aircraft respawns as under `revive`, which keeps the pool of free AI
+  aircraft that `ai-slot` needs.
+- **Where** (John): at its flight's **original spawn point**, with its original
+  heading, not near the lead and not at the revival distance. If another
+  aircraft is within 2,000 ft of the point, it steps back 1 nm at a time, up to
+  five steps, and never off the map. The revival distance below is a human's
+  alone.
+- **What.** The same aircraft, full fuel, the loadout the lobby gave that slot
+  (or the standard load) cut by the revival weapons setting, the flight's own
+  skill, and the flight's orders.
+- **Joining the flight** (John): the new aircraft is the **last wingman** of
+  whoever leads the flight now, so a flight that keeps losing its lead keeps
+  passing the lead down, and respawned aircraft queue at the back of that
+  line. In a flight of AI alone the lead goes on shifting down as fighters die,
+  as it always has.
+- **Whose loss it is.** Only an aircraft nobody holds respawns as the AI's:
+
+```mermaid
+flowchart TD
+    A[An aircraft is lost] --> B{Who held it?}
+    B -->|The AI, for nobody| C[AI respawn, if AI respawn is on and Revival is not none]
+    B -->|A player in the game| D[That player's own revival, as before]
+    B -->|A player who left the game| C
+    B -->|The AI, for an away or dropped player| D
+```
+
+  A player who is away (the AI flies their plane) keeps their own revival on
+  return, so their aircraft is never duplicated. A player who leaves the game
+  hands their aircraft's lineage to the AI.
+- **Room.** A mission holds 64 aircraft at once. Human revivals are made first
+  each tick, and an AI respawn takes the room they leave, retiring the oldest
+  wreck that has rested 30 seconds, or waits. A flight that has used its 254th
+  member number stops respawning.
+- **Nothing is said** on the radio or the HUD for an AI respawn. The server's
+  log and the hosting game's say "Red 2-5 respawned in plane 14 at its original
+  spawn" and the like. Respawns add to nobody's score, and killing a respawned
+  aircraft counts as any AI kill does.
+
+With AI respawn and unlimited lives, a co-op mission ends only on its time
+limit or when the King ends it; multiplayer has no "all enemies destroyed" end.
+
+### Revival distance and separation
+
+*John, 2026-10-09: the distance he meant is the **revival distance**, and he
+also asked for 75 on the **separation**.*
+
+- **Revival distance** (Settings, Revival page; `revive-distance`): 1, 5, 10, 20
+  and 40 nm as retail, and now **50, 75, 100 and 150 nm**. The default stays 10.
+  A human revives at this distance from the battle, on the bearing of their
+  side's start, as before; John's "original spawn point" rule is for the AI
+  alone. A point that would fall off the map, which a long distance near an
+  edge can do, is walked back toward the battle until it is on the map (fitted).
+  A trip back from 150 nm takes about 15 to 20 minutes at cruise.
+- **Separation** (the Quick Mission creator's field 17, `separation-nm` in a
+  mission file): now 1, 2, 5, 10, 20, 50, **75**, 100, 150, 200 and 300 nm.
+  Where a long separation does not fit a small theater, the enemy is placed as
+  far as the map allows; multiplayer's lobby does not yet say so, as single
+  player does. At 150 nm the sides still meet, about 10 minutes in, so a
+  10-minute time limit can end a game first.
+
+### Lead hold
+
+*Built (the lobby pass, slice R2; John's rules of 2026-10-09 marked).* In a
+game with revival (Revival is not `none`), a human who leads a flight **keeps
+the lead** while their aircraft is lost, while they wait to revive, while they
+sit in the lobby holding their seat, and while they fly back after reviving
+(John). Single player and games without revival keep today's rule, where the
+lead passes at once. The behaviour is specified in the
+[AI spec](spec/ai.md#lead-hold-in-games-with-revival).
+
+```mermaid
+flowchart TD
+    L(["Leading"]) -->|"their aircraft is lost, or they wait to revive"| H(["Held: a stand-in leads"])
+    H -->|"their new aircraft joins the flight"| L
+    L -->|"they leave the game"| P(["Passed on"])
+    H -->|"they leave the game"| P
+    P -->|"the next human in the flight is flying"| L
+    P -->|"the next human is waiting to revive"| H
+    P -->|"no human is left"| A(["The AI's own succession"])
+```
+
+- **While the lead is held**, a **stand-in** leads. It is the lowest-numbered
+  flying human, else the lowest-numbered flying AI aircraft, the same order the
+  AI has always used. The flight follows the stand-in as it would any lead. An
+  AI stand-in flies the mission of opportunity; a human stand-in may give wing
+  orders. A stand-in never becomes the owner of the lead.
+- **Two lines on the HUD.** A human who stands in reads "You lead the flight
+  until Viper flies again." (the lead's callsign; for a lead with no known
+  name, the plane's radio label, such as "Red one", and if it has none the
+  line says "until its lead flies again"). The owner, when their new aircraft joins, reads "You lead your
+  flight again." Both are text only, with no voice, and neither player hears
+  "You're the Wingleader now" for them. A player who takes the lead for good,
+  because the owner left, hears the call as always.
+- **The lead goes back** the moment the owner's new aircraft is in the flight.
+  The flight re-forms on it in member order, and the AI wingmen fly back into
+  formation, **except one that is engaged in combat, which finishes its fight
+  first** and then re-forms (John). The owner then orders them as usual.
+- **When the owner leaves the game** (leaves, is kicked or drops and is no
+  longer kept), the lead goes to the next human in the flight, who leads at
+  once if flying and holds the lead if waiting to revive. With no human left,
+  the AI's succession goes on. A player who leaves the flight to the lobby with
+  a living aircraft has left the flight the same way; one who leaves with a
+  lost aircraft keeps their seat and the lead.
+- **Away.** An away player's plane (the AI flying it) keeps the lead, and the
+  player gets it back with the plane.
+
+John accepts that a held lead can leave a flight without its leader for a long
+time, since revival can be minutes and 150 nm away.
 
 ## Rejoin and observers
 
@@ -1249,6 +1553,42 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Two-seat ejection | John, 2026-10-06 (Q60): in a two-seater Shift+E twice ejects the RIO too: two seats and two chutes, the RIO first, a short interval apart, both drawn and recorded; in a networked two-seater the crew follows the same rules. *Agent decisions (B5):* 0.4 seconds apart; the same rule for the AI's ejections; the debrief counts the pilot alone; the second chute rides the pilot-entity stream under the aircraft's id with bit 31 set, so no protocol change (built in B5); a checkpoint keeps the second chute, so a standby and a host taking over mid-descent keep it (B6, no protocol change) |
 | The relay's rate | John, 2026-10-06 (Q55): the master's `relay-rate` default goes from 64 to 128 KB/s each way per channel, since a relayed player's busiest second at 60 snapshots a second is 63 to 74 KB/s (D12). A master whose file sets `relay-rate` keeps its own value (built in R1; [the master's guide](MASTER-SERVER.md#the-configuration-file)) |
 | Avoidance heading follows the aircraft that set it | John, 2026-10-06 (Q61): the AI's traffic avoidance rule of 2026-09-29 keeps its heading only while the aircraft that set it is still a conflict; a conflict with another aircraft sets a fresh heading, 30 degrees off the current one and away from the new aircraft. Two flightmates that turned right together for one head-on aircraft no longer hold each other on that heading until they collide (`ai-regress-visual-incoming-flap`). Single-player AI fights move (built in B4b; [the AI spec](spec/ai.md#traffic-avoidance)) |
+
+### Made by John on 2026-10-09 for the lobby pass
+
+Side colours, distances, AI respawn and the lobby overhaul
+([the lobby](#the-lobby-since-the-lobby-pass), [AI respawn](#ai-respawn),
+[revival distance and separation](#revival-distance-and-separation),
+[lead hold](#lead-hold)). His request and his answers, as the lead relayed them:
+
+| No. | Decision |
+| --- | --- |
+| D1 | AI respawn applies in both co-op and PvP. AI follow the same lives and respawn delay rules as humans (lives are counted per original aircraft, since an AI aircraft has no player) |
+| D2 | Respawned AI aircraft come back at their flight's original spawn point, not near the current lead. This rule is for the AI alone: humans keep the revival distance (answer 1) |
+| D3 | The Bluefor and Redfor buttons are toggles, like check boxes. With no side yet, a side's box is greyed when that side is full; otherwise checking it joins that side (takes a free slot there) and filters the slot list to it. A player on a side may uncheck their own side's box: that leaves the side and frees their slot, and they may then check the other side if it is not full |
+| D4 | No separate "Game info" button at the top. The bottom row's Mission... button serves everyone: editable for the King as today, the same screen read only for every other player, so it is enabled for non-Kings |
+| D5 | The "Rules:" line stays. Only the King line and the "Mission:" line are removed; the ready-up hint goes between the chat input and the buttons |
+| D6 | A host Autobalance option. When on, the host assigns players to Bluefor or Redfor and players cannot change side; their side boxes are disabled and show the assigned side. *Agent decision:* it is built as the third value of the Lock sides setting, now called **Sides** (Free, Locked once flown, Balanced by the host), because balanced sides that a player could change in flight would be pointless |
+| Leadership | A shot-down AI aircraft respawns and joins its old flight as a wingman of whoever leads it now. In an AI-only flight the lead keeps shifting down as fighters die. With humans in the flight, a human lead keeps the lead while dead or respawning until that player leaves the game; then it goes to the next human in the flight, and with none left the AI's succession goes on. John accepts that leaders can be out of the fight while they respawn or travel back |
+| Answer 1 | The distance he meant is the **revival distance**: it gains 50, 75, 100 and 150 nm. The separation (the starting distance between the sides) also gains 75 nm. D2 is for the AI only |
+| Answer 2 | AI respawn gets its own setting row, on by default and greyed when Revival is none |
+| Answer 3 | AI wingmen re-form on a returning human lead, unless they are engaged in combat, when they finish the fight first |
+| Answer 4 | Autobalance does not re-deal when a player leaves: the next joiner goes to the smaller side, and the King re-deals by turning Autobalance off and on |
+| Answer 5 | The ready hint reads "Press Ready so the King can start the mission." for a player holding a slot, with the variants in [the ready hint](#the-ready-hint) |
+| Answer 6 | Colours as recommended: taken slots are filled bars, royal blue (36, 81, 186) or bright red (210, 36, 40), with white names; open slots are light blue (134, 182, 223) or light red (206, 113, 121) text; wing labels read "Blue 1 #2" and "Red 1 #2" |
+| A locked server | A dedicated server's `king-mission locked` reaches the clients (protocol 20), and the King's Mission... on such a server opens the read-only page, "This server's mission is fixed." (slice K1) |
+
+*Agent decisions of the pass that John has not yet seen in play* (his PvP test
+is the check): Autobalance's seating, tie and re-deal rules; the side boxes'
+"3/5" counts, their wording and Tab and Space; the Players list tinted by side
+and an unable player dimmed instead of red; the King's Mission... opening on
+the lobby's mission rather than the King's last draft; the wheel's two rows a
+notch and the red bar on Direct Connection's and the Internet Lobby's Messages
+boxes; the flat track for an import that lacks the slider pieces; the lead
+hold's order of succession, its two HUD lines and the stand-in naming the
+owner's plane by radio label ("Red one") instead of the player's callsign;
+the AI's lives per original aircraft; and AI wrecks retiring so respawns never
+fill the 64 aircraft.
 
 ## Open questions
 

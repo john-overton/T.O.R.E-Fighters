@@ -47,6 +47,7 @@ use tore_sim::flight::{self, PilotInput};
 use tore_world::combat::launcher;
 use tore_world::seats::SeatCommand;
 use tore_world::snapshot::{AircraftPose, RenderSnapshot};
+use tore_world::target_window::TargetObjective;
 
 /// The cycle: straight, a left turn, straight, a right turn, 10 s each.
 const LEG: Duration = Duration::from_secs(10);
@@ -640,6 +641,10 @@ pub fn enemies(client: &Client) -> BTreeSet<u32> {
         .collect()
 }
 
+/// How often a bot reading objectives designates the next enemy (follow-up
+/// F1).
+const OBJECTIVE_EVERY: Duration = Duration::from_secs(2);
+
 /// How long after its first eject press a bot presses again to confirm.
 const EJECT_CONFIRM: Duration = Duration::from_millis(500);
 
@@ -712,6 +717,18 @@ pub struct Bot {
     pub link_heard: Vec<String>,
     /// The readout's assignment last seen, for its changes.
     link_assigned: Option<tore_world::readout::LinkAssigned>,
+    /// Designate each enemy aircraft in turn, every [`OBJECTIVE_EVERY`], and
+    /// keep what the target window says the mission asks of it
+    /// ([`Bot::read_objectives`], the lobby pass's follow-up F1).
+    objectives: bool,
+    /// When the last designation was given, and the last enemy designated.
+    designated_at: Option<Duration>,
+    designated: Option<u32>,
+    /// What the target window last said of each plane it showed.
+    objective_seen: std::collections::BTreeMap<u32, Option<TargetObjective>>,
+    /// Each change of what the target window says of a plane ("plane 9
+    /// destroy"), in order, for `tore-bot` to print.
+    pub objectives_read: Vec<String>,
     /// The flightmates' assignments the readout's marks last showed, by
     /// bandit (a mask of member numbers), for their changes.
     link_marked: std::collections::BTreeMap<u32, u16>,
@@ -784,7 +801,55 @@ impl Bot {
             link_heard: Vec::new(),
             link_assigned: None,
             link_marked: Default::default(),
+            objectives: false,
+            designated_at: None,
+            designated: None,
+            objective_seen: Default::default(),
+            objectives_read: Vec::new(),
         }
+    }
+
+    /// Designate each enemy aircraft in turn while seated, and keep what the
+    /// target window says the mission asks of each (`tore-bot --objectives`,
+    /// the lobby pass's follow-up F1).
+    pub fn read_objectives(&mut self) {
+        self.objectives = true;
+    }
+
+    /// The next enemy to designate, when one is due.
+    fn designate_next(&mut self, now: Duration, controls: &mut Controls) {
+        if !self.objectives || self.client.seat().is_none() {
+            return;
+        }
+        if self
+            .designated_at
+            .is_some_and(|at| now.saturating_sub(at) < OBJECTIVE_EVERY)
+        {
+            return;
+        }
+        let Some(picture) = &self.picture else {
+            return;
+        };
+        let enemies = enemies(&self.client);
+        let present: Vec<u32> = picture
+            .targets
+            .iter()
+            .filter(|pose| pose.aircraft.is_some() && enemies.contains(&pose.id))
+            .map(|pose| pose.id)
+            .collect();
+        let next = present
+            .iter()
+            .copied()
+            .find(|id| self.designated.is_none_or(|last| *id > last))
+            .or_else(|| present.first().copied());
+        let Some(next) = next else {
+            return;
+        };
+        self.designated_at = Some(now);
+        self.designated = Some(next);
+        controls.commands.push(SeatCommand::Combat(
+            tore_sim::combat::live::Command::DesignateTarget(next),
+        ));
     }
 
     /// Gives the seat command `command` once, `after` the first seating: an
@@ -822,6 +887,20 @@ impl Bot {
                 WireEvent::Link(link) => self.link_heard.push(link_words(link)),
                 _ => {}
             }
+        }
+        // What the target window says of the plane it shows (follow-up F1).
+        if self.objectives
+            && let Some(brief) = frame.readout.as_ref().and_then(|r| r.target_window)
+            && self.objective_seen.get(&brief.id) != Some(&brief.objective)
+        {
+            self.objective_seen.insert(brief.id, brief.objective);
+            let words = match brief.objective {
+                Some(TargetObjective::Destroy) => "destroy",
+                Some(TargetObjective::Survive) => "survive",
+                None => "none",
+            };
+            self.objectives_read
+                .push(format!("plane {} {words}", brief.id));
         }
         let assigned = frame.readout.as_ref().and_then(|r| r.link.assigned);
         if assigned != self.link_assigned {
@@ -863,6 +942,7 @@ impl Bot {
             &mut self.radio_heard,
             &mut self.lines_read,
             &mut self.link_heard,
+            &mut self.objectives_read,
         ] {
             if list.len() > 256 {
                 list.drain(..list.len() - 256);
@@ -1068,6 +1148,7 @@ impl Bot {
         let mut controls = controls;
         self.revive(now, &mut controls);
         self.scripted_commands(now, &mut controls);
+        self.designate_next(now, &mut controls);
         self.away(now);
         self.client.update(now, &controls);
         self.watch_when_flying();

@@ -161,6 +161,28 @@ Airport and scene objects count as not friendly.
 Retail also requires a counter to reach 300 before a protect-only mission can
 succeed; what it counts is unknown, so this rule is not applied.
 
+### Objectives in a game with respawns
+
+A multiplayer game can bring a lost aircraft back: a player's revival, or the
+AI's respawn of its own aircraft. Each aircraft the mission started with is
+the root of a *lineage*, and every aircraft a revival or a respawn adds
+continues one (docs/ARCHITECTURE.md, "Death, revival and lives"). Retail has
+no respawns, so every rule here is an agent decision of the lobby pass's
+follow-up F1, 2026-10-09, **pending John**; he asked only that a respawned
+objective aircraft "should still say objective".
+
+| Rule | Provenance |
+| --- | --- |
+| An objective names a lineage. Every aircraft of an objective lineage is an objective wherever the original is: the target window's "Obj: Destroy" or "Obj: Survive", the AI's own target and escort lists (an intercepting AI wingman goes after the respawn too), and the network readout a client is sent | John asked for it, 2026-10-09; the rule is an agent decision |
+| A destroy objective counts each lineage once. It is destroyed the first time any aircraft of it is lost, so the objective can be met although the lineage flies again; shooting the respawn down later is credited as a kill as usual and changes no objective count | agent decision, pending John |
+| A protect objective fails on the first loss of a protected lineage, as it would without respawns; the respawned aircraft still shows "Obj: Survive" | agent decision, pending John |
+| A player's revived aircraft is asked what its lineage was asked: the same targets and friendly objectives | agent decision |
+| With no target group, the targets are every aircraft of the other side the mission started with, human-flown ones too, one lineage each. Before this, a networked flight counted only the AI's aircraft | agent decision; the table's retail rule, applied to every enemy aircraft |
+| A networked mission gives every aircraft its objectives when it is built (the group objective of its wing, the groups that must survive), so a player who takes one in flight is asked what the mission asks of that aircraft. Before this a player who took an aircraft by handoff had no objectives: the target window never read "Obj:", and the debrief listed no friendly objective | agent decision (a fault found by follow-up F1) |
+| A Redfor player's objectives are its own side's: friendly means its own side, whichever side it flies for | agent decision (a fault found by follow-up F1) |
+
+Single player never adds an aircraft, so none of this changes it.
+
 ### Landing grade
 
 Each touchdown on a landable surface after at least 5 seconds airborne counts

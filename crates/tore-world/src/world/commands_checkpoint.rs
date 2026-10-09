@@ -1,5 +1,7 @@
 //! The coders of the mission's commands and what they carry: the settings,
-//! a revival's spawn and its loadout (stage K slice K0).
+//! a revival's spawn and its loadout (stage K slice K0), the lead hold's
+//! two (the lobby pass's slice R2; the owner's coder is in
+//! `lead_hold_checkpoint.rs`) and a seat's callsign (follow-up F1).
 //!
 //! The host's journal records each tick's mission commands as given, and a
 //! standby replays them (docs/ARCHITECTURE.md, "The journal: one door into
@@ -72,6 +74,24 @@ impl Checkpoint for MissionCommand {
                 plane.save(s, None)?;
                 spawn.save(s, None)
             }
+            MissionCommand::Respawn { root, spawn } => {
+                s.writer().write_varint(6);
+                root.save(s, None)?;
+                spawn.save(s, None)
+            }
+            MissionCommand::LeadHold { on } => {
+                s.writer().write_varint(7);
+                on.save(s, None)
+            }
+            MissionCommand::LeadLeft { owner } => {
+                s.writer().write_varint(8);
+                owner.save(s, None)
+            }
+            MissionCommand::Callsign { seat, callsign } => {
+                s.writer().write_varint(9);
+                seat.save(s, None)?;
+                callsign.save(s, None)
+            }
         }
     }
 
@@ -97,6 +117,20 @@ impl Checkpoint for MissionCommand {
                 plane: Checkpoint::load(l, None)?,
                 spawn: Checkpoint::load(l, None)?,
             },
+            6 => MissionCommand::Respawn {
+                root: Checkpoint::load(l, None)?,
+                spawn: Checkpoint::load(l, None)?,
+            },
+            7 => MissionCommand::LeadHold {
+                on: Checkpoint::load(l, None)?,
+            },
+            8 => MissionCommand::LeadLeft {
+                owner: Checkpoint::load(l, None)?,
+            },
+            9 => MissionCommand::Callsign {
+                seat: Checkpoint::load(l, None)?,
+                callsign: Checkpoint::load(l, None)?,
+            },
             other => return invalid(format!("a mission command has no variant {other}")),
         })
     }
@@ -106,6 +140,7 @@ impl Checkpoint for MissionCommand {
 mod tests {
     use super::*;
     use crate::seats::{PlaneId, SeatId};
+    use crate::world::lead_hold::LeadOwner;
     use tore_sim::checkpoint::{Models, from_bytes, round_trip, to_bytes};
 
     fn spawn() -> Spawn {
@@ -167,6 +202,26 @@ mod tests {
                 plane: PlaneId(1_001),
                 spawn: Box::new(spawn()),
             },
+            MissionCommand::Respawn {
+                root: PlaneId(9),
+                spawn: Box::new(spawn()),
+            },
+            MissionCommand::LeadHold { on: true },
+            MissionCommand::LeadHold { on: false },
+            MissionCommand::LeadLeft {
+                owner: LeadOwner::Seat(SeatId(4)),
+            },
+            MissionCommand::LeadLeft {
+                owner: LeadOwner::Away(PlaneId(12)),
+            },
+            MissionCommand::Callsign {
+                seat: SeatId(5),
+                callsign: "Viper".into(),
+            },
+            MissionCommand::Callsign {
+                seat: SeatId(0),
+                callsign: String::new(),
+            },
         ]
     }
 
@@ -197,6 +252,12 @@ mod tests {
         }
         let mut s = Saver::new();
         s.writer().write_varint(5);
+        let body = s.finish_section();
+        let mut l = Loader::new(&body, &[], &models);
+        assert!(MissionCommand::load(&mut l, None).is_err());
+        // No variant 9.
+        let mut s = Saver::new();
+        s.writer().write_varint(9);
         let body = s.finish_section();
         let mut l = Loader::new(&body, &[], &models);
         assert!(MissionCommand::load(&mut l, None).is_err());

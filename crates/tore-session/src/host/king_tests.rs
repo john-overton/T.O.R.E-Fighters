@@ -283,6 +283,7 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
         (number::KILL_OWNER, 2),
         (number::OBSERVER_DELAY, 60),
         (number::IDLE_AI, 120),
+        (number::AI_RESPAWN, 0),
     ];
     let number_before = rig.host.mission_number();
     rig.client(king).change_settings(SettingsChange {
@@ -796,6 +797,28 @@ fn a_locked_servers_king_starts_kicks_and_passes_but_changes_nothing() {
 }
 
 #[test]
+fn a_locked_server_tells_every_lobby_so_and_a_hosted_game_never_does() {
+    let mut rig = Rig::new(spec(3, 1), |config| {
+        config.crown = CrownRule::FirstPlayer;
+        config.mission_locked = true;
+    });
+    let viper = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[viper, cobra]);
+    assert!(rig.lobby(viper).unwrap().mission_locked, "the King's lobby");
+    assert!(rig.lobby(cobra).unwrap().mission_locked, "a joiner's lobby");
+    // An open server and a game a player hosts say nothing of the kind.
+    let mut rig = Rig::new(spec(3, 1), |config| config.crown = CrownRule::FirstPlayer);
+    let viper = rig.join("Viper");
+    rig.gather(&[viper]);
+    assert!(!rig.lobby(viper).unwrap().mission_locked);
+    let mut rig = Rig::hosted(spec(3, 1));
+    let viper = rig.join("Viper");
+    rig.gather(&[viper]);
+    assert!(!rig.lobby(viper).unwrap().mission_locked);
+}
+
+#[test]
 fn a_crowned_server_left_empty_goes_back_to_its_file() {
     let mut rig = Rig::new(spec(2, 2), |config| {
         config.crown = CrownRule::FirstPlayer;
@@ -1039,3 +1062,11 @@ fn a_dedicated_servers_rate_is_its_files_and_the_king_may_not_turn_it() {
     rig.change(viper, &[(number::MODE, Mode::Pvp.value())]);
     assert_eq!(rig.host.snapshot_rate(), 24);
 }
+
+// The lobby pass's side requests (slice W0) drive this file's rig.
+#[path = "sides_tests.rs"]
+mod sides_tests;
+
+// The lobby pass's Autobalance (slice A1) drives this file's rig.
+#[path = "balance_tests.rs"]
+mod balance_tests;

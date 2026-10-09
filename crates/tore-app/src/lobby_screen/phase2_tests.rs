@@ -200,6 +200,21 @@ fn the_kings_seven_buttons_and_the_joiners_four_have_their_places() {
     assert!(joiner.settings_open().is_some());
 }
 
+#[test]
+fn a_joiners_mission_button_opens_the_mission_page_to_read() {
+    let mut joiner = screen_of(&sample(2), false);
+    assert_eq!(joiner.mission.label(), "Mission...");
+    // Mission... leads the joiner's row, three places in from the King's.
+    assert_eq!(
+        click(&mut joiner, button_centre(2)),
+        Some(Request::Mission),
+        "the page opens for a player who is not the King"
+    );
+    // Players... and Fly are the King's and are not drawn for a joiner.
+    assert!(!joiner.shown(Id::PlayersPanel) && !joiner.shown(Id::Fly));
+    assert!(joiner.shown(Id::Mission));
+}
+
 // ---- the Settings rows ----
 
 #[test]
@@ -281,6 +296,7 @@ fn only_the_king_turns_a_row_and_a_joiner_is_told_so() {
 fn pvp_rows_are_greyed_in_co_op_except_the_time_limit() {
     let coop = ctx(&king());
     for n in [
+        number::LOCK_SIDES,
         number::FIGHT,
         number::TALLY,
         number::KILL_LIMIT,
@@ -296,9 +312,37 @@ fn pvp_rows_are_greyed_in_co_op_except_the_time_limit() {
     // The time limit ends a co-op mission too.
     assert_eq!(row_state(Kind::Setting(number::TIME_LIMIT), &coop), Ok(()));
     let pvp = ctx(&sample_pvp(1));
-    for n in [number::FIGHT, number::KILL_LIMIT, number::OBSERVER_DELAY] {
+    for n in [
+        number::LOCK_SIDES,
+        number::FIGHT,
+        number::KILL_LIMIT,
+        number::OBSERVER_DELAY,
+    ] {
         assert_eq!(row_state(Kind::Setting(n), &pvp), Ok(()), "setting {n}");
     }
+}
+
+/// The lobby pass (slice W0; John, 2026-10-09): the AI respawn row sits on
+/// the Revival page, on by default, greyed while Revival is none.
+#[test]
+fn the_ai_respawn_row_is_greyed_while_nothing_revives() {
+    let row = Kind::Setting(number::AI_RESPAWN);
+    assert_eq!(page_rows(Page::Revival).last(), Some(&row));
+    assert_eq!(sp::row_label(row), "AI respawn");
+    let mut state = king();
+    set(&mut state, number::RESPAWN, 0);
+    assert_eq!(row_value(row, &ctx(&state)), "on");
+    assert_eq!(
+        row_state(row, &ctx(&state)),
+        Err(sp::AI_RESPAWN_NEEDS_REVIVAL.to_owned())
+    );
+    assert_eq!(sp::click(row, &ctx(&state), true), None);
+    set(&mut state, number::RESPAWN, 2);
+    assert_eq!(row_state(row, &ctx(&state)), Ok(()));
+    let Some(sp::Edit::Settings(change)) = sp::click(row, &ctx(&state), true) else {
+        panic!("a click turns it");
+    };
+    assert_eq!(change.values, vec![(number::AI_RESPAWN, 0)]);
 }
 
 #[test]

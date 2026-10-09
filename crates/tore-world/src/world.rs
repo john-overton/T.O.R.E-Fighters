@@ -67,6 +67,8 @@ mod handoff;
 mod handoff_tests;
 #[cfg(test)]
 mod lagcomp_tests;
+// The lobby pass's lead hold (slice R2).
+pub mod lead_hold;
 #[cfg(test)]
 mod loadout_tests;
 #[cfg(test)]
@@ -477,6 +479,11 @@ impl World {
             bridge.apply_mission_preset(ai.preset, lead.position);
             bridge.apply_group_objectives(&ai.group_objectives, lead.position);
             bridge.apply_group_survival(&ai.group_must_survive);
+            if open {
+                // Every plane carries its objectives for whoever flies it
+                // (the lobby pass's follow-up F1).
+                bridge.open_objectives(&ai.group_must_survive);
+            }
             bridge.mirror_pose_out(&mut self.combat.state.targets);
             self.combat.ai_poses = !bridge.is_empty();
             ai_aircraft = Some(bridge.len());
@@ -997,6 +1004,9 @@ impl World {
             cockpits: &self.cockpits,
             wings: self.ai_wings.as_ref(),
         });
+        // The lead hold's claims for the AI step (slice R2): nothing with
+        // the hold off, as in single player.
+        self.lead_before_ai();
         // One AI tick per combat tick, immediately after it, so the AI reads
         // the damage combat just applied and then writes the authoritative pose
         // back.
@@ -1043,6 +1053,8 @@ impl World {
             let message = bridge.take_message();
             self.ai_wings = Some(bridge);
             stepped?;
+            // The lead hold's owners and HUD lines from the step (slice R2).
+            self.lead_after_ai(out);
             let given = self
                 .datalink
                 .after_ai(self.combat.state.tick(), self.ai_wings.as_ref());
@@ -1260,6 +1272,22 @@ impl World {
         let ticks = self.combat.state.tick();
         // The checks' clock counts ticks from the flight's first one.
         let clock = ticks.saturating_sub(1) as f64 * flight::DT;
+        // Every human-flown plane as the result sees it, for a game with more
+        // than one (the lobby pass's follow-up F1): its side and whether it
+        // and its pilot are alive.
+        let humans: Vec<(u32, tore_sim::ai::launch::Side, bool)> = if self.cockpits.len() > 1 {
+            (0..self.cockpits.len())
+                .filter_map(|index| {
+                    let cockpit = &self.cockpits[index];
+                    let side = self.roster.plane(cockpit.plane)?.slot.wing.side;
+                    let pilot = &cockpit.flight.systems.pilot;
+                    let alive = self.cockpit_alive(index) && !pilot.dead && !pilot.ejected;
+                    Some((cockpit.plane.0, side, alive))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         for index in 0..self.cockpits.len() {
             let Some(seat) = self
                 .roster
@@ -1283,7 +1311,22 @@ impl World {
             let airborne = !on_runway && !flight.research.as_ref().is_some_and(|r| r.on_ground);
             let state = &self.combat.state;
             let wings = self.ai_wings.as_ref();
-            let succeeded = || ai_wings::outcome::succeeded(state, wings, plane, alive);
+            let (roster, revival) = (&self.roster, &self.revival);
+            let succeeded = || {
+                let side = roster
+                    .plane(PlaneId(plane))
+                    .map_or(tore_sim::ai::launch::Side::Friendly, |p| p.slot.wing.side);
+                let humans: Vec<ai_wings::outcome::Aircraft> = humans
+                    .iter()
+                    .map(|&(id, other, alive)| ai_wings::outcome::Aircraft {
+                        id,
+                        friendly: other == side,
+                        alive,
+                    })
+                    .collect();
+                let lineages = revival.objective_lineages(roster);
+                ai_wings::outcome::succeeded(state, wings, plane, alive, side, &humans, &lineages)
+            };
             let results =
                 cockpit
                     .result

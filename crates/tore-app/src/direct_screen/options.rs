@@ -261,6 +261,9 @@ impl OptionsPanel {
     pub fn moved(&mut self, point: Option<Point>) {
         self.ok.pointer_move(point);
         self.cancel.pointer_move(point);
+        if let Some(point) = point {
+            self.quick.drag(point);
+        }
     }
 
     pub fn wheel(&mut self, notches: i32, point: Option<Point>) {
@@ -273,6 +276,7 @@ impl OptionsPanel {
         let now = Instant::now();
         let Some(point) = point else {
             if !pressed {
+                self.quick.release();
                 self.ok.release((-1, -1));
                 self.cancel.release((-1, -1));
                 self.forward.release((-1, -1), now);
@@ -307,6 +311,7 @@ impl OptionsPanel {
             self.cancel.press(point);
             return Answer::None;
         }
+        self.quick.release();
         self.forward.release(point, now);
         self.may_host.release(point, now);
         let ok = self.ok.release(point) == Outcome::Activated;

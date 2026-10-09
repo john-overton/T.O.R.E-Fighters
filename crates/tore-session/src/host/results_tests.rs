@@ -70,7 +70,12 @@ fn shoot_down(host: &mut Host, owner: u32, victim: u32) {
 
 #[test]
 fn every_connection_gets_the_results_with_a_row_for_every_plane() {
-    let (mut rig, clients) = crowd(Mode::Pvp, &[(number::KILL_LIMIT, 0)]);
+    // The AI does not respawn its lost plane here (slice R1's AI respawn
+    // adds a row for each respawn; ai_respawn_tests.rs has those).
+    let (mut rig, clients) = crowd(
+        Mode::Pvp,
+        &[(number::KILL_LIMIT, 0), (number::AI_RESPAWN, 0)],
+    );
     // Viper shoots down the enemy's AI plane (3), and Cobra's plane is hit.
     shoot_down(&mut rig.host, 0, 3);
     rig.run(Duration::from_millis(200));
@@ -180,7 +185,13 @@ fn a_revival_lists_the_lost_plane_and_the_new_one_under_the_same_callsign() {
 
 #[test]
 fn a_retired_planes_row_survives_in_the_message() {
-    let (mut rig, [viper, ..]) = crowd(Mode::Pvp, &[(number::RESPAWN, Respawn::Revive.value())]);
+    let (mut rig, [viper, ..]) = crowd(
+        Mode::Pvp,
+        &[
+            (number::RESPAWN, Respawn::Revive.value()),
+            (number::AI_RESPAWN, 0),
+        ],
+    );
     shoot_down(&mut rig.host, 0, 3);
     rig.host
         .world
