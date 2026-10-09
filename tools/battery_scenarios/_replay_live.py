@@ -92,7 +92,7 @@ def restart_scenarios() -> list[Scenario]:
     for airport in (1, 2, 3, 4, 5):
         for wing in (1, 3, 5):
             setups[f"ground-{airport}-wing{wing}"] = ["--ground-start", str(airport), "--probe-wing-size", str(wing)]
-    for sep in (1, 2, 5, 10, 20, 50, 100, 150, 200, 300):
+    for sep in (1, 2, 5, 10, 20, 50, 75, 100, 150, 200, 300):
         setups[f"sep{sep}"] = ["--separation", str(sep)]
     for mission in ("cap", "intercept", "escort", "self-defense", "hold"):
         setups[f"mission-{mission}"] = ["--ai-mission", mission]

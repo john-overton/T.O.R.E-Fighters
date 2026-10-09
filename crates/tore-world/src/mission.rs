@@ -2225,7 +2225,7 @@ mod tests {
             ),
             (
                 "separation-nm 7",
-                "line 4: the separation is one of 1, 2, 5, 10, 20, 50, 100, 150, 200, 300",
+                "line 4: the separation is one of 1, 2, 5, 10, 20, 50, 75, 100, 150, 200, 300",
             ),
             ("preset boring", "line 4: `boring` is not a preset"),
             ("guns-only maybe", "line 4: `guns-only` takes yes or no"),
