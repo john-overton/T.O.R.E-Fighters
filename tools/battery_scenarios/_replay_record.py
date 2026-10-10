@@ -113,22 +113,29 @@ def decoy_problems(events: list[dict]) -> list[str]:
     """A decoyed missile names the chaff or flare that fooled it by the release
     number its `combat.countermeasure` entry carries. Recordings without numbers
     stay valid: only a number that is there is checked, and it must belong to a
-    device of that kind released earlier (by the aircraft the entry names, for
-    `weapon.decoyed`)."""
+    device of that kind released by then (by the aircraft the entry names, for
+    `weapon.decoyed`). A tick lists its weapon events before the devices
+    released on it, so a device counts from the tick it left."""
     problems: list[str] = []
-    released: set[tuple] = set()
+    released: dict[tuple, int] = {}
     for e in events:
         f = e.get("fields", {})
         if e["kind"] == "combat.countermeasure" and f.get("number") is not None:
-            released.add((f["number"], e.get("subject"), f.get("decoy")))
-        elif e["kind"] == "weapon.decoyed" and f.get("number") is not None:
-            if (f["number"], e.get("object"), f.get("decoy")) not in released:
+            released.setdefault((f["number"], e.get("subject"), f.get("decoy")), e["tick"])
+    for e in events:
+        f = e.get("fields", {})
+        if e["kind"] == "weapon.decoyed" and f.get("number") is not None:
+            left = released.get((f["number"], e.get("object"), f.get("decoy")))
+            if left is None or left > e["tick"]:
                 problems.append(
                     f"shot {f.get('projectile')} was decoyed by {f.get('decoy')} #{f['number']} "
                     f"of aircraft {e.get('object')}, which was never released")
         elif e["kind"] == "weapon.outcome" and f.get("replaces") is not None:
             m = re.search(r"decoyed by (chaff|flare) #(\d+) from ", f.get("reason", ""))
-            if m and not any(n == int(m.group(2)) and d == m.group(1) for n, _, d in released):
+            if m and not any(
+                n == int(m.group(2)) and d == m.group(1) and tick <= e["tick"]
+                for (n, _, d), tick in released.items()
+            ):
                 problems.append(
                     f"shot {f.get('projectile')} late hit names {m.group(1)} #{m.group(2)}, which was never released")
     return problems

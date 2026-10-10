@@ -139,6 +139,13 @@ class ShotOutcomeTests(unittest.TestCase):
         spoof = (3, "weapon.outcome", 3, 0, {"result": "spoofed"})
         good = (2, "weapon.decoyed", 3, 0, {"decoy": "chaff", "number": 7})
         self.assertEqual(rr.invariant_problems(self.decoy_log(good, spoof, late)), [])
+        # The same tick lists the decoy before the device that left on it.
+        self.assertEqual(rr.invariant_problems(self.decoy_log(
+            (1, "weapon.decoyed", 3, 0, {"decoy": "chaff", "number": 7}), spoof)), [])
+        # A decoy earlier than the release is wrong.
+        problems = rr.invariant_problems(self.decoy_log(
+            (0, "weapon.decoyed", 3, 0, {"decoy": "chaff", "number": 7}), spoof))
+        self.assertTrue(any("never released" in p for p in problems))
         # An older recording has no numbers: fine.
         old = (4, "weapon.outcome", 3, 0, {
             "result": "hit", "replaces": "spoofed",
