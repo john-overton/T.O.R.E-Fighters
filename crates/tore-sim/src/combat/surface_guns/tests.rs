@@ -162,6 +162,19 @@ fn surface_guns_table_is_pinned() {
             "{name}"
         );
         assert!(matches!(row.magazine_reload_s, 60 | 120), "{name}");
+        // Two spare magazines on land, unlimited on ships.
+        assert_eq!(
+            row.mount.reserve_magazines(),
+            (row.mount != Mount::Ship).then_some(2),
+            "{name}"
+        );
+        // Flak, 57 mm, 37 mm and tank guns keep the retail damage per round.
+        if matches!(
+            row.record,
+            "KS12.JT" | "KS19.JT" | "ZSU57.JT" | "M1939.JT" | "A_M1939.JT" | "M1.JT" | "T72.JT"
+        ) {
+            assert_eq!(row.per_game, 1, "{name}");
+        }
         assert!(row.magazine > 0 && row.burst > 0, "{name}");
         assert!(row.burst <= u16::from(row.per_game) * 255, "{name}");
         assert!(row.sustained_rpm() > 0., "{name}");
@@ -440,10 +453,10 @@ fn aaa_markdown() -> String {
     out.push_str(
         "| Gun | Record (units) | Retail burst / pause s / opening / muzzle ft/s | \
 Rate rpm | Burst rounds (s) | Pause s | Opening | Magazine | Magazine reload s | \
-Muzzle ft/s | Tracer | Damage per round | Damage per second vs retail |\n",
+Reload class | Reserve magazines | Muzzle ft/s | Tracer | Damage per round | Damage per second vs retail |\n",
     );
     out.push_str(
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |\n",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | --- | --- | ---: |\n",
     );
     for row in TABLE {
         let o = row.origins();
@@ -481,6 +494,11 @@ Muzzle ft/s | Tracer | Damage per round | Damage per second vs retail |\n",
             tag(row.opening_shots.to_string(), o.opening),
             tag(thousands(u64::from(row.magazine)), o.magazine),
             tag(row.magazine_reload_s.to_string(), o.reload),
+            row.mount.label().to_string(),
+            row.mount
+                .reserve_magazines()
+                .map_or("unlimited".to_string(), |n| n.to_string())
+                + " F",
             tag(thousands(row.muzzle_fps as u64), o.muzzle),
             if row.tracer { "every 3rd" } else { "none" }.to_string(),
             tag(
@@ -503,8 +521,8 @@ Muzzle ft/s | Tracer | Damage per round | Damage per second vs retail |\n",
 /// `TORE_UPDATE_SURFACE_GUNS_DOC=1 cargo test -p tore-sim surface_guns_doc`.
 #[test]
 fn surface_guns_doc_matches_the_table() {
-    const START: &str = "<!-- aaa-tuning-table:start -->\n";
-    const END: &str = "<!-- aaa-tuning-table:end -->";
+    const START: &str = "<!-- surface-guns-table:start -->\n";
+    const END: &str = "<!-- surface-guns-table:end -->";
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/spec/surface-defenses.md");
     // Windows checkouts may convert the doc to CRLF line endings.

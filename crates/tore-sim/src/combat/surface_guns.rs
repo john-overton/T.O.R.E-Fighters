@@ -109,6 +109,28 @@ impl Mount {
     }
 }
 
+impl Mount {
+    /// Spare magazines a mount carries beyond the loaded one (fitted, spec
+    /// "AAA tuning"): two for land guns, unlimited (`None`) for ships, which
+    /// are never resupplied by truck.
+    pub const fn reserve_magazines(self) -> Option<u32> {
+        match self {
+            Mount::Ship => None,
+            _ => Some(2),
+        }
+    }
+    /// The reload class the spec table prints.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Mount::Towed => "towed",
+            Mount::Infantry => "troops",
+            Mount::Vehicle => "vehicle",
+            Mount::Spaag => "self-propelled AAA",
+            Mount::Ship => "ship",
+        }
+    }
+}
+
 /// The retail LIB record's firing fields for the gun (survey 3.2, read from
 /// the shipped JT files; the ignored `real_data` test checks them against the
 /// LIB). Times are quarter seconds.
