@@ -1003,15 +1003,16 @@ porting an aircraft's sensors. For repeatable headless captures,
 `--scope-history` set the scope before the capture. See
 [the component guide](radar.md) and [its validation](baselines/radar.md).
 
-The Quick Mission ground-target/AAA/SAM sentence is unavailable. Clicking it
-opens a small notice instead of changing settings; OK, Enter, Space or Escape
-closes the notice. The enemy-distance choices include 100 and 150 nautical miles
-between 50 and 200. `--separation` accepts the same choices. See the
-[creator contract](spec/quick-mission-menu.md#unavailable-ground-target-controls).
-Preview the notice or distance list without a display:
+The Quick Mission ground-target/AAA/SAM sentence is live: the target list is the
+theater's, the strengths read "not", "lightly", "moderately" and "heavily", and
+the mission text carries them (`ground-target`, `defenses`). The enemy-distance
+choices include 100 and 150 nautical miles between 50 and 200. `--separation`
+accepts the same choices. See the
+[creator contract](spec/quick-mission-menu.md#ground-target-and-defenses).
+Preview a theater's target line or the distance list without a display:
 
 ```sh
-TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --snapshot-state ground-targets-unavailable --snapshot .local/ground-targets-unavailable.ppm --no-audio
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --theater EGY --snapshot-state ground-target --snapshot .local/ground-target.ppm --no-audio
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-mission --snapshot-state field-17 --snapshot .local/separation-choices.ppm --no-audio
 ```
 
