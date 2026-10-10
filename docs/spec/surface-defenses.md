@@ -324,7 +324,11 @@ many others survive.
 - Footprint clearance from every fixed template object and theater layout
   object, plus 300 ft from every runway's box.
 - Up to 8 candidates per object from the same stream; if none passes, the
-  original retail position is used. Positions round to whole feet and headings
+  original retail position is used (the relocated one in a relocated
+  template). An NT structure (the GCI radar site) stays put like a building.
+- Footprints are boxes from each type's shape vertex bounds at the placed
+  scale (the one scale seam, so they follow any rescale); a placed unit is
+  tested as the circle around its box, so its heading does not matter. Positions round to whole feet and headings
   to the retail angle unit; heights then come from the terrain as for any
   placement.
 
@@ -354,14 +358,21 @@ test.
 | A target lies within 2,000 ft of a theater layout object (built into a town, harbor or base) | `~QAPHELO`, `~QTBARG`, `~QPGSRUN`, `~QTSTRG`, `~QUCITY` |
 | It has routes | `~QUCOL` |
 
-That is 31 anchored templates. The other 77 offered non-empty templates
-relocate; the 16 "nothing" templates have no objects. The per-theater split is
+That is 31 anchored templates by the plan's survey. Measured by the rule on the
+retail data (slice L1) it is 34: runways are theater layout objects too, so
+`~QPGSRUN` (a target 1,000 ft from a dirt strip) anchors by the town rule; a
+dirt strip (`DTSTRP`, a `_STRIPProc` runway) counts as a runway, so `~QCCMHQ`
+(its centroid 0.6 nm from one) anchors; and every routed template anchors
+(`~QTCARGO`, `~QUFACT` besides `~QUCOL`). The other 74 offered non-empty
+templates relocate; the 16 "nothing" templates have no objects. The
+`surface-relocate-sweep` battery scenario pins the list. The per-theater split is
 in [Per-theater notes](#per-theater-notes).
 
 **Group transform.** A relocatable template moves as a rigid group: a rotation
 about its targets' centroid by a whole number of degrees (0 to 359) and a
-translation, computed with an integer cosine and sine table (degrees scaled by
-2^16) and 64-bit integer arithmetic, rounded half away from zero to whole feet.
+translation, computed with an integer cosine and sine table (whole degrees,
+scaled by 2^30 so a step is under a thousandth of a foot over 40 nm) and
+64-bit integer arithmetic, rounded half away from zero to whole feet.
 Per-object jitter is applied in the template's own frame before the transform,
 so spacing rules hold after the move.
 
@@ -393,12 +404,21 @@ theater centre. All of it comes from the seed and is inside the digest.
   default, pending John.)
 - **Red (defenders, AI or human).** The existing separation rule places them
   ahead of Blue at the selected separation, so Red moves with Blue and the
-  target. A separation shorter than the start distance puts Red between Blue
+  target. When the enemy group does not fit the map ahead, only the enemy's
+  bearing turns (as on a ground start), so Blue keeps heading at the target
+  (defined, agent). A separation shorter than the start distance puts Red between Blue
   and the target; a longer one puts Red beyond it, over the defenses.
 - **Ground starts.** An explicit runway choice is kept. With none picked, the
   default runway becomes the Blue-side airfield nearest the target that is at
   least 15 nm from it; a Redfor human ground start in PvP uses the Red-side
-  airfield nearest the target under the same rule (default, pending John).
+  airfield nearest the target under the same rule (default, pending John). An
+  airfield's side is its owner's; an unowned one takes its side of the front.
+  The airfield must hold the wing (no short strip or vertical pad); with none,
+  the earlier rule stands (the first friendly airport's runway that holds the
+  wing).
+- The target point is the targets' placed centroid. A theater with no front
+  (no owned placements on one side) starts Blue toward the middle of the map
+  (fitted).
 - No ground target: unchanged.
 
 ```mermaid
@@ -839,18 +859,29 @@ flowchart TD
    single linkage within 1 nm (6,076 ft), in the template's own frame for
    template units and in the world for base-layout units. Templates and base
    layouts never share a battery.
-2. A cluster larger than the system's cap is split: launchers in ascending id
-   order each join the nearest group still under the cap, seeded by the
-   lowest-id launcher.
+2. A cluster larger than the system's cap is split into as few batteries as
+   the cap allows. Seeds: the lowest-id launcher, then each time the launcher
+   farthest from every seed (lower id on a tie); the other launchers, in
+   ascending id order, join the nearest seed's battery still under the cap
+   (defined, agent: a reading of the plan's rule that keeps batteries
+   together on the ground).
 3. **Adoption.** An existing radar of the system's element type (GCI for SA-2
    and SA-3, SFLUSH for SA-6) on the same side within 2 nm of the battery's
    centroid, not already adopted, becomes its radar (nearest first, lower id on a
-   tie), keeping its id, flags and place. North Vietnam's base GCIs and template
-   radars such as `~QCLST`'s two GCI targets are adopted this way.
+   tie), keeping its id, flags and place. A template battery adopts only a
+   template radar and a base-layout battery only a layout radar. North
+   Vietnam's base GCIs and template radars such as `~QCLST`'s two GCI targets
+   are adopted this way when they stand within reach (see the per-theater
+   notes for North Vietnam).
 4. **New element.** Otherwise a radar is added: 600 to 1,000 ft from the
    launcher centroid (1,000 to 1,500 ft from an SA2A site's centre, outside the
-   six-rail ring), with the jitter validity rules, moving with its template's
-   group transform. Added radars are never targets.
+   six-rail ring), with the jitter validity rules and clear of its launchers,
+   moving with its template's group transform; if no candidate stands, the
+   first drawn. Added radars are never targets. Base layouts draw their
+   radars from seed 0, so a base layout looks the same in every flight. A
+   battery whose radar element the import cannot place (its record or shape
+   missing) is not formed and its launchers stay self-contained, so a mission
+   always builds.
 5. Each template battery also gets one MISTRK supply truck ([Resupply](#resupply)).
 
 Base layouts gain batteries too: Cuba (5 SA-2, 2 SA-6), North Vietnam (13 SA-2
@@ -901,8 +932,12 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
   and picks are untouched. One per slot because retail slots are spread out
   (median nearest-slot distance 3,280 ft, and only 13 percent of slots have
   another slot within 0.2 mile, measured over 1,770 slots), so a truck at 528 ft
-  serves essentially one slot. Placed 200 to 400 ft from the unit it serves, in
-  the jitter frame, with the same validity rules; ownership is the slot's.
+  serves essentially one slot. A battery's own truck serves its first launcher
+  that has no slot truck (a named launcher), else its first launcher. Placed
+  200 to 400 ft from the unit it serves (after that unit's jitter), with the
+  same validity rules and clear of it; the first drawn spot when none stands;
+  ownership is the slot's. Ids `0x5800_0000` up, in the order of the units
+  served (a slot's truck before its battery's).
   Trucks are passive units, targetable, Vehicle class (0x0200), and move with the
   defended group's relocation. Never targets. Number and placement: fitted
   (default, pending John).
@@ -1202,25 +1237,38 @@ layouts). Stems drop the `~Q` prefix.
 
 | Theater | Anchored (jitter only) | Relocated as a group | Battery systems in templates | Base-layout batteries | Parked aircraft templates |
 | --- | --- | --- | --- | --- | --- |
-| BAL | `BAIR`, `BBRD`, `BFAIR` | `BACOL`, `BFLT`, `BSHAR`, `BSPPY`, `BXING` | SA-6 | HAWK (4 launchers) | `BAIR`, `BFAIR` |
-| CUB | `CFAIR` | `CCARG`, `CCMHQ`, `CLST`, `CSCUD`, `CSUB` | SA-6 | SA-2 (5), SA-6 (2) | `CFAIR`, `CCMHQ` |
+| BAL | `BAIR`, `BBRD`, `BFAIR` | `BACOL`, `BFLT`, `BSHAR`, `BSPPY`, `BXING` | SA-6 | HAWK (4 launchers, 2 batteries) | `BAIR`, `BFAIR` |
+| CUB | `CFAIR`, `CCMHQ` | `CCARG`, `CLST`, `CSCUD`, `CSUB` | SA-6 | SA-2 (5), SA-6 (2) | `CFAIR`, `CCMHQ` |
 | EGY | `ELAIR`, `ESAIR` | `EARMOR`, `ECDEF`, `ECMHQ`, `ERDRI`, `ESFLT` | SA-6 (group 3) | none | `ELAIR`, `ESAIR` |
 | LFA | `LFFAIR` | `LFCARG`, `LFCMHQ`, `LFPATR`, `LFSAM`, `LFSTOR` | SA-6 (group 3) | none (Crotale is self-contained) | `LFFAIR` (targets) |
 | FRA | `FLAIR`, `FSAIR`, `FFACT` | `FCMHQ`, `FFLT`, `FRDRI`, `FSUP` | none (group 1) | none | `FLAIR`, `FSAIR`, `FFACT` |
 | GRE | `GRSAIR` | `GRCARG`, `GRPATR`, `GRRDR`, `GRSTOR` | none (group 4) | none | `GRSAIR` |
 | IRA | `IRFAIR` | `IRARM`, `IRCCC`, `IRCWP`, `IRPOW`, `IRRDR`, `IRRETR`, `IRSCUD` | SA-6 | SA-6 (4) | `IRFAIR` |
 | KURILE | `KPLNGR` | `KARMOR`, `KLFLT`, `KSCFT`, `KSFLT`, `KSILO`, `KSUB` | SA-6 | none | `KPLNGR` (targets) |
-| TVIET | `TBARG`, `TBRDG`, `TBUNK`, `TSTRG`, `TTRUCK` | `TAAA`, `TCARGO`, `TCOMM`, `TSAM` | SA-2 (`TSAM`), SA-6 | SA-2 (13, with 9 GCI to adopt) | none |
+| TVIET | `TBARG`, `TBRDG`, `TBUNK`, `TCARGO`, `TSTRG`, `TTRUCK` | `TAAA`, `TCOMM`, `TSAM` | SA-2 (`TSAM`), SA-6 | SA-2 (13 batteries; 1 of the 9 GCI adopted at 2 nm, 12 radars added) | none |
 | SPA | `SPFAIR` | `SPASA`, `SPCMHQ`, `SPFRU`, `SPSAM`, `SPSUP` | SA-3 (`SPSAM`, 9 launchers), SA-6 | SA-6 (2) | `SPFAIR` |
 | APA | `APFAIR`, `APHELO` | `APBLK`, `APCMHQ`, `APPATR`, `APSAM` | SA-2 (`APSAM`), SA-6 | HAWK (2), SA-6 (3) | `APFAIR`, `APHELO` |
 | PGU | `PGFAIR`, `PGSRUN` | `PGPATR`, `PGRDR`, `PGSAM`, `PGWSHP` | SA-3 (`PGSAM`, 9 launchers, GCI to adopt), SA-6 | SA-6 (3) | `PGFAIR`, `PGSRUN`, `PGSAM` |
 | NSK | `NSFAIR` | `NSARM`, `NSBORD`, `NSCOL`, `NSFOA`, `NSSUP` | SA-6 | SA-6 (4) | `NSFAIR` |
 | WTA | `WTFAIR` | `WTCARG`, `WTHYDO`, `WTLAND`, `WTPATR`, `WTWARS` | SA-6 | SA-6 (2) | `WTFAIR` (targets) |
-| UKR | `UBRI`, `UCITY`, `UCOL`, `USTRIP` | `UFACT`, `ULFLT`, `UNUKE`, `USFLT` | SA-6 | none | `USTRIP` |
+| UKR | `UBRI`, `UCITY`, `UCOL`, `UFACT`, `USTRIP` | `ULFLT`, `UNUKE`, `USFLT` | SA-6 | none | `USTRIP` |
 | VLA | `VLAIR`, `VSAIR` | `VARMOR`, `VCMHQ`, `VRDRI`, `VSFLT`, `VSUP` | SA-6 | none | `VLAIR`, `VSAIR` |
 
 Base-layout battery counts are launchers by type; how many batteries they make
-depends on the 1 nm clustering. The single-player regression cases fly Ukraine
+depends on the 1 nm clustering (measured: Cuba 5 SA-2 and 2 SA-6 batteries,
+the Baltics 2 HAWK, Panama 3 SA-6 and 1 HAWK, Iraq 4, Pakistan 2, the Persian
+Gulf 3, South Korea 4 and Taiwan 2 SA-6). In the North Vietnam layout only one
+GCI stands within 2 nm of an SA-2 site; six more stand 2.2 to 3.2 nm off and
+two 8 and 13 nm off, so twelve of its thirteen batteries get an added radar at
+the 2 nm default.
+
+Some relocatable templates never find a site in 20 seeds and stay at their
+retail spot: the mixed land and sea ones (`CSUB`, `LFPATR`, `APPATR`,
+`PGPATR`, `PGWSHP`; a rigid move does not keep a coastline), the Kuril
+Islands' (`KSCFT`, `KSUB`, `KSILO`, `KARMOR`; small islands), and the SAM
+networks spread over 15 nm or more of uneven ground (`TAAA`, `TSAM`, `APSAM`,
+`APBLK`, `GRSTOR`). Over all 74 relocatable templates 78 percent of seeded
+placements relocate. The single-player regression cases fly Ukraine
 and France and the golden tests use Ukraine; neither layout has base air
 defenses, so activating them should leave those unchanged.
 
