@@ -191,13 +191,15 @@ impl Renderer {
         self.sim
             .effects(&self.device, &self.queue, art, effects, marks);
     }
-    /// Burning flares, chaff and lit afterburners, which light the scene.
+    /// Burning flares, chaff, lit afterburners and AC-130 gunfire, which
+    /// light the scene.
     pub fn emitters(
         &mut self,
         devices: &tore_sim::combat::countermeasures::Devices,
         afterburners: &[crate::countermeasure_renderer::Afterburner],
+        guns: &crate::gun_flash::Drawn,
     ) {
-        self.sim.emitters(&self.queue, devices, afterburners);
+        self.sim.emitters(&self.queue, devices, afterburners, guns);
     }
     pub fn vapor(&mut self, vertices: &[f32]) {
         self.sim.vapor(&self.device, &self.queue, vertices);

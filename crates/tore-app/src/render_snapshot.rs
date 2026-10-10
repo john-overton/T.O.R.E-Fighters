@@ -370,7 +370,13 @@ pub fn combat_geometry(
             );
         }
         if p.gun && p.tracer {
-            tracer(&mut v, local(p.previous), local(p.position), &eye);
+            tracer(
+                &mut v,
+                local(p.previous),
+                local(p.position),
+                &eye,
+                tracer_brightness(&p.weapon),
+            );
         } else if !p.gun {
             // A visible thin strip marks the actual swept projectile segment.
             let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
@@ -509,8 +515,36 @@ fn mesh(
         }
     }
 }
-/// Camera-facing luminous ribbon over the actual swept gun segment.
-fn tracer(out: &mut Vec<f32>, previous: Vector, position: Vector, camera: &Camera) {
+/// How bright a gun's tracer is drawn against the ordinary one: the AC-130's
+/// 105 mm round half as bright again (John, 2026-10-09), so it reads at
+/// gunship ranges.
+pub const HOWITZER_TRACER: f64 = 1.5;
+fn tracer_brightness(weapon: &str) -> f64 {
+    if weapon == tore_sim::combat::gunship::GUNS[2] {
+        HOWITZER_TRACER
+    } else {
+        1.
+    }
+}
+/// The vertex color that the shader's sRGB decode turns into `linear`, so a
+/// tracer's brightness survives the decode the world vertices go through.
+fn encoded(linear: f64) -> f32 {
+    if linear <= 0.0031308 {
+        (linear * 12.92) as f32
+    } else {
+        (1.055 * linear.powf(1. / 2.4) - 0.055) as f32
+    }
+}
+/// Camera-facing luminous ribbon over the actual swept gun segment, at
+/// `brightness` times the ordinary tracer's radiance.
+fn tracer(
+    out: &mut Vec<f32>,
+    previous: Vector,
+    position: Vector,
+    camera: &Camera,
+    brightness: f64,
+) {
+    let level = encoded(brightness);
     let segment: Vector = std::array::from_fn(|i| position[i] - previous[i]);
     if tore_sim::attitude::dot(segment, segment) < 1e-12 {
         return;
@@ -548,9 +582,9 @@ fn tracer(out: &mut Vec<f32>, previous: Vector, position: Vector, camera: &Camer
             along as f32,
             across as f32,
             -8.,
-            1.,
-            1.,
-            1.,
+            level,
+            level,
+            level,
             -1.,
         ]);
     }
@@ -790,7 +824,7 @@ mod tests {
         camera.pitch = 0.;
         for end in [[20., 0., 0.], [0., 0., 20.]] {
             let mut output = Vec::new();
-            tracer(&mut output, [0.; 3], end, &camera);
+            tracer(&mut output, [0.; 3], end, &camera, 1.);
             assert_eq!(output.len(), 60);
             assert!(output.iter().all(|v| v.is_finite()));
             let points: Vec<[f32; 2]> = output.chunks_exact(10).map(|v| [v[0], v[1]]).collect();
@@ -800,8 +834,31 @@ mod tests {
             assert!(output.chunks_exact(10).all(|v| v[5] == -8.));
         }
         let mut output = Vec::new();
-        tracer(&mut output, [0.; 3], [0.; 3], &camera);
+        tracer(&mut output, [0.; 3], [0.; 3], &camera, 1.);
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn the_105_mm_tracer_is_half_as_bright_again_after_the_srgb_decode() {
+        assert_eq!(tracer_brightness("C_105.JT"), 1.5);
+        assert_eq!(tracer_brightness("C_25.JT"), 1.);
+        assert_eq!(tracer_brightness("M61A1.GN"), 1.);
+        // The shader decodes the vertex color from sRGB, as terrain.wgsl's
+        // `linear` does; the ordinary tracer keeps its old white exactly.
+        let decode = |c: f32| {
+            let c = f64::from(c);
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        assert_eq!(encoded(1.), 1.);
+        assert!((decode(encoded(1.5)) - 1.5).abs() < 1e-5);
+        let camera = Camera::new();
+        let mut output = Vec::new();
+        tracer(&mut output, [0.; 3], [20., 0., 0.], &camera, 1.5);
+        assert!(output.chunks_exact(10).all(|v| v[6] == encoded(1.5)));
     }
 
     #[test]
