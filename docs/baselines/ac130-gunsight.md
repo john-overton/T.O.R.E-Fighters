@@ -88,7 +88,8 @@ bot does not fly it. A human check on the three-platform test is open.
 - A real orbit under the flight model: the pin-orbit probe poses the aircraft
   kinematically on a circle, so the sight is exercised against a steady bank
   but not against the flight model's own wobble.
-- Hand flying: John has not yet flown the gunsight, so key feel (slew rates,
-  the quarter-rate nudge, zoom steps), the pipper's size and the GIMBAL LIMIT
-  eye icon choice (`<o>` or the hand-drawn bitmap) are unreviewed.
+- Hand flying: key feel (slew rates, the quarter-rate nudge, zoom steps) is
+  unreviewed. From renders John approved the LCOS pipper, its range-arc scale,
+  diamonds for the other linked guns, the crosshair ticks and the hand-drawn
+  GIMBAL LIMIT eyeball (2026-10-09).
 - Retail comparison is unavailable.

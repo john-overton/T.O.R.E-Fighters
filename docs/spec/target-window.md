@@ -222,11 +222,10 @@ MASK, NO LINE OF FIRE, EMPTY (the labels of `Readiness`). Only NO LINE OF FIRE
 and the empty and failed states block the trigger
 (`Readiness::gun_may_fire`); the rest are advisory. When the camera reaches
 the bottom hemisphere's top limit the row reads GIMBAL LIMIT after an eye icon
-(John, 2026-10-09: hand-drawn, not an emoji). He has not picked between two
-options, so both exist and the one-line `EYE_ICON` switch in
-`instruments/gunsight.rs` chooses. **Option 1 (the current default)**: the text
-`<o>`, an almond and a pupil in the page's font, no asset. **Option 2**: a
-hand-drawn 9 x 5 pixel eyeball bitmap (an almond outline with a round pupil).
+(John, 2026-10-09: hand-drawn, not an emoji). The page draws a hand-drawn
+9 x 5 pixel eyeball bitmap (an almond outline with a round pupil), John's pick
+over the text `<o>` in the page's font. The one-line `EYE_ICON` switch in
+`instruments/gunsight.rs` keeps the text option, and
 `--target-cam-preview gimbal-text` and `gimbal-bitmap` render each.
 
 **Arcs box.** The box spans the widest arc (C_25): heading -150 (aft) at the

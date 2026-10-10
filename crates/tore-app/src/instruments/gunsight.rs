@@ -421,9 +421,9 @@ fn pipper_at(view: &SightView, point: Vector) -> (i32, i32) {
     }
 }
 
-/// How the camera-limit notice draws its eye (John, 2026-10-09): the plain
-/// text "<o>" in the page's own font, or a hand-drawn pixel eyeball. The
-/// one-line switch is [`EYE_ICON`].
+/// How the camera-limit notice draws its eye: the hand-drawn pixel eyeball
+/// (John's pick, 2026-10-09), or the plain text "<o>" in the page's own font,
+/// kept for the `gimbal-text` preview. The one-line switch is [`EYE_ICON`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EyeIcon {
     /// "<o>": an almond and a pupil, in the page's font. No asset.
@@ -431,8 +431,8 @@ pub enum EyeIcon {
     /// A 9 x 5 almond outline with a round pupil, placed by hand.
     Bitmap,
 }
-/// The default eye icon.
-pub const EYE_ICON: EyeIcon = EyeIcon::Text;
+/// The eye icon the page draws: the hand-drawn eyeball (John, 2026-10-09).
+pub const EYE_ICON: EyeIcon = EyeIcon::Bitmap;
 
 /// The hand-drawn eyeball, row by row.
 const EYE_BITMAP: [&str; 5] = [

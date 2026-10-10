@@ -222,9 +222,9 @@ object. Whatever the mode, the guns train on the aim point inside their own arcs
   limit, still looking as near as it can, with GIMBAL LIMIT raised; the aim
   point stays on the true object or pin, so the guns train on it within their
   own arcs. The page shows
-  the limit as an eye icon and the words GIMBAL LIMIT. John has not chosen the
-  icon yet: the default is the text `<o>`, and a hand-drawn 9 x 5 pixel eyeball
-  is behind a one-line switch ([target window spec](target-window.md#ac-130-gunsight)). A pin above the hemisphere can be slewed down but not further up.
+  the limit as an eye icon and the words GIMBAL LIMIT. The icon is a hand-drawn
+  9 x 5 pixel eyeball (John's pick over the text `<o>`, which stays behind a
+  one-line switch; [target window spec](target-window.md#ac-130-gunsight)). A pin above the hemisphere can be slewed down but not further up.
   The default view is inside the hemisphere. The boundary is a plain 0
   degrees: ray casts from the dome through the model (AC130.SH, all faces)
   show nothing blocking the horizon over the left half or ahead and astern,
