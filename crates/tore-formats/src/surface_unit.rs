@@ -356,7 +356,12 @@ fn valid_resource(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'~' | b'$' | b'&'))
 }
 
-fn single_block(brf: &Brf, token: &Token, count: usize, what: &str) -> Result<Vec<String>> {
+pub(crate) fn single_block(
+    brf: &Brf,
+    token: &Token,
+    count: usize,
+    what: &str,
+) -> Result<Vec<String>> {
     if token.kind != "ptr" || token.scaled {
         return Err(invalid(&format!("NT {what} must be a reference")));
     }
@@ -368,7 +373,7 @@ fn single_block(brf: &Brf, token: &Token, count: usize, what: &str) -> Result<Ve
 }
 
 /// A pointer to one resource name, or a zero dword for none.
-fn optional_resource(brf: &Brf, token: &Token) -> Result<Option<String>> {
+pub(crate) fn optional_resource(brf: &Brf, token: &Token) -> Result<Option<String>> {
     if token.kind != "ptr" {
         return if token.number()? == 0 && !token.scaled {
             Ok(None)
