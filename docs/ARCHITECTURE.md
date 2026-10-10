@@ -962,7 +962,7 @@ from its vertex building.
 | `terrain` | `Terrain`, its `Overrides` and the shared `Placements` loader |
 | `combat`, `combat_tape` | `Combat`; the tape's command names and the `Entry` record |
 | `aircraft_type` | `AircraftType`, the simulation's view of one aircraft |
-| `snapshot` | The tick's picture as data (`RenderSnapshot`, poses, `interpolate`) |
+| `snapshot` | The tick's picture as data (`RenderSnapshot`, poses, `interpolate`, the poses of surface units that follow a route) |
 | `ai_wings` | `AiWings`, its orders, reports, chatter and engagement |
 | `comms`, `radio_calls`, `crew_voice`, `airfield_radio` | The radio channel and every call generator |
 | `situation` | The situation music's selector; the mission result check it reads is `ai_wings::outcome` |
