@@ -446,7 +446,9 @@ pub fn pilot_pose(state: &replay::EscapeeState) -> PilotPose {
 /// with a reviewed explosion type keeps that type.
 pub fn effect_kind(kind: live::EffectKind, blast: Option<u8>) -> replay::EffectKind {
     let on = match kind {
-        live::EffectKind::Hit => Some(replay::Strike::Hit),
+        // A flak burst is recorded as the air explosion it shows until the
+        // replay format carries it (slice RP1).
+        live::EffectKind::Hit | live::EffectKind::Flak => Some(replay::Strike::Hit),
         live::EffectKind::Destroyed => Some(replay::Strike::Destroyed),
         live::EffectKind::Ground => Some(replay::Strike::Ground),
         _ => None,
@@ -461,7 +463,7 @@ pub fn effect_kind(kind: live::EffectKind, blast: Option<u8>) -> replay::EffectK
         live::EffectKind::Flare => replay::EffectKind::Flare,
         live::EffectKind::Chaff => replay::EffectKind::Chaff,
         live::EffectKind::Launch => replay::EffectKind::Launch,
-        live::EffectKind::Hit => replay::EffectKind::Hit,
+        live::EffectKind::Hit | live::EffectKind::Flak => replay::EffectKind::Hit,
         live::EffectKind::Destroyed => replay::EffectKind::Destroyed,
         live::EffectKind::Ground => replay::EffectKind::Ground,
         live::EffectKind::DebrisImpact => replay::EffectKind::DebrisImpact,

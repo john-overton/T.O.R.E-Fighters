@@ -444,10 +444,12 @@ fn effect_code(kind: EffectKind) -> u64 {
         EffectKind::Destroyed => 4,
         EffectKind::Ground => 5,
         EffectKind::DebrisImpact => 6,
+        // Surface flak bursts; carried from protocol 22 (slice N1).
+        EffectKind::Flak => 7,
     }
 }
 
-const EFFECTS: [EffectKind; 7] = [
+const EFFECTS: [EffectKind; 8] = [
     EffectKind::Flare,
     EffectKind::Chaff,
     EffectKind::Launch,
@@ -455,6 +457,7 @@ const EFFECTS: [EffectKind; 7] = [
     EffectKind::Destroyed,
     EffectKind::Ground,
     EffectKind::DebrisImpact,
+    EffectKind::Flak,
 ];
 
 fn write_sound_kind(w: &mut BitWriter, kind: acoustics::Kind) {

@@ -42,6 +42,33 @@ pub enum TargetRole {
     Aircraft,
     Surface,
 }
+/// The surface-to-air records surface units fire that fly supported by their
+/// launcher's radar (docs/spec/surface-defenses.md, "SAM missiles"): radar
+/// records (seeker 3) with the support flag 0x200, as the missile inventory
+/// proposes, plus SA-19 and SA-N-11, which lack the flag but arm the HAWK,
+/// Roland, 2S6 and Kirov (default, pending John). Target role aircraft.
+/// ASROC stays held and the SS-N-9 is anti-ship: neither has a profile.
+pub const SURFACE_SUPPORTED: [&str; 13] = [
+    "SA2A.JT",
+    "SA3.JT",
+    "SA6.JT",
+    "SA15.JT",
+    "SA19.JT",
+    "R440.JT",
+    "MIS.JT",
+    "SAN3.JT",
+    "SAN4.JT",
+    "SAN7.JT",
+    "SAN9.JT",
+    "SAN11.JT",
+    "SEA_SPAR.JT",
+];
+/// The surface-to-air records with infrared seekers (seeker 2), which home on
+/// their own: shoulder-launched and vehicle SAMs.
+pub const SURFACE_INFRARED: [&str; 6] = [
+    "FIM92.JT", "SA7.JT", "SA9.JT", "SA13.JT", "SA14.JT", "SA16.JT",
+];
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Profile {
     pub role: TargetRole,
@@ -70,6 +97,12 @@ impl Profile {
     /// Guidance and active-seeker range, in nautical miles, of each reviewed
     /// identity, by weapon record name.
     fn reviewed_guidance(source: &str) -> Option<(Guidance, Option<f64>)> {
+        if SURFACE_SUPPORTED.contains(&source) {
+            return Some((Guidance::Supported, None));
+        }
+        if SURFACE_INFRARED.contains(&source) {
+            return Some((Guidance::Infrared, None));
+        }
         Some(match source {
             "AIM120.JT" | "MICA.JT" | "AA12.JT" => (Guidance::Active, Some(5.)),
             "AAML.JT" | "AGM84A.JT" | "AM39.JT" => (Guidance::Active, Some(8.)),

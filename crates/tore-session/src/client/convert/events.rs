@@ -342,7 +342,9 @@ pub fn datalink_event(entry: &Entry) -> replay::Event {
 /// app does for the single-player recorder).
 fn effect_kind(effect: EffectKind, explosion: Option<u8>) -> replay::EffectKind {
     let on = match effect {
-        EffectKind::Hit => Some(replay::Strike::Hit),
+        // A flak burst is recorded as the air explosion it shows until the
+        // replay format carries it (slice RP1).
+        EffectKind::Hit | EffectKind::Flak => Some(replay::Strike::Hit),
         EffectKind::Destroyed => Some(replay::Strike::Destroyed),
         EffectKind::Ground => Some(replay::Strike::Ground),
         _ => None,
@@ -355,7 +357,7 @@ fn effect_kind(effect: EffectKind, explosion: Option<u8>) -> replay::EffectKind 
         EffectKind::Flare => replay::EffectKind::Flare,
         EffectKind::Chaff => replay::EffectKind::Chaff,
         EffectKind::Launch => replay::EffectKind::Launch,
-        EffectKind::Hit => replay::EffectKind::Hit,
+        EffectKind::Hit | EffectKind::Flak => replay::EffectKind::Hit,
         EffectKind::Destroyed => replay::EffectKind::Destroyed,
         EffectKind::Ground => replay::EffectKind::Ground,
         EffectKind::DebrisImpact => replay::EffectKind::DebrisImpact,
