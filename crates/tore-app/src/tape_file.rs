@@ -289,7 +289,8 @@ fn replay_reader(
             for object in &scene.objects {
                 state.add_ground_target(
                     object.id,
-                    object.bounds,
+                    // Runways meet weapons at their pavement, as in flight.
+                    tore_world::combat::weapon_contact(object, scene).unwrap_or(object.bounds),
                     object.hit_points,
                     object.category,
                     // Combat tapes predate surface sides: neutral, as recorded.

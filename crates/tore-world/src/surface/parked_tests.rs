@@ -96,3 +96,63 @@ fn a_parked_aircraft_stands_on_its_gear_at_the_aircraft_scale_and_is_a_target() 
     bare.parked_scene.clear();
     assert_eq!(bare.digest(), surface.digest());
 }
+
+#[test]
+fn weapons_meet_a_runway_at_its_pavement_and_other_objects_at_their_box() {
+    use crate::combat::weapon_contact;
+    use tore_sim::airport::{OrientedBox, Runway, Scene, SourceKey, StaticObject};
+    // A field whose shape box is 92 ft tall, its runway plane at 100 ft.
+    let bounds = OrientedBox {
+        center: [0., 146., 0.],
+        half: [4000., 46., 4000.],
+        heading: 0.3,
+        pitch: 0.,
+        bank: 0.,
+    };
+    let object = |id: u32, runway: bool| StaticObject {
+        id,
+        source: SourceKey {
+            layout: "TEST.MM".into(),
+            ordinal: id,
+        },
+        name: "Field".into(),
+        object_type: "AIRPORT.OT".into(),
+        bounds,
+        hit_points: 30000,
+        category: 0x100,
+        radar_signature: 0.,
+        infrared_signature: 0.,
+        runway,
+    };
+    let scene = Scene {
+        objects: vec![object(1, true), object(2, false)],
+        runways: vec![Runway {
+            object: 1,
+            airport: 1,
+            name: "Field".into(),
+            surface: bounds,
+            approach_center: [0., 100., 0.],
+            elevation_ft: 100.,
+            heading: 0.3,
+            length_ft: 8000.,
+        }],
+        airports: Vec::new(),
+    };
+    let slab = weapon_contact(&scene.objects[0], &scene).unwrap();
+    assert_eq!(slab.half, [4000., 1.5, 4000.]);
+    assert!((slab.center[1] - 99.5).abs() < 1e-9);
+    // A bomb falling on an aircraft parked 6 ft above the pavement reaches
+    // it before the runway; it meets the pavement at the plane.
+    let parked = [500., 106., -700.];
+    let drop = |to: f64| slab.segment_fraction([500., 300., -700.], [500., to, -700.]);
+    assert_eq!(drop(parked[1]), None);
+    let at = drop(90.).unwrap();
+    assert!(
+        (300. - 210. * at - 101.).abs() < 1e-6,
+        "meets the slab top 1 ft up"
+    );
+    // Any other object keeps its shape's box; the runway's landable surface
+    // is not touched.
+    assert_eq!(weapon_contact(&scene.objects[1], &scene), None);
+    assert_eq!(scene.runways[0].surface, bounds);
+}

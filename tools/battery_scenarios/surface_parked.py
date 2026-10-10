@@ -7,13 +7,13 @@ Super Etendard targets and four other fighters stand gear down on the ground
 as surface-role targets on the ground (radar cannot see them); a Mk 82, an
 AGM-65G (whose seeker locks the aircraft first) and a gun burst destroy three
 Super Etendards, each with damage by section, a type-30 family explosion, a
-crash crater and a fire, a thrown fragment and a kill in the Fighter row (the
-airfield's whole-site contact box would stop every round, so the run knocks it
-down first, `--clear-shelters`). On the Ukraine strip `~QUSTRIP` a bomb on the
+crash crater and a fire, a thrown fragment and a kill in the Fighter row. No
+parked aircraft stands inside another object's weapon contact: the airfield
+meets weapons at its pavement. On the Ukraine strip `~QUSTRIP` a bomb on the
 parked MiG-29 does the same with no shelter in the way, and a gun burst on a
 MiG-25 damages its left wing without a kill. On the Clemenceau fleet `~QFFLT`
-all eight Rafale M and Super Etendards stand on the carrier deck (268 ft at
-today's placed scale); on the Kiev fleet `~QBFLT` the four Yak-141s stay out.
+all eight Rafale M and Super Etendards stand on the carrier deck (89 ft at
+real size); on the Kiev fleet `~QBFLT` the four Yak-141s stay out.
 """
 import re
 
@@ -32,6 +32,9 @@ OUTCOME = re.compile(
 KILL = re.compile(r"^surface-parked: kill (0x[0-9a-f]+) by (\d+) class (0x[0-9a-f]+) row Some\((\d+)\) aircraft (\d)$", re.M)
 EXPLOSION = re.compile(r"^surface-parked: explosion (\d+) at (-?\d+) (-?\d+) (-?\d+)$", re.M)
 ROW = re.compile(r"^surface-parked: row (0x[0-9a-f]+) role (\S+) on-ground (\d) airborne (\d) parked (\d) sheltered (\S+)$", re.M)
+
+# The Clemenceau's deck: 67 hull units at 4/3 ft per unit (real size).
+DECK_FT = 89.33
 
 # Damage sections in the order the outcome prints them.
 SECTIONS = ["cockpit", "core", "nose", "left wing", "right wing", "tail"]
@@ -76,8 +79,8 @@ def lffair_problems(output: str) -> list[str]:
         if a[4] == "none" or a[12] != "none" or float(a[10]) <= 0:
             problems.append(f"{a[0]} {a[1]}: gear {a[4]} deck {a[12]} origin-up {a[10]}, want gear down on the ground")
     for m in ROW.finditer(output):
-        if (m.group(2), m.group(3), m.group(4), m.group(5)) != ("surface", "1", "0", "1"):
-            problems.append(f"{m.group(1)}: {m.group(0)}, want a surface-role parked row on the ground")
+        if (m.group(2), m.group(3), m.group(4), m.group(5), m.group(6)) != ("surface", "1", "0", "1", "none"):
+            problems.append(f"{m.group(1)}: {m.group(0)}, want a surface-role parked row on the ground that weapons reach")
     if "maverick 0x50000009 accepts 1 seeker-lock 1" not in output:
         problems.append("the Maverick's seeker did not lock the parked Super Etendard")
     _killed(output, ["0x50000008", "0x50000009", "0x5000000a"], problems)
@@ -100,8 +103,8 @@ def fleet_problems(output: str) -> list[str]:
     problems = []
     aircraft = AIRCRAFT.findall(output)
     clem = [a for a in aircraft if a[12] == "0x50000000"]
-    if len(clem) != 8 or len(aircraft) != 8 or any(abs(float(a[7]) - 268.0) > 0.5 for a in clem):
-        problems.append(f"{len(clem)} of {len(aircraft)} aircraft on the Clemenceau's deck at 268 ft, want 8")
+    if len(clem) != 8 or len(aircraft) != 8 or any(abs(float(a[7]) - DECK_FT) > 0.5 for a in clem):
+        problems.append(f"{len(clem)} of {len(aircraft)} aircraft on the Clemenceau's deck at {DECK_FT} ft, want 8")
     return problems
 
 
@@ -131,7 +134,7 @@ def scenarios() -> list[Scenario]:
     return [
         Scenario(
             name="surface-parked-aircraft", lane="ai",
-            args=["--surface-parked", "LFA", "QLFFAIR", "--clear-shelters",
+            args=["--surface-parked", "LFA", "QLFFAIR",
                   "--strike", "8:bomb", "--strike", "9:maverick", "--strike", "10:gun"],
             timeout=300,
             then=[
@@ -141,8 +144,8 @@ def scenarios() -> list[Scenario]:
             ],
             expect=[
                 r"^surface-parked: parked 9 placed 9 targets 5 parked-targets 5 unreadable 0$",
-                r"^surface-parked: cleared shelter 0x4000000b$",
             ],
+            forbid=[r"^surface-parked: row \S+ .* sheltered 0x", r"^surface-parked: cleared shelter"],
             check=problems,
             notes="Falklands airstrip strikes, the Ukraine strip MiG-29 and MiG-25, the Clemenceau deck and the "
                   "Kiev fleet's left-out Yak-141s.",

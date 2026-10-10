@@ -28,19 +28,20 @@ use tore_world::{
     world::{Seating, TickOutput, World},
 };
 
-/// The scene object whose solid box holds `point`, if any: a parked aircraft
-/// inside a shelter is reached only through it.
+/// The scene object whose weapon contact volume holds `point`, if any: a
+/// parked aircraft inside one is reached only through it. Runways meet
+/// weapons at their pavement (`tore_world::combat::weapon_contact`).
 fn sheltered(world: &World, point: [f64; 3]) -> Option<u32> {
     let below = [point[0], point[1] - 0.5, point[2]];
     let above = [point[0], point[1] + 0.5, point[2]];
-    world
-        .terrain
-        .airport_scene
+    let scene = &world.terrain.airport_scene;
+    scene
         .objects
         .iter()
         .find(|object| {
-            object.bounds.segment_fraction(below, above).is_some()
-                || object.bounds.segment_fraction(above, below).is_some()
+            let bounds = tore_world::combat::weapon_contact(object, scene).unwrap_or(object.bounds);
+            bounds.segment_fraction(below, above).is_some()
+                || bounds.segment_fraction(above, below).is_some()
         })
         .map(|object| object.id)
 }
@@ -180,10 +181,9 @@ pub fn run() -> AppResult<()> {
         );
     }
 
-    // The scene objects whose solid box holds a parked aircraft (an
-    // airfield's whole-site box, a factory) stop every round before it; with
-    // `--clear-shelters` they are knocked down first so the strikes reach
-    // the aircraft.
+    // A debug aid: the scene objects whose contact volume holds a parked
+    // aircraft (a building it stands in) stop every round before it; with
+    // `--clear-shelters` they are knocked down first.
     if clear_shelters {
         let shelters: std::collections::BTreeSet<u32> = surface
             .parked_scene

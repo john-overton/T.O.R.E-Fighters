@@ -1126,17 +1126,28 @@ not static scenery), engines off, and they never take off. The templates'
   scale, so the deck and its aircraft scale together (agent decision: the
   template positions were authored around the hull at its scenery scale).
   All eight `~QFFLT` aircraft (3 Rafale M, 5 Super Etendards) stand on the
-  Clemenceau's deck, 268 ft up at today's placed scale. The four `~QBFLT`
+  Clemenceau's deck, 89 ft up at real size (the lead kept this rule,
+  2026-10-10). The four `~QBFLT`
   Yak-141s stay out: the Kiev's only level faces lie below its waterline, so it
   has no deck the rule finds. An aircraft on no deck is listed with the
   template's left-out objects.
-- **Sheltered aircraft (finding, pending the lead).** In 16 of the 25
-  templates that place aircraft, every parked aircraft (112 of 161) stands
-  inside the solid contact box of another scene object: the airfield's
-  whole-site box (for example the Falklands field, 7,900 by 8,100 ft and 92
-  ft tall) or, in `~QFFACT`, the factory. That box takes every round first, so in game those aircraft cannot be
-  hit until it is destroyed. The rule that a runway object's contact is its
-  whole shape's box is the airport scene's, not this one's.
+- **Weapons reach aircraft on an airfield** (lead ruling, 2026-10-10). A
+  runway object's shape box spans its whole airfield (the Falklands field's
+  is 7,900 by 8,100 ft and 92 ft tall) and used to take every round before
+  the 112 parked aircraft in 16 templates standing inside it. For weapons a
+  runway object (`_STRIPProc`) now has pavement-only contact: a slab over its
+  footprint from 2 ft below the runway plane to 1 ft above it. Rounds and
+  bombs reach aircraft and units standing on or beside the field and meet the
+  pavement at the plane. The landable surface (grass between runways stays
+  landable, John), aircraft collision and every other use of the shape box are
+  unchanged. A composite runway shape's built-in structures (the towers and
+  hangars drawn inside RNWY1 and the AIRPORT shapes) no longer stop weapons:
+  they are part of the runway object, not objects of their own. At real size
+  (SC1) no parked aircraft stands inside another object's contact volume.
+- **Known gap: the Kiev fleet's aircraft.** KIEV.SH has no level deck above
+  its waterline (its only level faces lie 22 units below it), so the four
+  `~QBFLT` Yak-141s stand nowhere (accepted by the lead, 2026-10-10). Parking
+  them needs the Kiev's deck surface found another way.
 - **Network.** Built from the spec on every client like other static units;
   destruction travels as the ground-destroyed event plus the usual effect and
   mark events; a surface record is sent while damaged so damage smoke shows.
@@ -1391,7 +1402,6 @@ carry the label "default, pending John" where they appear above.
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
 | Supply truck numbers and stock | One truck per manned SAM or AAA slot plus one per template battery, unlimited stock, no added trucks in base layouts, two spare magazines per land gun. (The SAM rearm times of 300, 420 and 600 s are John's range, fitted within it.) | Retail slots stand about 3,300 ft apart, so a 528 ft radius covers one slot per truck |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and a Redfor human | A ground start across the map from a relocated target would mean a long flight |
-| Parked aircraft inside another object's contact box | Open: in 16 templates the airfield's whole-site box (or the `~QFFACT` factory) takes every round before the 112 aircraft inside it | Pending the lead: a runway object's contact box is its whole shape's, which is the airport scene's rule |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
 | Runway pavement width | Keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
