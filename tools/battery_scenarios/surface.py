@@ -7,6 +7,14 @@ theater's scene at heavy defenses. It checks the counts against the retail
 survey (template objects, `<sam>` and `<aaa>` slots, targets per template,
 base-layout SAM and AAA by side), the 0, 25, 60 and 100 percent rolls, and that
 a second run repeats every digest. See docs/spec/surface-defenses.md.
+
+The engagement scenarios run `--surface-trace`, which flies the player on a
+scripted straight line past one surface unit and prints what its controller
+does (phases, shots, bursts, radar, HARM rolls, battery changes), the RWR's
+ground squares, locks and tone, decoy rolls and a summary line. They read the
+retail records the import does not keep yet from the retail media, as the dump
+does. Numbers they check are the record's and the AAA tuning table's
+(docs/spec/surface-defenses.md).
 """
 import re
 
@@ -120,6 +128,255 @@ def resolve_all_problems(output: str) -> list[str]:
     return problems
 
 
+TRACE = re.compile(r"^surface-trace: t=([0-9.]+) (.*)$", re.M)
+SUMMARY = re.compile(r"^surface-trace: summary (.*)$", re.M)
+SUBJECT = re.compile(r"^surface-trace: subject (0x[0-9a-f]+) (\S+) side (\d+)", re.M)
+RADAR = re.compile(r"^surface-trace: radar (0x[0-9a-f]+)$", re.M)
+
+
+def runs(output: str) -> list[str]:
+    """The output of each run: the main command, then each `then` step."""
+    return re.split(r"^\$ then \d+:.*$", output, flags=re.M)
+
+
+def summary(run: str) -> dict[str, str]:
+    m = SUMMARY.search(run)
+    if not m:
+        return {}
+    words = m.group(1).split()
+    return dict(zip(words[::2], words[1::2]))
+
+
+def events(run: str) -> list[tuple[float, str]]:
+    return [(float(m.group(1)), m.group(2)) for m in TRACE.finditer(run)]
+
+
+def subject(run: str) -> str:
+    m = SUBJECT.search(run)
+    return m.group(1) if m else "?"
+
+
+def first(run: str, pattern: str) -> float | None:
+    for t, text in events(run):
+        if re.search(pattern, text):
+            return t
+    return None
+
+
+def near(a: float | None, b: float, tolerance: float = 0.02) -> bool:
+    return a is not None and abs(a - b) <= tolerance
+
+
+def sa6_engage_problems(output: str) -> list[str]:
+    """SA-6 (NPC 10 s search, 36 s first preparation; record 5 s lock, 15 s
+    between salvos): the phases at the record times, a launch, the RWR's
+    ground square, the lock tone and then the missile tone."""
+    problems: list[str] = []
+    run = runs(output)[0]
+    unit = subject(run)
+    prepare = first(run, rf"^phase {unit} w0 Prepare")
+    track = first(run, rf"^phase {unit} w0 Track")
+    shots = [t for t, text in events(run) if text.startswith(f"shot {unit} ") and " rounds 1 " in text]
+    if prepare is None or not near(track, prepare + 36.0):
+        problems.append(f"preparation {prepare} to lock {track}: expected 36 s")
+    if not shots or not near(shots[0], (track or 0) + 5.0):
+        problems.append(f"first launch {shots[:1]} not 5 s after the lock at {track}")
+    if len(shots) < 2 or not near(shots[1] - shots[0], 15.0):
+        problems.append(f"launches {shots}: expected 15 s apart")
+    s = summary(run)
+    for key in ("ground-square", "radar-lock-tone", "inbound-tone"):
+        if s.get(key) != "true":
+            problems.append(f"{key} {s.get(key)}")
+    lock = first(run, r"^rwr .*tone Some\(RadarLock\)")
+    inbound = first(run, r"^rwr .*tone Some\(RadarInbound\)")
+    if lock is None or inbound is None or lock >= inbound:
+        problems.append(f"lock tone at {lock} should come before the missile tone at {inbound}")
+    return problems
+
+
+def sa2_low_problems(output: str) -> list[str]:
+    """Under the SA-2's 3,000 ft seeker floor: its radar is on and the RWR shows
+    it, but it never launches."""
+    problems: list[str] = []
+    run = runs(output)[0]
+    unit = subject(run)
+    if first(run, rf"^radar {unit} on") is None:
+        problems.append("the SA-2's radar never came on")
+    s = summary(run)
+    if s.get("ground-square") != "true":
+        problems.append("no RWR ground square for the SA-2")
+    if s.get("missiles") != "0":
+        problems.append(f"{s.get('missiles')} missiles launched under the floor")
+    return problems
+
+
+def chaff_flare_problems(output: str) -> list[str]:
+    """SA-6 and SA-7 launches against a jet dispensing chaff and flares: the
+    radar missile rolls against chaff, the infrared one against flares, and
+    some are decoyed."""
+    problems: list[str] = []
+    run = runs(output)[0]
+    rolls = [text for _, text in events(run) if text.startswith("decoy ")]
+    if not any(r.startswith("decoy Chaff") and " SA6.JT " in r for r in rolls):
+        problems.append("no chaff roll against an SA-6")
+    if not any(r.startswith("decoy Flare") and " SA7.JT " in r for r in rolls):
+        problems.append("no flare roll against an SA-7")
+    if any(r.startswith("decoy Chaff") and (" SA7.JT " in r or " SA13.JT " in r or " SA14.JT " in r) for r in rolls):
+        problems.append("chaff rolled against an infrared missile")
+    if any(r.startswith("decoy Flare") and " SA6.JT " in r for r in rolls):
+        problems.append("a flare rolled against a radar missile")
+    if not any(r.endswith("decoyed true") for r in rolls):
+        problems.append("nothing was decoyed")
+    return problems
+
+
+def harm_problems(output: str) -> list[str]:
+    """An AGM-88 at an SA-6 battery's Straight Flush: an ace radar shuts down,
+    the battery goes Blind for 30 s and comes back; a killed radar blinds it
+    for good."""
+    problems: list[str] = []
+    harm, killed = (runs(output) + ["", ""])[:2]
+    m = RADAR.search(harm)
+    radar = m.group(1) if m else "?"
+    shut = first(harm, rf"^harm-roll {radar} .* shutdown$")
+    if shut is None:
+        problems.append("no HARM shutdown roll succeeded")
+    else:
+        if not near(first(harm, rf"^radar {radar} off"), shut):
+            problems.append("the radar did not go off with the shutdown")
+        if not near(first(harm, r"^battery 0 Blind"), shut):
+            problems.append("the battery did not go Blind with the shutdown")
+        back = [t for t, text in events(harm) if text == f"radar {radar} on" and t > shut]
+        if not back or not near(back[0], shut + 30.0):
+            problems.append(f"the radar came back at {back[:1]}, expected 30 s after {shut}")
+    kill = first(killed, r"^killed ")
+    blind = first(killed, r"^battery 0 Blind")
+    if kill is None or not near(blind, kill):
+        problems.append(f"killing the radar at {kill} did not blind the battery ({blind})")
+    after = [text for t, text in events(killed) if kill is not None and t > kill and text.startswith("battery 0 ")]
+    if after:
+        problems.append(f"the battery left Blind after its radar died: {after[:2]}")
+    if any(t > (kill or 0) for t, text in events(killed) if text.startswith("shot ")):
+        problems.append("a launch after the radar died")
+    return problems
+
+
+def battery_sa2_problems(output: str) -> list[str]:
+    """A North Vietnam SA-2 site with its GCI radar as a battery: the radar is
+    the RWR's square, never the launcher; with the radar killed in daylight it
+    launches on its optical backup with no lock tone; at night it does not."""
+    problems: list[str] = []
+    live, optical, night = (runs(output) + ["", "", ""])[:3]
+    unit = subject(live)
+    m = RADAR.search(live)
+    radar = m.group(1) if m else "?"
+    squares = [text for _, text in events(live) if text.startswith("rwr ground-squares")]
+    if not any(f'"{radar}"' in text for text in squares):
+        problems.append(f"the radar {radar} never showed on the RWR")
+    if any(f'"{unit}"' in text for text in squares):
+        problems.append(f"the launcher {unit} showed on the RWR")
+    if int(summary(live).get("missiles", "0")) == 0 or summary(live).get("radar-lock-tone") != "true":
+        problems.append(f"the battery did not lock and launch: {summary(live)}")
+    s = summary(optical)
+    if int(s.get("missiles", "0")) == 0:
+        problems.append("no optical launch in daylight")
+    if s.get("lock-tone") != "false":
+        problems.append("a lock tone from a blind battery")
+    if first(optical, r"^battery 0 .*optical") is None:
+        problems.append("the battery never went to its optical backup")
+    if summary(night).get("missiles") != "0" or first(night, r"^battery 0 Blind") is None:
+        problems.append(f"at night a blind SA-2 battery fired or did not go Blind: {summary(night)}")
+    return problems
+
+
+def zsu23_problems(output: str) -> list[str]:
+    """ZSU-23 (AAA tuning row: 99-round bursts at 3,400 rpm, a 2,000-round
+    magazine, every third round a tracer): bursts, tracers, hits, magazine."""
+    problems: list[str] = []
+    run = runs(output)[0]
+    unit = subject(run)
+    bursts = [text for _, text in events(run) if text.startswith(f"burst {unit} ")]
+    full = [b for b in bursts if " rounds 99 " in b]
+    if not full:
+        problems.append(f"no full 99-round burst: {bursts[:3]}")
+    for b in full:
+        rpm = float(b.rsplit("rpm ", 1)[1])
+        if abs(rpm - 3400) > 34:
+            problems.append(f"burst rate {rpm} rpm, table 3,400")
+    s = summary(run)
+    rounds, tracers = int(s.get("rounds", "0")), int(s.get("tracers", "0"))
+    if abs(tracers - rounds / 3) > 1:
+        problems.append(f"{tracers} tracers in {rounds} rounds, every third")
+    if int(s.get("hits", "0")) == 0:
+        problems.append("no hits registered")
+    m = re.search(rf"^surface-trace: stock {unit} m0 loaded (\d+) reserve (\d+)$", run, re.M)
+    if not m or int(m.group(1)) + rounds != 2000 or m.group(2) != "2":
+        problems.append(f"magazine: {m.group(0) if m else None} after {rounds} rounds of 2,000")
+    return problems
+
+
+def flak_problems(output: str) -> list[str]:
+    """KS-19 over North Vietnam's AAA emplacement: an eight-shell opening
+    barrage, single shells after, flak bursts high and no tracers; at 3,000 ft,
+    under the 4,000 ft floor, it holds fire."""
+    problems: list[str] = []
+    high, low = (runs(output) + ["", ""])[:2]
+    unit = subject(high)
+    shots = [text for _, text in events(high) if text.startswith(f"shot {unit} ")]
+    opening = [s for s in shots if " opening" in s]
+    if len(opening) != 8 or shots[:8] != opening:
+        problems.append(f"opening barrage {len(opening)} shells, expected the first 8")
+    if len(shots) <= 8:
+        problems.append("no shells after the opening barrage")
+    s = summary(high)
+    if s.get("tracers") != "0":
+        problems.append(f"{s.get('tracers')} flak tracers")
+    if int(s.get("flak-bursts", "0")) == 0 or s.get("min-burst-ft") == "none" or float(s["min-burst-ft"]) < 4000:
+        problems.append(f"flak bursts {s.get('flak-bursts')} lowest {s.get('min-burst-ft')} ft")
+    if any(text.startswith(f"shot {subject(low)} ") for _, text in events(low)):
+        problems.append("the KS-19 fired below its 4,000 ft floor")
+    return problems
+
+
+def barrage_problems(output: str) -> list[str]:
+    """North Vietnam SAM sites' barrage zone: it fires about a third of its
+    bursts (random fire 33 percent) and sleeps once the jet leaves."""
+    problems: list[str] = []
+    run = runs(output)[0]
+    unit = subject(run)
+    tried = sum(1 for _, text in events(run) if text.startswith(f"phase {unit} w0 Fire"))
+    fired = sum(1 for _, text in events(run) if text.startswith(f"burst {unit} "))
+    if tried < 20 or not 0.1 <= fired / tried <= 0.6:
+        problems.append(f"{fired} of {tried} bursts fired, retail 33 percent")
+    if first(run, rf"^phase {unit} w0 Idle") is None:
+        problems.append("the zone never went back to sleep")
+    if summary(run).get("ground-square") != "false":
+        problems.append("the barrage zone showed on the RWR")
+    return problems
+
+
+def base_defenses_problems(output: str) -> list[str]:
+    """Cuba's base layout: an enemy SA-2 engages a Blue jet, and Blue's M163s
+    engage a Redfor one."""
+    problems: list[str] = []
+    red, blue = (runs(output) + ["", ""])[:2]
+    m = SUBJECT.search(red)
+    if not m or m.group(3) != "2" or int(summary(red).get("missiles", "0")) == 0:
+        problems.append(f"the Redfor SA-2 did not engage: {summary(red)}")
+    m = SUBJECT.search(blue)
+    if not m or m.group(3) != "1" or int(summary(blue).get("rounds", "0")) == 0:
+        problems.append(f"the Blue M163 did not engage a Redfor jet: {summary(blue)}")
+    return problems
+
+
+TRACE_NOTES = ("Reads the surface records the import does not keep yet from the retail media "
+               "(TORE_GAME_DIR, the remembered source or the gameassets link).")
+
+
+def trace(*args: str) -> list[str]:
+    return ["--surface-trace", *args]
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -131,5 +388,84 @@ def scenarios() -> list[Scenario]:
             check=resolve_all_problems,
             notes="Reads the templates from the retail media (TORE_GAME_DIR, the remembered source or the "
                   "gameassets link) until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-sa6-engage", lane="ai", timeout=300,
+            args=trace("IRA", "--over", "SA6", "--altitude", "15000", "--from", "20", "--seconds", "150",
+                       "--invulnerable"),
+            forbid=[r"^surface-trace: t=\S+ player crashed"],
+            check=sa6_engage_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-sa2-low", lane="ai", timeout=300,
+            args=trace("TVIET", "--over", "SA2A", "--altitude", "1000", "--from", "20", "--seconds", "150",
+                       "--invulnerable", "--quiet-shots"),
+            forbid=[r"^surface-trace: t=\S+ player crashed"],
+            check=sa2_low_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-chaff-flare", lane="ai", timeout=300,
+            args=trace("UKR", "QUFACT", "--surface-seed", "2", "--unit", "0x5000000e", "--near", "2000",
+                       "--altitude", "5000", "--speed", "300", "--from", "6", "--seconds", "120",
+                       "--chaff", "1", "--flares", "1", "--invulnerable"),
+            check=chaff_flare_problems, notes=TRACE_NOTES + " Seed 2 mans the factory's SA-6 and SA-7 slots.",
+        ),
+        Scenario(
+            name="surface-harm", lane="ai", timeout=400,
+            args=trace("VLA", "QVRDRI", "--surface-seed", "4", "--unit", "0x5000000d", "--battery-near",
+                       "--skill", "3", "--rng", "2", "--aircraft", "f16c", "--altitude", "20000",
+                       "--from", "25", "--harm-at", "10", "--seconds", "200", "--invulnerable"),
+            then=[Step(trace("VLA", "QVRDRI", "--surface-seed", "4", "--unit", "0x5000000d", "--battery-near",
+                             "--skill", "3", "--aircraft", "f16c", "--altitude", "20000", "--from", "25",
+                             "--kill-at", "140", "--seconds", "220", "--invulnerable"), timeout=300)],
+            check=harm_problems,
+            notes=TRACE_NOTES + " --battery-near forms the battery the layout slice will form; the AGM-88 is put "
+                  "in flight from the jet directly (no designation of ground emitters yet).",
+        ),
+        Scenario(
+            name="surface-battery-sa2", lane="ai", timeout=400,
+            args=trace("TVIET", "--over", "SA2A", "--index", "6", "--battery-near", "--altitude", "20000",
+                       "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots"),
+            then=[
+                Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--battery-near", "--altitude", "20000",
+                           "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots",
+                           "--kill-at", "1"), timeout=300),
+                Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--battery-near", "--altitude", "20000",
+                           "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots",
+                           "--kill-at", "1", "--condition", "night"), timeout=300),
+            ],
+            check=battery_sa2_problems,
+            notes=TRACE_NOTES + " The North Vietnam SA-2 with a GCI within 2 nm; --battery-near stands in for the "
+                  "layout slice's battery forming.",
+        ),
+        Scenario(
+            name="surface-zsu23-gun", lane="ai", timeout=300,
+            args=trace("BAL", "--over", "ZSU23", "--altitude", "1500", "--speed", "250", "--from", "4",
+                       "--seconds", "120", "--quiet-shots"),
+            check=zsu23_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-flak-tviet", lane="ai", timeout=400,
+            args=trace("TVIET", "QTAAA", "--over", "KS19", "--aircraft", "a10", "--altitude", "15000",
+                       "--speed", "300", "--from", "10", "--seconds", "120", "--invulnerable"),
+            then=[Step(trace("TVIET", "QTAAA", "--over", "KS19", "--aircraft", "a10", "--altitude", "3000",
+                             "--speed", "300", "--from", "10", "--seconds", "120", "--invulnerable"),
+                       timeout=300)],
+            check=flak_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-barrage-zone", lane="ai", timeout=300,
+            args=trace("TVIET", "QTSAM", "--over", "A_M1939", "--altitude", "3000", "--speed", "250",
+                       "--from", "6", "--pass", "2000", "--seconds", "300", "--quiet-shots", "--invulnerable"),
+            check=barrage_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-base-defenses", lane="ai", timeout=400,
+            args=trace("CUB", "--over", "SA2A", "--altitude", "20000", "--from", "20", "--seconds", "150",
+                       "--quiet-shots", "--invulnerable"),
+            then=[Step(trace("CUB", "--over", "M163", "--player-side", "red", "--altitude", "1500",
+                             "--speed", "300", "--from", "4", "--seconds", "90", "--quiet-shots",
+                             "--invulnerable"), timeout=300)],
+            check=base_defenses_problems, notes=TRACE_NOTES,
         ),
     ]

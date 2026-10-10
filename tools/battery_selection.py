@@ -342,6 +342,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/telemetry.rs", ("flight-maneuvers", "instruments"), "telemetry"),
     _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers", "flight-powered"), "cheats; Easy flight physics"),
     # tore-sim: AI.
+    _r("crates/tore-sim/src/ai/surface*", ("surface",), "the surface engagement controller"),
     _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio",), "AI"),
     # tore-sim: the flight data link's radar table.
     _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link radar table"),
@@ -630,6 +631,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/navigation.rs", ("flight-landing", "airports", "ai-airfield", "menus-creator"), "navigation and airport lists"),
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
     _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
+    _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
     _r("crates/tore-app/src/replay/net_convert.rs", ("net-convert",), "converting a capture into a replay"),

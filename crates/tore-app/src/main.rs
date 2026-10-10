@@ -114,6 +114,7 @@ mod su35_animation;
 mod surface_dump;
 mod surface_lighting;
 mod surface_preview;
+mod surface_trace;
 mod tape_file;
 mod target_info;
 mod target_preview;
@@ -8524,6 +8525,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-sheets") {
         surface_dump::sheets()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--surface-trace") {
+        surface_trace::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-preview") {
