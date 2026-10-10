@@ -237,8 +237,8 @@ pub fn template(
     let (aaa_percent, sam_percent) = (percent(target.aaa, "AAA")?, percent(target.sam, "SAM")?);
     let enemy = i32::try_from(target.enemy_nationality).map_err(|e| e.to_string())? | 0x80;
     let resource = template.resource();
-    // Aircraft in a template that holds a carrier are scheduled deck
-    // launches, not parked aircraft (decision 12.7).
+    // Aircraft in a template that holds a carrier stand on its deck when
+    // their spot lies on it, and stay out otherwise (lead ruling after S2).
     let mut carrier = false;
     for object in &template.objects {
         carrier |= match &object.kind {
@@ -261,6 +261,7 @@ pub fn template(
     };
     let mut units = Vec::new();
     let mut parked = Vec::new();
+    let mut deck_candidates = Vec::new();
     let mut placements = Vec::new();
     for object in &template.objects {
         let ordinal = object.ordinal;
@@ -319,22 +320,20 @@ pub fn template(
             .map_err(|error| format!("{stem}: object {ordinal}: {error}"))?;
         match entry.family {
             Family::Aircraft => {
+                let aircraft = ParkedAircraft {
+                    id,
+                    resource: entry.resource.clone(),
+                    position: object.position,
+                    angles: object.angles,
+                    nationality: Some(nationality),
+                    side,
+                    target: object.is_target(),
+                    deck: None,
+                };
                 if carrier {
-                    site.left_out.push(LeftOut {
-                        ordinal,
-                        resource: entry.resource.clone(),
-                        why: "a scheduled deck launch",
-                    });
+                    deck_candidates.push(aircraft);
                 } else {
-                    parked.push(ParkedAircraft {
-                        id,
-                        resource: entry.resource.clone(),
-                        position: object.position,
-                        angles: object.angles,
-                        nationality: Some(nationality),
-                        side,
-                        target: object.is_target(),
-                    });
+                    parked.push(aircraft);
                 }
             }
             Family::Unit(_) | Family::Object => {
@@ -395,6 +394,47 @@ pub fn template(
                 ));
             }
         }
+    }
+    // Fleet aircraft: on the first carrier whose deck holds their spot.
+    if !deck_candidates.is_empty() {
+        let mut hulls = Vec::new();
+        for unit in &units {
+            let is_carrier = catalog
+                .entry(&unit.resource)
+                .is_ok_and(|entry| entry.carrier);
+            if is_carrier
+                && let Some(shape) = super::catalog::unit_shape(catalog.resources(), &unit.resource)
+                && let Some(hull) = super::parked::Hull::of(catalog.resources(), unit, &shape)
+            {
+                hulls.push((unit, hull));
+            }
+        }
+        for mut aircraft in deck_candidates {
+            let on = hulls.iter().find(|(unit, hull)| {
+                super::parked::deck_spot(
+                    &hull.deck,
+                    hull.authored_scale,
+                    hull.placed_scale,
+                    unit.position,
+                    unit.angles[0],
+                    aircraft.position,
+                )
+                .is_some()
+            });
+            match on {
+                Some((unit, _)) => {
+                    aircraft.deck = Some(unit.id);
+                    parked.push(aircraft);
+                }
+                None => site.left_out.push(LeftOut {
+                    ordinal: aircraft.id.0 - super::SURFACE_UNIT_BASE,
+                    resource: aircraft.resource,
+                    why: "on no carrier's deck",
+                }),
+            }
+        }
+        parked.sort_by_key(|aircraft| aircraft.id);
+        site.left_out.sort_by_key(|left| left.ordinal);
     }
     Ok(TemplateResolution {
         site,

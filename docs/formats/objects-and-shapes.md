@@ -650,7 +650,8 @@ attitude and adds it to the carrier's position (`0x411d10`).
 
 Tractor headings are -20384, 4004 and -3276 (Wasp: -25116); islands 0. The
 loop is skipped in two game modes (word `0x520a50` equal to 3 or 12), not
-traced further.
+traced further. The table is recorded as facts in `tore_formats::carrier`
+(`CARRIERS`, `for_hull`), where the game reads it.
 
 Every height is 0 (the Clemenceau's officer 20), yet the island shapes reach
 down to their ground offset (F2 word +8, which FA 0x42e0c0 reads to stand an
@@ -669,7 +670,8 @@ for the slice that places carriers.
 
 ### Flight decks
 
-The flat deck is the height shared by the largest area of level faces. The
+The flat deck is the height shared by the largest area of level faces
+(`tore_formats::carrier::flight_deck`, fitted). The
 outline is the convex hull of those faces (right, forward), in source units;
 times 4 for feet at the scenery scale, which is what the carriers' own
 placement offsets and the template positions use.
@@ -686,6 +688,80 @@ level faces lie at 49 and 33 units, and some deck faces are not level), so
 its outline is partial. Kitty Hawk also has smaller level areas at 50 and 22
 units. The areas sum level faces and count overlaps twice. The Clemenceau
 template `~QFFLT` parks its eight aircraft inside the CLEM outline.
+
+The Kiev (KIEV.SH, not in the FA.EXE carrier table) has level faces only at
+-22 units, below its origin, about 57,300 square units: no deck the rule
+finds. The game takes a deck only above the hull's origin (the waterline), so
+the four `~QBFLT` Yak-141s stand nowhere
+([parked aircraft](../spec/surface-defenses.md#parked-aircraft)).
+`parked_inspect FA_2.LIB FA_1.LIB --deck HULL.SH` lists a hull's levels.
+
+### Parked aircraft gear
+
+An aircraft shape draws its devices as branches its instance state words
+switch on: afterburner flame, airbrake, landing gear, hook, flaps. With
+every word 0 the gear is up. `tore_formats::parked_aircraft::gear` finds the
+gear word from the shape alone: the word whose branch, switched on by
+itself, adds the faces that reach lowest, at least as low as the rest of the
+shape (a tie goes to the branch that adds more faces, then the lower word).
+No word adds faces on the helicopters AH1 (COB.SH) and MI17 (HIP.SH): their
+skids and wheels are always drawn. Every one of the 39 aircraft types the
+Quick Mission templates park reads in the state path, gear up and down.
+Across them the gear-down lowest point equals the shape's ground offset (F2
+word +8, scenery feet) within two shape units; an ignored retail test
+(`parked_aircraft::import_tests`) pins the table. `parked_inspect FA_2.LIB
+FA_1.LIB [PT ...]` prints each type's words and what each adds.
+
+| PT | Shape | Gear word | Gear faces | Wheels (units below origin) | Ground offset |
+| --- | --- | --- | ---: | ---: | ---: |
+| A37 | A37 | 6380 | 12 | 9 | -9 |
+| AH1 | COB | none | 0 | 22 | -21 |
+| C130 | C130 (exponent 9) | 3a30 | 6 | 21 | -40 |
+| F16E | F16E | 8d8c | 25 | 21 | -21 |
+| F4E | F4E | 5dfc | 6 | 21 | -21 |
+| F5EE | F5EE | 639c | 6 | 18 | -18 |
+| F5EV | F5EV | 614c | 6 | 18 | -18 |
+| J7E | J7E | 4ce6 | 6 | 15 | -14 |
+| KA50 | HOKUM | 7350 | 6 | 14 | -14 |
+| M2000 | M20 | 589c | 6 | 12 | -13 |
+| M2000E | M20E | 592c | 6 | 13 | -13 |
+| M25 | MIG25 | 760c | 12 | 28 | -27 |
+| M5 | MR5 | 67cc | 12 | 16 | -17 |
+| MF1 | MF1 | 5adc | 6 | 17 | -17 |
+| MI17 | HIP | none | 0 | 25 | -24 |
+| MI24 | HIND | 7196 | 6 | 30 | -29 |
+| MIG17F | M17 | 605c | 22 | 14 | -14 |
+| MIG21 | MIG21 | 4a56 | 6 | 18 | -18 |
+| MIG21F | M21F | 5d0c | 26 | 19 | -19 |
+| MIG23 | MIG23 (exponent 9) | 6ae6 | 18 | 10 | -20 |
+| MIG27 | MIG27 | 390c | 6 | 20 | -19 |
+| MIG29 | MIG29 | 824c | 16 | 20 | -19 |
+| MIG29M | MIG2M | 7f1c | 16 | 20 | -19 |
+| MIG29V | MIG2V | 38b6 | 6 | 24 | -23 |
+| MIG31 | MIG31 | 612c | 12 | 30 | -30 |
+| MR3 | MR3 | 604c | 6 | 13 | -13 |
+| MR3E | MR3E | 593c | 6 | 13 | -13 |
+| Q5 | Q5 | 63fc | 6 | 15 | -14 |
+| RAFALE | RAF | 5b62 | 20 | 18 | -18 |
+| RAFALEF | RAFF | 6092 | 20 | 18 | -18 |
+| SFR | SFR (exponent 9) | 5e50 | 6 | 10 | -20 |
+| SPE | SPE | 68cc | 6 | 17 | -16 |
+| SU24 | SU24 (exponent 9) | 765c | 24 | 13 | -24 |
+| SU25 | SU25 | 8396 | 18 | 23 | -22 |
+| SU27V | SU27V | 41dc | 8 | 23 | -22 |
+| SU34 | SU34 | 67cc | 8 | 26 | -26 |
+| SU35 | SU35 | 79cc | 18 | 22 | -22 |
+| SU7 | SU7 | 629c | 10 | 19 | -19 |
+| YAK141 | Y141 | 6270 | 4 | 21 | -21 |
+
+Words are hexadecimal. Most jets number their words flame, brake, gear,
+flaps from one base (gear at base + 0xc); the MiG-21, J-7E and MiG-29V
+(no brake word) have gear at base + 6, the A-37 at its first word, and the
+Yak-141's branch adds only its main gear (its nose gear is always drawn).
+The Rafale M (RAFF) word 609e also reaches 18 units with four faces (likely
+its hook); the Super Etendard's 68d8 reaches 16. The helicopters' and the
+C-130's rotor and propeller discs are drawn as in flight: no state word
+stops them.
 
 ### Extents at both scales
 

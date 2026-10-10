@@ -1129,6 +1129,13 @@ impl Terrain {
             }
         }
         self.surface.courses = courses;
+        // The parked aircraft stand on the ground or their carrier's deck.
+        let (parked, unreadable) =
+            crate::surface::parked::place(resources, &self.surface, &|x, z| {
+                f64::from(self.height(x as f32, z as f32))
+            });
+        self.surface.parked_scene = parked;
+        self.surface.unreadable.extend(unreadable);
         self.airport_scene = tore_sim::airport::Scene {
             objects,
             runways,

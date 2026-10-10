@@ -8,7 +8,10 @@
 //! scale bar in feet. A launcher sheet shows the dynamic (state) projection
 //! with each loaded-round count. Carrier sheets place each hull's island and
 //! deck parts from the FA.EXE carrier table, and a fleet scene lays out the
-//! Clemenceau template `~QFFLT`. Shapes, textures, the palette and the label
+//! Clemenceau template `~QFFLT`. The parked-aircraft sheets (slice PA1) show
+//! every aircraft the templates park, gear down, and the `~QFFLT` aircraft
+//! on the Clemenceau's deck as the game places them; `--surface-preview
+//! OUT_DIR parked` draws only those. Shapes, textures, the palette and the label
 //! font are read straight from the user's own `FA_1.LIB` and `FA_2.LIB` (the
 //! remembered media source, `TORE_GAME_DIR`, or `gameassets/`), so the sheets
 //! do not depend on what the import selected.
@@ -20,10 +23,13 @@
 //! in their palette colour, and a fixed light that darkens faces turned away
 //! from it so the form reads (the game's shader also shades by the surface
 //! normal). Sprites face the viewer, as in the game.
+mod parked;
+
 use crate::AppResult;
 use std::{collections::BTreeMap, path::Path};
 use tore_formats::{
     Archive, Pic,
+    carrier::{CARRIERS, Carrier, Deck, flight_deck},
     font::Font,
     shape::{DAMAGED_WORD, Face, Shape, contact_offset, loaded_count_word, object_scale},
 };
@@ -764,159 +770,6 @@ fn launcher_sheet(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
     Ok(())
 }
 
-/// A part FA.EXE spawns with a carrier: its shape, its offset from the
-/// carrier's origin in world units (right, up, forward, turned with the
-/// carrier) and its heading in binary angle units (65536 a turn).
-struct Attachment {
-    shape: &'static str,
-    offset: [i16; 3],
-    heading: i16,
-}
-
-/// A carrier and the parts spawned with it. The island is always the last
-/// part, an OT whose damaged look is its own damage branch.
-struct Carrier {
-    hull: &'static str,
-    damaged: &'static str,
-    note: &'static str,
-    parts: &'static [Attachment],
-}
-
-const fn part(shape: &'static str, offset: [i16; 3], heading: i16) -> Attachment {
-    Attachment {
-        shape,
-        offset,
-        heading,
-    }
-}
-
-/// The carrier table in FA.EXE 1.02F (names from `0x50cbd0`, offsets from
-/// `0x50cbe8`, headings from `0x50cc08` for the Eisenhower; the other
-/// carriers follow at `0x50cc18`, `0x50cc38` and `0x50cc80`). The spawning
-/// code turns each offset by the carrier's attitude and adds it to the
-/// carrier's position (`0x411d10`). Every height in the table is 0 except the
-/// Clemenceau's catapult officer (20). The preview stands each part on the
-/// hull's flight deck by its ground offset (the shape's F2 contact word), as
-/// objects stand on the ground: the deck crew's feet, the tractors' wheels
-/// and the islands' bases then all meet the deck. That rule is an inference
-/// (fitted); the game's deck placement is not traced.
-const CARRIERS: [Carrier; 4] = [
-    Carrier {
-        hull: "NIMZ.SH",
-        damaged: "NIMZ_A.SH",
-        note: "Eisenhower (NIMZ.NT)",
-        parts: &[
-            part("CATGUY.SH", [-15, 0, 1011], 32760),
-            part("MULEA.SH", [292, 0, -408], -20384),
-            part("MULEB.SH", [205, 0, -158], 4004),
-            part("MULEC.SH", [-387, 0, -729], -3276),
-            part("NIMZT.SH", [360, 0, -195], 0),
-        ],
-    },
-    Carrier {
-        hull: "KITT.SH",
-        damaged: "KITT_A.SH",
-        note: "Kitty Hawk (KITT.NT)",
-        parts: &[
-            part("CATGUY.SH", [-15, 0, 1011], 32760),
-            part("MULEA.SH", [252, 0, -408], -20384),
-            part("MULEB.SH", [205, 0, -158], 4004),
-            part("MULEC.SH", [-347, 0, -729], -3276),
-            part("KITTT.SH", [300, 0, -190], 0),
-        ],
-    },
-    Carrier {
-        hull: "CLEM.SH",
-        damaged: "CLEM_A.SH",
-        note: "Clemenceau (CLEM.NT)",
-        parts: &[
-            part("CATGUY.SH", [70, 20, 1420], 32760),
-            part("MULEA.SH", [330, 0, -700], -20384),
-            part("MULEB.SH", [466, 0, 700], 4004),
-            part("MULEC.SH", [-410, 0, -729], -3276),
-            part("CLEMT.SH", [380, 0, 230], 0),
-        ],
-    },
-    Carrier {
-        hull: "WASP.SH",
-        damaged: "WASP_A.SH",
-        note: "Wasp (WASP.NT)",
-        parts: &[
-            part("MULEA.SH", [80, 0, 320], -25116),
-            part("WASPT.SH", [0, 0, 0], 0),
-        ],
-    },
-];
-
-/// The flat top parts and parked aircraft stand on: the height shared by the
-/// largest area of level faces, in source units, the area of those faces in
-/// square source units, and their convex outline (right, forward).
-struct Deck {
-    height: f32,
-    area: f32,
-    outline: Vec<[f32; 2]>,
-}
-
-fn flight_deck(shape: &Shape) -> Option<Deck> {
-    let mut levels: BTreeMap<i64, (f32, Vec<[f32; 2]>)> = BTreeMap::new();
-    for face in &shape.faces {
-        let p = &face.positions;
-        if p.len() < 3 {
-            continue;
-        }
-        let z = p[0][2];
-        if p.iter().any(|q| (q[2] - z).abs() > 1e-3) {
-            continue;
-        }
-        let twice: f32 = (0..p.len())
-            .map(|i| {
-                let (a, b) = (p[i], p[(i + 1) % p.len()]);
-                a[0] * b[1] - b[0] * a[1]
-            })
-            .sum();
-        let level = levels.entry((z * 1000.).round() as i64).or_default();
-        level.0 += twice.abs() / 2.;
-        level.1.extend(p.iter().map(|q| [q[0], q[1]]));
-    }
-    let (key, (area, points)) = levels.into_iter().max_by(|a, b| a.1.0.total_cmp(&b.1.0))?;
-    Some(Deck {
-        height: key as f32 / 1000.,
-        area,
-        outline: convex_hull(points),
-    })
-}
-
-/// Andrew's monotone chain, counter-clockwise from the lowest-left point.
-fn convex_hull(mut points: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
-    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
-    points.dedup();
-    if points.len() < 3 {
-        return points;
-    }
-    let turn = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
-        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-    };
-    let mut hull: Vec<[f32; 2]> = Vec::new();
-    for pass in 0..2 {
-        let start = hull.len();
-        let ordered: Vec<[f32; 2]> = if pass == 0 {
-            points.clone()
-        } else {
-            points.iter().rev().copied().collect()
-        };
-        for p in ordered {
-            while hull.len() >= start + 2
-                && turn(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.
-            {
-                hull.pop();
-            }
-            hull.push(p);
-        }
-        hull.pop();
-    }
-    hull
-}
-
 /// Several loaded shapes as one, in feet: each turned by its heading (binary
 /// angle units) about the up axis and moved by its offset in feet (right,
 /// forward, up).
@@ -1176,10 +1029,10 @@ fn fleet_scene(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
 
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
-    let (out, hawk_radar) = match args.as_slice() {
-        [out] => (out, false),
-        [out, what] if what == "hawk-radar" => (out, true),
-        _ => return Err("--surface-preview OUTPUT_DIRECTORY [hawk-radar]".into()),
+    let (out, which) = match args.as_slice() {
+        [out] => (out, None),
+        [out, what] if what == "hawk-radar" || what == "parked" => (out, Some(what.as_str())),
+        _ => return Err("--surface-preview OUTPUT_DIRECTORY [hawk-radar | parked]".into()),
     };
     let out = Path::new(out);
     std::fs::create_dir_all(out)?;
@@ -1195,10 +1048,15 @@ pub fn run() -> AppResult<()> {
         textures: BTreeMap::new(),
         font: Font::parse(&media.get("WIN11.FNT")?)?,
     };
-    if hawk_radar {
+    if which == Some("hawk-radar") {
         for subject in &HAWK_RADAR_CANDIDATES {
             sheet(out, &media, &mut art, subject, "hawk-radar")?;
         }
+        return Ok(());
+    }
+    parked::parked_sheet(out, &media, &mut art)?;
+    parked::deck_scene(out, &media, &mut art)?;
+    if which == Some("parked") {
         return Ok(());
     }
     for subject in NEW {
@@ -1243,38 +1101,6 @@ mod tests {
         // From the bow quarter the bow is nearer the eye than the stern.
         let quarter = Camera::new(&VIEWS[0], [0.; 3], 1., TILE);
         assert!(quarter.project(bow)[2] < quarter.project([0., -100., 0.])[2]);
-    }
-
-    #[test]
-    fn flight_deck_is_the_largest_level_area_with_its_convex_outline() {
-        let face = |points: &[[f32; 3]]| Face {
-            positions: points.to_vec(),
-            colors: vec![0; points.len()],
-            fog: Default::default(),
-            uv: Vec::new(),
-            texture: String::new(),
-            subtype: 0x41,
-            normal: None,
-            address: 0,
-        };
-        let shape = Shape {
-            lines: Vec::new(),
-            faces: vec![
-                face(&[[0., 0., 10.], [4., 0., 10.], [4., 8., 10.], [0., 8., 10.]]),
-                face(&[[4., 0., 10.], [6., 2., 10.], [4., 8., 10.]]),
-                face(&[[0., 0., 20.], [1., 0., 20.], [1., 1., 20.]]),
-                face(&[[0., 0., 0.], [9., 0., 0.], [9., 0., 30.]]),
-            ],
-            billboards: Vec::new(),
-            state_words: Default::default(),
-        };
-        let deck = flight_deck(&shape).unwrap();
-        assert_eq!(deck.height, 10.);
-        assert_eq!(deck.area, 40.);
-        assert_eq!(
-            deck.outline,
-            vec![[0., 0.], [4., 0.], [6., 2.], [4., 8.], [0., 8.]]
-        );
     }
 
     #[test]

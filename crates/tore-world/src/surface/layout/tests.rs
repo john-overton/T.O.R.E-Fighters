@@ -221,6 +221,7 @@ fn entry(resource: &str) -> Arc<Entry> {
         supply_truck: truck,
         carrier: false,
         unit: None,
+        aircraft: None,
     })
 }
 

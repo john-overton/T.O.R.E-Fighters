@@ -22,6 +22,7 @@ pub mod emitters;
 pub mod fire;
 pub mod layout;
 pub mod movement;
+pub mod parked;
 pub mod resolve;
 pub mod units;
 
@@ -283,9 +284,13 @@ pub struct Surface {
     /// Every surface unit, ascending id: the base layout's NTs, then the
     /// template's objects.
     pub units: Vec<Unit>,
-    /// The template's aircraft, parked on the ground (filled in by the
-    /// parked-aircraft slice; listed here with their ids).
+    /// The template's aircraft, parked on the ground or a carrier deck,
+    /// ascending id.
     pub parked: Vec<ParkedAircraft>,
+    /// Where each parked aircraft stands and what it is, once the terrain is
+    /// known ([`parked::place`]); not in the digest, which covers what it is
+    /// built from.
+    pub parked_scene: Vec<parked::ParkedPose>,
     /// Supply trucks: those already standing in the layout and the template,
     /// and those the layout rules add.
     pub trucks: Vec<SupplyTruck>,
@@ -422,6 +427,7 @@ impl Surface {
             h.i32s(&parked.angles);
             h.u32(parked.side.0);
             h.u8(u8::from(parked.target));
+            h.u32(parked.deck.map_or(0, |id| id.0));
         }
         h.u32(self.trucks.len() as u32);
         for truck in &self.trucks {
@@ -494,5 +500,7 @@ impl Digest {
 
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod parked_tests;
 #[cfg(test)]
 mod tests;
