@@ -487,7 +487,11 @@ fn flak_bursts_at_its_time_fuze_as_a_flak_effect() {
     assert_eq!(s.surface_round(id), None);
     let bursts = flak_effects(&s);
     assert_eq!(bursts.len(), 1);
-    assert_eq!(bursts[0].blast, Some(27), "the record's own explosion");
+    assert_eq!(
+        bursts[0].blast,
+        Some(28),
+        "the 100 mm shell bursts as the larger flak sheet"
+    );
     // One second at the tuned muzzle velocity, straight up.
     let height = bursts[0].position[1] - 30.;
     assert!(
@@ -504,6 +508,23 @@ fn flak_bursts_at_its_time_fuze_as_a_flak_effect() {
 }
 
 #[test]
+fn the_85_mm_flak_keeps_the_records_small_flak_explosion() {
+    let mut s = scene();
+    unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
+    let mut w = ks19();
+    w.source = "KS12.JT".into();
+    surface_guns::apply("KS12", &mut w).unwrap();
+    assert_eq!(flak_explosion(&w), 27);
+    let mut fired = shot(w, [0., 30., 0.], [0., 1000., 0.], None);
+    fired.end_tick = Some(60);
+    s.fire_surface(fired).unwrap();
+    run_from(&mut s, 60, far());
+    let bursts = flak_effects(&s);
+    assert_eq!(bursts.len(), 1);
+    assert_eq!(bursts[0].blast, Some(27));
+}
+
+#[test]
 fn flak_bursts_near_a_hostile_aircraft_and_passes_a_friendly_one() {
     for (side, bursts) in [(Side(1), true), (REDFOR, false)] {
         let mut s = scene();
@@ -513,7 +534,9 @@ fn flak_bursts_near_a_hostile_aircraft_and_passes_a_friendly_one() {
         let id = s
             .fire_surface(shot(ks19(), [0., 30., 0.], [0., 1000., 0.], None))
             .unwrap();
-        run_from(&mut s, 360, far());
+        // The shell reaches the fuze sphere at about tick 236, and the 100 mm
+        // burst's effect lasts one second: look while it shows.
+        run_from(&mut s, 300, far());
         let found = flak_effects(&s);
         if bursts {
             assert_eq!(found.len(), 1);

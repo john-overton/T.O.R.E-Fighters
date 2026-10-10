@@ -47,7 +47,7 @@ pub use parked::{ParkedAircraft, ParkedSite};
 mod surface;
 pub use surface::{
     GroundLook, Refused, SURFACE_PROJECTILE_ID_BASE, SURFACE_PROJECTILE_RESERVE, SurfaceRound,
-    SurfaceShot, is_flak, surface_tracer, ticks_to_range,
+    SurfaceShot, flak_explosion, is_flak, surface_tracer, ticks_to_range,
 };
 
 /// Rounds, missiles and bombs in flight at once. John, 2026-10-09: 5,000,
@@ -4328,7 +4328,7 @@ impl State {
             } {
                 if surface.is_some_and(|round| round.flak) {
                     // A flak shell that reaches the end of its life bursts there.
-                    impacts.push((p.position, EffectKind::Flak, w.effects.object_explosion, 0));
+                    impacts.push((p.position, EffectKind::Flak, flak_explosion(w), 0));
                     bursts.push(collateral::Burst::new(
                         p,
                         w,
@@ -4662,7 +4662,7 @@ impl State {
                         let position = std::array::from_fn(|i| {
                             p.previous[i] + (p.position[i] - p.previous[i]) * at
                         });
-                        impacts.push((position, EffectKind::Flak, w.effects.object_explosion, 0));
+                        impacts.push((position, EffectKind::Flak, flak_explosion(w), 0));
                         bursts.push(collateral::Burst::new(
                             p,
                             w,
@@ -4679,7 +4679,7 @@ impl State {
                 // any other round has gone past its target and goes away.
                 if first.is_none() && round.end_tick.is_some_and(|end| p.age >= end) {
                     if round.flak {
-                        impacts.push((p.position, EffectKind::Flak, w.effects.object_explosion, 0));
+                        impacts.push((p.position, EffectKind::Flak, flak_explosion(w), 0));
                         bursts.push(collateral::Burst::new(
                             p,
                             w,

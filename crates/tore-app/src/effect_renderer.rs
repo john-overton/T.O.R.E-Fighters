@@ -2,6 +2,11 @@
 //! simulation owns every effect's type, place and life; the sheets, frame
 //! layouts and sizes are in docs/spec/explosions.md.
 //!
+//! Flak bursts draw `FLAKA` (the 85 mm shell's type 27, two seconds) or the
+//! larger `FLAKB` (the 100 mm shell's type 28, one second): the simulation
+//! picks the type from the shell's record. The light and dark puff a burst
+//! leaves are `surface_fx.rs`'s.
+//!
 //! A large ground explosion also throws out a shockwave: a ring of
 //! `SMOKE.PIC` dust (or white spray on water) that races outward from the
 //! blast and fades (docs/spec/explosions.md, "Shockwave"). It is drawn from
@@ -265,6 +270,7 @@ fn legacy(kind: EffectKind) -> Option<(u8, u16)> {
         EffectKind::Hit => Some((18, 45)),
         EffectKind::Ground => Some((15, 45)),
         EffectKind::Destroyed => Some((blast::AIRCRAFT, 240)),
+        EffectKind::Flak => Some((27, 240)),
         _ => None,
     }
 }
@@ -378,7 +384,37 @@ pub struct EffectRenderer {
     bind: Option<wgpu::BindGroup>,
     buffer: wgpu::Buffer,
     sprites: Vec<Sprite>,
+    /// The fires that fit their unit: where each burns and how wide it is
+    /// drawn, in feet.
+    fires: Vec<([f64; 3], f64)>,
     count: u32,
+}
+
+/// A fire this near a fitted fire's spot (feet, level) is that fire.
+const FIRE_FIT_FT: f64 = 2.;
+
+/// `sprites` with every fire sprite that stands on one of `fires` drawn at
+/// that fire's width (the fire's sheet is as wide as it is tall by the
+/// layout's aspect).
+fn fit_fires(sprites: &[Sprite], fires: &[([f64; 3], f64)]) -> Vec<Sprite> {
+    let (_, layout) = SHEETS[FIRE_SHEET];
+    sprites
+        .iter()
+        .map(|sprite| {
+            let mut sprite = *sprite;
+            if sprite.layer == FIRE_SHEET
+                && let Some((_, width)) = fires.iter().find(|(at, _)| {
+                    (at[0] - sprite.position[0]).hypot(at[2] - sprite.position[2]) <= FIRE_FIT_FT
+                })
+            {
+                sprite.extent = [
+                    width / 2.,
+                    width * f64::from(layout.height) / f64::from(layout.width),
+                ];
+            }
+            sprite
+        })
+        .collect()
 }
 impl EffectRenderer {
     pub fn new(
@@ -397,8 +433,14 @@ impl EffectRenderer {
                 mapped_at_creation: false,
             }),
             sprites: Vec::new(),
+            fires: Vec::new(),
             count: 0,
         }
+    }
+    /// The fires of destroyed units and the width each is drawn at, for the
+    /// next `update`.
+    pub fn fit_fires(&mut self, fires: &[([f64; 3], f64)]) {
+        self.fires = fires.to_vec();
     }
     /// Rebuild for a new anti-aliasing sample count; the next `prepare`
     /// recreates the bindings.
@@ -544,8 +586,8 @@ impl EffectRenderer {
     /// far to near.
     pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
         let eye = camera.position;
-        let mut visible: Vec<_> = self
-            .sprites
+        let fitted = fit_fires(&self.sprites, &self.fires);
+        let mut visible: Vec<_> = fitted
             .iter()
             .filter_map(|s| {
                 let offset: [f64; 3] = std::array::from_fn(|i| s.position[i] - eye[i]);
@@ -628,6 +670,32 @@ mod tests {
             assert!(last[1] + last[3] <= SHEET_HEIGHT as f32, "{name}");
         }
         assert_eq!(SHEETS[4].1.cell(4), [81., 58., 78., 56.]);
+    }
+
+    #[test]
+    fn flak_bursts_draw_the_small_sheet_for_85_mm_and_the_large_one_for_100_mm() {
+        let art = Art::synthetic();
+        let burst = |kind: u8, ticks: u16| {
+            sprites(&art, &[effect(EffectKind::Flak, Some(kind), ticks)], &[])
+        };
+        // Type 27: FLAKA, 28 frames over two seconds, floating where it bursts.
+        let small = burst(27, 120);
+        assert_eq!(small.len(), 1, "no shockwave, no second sprite");
+        assert_eq!(small[0].layer, 12);
+        assert_eq!(SHEETS[small[0].layer].0, "FLAKA.PIC");
+        assert_eq!(small[0].mode, Mode::Billboard);
+        assert_eq!(small[0].cell, SHEETS[12].1.cell(14));
+        assert!(small[0].emissive);
+        // Type 28: FLAKB, 12 frames over one second, drawn larger.
+        let large = burst(28, 60);
+        assert_eq!(SHEETS[large[0].layer].0, "FLAKB.PIC");
+        assert_eq!(large[0].cell, SHEETS[13].1.cell(6));
+        let width = |kind: u8| f64::from(blast::rolled_size(kind, [100., 0., 200.]));
+        assert!(width(28) > width(27));
+        assert_eq!(large[0].extent[0], width(28) / 2.);
+        // An old recording's flak (no type) draws as the small one.
+        let legacy = sprites(&art, &[effect(EffectKind::Flak, None, 240)], &[]);
+        assert_eq!(SHEETS[legacy[0].layer].0, "FLAKA.PIC");
     }
 
     #[test]
@@ -714,6 +782,31 @@ mod tests {
         assert_eq!(
             sprites(&missing, &[effect(EffectKind::Ground, Some(35), 200)], &[]).len(),
             1
+        );
+    }
+
+    #[test]
+    fn a_fire_that_fits_its_unit_is_drawn_at_the_units_width() {
+        let art = Art::synthetic();
+        let fire = |x| MarkPose {
+            kind: MarkKind::Fire,
+            position: [x, 10., 0.],
+            age: 0,
+            strength: 1.,
+        };
+        let drawn = sprites(&art, &[], &[fire(0.), fire(500.)]);
+        // Both are the crash site's 100 feet until one is fitted.
+        assert!(drawn.iter().all(|s| s.extent[0] == 50.));
+        let (_, layout) = SHEETS[FIRE_SHEET];
+        let fitted = fit_fires(&drawn, &[([0., 10., 0.], 30.)]);
+        assert_eq!(fitted[0].extent[0], 15.);
+        assert_eq!(
+            fitted[0].extent[1],
+            30. * f64::from(layout.height) / f64::from(layout.width)
+        );
+        assert_eq!(
+            fitted[1].extent, drawn[1].extent,
+            "the other keeps its size"
         );
     }
 

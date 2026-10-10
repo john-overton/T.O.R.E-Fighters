@@ -870,6 +870,7 @@ impl SimRenderer {
         self.countermeasures
             .upload(queue, devices, afterburners, guns);
         self.smoke.gun_smoke(&guns.puffs);
+        self.effects.fit_fires(&guns.fires);
     }
     pub fn combat(
         &mut self,

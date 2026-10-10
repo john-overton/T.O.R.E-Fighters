@@ -273,6 +273,9 @@ pub struct Puff {
     pub position: Vector,
     pub radius: f64,
     pub opacity: f32,
+    /// Drawn with the dark smoke puff rather than the white one: flak and
+    /// the smoke of a wreck.
+    pub dark: bool,
 }
 
 /// Everything a frame draws for the guns.
@@ -281,6 +284,9 @@ pub struct Drawn {
     pub flashes: Vec<Flash>,
     pub lights: Vec<FlareLight>,
     pub puffs: Vec<Puff>,
+    /// The crash-site fires of destroyed surface units, each with the width
+    /// in feet it is drawn at (the fire sprite fits to its unit).
+    pub fires: Vec<(Vector, f64)>,
 }
 
 /// The shots seen so far and the rounds the last picture held.
@@ -290,6 +296,8 @@ pub struct Tracker {
     tick: Option<u64>,
     shots: VecDeque<Shot>,
     serial: u32,
+    /// The surface defenses' gunfire, launches, flak and wrecks.
+    surface: crate::surface_fx::Tracker,
 }
 
 impl Tracker {
@@ -324,6 +332,7 @@ impl Tracker {
         self.seen = seen;
         self.tick = Some(picture.tick);
         self.expire(now);
+        self.surface.observe(picture, now, primed);
     }
 
     /// Records one shot of gun `slot` of `aircraft` at `now`.
@@ -421,13 +430,14 @@ impl Tracker {
                 strength: look.light * intensity,
             });
         }
+        self.surface.draw(now, &mut drawn);
         drawn
     }
 }
 
 /// A shot's flash at `now`: its intensity, its size as a fraction of the
 /// calibre's length and the seed that shapes it; none once it is over.
-fn envelope(shot: &Shot, look: &Look, now: f64) -> Option<(f64, f64, u32)> {
+pub(crate) fn envelope(shot: &Shot, look: &Look, now: f64) -> Option<(f64, f64, u32)> {
     let age = now - shot.at;
     if shot.slot == 0 {
         // The gatling: a shot lasts until the next is due at the cadence it
@@ -465,7 +475,7 @@ fn envelope(shot: &Shot, look: &Look, now: f64) -> Option<(f64, f64, u32)> {
 /// The `k`th blast puff of a shot at `age` ticks: blown out along the barrel
 /// and slowed by the air at once, it stays where the air took it while the
 /// aircraft flies on, so it drifts aft of the guns.
-fn puff(shot: &Shot, look: &Look, age: f64, k: usize) -> Option<Puff> {
+pub(crate) fn puff(shot: &Shot, look: &Look, age: f64, k: usize) -> Option<Puff> {
     if age >= look.puff_life {
         return None;
     }
@@ -483,6 +493,7 @@ fn puff(shot: &Shot, look: &Look, age: f64, k: usize) -> Option<Puff> {
         }),
         radius,
         opacity: look.puff_opacity * (1. - t as f32).powi(2),
+        dark: false,
     })
 }
 

@@ -1332,6 +1332,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 aim120: false,
             }],
             locks: vec![3],
+            painting: Vec::new(),
         },
         damage: DamageReadout {
             hp: 90,

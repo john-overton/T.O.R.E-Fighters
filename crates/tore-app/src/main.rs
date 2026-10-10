@@ -114,6 +114,8 @@ mod su27_animation;
 mod su35_animation;
 mod surface_drive;
 mod surface_dump;
+mod surface_fx;
+mod surface_fx_preview;
 mod surface_lighting;
 mod surface_objective;
 mod surface_parked;
@@ -4766,6 +4768,13 @@ impl ApplicationHandler for App {
                                 &self.scenery,
                                 presented,
                                 &frame.readout,
+                                self.world
+                                    .combat
+                                    .state
+                                    .ownship(frame.plane.0)
+                                    .map_or(tore_sim::combat::live::DEFAULT_OWNSHIP_SIDE, |own| {
+                                        own.side
+                                    }),
                                 &self.hornet.font,
                                 &self.menu.quick_sprites,
                             );
@@ -8571,6 +8580,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         surface_preview::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--surface-fx-preview") {
+        surface_fx_preview::run()?;
+        return Ok(Outcome::Done);
+    }
     diagnostics::stage("argument parsing and startup options");
     if matches!(session, Session::First) {
         // `--find-games` and `--browse` keep stdout for the games they list.
@@ -8691,6 +8704,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut ground_start_airport: Option<u32> = None;
     let mut probe_script = ProbeScript::default();
     let mut separation_nm: Option<f64> = None;
+    // `--ground-target STEM`, `--defenses AAA SAM`, `--surface-seed N`: the
+    // creator's ground target for a launched flight or a capture.
+    let mut ground_target: Option<String> = None;
+    let mut target_defenses = (3_usize, 3_usize);
+    let mut target_seed = 1_u32;
     let mut launch_creator = false;
     let (mut smoke_test, mut no_audio, mut import_only) = (false, false, false);
     // `--windowed`, and any flag that fixes the window size, opt out of the
@@ -8718,6 +8736,19 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
             "--ground-start" => {
                 ground_start_airport=Some(option_number("--ground-start", &args.next().ok_or("--ground-start needs an airport number")?)?);
+            }
+            "--ground-target" => {
+                ground_target = Some(args.next().ok_or("--ground-target needs a template stem, for example QTAAA")?);
+            }
+            "--defenses" => {
+                let usage = "--defenses needs an AAA level and a SAM level, each 0 to 3";
+                let level = |value: Option<String>| -> Result<usize, String> {
+                    value.ok_or(usage)?.parse::<usize>().ok().filter(|n| *n <= 3).ok_or_else(|| usage.to_owned())
+                };
+                target_defenses = (level(args.next())?, level(args.next())?);
+            }
+            "--surface-seed" => {
+                target_seed = args.next().ok_or("--surface-seed needs a number")?.parse().map_err(|e| bad_number(&arg, &e))?;
             }
             "--separation" => {
                 let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse().map_err(|e| bad_number(&arg, &e))?;
@@ -11460,6 +11491,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     quick.choose_theater_code(&theater_code, &theater_resources);
     if let Some(object) = ground_start {
         quick.choose_ground_runway(object)?;
+    }
+    if let Some(stem) = &ground_target {
+        quick.choose_ground_target(stem, target_defenses, target_seed)?;
     }
     if let Some(nm) = separation_nm {
         quick.draft.values[17] = mission_layout::SEPARATION_NM

@@ -1613,6 +1613,24 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --ove
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
 ```
 
+`--surface-fx-preview OUT_DIR [SCENE ...]` renders what the surface defenses
+look like, offscreen, by day, at dusk and at night: `flak` (the KS-12 and
+KS-19 bursts over North Vietnam, wide and close to the jet), `zsu23` and
+`zsu57` (muzzle flash, firing light and tracers beside a gun), `sam` (an SA-6
+leaving its rail, at the pad and up its path), `wreck` (a destroyed ZSU-23
+smoking) and `map` (the flight map over the same target). Each scene is the
+real game: it builds the mission, flies the player past the unit, steps the
+whole world and draws the frame the first flak burst, round, launch or kill
+makes through the same picture, tracker and renderer the game uses. The names
+of the frames say the scene, the light, the view and the ticks after the
+trigger. `--ground-target STEM [--defenses AAA SAM] [--surface-seed N]` sets
+the creator's ground target for a launched flight or capture
+(`--launch-quick-mission`, `--smoke-test`).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh target/debug/tore-app --surface-fx-preview .local/tmp/fx flak sam
+```
+
 `--surface-objective THEATER STEM` checks a ground target's objectives and the
 debrief in the whole world. The player flies a scripted pass at the target's
 defenses (`--from` nm out, `--altitude` feet above the ground, 400 knots,

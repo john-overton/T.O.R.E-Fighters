@@ -290,6 +290,12 @@ pub fn run() -> AppResult<()> {
     }
     let snapshot = world.combat.render_snapshot().clone();
     let standing = crate::render_snapshot::standing(&world.combat.state.targets);
+    // The surface defenses' own presentation: wreck fires fitted to their
+    // units and the smoke of wrecks without a fire (`surface_fx`).
+    let now = snapshot.tick as f64;
+    let mut tracker = crate::gun_flash::Tracker::default();
+    tracker.observe(&snapshot, now, |_| None);
+    let guns = tracker.draw(now, |_| None);
     let tag = o
         .tag
         .clone()
@@ -334,6 +340,8 @@ pub fn run() -> AppResult<()> {
             &snapshot.effects,
             &snapshot.marks,
         );
+        gpu.sim
+            .emitters(&gpu.queue, &world.combat.state.devices, &[], &guns);
         let pixels = gpu.pixels(&camera, &world.terrain, &scenery)?;
         let path = out.join(format!("{tag}-{view}.png"));
         std::fs::write(
