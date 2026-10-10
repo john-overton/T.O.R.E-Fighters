@@ -391,7 +391,7 @@ sessions and survive aircraft changes/restarts. [Full settings contract](INPUT.m
 `[` and `]` cycle NAV and weapons. Weapon selection arms; NAV disarms.
 The HUD status reads NAV, LCOS for the armed gun, or ARM for missiles.
 There is no separate master-arm control. **L** clears designation and **K**
-jettisons the selected external group in the live range. Class and station-fault
+jettisons the selected external group in any flight (the AC-130, which carries nothing external, is unchanged). Class and station-fault
 fixtures remain available through the controls editor and command-line setup.
 Restart repairs/reloads. Selection releases the trigger before another press.
 T cycles current radar contacts nearest first and Shift-T backwards, skipping

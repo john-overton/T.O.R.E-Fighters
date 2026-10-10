@@ -476,7 +476,7 @@ Deliberate differences from FA:
 | Ctrl+A | Waypoint autopilot | Find-nearest cheat, when the Multi menu allows it | John requested the two autopilot modes on 2026-09-17 |
 | Z / X | Rudder, alongside End / Page Down; on the AV-8 and Yak-141 the nozzle steps, as in FA | Wing sweep and, on the VTOL jets, nozzle steps (Shift+Z / Shift+X presets) | Laptops lack End and Page Down; T.O.R.E sweeps the F-14 automatically. The jets' nozzle keys are John's choice of 2026-10-08 |
 | M | Cycle sensor channels | HARM seeker | No HARM channel yet |
-| Shift+K | Jettison the selected external group, live-fire range only | Jettison all air-to-ground ordnance | Fitted jettison |
+| Shift+K | Jettison the selected external group, in any flight (an aircraft with nothing external, the AC-130 among them, is unchanged) | Jettison all air-to-ground ordnance | Fitted jettison; works outside the live-fire range since John, 2026-10-10 |
 | L | Clear designation, alongside ; | Unused | Earlier T.O.R.E key, kept |
 | Shift+/ | Center view, alongside keypad 5 | Unused | Laptops lack a keypad |
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
@@ -858,7 +858,7 @@ button or combo in **Escape → Control** when necessary. No desktop shortcuts a
 changed. Unmodified Start still pauses; unmodified flight buttons, shoulders,
 rudder triggers and instrument navigation retain their functions. External view
 uses F10 or a custom `view-external` binding; Select is no longer its default.
-No AI makes the incoming launch decision. Fixtures/jettison require `--live-fire`.
+No AI makes the incoming launch decision. Incoming and damage fixtures require `--live-fire`; jettison does not.
 
 Profile chord syntax is `MODIFIER+CONTROL` or `MODIFIER+MODIFIER+CONTROL`, for
 example:

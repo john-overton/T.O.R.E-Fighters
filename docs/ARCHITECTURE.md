@@ -1425,7 +1425,7 @@ today, because window events always arrive between frames.
 | `CycleWeapon` | The weapon selection steps and NAV mode follows the arming; the weapon page turns to it (`Cue::WeaponCycled { seat }`). |
 | `Airport` | A NAV mode switch or a tower request, as in B0. |
 | `Combat(command)` | Combat takes the command as it is: designation (next, previous, visual, by identity from a scope click) and the seeker mode or the designation release from the weapon display. |
-| `Manual(command)` | A key, button or menu command: arming, seeker mode, clearing the designation, jettison and the range and development commands. It lets go of the trigger, gives combat the command, and puts the payload weight right. Outside `--live-fire` only arming, seeker and designation work, and the pilot gets "Manual range command requires --live-fire". |
+| `Manual(command)` | A key, button or menu command: arming, seeker mode, clearing the designation, the gun-group keys, jettison and the range and development commands. It lets go of the trigger, gives combat the command, and puts the payload weight right. Outside `--live-fire` only arming, seeker, designation, gun-group and jettison work, and the pilot gets "Manual range command requires --live-fire". |
 | `RangeReset` | A new target on the range; "Target reset is available only with --live-fire" otherwise. |
 | `ReleaseChaff`, `ReleaseFlare` | One cartridge or flare, with the retail messages ("Chaff launched, 11 left", "Out of flares"). Refused when the aircraft is destroyed, the pilot has ejected or it has no hit points. |
 | `RadioSilence` | Toggles radio silence and tells the pilot ("Radio silence", "Radio traffic OK"). |
