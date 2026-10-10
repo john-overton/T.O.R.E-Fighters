@@ -9553,7 +9553,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--smoke-test" => smoke_test = true,
             "--windowed" => windowed_flag = true,
             flag @ ("--anti-aliasing" | "--render-scale" | "--spotting-aid"
-            | "--terrain-filtering") => {
+            | "--terrain-filtering" | "--building-distance" | "--building-detail") => {
                 let value = args.next().ok_or(format!("{flag} needs a value"))?;
                 graphics_flags.push((flag.to_owned(), value));
             }

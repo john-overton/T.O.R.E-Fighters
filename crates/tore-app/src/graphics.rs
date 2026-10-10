@@ -84,6 +84,17 @@ impl SpottingAid {
 /// Render scale steps, in percent of the window's pixel size.
 pub const RENDER_SCALES: [u32; 5] = [75, 100, 125, 150, 200];
 
+/// City fill building draw distance steps, nautical miles (CF0 prototype;
+/// John, 2026-10-10).
+pub const BUILDING_DISTANCES: [u32; 3] = [10, 20, 30];
+/// City fill building texture and detail distance steps, nautical miles:
+/// full detail inside, plain boxes beyond.
+pub const BUILDING_DETAILS: [u32; 5] = [1, 2, 5, 10, 20];
+/// The defaults: geometry to 30 nm, full detail inside 5 nm (John,
+/// 2026-10-10).
+pub const DEFAULT_BUILDING_DISTANCE: u32 = 30;
+pub const DEFAULT_BUILDING_DETAIL: u32 = 5;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Options {
     pub anti_aliasing: AntiAliasing,
@@ -91,6 +102,12 @@ pub struct Options {
     pub render_scale: u32,
     pub spotting_aid: SpottingAid,
     pub terrain_filtering: bool,
+    /// City fill buildings draw out to this, nautical miles; one of
+    /// `BUILDING_DISTANCES`.
+    pub building_distance_nm: u32,
+    /// City fill buildings draw with full texture and detail inside this,
+    /// nautical miles; one of `BUILDING_DETAILS`.
+    pub building_detail_nm: u32,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -99,6 +116,8 @@ impl Default for Options {
             render_scale: 100,
             spotting_aid: SpottingAid::Subtle,
             terrain_filtering: true,
+            building_distance_nm: DEFAULT_BUILDING_DISTANCE,
+            building_detail_nm: DEFAULT_BUILDING_DETAIL,
         }
     }
 }
@@ -110,19 +129,30 @@ impl Options {
             render_scale: 100,
             spotting_aid: SpottingAid::Off,
             terrain_filtering: false,
+            building_distance_nm: DEFAULT_BUILDING_DISTANCE,
+            building_detail_nm: DEFAULT_BUILDING_DETAIL,
         }
     }
     pub fn scale(&self) -> f32 {
         self.render_scale as f32 / 100.
     }
+    /// The settings file. The city fill building distances are written only
+    /// when they differ from the defaults, so a default file is unchanged.
     pub fn text(&self) -> String {
-        format!(
+        let mut text = format!(
             "tore-graphics 1\nanti-aliasing {}\nrender-scale {}\nspotting-aid {}\nterrain-filtering {}\n",
             self.anti_aliasing.key(),
             self.render_scale,
             self.spotting_aid.key(),
             self.terrain_filtering,
-        )
+        );
+        if self.building_distance_nm != DEFAULT_BUILDING_DISTANCE {
+            text += &format!("building-distance {}\n", self.building_distance_nm);
+        }
+        if self.building_detail_nm != DEFAULT_BUILDING_DETAIL {
+            text += &format!("building-detail {}\n", self.building_detail_nm);
+        }
+        text
     }
     pub fn parse(text: &str) -> Result<Self, String> {
         if text.len() > 4096 {
@@ -139,10 +169,22 @@ impl Options {
                 return Err("invalid or duplicate graphics setting".into());
             }
         }
-        if values.len() != 4 {
+        let optional = ["building-distance", "building-detail"]
+            .iter()
+            .filter(|k| values.contains_key(*k))
+            .count();
+        if values.len() != 4 + optional {
             return Err("unknown or missing graphics setting".into());
         }
         let get = |k: &str| values.get(k).copied().ok_or(format!("missing {k}"));
+        let step = |k: &str, steps: &[u32], default: u32| match values.get(k) {
+            None => Ok(default),
+            Some(v) => v
+                .parse::<u32>()
+                .ok()
+                .filter(|n| steps.contains(n))
+                .ok_or(format!("invalid {k}")),
+        };
         let boolean = |k: &str| get(k)?.parse::<bool>().map_err(|_| format!("invalid {k}"));
         let render_scale = get("render-scale")?
             .parse::<u32>()
@@ -155,6 +197,16 @@ impl Options {
             render_scale,
             spotting_aid: SpottingAid::parse(get("spotting-aid")?).ok_or("invalid spotting-aid")?,
             terrain_filtering: boolean("terrain-filtering")?,
+            building_distance_nm: step(
+                "building-distance",
+                &BUILDING_DISTANCES,
+                DEFAULT_BUILDING_DISTANCE,
+            )?,
+            building_detail_nm: step(
+                "building-detail",
+                &BUILDING_DETAILS,
+                DEFAULT_BUILDING_DETAIL,
+            )?,
         })
     }
     /// Command-line overrides for one run; they are not saved by themselves.
@@ -183,6 +235,20 @@ impl Options {
                         .ok_or("--spotting-aid needs off, subtle or strong")?
                 }
                 "--terrain-filtering" => self.terrain_filtering = switch(flag, value)?,
+                "--building-distance" => {
+                    self.building_distance_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| BUILDING_DISTANCES.contains(n))
+                        .ok_or("--building-distance needs 10, 20 or 30")?
+                }
+                "--building-detail" => {
+                    self.building_detail_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| BUILDING_DETAILS.contains(n))
+                        .ok_or("--building-detail needs 1, 2, 5, 10 or 20")?
+                }
                 _ => return Err(format!("unknown graphics flag {flag}")),
             }
         }
@@ -225,8 +291,21 @@ mod tests {
             render_scale: 150,
             spotting_aid: SpottingAid::Strong,
             terrain_filtering: false,
+            building_distance_nm: 20,
+            building_detail_nm: 2,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
+        // The default building distances are not written, and a file
+        // without them reads as the defaults.
+        assert!(!Options::default().text().contains("building"));
+        assert!(
+            Options::parse(
+                &options
+                    .text()
+                    .replace("building-detail 2", "building-detail 3")
+            )
+            .is_err()
+        );
         assert_eq!(
             Options::parse(&Options::default().text()).unwrap(),
             Options::default()

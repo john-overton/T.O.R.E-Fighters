@@ -9,7 +9,9 @@ use crate::controls_editor::{
     self as chrome, BUTTON, Editor as Chrome, FOCUS, GOOD, HEADER, INK, MUTED, PALE, PANEL, Rect,
     ResultAction, TITLE, WHITE, fit, inside, text_width,
 };
-use crate::graphics::{AntiAliasing, Options, RENDER_SCALES, SpottingAid};
+use crate::graphics::{
+    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, Options, RENDER_SCALES, SpottingAid,
+};
 use crate::menu::Canvas;
 use std::path::Path;
 use tore_formats::font::Font;
@@ -20,13 +22,33 @@ enum Row {
     RenderScale,
     SpottingAid,
     TerrainFiltering,
+    BuildingDistance,
+    BuildingDetail,
 }
-const ROWS: [Row; 4] = [
+const BASE_ROWS: [Row; 4] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
 ];
+const CITY_ROWS: [Row; 6] = [
+    Row::AntiAliasing,
+    Row::RenderScale,
+    Row::SpottingAid,
+    Row::TerrainFiltering,
+    Row::BuildingDistance,
+    Row::BuildingDetail,
+];
+/// The rows shown: the two city building rows only while the CF0 city fill
+/// prototype is switched on (`TORE_CITY_FILL=1`), so the screen is unchanged
+/// otherwise.
+fn rows() -> &'static [Row] {
+    if tore_world::city::enabled() {
+        &CITY_ROWS
+    } else {
+        &BASE_ROWS
+    }
+}
 impl Row {
     fn label(self) -> &'static str {
         match self {
@@ -34,6 +56,8 @@ impl Row {
             Row::RenderScale => "Render scale",
             Row::SpottingAid => "Spotting aid",
             Row::TerrainFiltering => "Terrain filtering",
+            Row::BuildingDistance => "Building distance",
+            Row::BuildingDetail => "Building detail",
         }
     }
     fn description(self) -> &'static str {
@@ -48,6 +72,10 @@ impl Row {
                 "Outlines distant aircraft so they are easier to see against the sky and ground."
             }
             Row::TerrainFiltering => "Reduces shimmer and crawling patterns on distant ground.",
+            Row::BuildingDistance => "How far away city buildings are drawn.",
+            Row::BuildingDetail => {
+                "City buildings inside this distance are drawn with full texture and detail, farther ones as plain blocks."
+            }
         }
     }
     fn choices(self) -> Vec<String> {
@@ -56,6 +84,8 @@ impl Row {
             Row::RenderScale => RENDER_SCALES.map(|s| format!("{s}%")).to_vec(),
             Row::SpottingAid => SpottingAid::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::TerrainFiltering => vec!["Off".into(), "On".into()],
+            Row::BuildingDistance => BUILDING_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
+            Row::BuildingDetail => BUILDING_DETAILS.map(|n| format!("{n} nm")).to_vec(),
         }
     }
 }
@@ -126,7 +156,7 @@ impl Editor {
 
     fn choice(&self, row: usize) -> usize {
         let d = &self.draft;
-        match ROWS[row] {
+        match rows()[row] {
             Row::AntiAliasing => AntiAliasing::ALL
                 .iter()
                 .position(|a| *a == d.anti_aliasing)
@@ -140,19 +170,29 @@ impl Editor {
                 .position(|a| *a == d.spotting_aid)
                 .unwrap_or(0),
             Row::TerrainFiltering => usize::from(d.terrain_filtering),
+            Row::BuildingDistance => BUILDING_DISTANCES
+                .iter()
+                .position(|n| *n == d.building_distance_nm)
+                .unwrap_or(BUILDING_DISTANCES.len() - 1),
+            Row::BuildingDetail => BUILDING_DETAILS
+                .iter()
+                .position(|n| *n == d.building_detail_nm)
+                .unwrap_or(2),
         }
     }
     fn set_choice(&mut self, row: usize, i: usize) {
         let d = &mut self.draft;
-        match ROWS[row] {
+        match rows()[row] {
             Row::AntiAliasing => d.anti_aliasing = AntiAliasing::ALL[i],
             Row::RenderScale => d.render_scale = RENDER_SCALES[i],
             Row::SpottingAid => d.spotting_aid = SpottingAid::ALL[i],
             Row::TerrainFiltering => d.terrain_filtering = i == 1,
+            Row::BuildingDistance => d.building_distance_nm = BUILDING_DISTANCES[i],
+            Row::BuildingDetail => d.building_detail_nm = BUILDING_DETAILS[i],
         }
     }
     fn available(&self, row: usize, i: usize) -> bool {
-        ROWS[row] != Row::AntiAliasing || self.supported[i]
+        rows()[row] != Row::AntiAliasing || self.supported[i]
     }
     fn unsupported(&self) -> Vec<&'static str> {
         AntiAliasing::ALL
@@ -164,7 +204,7 @@ impl Editor {
     }
     /// A one-line note under the focused row's description, if it has one.
     fn note(&self, row: usize) -> Option<String> {
-        if ROWS[row] != Row::AntiAliasing {
+        if rows()[row] != Row::AntiAliasing {
             return None;
         }
         let chosen = self.draft.anti_aliasing;
@@ -189,7 +229,7 @@ impl Editor {
     fn pick(&mut self, row: usize, i: usize) -> ResultAction {
         self.focus = Focus::Row(row);
         self.row = row;
-        let label = &ROWS[row].choices()[i];
+        let label = &rows()[row].choices()[i];
         if !self.available(row, i) {
             self.message = format!("{label} is not available on this graphics card");
             return ResultAction::Changed;
@@ -198,13 +238,13 @@ impl Editor {
             return ResultAction::None;
         }
         self.set_choice(row, i);
-        self.message = format!("{} set to {label}.", ROWS[row].label());
+        self.message = format!("{} set to {label}.", rows()[row].label());
         ResultAction::Changed
     }
     /// Left/right: the next available choice in that direction, stopping at
     /// the ends.
     fn step(&mut self, row: usize, delta: i32) -> ResultAction {
-        let count = ROWS[row].choices().len() as i32;
+        let count = rows()[row].choices().len() as i32;
         let mut i = self.choice(row) as i32 + delta;
         while (0..count).contains(&i) {
             if self.available(row, i as usize) {
@@ -216,7 +256,7 @@ impl Editor {
     }
     /// Enter, a click or the gamepad's A: the next available choice, wrapping.
     fn cycle(&mut self, row: usize) -> ResultAction {
-        let count = ROWS[row].choices().len();
+        let count = rows()[row].choices().len();
         let start = self.choice(row);
         (1..count)
             .map(|k| (start + k) % count)
@@ -243,7 +283,7 @@ impl Editor {
     // ---- navigation -----------------------------------------------------
 
     fn order() -> Vec<Focus> {
-        (0..ROWS.len())
+        (0..rows().len())
             .map(Focus::Row)
             .chain((0..FOOTER.len()).map(Focus::Footer))
             .collect()
@@ -255,7 +295,7 @@ impl Editor {
         }
     }
     fn move_focus(&mut self, key: &str) -> ResultAction {
-        let last = ROWS.len() - 1;
+        let last = rows().len() - 1;
         let focus = match (self.focus, key) {
             (Focus::Row(r), "ArrowUp") => Focus::Row(r.saturating_sub(1)),
             (Focus::Row(r), "ArrowDown") if r < last => Focus::Row(r + 1),
@@ -321,11 +361,13 @@ impl Editor {
     // ---- pointer --------------------------------------------------------
 
     fn row_rect(row: usize) -> Rect {
+        // Six rows fit the panel at a tighter step.
+        let step = if rows().len() > 4 { 24 } else { ROW_STEP };
         (
             PANEL_RECT.0 + 4,
-            ROW_TOP + row as i32 * ROW_STEP,
+            ROW_TOP + row as i32 * step,
             PANEL_RECT.2 - 8,
-            ROW_STEP - 4,
+            step - 4,
         )
     }
     fn choice_rect(row: usize, i: usize) -> Rect {
@@ -342,7 +384,7 @@ impl Editor {
         (312 + i as i32 * 108, 456, 100, 18)
     }
     fn hit(&self, p: (f64, f64)) -> Option<Hit> {
-        for (row, kind) in ROWS.iter().enumerate() {
+        for (row, kind) in rows().iter().enumerate() {
             if !inside(p, Self::row_rect(row)) {
                 continue;
             }
@@ -410,7 +452,7 @@ impl Editor {
         };
         let x = panel.0 + panel.2 - 6 - text_width(font, state);
         Chrome::text(pixels, font, panel, color, state, (x, 29));
-        for (row, kind) in ROWS.iter().enumerate() {
+        for (row, kind) in rows().iter().enumerate() {
             let r = Self::row_rect(row);
             let focused = self.focus == Focus::Row(row);
             if focused {
@@ -460,8 +502,8 @@ impl Editor {
                 None,
             ),
             Focus::Row(_) => (
-                ROWS[self.row].label().to_ascii_uppercase(),
-                ROWS[self.row].description(),
+                rows()[self.row].label().to_ascii_uppercase(),
+                rows()[self.row].description(),
                 self.note(self.row),
             ),
         };

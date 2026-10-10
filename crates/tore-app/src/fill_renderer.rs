@@ -1,10 +1,14 @@
 //! City fill buildings, CF0 prototype (`tore_world::city`), drawn in three
-//! tiers out to 30 nm (John, 2026-10-10): full detail (the kit piece with its
-//! textures) inside 20 nm, a blend band from 20 to 25 nm where each building
+//! tiers set by the Graphics screen (John, 2026-10-10; defaults 30 nm and
+//! 5 nm): full detail (the kit piece with its textures) inside the building
+//! detail distance, a blend band a quarter beyond it where each building
 //! turns from its far box to full detail at its own fixed distance, and the
 //! far box (its footprint in its dominant colour, untextured, a cheap
-//! shader) from 25 to 30 nm. Buildings sink into the ground over the last
-//! nautical mile, and anything smaller than one pixel on screen is not drawn.
+//! shader) out to the building distance. Buildings sink into the ground over
+//! the last nautical mile, and anything smaller than one pixel on screen is
+//! not drawn. The target display (camera slot 4: the target window and the
+//! TV and gunsight views) draws every building it sees at full detail, culled
+//! to its own narrow view.
 //!
 //! The per-view work is on the GPU: a compute pass culls every building
 //! against the view and writes the full detail lists per piece and the far
@@ -20,8 +24,9 @@ use tore_world::city::CityFill;
 const NM: f64 = 6_076.115_49;
 
 /// The tier distances, nautical miles, and the smallest drawn size, pixels.
-/// `TORE_CITY_FILL_TIERS=FULL,BLEND,DRAW,MIN_PX[,DETAIL_PX]` changes them
-/// (a measuring aid).
+/// The graphics options set them ([`Tiers::from_options`]);
+/// `TORE_CITY_FILL_TIERS=FULL,BLEND,DRAW,MIN_PX[,DETAIL_PX]` overrides them
+/// (a developer aid).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tiers {
     /// Full detail inside this.
@@ -37,34 +42,45 @@ pub struct Tiers {
     pub detail_px: f64,
 }
 
-impl Default for Tiers {
-    fn default() -> Self {
+/// The blend band runs from the detail distance to this share beyond it
+/// (fitted).
+pub const BLEND_SHARE: f64 = 1.25;
+
+impl Tiers {
+    /// The tiers the Graphics screen's building distance and building
+    /// detail choose: full detail inside the detail distance, a blend band
+    /// a quarter beyond it, plain boxes out to the building distance.
+    pub fn from_options(options: &crate::graphics::Options) -> Self {
+        let draw = f64::from(options.building_distance_nm);
+        let full = f64::from(options.building_detail_nm).min(draw);
         Self {
-            full_nm: 20.,
-            blend_nm: 25.,
-            draw_nm: 30.,
+            full_nm: full,
+            blend_nm: (full * BLEND_SHARE).min(draw),
+            draw_nm: draw,
             min_px: 1.,
             detail_px: 0.,
         }
     }
-}
-
-impl Tiers {
-    pub fn from_env() -> Self {
-        let mut tiers = Self::default();
-        if let Ok(text) = std::env::var("TORE_CITY_FILL_TIERS") {
-            let v: Vec<f64> = text.split(',').filter_map(|s| s.parse().ok()).collect();
-            if v.len() >= 4 {
-                tiers = Self {
-                    full_nm: v[0],
-                    blend_nm: v[1],
-                    draw_nm: v[2],
-                    min_px: v[3],
-                    detail_px: v.get(4).copied().unwrap_or(0.),
-                };
-            }
+    /// The developer override, when set and well formed.
+    pub fn from_env() -> Option<Self> {
+        let text = std::env::var("TORE_CITY_FILL_TIERS").ok()?;
+        let v: Vec<f64> = text.split(',').filter_map(|s| s.parse().ok()).collect();
+        (v.len() >= 4).then(|| Self {
+            full_nm: v[0],
+            blend_nm: v[1],
+            draw_nm: v[2],
+            min_px: v[3],
+            detail_px: v.get(4).copied().unwrap_or(0.),
+        })
+    }
+    /// The target display's tiers: everything it draws at full detail.
+    pub fn target(self) -> Self {
+        Self {
+            full_nm: self.draw_nm,
+            blend_nm: self.draw_nm,
+            detail_px: 0.,
+            ..self
         }
-        tiers
     }
 }
 
@@ -313,7 +329,9 @@ pub struct Stats {
 
 pub struct FillRenderer {
     art: Arc<FillArt>,
+    /// The Graphics screen's tiers, and the developer override.
     tiers: Tiers,
+    override_tiers: Option<Tiers>,
     vertices: wgpu::Buffer,
     records: wgpu::Buffer,
     counts: wgpu::Buffer,
@@ -633,7 +651,8 @@ impl FillRenderer {
         );
         Self {
             art: Arc::clone(art),
-            tiers: Tiers::from_env(),
+            tiers: Tiers::from_options(&crate::graphics::Options::default()),
+            override_tiers: Tiers::from_env(),
             vertices,
             records,
             counts,
@@ -652,6 +671,11 @@ impl FillRenderer {
             decal,
             far,
         }
+    }
+
+    /// Takes the Graphics screen's building distances.
+    pub fn set_options(&mut self, options: &crate::graphics::Options) {
+        self.tiers = Tiers::from_options(options);
     }
 
     /// Rebuilds the render pipelines for a new sample count.
@@ -718,7 +742,12 @@ impl FillRenderer {
         let f = 1.732_050_8 * camera.zoom.max(0.01);
         let zoom = f64::from(camera.zoom).clamp(1., 4.);
         let eye: [f32; 3] = std::array::from_fn(|i| (camera.position[i] - origin[i]) as f32);
-        let t = self.tiers;
+        let tiers = self.override_tiers.unwrap_or(self.tiers);
+        let t = if camera.weather_slot == 4 {
+            tiers.target()
+        } else {
+            tiers
+        };
         let mut p = [0f32; PARAM_WORDS];
         p[0..3].copy_from_slice(&origin.map(|v| v as f32));
         p[4..7].copy_from_slice(&eye);

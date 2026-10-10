@@ -32,6 +32,8 @@ shown below the options.
 | Render scale | 75%, 100%, 125%, 150%, 200% | 100% |
 | Spotting aid | Off, Subtle, Strong | Subtle |
 | Terrain filtering | Off, On | On |
+| Building distance (city fill prototype only) | 10 nm, 20 nm, 30 nm | 30 nm |
+| Building detail (city fill prototype only) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
 beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
@@ -127,12 +129,29 @@ Measured on consecutive frames, the pixel change in distant terrain fell by 29%
 to 57% depending on the view. Very distant high-contrast art keeps a fixed
 grain, and thin features such as far roads fade.
 
+## Building distance and building detail
+
+Shown only while the experimental city fill is switched on
+(`TORE_CITY_FILL=1`; see the [feature matrix](../features.md)). John asked
+on 2026-10-10 for both settings and their defaults; the steps are agent
+choices. Building distance is how far city fill buildings are drawn.
+Building detail is the distance inside which they are drawn with full
+texture and detail; beyond it they are plain blocks in each building's
+main colour, and over a band a quarter beyond the detail distance each
+building changes at its own distance, so the edge does not show as a line.
+The target display (target window, TV and gunsight views) draws every
+building it sees at full detail whatever the setting. The values are saved
+only when they differ from the defaults. Measured costs are in the city
+fill notes; at 4K the 5 nm default adds about 2 to 4 ms over Kiev, 1 nm
+about 1 ms.
+
 ## Command line
 
 For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong`,
-`--terrain-filtering on|off`, and `--original-graphics` for everything off at
-100%. Flags apply in order, so `--original-graphics --spotting-aid strong`
+`--terrain-filtering on|off`, `--building-distance 10|20|30`,
+`--building-detail 1|2|5|10|20`, and `--original-graphics` for everything off
+at 100%. Flags apply in order, so `--original-graphics --spotting-aid strong`
 turns on only the outline. Pressing Apply on the Graphics screen saves whatever
 the screen shows, including a flag's value.
 

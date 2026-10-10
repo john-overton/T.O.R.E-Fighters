@@ -650,6 +650,10 @@ impl SimRenderer {
                 art,
             )
         });
+        let mut fill = fill;
+        if let Some(fill) = &mut fill {
+            fill.set_options(&options);
+        }
         let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Celestial vertices"),
             size: 256 * 1024,
@@ -1196,6 +1200,9 @@ impl SimRenderer {
         samples: u32,
     ) {
         self.options = options;
+        if let Some(fill) = &mut self.fill {
+            fill.set_options(&options);
+        }
         if samples == self.samples {
             return;
         }

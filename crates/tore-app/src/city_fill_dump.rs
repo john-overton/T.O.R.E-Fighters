@@ -16,6 +16,10 @@
 //! - `--render` draws each spot offscreen at 1920 by 1080 with the fill off
 //!   and on: `NAME-off.png` and `NAME-on.png`. The camera looks at ground
 //!   point X, Z from HEIGHT ft above it, PITCH degrees down, facing YAW.
+//! - `--target NAME@X,Z,HEIGHT,PITCH,YAW,ZOOM` renders the spot as the
+//!   target display draws it (camera slot 4, its zoom), off and on.
+//! - `--target-bench X,Z,HEIGHT,PITCH,YAW,ZOOM,FRAMES` times that view held
+//!   still at `--size`, off then on.
 //! - `--bench` flies the offscreen camera FRAMES frames along HEADING from
 //!   X, Z at HEIGHT ft above the ground, FEET_PER_FRAME apart, at `--size`
 //!   (3840 by 2160 by default), fill off then on, and prints each pass's
@@ -119,12 +123,16 @@ pub fn run() -> AppResult<()> {
     let out = Path::new(args.first().ok_or(usage)?);
     let mut theater = "UKR".to_owned();
     let mut renders = Vec::new();
+    let mut targets = Vec::new();
+    let mut target_bench = None;
     let mut bench = None;
     let mut size = [3840u32, 2160u32];
     let mut it = args.iter().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--render" => renders.push(it.next().ok_or(usage)?.clone()),
+            "--target" => targets.push(it.next().ok_or(usage)?.clone()),
+            "--target-bench" => target_bench = Some(numbers(it.next().ok_or(usage)?)?),
             "--bench" => bench = Some(numbers(it.next().ok_or(usage)?)?),
             "--size" => {
                 let v = numbers(it.next().ok_or(usage)?)?;
@@ -275,6 +283,109 @@ pub fn run() -> AppResult<()> {
                 stats.boxes,
             );
         }
+    }
+    for item in &targets {
+        let (name, spot) = item.split_once('@').ok_or(usage)?;
+        let v = numbers(spot)?;
+        for on in [false, true] {
+            let (world, mut scenery) = world(&resources, &theater, on)?;
+            use_gpu(&scenery, &mut gpu)?;
+            let gpu = gpu.as_mut().expect("gpu");
+            let mut camera = camera_at(&world, &v);
+            camera.weather_slot = 4;
+            camera.zoom = v[5] as f32;
+            scenery.resolve_palette(&world, camera.position[1]);
+            scenery.set_origin(camera.position);
+            let geometry = std::sync::Arc::clone(scenery.static_geometry_where(&hidden_none));
+            gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
+            let pixels = gpu.pixels(&camera, &world, &scenery)?;
+            let path = out.join(format!("{name}-{}.png", if on { "on" } else { "off" }));
+            std::fs::write(
+                &path,
+                crate::replay::png::encode_rgba(crate::reel::WIDTH, crate::reel::HEIGHT, &pixels)?,
+            )?;
+            let stats = match &gpu.sim.fill {
+                Some(f) => f.stats(&gpu.device, &gpu.queue)?,
+                None => Default::default(),
+            };
+            println!(
+                "target: {} ({} buildings at full detail, {} as far boxes)",
+                path.display(),
+                stats.full,
+                stats.boxes
+            );
+        }
+    }
+    if let Some(v) = target_bench {
+        let frames = v[6] as usize;
+        let mut means = Vec::new();
+        for on in [false, true] {
+            let (world, mut scenery) = world(&resources, &theater, on)?;
+            use_gpu(&scenery, &mut gpu)?;
+            let gpu = gpu.as_mut().expect("gpu");
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("City fill target bench target"),
+                size: wgpu::Extent3d {
+                    width: size[0],
+                    height: size[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            let geometry = std::sync::Arc::clone(scenery.static_geometry_where(&hidden_none));
+            gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
+            let mut camera = camera_at(&world, &v);
+            camera.weather_slot = 4;
+            camera.zoom = v[5] as f32;
+            scenery.resolve_palette(&world, camera.position[1]);
+            scenery.set_origin(camera.position);
+            let mut times = Vec::with_capacity(frames);
+            for frame in 0..frames + 30 {
+                let started = Instant::now();
+                let mut encoder = gpu.device.create_command_encoder(&Default::default());
+                gpu.sim.draw(
+                    &gpu.device,
+                    &gpu.queue,
+                    &mut encoder,
+                    &view,
+                    size,
+                    &camera,
+                    &world,
+                    &scenery,
+                );
+                gpu.queue.submit([encoder.finish()]);
+                gpu.device.poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: Some(Duration::from_secs(60)),
+                })?;
+                if frame >= 30 {
+                    times.push(started.elapsed().as_secs_f64() * 1e3);
+                }
+            }
+            let stats = match &gpu.sim.fill {
+                Some(f) => f.stats(&gpu.device, &gpu.queue)?,
+                None => Default::default(),
+            };
+            let mean = times.iter().sum::<f64>() / times.len() as f64;
+            println!(
+                "target bench fill {}: {} frames at {}x{}, mean {:.3} ms, {} buildings at full detail, {} as far boxes",
+                if on { "on" } else { "off" },
+                times.len(),
+                size[0],
+                size[1],
+                mean,
+                stats.full,
+                stats.boxes
+            );
+            means.push(mean);
+        }
+        println!("target bench added: {:.3} ms mean", means[1] - means[0]);
     }
     if let Some(v) = bench {
         let frames = v[5] as usize;
