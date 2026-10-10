@@ -62,6 +62,12 @@ time in thirty; type 30 shows 24 to 26 a quarter of the time, 31 to 33 about
 the time; 35 shows 36 or 37 two times in three. Exact chances are in the
 [format notes](../formats/explosions.md#explosion-table).
 
+Flak: the KS-12's 85 mm shell bursts as type 27 (`FLAKA`, two seconds) and the
+KS-19's 100 mm shell as type 28 (`FLAKB`, one second, heavier sounds, size
+170); the retail records of both name 27, so the larger calibre's type is
+fitted. Each burst throws a flash of light and leaves a dark puff that hangs for
+about four seconds ([surface defenses](surface-defenses.md#flak-bursts-gunfire-launches-and-light)).
+
 Craters: half width 16 feet per unit of the weapon's crater size, at most 333
 feet. Guns have no crater; air-to-air missiles 3 (96 feet across); rockets 1
 or 2; anti-ship missiles 6; air-to-ground missiles and 500 and 1,000 lb class

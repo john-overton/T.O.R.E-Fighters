@@ -695,12 +695,14 @@ KS-12 and KS-19 (fuze 250 ft, collateral 750 ft at 35 percent):
   flight to the lead point and bursts then, or earlier if it passes within the
   250 ft fuze radius of a hostile aircraft. Fitted (the time fuze is not in the
   data; the proximity radius is).
-- A burst deals collateral damage, plays the record's own explosion (type 27,
-  the original's air flak row: size 130, 2 s, air explosion sounds; retail)
-  and shows the FLAKA, FLAKB or FLAKC sprite with a dark puff that lingers
+- A burst deals collateral damage and plays an air flak explosion: the KS-12's
+  is the record's own type 27 (the original's air flak row: size 130, 2 s,
+  air explosion sounds; retail), the KS-19's is type 28 (size 170, 1 s, the
+  heavy flak sounds; both records name 27, so the larger calibre's type is
+  fitted). Each shows its sheet (FLAKA, FLAKB) with a dark puff that lingers
   about 4 s and a point light
-  ([Destroyed looks and drawing](#destroyed-looks-and-drawing)). It has no
-  tracer, and a shell is not drawn in flight.
+  ([flak bursts, gunfire, launches and light](#flak-bursts-gunfire-launches-and-light)).
+  It has no tracer, and a shell is not drawn in flight.
 - Only a hostile aircraft in flight sets off the proximity fuze; a shell
   passes friendly aircraft and aircraft on the ground.
 - Startup shots 8: the first engagement opens with an eight-shell barrage
@@ -1232,17 +1234,47 @@ John accepted the recommended looks.
 The explosion uses the unit's own type (21 ground, 35 ship, 15 men) and crater
 size on land, rather than one fitted value for all ground objects.
 
-### Flak bursts, tracers and light
+### Flak bursts, gunfire, launches and light
 
-- **Flak burst.** The FLAKA sheet for 85 mm, FLAKB for 100 mm, FLAKC for any
-  later calibre (fitted), the record's explosion sound, a dark puff that
-  lingers about 4 s, and a point light added to the flare light list with the
-  flare law (four times brighter at night). Light 160 for 85 mm and 200 for 100
-  mm, life 10 ticks (fitted). Flak has no tracer.
-- **AAA tracers.** The existing tracer flag (every third round) and drawing. A
-  muzzle flash for AAA is optional.
+John's request (2026-10-10): AAA and flak fire real shells, flak has no
+tracers, and flak explosions flash light. Everything below is presentation
+only (opinionated, agent, 2026-10-10: the numbers are fitted by eye from the
+preview sheets), rebuilt from the picture every frame, so single player, a
+networked client and a replay show the same. Lights ride the AC-130's point
+light path (a warm light with the flare's law: inverse square, 1,500 ft reach,
+four times as bright at night, blending in at dusk; strengths are in the flare
+light's units, one flare is 4,000).
+
+| What | Look | Basis |
+| --- | --- | --- |
+| Flak burst, 85 mm (KS-12) | Explosion type 27: the `FLAKA` sheet, 2 s, size 130 | retail row |
+| Flak burst, 100 mm (KS-19) | Explosion type 28: the larger `FLAKB` sheet, 1 s, size 170, heavy flak sounds | fitted (both records name 27) |
+| Flak light | One point light at the burst: 10,000 (85 mm) or 14,000 (100 mm) at the peak, held 2 ticks, gone by 14 ticks | fitted |
+| Flak puff | Three dark puffs growing from 0.3 to 0.8 of the explosion's width, fading in over 0.2 s and out by 4 s, drifting up 3 ft/s | fitted |
+| Flak shell in flight | Not drawn; no tracer | John |
+| AAA tracers | The existing flag and drawing: every third round for guns whose tuning row has a tracer (Shilka, Tunguska, Vulcan, ship guns, 37 mm, 57 mm), none for flak, tank guns and small arms | spec-derived ([AAA tuning](#aaa-tuning)) |
+| Muzzle flash and firing light | The gun-flash sprite at the muzzle, along the barrel, in three classes: light cannon (ZSU-23, 2S6, Vulcan and Phalanx, 30 mm ship guns, BMP-2, BTR-80, M113, M2: a flicker that never goes dark at any cadence, 8 ft, light 160), 37 mm and 57 mm (a distinct pop, 14 ft, light 340, one puff) and 85 mm to 125 mm guns (flak and tank guns: a big flash, 28 ft, light 700, three puffs). One flash per gun, its newest round. The barrage zone and small arms flash nothing | fitted |
+| SAM launch | When the motor lights (speed 30 ft/s; the SA-6 sits about 2 s on its rail first): a flash 40 ft long along its heading for 0.15 s, a point light of 2,800 fading over 40 ticks, and a white cloud of six puffs growing from 10 to 60 ft over 8 s. The missile's own smoke trail is the simulation's | fitted |
+| Wreck smoke | A destroyed surface unit sends up a dark column for 15 minutes, the last minute fading it out: a puff every 0.4 s rising 16 ft/s in a fixed 7 ft/s breeze, growing from 6 ft by 3 ft/s, living 30 s, sized by the unit's hit points ((hp / 100) to the one quarter, from 0.6 to 2.4). Ships, vehicles, launchers, guns and buildings alike; the 24 newest columns draw. A unit with a crash fire of its own (a parked aircraft) has the simulation's column instead | fitted |
+
+A column or a puff starts from the picture alone: a destroyed unit first seen
+dead (a restart in progress, a seek) starts its column ten seconds old. The
+fire sprite of a crash site is not drawn for ground wrecks; that, and the wreck
+shapes, belong to the destroyed looks above.
+
+**The flight map** shows surface units known by sight (identified, not just
+painted by radar) with the symbol of their kind and the tile of their side:
+a gun, launcher, tank, truck, radar or ship symbol from `MCICONS.PIC`, on its
+blue tile for the viewer's own side and its red tile for the other, so a
+Redfor pilot sees the colours the other way round. A unit with no side stays
+on the grey tile that claims nothing, and a contact only the radar found stays
+the yellow "unknown surface" placeholder: unknown contacts never show
+allegiance ([flight map](flight-map.md)). The RWR draws the square of a radar
+whose controller is tracking or firing at the player bright and steady
+([RWR](rwr.md)).
+
 - **Moving units** (the column) are drawn as dynamic objects, the way aircraft
-  are, and shown on the minimap and flight map as surface contacts. Stationary
+  are, and shown on the flight map as surface contacts. Stationary
   units draw as scenery with ids.
 - SAM launchers do not slew or elevate visibly this round (no articulation data
   beyond the loaded-count envelope); loaded rails empty as missiles leave and
