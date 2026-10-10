@@ -20,7 +20,6 @@ use tore_formats::{
     surface_unit::class,
 };
 
-
 const HEADER: &str = "[brent's_relocatable_format]\n";
 
 /// One line per field of `layout`; `value` overrides a field by name.
