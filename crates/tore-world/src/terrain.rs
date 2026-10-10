@@ -978,8 +978,9 @@ impl Terrain {
             surface: Default::default(),
             redrawn: Vec::new(),
         };
-        let plans =
-            redrawn::plans(recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports))?;
+        let plans = redrawn::Plans::new(
+            recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports),
+        )?;
         out.build_airport_scene(resources, code.trim_end_matches(".MM"), target, &plans)?;
         Ok(out)
     }
@@ -992,7 +993,7 @@ impl Terrain {
         resources: &dyn ResourceSource,
         code: &str,
         target: Option<&crate::surface::resolve::GroundTarget>,
-        plans: &[redrawn::Plan],
+        plans: &redrawn::Plans,
     ) -> WorldResult<()> {
         use tore_sim::airport::{
             Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
@@ -1002,7 +1003,7 @@ impl Terrain {
         self.place_surface(resources, &sources, code);
         // Experiment AP1: redrawn airports move and add their buildings
         // after the surface has placed, so its layout is the retail one.
-        self.redrawn = redrawn::apply(resources, code, &mut sources, plans, |x, z| {
+        self.redrawn = redrawn::apply(resources, &mut sources, plans, |x, z| {
             f64::from(self.height(x as f32, z as f32))
         })?;
         sources.add_surface(resources, &self.surface)?;
@@ -1097,8 +1098,10 @@ impl Terrain {
                             + basis.forward[axis] * local[2]
                     });
                 }
-                if let Some(found) = redraw.map(|built| built.anchors).or_else(|| {
-                    sources
+                // A redrawn airport's anchors are its plan's, or none.
+                let found = match redraw {
+                    Some(built) => built.anchors,
+                    None => sources
                         .strip_boxes
                         .get(&placement.object_type)
                         .and_then(|boxes| {
@@ -1109,8 +1112,9 @@ impl Terrain {
                                         + basis.forward[axis] * local[2]
                                 })
                             })
-                        })
-                }) {
+                        }),
+                };
+                if let Some(found) = found {
                     anchors.insert(id, found);
                 }
                 runways.push(Runway {

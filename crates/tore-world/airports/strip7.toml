@@ -1,0 +1,95 @@
+# T.O.R.E redrawn airport plan: STRIP7.OT (RNWY7.SH, 26 base airports). Experiment AP1, 2026-10-10.
+#
+# Opinionated (John, 2026-10-10: redraw the airports at real size from retail
+# airport textures; one plan per runway shape type; larger airports keep
+# their strips, with parking and taxiways on both sides). Sizes and positions
+# are agent choices at real-world scale (fitted); runway centrelines follow
+# the retail ones. Only applies with TORE_REDRAWN_AIRPORTS=1.
+# Feet in the runway frame: x right of the retail runway centreline, z along
+# it from its near threshold (STRIP anchor 0x11). Keys:
+# docs/formats/redrawn-airports.md.
+
+applies_to = "STRIP7.OT"
+runway_length_ft = 7388
+ils_runway = true
+grass_margin_ft = 150
+
+[[material]]
+name = "apron"
+pic = "_RNWY7.PIC"
+rect = [102, 121, 74, 99]
+tile_ft = [74, 99]
+variants = [[179, 121, 74, 99], [179, 222, 74, 99]]
+
+[[runway]]
+name = "R0"
+from = [0, 0]
+length = 7388
+width = 200
+pad = 220
+touchdown = 1500
+
+[[runway]]
+name = "R1"
+from = [-1632, 0]
+length = 6820
+width = 150
+pad = 100
+touchdown = 1500
+
+[[taxiway]]
+name = "west"
+width = 75
+points = [[-2082, -190], [-2082, 7138]]
+
+[[taxiway]]
+name = "east"
+width = 75
+points = [[450, -190], [450, 7138]]
+
+[[taxiway]]
+name = "south"
+width = 75
+points = [[-2082, -190], [450, -190]]
+
+[[taxiway]]
+name = "north"
+width = 75
+points = [[-2082, 7138], [450, 7138]]
+
+[[taxiway]]
+name = "mid1"
+width = 75
+points = [[-2082, 3600], [450, 3600]]
+
+[[apron]]
+name = "main"
+min = [487.5, 1108]
+max = [1387.5, 4433]
+
+[[apron]]
+name = "second"
+min = [-2619.5, 2216]
+max = [-2119.5, 4433]
+
+[[line]]
+from = [1387.5, 1108]
+to = [1387.5, 4433]
+out = [1, 0]
+
+[[line]]
+from = [-2619.5, 2216]
+to = [-2619.5, 4433]
+out = [-1, 0]
+
+[anchors]
+taxi_out = [[450, 1108], [450, -190], [225, -190], [0, -190]]
+takeoff = [0, 0]
+landing = [0, 1000]
+taxi_in = [[0, 7138], [225, 7138], [450, 7138], [450, 4433]]
+parking = [[938, 1770], [938, 2020], [938, 2270], [938, 2520], [938, 2770], [938, 3020], [938, 3270], [938, 3520], [938, 3770]]
+parking_heading = -90
+
+[extras]
+hangars = 8
+vehicles = true

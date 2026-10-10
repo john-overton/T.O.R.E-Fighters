@@ -1,0 +1,116 @@
+# T.O.R.E redrawn airports: default materials. Experiment AP1, 2026-10-10.
+#
+# The dark asphalt set from _RNWY7.PIC, the one retail atlas with threshold
+# bars and centreline dashes, and the runway number boards of several
+# atlases. A plan's own materials replace these by name; whatever its own
+# atlas lacks falls back to these (John, 2026-10-10: each theater's own
+# runway textures where they have the pieces, otherwise dark asphalt).
+# Texel rectangles are [x, y, w, h], rows from the top; tile_ft is the feet
+# one copy covers along the texture's columns and rows (0: the element's
+# width). Keys: docs/formats/redrawn-airports.md.
+
+[[material]]
+name = "runway_centreline"   # dark asphalt with a centreline dash
+pic = "_RNWY7.PIC"
+rect = [102, 2, 98, 117]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "runway_touchdown"    # the same with tyre marks
+pic = "_RNWY7.PIC"
+rect = [1, 2, 98, 117]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "runway_threshold"    # threshold bars
+pic = "_RNWY7.PIC"
+rect = [1, 121, 98, 117]
+tile_ft = [100, 150]
+
+[[material]]
+name = "runway_plain"        # asphalt beside the dash
+pic = "_RNWY7.PIC"
+rect = [104, 2, 40, 117]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "taxiway"             # grey asphalt, its marks along the columns
+pic = "_RNWY7.PIC"
+rect = [2, 300, 95, 56]
+tile_ft = [190, 0]
+along = "u"
+paint = ["taxiway"]
+
+[[material]]
+name = "apron"               # concrete slabs, three by four
+pic = "_RNWY7.PIC"
+rect = [102, 121, 74, 99]
+tile_ft = [74, 99]
+variants = [[179, 121, 74, 99], [179, 222, 74, 99]]
+
+[[material]]
+name = "fillet"              # a curved taxiway corner
+pic = "_RNWY7.PIC"
+rect = [1, 417, 39, 45]
+tile_ft = [50, 50]
+
+# Designation digits from the runway number boards; the board itself is
+# painted over with the runway's own asphalt.
+[[material]]
+name = "digit_1"
+pic = "_RNWY7.PIC"
+rect = [180, 382, 16, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
+
+[[material]]
+name = "digit_2"
+pic = "_RNWY7.PIC"
+rect = [160, 382, 16, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
+
+[[material]]
+name = "digit_3"
+pic = "_RNWY1.PIC"
+rect = [225, 480, 14, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
+
+[[material]]
+name = "digit_5"
+pic = "_RNWY5.PIC"
+rect = [239, 250, 14, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
+
+[[material]]
+name = "digit_6"
+pic = "_RNWY5.PIC"
+rect = [239, 217, 14, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
+
+[[material]]
+name = "digit_7"
+pic = "_RNWY5A.PIC"
+rect = [103, 277, 14, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
+
+[[material]]
+name = "digit_8"
+pic = "_RNWY3.PIC"
+rect = [44, 471, 14, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
+
+[[material]]
+name = "digit_9"
+pic = "_RNWY3.PIC"
+rect = [106, 469, 14, 15]
+tile_ft = [20, 60]
+paint = ["digit"]
