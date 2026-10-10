@@ -6,6 +6,7 @@
 //!
 //! ```text
 //! parked_inspect FA_2.LIB FA_1.LIB [PT ...]
+//! parked_inspect FA_2.LIB FA_1.LIB --deck HULL.SH ...
 //! ```
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -30,6 +31,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .find_map(|lib| lib.read(name).ok())
             .ok_or_else(|| format!("{name} is in neither archive"))
     };
+    if args.get(2).map(String::as_str) == Some("--deck") {
+        // Every level of a hull shape with its area of level faces.
+        for name in &args[3..] {
+            let shape = Shape::scenery(&read(&name.to_ascii_uppercase())?)?;
+            let mut levels: BTreeMap<i64, f32> = BTreeMap::new();
+            for face in &shape.faces {
+                let p = &face.positions;
+                if p.len() < 3 || p.iter().any(|q| (q[2] - p[0][2]).abs() > 1e-3) {
+                    continue;
+                }
+                let twice: f32 = (0..p.len())
+                    .map(|i| {
+                        let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                        a[0] * b[1] - b[0] * a[1]
+                    })
+                    .sum();
+                *levels.entry(p[0][2].round() as i64).or_default() += twice.abs() / 2.;
+            }
+            println!("{name}: {levels:?}");
+            println!(
+                "  deck rule: {:?}",
+                tore_formats::carrier::flight_deck(&shape).map(|d| (d.height, d.area))
+            );
+        }
+        return Ok(());
+    }
     let mut types: BTreeSet<String> = args[2..].iter().map(|a| a.to_ascii_uppercase()).collect();
     if types.is_empty() {
         for name in libs[0]

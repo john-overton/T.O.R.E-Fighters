@@ -8,7 +8,10 @@
 //! scale bar in feet. A launcher sheet shows the dynamic (state) projection
 //! with each loaded-round count. Carrier sheets place each hull's island and
 //! deck parts from the FA.EXE carrier table, and a fleet scene lays out the
-//! Clemenceau template `~QFFLT`. Shapes, textures, the palette and the label
+//! Clemenceau template `~QFFLT`. The parked-aircraft sheets (slice PA1) show
+//! every aircraft the templates park, gear down, and the `~QFFLT` aircraft
+//! on the Clemenceau's deck as the game places them; `--surface-preview
+//! OUT_DIR parked` draws only those. Shapes, textures, the palette and the label
 //! font are read straight from the user's own `FA_1.LIB` and `FA_2.LIB` (the
 //! remembered media source, `TORE_GAME_DIR`, or `gameassets/`), so the sheets
 //! do not depend on what the import selected.
@@ -20,6 +23,8 @@
 //! in their palette colour, and a fixed light that darkens faces turned away
 //! from it so the form reads (the game's shader also shades by the surface
 //! normal). Sprites face the viewer, as in the game.
+mod parked;
+
 use crate::AppResult;
 use std::{collections::BTreeMap, path::Path};
 use tore_formats::{
@@ -988,8 +993,10 @@ fn fleet_scene(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
 
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
-    let [out] = args.as_slice() else {
-        return Err("--surface-preview OUTPUT_DIRECTORY".into());
+    let (out, only_parked) = match args.as_slice() {
+        [out] => (out, false),
+        [out, which] if which == "parked" => (out, true),
+        _ => return Err("--surface-preview OUTPUT_DIRECTORY [parked]".into()),
     };
     let out = Path::new(out);
     std::fs::create_dir_all(out)?;
@@ -1005,6 +1012,11 @@ pub fn run() -> AppResult<()> {
         textures: BTreeMap::new(),
         font: Font::parse(&media.get("WIN11.FNT")?)?,
     };
+    parked::parked_sheet(out, &media, &mut art)?;
+    parked::deck_scene(out, &media, &mut art)?;
+    if only_parked {
+        return Ok(());
+    }
     for subject in NEW {
         sheet(out, &media, &mut art, subject, "new")?;
     }
