@@ -253,3 +253,15 @@ gimbal (gimbal-text and gimbal-bitmap force an eye icon), zoom1 to zoom6, and
 bloomN (the tracked page N ticks after a 105 mm shot, N 0 to 40: the sensor
 picture whited out by the [bloom](ac130-linked-guns.md#muzzle-flash), the
 overlay untouched).
+
+## Targeting page
+
+Specified in [air-to-ground](air-to-ground.md#the-targeting-page), not yet
+built. On an aircraft with a laser or FLIR sight (or with a buddy's laser spot
+valid for a selected laser weapon), the camera 4 target display becomes a
+targeting pod page whenever the sight is pinned, slewed, lasing, or an
+air-to-ground weapon is selected: it shows the pod's view, a flashing **LASE**
+cue (**BUDDY** when the spot is someone else's), the laser range and the
+weapon's time to impact. Otherwise this window is unchanged, and the AC-130
+keeps its [gunsight page](#ac-130-gunsight). The window already names a ground
+object once one is designated.

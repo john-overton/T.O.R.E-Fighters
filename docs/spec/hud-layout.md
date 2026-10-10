@@ -187,3 +187,16 @@ armed. These exceptions are developer facilities, not alternate player defaults.
 [Validation and visual evidence](../baselines/hud-cleanup.md#expanded-hud-and-startup-review).
 
 [Horizon reference validation](../baselines/horizon-creator.md).
+
+## Air-to-ground status words
+
+Specified in [air-to-ground](air-to-ground.md#the-hud-in-air-to-ground-modes),
+not yet built. The status word at (207,259) gains two bomb modes beside NAV,
+LCOS and ARM: **CCIP** (the dive pipper with a dotted fall line, ring radius 9
+reference pixels) and **LVL** (the level-flight "T" release guide, with a time
+to release in the weapon text). Ctrl+M switches between them. Guided bombs show
+a release range indicator on the weapon range scale at x=390. A laser point is
+marked with a 12 by 8 reference pixel box, and laser range, buddy-spot and time
+to impact text join the weapon rows. The warnings LOW and FRAG appear in the
+readiness slot. All positions follow this page's weapon rows; the air-to-ground
+spec holds the behaviour and numbers.

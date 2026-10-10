@@ -540,7 +540,9 @@ fighter exhaust aspect/throttle multipliers, an **agent-fitted** contrast model.
 No surface target scene or surface designation channel is supplied by this fix;
 AGM-65 remains unavailable against the practice aircraft rather than borrowing
 its A2A targeting workflow. Surface seeker behavior is tested with synthetic
-fixtures. Active surface support/mission integration remains deferred.
+fixtures. Active surface support/mission integration remains deferred; the
+surface designation channels are now specified in
+[air-to-ground](air-to-ground.md#ground-contacts-and-channels) (not yet built).
 
 The imported AGM65G minimum is 500 feet, whereas the manual table states 0.8 nmi.
 This unresolved source discrepancy needs record/unit research. Keep the reviewed
@@ -982,3 +984,17 @@ missile only while its own enabled seeker has an acquired observation of the
 releasing aircraft. An inactive active-radar seeker is not decoyed by a chaff
 burst. Successful decoy preserves the physical coasting body and retires its
 lock; the body can remain visible.
+
+## Air-to-ground weapons
+
+Specified in [air-to-ground](air-to-ground.md), not yet built. The surface
+roles above gain player-side designation (A-G radar, FLIR, HARM page, sight,
+visual). The inventory of 40 real air-to-ground records in twelve
+[weapon classes](air-to-ground.md#weapon-classes) lists each record's seeker,
+ranges and carriers. New guidance kinds join the four above: **laser** (rides a
+laser spot, falls blindly without it), **coordinate** (GPS bombs fly to the
+point designated at release) and **command** (the AT-2 rides the designation).
+A HARM gets a boresight cue like air-to-air BORE, and a Maverick may fire in
+BORE at the hottest ground object near the bore. The rules for the HUD range
+scale of a guided bomb, the HARM cue and the laser box are in
+[the HUD section](air-to-ground.md#the-hud-in-air-to-ground-modes).
