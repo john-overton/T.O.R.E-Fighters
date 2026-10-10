@@ -14,6 +14,7 @@ pub mod loading;
 pub mod loadout;
 pub mod missiles;
 pub mod smoke;
+pub mod surface_guns;
 pub mod systems;
 pub mod threats;
 use tore_formats::{
