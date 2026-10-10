@@ -4,7 +4,9 @@
 //! per scene; the sequenced flashers are rewritten each frame from the
 //! world's tick clock, so a replay flashes as the flight did. Presentation is
 //! `fitted`, agent choices of 2026-10-10: colours, how far each kind shows at
-//! night and how much of it shows by day (only PAPI, faintly).
+//! night and how much of it shows by day (only the PAPI, at full strength
+//! and a larger point, so it reads on a daylight final from 2 to 3 nm; John,
+//! 2026-10-10).
 //! `TORE_AIRFIELD_LIGHTS=0` turns them off, to measure their cost.
 use crate::terrain::{
     Terrain,
@@ -28,7 +30,7 @@ fn look(kind: LightKind) -> ([f32; 3], f32, f32) {
         LightKind::Approach => ([1.0, 0.95, 0.85], 10. * NM, 0.),
         LightKind::ApproachSide => ([1.0, 0.1, 0.06], 6. * NM, 0.),
         LightKind::Flasher => ([2.2, 2.3, 2.6], 12. * NM, 0.),
-        LightKind::Papi => ([1.0, 1.0, 1.0], 8. * NM, 0.25),
+        LightKind::Papi => ([1.0, 1.0, 1.0], 8. * NM, 1.),
         LightKind::Taxiway => ([0.15, 0.3, 1.0], 2. * NM, 0.),
     }
 }

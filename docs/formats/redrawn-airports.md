@@ -170,8 +170,10 @@ rows are one table (`terrain::redrawn::lights::approach_rows`).
 Lights are drawn as points, a little larger as they near, dimmed with
 distance, haze and cloud (dimmed as a surface at a third of their distance is,
 so they carry farther than terrain) and by daylight: full at night, fading
-through dusk with the flares' night rule, gone by day except the PAPI at a
-quarter. They are tested against the world depth without writing it, like the
+through dusk with the flares' night rule, gone by day except the PAPI,
+which shows by day at full strength, 1.8 times as bright and 1.4 times as
+large, so it reads on a daylight final from 2 to 3 nm (John, 2026-10-10);
+at night it keeps the plain point. They are tested against the world depth without writing it, like the
 flares, and drawn in two instanced batches (steady lights uploaded once per
 scene, flashers rewritten each frame from the world's tick clock, so a replay
 flashes as its flight did). `TORE_AIRFIELD_LIGHTS=0` hides them. Kiev's field
@@ -185,7 +187,8 @@ The redraw keeps every retail runway length, so the 22 dirt strips (DTSTRP,
 by type (`Scene::vertical_pad`), which keeps conventional aircraft off them
 whatever their length.
 
-Lengthening them (not built; John to decide): all 22 lie on flat cells at
+Lengthening them is a future option: John chose on 2026-10-10 to leave them
+as they are. The findings: all 22 lie on flat cells at
 0 ft with nothing higher within 2 nm, so a 3,500 or 4,000 ft strip needs no
 cut or fill. Laid forward from the retail threshold, three would cross a
 water cell (Toncri, Al Turas, Deleite; Deleite whichever way it is laid, the

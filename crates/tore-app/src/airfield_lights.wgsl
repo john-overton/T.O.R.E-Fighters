@@ -30,10 +30,14 @@ struct AirfieldLightOut {
   rgb=mix(vec3<f32>(1.0,0.08,0.05),vec3<f32>(1.0,0.97,0.92),smoothstep(param-0.03,param+0.03,elevation));
  }
  if kind==5u {level*=param;}
+ // By day the PAPI shows brighter and larger, as a real one reads on a
+ // daylight final; at night it keeps the plain point, so it does not bloom.
+ let papi_day=select(0.0,1.0-device_night(),kind==6u);
+ level*=1.0+0.8*papi_day;
  level*=clamp(8000.0/max(distance,1.0),0.6,1.0)*(1.0-smoothstep(0.75*range,range,distance));
  if level<=0.002 {return out;}
  let pixel=device_pixel(z);
- let radius=pixel*(2.0+2.5*clamp(800.0/max(distance,1.0),0.0,1.0))*select(1.0,1.5,kind==5u);
+ let radius=pixel*(2.0+2.5*clamp(800.0/max(distance,1.0),0.0,1.0))*select(1.0,1.5,kind==5u)*(1.0+0.4*papi_day);
  let corners=array<vec2<f32>,6>(vec2(-1.0,-1.0),vec2(1.0,-1.0),vec2(1.0,1.0),vec2(-1.0,-1.0),vec2(1.0,1.0),vec2(-1.0,1.0));
  let local=corners[vertex]*radius*2.0;
  let q=p+scene.right.xyz*local.x+scene.up.xyz*local.y;
