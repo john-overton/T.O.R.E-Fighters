@@ -1722,6 +1722,7 @@ impl QReadout {
                 missiles,
                 inbound,
                 locks,
+                painting: Vec::new(),
             },
             damage,
             countermeasures,

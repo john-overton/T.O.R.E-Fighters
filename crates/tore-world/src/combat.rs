@@ -348,6 +348,8 @@ impl Combat {
         let locks = &mut readout.rwr.locks;
         locks.extend(self.surface.locks_on(plane));
         locks.truncate(crate::readout::MAX_AI_THREATS);
+        // The radars painting the plane show bright on its RWR.
+        readout.rwr.painting = self.surface.painting(plane);
         Some(readout)
     }
     /// Player airborne startup convention: canonical gun selected and armed.
