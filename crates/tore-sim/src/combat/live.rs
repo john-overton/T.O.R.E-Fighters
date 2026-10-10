@@ -3423,8 +3423,7 @@ impl State {
     pub fn remove_ground_targets(&mut self) {
         let (bounds, parked) = (&self.ground_bounds, &self.parked);
         let scene = |id: u32| bounds.contains_key(&id) || parked.contains_key(&id);
-        self.projectiles
-            .retain(|p| !p.target.is_some_and(|id| scene(id)));
+        self.projectiles.retain(|p| !p.target.is_some_and(&scene));
         self.targets.retain(|t| !scene(t.id));
         self.ground_bounds.clear();
         self.ground_looks.clear();
@@ -4815,11 +4814,9 @@ impl State {
                     if t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id) {
                         t.localized_damage.record(section, scaled, t.initial_hp);
                     }
-                    if t.role == TargetRole::Aircraft {
-                        if t.hp > 0 {
-                            t.faults
-                                .hit(scaled, t.initial_hp, |n| draw(&mut self.rng, n));
-                        }
+                    if t.role == TargetRole::Aircraft && t.hp > 0 {
+                        t.faults
+                            .hit(scaled, t.initial_hp, |n| draw(&mut self.rng, n));
                     }
                     if self.history.len() == MAX_HIT_RECORDS {
                         self.history.remove(0);

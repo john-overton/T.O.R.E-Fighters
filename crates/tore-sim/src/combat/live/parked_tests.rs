@@ -278,8 +278,8 @@ fn a_broken_section_throws_the_types_fragment_from_its_attachment_point() {
     assert_eq!(piece.variant, 0);
     // Released at the attachment point: offset 0 from the origin.
     let start: Vector = [0., 8. + 0., 3000. + 20.];
-    for axis in 0..3 {
-        assert!((piece.position[axis] - start[axis]).abs() < 6., "{piece:?}");
+    for (at, want) in piece.position.iter().zip(start) {
+        assert!((at - want).abs() < 6., "{piece:?}");
     }
 }
 
