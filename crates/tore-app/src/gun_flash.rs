@@ -68,6 +68,66 @@ pub const LOOKS: [Look; 3] = [
     },
 ];
 
+/// The target camera's bloom when the player's 105 fires: a whiteout that
+/// lifts the sensor picture toward white and fades over a fraction of a second
+/// (opinionated, agent, 2026-10-10, from John's request: it should read
+/// clearly and not blind the sight for long). The overlay (pipper, text,
+/// boxes) is drawn over it and stays readable. Every number lives here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bloom {
+    /// How far toward white the picture's centre goes at the peak, 0 to 1.
+    pub peak: f64,
+    /// Ticks the peak holds before it fades.
+    pub hold: f64,
+    /// Ticks from the shot until the bloom is gone.
+    pub life: f64,
+    /// The share of the peak left at the picture's corners: the glow is
+    /// brightest in the middle.
+    pub edge: f64,
+}
+
+pub const BLOOM: Bloom = Bloom {
+    peak: 0.9,
+    hold: 4.,
+    life: 40.,
+    edge: 0.6,
+};
+
+impl Bloom {
+    /// The whiteout strength `age` ticks after a 105 shot: the peak held for
+    /// `hold` ticks, then falling away quickly (a squared ease) to nothing at
+    /// `life`.
+    pub fn level(&self, age: f64) -> f64 {
+        if !(0. ..self.life).contains(&age) {
+            return 0.;
+        }
+        if age < self.hold {
+            return self.peak;
+        }
+        let left = 1. - (age - self.hold) / (self.life - self.hold);
+        self.peak * left * left
+    }
+
+    /// Lifts an RGBA picture of `width` by `height` pixels toward white by
+    /// `level` (from [`Bloom::level`]), most in the middle. Alpha is left as
+    /// it is.
+    pub fn lift(&self, rgba: &mut [u8], width: usize, height: usize, level: f64) {
+        if level <= 0. || width == 0 || height == 0 {
+            return;
+        }
+        for (i, pixel) in rgba.chunks_exact_mut(4).enumerate() {
+            let x = ((i % width) as f64 + 0.5) / width as f64 * 2. - 1.;
+            let y = ((i / width) as f64 + 0.5) / height as f64 * 2. - 1.;
+            let d2 = (x * x + y * y) / 2.;
+            let lift = (level * (1. - (1. - self.edge) * d2)).clamp(0., 1.);
+            for channel in &mut pixel[..3] {
+                let value = f64::from(*channel);
+                *channel = (value + (255. - value) * lift).round() as u8;
+            }
+        }
+    }
+}
+
 /// Two 25 mm shots this close together (ticks) are one unbroken, flickering
 /// flash: the gatling reads as firing continuously at any rate it is given.
 pub const BRIDGE_TICKS: f64 = 30.;
@@ -299,6 +359,16 @@ impl Tracker {
     fn expire(&mut self, now: f64) {
         self.shots
             .retain(|s| now - s.at <= LOOKS[s.slot].life.max(LOOKS[s.slot].puff_life) + 1.);
+    }
+
+    /// The target camera's bloom now, 0 to 1: the newest 105 shot of
+    /// `aircraft` seen so far, at presentation tick `now`.
+    pub fn bloom(&self, aircraft: u32, now: f64) -> f64 {
+        self.shots
+            .iter()
+            .filter(|s| s.aircraft == aircraft && s.slot == 2)
+            .map(|s| BLOOM.level(now - s.at))
+            .fold(0., f64::max)
     }
 
     /// The shots still showing anything.
@@ -592,6 +662,75 @@ mod tests {
         tracker.fire(7, 1, 72., &mount);
         assert!(tracker.draw(40., lookup).flashes.is_empty());
         assert_eq!(tracker.draw(72., lookup).flashes.len(), 1);
+    }
+
+    #[test]
+    fn the_25_mm_flickers_and_is_never_a_steady_glow() {
+        // John's pick (2026-10-10): a held 25 mm flickers in size and
+        // brightness from tick to tick.
+        let mount = Mount::of_pose(&ac130(7)).unwrap();
+        let mut tracker = Tracker::default();
+        for n in 0..30 {
+            tracker.fire(7, 0, f64::from(n) * 4., &mount);
+        }
+        let mut seen: Vec<(u64, u64)> = Vec::new();
+        for tick in 60..100 {
+            let drawn = tracker.draw(f64::from(tick), |_| Some(mount));
+            assert_eq!(drawn.flashes.len(), 1, "tick {tick}");
+            let flash = drawn.flashes[0];
+            assert!(flash.intensity > 0.3, "never dark");
+            seen.push((flash.intensity.to_bits(), flash.length.to_bits()));
+        }
+        seen.sort_unstable();
+        seen.dedup();
+        assert!(seen.len() > 30, "{} distinct looks in 40 ticks", seen.len());
+    }
+
+    #[test]
+    fn a_105_shot_blooms_the_sight_briefly_and_only_for_its_own_aircraft() {
+        let mount = Mount::of_pose(&ac130(7)).unwrap();
+        let mut tracker = Tracker::default();
+        assert_eq!(tracker.bloom(7, 0.), 0.);
+        // The other calibres never bloom the sight.
+        tracker.fire(7, 0, 0., &mount);
+        tracker.fire(7, 1, 0., &mount);
+        assert_eq!(tracker.bloom(7, 1.), 0.);
+        tracker.fire(7, 2, 10., &mount);
+        // Full at the shot, gone by `life`, and strictly falling between.
+        assert_eq!(tracker.bloom(7, 10.), BLOOM.peak);
+        assert_eq!(tracker.bloom(7, 10. + BLOOM.hold - 0.1), BLOOM.peak);
+        let mut last = BLOOM.peak;
+        for step in 1..=(BLOOM.life - BLOOM.hold) as u32 {
+            let now = 10. + BLOOM.hold + f64::from(step);
+            let level = tracker.bloom(7, now);
+            assert!(level < last || level == 0., "falls at +{step}");
+            last = level;
+        }
+        assert_eq!(tracker.bloom(7, 10. + BLOOM.life), 0.);
+        // A fraction of a second: under half a second in all, and mostly
+        // gone after a quarter second (30 ticks).
+        assert!(BLOOM.life / 120. < 0.5);
+        assert!(BLOOM.level(30.) < 0.15 * BLOOM.peak);
+        // Not before the shot, and not for another aircraft.
+        assert_eq!(tracker.bloom(7, 9.), 0.);
+        assert_eq!(tracker.bloom(8, 10.), 0.);
+    }
+
+    #[test]
+    fn the_bloom_lifts_toward_white_most_in_the_middle_and_leaves_alpha() {
+        let mut picture = vec![60, 90, 120, 255].repeat(9 * 9);
+        BLOOM.lift(&mut picture, 9, 9, 0.);
+        assert_eq!(&picture[..4], &[60, 90, 120, 255], "no bloom, no change");
+        BLOOM.lift(&mut picture, 9, 9, BLOOM.peak);
+        let at = |x: usize, y: usize| picture[(y * 9 + x) * 4];
+        assert!(at(4, 4) > at(0, 0), "brightest in the middle");
+        assert!(at(0, 0) > 60, "every pixel is lifted");
+        assert!(at(4, 4) > 220, "the middle nearly whites out");
+        assert!(picture.chunks_exact(4).all(|p| p[3] == 255));
+        // A full whiteout would be white; the peak is not quite that.
+        let mut all = vec![0, 0, 0, 255].repeat(4);
+        BLOOM.lift(&mut all, 2, 2, 1.);
+        assert!(all.chunks_exact(4).all(|p| p[0] > 140));
     }
 
     #[test]
