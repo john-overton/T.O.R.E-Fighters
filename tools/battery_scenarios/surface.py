@@ -1,4 +1,4 @@
-"""Lane: ai. Surface units: ground target resolution and base-layout air defenses.
+"""Lane: ai. Surface units: ground target resolution, layout and base-layout air defenses.
 
 `surface-resolve-all` runs `--surface-dump --all`: every offered Quick Mission
 ground target template of every theater resolved at every defense level with
@@ -6,7 +6,19 @@ three seeds, each theater's base layout, and each template placed in its
 theater's scene at heavy defenses. It checks the counts against the retail
 survey (template objects, `<sam>` and `<aaa>` slots, targets per template,
 base-layout SAM and AAA by side), the 0, 25, 60 and 100 percent rolls, and that
-a second run repeats every digest. See docs/spec/surface-defenses.md.
+a second run repeats every digest.
+
+`surface-relocate-sweep` runs `--surface-dump --sweep`: every offered template
+placed at heavy defenses with seeds 1 to 20. Every placement passes the site
+rules, the anchored templates are exactly the expected ones and never move, at
+least 60 percent of the other placements relocate, the batteries and trucks
+keep their rules, each base layout forms its batteries, and a second run
+repeats the digests.
+
+`surface-start-placement` runs `--surface-dump --starts`: one mission per
+theater with a ground target. Blue starts 20 to 30 nm from the target toward
+its own side and heading at it, Red 20 nm ahead, both on the map. See
+docs/spec/surface-defenses.md.
 """
 import re
 
@@ -120,6 +132,125 @@ def resolve_all_problems(output: str) -> list[str]:
     return problems
 
 
+# Templates that stay at their retail spot, by the anchoring rule over their
+# contents (docs/spec/surface-defenses.md, "Relocation"), measured on the
+# retail data (surface-AI round, slice L1, 2026-10-10): the plan's 31 with
+# ~QPGSRUN by its target beside a dirt strip, plus ~QTCARGO and ~QUFACT
+# (routes, lead ruling) and ~QCCMHQ (its centroid 0.6 nm from a dirt strip).
+ANCHORED = {
+    "QAPFAIR": "runway", "QAPHELO": "runway", "QBAIR": "runway", "QBBRD": "bridge-or-road",
+    "QBFAIR": "strip", "QCCMHQ": "runway", "QCFAIR": "runway", "QELAIR": "runway",
+    "QESAIR": "runway", "QFFACT": "strip", "QFLAIR": "runway", "QFSAIR": "runway",
+    "QGRSAIR": "strip", "QIRFAIR": "runway", "QKPLNGR": "runway", "QLFFAIR": "runway",
+    "QNSFAIR": "runway", "QPGFAIR": "runway", "QPGSRUN": "town", "QSPFAIR": "runway",
+    "QTBARG": "town", "QTBRDG": "bridge-or-road", "QTBUNK": "strip", "QTCARGO": "route",
+    "QTSTRG": "town", "QTTRUCK": "bridge-or-road", "QUBRI": "bridge-or-road", "QUCITY": "town",
+    "QUCOL": "route", "QUFACT": "route", "QUSTRIP": "strip", "QVLAIR": "runway",
+    "QVSAIR": "runway", "QWTFAIR": "runway",
+}
+
+# Base-layout batteries per theater (SA-2, SA-3, SA-6, HAWK), from the plan's
+# list (section 3.11): Cuba 5 SA-2 and 2 SA-6, North Vietnam 13 SA-2, the
+# Baltics' 4 HAWK in two sites, Panama 3 SA-6 and a HAWK pair, the SA-6 sites
+# of Iraq, Pakistan, the Persian Gulf, South Korea and Taiwan.
+BASE_BATTERIES = {
+    "BAL": (0, 0, 0, 2), "CUB": (5, 0, 2, 0), "IRA": (0, 0, 4, 0), "TVIET": (13, 0, 0, 0),
+    "SPA": (0, 0, 2, 0), "APA": (0, 0, 3, 1), "PGU": (0, 0, 3, 0), "NSK": (0, 0, 4, 0),
+    "WTA": (0, 0, 2, 0),
+}
+
+SWEEP_LINE = re.compile(
+    r"^surface-sweep: (\S+) (\S+) seed (\d+) anchor (\S+) moved-ft (\d+) rotation (\d+) units (\d+) "
+    r"trucks (\d+) batteries (\d+) problems (\d+) digest (0x[0-9a-f]+)$",
+    re.M,
+)
+BASE_BATTERY_LINE = re.compile(
+    r"^surface-base-batteries: (\S+) batteries (\d+) sa2 (\d+) sa3 (\d+) sa6 (\d+) hawk (\d+) adopted (\d+) "
+    r"added (\d+) launchers (\d+) in-batteries (\d+) ",
+    re.M,
+)
+
+
+def relocate_sweep_problems(output: str) -> list[str]:
+    """Site rules, anchors, relocation share, base batteries, repeated digests."""
+    problems: list[str] = []
+    first, _, again = output.partition("$ then 1:")
+    digests: dict[tuple, str] = {}
+    anchors: dict[str, str] = {}
+    free = moved = 0
+    for m in SWEEP_LINE.finditer(first):
+        stem, seed, anchor, distance = m.group(2), int(m.group(3)), m.group(4), int(m.group(5))
+        digests[(stem, seed)] = m.group(11)
+        anchors.setdefault(stem, anchor)
+        if anchors[stem] != anchor:
+            problems.append(f"{stem}: anchor {anchor} with seed {seed}, {anchors[stem]} before")
+        if anchor == "none":
+            free += 1
+            moved += distance > 0
+        elif distance:
+            problems.append(f"{stem}: anchored ({anchor}) but moved {distance} ft with seed {seed}")
+    if len(anchors) != len(SURVEY) - 16:
+        problems.append(f"{len(anchors)} templates swept, expected {len(SURVEY) - 16}")
+    want = {stem: anchor for stem, anchor in ANCHORED.items()}
+    got = {stem: anchor for stem, anchor in anchors.items() if anchor != "none"}
+    if got != want:
+        extra = sorted(set(got.items()) - set(want.items()))
+        missing = sorted(set(want.items()) - set(got.items()))
+        problems.append(f"anchored templates differ: extra {extra}, missing {missing}")
+    if free and moved < 0.6 * free:
+        problems.append(f"only {moved} of {free} free placements relocated")
+    for line in re.findall(r"^surface-sweep-problem: .*$", first, re.M)[:20]:
+        problems.append(line)
+    bases = {m.group(1): m for m in BASE_BATTERY_LINE.finditer(first)}
+    for theater, m in bases.items():
+        counts = tuple(int(m.group(i)) for i in range(3, 7))
+        if counts != BASE_BATTERIES.get(theater, (0, 0, 0, 0)):
+            problems.append(f"{theater} base batteries (SA-2, SA-3, SA-6, HAWK) {counts}, expected {BASE_BATTERIES.get(theater, (0, 0, 0, 0))}")
+        if m.group(9) != m.group(10):
+            problems.append(f"{theater}: {m.group(10)} of {m.group(9)} battery launchers in batteries")
+    if len(bases) != 16:
+        problems.append(f"{len(bases)} base layouts, expected 16")
+    repeats = 0
+    for m in SWEEP_LINE.finditer(again):
+        key = (m.group(2), int(m.group(3)))
+        repeats += 1
+        if digests.get(key) != m.group(11):
+            problems.append(f"{key}: digest {digests.get(key)} then {m.group(11)}")
+    if repeats != 2 * (len(SURVEY) - 16):
+        problems.append(f"second run placed {repeats} times, expected {2 * (len(SURVEY) - 16)}")
+    return problems
+
+
+START_LINE = re.compile(
+    r"^surface-start: (\S+) (\S+) blue-nm ([\d.]+) side-off-deg ([\d.]+) heading-off-deg ([\d.]+) "
+    r"red-nm (-?[\d.]+) blue-on-map (\d) red-on-map (\d) front (\d)$",
+    re.M,
+)
+
+
+def start_placement_problems(output: str) -> list[str]:
+    """Blue 20 to 30 nm out toward its side, at the target; Red 20 nm ahead; on the map."""
+    problems: list[str] = []
+    lines = list(START_LINE.finditer(output))
+    if len(lines) != 16:
+        problems.append(f"{len(lines)} theaters checked, expected 16")
+    for m in lines:
+        theater = m.group(1)
+        blue, side_off, heading_off, red = (float(m.group(i)) for i in (3, 4, 5, 6))
+        if not 19.99 <= blue <= 30.01:
+            problems.append(f"{theater}: Blue starts {blue} nm from the target")
+        # The spread is 30 degrees about a whole-degree bearing.
+        if m.group(9) == "1" and side_off > 31.0:
+            problems.append(f"{theater}: Blue starts {side_off} degrees off its side of the front")
+        if heading_off > 0.5:
+            problems.append(f"{theater}: Blue heads {heading_off} degrees off the target")
+        if abs(red - 20.0) > 0.1:
+            problems.append(f"{theater}: Red starts {red} nm from Blue, separation 20")
+        if (m.group(7), m.group(8)) != ("1", "1"):
+            problems.append(f"{theater}: a start is off the map")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -131,5 +262,21 @@ def scenarios() -> list[Scenario]:
             check=resolve_all_problems,
             notes="Reads the templates from the retail media (TORE_GAME_DIR, the remembered source or the "
                   "gameassets link) until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-relocate-sweep", lane="ai",
+            args=["--surface-dump", "--sweep"], timeout=600,
+            expect=[r"^surface-sweep: 2160 placements, \d+ relocated, 0 problems, 0 errors$"],
+            forbid=[r"^surface-sweep: error"],
+            then=[Step(["--surface-dump", "--sweep", "--seeds", "2"], timeout=300)],
+            check=relocate_sweep_problems,
+            notes="Reads the templates from the retail media until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-start-placement", lane="ai",
+            args=["--surface-dump", "--starts"], timeout=300,
+            expect=[r"^surface-start: 16 theaters$"],
+            check=start_placement_problems,
+            notes="Reads the templates from the retail media until the import keeps them.",
         ),
     ]

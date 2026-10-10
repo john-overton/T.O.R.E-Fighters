@@ -1520,22 +1520,37 @@ first start, as any stale cache does. See [the evidence](baselines/explosions.md
 
 ## Surface unit inspection
 
-`--surface-dump` prints a theater's surface units as a mission resolves them
-([surface defenses](spec/surface-defenses.md)): each unit's id, type, side,
-position, destroyed look and whether the scene can draw it, the removed
-defense slots and the surface digest. Name a ground target template to add
-its units; defenses default to heavy and the enemy to the theater's own.
+`--surface-dump` prints a theater's surface units as a mission resolves and
+places them ([surface defenses](spec/surface-defenses.md)): each unit's id,
+type, side, position, destroyed look and whether the scene can draw it (added
+trucks and radars marked `added`), the removed defense slots, the template's
+anchor and group move, every SAM battery (its radar, adopted or added, its
+launchers and truck), every supply truck with the unit it serves and its gap,
+the starts (target point, Blue's start and heading, the ranked airfields), what
+the layout could not add, and the surface digest. Name a ground target
+template to add its units; defenses default to heavy and the enemy to the
+theater's own. `--no-jitter` and `--no-relocate` show the retail spot.
 `--all` resolves every offered template at every defense level, which the
 `surface-resolve-all` battery scenario checks against the retail survey.
-`--surface-sheets` renders each template at its retail spot from above and
-closer, heavy defenses, seed 1, with a marker per unit (red Redfor, blue Blue,
-a white ring for a target, yellow parked aircraft, green supply trucks,
-magenta a unit whose shape does not read yet). No window opens.
+`--sweep [--seeds N] [THEATER ...]` places every offered template with seeds
+1 to N (20) and reports each base layout's batteries and every placement's
+anchor, move, broken site rules and digest (`surface-relocate-sweep`).
+`--starts [THEATER ...]` builds one mission per theater with a ground target
+and reports where Blue and Red start (`surface-start-placement`).
+`--surface-sheets` renders each template from above and closer, heavy
+defenses, at its retail spot (seed 1, no jitter or relocation); `--variants`
+adds the placed layout with seeds 1 and 2. A marker per unit: red Redfor, blue
+Blue, a white ring for a target, yellow parked aircraft, green supply trucks,
+cyan battery radars, orange battery launchers, magenta a unit whose shape does
+not read yet. No window opens.
 
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump TVIET QTSAM --defenses 2 3 --surface-seed 7
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump UKR QUNUKE --no-relocate
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump --all
-TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-sheets .local/surface-sheets UKR:QUCITY TVIET
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump --sweep --seeds 5 CUB TVIET
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump --starts
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-sheets .local/surface-sheets --variants UKR:QUCITY TVIET
 ```
 
 The import does not keep the templates or the unit types only they name yet,
