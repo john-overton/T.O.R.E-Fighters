@@ -17,12 +17,14 @@
 //! This module resolves and identifies; it never moves or fires anything.
 pub mod catalog;
 mod checkpoint;
+pub mod emitters;
+pub mod fire;
 pub mod resolve;
 pub mod units;
 
 pub use units::{
-    Battery, BatterySystem, GroupTransform, ParkedAircraft, SupplyTruck, SurfaceState,
-    SurfaceUnitState,
+    Battery, BatteryState, BatterySystem, Engager, GroupTransform, MountStock, ParkedAircraft,
+    RadarState, SupplyTruck, SurfaceState, SurfaceUnitState,
 };
 
 use crate::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
@@ -279,6 +281,10 @@ pub struct Surface {
     /// Why the mission's ground target stands nowhere: its template is not in
     /// the import. The mission flies without it.
     pub unresolved: Option<String>,
+    /// What the armed units, radars and batteries fight with, read from their
+    /// records when the terrain builds (not part of the digest: it follows
+    /// from the units and the import).
+    pub arsenal: fire::Arsenal,
 }
 
 impl Surface {
@@ -315,14 +321,13 @@ impl Surface {
     }
     /// A fresh changing state for every unit, as a mission starts.
     pub fn fresh_state(&self) -> SurfaceState {
-        SurfaceState {
-            digest: self.digest(),
-            units: self
-                .units
+        SurfaceState::new(
+            self.digest(),
+            self.units
                 .iter()
                 .map(|unit| SurfaceUnitState::new(unit.id))
                 .collect(),
-        }
+        )
     }
 
     /// FNV-1a 64 over everything resolved: the template and its settings,

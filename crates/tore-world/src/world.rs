@@ -1079,6 +1079,10 @@ impl World {
                 }
             }
         }
+        // The surface units' tick, after the AI's and before the next combat
+        // step: their shots join the projectiles and their fire-control
+        // answers join the AI's (docs/spec/surface-defenses.md, "Surface AI").
+        self.step_surface();
         // Two flightmates have both locked one aircraft: the humans among
         // them hear a beep and read a line (the data link's sort warning).
         let edge = self.datalink.sort_edge(&self.roster);
@@ -1111,6 +1115,75 @@ impl World {
         out.emissions = self.combat.state.take_sound_events();
         out.events = events;
         Ok(())
+    }
+
+    /// The surface's tick ([`crate::surface::fire::step`]) against every
+    /// aircraft in the air: the AI's and the humans'. Nothing happens in a
+    /// mission without armed surface units.
+    fn step_surface(&mut self) {
+        use crate::surface::fire::{self, Aircraft};
+        if self.terrain.surface.arsenal.is_empty() {
+            return;
+        }
+        let state = &self.combat.state;
+        let mut aircraft: Vec<Aircraft> = state
+            .targets
+            .iter()
+            .filter(|t| t.role == tore_sim::combat::missiles::TargetRole::Aircraft && t.hp > 0)
+            .map(|t| Aircraft {
+                id: t.id,
+                side: t.side,
+                position: t.position,
+                velocity: t.velocity,
+                category: t.category,
+                airborne: t.airborne && !t.on_ground && t.wreck.is_none(),
+                jammer: t.jammer_active && t.jammer.as_ref().is_some_and(|j| j.radio_frequency),
+            })
+            .collect();
+        for cockpit in &self.cockpits {
+            let Some(own) = state.ownship(cockpit.plane.0) else {
+                continue;
+            };
+            let flight = &cockpit.flight;
+            let [x, _, z] = flight.position;
+            if own.hp <= 0 || flight.crashed || aircraft.iter().any(|a| a.id == own.aircraft) {
+                continue;
+            }
+            aircraft.push(Aircraft {
+                id: own.aircraft,
+                side: own.side,
+                position: flight.position,
+                velocity: flight.velocity,
+                category: own.configuration().target_category,
+                airborne: !flight.supported_at(self.terrain.surface(x, z).height),
+                jammer: combat::launcher(flight).jammer,
+            });
+        }
+        aircraft.sort_by_key(|a| a.id);
+        let terrain = &self.terrain;
+        let ground = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
+        // Night and fog hide a target from a blind battery's optical sight.
+        let daylight = !matches!(terrain.condition, Some(2 | 5));
+        let scene = fire::Scene {
+            tick: self.combat.state.tick(),
+            aircraft: &aircraft,
+            ground: &ground,
+            daylight,
+        };
+        let stepped = fire::step(
+            &terrain.surface,
+            &mut self.combat.surface,
+            &mut self.combat.state,
+            &scene,
+        );
+        let ai: Vec<_> = self
+            .ai_wings
+            .as_ref()
+            .map(|wings| wings.actor_supports().collect())
+            .unwrap_or_default();
+        self.combat
+            .state
+            .set_actor_supports(ai.into_iter().chain(stepped.supports));
     }
 
     /// The seat that flies the plane of `cockpit`: a cockpit exists while a

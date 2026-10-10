@@ -122,36 +122,154 @@ impl GroupTransform {
     }
 }
 
+/// One mount's stock: the rounds loaded (a gun's magazine, a launcher's
+/// rails), the spare magazines behind them (`None`: unlimited, a ship's gun;
+/// `Some(0)` for rails, which only a truck refills) and the running round
+/// number of a gun (its damage share and tracer). The resupply slice refills
+/// `loaded` and `reserve`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MountStock {
+    pub loaded: u32,
+    pub reserve: Option<u32>,
+    pub ordinal: u64,
+}
+
+/// A visual gun's last look at its target, refreshed every 0.5 s.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seen {
+    pub target: u32,
+    pub tick: u64,
+    pub position: [f64; 3],
+    pub velocity: [f64; 3],
+}
+
+/// One controller of a unit, with what a gun keeps between rounds.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Engager {
+    pub controller: tore_sim::ai::surface::Controller,
+    /// The burst's aim error, radians right and up.
+    pub aim_error: [f64; 2],
+    /// A barrage burst that lost its random-fire roll: it spends its time
+    /// without firing.
+    pub holding: bool,
+    pub seen: Option<Seen>,
+}
+
+/// A unit's radar: on while a hostile is in range and 30 s after
+/// (docs/spec/surface-defenses.md, "RWR emitters and radar state").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RadarState {
+    pub on: bool,
+    pub last_hostile: Option<u64>,
+    /// Off until this tick after a HARM shutdown.
+    pub shutdown_until: Option<u64>,
+}
+
+/// A SAM battery's controller and whether it fights on its optical backup.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BatteryState {
+    pub controller: tore_sim::ai::surface::Controller,
+    pub optical: bool,
+}
+
 /// One unit's changing state. Its hit points stay in combat's target row
-/// (`live::State`), which the checkpoint already codes; the controller,
-/// movement and resupply slices add their fields here.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// (`live::State`), which the checkpoint already codes. A unit is armed from
+/// its [`super::fire::Arms`] on the first surface tick (and again after a
+/// restart clears it).
+#[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceUnitState {
     pub id: UnitId,
+    pub armed: bool,
+    /// One per weapon of its arms, in order.
+    pub engagers: Vec<Engager>,
+    /// One per hardpoint.
+    pub mounts: Vec<MountStock>,
+    pub radar: RadarState,
+    /// A live friendly supply truck is within reach this tick. The resupply
+    /// slice sets it before the surface tick; it lets an empty gun swap a
+    /// magazine from the truck.
+    pub supply: bool,
 }
 
 impl SurfaceUnitState {
     pub fn new(id: UnitId) -> Self {
-        Self { id }
+        Self {
+            id,
+            armed: false,
+            engagers: Vec::new(),
+            mounts: Vec::new(),
+            radar: RadarState::default(),
+            supply: false,
+        }
+    }
+    /// Its launchers' empty rails: hardpoints of a missile weapon below
+    /// their full load (from [`super::fire::Arms::loads`]).
+    pub fn empty_rails(&self, arms: &super::fire::Arms) -> Vec<usize> {
+        arms.weapons
+            .iter()
+            .filter(|w| w.kind == super::fire::Kind::Missile)
+            .flat_map(|w| w.mounts.iter().map(|m| m.index))
+            .filter(|&i| {
+                self.mounts
+                    .get(i)
+                    .zip(arms.loads.get(i))
+                    .is_some_and(|(now, full)| now.loaded < full.loaded)
+            })
+            .collect()
+    }
+    /// Refills every missile rail to its full load (the resupply slice's
+    /// rearm).
+    pub fn refill_rails(&mut self, arms: &super::fire::Arms) {
+        for index in self.empty_rails(arms) {
+            self.mounts[index].loaded = arms.loads[index].loaded;
+        }
     }
 }
 
 /// Every unit's changing state, in the surface's unit order, with the digest
 /// of the surface it belongs to, so a checkpoint never restores over a
-/// different one.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// different one; the batteries' controllers; and the surface's random draws.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SurfaceState {
     pub digest: u64,
     pub units: Vec<SurfaceUnitState>,
+    /// By index in `Surface::batteries`.
+    pub batteries: Vec<BatteryState>,
+    /// SplitMix64 state of aim errors, barrage rolls and HARM shutdowns.
+    pub rng: u64,
+    /// Anti-radiation missiles an emitter has already rolled against.
+    pub harm_rolled: std::collections::BTreeSet<u32>,
+    /// This tick's controller trace (`--surface-trace`). Not checkpointed.
+    pub trace: Vec<super::fire::Trace>,
+    /// This tick's missile locks, (aircraft, seeker class), for the RWR
+    /// tone. Not checkpointed: rebuilt every tick.
+    pub locks: Vec<(u32, u8)>,
+    /// This tick's painting emitters, (aircraft, emitter id).
+    pub painting: Vec<(u32, u32)>,
 }
 
 impl SurfaceState {
+    /// A fresh state for the surface with `digest` and `units`.
+    pub fn new(digest: u64, units: Vec<SurfaceUnitState>) -> Self {
+        Self {
+            digest,
+            units,
+            rng: digest,
+            ..Self::default()
+        }
+    }
     /// Every unit back to its state at the mission's start, as a restart
     /// does.
     pub fn reset(&mut self) {
         for unit in &mut self.units {
             *unit = SurfaceUnitState::new(unit.id);
         }
+        self.batteries.clear();
+        self.rng = self.digest;
+        self.harm_rolled.clear();
+        self.trace.clear();
+        self.locks.clear();
+        self.painting.clear();
     }
     pub fn unit(&self, id: UnitId) -> Option<&SurfaceUnitState> {
         self.units
@@ -164,5 +282,75 @@ impl SurfaceState {
             .binary_search_by_key(&id, |unit| unit.id)
             .ok()
             .map(|at| &mut self.units[at])
+    }
+    /// Arms every unit not armed yet from `arsenal` and sizes the batteries.
+    pub fn arm(&mut self, arsenal: &super::fire::Arsenal) {
+        for arms in &arsenal.units {
+            if let Some(unit) = self.unit_mut(arms.unit)
+                && !unit.armed
+            {
+                unit.armed = true;
+                unit.engagers = vec![Engager::default(); arms.weapons.len()];
+                unit.mounts = arms.loads.clone();
+            }
+        }
+        let batteries = arsenal
+            .batteries
+            .iter()
+            .map(|b| b.index + 1)
+            .max()
+            .unwrap_or(0);
+        if self.batteries.len() < batteries {
+            self.batteries.resize(batteries, BatteryState::default());
+        }
+    }
+    /// Missiles loaded on `weapon`'s rails of `arms`.
+    pub fn rails(&self, arms: &super::fire::Arms, weapon: &super::fire::WeaponArms) -> u32 {
+        let Some(unit) = self.unit(arms.unit) else {
+            return 0;
+        };
+        weapon
+            .mounts
+            .iter()
+            .filter_map(|m| unit.mounts.get(m.index))
+            .map(|stock| stock.loaded)
+            .sum()
+    }
+    /// The first loaded rail of `weapon` on `arms` whose heading arc covers
+    /// `target`.
+    pub fn rail_for(
+        &self,
+        arms: &super::fire::Arms,
+        weapon: &super::fire::WeaponArms,
+        target: [f64; 3],
+    ) -> Option<usize> {
+        let unit = self.unit(arms.unit)?;
+        let muzzle = arms.muzzle();
+        let bearing = (target[0] - muzzle[0]).atan2(target[2] - muzzle[2]);
+        weapon
+            .mounts
+            .iter()
+            .filter(|m| unit.mounts.get(m.index).is_some_and(|s| s.loaded > 0))
+            .find(|m| super::fire::covers(m, (bearing - arms.heading).to_degrees()))
+            .map(|m| m.index)
+    }
+    /// The seeker classes (2 infrared, 3 radar) of the surface missile locks
+    /// held on aircraft `plane` this tick, for the RWR tone
+    /// (docs/spec/rwr.md#warning-tones).
+    pub fn locks_on(&self, plane: u32) -> Vec<u8> {
+        self.locks
+            .iter()
+            .filter(|(target, class)| *target == plane && matches!(class, 2 | 3))
+            .map(|(_, class)| *class)
+            .collect()
+    }
+    /// The surface emitters painting aircraft `plane` this tick: radars whose
+    /// controller tracks or fires at it.
+    pub fn painting(&self, plane: u32) -> Vec<u32> {
+        self.painting
+            .iter()
+            .filter(|(target, _)| *target == plane)
+            .map(|(_, emitter)| *emitter)
+            .collect()
     }
 }
