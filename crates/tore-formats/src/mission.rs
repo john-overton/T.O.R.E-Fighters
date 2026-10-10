@@ -22,6 +22,9 @@ pub struct Placement {
     pub source_nationality: Option<i32>,
     /// True for the newer already-numbered nationality2 field.
     pub nationality2: bool,
+    /// True for the already-numbered nationality3 field the Quick Mission
+    /// writer passes through (docs/formats/quick-templates.md).
+    pub nationality3: bool,
     pub nationality: Option<i32>,
     pub flags: Option<i32>,
     pub speed: Option<i32>,
@@ -45,6 +48,34 @@ pub struct Layout {
     pub placements: Vec<Placement>,
 }
 
+/// Which owner field a placement used. `Two` and `Three` hold an index into
+/// the creator nationality list with the side in bit 0x80; only `Legacy` goes
+/// through the map-dependent [`mission_nationality`] conversion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NationalityField {
+    Legacy,
+    Two,
+    Three,
+}
+
+impl Placement {
+    /// The owner field this placement was written with, when it has one.
+    pub fn nationality_field(&self) -> Option<NationalityField> {
+        if self.nationality3 {
+            Some(NationalityField::Three)
+        } else if self.nationality2 {
+            Some(NationalityField::Two)
+        } else {
+            self.source_nationality.map(|_| NationalityField::Legacy)
+        }
+    }
+    /// True when the owner is Redfor: the nationality byte's side bit 0x80
+    /// (docs/formats/quick-templates.md#ownership). `None` without an owner.
+    pub fn redfor(&self) -> Option<bool> {
+        self.nationality.map(|value| value & 0x80 != 0)
+    }
+}
+
 pub fn airport_section(section: Option<&str>) -> bool {
     section.is_some_and(|name| {
         let name = name.to_ascii_lowercase();
@@ -52,7 +83,7 @@ pub fn airport_section(section: Option<&str>) -> bool {
     })
 }
 
-fn integer(value: &str, context: &str) -> Result<i32> {
+pub(crate) fn integer(value: &str, context: &str) -> Result<i32> {
     let value = value.trim();
     if let Some(hex) = value.strip_prefix('$') {
         return u32::from_str_radix(hex, 16)
@@ -64,7 +95,7 @@ fn integer(value: &str, context: &str) -> Result<i32> {
         .map_err(|_| invalid(&format!("{context}: integer outside i32")))
 }
 
-fn vector(value: &str, context: &str) -> Result<[i32; 3]> {
+pub(crate) fn vector(value: &str, context: &str) -> Result<[i32; 3]> {
     let values = value
         .split_whitespace()
         .map(|v| integer(v, context))
@@ -74,7 +105,7 @@ fn vector(value: &str, context: &str) -> Result<[i32; 3]> {
         .map_err(|_| invalid(&format!("{context}: expected three integers")))
 }
 
-fn resource(value: &str, context: &str) -> Result<String> {
+pub(crate) fn resource(value: &str, context: &str) -> Result<String> {
     let value = value.to_ascii_uppercase();
     if value.is_empty()
         || value.len() > 64
@@ -87,7 +118,7 @@ fn resource(value: &str, context: &str) -> Result<String> {
     Ok(value)
 }
 
-fn display_name(value: &str, context: &str) -> Result<String> {
+pub(crate) fn display_name(value: &str, context: &str) -> Result<String> {
     let value = value.trim().trim_matches('\u{1}');
     if value.is_empty() || value.len() > 255 || value.chars().any(char::is_control) {
         return Err(invalid(&format!("{context}: invalid object name")));
@@ -207,7 +238,7 @@ impl Layout {
         }
         for placement in &mut placements {
             placement.nationality = placement.source_nationality.map(|value| {
-                if placement.nationality2 {
+                if placement.nationality2 || placement.nationality3 {
                     i32::from(value as u8)
                 } else {
                     mission_nationality(map.as_deref(), value)
@@ -253,12 +284,17 @@ fn parse_record(
         "angle",
         "nationality",
         "nationality2",
+        "nationality3",
         "flags",
         "speed",
         "name",
         "alias",
     ];
-    if find("nationality").is_some() && find("nationality2").is_some() {
+    let owner_fields = ["nationality", "nationality2", "nationality3"]
+        .iter()
+        .filter(|name| find(name).is_some())
+        .count();
+    if owner_fields > 1 {
         return Err(invalid(&format!(
             "{context}: conflicting nationality fields"
         )));
@@ -272,8 +308,11 @@ fn parse_record(
         object_type,
         position,
         angles,
-        source_nationality: optional_integer("nationality2")?.or(optional_integer("nationality")?),
+        source_nationality: optional_integer("nationality3")?
+            .or(optional_integer("nationality2")?)
+            .or(optional_integer("nationality")?),
         nationality2: find("nationality2").is_some(),
+        nationality3: find("nationality3").is_some(),
         nationality: None,
         flags: optional_integer("flags")?,
         speed: optional_integer("speed")?,
@@ -478,6 +517,54 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn nationality3_is_numbered_and_carries_the_side_bit() {
+        // CUB.MM writes nationality3 161: bit 0x80 is Redfor, 33 is Cuban.
+        let text = SAMPLE.replace("nationality 137", "nationality3 161");
+        let l = Layout::parse("CUB.MM", text.as_bytes()).unwrap();
+        let p = &l.placements[0];
+        assert!(p.nationality3 && !p.nationality2);
+        assert_eq!(p.source_nationality, Some(161));
+        assert_eq!(p.nationality, Some(161));
+        assert_eq!(p.nationality_field(), Some(NationalityField::Three));
+        assert_eq!(p.redfor(), Some(true));
+        assert!(!p.unknown.iter().any(|(key, _)| key == "nationality3"));
+        // No legacy remap, whatever the map says: the Ukraine and Vietnam
+        // theaters would otherwise move low values around.
+        let friendly = SAMPLE.replace("nationality 137", "nationality3 39");
+        let l = Layout::parse("WTA.MM", friendly.as_bytes()).unwrap();
+        assert_eq!(l.placements[0].nationality, Some(39));
+        assert_eq!(l.placements[0].redfor(), Some(false));
+        let ukraine = SAMPLE.replace("nationality 137", "nationality3 13");
+        let l = Layout::parse("UKR.MM", ukraine.as_bytes()).unwrap();
+        assert_eq!(l.placements[0].nationality, Some(13));
+    }
+    #[test]
+    fn nationality_field_reports_the_spelling_and_conflicts_fail() {
+        let legacy = Layout::parse("UKR.MM", SAMPLE.as_bytes()).unwrap();
+        assert_eq!(
+            legacy.placements[0].nationality_field(),
+            Some(NationalityField::Legacy)
+        );
+        assert_eq!(legacy.placements[0].redfor(), Some(true));
+        let two = SAMPLE.replace("nationality 137", "nationality2 137");
+        let two = Layout::parse("UKR.MM", two.as_bytes()).unwrap();
+        assert_eq!(
+            two.placements[0].nationality_field(),
+            Some(NationalityField::Two)
+        );
+        let none = SAMPLE.replace("\tnationality 137\n", "");
+        let none = Layout::parse("UKR.MM", none.as_bytes()).unwrap();
+        assert_eq!(none.placements[0].nationality_field(), None);
+        assert_eq!(none.placements[0].redfor(), None);
+        for pair in [
+            "nationality 137\n\tnationality3 137",
+            "nationality2 137\n\tnationality3 137",
+        ] {
+            let text = SAMPLE.replace("nationality 137", pair);
+            assert!(Layout::parse("UKR.MM", text.as_bytes()).is_err(), "{pair}");
+        }
     }
     #[test]
     fn rejects_duplicate_and_truncated_records() {
