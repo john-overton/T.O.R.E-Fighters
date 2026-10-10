@@ -9,9 +9,11 @@ AGM-65G (whose seeker locks the aircraft first) and a gun burst destroy three
 Super Etendards, each with damage by section, a type-30 family explosion, a
 crash crater and a fire, a thrown fragment and a kill in the Fighter row. No
 parked aircraft stands inside another object's weapon contact: the airfield
-meets weapons at its pavement. On the Ukraine strip `~QUSTRIP` a bomb on the
-parked MiG-29 does the same with no shelter in the way, and a gun burst on a
-MiG-25 damages its left wing without a kill. On the Clemenceau fleet `~QFFLT`
+meets weapons at its pavement. Bombs splash what stands near, so a strike that
+destroys a building beside an aircraft is allowed its other explosion. On the
+Ukraine strip `~QUSTRIP` a bomb on the parked MiG-29 does the same with no
+shelter in the way and splashes the MiG-25 beside it without a kill; in a
+separate run a gun burst on that MiG-25 damages its left wing without a kill. On the Clemenceau fleet `~QFFLT`
 all eight Rafale M and Super Etendards stand on the carrier deck (89 ft at
 real size); on the Kiev fleet `~QBFLT` the four Yak-141s stay out.
 """
@@ -60,9 +62,16 @@ def _killed(output: str, ids: list[str], problems: list[str]) -> None:
             problems.append(f"no kill for {id}")
         elif (k.group(2), k.group(3), k.group(4), k.group(5)) != ("0", "0x8000", "0", "0"):
             problems.append(f"{id} kill {k.group(0)}: want by the player, class 0x8000, Fighter row 0, not a roster aircraft")
+    # Splash (every bomb's blast reaches what stands near) can destroy
+    # neighbours that are not aircraft, whose explosions are other types.
     blasts = [int(m.group(1)) for m in EXPLOSION.finditer(output)]
-    if len(blasts) < len(ids) or any(not 24 <= b <= 33 for b in blasts):
-        problems.append(f"explosions {blasts}: want one aircraft explosion (24 to 33) per kill")
+    aircraft_blasts = [b for b in blasts if 24 <= b <= 33]
+    other_kills = [k for k in kills.values() if k.group(3) != "0x8000"]
+    if len(aircraft_blasts) < len(ids) or len(blasts) - len(aircraft_blasts) > len(other_kills):
+        problems.append(
+            f"explosions {blasts}: want one aircraft explosion (24 to 33) per kill and others only for "
+            f"{len(other_kills)} destroyed non-aircraft"
+        )
 
 
 def lffair_problems(output: str) -> list[str]:
@@ -87,10 +96,16 @@ def lffair_problems(output: str) -> list[str]:
     return problems
 
 
-def ustrip_problems(output: str) -> list[str]:
+def ustrip_problems(bomb: str, gun: str) -> list[str]:
+    """The bomb run and the gun run are separate: a Mk 82 on the MiG-29 splashes
+    the MiG-25 206 ft away to a quarter of its hit points, so a burst in the same
+    run would finish it."""
     problems = []
-    _killed(output, ["0x50000022"], problems)
-    outcomes = {m.group(1): m for m in OUTCOME.finditer(output)}
+    _killed(bomb, ["0x50000022"], problems)
+    splashed = {m.group(1): m for m in OUTCOME.finditer(bomb)}.get("0x50000021")
+    if splashed is None or splashed.group(3) == "0" or splashed.group(9) != "0":
+        problems.append(f"the bomb's splash should hurt the MiG-25 without a kill: {splashed and splashed.group(0)}")
+    outcomes = {m.group(1): m for m in OUTCOME.finditer(gun)}
     mig25 = outcomes.get("0x50000021")
     if mig25 is None or mig25.group(3) == "0" or mig25.group(9) != "0":
         problems.append(f"the gun burst on the MiG-25 should damage it without a kill: {mig25 and mig25.group(0)}")
@@ -125,9 +140,14 @@ def runs(output: str) -> list[str]:
 
 def problems(output: str) -> list[str]:
     parts = runs(output)
-    if len(parts) < 4:
-        return [f"{len(parts) - 1} runs finished, want 4"]
-    return lffair_problems(parts[0]) + ustrip_problems(parts[1]) + fleet_problems(parts[2]) + fleet_problems_kiev(parts[3])
+    if len(parts) < 5:
+        return [f"{len(parts) - 1} runs finished, want 5"]
+    return (
+        lffair_problems(parts[0])
+        + ustrip_problems(parts[1], parts[2])
+        + fleet_problems(parts[3])
+        + fleet_problems_kiev(parts[4])
+    )
 
 
 def scenarios() -> list[Scenario]:
@@ -138,7 +158,8 @@ def scenarios() -> list[Scenario]:
                   "--strike", "8:bomb", "--strike", "9:maverick", "--strike", "10:gun"],
             timeout=300,
             then=[
-                Step(["--surface-parked", "UKR", "QUSTRIP", "--strike", "34:bomb", "--strike", "33:gun"], timeout=300),
+                Step(["--surface-parked", "UKR", "QUSTRIP", "--strike", "34:bomb"], timeout=300),
+                Step(["--surface-parked", "UKR", "QUSTRIP", "--strike", "33:gun"], timeout=300),
                 Step(["--surface-parked", "FRA", "QFFLT", "--seconds", "0"], timeout=120),
                 Step(["--surface-parked", "BAL", "QBFLT", "--seconds", "0"], timeout=120),
             ],
