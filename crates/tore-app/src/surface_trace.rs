@@ -184,7 +184,7 @@ fn options() -> AppResult<Options> {
 /// target templates and the unit, object, aircraft, shape, picture, weapon
 /// and sensor records, read from the retail media (`TORE_GAME_DIR`, the
 /// remembered source or the `gameassets` link).
-fn resources() -> AppResult<BTreeMap<String, Vec<u8>>> {
+pub(crate) fn resources() -> AppResult<BTreeMap<String, Vec<u8>>> {
     let mut resources = crate::reel::load_assets()?.theater_resources;
     let data = crate::assets::data_directory()?;
     let candidates = std::env::var_os("TORE_GAME_DIR")
