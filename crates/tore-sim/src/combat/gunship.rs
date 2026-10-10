@@ -23,12 +23,15 @@ pub const SOURCE_SCALE: f64 = 2. / 3.;
 /// mesh and John's reference photo (2026-10-09): the ball hangs just below
 /// the fairing's lower face, so the point sits 1.5 source units under it.
 pub const EYE_SOURCE: Vector = [-13.5, 11., -15.5];
-const HEADING_ARC: [f64; 3] = [
+/// Each gun's heading half-arc either side of neutral (abeam left), radians,
+/// by source slot; the target camera's gun box draws them.
+pub const HEADING_ARC: [f64; 3] = [
     60_f64.to_radians(),
     45_f64.to_radians(),
     25_f64.to_radians(),
 ];
-const ELEVATION_ARC: [f64; 3] = [
+/// Each gun's elevation half-arc either side of level, radians.
+pub const ELEVATION_ARC: [f64; 3] = [
     60_f64.to_radians(),
     45_f64.to_radians(),
     45_f64.to_radians(),

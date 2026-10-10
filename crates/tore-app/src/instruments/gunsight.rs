@@ -35,15 +35,27 @@ const NOTICE_TICKS: u64 = 240;
 /// elevation: the box spans it (C_25).
 const BOX_HEADING: f64 = 60.;
 const BOX_ELEVATION: f64 = 60.;
-/// Each gun's arc half-widths, degrees: heading then elevation. Copies of the
-/// installed limits (docs/spec/ac130-linked-guns.md).
-const ARC: [(f64, f64); 3] = [(60., 60.), (45., 45.), (25., 45.)];
+/// Each gun's arc half-widths, degrees: heading then elevation, the sim's own
+/// limits (docs/spec/ac130-linked-guns.md).
+fn arc(slot: usize) -> (f64, f64) {
+    (
+        gunship::HEADING_ARC[slot].to_degrees(),
+        gunship::ELEVATION_ARC[slot].to_degrees(),
+    )
+}
 /// The camera's own gimbal is the hemisphere below the aircraft: its look
-/// elevation stops at the horizon (John, 2026-10-09, S1b clamps the sim's
-/// look there). The page also reads the limit from the look itself.
-const CAMERA_TOP: f64 = 0.;
+/// elevation stops at the horizon (John, 2026-10-09; the sim clamps the look
+/// there). The host's GIMBAL LIMIT notice says so authoritatively; the page
+/// also reads the limit from its own predicted look, which leads the notice
+/// by a round trip.
+fn camera_top() -> f64 {
+    gunship::GIMBAL_TOP.to_degrees()
+}
 /// Within this many degrees of the camera's limit the page says so.
 const LIMIT_MARGIN: f64 = 0.5;
+/// The GIMBAL LIMIT notice is raised every tick the limit holds, so it counts
+/// as live for this many combat ticks after the last (a quarter second).
+const LIMIT_NOTICE_TICKS: u64 = 30;
 
 /// Where the sight's camera is and what it looks along: the page projects the
 /// symbology through it.
@@ -137,13 +149,6 @@ pub struct Page {
     pub view: Option<SightView>,
 }
 
-/// The shim over S1b's gimbal-limit notice: the page also reads the limit
-/// from the look itself, so this stays false until the notice exists.
-/// S1b: replace with `matches!(notice.notice, Notice::GimbalLimit)`.
-fn notice_is_gimbal_limit(_notice: &gunship::SightNotice) -> bool {
-    false
-}
-
 impl Page {
     /// The page's data from the readout. `None` off the AC-130.
     pub fn new(
@@ -180,14 +185,19 @@ impl Page {
         // impacts were computed for.
         let now = g.impacts_tick + 1;
         let notice = g.notice.and_then(|n| {
-            (n.tick <= now && now - n.tick < NOTICE_TICKS).then_some(match n.notice {
-                Notice::NoGroundPoint => PageNotice::NoGroundPoint,
-                Notice::DropToSlew => PageNotice::DropToSlew,
-            })
+            if n.tick > now || now - n.tick >= NOTICE_TICKS {
+                return None;
+            }
+            match n.notice {
+                Notice::NoGroundPoint => Some(PageNotice::NoGroundPoint),
+                Notice::DropToSlew => Some(PageNotice::DropToSlew),
+                // Drawn as the gimbal limit mark, not on the activity row.
+                Notice::GimbalLimit => None,
+            }
         });
-        let limit_notice = g.notice.is_some_and(|n| {
-            n.tick <= now && now - n.tick < NOTICE_TICKS && notice_is_gimbal_limit(&n)
-        });
+        // The host raises it every tick the camera is held at its limit, so
+        // a short window (not the activity row's two seconds) keeps it live.
+        let limit_notice = gimbal_notice_live(g.notice, now);
         let gimbal_limit = limit_notice || at_camera_limit(g.look);
         let point = g.aim.unwrap_or(player.position);
         let offset: Vector = std::array::from_fn(|i| point[i] - player.position[i]);
@@ -237,9 +247,16 @@ impl Page {
     }
 }
 
+/// The host's GIMBAL LIMIT notice is live at readout tick `now`.
+fn gimbal_notice_live(notice: Option<gunship::SightNotice>, now: u64) -> bool {
+    notice.is_some_and(|n| {
+        n.notice == Notice::GimbalLimit && n.tick <= now && now - n.tick < LIMIT_NOTICE_TICKS
+    })
+}
+
 /// The camera's own gimbal limit, from the look alone.
 fn at_camera_limit(look: [f64; 2]) -> bool {
-    look[1].to_degrees() >= CAMERA_TOP - LIMIT_MARGIN
+    look[1].to_degrees() >= camera_top() - LIMIT_MARGIN
 }
 
 /// "9:00 LO": the clock bearing of an offset from the nose and the Hi/Lo
@@ -598,10 +615,10 @@ fn arcs_box(r: &mut Raster, page: &Page) {
     let look_dh = heading(page.look[0]);
     let look_e = page.look[1].to_degrees();
     let lead = page.lead();
-    let arc = lead.map_or(ARC[0], |slot| ARC[slot]);
+    let arc = arc(lead.unwrap_or(0));
     let outside = look_dh.abs() > arc.0 || look_e.abs() > arc.1;
     // The camera's own horizon limit.
-    let horizon = to_y(CAMERA_TOP).round() as i32;
+    let horizon = to_y(camera_top()).round() as i32;
     for x in bx + 2..bx + bw - 2 {
         if page.gimbal_limit {
             r.rect(x, horizon, 1, 1, INK);
@@ -1187,6 +1204,23 @@ mod tests {
         assert!(Readiness::TerrainMask.gun_may_fire());
         assert!(!Readiness::GunObscured.gun_may_fire());
         assert!(!Readiness::Empty.gun_may_fire());
+    }
+
+    #[test]
+    fn the_hosts_gimbal_notice_and_the_sims_arcs_drive_the_page() {
+        let at = |notice, tick| Some(gunship::SightNotice { notice, tick });
+        // Raised every tick the limit holds: live just after, gone a while on.
+        assert!(gimbal_notice_live(at(Notice::GimbalLimit, 100), 100));
+        assert!(gimbal_notice_live(at(Notice::GimbalLimit, 100), 120));
+        assert!(!gimbal_notice_live(at(Notice::GimbalLimit, 100), 400));
+        assert!(!gimbal_notice_live(at(Notice::DropToSlew, 100), 100));
+        assert!(!gimbal_notice_live(None, 100));
+        // The camera's top is the sim's hemisphere boundary; the gun arcs are
+        // the sim's.
+        assert_eq!(camera_top(), 0.);
+        assert_eq!((arc(0).0.round(), arc(0).1.round()), (60., 60.));
+        assert_eq!(arc(2).0.round(), 25.);
+        assert_eq!(arc(1).1.round(), 45.);
     }
 
     #[test]
