@@ -487,7 +487,11 @@ fn flak_bursts_at_its_time_fuze_as_a_flak_effect() {
     assert_eq!(s.surface_round(id), None);
     let bursts = flak_effects(&s);
     assert_eq!(bursts.len(), 1);
-    assert_eq!(bursts[0].blast, Some(27), "the record's own explosion");
+    assert_eq!(
+        bursts[0].blast,
+        Some(28),
+        "the 100 mm shell bursts as the larger flak sheet"
+    );
     // One second at the tuned muzzle velocity, straight up.
     let height = bursts[0].position[1] - 30.;
     assert!(
@@ -501,6 +505,23 @@ fn flak_bursts_at_its_time_fuze_as_a_flak_effect() {
             ..
         }]
     ));
+}
+
+#[test]
+fn the_85_mm_flak_keeps_the_records_small_flak_explosion() {
+    let mut s = scene();
+    unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
+    let mut w = ks19();
+    w.source = "KS12.JT".into();
+    surface_guns::apply("KS12", &mut w).unwrap();
+    assert_eq!(flak_explosion(&w), 27);
+    let mut fired = shot(w, [0., 30., 0.], [0., 1000., 0.], None);
+    fired.end_tick = Some(60);
+    s.fire_surface(fired).unwrap();
+    run_from(&mut s, 60, far());
+    let bursts = flak_effects(&s);
+    assert_eq!(bursts.len(), 1);
+    assert_eq!(bursts[0].blast, Some(27));
 }
 
 #[test]

@@ -131,6 +131,18 @@ pub fn is_flak(w: &Weapon) -> bool {
         && w.damage.collateral_percent > 0
 }
 
+/// The explosion a flak shell bursts as. Both flak records name type 27, the
+/// small flak sheet (`FLAKA`); the 100 mm KS-19 bursts as type 28, the larger
+/// `FLAKB` sheet with its heavier sounds, so the two calibres read apart on
+/// screen and by ear (fitted, docs/spec/surface-defenses.md, "Flak").
+pub fn flak_explosion(w: &Weapon) -> u8 {
+    if w.source.eq_ignore_ascii_case("KS19.JT") {
+        28
+    } else {
+        w.effects.object_explosion
+    }
+}
+
 /// Whether the `ordinal`th round of a surface gun carries a tracer: the AAA
 /// tuning table says which guns have tracers (flak, tank guns and small arms
 /// do not), and those mark every third round as aircraft guns do.
