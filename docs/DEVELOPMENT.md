@@ -1648,6 +1648,15 @@ the first enemy plane, so the targets are a Protect objective and a Blue plane
 drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
 `surface-objective-*` battery scenarios run it.
 
+`--record PATH` records the run as a mission recording (a format 3 file, see
+[Mission replays](REPLAYS.md#versions-and-damage)); `--verify-render` then reads
+it back and compares every tick with the picture the run drew, printing
+`surface-objective: verify-render: PASS ticks=... missing=0 differing=0` or the
+first difference. `--run-on` keeps the run going to `--seconds` after every
+target is down, so supply trucks rearm the emptied launchers, and
+`--vulnerable` takes the player's invulnerability away, so the defenses can
+shoot it down. The `replay-surface` scenario uses all four.
+
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --redfor

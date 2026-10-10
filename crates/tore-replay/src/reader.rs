@@ -22,7 +22,7 @@ use crate::limits::{
 };
 use crate::model::{
     AircraftInfo, EffectKind, EffectSpawn, Event, Footer, Frame, Header, LAYER_CONTRAILS, PuffKind,
-    PuffSpawn, TreeSample, WeaponInfo,
+    PuffSpawn, SurfaceInfo, TreeSample, WeaponInfo,
 };
 use crate::spawns::{FrameSpawns, get_spawns};
 use crate::strings::StringTable;
@@ -158,6 +158,7 @@ pub struct Recording {
     strings: StringTable,
     aircraft: BTreeMap<u32, AircraftInfo>,
     weapons: BTreeMap<u32, WeaponInfo>,
+    surface_units: BTreeMap<u32, SurfaceInfo>,
     events: Vec<TimedEvent>,
     checksums: Vec<(u64, u64)>,
     trees: HashMap<(u32, String), Vec<(usize, u64)>>,
@@ -286,6 +287,7 @@ impl Recording {
             strings: StringTable::default(),
             aircraft: BTreeMap::new(),
             weapons: BTreeMap::new(),
+            surface_units: BTreeMap::new(),
             events: Vec::new(),
             checksums: Vec::new(),
             trees: HashMap::new(),
@@ -495,12 +497,15 @@ impl Recording {
                 "the file holds more than {MAX_EVENTS_TOTAL} events"
             )));
         }
-        if let Some((aircraft, weapons)) = entities {
+        if let Some((aircraft, weapons, surface)) = entities {
             for info in aircraft {
                 self.aircraft.entry(info.id).or_insert(info);
             }
             for info in weapons {
                 self.weapons.entry(info.id).or_insert(info);
+            }
+            for info in surface {
+                self.surface_units.entry(info.id).or_insert(info);
             }
         }
         if header.frames == 0 {
@@ -600,6 +605,15 @@ impl Recording {
 
     pub fn weapon_info(&self, id: u32) -> Option<&WeaponInfo> {
         self.weapons.get(&id)
+    }
+
+    /// Every surface unit the recording names (format 3), by id.
+    pub fn surface_units(&self) -> impl Iterator<Item = &SurfaceInfo> {
+        self.surface_units.values()
+    }
+
+    pub fn surface_info(&self, id: u32) -> Option<&SurfaceInfo> {
+        self.surface_units.get(&id)
     }
 
     /// Every event in the recording, in tick order.

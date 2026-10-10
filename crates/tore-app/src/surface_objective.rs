@@ -1,5 +1,6 @@
 //! `--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM]
-//! [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly]`: a
+//! [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly]
+//! [--record PATH [--verify-render]] [--run-on] [--vulnerable]`: a
 //! development aid and the battery's check of the ground target's objectives
 //! (docs/spec/surface-defenses.md, "Objectives, scoring and debrief"). No
 //! window opens; the whole mission tick runs as in the game.
@@ -16,7 +17,15 @@
 //! so the objective is the Protect line, and the bombs are a Blue plane's.
 //! `--kill-friendly` also destroys one friendly unit that is not a target,
 //! which fails the mission (retail's friendly fire).
-use crate::{AppResult, surface_dump};
+//!
+//! `--record PATH` records the run as a mission recording (a format 3 file for
+//! a ground target), `--verify-render` reads it back and checks that every
+//! recorded tick redraws the picture the run drew, and `--run-on` keeps the
+//! run going to `--seconds` after every target is down, so trucks can rearm
+//! the launchers the pass emptied. The battery's `replay-surface` scenario
+//! uses them. `--vulnerable` takes the invulnerability away, so the defenses
+//! can shoot the player down.
+use crate::{AppResult, replay, snapshot::RenderSnapshot, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
     attitude::Vector,
@@ -47,6 +56,10 @@ struct Options {
     altitude: f64,
     seconds: f64,
     kill_friendly: bool,
+    record: Option<std::path::PathBuf>,
+    verify: bool,
+    run_on: bool,
+    vulnerable: bool,
 }
 
 fn options() -> AppResult<Options> {
@@ -61,6 +74,10 @@ fn options() -> AppResult<Options> {
         altitude: 3_000.,
         seconds: 200.,
         kill_friendly: false,
+        record: None,
+        verify: false,
+        run_on: false,
+        vulnerable: false,
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -78,15 +95,22 @@ fn options() -> AppResult<Options> {
             "--altitude" => o.altitude = next()?.parse()?,
             "--seconds" => o.seconds = next()?.parse()?,
             "--kill-friendly" => o.kill_friendly = true,
+            "--record" => o.record = Some(next()?.into()),
+            "--verify-render" => o.verify = true,
+            "--run-on" => o.run_on = true,
+            "--vulnerable" => o.vulnerable = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
     }
     let [theater, stem] = positional.as_slice() else {
-        return Err("--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM] [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly]".into());
+        return Err("--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM] [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly] [--record PATH [--verify-render]] [--run-on] [--vulnerable]".into());
     };
     o.theater = theater.to_ascii_uppercase();
     o.stem = stem.trim_start_matches('~').to_ascii_uppercase();
+    if o.verify && o.record.is_none() {
+        return Err("--verify-render checks a --record run".into());
+    }
     Ok(o)
 }
 
@@ -96,7 +120,9 @@ fn spec(o: &Options) -> AppResult<MissionSpec> {
     spec.aaa = Defense::from_level(o.defenses.0).ok_or("defense levels are 0 to 3")?;
     spec.sam = Defense::from_level(o.defenses.1).ok_or("defense levels are 0 to 3")?;
     spec.surface_seed = o.seed;
-    spec.cheats.damage = tore_sim::cheats::Damage::Invulnerable;
+    if !o.vulnerable {
+        spec.cheats.damage = tore_sim::cheats::Damage::Invulnerable;
+    }
     if o.redfor {
         // A multiplayer mission: two Blue and two Redfor aircraft, the AI
         // flying them until a human takes one.
@@ -210,6 +236,11 @@ pub fn run() -> AppResult<()> {
     }
     let first = capture(&world)?;
     print("start", &first);
+    let mut record = o
+        .record
+        .as_ref()
+        .map(|path| Record::start(&world, path, o.verify))
+        .transpose()?;
 
     // The line the human flies: at the middle of the targets, `--from` nm out.
     let center = {
@@ -326,9 +357,16 @@ pub fn run() -> AppResult<()> {
             tick: world.tick(),
             ..SeatInput::default()
         };
+        if let Some(record) = &mut record {
+            record.before(&mut world);
+        }
         world.step(std::slice::from_ref(&input), &mut out)?;
+        if let Some(record) = &mut record {
+            record.after(&mut world, &out);
+        }
         // Stop when every target has fallen and the friendly one too.
-        if t > over_at + 4.
+        if !o.run_on
+            && t > over_at + 4.
             && targets.iter().all(|id| row_dead(&world, *id))
             && friendly.is_none_or(|id| row_dead(&world, id))
         {
@@ -344,7 +382,11 @@ pub fn run() -> AppResult<()> {
                 .filter(|row| targets.contains(&row.id) && row.hp > 0)
                 .map(|row| distance(row.position, world.cockpits[0].flight.position))
                 .fold(f64::INFINITY, f64::min);
-            line(t, format_args!("nearest living target {near:.0} ft"));
+            if near.is_finite() {
+                line(t, format_args!("nearest living target {near:.0} ft"));
+            } else {
+                line(t, "no target is left standing");
+            }
         }
     }
     // Let the last bombs land and the world settle.
@@ -354,7 +396,13 @@ pub fn run() -> AppResult<()> {
             tick: world.tick(),
             ..SeatInput::default()
         };
+        if let Some(record) = &mut record {
+            record.before(&mut world);
+        }
         world.step(std::slice::from_ref(&input), &mut out)?;
+        if let Some(record) = &mut record {
+            record.after(&mut world, &out);
+        }
     }
     for id in &targets {
         if let Some(row) = world.combat.state.targets.iter().find(|row| row.id == *id) {
@@ -369,8 +417,122 @@ pub fn run() -> AppResult<()> {
     for objective in &last.objectives {
         println!("surface-objective: sentence {}", objective.sentence());
     }
+    if let Some(record) = record {
+        for line in record.finish(&world, &last)? {
+            println!("surface-objective: {line}");
+        }
+    }
     println!("surface-objective: done");
     Ok(())
+}
+
+/// The run as a mission recording, the way the AI probe records: the picture
+/// is taken as live flight takes it and nothing it reads feeds back.
+struct Record {
+    recorder: replay::recorder::Recorder,
+    /// Every tick's picture, when the run checks the recording against them.
+    pictures: Option<Vec<RenderSnapshot>>,
+    devices: Vec<(u64, u64)>,
+}
+
+impl Record {
+    fn start(world: &World, path: &std::path::Path, verify: bool) -> AppResult<Self> {
+        use replay::{convert, recorder};
+        let combat = &world.combat;
+        let flight = &world.cockpits[0].flight;
+        let snapshot = combat.render_snapshot();
+        let extra = vec![(
+            "probe".to_owned(),
+            "the surface objective run on the full mission tick: no audio, music, HUD or rumble"
+                .to_owned(),
+        )];
+        let header = recorder::header(
+            tore_replay::MissionKind::Probe,
+            &world.terrain,
+            &convert::Presentation::of(snapshot),
+            extra,
+            std::time::SystemTime::now(),
+        );
+        let player = recorder::Human::single_player("F/A-18D", true);
+        let roster = recorder::roster(
+            snapshot,
+            &player,
+            &[],
+            world.ai_wings.as_ref(),
+            combat.dummy_types(),
+        );
+        let mut recorder = recorder::Recorder::start(path.to_path_buf(), &header, &roster)
+            .map_err(|error| format!("--record {}: {error}", path.display()))?
+            .for_seat(SEAT, player.id);
+        recorder.wait_for_writer();
+        recorder.begin(recorder::Tick {
+            snapshot,
+            combat,
+            flight,
+            previous: flight,
+            pilot: &tore_sim::flight::PilotInput::default(),
+            others: &[],
+            wings: world.ai_wings.as_ref(),
+            world: &world.terrain,
+            events: &[],
+            outcomes: &[],
+            journal: None,
+        });
+        Ok(Self {
+            recorder,
+            pictures: verify.then(|| vec![snapshot.clone()]),
+            devices: Vec::new(),
+        })
+    }
+
+    fn before(&mut self, world: &mut World) {
+        self.recorder.start_tick(None, &mut world.combat);
+    }
+
+    fn after(&mut self, world: &mut World, out: &TickOutput) {
+        let idle = tore_sim::flight::PilotInput::default();
+        let cockpit = &world.cockpits[0];
+        self.recorder.begin(replay::recorder::Tick {
+            snapshot: world.combat.render_snapshot(),
+            combat: &world.combat,
+            flight: &cockpit.flight,
+            previous: &cockpit.previous_flight,
+            pilot: &idle,
+            others: &[],
+            wings: world.ai_wings.as_ref(),
+            world: &world.terrain,
+            events: &out.events,
+            outcomes: &out.outcomes,
+            journal: out.journal.as_ref(),
+        });
+        self.recorder.end(None, &mut world.combat);
+        if let Some(pictures) = &mut self.pictures {
+            pictures.push(world.combat.render_snapshot().clone());
+        }
+        self.devices.push((
+            world.combat.state.tick(),
+            replay::devices::digest(&world.combat.state.devices),
+        ));
+    }
+
+    /// Finishes the file and, when asked, replays it against the run.
+    fn finish(mut self, world: &World, report: &debrief::Report) -> AppResult<Vec<String>> {
+        self.recorder.note(
+            tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
+                .with(tore_replay::vocab::field::REASON, "the run finished"),
+        );
+        let footer = crate::replay_footer(&world.combat, PLAYER, Some(report), "the run finished");
+        let path = self
+            .recorder
+            .finish(&footer)
+            .ok_or("the recording could not be finished; see the session log")?;
+        let mut lines = vec![format!("recorded {}", path.display())];
+        if let Some(pictures) = &self.pictures {
+            let verification = replay::cli::verify(&path, pictures, &self.devices, &world.terrain)?;
+            lines.push(verification.line());
+        }
+        Ok(lines)
+    }
 }
 
 fn capture(world: &World) -> AppResult<debrief::Report> {

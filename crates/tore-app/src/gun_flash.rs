@@ -11,7 +11,7 @@
 //! posed now, so it stays on the gun while the aircraft flies on.
 use crate::countermeasure_renderer::FlareLight;
 use crate::snapshot::{AircraftPose, GUN_AIM, RenderSnapshot};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::f64::consts::{FRAC_PI_2, PI};
 use tore_formats::aircraft::AircraftId;
 use tore_sim::{
@@ -357,6 +357,14 @@ impl Tracker {
         while self.shots.len() > MAX_SHOTS {
             self.shots.pop_front();
         }
+    }
+
+    /// A replay tells the surface defenses' wreck smoke when each destroyed
+    /// unit died, so a seek does not give every wreck the same fresh age
+    /// (format 3). Flight leaves it empty.
+    #[allow(dead_code)] // For the replay viewer.
+    pub fn set_deaths(&mut self, deaths: BTreeMap<u32, u64>) {
+        self.surface.set_deaths(deaths);
     }
 
     /// Forgets every shot and round, as a new flight or replay does.

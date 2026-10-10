@@ -13,7 +13,7 @@ use crate::codec::{In, put_iv, put_opt_id, put_pair, put_triple, put_uv, put_xf6
 use crate::error::{Result, corrupt};
 use crate::model::{
     AircraftFlags, AircraftState, DEVICE_COUNT, DebrisState, EscapeeState, ProjectileState,
-    SECTION_COUNT, Seeker, TICKS_PER_SECOND, device,
+    SECTION_COUNT, Seeker, SurfaceState, TICKS_PER_SECOND, device,
 };
 use std::array::from_fn;
 use std::f64::consts::{PI, TAU};
@@ -1206,6 +1206,135 @@ pub(crate) fn get_debris(input: &mut In, old: Option<DebrisPred>) -> Result<Debr
     Ok(p)
 }
 
+const U_POS: u64 = 1;
+const U_ATT: u64 = 1 << 1;
+const U_WRECK: u64 = 1 << 2;
+const U_KEY: u64 = 1 << 6;
+
+fn surface_encodable(s: &SurfaceState) -> bool {
+    s.position.iter().all(|v| within(*v, POSITION_LIMIT))
+        && s.attitude.iter().all(|v| within(*v, ANGLE_LIMIT))
+}
+
+/// A surface unit's pose as the reader holds it (format 3). Units move
+/// slowly and steadily, so the second-order prediction of aircraft positions
+/// applies: a unit driving straight costs a zero residual.
+#[derive(Clone, Debug)]
+pub(crate) struct SurfacePred {
+    pos: [Chan; 3],
+    att: [Chan; 3],
+    wrecked: bool,
+    predictable: bool,
+}
+
+impl SurfacePred {
+    fn key(s: &SurfaceState) -> Self {
+        Self {
+            pos: s.position.map(Chan::key),
+            att: s.attitude.map(Chan::key),
+            wrecked: s.wrecked,
+            predictable: surface_encodable(s),
+        }
+    }
+
+    pub fn state(&self, id: u32) -> SurfaceState {
+        SurfaceState {
+            id,
+            position: from_fn(|i| self.pos[i].value(POS)),
+            attitude: [
+                self.att[0].yaw(),
+                self.att[1].signed_angle(),
+                self.att[2].signed_angle(),
+            ],
+            wrecked: self.wrecked,
+        }
+    }
+}
+
+pub(crate) fn put_surface(
+    buf: &mut Vec<u8>,
+    old: Option<SurfacePred>,
+    s: &SurfaceState,
+) -> SurfacePred {
+    let Some(mut p) = old.filter(|p| p.predictable && surface_encodable(s)) else {
+        put_uv(buf, U_KEY);
+        for v in s.position.iter().chain(&s.attitude) {
+            put_xf64(buf, *v);
+        }
+        buf.push(u8::from(s.wrecked));
+        return SurfacePred::key(s);
+    };
+    let pos: [i64; 3] = from_fn(|i| {
+        let pred = p.pos[i].p2();
+        p.pos[i].code(s.position[i], POS, pred)
+    });
+    let att: [i64; 3] = from_fn(|i| {
+        let pred = p.att[i].p2();
+        p.att[i].code_angle(s.attitude[i], pred)
+    });
+    let mask = if pos != [0; 3] { U_POS } else { 0 }
+        | if att != [0; 3] { U_ATT } else { 0 }
+        | if s.wrecked != p.wrecked { U_WRECK } else { 0 };
+    put_uv(buf, mask);
+    if mask & U_POS != 0 {
+        put_triple(buf, pos);
+    }
+    if mask & U_ATT != 0 {
+        put_triple(buf, att);
+    }
+    if mask & U_WRECK != 0 {
+        buf.push(u8::from(s.wrecked));
+    }
+    p.wrecked = s.wrecked;
+    p
+}
+
+pub(crate) fn get_surface(input: &mut In, old: Option<SurfacePred>) -> Result<SurfacePred> {
+    let flag = |input: &mut In| match input.u8()? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(corrupt("a surface unit's wrecked flag is invalid")),
+    };
+    let mask = input.uv()?;
+    if mask == U_KEY {
+        let mut f = || input.xf64();
+        let position = [f()?, f()?, f()?];
+        let attitude = [f()?, f()?, f()?];
+        let wrecked = flag(input)?;
+        return Ok(SurfacePred::key(&SurfaceState {
+            id: 0,
+            position,
+            attitude,
+            wrecked,
+        }));
+    }
+    if mask & !(U_POS | U_ATT | U_WRECK) != 0 {
+        return Err(corrupt("a surface unit record has unknown bits"));
+    }
+    let mut p =
+        old.ok_or_else(|| corrupt("a change record for a surface unit with no key record"))?;
+    let pos = if mask & U_POS != 0 {
+        input.triple()?
+    } else {
+        [0; 3]
+    };
+    let att = if mask & U_ATT != 0 {
+        input.triple()?
+    } else {
+        [0; 3]
+    };
+    if mask & U_WRECK != 0 {
+        p.wrecked = flag(input)?;
+    }
+    for i in 0..3 {
+        let pred = p.pos[i].p2();
+        p.pos[i].apply(pred, pos[i]);
+        let pred = p.att[i].p2();
+        p.att[i].apply(pred, att[i]);
+    }
+    Ok(p)
+}
+
 const E_POS: u64 = 1;
 const E_HEADING: u64 = 1 << 1;
 const E_PHASE: u64 = 1 << 2;
@@ -1426,7 +1555,7 @@ mod powered_lift_tests {
         for _ in 0..3 {
             put_uv(&mut frames, 0);
         }
-        let mut bytes = format::prelude();
+        let mut bytes = format::prelude(2);
         bytes[8..10].copy_from_slice(&1u16.to_le_bytes());
         bytes.extend(format::chunk(
             format::KIND_HEADER,

@@ -95,6 +95,31 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
                 "a scattered deck at {feet} ft"
             ))
     )?;
+    if let Some(target) = &world.ground_target {
+        writeln!(
+            out,
+            "Ground      target {} with AAA {} and SAM {}, surface seed {}, enemy nationality {}, {} nm apart{}{}",
+            target.stem,
+            target.aaa,
+            target.sam,
+            target.seed,
+            target.enemy_nationality,
+            target.separation_nm,
+            if target.jitter {
+                ""
+            } else {
+                ", positions fixed"
+            },
+            if target.relocate {
+                ""
+            } else {
+                ", template not relocated"
+            },
+        )?;
+    }
+    if world.airfield_scene != 0 {
+        writeln!(out, "Airfields   scene {}", world.airfield_scene)?;
+    }
     let frames = recording.frame_count();
     let aircraft = recording.aircraft().count().max(1) as u64;
     match recording.first_tick().zip(recording.last_tick()) {
@@ -131,6 +156,18 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
         }
         None => writeln!(out, "Result      unknown: the recording did not finish")?,
     }
+    if recording.surface_units().next().is_some() {
+        let units: Vec<_> = recording.surface_units().collect();
+        let hostile = units
+            .iter()
+            .filter(|unit| unit.side == tore_replay::Side::Enemy)
+            .count();
+        writeln!(
+            out,
+            "Surface     {} units named, {hostile} of them enemy",
+            units.len()
+        )?;
+    }
     for info in recording.aircraft() {
         writeln!(
             out,
@@ -163,6 +200,21 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
                 .as_ref()
                 .map_or(String::new(), |s| format!(", shape {s}"))
         )?;
+    }
+    // Effects by kind, for a recording that can hold flak and craters from
+    // surface units (format 3).
+    if header.format_version >= 3
+        && let Ok(spawns) = recording.spawns(0, u64::MAX)
+    {
+        let mut effects: BTreeMap<&str, usize> = BTreeMap::new();
+        for (_, effect) in &spawns.effects {
+            *effects.entry(effect.kind.name()).or_default() += 1;
+        }
+        let list: Vec<String> = effects
+            .iter()
+            .map(|(name, count)| format!("{name} {count}"))
+            .collect();
+        writeln!(out, "Effects     {}", list.join(", "))?;
     }
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     for event in recording.events() {

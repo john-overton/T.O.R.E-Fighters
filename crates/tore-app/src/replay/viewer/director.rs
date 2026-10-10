@@ -253,17 +253,23 @@ impl Viewer {
         }));
         let flash_now = tick as f64 + self.clock.alpha();
         let mounts = crate::gun_flash::mounts(&picture, None);
-        self.gun_flash.observe(&picture, flash_now, &mounts);
+        Self::observe_surface(
+            (&self.tracks, &self.recording),
+            &mut self.gun_flash,
+            &picture,
+            (tick, flash_now),
+            &mounts,
+        );
         let guns = self.gun_flash.draw(flash_now, &mounts);
         sim.emitters(queue, devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
+        let rails = self.rails(tick);
         sim.airports(
             device,
             queue,
-            self.scenery.static_geometry_where(&destroyed),
+            self.scenery.static_geometry_replay(&destroyed, &rails),
         );
-        // The men, deck crew and parked aircraft pieces (moving units once
-        // recordings carry their poses).
+        // The routed units, the men, deck crew and parked aircraft pieces.
         sim.surface_units(
             device,
             queue,

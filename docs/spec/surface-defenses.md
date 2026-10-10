@@ -1474,6 +1474,25 @@ debrief's tallies (see
 - The protocol rises to 22 for these messages; the wire layout is specified in
   [the protocol document](../formats/net-protocol.md) when slice N1 lands.
 
+## Replays
+
+An opinionated addition (the recording is John's request of 2026-09-26; what it
+keeps of the surface is an agent decision, slice RP1, 2026-10-10). A ground
+target mission's recording is a format 3 file
+([the format](../REPLAYS.md#versions-and-damage)); a replay shows the same
+surface the flight had.
+
+| What | How it is kept |
+| --- | --- |
+| The surface itself | The ground target (template stem, defense levels, seed, enemy nationality, night rule, jitter and relocation switches, enemy distance) is in the header, so the viewer resolves the same template, defenses, trucks, radars, parked aircraft and starts again. The airfield scene number is reserved there (0 is the retail airfields) |
+| Units that drive or sail | A pose each tick (position and attitude to the recording's precision of 1/32 ft, the wrecked flag), keyed by the unit's fixed id. Standing units are the rebuilt scenery |
+| Wrecks | The unit's hit points (as for any ground object), so the wreck look, the crater, the fire mark and the smoke column come back; the registry's hit points size the fire. The smoke starts on the tick the unit died, however the playhead got there |
+| Launchers and guns | A launcher's rails, every rail of the unit when one changes, and a gun's spare magazines when they change; a unit not listed holds its full load. Gun rounds and missiles are the usual projectiles owned by the unit's id |
+| Radars | `surface.radar` events when a radar comes on, goes off or is shut down |
+| Parked aircraft | Their hit points like any ground object, and the piece a destroyed one throws |
+| Flak | Its own effect code with the explosion type (the KS-12's 27, the KS-19's 28), so the replay lights and puffs each burst |
+| Names | A registry of each unit's name, label, side, hit points and position; losses to a unit say `it was shot down by an SA-6` |
+
 ## Per-theater notes
 
 Columns: default enemy (field 20) and equipment group; targets in menu order
