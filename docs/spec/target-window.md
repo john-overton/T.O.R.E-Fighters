@@ -110,3 +110,97 @@ Unknown: original Hi/Lo threshold, exact camera pose, speed definition, bar
 fill direction, complete activity wording, campaign objective loading, and
 player-specific evade provenance. Next research should inspect mission objective
 records and activity display contracts. No AI decisions or flight adapters change.
+
+## AC-130 gunsight
+
+Opinionated, requested by John on 2026-10-09 (the gunsight project; retail has
+no AC-130 gunsight and no sensor camera, so none of this claims retail
+parity). On the AC-130 the TARGET CAM page is the gunsight. Every other
+aircraft keeps the page above unchanged. The sight itself (modes, slew, pin,
+the guns' train, the pipper's ballistics) is specified in
+[AC-130 linked guns](ac130-linked-guns.md); this section covers what the page
+and its camera show.
+
+### The camera
+
+- **Eye point.** The camera looks from sensor dome D, the round turret on the
+  left of the belly just forward of the wing root, not from the aircraft's
+  centre. Its own gimbal is the hemisphere below the aircraft: its elevation
+  stops at the horizon (the sim clamps the sight's look; the page reads the
+  limit from the look too).
+- **Direction and zoom.** The camera looks along the sight's body-relative
+  look angles (heading, elevation), so it follows the aircraft's bank and
+  turn, roll 0. Free and pinned sights use the client's zoom, six steps whose
+  vertical fields are 30, 15, 7.5, 3.75, 1.875 and 0.94 degrees (fitted,
+  agent choice; `Camera.zoom` 2.15 up to 69). A tracked object keeps the
+  automatic framing of the section above (camera on the eye-to-target line, at
+  most one nautical mile behind the object, fitted to the object), whatever
+  the zoom step.
+- **Between ticks.** The look the sim reports is carried smoothly between its
+  120 Hz ticks (interpolated by the frame's tick fraction, the short way round
+  the heading), so a slew and the return to the default view travel at the
+  sim's rate and never snap. The return travels at the sight's return speed
+  (22.5 degrees a second); the page names it RETURN.
+- The 3D picture still refreshes at 24 Hz; the symbology below is drawn every
+  frame from the presented look, over the last picture.
+
+### The page (138 x 114 screen pixels)
+
+All gunsight marks are ink `[20,20,20]` with a one pixel white halo.
+
+| Element | Where | Notes |
+| --- | --- | --- |
+| Crosshair | Four 3 pixel ticks, 2 to 4 pixels out from (69,57) | Camera centre, always drawn |
+| Pipper | Circle of radius 9, ticks 6 to 13 pixels out, 1 pixel centre dot | The candidate gun's predicted impact; the first linked gun when none is a candidate |
+| Other linked guns | 3 x 3 dot at each impact | Shows whether the group converges |
+| Pinned mark | 7 x 7 square on the pin | Free slew draws none |
+| Tracked mark | 11 x 11 square on the target | |
+| Gun list | 25, 40, 105 at x=3, rows y=3, 14, 25 | See below |
+| Name row | y=3, centred in x 22 to 122 | Target name; PINNED; SLEW; RETURN |
+| Activity row | y=16 | Target activity; ZOOM n when free or pinned; notices NO GROUND POINT and L TO DROP for two seconds |
+| Link rows | From y=28 | Unchanged rows, narrowed |
+| Status row | y=72, centred, with a white halo | The pipper gun's readiness label |
+| Objective row | y=82 | Moved up from y=90 |
+| Arcs box | x 45 to 90, y 92 to 111 | Between the clock and the range |
+| Clock, range | y=103 | Range is to the sight point; a tracked target keeps its NM and KTS alternation |
+| Damage bar | x 133 to 137 | Tracked target only |
+
+**Pipper states.** Live and solid when the guns are on the aim point. Dashed
+ring with its centre dot when the status is CANNOT BEAR: the guns stop at the
+arc edge, so the pipper sits where the clamped guns put their rounds. A dashed
+ring with no centre dot for MAX RANGE or rounds that spend before reaching
+anything. A pipper that falls off the page, or behind the camera, is parked on
+the page edge in its direction with its ticks clear of the edge.
+
+**Gun list.** The labels follow the data (25, 40, 105). Linked: a box. Linked
+and READY: the box has a heavy right edge. Linked and slewing: a dashed box.
+Candidate (Ctrl+7): inverse (white on ink). CANNOT BEAR, MAX RANGE or MIN
+RANGE: a diagonal strike. Empty, or not fitted: a grey label struck flat.
+
+**Status row.** READY, SLEWING, CANNOT BEAR, MAX RANGE, MIN RANGE, TERRAIN
+MASK, NO LINE OF FIRE, EMPTY (the labels of `Readiness`). Only NO LINE OF FIRE
+and the empty and failed states block the trigger
+(`Readiness::gun_may_fire`); the rest are advisory. When the camera reaches
+the bottom hemisphere's top limit the row reads `<o> GIMBAL LIMIT`: an eye
+drawn as the text "<o>" in the page's font by default. A hand-drawn 9 x 5
+eyeball bitmap is behind the one-line `EYE_ICON` switch in
+`instruments/gunsight.rs` (John to choose).
+
+**Arcs box.** The box spans the widest arc (C_25): heading -30 (forward) at the
+left edge to -150 (aft) at the right, elevation +60 at the top to -60 at the
+bottom. Inside it: a dotted line at the camera's own horizon limit (solid, with
+a filled sight mark, when the camera is against it); grey corner brackets for
+the candidate gun's own arc; ticks at abeam; each linked gun's actual train as
+a 2 x 2 dot, the candidate's as a ring; the camera's direction as a hollow 5 x 5
+square. When the camera looks outside the candidate gun's arc the outline goes
+dashed, and when it looks outside the box an arrowhead sits just outside the
+nearest edge, pointing the way (forward is left, aft right).
+
+### Preview
+
+`--panel-snapshot OUT.ppm --target-cam-preview MODE` draws the page from a
+synthetic readout on a synthetic scene with the CPU raster, no GPU and no
+retail scene (the imported instrument font is needed: `--aircraft ac130` and
+`TORE_DATA_DIR`). Modes: free, pinned, tracked, outside, range, mask, nolos,
+empty, returning, gimbal (gimbal-text and gimbal-bitmap force an eye icon),
+zoom1 to zoom6.
