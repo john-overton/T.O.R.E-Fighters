@@ -3443,6 +3443,18 @@ player never runs any of it.
   Rounds come in the picture with numbers far above the host's, so a camera or
   the regenerated smoke never takes one for a host's projectile.
 
+*Built (N1, protocol 22, the surface world).* Every game builds the ground
+target from the mission text and the seed the host drew, and refuses a seat or
+resume whose surface digest differs from its own. Moving surface units arrive
+as entities and join the picture's `surface` list (their ground rows move with
+them); the told unit states (`ClientFrame::surface_units`) go into the game's
+never-stepped copy of the mission (`net/play.rs`, `surface_units_to_world`),
+so rails, radars and wrecks draw from it; a surface gun's burst is one event,
+and `net/guns.rs` remakes its rounds, owned by the unit, from the unit's
+hardpoint, turning them with the target it draws through the host's own
+`surface::fire::gun_aim_point`. The details are in
+[the wire's surface world](formats/net-protocol.md#the-surface-world-protocol-22).
+
 *Built (D8b, the game's side that needs no session).* The game's flight
 screen has a session mode (`FlightUi::session`): no Pause, time compression or
 Restart (each answers with a HUD line), only the three screen-only cheats in
