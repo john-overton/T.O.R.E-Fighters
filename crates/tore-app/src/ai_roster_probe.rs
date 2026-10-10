@@ -124,7 +124,14 @@ pub fn roster_probe(
                 {
                     let bank = replay.bank;
                     let yaw = replay.yaw;
-                    if was_alive && actor.alive() {
+                    // A tick on which the aircraft took damage (a missile's
+                    // splash can hurt an AI that lives on) also hands its
+                    // flight new damage and system faults from the combat
+                    // row before it flies; only the other ticks are a pure
+                    // replay of its input.
+                    let struck = replay.damage_fraction != actor.flight().damage_fraction
+                        || replay.systems.counts != actor.flight().systems.counts;
+                    if was_alive && actor.alive() && !struck {
                         replay.damage_fraction = actor.flight().damage_fraction;
                         replay.payload_lbs = actor.flight().payload_lbs;
                         replay.step(actor.last_input(), |x, z| {

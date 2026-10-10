@@ -601,15 +601,16 @@ TORE rules (defined and fitted):
   Kashtan carry their own radars; only the battery systems need component
   radars (answered for John's question).
 - **SS-N-9** never fires: there are no surface targets this round.
-- **Collateral damage** is new and shared with flak: every aircraft inside the
-  collateral radius takes the record's damage times the collateral percent,
-  once per burst. The aircraft a missile strikes takes its direct hit only.
-  Friendly fire off spares the shooter's side, as for a direct hit. A burst
-  is a missile striking an aircraft or the ground, or a flak shell bursting.
-  Fitted. It applies to surface weapons only this round: the aircraft
-  weapons' records carry collateral radii too (750 ft at 35 percent on most
-  missiles, 100 percent on bombs) but keep today's behaviour, no collateral
-  damage, until John decides (default, pending John).
+- **Collateral damage** follows the rule every weapon follows, in
+  [splash damage](missiles.md#splash-damage): a share of the record's damage
+  falling from the collateral percent at the burst to nothing at the radius,
+  measured to each aircraft's surface, whole in the air and halved on the
+  ground. The aircraft a missile strikes takes its direct hit only; friendly
+  fire off spares the shooter's side. A burst is a missile striking an
+  aircraft or the ground, or a flak shell bursting. A surface unit's splash
+  reaches aircraft only (see the next point), so a SAM falling back near its
+  own battery never wrecks it. John decided on 2026-10-10 that splash applies
+  to every weapon, aircraft missiles, rockets and bombs included.
 - **What a surface round can hit.** Aircraft and the terrain only: surface
   units do not fight each other this round, so a round or missile passes
   through ground objects and ships, and a launcher is never hit by its own
@@ -1365,7 +1366,6 @@ carry the label "default, pending John" where they appear above.
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
 | Runway pavement width | Keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
 | Building and unit hit boxes | Real size, a third of retail's in every axis, with the drawn size | Matches John's realistic scale; retail's targets were three times larger and easier to hit |
-| Collateral damage from aircraft weapons | Surface weapons only; aircraft missiles, rockets and bombs keep doing none | Their records carry collateral radii, but turning them on changes every air-to-air fight and is outside this round |
 
 ## Provenance summary
 
@@ -1373,6 +1373,6 @@ carry the label "default, pending John" where they appear above.
 | --- | --- |
 | Unit records, weapon records, template contents, rolls, equipment lists, night rule, `nationality3` pass-through, flak floors and fuze radius, burst, salvo, reload, startup shots, search and preparation times, tracking delay, target flags | retail |
 | B42 phases, missile guidance classes, decoy rules, RWR states | spec-derived |
-| Having a gun rate, magazine and reload (values fitted); the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
-| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, collateral law, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
+| Having a gun rate, magazine and reload (values fitted); splash damage for every weapon; the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
+| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
 | Unready flag producer, hit-chance rule, surface ranking terms, `zoneDist` and `maxVisDist` units, movement word units other than `w_speed`, whether retail Quick Missions activate base defenses | unknown, see [Unknowns](#unknowns) |
