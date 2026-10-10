@@ -122,9 +122,10 @@ pub fn run() -> AppResult<()> {
                 )?;
                 let (moved, added) = built.building_counts();
                 println!(
-                    "airfield sheet: {} plan={} airport={name:?} buildings moved={moved} added={added}",
+                    "airfield sheet: {} plan={} airport={name:?} buildings moved={moved} added={added} lights={}",
                     path.display(),
-                    built.plan
+                    built.plan,
+                    built.lights.len()
                 );
             }
         }

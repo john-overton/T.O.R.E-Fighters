@@ -328,3 +328,58 @@ fn a_plan_for_another_runway_length_is_refused() {
     let error = redrawn_terrain(&map, &plans).err().unwrap().to_string();
     assert!(error.contains("plan expects 7000"), "{error}");
 }
+
+#[test]
+fn the_ils_runway_gets_edge_threshold_papi_and_approach_lights() {
+    use lights::LightKind as K;
+    let plans = builtin();
+    let plan = single(&plans, "STRIP.OT");
+    let parts = [(&plan, [0., 0.])];
+    let (materials, patches) = compose(&parts, None, 0.);
+    let frame = Frame {
+        origin: [0.; 3],
+        right: [1., 0., 0.],
+        forward: [0., 0., 1.],
+    };
+    let all = lights::lights(&parts, None, &patches, &materials, &frame, &|_, _| -50.);
+    let count = |kind| all.iter().filter(|l| l.kind == kind).count();
+    // Three runways, both ends marked: four PAPI lights at each end.
+    assert_eq!(count(K::Papi), 3 * 2 * 4);
+    // The approach lights on the ILS runway's two ends only: 24 barrettes
+    // of five and a crossbar of 16, ten side rows of six, 15 flashers.
+    assert_eq!(count(K::Approach), 2 * (24 * 5 + 16));
+    assert_eq!(count(K::ApproachSide), 2 * 10 * 6);
+    assert_eq!(count(K::Flasher), 2 * 15);
+    // Every 200 ft along both edges of all three runways.
+    assert_eq!(count(K::Edge), 2 * (29 + 25 + 21));
+    assert_eq!(count(K::Threshold), count(K::End));
+    assert!(count(K::Taxiway) > 100);
+    // Near-end PAPI: on the approach's left, the light nearest the runway
+    // switching highest.
+    let mut papi: Vec<_> = all
+        .iter()
+        .filter(|l| {
+            l.kind == K::Papi
+                && l.position[2] < 2_000.
+                && l.position[0] < 0.
+                && l.position[0] > -300.
+        })
+        .collect();
+    papi.sort_by(|a, b| a.position[0].total_cmp(&b.position[0]));
+    let angles: Vec<f64> = papi.iter().map(|l| l.param).collect();
+    assert_eq!(angles, lights::PAPI_ANGLES_DEG);
+    assert!((papi[0].position[2] - tore_sim::airport::AIM_PAST_THRESHOLD_FT).abs() < 1e-9);
+    // No taxiway light stands on pavement; approach lights stand on their
+    // stanchions at least at the runway's height.
+    for light in &all {
+        if light.kind == K::Taxiway {
+            assert!(!on_pavement(
+                &patches,
+                [light.position[0], light.position[2]]
+            ));
+        }
+        if light.kind == K::Approach {
+            assert!(light.position[1] >= 3.);
+        }
+    }
+}

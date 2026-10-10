@@ -102,6 +102,8 @@ pub struct SimRenderer {
     smoke: crate::smoke_renderer::SmokeRenderer,
     effects: crate::effect_renderer::EffectRenderer,
     countermeasures: crate::countermeasure_renderer::Instances,
+    /// Experiment AP1: the redrawn airports' lights.
+    airfield_lights: crate::airfield_lights::Lights,
     battle: Option<(wgpu::Buffer, u32)>,
     battle_contacts: Vec<Contact>,
     airports: Option<(wgpu::Buffer, u32)>,
@@ -178,6 +180,7 @@ struct Pipelines {
     rim_light_pipeline: wgpu::RenderPipeline,
     rim_depth_layout: wgpu::BindGroupLayout,
     countermeasures: crate::countermeasure_renderer::Pipelines,
+    airfield_lights: crate::airfield_lights::Pipeline,
 }
 impl Pipelines {
     fn new(
@@ -449,6 +452,8 @@ impl Pipelines {
             &surface_layout,
             &rim_layout,
         );
+        let airfield_lights =
+            crate::airfield_lights::Pipeline::new(device, shader, format, samples, &surface_layout);
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Retail sky preview"),
             layout: Some(&sky_layout),
@@ -553,6 +558,7 @@ impl Pipelines {
             rim_light_pipeline,
             rim_depth_layout,
             countermeasures,
+            airfield_lights,
         }
     }
 }
@@ -569,12 +575,13 @@ impl SimRenderer {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "{}\n{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}\n{}",
                     include_str!("surface_lighting.wgsl"),
                     include_str!("terrain.wgsl"),
                     include_str!("spotting.wgsl"),
                     include_str!("countermeasures.wgsl"),
-                    include_str!("gun_flash.wgsl")
+                    include_str!("gun_flash.wgsl"),
+                    include_str!("airfield_lights.wgsl")
                 )
                 .into(),
             ),
@@ -790,6 +797,7 @@ impl SimRenderer {
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
             effects: crate::effect_renderer::EffectRenderer::new(device, format, &shader, samples),
             countermeasures: crate::countermeasure_renderer::Instances::new(device),
+            airfield_lights: crate::airfield_lights::Lights::new(),
             battle: None,
             battle_contacts: Vec::new(),
             airports: None,
@@ -1411,6 +1419,7 @@ impl SimRenderer {
         // The world renders at the render-scale size; the lens flare and the
         // resample work at the output size.
         let output = size;
+        self.airfield_lights.update(device, queue, world);
         let slot = self.targets(device, output);
         let size = self.targets[slot].size;
         let weather = scenery.sample_view(world, camera.position[1], camera.weather_slot);
@@ -1788,6 +1797,8 @@ impl SimRenderer {
         pass.set_bind_group(1, &self.lighting.bind, &[]);
         self.countermeasures
             .draw_world(&mut pass, &self.p.countermeasures);
+        self.airfield_lights
+            .draw(&mut pass, &self.p.airfield_lights);
         drop(pass);
         if let Some((_, bind)) = &targets.scaled {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

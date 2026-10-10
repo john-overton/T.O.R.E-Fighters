@@ -13,6 +13,7 @@ mod aim_box;
 mod aircraft;
 mod aircraft_animation;
 mod aircraft_animation_probe;
+mod airfield_lights;
 mod airfield_sheets;
 mod assets;
 mod attitude;

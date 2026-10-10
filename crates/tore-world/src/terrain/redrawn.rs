@@ -23,6 +23,7 @@ mod buildings;
 mod data;
 pub mod geometry;
 pub mod layout;
+pub mod lights;
 pub mod plan;
 
 use super::{Placements, runway_length_ft};
@@ -160,6 +161,8 @@ pub struct Built {
     pub surface: OrientedBox,
     /// The AI's points; `None` leaves the runway without anchors.
     pub anchors: Option<AirfieldAnchors>,
+    /// The airport's lights, drawn by the app; empty for a pair's tile.
+    pub lights: Vec<lights::Light>,
     /// Layout placements moved: index in the layout and the new placement.
     moved: Vec<(usize, Placement)>,
     /// Placements added after the layout's own.
@@ -311,6 +314,7 @@ pub(super) fn apply(
             name = format!("{}+{}", base.object_type, tile.object_type);
         }
         let (materials, patches) = layout::compose(&parts, links, f64::from(base.angle));
+        let airport_lights = lights::lights(&parts, links, &patches, &materials, &frame, &height);
         let a = base_plan.anchors.as_ref();
         let anchor_points: Vec<Point> = a
             .map(|a| {
@@ -396,6 +400,7 @@ pub(super) fn apply(
             patches,
             surface,
             anchors,
+            lights: airport_lights,
             moved: relaid.moved,
             added: relaid.added,
         };
@@ -409,6 +414,7 @@ pub(super) fn apply(
                 patches: Vec::new(),
                 surface,
                 anchors,
+                lights: Vec::new(),
                 moved: Vec::new(),
                 added: Vec::new(),
             });
