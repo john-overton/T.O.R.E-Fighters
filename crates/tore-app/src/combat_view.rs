@@ -813,6 +813,7 @@ pub(crate) mod render_hash_tests {
     }
     fn shape(faces: Vec<Face>) -> Shape {
         Shape {
+            billboards: Vec::new(),
             lines: Vec::new(),
             faces,
             state_words: Default::default(),
@@ -1000,6 +1001,7 @@ pub(crate) mod render_hash_tests {
     }
     pub(crate) fn escape_art() -> crate::ejection_art::Art {
         let pose = |n: usize| Shape {
+            billboards: Vec::new(),
             lines: vec![
                 Line {
                     positions: [[0., 0., 3. + n as f32], [2., 1., 9.]],

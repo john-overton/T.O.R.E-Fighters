@@ -876,6 +876,7 @@ mod tests {
         let mut exhaust = face.clone();
         exhaust.subtype = 0x4c;
         let shape = Shape {
+            billboards: Vec::new(),
             lines: vec![],
             faces: vec![face, exhaust],
             state_words: Default::default(),

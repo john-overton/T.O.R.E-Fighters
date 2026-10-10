@@ -61,6 +61,20 @@ fn hash_shape(h: &mut Fnv, shape: &Shape) {
         h.f32s(&l.positions.concat());
         h.bytes(&[l.color, l.fog as u8]);
     }
+    // Sprites joined the projection after the manifest was first recorded;
+    // hashing them only when present keeps those digests valid while still
+    // catching a recorded shape that gains one.
+    if !shape.billboards.is_empty() {
+        h.u64(shape.billboards.len() as u64);
+        for b in &shape.billboards {
+            h.u64(b.address as u64);
+            h.f32s(&b.center);
+            h.f32s(&b.size);
+            h.f32s(b.uv.as_ref().map_or(&[][..], |uv| uv.as_flattened()));
+            h.bytes(b.texture.as_bytes());
+            h.bytes(&[b.fog as u8]);
+        }
+    }
     h.u64(shape.state_words.len() as u64);
     for w in &shape.state_words {
         h.u64(*w as u64);
