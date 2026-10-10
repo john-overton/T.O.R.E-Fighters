@@ -446,6 +446,7 @@ either way (`0x44354d` onward). Damage and splash are unaffected.
 | What object type 43 draws, so what a cluster burst looks like in single player | Trace type 43 in the shape and effect draw code | Decision 13's presentation-only flashes (opinionated, agent) |
 | Meaning of launcher type bit 0x2 (`+0xa6`) | Read the NPC flag consumers | None needed: no imported aircraft sets it |
 | World axis of the pack stagger relative to north | Read the theater axis convention | Use the store's own lateral axis (fitted) |
+| How a guided bomb falls. GBU and JDAM records (GBU10 0x2a543, GBU29 0x2a043) carry neither 0x10 nor 0x4, so they never get the bomb equation; with no target the creation and loss paths call `0x4c1720`, which commands the current heading, pitch and roll (`0x4c1720` to `0x4c1752`), and the 0x40 command heads for `finalSpeed` 278 | Trace motion types 1 and 2 in `MoveObj` (`0x436c70` and peers) for any fall term | The bomb equation from the guided bomb's current state when it has no spot (plan section 5, fitted) |
 
 ## Bomb sight
 
