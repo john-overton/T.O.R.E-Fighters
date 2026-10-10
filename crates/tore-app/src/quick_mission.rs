@@ -6,6 +6,7 @@ use crate::{
     mission_layout::{FEET_PER_NM, RETAIL_SEPARATIONS, SEPARATION_NM},
     terrain::Terrain,
 };
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, ui::creator::Options};
 use tore_session::wire::messages::ItemKind;
@@ -15,7 +16,9 @@ use tore_sim::ai::{
     experience::EnemySkillOverride,
     launch::{Side, WingId, WingLaunch, WingSelection, resolve_wings},
 };
-use tore_world::mission::{ALTITUDES_FT, Condition, MissionSpec, Skill, Start, WingSpec};
+use tore_world::mission::{
+    ALTITUDES_FT, Condition, Defense, MissionSpec, Skill, Start, WingSpec, ground_targets,
+};
 pub mod matrix;
 /// The aircraft fields of the five wings the AI flies. Field 6 is friendly
 /// wing 1's, which is also the player's own aircraft.
@@ -45,17 +48,19 @@ const DOWN: usize = 73;
 const OBJECTIVE_BASE: usize = 80;
 const OBJECTIVE_COUNT: usize = 6;
 const SURVIVAL_BASE: usize = OBJECTIVE_BASE + OBJECTIVE_COUNT;
-const GROUND_SECTION: usize = 92;
-const GROUND_NOTICE_OK: usize = 93;
-const GROUND_SECTION_RECT: Rect = (334, 294, 278, 49);
-const GROUND_NOTICE_RECT: Rect = (166, 202, 308, 88);
+/// The first row of the Airport list when a ground target is set: the world
+/// picks the runway from the target (`start ground auto`).
+const AUTO_AIRPORT: &str = "Automatic (near the target)";
+/// Said when the AAA or SAM strength is touched with no ground target.
+const NO_TARGET_NOTICE: &str = "Choose a ground target first: the defenses are the target's.";
 /// The tint of a list row the lobby's creator dims: what not everyone has.
 const GAP_TEXT: [u8; 3] = [104, 110, 112];
 /// The same dimming on a field's grey, where [`GAP_TEXT`] would not show.
 const GAP_FIELD_TEXT: [u8; 3] = [158, 165, 167];
-/// The fields the lobby's mission does not carry (the nationalities and the
-/// situation): the read-only creator says they are the King's.
-const NOT_CARRIED: [usize; 3] = [3, 16, 20];
+/// The fields the lobby's mission does not carry (the friendly nationality and
+/// the situation): the read-only creator says they are the King's. The enemy
+/// nationality (field 20) is the mission's, since it picks the target's units.
+const NOT_CARRIED: [usize; 2] = [3, 16];
 /// What those fields read in the read-only creator.
 const AS_THE_KINGS: &str = "as the King's";
 /// Said when a field of the read-only creator is clicked.
@@ -173,7 +178,6 @@ pub struct QuickMission {
     scroll: usize,
     controls: Vec<(usize, Rect)>,
     pub notice: Option<String>,
-    ground_notice: bool,
     pub help: bool,
     pub shift: bool,
     /// The creator is open from a multiplayer lobby (EF8): its OK button
@@ -191,6 +195,10 @@ pub struct QuickMission {
     /// the mission's value: an aircraft this game does not have (by field),
     /// a wing count past the list's end. Empty outside the read-only page.
     shown: BTreeMap<usize, String>,
+    /// The seed of the surface layout, rolled when the creator's OK starts a
+    /// flight with a ground target and kept until the next one, so a restart
+    /// flies the same defenses. 0 until then.
+    surface_seed: u32,
 }
 /// What the creator keeps for the lobby's Cancel to put back: the draft and
 /// everything beside it that Accept would send.
@@ -287,7 +295,7 @@ impl QuickMission {
             airport_objects.push(ids);
             short_strips.push(short);
         }
-        Self {
+        let mut quick = Self {
             debrief: None,
             debrief_to_menu: false,
             ordnance: None,
@@ -318,14 +326,18 @@ impl QuickMission {
             scroll: 0,
             controls: vec![],
             notice: None,
-            ground_notice: false,
             help: false,
             shift: false,
             lobby: false,
             gaps: BTreeMap::new(),
             view: None,
             shown: BTreeMap::new(),
-        }
+            surface_seed: 0,
+        };
+        // The enemy is the first theater's from the start, as a theater
+        // change makes it for every other.
+        quick.draft.values[20] = enemy_nationality(quick.base_theater_index());
+        quick
     }
     /// The ground-start airports of one theater layout (names and object ids),
     /// and the short strips left off that list. `fitted`, agent decision
@@ -509,20 +521,32 @@ impl QuickMission {
             .and_then(|code| self.theater_catalog.iter().position(|c| c == code))
             .unwrap_or(0)
     }
-    fn values(&self, id: usize) -> &[String] {
-        if id == 6 {
+    fn values(&self, id: usize) -> Cow<'_, [String]> {
+        Cow::Borrowed(if id == 6 {
             &self.aircraft_names
         } else if AI_AIRCRAFT_FIELDS.contains(&id) {
             &self.wing_names
         } else if id == 33 {
             &self.start_modes
         } else if id == 34 {
-            &self.airport_names[self.draft.values[13]]
+            let names = &self.airport_names[self.draft.values[13]];
+            if self.has_target() {
+                // The world's own pick first, then the theater's airports.
+                let mut rows = Vec::with_capacity(names.len() + 1);
+                rows.push(AUTO_AIRPORT.to_owned());
+                rows.extend(names.iter().cloned());
+                return Cow::Owned(rows);
+            }
+            names
         } else if id == 30 {
             &self.options.targets[self.base_theater_index()]
         } else {
             &self.options.fields[id]
-        }
+        })
+    }
+    /// A friendly ground target is chosen (field 30 is not "none").
+    fn has_target(&self) -> bool {
+        self.draft.values[30] != 0
     }
     fn value(&self, id: usize) -> String {
         if self.view.is_some() {
@@ -665,7 +689,7 @@ impl QuickMission {
                 .map(|(label, _)| label)
                 .collect()
         } else {
-            self.values(id).to_vec()
+            self.values(id).into_owned()
         }
     }
     /// The six wing rows as the AI launch payload: side, aircraft, wing skill
@@ -726,6 +750,7 @@ impl QuickMission {
                 runway,
                 altitude_ft,
             },
+            None if self.ground_auto() => Start::GroundAuto { altitude_ft },
             None => Start::Airborne { altitude_ft },
         };
         spec.separation_nm = self.separation_nm() as u32;
@@ -743,7 +768,31 @@ impl QuickMission {
         }
         spec.objectives = self.group_objectives;
         spec.must_survive = self.group_must_survive;
+        // The ground target, by its template's stem, and the defenses that
+        // go with it (the creator clears them with no target).
+        if self.has_target() {
+            spec.ground_target = Some(
+                ground_targets(&theater)
+                    .get(v[30] - 1)
+                    .ok_or("Choose one of this theater's ground targets.")?
+                    .to_string(),
+            );
+            spec.aaa = Defense::from_level(v[31]).ok_or("Choose an AAA strength.")?;
+            spec.sam = Defense::from_level(v[32]).ok_or("Choose a SAM strength.")?;
+        }
+        spec.enemy_nationality = u8::try_from(v[20])
+            .ok()
+            .filter(|n| *n < tore_world::mission::NATIONALITIES)
+            .ok_or("Choose one of the enemy nationalities.")?;
+        spec.surface_seed = self.surface_seed;
         Ok(spec)
+    }
+    /// Draws the surface layout's seed for the flight about to start, when it
+    /// has a ground target to lay out. Kept until the next flight, so a
+    /// restart reuses it. `fitted`: any nonzero 32-bit value; the clock and
+    /// the process make it, as nothing here has to be reproducible.
+    pub fn roll_surface_seed(&mut self) {
+        self.surface_seed = if self.has_target() { fresh_seed() } else { 0 };
     }
     /// The aircraft/count pairs the current mission spawner still takes. This
     /// is the launch payload with side, member and experience dropped; it stays
@@ -764,14 +813,22 @@ impl QuickMission {
     pub fn ground_start(&self) -> bool {
         self.draft.values[33] == 1
     }
+    /// The runway the draft chose by name. With a ground target the Airport
+    /// list's first row is the world's own pick (`ground_auto`), and the
+    /// airports follow it.
     pub fn ground_runway(&self) -> Option<u32> {
         self.ground_start()
             .then(|| {
-                self.airport_objects[self.draft.values[13]]
-                    .get(self.draft.values[34])
-                    .copied()
+                let at = self.draft.values[34].checked_sub(usize::from(self.has_target()))?;
+                self.airport_objects[self.draft.values[13]].get(at).copied()
             })
             .flatten()
+    }
+    /// A ground start whose runway the world picks from the ground target
+    /// (`start ground auto`): the default when a target is set and no runway
+    /// was picked.
+    pub fn ground_auto(&self) -> bool {
+        self.ground_start() && self.has_target() && self.draft.values[34] == 0
     }
     pub fn choose_ground_runway(&mut self, object: u32) -> Result<(), String> {
         if let Some((_, name)) = self
@@ -788,7 +845,7 @@ impl QuickMission {
             .position(|id| *id == object)
             .ok_or_else(|| "No imported runway matches the chosen airport".to_string())?;
         self.apply(33, 1);
-        self.apply(34, index);
+        self.apply(34, index + usize::from(self.has_target()));
         Ok(())
     }
     /// The chosen enemy separation in nautical miles (manual p.19). An index
@@ -813,7 +870,7 @@ impl QuickMission {
                     .into(),
             );
         }
-        if self.ground_start() && self.ground_runway().is_none() {
+        if self.ground_start() && self.ground_runway().is_none() && !self.ground_auto() {
             return Some(
                 "No imported runways are available in this theater. Choose Airborne.".into(),
             );
@@ -834,11 +891,6 @@ impl QuickMission {
                 "The AI cannot fly the {} yet, so friendly wing 1 can only hold you. Set friendly wing 1 to one aircraft.",
                 player.label()
             ));
-        }
-        if v[30] != 0 || v[31] != 0 || v[32] != 0 {
-            return Some(
-                "Ground targets and defenses are not available yet. Select none to fly.".into(),
-            );
         }
         if condition(v[15]).is_none() {
             return Some("Choose one of the six available weather conditions.".into());
@@ -898,7 +950,36 @@ impl QuickMission {
             .ok_or_else(|| format!("This creator has no theater {}.", spec.theater))?;
         v[13] = theater;
         v[3] = 0;
-        v[20] = enemy_nationality(self.base_theater_index_of(theater));
+        v[20] = if usize::from(spec.enemy_nationality) < self.options.fields[20].len() {
+            usize::from(spec.enemy_nationality)
+        } else {
+            unshown.insert(
+                20,
+                (
+                    spec.enemy_nationality.to_string(),
+                    format!("enemy nationality {}", spec.enemy_nationality),
+                ),
+            );
+            enemy_nationality(self.base_theater_index_of(theater))
+        };
+        if let Some(stem) = &spec.ground_target {
+            let offered = self.options.targets[self.base_theater_index_of(theater)].len();
+            match ground_targets(&spec.theater)
+                .iter()
+                .position(|offer| offer == stem)
+                .map(|at| at + 1)
+                .filter(|at| *at < offered)
+            {
+                Some(at) => {
+                    v[30] = at;
+                    v[31] = spec.aaa.level();
+                    v[32] = spec.sam.level();
+                }
+                None => {
+                    unshown.insert(30, (stem.clone(), format!("the ground target {stem}")));
+                }
+            }
+        }
         v[15] = (0..6)
             .find(|index| condition(*index).and_then(Condition::from_index) == Some(spec.condition))
             .ok_or("This creator cannot show the mission's weather.")?;
@@ -1010,6 +1091,12 @@ impl QuickMission {
         over.wings = spec.wings;
         over.objectives = spec.objectives;
         over.must_survive = spec.must_survive;
+        // The ground target and its defenses are the creator's; the seed is
+        // the host's to draw when the flight starts.
+        over.ground_target = spec.ground_target;
+        over.aaa = spec.aaa;
+        over.sam = spec.sam;
+        over.enemy_nationality = spec.enemy_nationality;
         // A lobby's mission carries no loadouts: each player arms their own.
         over.loadout = None;
         over.plane_loadouts.clear();
@@ -1134,9 +1221,13 @@ impl QuickMission {
             return Err(problem);
         }
         let mut spec = self.mission_spec()?;
-        if let Start::Ground { altitude_ft, .. } = spec.start {
-            spec.start = Start::Airborne { altitude_ft };
+        if spec.start.on_ground() {
+            spec.start = Start::Airborne {
+                altitude_ft: spec.start.altitude_ft(),
+            };
         }
+        // The host draws the seed when the flight starts.
+        spec.surface_seed = 0;
         // The host reads the mission as text: what the text cannot carry
         // would silently change on the way.
         match MissionSpec::from_text(&spec.to_text()) {
@@ -1146,16 +1237,24 @@ impl QuickMission {
         }
     }
     fn apply(&mut self, id: usize, value: usize) {
+        let had_target = self.has_target();
         self.draft.values[id] = value;
         self.draft.values[4] = self.draft.values[4].max(1);
-        if self.draft.values[30] == 0 {
-            self.draft.values[31] = 0;
-            self.draft.values[32] = 0;
-        }
         if id == 13 {
             self.draft.values[34] = 0;
             self.draft.values[30] = 0;
             self.nationalities();
+        }
+        // The Airport list gains its first row (the world's pick) with a
+        // target, so its index starts over when a target comes or goes.
+        if id == 30 && had_target != self.has_target() {
+            self.draft.values[34] = 0;
+        }
+        // No ground target, no defenses (retail clears both). A theater
+        // change clears the target above, so it clears them here too.
+        if !self.has_target() {
+            self.draft.values[31] = 0;
+            self.draft.values[32] = 0;
         }
         self.aircraft_selection = self.draft.values[6];
         self.selection = self.theater_index();
@@ -1173,14 +1272,18 @@ impl QuickMission {
             ));
         }
     }
-    fn show_ground_notice(&mut self) {
-        self.cancel();
-        self.notice = None;
-        self.ground_notice = true;
+    /// The defenses are the ground target's: with none, touching their
+    /// fields says so and changes nothing. True when it did.
+    fn refuse_defense(&mut self, id: usize) -> bool {
+        if matches!(id, 31 | 32) && !self.has_target() {
+            self.cancel();
+            self.notice = Some(NO_TARGET_NOTICE.into());
+            return true;
+        }
+        false
     }
     fn open(&mut self, id: usize) {
-        if (30..=32).contains(&id) {
-            self.show_ground_notice();
+        if self.refuse_defense(id) {
             return;
         }
         self.selector = Some(id);
@@ -1247,6 +1350,12 @@ impl QuickMission {
     /// The read-only creator as a player who is not the King sees it.
     fn preview_view(&mut self, name: &str) -> crate::AppResult<()> {
         let mut spec = self.preview_spec()?;
+        if name.ends_with("-target") {
+            // The King's mission names a ground target and its defenses.
+            spec.ground_target = ground_targets(&spec.theater).first().map(|s| s.to_string());
+            spec.aaa = Defense::Moderate;
+            spec.sam = Defense::Heavy;
+        }
         let gaps = name.ends_with("-gaps");
         if gaps {
             // This game lacks the last aircraft: the enemy's third wing
@@ -1358,7 +1467,26 @@ impl QuickMission {
             // Debrief pages are prepared by the snapshot host.
             state if state.starts_with("debrief") => {}
             "help" => self.help = true,
-            "ground-targets-unavailable" => self.show_ground_notice(),
+            // A ground target with its defenses (the theater's first target,
+            // AAA moderately, SAMs heavily), its last, and a ground start the
+            // world places from the target.
+            "ground-target" | "ground-target-last" | "ground-start-auto" => {
+                let last = self.values(30).len().saturating_sub(1);
+                self.apply(
+                    30,
+                    if name == "ground-target-last" {
+                        last
+                    } else {
+                        1
+                    },
+                );
+                self.apply(31, if name == "ground-target-last" { 1 } else { 2 });
+                self.apply(32, if name == "ground-target-last" { 2 } else { 3 });
+                if name == "ground-start-auto" {
+                    self.apply(33, 1);
+                }
+            }
+            "lobby-creator-view-target" => self.preview_view(name)?,
             "ground-start" => self.apply(33, 1),
             "airports" => {
                 self.apply(33, 1);
@@ -1373,7 +1501,7 @@ impl QuickMission {
                 self.open(OBJECTIVE_BASE + group - 1);
             }
             _ => {
-                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..35).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, airports, objective-1 through objective-6, theaters, help, field-3 through field-34")?;
+                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..35).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, ground-start-auto, ground-target, ground-target-last, airports, objective-1 through objective-6, theaters, help, field-3 through field-34")?;
                 self.open(id);
             }
         }
@@ -1444,7 +1572,7 @@ impl QuickMission {
             self.right_pressed = None;
             return o.right(down);
         }
-        if self.selector.is_some() || self.help || self.ground_notice {
+        if self.selector.is_some() || self.help {
             self.right_pressed = None;
             return Action::None;
         }
@@ -1452,7 +1580,6 @@ impl QuickMission {
             self.pressed = None;
             self.right_pressed = self.hover.filter(|id| {
                 (3..=34).contains(id)
-                    || *id == GROUND_SECTION
                     || (OBJECTIVE_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT).contains(id)
             });
             return Action::None;
@@ -1469,8 +1596,8 @@ impl QuickMission {
             self.notice = Some(kind.refusal().into());
             return Action::Click;
         }
-        if matches!(id, 30..=32 | GROUND_SECTION) {
-            self.show_ground_notice();
+        if self.refuse_defense(id) {
+            self.focus = id;
             return Action::Click;
         }
         if self.lobby && matches!(id, 33 | 34) {
@@ -1543,7 +1670,6 @@ impl QuickMission {
         self.hover = None;
         self.selector = None;
         self.help = false;
-        self.ground_notice = false;
     }
     /// A press in the read-only creator: Back closes it, and a field says
     /// that it cannot be changed. Nothing else happens.
@@ -1552,7 +1678,7 @@ impl QuickMission {
             0 => self.help = !self.help,
             61 => return Action::Exit,
             OK | CANCEL => return Action::Back,
-            3..=34 | 60 | OBJECTIVE_BASE..=GROUND_SECTION => {
+            3..=34 | 60 | OBJECTIVE_BASE..=91 => {
                 self.focus = id;
                 self.notice = Some(kind.refusal().into());
             }
@@ -1563,14 +1689,6 @@ impl QuickMission {
     fn activate(&mut self, id: usize) -> Action {
         if let Some(kind) = self.view {
             return self.activate_view(kind, id);
-        }
-        if self.ground_notice {
-            return if id == GROUND_NOTICE_OK {
-                self.cancel();
-                Action::Click
-            } else {
-                Action::None
-            };
         }
         if let Some(field) = self.selector {
             match id {
@@ -1628,11 +1746,13 @@ impl QuickMission {
                 if let Some(message) = self.unsupported() {
                     self.notice = Some(message);
                 } else {
+                    // A new flight, a new layout of its defenses.
+                    self.roll_surface_seed();
                     return Action::Mission;
                 }
             }
             CANCEL => return Action::Back,
-            30..=32 | GROUND_SECTION => self.show_ground_notice(),
+            31 | 32 if self.refuse_defense(id) => self.focus = id,
             33 | 34 if self.lobby => {
                 self.focus = id;
                 self.notice = Some(AIRBORNE_NOTICE.into());
@@ -1677,13 +1797,6 @@ impl QuickMission {
         // Enter closes the read-only creator, as Back does.
         if self.view.is_some() && key == "Enter" {
             return Action::Back;
-        }
-        if self.ground_notice {
-            return if matches!(key, "Enter" | " " | "Escape") {
-                self.activate(GROUND_NOTICE_OK)
-            } else {
-                Action::None
-            };
         }
         if key == "Escape" {
             // The lobby's notice is not in the way of Cancel (EF8).
@@ -1891,7 +2004,6 @@ impl QuickMission {
                 &[("Airport: ", None), ("", Some(34))],
             );
         }
-        self.controls.push((GROUND_SECTION, GROUND_SECTION_RECT));
         let (mut x, mut y) = (340, 301);
         for (text, id) in [
             ("Friendly ground target is ", None),
@@ -2019,20 +2131,6 @@ impl QuickMission {
             self.button(&mut c, sprites, POP_OK, "OK", (217, 437, 85, 24));
             self.button(&mut c, sprites, POP_CANCEL, "Cancel", (312, 437, 85, 24));
         }
-        if self.ground_notice {
-            self.controls.clear();
-            let (x, y, w, h) = GROUND_NOTICE_RECT;
-            c.rect((x + 4, y + 4, w, h), [16, 19, 20, 255]);
-            c.rect(GROUND_NOTICE_RECT, [35, 44, 46, 255]);
-            bevel(&mut c, GROUND_NOTICE_RECT, false);
-            for (text, y) in [
-                ("Ground targets, AAA and SAMs", 214),
-                ("are not implemented yet.", 231),
-            ] {
-                c.centered_text(font, text, (174, y, 292, 13));
-            }
-            self.button(&mut c, sprites, GROUND_NOTICE_OK, "OK", (285, 255, 85, 24));
-        }
         animating
     }
     fn line(
@@ -2104,7 +2202,7 @@ impl QuickMission {
             sprites,
             label,
             (r.0, r.1, r.2),
-            matches!(id, OK | POP_OK | GROUND_NOTICE_OK),
+            matches!(id, OK | POP_OK),
             self.pressed == Some(id),
         );
         self.controls.push((id, hit));
@@ -2138,7 +2236,21 @@ fn stripe(c: &mut Canvas, (x, y, w, h): Rect, selected: bool) {
 /// The enemy nationality field's value for a base theater (the first field,
 /// the friendly nationality, is always 0).
 fn enemy_nationality(base_theater: usize) -> usize {
-    [10, 33, 14, 57, 3, 41, 23, 10, 20, 37, 34, 24, 9, 2, 10, 2][base_theater]
+    tore_formats::quick_template::tables::ENEMY_NATIONALITY[base_theater]
+}
+/// A fresh nonzero seed: the clock, the process and a counter, mixed.
+fn fresh_seed() -> u32 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let mut z = nanos
+        ^ (u64::from(std::process::id()) << 32)
+        ^ COUNT.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    ((z ^ (z >> 31)) as u32).max(1)
 }
 fn source_theaters() -> [&'static str; 16] {
     tore_world::mission::THEATERS
@@ -2255,6 +2367,7 @@ pub fn hud(
 mod tests {
     use super::*;
     use tore_sim::ai::launch::legacy_pairs;
+    use tore_world::mission::default_enemy_nationality;
     #[test]
     fn a_multiplayer_debrief_returns_to_the_menu_and_a_single_player_one_to_the_creator() {
         let mut q = setup();
@@ -2280,8 +2393,8 @@ mod tests {
             .position(|name| *name == "UKR")
             .unwrap();
         assert_eq!(q.base_theater_index(), base);
-        assert_eq!(q.values(30), q.options.targets[base]);
-        assert_eq!(q.values(34), ["Variant runway"]);
+        assert_eq!(&q.values(30)[..], &q.options.targets[base][..]);
+        assert_eq!(&q.values(34)[..], ["Variant runway"]);
         q.apply(33, 1);
         assert_eq!(q.ground_runway(), Some(0x4000_0003));
         q.theater(0);
@@ -2302,10 +2415,30 @@ mod tests {
         assert_eq!(q.theater_codes[q.draft.values[13]], "UKR");
     }
     fn setup() -> QuickMission {
+        // The retail list sizes: a target list per theater (the templates'),
+        // and the four strengths of the AAA and SAM fields.
         let mut options = Options {
             fields: vec![vec!["value".into(); 60]; 33],
-            targets: vec![vec!["none".into(), "target".into()]; 16],
+            targets: tore_formats::quick_template::tables::TEMPLATES
+                .iter()
+                .map(|stems| {
+                    (0..stems.len())
+                        .map(|i| {
+                            if i == 0 {
+                                "none".into()
+                            } else {
+                                format!("target {i}")
+                            }
+                        })
+                        .collect()
+                })
+                .collect(),
         };
+        for id in [31, 32] {
+            options.fields[id] = ["not", "lightly", "moderately", "heavily"]
+                .map(String::from)
+                .to_vec();
+        }
         options.fields[15] = [
             "dawn",
             "clear",
@@ -2590,41 +2723,30 @@ mod tests {
         assert!(matches!(right_click(&mut q, 15), Action::None));
         assert_eq!(q.draft.values, before);
         q.cancel();
-        for field in [30, 31, 32, GROUND_SECTION] {
-            // Both pointer buttons show the notice without editing the draft.
+        // The defenses are a target's: with none, both pointer buttons, the
+        // keys and a direct open say so and change nothing.
+        for field in [31, 32] {
             q.hover = Some(field);
             q.down();
             assert!(matches!(q.up(), Action::Click));
-            assert!(q.ground_notice);
+            assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
             assert!(q.selector.is_none());
-            assert!(matches!(q.activate(OK), Action::None));
-            assert!(matches!(right_click(&mut q, 15), Action::None));
-            q.key("Escape", false);
+            q.notice = None;
             assert!(matches!(right_click(&mut q, field), Action::Click));
-            assert!(q.ground_notice);
-            q.key("Enter", false);
-            assert!(!q.ground_notice);
-            assert_eq!(q.draft.values, before);
-        }
-        for field in 30..=32 {
+            assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
+            q.notice = None;
             q.focus = field;
             for shift in [false, true] {
                 q.key("Enter", shift);
-                assert!(q.ground_notice);
+                assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
                 assert!(q.selector.is_none());
-                q.activate(GROUND_NOTICE_OK);
-                assert_eq!(q.draft.values, before);
+                q.notice = None;
             }
-            q.open(field); // Direct selector previews must not bypass the guard.
-            assert!(q.ground_notice && q.selector.is_none());
+            q.open(field);
+            assert!(q.selector.is_none());
             q.cancel();
+            assert_eq!(q.draft.values, before);
         }
-        // The sentence background, away from its value boxes, is also clickable.
-        q.controls = vec![(GROUND_SECTION, GROUND_SECTION_RECT)];
-        q.pointer(Some((340., 298.)));
-        q.down();
-        q.up();
-        assert!(q.ground_notice);
         q.key(" ", false);
         q.activate(15);
         assert_ne!(q.draft.values[15], before[15]);
@@ -2686,9 +2808,14 @@ mod tests {
         assert!(q.lobby_problem().unwrap().contains("developer theater"));
         assert!(q.lobby_spec().is_err());
         q.apply(13, 0);
-        q.draft.values[30] = 1;
-        assert!(q.lobby_problem().unwrap().contains("Ground targets"));
-        q.draft.values[30] = 0;
+        // A ground target is a mission a host takes.
+        q.apply(30, 1);
+        q.apply(31, 1);
+        assert!(q.lobby_problem().is_none());
+        let spec = q.lobby_spec().expect("a mission with a target");
+        assert_eq!(spec.ground_target.as_deref(), Some("QUSFLT"));
+        assert_eq!((spec.aaa, spec.sam), (Defense::Light, Defense::None));
+        q.apply(30, 0);
         // OK is Accept: it still answers Mission, which the lobby takes.
         assert_eq!(q.activate(OK), Action::Mission);
         // Esc leaves with the notice up, and Cancel puts the draft back.
@@ -2700,6 +2827,255 @@ mod tests {
         q.leave_lobby();
         assert!(!q.lobby && q.notice.is_none());
     }
+    // ---- the ground target and its defenses (surface-AI round, slice Q1) ----
+
+    #[test]
+    fn every_theaters_target_list_is_its_template_list_and_each_target_round_trips() {
+        use tore_formats::quick_template::tables::{ENEMY_NATIONALITY, TEMPLATES, THEATERS};
+        let mut q = lobby_creator();
+        for (index, theater) in THEATERS.into_iter().enumerate() {
+            let at = q.theater_codes.iter().position(|c| c == theater).unwrap();
+            q.apply(13, at);
+            assert_eq!(q.values(30).len(), TEMPLATES[index].len(), "{theater}");
+            assert_eq!(q.draft.values[30], 0, "a theater starts with no target");
+            for (target, stem) in TEMPLATES[index].iter().enumerate().skip(1) {
+                q.apply(30, target);
+                q.apply(31, target % 4);
+                q.apply(32, (target + 1) % 4);
+                let spec = q.mission_spec().unwrap();
+                assert_eq!(spec.ground_target.as_deref(), Some(*stem), "{theater}");
+                assert_eq!(spec.aaa.level(), target % 4);
+                assert_eq!(spec.sam.level(), (target + 1) % 4);
+                assert_eq!(
+                    usize::from(spec.enemy_nationality),
+                    ENEMY_NATIONALITY[index]
+                );
+                // The host takes it as text, and a creator reads it back.
+                let sent = q.lobby_spec().unwrap();
+                assert_eq!(MissionSpec::from_text(&sent.to_text()).unwrap(), sent);
+                let draft = q.draft.values;
+                q.load_spec(&sent, true).unwrap();
+                assert_eq!(q.draft.values[30..=32], draft[30..=32], "{theater} {stem}");
+                assert_eq!(q.lobby_spec().unwrap(), sent);
+            }
+            // The "nothing" entry is no target.
+            q.apply(30, 0);
+            assert_eq!(q.mission_spec().unwrap().ground_target, None);
+        }
+    }
+
+    #[test]
+    fn the_creator_shows_the_retail_strength_words_and_the_text_form_the_plain_ones() {
+        let mut q = lobby_creator();
+        q.apply(30, 1);
+        for (level, retail, plain) in [
+            (0, "not", "none"),
+            (1, "lightly", "light"),
+            (2, "moderately", "moderate"),
+            (3, "heavily", "heavy"),
+        ] {
+            q.apply(31, level);
+            q.apply(32, level);
+            assert_eq!(
+                (q.value(31).as_str(), q.value(32).as_str()),
+                (retail, retail)
+            );
+            let text = q.mission_spec().unwrap().to_text();
+            if level > 0 {
+                assert!(
+                    text.contains(&format!("defenses aaa {plain} sam {plain}")),
+                    "{text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_defenses_go_when_the_target_does_and_wait_for_one() {
+        let mut q = lobby_creator();
+        // With no target the defenses cannot be touched: a notice says why.
+        for field in [31, 32] {
+            q.focus = field;
+            q.notice = None;
+            assert_eq!(q.activate(field), Action::Click);
+            assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
+            assert_eq!(q.draft.values[field], 0);
+        }
+        q.apply(30, 2);
+        q.apply(31, 3);
+        q.apply(32, 1);
+        assert_eq!(q.activate(31), Action::Click);
+        assert_eq!(q.draft.values[31], 0, "the strength cycles with a target");
+        // None clears both, as retail does.
+        q.apply(31, 3);
+        q.apply(30, 0);
+        assert_eq!((q.draft.values[31], q.draft.values[32]), (0, 0));
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(
+            (spec.ground_target, spec.aaa, spec.sam),
+            (None, Defense::None, Defense::None)
+        );
+        // A theater change clears the target and the defenses with it, at
+        // once (retail leaves them to the next change).
+        q.apply(30, 1);
+        q.apply(31, 2);
+        q.apply(32, 2);
+        q.apply(13, 3);
+        assert_eq!(q.draft.values[30..=32], [0, 0, 0]);
+    }
+
+    #[test]
+    fn the_flight_draws_the_surface_seed_and_a_restart_keeps_it() {
+        let mut q = lobby_creator();
+        q.lobby = false;
+        // No target, no layout to seed: the mission text is what it was.
+        assert_eq!(q.activate(OK), Action::Mission);
+        assert_eq!(q.mission_spec().unwrap().surface_seed, 0);
+        assert!(!q.mission_spec().unwrap().to_text().contains("surface-seed"));
+        q.apply(30, 1);
+        assert_eq!(q.activate(OK), Action::Mission);
+        let seed = q.mission_spec().unwrap().surface_seed;
+        assert_ne!(seed, 0);
+        // The restart builds the same spec again; the next flight rolls anew.
+        assert_eq!(q.mission_spec().unwrap().surface_seed, seed);
+        assert!(
+            q.mission_spec()
+                .unwrap()
+                .to_text()
+                .contains(&format!("surface-seed {seed}\n"))
+        );
+        let seeds: std::collections::BTreeSet<u32> = (0..50)
+            .map(|_| {
+                q.roll_surface_seed();
+                q.surface_seed
+            })
+            .collect();
+        assert!(seeds.len() > 40 && !seeds.contains(&0), "{seeds:?}");
+        // The host draws its own: the lobby's mission carries none.
+        q.surface_seed = 99;
+        q.lobby = true;
+        assert_eq!(q.lobby_spec().unwrap().surface_seed, 0);
+    }
+
+    #[test]
+    fn the_enemy_nationality_is_the_missions_and_a_theaters_own_is_not_written() {
+        let mut q = lobby_creator();
+        let default = q.mission_spec().unwrap();
+        assert_eq!(
+            default.enemy_nationality,
+            default_enemy_nationality(&default.theater)
+        );
+        assert!(!default.to_text().contains("enemy-nationality"));
+        q.apply(20, 5);
+        let chosen = q.lobby_spec().unwrap();
+        assert_eq!(chosen.enemy_nationality, 5);
+        assert!(chosen.to_text().contains("enemy-nationality 5\n"));
+        // A creator opened on that mission has it, and the read-only one
+        // shows it instead of "as the King's".
+        let mut other = lobby_creator();
+        other.load_spec(&chosen, true).unwrap();
+        assert_eq!(other.draft.values[20], 5);
+        other.lobby = false;
+        other
+            .open_lobby_mission(&chosen, Some(ViewKind::Reader))
+            .unwrap();
+        assert_eq!(other.value(20), "value");
+        assert!(other.view_tint(20).is_none());
+        assert!(NOT_CARRIED.iter().all(|field| *field != 20));
+        // Laid over the lobby's mission, it goes with the rest.
+        let lobby = MissionSpec::new("UKR", AircraftId::F18);
+        assert_eq!(QuickMission::lay_over(&lobby, chosen).enemy_nationality, 5);
+    }
+
+    #[test]
+    fn a_ground_start_with_a_target_is_auto_until_a_runway_is_picked() {
+        let mut q = setup();
+        q.airport_names[0] = vec!["First Field".into(), "Second Field".into()];
+        q.airport_objects[0] = vec![0x4000_0000, 0x4000_0003];
+        q.apply(33, 1);
+        // With no target the list is the airports, the first one chosen.
+        assert_eq!(&q.values(34)[..], ["First Field", "Second Field"]);
+        assert_eq!(q.ground_runway(), Some(0x4000_0000));
+        assert!(!q.ground_auto());
+        assert!(matches!(
+            q.mission_spec().unwrap().start,
+            Start::Ground { .. }
+        ));
+        // A target brings the world's own pick in front, and it is the default.
+        q.apply(30, 1);
+        assert_eq!(q.values(34)[0], AUTO_AIRPORT);
+        assert_eq!(q.values(34).len(), 3);
+        assert!(q.ground_auto() && q.ground_runway().is_none());
+        assert_eq!(q.value(34), AUTO_AIRPORT);
+        assert!(q.unsupported().is_none());
+        let spec = q.mission_spec().unwrap();
+        assert_eq!(spec.start, Start::GroundAuto { altitude_ft: 5_000 });
+        assert!(spec.to_text().contains("start ground auto\n"));
+        // Picking an airport by name keeps it; the lobby turns either start
+        // into an airborne one.
+        q.apply(34, 2);
+        assert_eq!(q.ground_runway(), Some(0x4000_0003));
+        assert!(!q.ground_auto());
+        assert_eq!(
+            q.mission_spec().unwrap().start,
+            Start::Ground {
+                runway: 0x4000_0003,
+                altitude_ft: 5_000
+            }
+        );
+        q.choose_ground_runway(0x4000_0000).unwrap();
+        assert_eq!(q.ground_runway(), Some(0x4000_0000));
+        assert_eq!(
+            q.draft.values[34], 1,
+            "the first airport follows the auto row"
+        );
+        // Dropping the target puts the list back to the airports.
+        q.apply(30, 0);
+        assert_eq!(q.draft.values[34], 0);
+        assert_eq!(q.ground_runway(), Some(0x4000_0000));
+        // A theater with no airports can still start on auto with a target.
+        q.apply(13, 3);
+        q.apply(33, 1);
+        q.airport_names[3].clear();
+        q.airport_objects[3].clear();
+        assert!(q.unsupported().unwrap().contains("No imported runways"));
+        q.apply(30, 1);
+        assert!(q.ground_auto() && q.unsupported().is_none());
+        q.lobby = true;
+        assert!(matches!(
+            q.lobby_spec().unwrap().start,
+            Start::Airborne { .. }
+        ));
+    }
+
+    #[test]
+    fn the_read_only_creator_shows_the_target_and_its_defenses_and_changes_none() {
+        let mut spec = MissionSpec::new("EGY", AircraftId::F18);
+        spec.ground_target = Some(ground_targets("EGY")[2].to_string());
+        spec.aaa = Defense::Heavy;
+        spec.sam = Defense::Light;
+        let mut q = viewer(&spec);
+        assert_eq!(q.draft.values[30..=32], [3, 3, 1]);
+        assert_eq!(
+            [q.value(30), q.value(31), q.value(32)],
+            ["target 3", "heavily", "lightly"]
+        );
+        for field in [30, 31, 32] {
+            q.notice = None;
+            assert_eq!(q.activate(field), Action::Click);
+            assert_eq!(q.notice.as_deref(), Some(VIEW_REFUSAL));
+            assert!(q.selector.is_none());
+        }
+        assert_eq!(q.draft.values[30..=32], [3, 3, 1]);
+        assert_eq!(q.lobby_spec().unwrap(), spec);
+        // A target this creator's list has no entry for is not silently lost.
+        let mut odd = spec.clone();
+        odd.ground_target = Some("QEARMOR".into());
+        let mut short = lobby_creator();
+        short.options.targets[2].truncate(3);
+        assert!(short.load_spec(&odd, true).unwrap_err().contains("QEARMOR"));
+    }
+
     /// The words the host would give for the Rafale and for a theater.
     fn some_gaps(q: &mut QuickMission) {
         let theater = q.theater_codes[1].clone();
@@ -3115,7 +3491,7 @@ mod tests {
         q.apply(6, 0);
         // Every editor row maps to its intended source weather, including night.
         assert_eq!(
-            q.values(15),
+            &q.values(15)[..],
             ["dawn", "clear", "cloudy", "foggy", "sunset", "night"]
         );
         for (value, source) in [3, 0, 1, 2, 4, 5].into_iter().enumerate() {
@@ -3126,8 +3502,11 @@ mod tests {
         q.apply(15, 6);
         assert!(q.unsupported().unwrap().contains("six available"));
         q.apply(15, 1);
+        // A ground target and its defenses are a mission the game flies.
         q.apply(30, 1);
-        assert!(q.unsupported().unwrap().contains("Ground"));
+        q.apply(31, 2);
+        q.apply(32, 3);
+        assert!(q.unsupported().is_none());
     }
     // ---- the lobby's mission read back, and read-only (lobby pass, L4) ----
 
@@ -3258,6 +3637,12 @@ mod tests {
         };
         q.load_spec(&ground, true).unwrap();
         assert!(!q.ground_start());
+        let mut auto = spec.clone();
+        auto.start = Start::GroundAuto {
+            altitude_ft: 10_000,
+        };
+        q.load_spec(&auto, true).unwrap();
+        assert!(!q.ground_start());
         let mut airborne = spec;
         airborne.start = Start::Airborne {
             altitude_ft: 10_000,
@@ -3320,7 +3705,7 @@ mod tests {
         assert!(q.notice.as_deref().is_some_and(|n| n.contains("View only")));
         let before = (q.draft.clone(), q.group_objectives, q.group_must_survive);
         let fields: Vec<usize> = (3..=34)
-            .chain([60, GROUND_SECTION])
+            .chain([60])
             .chain(OBJECTIVE_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT)
             .collect();
         for id in &fields {
@@ -3335,10 +3720,7 @@ mod tests {
                 assert_eq!(right_click(&mut q, *id), Action::Click);
                 assert_eq!(q.notice.as_deref(), Some(VIEW_REFUSAL), "right {id}");
             }
-            assert!(
-                q.selector.is_none() && !q.ground_notice,
-                "{id} opened a pop-up"
-            );
+            assert!(q.selector.is_none(), "{id} opened a pop-up");
         }
         for key in ["Tab", "ArrowDown", "ArrowUp", " ", "Home", "x"] {
             q.key(key, false);

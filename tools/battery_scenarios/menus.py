@@ -41,13 +41,13 @@ NORMAL_STATES = [
 QUICK_STATES = [
     "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
     "ordnance-message", "ordnance-message-long", "debrief", "debrief-2", "debrief-3", "debrief-4",
-    "debrief-5", "debrief-success", "objectives", "ground-start", "airports", "ground-targets-unavailable",
+    "debrief-5", "debrief-success", "objectives", "ground-start", "airports", "ground-start-auto", "ground-target", "ground-target-last", "field-30",
     "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
     # Stage L (slice L4): the lobby's creator and Load Ordnance with items not every player has dimmed.
     "lobby-creator-gaps", "lobby-creator-gap-notice", "lobby-creator-gap-theaters", "lobby-ordnance-gaps",
     # Lobby pass (slice L4): the mission page read-only, for a player who is not the King.
     "lobby-creator-view", "lobby-creator-view-gaps", "lobby-creator-view-click", "lobby-creator-view-changed",
-    "lobby-creator-view-flying", "lobby-creator-view-locked",
+    "lobby-creator-view-flying", "lobby-creator-view-locked", "lobby-creator-view-target",
 ]
 THEATERS = ["BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU", "NSK", "WTA", "UKR", "VLA"]
 VARIANT_THEATERS = [f"~{code}{n}" for code in ("UKR", "VLA") for n in range(1, 9)] + ["~UKRF", "~VLAF", "~WTAF"]
