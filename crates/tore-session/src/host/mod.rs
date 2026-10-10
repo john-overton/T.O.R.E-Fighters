@@ -680,6 +680,21 @@ fn build_world(
     Ok((journal::Driver::new(world), reads.manifest()))
 }
 
+/// `spec` with a surface seed when it has a ground target and none was drawn
+/// (protocol 22; the Quick Mission creator's lobby mission, a server's file
+/// and a bot's mission carry 0): drawn from the session and the mission's
+/// number and text before the text is sent, so every player builds the same
+/// layout from it, and kept by a restart of the same mission. Never 0.
+pub(super) fn with_surface_seed(mut spec: MissionSpec, session: u64, number: u32) -> MissionSpec {
+    if spec.ground_target.is_some() && spec.surface_seed == 0 {
+        let text = tore_codec::hash::fnv1a64(spec.to_text().as_bytes());
+        let mixed = session ^ (u64::from(number) << 32) ^ text;
+        let drawn = tore_net::SplitMix64::new(mixed).next_u64();
+        spec.surface_seed = ((drawn >> 32) as u32).max(1);
+    }
+    spec
+}
+
 fn session_id(entropy: tore_net::Entropy) -> u64 {
     use std::hash::BuildHasher;
     match entropy {
@@ -727,6 +742,7 @@ pub fn debrief_message(report: &debrief::Report) -> Debrief {
         enemy_sam: p.enemy_sam,
         enemy_gun: p.enemy_gun,
         enemy_aaa: p.enemy_aaa,
+        shot_down_by: p.shot_down_by.clone(),
     };
     Debrief {
         success: report.outcome == debrief::Outcome::Success,
@@ -839,6 +855,8 @@ impl Host {
         let settings = crate::settings::Store::from_config(&config);
         let court = king::Court::new(&config, &spec);
         let spec = king::with_settings(spec, &settings);
+        let session_id = session_id(config.entropy);
+        let spec = with_surface_seed(spec, session_id, 1);
         let (world, manifest) = build_world(&spec, &resources)?;
         let mut server = Server::new(ServerConfig {
             protocol_version: PROTOCOL_VERSION,
@@ -847,7 +865,6 @@ impl Host {
             max_section_kind: SECTION_FILLER,
             entropy: config.entropy,
         });
-        let session_id = session_id(config.entropy);
         // The host's transport answers a Reach for its own session as the
         // game that hosts it (stage K).
         server.set_reach_session(Some(session_id));
@@ -1218,6 +1235,12 @@ impl Host {
     /// The mission's world.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// The mission text the players build from, as the Mission message
+    /// sends it (with the surface seed the host drew, protocol 22).
+    pub fn mission_text(&self) -> &str {
+        &self.spec_text
     }
 
     /// The lobby's mission (the players' loadouts are not in it).
@@ -2431,6 +2454,7 @@ impl Host {
         // The King's settings decide what the mission carries of them
         // (friendly fire, the loadout rule), whatever the text says.
         let spec = king::with_settings(spec, &self.settings);
+        let spec = with_surface_seed(spec, self.session_id, self.number.wrapping_add(1));
         if !spec.plane_loadouts.is_empty() {
             return Err(
                 "A lobby's mission carries no loadouts: each player arms their own.".into(),
@@ -3183,6 +3207,7 @@ impl Host {
             loadout,
             roster: self.roster(),
             destroyed: self.tracker.destroyed().iter().copied().collect(),
+            surface_digest: self.world.terrain.surface.digest(),
         }));
         self.send(connection, &seated);
         self.log(HostLog::Seated {

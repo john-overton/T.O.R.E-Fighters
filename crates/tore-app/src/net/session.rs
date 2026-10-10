@@ -1798,6 +1798,7 @@ impl NetSession {
             &guns::Around {
                 ground: &ground,
                 stations: &stations,
+                surface: Some(&around.terrain.surface),
             },
             &mut picture,
         );

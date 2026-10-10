@@ -285,6 +285,9 @@ pub struct ResumedFlight {
     pub exact: Vec<u8>,
     /// The ground objects destroyed by T.
     pub destroyed: Vec<u32>,
+    /// The new host's surface digest, as the Seated message's (protocol
+    /// 22): a player whose own differs does not resume.
+    pub surface_digest: u64,
 }
 
 /// The new host's answer to Resume (new host to player, kind 49).
@@ -679,6 +682,7 @@ pub(super) fn write_resumed(w: &mut BitWriter, resumed: &Resumed) -> WireResult<
         last_command,
         exact,
         destroyed,
+        surface_digest,
     } = match resumed {
         Resumed::NotFlying => {
             let _ = w.write_bits(0, 8);
@@ -695,7 +699,9 @@ pub(super) fn write_resumed(w: &mut BitWriter, resumed: &Resumed) -> WireResult<
     let _ = w.write_bits(u64::from(*tick), 32);
     let _ = w.write_bits(u64::from(*last_command), 16);
     write_long_bytes(w, exact);
-    super::messages::write_destroyed(w, destroyed)
+    super::messages::write_destroyed(w, destroyed)?;
+    let _ = w.write_bits(*surface_digest, 64);
+    Ok(())
 }
 
 pub(super) fn read_resumed(r: &mut BitReader<'_>) -> WireResult<Resumed> {
@@ -711,6 +717,7 @@ pub(super) fn read_resumed(r: &mut BitReader<'_>) -> WireResult<Resumed> {
         last_command: r.read_bits(16)? as u16,
         exact: read_long_bytes(r, wire_limits::MESSAGE, "exact state bytes")?,
         destroyed: super::messages::read_destroyed(r)?,
+        surface_digest: r.read_bits(64)?,
     }))
 }
 

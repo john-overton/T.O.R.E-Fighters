@@ -241,11 +241,24 @@ impl Events {
                 // and the weapon page are the player's hands, the order's
                 // answer is its HUD line, the aircraft's end is in its state,
                 // and sounds are made again from the recorded effects.
+                // A surface unit's gun burst, as a gun burst of the unit and
+                // its hardpoint with the schedule's length (protocol 22; the
+                // recording's surface tracks are the replay slice's).
+                WireEvent::SurfaceBurst {
+                    unit, mount, span, ..
+                } => vec![Put::Event(
+                    replay::Event::new(kind::WEAPON_GUN_BURST)
+                        .with_subject(*unit)
+                        .with(field::STATION, i64::from(*mount))
+                        .with("length_ticks", i64::from(*span)),
+                )],
                 WireEvent::OrderReply { .. }
                 | WireEvent::WeaponCycled
                 | WireEvent::Feedback { .. }
                 | WireEvent::YourAircraftExploded { .. }
-                | WireEvent::Sound { .. } => Vec::new(),
+                | WireEvent::Sound { .. }
+                | WireEvent::SurfaceBurstEnd { .. }
+                | WireEvent::SurfaceUnit(_) => Vec::new(),
             };
             out.extend(events.into_iter().map(|put| (tick, put)));
         }

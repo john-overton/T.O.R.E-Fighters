@@ -649,9 +649,92 @@ const OBJECTIVE_EVERY: Duration = Duration::from_secs(2);
 const EJECT_CONFIRM: Duration = Duration::from_millis(500);
 
 /// A client with the scripted pilot.
+/// What a bot's frames showed of a ground target (protocol 22, slice N1),
+/// for `tore-bot` to print and the net lane's surface scenarios to read.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SurfaceSeen {
+    /// The most moving surface units one frame drew, and of them wrecks.
+    pub moving: usize,
+    pub wrecks: usize,
+    /// Surface units' gun bursts, early ends and changed states told.
+    pub bursts: u64,
+    pub ends: u64,
+    pub states: u64,
+    /// The most units one frame held as not built (hit points, radar,
+    /// rails, spares).
+    pub told: usize,
+    /// Missile launches whose shooter is a surface unit.
+    pub launches: u64,
+    /// Flak bursts in the air.
+    pub flak: u64,
+    /// Frames whose readout had a surface radar painting the plane.
+    pub painted: u64,
+    /// The surface rounds one frame drew at most.
+    pub rounds: usize,
+}
+
+impl SurfaceSeen {
+    fn see(&mut self, frame: &ClientFrame) {
+        let unit = |id: u32| (0x4000_0000..0x6000_0000).contains(&id);
+        self.moving = self.moving.max(frame.picture.surface.len());
+        self.wrecks = self
+            .wrecks
+            .max(frame.picture.surface.iter().filter(|p| p.wrecked).count());
+        self.told = self.told.max(frame.surface_units.len());
+        self.rounds = self.rounds.max(
+            frame
+                .picture
+                .projectiles
+                .iter()
+                .filter(|p| p.gun && unit(p.owner))
+                .count(),
+        );
+        if frame
+            .readout
+            .as_ref()
+            .is_some_and(|r| !r.rwr.painting.is_empty())
+        {
+            self.painted += 1;
+        }
+        for event in &frame.events {
+            match &event.event {
+                WireEvent::SurfaceBurst { .. } => self.bursts += 1,
+                WireEvent::SurfaceBurstEnd { .. } => self.ends += 1,
+                WireEvent::SurfaceUnit(_) => self.states += 1,
+                WireEvent::Launch { shooter, .. } if unit(*shooter) => self.launches += 1,
+                WireEvent::Effect {
+                    kind: tore_sim::combat::live::EffectKind::Flak,
+                    ..
+                } => self.flak += 1,
+                _ => {}
+            }
+        }
+    }
+
+    /// The line `tore-bot` prints.
+    pub fn line(&self) -> String {
+        format!(
+            "moving {}, wrecks {}, bursts {}, ends {}, states {}, told {}, launches {}, flak {}, \
+             painted {}, rounds {}",
+            self.moving,
+            self.wrecks,
+            self.bursts,
+            self.ends,
+            self.states,
+            self.told,
+            self.launches,
+            self.flak,
+            self.painted,
+            self.rounds
+        )
+    }
+}
+
 pub struct Bot {
     pub client: Client,
     pub pilot: ScriptedPilot,
+    /// What its frames have shown of a ground target (protocol 22).
+    pub surface: SurfaceSeen,
     last_frame: Option<Duration>,
     picture: Option<RenderSnapshot>,
     /// Frames drawn.
@@ -769,6 +852,7 @@ impl Bot {
         Self {
             client,
             pilot: ScriptedPilot::new(),
+            surface: SurfaceSeen::default(),
             last_frame: None,
             picture: None,
             frames: 0,
@@ -1121,6 +1205,7 @@ impl Bot {
                 self.pilot.arm(&frame.config);
                 self.picture = Some(frame.picture.clone());
                 self.hear(&frame);
+                self.surface.see(&frame);
                 drawn = Some(frame);
             } else if let Some(frame) = self.client.observer_frame(now) {
                 self.watched += 1;

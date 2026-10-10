@@ -1572,3 +1572,89 @@ fn real_takeover(
 // The lobby pass's slice R1: an AI respawn pending at a takeover.
 #[path = "ai_respawn_resume_tests.rs"]
 mod ai_respawn_resume_tests;
+
+/// Protocol 22, slice N1: the routed column's units keep moving through a
+/// takeover. The old host hurts the standing tank (by hand, so the standbys
+/// are appointed again to hold it) and is cut off while the column drives;
+/// the standby's world at T codes to the old host's (the surface state is
+/// in the checkpoint), every player resumes with the same surface digest,
+/// and each draws the moving tank and is told the hurt one by the new host.
+#[test]
+fn a_takeover_carries_the_ground_target_and_every_player_resumes_on_it() {
+    use tore_world::surface::{SURFACE_UNIT_BASE, UnitId};
+    use tore_world::test_support::surface::{routed_resources, spec_with_target, target};
+    const TANK: u32 = SURFACE_UNIT_BASE;
+    const STANDING: u32 = SURFACE_UNIT_BASE + 2;
+    let crowd = crowd_spec(20);
+    let mut spec = spec_with_target(&target("QUCOL", 0, 0, 7));
+    spec.wings = crowd.wings;
+    spec.start = crowd.start;
+    spec.separation_nm = crowd.separation_nm;
+    let mut rig = Rig::with_resources(spec, Arc::new(routed_resources()));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    rig.fly();
+    let (first, _) = rig.standbys();
+    let hurt = {
+        let row = rig
+            .host_mut()
+            .world
+            .combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == STANDING)
+            .unwrap();
+        row.hp /= 2;
+        row.hp
+    };
+    rig.host_mut().set_standbys_enabled(false);
+    rig.run(Duration::from_millis(20));
+    rig.host_mut().set_standbys_enabled(true);
+    rig.run(Duration::from_secs(3));
+    let digest = rig.host().world.terrain.surface.digest();
+    rig.record_from = Some(rig.host().world.tick());
+    rig.run(Duration::from_millis(500));
+    rig.cut(0);
+    assert!(rig.run_until(Duration::from_secs(3), |r| !r.takeovers.is_empty()));
+    rig.record_from = None;
+    let (game, _, tick, coded) = rig.takeovers[0].clone();
+    assert_eq!(game, first);
+    assert!(
+        rig.checkpoints.get(&tick) == Some(&coded),
+        "the standby's surface at T differs from the old host's"
+    );
+    rig.back_after_cut(Duration::from_secs(5));
+    rig.run(Duration::from_secs(1));
+    let new = rig.host_of(first);
+    assert_eq!(new.world().terrain.surface.digest(), digest);
+    let mover = new
+        .world()
+        .combat
+        .surface
+        .unit(UnitId(TANK))
+        .and_then(|u| u.mover)
+        .expect("the tank drives on the new host");
+    assert!(mover.speed_feet() > 0. || mover.leg > 0);
+    let now = rig.net.now();
+    for g in 1..rig.games.len() {
+        if rig.games[g].gone {
+            continue;
+        }
+        let callsign = rig.games[g].callsign.clone();
+        let frame = rig.games[g]
+            .client
+            .frame(now)
+            .unwrap_or_else(|| panic!("{callsign} flies on"));
+        assert!(
+            frame.picture.surface.iter().any(|p| p.id.0 == TANK),
+            "{callsign} draws the tank"
+        );
+        assert_eq!(
+            frame.surface_units.get(&STANDING).map(|v| v.hp),
+            Some(hurt),
+            "{callsign} is told the hurt tank"
+        );
+    }
+}

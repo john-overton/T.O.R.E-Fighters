@@ -216,11 +216,21 @@ impl Feeder {
             return *id;
         }
         let id = self.weapons.len() as u32;
+        // An aircraft's weapon from the mission's loadouts, a surface unit's
+        // (its owner is the unit, protocol 22) from the surface's arms.
         let known = world.and_then(|w| {
             w.combat
                 .dummy_configurations()
                 .iter()
                 .flat_map(|c| c.stations.iter().map(|s| &s.weapon))
+                .chain(
+                    w.terrain
+                        .surface
+                        .arsenal
+                        .units
+                        .iter()
+                        .flat_map(|arms| arms.weapons.iter().map(|w| &w.record)),
+                )
                 .find(|w| w.source == pose.weapon)
         });
         out.weapons.push(match known {

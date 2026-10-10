@@ -430,6 +430,13 @@ pub(super) fn fly(
 
 /// Asserts every limit of the acceptance table for every bot.
 pub(super) fn check(cell: Cell, figures: &[Figures]) {
+    check_with(cell, figures, true);
+}
+
+/// [`check`], with whether the bots must have fought (`fight`): a ground
+/// target's starts follow the target, so its bots may not meet the enemy in
+/// the short form.
+fn check_with(cell: Cell, figures: &[Figures], fight: bool) {
     let limit = limits(cell.loss_percent);
     for (n, f) in figures.iter().enumerate() {
         let who = format!("{cell:?} bot {n}");
@@ -458,7 +465,7 @@ pub(super) fn check(cell: Cell, figures: &[Figures]) {
             f.outside_events
         );
         // The fight happened: the bot fired, so the release rule was tested.
-        assert!(f.event_ticks > 0, "{who}: the bot fired no gun");
+        assert!(!fight || f.event_ticks > 0, "{who}: the bot fired no gun");
         // Other aircraft: 99 percent within the distance for the loss.
         assert!(f.drawn > 0, "{who}: other aircraft were drawn");
         assert!(
@@ -522,4 +529,36 @@ cells! {
     rtt_300_loss_0, full_rtt_300_loss_0: 300, 0;
     rtt_300_loss_2, full_rtt_300_loss_2: 300, 2;
     rtt_300_loss_5, full_rtt_300_loss_5: 300, 5;
+}
+
+/// Protocol 22, slice N1: the 150 ms, 2 percent cell over a ground target
+/// whose column drives (the synthetic `~QUCOL`): the moving units' records
+/// and the surface events share the snapshots with the flight, and every
+/// limit of the table still holds. The starts follow the target (Blue heads
+/// at it, away from Red), so the bots need not have fought in the short
+/// form.
+#[test]
+fn surface_rtt_150_loss_2() {
+    use tore_world::test_support::surface::{routed_resources, spec_with_target, target};
+    let cell = Cell {
+        round_trip_ms: 150,
+        loss_percent: 2,
+    };
+    let link = LinkConfig::for_round_trip(
+        Duration::from_millis(cell.round_trip_ms),
+        0.1,
+        cell.loss(),
+        0.01,
+    );
+    let fight = spec(4, 4, 1);
+    let mut mission = spec_with_target(&target("QUCOL", 0, 0, 11));
+    mission.wings = fight.wings;
+    mission.start = fight.start;
+    mission.separation_nm = fight.separation_nm;
+    let mut rig = Rig::with_import(mission, link, 2_152, routed_resources(), |_| {});
+    rig.watch = true;
+    let a = rig.join(|c| c.callsign = "Alpha".into(), bot_script());
+    let b = rig.join(|c| c.callsign = "Bravo".into(), bot_script());
+    let figures = fly(&mut rig, &[a, b], cell, SHORT_SECONDS, &mut Rig::step);
+    check_with(cell, &figures, false);
 }

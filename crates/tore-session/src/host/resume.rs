@@ -649,6 +649,7 @@ impl Host {
                 last_command,
                 exact,
                 destroyed,
+                surface_digest: self.world.terrain.surface.digest(),
             }))),
         );
         if let Some(active) = &mut self.resuming.active {

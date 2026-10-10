@@ -87,6 +87,8 @@ mod sight_tests;
 #[cfg(test)]
 mod stall_tests;
 #[cfg(test)]
+mod surface_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::host::BuildId;
@@ -94,7 +96,7 @@ use crate::wire::chat::{ChatLine, ChatSend, Receiver, Refusal};
 use crate::wire::connection::ClientConnection;
 use crate::wire::connection::FlightOrder;
 use crate::wire::entity::EntityKey;
-use crate::wire::events::{ReceivedEvent, WireEvent};
+use crate::wire::events::{ReceivedEvent, SurfaceUnitView, WireEvent};
 use crate::wire::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
 use crate::wire::messages::{
     ContentRefused, Debrief, Goodbye, Kick, LobbyPhase, LobbyState, Lock, Message, Mission,
@@ -163,6 +165,8 @@ pub const BEHIND_TICKS: f64 = 1.;
 pub const CORRECTION_HOLD_TICKS: u64 = 15;
 /// Events held for the caller at most; older ones are dropped.
 const MAX_EVENTS: usize = 4096;
+/// States kept per surface unit ahead of the drawn tick (protocol 22).
+const MAX_SURFACE_STATES: usize = 64;
 
 /// What a join needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -405,6 +409,21 @@ pub enum ClientEvent {
     Observing(Box<Observing>),
 }
 
+/// Why this game cannot fly a seat the host gave with `host` as its surface
+/// digest (protocol 22): `None` when the client's own copy of the mission
+/// has built the same ground target, units, batteries, trucks, parked
+/// aircraft and starts.
+pub fn surface_mismatch(world: &World, host: u64) -> Option<String> {
+    let ours = world.terrain.surface.digest();
+    (ours != host).then(|| {
+        format!(
+            "Your game places this mission's ground target differently from the host's \
+             (surface {ours:016x}, host {host:016x}), so it cannot fly it. Both games need \
+             the same build and the same imported data."
+        )
+    })
+}
+
 /// The plain words for a mission's end, for the player.
 pub fn ended_text(ended: &MissionEnded) -> String {
     use crate::wire::messages::EndReason;
@@ -537,6 +556,10 @@ pub struct ClientFrame {
     /// The events released since the last frame, in order: the seat's cues
     /// on arrival, mission-wide events once the picture reaches their tick.
     pub events: Vec<ReceivedEvent>,
+    /// Every surface unit the host has told of that is not as the mission
+    /// built it, as at `render_tick` (protocol 22): hit points, radar,
+    /// rails and spares. A unit not listed is as built.
+    pub surface_units: BTreeMap<u32, SurfaceUnitView>,
 }
 
 impl PartialEq for ClientFrame {
@@ -552,6 +575,7 @@ impl PartialEq for ClientFrame {
             && self.render_tick.to_bits() == other.render_tick.to_bits()
             && self.readout == other.readout
             && self.events == other.events
+            && self.surface_units == other.surface_units
     }
 }
 
@@ -685,6 +709,10 @@ pub struct Client {
     effects: Vec<Shown>,
     marks: Vec<(u32, MarkKind, [f64; 3])>,
     destroyed: BTreeMap<u32, u32>,
+    /// Each surface unit's states the host has told (protocol 22), by
+    /// unit, oldest first, each from its tick; the picture takes the newest
+    /// at or before the drawn tick.
+    surface_units: BTreeMap<u32, VecDeque<(u32, SurfaceUnitView)>>,
     pending: Vec<Command>,
     view_subject: Option<EntityKey>,
     unacked: VecDeque<NumberedCommand>,
@@ -851,6 +879,7 @@ impl Client {
             effects: Vec::new(),
             marks: Vec::new(),
             destroyed: BTreeMap::new(),
+            surface_units: BTreeMap::new(),
             pending: Vec::new(),
             view_subject: None,
             unacked: VecDeque::new(),
@@ -1612,10 +1641,34 @@ impl Client {
         let config = Arc::clone(seat.predictor.config());
         let terms = seat.predictor.terms().copied();
         let player = player_pose(plane, &presented, &config, terms.as_ref());
+        // Each surface unit's newest state at the drawn tick; the older ones
+        // are no longer needed.
+        for states in self.surface_units.values_mut() {
+            while states.len() > 1 && states.get(1).is_some_and(|(t, _)| f64::from(*t) <= render) {
+                states.pop_front();
+            }
+        }
+        let surface_units: BTreeMap<u32, SurfaceUnitView> = self
+            .surface_units
+            .iter()
+            .filter_map(|(unit, states)| {
+                let (tick, view) = states.front()?;
+                (f64::from(*tick) <= render).then(|| (*unit, view.clone()))
+            })
+            .collect();
         let mission = self.mission.as_ref()?;
         let mut targets = drawn.aircraft;
         targets.extend(mission.ground.iter().map(|pose| {
             let mut pose = pose.clone();
+            if let Some(view) = surface_units.get(&pose.id) {
+                pose.damage.hp = view.hp;
+            }
+            // A unit that follows a route is where the host's Mover has it
+            // (protocol 22), so the views and the target window follow it.
+            if let Some(moving) = drawn.surface.iter().find(|m| m.id.0 == pose.id) {
+                pose.position = moving.position;
+                pose.attitude = moving.attitude;
+            }
             if self
                 .destroyed
                 .get(&pose.id)
@@ -1672,8 +1725,19 @@ impl Client {
             debris: drawn.debris,
             pilots,
             models: mission.models.clone(),
-            // Moving surface units reach clients with the network slice (N1).
-            surface: Vec::new(),
+            // Moving surface units (protocol 22): a unit the host has
+            // destroyed by the drawn time is a wreck.
+            surface: drawn
+                .surface
+                .into_iter()
+                .map(|mut pose| {
+                    pose.wrecked |= self
+                        .destroyed
+                        .get(&pose.id.0)
+                        .is_some_and(|tick| f64::from(*tick) <= render);
+                    pose
+                })
+                .collect(),
         };
         // The newest readout, its contacts placed around the drawn plane.
         let mut readout = self.wire.as_ref().and_then(|wire| {
@@ -1731,6 +1795,7 @@ impl Client {
             readout,
             config,
             events: std::mem::take(&mut self.released),
+            surface_units,
         })
     }
 
@@ -2166,6 +2231,27 @@ impl Client {
         self.event(ClientEvent::MissionLoaded);
     }
 
+    /// A seat or a resume whose surface the client builds otherwise than
+    /// the host (protocol 22): the client tells the host as it does a
+    /// content difference, and stays in the lobby, marked unable.
+    pub(crate) fn refuse_surface(&mut self, reason: String) {
+        self.log("surface-refused", &[&reason]);
+        let number = self.number.unwrap_or_default();
+        self.send(&Message::ContentRefused(ContentRefused {
+            mission: number,
+            names: Vec::new(),
+            reason: reason.clone(),
+            flight: true,
+        }));
+        self.unable = Some(reason.clone());
+        self.unable_flight = true;
+        self.end_flight();
+        self.event(ClientEvent::ContentRefused {
+            names: Vec::new(),
+            reason,
+        });
+    }
+
     /// The plane is the player's: its exact state decoded, the prediction
     /// started and the clock set ahead of the host.
     fn seated(&mut self, seated: Seated) {
@@ -2180,6 +2266,10 @@ impl Client {
             self.log("seat-failed", &["the mission is not loaded"]);
             return;
         };
+        if let Some(reason) = surface_mismatch(&mission.world, seated.surface_digest) {
+            self.refuse_surface(reason);
+            return;
+        }
         let world = &mission.world;
         let plane = seated.plane;
         let aircraft = seated
@@ -2369,6 +2459,7 @@ impl Client {
         self.effects.clear();
         self.marks.clear();
         self.destroyed.clear();
+        self.surface_units.clear();
         self.snapshot_tick = None;
         self.pending_own.clear();
         self.holding_since = None;
@@ -2654,10 +2745,28 @@ impl Client {
                     seat.predictor.destroyed(*object);
                 }
             }
+            WireEvent::SurfaceUnit(view) => {
+                let states = self.surface_units.entry(view.unit).or_default();
+                // In tick order; a later state of the same tick replaces it.
+                let at = states
+                    .iter()
+                    .rposition(|(t, _)| *t <= event.tick)
+                    .map_or(0, |i| i + 1);
+                if at > 0 && states[at - 1].0 == event.tick {
+                    states[at - 1].1 = view.clone();
+                } else {
+                    states.insert(at, (event.tick, view.clone()));
+                }
+                while states.len() > MAX_SURFACE_STATES {
+                    states.pop_front();
+                }
+            }
             WireEvent::Launch { .. }
             | WireEvent::WingEjection { .. }
             | WireEvent::Countermeasure { .. }
             | WireEvent::GunBurst { .. }
+            | WireEvent::SurfaceBurst { .. }
+            | WireEvent::SurfaceBurstEnd { .. }
             | WireEvent::Sound { .. } => {}
         }
         // Held in tick order (events arrive in number order, which is
