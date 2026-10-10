@@ -534,7 +534,9 @@ fn flak_bursts_near_a_hostile_aircraft_and_passes_a_friendly_one() {
         let id = s
             .fire_surface(shot(ks19(), [0., 30., 0.], [0., 1000., 0.], None))
             .unwrap();
-        run_from(&mut s, 360, far());
+        // The shell reaches the fuze sphere at about tick 236, and the 100 mm
+        // burst's effect lasts one second: look while it shows.
+        run_from(&mut s, 300, far());
         let found = flak_effects(&s);
         if bursts {
             assert_eq!(found.len(), 1);
