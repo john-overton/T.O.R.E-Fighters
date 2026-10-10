@@ -112,6 +112,7 @@ fn overrides() -> Overrides {
         time: Some([12, 0]),
         wind: None,
         cloud_altitude: Some(0),
+        redrawn_airports: false,
     }
 }
 

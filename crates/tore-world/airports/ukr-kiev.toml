@@ -1,0 +1,241 @@
+# T.O.R.E redrawn airport: Kiev, Ukraine (UKR.MM). Experiment AP1, 2026-10-10.
+#
+# Opinionated (John, 2026-10-10: "a test redraw of an airport using airport
+# textures but redrawn to be accurate"); every size and position below is an
+# agent choice at real-world scale, labelled fitted in
+# docs/formats/redrawn-airports.md. Only applies with TORE_REDRAWN_AIRPORTS=1.
+#
+# Feet in the runway frame: x to the right of the retail runway's centreline,
+# z along it from its near threshold (the retail takeoff point). The frame
+# comes from the user's import, so the runway, its length and the ILS stay
+# exactly where retail put them. No retail coordinates are stored here.
+
+layout = "UKR"
+strip = "Kiev"
+# The retail runway length this plan was drawn for; any other length refuses it.
+runway_length_ft = 5532
+# Grass kept landable around the pavement (the whole field stays landable).
+grass_margin_ft = 150
+
+# Materials: texel rectangles [x, y, w, h] of retail runway art (rows from the
+# top) and the feet one copy covers along the texture's columns and rows. A
+# runway material's first tile_ft of 0 spans the runway's width.
+[[material]]
+name = "runway_centreline"   # dark asphalt with a centreline dash
+pic = "_RNWY7.PIC"
+rect = [102, 2, 98, 117]
+tile_ft = [0, 240]
+
+[[material]]
+name = "runway_touchdown"    # the same with tyre marks
+pic = "_RNWY7.PIC"
+rect = [1, 2, 98, 117]
+tile_ft = [0, 240]
+
+[[material]]
+name = "runway_threshold"    # threshold bars
+pic = "_RNWY7.PIC"
+rect = [1, 121, 98, 117]
+tile_ft = [100, 150]
+
+[[material]]
+name = "runway_plain"        # asphalt beside the dash
+pic = "_RNWY7.PIC"
+rect = [104, 2, 40, 117]
+tile_ft = [0, 240]
+
+[[material]]
+name = "taxiway"             # grey asphalt, its marks along the columns
+pic = "_RNWY7.PIC"
+rect = [2, 300, 95, 56]
+tile_ft = [190, 75]
+
+[[material]]
+name = "apron"               # concrete slabs, three by four
+pic = "_RNWY7.PIC"
+rect = [102, 121, 74, 101]
+tile_ft = [74, 101]
+
+# Designation digits, cut from the runway number boards of other airports.
+[[material]]
+name = "digit_1"
+pic = "_RNWY7.PIC"
+rect = [160, 382, 16, 15]
+tile_ft = [20, 60]
+
+[[material]]
+name = "digit_3"
+pic = "_RNWY1.PIC"
+rect = [225, 480, 14, 15]
+tile_ft = [20, 60]
+
+[[material]]
+name = "digit_6"
+pic = "_RNWY5.PIC"
+rect = [239, 217, 14, 15]
+tile_ft = [20, 60]
+
+[[material]]
+name = "digit_8"
+pic = "_RNWY3.PIC"
+rect = [44, 471, 14, 15]
+tile_ft = [20, 60]
+
+# The retail runway, at a real 200 ft width (retail paves 368 ft).
+[[runway]]
+name = "36R/18L"
+x = 0
+threshold = 0
+length = 5532
+width = 200
+pad = 220
+touchdown = 1500
+numbers = ["36", "18"]
+
+# A close parallel runway, 1,068 ft to the left, 150 ft wide.
+[[runway]]
+name = "36L/18R"
+x = -1068
+threshold = 580
+length = 4400
+width = 150
+pad = 100
+touchdown = 1000
+numbers = ["36", "18"]
+
+# Taxiways, 75 ft wide, along x or z between two centreline points.
+[[taxiway]]
+name = "A"          # the parallel taxiway in front of the apron
+width = 75
+from = [-1812, -160]
+to = [-1812, 5280]
+
+[[taxiway]]
+name = "S"          # south link to the runway's start
+width = 75
+from = [-1812, -160]
+to = [0, -160]
+
+[[taxiway]]
+name = "N"          # north exit from the end of the runway
+width = 75
+from = [-1812, 5280]
+to = [0, 5280]
+
+[[taxiway]]
+name = "M"          # midfield link, crossing the parallel runway
+width = 75
+from = [-1812, 2880]
+to = [0, 2880]
+
+# The apron, 850 ft deep and 3,200 ft long, against taxiway A.
+[[apron]]
+name = "main"
+min = [-2662, 780]
+max = [-1812, 3980]
+
+# The AI's points (docs/formats/native-strip.md roles).
+[anchors]
+# Parking-area exit, then down taxiway A and along S to the runway's start,
+# the last point on the centreline behind the takeoff spot.
+taxi_out = [[-1812, 780], [-1812, -160], [-400, -160], [0, -160]]
+takeoff = [0, 0]
+landing = [0, 1000]
+# Rollout end at taxiway N, the exit, the corner and the apron's north entry.
+taxi_in = [[0, 5280], [-400, 5280], [-1812, 5280], [-1812, 3980]]
+# Nine slots in one row on the apron, 250 ft apart, noses toward the runway.
+parking = [
+  [-2262, 1280], [-2262, 1530], [-2262, 1780], [-2262, 2030], [-2262, 2280],
+  [-2262, 2530], [-2262, 2780], [-2262, 3030], [-2262, 3280],
+]
+parking_heading = 90
+
+# Buildings at real size against the apron's west edge (x -2662). "replaces"
+# moves the retail placement with that alias; the others are added.
+[[building]]
+type = "HANGR.OT"
+at = [-2806, 900]
+heading = -90
+replaces = -10114
+
+[[building]]
+type = "HANGR.OT"
+at = [-2806, 1100]
+heading = -90
+replaces = -10115
+
+[[building]]
+type = "HANGR.OT"
+at = [-2806, 3400]
+heading = -90
+replaces = -10116
+
+[[building]]
+type = "HANGR.OT"
+at = [-2806, 3600]
+heading = -90
+replaces = -10117
+
+[[building]]
+type = "CTOWR.OT"
+at = [-2903, 2380]
+heading = -180
+replaces = -10118
+
+# Extra hangars to fill the row.
+[[building]]
+type = "HANGR.OT"
+at = [-2806, 1300]
+heading = -90
+
+[[building]]
+type = "HANGRB.OT"
+at = [-2883, 1720]
+heading = -90
+
+[[building]]
+type = "HANGRB.OT"
+at = [-2883, 2960]
+heading = -90
+
+[[building]]
+type = "HANGR.OT"
+at = [-2806, 3800]
+heading = -90
+
+# Fuel tanks south of the apron.
+[[building]]
+type = "FUEL.OT"
+at = [-2450, 560]
+heading = 0
+
+[[building]]
+type = "FUEL.OT"
+at = [-2300, 560]
+heading = 0
+
+# Vehicles: fuel trucks by the parking row, trucks by the hangars.
+[[building]]
+type = "TANKER.NT"
+at = [-2310, 1405]
+heading = 0
+
+[[building]]
+type = "TANKER.NT"
+at = [-2310, 2405]
+heading = 0
+
+[[building]]
+type = "TANKER.NT"
+at = [-2310, 3155]
+heading = 180
+
+[[building]]
+type = "TRUCK.NT"
+at = [-2600, 1000]
+heading = 90
+
+[[building]]
+type = "TRUCK.NT"
+at = [-2600, 3500]
+heading = 90
