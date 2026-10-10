@@ -79,3 +79,38 @@ class KilledProbeTests(unittest.TestCase):
             self.assertTrue(rr.has_length(f"State       INCOMPLETE\nLength      {length} (22440 frames)\n"), length)
         self.assertFalse(rr.has_length("State       INCOMPLETE\nResult      unknown\n"))
         self.assertFalse(rr.has_length("Length      none\n"))
+
+
+class ShotOutcomeTests(unittest.TestCase):
+    @staticmethod
+    def log(*results):
+        import json
+
+        lines = [{"type": "aircraft", "id": 3}, {"type": "event", "tick": 1, "t": 0.01, "kind": "weapon.launch",
+                                                  "subject": 3, "fields": {"projectile": 16777216}}]
+        for i, (result, replaces) in enumerate(results):
+            fields = {"projectile": 16777216, "result": result}
+            if replaces:
+                fields["replaces"] = replaces
+            lines.append({"type": "event", "tick": 2 + i, "t": 0.02, "kind": "weapon.outcome", "subject": 3, "fields": fields})
+        return "\n".join(json.dumps(line) for line in lines)
+
+    def test_one_outcome_or_a_spoof_replaced_by_a_hit_pass(self):
+        from battery_scenarios import _replay_record as rr  # noqa: E402
+
+        self.assertEqual(rr.invariant_problems(self.log(("hit", None))), [])
+        self.assertEqual(rr.invariant_problems(self.log(("spoofed", None), ("hit", "spoofed"))), [])
+
+    def test_any_other_repeat_fails(self):
+        from battery_scenarios import _replay_record as rr  # noqa: E402
+
+        for results in (
+            [("spoofed", None), ("hit", None)],
+            [("hit", None), ("hit", None)],
+            [("missed", None), ("hit", "spoofed")],
+            [("hit", "spoofed"), ("spoofed", None)],
+            [("spoofed", None), ("hit", "spoofed"), ("hit", "spoofed")],
+            [("hit", "spoofed")],
+        ):
+            problems = rr.invariant_problems(self.log(*results))
+            self.assertTrue(any("shot 16777216" in p for p in problems), results)

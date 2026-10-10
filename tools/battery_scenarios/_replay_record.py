@@ -93,6 +93,22 @@ def semantic_log_problems(text: str) -> list[str]:
     return problems
 
 
+def outcome_problems(shot: int, results: list[dict]) -> list[str]:
+    """A shot has one outcome. The one exception: a missile recorded as spoofed
+    that flies on and damages an aircraft is recorded again as a hit that
+    names the spoof it replaces (the debrief ledger withdraws the spoof and
+    counts the hit, docs/spec/debrief.md)."""
+    kinds = [(r.get("result"), r.get("replaces")) for r in results]
+    if len(kinds) == 1:
+        if kinds[0][1] is not None:
+            return [f"shot {shot} outcome replaces {kinds[0][1]} but none came before it"]
+        return []
+    if kinds == [("spoofed", None), ("hit", "spoofed")]:
+        return []
+    return [f"shot {shot} has {len(kinds)} outcomes: " + ", ".join(
+        k if r is None else f"{k} replacing {r}" for k, r in kinds)]
+
+
 def invariant_problems(text: str) -> list[str]:
     """Event-stream invariants: order, ownership, one outcome per shot, decoy counts, no revivals."""
     problems: list[str] = []
@@ -118,7 +134,7 @@ def invariant_problems(text: str) -> list[str]:
         if e["kind"] in ("combat.destroyed", "aircraft.crashed") and e.get("subject") is not None:
             dead.setdefault(e["subject"], e["t"])
     launched = set()
-    outcomes: dict[int, int] = {}
+    outcomes: dict[int, list[dict]] = {}
     left: dict[tuple, int] = {}
     for e in events:
         f = e.get("fields", {})
@@ -127,15 +143,14 @@ def invariant_problems(text: str) -> list[str]:
             if e["subject"] in dead and e["t"] > dead[e["subject"]] + 0.01:
                 problems.append(f"aircraft {e['subject']} fired at {e['t']}s after it was lost at {dead[e['subject']]}s")
         elif e["kind"] == "weapon.outcome":
-            outcomes[f["projectile"]] = outcomes.get(f["projectile"], 0) + 1
+            outcomes.setdefault(f["projectile"], []).append(f)
         elif e["kind"] == "combat.countermeasure" and f.get("left") is not None:
             key = (e.get("subject"), f.get("decoy"))
             if f["left"] < 0 or f["left"] > left.get(key, 10**9):
                 problems.append(f"aircraft {key[0]} {key[1]} count went to {f['left']} at {e['t']}s")
             left[key] = f["left"]
-    for shot, count in outcomes.items():
-        if count > 1:
-            problems.append(f"shot {shot} has {count} outcomes")
+    for shot, results in outcomes.items():
+        problems += outcome_problems(shot, results)
         if shot not in launched:
             problems.append(f"shot {shot} has an outcome but no launch")
     revived: set[int] = set()
