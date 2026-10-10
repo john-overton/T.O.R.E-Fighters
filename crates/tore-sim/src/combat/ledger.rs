@@ -87,11 +87,19 @@ pub enum Resolution {
 /// How one shot ended, kept for mission recordings. Write-only: nothing in
 /// flight reads it; the host drains the list each tick with
 /// [`Ledger::take_outcomes`].
+///
+/// A shot is reported once, with one exception: a missile reported as
+/// [`Resolution::Spoofed`] that flies on and damages an aircraft is reported
+/// again, as a hit that `replaces` the spoof (see [`Ledger::resolve`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Outcome {
     pub projectile: u32,
     pub key: Key,
     pub resolution: Resolution,
+    /// The outcome already reported for this shot that this one withdraws:
+    /// `Some(Spoofed)` for a decoyed missile that struck after all, `None`
+    /// for a shot's first and usually only outcome.
+    pub replaces: Option<Resolution>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,7 +176,7 @@ impl Ledger {
             Resolution::Spoofed => tally.spoofed += 1,
             Resolution::Jammed => tally.jammed += 1,
         }
-        self.report(projectile, key, resolution);
+        self.report(projectile, key, resolution, None);
     }
     /// The end of a missile that was resolved as spoofed: only damage turns
     /// it into a hit.
@@ -183,10 +191,16 @@ impl Ledger {
             tally.spoofed = tally.spoofed.saturating_sub(1);
             tally.hit += 1;
             tally.damage = tally.damage.saturating_add(damage);
-            self.report(projectile, key, resolution);
+            self.report(projectile, key, resolution, Some(Resolution::Spoofed));
         }
     }
-    fn report(&mut self, projectile: u32, key: Key, resolution: Resolution) {
+    fn report(
+        &mut self,
+        projectile: u32,
+        key: Key,
+        resolution: Resolution,
+        replaces: Option<Resolution>,
+    ) {
         if self.outcomes.len() == MAX_OUTCOMES {
             self.outcomes.pop_front();
         }
@@ -194,6 +208,7 @@ impl Ledger {
             projectile,
             key,
             resolution,
+            replaces,
         });
     }
     /// Shot outcomes since the last call, oldest first.
@@ -303,11 +318,13 @@ mod tests {
                     projectile: 1,
                     key: key(3, Some(0), ShotKind::AirToAir),
                     resolution: Resolution::Spoofed,
+                    replaces: None,
                 },
                 Outcome {
                     projectile: 2,
                     key: key(0, Some(3), ShotKind::Gun),
                     resolution: Resolution::Hit(40),
+                    replaces: None,
                 },
             ]
         );
@@ -371,12 +388,60 @@ mod tests {
         );
         // Resolved once each: launches never fall short of their outcomes.
         assert_eq!(missiles.failed(), 0);
-        // The recording hears of the late strike, as a hit on the same key.
+        // The recording hears of the late strike, as a hit on the same key
+        // that says it replaces the spoof reported before.
         let outcomes = ledger.take_outcomes();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].projectile, 1);
         assert_eq!(outcomes[0].resolution, Resolution::Hit(140));
         assert_eq!(outcomes[0].key.aim, Some(7));
+        assert_eq!(outcomes[0].replaces, Some(Resolution::Spoofed));
+    }
+
+    #[test]
+    fn a_shot_reported_twice_is_only_a_spoof_then_the_hit_that_replaces_it() {
+        // The recording checks hold every shot to one outcome, or to a spoof
+        // followed by one hit that names it: nothing else repeats a shot.
+        let mut ledger = Ledger::default();
+        for id in 1..=6 {
+            ledger.launch(id, 0, Some(7), ShotKind::AirToAir);
+        }
+        ledger.resolve(1, Resolution::Spoofed);
+        ledger.resolve(2, Resolution::Spoofed);
+        ledger.resolve(3, Resolution::Hit(80));
+        ledger.resolve(4, Resolution::Missed);
+        ledger.resolve(5, Resolution::Jammed);
+        ledger.resolve(6, Resolution::Spoofed);
+        // What can still happen to each: a strike, a second strike, a miss,
+        // damage after an end, a strike on a jammed missile, a wreck touch.
+        ledger.resolve(1, Resolution::Hit(100));
+        ledger.resolve(1, Resolution::Hit(100));
+        ledger.resolve(2, Resolution::Missed);
+        ledger.resolve(3, Resolution::Hit(80));
+        ledger.resolve(4, Resolution::Hit(60));
+        ledger.resolve(5, Resolution::Hit(60));
+        ledger.resolve(6, Resolution::Hit(0));
+        let mut by_shot: BTreeMap<u32, Vec<(Resolution, Option<Resolution>)>> = BTreeMap::new();
+        for outcome in ledger.take_outcomes() {
+            by_shot
+                .entry(outcome.projectile)
+                .or_default()
+                .push((outcome.resolution, outcome.replaces));
+        }
+        assert_eq!(
+            by_shot[&1],
+            [
+                (Resolution::Spoofed, None),
+                (Resolution::Hit(100), Some(Resolution::Spoofed))
+            ]
+        );
+        for (shot, reports) in &by_shot {
+            if *shot != 1 {
+                assert_eq!(reports.len(), 1, "shot {shot}: {reports:?}");
+                assert_eq!(reports[0].1, None, "shot {shot}");
+            }
+        }
+        assert_eq!(by_shot.len(), 6);
     }
 
     #[test]

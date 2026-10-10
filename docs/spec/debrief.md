@@ -136,7 +136,9 @@ shooter the last attacker.
   damage are counted, and the missile is still one launch). Without this an
   aircraft could lose its hit points and its shooter be credited with the kill
   while the hit table showed none. A decoyed missile that only touches a wreck,
-  explodes on the ground, runs out or is jammed stays Spoofed.
+  explodes on the ground, runs out or is jammed stays Spoofed. A mission
+  recording keeps both moments: the spoof when the decoy wins, then the hit,
+  marked as replacing it ([recorded events](../REPLAYS.md#recording)).
 - **Same rule everywhere.** Multiplayer scores (kills, damage) and the PvP
   kill limit credit a lost plane by this same record (`Ledger::credit`), so a
   plane's credited kill, its debrief and its score agree. A kill before the

@@ -1024,52 +1024,7 @@ impl Recorder {
         }
         // How each shot ended.
         for resolved in tick.outcomes {
-            let (result, damage) = match resolved.resolution {
-                ledger::Resolution::Hit(damage) => (outcome::HIT, Some(damage)),
-                ledger::Resolution::Missed => (outcome::MISSED, None),
-                ledger::Resolution::Spoofed => (outcome::SPOOFED, None),
-                ledger::Resolution::Jammed => (outcome::JAMMED, None),
-            };
-            let mut event = Event::new(kind::WEAPON_OUTCOME)
-                .with_subject(resolved.key.owner)
-                .with(field::PROJECTILE, replay::Value::Id(resolved.projectile))
-                .with(field::RESULT, result);
-            if let Some(target) = resolved.key.aim {
-                event = event.with_object(target);
-            }
-            if let Some(damage) = damage {
-                event = event.with(field::DAMAGE, i64::from(damage));
-            }
-            let shot = self.shots.get(&resolved.projectile);
-            if let Some(weapon) = shot.map(|shot| shot.weapon) {
-                event = event.with(field::WEAPON, replay::Value::Id(weapon));
-            }
-            if let Some((miss, _)) = self.why.closest(resolved.projectile)
-                && resolved.resolution == ledger::Resolution::Missed
-            {
-                event = event.with(field::MISS_FT, trees::round(miss, 1));
-            }
-            let reason = match resolved.resolution {
-                ledger::Resolution::Spoofed => self.why.decoyed(resolved.projectile).map(|roll| {
-                    format!(
-                        "decoyed by {} from {} ({})",
-                        why::decoy_name(roll.class),
-                        self.who(roll.releaser),
-                        roll.draw.map_or_else(String::new, |d| trees::draw_text(&d))
-                    )
-                }),
-                ledger::Resolution::Jammed => {
-                    Some("the target's jammer or countermeasures deceived it".to_owned())
-                }
-                ledger::Resolution::Missed => shot
-                    .and_then(|shot| shot.lost_at)
-                    .map(|at| format!("it lost track of its target at {}", trees::clock(at))),
-                ledger::Resolution::Hit(_) => None,
-            };
-            if let Some(reason) = reason {
-                event = event.with(field::REASON, reason);
-            }
-            events.push(event);
+            events.push(self.outcome_event(resolved));
         }
         // Rounds that hit the ground: each ground impact effect this tick,
         // matched to the nearest weapon that vanished.
@@ -1106,6 +1061,72 @@ impl Recorder {
             }
             events.push(event);
         }
+    }
+
+    /// The `weapon.outcome` event for one shot the ledger resolved. A late
+    /// hit that replaces an earlier spoof says so, and why.
+    fn outcome_event(&self, resolved: &ledger::Outcome) -> Event {
+        let mut event = Event::new(kind::WEAPON_OUTCOME)
+            .with_subject(resolved.key.owner)
+            .with(field::PROJECTILE, replay::Value::Id(resolved.projectile))
+            .with(field::RESULT, result_name(resolved.resolution));
+        if let Some(target) = resolved.key.aim {
+            event = event.with_object(target);
+        }
+        if let ledger::Resolution::Hit(damage) = resolved.resolution {
+            event = event.with(field::DAMAGE, i64::from(damage));
+        }
+        let shot = self.shots.get(&resolved.projectile);
+        if let Some(weapon) = shot.map(|shot| shot.weapon) {
+            event = event.with(field::WEAPON, replay::Value::Id(weapon));
+        }
+        if let Some((miss, _)) = self.why.closest(resolved.projectile)
+            && resolved.resolution == ledger::Resolution::Missed
+        {
+            event = event.with(field::MISS_FT, trees::round(miss, 1));
+        }
+        let reason = match resolved.resolution {
+            ledger::Resolution::Spoofed => self.why.decoyed(resolved.projectile).map(|roll| {
+                format!(
+                    "decoyed by {} from {} ({})",
+                    why::decoy_name(roll.class),
+                    self.who(roll.releaser),
+                    roll.draw.map_or_else(String::new, |d| trees::draw_text(&d))
+                )
+            }),
+            ledger::Resolution::Jammed => {
+                Some("the target's jammer or countermeasures deceived it".to_owned())
+            }
+            ledger::Resolution::Missed => shot
+                .and_then(|shot| shot.lost_at)
+                .map(|at| format!("it lost track of its target at {}", trees::clock(at))),
+            // The decoy roll is kept only for its own tick, so a later strike
+            // names when the track was lost instead.
+            ledger::Resolution::Hit(_) => resolved.replaces.map(|_| {
+                let decoy = self.why.decoyed(resolved.projectile).map_or_else(
+                    || "it was spoofed".to_owned(),
+                    |roll| {
+                        format!(
+                            "it was decoyed by {} from {}",
+                            why::decoy_name(roll.class),
+                            self.who(roll.releaser)
+                        )
+                    },
+                );
+                let when = shot
+                    .and_then(|shot| shot.lost_at)
+                    .map(|at| format!(" at {}", trees::clock(at)))
+                    .unwrap_or_default();
+                format!("{decoy}{when} but flew on and struck anyway")
+            }),
+        };
+        if let Some(replaced) = resolved.replaces {
+            event = event.with(field::REPLACES, result_name(replaced));
+        }
+        if let Some(reason) = reason {
+            event = event.with(field::REASON, reason);
+        }
+        event
     }
 
     fn aircraft_events(&mut self, tick: &Tick<'_>, frame: &Frame, events: &mut Vec<Event>) {
@@ -1650,6 +1671,16 @@ fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
 }
 
+/// A ledger resolution as a recorded `result`.
+fn result_name(resolution: ledger::Resolution) -> &'static str {
+    match resolution {
+        ledger::Resolution::Hit(_) => outcome::HIT,
+        ledger::Resolution::Missed => outcome::MISSED,
+        ledger::Resolution::Spoofed => outcome::SPOOFED,
+        ledger::Resolution::Jammed => outcome::JAMMED,
+    }
+}
+
 /// An aircraft's registered label, or `aircraft 7` for one never registered.
 fn who(infos: &BTreeMap<u32, replay::AircraftInfo>, id: u32) -> String {
     match infos.get(&id) {
@@ -2024,6 +2055,79 @@ mod tests {
     use super::*;
     use crate::combat_view::render_hash_tests as fixture;
     use std::sync::mpsc::Receiver;
+
+    #[test]
+    fn a_decoyed_missile_that_strikes_anyway_is_recorded_as_a_hit_replacing_the_spoof() {
+        let roster = [replay::AircraftInfo {
+            id: 3,
+            label: "Enemy 1-1".into(),
+            ..Default::default()
+        }];
+        let (mut recorder, _receiver) = Recorder::detached(64, &roster);
+        let key = ledger::Key {
+            owner: 3,
+            aim: Some(0),
+            kind: ledger::ShotKind::AirToAir,
+        };
+        let spoofed = recorder.outcome_event(&ledger::Outcome {
+            projectile: 1 << 24,
+            key,
+            resolution: ledger::Resolution::Spoofed,
+            replaces: None,
+        });
+        assert_eq!(spoofed.string(field::RESULT), Some(outcome::SPOOFED));
+        assert_eq!(spoofed.get(field::REPLACES), None);
+        let hit = recorder.outcome_event(&ledger::Outcome {
+            projectile: 1 << 24,
+            key,
+            resolution: ledger::Resolution::Hit(116),
+            replaces: Some(ledger::Resolution::Spoofed),
+        });
+        assert_eq!(hit.kind, kind::WEAPON_OUTCOME);
+        assert_eq!(hit.subject, Some(3));
+        assert_eq!(hit.object, Some(0));
+        assert_eq!(hit.id(field::PROJECTILE), Some(1 << 24));
+        assert_eq!(hit.string(field::RESULT), Some(outcome::HIT));
+        assert_eq!(hit.num(field::DAMAGE), Some(116.));
+        assert_eq!(hit.string(field::REPLACES), Some(outcome::SPOOFED));
+        assert_eq!(
+            hit.string(field::REASON),
+            Some("it was spoofed but flew on and struck anyway")
+        );
+        // A shot the recorder followed names when its track was lost.
+        recorder.shots.insert(
+            1 << 24,
+            Shot {
+                owner: 3,
+                weapon: 2,
+                target: None,
+                status: None,
+                position: [0.; 3],
+                lost: true,
+                lost_at: Some(1_621),
+            },
+        );
+        let named = recorder.outcome_event(&ledger::Outcome {
+            projectile: 1 << 24,
+            key,
+            resolution: ledger::Resolution::Hit(116),
+            replaces: Some(ledger::Resolution::Spoofed),
+        });
+        assert_eq!(named.id(field::WEAPON), Some(2));
+        assert_eq!(
+            named.string(field::REASON),
+            Some("it was spoofed at 0:13.5 but flew on and struck anyway")
+        );
+        // An ordinary hit names nothing it replaces and gives no reason.
+        let plain = recorder.outcome_event(&ledger::Outcome {
+            projectile: 2,
+            key,
+            resolution: ledger::Resolution::Hit(40),
+            replaces: None,
+        });
+        assert_eq!(plain.get(field::REPLACES), None);
+        assert_eq!(plain.get(field::REASON), None);
+    }
 
     #[test]
     fn the_f22n_and_faxx_are_never_named_as_the_f22() {

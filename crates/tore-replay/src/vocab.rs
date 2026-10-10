@@ -35,7 +35,10 @@ pub mod kind {
     /// How a shot ended. Subject: shooter. Object: intended target. Fields:
     /// `projectile`, `result` (Text from [`super::outcome`]: hit, missed,
     /// spoofed, jammed), `damage` (Int), `hp_after` (Int), `reason` (Text),
-    /// `miss_ft` (Num: the closest the shot came to its target).
+    /// `miss_ft` (Num: the closest the shot came to its target), `replaces`
+    /// (Text from [`super::outcome`]). One per shot, except that a missile
+    /// recorded as spoofed which flies on and damages an aircraft gets a
+    /// second, `hit`, with `replaces` spoofed: the later one stands.
     pub const WEAPON_OUTCOME: &str = "weapon.outcome";
     /// Damage landed. Subject: attacker. Object: the aircraft or surface
     /// object hit. Fields: `projectile`, `weapon`, `damage` (Int), `hp_after`
@@ -359,6 +362,8 @@ pub mod field {
     pub const DAMAGE: &str = "damage";
     pub const HP_AFTER: &str = "hp_after";
     pub const MISS_FT: &str = "miss_ft";
+    /// The result an outcome withdraws, from [`super::outcome`].
+    pub const REPLACES: &str = "replaces";
     pub const SECTION: &str = "section";
     pub const DECOY: &str = "decoy";
     pub const REASON: &str = "reason";
