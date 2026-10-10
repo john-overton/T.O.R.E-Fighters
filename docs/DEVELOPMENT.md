@@ -1587,6 +1587,27 @@ neighbours too. A launcher in a SAM battery is traced with its battery's radar
 and launchers. It reads the same retail records, weapons and sensors too.
 The `surface-*` engagement battery scenarios run it.
 
+`--surface-scene OUT_DIR THEATER STEM` renders a ground target as the game
+draws it, offscreen at 1080p (no window): it steps the whole world
+`--seconds S` (`--surface-only` steps just the moving units, for long
+marches), optionally destroys units (`--kill all`, or a comma list of
+template ordinals, unit types such as `SA3.NT`, and `within:FEET` of the
+framed units) and lets them burn for `--burn S` seconds, sets every
+launcher's rails to at most `--rails N` rounds, then writes one PNG per view
+(`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
+framing `--focus` (`routed`, `parked`, ordinals or types) within
+`--distance FT`. It draws the static scene with its wrecks and rails, the
+moving units, men and deck crew, explosions, fires and smoke. `--surface-preview
+OUT_DIR destroyed` draws one unit of each class beside its destroyed look,
+read from the records, and the four carriers with their damaged islands.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 1300 --surface-only --focus routed --distance 110 --look 300,-35
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes PGU QPGSAM --focus 8 --distance 14 --look 30,-25 --rails 1
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes FRA QFFLT --focus CLEM.NT --distance 420 --kill CLEM.NT --burn 30
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/destroyed destroyed
+```
+
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --over SA6 --altitude 15000 --from 20 --seconds 150
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
