@@ -925,6 +925,7 @@ mod tests {
             address: 0,
         };
         let shape = Shape {
+            billboards: Vec::new(),
             lines: vec![],
             faces: vec![
                 face(40., 100., -1.),
@@ -936,6 +937,7 @@ mod tests {
         assert_eq!(pavement_height(&shape), -1.);
         assert_eq!(
             pavement_height(&Shape {
+                billboards: Vec::new(),
                 lines: vec![],
                 faces: vec![],
                 state_words: Default::default()

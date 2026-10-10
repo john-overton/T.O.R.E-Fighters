@@ -300,6 +300,7 @@ mod tests {
         blade.normal = Some([32767., 0., 0.]);
         let back = mirrored(&blade, 0x40c0);
         let donor = Shape {
+            billboards: Vec::new(),
             faces: vec![blade.clone(), back],
             lines: vec![],
             state_words: Default::default(),
@@ -311,6 +312,7 @@ mod tests {
         let mut reverse = old.clone();
         reverse.address = 0x584b;
         let mut shape = Shape {
+            billboards: Vec::new(),
             faces: vec![old, reverse],
             lines: vec![],
             state_words: Default::default(),

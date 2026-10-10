@@ -371,6 +371,7 @@ mod tests {
             ),
         ];
         let shape = Shape {
+            billboards: Vec::new(),
             faces: source.clone(),
             lines: Vec::new(),
             state_words: BTreeSet::new(),

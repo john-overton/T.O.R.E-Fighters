@@ -559,6 +559,7 @@ mod tests {
     use super::*;
     fn shape(faces: Vec<Face>) -> Shape {
         Shape {
+            billboards: Vec::new(),
             faces,
             lines: Vec::new(),
             state_words: Default::default(),

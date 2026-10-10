@@ -223,6 +223,7 @@ mod tests {
         let art = Art::synthetic(
             (0..5)
                 .map(|_| Shape {
+                    billboards: Vec::new(),
                     faces: vec![front.clone(), back.clone()],
                     lines: vec![],
                     state_words: Default::default(),
