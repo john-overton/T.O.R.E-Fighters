@@ -4580,7 +4580,15 @@ impl State {
                             LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
                         }
                     } else {
-                        let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
+                        // A parked aircraft is met at its aircraft sphere: a bomb or
+                        // missile's fuze radius does not reach it (fitted; nothing
+                        // bursts beside a ground target).
+                        let fuze = if self.parked.contains_key(&t.id) {
+                            0
+                        } else {
+                            w.damage.fuze_radius.max(0)
+                        };
+                        let radius = t.radius * hitbox + f64::from(fuze);
                         let start = sub(p.previous, old_targets[i]);
                         // A round leaving its own launcher's volume is not a hit.
                         if p.owner == t.id && dot(start, start) <= radius * radius {

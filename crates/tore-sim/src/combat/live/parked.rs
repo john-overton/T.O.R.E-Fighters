@@ -11,8 +11,9 @@
 //!   rounds pass it by, as they pass every ground object.
 //! - **For damage it is an aircraft**: the aircraft volume contact test for
 //!   gun rounds and the aircraft sphere for everything else (it has no ground
-//!   box), hits recorded by damage section, its own PT class word for the
-//!   debrief's kill rows. When destroyed it explodes as an aircraft (type
+//!   box), without the weapon's fuze radius (fitted: a bomb does not burst
+//!   100 ft above it), hits recorded by damage section, its own PT class
+//!   word for the debrief's kill rows. When destroyed it explodes as an aircraft (type
 //!   30), throws its fragment, and leaves the ground-crash crater and a fire
 //!   with its smoke column for 15 minutes ([`State::aircraft_crashed`]'s
 //!   marks), without the crash explosion: it did not fall. On a carrier deck

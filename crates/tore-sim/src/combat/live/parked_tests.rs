@@ -211,7 +211,9 @@ fn destroyed_it_explodes_as_an_aircraft_burns_and_leaves_a_crater_on_land() {
             .find(|e| e.kind == EffectKind::Destroyed)
             .and_then(|e| e.blast)
             .unwrap();
-        assert!((30..=32).contains(&blast), "{blast}");
+        // Type 30 with its usual variety (24 to 33), never the ground
+        // object's 35.
+        assert!((24..=33).contains(&blast), "{blast}");
         let craters: Vec<_> = s
             .marks
             .iter()
@@ -324,4 +326,25 @@ fn scene_replacement_removes_parked_aircraft_and_a_checkpoint_keeps_them() {
     s.add_parked_aircraft(&parked([0., 8., 3000.], None))
         .unwrap();
     assert_eq!(row(&s).hp, 100);
+}
+
+#[test]
+fn a_fuze_radius_does_not_reach_a_parked_aircraft() {
+    let mut s = scene(false);
+    let mut bomb = record("MK82.JT", 500);
+    bomb.damage.fuze_radius = 100;
+    // Dropped 120 ft above it: inside fuze radius plus sphere, but it falls
+    // to the aircraft before it bursts.
+    s.projectiles
+        .push(toward(9, bomb, [0., 128., 3000.], [0., -1., 0.]));
+    run(&mut s, 1, false);
+    assert_eq!(row(&s).hp, 100, "no burst at the release point");
+    let events = run(&mut s, 20, false);
+    assert!(events.contains(&Event::Destroyed(PARKED)));
+    let blast = s
+        .effects
+        .iter()
+        .find(|e| e.kind == EffectKind::Destroyed)
+        .unwrap();
+    assert!(blast.position[1] < 8. + AIRCRAFT_RADIUS_FT + 13.);
 }
