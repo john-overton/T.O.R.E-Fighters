@@ -118,8 +118,13 @@ no AC-130 gunsight and no sensor camera, so none of this claims retail
 parity). On the AC-130 the TARGET CAM page is the gunsight. Every other
 aircraft keeps the page above unchanged. The sight itself (modes, slew, pin,
 the guns' train, the pipper's ballistics) is specified in
-[AC-130 linked guns](ac130-linked-guns.md); this section covers what the page
-and its camera show.
+[AC-130 linked guns](ac130-linked-guns.md#the-gunsight); this section covers what
+the page and its camera show. In short: the picture always looks somewhere
+(a target, a pinned point or a free line of sight the pilot slews); a circled
+cross, the pipper, shows where the linked guns' rounds will land; a gun list
+and a small arcs box show which guns are linked and where each is trained. The
+box and diamond that mark the same point on every other view are specified in
+[the aim box](ac130-linked-guns.md#the-aim-box-on-every-view).
 
 ### The camera
 
@@ -165,7 +170,26 @@ All gunsight marks are ink `[20,20,20]` with a one pixel white halo.
 | Clock, range | y=103 | Range is to the sight point; a tracked target keeps its NM and KTS alternation |
 | Damage bar | x 133 to 137 | Tracked target only |
 
-**Pipper states.** Live and solid when the guns are on the aim point. Dashed
+**Pipper states.** The sim evaluates each linked gun's pipper every tick from
+where the sight point sits relative to that gun's arc and range:
+
+```mermaid
+stateDiagram-v2
+    state "Live: guns on the aim point" as Live
+    state "Slewing: guns moving to it" as Slewing
+    state "Parked: sight point outside the arc" as Parked
+    state "Out of range: no impact before rounds expire" as Spent
+    [*] --> Slewing
+    Slewing --> Live: within 1 degree
+    Live --> Slewing: sight point moves faster than 30 deg per s
+    Live --> Parked: sight point leaves the arc
+    Slewing --> Parked: sight point leaves the arc
+    Parked --> Slewing: sight point re-enters the arc
+    Live --> Spent: beyond gun range
+    Spent --> Slewing: back inside range
+```
+
+The page draws them: live and solid when the guns are on the aim point. Dashed
 ring with its centre dot when the status is CANNOT BEAR: the guns stop at the
 arc edge, so the pipper sits where the clamped guns put their rounds. A dashed
 ring with no centre dot for MAX RANGE or rounds that spend before reaching
@@ -181,10 +205,13 @@ RANGE: a diagonal strike. Empty, or not fitted: a grey label struck flat.
 MASK, NO LINE OF FIRE, EMPTY (the labels of `Readiness`). Only NO LINE OF FIRE
 and the empty and failed states block the trigger
 (`Readiness::gun_may_fire`); the rest are advisory. When the camera reaches
-the bottom hemisphere's top limit the row reads `<o> GIMBAL LIMIT`: an eye
-drawn as the text "<o>" in the page's font by default. A hand-drawn 9 x 5
-eyeball bitmap is behind the one-line `EYE_ICON` switch in
-`instruments/gunsight.rs` (John to choose).
+the bottom hemisphere's top limit the row reads GIMBAL LIMIT after an eye icon
+(John, 2026-10-09: hand-drawn, not an emoji). He has not picked between two
+options, so both exist and the one-line `EYE_ICON` switch in
+`instruments/gunsight.rs` chooses. **Option 1 (the current default)**: the text
+`<o>`, an almond and a pupil in the page's font, no asset. **Option 2**: a
+hand-drawn 9 x 5 pixel eyeball bitmap (an almond outline with a round pupil).
+`--target-cam-preview gimbal-text` and `gimbal-bitmap` render each.
 
 **Arcs box.** The box spans the widest arc (C_25): heading -30 (forward) at the
 left edge to -150 (aft) at the right, elevation +60 at the top to -60 at the

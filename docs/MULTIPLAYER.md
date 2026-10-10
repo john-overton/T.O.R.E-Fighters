@@ -753,6 +753,16 @@ recording), the sort order (Alt+A), the battle net and its monitor key
   **Leave Game** (John, 2026-10-06; built in F2-A, F2-O3 and F2-O4,
   [architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
 - Game speed and realism settings are locked by the lobby for everyone.
+- *The AC-130's gunsight* (John, 2026-10-09; protocol 21): the host owns the
+  whole sight (its look, a pin or track, the guns' train and the pipper), and
+  the pilot's seat sends only the slew, the zoom step and the designate and pin
+  commands. The camera turns smoothly on the client from its own inputs and
+  corrects to the host; the pipper and gun marks are the host's, a round trip
+  late, like the barrels. Other players see the barrels follow the sight. The
+  AC-130's always-on Easy targeting is part of the aircraft, so it applies even
+  when the King turns cheats off. The spec is
+  [AC-130 gunsight](spec/ac130-linked-guns.md#the-gunsight), the bytes are in
+  [the wire](formats/net-protocol.md#the-gunsight).
 - If a flight lead is shot down, a human in the flight takes the lead if there
   is one, otherwise the next AI member ([lead succession](#slots-ai-fill-and-handoff)).
 - *Retail gap-fill (agent):* the Cheat menu is available to the King only and

@@ -8,10 +8,24 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation contract, 2026-10-05. John requested player-selected targets,
-tracking gun mounts and selectable linked combinations. This contract contains
-source-derived installation and fitted control/aiming laws. It grants no
-independent target choice, orbit control or AI pilot changes.
+Implementation contract, 2026-10-05, extended on 2026-10-09 with the gunsight.
+John requested player-selected targets, tracking gun mounts and selectable
+linked combinations, then asked for the target camera to become a gunsight with
+a pipper, a pinnable ground point, always-on targeting and guns that fire
+without a solution. This contract contains source-derived installation and
+fitted control/aiming laws. It grants no orbit control or AI pilot changes.
+
+For a player: the AC-130's TARGET CAM page is a gunsight. The camera always
+looks somewhere, the three guns follow that point as far as their arcs allow, a
+pipper shows where rounds will land, and the trigger always works. The
+[target window spec](target-window.md#ac-130-gunsight) covers the page. Retail
+has no AC-130 gunsight, sensor slew or ground pin, so none of it claims retail
+parity.
+
+- [Selection and controls](#selection-and-controls): the gun group.
+- [Tracking and fitted limits](#tracking-and-fitted-limits): arcs, slew, barrels.
+- [The gunsight](#the-gunsight): modes, keys, pod track, sensor dome, pipper, aim box.
+- [Feedback and shared state](#feedback-and-shared-state): readiness and the network.
 
 ## Selection and controls
 
@@ -26,12 +40,12 @@ NAV or a non-gun station suspends group fire.
 Ctrl+7 selects the next installed gun candidate and arms gun mode. Ctrl+8 adds
 or removes that candidate from the group. Removing its last member leaves an
 empty group and blocks fire rather than choosing another gun. On a standard
-Linux gamepad, hold Select and push the right stick right past half travel to
-choose the next candidate, or left past half travel to toggle it. Return the
-stick before another activation. Group actions are meaningful only on AC-130;
-these gestures retain their flight-control meanings on applicable VTOL and
-rotorcraft. Existing combat buttons and left-stick cyclic remain available.
-These keys and gestures are agent decisions dated 2026-10-05.
+gamepad, hold View (Select) and press the D-pad up to choose the next candidate
+or down to toggle it. They sat on View plus the right stick until the gunsight
+took the stick for slewing (John, 2026-10-09). Group actions are meaningful only
+on AC-130; on the AC-130 the D-pad's range-reset and damage-test uses are off.
+Existing combat buttons and left-stick cyclic remain available. These keys and
+gestures are agent decisions dated 2026-10-05, moved on 2026-10-09.
 
 The ordinary Fire action releases every enabled gun that has ammunition, is not
 failed or lost, and whose own airframe is not in the line of fire. It needs no
@@ -122,6 +136,27 @@ checkpoint all hold the same sight. It has three modes:
 | Pinned | Toward a fixed world ground point; slewing moves the point | The pin |
 | Tracked | Toward an object, air or ground, at any range | The object, with lead |
 
+How the sight moves between the modes:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "Free slew<br/>Alt+arrows turn the view<br/>manual zoom" as Free
+    state "Tracked object, air or ground<br/>automatic framing" as Tracked
+    state "Pinned ground point<br/>Alt+arrows move the pin<br/>manual zoom" as Pinned
+    [*] --> Free: start at -90 / -25
+    Free --> Tracked: Backslash on an object,<br/>T, Enter, scope click
+    Free --> Pinned: Backslash on bare ground,<br/>Shift+Backslash
+    Pinned --> Tracked: Backslash on an object,<br/>T, Enter
+    Tracked --> Pinned: Shift+Backslash,<br/>or target destroyed
+    Pinned --> Free: L, view stays
+    Tracked --> Free: L, view stays
+```
+
+In free slew with nothing held, L travels back to the default -90 / -25 at slew
+speed. Backslash, T or Enter on another object while tracking switches to that
+object. Whatever the mode, the guns train on the aim point inside their own arcs.
+
 - **Default view**: free slew at heading -90 degrees (abeam left) and elevation
   -25 degrees in the aircraft's own frame, zoom step 3. It is inside every
   gun's arc and clear of the airframe at any bank. Mission start, restart and
@@ -179,7 +214,10 @@ checkpoint all hold the same sight. It has three modes:
   banked aircraft's far side, high ground) leaves the camera stopped at the
   limit, still looking as near as it can, with GIMBAL LIMIT raised; the aim
   point stays on the true object or pin, so the guns train on it within their
-  own arcs. A pin above the hemisphere can be slewed down but not further up.
+  own arcs. The page shows
+  the limit as an eye icon and the words GIMBAL LIMIT. John has not chosen the
+  icon yet: the default is the text `<o>`, and a hand-drawn 9 x 5 pixel eyeball
+  is behind a one-line switch ([target window spec](target-window.md#ac-130-gunsight)). A pin above the hemisphere can be slewed down but not further up.
   The default view is inside the hemisphere. The boundary is a plain 0
   degrees: ray casts from the dome through the model (AC130.SH, all faces)
   show nothing blocking the horizon over the left half or ahead and astern,
@@ -193,6 +231,77 @@ checkpoint all hold the same sight. It has three modes:
   step twenty times (fitted). Terrain within 25 feet of a point does not mask
   it, so a ground point is not masked by the ground it lies on (fitted).
 
+### Keys
+
+All opinionated (John, 2026-10-09, accepted from the plan's recommendations).
+Every key works on the AC-130 only; elsewhere Backslash and Shift+' / Shift+;
+report "not implemented yet" (retail's IR/laser designate and bomb camera zoom)
+and the rest do nothing.
+
+| Action | Keyboard | Gamepad |
+| --- | --- | --- |
+| Designate under the crosshair (object, else ground) | Backslash | View + A, tapped |
+| Pin the ground under the crosshair | Shift+Backslash | View + A, held half a second |
+| Drop the target or pin; again, back to the default view | L or ; | View + B |
+| Slew the sight | Alt + arrows (or Alt + keypad 4, 6, 8, 2) | View + right stick |
+| Zoom in / out | Shift+' / Shift+; | none |
+| Next gun candidate / link or unlink it | Ctrl+7 / Ctrl+8 | View + D-pad up / down |
+| Live-fire range reset (developer fixture) | Ctrl+Shift+Backslash | none |
+
+Backslash kept its retail meaning, "designate the object nearest the centre".
+The live-fire range reset used to sit on it and now follows the placement rule
+"kept its letter and gained Ctrl+Shift". A held slew key starts at a quarter of
+full deflection for a quarter second so a short press nudges, then runs at full
+rate; a stick is proportional. [Input guide](../INPUT.md#ac-130-gunsight-controls).
+
+### The pipper
+
+The pipper is where rounds from a gun at its actual train land. Each tick the
+sim marches the same trajectory the round will fly (launch speed, drop, service
+cadence, round life) from the posed muzzle along the actual barrel, for the
+candidate gun and every linked gun (`gunship_impact::impact`).
+
+- **Ground, pin or free point**: where the trajectory meets the terrain.
+- **Air target**: where the round is when it reaches the target's range, minus
+  the target's velocity times the flight time, so correctly led guns put the
+  pipper on the target.
+- **Spent**: rounds that expire (30 seconds at most) before reaching anything
+  report no impact; the page shows MAX RANGE.
+
+Against rounds fired through the combat step the pipper's centre line misses by
+under 0.1 foot; real rounds scatter inside the fitted 0.25-degree cone (about
+20 feet at 4,500 feet), which the pipper does not show. Rounds hitting objects
+or the aircraft are not modelled. The march limits are agent choices. How the
+page draws the states is in the
+[target window spec](target-window.md#ac-130-gunsight).
+
+### The aim box on every view
+
+Opinionated (John, 2026-10-09: a box on any view at any time, marking the
+target or point of aim, in the style of Easy targeting). It is presentation
+only and reads the readout the same way in single player and online.
+
+- **The box** marks the aim point: a square on a tracked object (with the
+  friendly X on a friendly), a square with a centre dot on a pin, corner
+  brackets on a free-slew point. It is always drawn on the AC-130.
+- **The diamond** marks where the guns will actually hit, only when that
+  differs from the box: the candidate gun (else the lowest linked gun with a
+  pipper) reads SLEWING, CANNOT BEAR, MAX RANGE or MIN RANGE, and the diamond
+  is more than one box width from the box.
+- **Where**: inside the HUD's square region the HUD draws it; elsewhere in the
+  cockpit and in every external, chase and padlock view a floating square
+  (while the HUD toggle is on, Shift+U hides it with the rest); the Front View
+  and Other View pages draw a 7 pixel square. A box off the screen becomes an
+  edge arrow, in the HUD's shape and drawn twice as large on full-screen views,
+  sliding in along its ray to stay clear of the instrument windows. Floating
+  marks paint only where the canvas is clear, so an instrument window can hide
+  one (as it hides Easy targeting's square today). The target camera page is
+  the gunsight itself and draws neither. A mission replay has no HUD and shows
+  nothing.
+- The HUD square covers about 18 degrees either side of the nose and the guns'
+  arcs start 30 degrees off it, so a box inside the HUD always comes with the
+  diamond.
+
 ## Feedback and shared state
 
 The input page exposes the two group actions with AC-130 applicability. A group
@@ -204,6 +313,24 @@ advisory, remains visible even when another group member is ready; every
 member fires independently unless it is itself blocked.
 The status line shows the advisory states only to tell the pilot a shot is not
 solved; none of them holds the trigger.
+
+**Readiness split.** NO LINE OF FIRE is the gun's own airframe (the fitted
+boxes above) and blocks. TERRAIN MASK, terrain between muzzle and aim point,
+is advisory. The status order puts the airframe check first, so it shows even
+when the aim is also out of arc or range; a gun slewing through the blocked
+region reads NO LINE OF FIRE for those ticks and fires on the clear ticks
+either side. `Readiness::gun_may_fire` is the one place the rule lives.
+
+**Multiplayer** (protocol 21, [wire](../formats/net-protocol.md#the-gunsight)).
+The host owns the whole sight, so a seat sends only its slew deflection, zoom
+step and the two sight commands, and the host's combat step does everything
+else; a standby replays it bit for bit. The owner's readout carries the sight,
+look, aim point, pippers and per-gun status. The client turns its own copy of
+the camera from its own inputs for a smooth view and corrects to the host's
+look (snapping past a tenth of the field of view); the pipper, gun marks and
+status are the host's, a round trip late, like the barrels. Other players see
+the barrels follow the sight through the entity's gun devices (protocol 18).
+The always-on targeting applies even when the King turns cheats off.
 
 Host, clients and replay receive actual heading/elevation and membership. The
 six angle values use slot order C_25, C_40, C_105 and interleaved heading/elevation;
@@ -217,6 +344,13 @@ Use synthetic gun records and targets to check each single cannon, mixed groups,
 first-tick linked releases and distinct subsequent cadence, tracking slew/limits,
 target changes/loss, trigger release, empty/failed stations, empty groups and
 restart. Check command tapes and replicated actual mount angles/membership.
+For the gunsight: the default view inside every arc and clear of the airframe,
+exact repeatable slew integration, the pin, drop and return rules, the pick,
+the pipper against fired rounds, fire with no solution in every advisory state,
+a checkpoint restored mid-slew, a client that slews and pins while a second
+client's barrels follow, and the headless battery scenarios `ac130-pin-orbit`,
+`ac130-fire-no-target` and `ac130-track-out-of-arc`
+([baseline](../baselines/ac130-gunsight.md)).
 The unavailable retail comparison does not establish retail parity. Original
 mount slew, the arc interpretation, gun geometry hinges and muzzle-to-art scale
 remain approximate. The next research step is the reviewed bounded hardpoint

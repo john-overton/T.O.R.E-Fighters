@@ -179,14 +179,17 @@ and press the gamepad D-pad up or down for the same actions (they sat on the
 right stick before the gunsight took it, John 2026-10-09).
 These gestures act on AC-130 only. The Weapons instrument shows the authoritative
 `LINK` membership and marks the current candidate with its ordinary selection
-arrow. Fire releases ready members together, each retaining its own ammunition
-and cadence. Empty or blocked members do not stop the others. An empty group
+arrow. Fire releases every enabled member together, each retaining its own
+ammunition and cadence; it needs no target or firing solution. Empty or
+blocked members do not stop the others. An empty group
 reports GROUP EMPTY. Bracket selection retains ordinary single-gun operation
 until multiple guns are linked; NAV suspends group fire.
 
-A designated observed target is required. Mounts track at 30 degrees/second and
-shots use their actual barrel directions and muzzle positions. NO TARGET,
-CANNOT BEAR, SLEWING and NO LINE OF FIRE explain why a gun cannot release.
+Mounts follow the gunsight's aim point (a target, a pin or the free line of
+sight) at 30 degrees/second and shots use their actual barrel directions and
+muzzle positions. NO TARGET, CANNOT BEAR, SLEWING, MAX RANGE and TERRAIN MASK
+only say the shot is not solved; the guns still fire. SAFE, EMPTY, GROUP EMPTY
+and NO LINE OF FIRE (the gun's own airframe) are what stop a gun.
 The [gunship contract](spec/ac130-linked-guns.md) records source arcs, fitted
 articulation/clearance, limits and shared host/client/replay state. These controls
 and the linked firing capability are authored choices, not recovered retail
@@ -220,11 +223,15 @@ one direction each, using its virtual button tokens: `bind stick axis:16=-1
 sight-left hold`. Hat positions are not `position=N` bindings for these
 actions, because a slew is held, not pressed.
 
-Select + A also stays the radar `designate` on every other aircraft; the
-AC-130 swaps in the sight's designate and pin, and the Select + D-pad uses
-that belong to the vectoring jets, the range reset and the damage test are off
-there. The live-fire range reset, which took Backslash, is now
-Ctrl+Shift+Backslash.
+Select + A stays the radar `designate` on every other aircraft; the AC-130
+swaps in the sight's designate and pin. The Select + D-pad uses that belong to
+the vectoring jets, the range reset and the damage test are off on the AC-130,
+where the D-pad picks and links guns. The live-fire range reset, which took
+Backslash, is now Ctrl+Shift+Backslash.
+
+On [the keyboard map](tore-keyboard-map.html) the gunsight keys are on the Fly &
+Fight sheet, with an AC-130 legend box. The range reset is a developer fixture
+and stays off it, as the [map's rules](tore-keyboard-map-rules.md) require.
 
 ## In-game controls and saved preferences
 
