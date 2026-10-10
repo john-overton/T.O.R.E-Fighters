@@ -8,6 +8,10 @@
 //! ([`gunship::slewed`], [`gunship::homeward`]) from the same quantized
 //! frames the predictor steps, and corrects to the host's look:
 //!
+//! - The look never leaves the camera's gimbal, the hemisphere below the
+//!   aircraft ([`gunship::GIMBAL_TOP`]): every step, correction and drawn
+//!   offset is held inside it, as the host holds its own. The GIMBAL LIMIT
+//!   notice is the host's (it rides in the readout).
 //! - Every predicted tick steps the look. A free sight turns with the slew,
 //!   or travels home after an L. A pinned sight looks at the host's pin from
 //!   the predicted plane, turned by the slews the client made since the
@@ -111,13 +115,6 @@ fn wrap(angle: f64) -> f64 {
     if wrapped == -PI { PI } else { wrapped }
 }
 
-fn clamp_elevation(e: f64) -> f64 {
-    e.clamp(
-        -gunship::LOOK_ELEVATION_LIMIT,
-        gunship::LOOK_ELEVATION_LIMIT,
-    )
-}
-
 /// How far apart two looks are, radians across the picture.
 pub fn separation(a: [f64; 2], b: [f64; 2]) -> f64 {
     let heading = wrap(a[0] - b[0]) * a[1].cos().max(b[1].cos());
@@ -135,7 +132,7 @@ impl SightPrediction {
     pub fn presented(&self) -> [f64; 2] {
         [
             wrap(self.look[0] + self.offset[0]),
-            clamp_elevation(self.look[1] + self.offset[1]),
+            gunship::clamp_elevation(self.look[1] + self.offset[1]),
         ]
     }
 
@@ -165,16 +162,23 @@ impl SightPrediction {
         }
     }
 
-    /// A pinned look: at the host's pin from the plane, turned by the slews
-    /// the pin does not hold yet.
-    fn pinned_look(&self, pin: Vector, plane: &flight::State) -> [f64; 2] {
+    /// A pinned sight's bearing: from the camera's eye (sensor dome D on the
+    /// predicted plane) at the host's pin, turned by the slews the pin does
+    /// not hold yet. It can lie above the camera's gimbal.
+    fn pinned_bearing(&self, pin: Vector, plane: &flight::State) -> [f64; 2] {
         let launcher = tore_world::combat::launcher(plane);
-        let at = gunship::body_angles(launcher, sub(pin, plane.position));
+        let at = gunship::body_angles(launcher, sub(pin, gunship::eye_position(launcher)));
         let turn = self
             .pending
             .iter()
             .fold([0.; 2], |sum, (_, d)| [sum[0] + d[0], sum[1] + d[1]]);
-        [wrap(at[0] + turn[0]), clamp_elevation(at[1] + turn[1])]
+        [wrap(at[0] + turn[0]), at[1] + turn[1]]
+    }
+
+    /// A pinned look: the bearing held inside the camera's gimbal, so a pin
+    /// above the hemisphere leaves the camera at its edge, as the host's.
+    fn pinned_look(&self, pin: Vector, plane: &flight::State) -> [f64; 2] {
+        gunship::clamp_look(self.pinned_bearing(pin, plane))
     }
 
     fn advance(
@@ -214,16 +218,18 @@ impl SightPrediction {
                 }
             }
             Sight::Pinned(pin) => {
+                let mut bearing = self.look;
                 if let Some(plane) = plane {
-                    self.look = self.pinned_look(pin, plane);
+                    bearing = self.pinned_bearing(pin, plane);
+                    self.look = gunship::clamp_look(bearing);
                 }
                 if deflected {
-                    let turned = gunship::slewed(self.look, deflection, zoom);
-                    self.pending.push_back((
-                        tick,
-                        [wrap(turned[0] - self.look[0]), turned[1] - self.look[1]],
-                    ));
-                    self.look = turned;
+                    // The host's pin law: it neither rises above the horizon
+                    // nor above where it already is.
+                    let turned = gunship::slew_pin(bearing, deflection, zoom);
+                    self.pending
+                        .push_back((tick, [wrap(turned[0] - bearing[0]), turned[1] - bearing[1]]));
+                    self.look = gunship::clamp_look(turned);
                 }
             }
             Sight::Tracked(_) => {

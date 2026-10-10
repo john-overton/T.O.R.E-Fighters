@@ -16,6 +16,13 @@ pub const NAMES: [&str; 3] = ["25MM", "40MM", "105MM"];
 pub const PIVOTS_SOURCE: [Vector; 3] = [[-9.5, 29., -12.], [-11., -7., -11.], [-9., -25., -11.5]];
 pub const TIPS_SOURCE: [Vector; 3] = [[-16.5, 28., -14.], [-18., -7., -14.], [-21.5, -25., -14.5]];
 pub const SOURCE_SCALE: f64 = 2. / 3.;
+/// Sensor dome D, the gunsight camera's eye: the round electro-optical
+/// turret under the left side of the fuselage, just forward of the wing root,
+/// at the middle of the left belly fairing (source X -9..-14, Y 4..26, Z -7..-16
+/// in AC130.SH). Source axes: right, forward, up. Fitted from the reviewed
+/// mesh and John's reference photo (2026-10-09): the ball hangs just below
+/// the fairing's lower face, so the point sits 1.5 source units under it.
+pub const EYE_SOURCE: Vector = [-13.5, 11., -15.5];
 const HEADING_ARC: [f64; 3] = [
     60_f64.to_radians(),
     45_f64.to_radians(),
@@ -32,9 +39,15 @@ const AIM_TOLERANCE: f64 = 1_f64.to_radians();
 /// The default view: 90 degrees left and 25 degrees down in the aircraft's
 /// own frame, as [heading, elevation] (opinionated, John, 2026-10-09).
 pub const DEFAULT_LOOK: [f64; 2] = [-FRAC_PI_2, -25. * PI / 180.];
-/// Free slew elevation stops short of straight up and down (fitted: avoids
-/// the singular heading there).
+/// Free slew elevation stops short of straight down (fitted: avoids the
+/// singular heading there). The camera's gimbal reaches nadir otherwise.
 pub const LOOK_ELEVATION_LIMIT: f64 = 89. * PI / 180.;
+/// The camera's gimbal covers the hemisphere below the aircraft: elevation
+/// from here down through nadir, heading free across the full turn
+/// (opinionated, John, 2026-10-09). The belly shows only a few degrees of
+/// fuselage across the right side from the dome (see docs/spec/ac130-linked-guns.md),
+/// so the boundary is the horizontal plane of the aircraft.
+pub const GIMBAL_TOP: f64 = 0.;
 /// The target camera's zoom ladder: six steps, the widest 30 degrees tall,
 /// each half the one before (fitted, agent choice; retail gives six steps).
 pub const ZOOM_STEPS: u8 = 6;
@@ -105,6 +118,10 @@ pub enum Notice {
     NoGroundPoint,
     /// The pilot slewed while tracking: L drops the target first.
     DropToSlew,
+    /// The camera is stopped at the edge of its gimbal: the pilot is slewing
+    /// against it, or the tracked target or pin lies above the hemisphere
+    /// below the aircraft. Raised every tick it holds.
+    GimbalLimit,
 }
 /// The last notice and the combat tick it was raised on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,8 +153,11 @@ pub struct State {
     pub elevations: [f64; 3],
     /// What the sight holds.
     pub sight: Sight,
-    /// Body-relative [heading, elevation] of the line of sight, kept current
-    /// in every mode so a drop continues from it.
+    /// Body-relative [heading, elevation] of the camera's line of sight from
+    /// the eye, kept current in every mode so a drop continues from it. It
+    /// never leaves the gimbal's hemisphere ([`GIMBAL_TOP`] and below); a
+    /// track or pin above it leaves the camera at the limit while `aim`
+    /// stays on the true point.
     pub look: [f64; 2],
     /// The sight is travelling back to [`DEFAULT_LOOK`] at
     /// [`RETURN_PER_TICK`].
@@ -284,13 +304,20 @@ impl State {
         ground: &impl Fn(f64, f64) -> f64,
         tick: u64,
     ) -> (TargetObservation, bool) {
-        let origin = launcher.position;
+        let origin = eye_position(launcher);
         let found = |id: u32| objects.iter().find(|o| o.id == id && o.alive);
+        // Set when the camera is held at the gimbal's edge this tick.
+        let mut limited = false;
+        self.look = clamp_look(self.look);
         // A track ends only when its object is destroyed or removed; the
         // sight then holds the ground it was looking at.
         if let Sight::Tracked(id) = self.sight {
             match found(id) {
-                Some(object) => self.look = body_angles(launcher, sub(object.position, origin)),
+                Some(object) => {
+                    let at = body_angles(launcher, sub(object.position, origin));
+                    limited |= at[1] > GIMBAL_TOP;
+                    self.look = clamp_look(at);
+                }
                 None => match sight_ground(
                     origin,
                     direction(launcher, self.look[0], self.look[1]),
@@ -301,8 +328,13 @@ impl State {
                 },
             }
         }
+        // The pin's own bearing from the eye, which may lie above the
+        // gimbal while the camera stops at its edge.
+        let mut pin_look = [0.; 2];
         if let Sight::Pinned(point) = self.sight {
-            self.look = body_angles(launcher, sub(point, origin));
+            pin_look = body_angles(launcher, sub(point, origin));
+            limited |= pin_look[1] > GIMBAL_TOP;
+            self.look = clamp_look(pin_look);
         }
         let line = direction(launcher, self.look[0], self.look[1]);
         match (self.request.take(), self.sight) {
@@ -316,6 +348,7 @@ impl State {
                 } else if let Some(point) = sight_ground(origin, line, ground) {
                     self.sight = Sight::Pinned(point);
                     self.returning = false;
+                    pin_look = self.look;
                 } else {
                     self.notice = Some(SightNotice {
                         notice: Notice::NoGroundPoint,
@@ -338,7 +371,9 @@ impl State {
             Sight::Free => {
                 if deflected {
                     self.returning = false;
-                    self.look = slewed(self.look, deflection, self.zoom());
+                    let turned = slew_raw(self.look, deflection, self.zoom());
+                    limited |= turned[1] > GIMBAL_TOP;
+                    self.look = clamp_look(turned);
                 } else if self.returning {
                     self.look = homeward(self.look);
                     self.returning = self.look != DEFAULT_LOOK;
@@ -346,15 +381,26 @@ impl State {
             }
             Sight::Pinned(_) => {
                 if deflected {
-                    let look = slewed(self.look, deflection, self.zoom());
-                    if let Some(point) =
-                        sight_ground(origin, direction(launcher, look[0], look[1]), ground)
+                    let turned = slew_pin(pin_look, deflection, self.zoom());
+                    limited |= slew_raw(pin_look, deflection, self.zoom())[1] > turned[1];
+                    // A slew the limit cancels leaves the pin where it is.
+                    let moved =
+                        wrap(turned[0] - pin_look[0]).abs() + (turned[1] - pin_look[1]).abs();
+                    if moved > 1e-12
+                        && let Some(point) =
+                            sight_ground(origin, direction(launcher, turned[0], turned[1]), ground)
                     {
                         self.sight = Sight::Pinned(point);
-                        self.look = look;
+                        self.look = clamp_look(turned);
                     }
                 }
             }
+        }
+        if limited && self.notice.is_none_or(|n| n.tick != tick) {
+            self.notice = Some(SightNotice {
+                notice: Notice::GimbalLimit,
+                tick,
+            });
         }
         self.slew_held = deflected;
         let tracked = self.sight.tracked().and_then(found);
@@ -498,17 +544,40 @@ pub fn zoom_step(raw: u8) -> u8 {
 pub fn field_of_view(step: u8) -> f64 {
     WIDEST_FIELD / f64::from(1u32 << (zoom_step(step) - 1))
 }
-/// The look angles after one tick of slew at this deflection and zoom.
-/// Heading wraps through a full turn; elevation stops at the limit. The
-/// heading rate is divided by the cosine of elevation (floored at a quarter)
-/// so the picture moves at the same rate across the screen.
+/// The look angles after one tick of slew at this deflection and zoom, held
+/// inside the camera's gimbal. Heading wraps through a full turn; elevation
+/// stops at the horizon ([`GIMBAL_TOP`]) and just short of nadir. The heading
+/// rate is divided by the cosine of elevation (floored at a quarter) so the
+/// picture moves at the same rate across the screen.
 pub fn slewed(look: [f64; 2], deflection: [f64; 2], zoom: u8) -> [f64; 2] {
+    clamp_look(slew_raw(look, deflection, zoom))
+}
+/// [`slewed`] before the gimbal clamp: what the pilot's slew asks for. Its
+/// elevation above [`GIMBAL_TOP`] is a push against the limit.
+pub fn slew_raw(look: [f64; 2], deflection: [f64; 2], zoom: u8) -> [f64; 2] {
     let rate = SLEW_FIELDS_PER_SECOND * field_of_view(zoom) / 120.;
     let heading = look[0] + rate * deflection[0] / look[1].cos().max(0.25);
-    [
-        wrap(heading),
-        (look[1] + rate * deflection[1]).clamp(-LOOK_ELEVATION_LIMIT, LOOK_ELEVATION_LIMIT),
-    ]
+    [wrap(heading), look[1] + rate * deflection[1]]
+}
+/// A pin's slew from its own bearing (which may lie above the gimbal): it may
+/// not rise above the horizon, nor above where it already is.
+pub fn slew_pin(look: [f64; 2], deflection: [f64; 2], zoom: u8) -> [f64; 2] {
+    let mut turned = slew_raw(look, deflection, zoom);
+    turned[1] = turned[1].clamp(-LOOK_ELEVATION_LIMIT, look[1].max(GIMBAL_TOP));
+    turned
+}
+/// The elevation of a camera look held inside the gimbal.
+pub fn clamp_elevation(elevation: f64) -> f64 {
+    elevation.clamp(-LOOK_ELEVATION_LIMIT, GIMBAL_TOP)
+}
+/// A look held inside the camera's gimbal: the hemisphere below the aircraft.
+pub fn clamp_look(look: [f64; 2]) -> [f64; 2] {
+    [look[0], clamp_elevation(look[1])]
+}
+/// The sight's bearing is above the camera's gimbal: the camera stops at its
+/// edge and the notice shows.
+pub fn beyond_gimbal(look: [f64; 2]) -> bool {
+    look[1] > GIMBAL_TOP
 }
 /// One tick of the travel back to the default view, along the straight line
 /// between the two in heading and elevation.
@@ -532,8 +601,9 @@ fn wrap(angle: f64) -> f64 {
 fn sub(a: Vector, b: Vector) -> Vector {
     std::array::from_fn(|i| a[i] - b[i])
 }
-/// Body-relative [heading, elevation] of a world offset, elevation held
-/// inside the look limit.
+/// Body-relative [heading, elevation] of a world offset, as the true bearing:
+/// it can lie above the camera's gimbal ([`clamp_look`] holds the camera
+/// there); only the straight-down singularity is kept off.
 pub fn body_angles(launcher: Launcher, offset: Vector) -> [f64; 2] {
     let right = dot(offset, launcher.basis.right);
     let forward = dot(offset, launcher.basis.forward);
@@ -637,6 +707,18 @@ fn sky_range(config: &Configuration) -> f64 {
 }
 fn approach(current: f64, demand: f64) -> f64 {
     current + (demand - current).clamp(-SLEW_PER_TICK, SLEW_PER_TICK)
+}
+/// The gunsight camera's eye in the aircraft's frame, host mount order
+/// (right, up, forward), feet: sensor dome D.
+pub fn eye() -> Vector {
+    let [x, forward, up] = EYE_SOURCE;
+    [x * SOURCE_SCALE, up * SOURCE_SCALE, forward * SOURCE_SCALE]
+}
+/// Where the camera's eye is in the world: every sight ray (designate, pin,
+/// terrain mask of a pick, the camera) starts here, not at the aircraft's
+/// centre.
+pub fn eye_position(launcher: Launcher) -> Vector {
+    world_mount(launcher, eye())
 }
 pub fn pivot(slot: usize) -> Vector {
     let [x, forward, up] = PIVOTS_SOURCE[slot];

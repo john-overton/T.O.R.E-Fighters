@@ -131,8 +131,9 @@ checkpoint all hold the same sight. It has three modes:
   look at 120 Hz. Full deflection turns 0.75 of the camera's vertical field of
   view a second across the screen (the heading rate is divided by the cosine of
   elevation, floored at a quarter): 22.5 degrees a second at step 1 down to
-  0.7 at step 6. Heading wraps through a full turn and elevation stops at
-  89 degrees up or down (fitted). The zoom ladder is 30 degrees tall at step 1
+  0.7 at step 6. Heading wraps through a full turn; elevation is held inside
+  the camera's gimbal (below) and stops at 89 degrees down (fitted: avoids the
+  straight-down singularity). The zoom ladder is 30 degrees tall at step 1
   and halves each step (fitted, agent choice). Slewing while tracking does
   nothing and raises a one-off "L to drop" notice.
 - **Backslash** (designate): the object nearest the line of sight within the
@@ -160,6 +161,33 @@ checkpoint all hold the same sight. It has three modes:
   because the sight is the aircraft's sensor. Its target camera and HUD square
   follow the sight's track, ground objects included. Other aircraft are
   unchanged.
+- **Sensor dome D and the gimbal** (opinionated, John, 2026-10-09). The camera
+  looks from the round sensor turret under the left side of the fuselage, just
+  forward of the wing root, not from the aircraft's centre. In the model it
+  sits in the left belly fairing at source (-13.5, 11, -15.5), 9.0 feet left,
+  10.3 feet below and 7.3 feet ahead of the aircraft's origin (fitted from the
+  mesh and John's reference photo; `gunship::eye` and `gunship::eye_position`).
+  Every sight ray starts there: the camera, the ground under the crosshair
+  (Backslash, Shift+Backslash, free slew), the pick's terrain-mask test and the
+  auto-pin after a kill. The guns still fire from their own pivots at the
+  point those rays find.
+  The camera's gimbal is the hemisphere below the aircraft: elevation from the
+  aircraft's horizontal plane (0 degrees) down through straight down (held at
+  89 degrees), heading free across the whole turn. Slewing up stops at the
+  horizon and raises GIMBAL LIMIT (`Notice::GimbalLimit`) every tick the
+  pilot pushes against it. A tracked object or a pin above the hemisphere (a
+  banked aircraft's far side, high ground) leaves the camera stopped at the
+  limit, still looking as near as it can, with GIMBAL LIMIT raised; the aim
+  point stays on the true object or pin, so the guns train on it within their
+  own arcs. A pin above the hemisphere can be slewed down but not further up.
+  The default view is inside the hemisphere. The boundary is a plain 0
+  degrees: ray casts from the dome through the model (AC130.SH, all faces)
+  show nothing blocking the horizon over the left half or ahead and astern,
+  and only the belly across the right side, 3 to 7 degrees below the horizon
+  from azimuth 15 to 165 degrees right of the nose (the real turret ball hangs
+  below the skin, so this depends on how far it is placed). The wing (source
+  Z 6) and nacelles (Z -6 and up) lie 20 and 9 units above the horizon plane
+  and never block below it.
 - The line of sight meets the ground by marching in steps of half the height
   above the ground (16 to 1,000 feet) out to 40 nmi, then halving the last
   step twenty times (fitted). Terrain within 25 feet of a point does not mask

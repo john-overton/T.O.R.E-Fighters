@@ -1286,13 +1286,13 @@ its gunsight scalar group. The group is empty on every other aircraft. Its
 | --- | --- |
 | 2 | The sight's mode (0 free, 1 pinned, 2 tracked) and the tracked object's id (0 otherwise) |
 | 3 | The pin, as an offset from the aim point in 1/8 ft (0 unless pinned; a pin is its own aim point, so it costs three bytes) |
-| 2 | The look: body-relative heading and elevation in steps of 2^-20 of a turn |
+| 2 | The look: the camera's body-relative heading and elevation from sensor dome D, in steps of 2^-20 of a turn. The elevation is never above 0: the camera's gimbal is the hemisphere below the aircraft, so a target or pin above it leaves the look at the limit while the aim point stays true |
 | 1 | Travelling back to the default view |
 | 4 | The aim point: present, then its position in 1/8 ft |
 | 3 x 6 | Each gun's pipper by source slot (25 mm, 40 mm, 105 mm): kind (0 none, 1 ground, 2 air, 3 spent), its point as an offset from the aim point in 1/8 ft, its flight time in 1/64 s and its range in whole feet |
 | 1 | The pippers' launch tick, as ticks before the readout's |
 | 3 | Each gun's readiness, in the readout's readiness codes (24 is TERRAIN MASK) |
-| 2 | The last notice (0 none, 1 no ground point, 2 drop to slew) and its tick, as ticks before the readout's |
+| 2 | The last notice (0 none, 1 no ground point, 2 drop to slew, 3 gimbal limit) and its tick, as ticks before the readout's. The gimbal limit is raised every tick the camera is held at the edge of its gimbal, so its tick stays fresh while it holds |
 | 1 | The zoom step, 1 to 6 |
 
 *Agent decisions:* the plan asked for points relative to the aircraft, but
@@ -1311,10 +1311,12 @@ gun devices (protocol 18), so a second player sees them follow the sight.
 
 **The client turns the camera itself** (`tore_session::client::sight`). The
 host's look arrives a round trip late, so the client turns its own copy with
-the sim's own law from the same quantized frames its prediction steps: a free
+the sim's own law (including the gimbal clamp: no predicted, corrected or
+drawn look is ever above the horizon) from the same quantized frames its
+prediction steps: a free
 sight slews or travels home after a predicted L; a pinned one looks at the
-host's pin from the predicted plane, turned by the slews the host's pin does
-not hold yet; a tracked one holds the host's look, since the target camera
+host's pin from the dome's place on the predicted plane, turned by the slews
+the host's pin does not hold yet; a tracked one holds the host's look, since the target camera
 frames a track by itself. When a newer readout arrives, its look (the sight
 after the input of the tick before the readout's) is compared with the
 client's own for that tick; when they differ by more than 10 microradians
