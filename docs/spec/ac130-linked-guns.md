@@ -23,6 +23,7 @@ has no AC-130 gunsight, sensor slew or ground pin, so none of it claims retail
 parity.
 
 - [Selection and controls](#selection-and-controls): the gun group.
+- [Fire rates, muzzle velocities and loads](#fire-rates-muzzle-velocities-and-loads): the three guns' real cycles.
 - [Tracking and fitted limits](#tracking-and-fitted-limits): arcs, slew, barrels.
 - [The gunsight](#the-gunsight): modes, keys, pod track, sensor dome, pipper, aim box.
 - [Feedback and shared state](#feedback-and-shared-state): readiness and the network.
@@ -60,6 +61,63 @@ its own source cadence, ammunition and physical-round scheduling. A blocked or
 empty gun does not prevent another member from firing. Trigger release clears
 pending rounds for all guns. Group changes also release pending rounds. Restart
 recreates initial membership and neutral mount angles.
+
+## Fire rates, muzzle velocities and loads
+
+Retail gives the three guns one generic record, so the 105 fired 480 rounds a
+minute and the 25 and 40 fired 1,920, all at 2,933 feet a second. John asked
+(2026-10-09) for realistic rates and muzzle velocities. TORE overrides the
+burst and speed fields of these three records (`C_25.JT`, `C_40.JT`,
+`C_105.JT`) when it loads them, and no other weapon: `gunship::apply_tore_record`,
+called where the combat configuration and a mission loadout read a weapon.
+Provenance: **opinionated (John, 2026-10-09)**, figures from the real AC-130U.
+
+| Gun | Retail rate | TORE rate | Round every | Retail muzzle | TORE muzzle | Loaded | Real AC-130U load |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 25 mm GAU-12/U | 1,920 a minute | 1,800 a minute | 0.033 s (4 ticks) | 2,933 ft/s | 3,450 ft/s | 3,000 | about 3,000 |
+| 40 mm L/60 Bofors | 1,920 a minute | 100 a minute | 0.6 s (72 ticks) | 2,933 ft/s | 2,870 ft/s | 1,000 | 256 |
+| 105 mm M102 | 480 a minute | 10 a minute | 6 s (720 ticks) | 2,933 ft/s | 1,620 ft/s | 500 | about 100 |
+
+Loads were not changed. A held trigger fires the first round at once and then
+one round per interval, each gun on its own cycle, so linked guns drift apart
+as they always did. A fresh press never beats the cycle: the deadline of the
+next round survives a release, so tapping the trigger fires no faster than
+holding it (checked at ten taps a second). A gun held back for a moment
+(NO LINE OF FIRE) waits at most a quarter second after the block lifts, however
+slow its cycle.
+
+How the record expresses it: a burst of `gameRoundsInBurst` x
+`actualRoundsPerGame` rounds takes `gameBurstT` quarter seconds, so the 25 is
+15 x 2 rounds in 1 s, the 40 is 5 x 2 in 6 s and the 105 is 1 x 2 in 12 s.
+`actualRoundsPerGame` stays 2, so every round carries the damage it did.
+
+Muzzle velocity is the record's `initialSpeed`; the maximum and final speeds
+follow it (the final speed is half the muzzle velocity, as in retail). A round
+loses only 7 ft/s every second in this record, so the figures hold over its
+10 second life. The 105's slowest round reaches the 13,000 foot sight limit in
+about 8 seconds, so the life was not changed. The pipper and the AI both read
+the speed from the record, so the lead and drop follow it (the pinned orbit
+puts all 319 rounds, the 105's included, within 54.3 feet of the pin).
+
+**Tracers.** Every round of a gun slower than four rounds a second carries a
+tracer ribbon (the 40 and the 105); the 25 keeps one round in three, as every
+retail gun does. A drawing layer can recognise the 105 by the projectile's
+weapon, `C_105.JT` (`ProjectilePose::weapon`).
+
+**Damage.** The cycle changes damage per second, not damage per hit. At the
+retail damage figures a 105 round (damage 150 over the gun scale of 3 and 2
+rounds per game round, 25 per hit) at 10 a minute delivers about a fiftieth of
+what it did at 480 a minute. John has not asked for a damage pass; it is the
+obvious next balance question.
+
+**Readout.** The gun status line has no cycling state. `Ownship::gun_ready_in`
+gives the ticks until a gun's next round may leave, 0 when ready, as the hook
+for a "ready in" indicator beside the 105 in the gun list; nothing displays it.
+
+**AI.** An AI AC-130 takes the same record. Its gunnery fires in half-second
+bursts with half-second recoveries and keeps the record's cadence between them,
+so a 105 fires every 6 seconds (720 ticks is a whole number of its 120 tick
+burst and recovery cycles) and the queue never grows: nothing waits and no rounds are banked.
 
 ## Tracking and fitted limits
 
@@ -265,7 +323,7 @@ candidate gun and every linked gun (`gunship_impact::impact`).
 - **Air target**: where the round is when it reaches the target's range, minus
   the target's velocity times the flight time, so correctly led guns put the
   pipper on the target.
-- **Spent**: rounds that expire (30 seconds at most) before reaching anything
+- **Spent**: rounds that expire (the record's 10 seconds) before reaching anything
   report no impact; the page shows MAX RANGE.
 
 Against rounds fired through the combat step the pipper's centre line misses by
