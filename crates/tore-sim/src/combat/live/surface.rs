@@ -73,11 +73,16 @@ pub struct SurfaceRound {
 
 /// How a destroyed ground object explodes: its unit record's explosion type
 /// (`expType`: 21 for ground vehicles, 35 for ships, 15 for men) and the
-/// crater it leaves on land (`craterSize`).
+/// crater it leaves on land (`craterSize`), and whether its wreck burns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GroundLook {
     pub explosion: u8,
     pub crater: u8,
+    /// The wreck stays and burns: a fire with its smoke column for 15
+    /// minutes at the foot of its box ([`State::burn_wrecks`]). Ships, ground
+    /// vehicles, SAM launchers and AAA guns (docs/spec/surface-defenses.md,
+    /// "Destroyed looks"); men and bunkers do not.
+    pub burns: bool,
 }
 
 /// One surface unit's shot for [`State::fire_surface`].
@@ -319,6 +324,46 @@ impl State {
     /// Ground object `id`'s contact volume now.
     pub fn ground_bounds(&self, id: u32) -> Option<crate::airport::OrientedBox> {
         self.ground_bounds.get(&id).copied()
+    }
+
+    /// Lights the fire of every destroyed ground object whose look burns
+    /// and has not burned yet: a fire mark (the fire and its smoke column,
+    /// 15 minutes) at the foot of its box, or at its row without one, once
+    /// per object. However the object died (a hit, splash, a host's
+    /// destroyed event), it burns where its wreck stands. The oldest fire
+    /// goes out when the list is full, as for crash sites.
+    pub(super) fn burn_wrecks(&mut self) {
+        use crate::combat::blast::{self, MarkKind};
+        if !self.ground_looks.values().any(|look| look.burns) {
+            return;
+        }
+        let lit: Vec<(u32, Vector)> = self
+            .targets
+            .iter()
+            .filter(|t| t.hp <= 0 && !self.crashed.contains(&t.id))
+            .filter(|t| self.ground_looks.get(&t.id).is_some_and(|look| look.burns))
+            .map(|t| {
+                let at = self
+                    .ground_bounds
+                    .get(&t.id)
+                    .map_or(t.position, super::collateral::foot);
+                (t.id, at)
+            })
+            .collect();
+        for (id, at) in lit {
+            self.crashed.insert(id);
+            if self
+                .marks
+                .iter()
+                .filter(|m| m.kind == MarkKind::Fire)
+                .count()
+                >= blast::MAX_FIRES
+                && let Some(oldest) = self.marks.iter().position(|m| m.kind == MarkKind::Fire)
+            {
+                self.marks.remove(oldest);
+            }
+            self.mark(at, MarkKind::Fire, blast::CRASH_TICKS);
+        }
     }
 }
 

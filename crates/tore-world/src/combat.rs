@@ -405,6 +405,13 @@ impl Combat {
                     live::GroundLook {
                         explosion: unit.explosion?,
                         crater: unit.crater?,
+                        // Wrecks that stay burn (docs/spec/surface-defenses.md,
+                        // "Destroyed looks").
+                        burns: matches!(
+                            unit.look,
+                            crate::surface::DestroyedLook::DamagedShape(_)
+                                | crate::surface::DestroyedLook::Wreck(_)
+                        ),
                     },
                 ))
             })
@@ -869,6 +876,10 @@ impl Combat {
                         others.iter().find(|(own, _)| own.aircraft == piece.owner)
                     {
                         own.damage_section().map(|section| section as usize)
+                    } else if self.state.is_parked(piece.owner) {
+                        // A parked aircraft's piece: 0 is its `_B` shape,
+                        // 1 its `_D` (docs/spec/surface-defenses.md).
+                        Some(piece.variant)
                     } else {
                         self.state
                             .targets

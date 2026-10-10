@@ -262,6 +262,15 @@ impl Viewer {
             queue,
             self.scenery.static_geometry_where(&destroyed),
         );
+        // The men, deck crew and parked aircraft pieces (moving units once
+        // recordings carry their poses).
+        sim.surface_units(
+            device,
+            queue,
+            &self
+                .scenery
+                .surface_vertices(&picture, &|id| !destroyed.contains(&id), &camera),
+        );
         if let Some(art) = &self.art.escape {
             sim.escapees(
                 device,

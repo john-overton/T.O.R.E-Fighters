@@ -348,3 +348,35 @@ fn a_fuze_radius_does_not_reach_a_parked_aircraft() {
         .unwrap();
     assert!(blast.position[1] < 8. + AIRCRAFT_RADIUS_FT + 13.);
 }
+
+#[test]
+fn a_badly_damaged_parked_aircraft_smokes_until_it_dies() {
+    use crate::combat::smoke::Kind;
+    let dark = |s: &State| {
+        s.smoke
+            .puffs
+            .iter()
+            .filter(|p| p.kind == Kind::Aircraft)
+            .count()
+    };
+    let mut s = scene(false);
+    run(&mut s, 60, false);
+    assert_eq!(dark(&s), 0, "an undamaged aircraft does not smoke");
+    let set_hp = |s: &mut State, hp: i32| {
+        s.targets.iter_mut().find(|t| t.id == PARKED).unwrap().hp = hp;
+    };
+    set_hp(&mut s, 60);
+    run(&mut s, 60, false);
+    assert_eq!(dark(&s), 0, "light damage does not smoke");
+    // At half its hit points it smokes as a damaged aircraft does, every
+    // 12 ticks, from where it stands.
+    set_hp(&mut s, 50);
+    run(&mut s, 120, false);
+    assert!((9..=11).contains(&dark(&s)), "{}", dark(&s));
+    assert!(
+        s.smoke
+            .puffs
+            .iter()
+            .all(|p| (p.position[2] - 3000.).abs() < 40.)
+    );
+}
