@@ -224,6 +224,10 @@ pub mod tests {
             map.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
             map.insert("TORE_AIRPORTS_V1".into(), b"SCENE1".to_vec());
             map.insert("TORE_SPEECH_V1".into(), b"ALL1".to_vec());
+            map.insert(
+                tore_import::surface::MARKER.into(),
+                tore_import::surface::MARKER_VALUE.to_vec(),
+            );
         }
         write_pack(&dir.join("menu-1.pack"), &map).unwrap();
         dir

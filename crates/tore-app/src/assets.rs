@@ -298,11 +298,12 @@ mod tests {
     use super::*;
     use tore_import::{Resources, selection};
 
-    const OLD_MARKERS: [(&str, &[u8]); 4] = [
+    const OLD_MARKERS: [(&str, &[u8]); 5] = [
         ("TORE_MUSIC_V1", b"PCM1"),
         ("TORE_COMBAT_V1", b"RAW1"),
         ("TORE_AIRPORTS_V1", b"SCENE1"),
         ("TORE_SPEECH_V1", b"ALL1"),
+        ("TORE_SURFACE_V1", b"SURF1"),
     ];
 
     fn older_pack() -> Resources {

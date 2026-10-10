@@ -78,6 +78,8 @@ Cache locations:
 
 `TORE_DATA_DIR` overrides this directory for isolated checks, e.g. `TORE_DATA_DIR=.local/test-profile cargo run --locked -p tore-app -- --import gameassets/fighters-anthology --import-only`. Each import creates a versioned `menu-*.pack`; the latest valid pack is loaded, with fallback to earlier valid packs if a write was interrupted. `import-report.txt` records resource names and offsets. After a successful import or startup load, older numbered packs are automatically removed. An import is read back and validated before cleanup; failed imports leave earlier packs available. Cleanup leaves newer generations and unrelated files alone. See [cache retention](spec/import-cache.md). Imported resources never go into the executable.
 
+The import keeps the Quick Mission ground target data (templates, surface units and their shapes) under their retail names ([contract](spec/import-cache.md#ground-target-data-slice-im1)). To prove a source imports completely, run `cargo test -p tore-import --test surface_data -- --ignored --nocapture` (about a minute each): it imports the install (`TORE_GAME_DIR`, default the `gameassets` link) and the 1.0 disc (`TORE_DISC_DIR`, default its `disc1` folder) into scratch folders under `TMPDIR` and checks that every template resolves.
+
 ## Linux and Windows
 
 Linux: install rustup and a native toolchain. On Ubuntu 24.04:

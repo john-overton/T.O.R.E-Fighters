@@ -5,6 +5,7 @@
 //! frame's tick fraction, which the app owns (`CombatView`). Snapshots never
 //! feed back into sensors, physics or the AI. Nothing here draws: the vertex
 //! building that turns a snapshot into a picture is `render_snapshot.rs`.
+pub use crate::surface::SurfacePose;
 use std::collections::BTreeMap;
 use tore_formats::aircraft::AircraftId;
 use tore_sim::flight;
@@ -43,6 +44,10 @@ pub struct RenderSnapshot {
     pub pilots: Vec<PilotPose>,
     /// Loaded aircraft models in draw order, one batch each.
     pub models: Vec<AircraftId>,
+    /// The surface units that follow a route (columns, ships), in id order:
+    /// where each is now. A standing unit is part of the scenery and is not
+    /// listed. Empty in a mission with no routed unit.
+    pub surface: Vec<SurfacePose>,
 }
 impl RenderSnapshot {
     #[allow(dead_code)] // Used by mission replays to find a recorded aircraft.
@@ -376,7 +381,41 @@ pub fn interpolate(
         debris: current.debris.clone(),
         pilots: current.pilots.clone(),
         models: current.models.clone(),
+        surface: blend_surface(
+            previous.map(|p| p.surface.as_slice()),
+            &current.surface,
+            alpha,
+        ),
     }
+}
+
+/// The routed surface units between two snapshots at tick fraction `alpha`
+/// (already clamped): position and attitude blend from the previous tick; a
+/// unit new this tick is drawn where it is.
+pub fn blend_surface(
+    previous: Option<&[SurfacePose]>,
+    current: &[SurfacePose],
+    alpha: f64,
+) -> Vec<SurfacePose> {
+    current
+        .iter()
+        .map(|pose| {
+            let mut pose = pose.clone();
+            if let Some(before) =
+                previous.and_then(|all| all.iter().find(|before| before.id == pose.id))
+            {
+                pose.position = std::array::from_fn(|i| {
+                    before.position[i] + (pose.position[i] - before.position[i]) * alpha
+                });
+                let [yaw, pitch, bank] = before.attitude;
+                let [next_yaw, next_pitch, next_bank] = pose.attitude;
+                pose.attitude = Basis::new(yaw, pitch, bank)
+                    .blended(Basis::new(next_yaw, next_pitch, next_bank), alpha)
+                    .angles();
+            }
+            pose
+        })
+        .collect()
 }
 
 /// One target at tick fraction `alpha` (already clamped).

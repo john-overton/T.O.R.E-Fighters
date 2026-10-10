@@ -204,3 +204,67 @@ fn every_shape_that_projected_keeps_its_face_lists() {
         failures.join("\n")
     );
 }
+
+/// The carriers draw their full models on every path, the islands their
+/// damage branch, and the deck crew its sprite frame (slice S2). Counts are
+/// from the user's own FA_2.LIB; skips without it.
+#[test]
+fn carriers_islands_and_deck_crew_draw_their_full_models() {
+    use tore_formats::shape::{DAMAGED_WORD, SPRITE_FRAME_WORD};
+    let Ok(lib) = Archive::open(game_dir().join("FA_2.LIB")) else {
+        eprintln!("skipped: no retail FA_2.LIB");
+        return;
+    };
+    let read = |name: &str| lib.read(name).unwrap();
+    let damaged = BTreeMap::from([(DAMAGED_WORD, 1)]);
+    for (name, faces, damaged_faces) in [
+        ("NIMZ.SH", 98, None),
+        ("NIMZ_A.SH", 98, None),
+        ("KITT.SH", 232, None),
+        ("KITT_A.SH", 233, None),
+        ("CLEM.SH", 96, None),
+        ("CLEM_A.SH", 98, None),
+        ("WASP.SH", 139, None),
+        ("WASP_A.SH", 140, None),
+        ("NIMZT.SH", 48, Some(48)),
+        ("KITTT.SH", 77, Some(64)),
+        ("CLEMT.SH", 66, Some(66)),
+        ("WASPT.SH", 85, Some(83)),
+    ] {
+        let data = read(name);
+        let state = Shape::with_state(&data, &BTreeMap::new()).unwrap();
+        assert_eq!(state.faces.len(), faces, "{name} state path");
+        assert_eq!(Shape::scenery(&data).unwrap().faces.len(), faces, "{name}");
+        let broken = Shape::with_state(&data, &damaged).unwrap();
+        assert_eq!(broken.faces.len(), damaged_faces.unwrap_or(faces), "{name}");
+        if damaged_faces.is_some() {
+            assert!(
+                broken
+                    .faces
+                    .iter()
+                    .all(|f| f.texture.contains("_A") || f.texture.ends_with("D.PIC"))
+            );
+        }
+    }
+    let crew = read("CATGUY.SH");
+    let scenery = Shape::scenery(&crew).unwrap();
+    let [sprite] = scenery.billboards.as_slice() else {
+        panic!("one deck crew sprite");
+    };
+    assert_eq!(sprite.size, [8., 12.]);
+    assert_eq!(sprite.texture, "CATF.PIC");
+    assert_eq!(
+        sprite.uv,
+        Some([[1., 411.], [1., 469.], [52., 469.], [52., 411.]])
+    );
+    let wide = BTreeMap::from([(SPRITE_FRAME_WORD, 9 << 16 | 2)]);
+    let posed = Shape::with_state(&crew, &wide).unwrap();
+    assert!(posed.state_words.contains(&SPRITE_FRAME_WORD));
+    assert_eq!(posed.billboards[0].size, [12., 12.]);
+    assert_eq!(
+        posed.billboards[0].uv,
+        Some([[478., 253.], [478., 311.], [559., 311.], [559., 253.]])
+    );
+    let outside = BTreeMap::from([(SPRITE_FRAME_WORD, 11 << 16)]);
+    assert!(Shape::with_state(&crew, &outside).is_err());
+}

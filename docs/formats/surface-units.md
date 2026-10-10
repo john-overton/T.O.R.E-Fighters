@@ -156,3 +156,8 @@ cargo test -p tore-formats quick_template::import_tests -- --ignored
 The ignored tests need the retail install (`TORE_GAME_DIR`, or the
 `gameassets` link) and check that all 84 NTs parse, that every shape, store and
 damaged look they name exists, and the counts above.
+
+Which of these records, shapes and textures the import keeps, and why, is in
+[the import contract](../spec/import-cache.md#ground-target-data-slice-im1); the
+walk is `tore_formats::surface_set` and its proof is
+`cargo test -p tore-import --test surface_data -- --ignored`.

@@ -14,10 +14,12 @@
 //! combat registers each unit as a target with its side, and keeps the
 //! units' changing state ([`SurfaceUnitState`]) in its checkpointed state.
 //!
-//! This module resolves and identifies; it never moves or fires anything.
+//! This module resolves and identifies; [`movement`] moves the units that
+//! follow a route. Nothing here fires.
 pub mod catalog;
 mod checkpoint;
 pub mod layout;
+pub mod movement;
 pub mod resolve;
 pub mod units;
 
@@ -271,6 +273,10 @@ pub struct Surface {
     /// The template's rigid move (identity until the layout slice relocates
     /// it).
     pub transform: GroupTransform,
+    /// The units that follow a route, by id: what [`movement`] needs to drive
+    /// them. Routed templates are never relocated or jittered, so the routes
+    /// are in the same frame as the units.
+    pub courses: BTreeMap<UnitId, movement::Course>,
     pub template: Option<TemplateSite>,
     /// The side of every scene object by id: units and owned layout
     /// placements alike. Absent ids are neutral.
@@ -460,5 +466,7 @@ impl Digest {
     }
 }
 
+#[cfg(test)]
+mod movement_tests;
 #[cfg(test)]
 mod tests;
