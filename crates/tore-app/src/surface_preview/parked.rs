@@ -187,6 +187,9 @@ pub(super) fn deck_scene(out: &Path, media: &Media, art: &mut Art) -> AppResult<
             *p = p.map(|v| v * ratio);
         }
     }
+    for line in &mut clem.shape.lines {
+        line.positions = line.positions.map(|p| p.map(|v| v * ratio));
+    }
     for sprite in &mut clem.shape.billboards {
         sprite.center = sprite.center.map(|v| v * ratio);
         sprite.size = sprite.size.map(|v| v * ratio);
