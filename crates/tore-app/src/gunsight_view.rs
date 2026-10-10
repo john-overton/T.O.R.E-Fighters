@@ -9,19 +9,12 @@ use tore_sim::{
     combat::{gunship, live::Launcher},
 };
 
-/// Where the camera sits in the aircraft frame (right, up, forward, feet):
-/// sensor dome D, the round turret on the left of the belly just forward of
-/// the wing root (John, 2026-10-09).
-///
-/// A shim for slice S1b's accessor, which owns the true value and moves the
-/// sim's look origin there too: replace the body with a call to it.
-fn sensor_eye_local() -> Vector {
-    [-3.5, -9.5, 10.]
-}
-
-/// The camera's world position for a launcher pose.
+/// The camera's world position for a launcher pose: sensor dome D, the round
+/// turret on the left of the belly just forward of the wing root, from the
+/// sim's own eye (`gunship::eye`), the origin of every sight ray
+/// (John, 2026-10-09).
 pub fn eye(launcher: &Launcher) -> Vector {
-    gunship::world_mount(*launcher, sensor_eye_local())
+    gunship::eye_position(*launcher)
 }
 
 /// `Camera::zoom` for a zoom step: the picture's vertical field is

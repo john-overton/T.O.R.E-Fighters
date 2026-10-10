@@ -359,3 +359,77 @@ fn barrels_follow_the_sight(mut rig: Rig, snaps: u64) {
     let watched_now = gun_devices(&rig.players[watcher].frames.last().unwrap().picture, 0).unwrap();
     assert!(swing(&watched_now, &after.normalized_devices()) < 0.05);
 }
+
+#[test]
+fn the_predicted_camera_never_leaves_the_hemisphere_below_the_aircraft() {
+    // Slewing up at the widest step passes the horizon in a second and holds
+    // there; no tick, and no drawn offset, is above it.
+    let frames: Vec<InputFrame> = (0..300).map(|_| slew([30, 127], 1)).collect();
+    let mut sight = SightPrediction::default();
+    let plane = plane_state();
+    for (i, frame) in frames.iter().enumerate() {
+        sight.step(i as u64 + 1, frame, &[], &plane);
+        assert!(sight.look()[1] <= gunship::GIMBAL_TOP, "tick {i}");
+        assert!(sight.presented()[1] <= gunship::GIMBAL_TOP, "tick {i}");
+    }
+    assert_eq!(sight.look()[1], gunship::GIMBAL_TOP);
+    // The heading kept turning against the limit.
+    assert!(separation([sight.look()[0], 0.], [DEFAULT_LOOK[0], 0.]) > 0.1);
+    // A drawn correction cannot carry it above either.
+    let (mut sight, history) = predicted(&frames);
+    let host = host_shows([0.5, -0.001], Sight::Free, false);
+    sight.correct(41, &host, &history, &plane);
+    assert!(sight.presented()[1] <= gunship::GIMBAL_TOP);
+    assert!(sight.look()[1] <= gunship::GIMBAL_TOP);
+}
+
+#[test]
+fn a_pin_above_the_hemisphere_leaves_the_predicted_camera_at_the_limit() {
+    let plane = plane_state();
+    // High above the aircraft: the camera can only look at its horizon.
+    let pin = [
+        plane.position[0] - 3_000.,
+        plane.position[1] + 4_000.,
+        plane.position[2],
+    ];
+    let mut sight = SightPrediction::default();
+    let host = host_shows(
+        [-std::f64::consts::FRAC_PI_2, 0.],
+        Sight::Pinned(pin),
+        false,
+    );
+    sight.correct(5, &host, &VecDeque::new(), &plane);
+    assert_eq!(sight.look()[1], 0.);
+    // Slewing up goes nowhere; slewing down turns the bearing but the camera
+    // stays on the limit while the pin is still above it.
+    for tick in 6..20 {
+        sight.step(tick, &slew([0, 127], 3), &[], &plane);
+        assert_eq!(sight.look()[1], 0.);
+    }
+    for tick in 20..40 {
+        sight.step(tick, &slew([0, -127], 3), &[], &plane);
+        assert!(sight.look()[1] <= 0.);
+        assert!(sight.presented()[1] <= 0.);
+    }
+    // A pin below the horizon is looked at, from the dome rather than the
+    // aircraft's centre.
+    let low = [
+        plane.position[0] - 3_000.,
+        plane.position[1] - 3_000.,
+        plane.position[2],
+    ];
+    let mut sight = SightPrediction::default();
+    let host = host_shows(
+        [-std::f64::consts::FRAC_PI_2, -0.8],
+        Sight::Pinned(low),
+        false,
+    );
+    sight.correct(5, &host, &VecDeque::new(), &plane);
+    let launcher = tore_world::combat::launcher(&plane);
+    let from_eye = gunship::body_angles(
+        launcher,
+        std::array::from_fn(|i| low[i] - gunship::eye_position(launcher)[i]),
+    );
+    assert_eq!(sight.look(), from_eye);
+    assert!(from_eye[1] < 0.);
+}

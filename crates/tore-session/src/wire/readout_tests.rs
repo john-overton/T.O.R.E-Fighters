@@ -607,6 +607,15 @@ fn the_gunsight_group_stands_for_the_sight() {
             false,
         ),
         (Sight::Pinned(point(0.)), [None; 3], None, true),
+        (
+            Sight::Tracked(8),
+            [None; 3],
+            Some(SightNotice {
+                notice: Notice::GimbalLimit,
+                tick: 11,
+            }),
+            true,
+        ),
     ] {
         let mut readout = readout.clone();
         let gunsight = tore_world::readout::GunsightReadout {
@@ -665,7 +674,7 @@ fn the_gunsight_group_stands_for_the_sight() {
     for (index, value) in [
         (0, 3),
         (12, 4),
-        (34, 3),
+        (34, 4),
         (36, 0),
         (36, 7),
         (31, 99),

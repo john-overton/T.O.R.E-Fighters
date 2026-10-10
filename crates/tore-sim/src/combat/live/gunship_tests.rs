@@ -181,7 +181,11 @@ fn tracked_mounts_slew_within_limits_and_fire_on_at_the_arc_limit() {
     let group = s.own().gunship.as_ref().unwrap();
     assert_eq!(group.target(), None);
     assert_eq!(group.sight, gunship::Sight::Free);
-    assert!((group.look[0] - FRAC_PI_2).abs() < 1e-9, "{:?}", group.look);
+    // (The dome is 9 feet left and 7 ahead of the centre, so the heading
+    // from it is a little aft of abeam; the target sat level with the
+    // aircraft, a few feet above the dome, so the camera is at the horizon.)
+    assert!((group.look[0] - FRAC_PI_2).abs() < 0.01, "{:?}", group.look);
+    assert_eq!(group.look[1], 0.);
     assert_ne!(group.status[0], Readiness::Ready);
 }
 #[test]
@@ -426,11 +430,14 @@ fn slew_integrates_from_deflection_and_zoom_exactly_and_repeatably() {
     assert!((raised - 22.5).abs() < 1e-9, "{raised}");
     assert!((gunship::field_of_view(6).to_degrees() - 0.9375).abs() < 1e-12);
     assert_eq!(gunship::field_of_view(0), gunship::field_of_view(3));
-    // Heading wraps through a full turn; elevation stops at 89 degrees.
-    let mut look = [PI - 0.001, 1.5532];
+    // Heading wraps through a full turn; elevation stops at the horizon up
+    // and just short of straight down.
+    let mut look = [PI - 0.001, -0.001];
     look = gunship::slewed(look, [1., 1.], 1);
     assert!(look[0] < 0., "{look:?}");
-    assert_eq!(look[1], gunship::LOOK_ELEVATION_LIMIT);
+    assert_eq!(look[1], gunship::GIMBAL_TOP);
+    let look = gunship::slewed([0., -1.5532], [0., -1.], 1);
+    assert_eq!(look[1], -gunship::LOOK_ELEVATION_LIMIT);
 }
 
 #[test]
@@ -438,24 +445,26 @@ fn the_free_aim_point_is_where_the_line_of_sight_meets_the_ground_or_the_gun_ran
     let mut s = free_gunship();
     tick(&mut s, false);
     let aim = group(&s).aim.unwrap();
-    // 1,000 feet up, 25 degrees down, out of the left side.
+    // The dome's height up, 25 degrees down, out of the left side.
+    let eye = gunship::eye_position(launcher());
     assert!(aim[1].abs() < 0.01, "{aim:?}");
     assert!(
-        (aim[0] + 1000. / 25_f64.to_radians().tan()).abs() < 0.1,
+        (aim[0] - eye[0] + eye[1] / 25_f64.to_radians().tan()).abs() < 0.1,
         "{aim:?}"
     );
-    assert!(aim[2].abs() < 1e-6);
+    assert!((aim[2] - eye[2]).abs() < 1e-6);
     // Rising ground: the aim lies on it.
     let slope = |x: f64, _: f64| (-x * 0.3).max(0.);
     tick_over(&mut s, slope);
     let aim = group(&s).aim.unwrap();
     assert!((aim[1] - slope(aim[0], aim[2])).abs() < 0.01, "{aim:?}");
-    assert!(aim[0] > -1000. / 25_f64.to_radians().tan());
-    // Looking above the horizon: a point at the guns' range.
-    group_mut(&mut s).look = [-FRAC_PI_2, 10_f64.to_radians()];
+    assert!(aim[0] > eye[0] - eye[1] / 25_f64.to_radians().tan());
+    // Looking along the horizon, the most the gimbal allows: a point at the
+    // guns' range from the dome.
+    group_mut(&mut s).look = [-FRAC_PI_2, 0.];
     tick(&mut s, false);
     let aim = group(&s).aim.unwrap();
-    let origin = launcher().position;
+    let origin = eye;
     let range = (0..3)
         .map(|i| (aim[i] - origin[i]).powi(2))
         .sum::<f64>()
@@ -1054,9 +1063,11 @@ fn the_airframe_blocks_even_when_the_aim_is_out_of_range_or_arc() {
     let mut s = free_gunship();
     s.own_mut().selected = 1;
     group_mut(&mut s).included = [false, true, false];
-    // Level-up sky aim, abeam: the nacelle is in the way of gun 1, and the
-    // sky point is also beyond any arc.
-    group_mut(&mut s).look = [-FRAC_PI_2, 30_f64.to_radians()];
+    // A target 30 degrees up, abeam, at 10,000 feet: the camera stops at the
+    // horizon, the guns aim at the target, and the nacelle is in the way of
+    // gun 1.
+    s.targets[0].position = [-10_000. * 30_f64.to_radians().cos(), 1000. + 5000., 0.];
+    s.command(OWN, Command::DesignateTarget(42), launcher());
     for _ in 0..360 {
         tick(&mut s, false);
     }
@@ -1091,5 +1102,240 @@ fn only_the_hard_blocks_stop_a_gun() {
         TerrainMask,
     ] {
         assert!(advisory.gun_may_fire(), "{advisory:?}");
+    }
+}
+
+/// The fixture's launcher turned to `bank` radians, for a banked orbit.
+fn banked(bank: f64) -> Launcher {
+    Launcher {
+        basis: Basis::new(0., 0., bank),
+        ..launcher()
+    }
+}
+fn tick_as(s: &mut State, launcher: Launcher) -> Vec<Event> {
+    s.step(
+        &[OwnshipInput {
+            aircraft: OWN,
+            held: false,
+            launcher,
+        }],
+        |_, _| 0.,
+    )
+}
+fn gimbal_notice(s: &State) -> Option<u64> {
+    group(s)
+        .notice
+        .filter(|n| n.notice == gunship::Notice::GimbalLimit)
+        .map(|n| n.tick)
+}
+
+#[test]
+fn the_eye_is_sensor_dome_d_under_the_left_fuselage_forward_of_the_wing() {
+    let [right, up, forward] = gunship::eye();
+    // Left of the centre line, below it, ahead of the wing root (source Y
+    // up to 1 on the wing, 2/3 foot a unit), and outboard of the left skin's
+    // belly corner.
+    assert!(right < -8. && right > -10., "{right}");
+    assert!(up < -9. && up > -12., "{up}");
+    assert!(forward > 0.67 && forward < 17., "{forward}");
+    let eye = gunship::eye_position(launcher());
+    assert_eq!(eye, [right, 1000. + up, forward]);
+}
+
+#[test]
+fn slewing_up_stops_at_the_horizon_and_raises_the_gimbal_limit() {
+    let mut s = free_gunship();
+    // (The fixture's warm-up tracked a target level with the aircraft, a few
+    // feet above the dome: an old notice, which does not count.)
+    let stale = gimbal_notice(&s);
+    // Full deflection up at step 1 climbs 22.5 degrees a second from -25.
+    s.set_sight_input(OWN, [0, 127], 1);
+    let mut first_notice = None;
+    for n in 0..240 {
+        tick(&mut s, false);
+        assert!(group(&s).look[1] <= gunship::GIMBAL_TOP, "tick {n}");
+        if first_notice.is_none() && gimbal_notice(&s) != stale {
+            first_notice = Some(n);
+        }
+    }
+    assert_eq!(group(&s).look[1], 0.);
+    // The notice comes the tick the slew first asks for more than the
+    // hemisphere gives (25 degrees at 22.5 a second), and is raised again
+    // every tick the pilot holds against it.
+    let first = first_notice.unwrap();
+    assert!((130..=140).contains(&first), "{first}");
+    assert_eq!(gimbal_notice(&s), Some(group(&s).notice.unwrap().tick));
+    tick(&mut s, false);
+    assert_eq!(gimbal_notice(&s), Some(group(&s).notice.unwrap().tick));
+    let raised = group(&s).notice.unwrap().tick;
+    tick(&mut s, false);
+    assert!(group(&s).notice.unwrap().tick > raised);
+    // The heading stays free: turning round the whole way keeps the limit.
+    s.set_sight_input(OWN, [127, 127], 1);
+    for _ in 0..600 {
+        tick(&mut s, false);
+        assert_eq!(group(&s).look[1], 0.);
+    }
+    // Slewing back down leaves the limit and stops raising the notice.
+    s.set_sight_input(OWN, [0, -127], 1);
+    tick(&mut s, false);
+    let last = group(&s).notice.unwrap().tick;
+    for _ in 0..10 {
+        tick(&mut s, false);
+    }
+    assert_eq!(group(&s).notice.unwrap().tick, last);
+    assert!(group(&s).look[1] < 0.);
+}
+
+#[test]
+fn a_target_above_the_hemisphere_holds_the_camera_at_the_limit_while_the_guns_train() {
+    let mut s = gunship();
+    // 45 degrees up, abeam, 3,000 feet out: inside the 40 mm's elevation
+    // arc, above the hemisphere.
+    let up = 3000.;
+    s.targets[0].position = [-up, 1000. + up, 0.];
+    s.command(OWN, Command::DesignateTarget(42), launcher());
+    let mut now = 0;
+    for n in 0..240 {
+        tick(&mut s, false);
+        let g = group(&s);
+        assert_eq!(g.sight, Sight::Tracked(42), "tick {n}");
+        // The camera stops at the horizon, still looking abeam; the aim is
+        // the true target.
+        assert_eq!(g.look[1], 0., "tick {n}");
+        assert!((g.look[0] + FRAC_PI_2).abs() < 0.01, "{:?}", g.look);
+        assert_eq!(g.aim, Some(s.targets[0].position));
+        now = g.notice.unwrap().tick;
+        assert_eq!(gimbal_notice(&s), Some(now), "tick {n}");
+    }
+    // The guns follow the target within their own arcs.
+    let g = group(&s);
+    assert!(g.elevations[1] > 30_f64.to_radians(), "{:?}", g.elevations);
+    assert!(g.elevations[2] > 30_f64.to_radians());
+    // L drops the track and the camera stays where it was, at the limit.
+    s.command(OWN, Command::ClearDesignation, launcher());
+    tick(&mut s, false);
+    assert_eq!(group(&s).sight, Sight::Free);
+    assert_eq!(group(&s).look[1], 0.);
+    assert!(gimbal_notice(&s).is_none_or(|t| t <= now));
+    // A target below the horizon raises nothing.
+    let mut low = gunship();
+    low.targets[0].position = [-3000., 0., 0.];
+    let stale = gimbal_notice(&low);
+    low.command(OWN, Command::DesignateTarget(42), launcher());
+    for _ in 0..30 {
+        tick(&mut low, false);
+    }
+    assert!(group(&low).look[1] < 0.);
+    assert_eq!(gimbal_notice(&low), stale);
+}
+
+#[test]
+fn a_pin_the_banked_aircraft_carries_above_the_hemisphere_stops_the_camera_at_the_limit() {
+    let mut s = free_gunship();
+    s.command(OWN, Command::SightPinGround, launcher());
+    tick(&mut s, false);
+    let Sight::Pinned(pin) = group(&s).sight else {
+        panic!("{:?}", group(&s).sight)
+    };
+    let stale = gimbal_notice(&s);
+    // Roll the left wing up until the pin lies above the aircraft's horizon.
+    let tilt = [0.7, -0.7]
+        .into_iter()
+        .find(|b| {
+            let l = banked(*b);
+            gunship::body_angles(l, [0, 1, 2].map(|i| pin[i] - gunship::eye_position(l)[i]))[1] > 0.
+        })
+        .expect("one bank puts the pin above the horizon");
+    let l = banked(tilt);
+    for _ in 0..30 {
+        tick_as(&mut s, l);
+        let g = group(&s);
+        assert_eq!(g.sight, Sight::Pinned(pin));
+        assert_eq!(g.look[1], 0.);
+        assert_eq!(g.aim, Some(pin));
+        assert_eq!(gimbal_notice(&s), Some(g.notice.unwrap().tick));
+        assert_ne!(gimbal_notice(&s), stale);
+    }
+    // Slewing further up does not move the pin; slewing down does, and the
+    // camera stays at the limit until the pin comes back inside.
+    s.set_sight_input(OWN, [0, 127], 3);
+    tick_as(&mut s, l);
+    assert_eq!(group(&s).sight, Sight::Pinned(pin));
+    s.set_sight_input(OWN, [0, -127], 3);
+    tick_as(&mut s, l);
+    assert_ne!(group(&s).sight, Sight::Pinned(pin));
+    assert_eq!(group(&s).look[1], 0.);
+}
+
+#[test]
+fn sight_rays_start_at_the_eye_not_the_aircraft_centre() {
+    // An object dead on the dome's line of sight at 1,000 feet, with the
+    // pick radius at step 6 (0.07 degrees) narrower than the dome's offset
+    // from the centre (0.7 degrees there): picked from the eye only.
+    let eye = gunship::eye_position(launcher());
+    let line = gunship::direction(launcher(), DEFAULT_LOOK[0], DEFAULT_LOOK[1]);
+    let on = |origin: Vector| -> Vector { std::array::from_fn(|i| origin[i] + line[i] * 1000.) };
+    let mut s = free_gunship();
+    s.targets[0].position = on(eye);
+    s.set_sight_input(OWN, [0, 0], 6);
+    s.command(OWN, Command::SightDesignate, launcher());
+    tick(&mut s, false);
+    assert_eq!(group(&s).sight, Sight::Tracked(42));
+    let mut centre = free_gunship();
+    centre.targets[0].position = on(launcher().position);
+    centre.set_sight_input(OWN, [0, 0], 6);
+    centre.command(OWN, Command::SightDesignate, launcher());
+    tick(&mut centre, false);
+    assert!(matches!(group(&centre).sight, Sight::Pinned(_)));
+    // The pin lies on the line from the eye.
+    let Sight::Pinned(pin) = group(&centre).sight else {
+        unreachable!()
+    };
+    let offset: Vector = std::array::from_fn(|i| pin[i] - eye[i]);
+    let along = dot(offset, line);
+    let off_line: f64 = (0..3)
+        .map(|i| (offset[i] - line[i] * along).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    assert!(off_line < 1e-3, "{off_line}");
+    // The free aim point is on it too.
+    let mut free = free_gunship();
+    tick(&mut free, false);
+    let aim = group(&free).aim.unwrap();
+    let offset: Vector = std::array::from_fn(|i| aim[i] - eye[i]);
+    let along = dot(offset, line);
+    assert!(
+        (0..3)
+            .map(|i| (offset[i] - line[i] * along).powi(2))
+            .sum::<f64>()
+            .sqrt()
+            < 1e-3
+    );
+}
+
+#[test]
+fn a_gimbal_limit_notice_survives_a_checkpoint_and_steps_on_identically() {
+    use crate::checkpoint::{Models, from_bytes, to_bytes};
+    let mut s = gunship();
+    s.targets[0].position = [-3000., 4000., 0.];
+    s.command(OWN, Command::DesignateTarget(42), launcher());
+    for _ in 0..20 {
+        tick(&mut s, false);
+    }
+    assert!(gimbal_notice(&s).is_some());
+    s.take_device_notes();
+    s.take_decoy_rolls();
+    s.ledger.take_outcomes();
+    let models = Models::default();
+    let before = group(&s).clone();
+    let coded = to_bytes(&s, &models).unwrap();
+    let mut copy: State = from_bytes(&coded, &models).unwrap();
+    assert_eq!(copy.own().gunship.as_ref(), Some(&before));
+    for n in 0..60 {
+        let a = tick(&mut s, n % 2 == 0);
+        let b = tick(&mut copy, n % 2 == 0);
+        assert_eq!(format!("{a:?}"), format!("{b:?}"), "tick {n}");
+        assert_eq!(group(&s), group(&copy), "tick {n}");
     }
 }

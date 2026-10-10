@@ -171,6 +171,7 @@ crate::checkpoint_enum!(crate::combat::gunship::SightRequest {
 crate::checkpoint_enum!(crate::combat::gunship::Notice {
     NoGroundPoint = 0,
     DropToSlew = 1,
+    GimbalLimit = 2,
 });
 type SightNotice = crate::combat::gunship::SightNotice;
 crate::checkpoint_struct!(SightNotice { notice, tick });

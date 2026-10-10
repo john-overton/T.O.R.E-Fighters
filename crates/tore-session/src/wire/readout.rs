@@ -785,6 +785,7 @@ fn gunsight_values(g: &GunsightReadout, tick: u64) -> Vec<i64> {
             match notice {
                 Notice::NoGroundPoint => 1,
                 Notice::DropToSlew => 2,
+                Notice::GimbalLimit => 3,
             },
             tick as i64 - at as i64,
         ),
@@ -853,11 +854,11 @@ fn gunsight_of(values: &[i64], tick: u64) -> WireResult<Option<GunsightReadout>>
     };
     let notice = match values[34] {
         0 => None,
-        code @ (1 | 2) => Some(SightNotice {
-            notice: if code == 1 {
-                Notice::NoGroundPoint
-            } else {
-                Notice::DropToSlew
+        code @ (1..=3) => Some(SightNotice {
+            notice: match code {
+                1 => Notice::NoGroundPoint,
+                2 => Notice::DropToSlew,
+                _ => Notice::GimbalLimit,
             },
             tick: back(values[35])?,
         }),
