@@ -181,6 +181,9 @@ pub struct Combat {
     ground_looks: BTreeMap<u32, live::GroundLook>,
     /// The surface units' changing state; see [`crate::surface`].
     pub surface: crate::surface::SurfaceState,
+    /// The parked aircraft, registered after the scene's objects whenever
+    /// they are, with their short names for the target window. Setup.
+    parked: Vec<(live::ParkedAircraft, String)>,
     /// The records of the combat tape being written, collected until the app
     /// drains them (`take_tape`); `None` when no tape is being recorded.
     /// Combat holds no file: the app owns the writer.
@@ -339,19 +342,27 @@ impl Combat {
                 ))
             })
             .collect();
+        let parked = terrain
+            .surface
+            .parked_scene
+            .iter()
+            .map(|pose| (pose.target(), pose.name.clone()))
+            .collect();
         let previous = (
             std::mem::replace(&mut self.ground_sides, sides),
             std::mem::replace(&mut self.ground_looks, looks),
+            std::mem::replace(&mut self.parked, parked),
         );
         if let Err(error) = self.add_airport_targets(&terrain.airport_scene) {
-            (self.ground_sides, self.ground_looks) = previous;
+            (self.ground_sides, self.ground_looks, self.parked) = previous;
             return Err(error);
         }
         self.surface = terrain.surface.fresh_state();
         Ok(())
     }
     /// Registers `scene`'s objects as combat targets with the sides the last
-    /// [`Self::add_scene_targets`] gave (none before one: neutral).
+    /// [`Self::add_scene_targets`] gave (none before one: neutral), then that
+    /// call's parked aircraft.
     pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> WorldResult<()> {
         scene.validate().map_err(std::io::Error::other)?;
         // A new layout replaces static identities atomically in the staged state.
@@ -364,6 +375,9 @@ impl Combat {
                 self.ground_side(object.id),
                 self.ground_looks.get(&object.id).copied(),
             )?;
+        }
+        for (parked, _) in &self.parked {
+            staged.add_parked_aircraft(parked)?;
         }
         self.state = staged;
         self.airport_objects = scene.objects.clone();
@@ -403,6 +417,12 @@ impl Combat {
             .iter()
             .find(|o| o.id == id)
             .map(|o| o.name.as_str())
+            .or_else(|| {
+                self.parked
+                    .iter()
+                    .find(|(parked, _)| parked.id == id)
+                    .map(|(_, name)| name.as_str())
+            })
     }
     pub fn new(h: &AircraftType, data: &dyn ResourceSource, range: bool) -> WorldResult<Self> {
         let config = live::Configuration::from_source(&h.profile, |name| {
@@ -467,6 +487,7 @@ impl Combat {
             ground_sides: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
             surface: Default::default(),
+            parked: Vec::new(),
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
             poses: BTreeMap::new(),
@@ -1224,6 +1245,9 @@ impl Combat {
             let look = self.ground_looks.get(&object.id).copied();
             Self::register_airport_object(&mut self.state, object, side, look)?;
         }
+        for (parked, _) in &self.parked {
+            self.state.add_parked_aircraft(parked)?;
+        }
         self.surface.reset();
         if let Some(aircraft) = host {
             self.restart_render(aircraft, s, None);
@@ -1890,6 +1914,7 @@ pub mod fixtures {
             ground_sides: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
             surface: Default::default(),
+            parked: Vec::new(),
             tape: None,
             last_launcher: None,
             notes: Default::default(),

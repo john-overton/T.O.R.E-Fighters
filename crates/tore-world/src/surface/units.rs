@@ -81,10 +81,10 @@ pub struct SupplyTruck {
     pub added: bool,
 }
 
-/// One of the template's aircraft, parked on the ground: a simulated
-/// aircraft with engines off that never takes off (John, 2026-10-10). The
-/// resolution slice lists them with their ids; the parked-aircraft slice
-/// puts them in the world.
+/// One of the template's aircraft, parked on the ground or a carrier deck: a
+/// simulated aircraft with engines off that never takes off (John,
+/// 2026-10-10). Resolution lists them with their ids;
+/// [`super::parked`] puts them in the world.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParkedAircraft {
     pub id: UnitId,
@@ -96,6 +96,8 @@ pub struct ParkedAircraft {
     pub side: Side,
     /// Flag 0x80: a destroy target. Retail writes the others as `$4017`.
     pub target: bool,
+    /// The carrier whose deck it stands on, for a fleet template's aircraft.
+    pub deck: Option<UnitId>,
 }
 
 /// The rigid move of a relocated template: a whole-degree rotation about
