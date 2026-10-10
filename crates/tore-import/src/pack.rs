@@ -87,6 +87,11 @@ pub fn check_markers(resources: &Resources) -> ImportResult<()> {
     if resources.get("TORE_SPEECH_V1").map(Vec::as_slice) != Some(b"ALL1") {
         return Err("cache predates the full radio speech set; re-import media".into());
     }
+    if resources.get(crate::surface::MARKER).map(Vec::as_slice)
+        != Some(crate::surface::MARKER_VALUE)
+    {
+        return Err("cache predates the ground target data; re-import media".into());
+    }
     Ok(())
 }
 
@@ -384,6 +389,10 @@ mod tests {
             ("TORE_COMBAT_V1".to_string(), b"RAW1".to_vec()),
             ("TORE_AIRPORTS_V1".to_string(), b"SCENE1".to_vec()),
             ("TORE_SPEECH_V1".to_string(), b"ALL1".to_vec()),
+            (
+                crate::surface::MARKER.to_string(),
+                crate::surface::MARKER_VALUE.to_vec(),
+            ),
             ("F18.PT".to_string(), vec![1, 2, 3]),
         ])
     }
@@ -414,7 +423,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(loaded.resources, good);
-        assert_eq!(loaded.value, 5);
+        assert_eq!(loaded.value, 6);
         // The refused newer pack is neither loaded nor deleted.
         assert!(directory.0.join("menu-20.pack").exists());
         assert!(directory.0.join("menu-10.pack").exists());
@@ -427,6 +436,18 @@ mod tests {
         resources.insert("TORE_COMBAT_V1".to_string(), b"RAW0".to_vec());
         let error = check_markers(&resources).unwrap_err().to_string();
         assert!(error.contains("re-import media"), "{error}");
+    }
+
+    #[test]
+    fn a_pack_without_the_ground_target_marker_is_refused_by_every_consumer() {
+        let mut resources = marked();
+        check_markers(&resources).unwrap();
+        resources.remove(crate::surface::MARKER);
+        let error = check_markers(&resources).unwrap_err().to_string();
+        assert!(error.contains("ground target"), "{error}");
+        assert!(error.contains("re-import media"), "{error}");
+        resources.insert(crate::surface::MARKER.to_string(), b"SURF0".to_vec());
+        assert!(check_markers(&resources).is_err());
     }
 
     #[test]

@@ -133,6 +133,7 @@ fn a_host_and_two_bots_fly_over_loopback_udp() {
         ("TORE_COMBAT_V1", "RAW1"),
         ("TORE_AIRPORTS_V1", "SCENE1"),
         ("TORE_SPEECH_V1", "ALL1"),
+        ("TORE_SURFACE_V1", "SURF1"),
     ] {
         import.insert(marker.into(), value.as_bytes().to_vec());
     }

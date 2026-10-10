@@ -15,6 +15,7 @@ use crate::{
         MULTIPLAYER_DATA, SLIDER_ART,
     },
     source::{Build, RESOURCE as SOURCE_RESOURCE, Source},
+    surface::{MARKER as SURFACE_MARKER, MARKER_VALUE as SURFACE_MARKER_VALUE},
 };
 use std::{fs, path::Path};
 
@@ -112,6 +113,36 @@ pub fn import_with_progress<T>(
         &aircraft_libs.iter().collect::<Vec<_>>(),
         &scene_layouts,
     )?;
+    // The ground target templates, every record they and the base layouts can
+    // name, and the shapes and textures of those (slice IM1).
+    progress(Progress::Preparing("Finding ground targets"));
+    let surface = tore_formats::surface_set::select(&tore_formats::surface_set::Archives(
+        &aircraft_libs.iter().collect::<Vec<_>>(),
+    ))?;
+    report.push_str(&format!(
+        "Surface data: {} templates, {} units, {} objects, {} aircraft, {} resources\n",
+        surface.templates.len(),
+        surface.count(tore_formats::surface_set::Family::Unit),
+        surface.count(tore_formats::surface_set::Family::Object),
+        surface.count(tore_formats::surface_set::Family::Aircraft),
+        surface.resources.len()
+    ));
+    for gap in &surface.missing {
+        report.push_str(&format!(
+            "Surface data unavailable: {} (needed by {})\n",
+            gap.name, gap.needed_by
+        ));
+    }
+    for (name, error) in &surface.unread {
+        report.push_str(&format!("Surface record unreadable: {name}: {error}\n"));
+    }
+    if !surface.missing.is_empty() || !surface.unread.is_empty() {
+        summary.push(format!(
+            "Ground targets: {} names missing, {} records unreadable",
+            surface.missing.len(),
+            surface.unread.len()
+        ));
+    }
     for (filename, names, debrief, multiplayer) in [
         ("FA_1.LIB", MENU_ART, DEBRIEF_ART, MULTIPLAYER_ART),
         ("FA_2.LIB", MENU_DATA, DEBRIEF_DATA, MULTIPLAYER_DATA),
@@ -133,6 +164,7 @@ pub fn import_with_progress<T>(
                     || n.as_str() == "MCICONS.PIC"
                     || aircraft_names.contains(*n)
                     || scene_names.contains(*n)
+                    || surface.resources.contains(*n)
                     || tore_formats::ui::creator::resource(n)
                     || tore_formats::music::resource(n)
                     || tore_formats::radio::resource(n)
@@ -304,6 +336,7 @@ pub fn import_with_progress<T>(
     resources.insert("TORE_AIRPORTS_V1".into(), b"SCENE1".to_vec());
     resources.insert("TORE_SPEECH_V1".into(), b"ALL1".to_vec());
     resources.insert(MULTIPLAYER_MARKER.into(), MULTIPLAYER_MARKER_VALUE.to_vec());
+    resources.insert(SURFACE_MARKER.into(), SURFACE_MARKER_VALUE.to_vec());
     drop(decode(&resources)?);
     fs::create_dir_all(destination)?;
     // Generation files keep the previous import usable until the new pack is complete.
