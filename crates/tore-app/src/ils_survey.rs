@@ -119,6 +119,7 @@ pub fn check_path(theater: &str, world: &Terrain, clearance_ft: f64) -> Vec<Stri
                         alive: true,
                         speed_fps: 250.,
                         ground_clearance_ft: clearance_ft,
+                        redfor: false,
                     };
                     let mut service = Service::new(scene).ok()?;
                     service.command(scene, aircraft, Command::SelectAirport(runway.airport));

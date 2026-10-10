@@ -1127,9 +1127,11 @@ impl Terrain {
                         .clone()
                         .unwrap_or_else(|| format!("Airport {airport_id}")),
                     runway_objects: vec![id],
-                    // Base free flight has no mission-side player assignment.
-                    // Treat imported fields as neutral with explicit host permission.
-                    allegiance: Allegiance::Neutral,
+                    // The runway's layout owner (slice AL1, John 2026-10-10):
+                    // Blue's field is friendly, Redfor's hostile, and one
+                    // with no owner field neutral. Neutral fields grant
+                    // permission to both sides (agent decision, AL1).
+                    allegiance: Allegiance::of_owner(placement.redfor()),
                     neutral_permission: true,
                 });
             }

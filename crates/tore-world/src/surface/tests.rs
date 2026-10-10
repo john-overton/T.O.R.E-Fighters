@@ -881,6 +881,45 @@ fn airfield_resources() -> BTreeMap<String, Vec<u8>> {
 }
 
 #[test]
+fn each_airfield_takes_its_layout_side_and_ai_homes_follow_it() {
+    use crate::ai_wings::Airfields;
+    use tore_sim::{ai::launch::Side, airport::Allegiance};
+    let r = airfield_resources();
+    let spec = MissionSpec::new(THEATER, AircraftId::F18);
+    let world = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    let scene = &world.terrain.airport_scene;
+    let strip = |n| LAYOUT_OBJECT_BASE + n;
+    let side_of = |n| {
+        let id = scene.runway(strip(n)).unwrap().airport;
+        scene
+            .airports
+            .iter()
+            .find(|a| a.id == id)
+            .unwrap()
+            .allegiance
+    };
+    // Beside the target (no owner), west (Blue), east (Red), south (Blue).
+    assert_eq!(
+        [5, 6, 7, 8].map(side_of),
+        [
+            Allegiance::Neutral,
+            Allegiance::Friendly,
+            Allegiance::Hostile,
+            Allegiance::Friendly
+        ]
+    );
+    let fields = Airfields::from_world(&world.terrain, None);
+    let at = |n| world.terrain.runway_view(strip(n)).unwrap().center;
+    let home = |n, side| fields.home(at(n), side).map(|r| r.object);
+    // Over the Red field Blue goes home to the neutral one beside the
+    // target, the nearest it may use; over a Blue field Redfor does too.
+    assert_eq!(home(7, Side::Friendly), Some(strip(5)));
+    assert_eq!(home(7, Side::Enemy), Some(strip(7)));
+    assert_eq!(home(6, Side::Enemy), Some(strip(5)));
+    assert_eq!(home(6, Side::Friendly), Some(strip(6)));
+}
+
+#[test]
 fn an_automatic_ground_start_takes_the_nearest_own_airfield_15_nm_out() {
     use crate::mission::Start;
     let r = airfield_resources();
