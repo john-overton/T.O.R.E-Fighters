@@ -105,6 +105,7 @@ impl<'a> NetEffects<'a> {
                 .filter_map(|info| Some((info.id, convert::identity(&info.pt)?)))
                 .collect(),
             weapons: weapons.iter().map(|w| (w.id, w.clone())).collect(),
+            ..Identities::default()
         };
         Self {
             world,

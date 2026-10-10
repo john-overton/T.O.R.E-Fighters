@@ -10,16 +10,18 @@ use crate::chunk::ChunkEncoder;
 use crate::error::{Error, Result, invalid};
 use crate::format::{
     CHUNK_HEADER_BYTES, IndexEntry, KIND_FOOTER, KIND_HEADER, KIND_INDEX, chunk, encode_footer,
-    encode_header, encode_index, prelude, trailer,
+    encode_header, encode_index, prelude, trailer, version_for,
 };
 use crate::limits::{
     MAX_AIRCRAFT, MAX_CHUNK_BYTES, MAX_CHUNK_FRAMES, MAX_CHUNKS, MAX_DEBRIS, MAX_EFFECTS_PER_TICK,
     MAX_ESCAPEES, MAX_EVENTS_PER_TICK, MAX_FIELDS_PER_EVENT, MAX_FILE_BYTES, MAX_IDS_PER_VALUE,
-    MAX_PROJECTILES, MAX_PUFFS_PER_TICK, MAX_REGISTERED, MAX_STRING_BYTES,
-    MAX_SURFACE_CHANGES_PER_TICK, MAX_TREE_DEPTH, MAX_TREE_NODES, MAX_TREES_PER_TICK,
+    MAX_PROJECTILES, MAX_PUFFS_PER_TICK, MAX_REGISTERED, MAX_REGISTERED_SURFACE, MAX_STRING_BYTES,
+    MAX_SURFACE_CHANGES_PER_TICK, MAX_SURFACE_STOCK_PER_TICK, MAX_SURFACE_UNITS, MAX_TREE_DEPTH,
+    MAX_TREE_NODES, MAX_TREES_PER_TICK,
 };
 use crate::model::{
-    AircraftInfo, EffectKind, Event, Footer, Frame, Header, PuffKind, TreeSample, Value, WeaponInfo,
+    AircraftInfo, EffectKind, Event, Footer, Frame, Header, PuffKind, SurfaceInfo, TreeSample,
+    Value, WeaponInfo,
 };
 use crate::strings::Interner;
 use std::collections::{HashMap, HashSet};
@@ -83,6 +85,9 @@ pub struct Writer {
     strings: Interner,
     aircraft: HashMap<u32, AircraftInfo>,
     weapons: HashMap<u32, WeaponInfo>,
+    surface_units: HashMap<u32, SurfaceInfo>,
+    /// The format version this file is written in.
+    version: u16,
     chunk: ChunkEncoder,
     last_tick: Option<u64>,
     frames: u64,
@@ -113,13 +118,14 @@ impl Writer {
         if final_path.exists() {
             return Err(invalid(format!("{} already exists", final_path.display())));
         }
+        let version = version_for(header);
         let header = encode_header(header)?;
         let partial = partial_path(&final_path);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&partial)?;
-        let mut start = prelude();
+        let mut start = prelude(version);
         start.extend_from_slice(&chunk(KIND_HEADER, 0, 0, &header));
         file.write_all(&start)?;
         file.flush()?;
@@ -132,6 +138,8 @@ impl Writer {
             strings: Interner::default(),
             aircraft: HashMap::new(),
             weapons: HashMap::new(),
+            surface_units: HashMap::new(),
+            version,
             chunk: ChunkEncoder::default(),
             last_tick: None,
             frames: 0,
@@ -228,6 +236,55 @@ impl Writer {
         Ok(())
     }
 
+    /// Registers a surface unit's identity, with the same rules as aircraft.
+    /// Only a format 3 recording (a header whose world has a ground target
+    /// or surface units) takes surface tracks.
+    pub fn register_surface_unit(&mut self, info: &SurfaceInfo) -> Result<()> {
+        self.check_running()?;
+        self.check_surface_format("a surface unit")?;
+        if let Some(old) = self.surface_units.get(&info.id) {
+            return if old == info {
+                Ok(())
+            } else {
+                Err(invalid(format!(
+                    "surface unit {} is already registered as {}",
+                    info.id, old.label
+                )))
+            };
+        }
+        if self.surface_units.len() >= MAX_REGISTERED_SURFACE {
+            return Err(invalid(format!(
+                "more than {MAX_REGISTERED_SURFACE} registered surface units"
+            )));
+        }
+        if info.position.iter().any(|v| !v.is_finite()) {
+            return Err(invalid(
+                "a surface unit stands at a position that is not a number",
+            ));
+        }
+        for text in [&info.name, &info.label] {
+            check_string("a surface unit identity", text)?;
+        }
+        self.make_room(512)?;
+        self.chunk.add_surface_unit(info, &mut self.strings);
+        self.surface_units.insert(info.id, info.clone());
+        Ok(())
+    }
+
+    /// The format version this recording is written in.
+    pub fn version(&self) -> u16 {
+        self.version
+    }
+
+    fn check_surface_format(&self, what: &str) -> Result<()> {
+        if self.version < 3 {
+            return Err(invalid(format!(
+                "{what} needs a format 3 recording: set the header's world to have a ground target, a redrawn airfield scene or surface units"
+            )));
+        }
+        Ok(())
+    }
+
     /// Adds one frame. A frame that breaks a rule is refused with a clear
     /// message and nothing is written for it. Ticks must increase; a jump
     /// starts a new chunk, and the missing ticks read back as a gap.
@@ -242,6 +299,12 @@ impl Writer {
             )));
         }
         let bound = validate(frame)?;
+        if self.version < 3 && uses_surface_tracks(frame) {
+            return Err(invalid(format!(
+                "the frame at tick {} holds surface tracks, which need a format 3 recording",
+                frame.tick
+            )));
+        }
         if bound + CHUNK_HEADER_BYTES + 1024 > MAX_CHUNK_BYTES {
             return Err(invalid(format!(
                 "the frame at tick {} needs up to {bound} bytes, more than one chunk holds",
@@ -391,6 +454,17 @@ impl Drop for Writer {
     }
 }
 
+/// Whether a frame holds anything only format 3 stores.
+fn uses_surface_tracks(frame: &Frame) -> bool {
+    !frame.surface.is_empty()
+        || !frame.surface_stock.is_empty()
+        || !frame.debris_pieces.is_empty()
+        || frame
+            .new_effects
+            .iter()
+            .any(|e| matches!(e.kind, EffectKind::Flak { .. }))
+}
+
 fn check_string(what: &str, text: &str) -> Result<()> {
     if text.len() > MAX_STRING_BYTES {
         return Err(invalid(format!(
@@ -522,15 +596,34 @@ fn validate(frame: &Frame) -> Result<usize> {
         frame.surface_hp.len(),
         MAX_SURFACE_CHANGES_PER_TICK,
     )?;
+    check_count(t, "surface units", frame.surface.len(), MAX_SURFACE_UNITS)?;
+    check_count(
+        t,
+        "surface stock changes",
+        frame.surface_stock.len(),
+        MAX_SURFACE_STOCK_PER_TICK,
+    )?;
+    check_count(t, "debris pieces", frame.debris_pieces.len(), MAX_DEBRIS)?;
     check_count(t, "events", frame.events.len(), MAX_EVENTS_PER_TICK)?;
     check_count(t, "display trees", frame.trees.len(), MAX_TREES_PER_TICK)?;
     unique(t, "aircraft", frame.aircraft.iter().map(|a| a.id))?;
+    unique(t, "surface unit", frame.surface.iter().map(|u| u.id))?;
     unique(t, "projectile", frame.projectiles.iter().map(|p| p.id))?;
     unique(
         t,
         "debris piece",
         frame.debris.iter().map(|d| (d.owner, d.index)),
     )?;
+    for unit in &frame.surface {
+        if !unit
+            .position
+            .iter()
+            .chain(&unit.attitude)
+            .all(|v| v.is_finite())
+        {
+            return Err(invalid("a surface unit's pose must be finite"));
+        }
+    }
     for effect in &frame.new_effects {
         if let EffectKind::Other(code) = effect.kind
             && EffectKind::from_code(code) != effect.kind
@@ -578,6 +671,9 @@ fn validate(frame: &Frame) -> Result<usize> {
     bound += frame.new_effects.len() * 48;
     bound += frame.new_puffs.len() * 40;
     bound += frame.surface_hp.len() * 16;
+    bound += frame.surface.len() * 96;
+    bound += frame.surface_stock.len() * 24;
+    bound += frame.debris_pieces.len() * 16;
     for event in &frame.events {
         bound += event_bound(event)?;
     }

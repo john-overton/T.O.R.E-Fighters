@@ -170,6 +170,10 @@ pub struct Recorded {
     /// Scattered cloud deck in feet, 0 for none.
     pub cloud_altitude: i32,
     pub weather_seed: i32,
+    /// The Quick Mission ground target the flight had, so the surface
+    /// (template, defenses, seed, nationality, separation and so the starts)
+    /// rebuilds exactly.
+    pub target: Option<crate::surface::resolve::GroundTarget>,
 }
 
 /// The imported layout of one theater with the definitions and shapes its
@@ -857,8 +861,8 @@ impl Terrain {
 
     /// Rebuilds the world a mission recording was flown in from its recorded,
     /// resolved launch settings: layout, weather choice and layer, start time,
-    /// wind and cloud deck. No override applies, so a replay looks the same
-    /// whatever the viewer's settings are.
+    /// wind, cloud deck and ground target. No override applies, so a replay
+    /// looks the same whatever the viewer's settings are.
     #[allow(dead_code)] // Used by the mission replay viewer.
     pub fn for_recorded(resources: &dyn ResourceSource, recorded: &Recorded) -> WorldResult<Self> {
         Self::build(
@@ -867,7 +871,7 @@ impl Terrain {
             recorded.condition,
             Some(recorded),
             &Overrides::default(),
-            None,
+            recorded.target.as_ref(),
         )
     }
 
