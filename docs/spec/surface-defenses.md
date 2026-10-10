@@ -583,13 +583,39 @@ TORE rules (defined and fitted):
 - **SS-N-9** never fires: there are no surface targets this round.
 - **Collateral damage** is new and shared with flak: every aircraft inside the
   collateral radius takes the record's damage times the collateral percent,
-  once per burst. Fitted.
+  once per burst. The aircraft a missile strikes takes its direct hit only.
+  Friendly fire off spares the shooter's side, as for a direct hit. A burst
+  is a missile striking an aircraft or the ground, or a flak shell bursting.
+  Fitted. It applies to surface weapons only this round: the aircraft
+  weapons' records carry collateral radii too (750 ft at 35 percent on most
+  missiles, 100 percent on bombs) but keep today's behaviour, no collateral
+  damage, until John decides (default, pending John).
+- **What a surface round can hit.** Aircraft and the terrain only: surface
+  units do not fight each other this round, so a round or missile passes
+  through ground objects and ships, and a launcher is never hit by its own
+  missile leaving the rail. Defined (agent).
 
 ### AAA and flak
 
 All gun rounds are physical projectiles (defined, John), flown by the existing
 gun-round model with the tuned muzzle velocity and hit-tested like aircraft
 rounds. Flak is physical too; it has no tracer.
+
+How a surface gun round differs from an aircraft's (defined, agent):
+
+- It does its record's damage, split over the physical rounds of a game round
+  as the [AAA tuning](#aaa-tuning) table says. The aircraft guns' one-third
+  rule and their critical hits (a round through the cockpit kills the pilot)
+  do not apply: the table already matches retail damage per second, and a
+  critical kill on top would make AAA deadlier than retail.
+- A jammer does not defeat individual gun rounds; it works on missile seekers.
+  A gun's skill-based aim error is its accuracy rule.
+- A controller may end a gun's rounds a little past the target's range instead
+  of letting them fly their whole life (a Shilka at 3,400 rounds a minute
+  otherwise keeps about 280 rounds in the air), so the sky stays within the
+  projectile limit.
+- Surface fire never fills the last 1,000 of the 5,000 projectile slots, which
+  stay free for the aircraft's own weapons (fitted).
 
 #### Gun records (retail)
 
@@ -643,10 +669,14 @@ KS-12 and KS-19 (fuze 250 ft, collateral 750 ft at 35 percent):
   flight to the lead point and bursts then, or earlier if it passes within the
   250 ft fuze radius of a hostile aircraft. Fitted (the time fuze is not in the
   data; the proximity radius is).
-- A burst deals collateral damage, plays the heavy flak explosion and shows the
-  FLAKA, FLAKB or FLAKC sprite with a dark puff that lingers about 4 s and a
-  point light ([Destroyed looks and drawing](#destroyed-looks-and-drawing)). It
-  has no tracer, and a shell is not drawn in flight.
+- A burst deals collateral damage, plays the record's own explosion (type 27,
+  the original's air flak row: size 130, 2 s, air explosion sounds; retail)
+  and shows the FLAKA, FLAKB or FLAKC sprite with a dark puff that lingers
+  about 4 s and a point light
+  ([Destroyed looks and drawing](#destroyed-looks-and-drawing)). It has no
+  tracer, and a shell is not drawn in flight.
+- Only a hostile aircraft in flight sets off the proximity fuze; a shell
+  passes friendly aircraft and aircraft on the ground.
 - Startup shots 8: the first engagement opens with an eight-shell barrage
   (retail).
 - A shell reaching its life without bursting bursts there.
@@ -1047,7 +1077,7 @@ size on land, rather than one fitted value for all ground objects.
 ### Flak bursts, tracers and light
 
 - **Flak burst.** The FLAKA sheet for 85 mm, FLAKB for 100 mm, FLAKC for any
-  later calibre (fitted), the heavy flak explosion sound, a dark puff that
+  later calibre (fitted), the record's explosion sound, a dark puff that
   lingers about 4 s, and a point light added to the flare light list with the
   flare law (four times brighter at night). Light 160 for 85 mm and 200 for 100
   mm, life 10 ticks (fitted). Flak has no tracer.
@@ -1240,6 +1270,7 @@ carry the label "default, pending John" where they appear above.
 | Fleet-template aircraft | Leave out the Yak-141s in `~QBFLT` and the Rafale M and Super Etendards in `~QFFLT` | Scheduled launches 60 and 90 minutes in, up to 1,962 ft from carriers about 900 ft long |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 2 nm; Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
+| Collateral damage from aircraft weapons | Surface weapons only; aircraft missiles, rockets and bombs keep doing none | Their records carry collateral radii, but turning them on changes every air-to-air fight and is outside this round |
 
 ## Provenance summary
 

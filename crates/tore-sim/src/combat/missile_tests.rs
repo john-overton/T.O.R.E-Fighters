@@ -211,7 +211,7 @@ fn all_nine_activation_thresholds_and_no_false_pitbull() {
         );
     }
     for name in [
-        "AS14.JT", "AS30.JT", "AT12.JT", "AT2.JT", "ASROC.JT", "SA19.JT", "SAN11.JT",
+        "AS14.JT", "AS30.JT", "AT12.JT", "AT2.JT", "ASROC.JT", "SSN9.JT",
     ] {
         assert!(Profile::for_weapon(&weapon(name)).is_none());
         assert!(!Profile::reviewed(name));

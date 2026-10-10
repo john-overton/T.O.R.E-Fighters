@@ -107,9 +107,17 @@ pub fn recordings() -> impl Iterator<Item = &'static str> {
 
 /// Every FA aircraft explodes as type 30 when destroyed.
 pub const AIRCRAFT: u8 = 30;
-/// A destroyed ground object or ship: its own type is not read yet, so a
-/// large ground blast stands in (fitted).
+/// A destroyed ground object or ship without a unit record (buildings and
+/// other scenery): a large ground blast (fitted).
 pub const GROUND_OBJECT: u8 = 35;
+/// The explosion a destroyed ground object or ship shows: its unit record's
+/// own type (`expType`: 21 for ground vehicles, 35 for ships, 15 for men,
+/// docs/spec/surface-defenses.md, "Destroyed looks") when it has one the
+/// table defines, otherwise [`GROUND_OBJECT`].
+pub fn ground_object(unit: Option<u8>) -> u8 {
+    unit.filter(|kind| explosion(*kind).is_some())
+        .unwrap_or(GROUND_OBJECT)
+}
 /// An aircraft hitting land or water (opinionated, John 2026-09-28).
 pub const CRASH_LAND: u8 = 35;
 pub const CRASH_WATER: u8 = 34;
@@ -342,6 +350,17 @@ mod tests {
         assert_eq!(sizes.last(), Some(&255));
         assert_eq!(styles.len(), 3);
         assert_eq!(rolled_size(18, [0.; 3]).max(33), rolled_size(18, [0.; 3]));
+    }
+
+    #[test]
+    fn a_ground_object_explodes_as_its_unit_record_says() {
+        assert_eq!(ground_object(Some(21)), 21);
+        assert_eq!(ground_object(Some(15)), 15);
+        assert_eq!(ground_object(Some(35)), 35);
+        // No record, or a type the table does not define: the fitted blast.
+        assert_eq!(ground_object(None), GROUND_OBJECT);
+        assert_eq!(ground_object(Some(0)), GROUND_OBJECT);
+        assert_eq!(ground_object(Some(39)), GROUND_OBJECT);
     }
 
     #[test]

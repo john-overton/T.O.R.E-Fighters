@@ -114,6 +114,7 @@ fn effect_kind_number(kind: EffectKind) -> u64 {
         EffectKind::Destroyed => 4,
         EffectKind::Ground => 5,
         EffectKind::DebrisImpact => 6,
+        EffectKind::Flak => 7,
     }
 }
 
@@ -126,6 +127,7 @@ fn effect_kind(number: u64) -> Result<EffectKind, CheckpointError> {
         4 => EffectKind::Destroyed,
         5 => EffectKind::Ground,
         6 => EffectKind::DebrisImpact,
+        7 => EffectKind::Flak,
         other => return invalid(format!("an effect kind has no variant {other}")),
     })
 }
@@ -357,8 +359,8 @@ mod tests {
             records: Vec::new(),
         };
         assert!(from_bytes::<Draw>(&coded, &models).is_err());
-        assert!(effect_kind(7).is_err());
-        for n in 0..7 {
+        assert!(effect_kind(8).is_err());
+        for n in 0..8 {
             assert_eq!(effect_kind_number(effect_kind(n).unwrap()), n);
         }
     }
