@@ -184,6 +184,9 @@ pub struct Combat {
     /// The parked aircraft, registered after the scene's objects whenever
     /// they are, with their short names for the target window. Setup.
     parked: Vec<(live::ParkedAircraft, String)>,
+    /// The mission's ground targets that have a combat row (the surface's
+    /// 0x80 objects), for the target window's objective line. Setup.
+    surface_targets: std::collections::BTreeSet<u32>,
     /// The contact volume weapons meet for each scene object whose differs
     /// from its shape's box: a runway's pavement ([`weapon_contact`]). Setup.
     weapon_boxes: BTreeMap<u32, tore_sim::airport::OrientedBox>,
@@ -344,6 +347,11 @@ impl Combat {
         cockpit: Option<&crate::world::Cockpit>,
     ) -> Option<crate::readout::CockpitReadout> {
         let mut readout = crate::readout::build(&self.state, plane, launcher, wings, cockpit)?;
+        if let Some(brief) = readout.target_window.as_mut()
+            && brief.objective.is_none()
+        {
+            brief.objective = self.ground_objective(plane, brief.id);
+        }
         // Surface units' missile locks sound the same tone as the AI's.
         let locks = &mut readout.rwr.locks;
         locks.extend(self.surface.locks_on(plane));
@@ -351,6 +359,28 @@ impl Combat {
         // The radars painting the plane show bright on its RWR.
         readout.rwr.painting = self.surface.painting(plane);
         Some(readout)
+    }
+    /// What the mission asks of `plane` about target `id` when it is one of
+    /// the ground target's objects: the window says "Obj:" for those too. The
+    /// enemy side's planes (a Redfor player in a multiplayer game) must keep
+    /// them, every other plane destroys them.
+    pub fn ground_objective(
+        &self,
+        plane: u32,
+        id: u32,
+    ) -> Option<crate::target_window::TargetObjective> {
+        use crate::target_window::TargetObjective;
+        self.surface_targets.contains(&id).then(|| {
+            let redfor = self
+                .state
+                .ownship(plane)
+                .is_some_and(|own| own.side == ENEMY_SIDE);
+            if redfor {
+                TargetObjective::Survive
+            } else {
+                TargetObjective::Destroy
+            }
+        })
     }
     /// Player airborne startup convention: canonical gun selected and armed.
     pub fn apply_startup_weapons(&mut self) {
@@ -377,6 +407,13 @@ impl Combat {
                     live::GroundLook {
                         explosion: unit.explosion?,
                         crater: unit.crater?,
+                        // Wrecks that stay burn (docs/spec/surface-defenses.md,
+                        // "Destroyed looks").
+                        burns: matches!(
+                            unit.look,
+                            crate::surface::DestroyedLook::DamagedShape(_)
+                                | crate::surface::DestroyedLook::Wreck(_)
+                        ),
                     },
                 ))
             })
@@ -407,6 +444,10 @@ impl Combat {
             return Err(error);
         }
         self.surface = terrain.surface.fresh_state();
+        self.surface_targets =
+            crate::ai_wings::outcome::ground_targets(&terrain.surface, &self.state)
+                .into_iter()
+                .collect();
         Ok(())
     }
     /// Registers `scene`'s objects as combat targets with the sides the last
@@ -545,6 +586,7 @@ impl Combat {
             ground_looks: BTreeMap::new(),
             surface: Default::default(),
             parked: Vec::new(),
+            surface_targets: Default::default(),
             weapon_boxes: BTreeMap::new(),
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
@@ -836,6 +878,10 @@ impl Combat {
                         others.iter().find(|(own, _)| own.aircraft == piece.owner)
                     {
                         own.damage_section().map(|section| section as usize)
+                    } else if self.state.is_parked(piece.owner) {
+                        // A parked aircraft's piece: 0 is its `_B` shape,
+                        // 1 its `_D` (docs/spec/surface-defenses.md).
+                        Some(piece.variant)
                     } else {
                         self.state
                             .targets
@@ -1974,6 +2020,7 @@ pub mod fixtures {
             ground_looks: BTreeMap::new(),
             surface: Default::default(),
             parked: Vec::new(),
+            surface_targets: Default::default(),
             weapon_boxes: BTreeMap::new(),
             tape: None,
             last_launcher: None,

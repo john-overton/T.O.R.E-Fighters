@@ -284,6 +284,9 @@ pub struct Drawn {
     pub flashes: Vec<Flash>,
     pub lights: Vec<FlareLight>,
     pub puffs: Vec<Puff>,
+    /// The crash-site fires of destroyed surface units, each with the width
+    /// in feet it is drawn at (the fire sprite fits to its unit).
+    pub fires: Vec<(Vector, f64)>,
 }
 
 /// The shots seen so far and the rounds the last picture held.

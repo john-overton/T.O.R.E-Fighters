@@ -196,7 +196,10 @@ impl Recorder {
     }
 }
 
-/// The plane of the roster `owner` is, with who flies it now.
+/// The plane of the roster `owner` is, with who flies it now. `None` for an
+/// owner that is no plane of the roster: a SAM site, gun or ship (a surface
+/// id) that shot a plane down, or one of the scene's own objects. Such a shot
+/// or kill credits no player, and retail multiplayer scores no ground kills.
 fn flown(world: &World, owner: u32) -> Option<Flown> {
     world.roster.plane(PlaneId(owner)).map(|plane| Flown {
         plane: plane.id,

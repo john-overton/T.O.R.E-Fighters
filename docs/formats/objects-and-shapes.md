@@ -665,8 +665,15 @@ and the hull numbers on the Eisenhower and Kitty Hawk islands above it.
 Against it: the Eisenhower then stands 832 ft (277 ft at a third) above the
 waterline, where its real mast top is about 207 ft; with the island's origin
 on the deck instead it stands 596 ft (199 ft), and the lower third of the
-island, with its hull number, hangs below the deck. This is an open question
-for the slice that places carriers.
+island, with its hull number, hangs below the deck. The lead kept the
+ground-offset rule (2026-10-10), and the game places the parts that way:
+the offset is in world feet at the scenery scale (CLEMT's -224 matches its
+lowest point, -57 units at 4 ft a unit; a T-80's -16 matches its lowest point
+at 1 ft a unit), so in game it takes the hull's real-size factor, a third,
+like the table offsets and the deck. Ships and the bunkers record offsets
+well below their geometry (Krivak -100 against a lowest point of -26 units,
+BNK5 -176 against -88), so land units alone stand on their lowest point in
+game ([drawing](../spec/surface-defenses.md#drawing)).
 
 ### Flight decks
 

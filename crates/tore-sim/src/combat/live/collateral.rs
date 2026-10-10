@@ -159,7 +159,7 @@ fn sphere_distance(center: Vector, radius: f64, point: Vector) -> f64 {
 }
 
 /// Where a ground object stands: the middle of the bottom of its box.
-fn foot(bounds: &OrientedBox) -> Vector {
+pub(super) fn foot(bounds: &OrientedBox) -> Vector {
     let up = Basis::new(bounds.heading, bounds.pitch, bounds.bank).up;
     std::array::from_fn(|i| bounds.center[i] - up[i] * bounds.half[1])
 }

@@ -384,7 +384,37 @@ pub struct EffectRenderer {
     bind: Option<wgpu::BindGroup>,
     buffer: wgpu::Buffer,
     sprites: Vec<Sprite>,
+    /// The fires that fit their unit: where each burns and how wide it is
+    /// drawn, in feet.
+    fires: Vec<([f64; 3], f64)>,
     count: u32,
+}
+
+/// A fire this near a fitted fire's spot (feet, level) is that fire.
+const FIRE_FIT_FT: f64 = 2.;
+
+/// `sprites` with every fire sprite that stands on one of `fires` drawn at
+/// that fire's width (the fire's sheet is as wide as it is tall by the
+/// layout's aspect).
+fn fit_fires(sprites: &[Sprite], fires: &[([f64; 3], f64)]) -> Vec<Sprite> {
+    let (_, layout) = SHEETS[FIRE_SHEET];
+    sprites
+        .iter()
+        .map(|sprite| {
+            let mut sprite = *sprite;
+            if sprite.layer == FIRE_SHEET
+                && let Some((_, width)) = fires.iter().find(|(at, _)| {
+                    (at[0] - sprite.position[0]).hypot(at[2] - sprite.position[2]) <= FIRE_FIT_FT
+                })
+            {
+                sprite.extent = [
+                    width / 2.,
+                    width * f64::from(layout.height) / f64::from(layout.width),
+                ];
+            }
+            sprite
+        })
+        .collect()
 }
 impl EffectRenderer {
     pub fn new(
@@ -403,8 +433,14 @@ impl EffectRenderer {
                 mapped_at_creation: false,
             }),
             sprites: Vec::new(),
+            fires: Vec::new(),
             count: 0,
         }
+    }
+    /// The fires of destroyed units and the width each is drawn at, for the
+    /// next `update`.
+    pub fn fit_fires(&mut self, fires: &[([f64; 3], f64)]) {
+        self.fires = fires.to_vec();
     }
     /// Rebuild for a new anti-aliasing sample count; the next `prepare`
     /// recreates the bindings.
@@ -550,8 +586,8 @@ impl EffectRenderer {
     /// far to near.
     pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
         let eye = camera.position;
-        let mut visible: Vec<_> = self
-            .sprites
+        let fitted = fit_fires(&self.sprites, &self.fires);
+        let mut visible: Vec<_> = fitted
             .iter()
             .filter_map(|s| {
                 let offset: [f64; 3] = std::array::from_fn(|i| s.position[i] - eye[i]);
@@ -746,6 +782,31 @@ mod tests {
         assert_eq!(
             sprites(&missing, &[effect(EffectKind::Ground, Some(35), 200)], &[]).len(),
             1
+        );
+    }
+
+    #[test]
+    fn a_fire_that_fits_its_unit_is_drawn_at_the_units_width() {
+        let art = Art::synthetic();
+        let fire = |x| MarkPose {
+            kind: MarkKind::Fire,
+            position: [x, 10., 0.],
+            age: 0,
+            strength: 1.,
+        };
+        let drawn = sprites(&art, &[], &[fire(0.), fire(500.)]);
+        // Both are the crash site's 100 feet until one is fitted.
+        assert!(drawn.iter().all(|s| s.extent[0] == 50.));
+        let (_, layout) = SHEETS[FIRE_SHEET];
+        let fitted = fit_fires(&drawn, &[([0., 10., 0.], 30.)]);
+        assert_eq!(fitted[0].extent[0], 15.);
+        assert_eq!(
+            fitted[0].extent[1],
+            30. * f64::from(layout.height) / f64::from(layout.width)
+        );
+        assert_eq!(
+            fitted[1].extent, drawn[1].extent,
+            "the other keeps its size"
         );
     }
 

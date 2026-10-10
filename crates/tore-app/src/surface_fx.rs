@@ -179,6 +179,8 @@ pub struct Tracker {
     bursts: BTreeMap<(i64, i64, i64, u64), Burst>,
     alive: BTreeSet<u32>,
     wrecks: BTreeMap<u32, Wreck>,
+    /// The fires of destroyed units and how wide each is drawn.
+    fires: Vec<(Vector, f64)>,
     serial: u32,
 }
 
@@ -308,9 +310,18 @@ impl Tracker {
     /// column the tick they are first seen dead after being seen alive.
     fn wrecks_of(&mut self, picture: &RenderSnapshot) {
         let mut alive = BTreeSet::new();
+        // A wreck that has since lit its own fire has the simulation's column.
+        self.wrecks
+            .retain(|_, w| fire_at(picture, w.position).is_none());
+        self.fires.clear();
         for pose in picture.targets.iter().filter(|p| is_surface_row(p)) {
             if pose.crashed {
-                if self.wrecks.contains_key(&pose.id) || burning(picture, pose.position) {
+                if let Some(fire) = fire_at(picture, pose.position) {
+                    // Its fire is drawn as big as the unit.
+                    self.fires.push((fire, fire_width(pose.damage.initial_hp)));
+                    continue;
+                }
+                if self.wrecks.contains_key(&pose.id) {
                     continue;
                 }
                 let born = if self.alive.contains(&pose.id) {
@@ -376,6 +387,7 @@ impl Tracker {
             draw_burst(burst, now, out);
         }
         self.draw_wrecks(now, out);
+        out.fires.extend(self.fires.iter().copied());
     }
 
     fn draw_launch(&self, launch: &Launch, now: f64, out: &mut Drawn) {
@@ -532,13 +544,25 @@ fn is_surface_row(pose: &AircraftPose) -> bool {
     pose.aircraft.is_none() && !pose.airborne && is_unit(pose.id)
 }
 
-/// Whether a crash-site fire already burns by `position`.
-fn burning(picture: &RenderSnapshot, position: Vector) -> bool {
-    picture.marks.iter().any(|m| {
-        m.kind == MarkKind::Fire
-            && (m.position[0] - position[0]).hypot(m.position[2] - position[2])
-                <= wreck::FIRE_NEAR_FT
-    })
+/// The spot of the crash-site fire already burning by `position`, if any.
+fn fire_at(picture: &RenderSnapshot, position: Vector) -> Option<Vector> {
+    picture
+        .marks
+        .iter()
+        .find(|m| {
+            m.kind == MarkKind::Fire
+                && (m.position[0] - position[0]).hypot(m.position[2] - position[2])
+                    <= wreck::FIRE_NEAR_FT
+        })
+        .map(|m| m.position)
+}
+
+/// How wide a burning wreck's fire is drawn, in feet, by the unit's hit
+/// points (opinionated, agent, 2026-10-10): 30 ft for a 100 point vehicle,
+/// growing with the square root, from 24 ft to 140 ft, against the 100 ft of
+/// a crash site.
+pub fn fire_width(hit_points: i32) -> f64 {
+    (30. * (f64::from(hit_points.max(1)) / 100.).sqrt()).clamp(24., 140.)
 }
 
 #[cfg(test)]
@@ -914,6 +938,30 @@ mod tests {
         tracker.observe(&picture, 3000., false);
         // Only the plain destroyed unit; one first seen dead stands warm.
         assert_eq!(tracker.wrecks(), 1);
+        // The parked one's fire is drawn at its unit's width, not a crash site's.
+        assert_eq!(tracker.fires, vec![([5010., 0., 5020.], fire_width(100))]);
+        // A wreck that lights its fire later gives up its own column.
+        let mut late = Tracker::default();
+        let mut dead = unit_pose(UNIT + 7, 0);
+        dead.position = [9000., 0., 9000.];
+        let bare = RenderSnapshot {
+            targets: vec![dead.clone()],
+            ..self::picture(10)
+        };
+        late.observe(&bare, 10., false);
+        assert_eq!(late.wrecks(), 1);
+        let lit = RenderSnapshot {
+            marks: vec![MarkPose {
+                kind: MarkKind::Fire,
+                position: [9000., 0., 9000.],
+                age: 1,
+                strength: 1.,
+            }],
+            ..bare
+        };
+        late.observe(&lit, 11., true);
+        assert_eq!(late.wrecks(), 0);
+        assert_eq!(late.fires.len(), 1);
         let out = drawn(&tracker, 3000.);
         assert!(out.puffs.len() as u64 >= wreck::WARM_TICKS / wreck::STEP_TICKS);
         // Only the 24 newest columns draw.
@@ -929,6 +977,19 @@ mod tests {
             drawn(&crowded, 400.).puffs.len(),
             per_column * wreck::MAX_COLUMNS
         );
+    }
+
+    #[test]
+    fn a_fire_is_as_big_as_its_unit() {
+        assert_eq!(fire_width(100), 30.);
+        assert_eq!(fire_width(5), 24., "never smaller than a campfire");
+        assert!(fire_width(650) > 2. * fire_width(100));
+        assert_eq!(
+            fire_width(4_000),
+            140.,
+            "a carrier's tops out above a crash site's 100 ft"
+        );
+        assert!(fire_width(500) < blast::FIRE_SIZE as f64);
     }
 
     #[test]

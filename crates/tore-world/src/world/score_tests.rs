@@ -374,6 +374,85 @@ fn ground_kills_are_not_aircraft_and_damage_is_a_fraction_of_the_whole() {
     assert_eq!(recorder.recorded().collect::<Vec<_>>(), [ground.id]);
 }
 
+/// A SAM or gun site (a surface id) shoots a human down: the score facts name
+/// no shooter, since no plane of the roster is credited (retail multiplayer
+/// scores no ground kills), and nothing in the recorder trips on an owner
+/// that is not a roster plane.
+#[test]
+fn a_surface_units_shot_has_no_roster_shooter_and_a_parked_aircraft_is_no_aircraft_kill() {
+    let mut world = scoring_mission();
+    let site = crate::surface::SURFACE_UNIT_BASE + 7;
+    // A parked aircraft: a ground row with a fighter's class word.
+    let mut parked = crate::test_support::target(
+        crate::surface::SURFACE_UNIT_BASE + 20,
+        [0., 0., 60_000.],
+        0.,
+    );
+    parked.role = TargetRole::Surface;
+    parked.aircraft = None;
+    parked.airborne = false;
+    parked.category = 0x8000;
+    world.combat.state.targets.push(parked.clone());
+    // The site hit the human, then killed it (the ledger's credit).
+    let capacity = world
+        .combat
+        .state
+        .ownship(E_HUMAN.0)
+        .unwrap()
+        .configuration()
+        .damage_capacity;
+    let owner_kill = Kill {
+        owner: site,
+        victim: E_HUMAN.0,
+        category: 0x8000,
+        aircraft: true,
+    };
+    world.combat.state.ledger.damaged(owner_kill);
+    world.combat.state.ledger.kill(owner_kill);
+    world.combat.state.ownship_mut(E_HUMAN.0).unwrap().hp = 0;
+    let strike = |owner: u32, victim: u32, amount: i32, destroyed: bool| Strike {
+        owner,
+        victim,
+        weapon_flags: 0x80,
+        destroyed,
+        amount,
+    };
+    let mut recorder = Recorder::default();
+    recorder.record(
+        &world,
+        9,
+        &[
+            strike(site, E_HUMAN.0, capacity, true),
+            strike(F_LEAD.0, parked.id, parked.hp, true),
+        ],
+    );
+    let facts = recorder.take().facts;
+    let victim = plane_victim(human(E_HUMAN));
+    assert!(facts.contains(&Fact::Damage {
+        shooter: None,
+        victim,
+        fraction: 1.,
+    }));
+    // The human's loss is a kill with nobody to credit, and a loss.
+    assert!(facts.contains(&Fact::Kill {
+        shooter: None,
+        victim,
+        pilot_aboard: true,
+    }));
+    assert_eq!(losses(&facts).len(), 1);
+    // The parked fighter is credited to the human who destroyed it, as a
+    // ground kill: not an aircraft, no pilot aboard.
+    assert!(facts.contains(&Fact::Kill {
+        shooter: Some(human(F_LEAD)),
+        victim: Victim {
+            target: parked.id,
+            flown: None,
+            aircraft: false,
+        },
+        pilot_aboard: false,
+    }));
+}
+
 #[test]
 fn the_facts_change_nothing_the_mission_does() {
     let run = |scoring: bool| {

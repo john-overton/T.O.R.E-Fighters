@@ -109,6 +109,8 @@ pub struct SimRenderer {
     /// The immutable batch currently in both static buffers. Fresh renderers
     /// have no batch, even if their scenery already has cached geometry.
     airport_geometry: Option<Arc<StaticGeometry>>,
+    /// The surface units drawn every frame, relative to the render origin.
+    surface_units: Option<(wgpu::Buffer, u32)>,
     /// Per-model formation batches, with each aircraft's vertex range.
     dummies: Vec<(
         tore_formats::aircraft::AircraftId,
@@ -162,6 +164,8 @@ struct Pipelines {
     airport_pipeline: wgpu::RenderPipeline,
     scenery_line_pipeline: wgpu::RenderPipeline,
     airport_decal_pipeline: wgpu::RenderPipeline,
+    moving_pipeline: wgpu::RenderPipeline,
+    moving_decal_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     canopy_depth_pipeline: wgpu::RenderPipeline,
     canopy_pipeline: wgpu::RenderPipeline,
@@ -262,6 +266,17 @@ impl Pipelines {
             .bias
             .constant = 1;
         let airport_decal_pipeline = device.create_render_pipeline(&surface_descriptor);
+        // The surface units drawn every frame (columns, men, deck crew,
+        // parked aircraft pieces) use the static art and its two passes, but
+        // are built relative to the render origin like the aircraft.
+        surface_descriptor.vertex.entry_point = Some("object_vertex");
+        surface_descriptor.label = Some("Moving scenery coplanar texture details");
+        let moving_decal_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.label = Some("Moving scenery surfaces");
+        surface_descriptor.depth_stencil.as_mut().unwrap().bias = Default::default();
+        surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_solid_fragment");
+        let moving_pipeline = device.create_render_pipeline(&surface_descriptor);
+        surface_descriptor.vertex.entry_point = Some("vertex");
         surface_descriptor
             .depth_stencil
             .as_mut()
@@ -526,6 +541,8 @@ impl Pipelines {
             airport_pipeline,
             scenery_line_pipeline,
             airport_decal_pipeline,
+            moving_pipeline,
+            moving_decal_pipeline,
             terrain_pipeline,
             canopy_depth_pipeline,
             canopy_pipeline,
@@ -778,6 +795,7 @@ impl SimRenderer {
             airports: None,
             airport_lines: None,
             airport_geometry: None,
+            surface_units: None,
             vapor: None,
             p: pipelines,
             shader,
@@ -852,6 +870,7 @@ impl SimRenderer {
         self.countermeasures
             .upload(queue, devices, afterburners, guns);
         self.smoke.gun_smoke(&guns.puffs);
+        self.effects.fit_fires(&guns.fires);
     }
     pub fn combat(
         &mut self,
@@ -904,6 +923,32 @@ impl SimRenderer {
         self.airport_vertices(device, queue, &geometry.vertices);
         self.airport_lines(device, queue, &geometry.lines);
         self.airport_geometry = Some(Arc::clone(geometry));
+    }
+    /// This frame's moving surface geometry
+    /// ([`crate::scenery::Scenery::surface_vertices`]): drawn with the static
+    /// art, relative to the render origin.
+    pub fn surface_units(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+        let needed = (vertices.len() * 4).max(40) as u64;
+        if self
+            .surface_units
+            .as_ref()
+            .is_none_or(|(buffer, _)| buffer.size() < needed)
+        {
+            self.surface_units = Some((
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Moving surface units"),
+                    size: needed.next_power_of_two().max(64 * 1024),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                0,
+            ));
+        }
+        let (buffer, count) = self.surface_units.as_mut().unwrap();
+        if !vertices.is_empty() {
+            queue.write_buffer(buffer, 0, &bytes(vertices));
+        }
+        *count = (vertices.len() / 10) as u32;
     }
     fn airport_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
         if self.airports.is_none() {
@@ -1554,6 +1599,11 @@ impl SimRenderer {
             if let Some((buffer, count)) = &self.airports {
                 objects.push((&self.bind, buffer, *count));
             }
+            if let Some((buffer, count)) = &self.surface_units
+                && *count > 0
+            {
+                objects.push((&self.bind, buffer, *count));
+            }
             if let Some((bind, buffer, count)) = &self.aircraft {
                 objects.push((bind, buffer, *count));
                 if let Some((buffer, count)) = &self.battle {
@@ -1661,6 +1711,16 @@ impl SimRenderer {
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..*count, 0..1);
             pass.set_pipeline(&self.p.airport_decal_pipeline);
+            pass.draw(0..*count, 0..1);
+        }
+        if let Some((buffer, count)) = &self.surface_units
+            && *count > 0
+        {
+            pass.set_pipeline(&self.p.moving_pipeline);
+            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..*count, 0..1);
+            pass.set_pipeline(&self.p.moving_decal_pipeline);
             pass.draw(0..*count, 0..1);
         }
         if let Some((buffer, count)) = &self.airport_lines {

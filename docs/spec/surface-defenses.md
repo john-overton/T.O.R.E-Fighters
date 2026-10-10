@@ -739,8 +739,8 @@ Five Quick Mission templates carry routes (retail: every other object has `speed
 
 | Template | Who moves | Route |
 | --- | --- | --- |
-| `~QUCOL` | Nine tanks | Three legs at 50 ft/s, 58,600 to 62,600 ft each (9.6 to 10.3 nm), the tanks 400 ft apart in a column that merges on the first point |
-| `~QTCARGO` | Three CARGO2 target ships | One leg at 16 ft/s (9.5 knots) to a common point, 87,100 to 101,800 ft |
+| `~QUCOL` | Nine tanks | Three legs at 50 ft/s, 58,600 to 62,600 ft each (9.6 to 10.3 nm), the tanks 400 ft apart in a column on one road (in game, each in its own lane) |
+| `~QTCARGO` | Three CARGO2 target ships | One leg at 16 ft/s (9.5 knots) to a common point, 87,100 to 101,800 ft (in game, they end side by side) |
 | `~QUFACT`, `~QUBUNK` | One truck each | Legs at 50 ft/s, 6,100 ft and 72,200 ft |
 | `~QFACT` (not offered) | One truck | A copy of `~QUFACT`'s |
 
@@ -769,9 +769,20 @@ The follower (fitted: the retail waypoint consumer is untraced):
   classed as land).
 - **Stops.** A unit stands on the end of its route for good. A destroyed unit
   stops at once, where it died, and stays.
-- **No collision.** Units neither avoid each other nor block aircraft: the
-  tanks of `~QUCOL` merge on the first point, and the three cargo ships end on
-  one point. Planes fly through a routed unit (agent decision: the scene's
+- **Lanes** (fitted, lead ruling after M1, 2026-10-10). Units whose legs run
+  through exactly the same points (the nine `~QUCOL` tanks, the three
+  `~QTCARGO` ships) drive side by side instead of on one line: in ascending id
+  order each takes a lane, centred on the authored path, 1.5 of the group's
+  widest hull beam apart (the hit box at its drawn size: 17 ft for the T-72,
+  T-80 and T-90 column). Every one of the group's points moves right of the
+  direction of travel by the unit's lane, across the leg that arrives at it
+  and mitred at a corner (at most twice the lane) so the lanes stay parallel
+  through it. Starts do not move, so the column keeps its order and its
+  spacing along the road, and the units finish side by side. Offsets are
+  whole feet from integer route data, so every machine computes the same
+  routes. A unit alone on its route keeps it.
+- **No collision.** Units neither avoid each other nor block aircraft beyond
+  their lanes. Planes fly through a routed unit (agent decision: the scene's
   contact box at its start would otherwise stay solid where it no longer
   stands).
 - **Fire.** Guns fire while moving (fitted; retail behaviour unknown). The unit
@@ -1204,6 +1215,14 @@ shape's F2 ground offset, which the records give in retail feet, take the same
 factor. Runways, bridges and roads keep the retail scale. The rule and its
 evidence: [placed object scale](../formats/objects-and-shapes.md#placed-object-scale-2026-10-10).
 
+A land unit (an NT that is not a ship, a structure or a man) stands on the
+lowest point of its shape, standing or moving, and its contact and hit box
+stand with it (fitted: a vehicle's shape origin is at its turret or rails,
+and for every land unit the lowest point equals the F2 ground offset within a
+unit; a T-80 drawn on its origin hid its hull in the ground). Ships keep
+their waterline and buildings their authored depth: their F2 offsets lie well
+below their geometry (Krivak -100 against -26, the bunkers -176 against -88).
+
 ### Shapes the reader cannot draw yet
 
 No stand-ins (defined, John): the shape reader learns the missing shapes.
@@ -1220,19 +1239,62 @@ All other NT shapes read. See [the shape guide](../formats/objects-and-shapes.md
 
 ### Destroyed looks
 
-John accepted the recommended looks.
+John accepted the recommended looks (12.4).
 
 | Object | Look | Basis |
 | --- | --- | --- |
 | Ships | Swap to the `_A` shape (every ship has one), keep it in place, burning with fire and smoke for 15 minutes | retail shapes |
-| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", hp 0) at the unit's pose, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
-| Bunkers with damaged variants (~BNK5, ~BNK6, ~BNK8) | Swap to the damaged OT's shape | retail |
-| Other buildings | Removed, plus a crater and fire | current behaviour |
-| Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment | existing aircraft path |
+| Carriers | The `_A` hull, the island's own damage branch (`shape::DAMAGED_WORD`), the deck tractors as they were and the deck crew gone, burning | retail shapes, fitted parts rule |
+| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose on the ground, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
+| Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; no fire | retail |
+| Other buildings | Removed, with the crater the hit leaves; no fire | current behaviour |
+| Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment drawn with the type's own `_B` or `_D` shape | existing aircraft path |
 | Men, barrage zones | Removed | |
 
 The explosion uses the unit's own type (21 ground, 35 ship, 15 men) and crater
 size on land, rather than one fitted value for all ground objects.
+
+- **The fire.** However a burning wreck died (a hit, splash, the host's
+  destroyed event), it gets one fire with its smoke column, the crash site's
+  look, at the foot of its hit box, for 15 minutes; the oldest fire goes out
+  when 64 burn at once, as for crash sites (fitted).
+- **A moving unit** destroyed stops where it died and its wreck lies there.
+- **A replay** shows the wreck of every object it recorded as destroyed.
+
+### Drawing
+
+- **Moving units** (the column, the cargo ships, the trucks that drive) are
+  drawn every frame at their blended pose with the static scenery's art and
+  passes, built relative to the render origin; the scenery's copy at the
+  start is not drawn. Land units tilt with the terrain, ships stay level.
+  Stationary units draw as scenery with ids.
+- **Launcher rails** (CHAP, SA-2, SA-3, SCUD) show the rounds each hardpoint
+  still carries: a rail empties as its missile leaves and fills again when a
+  truck rearms it. Launchers do not slew or elevate (no articulation data
+  beyond the loaded count).
+- **Men** (SOLDIER) are viewer-facing sprites, 4 ft tall, upright on the
+  screen; they vanish with their unit.
+- **Carriers** carry their island and deck parts from the FA.EXE carrier table
+  (the catapult officer, the three deck tractors and the island; Wasp: one
+  tractor and the island). Each part stands on the flight deck by its F2 ground
+  offset (retail feet, at the hull's factor), its table offset at the hull's
+  placed scale, turned with the hull (lead ruling after S2: the island stands
+  about 70 ft taller than real). The catapult officer (CATGUY) is a sprite:
+  the front sheet while the viewer is ahead of him, the back sheet behind,
+  cycling his 11 signal frames four times a second (fitted: the native frame
+  choice is untraced). A carrier with aircraft on its deck keeps its template
+  spot (no jitter), so its deck aircraft stay on it.
+- **Parked aircraft** stand gear down as scenery; a destroyed one's fragment
+  is drawn in flight and where it lands, and a parked aircraft at half its hit
+  points or less smokes as a damaged aircraft in the air does (dark puffs
+  every 12 ticks) until it is destroyed.
+- Battery radars and trucks are ordinary NT shapes (SA6SFR, KING, MISTRK,
+  TRUCK); the HAWK element draws SRDR2 (John, 2026-10-10).
+
+`--surface-scene` renders a ground target in game offscreen after a chosen
+time, with units destroyed and rails emptied on request, and `--surface-preview
+OUT destroyed` draws each class beside its destroyed look (see
+[development](../DEVELOPMENT.md#surface-unit-inspection)).
 
 ### Flak bursts, gunfire, launches and light
 
@@ -1255,12 +1317,13 @@ light's units, one flare is 4,000).
 | AAA tracers | The existing flag and drawing: every third round for guns whose tuning row has a tracer (Shilka, Tunguska, Vulcan, ship guns, 37 mm, 57 mm), none for flak, tank guns and small arms | spec-derived ([AAA tuning](#aaa-tuning)) |
 | Muzzle flash and firing light | The gun-flash sprite at the muzzle, along the barrel, in three classes: light cannon (ZSU-23, 2S6, Vulcan and Phalanx, 30 mm ship guns, BMP-2, BTR-80, M113, M2: a flicker that never goes dark at any cadence, 8 ft, light 160), 37 mm and 57 mm (a distinct pop, 14 ft, light 340, one puff) and 85 mm to 125 mm guns (flak and tank guns: a big flash, 28 ft, light 700, three puffs). One flash per gun, its newest round. The barrage zone and small arms flash nothing | fitted |
 | SAM launch | When the motor lights (speed 30 ft/s; the SA-6 sits about 2 s on its rail first): a flash 40 ft long along its heading for 0.15 s, a point light of 2,800 fading over 40 ticks, and a white cloud of six puffs growing from 10 to 60 ft over 8 s. The missile's own smoke trail is the simulation's | fitted |
-| Wreck smoke | A destroyed surface unit sends up a dark column for 15 minutes, the last minute fading it out: a puff every 0.4 s rising 16 ft/s in a fixed 7 ft/s breeze, growing from 6 ft by 3 ft/s, living 30 s, sized by the unit's hit points ((hp / 100) to the one quarter, from 0.6 to 2.4). Ships, vehicles, launchers, guns and buildings alike; the 24 newest columns draw. A unit with a crash fire of its own (a parked aircraft) has the simulation's column instead | fitted |
+| Wreck smoke | A destroyed unit whose wreck burns (ships, vehicles, launchers and guns) has the simulation's crash-site fire and its smoke column, 15 minutes, one column per wreck. The fire sprite is fitted to the unit: 30 ft wide for a 100 point vehicle, growing with the square root of its hit points, from 24 ft to 140 ft (a crash site's is 100 ft). A destroyed unit that does not burn (a building or bunker) sends up a smaller dark column of its own for 15 minutes, the last minute fading it out: a puff every 0.4 s rising 16 ft/s in a fixed 7 ft/s breeze, growing from 6 ft by 3 ft/s, living 30 s, sized by its hit points ((hp / 100) to the one quarter, from 0.6 to 2.4); the 24 newest draw. A wreck that lights its fire later gives up its own column | fitted |
 
 A column or a puff starts from the picture alone: a destroyed unit first seen
 dead (a restart in progress, a seek) starts its column ten seconds old. The
-fire sprite of a crash site is not drawn for ground wrecks; that, and the wreck
-shapes, belong to the destroyed looks above.
+fire's width comes from the unit's hit points in the picture, so a replay
+(which records fires without a size) draws the crash site's 100 ft until the
+replay slice carries it.
 
 **The flight map** shows surface units known by sight (identified, not just
 painted by radar) with the symbol of their kind and the tile of their side:
@@ -1273,15 +1336,6 @@ allegiance ([flight map](flight-map.md)). The RWR draws the square of a radar
 whose controller is tracking or firing at the player bright and steady
 ([RWR](rwr.md)).
 
-- **Moving units** (the column) are drawn as dynamic objects, the way aircraft
-  are, and shown on the flight map as surface contacts. Stationary
-  units draw as scenery with ids.
-- SAM launchers do not slew or elevate visibly this round (no articulation data
-  beyond the loaded-count envelope); loaded rails empty as missiles leave and
-  fill again when trucks rearm them.
-- Battery radars and trucks are ordinary NT shapes (SA6SFR, KING, MISTRK, TRUCK
-  all read today); the HAWK element uses the LIB shape John picks (default,
-  pending John).
 
 ## Objectives, scoring and debrief
 
@@ -1312,6 +1366,24 @@ otherwise. Template objects keep their own 0x80 flags.
   parked aircraft included, have no lineage.
 - The in-flight "Obj: Destroy" or "Obj: Survive" line in the target window
   applies to designated surface targets.
+
+### Implementation (slice O1, 2026-10-10)
+
+| Rule | As built | Basis |
+| --- | --- | --- |
+| Targets | The ground target's objects flagged 0x80 that have a combat row (a unit whose shape cannot be drawn is no target) and the parked aircraft flagged 0x80: a friendly plane's Destroy list, joined to its air requirement; a Redfor plane's Protect list. Moving routed targets count where they die; the wreck stays | defined (John) |
+| Destroyed | A surface object is destroyed when its combat row has no hit points, whoever did it (a shell, a bomb, splash, a crash). One the result cannot find is undecided, neither destroyed nor lost; before this an unknown id counted as destroyed at once. An unlisted aircraft still counts as gone | defined (agent); the unknown-id fix is the bug |
+| Friendly fire | Any surface object of the plane's side that is not named in its Destroy or Protect list: base-layout units, a template's friendly (`nationality3`) units, battery radars and supply trucks. Scenery with no side is never friendly | defined (John) |
+| PvP | `Requirements::with_ground`: Blue gets Destroy, Redfor gets Protect. A Redfor plane's own non-target units are friends: shooting one is friendly fire | defined (John) |
+| Debrief rows | A hostile surface unit's gun round at the pilot is AAA, anything else SAM (a battery missile belongs to its launcher); the unit's class word picks its kill row; splash kills credit the shooter | retail rule |
+| Names | The pilot who was shot down by a surface unit gets a **Shot down by** row (the unit's short name) and a flight message; the networked debrief does not carry it yet | opinionated (agent, 2026-10-10) |
+| Radio | A surface unit makes no hit or kill call; a Blue site's side is its own, not the AI's friend list | defined (agent) |
+| Target window | "Obj: Destroy" (Redfor: "Obj: Survive") for a ground target, destroyed or not | defined (John) |
+
+`--surface-objective THEATER STEM` flies a scripted pass at a ground target's
+defenses, drops bombs on its targets and prints the objectives and the
+debrief's tallies (see
+[development](../DEVELOPMENT.md#surface-unit-inspection)).
 
 ### Debrief
 

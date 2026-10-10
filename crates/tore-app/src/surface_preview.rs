@@ -1027,12 +1027,84 @@ fn fleet_scene(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
     Ok(())
 }
 
+/// One unit or building of each class with the look it leaves when
+/// destroyed (docs/spec/surface-defenses.md, "Destroyed looks").
+const DESTROYED: [(&str, &str); 14] = [
+    ("T72.NT", "T-72 tank: the DEST.OT wreck"),
+    ("T80.NT", "T-80 tank: the DEST.OT wreck"),
+    ("T90.NT", "T-90 tank: the DEST.OT wreck"),
+    ("TRUCK.NT", "supply truck: the DEST.OT wreck"),
+    ("SA3.NT", "SA-3 launcher: the DEST.OT wreck"),
+    ("SA6.NT", "SA-6 launcher: the DEST.OT wreck"),
+    ("ZSU23.NT", "ZSU-23-4 gun: the DEST.OT wreck"),
+    ("KS19.NT", "KS-19 flak gun: the DEST.OT wreck"),
+    ("KRIVAK.NT", "Krivak frigate: its _A hull"),
+    ("CARGO2.NT", "cargo ship: its _A hull"),
+    ("BNK5.OT", "bunker: its ~BNK5 damaged variant"),
+    ("BNK6.OT", "bunker: its ~BNK6 damaged variant"),
+    ("BNK8.OT", "bunker: its ~BNK8 damaged variant"),
+    ("SOLDIER.NT", "soldier: vanishes"),
+];
+
+/// A sheet per class of the intact unit and its destroyed look, read from
+/// the records as the game resolves them: a ship's `_A` hull, the DEST.OT
+/// wreck for other vehicles, launchers and guns, a building's `~` variant,
+/// nothing for men. Also the carriers with their damaged islands.
+fn destroyed_sheets(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
+    use tore_formats::surface_unit::{SurfaceUnit, class};
+    let wreck = named_shape(&media.get("DEST.OT")?).ok_or("DEST.OT names no shape")?;
+    for (record, note) in DESTROYED {
+        let bytes = media.get(record)?;
+        let shape = named_shape(&bytes).ok_or_else(|| format!("{record} names no shape"))?;
+        let damaged = if record.ends_with(".NT") {
+            let unit = SurfaceUnit::parse(&bytes)?;
+            if unit.class & class::OTHER != 0 {
+                None
+            } else if unit.class & class::SHIP != 0 {
+                unit.damaged_shape.clone()
+            } else {
+                Some(wreck.clone())
+            }
+        } else {
+            named_shape(&media.get(&format!("~{record}"))?)
+        };
+        let shape_bytes = media.get(&shape)?;
+        let low = Shape::scenery(&shape_bytes)?
+            .faces
+            .iter()
+            .flat_map(|face| face.positions.iter().map(|p| p[2]))
+            .fold(f32::INFINITY, f32::min);
+        println!(
+            "Surface preview: {record} {shape} ground offset {:?} units, lowest point {low} units",
+            contact_offset(&shape_bytes)?
+        );
+        let subject = Subject {
+            shape: Box::leak(shape.into_boxed_str()),
+            damaged: damaged.map_or(Damaged::None, |name| {
+                Damaged::Shape(Box::leak(name.into_boxed_str()))
+            }),
+            note,
+        };
+        sheet(out, media, art, &subject, "destroyed")?;
+    }
+    for carrier in &CARRIERS {
+        carrier_sheet(out, media, art, carrier)?;
+    }
+    Ok(())
+}
+
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
     let (out, which) = match args.as_slice() {
         [out] => (out, None),
-        [out, what] if what == "hawk-radar" || what == "parked" => (out, Some(what.as_str())),
-        _ => return Err("--surface-preview OUTPUT_DIRECTORY [hawk-radar | parked]".into()),
+        [out, what] if ["hawk-radar", "parked", "destroyed"].contains(&what.as_str()) => {
+            (out, Some(what.as_str()))
+        }
+        _ => {
+            return Err(
+                "--surface-preview OUTPUT_DIRECTORY [hawk-radar | parked | destroyed]".into(),
+            );
+        }
     };
     let out = Path::new(out);
     std::fs::create_dir_all(out)?;
@@ -1053,6 +1125,9 @@ pub fn run() -> AppResult<()> {
             sheet(out, &media, &mut art, subject, "hawk-radar")?;
         }
         return Ok(());
+    }
+    if which == Some("destroyed") {
+        return destroyed_sheets(out, &media, &mut art);
     }
     parked::parked_sheet(out, &media, &mut art)?;
     parked::deck_scene(out, &media, &mut art)?;

@@ -5068,12 +5068,15 @@ impl State {
             self.blast(p, kind, explosion);
             self.crater(p, crater, super::blast::FOREVER);
         }
+        self.burn_wrecks();
         use super::smoke::Kind;
-        for t in self
-            .targets
-            .iter()
-            .filter(|t| t.airborne && t.damage_fraction() >= 0.5)
-        {
+        // A damaged parked aircraft smokes like a damaged aircraft in the air
+        // (docs/spec/surface-defenses.md, "Parked aircraft"); a destroyed one
+        // burns at its crash site instead.
+        for t in self.targets.iter().filter(|t| {
+            (t.airborne || (t.hp > 0 && self.parked.contains_key(&t.id)))
+                && t.damage_fraction() >= 0.5
+        }) {
             sources.push((
                 std::array::from_fn(|i| t.position[i] - t.basis.forward[i] * 15.),
                 Kind::Aircraft,
