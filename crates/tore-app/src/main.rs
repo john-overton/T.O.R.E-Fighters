@@ -117,6 +117,7 @@ mod surface_dump;
 mod surface_lighting;
 mod surface_parked;
 mod surface_preview;
+mod surface_scene;
 mod surface_trace;
 mod tape_file;
 mod target_info;
@@ -3985,6 +3986,7 @@ impl ApplicationHandler for App {
                         }
                         // Everything combat draws this frame, shared by every camera.
                         let picture = self.combat_view.presented(&self.world.combat);
+                        let standing = render_snapshot::standing(&self.world.combat.state.targets);
                         // The flight frame every screen below draws: the seat's
                         // plane at this frame's instant, the picture, the smoke
                         // and the devices. A networked flight's comes from the
@@ -4228,10 +4230,10 @@ impl ApplicationHandler for App {
                                 return;
                             }
                         }
-                        renderer.airports(
-                            self.scenery
-                                .static_geometry(&self.world.combat.state.targets),
-                        );
+                        renderer.airports(self.scenery.static_geometry(
+                            &self.world.combat.state.targets,
+                            &self.world.combat.surface,
+                        ));
                         let target_due = self.target_refresh.due(now) || self.smoke_test;
                         let other_due = now.duration_since(self.instrument_time).as_millis() >= 100
                             || self.smoke_test;
@@ -4340,6 +4342,11 @@ impl ApplicationHandler for App {
                                         &camera,
                                         &self.world.terrain,
                                         &self.scenery,
+                                    ));
+                                    renderer.surface_units(&self.scenery.surface_vertices(
+                                        &picture,
+                                        &|id| standing.contains(&id),
+                                        &camera,
                                     ));
                                     renderer.aircraft(
                                         &self.hornet,
@@ -4455,6 +4462,11 @@ impl ApplicationHandler for App {
                             &self.camera,
                             &self.world.terrain,
                             &self.scenery,
+                        ));
+                        renderer.surface_units(&self.scenery.surface_vertices(
+                            &picture,
+                            &|id| standing.contains(&id),
+                            &self.camera,
                         ));
                         renderer.aircraft(
                             &self.hornet,
@@ -4958,10 +4970,10 @@ impl ApplicationHandler for App {
                     }
                 }
                 if self.screen == Screen::Viewer {
-                    renderer.airports(
-                        self.scenery
-                            .static_geometry(&self.world.combat.state.targets),
-                    );
+                    renderer.airports(self.scenery.static_geometry(
+                        &self.world.combat.state.targets,
+                        &self.world.combat.surface,
+                    ));
                 }
                 let compose_ms = frame_start.elapsed().as_secs_f64() * 1000. - simulation_ms;
                 let present_start = Instant::now();
@@ -8536,6 +8548,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-parked") {
         surface_parked::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--surface-scene") {
+        surface_scene::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-sheets") {
