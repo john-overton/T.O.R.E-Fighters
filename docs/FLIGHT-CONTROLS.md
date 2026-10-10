@@ -31,8 +31,9 @@ else. Slew it with Alt + the arrows and zoom with Shift+' / Shift+;. Backslash
 designates whatever is under the crosshair, an object if there is one and the
 ground if not; Shift+Backslash pins the ground there; L or ; drops the target
 or pin, and pressed again sends the view back to the default. The guns follow
-that point inside their arcs, a circled cross (the pipper) shows where rounds
-will land, and a box on every view marks the point. The AC-130 tracks ground
+that point inside their arcs, a ring and dot (the pipper, with a bold range arc
+like the fighter's LCOS pipper) shows where rounds will land, and a box on every
+view marks the point. The AC-130 tracks ground
 and air objects at any range, as if Easy targeting were always on. On a
 gamepad hold View: the right stick slews, A designates (tap) or pins (hold),
 D-pad up and down pick and link a gun. [Keys](INPUT.md#ac-130-gunsight-controls),

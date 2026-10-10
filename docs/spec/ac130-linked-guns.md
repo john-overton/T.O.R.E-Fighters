@@ -271,8 +271,10 @@ candidate gun and every linked gun (`gunship_impact::impact`).
 Against rounds fired through the combat step the pipper's centre line misses by
 under 0.1 foot; real rounds scatter inside the fitted 0.25-degree cone (about
 20 feet at 4,500 feet), which the pipper does not show. Rounds hitting objects
-or the aircraft are not modelled. The march limits are agent choices. How the
-page draws the states is in the
+or the aircraft are not modelled. The march limits are agent choices. The page
+draws each pipper as the fighter HUD's LCOS ring and dot; the candidate's ring
+carries a range arc scaled to the gun's 13,000 foot maximum, the other linked
+guns a small diamond. How the page draws the states is in the
 [target window spec](target-window.md#ac-130-gunsight).
 
 ### The aim box on every view
