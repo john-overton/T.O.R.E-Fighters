@@ -10,6 +10,7 @@ use super::{
 use crate::{seats::SeatInput, test_support::resources::schema, world::TickOutput};
 use std::f64::consts::PI;
 use tore_formats::surface_unit::class;
+use tore_sim::attitude::Basis;
 
 /// The follower's step, 120 Hz.
 const STEP: f64 = 1. / 120.;
@@ -451,6 +452,13 @@ fn a_moving_tank_keeps_its_target_and_hit_box_with_it() {
         );
     }
     assert_eq!(bounds.half, box0.half);
+    // After the step the row is on the aim point of the box, which sits in
+    // the upper half of the volume.
+    let basis = Basis::new(bounds.heading, bounds.pitch, bounds.bank);
+    for i in 0..3 {
+        let aim = bounds.center[i] + basis.up[i] * bounds.half[1] * 0.5;
+        assert!((now.position[i] - aim).abs() < 1e-6, "axis {i}");
+    }
     // Ground-relative velocity is the pose's.
     let speed = now.velocity[0].hypot(now.velocity[2]);
     assert!((speed - mover.speed_feet()).abs() < 1e-6);
@@ -578,4 +586,36 @@ fn a_restart_puts_the_column_back_at_its_start() {
     assert_ne!(row(&w, TANK_ID).position, start);
     w.combat.reset(&mut w.cockpits[0].flight).unwrap();
     assert!(mover_of(&w, TANK_ID).is_none());
+}
+
+#[test]
+fn a_machine_told_where_a_unit_is_places_its_target_and_box() {
+    let mut host = world();
+    step(&mut host, 900);
+    let mover = mover_of(&host, TANK_ID).unwrap();
+    let mut client = world();
+    assert!(
+        client
+            .combat
+            .place_surface_unit(&client.terrain, UnitId(TANK_ID), mover)
+    );
+    assert_eq!(mover_of(&client, TANK_ID), Some(mover));
+    assert_eq!(row(&client, TANK_ID).position, row(&host, TANK_ID).position);
+    assert_eq!(
+        client.combat.state.ground_bounds(TANK_ID),
+        host.combat.state.ground_bounds(TANK_ID)
+    );
+    // The standing tank follows no route; nothing is placed for it.
+    assert!(
+        !client
+            .combat
+            .place_surface_unit(&client.terrain, UnitId(STANDING_ID), mover)
+    );
+    // From there the client's march is the host's.
+    step(&mut host, 600);
+    step(&mut client, 600);
+    assert_eq!(
+        mover_of(&client, TANK_ID).unwrap().halt,
+        mover_of(&host, TANK_ID).unwrap().halt
+    );
 }

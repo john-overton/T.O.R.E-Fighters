@@ -472,8 +472,29 @@ impl Combat {
             }
             let mover = *mover;
             self.state
-                .move_ground_target(id.0, mover.bounds(&rig), mover.velocity());
+                .move_ground_target(id.0, mover.bounds(&rig), mover.velocity(), true);
         }
+    }
+
+    /// Puts the unit `id` that follows a route in the state `mover`, as a
+    /// machine that is told where the unit is (a client, a rejoin) does, and
+    /// moves its combat target and hit box there. False if `id` follows no
+    /// route or is not in the scene.
+    pub fn place_surface_unit(&mut self, terrain: &Terrain, id: UnitId, mover: Mover) -> bool {
+        let Some(rig) = terrain.surface.courses.get(&id).and_then(|c| c.rig) else {
+            return false;
+        };
+        let Some(slot) = self.surface.unit_mut(id) else {
+            return false;
+        };
+        if !self
+            .state
+            .move_ground_target(id.0, mover.bounds(&rig), mover.velocity(), false)
+        {
+            return false;
+        }
+        slot.mover = Some(mover);
+        true
     }
 
     /// The poses of the units that follow a route, for the picture: every

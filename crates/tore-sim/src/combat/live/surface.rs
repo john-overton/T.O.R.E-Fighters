@@ -290,11 +290,18 @@ impl State {
     /// orientation and ground-relative velocity). Hit points and everything
     /// else stay. False if `id` is not a ground object or `bounds` is not a
     /// valid volume.
+    ///
+    /// The step advances every living target by its velocity, so a caller
+    /// that moves the unit just before a step passes `before_step`: the row
+    /// is set one step behind and the step brings it to the aim point. A
+    /// caller placing the unit between ticks passes false and the row is at
+    /// the aim point at once.
     pub fn move_ground_target(
         &mut self,
         id: u32,
         bounds: crate::airport::OrientedBox,
         velocity: Vector,
+        before_step: bool,
     ) -> bool {
         if !bounds.valid() || !self.ground_bounds.contains_key(&id) {
             return false;
@@ -303,8 +310,14 @@ impl State {
             return false;
         };
         let basis = crate::attitude::Basis::new(bounds.heading, bounds.pitch, bounds.bank);
-        target.position =
-            std::array::from_fn(|i| bounds.center[i] + basis.up[i] * bounds.half[1] * 0.5);
+        let behind = if before_step && target.hp > 0 {
+            velocity.map(|v| v / 120.)
+        } else {
+            [0.; 3]
+        };
+        target.position = std::array::from_fn(|i| {
+            bounds.center[i] + basis.up[i] * bounds.half[1] * 0.5 - behind[i]
+        });
         target.basis = basis;
         target.velocity = velocity;
         self.ground_bounds.insert(id, bounds);
@@ -509,6 +522,9 @@ impl State {
     }
 }
 
+#[cfg(test)]
+#[path = "ground_move_tests.rs"]
+mod ground_move_tests;
 #[cfg(test)]
 #[path = "surface_tests.rs"]
 mod tests;
