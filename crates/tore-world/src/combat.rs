@@ -176,6 +176,9 @@ pub struct Combat {
     /// The side of each scene object that has one (the surface's), applied
     /// whenever the scene's targets are registered. Setup.
     ground_sides: BTreeMap<u32, live::Side>,
+    /// The explosion and crater of each surface unit whose record names
+    /// them, applied with the sides. Setup.
+    ground_looks: BTreeMap<u32, live::GroundLook>,
     /// The surface units' changing state; see [`crate::surface`].
     pub surface: crate::surface::SurfaceState,
     /// The records of the combat tape being written, collected until the app
@@ -322,9 +325,26 @@ impl Combat {
     /// side its surface gives it, and starts the surface units' state.
     pub fn add_scene_targets(&mut self, terrain: &Terrain) -> WorldResult<()> {
         let sides = terrain.surface.object_sides.clone();
-        let previous = std::mem::replace(&mut self.ground_sides, sides);
+        let looks = terrain
+            .surface
+            .units
+            .iter()
+            .filter_map(|unit| {
+                Some((
+                    unit.id.0,
+                    live::GroundLook {
+                        explosion: unit.explosion?,
+                        crater: unit.crater?,
+                    },
+                ))
+            })
+            .collect();
+        let previous = (
+            std::mem::replace(&mut self.ground_sides, sides),
+            std::mem::replace(&mut self.ground_looks, looks),
+        );
         if let Err(error) = self.add_airport_targets(&terrain.airport_scene) {
-            self.ground_sides = previous;
+            (self.ground_sides, self.ground_looks) = previous;
             return Err(error);
         }
         self.surface = terrain.surface.fresh_state();
@@ -338,7 +358,12 @@ impl Combat {
         let mut staged = self.state.clone();
         staged.remove_ground_targets();
         for object in &scene.objects {
-            Self::register_airport_object(&mut staged, object, self.ground_side(object.id))?;
+            Self::register_airport_object(
+                &mut staged,
+                object,
+                self.ground_side(object.id),
+                self.ground_looks.get(&object.id).copied(),
+            )?;
         }
         self.state = staged;
         self.airport_objects = scene.objects.clone();
@@ -355,6 +380,7 @@ impl Combat {
         state: &mut live::State,
         object: &tore_sim::airport::StaticObject,
         side: live::Side,
+        look: Option<live::GroundLook>,
     ) -> WorldResult<()> {
         state.add_ground_target(
             object.id,
@@ -363,6 +389,9 @@ impl Combat {
             object.category,
             side,
         )?;
+        if let Some(look) = look {
+            state.set_ground_look(object.id, look);
+        }
         if let Some(target) = state.targets.iter_mut().find(|t| t.id == object.id) {
             target.signature.radar = object.radar_signature;
             target.signature.infrared = object.infrared_signature;
@@ -436,6 +465,7 @@ impl Combat {
             dummy_configs: Vec::new(),
             airport_objects: Vec::new(),
             ground_sides: BTreeMap::new(),
+            ground_looks: BTreeMap::new(),
             surface: Default::default(),
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
@@ -1190,7 +1220,8 @@ impl Combat {
         // Aircraft are spawned first, preserving their roster ordering.
         for object in &self.airport_objects {
             let side = self.ground_side(object.id);
-            Self::register_airport_object(&mut self.state, object, side)?;
+            let look = self.ground_looks.get(&object.id).copied();
+            Self::register_airport_object(&mut self.state, object, side, look)?;
         }
         self.surface.reset();
         if let Some(aircraft) = host {
@@ -1856,6 +1887,7 @@ pub mod fixtures {
             dummy_configs: Vec::new(),
             airport_objects: Vec::new(),
             ground_sides: BTreeMap::new(),
+            ground_looks: BTreeMap::new(),
             surface: Default::default(),
             tape: None,
             last_launcher: None,

@@ -599,6 +599,19 @@ fn combat_registers_every_unit_with_its_side() {
         );
     }
     assert_eq!(side_in_combat(&world, SURFACE_UNIT_BASE + 16), None);
+    // Units explode with their own record's look; base-layout buildings keep
+    // the fitted ground-object one.
+    let look = |id| {
+        world
+            .combat
+            .state
+            .ground_look(id)
+            .map(|l| (l.explosion, l.crater))
+    };
+    assert_eq!(look(SURFACE_UNIT_BASE), Some((21, 6)));
+    assert_eq!(look(SURFACE_UNIT_BASE + 12), Some((0, 0)));
+    assert_eq!(look(LAYOUT_OBJECT_BASE), Some((21, 6)));
+    assert_eq!(look(LAYOUT_OBJECT_BASE + 2), None);
     assert_eq!(surface.targets().count(), 3);
     assert_eq!(world.combat.surface.units.len(), surface.units.len());
     // A restart keeps the sides.

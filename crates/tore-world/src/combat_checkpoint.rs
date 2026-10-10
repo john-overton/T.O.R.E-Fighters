@@ -14,7 +14,7 @@
 //! - setup, fixed when the mission is built and the same in the fresh world:
 //!   `contrail_offsets`, `range`, `clean_recording`, `open`, `initial_ammo`,
 //!   `dummies`, `mission_spawns`, `mission_layout`, `dummy_types`,
-//!   `dummy_configs`, `airport_objects`, `ground_sides`;
+//!   `dummy_configs`, `airport_objects`, `ground_sides`, `ground_looks`;
 //! - local, one machine's: `tape` (the recorder's list, which the app owns),
 //!   `last_launcher` (read only to write the tape) and `notes` (the mission
 //!   recorder's command notes, which nothing in flight reads);
@@ -117,6 +117,7 @@ impl Combat {
             dummy_configs: _,
             airport_objects: _,
             ground_sides: _,
+            ground_looks: _,
             surface,
             // Local: the recorder's list, owned by the app.
             tape: _,
@@ -172,6 +173,7 @@ impl Combat {
             dummy_configs: _,
             airport_objects: _,
             ground_sides: _,
+            ground_looks: _,
             surface: surface_slot,
             tape: _,
             last_launcher: _,

@@ -47,9 +47,9 @@ pub const BATTERY_RADAR_BASE: u32 = 0x5C00_0000;
 /// One past the last surface unit id.
 pub const SURFACE_UNIT_END: u32 = 0x6000_0000;
 /// First id of the shots surface units fire (SAMs and shells), a counter of
-/// its own. AI aircraft shots start at `1 << 24` and would need 16.7 million
-/// shots to reach it.
-pub const SURFACE_PROJECTILE_ID_BASE: u32 = 0x0200_0000;
+/// its own in combat. AI aircraft shots start at `1 << 24` and would need
+/// 16.7 million shots to reach it.
+pub use tore_sim::combat::live::SURFACE_PROJECTILE_ID_BASE;
 /// A live supply truck resupplies friendly units within this horizontal
 /// distance: 0.1 mile (John, 2026-10-10).
 pub const RESUPPLY_RADIUS_FT: f64 = 528.0;

@@ -145,8 +145,10 @@ impl<'a> Catalog<'a> {
                     } else {
                         self.object_look(resource)
                     },
-                    explosion: None,
-                    crater: None,
+                    // Aircraft explode as aircraft (the parked-aircraft
+                    // path); objects with their own record's look.
+                    explosion: (!aircraft).then_some(definition.explosion),
+                    crater: (!aircraft).then_some(definition.crater),
                     supply_truck: false,
                     carrier: false,
                     unit: None,
