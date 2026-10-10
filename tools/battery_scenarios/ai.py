@@ -882,7 +882,12 @@ def scenarios() -> list[Scenario]:
                      notes="wingman flipped between missile defense and formation every tick (fixed 2026-09-28)"))
     def wingman_back_in_fight(output: str) -> list[str]:
         problems = probe_problems(output)
-        if re.search(r"^actor=3 Enemy 1-2 \S+ activity=(Landing|Holding at marshal) alive=true", output, re.M):
+        # With no friendly left (the player destroyed, the friendly wingman
+        # out), Enemy 1-2 has won and goes home to land, as winners do. Splash
+        # damage (2026-10-10) changed this fight so that it can end that way.
+        won = (re.search(r"destroyed: player$", output, re.M)
+               and not re.search(r"^actor=\d+ Friendly \S+ \S+ activity=.*? alive=true", output, re.M))
+        if not won and re.search(r"^actor=3 Enemy 1-2 \S+ activity=(Landing|Holding at marshal) alive=true", output, re.M):
             problems.append("Enemy 1-2 is still following its ejected leader in to land")
         return problems
 
