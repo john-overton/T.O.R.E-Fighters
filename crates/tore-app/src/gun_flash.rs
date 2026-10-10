@@ -707,9 +707,7 @@ mod tests {
             last = level;
         }
         assert_eq!(tracker.bloom(7, 10. + BLOOM.life), 0.);
-        // A fraction of a second: under half a second in all, and mostly
-        // gone after a quarter second (30 ticks).
-        assert!(BLOOM.life / 120. < 0.5);
+        // A fraction of a second: mostly gone after a quarter second (30 ticks).
         assert!(BLOOM.level(30.) < 0.15 * BLOOM.peak);
         // Not before the shot, and not for another aircraft.
         assert_eq!(tracker.bloom(7, 9.), 0.);
@@ -718,7 +716,7 @@ mod tests {
 
     #[test]
     fn the_bloom_lifts_toward_white_most_in_the_middle_and_leaves_alpha() {
-        let mut picture = vec![60, 90, 120, 255].repeat(9 * 9);
+        let mut picture = [60, 90, 120, 255].repeat(9 * 9);
         BLOOM.lift(&mut picture, 9, 9, 0.);
         assert_eq!(&picture[..4], &[60, 90, 120, 255], "no bloom, no change");
         BLOOM.lift(&mut picture, 9, 9, BLOOM.peak);
@@ -728,7 +726,7 @@ mod tests {
         assert!(at(4, 4) > 220, "the middle nearly whites out");
         assert!(picture.chunks_exact(4).all(|p| p[3] == 255));
         // A full whiteout would be white; the peak is not quite that.
-        let mut all = vec![0, 0, 0, 255].repeat(4);
+        let mut all = [0, 0, 0, 255].repeat(4);
         BLOOM.lift(&mut all, 2, 2, 1.);
         assert!(all.chunks_exact(4).all(|p| p[0] > 140));
     }

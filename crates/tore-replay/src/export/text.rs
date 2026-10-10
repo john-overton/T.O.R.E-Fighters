@@ -259,6 +259,18 @@ pub(crate) fn comms_text(event: &Event, names: &Names) -> String {
     comms(event, names, false)
 }
 
+/// The chaff or flare a missile followed. The release's number, when the
+/// recording has it, says which one: `chaff #7`. Older recordings carry no
+/// number and say `chaff` or `a flare`.
+fn decoy_text(kind: Option<String>, number: Option<f64>) -> String {
+    match (kind, number) {
+        (Some(d), Some(n)) => format!("{d} #{}", num(n, 0)),
+        (Some(d), None) if d == "chaff" => d,
+        (Some(d), None) => format!("a {d}"),
+        (None, _) => "a decoy".into(),
+    }
+}
+
 /// A one-line plain-English description of any event.
 pub(crate) fn describe(event: &Event, names: &Names) -> String {
     let s = event
@@ -311,11 +323,7 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             format!("{shot} from {s} lost track{}{}", to("of"), because(event))
         }
         kind::WEAPON_DECOYED => {
-            let decoy = match opt(event, field::DECOY) {
-                Some(d) if d == "chaff" => d,
-                Some(d) => format!("a {d}"),
-                None => "a decoy".into(),
-            };
+            let decoy = decoy_text(opt(event, field::DECOY), event.num(field::NUMBER));
             let roll = match (event.num(field::ROLL), event.num(field::THRESHOLD)) {
                 (Some(r), Some(t)) => format!(" (roll {} < {})", num(r, 0), num(t, 0)),
                 _ => String::new(),
@@ -552,6 +560,17 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_followed_decoy_names_its_number_when_the_recording_has_one() {
+        let kind = |k: &str| Some(k.to_owned());
+        assert_eq!(decoy_text(kind("chaff"), Some(7.)), "chaff #7");
+        assert_eq!(decoy_text(kind("flare"), Some(12.)), "flare #12");
+        // Recordings made before the number was kept read as they did.
+        assert_eq!(decoy_text(kind("chaff"), None), "chaff");
+        assert_eq!(decoy_text(kind("flare"), None), "a flare");
+        assert_eq!(decoy_text(None, None), "a decoy");
+    }
 
     #[test]
     fn clocks_and_numbers_read_naturally() {

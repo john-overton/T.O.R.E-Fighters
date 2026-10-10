@@ -109,6 +109,31 @@ def outcome_problems(shot: int, results: list[dict]) -> list[str]:
         k if r is None else f"{k} replacing {r}" for k, r in kinds)]
 
 
+def decoy_problems(events: list[dict]) -> list[str]:
+    """A decoyed missile names the chaff or flare that fooled it by the release
+    number its `combat.countermeasure` entry carries. Recordings without numbers
+    stay valid: only a number that is there is checked, and it must belong to a
+    device of that kind released earlier (by the aircraft the entry names, for
+    `weapon.decoyed`)."""
+    problems: list[str] = []
+    released: set[tuple] = set()
+    for e in events:
+        f = e.get("fields", {})
+        if e["kind"] == "combat.countermeasure" and f.get("number") is not None:
+            released.add((f["number"], e.get("subject"), f.get("decoy")))
+        elif e["kind"] == "weapon.decoyed" and f.get("number") is not None:
+            if (f["number"], e.get("object"), f.get("decoy")) not in released:
+                problems.append(
+                    f"shot {f.get('projectile')} was decoyed by {f.get('decoy')} #{f['number']} "
+                    f"of aircraft {e.get('object')}, which was never released")
+        elif e["kind"] == "weapon.outcome" and f.get("replaces") is not None:
+            m = re.search(r"decoyed by (chaff|flare) #(\d+) from ", f.get("reason", ""))
+            if m and not any(n == int(m.group(2)) and d == m.group(1) for n, _, d in released):
+                problems.append(
+                    f"shot {f.get('projectile')} late hit names {m.group(1)} #{m.group(2)}, which was never released")
+    return problems
+
+
 def invariant_problems(text: str) -> list[str]:
     """Event-stream invariants: order, ownership, one outcome per shot, decoy counts, no revivals."""
     problems: list[str] = []
@@ -149,6 +174,7 @@ def invariant_problems(text: str) -> list[str]:
             if f["left"] < 0 or f["left"] > left.get(key, 10**9):
                 problems.append(f"aircraft {key[0]} {key[1]} count went to {f['left']} at {e['t']}s")
             left[key] = f["left"]
+    problems += decoy_problems(events)
     for shot, results in outcomes.items():
         problems += outcome_problems(shot, results)
         if shot not in launched:

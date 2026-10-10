@@ -277,6 +277,9 @@ pub struct DecoyRoll {
     pub projectile: u32,
     /// [`EffectKind::Chaff`] or [`EffectKind::Flare`].
     pub kind: EffectKind,
+    /// The number of the chaff cartridge or flare the missile rolled
+    /// against: [`DeviceRelease::number`] of its release.
+    pub device: u64,
     /// The missile's decoy susceptibility, percent.
     pub susceptibility: u8,
     /// The dispenser's effectiveness, percent.
@@ -3116,6 +3119,8 @@ impl State {
             own.aircraft,
             Some(left),
         );
+        // The device this release made, which every roll below is against.
+        let device = self.devices.released();
         for projectile in &mut self.projectiles {
             // Lazy: an AI missile carries its own weapon and its station
             // indexes the AI's loadout, which can be longer than this
@@ -3152,6 +3157,7 @@ impl State {
                 aircraft: own.aircraft,
                 projectile: projectile.id,
                 kind,
+                device,
                 susceptibility,
                 effectiveness,
                 threshold,
@@ -7376,6 +7382,9 @@ mod tests {
         );
         assert_eq!(roll.decoyed, decoyed);
         assert_eq!(roll.decoyed, roll.roll < 50);
+        // The roll names the chaff cartridge it was against: the number of
+        // the player's chaff release among the notes above.
+        assert_eq!(roll.device, 1);
         assert!(s.take_device_notes().is_empty() && s.take_decoy_rolls().is_empty());
         // A range reset clears the devices, and says so.
         s.range_target(0, launcher());

@@ -30,7 +30,9 @@ pub mod kind {
     /// aircraft that released the decoy. Fields: `projectile`, `decoy`
     /// (Text: chaff or flare), `roll` and `threshold` (Int: the decoy roll
     /// passed when roll < threshold), `susceptibility` and `effectiveness`
-    /// (Int, percent), `reason`.
+    /// (Int, percent), `number` (Int: the chaff cartridge or flare that fooled
+    /// it, the `number` of its `combat.countermeasure`; absent in recordings
+    /// made before it was kept), `reason`.
     pub const WEAPON_DECOYED: &str = "weapon.decoyed";
     /// How a shot ended. Subject: shooter. Object: intended target. Fields:
     /// `projectile`, `result` (Text from [`super::outcome`]: hit, missed,
@@ -38,7 +40,11 @@ pub mod kind {
     /// `miss_ft` (Num: the closest the shot came to its target), `replaces`
     /// (Text from [`super::outcome`]). One per shot, except that a missile
     /// recorded as spoofed which flies on and damages an aircraft gets a
-    /// second, `hit`, with `replaces` spoofed: the later one stands.
+    /// second, `hit`, with `replaces` spoofed: the later one stands. That
+    /// hit's `reason` names the chaff or flare that fooled the missile, as in
+    /// `it was decoyed by chaff #7 from Enemy 2-1 at 0:13.5 but flew on and
+    /// struck anyway`; `#7` is the `number` of that device's
+    /// `combat.countermeasure` entry.
     pub const WEAPON_OUTCOME: &str = "weapon.outcome";
     /// Damage landed. Subject: attacker. Object: the aircraft or surface
     /// object hit. Fields: `projectile`, `weapon`, `damage` (Int), `hp_after`

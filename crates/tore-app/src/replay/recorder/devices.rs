@@ -51,6 +51,7 @@ fn player_roll(roll: &live::DecoyRoll) -> DecoyRoll {
         projectile: roll.projectile,
         releaser: roll.aircraft,
         class: class(roll.kind),
+        device: roll.device,
         susceptibility: roll.susceptibility,
         effectiveness: roll.effectiveness,
         draw: Some(tore_sim::ai::Draw {
@@ -177,6 +178,7 @@ mod tests {
             aircraft: 0,
             projectile: 12,
             kind: live::EffectKind::Flare,
+            device: 9,
             susceptibility: 70,
             effectiveness: 60,
             threshold: 42,

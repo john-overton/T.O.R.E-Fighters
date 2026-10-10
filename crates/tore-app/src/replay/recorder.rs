@@ -983,7 +983,7 @@ impl Recorder {
                 let reason = if let Some(roll) = decoyed {
                     format!(
                         "decoyed by {} from {}",
-                        why::decoy_name(roll.class),
+                        why::decoy_label(roll),
                         self.who(roll.releaser)
                     )
                 } else if seeker_lost {
@@ -1089,7 +1089,7 @@ impl Recorder {
             ledger::Resolution::Spoofed => self.why.decoyed(resolved.projectile).map(|roll| {
                 format!(
                     "decoyed by {} from {} ({})",
-                    why::decoy_name(roll.class),
+                    why::decoy_label(roll),
                     self.who(roll.releaser),
                     roll.draw.map_or_else(String::new, |d| trees::draw_text(&d))
                 )
@@ -1100,15 +1100,20 @@ impl Recorder {
             ledger::Resolution::Missed => shot
                 .and_then(|shot| shot.lost_at)
                 .map(|at| format!("it lost track of its target at {}", trees::clock(at))),
-            // The decoy roll is kept only for its own tick, so a later strike
-            // names when the track was lost instead.
+            // The late strike names the chaff or flare that fooled the missile,
+            // from the roll kept since its own tick, and when the track was
+            // lost.
             ledger::Resolution::Hit(_) => resolved.replaces.map(|_| {
-                let decoy = self.why.decoyed(resolved.projectile).map_or_else(
+                let roll = self
+                    .why
+                    .decoyed(resolved.projectile)
+                    .or_else(|| self.why.decoyed_earlier(resolved.projectile));
+                let decoy = roll.map_or_else(
                     || "it was spoofed".to_owned(),
                     |roll| {
                         format!(
                             "it was decoyed by {} from {}",
-                            why::decoy_name(roll.class),
+                            why::decoy_label(roll),
                             self.who(roll.releaser)
                         )
                     },
@@ -2117,6 +2122,66 @@ mod tests {
         assert_eq!(
             named.string(field::REASON),
             Some("it was spoofed at 0:13.5 but flew on and struck anyway")
+        );
+        // A roll made on an earlier tick names the chaff or flare that fooled
+        // the missile: its kind, its number and who released it.
+        let roll = |device| crate::ai_wings::DecoyRoll {
+            projectile: 1 << 24,
+            releaser: 3,
+            class: tore_sim::ai::threat::SeekerClass::Radar,
+            device,
+            susceptibility: 70,
+            effectiveness: 60,
+            draw: None,
+            decoyed: true,
+        };
+        recorder.keep_roll(roll(7));
+        recorder.why.next_tick();
+        let fooled = recorder.outcome_event(&ledger::Outcome {
+            projectile: 1 << 24,
+            key,
+            resolution: ledger::Resolution::Hit(116),
+            replaces: Some(ledger::Resolution::Spoofed),
+        });
+        assert_eq!(
+            fooled.string(field::REASON),
+            Some(
+                "it was decoyed by chaff #7 from Enemy 1-1 at 0:13.5 but flew on and struck anyway"
+            )
+        );
+        // The `weapon.decoyed` entry carries the device's number too, and
+        // omits it for a roll that has none.
+        assert_eq!(
+            why::decoyed_event(&roll(7), Some(3)).num(field::NUMBER),
+            Some(7.)
+        );
+        assert_eq!(
+            why::decoyed_event(&roll(0), Some(3)).get(field::NUMBER),
+            None
+        );
+        // A spoofed outcome quotes the draw of its own tick's roll only.
+        let spoof = recorder.outcome_event(&ledger::Outcome {
+            projectile: 1 << 24,
+            key,
+            resolution: ledger::Resolution::Spoofed,
+            replaces: None,
+        });
+        assert_eq!(
+            spoof.string(field::REASON),
+            None,
+            "this tick's roll is gone"
+        );
+        // A roll recorded before devices were numbered names the kind alone.
+        recorder.keep_roll(roll(0));
+        let old = recorder.outcome_event(&ledger::Outcome {
+            projectile: 1 << 24,
+            key,
+            resolution: ledger::Resolution::Hit(116),
+            replaces: Some(ledger::Resolution::Spoofed),
+        });
+        assert_eq!(
+            old.string(field::REASON),
+            Some("it was decoyed by chaff from Enemy 1-1 at 0:13.5 but flew on and struck anyway")
         );
         // An ordinary hit names nothing it replaces and gives no reason.
         let plain = recorder.outcome_event(&ledger::Outcome {
