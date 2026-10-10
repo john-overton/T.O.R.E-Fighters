@@ -711,6 +711,8 @@ pub struct Viewer {
     /// is rebuilt over it.
     template: flight::State,
     scratch: flight::State,
+    /// AC-130 muzzle flashes: the gunship rounds each picture showed.
+    gun_flash: crate::gun_flash::Tracker,
     playback: Playback,
     /// The plane the recording is for (`draw.player`, plane 0 in single
     /// player's), or [`convert::NO_PLAYER`] for an observer's.
@@ -992,6 +994,7 @@ impl Viewer {
             world,
             scenery,
             scratch: template.clone(),
+            gun_flash: Default::default(),
             template,
             ownship,
             models,
@@ -2828,7 +2831,13 @@ impl Viewer {
                 player_outlets,
             )
         }));
-        renderer.emitters(devices, &glows);
+        // AC-130 muzzle flashes from the recorded rounds, on the recorded
+        // barrels, as live flight draws them.
+        let flash_now = tick as f64 + self.clock.alpha();
+        let mounts = crate::gun_flash::mounts(&picture, None);
+        self.gun_flash.observe(&picture, flash_now, &mounts);
+        let guns = self.gun_flash.draw(flash_now, &mounts);
+        renderer.emitters(devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
         renderer.airports(self.scenery.static_geometry_where(&destroyed));
         if let Some(art) = &self.art.escape {

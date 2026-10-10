@@ -62,7 +62,7 @@ fn target(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat) -> wg
     })
 }
 impl Gpu {
-    async fn new(scenery: &Scenery) -> AppResult<Self> {
+    pub(crate) async fn new(scenery: &Scenery) -> AppResult<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -295,7 +295,7 @@ fn capture_encoder(output: &Path, alpha: bool) -> AppResult<Child> {
         .spawn()?)
 }
 
-fn load_assets() -> AppResult<Assets> {
+pub(crate) fn load_assets() -> AppResult<Assets> {
     let assets = Assets::load(&crate::assets::data_directory()?)?;
     let _ = WEATHER.set(
         assets

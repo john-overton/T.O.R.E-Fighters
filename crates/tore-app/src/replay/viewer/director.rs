@@ -251,7 +251,11 @@ impl Viewer {
                 player_outlets,
             )
         }));
-        sim.emitters(queue, devices, &glows);
+        let flash_now = tick as f64 + self.clock.alpha();
+        let mounts = crate::gun_flash::mounts(&picture, None);
+        self.gun_flash.observe(&picture, flash_now, &mounts);
+        let guns = self.gun_flash.draw(flash_now, &mounts);
+        sim.emitters(queue, devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
         sim.airports(
             device,

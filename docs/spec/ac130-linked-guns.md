@@ -25,6 +25,7 @@ parity.
 - [Selection and controls](#selection-and-controls): the gun group.
 - [Tracking and fitted limits](#tracking-and-fitted-limits): arcs, slew, barrels.
 - [The gunsight](#the-gunsight): modes, keys, pod track, sensor dome, pipper, aim box.
+- [Muzzle flash](#muzzle-flash): flashes, gun light, blast smoke, the 105 tracer.
 - [Feedback and shared state](#feedback-and-shared-state): readiness and the network.
 
 ## Selection and controls
@@ -301,6 +302,78 @@ only and reads the readout the same way in single player and online.
 - The HUD square covers about 18 degrees either side of the nose and the guns'
   arcs start 30 degrees off it, so a box inside the HUD always comes with the
   diamond.
+
+## Muzzle flash
+
+Opinionated (John, 2026-10-09: "some sort of muzzle flash ... and some
+illumination when firing"). Every number below is an agent choice. It is
+presentation only: nothing here reaches the simulation, the wire, a checkpoint
+or a recording, so determinism and the golden fingerprints are untouched.
+
+**When a gun flashes.** Each round a gun lets go flashes once, so the flash
+follows whatever fire rate the gun has. The signal is a gunship round that is
+new in the picture: single player sees the simulation's own rounds, a networked
+client sees the rounds it makes again from the host's gun bursts (other players'
+AC-130s too), and a replay sees its recorded rounds. All three keep a round's
+number for its whole flight, so no new wire field or recording field is needed.
+A replay seek, a restart or a stall of more than two seconds starts afresh
+without flashing the rounds already in the air.
+
+```mermaid
+flowchart LR
+  SP[Single player: simulation rounds] --> P[Rounds in the picture]
+  MP[Online: rounds remade from host gun bursts] --> P
+  RP[Replay: recorded rounds] --> P
+  P -->|a round number not seen last frame| S[One shot of that gun]
+  S --> F[Flash on the barrel tip as drawn now]
+  S --> L[Light on the hull and nearby air]
+  S --> K[Blast smoke left in the air]
+```
+
+**The flash** sits on the barrel tip as the barrel is drawn this frame, along
+the barrel, so it stays on the gun while the aircraft flies on and turns with
+the barrel. It is a flat sprite with hard edges in three bands (a white-hot
+heart, yellow, an orange rim) and no soft halo or glare, in the manner of the
+original's explosion sheets. It covers what lies behind it rather than adding
+light, so the orange holds against a bright sky. A plume reaches out along the
+barrel with a jagged edge; a burst of four to six petals opens when the barrel
+points toward or away from the eye. It is never drawn smaller than about two
+pixels, so a firing gunship twinkles at a distance. It is drawn in every world
+view, the gunsight camera's included, wherever the barrel tip is in frame; the
+gunsight camera hangs under the belly forward of the guns, so in its default
+view (90 degrees left, 25 degrees down) the flash is out of frame and shows
+only when the camera looks aft along the side.
+
+| Gun | Flash | Reach | Peak light | Smoke |
+| --- | --- | --- | --- | --- |
+| 25 mm | Flickers in size and brightness every tick; a shot lasts until the next is due at the cadence the gun is firing at (any gap up to 30 ticks), so a held trigger reads as one continuous flicker | 5 ft | 60 | none |
+| 40 mm | A distinct pop each round, 9 ticks, full at once then fading | 9 ft | 130 | one puff, 2.5 to 9 ft, 1.5 s |
+| 105 mm | A big flash held 2 ticks, gone by 16 ticks (0.13 s), growing as it fades | 20 ft | 240 | three puffs, 4 to 20 ft, 3 s |
+
+As a flash dies its white heart shrinks first, then the yellow, and the orange
+rim draws in last.
+
+**The light** is a warm point light 30 percent of the way out along the flash,
+of the same kind as a burning flare's ([flare light](countermeasures.md#flare-light)):
+inverse square, no shadows, out to 1,500 feet, counting up to four times as
+much at night. Its strength is in the flare's units, feet squared: the 105's
+240 lights a facing panel 10 feet away about twice as brightly as full sun at
+its peak, then fades with the flash. So the fuselage side, the left wing's
+underside and the nacelles light up near the guns, strongly at night and dusk
+and subtly by day, along with nearby smoke, clouds and any terrain or aircraft
+within reach. The 105 gives one strong pulse, the 25 mm a flickering glow
+while the trigger is held. Like flare light it needs the smooth lighting mode;
+the original-graphics mode keeps its palette lighting.
+
+**Blast smoke.** The 40 mm and 105 mm leave the original white smoke puff in
+the air: blown out along the barrel, slowed at once, then left where the air
+took it, so it drifts aft of the gunship as it flies on, swelling and fading.
+
+**The 105 mm tracer** is drawn half as bright again as any other gun's tracer
+(John, 2026-10-09). The rule keys on the round's weapon record (C_105.JT), so it
+applies to every 105 round the simulation marks as a tracer.
+
+No graphics option turns this off, as none turns flare light off.
 
 ## Feedback and shared state
 

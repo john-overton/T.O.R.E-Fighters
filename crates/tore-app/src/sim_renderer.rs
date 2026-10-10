@@ -552,11 +552,12 @@ impl SimRenderer {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}",
                     include_str!("surface_lighting.wgsl"),
                     include_str!("terrain.wgsl"),
                     include_str!("spotting.wgsl"),
-                    include_str!("countermeasures.wgsl")
+                    include_str!("countermeasures.wgsl"),
+                    include_str!("gun_flash.wgsl")
                 )
                 .into(),
             ),
@@ -838,15 +839,19 @@ impl SimRenderer {
             marks,
         );
     }
-    /// This frame's light and glare sources: burning flares, chaff and lit
-    /// afterburners. Call before drawing, after `smoke`.
+    /// This frame's light and glare sources: burning flares, chaff, lit
+    /// afterburners and AC-130 gunfire, whose blast smoke joins the smoke.
+    /// Call before drawing, after `smoke`.
     pub fn emitters(
         &mut self,
         queue: &wgpu::Queue,
         devices: &tore_sim::combat::countermeasures::Devices,
         afterburners: &[crate::countermeasure_renderer::Afterburner],
+        guns: &crate::gun_flash::Drawn,
     ) {
-        self.countermeasures.upload(queue, devices, afterburners);
+        self.countermeasures
+            .upload(queue, devices, afterburners, guns);
+        self.smoke.gun_smoke(&guns.puffs);
     }
     pub fn combat(
         &mut self,
@@ -2248,7 +2253,9 @@ mod lighting_tests {
                         devices.step(&|_, _| 0.);
                     }
                 }
-                renderer.countermeasures.upload(&queue, &devices, &[]);
+                renderer
+                    .countermeasures
+                    .upload(&queue, &devices, &[], &Default::default());
                 let mut camera = Camera::new();
                 camera.position = [0., 200., 0.];
                 camera.pitch = -std::f32::consts::FRAC_PI_2;

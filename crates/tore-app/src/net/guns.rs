@@ -183,7 +183,11 @@ pub struct Guns {
     cadence: Cadence,
     /// The station `cadence` is for.
     station: Option<usize>,
-    own: Vec<Round>,
+    /// The seat's rounds, each with a number that stays with it while the
+    /// rounds before it leave the air.
+    own: Vec<(u32, Round)>,
+    /// The number the seat's next round gets.
+    own_serial: u32,
     /// The tick the seat's rounds have been made to.
     own_tick: u64,
     /// The ticks the seat's own rounds left, for counting the rounds it has
@@ -239,16 +243,17 @@ impl Guns {
             incoming: false,
             speed_f8: round.speed_f8,
         };
+        // A round keeps its number for its whole flight, so whatever reads
+        // the picture (the muzzle flashes) sees a new number only for a new
+        // round.
         let own = self
             .own
             .iter()
-            .enumerate()
-            .map(|(i, round)| pose(OWN_IDS + i as u32, input.plane, round));
+            .map(|(serial, round)| pose(own_id(*serial), input.plane, round));
         let others = self
             .others
             .iter()
-            .enumerate()
-            .map(|(i, other)| pose(OTHER_IDS + i as u32, other.shooter, &other.round));
+            .map(|other| pose(other_id(other.serial), other.shooter, &other.round));
         picture.projectiles.extend(own.chain(others));
     }
 
@@ -291,7 +296,7 @@ impl Guns {
     pub fn rounds(&self, tick: u64) -> impl Iterator<Item = (u32, u32, u64, &Round)> {
         self.others.iter().map(move |other| {
             (
-                OTHER_IDS + other.serial,
+                other_id(other.serial),
                 other.shooter,
                 tick.saturating_sub(other.release),
                 &other.round,
@@ -369,7 +374,7 @@ impl Guns {
         for tick in self.own_tick + 1..=input.tick {
             let back = (input.tick - tick) as f64 / 120.;
             self.own
-                .retain_mut(|round| round.step(tick, &around.ground));
+                .retain_mut(|(_, round)| round.step(tick, &around.ground));
             let Some(station) = gun else {
                 continue;
             };
@@ -397,7 +402,8 @@ impl Guns {
                 fired.tracer,
             ) && round.step(tick, &around.ground)
             {
-                self.own.push(round);
+                self.own_serial = self.own_serial.wrapping_add(1);
+                self.own.push((self.own_serial, round));
             }
         }
         self.own_tick = input.tick;
@@ -487,6 +493,16 @@ impl Guns {
         }
         self.bursts = bursts;
     }
+}
+
+/// The picture's number for the seat's round `serial`, in its own block.
+fn own_id(serial: u32) -> u32 {
+    OWN_IDS | (serial & !OWN_IDS)
+}
+/// The picture's number for another aircraft's round `serial`, below the
+/// seat's block.
+fn other_id(serial: u32) -> u32 {
+    OTHER_IDS | (serial & 0x0FFF_FFFF)
 }
 
 /// One round of another aircraft, let go at `release` and flown on to `now`
@@ -1019,5 +1035,53 @@ mod tests {
         // A round every 5 ticks from tick 100 to tick 140, those from 100 to
         // 120 in the air: five of them.
         assert_eq!(picture.projectiles.len(), 5);
+    }
+
+    #[test]
+    fn a_round_keeps_its_picture_number_while_the_rounds_before_it_leave() {
+        let weapon = gun((4, 3, 2));
+        let config = configuration(&weapon);
+        let ground = |_: f64, _: f64| -100_000.;
+        let stations = |_: AircraftId| &config.stations[..];
+        let around = around(&ground, &stations);
+        let mut guns = Guns::default();
+        let events = [burst_event(1, 100, None), burst_event(2, 100, Some(40))];
+        let mut seen: Vec<u32> = Vec::new();
+        let mut gone: Vec<u32> = Vec::new();
+        let mut previous: Vec<u32> = Vec::new();
+        for tick in 99..2_000 {
+            let input = Inputs {
+                tick,
+                render_tick: tick as f64,
+                trigger: false,
+                plane: 3,
+                own: launcher(tick),
+                stores: None,
+                config: &config,
+                events: if tick == 101 { &events } else { &[] },
+            };
+            let mut picture = RenderSnapshot {
+                targets: vec![shooter_pose(tick)],
+                ..RenderSnapshot::default()
+            };
+            guns.step(&input, &around, &mut picture);
+            let ids: Vec<u32> = picture.projectiles.iter().map(|p| p.id).collect();
+            for id in &ids {
+                assert!(!gone.contains(id), "round {id:x} came back at tick {tick}");
+                if !seen.contains(id) {
+                    seen.push(*id);
+                }
+            }
+            gone.extend(previous.iter().filter(|id| !ids.contains(id)));
+            previous = ids;
+        }
+        // Every round of the burst had a number of its own, and all have left.
+        let rounds = (0..)
+            .take_while(|n| gun_round::release_tick(&weapon, 100, *n) <= 139)
+            .count();
+        assert_eq!(seen.len(), rounds);
+        assert!(previous.is_empty() && gone.len() == rounds);
+        assert_eq!(own_id(5), OWN_IDS + 5);
+        assert_eq!(other_id(0x1234_5678), OTHER_IDS + 0x0234_5678);
     }
 }
