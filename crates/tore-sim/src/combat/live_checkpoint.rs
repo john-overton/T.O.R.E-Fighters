@@ -195,7 +195,11 @@ crate::checkpoint_enum!(EffectKind {
 type SurfaceRound = super::SurfaceRound;
 crate::checkpoint_struct!(SurfaceRound { end_tick, flak });
 type GroundLook = super::GroundLook;
-crate::checkpoint_struct!(GroundLook { explosion, crater });
+crate::checkpoint_struct!(GroundLook {
+    explosion,
+    crater,
+    burns
+});
 
 type ParkedSite = super::ParkedSite;
 crate::checkpoint_struct!(ParkedSite {

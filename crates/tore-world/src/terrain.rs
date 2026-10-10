@@ -341,6 +341,21 @@ impl PlacedSize {
     }
 }
 
+/// Whether a placed type is a land surface unit (an NT that is not a ship,
+/// a structure or a man): it stands on the lowest point of its shape rather
+/// than on its origin (docs/spec/surface-defenses.md, "Size"; fitted: for
+/// every land unit the lowest point equals the shape's F2 ground offset
+/// within a unit, while ships and bunkers record offsets below their
+/// geometry).
+pub fn stands_on_wheels(definition: &tore_formats::static_object::Definition) -> bool {
+    use tore_formats::surface_unit::class;
+    definition
+        .resource_name
+        .to_ascii_uppercase()
+        .ends_with(".NT")
+        && definition.category & (class::SHIP | class::STRUCTURE | class::OTHER) == 0
+}
+
 /// Feet per shape unit of a placed object: the reviewed SH header exponent
 /// (`2^(e-8)`) times the [`PlacedSize`] factor of its definition. Every
 /// placed object's drawn size, contact box, collision and hit box (through
@@ -789,6 +804,11 @@ impl Placements {
         ];
         let grounding_offset = if runway {
             -pavement_height(shape) * scale
+        } else if stands_on_wheels(definition) {
+            // A vehicle, launcher or gun stands on its lowest point (its
+            // shape's origin is at its turret or rails); ships keep their
+            // waterline and buildings their authored depth.
+            (-min[1]).max(0.)
         } else {
             0.
         };
@@ -1159,6 +1179,8 @@ impl Terrain {
                 course.fit(&object.bounds, ground);
             }
         }
+        // Units that share a route drive side by side, not on one line.
+        crate::surface::movement::set_lanes(&mut courses);
         self.surface.courses = courses;
         // The parked aircraft stand on the ground or their carrier's deck.
         let (parked, unreadable) =

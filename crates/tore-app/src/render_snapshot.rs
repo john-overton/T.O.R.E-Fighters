@@ -304,6 +304,16 @@ fn aircraft_batches_serial<'a>(
         .collect()
 }
 
+/// The objects combat holds standing (hit points left), for the surface
+/// drawing: a man or a deck crew disappears with its owner.
+pub fn standing(targets: &[live::Target]) -> std::collections::BTreeSet<u32> {
+    targets
+        .iter()
+        .filter(|target| target.hp > 0)
+        .map(|target| target.id)
+        .collect()
+}
+
 /// Combat geometry drawn with the player's airframe: fixture targets over the
 /// player's presented state, debris, weapons, tracers and effects.
 pub fn combat_geometry(

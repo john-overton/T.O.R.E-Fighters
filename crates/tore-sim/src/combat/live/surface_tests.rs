@@ -726,6 +726,7 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
             Some(GroundLook {
                 explosion: 21,
                 crater: 5,
+                burns: false,
             }),
             false,
         ),
@@ -733,6 +734,7 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
             Some(GroundLook {
                 explosion: 21,
                 crater: 5,
+                burns: false,
             }),
             true,
         ),
@@ -817,7 +819,8 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
         42,
         GroundLook {
             explosion: 21,
-            crater: 1
+            crater: 1,
+            burns: false
         }
     ));
 }
@@ -851,6 +854,7 @@ fn surface_rounds_and_looks_restore_from_a_checkpoint_and_fly_on_identically() {
         GroundLook {
             explosion: 21,
             crater: 4,
+            burns: true,
         },
     );
     s.targets
@@ -934,4 +938,41 @@ fn real_data_surface_sam_records_match_their_guidance() {
             assert!(!is_flak(&records[row.record]), "{}", row.record);
         }
     }
+}
+
+#[test]
+fn a_burning_wreck_lights_one_fire_at_the_foot_of_its_box() {
+    use crate::combat::blast::{CRASH_TICKS, MarkKind};
+    let fires = |s: &State| -> Vec<(Vector, u32)> {
+        s.marks
+            .iter()
+            .filter(|m| m.kind == MarkKind::Fire)
+            .map(|m| (m.position, m.ticks))
+            .collect()
+    };
+    let mut s = scene();
+    unit(&mut s, UNIT, [0., 10., 30_000.], REDFOR);
+    unit(&mut s, UNIT + 1, [500., 10., 30_000.], REDFOR);
+    unit(&mut s, UNIT + 2, [900., 10., 30_000.], REDFOR);
+    for (id, burns) in [(UNIT, true), (UNIT + 1, false)] {
+        s.set_ground_look(
+            id,
+            GroundLook {
+                explosion: 21,
+                crater: 0,
+                burns,
+            },
+        );
+    }
+    run(&mut s, 2);
+    assert!(fires(&s).is_empty(), "nothing burns while it stands");
+    // However they die (here a host's destroyed event): the burning look
+    // lights a 15 minute fire where the wreck stands; the others none.
+    for t in s.targets.iter_mut().filter(|t| t.id >= UNIT) {
+        t.hp = 0;
+    }
+    run(&mut s, 1);
+    assert_eq!(fires(&s), [([0., 2., 30_000.], CRASH_TICKS)]);
+    run(&mut s, 120);
+    assert_eq!(fires(&s).len(), 1, "once per wreck");
 }

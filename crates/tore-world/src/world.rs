@@ -968,6 +968,21 @@ impl World {
                     {
                         plane::take_event(&mut cockpit.flight, cockpit.plane.0, event);
                     }
+                    // A SAM site, gun or ship that scored the kill is named
+                    // ("Shot down by SA-6"); aircraft kills stay unnamed, as
+                    // before. Agent decision, 2026-10-10.
+                    if let Some(&(_, seat)) = flown.iter().find(|(plane, _)| plane == aircraft)
+                        && let Some(name) = ai_wings::outcome::shot_down_by(
+                            &self.terrain.surface,
+                            &self.combat.state.ledger,
+                            *aircraft,
+                        )
+                    {
+                        out.cues.push(Cue::Message {
+                            seat,
+                            text: format!("Shot down by {name}"),
+                        });
+                    }
                 }
                 Event::Fired {
                     aircraft,
@@ -1403,6 +1418,7 @@ impl World {
             let state = &self.combat.state;
             let wings = self.ai_wings.as_ref();
             let (roster, revival) = (&self.roster, &self.revival);
+            let surface = &self.terrain.surface;
             let succeeded = || {
                 let side = roster
                     .plane(PlaneId(plane))
@@ -1416,7 +1432,16 @@ impl World {
                     })
                     .collect();
                 let lineages = revival.objective_lineages(roster);
-                ai_wings::outcome::succeeded(state, wings, plane, alive, side, &humans, &lineages)
+                ai_wings::outcome::succeeded(
+                    state,
+                    wings,
+                    plane,
+                    alive,
+                    side,
+                    &humans,
+                    &lineages,
+                    Some(surface),
+                )
             };
             let results =
                 cockpit

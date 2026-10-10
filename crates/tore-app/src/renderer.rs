@@ -171,6 +171,10 @@ impl Renderer {
     pub fn airports(&mut self, geometry: &Arc<crate::scenery::StaticGeometry>) {
         self.sim.airports(&self.device, &self.queue, geometry);
     }
+    /// This frame's moving surface units, sprites and parked aircraft pieces.
+    pub fn surface_units(&mut self, vertices: &[f32]) {
+        self.sim.surface_units(&self.device, &self.queue, vertices);
+    }
     /// Smoke puffs, flare smoke and the released chaff and flares.
     pub fn smoke(
         &mut self,
