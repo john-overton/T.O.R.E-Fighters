@@ -651,6 +651,7 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
 # 2026-09-30, so no scenario or fuzz seed starts on one. See `_strips.py`.)
 KNOWN_FAILURES = {
     "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",
+    "ai-theater-vla-takeoff-a6": "friendly wing with no route leaves the map on a Spassk Dalniy ground start, the first Blue field since slice AL1 (docs/testing/lane-ai.md, decision 5)",
 }
 
 

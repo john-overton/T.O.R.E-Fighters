@@ -258,6 +258,10 @@ low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s while the enemy is still alive (item 5 below).
+- `ai-theater-vla-takeoff-a6` (Spassk Dalniy, near the north edge; the first
+  Blue field in Vladivostok since slice AL1, when the Redfor airports 1 to 5
+  left the Blue ground starts): the same, the airborne friendly wing 2 leaves
+  the map after 156 s (item 5 below).
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
