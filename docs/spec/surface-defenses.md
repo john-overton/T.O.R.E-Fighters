@@ -273,6 +273,16 @@ Further rules, all retail data unless noted:
   and Vladivostok), on both sides, regardless of the "defended" setting. Retail
   evidence points the same way (the units carry weapons and the active `_GVProc`
   binding) but whether retail Quick Missions activate them is not traced.
+- **An airfield's guns belong to its own side** (retail layouts, measured
+  2026-10-10). In all 12 layouts every SAM and AAA unit near a runway has the
+  runway's own side, and no runway stands inside the launch reach of the
+  other side's base defenses. A ground start at a field of the player's side
+  is therefore quiet. The airport list and `--ground-start` still offer every
+  airport, enemy-owned ones included (airports are imported as neutral), so a
+  Blue wing that starts at an enemy field, such as Polotsk (Baltics), Taetan
+  or Wonsan (South Korea) or Longtian (Taiwan), meets that field's ZSU-23s
+  (0.3 to 0.6 nm from the runway) and SAMs as soon as it is airborne: the
+  defenders engage airborne hostiles only.
 - **In PvP the Redfor players defend the target** (defined, John). Template
   units are Redfor: they engage Blue aircraft only. Base-layout units take their
   layout side, so a Redfor player raiding a friendly airfield meets its SAMs.
