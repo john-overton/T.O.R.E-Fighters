@@ -7,7 +7,8 @@ digest), draws the column's moving tanks and is told what the defenses do (radar
 launches).
 
 `net-surface-pvp`: the same mission in PvP with one bot on each side. Redfor defends the target: the Blue bot's
-debrief has the Destroy line, the Red bot's the Protect line; the template's radars never paint the Red bot.
+debrief has the Destroy line, the Red bot's the Protect line; the template's radars never paint the Red bot. Blue's
+capture converts into a format 3 replay with the ground target, its seed and the surface units named.
 
 Both read the `tore-bot` surface line (`NAME: surface: digest D, moving M, ...`, every five seconds). See
 docs/testing/lane-net.md.
@@ -95,7 +96,10 @@ def drive_pvp(d: Drive) -> None:
     server = start_server(
         d, port, weapons_hold(surface_mission()), mode="pvp", kill_limit=5, kill_owner="total", time_limit=2,
     )
-    blue = start_bots(d, port, "blue", 75, "--callsign", "Blue", "--slot", "0")
+    replays = d.work / "replays"
+    replays.mkdir(exist_ok=True)
+    capture = replays / "2026-10-10_1700_NET_127001.tore-capture"
+    blue = start_bots(d, port, "blue", 75, "--callsign", "Blue", "--slot", "0", "--capture", capture)
     red = start_bots(d, port, "red", 75, "--callsign", "Red", "--slot", "6")
     blue.finish(140, None)
     red.finish(140, None)
@@ -113,6 +117,22 @@ def drive_pvp(d: Drive) -> None:
         bot.forbid(NET_BAD, "a network problem")
         bot.forbid(r"places this mission's ground target differently", "a surface digest refusal")
     server.forbid(NET_BAD, "a network problem")
+    # Blue's capture converts into a format 3 replay with the surface tracks (replay slice RP1's hooks).
+    if not capture.exists():
+        d.problem("the Blue bot wrote no capture")
+        return
+    run = d.run("convert", [d.app, "--convert-capture", capture], timeout=180)
+    run.expect(r"^Replay: .*\.tore-replay \(\d+ frames", "the replay's line")
+    replay = next(replays.glob("*.tore-replay"), None)
+    if replay is None:
+        d.problem("the conversion wrote no replay beside the capture")
+        return
+    info = d.run("info", [d.app, "--recording-info", replay], timeout=60)
+    info.expect(r"^State +finished normally", "a finished replay")
+    info.expect(r"^Game +.*, format 3,", "a format 3 recording")
+    info.expect(r"^Ground +target QUCOL with AAA 3 and SAM 3, surface seed [1-9]", "the ground target and its seed")
+    info.expect(r"^Surface +[1-9]\d* units named", "the surface units named")
+    info.forbid(r"INCOMPLETE|^Problem", "damage")
 
 
 def scenarios() -> list[Scenario]:

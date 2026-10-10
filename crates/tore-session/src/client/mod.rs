@@ -1632,6 +1632,7 @@ impl Client {
         self.stats.extrapolated += drawn.extrapolated as u64;
         self.stats.far_frames += drawn.far as u64;
         self.stats.far_extrapolated += drawn.far_extrapolated as u64;
+        let surface_units = self.surface_at(render);
 
         let seat = self.seat.as_ref()?;
         let own = seat.predictor.plane();
@@ -1641,44 +1642,9 @@ impl Client {
         let config = Arc::clone(seat.predictor.config());
         let terms = seat.predictor.terms().copied();
         let player = player_pose(plane, &presented, &config, terms.as_ref());
-        // Each surface unit's newest state at the drawn tick; the older ones
-        // are no longer needed.
-        for states in self.surface_units.values_mut() {
-            while states.len() > 1 && states.get(1).is_some_and(|(t, _)| f64::from(*t) <= render) {
-                states.pop_front();
-            }
-        }
-        let surface_units: BTreeMap<u32, SurfaceUnitView> = self
-            .surface_units
-            .iter()
-            .filter_map(|(unit, states)| {
-                let (tick, view) = states.front()?;
-                (f64::from(*tick) <= render).then(|| (*unit, view.clone()))
-            })
-            .collect();
         let mission = self.mission.as_ref()?;
         let mut targets = drawn.aircraft;
-        targets.extend(mission.ground.iter().map(|pose| {
-            let mut pose = pose.clone();
-            if let Some(view) = surface_units.get(&pose.id) {
-                pose.damage.hp = view.hp;
-            }
-            // A unit that follows a route is where the host's Mover has it
-            // (protocol 22), so the views and the target window follow it.
-            if let Some(moving) = drawn.surface.iter().find(|m| m.id.0 == pose.id) {
-                pose.position = moving.position;
-                pose.attitude = moving.attitude;
-            }
-            if self
-                .destroyed
-                .get(&pose.id)
-                .is_some_and(|tick| f64::from(*tick) <= render)
-            {
-                pose.damage.hp = 0;
-                pose.crashed = true;
-            }
-            pose
-        }));
+        targets.extend(self.ground_at(&mission.ground, &drawn.surface, &surface_units, render));
         self.effects
             .retain(|e| f64::from(e.tick) + f64::from(e.ticks) > render);
         let effects = self
@@ -1725,19 +1691,7 @@ impl Client {
             debris: drawn.debris,
             pilots,
             models: mission.models.clone(),
-            // Moving surface units (protocol 22): a unit the host has
-            // destroyed by the drawn time is a wreck.
-            surface: drawn
-                .surface
-                .into_iter()
-                .map(|mut pose| {
-                    pose.wrecked |= self
-                        .destroyed
-                        .get(&pose.id.0)
-                        .is_some_and(|tick| f64::from(*tick) <= render);
-                    pose
-                })
-                .collect(),
+            surface: self.moving_at(drawn.surface, render),
         };
         // The newest readout, its contacts placed around the drawn plane.
         let mut readout = self.wire.as_ref().and_then(|wire| {
@@ -1797,6 +1751,79 @@ impl Client {
             events: std::mem::take(&mut self.released),
             surface_units,
         })
+    }
+
+    // ----- The surface at the drawn tick (protocol 22) --------------------
+
+    /// Each surface unit's newest told state at drawn tick `render`; the
+    /// older ones are no longer needed.
+    pub(crate) fn surface_at(&mut self, render: f64) -> BTreeMap<u32, SurfaceUnitView> {
+        for states in self.surface_units.values_mut() {
+            while states.len() > 1 && states.get(1).is_some_and(|(t, _)| f64::from(*t) <= render) {
+                states.pop_front();
+            }
+        }
+        self.surface_units
+            .iter()
+            .filter_map(|(unit, states)| {
+                let (tick, view) = states.front()?;
+                (f64::from(*tick) <= render).then(|| (*unit, view.clone()))
+            })
+            .collect()
+    }
+
+    /// The mission's ground objects at drawn tick `render`: a told unit's
+    /// hit points, a unit that follows a route where the host's Mover has
+    /// it (so the views and the target window follow it), a destroyed one
+    /// down.
+    pub(crate) fn ground_at(
+        &self,
+        ground: &[AircraftPose],
+        moving: &[tore_world::surface::SurfacePose],
+        told: &BTreeMap<u32, SurfaceUnitView>,
+        render: f64,
+    ) -> Vec<AircraftPose> {
+        ground
+            .iter()
+            .map(|pose| {
+                let mut pose = pose.clone();
+                if let Some(view) = told.get(&pose.id) {
+                    pose.damage.hp = view.hp;
+                }
+                if let Some(unit) = moving.iter().find(|m| m.id.0 == pose.id) {
+                    pose.position = unit.position;
+                    pose.attitude = unit.attitude;
+                }
+                if self
+                    .destroyed
+                    .get(&pose.id)
+                    .is_some_and(|tick| f64::from(*tick) <= render)
+                {
+                    pose.damage.hp = 0;
+                    pose.crashed = true;
+                }
+                pose
+            })
+            .collect()
+    }
+
+    /// The moving units drawn at `render`: one the host has destroyed by
+    /// then is a wreck.
+    pub(crate) fn moving_at(
+        &self,
+        moving: Vec<tore_world::surface::SurfacePose>,
+        render: f64,
+    ) -> Vec<tore_world::surface::SurfacePose> {
+        moving
+            .into_iter()
+            .map(|mut pose| {
+                pose.wrecked |= self
+                    .destroyed
+                    .get(&pose.id.0)
+                    .is_some_and(|tick| f64::from(*tick) <= render);
+                pose
+            })
+            .collect()
     }
 
     // ----- Inside --------------------------------------------------------
