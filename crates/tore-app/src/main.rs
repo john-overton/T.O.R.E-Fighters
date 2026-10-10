@@ -2187,6 +2187,9 @@ impl App {
             },
         )
         .map_err(|error| error.to_string())?;
+        if let Some(why) = &built.world.terrain.surface.unresolved {
+            log::warn!("Surface: the ground target stands nowhere: {why}");
+        }
         let view = combat_view::CombatView::with_models(
             &built.world.combat,
             built.world.picture_plane().0,

@@ -192,8 +192,8 @@ fn surface_resources() -> BTreeMap<String, Vec<u8>> {
         + &place("MISTRK.NT", 1500, "\tnationality3 152\n")
         + &place("STORE.OT", 2000, "");
     r.insert("UKR.MM".into(), layout.into_bytes());
-    r.insert("~QSTEST.M".into(), test_template().into_bytes());
-    r.insert("~QSFLT.M".into(), fleet_template().into_bytes());
+    r.insert("~QUCITY.M".into(), test_template().into_bytes());
+    r.insert("~QUSFLT.M".into(), fleet_template().into_bytes());
     r
 }
 
@@ -291,7 +291,7 @@ fn defense_rolls_man_slots_at_the_retail_percentages() {
     for (level, percent) in [(0, 0.), (1, 25.), (2, 60.), (3, 100.)] {
         let (mut manned, mut seen) = (0usize, 0usize);
         for seed in 0..400 {
-            let resolved = resolve_with(&r, &target("QSTEST", level, level, seed));
+            let resolved = resolve_with(&r, &target("QUCITY", level, level, seed));
             manned += defenses(&resolved);
             seen += 12;
             // Every slot is either placed or listed as removed.
@@ -310,10 +310,10 @@ fn defense_rolls_man_slots_at_the_retail_percentages() {
 #[test]
 fn sam_and_aaa_levels_roll_separately() {
     let r = surface_resources();
-    let resolved = resolve_with(&r, &target("QSTEST", 3, 0, 7));
+    let resolved = resolve_with(&r, &target("QUCITY", 3, 0, 7));
     assert_eq!(slots(&resolved, Placeholder::Aaa).len(), 6);
     assert!(slots(&resolved, Placeholder::Sam).is_empty());
-    let resolved = resolve_with(&r, &target("QSTEST", 0, 3, 7));
+    let resolved = resolve_with(&r, &target("QUCITY", 0, 3, 7));
     assert!(slots(&resolved, Placeholder::Aaa).is_empty());
     assert_eq!(slots(&resolved, Placeholder::Sam).len(), 6);
 }
@@ -326,7 +326,7 @@ fn picks_come_uniformly_from_the_enemy_groups_lists() {
     for (nationality, group) in [(10, 2), (3, 1), (14, 3), (41, 4), (0, 0)] {
         let mut seen: BTreeMap<Placeholder, BTreeMap<String, usize>> = BTreeMap::new();
         for seed in 0..300 {
-            let mut t = target("QSTEST", 3, 3, seed);
+            let mut t = target("QUCITY", 3, 3, seed);
             t.enemy_nationality = nationality;
             let resolved = resolve_with(&r, &t);
             assert_eq!(resolved.site.group, group);
@@ -364,7 +364,7 @@ fn picks_come_uniformly_from_the_enemy_groups_lists() {
 #[test]
 fn the_night_rule_mans_every_aaa_slot_with_a_novice_zsu23() {
     let r = surface_resources();
-    let mut t = target("QSTEST", 3, 3, 11);
+    let mut t = target("QUCITY", 3, 3, 11);
     t.night_stealth = true;
     let resolved = resolve_with(&r, &t);
     let aaa = slots(&resolved, Placeholder::Aaa);
@@ -401,8 +401,8 @@ fn a_target_placeholder_that_fails_its_roll_is_no_target() {
             .chain(resolved.parked.iter().filter(|p| p.target).map(|p| p.id.0))
             .collect()
     };
-    let none = resolve_with(&r, &target("QSTEST", 0, 0, 3));
-    let heavy = resolve_with(&r, &target("QSTEST", 3, 3, 3));
+    let none = resolve_with(&r, &target("QUCITY", 0, 0, 3));
+    let heavy = resolve_with(&r, &target("QUCITY", 3, 3, 3));
     // The SAM slot target (ordinal 0), the bunker (12) and the parked
     // aircraft (16) at heavy; without SAMs only the last two.
     assert_eq!(
@@ -423,11 +423,11 @@ fn a_target_placeholder_that_fails_its_roll_is_no_target() {
 #[test]
 fn ids_follow_template_ordinals_whatever_the_rolls() {
     let r = surface_resources();
-    let heavy = resolve_with(&r, &target("QSTEST", 3, 3, 21));
+    let heavy = resolve_with(&r, &target("QUCITY", 3, 3, 21));
     let heavy_ids: BTreeSet<u32> = heavy.units.iter().map(|u| u.id.0).collect();
     for seed in 0..50 {
         for level in 0..4 {
-            let resolved = resolve_with(&r, &target("QSTEST", level, level, seed));
+            let resolved = resolve_with(&r, &target("QUCITY", level, level, seed));
             for unit in &resolved.units {
                 let Origin::Template { ordinal, .. } = unit.origin else {
                     panic!("a template unit from elsewhere");
@@ -450,15 +450,15 @@ fn ids_follow_template_ordinals_whatever_the_rolls() {
     }
     // The same inputs give the same resolution.
     assert_eq!(
-        resolve_with(&r, &target("QSTEST", 2, 1, 5)),
-        resolve_with(&r, &target("QSTEST", 2, 1, 5))
+        resolve_with(&r, &target("QUCITY", 2, 1, 5)),
+        resolve_with(&r, &target("QUCITY", 2, 1, 5))
     );
 }
 
 #[test]
 fn owners_are_rewritten_except_nationality3() {
     let r = surface_resources();
-    let resolved = resolve_with(&r, &target("QSTEST", 3, 3, 1));
+    let resolved = resolve_with(&r, &target("QUCITY", 3, 3, 1));
     for unit in &resolved.units {
         if unit.id.0 == SURFACE_UNIT_BASE + 15 {
             // `nationality3 39` passes through: friendly Taiwanese.
@@ -478,7 +478,7 @@ fn owners_are_rewritten_except_nationality3() {
 #[test]
 fn fleet_aircraft_are_deck_launches_and_left_out() {
     let r = surface_resources();
-    let resolved = resolve_with(&r, &target("QSFLT", 3, 3, 1));
+    let resolved = resolve_with(&r, &target("QUSFLT", 3, 3, 1));
     assert!(resolved.parked.is_empty());
     assert_eq!(resolved.site.left_out.len(), 1);
     assert_eq!(resolved.site.left_out[0].resource, "F18.PT");
@@ -547,16 +547,17 @@ fn base_layout_units_keep_their_layout_ids_and_take_their_sides() {
     assert!(surface.template.is_none());
 }
 
+/// A mission whose spec names `target`, built as the creator's would be.
 fn world_with_target(r: &BTreeMap<String, Vec<u8>>, target: &GroundTarget) -> World {
-    let spec = MissionSpec::new(THEATER, AircraftId::F18);
-    let mut world = World::new(&spec, r, Seating::SinglePlayer).unwrap();
-    // The spec carries no ground target until slice Q1; place it as the
-    // build will.
-    world.terrain =
-        Terrain::for_mission_with(r, THEATER, Some(0), &Overrides::default(), Some(target))
-            .unwrap();
-    world.combat.add_scene_targets(&world.terrain).unwrap();
-    world
+    use crate::mission::Defense;
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.ground_target = Some(target.stem.clone());
+    spec.aaa = Defense::from_level(target.aaa).unwrap();
+    spec.sam = Defense::from_level(target.sam).unwrap();
+    spec.surface_seed = target.seed;
+    spec.enemy_nationality = target.enemy_nationality as u8;
+    assert_eq!(GroundTarget::from_spec(&spec).as_ref(), Some(target));
+    World::new(&spec, r, Seating::SinglePlayer).unwrap()
 }
 
 fn side_in_combat(world: &World, id: u32) -> Option<tore_sim::combat::live::Side> {
@@ -586,7 +587,7 @@ fn combat_registers_every_unit_with_its_side() {
     );
     // With a ground target, its units join with theirs, and the parked
     // aircraft stays out of the scene until its own slice.
-    let mut world = world_with_target(&r, &target("QSTEST", 3, 3, 9));
+    let mut world = world_with_target(&r, &target("QUCITY", 3, 3, 9));
     let surface = world.terrain.surface.clone();
     for unit in surface.template_units() {
         assert!(unit.in_scene);
@@ -608,7 +609,7 @@ fn combat_registers_every_unit_with_its_side() {
 #[test]
 fn unit_hit_points_survive_a_checkpoint() {
     let r = surface_resources();
-    let t = target("QSTEST", 3, 3, 4);
+    let t = target("QUCITY", 3, 3, 4);
     let mut world = world_with_target(&r, &t);
     let damaged = [(SURFACE_UNIT_BASE + 12, 17), (LAYOUT_OBJECT_BASE, 0)];
     for (id, hp) in damaged {
@@ -640,7 +641,7 @@ fn unit_hit_points_survive_a_checkpoint() {
         Some(ENEMY_SIDE)
     );
     // A world with another surface refuses it.
-    let mut other = world_with_target(&r, &target("QSTEST", 1, 1, 4));
+    let mut other = world_with_target(&r, &target("QUCITY", 1, 1, 4));
     assert!(other.restore(&bytes).is_err());
 }
 
@@ -652,13 +653,13 @@ fn the_digest_repeats_and_tells_surfaces_apart() {
             .unwrap()
             .surface
     };
-    let a = build(&target("QSTEST", 2, 2, 100));
-    let b = build(&target("QSTEST", 2, 2, 100));
+    let a = build(&target("QUCITY", 2, 2, 100));
+    let b = build(&target("QUCITY", 2, 2, 100));
     assert_eq!(a.digest(), b.digest());
     assert_eq!(a, b);
     // Other rolls, another digest; so for a moved unit or a changed side.
     let other = (0..20)
-        .map(|seed| build(&target("QSTEST", 2, 2, seed)))
+        .map(|seed| build(&target("QUCITY", 2, 2, seed)))
         .find(|s| s.units != a.units)
         .unwrap();
     assert_ne!(other.digest(), a.digest());

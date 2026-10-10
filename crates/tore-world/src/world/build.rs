@@ -54,19 +54,6 @@ pub struct Built {
     pub restarted: Restarted,
 }
 
-/// What a mission with a ground target says until the surface layout exists:
-/// the target is carried but nothing stands at it. `None` without a target.
-/// Slice W1 removes this when it builds the surface units.
-pub(super) fn surface_gap_note(spec: &MissionSpec) -> Option<String> {
-    let target = spec.ground_target.as_deref()?;
-    Some(format!(
-        "Surface: the mission names ground target {target} (AAA {}, SAM {}, seed {}), but this build places no surface units yet; it flies without them.",
-        spec.aaa.name(),
-        spec.sam.name(),
-        spec.surface_seed
-    ))
-}
-
 impl World {
     /// Builds the mission `spec` describes from the imported `resources`: the
     /// terrain for the theater and weather, the aircraft types, the layout,
@@ -152,11 +139,6 @@ impl World {
         }
 
         let altitude = f64::from(spec.start.altitude_ft());
-        // The surface layout is not built yet (slice W1): say so, once, in the
-        // log, so a mission with a target is not mistaken for a defended one.
-        if let Some(note) = surface_gap_note(spec) {
-            eprintln!("{note}");
-        }
         let selected_ground = match spec.start {
             Start::GroundAuto { .. } => Some(mission_layout::auto_runway(
                 &terrain,

@@ -56,19 +56,19 @@ pub struct GroundTarget {
 }
 
 impl GroundTarget {
-    /// The ground target `spec` carries, `None` without one.
-    ///
-    /// Shim (slice W1) until slice Q1 adds the `MissionSpec` fields
-    /// `ground_target`, `aaa`, `sam`, `surface_seed` and `enemy_nationality`:
-    /// the spec carries no ground target yet, so this is always `None` and a
-    /// mission builds exactly as before. When Q1 merges this becomes
-    /// `spec.ground_target.as_ref().map(|stem| GroundTarget { stem, aaa:
-    /// spec.aaa level, sam: spec.sam level, seed: spec.surface_seed,
-    /// enemy_nationality: spec.enemy_nationality, night_stealth:
-    /// night_stealth(spec) })`.
+    /// The ground target `spec` carries, `None` without one: its template
+    /// stem, the creator's defense levels, the surface seed (0 when none was
+    /// drawn), the enemy nationality and the night rule.
     pub fn from_spec(spec: &MissionSpec) -> Option<Self> {
-        let _ = spec;
-        None
+        let stem = spec.ground_target.as_deref()?;
+        Some(Self {
+            stem: stem.trim_start_matches('~').to_ascii_uppercase(),
+            aaa: spec.aaa.level(),
+            sam: spec.sam.level(),
+            seed: spec.surface_seed,
+            enemy_nationality: usize::from(spec.enemy_nationality),
+            night_stealth: night_stealth(spec),
+        })
     }
 }
 

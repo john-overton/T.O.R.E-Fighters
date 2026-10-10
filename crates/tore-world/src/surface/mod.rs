@@ -276,6 +276,9 @@ pub struct Surface {
     /// Types whose record could not be read, with the reason; such a layout
     /// placement stays plain scenery.
     pub unreadable: Vec<(String, String)>,
+    /// Why the mission's ground target stands nowhere: its template is not in
+    /// the import. The mission flies without it.
+    pub unresolved: Option<String>,
 }
 
 impl Surface {
@@ -340,6 +343,13 @@ impl Surface {
                 h.u32(site.settings.seed);
                 h.u32(site.settings.enemy_nationality as u32);
                 h.u8(u8::from(site.settings.night_stealth));
+            }
+            None => h.u8(0),
+        }
+        match &self.unresolved {
+            Some(why) => {
+                h.u8(1);
+                h.text(why);
             }
             None => h.u8(0),
         }

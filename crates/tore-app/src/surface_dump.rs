@@ -232,6 +232,9 @@ fn print_surface(theater: &str, surface: &Surface) {
             );
         }
     }
+    if let Some(why) = &surface.unresolved {
+        println!("surface: unresolved ground target: {why}");
+    }
     for (name, why) in &surface.unreadable {
         println!("surface: unreadable {name}: {why}");
     }

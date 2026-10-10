@@ -403,7 +403,22 @@ impl Placements {
         let support_height = ground;
         let mut min = [f64::INFINITY; 3];
         let mut max = [f64::NEG_INFINITY; 3];
-        for point in shape.faces.iter().flat_map(|face| &face.positions) {
+        // A viewer-facing sprite (the men) spans its width across either
+        // horizontal axis and its height upward from its centre.
+        let sprites = shape.billboards.iter().flat_map(|sprite| {
+            let [w, h] = sprite.size.map(|v| v * 0.5);
+            let c = sprite.center;
+            [
+                [c[0] - w, c[1] - w, c[2] - h],
+                [c[0] + w, c[1] + w, c[2] + h],
+            ]
+        });
+        for point in shape
+            .faces
+            .iter()
+            .flat_map(|face| face.positions.iter().copied())
+            .chain(sprites)
+        {
             let mapped = [
                 f64::from(point[0]),
                 f64::from(point[2]),
@@ -805,23 +820,35 @@ impl Terrain {
         use crate::surface::{catalog::Catalog, resolve};
         let mut catalog = Catalog::new(resources);
         let base = resolve::layout(layout, &mut catalog);
+        let mut unresolved = None;
         let template = match target {
             Some(target) => {
                 let name = format!("~{}.M", target.stem.to_ascii_uppercase());
-                let bytes = resources.get(&name).ok_or_else(|| {
-                    format!("missing ground target template {name}; re-import media")
-                })?;
-                let template = tore_formats::quick_template::Template::parse(&name, bytes)?;
-                Some(resolve::template(
-                    &template,
-                    target,
-                    &mut catalog,
-                    layout.map.as_deref(),
-                )?)
+                match resources.get(&name) {
+                    Some(bytes) => {
+                        let template = tore_formats::quick_template::Template::parse(&name, bytes)?;
+                        Some(resolve::template(
+                            &template,
+                            target,
+                            &mut catalog,
+                            layout.map.as_deref(),
+                        )?)
+                    }
+                    // An import made before it kept the templates: the
+                    // mission flies, and says why nothing stands there.
+                    None => {
+                        unresolved = Some(format!(
+                            "the import has no ground target template {name}; re-import media"
+                        ));
+                        None
+                    }
+                }
             }
             None => None,
         };
-        Ok(resolve::surface(base, template)?)
+        let mut surface = resolve::surface(base, template)?;
+        surface.unresolved = unresolved;
+        Ok(surface)
     }
 
     /// The AI's view of one runway, with its airfield points when known.
