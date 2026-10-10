@@ -162,7 +162,7 @@ share `&RWRLOCK.5K`.
 | Tone condition | Existing TORE state | Gap |
 | --- | --- | --- |
 | Ranks 1 and 2, missile in flight | The flight music danger rule already lists live projectiles marked incoming whose target is the player, with the AIM-120 rule. The RWR `Incoming` indicator is a different, receiver-evidence state with a stale grace, so it must not drive the tone. | Split that list by the weapon's seeker signature, 3 or 2. |
-| Ranks 3 and 4, lock | The RWR `Tracking` indicator and `Painting` emitter state exist with no producer. The AI controller's weapon phase already reports `Tracking` (lock held, waiting the tracking delay) and `Fire`. | A per-actor feed: target is the player, phase `Tracking` or `Fire`, the seeker signature of the store being locked, held 1 s. TORE's AI keeps no selected station, per the flight music code. Whether TORE ground units run the same weapon service was not checked. |
+| Ranks 3 and 4, lock | The RWR `Tracking` indicator and `Painting` emitter state exist with no producer. The AI controller's weapon phase already reports `Tracking` (lock held, waiting the tracking delay) and `Fire`. | A per-actor feed: target is the player, phase `Tracking` or `Fire`, the seeker signature of the store being locked, held 1 s. TORE's AI keeps no selected station, per the flight music code. TORE's surface units run their own engagement controller ([surface defenses](surface-defenses.md#engagement)) and feed the same list. |
 | Level, pause, centering | Host mixer and the Sound/Music Prefs RWR and Overall words | None beyond applying Overall twice. |
 
 ### Implementation in TORE
@@ -177,7 +177,8 @@ step and the mixer loops it, centred, restarting on a change of tone.
 | Level | 0.4 times the original's ratio of this tone to a full-level effect at the default settings, then RWR and OVERALL relative to their defaults, OVERALL twice | spec-derived ratio; absolute level fitted |
 | Own seeker | Silent while a warning sounds; it restarts from the beginning afterwards | spec-derived |
 | Ejection and death | No tone once the player has ejected or the pilot is dead | fitted, retail unknown |
-| Ground units | No lock warning: TORE's ground units do not run the AI weapon service | unknown |
+| Ground units | A SAM launcher's or ship's missile controller whose target is the player and which holds its lock (tracking, firing, or between salvos) feeds the lock list with its missile's seeker class, so ranks 3 and 4 sound as for an AI aircraft; a SAM battery's lock is its radar's. A battery firing on its optical backup (radar dead) sounds no lock. Guns never do (no missile seeker class). | spec-derived (retail shares the weapons procedure, [RWR formats](../formats/rwr.md#lock-producer-stage)); the lock held between salvos fitted |
+| Ground emitters | A surface radar on the air (see [surface defenses](surface-defenses.md#rwr-emitters-and-radar-state)) is received as the Ground square. The surface controllers also report which emitters paint the player (tracking or firing at it); the instrument does not draw that bright state yet. | spec-derived; painting display pending (presentation slice) |
 | Replays | The tone is not recorded, so a replay is silent here | fitted gap |
 
 ### Unknown
