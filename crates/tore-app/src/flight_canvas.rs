@@ -1,5 +1,5 @@
 //! Aspect-responsive flight composition; menus keep their original 640x480 canvas.
-use crate::{aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
+use crate::{aim_box, aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
 use std::sync::Arc;
 use tore_formats::text::GlyphCodes;
 #[cfg(test)]
@@ -191,13 +191,21 @@ impl FlightCanvas {
             p[3] = (out * 255.).round() as u8;
         }
     }
-    /// Easy targeting's square outside the HUD: the HUD's own 14-pixel square
-    /// and one-pixel line at the HUD's on-screen scale for `zoom`, smoothed
-    /// like the HUD so it is no brighter or bolder, with the friendly X.
-    pub fn target_square(&mut self, [x, y]: [f64; 2], zoom: f64, color: [u8; 3], friendly: bool) {
-        let scale =
-            (f64::from(self.size[0]) / 640.).min(f64::from(self.size[1]) / 480.) * HUD_SCALE * zoom;
-        let mut line = |a: (f64, f64), b: (f64, f64)| {
+    /// How many canvas pixels one HUD pixel covers at `zoom`.
+    pub fn hud_pixel(&self, zoom: f64) -> f64 {
+        (f64::from(self.size[0]) / 640.).min(f64::from(self.size[1]) / 480.) * HUD_SCALE * zoom
+    }
+    /// Strokes given in HUD pixels about `at`, smoothed like the HUD so they
+    /// are no brighter or bolder.
+    fn hud_strokes(
+        &mut self,
+        [x, y]: [f64; 2],
+        zoom: f64,
+        color: [u8; 3],
+        strokes: &[aim_box::Stroke],
+    ) {
+        let scale = self.hud_pixel(zoom);
+        for &(a, b) in strokes {
             let steps = ((b.0 - a.0).hypot(b.1 - a.1) * scale * 2.).ceil().max(1.) as usize;
             for step in 0..=steps {
                 let t = step as f64 / steps as f64;
@@ -205,19 +213,53 @@ impl FlightCanvas {
                 let py = y + (a.1 + (b.1 - a.1) * t) * scale;
                 self.dot(px, py, scale, color);
             }
-        };
-        for (a, b) in [
-            ((-7., -7.), (7., -7.)),
-            ((7., -7.), (7., 7.)),
-            ((7., 7.), (-7., 7.)),
-            ((-7., 7.), (-7., -7.)),
-        ] {
-            line(a, b);
         }
-        if friendly {
-            line((-3., -3.), (3., 3.));
-            line((-3., 3.), (3., -3.));
-        }
+    }
+    /// The target square outside the HUD (Easy targeting's, and the AC-130's
+    /// aim-point box): the HUD's own 14-pixel square and one-pixel line at the
+    /// HUD's on-screen scale for `zoom`, with the friendly X for a friendly
+    /// target, a centre dot for a pinned point or corner brackets for a point
+    /// the sight only sweeps over.
+    pub fn target_square(
+        &mut self,
+        at: [f64; 2],
+        zoom: f64,
+        color: [u8; 3],
+        style: aim_box::Style,
+    ) {
+        self.hud_strokes(at, zoom, color, &aim_box::box_strokes(style));
+    }
+    /// The small diamond where the AC-130's guns will hit.
+    pub fn aim_diamond(&mut self, at: [f64; 2], zoom: f64, color: [u8; 3]) {
+        self.hud_strokes(
+            at,
+            zoom,
+            color,
+            &aim_box::diamond_strokes(aim_box::DIAMOND_HALF),
+        );
+    }
+    /// An arrow at the screen edge towards a box that is off screen, the
+    /// shape of the HUD's own edge arrow. `direction` is a unit vector, x
+    /// right and y down.
+    /// It keeps clear of the `windows` (the instrument panels), which would
+    /// hide it.
+    pub fn edge_chevron(
+        &mut self,
+        direction: [f64; 2],
+        zoom: f64,
+        color: [u8; 3],
+        windows: &[aim_box::Rect],
+    ) {
+        // Far enough in that the whole arrow, and the line's width, show.
+        let margin = aim_box::EDGE_ARROW * 1.5 * self.hud_pixel(zoom);
+        let tip =
+            aim_box::edge_point_clear(self.size.map(f64::from), margin, direction, windows, margin);
+        self.hud_strokes(
+            tip,
+            zoom,
+            color,
+            &aim_box::chevron_strokes(direction, aim_box::EDGE_ARROW, aim_box::EDGE_ARROW / 2.),
+        );
     }
     /// A `size`-wide square pen centred on (x, y), with partial pixels at its
     /// edges, blended so overlapping stamps never exceed full coverage.
@@ -758,7 +800,12 @@ mod tests {
         };
         canvas.size = [640, 480];
         canvas.pixels = vec![0; 640 * 480 * 4];
-        canvas.target_square([320., 240.], 1., [0, 255, 0], false);
+        canvas.target_square(
+            [320., 240.],
+            1.,
+            [0, 255, 0],
+            aim_box::Style::Tracked { friendly: false },
+        );
         let alpha = |c: &FlightCanvas, x: usize, y: usize| c.pixels[(y * 640 + x) * 4 + 3];
         // At 640 by 480 the HUD scale is 0.7225: a 10-pixel square of thin,
         // partly covered lines, never a solid bold outline.
@@ -767,7 +814,75 @@ mod tests {
         assert!(alpha(&canvas, edge, 240) < 255);
         assert_eq!(alpha(&canvas, 320, 240), 0);
         assert_eq!(alpha(&canvas, edge + 3, 240), 0);
-        canvas.target_square([0., 0.], 1., [0, 255, 0], true);
+        canvas.target_square(
+            [0., 0.],
+            1.,
+            [0, 255, 0],
+            aim_box::Style::Tracked { friendly: true },
+        );
+    }
+    #[test]
+    fn edge_chevron_sits_inside_the_edge_and_points_outward() {
+        let mut canvas = FlightCanvas {
+            size: [640, 480],
+            pixels: vec![0; 640 * 480 * 4],
+            ..Default::default()
+        };
+        canvas.edge_chevron([1., 0.], 1., [0, 255, 0], &[]);
+        let lit: Vec<(usize, usize)> = canvas
+            .pixels
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(_, p)| p[3] > 0)
+            .map(|(i, _)| (i % 640, i / 640))
+            .collect();
+        assert!(!lit.is_empty());
+        let right = lit.iter().map(|p| p.0).max().unwrap();
+        let left = lit.iter().map(|p| p.0).min().unwrap();
+        // The tip is 12 HUD pixels in from the right edge, the arms trail
+        // back towards the middle, and the arrow is centred on the row.
+        assert!(right < 640 && right > 640 - 20, "{right}");
+        assert!(left < right - 4);
+        let rows = (
+            lit.iter().map(|p| p.1).min().unwrap(),
+            lit.iter().map(|p| p.1).max().unwrap(),
+        );
+        assert!(rows.0 < 240 && rows.1 > 240 && (rows.0 + rows.1).abs_diff(480) <= 2);
+    }
+    #[test]
+    fn aim_diamond_is_smaller_than_the_box() {
+        let extent = |draw: &dyn Fn(&mut FlightCanvas)| {
+            let mut canvas = FlightCanvas {
+                size: [640, 480],
+                pixels: vec![0; 640 * 480 * 4],
+                ..Default::default()
+            };
+            draw(&mut canvas);
+            let xs: Vec<usize> = canvas
+                .pixels
+                .chunks_exact(4)
+                .enumerate()
+                .filter(|(_, p)| p[3] > 0)
+                .map(|(i, _)| i % 640)
+                .collect();
+            xs.iter().max().unwrap() - xs.iter().min().unwrap()
+        };
+        let diamond = extent(&|c| c.aim_diamond([320., 240.], 1., [0, 255, 0]));
+        let square = extent(&|c| {
+            c.target_square([320., 240.], 1., [0, 255, 0], aim_box::Style::Free);
+        });
+        assert!(
+            diamond * 2 <= square + 2 && diamond >= 3,
+            "{diamond} {square}"
+        );
+        // A pinned point is the square plus a centre dot.
+        let mut canvas = FlightCanvas {
+            size: [640, 480],
+            pixels: vec![0; 640 * 480 * 4],
+            ..Default::default()
+        };
+        canvas.target_square([320., 240.], 1., [0, 255, 0], aim_box::Style::Pinned);
+        assert!(canvas.pixels[(240 * 640 + 320) * 4 + 3] > 0);
     }
     #[test]
     fn veil_darkens_the_world_and_instruments_edges_first() {
