@@ -53,7 +53,12 @@ pub fn emitters(
                 .as_ref()
                 .is_some_and(|j| j.radio_frequency && j.strength > 0.);
         let emitting = jamming || target.radar_emitting;
-        if !emitting || !target.airborne {
+        // A surface emitter: the radar of a ground unit, a battery or a ship,
+        // which is never airborne (docs/spec/surface-defenses.md, "RWR
+        // emitters and radar state"). Anything else not airborne, a wreck on
+        // the ground, is silent.
+        let ground = !target.airborne;
+        if !emitting || (ground && (target.destroyed || !target.radar_emitting)) {
             continue;
         }
         let sighting = Sighting::new(observer.position, &observer.basis, target.position);
@@ -74,7 +79,9 @@ pub fn emitters(
             id: target.id,
             bearing_rad: sighting.heading_relative_bearing(observer.basis.angles()[0]),
             distance_nmi: ranged,
-            symbol: if ranged.is_some() {
+            symbol: if ground {
+                Symbol::Ground
+            } else if ranged.is_some() {
                 Symbol::Aircraft
             } else {
                 Symbol::Unknown
@@ -178,6 +185,49 @@ mod tests {
         let mut grounded = jamming.clone();
         grounded[0].airborne = false;
         assert!(emitters(&observer(), &grounded, &[], &environment(&ground, &clear)).is_empty());
+    }
+    #[test]
+    fn a_surface_radar_is_a_ground_emitter_until_it_is_destroyed() {
+        let ground = |_: f64, _: f64| 0.;
+        let clear = |_: [f64; 3], _: [f64; 3]| false;
+        let e = environment(&ground, &clear);
+        let mut radar = target(4, [0., 30., 60_760.], false);
+        radar.airborne = false;
+        radar.radar_emitting = true;
+        let found = emitters(&observer(), std::slice::from_ref(&radar), &[], &e);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].symbol, Symbol::Ground);
+        assert_eq!(found[0].distance_nmi, None);
+        // The ground square stays a square when our sensors range it too.
+        let contacts = [Contact {
+            id: 4,
+            channel: Channel::Radar,
+            bearing_rad: 0.,
+            elevation_rad: 0.,
+            distance_ft: 60_760.,
+            position: radar.position,
+            velocity: [0.; 3],
+            track_eligible: false,
+            destroyed: false,
+        }];
+        let ranged = emitters(&observer(), std::slice::from_ref(&radar), &contacts, &e);
+        assert_eq!(ranged[0].symbol, Symbol::Ground);
+        assert!(ranged[0].distance_nmi.is_some());
+        // Off, destroyed, masked or only jamming: not received.
+        for change in [
+            |t: &mut Observable| t.radar_emitting = false,
+            |t: &mut Observable| t.destroyed = true,
+            |t: &mut Observable| {
+                t.radar_emitting = false;
+                t.jammer_active = true;
+            },
+        ] {
+            let mut silent = radar.clone();
+            change(&mut silent);
+            assert!(emitters(&observer(), &[silent], &[], &e).is_empty());
+        }
+        let blocked = |_: [f64; 3], _: [f64; 3]| true;
+        assert!(emitters(&observer(), &[radar], &[], &environment(&ground, &blocked)).is_empty());
     }
     #[test]
     fn bearings_are_heading_relative_rather_than_body_relative() {
