@@ -6,7 +6,9 @@
 //! Each sheet shows one shape and its damaged `_A` shape from four sides
 //! through the scenery projection, the pose static placements use, with a
 //! scale bar in feet. A launcher sheet shows the dynamic (state) projection
-//! with each loaded-round count. Shapes, textures, the palette and the label
+//! with each loaded-round count. Carrier sheets place each hull's island and
+//! deck parts from the FA.EXE carrier table, and a fleet scene lays out the
+//! Clemenceau template `~QFFLT`. Shapes, textures, the palette and the label
 //! font are read straight from the user's own `FA_1.LIB` and `FA_2.LIB` (the
 //! remembered media source, `TORE_GAME_DIR`, or `gameassets/`), so the sheets
 //! do not depend on what the import selected.
@@ -23,7 +25,7 @@ use std::{collections::BTreeMap, path::Path};
 use tore_formats::{
     Archive, Pic,
     font::Font,
-    shape::{Face, Shape, loaded_count_word, object_scale},
+    shape::{DAMAGED_WORD, Face, Shape, contact_offset, loaded_count_word, object_scale},
 };
 
 const TILE: [usize; 2] = [560, 400];
@@ -33,44 +35,95 @@ const HEADER: usize = 58;
 const DROP: f32 = 16.;
 const BACKGROUND: [u8; 3] = [88, 98, 110];
 
-/// One sheet: a shape, its damaged shape if it has one, and why it is shown.
+/// Where a sheet's damaged row comes from.
+enum Damaged {
+    /// The shape has no damaged look.
+    None,
+    /// A separate `_A` shape, as every ship has.
+    Shape(&'static str),
+    /// The shape's own jump-to-damage branch (`shape::DAMAGED_WORD`), as the
+    /// carrier towers carry their damaged island.
+    Branch,
+}
+
+/// One sheet: a shape, its damaged look if it has one, and why it is shown.
 struct Subject {
     shape: &'static str,
-    damaged: Option<&'static str>,
+    damaged: Damaged,
     note: &'static str,
 }
 
-/// Shapes the reader learned in this round (slice S1).
-const NEW: [Subject; 6] = [
+/// Shapes the reader learned in this round (slices S1 and S2).
+const NEW: &[Subject] = &[
     Subject {
         shape: "KRIV.SH",
-        damaged: Some("KRIV_A.SH"),
+        damaged: Damaged::Shape("KRIV_A.SH"),
         note: "Krivak frigate (KRIVAK.NT)",
     },
     Subject {
         shape: "SOVR.SH",
-        damaged: Some("SOVR_A.SH"),
+        damaged: Damaged::Shape("SOVR_A.SH"),
         note: "Sovremennyy destroyer (SOVR.NT)",
     },
     Subject {
         shape: "SA3.SH",
-        damaged: None,
+        damaged: Damaged::None,
         note: "SA-3 Goa launcher (SA3.NT), no damaged shape",
     },
     Subject {
         shape: "SCD.SH",
-        damaged: None,
+        damaged: Damaged::None,
         note: "SCUD launcher (SCUD.NT), no damaged shape",
     },
     Subject {
         shape: "SOLDIER.SH",
-        damaged: None,
+        damaged: Damaged::None,
         note: "Soldier sprite (SOLDIER.NT), no damaged shape",
     },
     Subject {
         shape: "RUNNER.SH",
-        damaged: None,
+        damaged: Damaged::None,
         note: "Running man (RUNNER.NT), already read before this round",
+    },
+    Subject {
+        shape: "NIMZ.SH",
+        damaged: Damaged::Shape("NIMZ_A.SH"),
+        note: "Eisenhower hull (NIMZ.NT), the island is ~NIMZT",
+    },
+    Subject {
+        shape: "KITT.SH",
+        damaged: Damaged::Shape("KITT_A.SH"),
+        note: "Kitty Hawk hull (KITT.NT), the island is ~KITTT",
+    },
+    Subject {
+        shape: "CLEM.SH",
+        damaged: Damaged::Shape("CLEM_A.SH"),
+        note: "Clemenceau hull (CLEM.NT), the island is ~CLEMT",
+    },
+    Subject {
+        shape: "WASP.SH",
+        damaged: Damaged::Shape("WASP_A.SH"),
+        note: "Wasp hull (WASP.NT), the island is ~WASPT",
+    },
+    Subject {
+        shape: "NIMZT.SH",
+        damaged: Damaged::Branch,
+        note: "Eisenhower island (~NIMZT.OT), damaged row is its own damage branch",
+    },
+    Subject {
+        shape: "KITTT.SH",
+        damaged: Damaged::Branch,
+        note: "Kitty Hawk island (~KITTT.OT), damaged row is its own damage branch",
+    },
+    Subject {
+        shape: "CLEMT.SH",
+        damaged: Damaged::Branch,
+        note: "Clemenceau island (~CLEMT.OT), damaged row is its own damage branch",
+    },
+    Subject {
+        shape: "WASPT.SH",
+        damaged: Damaged::Branch,
+        note: "Wasp island (~WASPT.OT), damaged row is its own damage branch",
     },
 ];
 
@@ -78,22 +131,22 @@ const NEW: [Subject; 6] = [
 const EXISTING: [Subject; 4] = [
     Subject {
         shape: "KIEV.SH",
-        damaged: Some("KIEV_A.SH"),
+        damaged: Damaged::Shape("KIEV_A.SH"),
         note: "Kiev carrier, read before this round",
     },
     Subject {
         shape: "TICON.SH",
-        damaged: Some("TICON_A.SH"),
+        damaged: Damaged::Shape("TICON_A.SH"),
         note: "Ticonderoga cruiser, read before this round",
     },
     Subject {
         shape: "SA6.SH",
-        damaged: None,
+        damaged: Damaged::None,
         note: "SA-6 launcher, read before this round",
     },
     Subject {
         shape: "ZSU23.SH",
-        damaged: None,
+        damaged: Damaged::None,
         note: "ZSU-23-4 Shilka, read before this round",
     },
 ];
@@ -464,14 +517,17 @@ fn bounds(shape: &Shape, scale: f32) -> ([f32; 3], [f32; 3]) {
 }
 
 struct Loaded {
-    name: &'static str,
+    name: String,
     scale: f32,
+    /// The shape's ground offset in feet at the scenery scale (F2 record
+    /// word +8, what FA 0x42e0c0 reads to stand an object on the ground).
+    contact: f32,
     shape: Shape,
 }
 fn load(
     media: &Media,
     art: &mut Art,
-    name: &'static str,
+    name: &str,
     state: Option<&BTreeMap<usize, i32>>,
 ) -> AppResult<Loaded> {
     let bytes = media.get(name)?;
@@ -490,8 +546,9 @@ fn load(
         art.texture(media, &texture)?;
     }
     Ok(Loaded {
-        name,
+        name: name.to_owned(),
         scale: object_scale(&bytes)? as f32,
+        contact: f32::from(contact_offset(&bytes)?.unwrap_or(0)),
         shape,
     })
 }
@@ -576,10 +633,16 @@ fn lengths(loaded: &Loaded) -> String {
 
 fn sheet(out: &Path, media: &Media, art: &mut Art, subject: &Subject, tag: &str) -> AppResult<()> {
     let main = load(media, art, subject.shape, None)?;
-    let damaged = subject
-        .damaged
-        .map(|name| load(media, art, name, None))
-        .transpose()?;
+    let damaged = match subject.damaged {
+        Damaged::None => None,
+        Damaged::Shape(name) => Some(load(media, art, name, None)?),
+        Damaged::Branch => {
+            let state = BTreeMap::from([(DAMAGED_WORD, 1)]);
+            let mut loaded = load(media, art, subject.shape, Some(&state))?;
+            loaded.name = format!("{} damage branch", subject.shape);
+            Some(loaded)
+        }
+    };
     let group: Vec<&Loaded> = std::iter::once(&main).chain(damaged.as_ref()).collect();
     let rows = group.len();
     let mut canvas = Canvas::new(TILE[0] * VIEWS.len(), HEADER + TILE[1] * rows);
@@ -665,6 +728,416 @@ fn launcher_sheet(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
     Ok(())
 }
 
+/// A part FA.EXE spawns with a carrier: its shape, its offset from the
+/// carrier's origin in world units (right, up, forward, turned with the
+/// carrier) and its heading in binary angle units (65536 a turn).
+struct Attachment {
+    shape: &'static str,
+    offset: [i16; 3],
+    heading: i16,
+}
+
+/// A carrier and the parts spawned with it. The island is always the last
+/// part, an OT whose damaged look is its own damage branch.
+struct Carrier {
+    hull: &'static str,
+    damaged: &'static str,
+    note: &'static str,
+    parts: &'static [Attachment],
+}
+
+const fn part(shape: &'static str, offset: [i16; 3], heading: i16) -> Attachment {
+    Attachment {
+        shape,
+        offset,
+        heading,
+    }
+}
+
+/// The carrier table in FA.EXE 1.02F (names from `0x50cbd0`, offsets from
+/// `0x50cbe8`, headings from `0x50cc08` for the Eisenhower; the other
+/// carriers follow at `0x50cc18`, `0x50cc38` and `0x50cc80`). The spawning
+/// code turns each offset by the carrier's attitude and adds it to the
+/// carrier's position (`0x411d10`). Every height in the table is 0 except the
+/// Clemenceau's catapult officer (20). The preview stands each part on the
+/// hull's flight deck by its ground offset (the shape's F2 contact word), as
+/// objects stand on the ground: the deck crew's feet, the tractors' wheels
+/// and the islands' bases then all meet the deck. That rule is an inference
+/// (fitted); the game's deck placement is not traced.
+const CARRIERS: [Carrier; 4] = [
+    Carrier {
+        hull: "NIMZ.SH",
+        damaged: "NIMZ_A.SH",
+        note: "Eisenhower (NIMZ.NT)",
+        parts: &[
+            part("CATGUY.SH", [-15, 0, 1011], 32760),
+            part("MULEA.SH", [292, 0, -408], -20384),
+            part("MULEB.SH", [205, 0, -158], 4004),
+            part("MULEC.SH", [-387, 0, -729], -3276),
+            part("NIMZT.SH", [360, 0, -195], 0),
+        ],
+    },
+    Carrier {
+        hull: "KITT.SH",
+        damaged: "KITT_A.SH",
+        note: "Kitty Hawk (KITT.NT)",
+        parts: &[
+            part("CATGUY.SH", [-15, 0, 1011], 32760),
+            part("MULEA.SH", [252, 0, -408], -20384),
+            part("MULEB.SH", [205, 0, -158], 4004),
+            part("MULEC.SH", [-347, 0, -729], -3276),
+            part("KITTT.SH", [300, 0, -190], 0),
+        ],
+    },
+    Carrier {
+        hull: "CLEM.SH",
+        damaged: "CLEM_A.SH",
+        note: "Clemenceau (CLEM.NT)",
+        parts: &[
+            part("CATGUY.SH", [70, 20, 1420], 32760),
+            part("MULEA.SH", [330, 0, -700], -20384),
+            part("MULEB.SH", [466, 0, 700], 4004),
+            part("MULEC.SH", [-410, 0, -729], -3276),
+            part("CLEMT.SH", [380, 0, 230], 0),
+        ],
+    },
+    Carrier {
+        hull: "WASP.SH",
+        damaged: "WASP_A.SH",
+        note: "Wasp (WASP.NT)",
+        parts: &[
+            part("MULEA.SH", [80, 0, 320], -25116),
+            part("WASPT.SH", [0, 0, 0], 0),
+        ],
+    },
+];
+
+/// The flat top parts and parked aircraft stand on: the height shared by the
+/// largest area of level faces, in source units, the area of those faces in
+/// square source units, and their convex outline (right, forward).
+struct Deck {
+    height: f32,
+    area: f32,
+    outline: Vec<[f32; 2]>,
+}
+
+fn flight_deck(shape: &Shape) -> Option<Deck> {
+    let mut levels: BTreeMap<i64, (f32, Vec<[f32; 2]>)> = BTreeMap::new();
+    for face in &shape.faces {
+        let p = &face.positions;
+        if p.len() < 3 {
+            continue;
+        }
+        let z = p[0][2];
+        if p.iter().any(|q| (q[2] - z).abs() > 1e-3) {
+            continue;
+        }
+        let twice: f32 = (0..p.len())
+            .map(|i| {
+                let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                a[0] * b[1] - b[0] * a[1]
+            })
+            .sum();
+        let level = levels.entry((z * 1000.).round() as i64).or_default();
+        level.0 += twice.abs() / 2.;
+        level.1.extend(p.iter().map(|q| [q[0], q[1]]));
+    }
+    let (key, (area, points)) = levels.into_iter().max_by(|a, b| a.1.0.total_cmp(&b.1.0))?;
+    Some(Deck {
+        height: key as f32 / 1000.,
+        area,
+        outline: convex_hull(points),
+    })
+}
+
+/// Andrew's monotone chain, counter-clockwise from the lowest-left point.
+fn convex_hull(mut points: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    points.dedup();
+    if points.len() < 3 {
+        return points;
+    }
+    let turn = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let mut hull: Vec<[f32; 2]> = Vec::new();
+    for pass in 0..2 {
+        let start = hull.len();
+        let ordered: Vec<[f32; 2]> = if pass == 0 {
+            points.clone()
+        } else {
+            points.iter().rev().copied().collect()
+        };
+        for p in ordered {
+            while hull.len() >= start + 2
+                && turn(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.
+            {
+                hull.pop();
+            }
+            hull.push(p);
+        }
+        hull.pop();
+    }
+    hull
+}
+
+/// Several loaded shapes as one, in feet: each turned by its heading (binary
+/// angle units) about the up axis and moved by its offset in feet (right,
+/// forward, up).
+fn assemble(name: String, parts: &[(&Loaded, [f32; 3], i16)]) -> Loaded {
+    let mut shape = Shape {
+        lines: Vec::new(),
+        faces: Vec::new(),
+        billboards: Vec::new(),
+        state_words: Default::default(),
+    };
+    for (loaded, offset, heading) in parts {
+        let turn = f32::from(*heading) * std::f32::consts::TAU / 65536.;
+        let (sin, cos) = turn.sin_cos();
+        let place = |p: [f32; 3]| -> [f32; 3] {
+            let p = p.map(|v| v * loaded.scale);
+            [
+                offset[0] + p[0] * cos + p[1] * sin,
+                offset[1] + p[1] * cos - p[0] * sin,
+                offset[2] + p[2],
+            ]
+        };
+        for face in &loaded.shape.faces {
+            shape.faces.push(Face {
+                positions: face.positions.iter().map(|p| place(*p)).collect(),
+                normal: None,
+                ..face.clone()
+            });
+        }
+        for line in &loaded.shape.lines {
+            let mut line = line.clone();
+            line.positions = line.positions.map(place);
+            shape.lines.push(line);
+        }
+        for sprite in &loaded.shape.billboards {
+            let mut sprite = sprite.clone();
+            sprite.center = place(sprite.center);
+            sprite.size = sprite.size.map(|v| v * loaded.scale);
+            shape.billboards.push(sprite);
+        }
+    }
+    Loaded {
+        name,
+        scale: 1.,
+        contact: 0.,
+        shape,
+    }
+}
+
+/// A carrier hull with its parts in place, intact or damaged, in feet at the
+/// scenery scale, with the intact hull's deck.
+fn carrier_assembly(
+    media: &Media,
+    art: &mut Art,
+    carrier: &Carrier,
+    damaged: bool,
+) -> AppResult<(Loaded, Deck)> {
+    let hull = load(media, art, carrier.hull, None)?;
+    let deck = flight_deck(&hull.shape).ok_or("carrier hull has no level deck")?;
+    let hull = if damaged {
+        load(media, art, carrier.damaged, None)?
+    } else {
+        hull
+    };
+    let deck_feet = deck.height * hull.scale;
+    let mut parts = Vec::new();
+    for (index, attachment) in carrier.parts.iter().enumerate() {
+        let island = index + 1 == carrier.parts.len();
+        let loaded = if island && damaged {
+            let state = BTreeMap::from([(DAMAGED_WORD, 1)]);
+            load(media, art, attachment.shape, Some(&state))?
+        } else {
+            load(media, art, attachment.shape, None)?
+        };
+        let [right, up, forward] = attachment.offset.map(f32::from);
+        let lift = deck_feet + up - loaded.contact;
+        parts.push((loaded, [right, forward, lift], attachment.heading));
+    }
+    let mut all: Vec<(&Loaded, [f32; 3], i16)> = vec![(&hull, [0.; 3], 0)];
+    all.extend(parts.iter().map(|(l, o, h)| (l, *o, *h)));
+    let name = if damaged {
+        format!("{} with damaged island", carrier.damaged)
+    } else {
+        format!("{} with island and deck parts", carrier.hull)
+    };
+    Ok((assemble(name, &all), deck))
+}
+
+fn carrier_sheet(out: &Path, media: &Media, art: &mut Art, carrier: &Carrier) -> AppResult<()> {
+    let (intact, deck) = carrier_assembly(media, art, carrier, false)?;
+    let (damaged, _) = carrier_assembly(media, art, carrier, true)?;
+    let group = [&intact, &damaged];
+    let mut canvas = Canvas::new(TILE[0] * VIEWS.len(), HEADER + TILE[1] * 2);
+    canvas.text(
+        &art.font,
+        &format!(
+            "{}: hull, island and deck parts placed from the FA.EXE carrier table",
+            carrier.note
+        ),
+        10,
+        8,
+        [255, 255, 255],
+    );
+    canvas.text(&art.font, &lengths(&intact), 10, 32, [210, 225, 240]);
+    let frames: Vec<_> = VIEWS.iter().map(|view| frame(&group, view, TILE)).collect();
+    for (row, loaded) in group.iter().enumerate() {
+        for (column, view) in VIEWS.iter().enumerate() {
+            let (center, ppf) = frames[column];
+            let caption = if row == 0 { "intact," } else { "damaged," };
+            let picture = tile(art, loaded, view, center, ppf, caption, TILE);
+            canvas.blit(&picture, column * TILE[0], HEADER + row * TILE[1]);
+        }
+    }
+    let stem = carrier.hull.trim_end_matches(".SH");
+    let path = out.join(format!("carrier-{stem}.png"));
+    canvas.png(&path)?;
+    println!("Surface preview: {}", path.display());
+    for (row, loaded) in group.iter().enumerate() {
+        for view in [&VIEWS[0], &VIEWS[2], &VIEWS[3]] {
+            let (center, ppf) = frame(&group, view, DETAIL);
+            let caption = if row == 0 { "intact," } else { "damaged," };
+            let picture = tile(art, loaded, view, center, ppf, caption, DETAIL);
+            let name = format!(
+                "carrier-{stem}-{}-{}.png",
+                if row == 0 { "intact" } else { "damaged" },
+                view.name.replace(' ', "-")
+            );
+            picture.png(&out.join(name))?;
+        }
+    }
+    let scale = load(media, art, carrier.hull, None)?.scale;
+    let (lo, hi) = bounds(&intact.shape, 1.);
+    let outline: Vec<String> = deck
+        .outline
+        .iter()
+        .map(|p| format!("({:.0},{:.0})", p[0], p[1]))
+        .collect();
+    println!(
+        "Surface preview: {} deck at {:.0} units ({:.0} ft at the scenery scale, {:.0} ft at one third), {:.0} square units of level deck, outline (right,forward) in units {}",
+        carrier.hull,
+        deck.height,
+        deck.height * scale,
+        deck.height * scale / 3.,
+        deck.area,
+        outline.join(" ")
+    );
+    println!(
+        "Surface preview: {} with parts spans right {:.0}..{:.0}, forward {:.0}..{:.0}, up {:.0}..{:.0} ft at the scenery scale",
+        carrier.hull, lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]
+    );
+    Ok(())
+}
+
+/// The shape a PT or NT names in its `:shape` block.
+fn named_shape(text: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(text);
+    let mut lines = text.lines().skip_while(|l| l.trim() != ":shape").skip(1);
+    let name = lines.next()?.trim().strip_prefix("string \"")?;
+    Some(name.trim_end_matches('"').to_ascii_uppercase())
+}
+
+/// The Clemenceau fleet template `~QFFLT` laid out at its recorded positions:
+/// the carrier with its parts, its escorts and the aircraft parked on its
+/// deck (stood on the deck by their ground offset, as the carrier's parts
+/// are). Escort
+/// placeholders take the first unit of the list for the template theater's
+/// default enemy group; the surface round's resolution rules (W1) pick
+/// among them.
+fn fleet_scene(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
+    use tore_formats::quick_template::{ObjectKind, Template, tables};
+    let template = Template::parse("~QFFLT.M", &media.get("~QFFLT.M")?)?;
+    let theater = tables::TEMPLATES
+        .iter()
+        .position(|list| list.contains(&"QFFLT"))
+        .ok_or("QFFLT is in no theater list")?;
+    let group = tables::group_of(tables::ENEMY_NATIONALITY[theater]).ok_or("no group")?;
+    let carrier = &CARRIERS[2];
+    let (clem, deck) = carrier_assembly(media, art, carrier, false)?;
+    let deck_feet = deck.height * load(media, art, carrier.hull, None)?.scale;
+    let origin = template
+        .objects
+        .iter()
+        .find(|o| matches!(&o.kind, ObjectKind::Named(name) if name == "CLEM.NT"))
+        .ok_or("no CLEM in ~QFFLT")?
+        .position;
+    let mut escorts: Vec<(Loaded, [f32; 3], i16)> = Vec::new();
+    let mut parked: Vec<(Loaded, [f32; 3], i16)> = Vec::new();
+    for object in &template.objects {
+        let offset = [
+            (object.position[0] - origin[0]) as f32,
+            (object.position[2] - origin[2]) as f32,
+            0.,
+        ];
+        let resource = match (&object.kind, object.placeholder()) {
+            (_, Some(placeholder)) => tables::equipment(placeholder, group)
+                .and_then(|list| list.first())
+                .map(|name| name.to_string()),
+            (ObjectKind::Named(name), None) if name != "CLEM.NT" => Some(name.clone()),
+            _ => None,
+        };
+        let Some(resource) = resource else { continue };
+        let shape = named_shape(&media.get(&resource)?)
+            .ok_or_else(|| format!("{resource} names no shape"))?;
+        // Template angles are degrees; binary angle units turn the other way.
+        let heading = (-object.angles[0] as f32 * 65536. / 360.) as i16;
+        let loaded = load(media, art, &shape, None)?;
+        if resource.ends_with(".PT") {
+            let lift = deck_feet - loaded.contact;
+            parked.push((loaded, [offset[0], offset[1], lift], heading));
+        } else {
+            escorts.push((loaded, offset, heading));
+        }
+    }
+    let mut all: Vec<(&Loaded, [f32; 3], i16)> = vec![(&clem, [0.; 3], 0)];
+    all.extend(parked.iter().map(|(l, o, h)| (l, *o, *h)));
+    let close = assemble("CLEM.SH with parked aircraft".into(), &all);
+    all.extend(escorts.iter().map(|(l, o, h)| (l, *o, *h)));
+    let fleet = assemble("~QFFLT fleet".into(), &all);
+    let top = &VIEWS[3];
+    let oblique = View {
+        name: "fleet quarter",
+        azimuth: 35.,
+        elevation: 30.,
+    };
+    // At fleet range the ships are a few pixels long: ring and name each one.
+    let mut marks = vec![([0f32; 3], "CLEM.SH".to_owned())];
+    marks.extend(escorts.iter().map(|(l, o, _)| (*o, l.name.clone())));
+    for (view, name) in [(top, "top"), (&oblique, "quarter")] {
+        let (center, ppf) = frame(&[&fleet], view, DETAIL);
+        let mut picture = tile(art, &fleet, view, center, ppf, "fleet,", DETAIL);
+        let camera = Camera::new(view, center, ppf, DETAIL);
+        for (at, label) in &marks {
+            let [x, y, _] = camera.project(*at);
+            for step in 0..180 {
+                let turn = step as f32 * std::f32::consts::TAU / 180.;
+                let (sin, cos) = turn.sin_cos();
+                let (px, py) = ((x + 30. * cos) as i64, (y + 30. * sin) as i64);
+                picture.rect(px, py, 2, 2, [255, 214, 90]);
+            }
+            let text = label.trim_end_matches(".SH");
+            picture.text(&art.font, text, x as i64 + 36, y as i64 - 8, [255, 214, 90]);
+        }
+        picture.png(&out.join(format!("fleet-QFFLT-{name}.png")))?;
+    }
+    for view in [&VIEWS[0], &VIEWS[2], top] {
+        let (center, ppf) = frame(&[&close], view, DETAIL);
+        let picture = tile(art, &close, view, center, ppf, "parked aircraft,", DETAIL);
+        let name = format!("fleet-QFFLT-carrier-{}.png", view.name.replace(' ', "-"));
+        picture.png(&out.join(name))?;
+    }
+    println!(
+        "Surface preview: ~QFFLT {} escorts and {} parked aircraft around CLEM",
+        escorts.len(),
+        parked.len()
+    );
+    Ok(())
+}
+
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
     let [out] = args.as_slice() else {
@@ -684,13 +1157,17 @@ pub fn run() -> AppResult<()> {
         textures: BTreeMap::new(),
         font: Font::parse(&media.get("WIN11.FNT")?)?,
     };
-    for subject in &NEW {
+    for subject in NEW {
         sheet(out, &media, &mut art, subject, "new")?;
     }
     for subject in &EXISTING {
         sheet(out, &media, &mut art, subject, "existing")?;
     }
     launcher_sheet(out, &media, &mut art)?;
+    for carrier in &CARRIERS {
+        carrier_sheet(out, &media, &mut art, carrier)?;
+    }
+    fleet_scene(out, &media, &mut art)?;
     // Each texture as the shapes see it, holes (index 255 or masked) magenta.
     let textures = out.join("textures");
     std::fs::create_dir_all(&textures)?;
@@ -722,6 +1199,38 @@ mod tests {
         // From the bow quarter the bow is nearer the eye than the stern.
         let quarter = Camera::new(&VIEWS[0], [0.; 3], 1., TILE);
         assert!(quarter.project(bow)[2] < quarter.project([0., -100., 0.])[2]);
+    }
+
+    #[test]
+    fn flight_deck_is_the_largest_level_area_with_its_convex_outline() {
+        let face = |points: &[[f32; 3]]| Face {
+            positions: points.to_vec(),
+            colors: vec![0; points.len()],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x41,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            lines: Vec::new(),
+            faces: vec![
+                face(&[[0., 0., 10.], [4., 0., 10.], [4., 8., 10.], [0., 8., 10.]]),
+                face(&[[4., 0., 10.], [6., 2., 10.], [4., 8., 10.]]),
+                face(&[[0., 0., 20.], [1., 0., 20.], [1., 1., 20.]]),
+                face(&[[0., 0., 0.], [9., 0., 0.], [9., 0., 30.]]),
+            ],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let deck = flight_deck(&shape).unwrap();
+        assert_eq!(deck.height, 10.);
+        assert_eq!(deck.area, 40.);
+        assert_eq!(
+            deck.outline,
+            vec![[0., 0.], [4., 0.], [6., 2.], [4., 8.], [0., 8.]]
+        );
     }
 
     #[test]
