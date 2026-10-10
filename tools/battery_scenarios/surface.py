@@ -330,6 +330,73 @@ def zsu23_problems(output: str) -> list[str]:
     return problems
 
 
+def stock(run: str, unit: str) -> list[tuple[int, str]]:
+    """The final (loaded, reserve) of each of a unit's hardpoints."""
+    return [
+        (int(m.group(1)), m.group(2))
+        for m in re.finditer(rf"^surface-trace: stock {unit} m\d+ loaded (\d+) reserve (\S+)$", run, re.M)
+    ]
+
+
+def resupply_problems(output: str) -> list[str]:
+    """Resupply (John, 2026-10-10) on the Ukraine factory's seed 2 group, whose
+    SA-6 battery and ZSU-23 each have a supply truck within 0.1 mile.
+
+    Run 1: the SA-6 battery starts with empty rails; its MISTRK refills them all
+    after the 420 s rearm timer, and the battery then fires. Run 2: the trucks
+    are destroyed at 100 s; the rails stay empty and nothing fires. Run 3: the
+    ZSU-23 starts with no spare magazines and an empty magazine; the truck adds
+    one every 120 s. Run 4: the same gun with its magazine empty, the jet in
+    range: it swaps in 120 s, fires the whole magazine, and swaps again 120 s
+    after that, from the reserve the truck has refilled. Run 5: no truck, no
+    magazine and no reserve: Empty, silent."""
+    problems: list[str] = []
+    rearm, cut, refill, swaps, silent = (runs(output) + [""] * 5)[:5]
+    unit = subject(rearm)
+    if not re.search(r"^surface-trace: trucks (0x[0-9a-f]+ ?)+$", rearm, re.M):
+        problems.append("the SA-6 has no truck within reach")
+    when = [t for t, text in events(rearm) if text == f"rearm {unit}"]
+    if len(when) != 1 or not near(when[0], 420.0, 0.05):
+        problems.append(f"SA-6 rearm at {when}: expected one, at 420 s")
+    launch = first(rearm, rf"^shot {unit} ")
+    if launch is None or launch < 420.0:
+        problems.append(f"SA-6 launch at {launch}: expected after the rearm")
+    if int(summary(rearm).get("missiles", "0")) != 3:
+        problems.append(f"SA-6 fired {summary(rearm).get('missiles')} of its 3 missiles after the rearm")
+    if stock(rearm, unit) != [(0, "0")]:
+        problems.append(f"SA-6 stock after its three missiles {stock(rearm, unit)}")
+
+    s = summary(cut)
+    if first(cut, r"^killed truck") is None or s.get("rearms") != "0" or s.get("missiles") != "0":
+        problems.append(f"with the trucks destroyed: {s}")
+    if stock(cut, subject(cut)) != [(0, "0")]:
+        problems.append(f"with the trucks destroyed the rails were {stock(cut, subject(cut))}")
+
+    gun = subject(refill)
+    when = [t for t, text in events(refill) if text.startswith(f"refill {gun} ")]
+    if len(when) != 2 or not near(when[0], 120.0, 0.05) or not near(when[1], 240.0, 0.05):
+        problems.append(f"ZSU-23 reserve refills at {when}: expected 120 s and 240 s")
+    if stock(refill, gun) != [(0, "2")]:
+        problems.append(f"ZSU-23 stock {stock(refill, gun)}: the magazine is not topped up, the reserve holds two")
+
+    gun = subject(swaps)
+    reloads = [t for t, text in events(swaps) if re.match(rf"phase {gun} w0 Reload", text)]
+    done = [t for t, text in events(swaps) if text.startswith(f"swap {gun} ")]
+    if len(reloads) != 2 or len(done) != 2 or any(not near(b - a, 120.0, 0.02) for a, b in zip(reloads, done)):
+        problems.append(f"ZSU-23 swaps {reloads} to {done}: expected 120 s each")
+    s = summary(swaps)
+    if s.get("rounds") != "2000" or s.get("refills") != "1":
+        problems.append(f"ZSU-23 fired {s.get('rounds')} rounds with {s.get('refills')} refills: expected 2000 and 1")
+    if stock(swaps, gun) != [(2000, "1")]:
+        problems.append(f"ZSU-23 stock {stock(swaps, gun)}: expected a full magazine and one spare")
+
+    gun = subject(silent)
+    s = summary(silent)
+    if first(silent, rf"^phase {gun} w0 Empty") is None or s.get("rounds") != "0" or s.get("swaps") != "0":
+        problems.append(f"ZSU-23 with no truck and no reserve did not stay silent: {s}")
+    return problems
+
+
 def flak_problems(output: str) -> list[str]:
     """KS-19 over North Vietnam's AAA emplacement: an eight-shell opening
     barrage, single shells after, flak bursts high and no tracers; at 3,000 ft,
@@ -580,6 +647,28 @@ def scenarios() -> list[Scenario]:
             args=trace("BAL", "--over", "ZSU23", "--altitude", "1500", "--speed", "250", "--from", "4",
                        "--seconds", "120", "--quiet-shots"),
             check=zsu23_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-resupply", lane="ai", timeout=900,
+            args=trace("UKR", "QUFACT", "--surface-seed", "2", "--unit", "0x5000000e", "--drain",
+                       "--altitude", "15000", "--from", "62", "--seconds", "600", "--invulnerable"),
+            then=[
+                Step(trace("UKR", "QUFACT", "--surface-seed", "2", "--unit", "0x5000000e", "--drain",
+                           "--kill-truck-at", "100", "--altitude", "15000", "--from", "62",
+                           "--seconds", "600", "--invulnerable"), timeout=300),
+                Step(trace("UKR", "QUFACT", "--surface-seed", "2", "--unit", "0x5000000c", "--drain",
+                           "--drain-reserve", "--from", "200", "--seconds", "300", "--invulnerable",
+                           "--quiet-shots"), timeout=300),
+                Step(trace("UKR", "QUFACT", "--surface-seed", "2", "--unit", "0x5000000c", "--drain",
+                           "--altitude", "3000", "--speed", "60", "--from", "4", "--seconds", "400",
+                           "--invulnerable", "--quiet-shots"), timeout=300),
+                Step(trace("UKR", "QUFACT", "--surface-seed", "2", "--unit", "0x5000000c", "--drain",
+                           "--drain-reserve", "--kill-truck-at", "0", "--altitude", "3000", "--speed", "60",
+                           "--from", "4", "--seconds", "400", "--invulnerable", "--quiet-shots"), timeout=300),
+            ],
+            check=resupply_problems,
+            notes=TRACE_NOTES + " The factory's seed 2 group: an SA-6 battery and a ZSU-23, each with its "
+                  "supply truck.",
         ),
         Scenario(
             name="surface-flak-tviet", lane="ai", timeout=400,
