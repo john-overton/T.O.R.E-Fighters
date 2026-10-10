@@ -251,6 +251,18 @@ pub fn strip_length_ft(resources: &dyn ResourceSource, object_type: &str) -> Opt
     Some(runway_length_ft(min * scale, max * scale, anchor))
 }
 
+/// Feet per shape unit of a placed object: the reviewed SH header exponent
+/// (`2^(e-8)`), for buildings and surface units alike. Every placed object's
+/// drawn size and contact box (and so a surface unit's hit box) comes from
+/// this one value. Open question (surface-AI round, 2026-10-10): at this
+/// scale surface units draw about three times their real size (a Krivak
+/// 1,216 ft long against a real 405); a correction for NT units, once
+/// established, belongs here and nowhere else.
+pub fn placed_shape_scale(object_type: &str, shape_bytes: &[u8]) -> WorldResult<f64> {
+    let _ = object_type;
+    Ok(tore_formats::shape::object_scale(shape_bytes)?)
+}
+
 impl Placements {
     pub fn load(resources: &dyn ResourceSource, code: &str) -> WorldResult<Self> {
         let layout_name = format!("{code}.MM");
@@ -362,7 +374,7 @@ impl Placements {
                     }
                     self.shape_scales.insert(
                         object_type.to_owned(),
-                        tore_formats::shape::object_scale(shape_bytes)?,
+                        placed_shape_scale(object_type, shape_bytes)?,
                     );
                     self.shapes.insert(object_type.to_owned(), shape);
                 }
