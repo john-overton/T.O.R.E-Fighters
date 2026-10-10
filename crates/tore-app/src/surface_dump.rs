@@ -43,7 +43,7 @@ use tore_world::surface::{
 /// read from the retail media: `TORE_GAME_DIR`, else the source the data
 /// directory remembers, else the checkout's `gameassets/fighters-anthology`
 /// link. Returns how many were added.
-fn with_retail_surface(resources: &mut BTreeMap<String, Vec<u8>>) -> AppResult<usize> {
+pub(crate) fn with_retail_surface(resources: &mut BTreeMap<String, Vec<u8>>) -> AppResult<usize> {
     let data = crate::assets::data_directory()?;
     let candidates = std::env::var_os("TORE_GAME_DIR")
         .map(std::path::PathBuf::from)
