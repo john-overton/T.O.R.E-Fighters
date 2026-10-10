@@ -245,6 +245,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
     ),
+    "net-surface": (
+        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP",
+        ("net-surface-*",),
+    ),
 }
 
 def family_matches(family: str, name: str) -> bool:
@@ -290,7 +294,7 @@ MAIN_FAMILIES = (
     "replay-cli", "menus-creator", "flight-maneuvers", "flight-takeoff", "flight-landing", "ai-fights",
     "ai-airfield", "ai-lead", "ai-orders", "ai-regression", "flight-powered",
 )
-NET_FAMILIES = ("net-fly", "net-window", "net-convert")
+NET_FAMILIES = ("net-fly", "net-window", "net-convert", "net-surface")
 # What a change to host migration reaches besides the rest of the net lane (slice K9).
 NET_MIGRATE = NET_FAMILIES + ("net-migrate", "net-migrate-relay")
 RENDER_FAMILIES = ("windowed-menus", "flight-views", "instruments")
@@ -380,7 +384,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/combat.rs", ("flight-combat", "ai-fights", "ai-damage", "combat-tapes", "surface"), "combat in the world"),
     _r("crates/tore-world/src/combat_tape.rs", ("combat-tapes", "flight-combat"), "combat tapes"),
     _r("crates/tore-world/src/terrain.rs", ("airports", "flight-environment", "ai-airfield", "menus-creator", "surface"), "terrain and airport lists"),
-    _r("crates/tore-world/src/surface/*", ("surface", "airports", "flight-combat", "ai-fights"), "surface units: resolution, ids and sides"),
+    _r("crates/tore-world/src/surface/*", ("surface", "airports", "flight-combat", "ai-fights", "net-surface"), "surface units: resolution, ids and sides; what the network sends of them"),
     _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights", "surface") + NET_FAMILIES, "debrief evaluator; the multiplayer results rows; the surface tallies"),
     _r("crates/tore-world/src/debrief/*", ("menus-screens", "ai-fights") + NET_FAMILIES, "the multiplayer results rows' tests"),
     _r("crates/tore-world/src/seats.rs", ("ai-lead", "ai-fights"), "seats"),
@@ -731,6 +735,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/net_observe.py", ("net-window",), "the observer screen scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_datalink.py", ("net-window", "link-cues"), "the data link's cues in a multiplayer flight (stage G, slice G10)", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_accept.py", ("net-window",), "stage F phase 2's acceptance scenarios: the away menu's Spawn in Aircraft and a host's Leave Game (slice F2-X)", windowed=True, unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/net_surface.py", ("net-surface",), "a ground target online (protocol 22, slice N1)", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_screens.py", ("net-window",), "the game's rejoin and its HUD through a host migration (stage K, slice K7b)", windowed=True),
     _r("tools/test_battery_net.py", (), "net scenario tests", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),
