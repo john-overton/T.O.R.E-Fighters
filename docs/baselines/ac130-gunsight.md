@@ -30,9 +30,14 @@ train every 12 ticks as CSV.
 
 | Probe | Setup | Result |
 | --- | --- | --- |
-| `pin-orbit` | Left orbit at 4,000 ft, 6,000 ft radius, 300 ft/s (25 degrees of bank); all three guns linked; pin the ground at the orbit's centre; fire from 4 s to 14 s | Pin held for the whole orbit; 720 rounds, 689 ground impacts, all within 54.8 ft of the pin (mean 30.2 ft); no barrel moved faster than 30 degrees a second (biggest step 0.2500 degrees); every linked gun READY on 4,320 of 4,320 gun-ticks while firing; never NO LINE OF FIRE |
-| `fire-no-target` | Level at 3,000 ft, default view, nothing held; fire for 6 s | Sight stays in free slew at (-90, -25); all three guns fire (432 rounds); 260 ground impacts within 69.4 ft of the aim point 6,420 ft away (mean 37.5 ft) |
-| `track-out-of-arc` | Ground object 5,000 ft abeam tracked; fly past for 35 s; trigger held for the last 4 s (so the rounds do not destroy the object) | Object ends 154.6 degrees aft of the nose; all three guns read CANNOT BEAR with the barrels at their arc limits (-150, -135, -115 degrees, to under 0.5 degree); the sight still tracks the object and the camera stays on it (worst error 0.02 degree during the pass); 288 rounds fired while CANNOT BEAR |
+| `pin-orbit` | Left orbit at 4,000 ft, 6,000 ft radius, 300 ft/s (25 degrees of bank); all three guns linked; pin the ground at the orbit's centre; fire from 4 s to 14 s, run to 22 s so the slow 105 rounds land | Pin held for the whole orbit; 319 rounds (300 of the 25, 17 of the 40, 2 of the 105; 720 before the fire-rate pass), all 319 landed, all within 54.3 ft of the pin (mean 30.8 ft); no barrel moved faster than 30 degrees a second (biggest step 0.2500 degrees); every linked gun READY on 6,480 of 6,480 gun-ticks from the first round on; never NO LINE OF FIRE |
+| `fire-no-target` | Level at 3,000 ft, default view, nothing held; fire for 6 s | Sight stays in free slew at (-90, -25); all three guns fire 180, 10 and 1 rounds in 6 s (1,800, 100 and 10 a minute; 192, 192 and 48 in 6 s, 432 rounds, before the fire-rate pass); a trigger tapped ten times a second fires 60, 10 and 1; 126 ground impacts within 69.2 ft of the aim point 6,420 ft away (mean 38.2 ft). Loads 3,000, 1,000 and 500 |
+| `track-out-of-arc` | Ground object 5,000 ft abeam tracked; fly past for 35 s; trigger held for the last 4 s (so the rounds do not destroy the object) | Object ends 154.6 degrees aft of the nose; all three guns read CANNOT BEAR with the barrels at their arc limits (-150, -135, -115 degrees, to under 0.5 degree); the sight still tracks the object and the camera stays on it (worst error 0.02 degree during the pass); 128 rounds fired while CANNOT BEAR (288 before the fire-rate pass) |
+
+The fire-rate pass (John, 2026-10-09; [rates and muzzle velocities](../spec/ac130-linked-guns.md#fire-rates-muzzle-velocities-and-loads))
+cut the round counts and left the impact error where it was, with the 105 now
+flying at 1,620 ft/s and the 25 at 3,450 ft/s. Retail's generic record fired
+the three guns at 1,920, 1,920 and 480 rounds a minute.
 
 The checks and their thresholds (150 ft of the pin, 95 percent READY) are agent
 choices. The AC-130's guns leave no crater marks, so impacts are read from the

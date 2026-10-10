@@ -1339,3 +1339,117 @@ fn a_gimbal_limit_notice_survives_a_checkpoint_and_steps_on_identically() {
         assert_eq!(group(&s), group(&copy), "tick {n}");
     }
 }
+
+/// The gunship with the TORE record on its three guns (cyclic rate and muzzle
+/// velocity) and the real loads, so a long hold does not run dry.
+fn tore_gunship() -> State {
+    let mut s = gunship();
+    for station in &mut s.own_mut().config.stations {
+        gunship::apply_tore_record(&mut station.weapon);
+    }
+    s.own_mut().ammo = vec![3000, 1000, 500];
+    s.own_mut().gunship.as_mut().unwrap().included = [true; 3];
+    s
+}
+
+#[test]
+fn the_tore_record_cycles_each_gun_at_its_real_rate() {
+    let mut s = tore_gunship();
+    for (slot, rpm) in gunship::ROUNDS_PER_MINUTE.into_iter().enumerate() {
+        let weapon = &s.own().config.stations[slot].weapon;
+        assert_eq!(gunship::rounds_per_minute(weapon), f64::from(rpm));
+    }
+    // Twelve seconds of a held trigger: the first round at once, then every
+    // 4, 72 and 720 ticks.
+    let mut ticks: [Vec<usize>; 3] = Default::default();
+    for t in 0..12 * 120 {
+        for station in fired(tick(&mut s, true)) {
+            ticks[station].push(t);
+        }
+    }
+    assert_eq!(
+        ticks.each_ref().map(Vec::len),
+        [360, 20, 2],
+        "rounds a gun let go in 12 seconds"
+    );
+    for (slot, interval) in [4, 72, 720].into_iter().enumerate() {
+        assert!(
+            ticks[slot].windows(2).all(|w| w[1] - w[0] == interval),
+            "gun {slot}: {:?}",
+            &ticks[slot][..4.min(ticks[slot].len())]
+        );
+    }
+    // Every round debits one from the load.
+    assert_eq!(s.own().ammo, vec![3000 - 360, 1000 - 20, 500 - 2]);
+}
+
+#[test]
+fn a_fresh_press_cannot_beat_a_guns_cycle() {
+    let mut s = tore_gunship();
+    // Ten presses a second for 12 seconds, each held two ticks.
+    let mut counts = [0usize; 3];
+    for t in 0..12 * 120 {
+        for station in fired(tick(&mut s, t % 12 < 2)) {
+            counts[station] += 1;
+        }
+    }
+    // The 25 fires on every press (a round per 12 ticks), the 40 and 105 on
+    // the cycle's deadline alone.
+    assert_eq!(counts, [120, 20, 2], "{counts:?}");
+}
+
+#[test]
+fn a_guns_ready_in_counts_down_to_its_next_round() {
+    let mut s = tore_gunship();
+    assert_eq!(s.own().gun_ready_in(2, s.tick()), 0);
+    assert_eq!(fired(tick(&mut s, true)), vec![0, 1, 2]);
+    tick(&mut s, false);
+    let after = s.own().gun_ready_in(2, s.tick());
+    assert!((717..=720).contains(&after), "{after}");
+    assert!(s.own().gun_ready_in(0, s.tick()) <= 4);
+    for _ in 0..360 {
+        tick(&mut s, false);
+    }
+    let half = s.own().gun_ready_in(2, s.tick());
+    assert!((355..=360).contains(&half), "{half}");
+}
+
+#[test]
+fn the_tore_rounds_leave_at_the_real_muzzle_velocities_and_the_105_is_always_a_tracer() {
+    let mut s = tore_gunship();
+    // The first round of each gun, then a second 105 round after 6 seconds.
+    tick(&mut s, true);
+    let speeds: Vec<(usize, i32, bool)> = s
+        .projectiles
+        .iter()
+        .map(|p| (p.station, p.speed_f8 / 256, p.tracer))
+        .collect();
+    assert_eq!(
+        speeds.iter().map(|p| p.1).collect::<Vec<_>>(),
+        [3450, 2870, 1620]
+    );
+    for t in 1..6 * 120 + 2 {
+        tick(&mut s, true);
+        let _ = t;
+    }
+    // Rounds of the 105 (station 2) all carry a tracer, as do the 40's; the
+    // 25's carry one in three.
+    let mut by_station = [(0usize, 0usize); 3];
+    for p in &s.projectiles {
+        by_station[p.station].0 += 1;
+        by_station[p.station].1 += usize::from(p.tracer);
+    }
+    assert!(by_station[2].0 >= 1 && by_station[2].0 == by_station[2].1);
+    assert!(by_station[1].0 >= 1 && by_station[1].0 == by_station[1].1);
+    assert!(by_station[0].1 * 2 < by_station[0].0 && by_station[0].1 > 0);
+}
+
+#[test]
+fn the_tore_record_leaves_every_other_weapon_alone() {
+    let s = gunship();
+    let mut other = s.own().config.stations[0].weapon.clone();
+    other.source = "M61.JT".into();
+    let before = other.clone();
+    gunship::apply_tore_record(&mut other);
+    assert_eq!(other, before);
+}

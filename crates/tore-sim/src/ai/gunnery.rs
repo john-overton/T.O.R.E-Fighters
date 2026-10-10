@@ -249,6 +249,37 @@ mod tests {
         }
     }
     #[test]
+    fn the_tore_105_fires_one_round_per_cycle_with_no_waiting_and_no_banking() {
+        // Two physical rounds' scale and 720 ticks apiece (the TORE 105, a
+        // round every six seconds): the first at once, the rest on the dot,
+        // since a cycle of burst and recovery is 120 ticks and 720 is a
+        // multiple of it; at other phases a round slips at most one cycle.
+        for start in [0u64, 7, 61, 119] {
+            let mut cycle = Cycle::default();
+            let shots: Vec<_> = (start..start + 4000)
+                .filter(|t| cycle.advance(*t, Some(3), true, 2, 1440))
+                .collect();
+            assert!(shots.len() >= 5, "start {start}: {shots:?}");
+            assert_eq!(shots[0], start);
+            assert!(
+                shots
+                    .windows(2)
+                    .all(|w| (720..840).contains(&(w[1] - w[0]))),
+                "start {start}: {shots:?}"
+            );
+        }
+        // A pause (target lost) does not bank rounds.
+        let mut cycle = Cycle::default();
+        let mut shots = Vec::new();
+        for t in 0..3000 {
+            let ready = !(100..2200).contains(&t);
+            if cycle.advance(t, Some(3), ready, 2, 1440) {
+                shots.push(t);
+            }
+        }
+        assert!(shots.len() <= 3, "{shots:?}");
+    }
+    #[test]
     fn complete_bursts_have_sixteen_spaced_rounds_at_any_start_phase() {
         for start in 0..30 {
             let mut cycle = Cycle::default();

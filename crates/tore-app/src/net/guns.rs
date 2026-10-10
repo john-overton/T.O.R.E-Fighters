@@ -469,7 +469,7 @@ impl Guns {
                     station,
                     release,
                     now,
-                    (burst.base + n).is_multiple_of(3),
+                    gun_round::tracer(&station.weapon, burst.base + n),
                     around,
                     &mut self.next_id,
                 ) {

@@ -7,10 +7,66 @@ use super::{
 };
 use crate::attitude::{Vector, cross, dot, unit};
 use std::f64::consts::{FRAC_PI_2, PI};
-use tore_formats::aircraft::AircraftId;
+use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 
 pub const GUNS: [&str; 3] = ["C_25.JT", "C_40.JT", "C_105.JT"];
 pub const NAMES: [&str; 3] = ["25MM", "40MM", "105MM"];
+
+/// What each gun does at its trigger, by slot: the burst record
+/// (`gameRoundsInBurst`, `actualRoundsPerGame`, `gameBurstT`) that gives the
+/// AC-130U's cyclic rates. Opinionated (John, 2026-10-09: the retail 105
+/// fired as fast as the 25), after the real weapons: the 25 mm GAU-12/U at
+/// 1,800 rounds a minute, the 40 mm L/60 Bofors at 100 and the 105 mm M102
+/// at 10. A held trigger spaces rounds `gameBurstT` x 30 ticks over
+/// `gameRoundsInBurst` x `actualRoundsPerGame` apart (4, 72 and 720 ticks at
+/// 120 Hz) and a fresh press never beats that. `actualRoundsPerGame` stays the retail 2, so
+/// each round carries the damage it did and ammunition counts stay as loaded.
+pub const CYCLE: [[u8; 3]; 3] = [[15, 2, 4], [5, 2, 24], [1, 2, 48]];
+
+/// The AC-130 gun's fire rate, in rounds a minute, by slot (the figures
+/// [`CYCLE`] is built to).
+pub const ROUNDS_PER_MINUTE: [u32; 3] = [1_800, 100, 10];
+
+/// Muzzle velocities in feet per second, by slot (opinionated, John,
+/// 2026-10-09, after the real weapons): the GAU-12/U's 3,450, the L/60
+/// Bofors's 2,870 and the M102's 1,620. Retail gives all three 2,933. A round
+/// hardly slows in the retail record (7 feet per second every second), so
+/// the final speed keeps the retail half of the muzzle velocity.
+pub const MUZZLE_FPS: [i16; 3] = [3_450, 2_870, 1_620];
+
+/// Puts the TORE cyclic rate and muzzle velocity on one of the three AC-130
+/// gun records and leaves every other weapon alone. Retail gives all three
+/// the same generic record (8 rounds a quarter second for the 25 and 40, a
+/// second for the 105: 1,920, 1,920 and 480 rounds a minute, 2,933 feet a
+/// second). The record keeps its 10 second life: the 105's slowest round
+/// reaches the 13,000 foot sight limit in about 8 seconds.
+pub fn apply_tore_record(weapon: &mut Weapon) {
+    if let Some(slot) = GUNS
+        .iter()
+        .position(|gun| weapon.source.eq_ignore_ascii_case(gun))
+    {
+        let [in_burst, per_game, burst_t] = CYCLE[slot];
+        weapon.burst.game_rounds_in_burst = in_burst;
+        weapon.burst.actual_rounds_per_game = per_game;
+        weapon.burst.game_burst_t = burst_t;
+        let muzzle = MUZZLE_FPS[slot];
+        let movement = &mut weapon.movement;
+        movement.initial_speed = muzzle;
+        movement.maximum_speed = movement.maximum_speed.max(muzzle);
+        movement.corner_speed = movement.corner_speed.max(muzzle);
+        movement.final_speed = muzzle / 2;
+    }
+}
+
+/// A gun record's rounds a minute out of the barrel when held, from its burst
+/// record: the retail figure for a record that has not been through
+/// [`apply_tore_record`].
+pub fn rounds_per_minute(weapon: &Weapon) -> f64 {
+    let rounds = f64::from(weapon.burst.game_rounds_in_burst.max(1))
+        * f64::from(weapon.burst.actual_rounds_per_game.max(1));
+    // A burst time is a quarter second.
+    240. * rounds / f64::from(weapon.burst.game_burst_t.max(1))
+}
 /// Fitted pivots and muzzle tips selected from reviewed original barrel meshes.
 /// Source axes: right, forward, up. Shared by shot spawn and the renderer.
 pub const PIVOTS_SOURCE: [Vector; 3] = [[-9.5, 29., -12.], [-11., -7., -11.], [-9., -25., -11.5]];

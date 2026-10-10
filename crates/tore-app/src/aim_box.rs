@@ -500,17 +500,15 @@ mod tests {
 
         #[test]
         fn a_trained_gun_has_no_diamond_and_a_gun_out_of_range_has_one() {
-            // The synthetic guns reach about 5,600 feet; the default view
-            // from 5,000 feet looks 11,000 feet away, so they fall short.
+            // The synthetic guns' sight limit is about 5,600 feet; the default
+            // view from 5,000 feet looks 11,000 feet away, so they are out of
+            // range (the TORE muzzle velocities carry the rounds on to the
+            // ground there, where they used to run out first).
             let (mut readout, config) = gunship(600, |_| SeatInput::default());
             let sight = readout.gunsight.clone().unwrap();
             assert_eq!(sight.status[0], Readiness::MaximumRange);
             let short = marks(&readout, &config, false).unwrap();
-            let Some(tore_sim::combat::gunship_impact::Impact::Spent { point, .. }) =
-                sight.impacts[0]
-            else {
-                panic!("rounds run out: {:?}", sight.impacts);
-            };
+            let point = sight.impacts[0].expect("a pipper").point();
             assert_eq!(short.diamond, Some(point));
             // The same readout with its guns trained and in range: only the box.
             readout.gunsight.as_mut().unwrap().status = [Readiness::Ready; 3];

@@ -574,7 +574,8 @@ impl Configuration {
             let Some(name) = h.store.as_deref().filter(|n| n.ends_with(".JT")) else {
                 continue;
             };
-            let weapon = Weapon::parse(name, &read(name)?)?;
+            let mut weapon = Weapon::parse(name, &read(name)?)?;
+            super::gunship::apply_tore_record(&mut weapon);
             if name == "SUU16.JT" {
                 let equipment = tore_formats::aircraft::Equipment::parse(name, &read(name)?)?;
                 let real_rounds = i32::from(weapon.burst.projectiles_in_pod);
@@ -1699,6 +1700,24 @@ impl Ownship {
     }
     pub fn rounds(&self, station: usize) -> u16 {
         self.ammo.get(station).copied().unwrap_or(0) & 0x7fff
+    }
+    /// Ticks (120 Hz) before a gun station's next round may leave its barrel
+    /// at combat tick `tick`, 0 when it may now: what a "ready in" readout
+    /// for the AC-130's slow guns (the 105 cycles every 6 seconds) would show.
+    pub fn gun_ready_in(&self, station: usize, tick: u64) -> u64 {
+        let (Some(cadence), Some(s)) = (
+            self.gun_cadence.get(station),
+            self.config.stations.get(station),
+        ) else {
+            return 0;
+        };
+        let burst = &s.weapon.burst;
+        let physical = u64::from(burst.game_rounds_in_burst.max(1))
+            * u64::from(burst.actual_rounds_per_game.max(1));
+        cadence
+            .next_scaled
+            .saturating_sub(tick.saturating_mul(physical))
+            .div_ceil(physical)
     }
     pub fn designated(&self) -> Option<u32> {
         self.sensors.selected()
@@ -3903,9 +3922,7 @@ impl State {
                         cadence.next_scaled = self
                             .tick
                             .saturating_mul(u64::from(physical_rounds))
-                            .saturating_add(
-                                u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30),
-                            );
+                            .saturating_add(super::gun_round::blocked_push(w));
                     }
                     let ready = cadence.pending > 0
                         && allowed
@@ -3919,7 +3936,7 @@ impl State {
                             Some(
                                 (ordinal % u64::from(w.burst.actual_rounds_per_game.max(1))) as u8,
                             ),
-                            ordinal.is_multiple_of(3),
+                            super::gun_round::tracer(w, ordinal),
                         )
                     } else {
                         (0, 1, None, false)
