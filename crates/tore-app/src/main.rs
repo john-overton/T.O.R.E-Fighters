@@ -114,6 +114,7 @@ mod su27_animation;
 mod su35_animation;
 mod surface_drive;
 mod surface_dump;
+mod surface_fx;
 mod surface_lighting;
 mod surface_parked;
 mod surface_preview;

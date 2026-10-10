@@ -2,6 +2,11 @@
 //! simulation owns every effect's type, place and life; the sheets, frame
 //! layouts and sizes are in docs/spec/explosions.md.
 //!
+//! Flak bursts draw `FLAKA` (the 85 mm shell's type 27, two seconds) or the
+//! larger `FLAKB` (the 100 mm shell's type 28, one second): the simulation
+//! picks the type from the shell's record. The light and dark puff a burst
+//! leaves are `surface_fx.rs`'s.
+//!
 //! A large ground explosion also throws out a shockwave: a ring of
 //! `SMOKE.PIC` dust (or white spray on water) that races outward from the
 //! blast and fades (docs/spec/explosions.md, "Shockwave"). It is drawn from
@@ -265,6 +270,7 @@ fn legacy(kind: EffectKind) -> Option<(u8, u16)> {
         EffectKind::Hit => Some((18, 45)),
         EffectKind::Ground => Some((15, 45)),
         EffectKind::Destroyed => Some((blast::AIRCRAFT, 240)),
+        EffectKind::Flak => Some((27, 240)),
         _ => None,
     }
 }
@@ -628,6 +634,32 @@ mod tests {
             assert!(last[1] + last[3] <= SHEET_HEIGHT as f32, "{name}");
         }
         assert_eq!(SHEETS[4].1.cell(4), [81., 58., 78., 56.]);
+    }
+
+    #[test]
+    fn flak_bursts_draw_the_small_sheet_for_85_mm_and_the_large_one_for_100_mm() {
+        let art = Art::synthetic();
+        let burst = |kind: u8, ticks: u16| {
+            sprites(&art, &[effect(EffectKind::Flak, Some(kind), ticks)], &[])
+        };
+        // Type 27: FLAKA, 28 frames over two seconds, floating where it bursts.
+        let small = burst(27, 120);
+        assert_eq!(small.len(), 1, "no shockwave, no second sprite");
+        assert_eq!(small[0].layer, 12);
+        assert_eq!(SHEETS[small[0].layer].0, "FLAKA.PIC");
+        assert_eq!(small[0].mode, Mode::Billboard);
+        assert_eq!(small[0].cell, SHEETS[12].1.cell(14));
+        assert!(small[0].emissive);
+        // Type 28: FLAKB, 12 frames over one second, drawn larger.
+        let large = burst(28, 60);
+        assert_eq!(SHEETS[large[0].layer].0, "FLAKB.PIC");
+        assert_eq!(large[0].cell, SHEETS[13].1.cell(6));
+        let width = |kind: u8| f64::from(blast::rolled_size(kind, [100., 0., 200.]));
+        assert!(width(28) > width(27));
+        assert_eq!(large[0].extent[0], width(28) / 2.);
+        // An old recording's flak (no type) draws as the small one.
+        let legacy = sprites(&art, &[effect(EffectKind::Flak, None, 240)], &[]);
+        assert_eq!(SHEETS[legacy[0].layer].0, "FLAKA.PIC");
     }
 
     #[test]

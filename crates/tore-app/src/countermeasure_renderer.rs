@@ -19,6 +19,32 @@ const FLARE_COLOR: [f64; 3] = [1.0, 0.75, 0.45];
 pub const AFTERBURNER_SHARE: f64 = 0.125;
 /// Each engine's light sits in its flame, this far behind the outlet.
 pub const AFTERBURNER_BEHIND_FEET: f64 = 3.;
+/// A flak burst's light, in the flare light's units (opinionated, agent,
+/// 2026-10-10, from John's request that flak explosions flash light at
+/// night and dusk): the 85 mm shell's is a flare and a half at its peak, the
+/// 100 mm shell's twice a flare. It holds for two ticks, falls away over
+/// [`FLAK_LIGHT_TICKS`] and, like every flare light, counts up to four times
+/// as much against the night scene.
+pub const FLAK_LIGHT_SMALL: f64 = 2.5 * FLARE_STRENGTH;
+pub const FLAK_LIGHT_LARGE: f64 = 3.5 * FLARE_STRENGTH;
+pub const FLAK_LIGHT_TICKS: f64 = 14.;
+const FLAK_LIGHT_HOLD: f64 = 2.;
+
+/// The strength of the light of a flak burst of explosion `blast` (27 the
+/// 85 mm shell, 28 the 100 mm) `age` ticks after it went off; none before it
+/// or after [`FLAK_LIGHT_TICKS`].
+pub fn flak_light(blast: u8, age: f64) -> f64 {
+    if !(0. ..FLAK_LIGHT_TICKS).contains(&age) {
+        return 0.;
+    }
+    let peak = if blast == 27 {
+        FLAK_LIGHT_SMALL
+    } else {
+        FLAK_LIGHT_LARGE
+    };
+    let left = 1. - (age - FLAK_LIGHT_HOLD).max(0.) / (FLAK_LIGHT_TICKS - FLAK_LIGHT_HOLD);
+    peak * left * left
+}
 /// Foil strips drawn for each chaff cartridge.
 pub const CHAFF_STRIPS: u32 = 600;
 const FLARE_BYTES: usize = 9 * 4;
@@ -369,6 +395,34 @@ mod tests {
     use super::*;
     use tore_sim::attitude::Basis;
     use tore_sim::combat::countermeasures::Release;
+
+    #[test]
+    fn a_flak_burst_flashes_hard_then_falls_away_in_a_few_ticks() {
+        // The 100 mm shell's flash is stronger than the 85 mm's, both at
+        // least a flare's.
+        assert!(flak_light(28, 0.) > flak_light(27, 0.) && flak_light(27, 0.) >= FLARE_STRENGTH);
+        for (kind, peak) in [(27, FLAK_LIGHT_SMALL), (28, FLAK_LIGHT_LARGE)] {
+            assert_eq!(flak_light(kind, 0.), peak);
+            assert_eq!(flak_light(kind, 2.), peak, "held for two ticks");
+            let mut last = peak;
+            for tick in 3..14 {
+                let now = flak_light(kind, f64::from(tick));
+                assert!(now < last && now > 0., "falls at tick {tick}");
+                last = now;
+            }
+            assert_eq!(flak_light(kind, FLAK_LIGHT_TICKS), 0.);
+            assert_eq!(flak_light(kind, -1.), 0.);
+        }
+        // Lit by the flare law: a burst a hundred feet away lights a facing
+        // surface as a flare at 40 feet does, four times as much at night.
+        let lights = [FlareLight {
+            position: [0., 0., 100.],
+            strength: flak_light(27, 0.),
+        }];
+        let near = nearest(&lights, [0.; 3]);
+        assert_eq!(near.len(), 1);
+        assert_eq!(near[0][3] as f64, FLAK_LIGHT_SMALL);
+    }
 
     fn released(flares: usize, chaff: usize) -> Devices {
         let mut devices = Devices::default();
