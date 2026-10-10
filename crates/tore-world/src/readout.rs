@@ -24,6 +24,8 @@ use tore_sim::{
     airport::Service,
     attitude::Vector,
     combat::{
+        gunship::{self, Sight, SightNotice},
+        gunship_impact::Impact,
         live::{self, Launcher, Readiness, SeekerTone, Target},
         missiles::{FiringBand, LaunchMode, TargetRole, seeker},
         threats::ThreatRecord,
@@ -59,6 +61,8 @@ pub struct CockpitReadout {
     pub tick: u64,
     /// Stores and the selected station.
     pub stores: Stores,
+    /// The AC-130's gunsight; `None` on every other aircraft.
+    pub gunsight: Option<GunsightReadout>,
     /// The mounted seeker and its tone.
     pub seeker: SeekerReadout,
     /// What the weapon page and HUD estimate for the selected station.
@@ -134,6 +138,48 @@ impl Stores {
     /// The selected station's index.
     pub fn selected(&self) -> usize {
         usize::from(self.selected)
+    }
+}
+
+/// The AC-130 gunsight as the sim holds it (`tore_sim::combat::gunship::State`,
+/// docs/spec/ac130-linked-guns.md): what the target camera's gunsight page
+/// and the aim-point boxes draw. On the wire since protocol 21.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GunsightReadout {
+    /// What the sight holds: free slew, a pinned ground point or a tracked
+    /// object.
+    pub sight: Sight,
+    /// Body-relative [heading, elevation] of the line of sight, radians.
+    pub look: [f64; 2],
+    /// The sight is travelling back to the default view.
+    pub returning: bool,
+    /// The point the guns train on.
+    pub aim: Option<Vector>,
+    /// Each gun's pipper (the linked guns and the candidate), by source slot.
+    pub impacts: [Option<Impact>; 3],
+    /// The combat tick a round fired with these impacts would leave on.
+    pub impacts_tick: u64,
+    /// Each gun's readiness, by source slot (TERRAIN MASK included).
+    pub status: [Readiness; 3],
+    /// The last notice for the activity line and the tick it was raised.
+    pub notice: Option<SightNotice>,
+    /// The zoom step in use, 1 to 6.
+    pub zoom: u8,
+}
+impl GunsightReadout {
+    /// The readout of a gunship group.
+    pub fn of(group: &gunship::State) -> Self {
+        Self {
+            sight: group.sight,
+            look: group.look,
+            returning: group.returning,
+            aim: group.aim,
+            impacts: group.impacts,
+            impacts_tick: group.impacts_tick,
+            status: group.status,
+            notice: group.notice,
+            zoom: group.zoom(),
+        }
     }
 }
 
@@ -669,6 +715,7 @@ pub fn build(
                 .map_or([0.; 6], |guns| guns.normalized_devices()),
             gun_group: own.gunship.as_ref().map_or(0, |guns| guns.mask()),
         },
+        gunsight: own.gunship.as_ref().map(GunsightReadout::of),
         seeker: SeekerReadout {
             status: own.mounted.status,
             target: own.mounted.target,
@@ -750,10 +797,30 @@ impl PlainBits for TargetRow {
 }
 impl CockpitReadout {
     /// The plain bits of each group, in the order of the fields: header,
-    /// stores, seeker, estimates, targets, sensors, visual, map, rwr, damage,
-    /// countermeasures, airport, target window, music.
-    pub fn group_bits(&self) -> [(&'static str, usize); 14] {
+    /// stores, gunsight, seeker, estimates, targets, sensors, visual, map,
+    /// rwr, damage, countermeasures, airport, target window, music.
+    pub fn group_bits(&self) -> [(&'static str, usize); 15] {
         let observation = |_: &seeker::Observation| 32 + 2 * VECTOR + 3 * 64;
+        // Mode, its point or id, look, returning, aim, three impacts (kind,
+        // point, seconds, range), their tick, three readiness codes, the
+        // notice and the zoom step.
+        let gunsight = option(&self.gunsight, |g| {
+            2 + match g.sight {
+                Sight::Free => 0,
+                Sight::Pinned(_) => VECTOR,
+                Sight::Tracked(_) => 32,
+            } + 2 * 64
+                + 1
+                + option(&g.aim, |_| VECTOR)
+                + g.impacts
+                    .iter()
+                    .map(|i| option(i, |_| 2 + VECTOR + 2 * 64))
+                    .sum::<usize>()
+                + 64
+                + 3 * 5
+                + option(&g.notice, |_| 1 + 64)
+                + 3
+        });
         let stores = 8 + 1 + 1 + 16 * self.stores.ammo.len() + 32;
         let seeker = 4
             + option(&self.seeker.target, |_| 32)
@@ -821,6 +888,7 @@ impl CockpitReadout {
         [
             ("header", 32 + 64),
             ("stores", stores),
+            ("gunsight", gunsight),
             ("seeker", seeker),
             ("estimates", estimates),
             ("targets", targets),

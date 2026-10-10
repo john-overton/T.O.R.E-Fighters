@@ -102,6 +102,8 @@ pub struct Pipelines {
     flare: wgpu::RenderPipeline,
     chaff: wgpu::RenderPipeline,
     glare: wgpu::RenderPipeline,
+    /// AC-130 muzzle flashes (`gun_flash.rs`).
+    flash: wgpu::RenderPipeline,
 }
 impl Pipelines {
     /// `surface` holds the world material and shared lighting groups; `glare`
@@ -130,6 +132,11 @@ impl Pipelines {
             array_stride: FLARE_BYTES as u64,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32x3,3=>Float32,4=>Uint32],
+        }];
+        let flash_buffers = [wgpu::VertexBufferLayout {
+            array_stride: crate::gun_flash::FLASH_BYTES as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32x3,3=>Float32,4=>Uint32,5=>Uint32],
         }];
         let chaff_buffers = [wgpu::VertexBufferLayout {
             array_stride: CHAFF_BYTES as u64,
@@ -196,6 +203,16 @@ impl Pipelines {
                 depth.clone(),
                 samples,
             ),
+            flash: pipeline(
+                "AC-130 muzzle flashes",
+                surface,
+                "flash_vertex",
+                "flash_fragment",
+                &flash_buffers,
+                Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                depth.clone(),
+                samples,
+            ),
             chaff: pipeline(
                 "Chaff strips",
                 surface,
@@ -226,13 +243,15 @@ impl Pipelines {
     }
 }
 
-/// This frame's devices, uploaded once and drawn in every world view, and
-/// the lights of flares and afterburners.
+/// This frame's devices and muzzle flashes, uploaded once and drawn in every
+/// world view, and the lights of flares, afterburners and gunfire.
 pub struct Instances {
     flares: wgpu::Buffer,
     chaff: wgpu::Buffer,
+    flashes: wgpu::Buffer,
     flare_count: u32,
     chaff_count: u32,
+    flash_count: u32,
     pub lights: Vec<FlareLight>,
 }
 impl Instances {
@@ -248,13 +267,30 @@ impl Instances {
         Self {
             flares: buffer("Burning flare instances", MAX_FLARES * FLARE_BYTES),
             chaff: buffer("Chaff cloud instances", MAX_CHAFF * CHAFF_BYTES),
+            flashes: buffer(
+                "Muzzle flash instances",
+                crate::gun_flash::MAX_FLASHES * crate::gun_flash::FLASH_BYTES,
+            ),
             flare_count: 0,
             chaff_count: 0,
+            flash_count: 0,
             lights: Vec::new(),
         }
     }
-    pub fn upload(&mut self, queue: &wgpu::Queue, devices: &Devices, afterburners: &[Afterburner]) {
+    pub fn upload(
+        &mut self,
+        queue: &wgpu::Queue,
+        devices: &Devices,
+        afterburners: &[Afterburner],
+        guns: &crate::gun_flash::Drawn,
+    ) {
         self.lights = lights(devices, afterburners);
+        self.lights.extend(guns.lights.iter().copied());
+        let flashes = crate::gun_flash::instances(&guns.flashes);
+        self.flash_count = (flashes.len() / crate::gun_flash::FLASH_BYTES) as u32;
+        if !flashes.is_empty() {
+            queue.write_buffer(&self.flashes, 0, &flashes);
+        }
         let flares = flare_instances(devices);
         self.flare_count = (flares.len() / FLARE_BYTES) as u32;
         if !flares.is_empty() {
@@ -269,7 +305,7 @@ impl Instances {
     pub fn has_flares(&self) -> bool {
         self.flare_count > 0
     }
-    /// Chaff strips then flare bodies, inside the world pass. The caller has
+    /// Chaff strips, flare bodies, then muzzle flashes, inside the world pass. The caller has
     /// bound the world material (group 0) and shared lighting (group 1).
     pub fn draw_world(&self, pass: &mut wgpu::RenderPass<'_>, pipelines: &Pipelines) {
         if self.chaff_count > 0 {
@@ -281,6 +317,11 @@ impl Instances {
             pass.set_pipeline(&pipelines.flare);
             pass.set_vertex_buffer(0, self.flares.slice(..));
             pass.draw(0..6, 0..self.flare_count);
+        }
+        if self.flash_count > 0 {
+            pass.set_pipeline(&pipelines.flash);
+            pass.set_vertex_buffer(0, self.flashes.slice(..));
+            pass.draw(0..6, 0..self.flash_count);
         }
     }
     /// Glare over the resolved image. The caller has bound groups 0 and 1 and

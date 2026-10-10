@@ -147,6 +147,8 @@ pub fn inputs() -> InputsSection {
             rates: [1, -2, 3, -4],
             positions: [Some(12345), Some(-23456), Some(0), Some(32767)],
         },
+        sight: [5, -5],
+        sight_zoom: 3,
     };
     let mut frames = vec![first];
     let mut next = first;
@@ -164,6 +166,14 @@ pub fn inputs() -> InputsSection {
         history: true,
     };
     next.yaw = -200;
+    frames.push(next);
+    // The gunsight slewing at full deflection, zoomed in all the way, then
+    // idle (protocol 21).
+    next.sight = [-127, 127];
+    next.sight_zoom = 6;
+    frames.push(next);
+    next.sight = [0, 0];
+    next.sight_zoom = 0;
     frames.push(next);
     InputsSection {
         flight: 3,
@@ -214,7 +224,7 @@ pub fn entities() -> Vec<Entity> {
                     throttle: 230,
                     lift_levels: [12, 127, 254],
                     vector_yaw: -45,
-                    gun_aim: [-64, 0, -70, 10, -80, -30],
+                    gun_aim: [-16_384, 0, -17_920, 2_560, -20_480, -7_680],
                     gun_group: 5,
                 }),
                 engine: EngineState {
@@ -1141,6 +1151,42 @@ pub fn lobby() -> LobbyState {
     }
 }
 
+/// An AC-130 gunsight pinned on a ground point, every value on the wire's
+/// grid (protocol 21).
+pub fn gunsight() -> tore_world::readout::GunsightReadout {
+    use std::f64::consts::TAU;
+    use tore_sim::combat::gunship::{Notice, Sight, SightNotice};
+    use tore_sim::combat::gunship_impact::Impact;
+    use tore_sim::combat::live::Readiness;
+    let pin = [52_000.5, 200., -31_000.25];
+    tore_world::readout::GunsightReadout {
+        sight: Sight::Pinned(pin),
+        look: [-TAU / 4., -TAU / 16.],
+        returning: false,
+        aim: Some(pin),
+        impacts: [
+            Some(Impact::Ground {
+                point: [52_010., 195.5, -30_990.125],
+                seconds: 4.5,
+                range_ft: 7_000.,
+            }),
+            None,
+            Some(Impact::Spent {
+                point: [51_000., 900., -30_000.],
+                seconds: 10.,
+                range_ft: 13_000.,
+            }),
+        ],
+        impacts_tick: 400,
+        status: [Readiness::Ready, Readiness::TerrainMask, Readiness::GunArc],
+        notice: Some(SightNotice {
+            notice: Notice::DropToSlew,
+            tick: 390,
+        }),
+        zoom: 4,
+    }
+}
+
 /// A cockpit readout with every group and list filled, built by hand.
 pub fn readout() -> tore_world::readout::CockpitReadout {
     use tore_sim::combat::live::{Readiness, SeekerTone};
@@ -1194,6 +1240,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             gun_aim: [-0.5, 0., -0.4, 0.2, -0.6, -0.3],
             gun_group: 5,
         },
+        gunsight: Some(gunsight()),
         seeker: SeekerReadout {
             status: seeker::Status::Locked,
             target: Some(7),
@@ -1397,6 +1444,13 @@ pub fn readout_snapshots() -> (Vec<u8>, Vec<u8>) {
     second.sensors.contacts[0].position[0] += 3_210.;
     second.stores.ammo[0] -= 20;
     second.sensors.contacts.pop();
+    // The gunsight slewing the pin along.
+    if let Some(gunsight) = &mut second.gunsight {
+        gunsight.look[0] += std::f64::consts::TAU / 1_024.;
+        gunsight.aim = gunsight.aim.map(|a| [a[0] + 40., a[1], a[2]]);
+        gunsight.sight = tore_sim::combat::gunship::Sight::Pinned(gunsight.aim.unwrap());
+        gunsight.impacts_tick = 404;
+    }
     // The link: a track moved on its publishing tick, the assignment locked.
     second.link.tracks[0].position[0] += 200.;
     if let Some(assigned) = &mut second.link.assigned {
@@ -1711,6 +1765,8 @@ fn journal_input(seat: u8, tick: u64, pitch: f64, commands: Vec<SeatCommand>) ->
         },
         trigger: seat == 1,
         sensors: Controls::default(),
+        sight: [0; 2],
+        sight_zoom: 0,
         commands,
         view: Some(tore_world::seats::SeatView {
             tick: tick - 12,

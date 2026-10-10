@@ -276,11 +276,12 @@ impl InputBuffer {
 
 /// The controls a paused game sends (`Controls::neutral`, John's rule of
 /// 2026-09-30): stick, rudder and throttle rate centred, no throttle
-/// position (the throttle stays where it is), trigger released, the scope
-/// controls as they were.
+/// position (the throttle stays where it is), trigger released, no sight
+/// slew, the scope controls and the sight's zoom step as they were.
 fn neutral_frame(last: &InputFrame) -> InputFrame {
     InputFrame {
         sensors: last.sensors,
+        sight_zoom: last.sight_zoom,
         ..InputFrame::default()
     }
 }

@@ -40,6 +40,8 @@ mod command_tests;
 mod commands;
 #[cfg(test)]
 mod crowd;
+#[cfg(test)]
+mod gun_link_tests;
 // What the world does with an AI lead's data link work (stage G, slice G4).
 #[cfg(test)]
 mod datalink_assign_tests;
@@ -804,6 +806,9 @@ impl World {
                 .trigger(cockpit.plane.0)
                 .controller
                 .space(input.trigger, false, false);
+            self.combat
+                .state
+                .set_sight_input(cockpit.plane.0, input.sight, input.sight_zoom);
         }
         if self.combat.recording_tape()
             && let Some(own) = self.cockpits.first()

@@ -375,6 +375,21 @@ chevron. Combat retains a separate display-only target identity through sensor
 loss; this never substitutes for `sensors` launch support or radar observations.
 [Behavior and evidence](spec/gunsight-targeting.md).
 
+The AC-130's gunsight (a different thing, the player's FLIR-style target
+camera; [spec](spec/ac130-linked-guns.md#the-gunsight)) is combat state in
+`combat::gunship::State`: the sight mode (free, pinned or tracked), the
+body-relative look from the sensor dome, the aim point and each gun's pipper,
+all exact and in the checkpoint. The seat sends only a slew deflection, a zoom
+step and two commands; `live::State` integrates them at 120 Hz, trains the
+guns on the aim point and calls `combat::gunship_impact` for the pippers, so
+single player, the host and a standby run one law. `Readiness::gun_may_fire`
+decides which statuses hold the trigger. Presentation reads the owner's
+`CockpitReadout.gunsight`: the target camera page and its camera
+(`instruments/gunsight.rs`, `gunsight_view.rs`), the aim box on every view
+(`aim_box.rs`, `instruments/aim_marks.rs`) and, online, the client's own look
+prediction (`tore_session::client::sight`). Wire: protocol 21
+([the gunsight](formats/net-protocol.md#the-gunsight)).
+
 `ai::gunnery` uses the same trajectory solver with explicitly permitted visual
 or sensor observations. The controller chooses gun tracking through ordinary
 flight inputs and authorizes individual rounds. `ai_wings` rechecks barrel
@@ -3335,8 +3350,11 @@ only the tick-cost figure reads the process's clock.
   marks with the simulation's own rules; chaff and flares are flown again from
   their release events, as the replay viewer already does; explosions and hit
   flashes age locally from their spawn; other aircraft's gun rounds are drawn
-  from burst events, and its own at once from its trigger. None of these change
-  the simulation, which the host alone runs.
+  from burst events, and its own at once from its trigger, every linked gun
+  of an AC-130 on its own cadence. An AC-130's rounds leave the barrel tips
+  along the drawn train (the entity's gun devices, or the owner's readout),
+  as the host's do ([linked guns](spec/ac130-linked-guns.md#feedback-and-shared-state)).
+  None of these change the simulation, which the host alone runs.
 - **Presents the cues addressed to it**: HUD lines, radio calls with their
   recordings, the tower, weapon release sounds, rumble, the mission result
   calls, and the debrief the host sends when the player leaves.

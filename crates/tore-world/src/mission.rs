@@ -290,6 +290,7 @@ impl LoadoutSpec {
                     .get(&load.weapon)
                     .ok_or_else(|| format!("missing loadout resource {}", load.weapon))?;
                 let mut weapon = Weapon::parse(&load.weapon, bytes)?;
+                tore_sim::combat::gunship::apply_tore_record(&mut weapon);
                 if let Some(label) = label {
                     label(&mut weapon);
                 }

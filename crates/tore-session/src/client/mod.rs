@@ -81,6 +81,9 @@ pub mod revival;
 mod revival_tests;
 pub mod scores;
 pub mod seen;
+pub mod sight;
+#[cfg(test)]
+mod sight_tests;
 #[cfg(test)]
 mod stall_tests;
 #[cfg(test)]
@@ -272,6 +275,11 @@ pub struct Controls {
     pub trigger: bool,
     /// The scope controls.
     pub sensors: tore_sim::sensors::Controls,
+    /// The AC-130 gunsight's slew, [x, y], right and up positive, -127 to
+    /// 127 (protocol 21).
+    pub sight: [i8; 2],
+    /// The target camera's zoom step, 1 to 6; 0 means the default step.
+    pub sight_zoom: u8,
     /// Seat commands given, in order.
     pub commands: Vec<SeatCommand>,
     /// What the view follows when it is not the own cockpit.
@@ -280,7 +288,8 @@ pub struct Controls {
 
 impl Controls {
     /// Neutral controls for while a menu is up or the window lost focus:
-    /// stick centred, throttle held, trigger released, the scope as it is.
+    /// stick centred, throttle held, trigger released, no sight slew, the
+    /// scope as it is. The caller keeps the sight's zoom step.
     pub fn neutral(sensors: tore_sim::sensors::Controls) -> Self {
         Self {
             sensors,
@@ -302,7 +311,8 @@ impl Sampled {
     /// `controls` rounded as the host will step them.
     pub fn of(controls: &Controls) -> Self {
         Self {
-            frame: InputFrame::of(&controls.pilot, controls.trigger, controls.sensors),
+            frame: InputFrame::of(&controls.pilot, controls.trigger, controls.sensors)
+                .with_sight(controls.sight, controls.sight_zoom),
             commands: controls
                 .pilot
                 .commands
@@ -632,6 +642,8 @@ struct Seat {
     model: AircraftModel,
     predictor: Predictor,
     offset: Offset,
+    /// The AC-130 gunsight's look, turned ahead of the host.
+    sight: sight::SightPrediction,
     seated_at: Duration,
     seated_tick: u64,
     /// Initial forecast span: the host has no controls for its elapsed part.
@@ -1535,6 +1547,11 @@ impl Client {
         self.seat.as_ref().map(|s| &s.predictor)
     }
 
+    /// The AC-130 gunsight's look as the client turns it, while seated.
+    pub fn sight_prediction(&self) -> Option<&sight::SightPrediction> {
+        self.seat.as_ref().map(|s| &s.sight)
+    }
+
     /// The entities' extra delays and the like, for tests.
     pub fn interpolator(&self) -> &Interpolator {
         &self.interp
@@ -1657,10 +1674,36 @@ impl Client {
             models: mission.models.clone(),
         };
         // The newest readout, its contacts placed around the drawn plane.
-        let readout = self.wire.as_ref().and_then(|wire| {
+        let mut readout = self.wire.as_ref().and_then(|wire| {
             wire.cockpit_readout(&presented, Some(&mission.world.terrain.airport_scene))
                 .and_then(Result::ok)
         });
+        let seat_id = seat.seat;
+        let predicted_tick = seat.predictor.tick();
+        let own_flight = own.flight.clone();
+        let own_previous = own.previous_flight.clone();
+        // The gunsight's look: the client's own turn, corrected to the
+        // host's (gunsight plan 2.13).
+        if let Some(seat) = self.seat.as_mut()
+            && let Some(gunsight) = readout.as_mut().and_then(|r| {
+                let tick = r.tick;
+                r.gunsight.as_mut().map(|g| (tick, g))
+            })
+        {
+            let (tick, gunsight) = gunsight;
+            let corrected = seat.sight.correct(
+                tick,
+                gunsight,
+                seat.predictor.history(),
+                &seat.predictor.plane().flight,
+            );
+            if corrected == sight::Corrected::Snapped
+                && let Some(d) = &mut self.diagnostics
+            {
+                d.line(now, "sight-snapped", &[&tick.to_string()]);
+            }
+            gunsight.look = seat.sight.presented();
+        }
         if let Some(readout) = &readout {
             presented.gun_aim = std::array::from_fn(|mount| {
                 [
@@ -1675,11 +1718,11 @@ impl Client {
             }
         }
         Some(ClientFrame {
-            seat: seat.seat,
+            seat: seat_id,
             plane: PlaneId(plane),
-            tick: seat.predictor.tick(),
-            flight: own.flight.clone(),
-            previous: own.previous_flight.clone(),
+            tick: predicted_tick,
+            flight: own_flight,
+            previous: own_previous,
             presented,
             picture,
             render_tick: render,
@@ -2248,6 +2291,7 @@ impl Client {
             model,
             predictor,
             offset,
+            sight: sight::SightPrediction::default(),
             seated_at: now,
             seated_tick: u64::from(seated.tick),
             bootstrap_until: u64::from(seated.tick) + lead.ceil() as u64,
@@ -2714,6 +2758,8 @@ impl Client {
                     self.net.disconnect(DisconnectReason::Other(0));
                     return;
                 }
+                seat.sight
+                    .step(tick, &last, &[], &seat.predictor.plane().flight);
                 steps += 1;
                 continue;
             }
@@ -2726,6 +2772,7 @@ impl Client {
                 });
                 self.next_command = self.next_command.wrapping_add(1);
             }
+            let stepped = commands.clone();
             if let Err(error) = seat.predictor.step(frame, commands, &mission.world.terrain) {
                 let text = error.to_string();
                 if let Some(d) = &mut self.diagnostics {
@@ -2734,6 +2781,8 @@ impl Client {
                 self.net.disconnect(DisconnectReason::Other(0));
                 return;
             }
+            seat.sight
+                .step(tick, &frame, &stepped, &seat.predictor.plane().flight);
             steps += 1;
         }
         self.send_inputs(now);

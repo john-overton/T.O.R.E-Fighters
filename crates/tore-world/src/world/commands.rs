@@ -101,6 +101,24 @@ pub struct Settings {
     pub cheats: Cheats,
 }
 
+/// The manual combat commands a player has in every flight. Everything else a
+/// key can send (class cycling, station faults, damage, incoming fixtures,
+/// target ECM, jettison) is a range or development command.
+///
+/// The gun-group commands are gameplay: an AC-130 crew links its guns in a
+/// Quick Mission, a campaign mission and a multiplayer flight, not only on the
+/// `--live-fire` range (John, 2026-10-09).
+pub(crate) fn works_outside_range(command: Live) -> bool {
+    matches!(
+        command,
+        Live::ToggleArm
+            | Live::ClearDesignation
+            | Live::ToggleSeekerMode
+            | Live::NextGunGroup
+            | Live::ToggleGunGroup
+    )
+}
+
 impl World {
     /// Puts a mission command into force: every human-flown plane, combat and
     /// the AI wings take the new cheats.
@@ -237,17 +255,12 @@ impl World {
         }
     }
 
-    /// A key, button or menu combat command. The arming, seeker and
-    /// designation commands always work; the rest are range and development
+    /// A key, button or menu combat command. The arming, seeker, designation
+    /// and gun-group commands always work; the rest are range and development
     /// commands that need `--live-fire`.
     fn manual_command(&mut self, cockpit: usize, command: Live, out: &mut TickOutput) {
         let seat = self.seat_of_cockpit(cockpit);
-        if !self.combat.range
-            && !matches!(
-                command,
-                Live::ToggleArm | Live::ClearDesignation | Live::ToggleSeekerMode
-            )
-        {
+        if !self.combat.range && !works_outside_range(command) {
             out.cues.push(Cue::Message {
                 seat,
                 text: "Manual range command requires --live-fire".into(),

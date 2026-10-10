@@ -61,6 +61,8 @@ pub fn command_name(c: Command) -> String {
         Command::DesignatePrevious => "designate-previous",
         Command::DesignateVisual => "designate-visual",
         Command::ClearDesignation => "clear",
+        Command::SightDesignate => "sight-designate",
+        Command::SightPinGround => "sight-pin",
         Command::ToggleArm => "arm",
         Command::Jettison => "jettison",
         Command::ReplaceTarget => "target",
@@ -109,6 +111,8 @@ pub fn command(s: &str) -> Option<Command> {
         Command::DesignatePrevious,
         Command::DesignateVisual,
         Command::ClearDesignation,
+        Command::SightDesignate,
+        Command::SightPinGround,
         Command::ToggleArm,
         Command::Jettison,
         Command::ReplaceTarget,
@@ -156,6 +160,16 @@ mod tests {
             (Command::ToggleGunGroup, "gun-group-toggle"),
             (Command::ReleaseChaff, "chaff"),
             (Command::ReleaseFlare, "flare"),
+        ] {
+            assert_eq!(command_name(command), name);
+            assert_eq!(super::command(name), Some(command));
+        }
+    }
+    #[test]
+    fn gunsight_commands_have_stable_names() {
+        for (command, name) in [
+            (Command::SightDesignate, "sight-designate"),
+            (Command::SightPinGround, "sight-pin"),
         ] {
             assert_eq!(command_name(command), name);
             assert_eq!(super::command(name), Some(command));

@@ -56,7 +56,8 @@ cargo run --locked -p tore-app -- --combat-smoke --aircraft rafale
   cannot fire. Pause, menu, focus loss, resize and aircraft/restart transitions
   cancel held fire. A held key must physically release after interruption.
 - Semicolon cycles the aircraft's five PT weapon slots. Empty slots remain empty.
-- Backslash resets the explicit range target at a range suited to the selected
+- Ctrl+Shift+Backslash (plain Backslash until the AC-130 gunsight took it on
+  2026-10-09) resets the explicit range target at a range suited to the selected
   weapon's source minimum range. It does not replenish ammunition.
 - T or Enter designates the actual scripted target. Radar-guided stores require R
   to be on and source radar/weapon range/FOV checks to pass. Guns are visual/unguided.

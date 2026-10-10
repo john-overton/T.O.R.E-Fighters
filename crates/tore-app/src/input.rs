@@ -38,6 +38,14 @@ bind keyboard Ctrl-Alt-a hover-hold press\n\
 bind keyboard Ctrl-Shift-a stability-level press\n\
 bind keyboard Ctrl-7 weapon-group-next press\n\
 bind keyboard Ctrl-8 weapon-group-toggle press\n\
+bind keyboard \\ sight-designate press\n\
+bind keyboard Shift-\\ sight-pin press\n\
+bind keyboard Shift-' sight-zoom-in press\n\
+bind keyboard Shift-; sight-zoom-out press\n\
+bind keyboard Alt-ArrowLeft sight-left hold\n\
+bind keyboard Alt-ArrowRight sight-right hold\n\
+bind keyboard Alt-ArrowUp sight-up hold\n\
+bind keyboard Alt-ArrowDown sight-down hold\n\
 bind keyboard Shift-e eject press\n\
 bind keyboard n airport-nav press\n\
 bind keyboard Shift-n airport-next press\n\
@@ -125,8 +133,10 @@ fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> b
     }
     match &binding.action {
         Action::Axis(tore_input::Axis::VectorPitchRate) => vectoring,
-        // The gun gesture owns the same raw stick so it does not pan the camera.
-        Action::Axis(tore_input::Axis::VectorYawRate) => vectoring || gunship,
+        Action::Axis(tore_input::Axis::VectorYawRate) => vectoring,
+        // The AC-130's right stick slews the gunsight with Select held. The
+        // chord also keeps that stick from panning the camera.
+        Action::Axis(tore_input::Axis::SightX | tore_input::Axis::SightY) => gunship,
         Action::Axis(tore_input::Axis::ConversionRate) => conversion,
         Action::Axis(tore_input::Axis::CollectiveRate) => collective,
         Action::Pilot(PilotCommand::NeutralVector) => vectoring || conversion,
@@ -135,10 +145,21 @@ fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> b
         {
             powered
         }
+        // The gun-group gestures sit on Select with the D-pad up and down,
+        // where the vectoring and test uses of those directions are
+        // meaningless or development-only on the AC-130 (John, 2026-10-09).
         Action::Ui(name)
-            if matches!(name.as_str(), "weapon-group-next" | "weapon-group-toggle") =>
+            if matches!(
+                name.as_str(),
+                "weapon-group-next" | "weapon-group-toggle" | "sight-designate" | "sight-pin"
+            ) =>
         {
             gunship
+        }
+        // On the AC-130, A designates under the sight's crosshair instead of
+        // the next radar contact.
+        Action::Ui(name) if name == "designate" && binding.control == "button:314+button:304" => {
+            !gunship
         }
         Action::Ui(name)
             if name == "target-jammer" && binding.control == "button:314+button:315" =>
@@ -150,7 +171,10 @@ fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> b
                 && binding.control == "button:314+axis:17"
                 && binding.mode == tore_input::Mode::Position(-1) =>
         {
-            !(vectoring || conversion)
+            !(vectoring || conversion || gunship)
+        }
+        Action::Ui(name) if name == "damage-player" && binding.control == "button:314+axis:17" => {
+            !gunship
         }
         _ => true,
     }
@@ -177,6 +201,14 @@ pub struct Input {
     head: HeadTracker,
     head_raw: Option<[f64; 2]>,
     head_center: [f64; 2],
+    /// The AC-130 gunsight's slew ramp, stepped once per [`Self::frame`].
+    sight_slew: tore_input::SightSlew,
+    /// The slew deflection the last [`Self::frame`] resolved, right and up
+    /// positive.
+    sight_deflection: [i8; 2],
+    /// The gunsight's zoom step, 1 to 6: client state that rides in the seat
+    /// input (docs/INPUT.md, AC-130 gunsight).
+    sight_zoom: u8,
 }
 impl Input {
     /// The saved controls file, loaded without being asked for. A file that
@@ -253,6 +285,9 @@ impl Input {
             head,
             head_raw: None,
             head_center: [0.; 2],
+            sight_slew: tore_input::SightSlew::default(),
+            sight_deflection: [0; 2],
+            sight_zoom: tore_input::sight::ZOOM_DEFAULT,
         })
         .map(|mut input| {
             // The stock keys of a fixed-wing aircraft until a flight says
@@ -825,18 +860,38 @@ impl Input {
                 *command = self.role(*command);
             }
         }
-        if self.gamepad_roles[3]
-            && self
-                .resolver
-                .owned_binding(tore_input::Axis::VectorYawRate)
-                .is_some_and(|binding| binding.device.starts_with(AUTO_GAMEPAD_PREFIX))
-        {
-            frame.vector_yaw_rate = 0.;
-        }
         let mut commands = std::mem::take(&mut self.commands);
         commands.append(&mut frame.commands);
         frame.commands = commands;
+        let holds = ["sight-left", "sight-right", "sight-up", "sight-down"]
+            .map(|name| self.resolver.held(name));
+        let analog = self.resolver.sight_axes();
+        self.sight_deflection = tore_input::sight::deflection(self.sight_slew.step(holds, analog));
         (frame, look)
+    }
+    /// The gunsight's slew (right and up positive, -127 to 127) as the last
+    /// [`Self::frame`] resolved it, and the zoom step: the seat input's
+    /// `sight` and `sight_zoom`. The sim ignores both on every aircraft but
+    /// the AC-130.
+    pub fn sight(&self) -> ([i8; 2], u8) {
+        (self.sight_deflection, self.sight_zoom)
+    }
+    /// Zoom the gunsight in (positive) or out (negative) by steps; the new
+    /// step, 1 (widest) to 6.
+    pub fn zoom_sight(&mut self, steps: i8) -> u8 {
+        self.sight_zoom = tore_input::sight::zoom_step(self.sight_zoom, steps);
+        self.sight_zoom
+    }
+    /// A flight starts or restarts: the default zoom, no slew in progress.
+    pub fn reset_sight(&mut self) {
+        self.sight_zoom = tore_input::sight::ZOOM_DEFAULT;
+        self.sight_slew.release();
+        self.sight_deflection = [0; 2];
+    }
+    /// Whether the aircraft in flight is the gunship, the one aircraft with
+    /// a gunsight.
+    pub fn gunsight(&self) -> bool {
+        self.gamepad_roles[3]
     }
     pub fn feedback(&mut self, event: FeedbackEvent) {
         if !self.resolver.profile.rumble || self.context.0 || !self.context.1 {
@@ -1160,16 +1215,20 @@ pub fn gamepad_text(device: &Device) -> String {
     }
     for (control, action, mode) in [
         ("axis:3", "vector-yaw-rate", "axis"),
-        ("axis:3>0.5", "weapon-group-next", "press"),
-        ("axis:3<-0.5", "weapon-group-toggle", "press"),
         ("axis:4", "vector-pitch-rate", "axis"),
         ("axis:3", "conversion-rate", "axis"),
         ("axis:4", "collective-rate", "axis"),
+        ("axis:3", "sight-x", "axis"),
+        ("axis:4", "sight-y", "axis"),
         ("axis:17", "neutral-vector", "position=-1"),
+        ("axis:17", "weapon-group-next", "position=-1"),
+        ("axis:17", "weapon-group-toggle", "position=1"),
         ("button:315", "engine", "press"),
         ("button:311", "fire", "hold"),
         ("button:310", "weapon-next", "press"),
         ("button:304", "designate", "press"),
+        ("button:304", "sight-designate", "tap"),
+        ("button:304", "sight-pin", "long"),
         ("button:305", "clear-designation", "press"),
         ("button:307", "weapon-previous", "press"),
         ("button:308", "jammer", "press"),
@@ -1191,7 +1250,13 @@ pub fn gamepad_text(device: &Device) -> String {
             text.push_str(&format!(
                 "bind {} button:314+{control} {action} {mode} -1 0 1 0.1 1 {} 10\n",
                 default_ref,
-                if action == "collective-rate" { -1. } else { 1. }
+                // Pushing the stick up reads negative; collective up and
+                // the sight up are positive.
+                if matches!(action, "collective-rate" | "sight-y") {
+                    -1.
+                } else {
+                    1.
+                }
             ));
         }
     }
@@ -1501,6 +1566,104 @@ mod tests {
             p.to_text().unwrap()
         );
     }
+    /// The gunsight's stock keys (John, 2026-10-09): Backslash designates,
+    /// Shift+Backslash pins, Shift+' and Shift+; zoom, Alt with the arrows
+    /// (or the keypad's 4, 6, 8 and 2) slew. Ctrl+Shift+Backslash is not one
+    /// of them: it reaches the flight keys as the range reset.
+    #[test]
+    fn the_gunsight_keys_act_and_the_range_reset_key_passes_through() {
+        let mut i = Input::new(None, false).unwrap();
+        for (key, modifiers, action) in [
+            ("\\", M::empty(), "sight-designate"),
+            ("\\", M::SHIFT, "sight-pin"),
+            ("'", M::SHIFT, "sight-zoom-in"),
+            (";", M::SHIFT, "sight-zoom-out"),
+        ] {
+            assert!(i.key(key, true, modifiers), "{key}");
+            assert_eq!(
+                i.resolver.drain(),
+                vec![("keyboard".into(), Action::Ui(action.into()))],
+                "{key}"
+            );
+            assert!(i.key(key, false, modifiers));
+        }
+        assert!(!i.key("\\", true, M::CONTROL | M::SHIFT));
+        assert!(i.resolver.drain().is_empty());
+        // The plain keys beside them are not claimed.
+        assert!(!i.key("'", true, M::empty()));
+        assert!(!i.key(";", true, M::empty()));
+        assert!(!i.key("l", true, M::empty()));
+        // A held Alt arrow nudges at a quarter rate for a quarter second,
+        // then slews at full rate; letting go stops it.
+        let none = BTreeSet::new();
+        assert!(i.key("ArrowLeft", true, M::ALT));
+        let (pilot, look) = i.frame(&none, 0.5);
+        assert_eq!((pilot.roll, look), (0., [0.; 2]), "Alt+arrows fly nothing");
+        assert_eq!(i.sight().0, [-32, 0]);
+        for _ in 1..tore_input::sight::FINE_TICKS {
+            i.frame(&none, 0.5);
+        }
+        assert_eq!(i.sight().0, [-32, 0]);
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [-127, 0]);
+        assert!(i.key("ArrowUp", true, M::ALT));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [-127, 32]);
+        assert!(i.key("ArrowLeft", false, M::ALT));
+        assert!(i.key("ArrowUp", false, M::ALT));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+        // Plain arrows still roll and pitch, and Shift+arrows still look.
+        assert!(!i.key("ArrowLeft", true, M::empty()));
+        assert!(!i.key("ArrowLeft", true, M::SHIFT));
+        // A pause lets go of whatever was held.
+        assert!(i.key("ArrowRight", true, M::ALT));
+        i.frame(&none, 0.5);
+        assert_ne!(i.sight().0, [0, 0]);
+        i.context(true, true);
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+    }
+    #[test]
+    fn the_gunsight_zoom_steps_within_its_ladder_and_restarts_at_the_default() {
+        let mut i = input("");
+        assert_eq!(i.sight().1, tore_input::sight::ZOOM_DEFAULT);
+        assert_eq!(i.zoom_sight(1), 4);
+        assert_eq!(i.zoom_sight(5), 6);
+        assert_eq!(i.zoom_sight(-1), 5);
+        assert_eq!(i.zoom_sight(-9), 1);
+        assert_eq!(i.sight().1, 1);
+        i.reset_sight();
+        assert_eq!(i.sight().1, tore_input::sight::ZOOM_DEFAULT);
+        assert!(!i.gunsight());
+        i.aircraft_controls(false, false, false, true);
+        assert!(i.gunsight());
+    }
+    #[test]
+    fn a_players_own_sight_bindings_replace_the_stock_keys() {
+        let mut i = Input::new(None, false).unwrap();
+        let p = Profile::parse(
+            "tore-input 1\ndisable keyboard Alt-ArrowLeft\ndisable keyboard \\\nbind keyboard Ctrl-j sight-left hold\nbind keyboard Ctrl-k sight-designate press",
+        )
+        .unwrap();
+        i.save_settings_to(&p, None);
+        let none = BTreeSet::new();
+        // The stock keys are gone and swallowed; the moved ones act.
+        assert!(i.key("ArrowLeft", true, M::ALT));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+        assert!(i.key("ArrowLeft", false, M::ALT));
+        assert!(i.key("\\", true, M::empty()));
+        assert!(i.resolver.drain().is_empty());
+        assert!(i.key("j", true, M::CONTROL));
+        i.frame(&none, 0.5);
+        assert_eq!(i.sight().0[0], -32);
+        assert!(i.key("k", true, M::CONTROL));
+        assert_eq!(
+            i.resolver.drain(),
+            vec![("keyboard".into(), Action::Ui("sight-designate".into()))]
+        );
+    }
     #[test]
     fn wheel_notches_zoom_unless_removed() {
         let mut i = input("");
@@ -1613,16 +1776,69 @@ mod tests {
                 Action::Pilot(PilotCommand::NeutralVector)
             )]
         );
+        // The AC-130: Select with the right stick slews the gunsight (and
+        // pans nothing), and the gun-group gestures are Select with the
+        // D-pad up and down (John, 2026-10-09).
         i.aircraft_controls(false, false, false, true);
         event(&mut i, "button:314", 1.);
         event(&mut i, "axis:3", 0.75);
-        assert_eq!(
-            i.resolver.drain(),
-            vec![(device.id.clone(), Action::Ui("weapon-group-next".into()))]
+        assert!(
+            i.resolver.drain().is_empty(),
+            "the stick is no longer a gesture"
         );
         let (pilot, look) = i.frame(&BTreeSet::new(), 0.5);
         assert_eq!(pilot.vector_yaw_rate, 0.);
         assert_eq!(look[0], 0.);
+        assert!(i.sight().0[0] > 0, "stick right slews right");
+        event(&mut i, "axis:3", 0.);
+        event(&mut i, "axis:4", -1.);
+        i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(i.sight().0, [0, 127], "stick up slews up");
+        event(&mut i, "axis:4", 0.);
+        event(&mut i, "axis:17", -1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("weapon-group-next".into()))]
+        );
+        event(&mut i, "axis:17", 0.);
+        event(&mut i, "axis:17", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("weapon-group-toggle".into()))]
+        );
+        event(&mut i, "axis:17", 0.);
+        // A on the AC-130 designates under the crosshair, on release; the
+        // radar target it designates elsewhere stays out of the way.
+        event(&mut i, "button:304", 1.);
+        assert!(i.resolver.drain().is_empty());
+        event(&mut i, "button:304", 0.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("sight-designate".into()))]
+        );
+        // Held half a second it pins the ground instead.
+        event(&mut i, "button:304", 1.);
+        for _ in 0..tore_input::LONG_PRESS_TICKS {
+            i.frame(&BTreeSet::new(), 0.5);
+        }
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("sight-pin".into()))]
+        );
+        event(&mut i, "button:304", 0.);
+        assert!(i.resolver.drain().is_empty());
+        // The same stick on the other aircraft does not slew anything.
+        i.aircraft_controls(false, false, false, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:3", 0.75);
+        i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(i.sight().0, [0, 0]);
+        event(&mut i, "axis:3", 0.);
+        event(&mut i, "button:304", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("designate".into()))]
+        );
     }
     #[test]
     fn explicit_engine_and_target_jammer_bindings_override_contextual_gamepad_defaults() {
@@ -1739,10 +1955,12 @@ mod tests {
                     .any(|b| b.control == control && b.action == Action::parse(action).unwrap())
             );
         }
+        // The vectoring and conversion (or collective) uses of the right
+        // stick, and the gunship's gunsight slew.
         for control in ["button:314+axis:3", "button:314+axis:4"] {
             assert_eq!(
                 p.bindings.iter().filter(|b| b.control == control).count(),
-                2
+                3
             );
         }
         assert!(!p.bindings.iter().any(|b| matches!(
@@ -1842,7 +2060,10 @@ mod tests {
                 })
                 .cloned()
                 .collect();
-            assert_eq!(chords.len(), 14 + if roles[3] { 2 } else { 0 });
+            // The gunship swaps the radar designation, range reset and damage
+            // test for the gun-group gestures and the sight's tap and long
+            // press.
+            assert_eq!(chords.len(), if roles[3] { 15 } else { 14 });
             for binding in chords {
                 let mut r = Resolver::new(profile.clone());
                 r.filter_bindings(|binding| gamepad_binding_enabled(binding, roles));
@@ -1871,6 +2092,21 @@ mod tests {
                     },
                     baseline: false,
                 });
+                // A tap comes on release and a long press after its hold.
+                match binding.mode {
+                    tore_input::Mode::Tap => r.event(Event {
+                        device: d.id.clone(),
+                        control: control.into(),
+                        value: 0.,
+                        baseline: false,
+                    }),
+                    tore_input::Mode::Long => {
+                        for _ in 0..tore_input::LONG_PRESS_TICKS {
+                            r.frame(0.5);
+                        }
+                    }
+                    _ => {}
+                }
                 let actions = r.drain();
                 if binding.action == Action::Ui("fire".into()) {
                     assert!(r.held("fire"));

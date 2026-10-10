@@ -175,21 +175,63 @@ gear is fixed. The Hind retains retractable gear. This is an explicit
 ## AC-130 directed gun groups
 
 Ctrl+7 selects the next gun candidate; Ctrl+8 links or unlinks it. Hold Select
-and push the gamepad right stick right/left past half travel for the same actions.
+and press the gamepad D-pad up or down for the same actions (they sat on the
+right stick before the gunsight took it, John 2026-10-09).
 These gestures act on AC-130 only. The Weapons instrument shows the authoritative
 `LINK` membership and marks the current candidate with its ordinary selection
-arrow. Fire releases ready members together, each retaining its own ammunition
-and cadence. Empty or blocked members do not stop the others. An empty group
+arrow. Fire releases every enabled member together, each retaining its own
+ammunition and cadence; it needs no target or firing solution. Empty or
+blocked members do not stop the others. An empty group
 reports GROUP EMPTY. Bracket selection retains ordinary single-gun operation
 until multiple guns are linked; NAV suspends group fire.
 
-A designated observed target is required. Mounts track at 30 degrees/second and
-shots use their actual barrel directions and muzzle positions. NO TARGET,
-CANNOT BEAR, SLEWING and NO LINE OF FIRE explain why a gun cannot release.
+Mounts follow the gunsight's aim point (a target, a pin or the free line of
+sight) at 30 degrees/second and shots use their actual barrel directions and
+muzzle positions. NO TARGET, CANNOT BEAR, SLEWING, MAX RANGE and TERRAIN MASK
+only say the shot is not solved; the guns still fire. SAFE, EMPTY, GROUP EMPTY
+and NO LINE OF FIRE (the gun's own airframe) are what stop a gun.
 The [gunship contract](spec/ac130-linked-guns.md) records source arcs, fitted
 articulation/clearance, limits and shared host/client/replay state. These controls
 and the linked firing capability are authored choices, not recovered retail
 key assignments or original linked fire behaviour.
+
+### AC-130 gunsight controls
+
+The gunsight is the AC-130's target camera. These keys were chosen by John on
+2026-10-09; the behaviour behind them is the AC-130 gunsight project's, and the
+[controls list](CONTROLS.md) has every default. On any other aircraft they do
+nothing, and the two that mean something in retail say so.
+
+| Action | Keyboard | Gamepad | Notes |
+| --- | --- | --- | --- |
+| Designate what is under the crosshair | Backslash | Select + A, tapped | An object if one is there, else the ground. Retail's Backslash is "designate the IR/laser target", so the other aircraft report it as not implemented yet |
+| Pin the ground under the crosshair | Shift+Backslash | Select + A, held half a second | |
+| Drop the target or pin; again, back to the default view | L or ; | Select + B | The existing clear-designation keys |
+| Slew the sight | Alt + arrows (or Alt + keypad 4, 6, 8, 2) | Select + right stick | Actions `sight-left`, `sight-right`, `sight-up`, `sight-down` for keys and buttons; `sight-x` and `sight-y` for sticks and HOTAS axes (right and up positive) |
+| Zoom in / out | Shift+' / Shift+; | None | Retail's bomb camera zoom keys; six steps |
+| Next gun / link gun | Ctrl+7 / Ctrl+8 | Select + D-pad up / down | Moved from the right stick |
+
+A held slew key or button starts at a quarter of full deflection for a quarter
+second, so a short press nudges, then runs at full rate; an analog axis is
+proportional. The seat input carries the deflection (`sight`, -127 to 127 on
+each axis) and the zoom step (`sight_zoom`, 1 to 6, 3 at the start of a flight
+and of each new plane); the host turns them into degrees, so single player and
+multiplayer slew alike.
+
+A hat (such as a HOTAS point-of-view switch) binds to the four `sight-` holds,
+one direction each, using its virtual button tokens: `bind stick axis:16=-1
+sight-left hold`. Hat positions are not `position=N` bindings for these
+actions, because a slew is held, not pressed.
+
+Select + A stays the radar `designate` on every other aircraft; the AC-130
+swaps in the sight's designate and pin. The Select + D-pad uses that belong to
+the vectoring jets, the range reset and the damage test are off on the AC-130,
+where the D-pad picks and links guns. The live-fire range reset, which took
+Backslash, is now Ctrl+Shift+Backslash.
+
+On [the keyboard map](tore-keyboard-map.html) the gunsight keys are on the Fly &
+Fight sheet, with an AC-130 legend box. The range reset is a developer fixture
+and stays off it, as the [map's rules](tore-keyboard-map-rules.md) require.
 
 ## In-game controls and saved preferences
 
@@ -438,7 +480,10 @@ Deliberate differences from FA:
 | L | Clear designation, alongside ; | Unused | Earlier T.O.R.E key, kept |
 | Shift+/ | Center view, alongside keypad 5 | Unused | Laptops lack a keypad |
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
-| Backslash | Reset range target (test) | IR/laser designation, only with advanced targeting on | Moves when that targeting exists |
+| Backslash | On the AC-130, designate what is under the gunsight's crosshair; elsewhere "not implemented yet" | IR/laser designation, only with advanced targeting on | The AC-130 gunsight is that targeting, John 2026-10-09. The live-fire range reset moved to Ctrl+Shift+Backslash (kept its key, gained Ctrl+Shift) |
+| Shift+Backslash | Pin the AC-130 gunsight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
+| Shift+' / Shift+; | Zoom the AC-130 gunsight in / out; elsewhere "not implemented yet" | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
+| Alt + arrows | Slew the AC-130 gunsight | Unused | T.O.R.E addition, John 2026-10-09 |
 | Tab | Nothing | Fire the gun | Not wired yet |
 | V | Save the view to Other View and open it | The same, then return the main view to the front | The main view stays |
 
@@ -520,11 +565,12 @@ and automatic calibration wizards are not implemented.
 
 | Mode | Meaning / compatible actions |
 | --- | --- |
-| `axis` | Centered pitch, roll, yaw, throttle-rate, look-x or look-y |
+| `axis` | Centered pitch, roll, yaw, throttle-rate, look-x, look-y, sight-x or sight-y |
 | `unit` | Absolute throttle position with pickup |
 | `positive` / `negative` | Button-held signed contribution to a centered action |
 | `trigger-positive` / `trigger-negative` | Signed unipolar analog contribution; pairs add within a device/priority |
 | `press` / `release` | One command on the selected edge; repeated reports do not retrigger |
+| `tap` / `long` | A command on release if the control was held under half a second (`tap`), or once when it has been held half a second (`long`). Used together on one control, as the gunsight's designate and pin are on Select + A. 60 ticks at 120 Hz; a pause or lost focus forgets the press |
 | `hold` | Hold an equipment switch on while any assigned, armed source holds it |
 | `switch` | Explicit equipment on/off when the physical contact changes; initial state does not actuate |
 | `follow` | Continuously request the physical equipment setting, including at initialization/resume |
@@ -550,7 +596,8 @@ use the same simulation commands. `press` toggles; `switch`/`follow` request a s
 existing system behavior and never force animation fractions or bypass aircraft
 capabilities. Rafale's unavailable hook stays unavailable. `throttle=0.75`
 requests a preset. Axes are `pitch`, `roll`, `yaw`, `throttle`, `throttle-rate`,
-`look-x`, `look-y`, and the absolute `head-yaw` and `head-pitch`. Mouse controls
+`look-x`, `look-y`, `sight-x`, `sight-y` (the AC-130 gunsight, right and up
+positive), and the absolute `head-yaw` and `head-pitch`. Mouse controls
 are `button:right`, `button:middle`, `button:back`, `button:forward`, `wheel:up`
 and `wheel:down`; each wheel notch is one press.
 
@@ -559,7 +606,9 @@ UI actions: `pause`, `menu`, `end-flight`, `restart`, `bookmark`, `view-front`, 
 `view-target`, `view-target-player`, `view-fly-by`, `view-missile`, `store-view`,
 `view-target-track`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
 `range-down`, `range-up`, `radar-mode`, `sensor-channel`, `sensor-infrared`,
-`sensor-history`, `page-0` through `page-9`, instrument
+`sensor-history`, the AC-130 gunsight's `sight-designate`, `sight-pin`,
+`sight-zoom-in`, `sight-zoom-out` and the holds `sight-left`, `sight-right`,
+`sight-up`, `sight-down`, `page-0` through `page-9`, instrument
 commands below, and `menu-up/down/left/right/accept/back`. `sensor-channel` is an
 alias of `radar-mode`; both cycle the available radar and infrared channels
 rather than the retired cosmetic display mode. `sensor-infrared` requests the
@@ -781,14 +830,15 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | --- | --- |
 | Right shoulder | Space: hold fire/release |
 | Left shoulder | ] next NAV/weapon |
-| South (A) | T: next radar target |
+| South (A) | T: next radar target; on the AC-130, tapped: Backslash (designate under the sight), held half a second: Shift-Backslash (pin the ground) |
 | East (B) | L: clear designation |
 | West (X) | [ previous NAV/weapon |
 | North (Y) | J: own jammer toggle |
 | Left-stick click | R: radar toggle |
 | Right-stick click | Shift-K: selected external group jettison |
-| D-pad up | Backslash: replace range target |
-| D-pad down | Explicit `damage-player` developer fixture; keyboard D reports damage |
+| Right stick (AC-130) | Slew the gunsight; other aircraft keep their uses of it (look, nozzles, collective) |
+| D-pad up | Ctrl-Shift-Backslash: replace range target; on the vectoring jets and the V-22, neutral nozzles or nacelles; on the AC-130, Ctrl-7 (next gun candidate) |
+| D-pad down | Explicit `damage-player` developer fixture; keyboard D reports damage; on the AC-130, Ctrl-8 (link or unlink the candidate gun) |
 | D-pad left | Insert: release one chaff cartridge |
 | D-pad right | Delete: release one flare |
 | Start | Shift-Y: target jammer fixture |

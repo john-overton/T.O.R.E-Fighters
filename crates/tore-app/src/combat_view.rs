@@ -187,6 +187,12 @@ impl CombatView {
         Some(crate::target_preview::camera(player.position, position))
     }
 
+    /// Where the displayed target is drawn this frame.
+    pub fn display_position(&self, combat: &Combat, readout: &CockpitReadout) -> Option<[f64; 3]> {
+        let target = readout.targets.display.as_ref()?;
+        Some(self.target_position(combat, target))
+    }
+
     /// Where a displayed target is drawn this frame; one missing from the
     /// snapshots is drawn where it is.
     fn target_position(&self, combat: &Combat, target: &TargetRow) -> [f64; 3] {
@@ -461,6 +467,7 @@ pub fn readout(
                 }
             )
         }),
+        gunsight: crate::instruments::gunsight::Page::new(ro, config, s),
         chaff: ro.countermeasures.chaff,
         flares: ro.countermeasures.flares,
         target: ro.targets.display.as_ref().map(|target| {

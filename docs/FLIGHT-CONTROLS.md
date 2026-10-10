@@ -25,13 +25,28 @@ linearly to zero at 25 mph ground speed. [Rules and fitted constants](spec/later
 
 ## AC-130 directed guns
 
-Select an observed target, then use Ctrl+7 to choose a gun candidate and Ctrl+8
-to include or remove it from the firing group. Hold Fire to release eligible
-linked guns. The Weapons instrument's LINK row shows membership and its ordinary
-arrow identifies the current candidate. Each gun has its own ammo, cadence,
-source-informed arc and fitted tracking slew. A gun that cannot bear, is empty
-or has lost its target does not fire. These are player-directed controls;
-[limits and gamepad defaults](INPUT.md#ac-130-directed-gun-groups).
+On the AC-130 the TARGET CAM page (instrument 4) is a gunsight. The camera
+looks 90 degrees abeam to the left and 25 degrees down until you do something
+else. Slew it with Alt + the arrows and zoom with Shift+' / Shift+;. Backslash
+designates whatever is under the crosshair, an object if there is one and the
+ground if not; Shift+Backslash pins the ground there; L or ; drops the target
+or pin, and pressed again sends the view back to the default. The guns follow
+that point inside their arcs, a ring and dot (the pipper, with a bold range arc
+like the fighter's LCOS pipper) shows where rounds will land, and a box on every
+view marks the point. The AC-130 tracks ground
+and air objects at any range, as if Easy targeting were always on. On a
+gamepad hold View: the right stick slews, A designates (tap) or pins (hold),
+D-pad up and down pick and link a gun. [Keys](INPUT.md#ac-130-gunsight-controls),
+[behaviour](spec/ac130-linked-guns.md#the-gunsight).
+
+Use Ctrl+7 to choose a gun candidate and Ctrl+8 to include or remove it from
+the firing group. Hold Fire to release every enabled linked gun: it fires with
+or without a target or solution, along wherever the barrels point, and only
+SAFE, EMPTY, a lost gun or the aircraft's own wing in the way holds it. The
+Weapons instrument's LINK row shows membership and its ordinary arrow
+identifies the current candidate. Each gun has its own ammo, cadence,
+source-informed arc and fitted tracking slew. These are player-directed
+controls; [limits and gamepad defaults](INPUT.md#ac-130-directed-gun-groups).
 
 ## VTOL, tiltrotors and helicopters
 

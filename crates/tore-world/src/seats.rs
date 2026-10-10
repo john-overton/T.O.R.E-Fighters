@@ -387,6 +387,13 @@ pub struct SeatInput {
     /// The step sets them on the seat's flight before its commands, so a
     /// command given after a change sees it and the labels never lag.
     pub sensors: tore_sim::sensors::Controls,
+    /// The AC-130 gunsight slew: normalized deflection, x right and y up,
+    /// -127 to 127. The host integrates the look angles from it, so single
+    /// player and multiplayer run the same slew. Ignored on other aircraft.
+    pub sight: [i8; 2],
+    /// The AC-130 target camera's zoom step, 1 to 6 (0: the default step).
+    /// The host needs it for the slew rate and the Backslash pick radius.
+    pub sight_zoom: u8,
     /// Commands given since the last tick, applied in this order at its start.
     pub commands: Vec<SeatCommand>,
     /// What the seat's screen showed when this input was sampled, for lag
@@ -426,8 +433,8 @@ pub enum SeatCommand {
     /// A combat command from a key, a button or the menu: arming, the seeker
     /// mode, clearing the designation, jettison and the range and development
     /// commands. It lets go of the trigger first and puts the payload weight
-    /// right afterwards. Outside `--live-fire` only the arming, seeker and
-    /// designation commands take effect.
+    /// right afterwards. Outside `--live-fire` only the arming, seeker,
+    /// designation and AC-130 gun-group commands take effect.
     Manual(live::Command),
     /// Put a new target on the range (`--live-fire` only).
     RangeReset,

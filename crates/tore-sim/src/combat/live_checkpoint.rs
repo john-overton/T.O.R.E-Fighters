@@ -60,20 +60,121 @@ crate::checkpoint_enum!(Readiness {
     GunSlewing = 21,
     GroupEmpty = 22,
     GunObscured = 23,
+    TerrainMask = 24,
 });
 
-// The AC-130's player-directed gun mounts: their actual slewed angles, the
-// linked membership, the aim point and each gun's readiness are stepped at
-// the fixed tick, so a restore carries them.
+// The AC-130's player-directed gun mounts and gunsight: the actual slewed
+// angles, the linked membership, the sight's mode, look angles and aim point,
+// the seat's held sight controls, a pending Backslash, the last notice and
+// each gun's readiness are stepped at the fixed tick, so a restore carries
+// them.
 type GunshipState = crate::combat::gunship::State;
 crate::checkpoint_struct!(GunshipState {
     stations,
     included,
     headings,
     elevations,
-    target,
+    sight,
+    look,
+    returning,
+    aim,
+    impacts,
+    impacts_tick,
     status,
+    input,
+    slew_held,
+    request,
+    notice,
 });
+
+type Sight = crate::combat::gunship::Sight;
+impl Checkpoint for Sight {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        match self {
+            Self::Free => s.writer().write_varint(0),
+            Self::Pinned(point) => {
+                s.writer().write_varint(1);
+                point.save(s, None)?;
+            }
+            Self::Tracked(id) => {
+                s.writer().write_varint(2);
+                id.save(s, None)?;
+            }
+        }
+        Ok(())
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        Ok(match l.reader().read_varint()? {
+            0 => Self::Free,
+            1 => Self::Pinned(Checkpoint::load(l, None)?),
+            2 => Self::Tracked(Checkpoint::load(l, None)?),
+            other => return invalid(format!("a gunsight has no mode {other}")),
+        })
+    }
+}
+type Impact = crate::combat::gunship_impact::Impact;
+impl Checkpoint for Impact {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        let (kind, point, seconds, range_ft) = match *self {
+            Self::Ground {
+                point,
+                seconds,
+                range_ft,
+            } => (0, point, seconds, range_ft),
+            Self::Air {
+                point,
+                seconds,
+                range_ft,
+            } => (1, point, seconds, range_ft),
+            Self::Spent {
+                point,
+                seconds,
+                range_ft,
+            } => (2, point, seconds, range_ft),
+        };
+        s.writer().write_varint(kind);
+        point.save(s, None)?;
+        seconds.save(s, None)?;
+        range_ft.save(s, None)
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        let kind = l.reader().read_varint()?;
+        let point = Checkpoint::load(l, None)?;
+        let seconds = Checkpoint::load(l, None)?;
+        let range_ft = Checkpoint::load(l, None)?;
+        Ok(match kind {
+            0 => Self::Ground {
+                point,
+                seconds,
+                range_ft,
+            },
+            1 => Self::Air {
+                point,
+                seconds,
+                range_ft,
+            },
+            2 => Self::Spent {
+                point,
+                seconds,
+                range_ft,
+            },
+            other => return invalid(format!("a gun impact has no kind {other}")),
+        })
+    }
+}
+type SightInput = crate::combat::gunship::SightInput;
+crate::checkpoint_struct!(SightInput { deflection, zoom });
+crate::checkpoint_enum!(crate::combat::gunship::SightRequest {
+    Designate = 0,
+    Pin = 1,
+});
+crate::checkpoint_enum!(crate::combat::gunship::Notice {
+    NoGroundPoint = 0,
+    DropToSlew = 1,
+    GimbalLimit = 2,
+});
+type SightNotice = crate::combat::gunship::SightNotice;
+crate::checkpoint_struct!(SightNotice { notice, tick });
 
 crate::checkpoint_enum!(FriendlyFire { On = 0, Off = 1 });
 

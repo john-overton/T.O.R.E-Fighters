@@ -2077,6 +2077,38 @@ def heavy_gcurve_scenarios() -> list[Scenario]:
     ) for aircraft in HEAVY_AIRCRAFT]
 
 
+# The AC-130 gunsight probes (`--gunsight-probe`, crates/tore-app/src/gunsight_probe.rs):
+# scripted runs on flat ground through the live combat state with the imported guns.
+# name -> the PASS lines a healthy run prints at least.
+GUNSIGHT_PROBES = {"pin-orbit": 9, "fire-no-target": 9, "track-out-of-arc": 11}
+
+
+def check_gunsight(name: str, minimum: int):
+    def check(output: str) -> list[str]:
+        problems = [line.strip()[:200] for line in output.splitlines() if line.startswith("FAIL ")]
+        passes = sum(1 for line in output.splitlines() if line.startswith("PASS "))
+        if f"gunsight probe {name}: PASS" not in output:
+            problems.append(f"the {name} probe did not finish with PASS")
+        if passes < minimum:
+            problems.append(f"only {passes} PASS lines, expected at least {minimum}")
+        return problems
+
+    return check
+
+
+def gunsight_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-ac130-{name}",
+            lane="flight",
+            args=["--gunsight-probe", name, "--aircraft", "ac130", "--no-audio"],
+            check=check_gunsight(name, minimum),
+            timeout=300,
+        )
+        for name, minimum in GUNSIGHT_PROBES.items()
+    ]
+
+
 def scenarios() -> list[Scenario]:
     return (
         takeoff_scenarios()
@@ -2086,6 +2118,7 @@ def scenarios() -> list[Scenario]:
         + stall_scenarios()
         + fault_scenarios()
         + combat_scenarios()
+        + gunsight_scenarios()
         + slot_scenarios()
         + jettison_scenarios()
         + countermeasure_scenarios()

@@ -1,7 +1,9 @@
 //! Small independent raster instruments. Layout fitted to supplied retail captures;
 //! data is live, unsupported native sensors/camera modes are explicit.
+mod aim_marks;
 mod envelope;
 pub mod front_view;
+pub mod gunsight;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
 use tore_formats::text::GlyphCodes;
 use tore_formats::{Pic, font::Font};
@@ -432,6 +434,8 @@ pub struct CombatReadout {
     pub chaff: u8,
     pub flares: u8,
     pub target: Option<crate::target_window::Readout>,
+    /// The AC-130's gunsight page; `None` on every other aircraft.
+    pub gunsight: Option<gunsight::Page>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
     pub rwr: scope::Rwr,
@@ -464,6 +468,10 @@ pub struct Instruments {
     /// Flight data sampled with the requested and the shown forward-view frames.
     pub front_pending: Option<front_view::Symbology>,
     pub front_shown: Option<front_view::Symbology>,
+    /// The AC-130's aim-point marks for the Front View and Other View pages,
+    /// projected with the requested and the shown picture's camera.
+    pub aim_pending: std::collections::BTreeMap<u8, crate::aim_box::Layout>,
+    pub aim_shown: std::collections::BTreeMap<u8, crate::aim_box::Layout>,
     /// The HUD's primary color, shared by the forward-view symbology.
     pub hud_color: [u8; 3],
     /// The live cockpit palette, set by the host each frame. It colours the
@@ -500,6 +508,8 @@ impl Default for Instruments {
             cameras: Default::default(),
             front_pending: None,
             front_shown: None,
+            aim_pending: Default::default(),
+            aim_shown: Default::default(),
             hud_color: [GREEN[0], GREEN[1], GREEN[2]],
             palette: [[0; 3]; 256],
             target_preview: None,
@@ -569,6 +579,12 @@ impl Instruments {
             y += 104. * (size[0] / 640.).min(size[1] / 480.);
         }
         (x, y, w, h)
+    }
+    /// Where the shown windows sit on a `size` canvas: x, y, width, height.
+    pub fn window_rects(&self, size: [f64; 2]) -> Vec<(f64, f64, f64, f64)> {
+        (0..self.pages.len())
+            .map(|slot| self.screen_rect(slot, size))
+            .collect()
     }
     pub fn screen_pointer(
         &mut self,
@@ -1303,13 +1319,14 @@ impl Instruments {
                 self.combat.as_ref(),
             ),
             4 => {
-                if let Some((target, link)) = self
+                let gunsight = self.combat.as_ref().and_then(|c| c.gunsight.as_ref());
+                let shown = self
                     .combat
                     .as_ref()
-                    .and_then(|c| c.target.as_ref().map(|target| (target, &c.target_link)))
-                {
+                    .and_then(|c| c.target.as_ref().map(|target| (target, &c.target_link)));
+                if shown.is_some() || gunsight.is_some() {
                     r.rect(0, 0, SCREEN.2, SCREEN.3, [185, 185, 185, 255]);
-                    if self.camera_target == Some(target.id)
+                    if self.camera_target == shown.map(|(target, _)| target.id)
                         && let Some(pixels) = self.cameras.get(&4)
                     {
                         let mut gray = pixels.clone();
@@ -1327,6 +1344,10 @@ impl Instruments {
                             SCREEN.3,
                         );
                     }
+                }
+                if let Some(page) = gunsight {
+                    gunsight::draw(&mut r, f, page, shown);
+                } else if let Some((target, link)) = shown {
                     let ink = [20, 20, 20, 255];
                     let fit = |value: &str, limit: usize| {
                         let mut width = 0;
@@ -1399,6 +1420,9 @@ impl Instruments {
                         && let Some(symbology) = &self.front_shown
                     {
                         front_view::draw(&mut r, f, symbology, self.hud_color);
+                    }
+                    if let Some(layout) = self.aim_shown.get(&id) {
+                        aim_marks::draw(&mut r, layout, self.hud_color);
                     }
                 } else {
                     text(&mut r, "CAMERA LOADING", 19, 52);

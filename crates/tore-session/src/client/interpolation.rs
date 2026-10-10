@@ -22,8 +22,8 @@
 
 use super::clock::{ExtraDelay, JUMP_TICKS, TICKS_PER_SECOND, ticks_of};
 use crate::wire::entity::{
-    AircraftState, DebrisState, EntityKey, EntityKind, EntityState, PilotState, ProjectileState,
-    RATE_STEP, ROTOR_SPEED_STEP, ROTOR_TILT_STEP, SPEED_STEP, radians,
+    AircraftState, DebrisState, EntityKey, EntityKind, EntityState, GUN_AIM_STEPS, PilotState,
+    ProjectileState, RATE_STEP, ROTOR_SPEED_STEP, ROTOR_TILT_STEP, SPEED_STEP, radians,
 };
 use crate::wire::names::NameIndex;
 use crate::wire::priority::{far_interval_ticks, far_snapshots};
@@ -519,12 +519,12 @@ pub fn devices_of(state: &AircraftState) -> Option<[f64; tore_world::snapshot::D
             f64::from(d.vector_yaw) / 127.,
             f64::from(d.lift_levels[1]) / 255.,
             f64::from(d.lift_levels[2]) / 255.,
-            f64::from(d.gun_aim[0]) / 127.,
-            f64::from(d.gun_aim[1]) / 127.,
-            f64::from(d.gun_aim[2]) / 127.,
-            f64::from(d.gun_aim[3]) / 127.,
-            f64::from(d.gun_aim[4]) / 127.,
-            f64::from(d.gun_aim[5]) / 127.,
+            f64::from(d.gun_aim[0]) / GUN_AIM_STEPS,
+            f64::from(d.gun_aim[1]) / GUN_AIM_STEPS,
+            f64::from(d.gun_aim[2]) / GUN_AIM_STEPS,
+            f64::from(d.gun_aim[3]) / GUN_AIM_STEPS,
+            f64::from(d.gun_aim[4]) / GUN_AIM_STEPS,
+            f64::from(d.gun_aim[5]) / GUN_AIM_STEPS,
             f64::from(d.gun_group),
         ]
     })

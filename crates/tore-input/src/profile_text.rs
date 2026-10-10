@@ -42,6 +42,8 @@ pub fn action_name(action: &Action) -> String {
             Axis::TrimPitchRate => "trim-pitch-rate",
             Axis::TrimRollRate => "trim-roll-rate",
             Axis::TrimPedalRate => "trim-pedal-rate",
+            Axis::SightX => "sight-x",
+            Axis::SightY => "sight-y",
         }
         .into(),
         Action::Pilot(PilotCommand::Toggle(s)) => match s {
@@ -78,6 +80,8 @@ pub fn mode_name(mode: Mode) -> String {
         Mode::HoldState => "hold".into(),
         Mode::Press => "press".into(),
         Mode::Release => "release".into(),
+        Mode::Tap => "tap".into(),
+        Mode::Long => "long".into(),
         Mode::Switch => "switch".into(),
         Mode::Follow => "follow".into(),
         Mode::Position(n) => format!("position={n}"),

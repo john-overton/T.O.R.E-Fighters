@@ -115,6 +115,11 @@ own size, line weight and brightness (John, 2026-09-23). It is awareness only:
 missiles still guide within their normal limits and behaviour, and a target
 the sensors have lost gives no radar support.
 Depends on [target selection](#target-selection).
+**The AC-130 always has it** (John, 2026-10-09): its gunsight is a FLIR-style
+sensor, so a ground or air object designated with it stays targeted at any
+range whatever this cheat says, and in multiplayer even when the King turns
+cheats off. The cheat's row and every other aircraft are unchanged. The sight
+itself is in the [AC-130 spec](ac130-linked-guns.md#the-gunsight).
 
 **Air combat guns only.** Every aircraft, player and AI, can fire only its gun.
 An aircraft without a gun cannot fire. **Proposed:** missiles already in flight

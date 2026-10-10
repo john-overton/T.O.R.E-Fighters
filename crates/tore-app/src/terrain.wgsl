@@ -431,7 +431,9 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  let cloud=clamp(cloud_occlusion(vec3<f32>(1.0),in.direction,in.altitude)
      -cloud_occlusion(vec3<f32>(0.0),in.direction,in.altitude),vec3<f32>(0.0),vec3<f32>(1.0));
  let visibility=(1.0-clamp(haze(in.distance),0.0,1.0))*(1.0-air_opacity(in.distance,in.altitude));
- let radiance=(core*vec3<f32>(1.0,0.92,0.68)+halo*vec3<f32>(1.0,0.25,0.025))*edge*ends*visibility*cloud;
+ // The vertex color carries the gun's tracer brightness (1 for most guns,
+ // 1.5 for the AC-130's 105 mm), already decoded to linear.
+ let radiance=(core*vec3<f32>(1.0,0.92,0.68)+halo*vec3<f32>(1.0,0.25,0.025))*edge*ends*visibility*cloud*in.color.g;
  return vec4<f32>(radiance,0.0);
 }
 // Static world textures use index255/mask cutouts without opaque backing color.

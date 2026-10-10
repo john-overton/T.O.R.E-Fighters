@@ -43,6 +43,14 @@ fn surface(value: f64) -> i8 {
     }
 }
 
+fn gun_angle(value: f64) -> i16 {
+    if value.is_finite() {
+        (value.clamp(-1., 1.) * super::entity::GUN_AIM_STEPS).round() as i16
+    } else {
+        0
+    }
+}
+
 fn attitude(angles: [f64; 3]) -> [u16; 3] {
     angles.map(turn16)
 }
@@ -60,7 +68,7 @@ pub fn aircraft_state(pose: &AircraftPose) -> AircraftState {
         throttle: level(d[10]),
         lift_levels: [d[11], d[13], d[14]].map(level),
         vector_yaw: surface(d[12]),
-        gun_aim: std::array::from_fn(|i| surface(d[15 + i])),
+        gun_aim: std::array::from_fn(|i| gun_angle(d[15 + i])),
         gun_group: d[21].clamp(0., 7.) as u8,
     });
     let rate = |v: f64| steps(v, RATE_STEP).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;

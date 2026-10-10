@@ -22,8 +22,9 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
 - Exclude range fixtures, developer/test commands, damage injection, diagnostic
   toggles, startup command-line flags and AI tuning. Do not include a command
   simply because it appears in the complete input catalog. In particular,
-  Ctrl+Shift+I incoming missiles, Shift+Y target jammer and backslash range
-  reset do not belong on this map.
+  Ctrl+Shift+I incoming missiles, Shift+Y target jammer and the range reset
+  (Ctrl+Shift+Backslash since the AC-130 gunsight took plain Backslash) do not
+  belong on this map.
 - Use [the input catalog](../crates/tore-app/src/input_catalog.rs) and
   [generated controls list](CONTROLS.md) for current default bindings. Check
   [input handling](../crates/tore-app/src/input.rs),
@@ -49,6 +50,12 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   Flight keys the viewer does not read stay dim. Ctrl+B, the flight's "Mark
   replay moment" default, is on this sheet because its purpose is replays;
   the sheet says it works in flight.
+- The AC-130 gunsight keys (John, 2026-10-09) are on Fly & Fight: Backslash
+  and Shift+Backslash (designate, pin ground), Alt with the arrows (slew),
+  Shift+' and Shift+; (zoom), and L and ; (drop). They carry an AC- label, and
+  a small AC-130 legend box in the keyboard plate's free top-right corner
+  lists them with the gamepad gestures. Keep those labels in step with
+  [the input guide](INPUT.md#ac-130-gunsight-controls).
 - The keypad works as the navigation keys. Highlight a keypad key on the sheet
   for its command, with the same label as the key it stands for: keypad 0 and
   period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on

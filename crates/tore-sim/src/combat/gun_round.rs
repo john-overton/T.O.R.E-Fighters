@@ -42,6 +42,21 @@ fn round_span(weapon: &Weapon) -> u64 {
     u64::from(weapon.burst.game_burst_t.max(1)) * 30
 }
 
+/// The scaled ticks a held gun's deadline moves out while the gun may not
+/// fire: one round interval, but never more than a quarter second's worth, so
+/// a 105 whose line of fire clears waits no longer than any other gun. (Every
+/// retail record's interval is under a quarter second, so none changes.)
+pub fn blocked_push(weapon: &Weapon) -> u64 {
+    round_span(weapon).min(30 * physical_rounds(weapon))
+}
+
+/// Whether the `ordinal`th round of a gun carries a tracer ribbon (fitted
+/// marker): every third round, but every round of a gun that fires slower
+/// than four rounds a second, whose few rounds would otherwise go unseen.
+pub fn tracer(weapon: &Weapon, ordinal: u64) -> bool {
+    ordinal.is_multiple_of(3) || round_span(weapon) > 30 * physical_rounds(weapon)
+}
+
 /// The tick the `n`th round of a burst (the first is 0) leaves a gun held
 /// down without a break from `first`, the tick of the first round: combat
 /// spaces the rounds `burst time * 30 / physical rounds` ticks apart and
@@ -108,7 +123,7 @@ impl Cadence {
         if !allowed && self.pending > 0 {
             self.next_scaled = after
                 .saturating_mul(physical)
-                .saturating_add(round_span(weapon));
+                .saturating_add(blocked_push(weapon));
         }
         let ready =
             self.pending > 0 && allowed && after.saturating_mul(physical) >= self.next_scaled;
@@ -117,7 +132,7 @@ impl Cadence {
         }
         let fired = Fired {
             ordinal: self.ordinal,
-            tracer: self.ordinal.is_multiple_of(3),
+            tracer: tracer(weapon, self.ordinal),
         };
         self.pending -= 1;
         self.ordinal = self.ordinal.wrapping_add(1);
@@ -162,13 +177,29 @@ impl Round {
         tracer: bool,
     ) -> Option<Self> {
         let [id, owner, station] = seed;
+        let direction = projectile_launch_direction(weapon, forward, id, owner, station as usize);
+        let mut round = Self::aimed(weapon, muzzle, direction, speed_fps, tick)?;
+        round.tracer = tracer;
+        Some(round)
+    }
+
+    /// A round let go along exactly `direction`, with no spread: the centre of
+    /// the gun's dispersion cone, which is where a pipper points. Otherwise as
+    /// [`Round::release`].
+    pub fn aimed(
+        weapon: &Weapon,
+        muzzle: Vector,
+        direction: Vector,
+        speed_fps: f64,
+        tick: u64,
+    ) -> Option<Self> {
         let speed = launch_speed(&weapon.movement, (speed_fps * 256.) as i32).ok()? * 256;
         Some(Self {
             weapon: weapon.source.clone(),
-            tracer,
+            tracer: false,
             position: muzzle,
             previous: muzzle,
-            direction: projectile_launch_direction(weapon, forward, id, owner, station as usize),
+            direction,
             speed_f8: speed,
             movement: weapon.movement,
             flags: weapon.flags,
@@ -177,13 +208,24 @@ impl Round {
         })
     }
 
+    /// Whether the round's life is over at the step beginning at `tick`: the
+    /// check [`Round::step`] makes first, before it moves the round.
+    pub fn expired(&self, tick: u64) -> bool {
+        removal_due(
+            &self.movement,
+            (tick / 30) as u16,
+            self.launched_t,
+            (self.position[1] * 256.) as i32,
+        )
+    }
+
     /// Flies the round one tick, the one starting at `tick`, over `ground`
     /// (height by x and z). `false` once its life is over, or it is in the
     /// ground.
     pub fn step(&mut self, tick: u64, ground: &impl Fn(f64, f64) -> f64) -> bool {
         let now = (tick / 30) as u16;
         let m = &self.movement;
-        if removal_due(m, now, self.launched_t, (self.position[1] * 256.) as i32) {
+        if self.expired(tick) {
             return false;
         }
         self.previous = self.position;
@@ -258,5 +300,44 @@ mod tests {
                 .collect::<Vec<_>>(),
             [100, 102, 103, 105, 106]
         );
+    }
+    #[test]
+    fn a_slow_gun_marks_every_round_a_tracer_and_waits_no_more_than_a_quarter_second_blocked() {
+        let gun = |burst: (u8, u8, u8)| {
+            let mut weapon = crate::combat::gunsight::tests::weapon();
+            weapon.burst.game_rounds_in_burst = burst.0;
+            weapon.burst.actual_rounds_per_game = burst.1;
+            weapon.burst.game_burst_t = burst.2;
+            weapon
+        };
+        // A retail gun (8 rounds a quarter second): every third round, and a
+        // blocked deadline moves out by one round interval.
+        let fast = gun((4, 2, 1));
+        assert_eq!(
+            (0..6).map(|n| tracer(&fast, n)).collect::<Vec<_>>(),
+            [true, false, false, true, false, false]
+        );
+        assert_eq!(blocked_push(&fast), round_span(&fast));
+        // One round every 4 ticks (the TORE 25): the same.
+        let tore25 = gun((15, 2, 4));
+        assert!(!tracer(&tore25, 1));
+        assert_eq!(blocked_push(&tore25), round_span(&tore25));
+        // One round every 6 seconds (the TORE 105): all tracers, and a
+        // blocked gun waits 30 ticks past the block, not 720.
+        let slow = gun((1, 2, 48));
+        assert!((0..6).all(|n| tracer(&slow, n)));
+        assert_eq!(blocked_push(&slow), 30 * 2);
+        let mut cadence = Cadence::default();
+        assert!(cadence.step(&slow, true, true, 0).is_some());
+        // Blocked for a while with the trigger held, then clear: the next
+        // round is due at its 720 tick deadline or 30 ticks after the block
+        // lifts, whichever is later.
+        for tick in 1..800 {
+            assert!(cadence.step(&slow, true, false, tick).is_none());
+        }
+        let next = (800..900)
+            .find(|tick| cadence.step(&slow, true, true, *tick).is_some())
+            .expect("the cleared gun fires");
+        assert!((828..=832).contains(&next), "{next}");
     }
 }
