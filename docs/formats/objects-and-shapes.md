@@ -530,3 +530,108 @@ write and selects inert geometry without executing module code. The app packs
 its four runtime textures into an indexed atlas and draws seat, free-fall,
 inflating and open-parachute poses. Native shadow placement, camera-dependent
 detail selection and animation timing remain unverified.
+
+## NT surface-unit layout
+
+Recovered 2026-10-10 from the 84 `*.NT` records in `FA_2.LIB` (sha256
+`fb8b3021...6198`); the behaviour built on them is in
+[surface objectives and air defenses](../spec/surface-defenses.md). An NT is the
+"active object" counterpart of a static `*.OT`: the same text BRF container as a
+PT ([PT and equipment](aircraft.md#pt-and-equipment)) with the PLANE block
+removed.
+
+| Block | Present in NT | Layout source |
+| --- | --- | --- |
+| OBJECT | yes | The `OBJECT` field list in `aircraft_schema.rs`, identical to a PT's |
+| NPC | yes | The `NPC` field list: `flags`, `ctName`, `searchFrequencyT`, `unreadyAttackT`, `attackT`, `retargetT`, `zoneDist`, `numHards`, `hards` |
+| Hardpoints (`hards`) | yes, `numHards` entries | The `HARDPOINT` field list: `flags`, `pos.x/y/z`, `slewH`, `slewP`, `slewLimitH`, `slewLimitP`, `defaultTypeName`, `maxWeight`, `maxItems`, `name` |
+| PLANE (envelope, engines, structure) | no | PT only |
+
+An OT is the OBJECT block alone (no NPC block, so no weapons, sensors or
+movement). Today's `static_object::Definition` reads only the OBJECT prefix
+(names, shape, hit points, class word, radar and infrared signature), which is
+why base-layout NT placements already stand as scenery. A reader of the full NT
+record needs the NPC block and the hardpoint list as well.
+
+### OBJECT fields as they appear on NTs
+
+| Field | NT values (retail) | Status |
+| --- | --- | --- |
+| `obj_class` | 0x2000 ship, 0x1000 SAM, 0x0800 AAA, 0x0400 tank, 0x0200 vehicle, 0x0100 structure, 0x40 other (the [debrief](debrief.md#outcome) class words) | decoded |
+| `utilProc` | `_GVProc` (ground vehicles and ships), `_CARRIERProc` (5 carriers), `_OBJProc` (GCI radar, men, structures), own procs (CATGUY, EJECT) | decoded; only SARAN names an AI script (`HYDRO.BI`) |
+| `shape`, `shadowShape` | main shape; the damaged `_A` shape is a separate resource named per ship (`KIEV_A.SH`, `T69_A.SH`, ...) | decoded |
+| `hitPoints` | 5 (MANPADS, men) to 200 (main battle tanks); SA-2 site 650; ships 10 to 4,000 | decoded |
+| `damage[0..4]` | 255 on every NT | meaning unresolved |
+| `sigs[0..4]` | 100/100/100/100/0 for ground units; ships 150 to 300; Sea Shadow 100/100/50/10; small boats 100/100/25/25. `sigs[3]` is radar and `sigs[2]` infrared per the [radar spec](../spec/radar.md) | decoded |
+| `maxVisDist` | 78 (men 59, SA-2 391, GCI 195) | unit not established; 78, 195 and 391 match 20,000, 50,000 and 100,000 ft at 256 ft per unit (inference) |
+| `expType`, `craterSize` | 21 and 6 (ground), 35 and 0 (ships), 15 and 1 (men); see [explosions](explosions.md) | decoded |
+| `_turnRate`, `_minSpeed`, `_cornerSpeed`, `_maxSpeed`, `_acc`, `_dacc` | main battle tank 2730, 50, 50, 50; MANPADS 0, 10, 10; fixed guns 0; ships 910 turn and 50 speed (hydrofoils, frigates, LCAC 100); acceleration fields use the scaled marker | units not established; speeds read as feet per second and turn rate at 182 per degree, see [the spec](../spec/surface-defenses.md#the-units-of-the-movement-and-range-words) |
+| `flags` | 0x4000000 on SA2A, 0x2000000 on M1939, KS12, KS19, 0x801 on the Mule objects; carriers 0xc8331, 0x108331, 0x1c8131 | meaning unknown |
+
+### NPC fields
+
+| Field | Unit | Typical values (retail) |
+| --- | --- | --- |
+| `searchFrequencyT`, `unreadyAttackT`, `attackT` | quarter seconds, per the [AI timing](../spec/ai.md#b42-weapon-preparation-search-cadence-and-firing) | ground 20/60/40 (5, 15 and 10 s), ships 40/100/80, SAM-2/3/6 40/144/60 (10, 36 and 15 s), SA-15 20/20/20, SCUD 192/176/176 |
+| `retargetT` | quarter seconds | 32767 (never) except KS-12 and KS-19 at 40 (10 s) |
+| `zoneDist` | unknown | 0 except `A_M1939` at 195 |
+| `numHards`, `hards` | count, pointer to the hardpoint list | |
+
+### Hardpoint fields
+
+| Field | Notes (retail) |
+| --- | --- |
+| `pos.x/y/z` | Mount position in source units |
+| `slewLimitH`, `slewLimitP` | Turret arc half-angle relative to the hull: horizontal 0 for fixed mounts and vehicles, 10,920 to 27,300 for ship mounts; pitch 16,380 typical (8,190 tanks, 2,730 SA-2). 16,384 is 90 degrees if the angle unit is 65,536 per turn (inference); no slew rate is stored |
+| `defaultTypeName` | The weapon `.JT` record, or a sensor `.SEE` record for a sensor mount (`GCIR.SEE` on the GCI radar, `REDCR.SEE` on BUTLER: radar signature 3, 360 degrees, 0 to 303,800 ft, altitude 1 ft and up) |
+| `maxItems` | Load count; 32767 means unlimited (all guns); missiles are finite (SA-2 six rails of 1, SA-6 3, SA-15 8) |
+| `flags` | Unknown (hardpoint-type flag 2 excludes a store from the usable list, per the [AI notes](ai.md)) |
+
+### Counts and behaviour of the record set
+
+| Records | Class | Count |
+| --- | --- | ---: |
+| NT | ship (`_GVProc`) | 27 |
+| NT | ship, carriers (`_CARRIERProc`) | 5 |
+| NT | SAM | 17 |
+| NT | tank | 9 |
+| NT | vehicle | 11 |
+| NT | AAA | 8 |
+| NT | other (TROOPS) and men (SOLDIER, RUNNER, PLTDWN) | 4 |
+| NT | structure (GCI radar) | 1 |
+| NT | other (CATGUY, EJECT) | 2 |
+| OT | structure | 83 |
+| OT | other (city, houses, crates, rocks, roads, flags) | 74 |
+| OT | airports (`_STRIPProc`) | 13 |
+
+There is no radar-to-launcher link anywhere in the data: every launcher carries
+its own missile, and the missile's seeker zone is the search volume. The site
+pieces (revetments `SA3SITE.OT`, `HAWKSITE.OT`; radar vehicles LTRACK, SFLUSH,
+SRDR1, SRDR2; Tall King `KING.OT`; passive radars; microwave relays; MISTRK, the
+"SAM-Carrying Truck") are separate, unrelated objects with no weapons. Only
+`GCI.NT` (shape `KING.SH`) has a sensor hardpoint.
+
+### Shape reader status for NTs
+
+`shape_inspect` on all 115 NT main and `_A` shapes (with the state path rather
+than the scenery path): all ground vehicles, all AAA, 13 of 17 SAMs, all
+non-carrier ships except two, the Kiev and every `_A` except the carriers read
+cleanly. These fail:
+
+| Shape | Failure | Finding |
+| --- | --- | --- |
+| `SA3.SH`, `SCD.SH` | opcode `eb` | Both contain the same `eb 05 b8 01 00 00 00` HARDNumLoaded envelope that the scenery path already reviews for `CHAP.SH` and `SA2.SH` (SA3: four `83 f8 01/02 72 11` forms; SCD: two `0b c0 74 11` forms). The state path needs the same envelope with a loaded-count state |
+| `KRIV.SH` | opcode `15` unsupported | Most common gap in practice (the Krivak is a group 2 `<destroyer>` pick) |
+| `SOVR.SH` | opcode `ec` unsupported | |
+| `SOLDIER.SH`, `CATGUY.SH` | fail | Men in `~QPGFAIR`, `~QCSCUD`, `~QPGSAM` |
+| `NIMZ`, `KITT`, `CLEM`, `WASP` and their `_A` shapes | "No geometry" | Projection ends with no faces; likely a level-of-detail or state branch the reader does not take; the four carrier tower OTs (`~NIMZT`, `~KITTT`, `~CLEMT`, `~WASPT`) fail the same way |
+
+`CHAP.SH` and `SA2.SH` fail the state path too and use a fitted static pose.
+Among OTs, 163 of 170 project; `CRATER.SH`, the four carrier towers and the
+absent `TREE1`/`TREE2` do not
+([retail terrain review](../baselines/retail-terrain-review.md#object-findings)).
+Every ship has a `_A` damaged shape; no ground vehicle or SAM has one, and
+`DEST.OT` ("Destroyed Vehicle", hp 0, `DEST.SH`) is the wreck object.
+Damaged bunker variants `~BNK5`, `~BNK6`, `~BNK8` use `DBK*.SH`.
+The reader stays a bounded data grammar; each new opcode or envelope is reviewed
+and documented in this guide before it is accepted.
