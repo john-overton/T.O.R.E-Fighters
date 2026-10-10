@@ -194,3 +194,40 @@ fn a_game_that_places_the_ground_target_otherwise_refuses_its_seat() {
         "the host hears of it"
     );
 }
+
+/// PvP with a ground target (L1 hook): a Redfor human takes an enemy plane
+/// of the group the layout aims at Red's start, within 5 nm of the target,
+/// so Redfor starts by the target it defends.
+#[test]
+fn a_redfor_player_starts_by_the_target_it_defends() {
+    let mut spec = column();
+    spec.wings[3].count = 2;
+    spec.separation_nm = 20;
+    let mut rig = Rig::with_import(spec, link(), 23, routed_resources(), |config| {
+        config.open_planes = crate::host::OpenPlanes::All;
+    });
+    rig.host.start_now();
+    let red = rig.join(|c| c.plane = Some(2), level_script());
+    assert!(rig.run_until(Duration::from_secs(4), |r| r.seated(red)));
+    let starts = rig
+        .host
+        .world()
+        .terrain
+        .surface
+        .starts
+        .clone()
+        .expect("a ground target's starts");
+    let flight = &rig.players[red]
+        .client
+        .prediction()
+        .expect("flying")
+        .plane()
+        .flight;
+    let from_red = (flight.position[0] - f64::from(starts.red[0]))
+        .hypot(flight.position[2] - f64::from(starts.red[1]));
+    // The enemy group's members fly within a mile or two of its point.
+    assert!(from_red < 3. * 6_076., "{from_red} ft from Red's start");
+    let from_blue = (flight.position[0] - f64::from(starts.blue[0]))
+        .hypot(flight.position[2] - f64::from(starts.blue[1]));
+    assert!(from_blue > 15. * 6_076., "{from_blue} ft from Blue's start");
+}
