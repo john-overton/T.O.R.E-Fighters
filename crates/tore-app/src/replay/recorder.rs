@@ -32,10 +32,13 @@
 //! combat's write-only notes of released chaff and flares and the player's
 //! decoy rolls into entries a replay flies the devices from. A fourth,
 //! [`datalink`], turns the data link's write-only journal into `datalink.*`
-//! events.
+//! events. A fifth, [`surface`], records the surface world of a format 3
+//! recording: the routed units' poses, launcher and magazine changes, names,
+//! and the shots, resupply, radar and wreck events of surface units.
 mod datalink;
 mod devices;
 mod journal;
+mod surface;
 mod why;
 
 use super::convert::{self, EffectWatch, FlightData, Presentation};
@@ -71,6 +74,7 @@ const _: () = assert!(replay::limits::MAX_PROJECTILES >= live::MAX_PROJECTILES);
 enum Message {
     Aircraft(Box<replay::AircraftInfo>),
     Weapon(Box<replay::WeaponInfo>),
+    Surface(Box<replay::SurfaceInfo>),
     Frame(Box<Frame>),
     Finish(Box<replay::Footer>),
 }
@@ -91,6 +95,7 @@ fn spawn(writer: replay::Writer) -> std::io::Result<(SyncSender<Message>, Writer
                 let result = match message {
                     Message::Aircraft(info) => writer.register_aircraft(&info),
                     Message::Weapon(info) => writer.register_weapon(&info),
+                    Message::Surface(info) => writer.register_surface_unit(&info),
                     Message::Frame(frame) => writer.push(&frame),
                     Message::Finish(footer) => {
                         if refused > 0 {
@@ -315,6 +320,8 @@ pub struct Recorder {
     infos: BTreeMap<u32, replay::AircraftInfo>,
     /// What the reason events and trees remember between ticks.
     why: why::Why,
+    /// The surface world of a format 3 recording.
+    surface_watch: surface::Watch,
     /// The AI aircraft's chaff and flares left as the last tick was
     /// recorded, for the releases its end collects.
     dispensers: devices::Dispensers,
@@ -335,9 +342,12 @@ impl Recorder {
     ) -> Result<Self, String> {
         let writer = replay::Writer::create(&path, header).map_err(|e| e.to_string())?;
         let partial = writer.partial_path().to_path_buf();
+        let surface = writer.version() >= 3;
         let (sender, thread) = spawn(writer).map_err(|e| e.to_string())?;
         log::info!("Recording to {}", partial.display());
-        Ok(Self::with(path, sender, Some(thread), roster))
+        let mut recorder = Self::with(path, sender, Some(thread), roster);
+        recorder.surface_watch = surface::Watch::new(surface);
+        Ok(recorder)
     }
 
     /// A recorder whose queue the caller reads, with no file, for tests.
@@ -388,6 +398,7 @@ impl Recorder {
             trees: Vec::new(),
             infos: BTreeMap::new(),
             why: why::Why::default(),
+            surface_watch: surface::Watch::default(),
             dispensers: devices::Dispensers::new(),
         };
         for info in roster {
@@ -816,11 +827,20 @@ impl Recorder {
             let data = flight_data(player, pose, &tick, &targets, player_ground);
             frame.aircraft.push(convert::aircraft_state(pose, &data));
         }
+        // Surface rows whose hit points ran out this tick: wrecks.
+        let mut lost: Vec<(u32, i32)> = Vec::new();
         for target in snapshot.targets.iter().filter(|p| p.aircraft.is_none()) {
-            if self.surface.insert(target.id, target.damage.hp) != Some(target.damage.hp) {
+            let before = self.surface.insert(target.id, target.damage.hp);
+            if before != Some(target.damage.hp) {
                 frame.surface_hp.push((target.id, target.damage.hp));
+                if let Some(before) = before.filter(|hp| *hp > 0)
+                    && target.damage.hp <= 0
+                {
+                    lost.push((target.id, before));
+                }
             }
         }
+        self.surface_tracks(&tick, &mut frame, &lost);
         if number.is_multiple_of(replay::TICKS_PER_SECOND) {
             frame.checksum = Some(replay::state_checksum(&frame.aircraft));
         }
@@ -879,6 +899,7 @@ impl Recorder {
         self.decoys(&tick, &frame, &mut events);
         self.dispensers = devices::dispensers(tick.wings);
         self.weapon_events(&tick, &frame, &mut shots, &live_shots, &mut events);
+        self.surface_watch.events(&tick, &lost, &mut events);
         self.aircraft_events(&tick, &frame, &mut events);
         self.cue_events(&tick, player_ground, &mut events);
         self.shots = shots;
@@ -887,6 +908,59 @@ impl Recorder {
         frame.events.extend(events);
         self.frames += 1;
         self.frame = Some(frame);
+    }
+
+    /// The surface world of the tick (format 3): names for every surface unit
+    /// this tick mentions, then the poses, the launcher and magazine changes
+    /// and the debris pieces of the frame.
+    fn surface_tracks(&mut self, tick: &Tick<'_>, frame: &mut Frame, lost: &[(u32, i32)]) {
+        if !self.surface_watch.on {
+            return;
+        }
+        let ledger = &tick.combat.state.ledger;
+        let mentioned = tick
+            .snapshot
+            .projectiles
+            .iter()
+            .map(|p| p.owner)
+            .chain(tick.outcomes.iter().map(|o| o.key.owner))
+            .chain(tick.combat.surface.trace.iter().filter_map(trace_unit))
+            .chain(lost.iter().map(|(id, _)| *id))
+            .chain(
+                lost.iter()
+                    .filter_map(|(id, _)| ledger.credit(*id).map(|kill| kill.owner)),
+            );
+        for info in self.surface_watch.register(tick, mentioned) {
+            // Reasons and trees name a unit by its label, like an aircraft.
+            self.infos.insert(
+                info.id,
+                replay::AircraftInfo {
+                    id: info.id,
+                    name: info.name.clone(),
+                    label: info.label.clone(),
+                    side: info.side,
+                    ..replay::AircraftInfo::default()
+                },
+            );
+            self.send(Message::Surface(Box::new(info)));
+        }
+        frame.surface = self.surface_watch.poses(tick.snapshot);
+        frame.surface_stock = self.surface_watch.stock(tick);
+        frame.debris_pieces = self.surface_watch.pieces(tick.snapshot);
+    }
+
+    /// The reason an aircraft's loss gives when a surface unit shot it down:
+    /// "it was shot down by an SA-6".
+    fn shot_down_by(&self, tick: &Tick<'_>, victim: u32) -> Option<String> {
+        let name = tore_world::ai_wings::outcome::shot_down_by(
+            &tick.world.surface,
+            &tick.combat.state.ledger,
+            victim,
+        )?;
+        Some(format!(
+            "it was shot down by {} {name}",
+            surface::article(name)
+        ))
     }
 
     fn weapon_events(
@@ -1226,6 +1300,8 @@ impl Recorder {
                 // Lost to overspeed or the map edge, not to a weapon.
                 if let Some(cause) = flight.and_then(|f| f.systems.structure.cause) {
                     event = event.with(field::REASON, cause.label());
+                } else if let Some(reason) = self.shot_down_by(tick, id) {
+                    event = event.with(field::REASON, reason);
                 }
                 if let Some(hit) = hit_by(id) {
                     event = event.with(field::PROJECTILE, replay::Value::Id(hit.projectile));
@@ -1573,6 +1649,24 @@ fn fit(frame: &mut Frame) {
         "surface changes",
         &mut notes,
     );
+    cut(
+        &mut frame.surface,
+        MAX_SURFACE_UNITS,
+        "surface units",
+        &mut notes,
+    );
+    cut(
+        &mut frame.surface_stock,
+        MAX_SURFACE_STOCK_PER_TICK,
+        "surface stock changes",
+        &mut notes,
+    );
+    cut(
+        &mut frame.debris_pieces,
+        MAX_DEBRIS,
+        "debris pieces",
+        &mut notes,
+    );
     for event in &mut frame.events {
         short(&mut event.text);
         event.fields.truncate(MAX_FIELDS_PER_EVENT);
@@ -1624,6 +1718,21 @@ fn fit(frame: &mut Frame) {
                 "over the format's limits, left out: {}",
                 notes.join(", ")
             )));
+    }
+}
+
+/// The surface unit a controller trace line is about.
+fn trace_unit(trace: &tore_world::surface::fire::Trace) -> Option<u32> {
+    use tore_world::surface::fire::Trace;
+    match trace {
+        Trace::Phase { unit, .. }
+        | Trace::Shot { unit, .. }
+        | Trace::Swap { unit, .. }
+        | Trace::Rearm { unit }
+        | Trace::Refill { unit, .. }
+        | Trace::Radar { unit, .. }
+        | Trace::Shutdown { unit, .. } => Some(unit.0),
+        Trace::Battery { .. } => None,
     }
 }
 
@@ -2905,6 +3014,7 @@ mod tests {
             match message {
                 Message::Aircraft(info) => assert!(registered.insert(info.id)),
                 Message::Weapon(info) => assert!(weapons.insert(info.source.clone())),
+                Message::Surface(_) => unreachable!("no surface unit in this world"),
                 Message::Frame(frame) => frames.push(*frame),
                 Message::Finish(_) => unreachable!(),
             }

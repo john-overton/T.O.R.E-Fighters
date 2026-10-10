@@ -377,7 +377,15 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             if let Some(weapon) = weapon {
                 line.push_str(&format!(" ({weapon})"));
             }
-            line + &because(event)
+            // "it was shot down by an SA-6" repeats a killer the line names;
+            // it is kept when the line could only say "surface object 0x...".
+            let named = event
+                .object
+                .is_some_and(|id| !names.who(id).starts_with("surface object"));
+            match event.string(field::REASON) {
+                Some(reason) if named && reason.starts_with("it was shot down by ") => line,
+                _ => line + &because(event),
+            }
         }
         kind::COMBAT_AIRBURST => format!("{shot} from {s} burst{}", to("near")),
         kind::COMBAT_GROUND_IMPACT => format!("{shot} from {s} hit the ground"),
