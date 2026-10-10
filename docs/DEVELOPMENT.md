@@ -1520,6 +1520,17 @@ TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --
 A cache made before the explosion sounds and sheets were added re-imports on
 first start, as any stale cache does. See [the evidence](baselines/explosions.md).
 
+`--blast-preview OUT_DIR` (first argument) renders the shockwave ring of a
+large ground explosion offscreen, without a window: a type 35 blast with a
+Mk 84 crater at 0.1, 0.35, 0.7, 1.2 and 1.7 seconds from a strike aircraft's
+height, from low beside it and from overhead, by day (and the low view at
+dusk), plus a type 21 blast and a type 34 sea blast. `TORE_PREVIEW_THEATER`
+picks the theater (default UKR):
+
+```sh
+TORE_DATA_DIR=.local/surface-data target/debug/tore-app --blast-preview .local/tmp/blast
+```
+
 ## Surface unit inspection
 
 `--surface-dump` prints a theater's surface units as a mission resolves them
