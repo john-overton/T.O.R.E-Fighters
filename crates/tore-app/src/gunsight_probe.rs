@@ -144,16 +144,40 @@ fn tick(s: &mut live::State, l: Launcher, held: bool) -> Vec<Event> {
 struct Tally {
     shots: usize,
     ground: usize,
+    /// Rounds out of each station's barrel, by station index.
+    by_station: std::collections::BTreeMap<usize, usize>,
 }
 impl Tally {
     fn add(&mut self, events: &[Event]) {
         for e in events {
             match e {
-                Event::Fired { .. } => self.shots += 1,
+                Event::Fired { station, .. } => {
+                    self.shots += 1;
+                    *self.by_station.entry(*station).or_default() += 1;
+                }
                 Event::Ground => self.ground += 1,
                 _ => {}
             }
         }
+    }
+}
+
+/// The rounds each gun carries, by slot.
+fn loaded(s: &live::State) -> [u16; 3] {
+    let g = group(s);
+    std::array::from_fn(|slot| g.stations[slot].map_or(0, |station| s.own().ammo[station] & 0x7fff))
+}
+
+impl Tally {
+    /// Rounds out of each gun's barrel, by slot (25, 40, 105 mm).
+    fn per_gun(&self, s: &live::State) -> [usize; 3] {
+        let g = group(s);
+        std::array::from_fn(|slot| {
+            g.stations[slot]
+                .and_then(|station| self.by_station.get(&station))
+                .copied()
+                .unwrap_or(0)
+        })
     }
 }
 
@@ -235,7 +259,8 @@ fn pin_orbit(config: &Configuration, dump: Option<&std::path::Path>) -> AppResul
         ),
     );
     let fire_from = 4 * 120;
-    let total = 16 * 120;
+    // Two seconds past the last round's longest flight (the 105's, near 7).
+    let total = 22 * 120;
     let fire_until = 14 * 120;
     let mut tally = Tally::default();
     let mut csv = String::from(
@@ -338,6 +363,13 @@ fn pin_orbit(config: &Configuration, dump: Option<&std::path::Path>) -> AppResul
         ),
     );
     report.check(
+        tally.ground == tally.shots,
+        format!(
+            "every round landed, the slow 105's too ({} of {})",
+            tally.ground, tally.shots
+        ),
+    );
+    report.check(
         worst < 150.,
         format!("every ground impact is within 150 ft of the pin (worst {worst:.1} ft)"),
     );
@@ -385,6 +417,7 @@ fn fire_no_target(config: &Configuration) -> AppResult<()> {
         "the sight is in the default view (90 degrees left, 25 down)",
     );
     let aim = g.aim.ok_or("no aim point in free slew over flat ground")?;
+    let loaded = loaded(&s);
     let mut tally = Tally::default();
     let mut slots_fired = [false; 3];
     let mut impacts = Impacts::default();
@@ -401,6 +434,12 @@ fn fire_no_target(config: &Configuration) -> AppResult<()> {
         }
     }
     let worst = impacts.worst(aim);
+    let per_gun = tally.per_gun(&s);
+    println!("fire-no-target: rounds loaded (25, 40, 105 mm) {loaded:?}");
+    println!(
+        "fire-no-target: rounds out of the barrels in 6 s (25, 40, 105 mm) {per_gun:?}, {:?} a minute",
+        per_gun.map(|n| n * 10)
+    );
     println!(
         "fire-no-target: aim ({:.0}, {:.0}) shots={} ground_impacts={} distinct impact points={} worst {:.1} ft from the aim point (mean {:.1}); guns fired {:?}",
         aim[0],
@@ -420,6 +459,31 @@ fn fire_no_target(config: &Configuration) -> AppResult<()> {
         ),
     );
     report.check(slots_fired == [true; 3], "all three linked guns fired");
+    // Each gun holds its own cyclic rate (6 seconds of a held trigger from a
+    // standing start: the first round at once, then every interval).
+    report.check(
+        per_gun == [180, 10, 1],
+        format!(
+            "held fire cycles at 1,800, 100 and 10 rounds a minute (25, 40, 105 mm fired {per_gun:?} in 6 s)"
+        ),
+    );
+    // A trigger tapped ten times a second cannot beat those rates.
+    let mut tap = state(config)?;
+    for _ in 0..180 {
+        tick(&mut tap, l, false);
+    }
+    let mut tapped = Tally::default();
+    for t in 0..6 * 120 {
+        tapped.add(&tick(&mut tap, l, t % 12 < 2));
+    }
+    let tapped = tapped.per_gun(&tap);
+    println!("fire-no-target: rounds with the trigger tapped 10 times a second {tapped:?}");
+    report.check(
+        tapped[0] <= 181 && tapped[1] <= 10 && tapped[2] <= 1,
+        format!(
+            "tapping the trigger does not beat the cycle (25, 40, 105 mm fired {tapped:?} in 6 s)"
+        ),
+    );
     report.check(
         tally.ground > 0 && !impacts.points.is_empty(),
         format!(
