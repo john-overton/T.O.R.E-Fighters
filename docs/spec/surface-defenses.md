@@ -1243,7 +1243,7 @@ John accepted the recommended looks (12.4).
 | --- | --- | --- |
 | Ships | Swap to the `_A` shape (every ship has one), keep it in place, burning with fire and smoke for 15 minutes | retail shapes |
 | Carriers | The `_A` hull, the island's own damage branch (`shape::DAMAGED_WORD`), the deck tractors as they were and the deck crew gone, burning | retail shapes, fitted parts rule |
-| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose on the ground, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
+| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose, standing on its own lowest point like the unit it replaces, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
 | Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; no fire | retail |
 | Other buildings | Removed, with the crater the hit leaves; no fire | current behaviour |
 | Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment drawn with the type's own `_B` or `_D` shape | existing aircraft path |
