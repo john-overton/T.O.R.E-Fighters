@@ -1593,7 +1593,11 @@ flight at the jet, `--harm-at NM` puts an AGM-88 in flight at the unit's
 radar, `--kill-at S` destroys that radar, `--player-side red` flies for
 Redfor, `--condition night` darkens the sky, `--skill N` and `--rng N` fix the
 experience and the random draws, and `--near FT` follows the unit's
-neighbours too. A launcher in a SAM battery is traced with its battery's radar
+neighbours too. For resupply, `--drain` empties the followed units' rails and
+magazines at the start, `--drain-reserve` their spare magazines too, and
+`--kill-truck-at S` destroys the supply trucks within 0.1 mile of the unit; the
+trace prints `rearm` and `refill` lines and the final stock of every followed
+unit. A launcher in a SAM battery is traced with its battery's radar
 and launchers. It reads the same retail records, weapons and sensors too.
 The `surface-*` engagement battery scenarios run it.
 
@@ -1621,6 +1625,24 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --over SA6 --altitude 15000 --from 20 --seconds 150
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
+```
+
+`--surface-fx-preview OUT_DIR [SCENE ...]` renders what the surface defenses
+look like, offscreen, by day, at dusk and at night: `flak` (the KS-12 and
+KS-19 bursts over North Vietnam, wide and close to the jet), `zsu23` and
+`zsu57` (muzzle flash, firing light and tracers beside a gun), `sam` (an SA-6
+leaving its rail, at the pad and up its path), `wreck` (a destroyed ZSU-23
+smoking) and `map` (the flight map over the same target). Each scene is the
+real game: it builds the mission, flies the player past the unit, steps the
+whole world and draws the frame the first flak burst, round, launch or kill
+makes through the same picture, tracker and renderer the game uses. The names
+of the frames say the scene, the light, the view and the ticks after the
+trigger. `--ground-target STEM [--defenses AAA SAM] [--surface-seed N]` sets
+the creator's ground target for a launched flight or capture
+(`--launch-quick-mission`, `--smoke-test`).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh target/debug/tore-app --surface-fx-preview .local/tmp/fx flak sam
 ```
 
 `--surface-objective THEATER STEM` checks a ground target's objectives and the

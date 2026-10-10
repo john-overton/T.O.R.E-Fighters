@@ -4,7 +4,7 @@
 //! No retail data.
 use super::*;
 use crate::surface::{
-    Battery, DestroyedLook, Origin, SurfaceUnitState, Unit, UnitKind,
+    Battery, DestroyedLook, Origin, SurfaceUnitState, Unit, UnitKind, supply,
     units::{BatteryState, Engager},
 };
 use tore_formats::weapons::{
@@ -447,7 +447,12 @@ impl Fixture {
             )
             .unwrap();
         }
-        let mut arms: Vec<Arms> = units.iter().map(|p| p.arms.clone()).collect();
+        // Passive units (the resupply tests' trucks) have no arms.
+        let mut arms: Vec<Arms> = units
+            .iter()
+            .filter(|p| p.unit.kind == UnitKind::Active)
+            .map(|p| p.arms.clone())
+            .collect();
         for (index, battery) in batteries.iter().enumerate() {
             for a in &mut arms {
                 if a.unit == battery.radar || battery.launchers.contains(&a.unit) {
@@ -531,7 +536,21 @@ impl Fixture {
             ground: &ground,
             daylight: self.daylight,
         };
+        // Resupply (a no-op without trucks), as the world runs it.
+        let delivery = supply::step(
+            &self.surface,
+            &mut self.state,
+            &self.live,
+            &|unit, state| match state.and_then(|s| s.mover) {
+                Some(mover) => {
+                    let at = mover.position();
+                    [at[0], at[2]]
+                }
+                None => [f64::from(unit.position[0]), f64::from(unit.position[2])],
+            },
+        );
         let stepped = step(&self.surface, &mut self.state, &mut self.live, &scene);
+        supply::deliver(&self.surface, &mut self.state, delivery);
         self.supports = stepped.supports;
         for trace in &self.state.trace {
             if matches!(trace, Trace::Shot { .. }) {
@@ -1103,3 +1122,6 @@ fn a_moving_unit_fires_from_where_it_is_with_its_mount_turned() {
     };
     assert!((place.mount(&low, &|_, _| 0.)[1] - MUZZLE_CLEARANCE_FT).abs() < 1e-6);
 }
+
+#[path = "supply_tests.rs"]
+mod supply_tests;

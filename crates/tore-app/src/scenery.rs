@@ -981,6 +981,131 @@ pub(crate) mod tests {
         );
     }
 
+    /// The lowest vertex of `vertices` (relative to `origin`) against the
+    /// terrain: the smallest height above the ground under any vertex, and
+    /// the lowest vertex's height above the ground at `at`.
+    fn grounding(
+        vertices: &[f32],
+        origin: [f64; 3],
+        terrain: &Terrain,
+        at: [f64; 3],
+    ) -> (f64, f64) {
+        let points: Vec<[f64; 3]> = vertices
+            .chunks_exact(10)
+            .map(|v| std::array::from_fn(|i| f64::from(v[i]) + origin[i]))
+            .collect();
+        assert!(!points.is_empty(), "nothing drawn");
+        let height = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
+        let clearance = points
+            .iter()
+            .map(|p| p[1] - height(p[0], p[2]))
+            .fold(f64::INFINITY, f64::min);
+        let low = points.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        (clearance, low - height(at[0], at[2]))
+    }
+
+    /// Every land unit, standing or moving, intact or wrecked, draws with
+    /// its lowest vertex (track or wheel bottom) on the terrain: a T-72, a
+    /// ZSU-23, a truck and an SA-6 standing, their DEST wrecks, and a moving
+    /// T-80 tilted to the slope, alive and wrecked.
+    #[test]
+    #[ignore = "needs an imported data profile (TORE_DATA_DIR)"]
+    fn land_units_and_their_wrecks_stand_on_the_ground() {
+        use tore_world::{
+            mission::{Defense, MissionSpec},
+            seats::SeatInput,
+            world::{Seating, TickOutput, World},
+        };
+        let resources = crate::reel::load_assets().unwrap().theater_resources;
+        let build = |theater: &str, stem: &str| {
+            let mut spec = MissionSpec::new(theater, tore_formats::aircraft::AircraftId::F18);
+            spec.ground_target = Some(stem.into());
+            spec.surface_seed = 1;
+            (spec.aaa, spec.sam) = (Defense::Heavy, Defense::Heavy);
+            World::new(&spec, &resources, Seating::SinglePlayer).unwrap()
+        };
+        // Standing units and their wrecks.
+        let world = build("PGU", "QPGSAM");
+        let mut scenery = Scenery::build(&resources, &world.terrain).unwrap();
+        for kind in ["T72.NT", "ZSU23.NT", "TRUCK.NT", "SA6.NT"] {
+            let unit = world
+                .terrain
+                .surface
+                .template_units()
+                .find(|u| {
+                    u.resource == kind
+                        && u.in_scene
+                        && !world.terrain.surface.courses.contains_key(&u.id)
+                })
+                .unwrap_or_else(|| panic!("no standing {kind}"));
+            let at = [f64::from(unit.position[0]), 0., f64::from(unit.position[2])];
+            let intact = &scenery.static_vertices[&unit.id.0];
+            let (_, low) = grounding(intact, [0.; 3], &world.terrain, at);
+            assert!(low.abs() <= 1., "{kind} stands {low:.2} ft off the ground");
+            let wreck = scenery
+                .surface
+                .drawn(unit.id.0, &surface_art::Look::Wreck)
+                .unwrap_or_else(|| panic!("{kind} keeps no wreck"))
+                .vertices
+                .clone();
+            let (_, low) = grounding(&wreck, [0.; 3], &world.terrain, at);
+            assert!(
+                low.abs() <= 1.,
+                "{kind}'s wreck lies {low:.2} ft off the ground"
+            );
+            // Its hit box stands where it is drawn.
+            let bounds = world.combat.state.ground_bounds(unit.id.0).unwrap();
+            let bottom = bounds.center[1] - bounds.half[1];
+            let ground = f64::from(world.terrain.height(at[0] as f32, at[2] as f32));
+            assert!(
+                (bottom - ground).abs() <= 1.,
+                "{kind}'s box bottom {bottom} ground {ground}"
+            );
+        }
+        // A moving T-80, tilted to the slope.
+        let mut world = build("UKR", "QUCOL");
+        let mut out = TickOutput::default();
+        for _ in 0..120 * 60 {
+            let input = SeatInput {
+                tick: world.tick(),
+                ..SeatInput::default()
+            };
+            world.step(&[input], &mut out).unwrap();
+        }
+        let mut scenery = Scenery::build(&resources, &world.terrain).unwrap();
+        let picture = world.combat.render_snapshot().clone();
+        let t80 = picture
+            .surface
+            .iter()
+            .find(|pose| world.terrain.surface.unit(pose.id).unwrap().resource == "T80.NT")
+            .unwrap()
+            .clone();
+        let camera = crate::camera::Camera::new();
+        scenery.set_origin(t80.position);
+        let one = crate::snapshot::RenderSnapshot {
+            surface: vec![t80.clone()],
+            ..Default::default()
+        };
+        let drawn = scenery.surface_vertices(&one, &|_| true, &camera);
+        let (clearance, low) = grounding(&drawn, scenery.origin, &world.terrain, t80.position);
+        assert!(
+            low.abs() <= 1. && clearance > -1.,
+            "moving T-80: low {low:.2}, clearance {clearance:.2}"
+        );
+        let mut wrecked = t80;
+        wrecked.wrecked = true;
+        let one = crate::snapshot::RenderSnapshot {
+            surface: vec![wrecked.clone()],
+            ..Default::default()
+        };
+        let drawn = scenery.surface_vertices(&one, &|_| true, &camera);
+        let (_, low) = grounding(&drawn, scenery.origin, &world.terrain, wrecked.position);
+        assert!(
+            low.abs() <= 1.,
+            "moving T-80's wreck lies {low:.2} ft off the ground"
+        );
+    }
+
     #[test]
     fn static_cache_tracks_standing_objects_and_preserves_lines() {
         let mut scene = scenery();

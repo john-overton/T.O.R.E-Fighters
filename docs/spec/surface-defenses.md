@@ -695,12 +695,14 @@ KS-12 and KS-19 (fuze 250 ft, collateral 750 ft at 35 percent):
   flight to the lead point and bursts then, or earlier if it passes within the
   250 ft fuze radius of a hostile aircraft. Fitted (the time fuze is not in the
   data; the proximity radius is).
-- A burst deals collateral damage, plays the record's own explosion (type 27,
-  the original's air flak row: size 130, 2 s, air explosion sounds; retail)
-  and shows the FLAKA, FLAKB or FLAKC sprite with a dark puff that lingers
+- A burst deals collateral damage and plays an air flak explosion: the KS-12's
+  is the record's own type 27 (the original's air flak row: size 130, 2 s,
+  air explosion sounds; retail), the KS-19's is type 28 (size 170, 1 s, the
+  heavy flak sounds; both records name 27, so the larger calibre's type is
+  fitted). Each shows its sheet (FLAKA, FLAKB) with a dark puff that lingers
   about 4 s and a point light
-  ([Destroyed looks and drawing](#destroyed-looks-and-drawing)). It has no
-  tracer, and a shell is not drawn in flight.
+  ([flak bursts, gunfire, launches and light](#flak-bursts-gunfire-launches-and-light)).
+  It has no tracer, and a shell is not drawn in flight.
 - Only a hostile aircraft in flight sets off the proximity fuze; a shell
   passes friendly aircraft and aircraft on the ground.
 - Startup shots 8: the first engagement opens with an eight-shell barrage
@@ -877,7 +879,7 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 | Battery launcher | Each salvo leaves from the nearest launcher with a loaded rail, line of sight and the target in its launch zone; the missile is the launcher's, its support the radar's | defined (John) |
 | Optical backup | Detection and support from the first live launcher, inside half the launch range and 10 nm, preparation doubled, no emitter and no lock tone | defined (agent), default pending John |
 | Barrage zone | A target volume 60 ft square and 20 ft tall on the ground (bombs can kill it); it wakes when a hostile is within 195 x 256 ft and fires each burst with its 33 percent chance at the nearest hostile's lead point clamped into its fire zone, scattered by the record's offset-fire angles (20 degrees) | fitted |
-| Resupply hook | A unit's stock (rails, magazine, spare magazines) and a "truck in reach" flag are open to the resupply slice; with the flag set an empty gun swaps a magazine from the truck | defined (John's rule, slice SR1 builds it) |
+| Resupply hook | A unit's stock (rails, magazine, spare magazines) and a "truck in reach" flag that the [resupply](#resupply) step sets each tick before the controllers read it; with the flag set an empty gun swaps a magazine from the truck, and an Empty unit returns to Search once a rail or magazine is loaded | defined (John's rule, built in slice SR1) |
 
 `--surface-trace` flies a scripted pass past one unit and prints the
 controller's phases, shots and bursts, radar and HARM events and the RWR
@@ -1054,6 +1056,45 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
 - Ships are never resupplied (no trucks at sea).
 - State (rails, magazines, reserves, rearm timers) is part of the mission
   checkpoint.
+
+### How it runs
+
+Slice SR1 (2026-10-10) built the rules above. The details a player or a tester
+can see, and where the rules left a choice (defined, agent, unless marked):
+
+| Rule | As built | Basis |
+| --- | --- | --- |
+| Who is a truck | Every supply truck listed in the surface: the added ones and the MISTRK and TRUCK units already standing in a layout or template. A truck counts only while it stands (hit points above 0) | defined (John) |
+| Whose truck | The same side as the unit. A truck of the other side, or a neutral one, does nothing | defined (John) |
+| Reach | Straight-line distance on the map between the truck's and the unit's positions this tick, 528 ft or less. Height does not count. A truck on a route (`~QUFACT`, `~QUBUNK`) is measured where it is now, not where it was placed | defined (John), agent for the horizontal reading |
+| Who is resupplied | Every armed unit that is not a ship: launchers, guns, tanks, APCs, troops. Radars, trucks and structures carry nothing to refill | defined (John) |
+| The flag | Each tick, before the controllers run, a unit in reach of a live truck is marked so; the mark clears the same tick the last truck dies or drives out of reach | defined (agent) |
+| Rail timer | Starts the first tick a unit has an empty rail and a truck in reach; completes 600, 420 or 300 s later (the table above) and refills every empty rail in one step. Rails that were loaded are untouched. The timer is cleared when no truck is in reach or no rail is empty, so a new rearm always takes the full time | defined (John), times fitted |
+| Magazine timer | Per gun mount: runs while a truck is in reach and the mount has fewer than two spare magazines; each completion adds one spare, so a gun at none is full again after two swap periods. Cleared like the rail timer | defined (John) |
+| The loaded magazine | A truck never tops up the magazine in the gun, only the spares; an empty gun swaps a spare in (or draws from the truck when there is none) | defined (John) |
+| Truck swap and refill together | An empty gun with no spares and a truck in reach starts a swap at once; the swap draws from the truck. The reserve refill that completes on the same tick as the swap is added after it, so the gun ends with a full magazine and one spare after one swap period | defined (agent) |
+| Empty and Search | A unit that ran dry (Empty) goes back to Search the tick after its rails or magazine are loaded | defined (agent) |
+
+```mermaid
+sequenceDiagram
+    participant World as World tick
+    participant Sup as Resupply step
+    participant Ctl as Surface controllers
+    World->>Sup: truck positions, hit points, unit poses
+    Sup->>Ctl: each unit's "truck in reach" flag, timers advance
+    Ctl->>Ctl: engage, fire, swap magazines (a truck's swap draws from the truck)
+    Ctl->>Sup: tick over
+    Sup->>Ctl: apply finished rearms and refills, trace them
+```
+
+The tests are in `supply_tests.rs` (rail times per system, reach, a destroyed
+truck, one truck for several units, spare magazines, ships, a truck on a route,
+a checkpoint mid-rearm) and the `surface-resupply` battery scenario runs the
+Ukraine factory's seed 2 group (an SA-6 battery rearming after 420 s and
+firing, the trucks destroyed and nothing rearming, a ZSU-23 that gains a spare
+magazine every 120 s, swaps in 120 s and goes silent without a truck). The
+trace flags `--drain`, `--drain-reserve` and `--kill-truck-at S` set those up
+(see [development](../DEVELOPMENT.md#surface-unit-inspection)).
 
 ```mermaid
 flowchart TD
@@ -1243,7 +1284,7 @@ John accepted the recommended looks (12.4).
 | --- | --- | --- |
 | Ships | Swap to the `_A` shape (every ship has one), keep it in place, burning with fire and smoke for 15 minutes | retail shapes |
 | Carriers | The `_A` hull, the island's own damage branch (`shape::DAMAGED_WORD`), the deck tractors as they were and the deck crew gone, burning | retail shapes, fitted parts rule |
-| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose on the ground, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
+| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose, standing on its own lowest point like the unit it replaces, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
 | Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; no fire | retail |
 | Other buildings | Removed, with the crater the hit leaves; no fire | current behaviour |
 | Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment drawn with the type's own `_B` or `_D` shape | existing aircraft path |
@@ -1294,16 +1335,46 @@ time, with units destroyed and rails emptied on request, and `--surface-preview
 OUT destroyed` draws each class beside its destroyed look (see
 [development](../DEVELOPMENT.md#surface-unit-inspection)).
 
-### Flak bursts, tracers and light
+### Flak bursts, gunfire, launches and light
 
-- **Flak burst.** The FLAKA sheet for 85 mm, FLAKB for 100 mm, FLAKC for any
-  later calibre (fitted), the record's explosion sound, a dark puff that
-  lingers about 4 s, and a point light added to the flare light list with the
-  flare law (four times brighter at night). Light 160 for 85 mm and 200 for 100
-  mm, life 10 ticks (fitted). Flak has no tracer.
-- **AAA tracers.** The existing tracer flag (every third round) and drawing. A
-  muzzle flash for AAA is optional.
-- Moving units show on the minimap and flight map as surface contacts.
+John's request (2026-10-10): AAA and flak fire real shells, flak has no
+tracers, and flak explosions flash light. Everything below is presentation
+only (opinionated, agent, 2026-10-10: the numbers are fitted by eye from the
+preview sheets), rebuilt from the picture every frame, so single player, a
+networked client and a replay show the same. Lights ride the AC-130's point
+light path (a warm light with the flare's law: inverse square, 1,500 ft reach,
+four times as bright at night, blending in at dusk; strengths are in the flare
+light's units, one flare is 4,000).
+
+| What | Look | Basis |
+| --- | --- | --- |
+| Flak burst, 85 mm (KS-12) | Explosion type 27: the `FLAKA` sheet, 2 s, size 130 | retail row |
+| Flak burst, 100 mm (KS-19) | Explosion type 28: the larger `FLAKB` sheet, 1 s, size 170, heavy flak sounds | fitted (both records name 27) |
+| Flak light | One point light at the burst: 10,000 (85 mm) or 14,000 (100 mm) at the peak, held 2 ticks, gone by 14 ticks | fitted |
+| Flak puff | Three dark puffs growing from 0.3 to 0.8 of the explosion's width, fading in over 0.2 s and out by 4 s, drifting up 3 ft/s | fitted |
+| Flak shell in flight | Not drawn; no tracer | John |
+| AAA tracers | The existing flag and drawing: every third round for guns whose tuning row has a tracer (Shilka, Tunguska, Vulcan, ship guns, 37 mm, 57 mm), none for flak, tank guns and small arms | spec-derived ([AAA tuning](#aaa-tuning)) |
+| Muzzle flash and firing light | The gun-flash sprite at the muzzle, along the barrel, in three classes: light cannon (ZSU-23, 2S6, Vulcan and Phalanx, 30 mm ship guns, BMP-2, BTR-80, M113, M2: a flicker that never goes dark at any cadence, 8 ft, light 160), 37 mm and 57 mm (a distinct pop, 14 ft, light 340, one puff) and 85 mm to 125 mm guns (flak and tank guns: a big flash, 28 ft, light 700, three puffs). One flash per gun, its newest round. The barrage zone and small arms flash nothing | fitted |
+| SAM launch | When the motor lights (speed 30 ft/s; the SA-6 sits about 2 s on its rail first): a flash 40 ft long along its heading for 0.15 s, a point light of 2,800 fading over 40 ticks, and a white cloud of six puffs growing from 10 to 60 ft over 8 s. The missile's own smoke trail is the simulation's | fitted |
+| Wreck smoke | A destroyed unit whose wreck burns (ships, vehicles, launchers and guns) has the simulation's crash-site fire and its smoke column, 15 minutes, one column per wreck. The fire sprite is fitted to the unit: 30 ft wide for a 100 point vehicle, growing with the square root of its hit points, from 24 ft to 140 ft (a crash site's is 100 ft). A destroyed unit that does not burn (a building or bunker) sends up a smaller dark column of its own for 15 minutes, the last minute fading it out: a puff every 0.4 s rising 16 ft/s in a fixed 7 ft/s breeze, growing from 6 ft by 3 ft/s, living 30 s, sized by its hit points ((hp / 100) to the one quarter, from 0.6 to 2.4); the 24 newest draw. A wreck that lights its fire later gives up its own column | fitted |
+
+A column or a puff starts from the picture alone: a destroyed unit first seen
+dead (a restart in progress, a seek) starts its column ten seconds old. The
+fire's width comes from the unit's hit points in the picture, so a replay
+(which records fires without a size) draws the crash site's 100 ft until the
+replay slice carries it.
+
+**The flight map** shows surface units known by sight (identified, not just
+painted by radar) with the symbol of their kind and the tile of their side:
+a gun, launcher, tank, truck, radar or ship symbol from `MCICONS.PIC`, on its
+blue tile for the viewer's own side and its red tile for the other, so a
+Redfor pilot sees the colours the other way round. A unit with no side stays
+on the grey tile that claims nothing, and a contact only the radar found stays
+the yellow "unknown surface" placeholder: unknown contacts never show
+allegiance ([flight map](flight-map.md)). The RWR draws the square of a radar
+whose controller is tracking or firing at the player bright and steady
+([RWR](rwr.md)).
+
 
 ## Objectives, scoring and debrief
 

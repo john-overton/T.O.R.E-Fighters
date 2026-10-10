@@ -153,8 +153,8 @@ pub enum EmitterKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EmitterState {
     Detected,
-    /// Manual-defined illumination state, awaiting explicit lock evidence.
-    #[allow(dead_code)]
+    /// Manual-defined illumination state: a surface radar's controller is
+    /// tracking or firing at this aircraft (steady and bright).
     Painting,
     Tracking,
 }

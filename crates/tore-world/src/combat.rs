@@ -356,6 +356,8 @@ impl Combat {
         let locks = &mut readout.rwr.locks;
         locks.extend(self.surface.locks_on(plane));
         locks.truncate(crate::readout::MAX_AI_THREATS);
+        // The radars painting the plane show bright on its RWR.
+        readout.rwr.painting = self.surface.painting(plane);
         Some(readout)
     }
     /// What the mission asks of `plane` about target `id` when it is one of

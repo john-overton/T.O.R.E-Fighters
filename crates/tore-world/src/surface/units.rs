@@ -213,9 +213,11 @@ pub struct SurfaceUnitState {
     pub mounts: Vec<MountStock>,
     pub radar: RadarState,
     /// A live friendly supply truck is within reach this tick. The resupply
-    /// slice sets it before the surface tick; it lets an empty gun swap a
-    /// magazine from the truck.
+    /// slice sets it before the surface tick ([`super::supply::step`]); it
+    /// lets an empty gun swap a magazine from the truck.
     pub supply: bool,
+    /// The running rearm and magazine refill timers.
+    pub resupply: super::supply::Resupply,
 }
 
 impl SurfaceUnitState {
@@ -228,6 +230,7 @@ impl SurfaceUnitState {
             mounts: Vec::new(),
             radar: RadarState::default(),
             supply: false,
+            resupply: super::supply::Resupply::default(),
         }
     }
     /// Its launchers' empty rails: hardpoints of a missile weapon below

@@ -224,6 +224,24 @@ struct Mover {
     /// Feet its shape stands above its pose (a land unit on its lowest
     /// point, as its standing placement and hit box).
     lift: f64,
+    /// The same for its wreck, on the wreck's own lowest point.
+    wreck_lift: f64,
+}
+
+/// Feet a land unit's shape stands above its placement point so its lowest
+/// vertex (track or wheel bottom) meets the ground: the shape's lowest point
+/// at `scale`, never negative.
+pub(super) fn ground_lift(shape: &Shape, scale: f64) -> f64 {
+    let low = shape
+        .faces
+        .iter()
+        .flat_map(|face| face.positions.iter().map(|p| f64::from(p[2])))
+        .fold(f64::INFINITY, f64::min);
+    if low.is_finite() {
+        (-low * scale).max(0.)
+    } else {
+        0.
+    }
 }
 
 /// A launcher whose rails show its load.
@@ -386,6 +404,14 @@ impl SurfaceArt {
                 crew: None,
             });
         }
+        // A land unit's wreck lies on its own lowest point too (the DEST
+        // wreck reaches below its origin); a ship's `_A` hull keeps the
+        // waterline and a building's variant its depth.
+        let land = definition.is_some_and(tore_world::terrain::stands_on_wheels);
+        let wreck_lift = match &wreck {
+            Some(model) if land => ground_lift(&model.shape, model.scale),
+            _ => 0.,
+        };
         if surface.courses.contains_key(&UnitId(id))
             && let Some(name) = &main_shape
         {
@@ -399,6 +425,7 @@ impl SurfaceArt {
                     },
                     wreck,
                     lift,
+                    wreck_lift,
                 },
             );
             return Ok((Drawn::default(), true));
@@ -411,7 +438,9 @@ impl SurfaceArt {
                 &Stand {
                     scale: model.scale,
                     basis: stand.basis,
-                    origin: std::array::from_fn(|i| stand.origin[i] - stand.basis.up[i] * lift),
+                    origin: std::array::from_fn(|i| {
+                        stand.origin[i] + stand.basis.up[i] * (wreck_lift - lift)
+                    }),
                 },
                 &self.layers,
                 &mut drawn,
@@ -670,7 +699,11 @@ impl SurfaceArt {
             let basis = Basis::new(yaw, pitch, bank);
             let at = local(pose.position);
             // A wreck lies on the ground; the unit stands on its lowest point.
-            let lift = if pose.wrecked { 0. } else { mover.lift };
+            let lift = if pose.wrecked {
+                mover.wreck_lift
+            } else {
+                mover.lift
+            };
             let stand = Stand {
                 scale: model.scale,
                 basis,
@@ -930,6 +963,7 @@ mod tests {
                     scale: 1.,
                 }),
                 lift: 3.,
+                wreck_lift: 0.,
             },
         );
         art.movers.insert(
@@ -941,6 +975,7 @@ mod tests {
                 },
                 wreck: None,
                 lift: 0.,
+                wreck_lift: 0.,
             },
         );
         let pose = |id: u32, wrecked: bool| SurfacePose {

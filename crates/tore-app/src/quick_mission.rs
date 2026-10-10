@@ -787,6 +787,37 @@ impl QuickMission {
         spec.surface_seed = self.surface_seed;
         Ok(spec)
     }
+    /// The creator's ground target (field 30) by its template's stem, with
+    /// the AAA and SAM levels (fields 31 and 32, each 0 to 3) and the layout's
+    /// seed: what `--ground-target STEM --defenses AAA SAM --surface-seed N`
+    /// set for a launched flight or a capture.
+    pub fn choose_ground_target(
+        &mut self,
+        stem: &str,
+        (aaa, sam): (usize, usize),
+        seed: u32,
+    ) -> Result<(), String> {
+        let theater = self
+            .theater_codes
+            .get(self.draft.values[13])
+            .ok_or("Choose a theater.")?
+            .clone();
+        let stem = stem.trim_start_matches('~').to_ascii_uppercase();
+        let index = ground_targets(&theater)
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(&stem))
+            .ok_or_else(|| {
+                format!(
+                    "{theater} has no ground target {stem}: {}",
+                    ground_targets(&theater).join(" ")
+                )
+            })?;
+        self.draft.values[30] = index + 1;
+        self.draft.values[31] = aaa;
+        self.draft.values[32] = sam;
+        self.surface_seed = seed;
+        Ok(())
+    }
     /// Draws the surface layout's seed for the flight about to start, when it
     /// has a ground target to lay out. Kept until the next flight, so a
     /// restart reuses it. `fitted`: any nonzero 32-bit value; the clock and
