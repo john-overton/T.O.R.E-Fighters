@@ -46,6 +46,13 @@ bind keyboard Alt-ArrowLeft sight-left hold\n\
 bind keyboard Alt-ArrowRight sight-right hold\n\
 bind keyboard Alt-ArrowUp sight-up hold\n\
 bind keyboard Alt-ArrowDown sight-down hold\n\
+bind keyboard Ctrl-r a-g-radar press\n\
+bind keyboard Shift-r a-g-radar press\n\
+bind keyboard Ctrl-l laze press\n\
+bind keyboard / sight-next press\n\
+bind keyboard Ctrl-m weapon-seeker-mode press\n\
+bind keyboard Tab fire-gun press\n\
+bind keyboard Ctrl-x nearest-ground press\n\
 bind keyboard Shift-e eject press\n\
 bind keyboard n airport-nav press\n\
 bind keyboard Shift-n airport-next press\n\

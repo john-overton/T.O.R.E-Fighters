@@ -1331,6 +1331,20 @@ impl App {
             "range-target" => Command::RangeReset,
             "sight-designate" => Command::SightDesignate,
             "sight-pin" => Command::SightPinGround,
+            // A2G keys (K1): bound and listed, not wired to the sim yet.
+            "a-g-radar" | "laze" | "sight-next" | "fire-gun" | "nearest-ground" => {
+                let label = match name.as_str() {
+                    "a-g-radar" => "Air-to-ground radar",
+                    "laze" => "Laser",
+                    "sight-next" => "Sight: next visible object",
+                    "fire-gun" => "Fire the gun",
+                    _ => "Nearest ground target",
+                };
+                println!("{name}: not implemented yet");
+                self.flight_ui
+                    .message(format!("{label}: not implemented yet"));
+                Command::None
+            }
             "sight-zoom-in" => Command::SightZoom(1),
             "sight-zoom-out" => Command::SightZoom(-1),
             "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),

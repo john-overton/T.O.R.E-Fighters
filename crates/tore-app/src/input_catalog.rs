@@ -641,9 +641,23 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd(
         "weapon-seeker-mode",
-        "Seeker mode (bore/cued)",
+        "Delivery mode (CCIP/LVL, bore/cued)",
         Weapons,
-        &[],
+        &["Ctrl-m"],
+    ),
+    cmd("sight-next", "Sight: next visible object", Weapons, &["/"]),
+    cmd("laze", "Laser on or off", Weapons, &["Ctrl-l"]),
+    cmd(
+        "fire-gun",
+        "Fire the gun whatever is selected",
+        Weapons,
+        &["Tab"],
+    ),
+    cmd(
+        "nearest-ground",
+        "Nearest ground target (Easy targeting)",
+        Weapons,
+        &["Ctrl-x"],
     ),
     cmd("chaff", "Release chaff", Weapons, &["Insert"]),
     cmd("flare", "Release flare", Weapons, &["Delete"]),
@@ -676,6 +690,12 @@ pub const ENTRIES: &[Entry] = &[
     cmd("fail-station", "Fail station (test)", Weapons, &[]),
     cmd("damage-player", "Damage player (test)", Weapons, &[]),
     cmd("radar", "Radar power / radar channel", Sensors, &["r"]),
+    cmd(
+        "a-g-radar",
+        "Air-to-ground radar on or off",
+        Sensors,
+        &["Ctrl-r", "Shift-r"],
+    ),
     cmd("jammer", "Jammer (ECM)", Sensors, &["j"]),
     cmd("sensor-channel", "Cycle sensor channel", Sensors, &["m"]),
     cmd("sensor-infrared", "Infrared channel", Sensors, &["i"]),
@@ -1443,7 +1463,8 @@ mod tests {
         assert_eq!(owners("Ctrl-a"), ["waypoint-autopilot"]);
         assert_eq!(owners("Alt-a"), ["key:Alt-a"]);
         assert!(owners("Shift-a").is_empty());
-        assert!(owners("Ctrl-z").is_empty() && owners("Ctrl-x").is_empty());
+        assert!(owners("Ctrl-z").is_empty());
+        assert_eq!(owners("Ctrl-x"), ["nearest-ground"]);
         assert_eq!(
             Airframes::ALL.but(Airframes::VECTOR_JET).describe(),
             "not on AV-8 / Yak-141"
