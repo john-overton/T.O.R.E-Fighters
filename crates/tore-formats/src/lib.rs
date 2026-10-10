@@ -18,6 +18,7 @@ pub mod radio;
 pub mod shape;
 pub mod static_object;
 pub mod strip;
+pub mod surface_set;
 pub mod surface_unit;
 pub mod text;
 pub mod theater;

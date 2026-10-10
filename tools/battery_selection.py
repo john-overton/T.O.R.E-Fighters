@@ -432,6 +432,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-formats/src/executable.rs", ("menus-validate", "replay-settings"), "importer data"),
     _r("crates/tore-formats/src/module.rs", ("menus-validate", "replay-settings"), "importer data"),
     _r("crates/tore-formats/src/dcl.rs", ("menus-validate", "replay-settings"), "importer decompression"),
+    _r("crates/tore-formats/src/surface_set.rs", ("menus-validate", "replay-settings", "net-builds"), "what the import keeps for ground targets"),
+    _r("crates/tore-formats/src/surface_set/*", ("menus-validate", "replay-settings", "net-builds"), "what the import keeps for ground targets"),
     _r("crates/tore-formats/src/lib.rs", ("menus-validate", "flight-maneuvers", "ai-fights"), "tore-formats public surface"),
     _r("crates/tore-formats/*", ("menus-validate", "menus-creator", "flight-maneuvers", "ai-fights"), "tore-formats, unmapped file"),
     # tore-input and friends.
@@ -446,6 +448,18 @@ RULES: tuple[Rule, ...] = (
     _r(
         "crates/tore-import/src/source.rs", ("menus-validate", "replay-settings", "net-builds"),
         "the import's source entry (build and importer); nothing in single player reads it",
+    ),
+    _r(
+        "crates/tore-import/src/import.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "what the import selects and writes (net-content-builds imports the 1.0 disc)",
+    ),
+    _r(
+        "crates/tore-import/src/surface.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "the ground target data marker and lookups",
+    ),
+    _r(
+        "crates/tore-import/src/pack.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "the pack markers every start checks",
     ),
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
