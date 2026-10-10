@@ -1583,7 +1583,11 @@ flight at the jet, `--harm-at NM` puts an AGM-88 in flight at the unit's
 radar, `--kill-at S` destroys that radar, `--player-side red` flies for
 Redfor, `--condition night` darkens the sky, `--skill N` and `--rng N` fix the
 experience and the random draws, and `--near FT` follows the unit's
-neighbours too. A launcher in a SAM battery is traced with its battery's radar
+neighbours too. For resupply, `--drain` empties the followed units' rails and
+magazines at the start, `--drain-reserve` their spare magazines too, and
+`--kill-truck-at S` destroys the supply trucks within 0.1 mile of the unit; the
+trace prints `rearm` and `refill` lines and the final stock of every followed
+unit. A launcher in a SAM battery is traced with its battery's radar
 and launchers. It reads the same retail records, weapons and sensors too.
 The `surface-*` engagement battery scenarios run it.
 

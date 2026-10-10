@@ -24,6 +24,7 @@ pub mod layout;
 pub mod movement;
 pub mod parked;
 pub mod resolve;
+pub mod supply;
 pub mod units;
 
 pub use units::{

@@ -6,6 +6,7 @@
 use super::{
     BatteryState, Engager, MountStock, RadarState, SurfaceState, SurfaceUnitState, UnitId,
     movement::{Halt, Mover},
+    supply::Resupply,
     units::Seen,
 };
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
@@ -43,6 +44,8 @@ tore_sim::checkpoint_struct!(Mover {
     halt,
 });
 
+tore_sim::checkpoint_struct!(Resupply { rearm, refill });
+
 tore_sim::checkpoint_struct!(Seen {
     target,
     tick,
@@ -76,6 +79,7 @@ tore_sim::checkpoint_struct!(SurfaceUnitState {
     mounts,
     radar,
     supply,
+    resupply,
 });
 
 // The trace, locks, painting and places are rebuilt every surface tick.

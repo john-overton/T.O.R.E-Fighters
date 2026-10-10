@@ -879,7 +879,7 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 | Battery launcher | Each salvo leaves from the nearest launcher with a loaded rail, line of sight and the target in its launch zone; the missile is the launcher's, its support the radar's | defined (John) |
 | Optical backup | Detection and support from the first live launcher, inside half the launch range and 10 nm, preparation doubled, no emitter and no lock tone | defined (agent), default pending John |
 | Barrage zone | A target volume 60 ft square and 20 ft tall on the ground (bombs can kill it); it wakes when a hostile is within 195 x 256 ft and fires each burst with its 33 percent chance at the nearest hostile's lead point clamped into its fire zone, scattered by the record's offset-fire angles (20 degrees) | fitted |
-| Resupply hook | A unit's stock (rails, magazine, spare magazines) and a "truck in reach" flag are open to the resupply slice; with the flag set an empty gun swaps a magazine from the truck | defined (John's rule, slice SR1 builds it) |
+| Resupply hook | A unit's stock (rails, magazine, spare magazines) and a "truck in reach" flag that the [resupply](#resupply) step sets each tick before the controllers read it; with the flag set an empty gun swaps a magazine from the truck, and an Empty unit returns to Search once a rail or magazine is loaded | defined (John's rule, built in slice SR1) |
 
 `--surface-trace` flies a scripted pass past one unit and prints the
 controller's phases, shots and bursts, radar and HARM events and the RWR
@@ -1056,6 +1056,45 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
 - Ships are never resupplied (no trucks at sea).
 - State (rails, magazines, reserves, rearm timers) is part of the mission
   checkpoint.
+
+### How it runs
+
+Slice SR1 (2026-10-10) built the rules above. The details a player or a tester
+can see, and where the rules left a choice (defined, agent, unless marked):
+
+| Rule | As built | Basis |
+| --- | --- | --- |
+| Who is a truck | Every supply truck listed in the surface: the added ones and the MISTRK and TRUCK units already standing in a layout or template. A truck counts only while it stands (hit points above 0) | defined (John) |
+| Whose truck | The same side as the unit. A truck of the other side, or a neutral one, does nothing | defined (John) |
+| Reach | Straight-line distance on the map between the truck's and the unit's positions this tick, 528 ft or less. Height does not count. A truck on a route (`~QUFACT`, `~QUBUNK`) is measured where it is now, not where it was placed | defined (John), agent for the horizontal reading |
+| Who is resupplied | Every armed unit that is not a ship: launchers, guns, tanks, APCs, troops. Radars, trucks and structures carry nothing to refill | defined (John) |
+| The flag | Each tick, before the controllers run, a unit in reach of a live truck is marked so; the mark clears the same tick the last truck dies or drives out of reach | defined (agent) |
+| Rail timer | Starts the first tick a unit has an empty rail and a truck in reach; completes 600, 420 or 300 s later (the table above) and refills every empty rail in one step. Rails that were loaded are untouched. The timer is cleared when no truck is in reach or no rail is empty, so a new rearm always takes the full time | defined (John), times fitted |
+| Magazine timer | Per gun mount: runs while a truck is in reach and the mount has fewer than two spare magazines; each completion adds one spare, so a gun at none is full again after two swap periods. Cleared like the rail timer | defined (John) |
+| The loaded magazine | A truck never tops up the magazine in the gun, only the spares; an empty gun swaps a spare in (or draws from the truck when there is none) | defined (John) |
+| Truck swap and refill together | An empty gun with no spares and a truck in reach starts a swap at once; the swap draws from the truck. The reserve refill that completes on the same tick as the swap is added after it, so the gun ends with a full magazine and one spare after one swap period | defined (agent) |
+| Empty and Search | A unit that ran dry (Empty) goes back to Search the tick after its rails or magazine are loaded | defined (agent) |
+
+```mermaid
+sequenceDiagram
+    participant World as World tick
+    participant Sup as Resupply step
+    participant Ctl as Surface controllers
+    World->>Sup: truck positions, hit points, unit poses
+    Sup->>Ctl: each unit's "truck in reach" flag, timers advance
+    Ctl->>Ctl: engage, fire, swap magazines (a truck's swap draws from the truck)
+    Ctl->>Sup: tick over
+    Sup->>Ctl: apply finished rearms and refills, trace them
+```
+
+The tests are in `supply_tests.rs` (rail times per system, reach, a destroyed
+truck, one truck for several units, spare magazines, ships, a truck on a route,
+a checkpoint mid-rearm) and the `surface-resupply` battery scenario runs the
+Ukraine factory's seed 2 group (an SA-6 battery rearming after 420 s and
+firing, the trucks destroyed and nothing rearming, a ZSU-23 that gains a spare
+magazine every 120 s, swaps in 120 s and goes silent without a truck). The
+trace flags `--drain`, `--drain-reserve` and `--kill-truck-at S` set those up
+(see [development](../DEVELOPMENT.md#surface-unit-inspection)).
 
 ```mermaid
 flowchart TD

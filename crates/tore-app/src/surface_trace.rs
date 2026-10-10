@@ -9,6 +9,7 @@
 //!     [--altitude FT] [--speed KT] [--pass FT] [--from NM] [--seconds S]
 //!     [--condition NAME] [--chaff S] [--flares S] [--harm-at NM] [--kill-at S]
 //!     [--player-side red] [--invulnerable] [--quiet-shots]
+//!     [--drain] [--drain-reserve] [--kill-truck-at S]
 //! ```
 //!
 //! The aircraft flies north (or along `--heading`) at `--altitude` feet above
@@ -22,6 +23,11 @@
 //! aircraft when it is that close; `--kill-at S` destroys the radar (the
 //! battery's, or the unit itself) at S seconds. A battery launcher fights in
 //! the battery the layout formed; the trace follows its radar and launchers.
+//! The resupply checks (docs/spec/surface-defenses.md, "Resupply"): `--drain`
+//! empties the followed units' rails and magazines at the start,
+//! `--drain-reserve` empties their spare magazines too, and `--kill-truck-at
+//! S` destroys every supply truck within 0.1 mile of the unit at S seconds.
+//! A truck's rearm and reserve refill print as `rearm` and `refill` lines.
 //!
 //! The import does not keep the ground target templates and the types only
 //! they name yet, so the trace adds what the pack lacks from the retail
@@ -44,7 +50,7 @@ use tore_world::{
     mission::{Condition, Defense, MissionSpec},
     seats::{SeatCommand, SeatId, SeatInput},
     surface::{
-        IdRange, Surface, UnitId,
+        IdRange, RESUPPLY_RADIUS_FT, Surface, UnitId,
         fire::{Arsenal, Trace},
     },
     world::{Seating, TickOutput, World},
@@ -79,6 +85,9 @@ struct Options {
     flares: Option<f64>,
     harm_at_nm: Option<f64>,
     kill_at: Option<f64>,
+    drain: bool,
+    drain_reserve: bool,
+    kill_truck_at: Option<f64>,
     red: bool,
     invulnerable: bool,
     quiet_shots: bool,
@@ -111,6 +120,9 @@ fn options() -> AppResult<Options> {
         flares: None,
         harm_at_nm: None,
         kill_at: None,
+        drain: false,
+        drain_reserve: false,
+        kill_truck_at: None,
         red: false,
         invulnerable: false,
         quiet_shots: false,
@@ -158,6 +170,9 @@ fn options() -> AppResult<Options> {
             "--flares" => o.flares = Some(next()?.parse()?),
             "--harm-at" => o.harm_at_nm = Some(next()?.parse()?),
             "--kill-at" => o.kill_at = Some(next()?.parse()?),
+            "--drain" => o.drain = true,
+            "--drain-reserve" => o.drain_reserve = true,
+            "--kill-truck-at" => o.kill_truck_at = Some(next()?.parse()?),
             "--player-side" => o.red = next()?.eq_ignore_ascii_case("red"),
             "--invulnerable" => o.invulnerable = true,
             "--quiet-shots" => o.quiet_shots = true,
@@ -304,6 +319,8 @@ fn describe(trace: &Trace) -> String {
             if *flak { " flak" } else { "" }
         ),
         Trace::Swap { unit, mount } => format!("swap {:#x} m{mount}", unit.0),
+        Trace::Rearm { unit } => format!("rearm {:#x}", unit.0),
+        Trace::Refill { unit, mount } => format!("refill {:#x} m{mount}", unit.0),
         Trace::Radar { unit, on } => {
             format!("radar {:#x} {}", unit.0, if *on { "on" } else { "off" })
         }
@@ -335,6 +352,8 @@ fn about(trace: &Trace) -> Option<UnitId> {
         Trace::Phase { unit, .. }
         | Trace::Shot { unit, .. }
         | Trace::Swap { unit, .. }
+        | Trace::Rearm { unit }
+        | Trace::Refill { unit, .. }
         | Trace::Radar { unit, .. }
         | Trace::Shutdown { unit, .. } => Some(*unit),
         Trace::Battery { .. } => None,
@@ -365,6 +384,8 @@ struct Summary {
     inbound_tone: bool,
     swaps: u32,
     bursts: u32,
+    rearms: u32,
+    refills: u32,
 }
 
 /// A gun burst being summed up: first and last round's time, rounds.
@@ -516,6 +537,53 @@ pub fn run() -> AppResult<()> {
                 .collect::<Vec<_>>()
         );
     }
+    // The supply trucks that serve the unit where it stands: its side, within
+    // 0.1 mile of its placement.
+    let trucks: Vec<UnitId> = surface
+        .trucks
+        .iter()
+        .filter(|truck| {
+            surface
+                .unit(truck.id)
+                .zip(surface.unit(unit))
+                .is_some_and(|(truck, here)| {
+                    truck.side == here.side
+                        && f64::from(truck.position[0] - here.position[0])
+                            .hypot(f64::from(truck.position[2] - here.position[2]))
+                            <= RESUPPLY_RADIUS_FT
+                })
+        })
+        .map(|truck| truck.id)
+        .collect();
+    println!(
+        "surface-trace: trucks {}",
+        if trucks.is_empty() {
+            "none".to_owned()
+        } else {
+            trucks
+                .iter()
+                .map(|id| format!("{:#x}", id.0))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    );
+    // The resupply checks start the followed units short of rounds.
+    if o.drain || o.drain_reserve {
+        world.combat.surface.arm(&surface.arsenal);
+        for id in &focus {
+            let Some(state) = world.combat.surface.unit_mut(*id) else {
+                continue;
+            };
+            for stock in &mut state.mounts {
+                if o.drain {
+                    stock.loaded = 0;
+                }
+                if o.drain_reserve && stock.reserve.is_some() {
+                    stock.reserve = Some(0);
+                }
+            }
+        }
+    }
     let center = arms.position;
     let heading = o.heading_deg.to_radians();
     let forward = [heading.sin(), 0., heading.cos()];
@@ -534,6 +602,7 @@ pub fn run() -> AppResult<()> {
     let mut last_flare = f64::NEG_INFINITY;
     let mut harm_fired = false;
     let mut killed = false;
+    let mut trucks_killed = false;
     let mut out = TickOutput::default();
     let mut bursts: BTreeMap<(UnitId, usize), OpenBurst> = BTreeMap::new();
     let harm = resources
@@ -613,6 +682,24 @@ pub fn run() -> AppResult<()> {
             }
             line(t, format_args!("killed {:#x}", radar.0));
             killed = true;
+        }
+        if let Some(at) = o.kill_truck_at
+            && !trucks_killed
+            && t >= at
+        {
+            for id in &trucks {
+                if let Some(target) = world
+                    .combat
+                    .state
+                    .targets
+                    .iter_mut()
+                    .find(|target| target.id == id.0)
+                {
+                    target.hp = 0;
+                }
+                line(t, format_args!("killed truck {:#x}", id.0));
+            }
+            trucks_killed = true;
         }
         let input = SeatInput {
             seat: SEAT,
@@ -702,6 +789,14 @@ pub fn run() -> AppResult<()> {
                 }
                 Trace::Swap { .. } => {
                     summary.swaps += 1;
+                    line(t, describe(trace));
+                }
+                Trace::Rearm { .. } => {
+                    summary.rearms += 1;
+                    line(t, describe(trace));
+                }
+                Trace::Refill { .. } => {
+                    summary.refills += 1;
                     line(t, describe(trace));
                 }
                 _ => line(t, describe(trace)),
@@ -826,18 +921,22 @@ pub fn run() -> AppResult<()> {
         }
     }
     let player_hp = world.combat.state.ownship(PLAYER).map_or(0, |own| own.hp);
-    if let Some(state) = world.combat.surface.unit(unit) {
+    // The subject's stock first, then the other followed units'.
+    for id in std::iter::once(unit).chain(focus.iter().copied().filter(|id| *id != unit)) {
+        let Some(state) = world.combat.surface.unit(id) else {
+            continue;
+        };
         for (index, stock) in state.mounts.iter().enumerate() {
             println!(
                 "surface-trace: stock {:#x} m{index} loaded {} reserve {}",
-                unit.0,
+                id.0,
                 stock.loaded,
                 stock.reserve.map_or("unlimited".into(), |r| r.to_string())
             );
         }
     }
     println!(
-        "surface-trace: summary bursts {} missiles {} rounds {} refused {} opening {} tracers {} swaps {} flak-bursts {} min-burst-ft {} hits {} player-hp {player_hp} decoy-rolls {} decoyed {} shutdowns {} first-launch-s {} ground-square {} lock-tone {} radar-lock-tone {} inbound-tone {}",
+        "surface-trace: summary bursts {} missiles {} rounds {} refused {} opening {} tracers {} swaps {} rearms {} refills {} flak-bursts {} min-burst-ft {} hits {} player-hp {player_hp} decoy-rolls {} decoyed {} shutdowns {} first-launch-s {} ground-square {} lock-tone {} radar-lock-tone {} inbound-tone {}",
         summary.bursts,
         summary.missiles,
         summary.rounds,
@@ -845,6 +944,8 @@ pub fn run() -> AppResult<()> {
         summary.opening,
         summary.tracers,
         summary.swaps,
+        summary.rearms,
+        summary.refills,
         summary.flak,
         summary
             .min_burst_ft
