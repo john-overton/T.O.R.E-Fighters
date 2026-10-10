@@ -351,6 +351,104 @@ extra shape slots, different selectors/classes and unsupported layouts fail.
 This is metadata inspection, not object placement or full resource resolution.
 [Definition-reader evidence](../baselines/native-strip-definition.md).
 
+## Placed object scale (2026-10-10)
+
+Implementation, slice SC1 of the surface objectives round. John's direction
+(2026-10-10): "Ideally runways and buildings and aircraft are all the same
+realistic scale." The rule lives in one function,
+`tore_world::terrain::placed_shape_scale`, with its parts in
+`terrain::PlacedSize`. Every placed object's drawn mesh, contact box,
+collision box and hit box comes from it through `Placements::stance`, and so
+does a runway's length (`strip_length_ft`).
+
+**The rule.** Feet per shape unit of a placed object are the SH header scale
+`2^(e-8)` times a factor:
+
+| Placed object | Factor | Why |
+| --- | --- | --- |
+| Runways and strips: any definition naming `_STRIPProc` | 1 | A runway's length is a real map length. At a third, the 4,060 ft theater runways would be 1,350 ft and the 1,074 ft short strips 358 ft. |
+| Bridges and roads: `MAP_TIED_TYPES` (BRDEND, BRDMID, BR1/2/3 END and MID, BRD1 to BRD4, ROAD, ROAD2, ROAD4, ROADC) | 1 | They span real terrain. A bridge's ends and middle overlap only at the shape scale (see below). |
+| Everything else: buildings, theater objects, city blocks, surface units | 1/3 (`REAL_SIZE_FACTOR`) | Real size, the aircraft renderer's factor. |
+
+Runways are told apart by their definition. Bridges and roads are not: their
+OBJECT records are `_OBJProc` objects like any building, and no flag or class
+word separates them (a bridge end has flags `$901`, a crane the `$20921` of a
+bridge middle, a road the `$0` of a tree, all FA_2.LIB), so the twelve bridge
+and four road types are listed by name in `MAP_TIED_TYPES`, the one list.
+
+Lengths that a record gives in retail feet at the shape scale follow the same
+factor, through `PlacedSize::feet`: an NT mount position
+(`surface::mount_position_ft`, a Krivak's mount at z -225 lies 75 ft aft) and
+a surface unit shape's F2 ground offset (`surface::ground_offset_ft`). No
+code read either before this slice; the surface controller and presentation
+slices use these helpers.
+
+Provenance: `opinionated` (John, realistic scale, 2026-10-10), with the factor
+`fitted`. It is not retail parity: retail draws every shape about three times
+real size.
+
+**Evidence that retail is 3x and the map is real.** The full investigation is
+in the surface round's scale finding; its native results:
+
+- Both camera-relative shape draw entries in FA.EXE (`0x4d057c`, `0x4d0cf7`)
+  shift by the header exponent word alone, on fixed8 feet world coordinates,
+  with no separate factor for aircraft. OpenFA reads shapes the same way.
+- PT, NT and STRIP data in feet match the meshes only at `2^(e-8)`: AC-130 PT
+  gun positions, KRIVAK.NT mounts (z -225, -310 and +300 inside a hull box of
+  -492 to 720), RUNWAY.SH STRIP anchors at scale 4, and the F2 contact offset.
+- Map positions are real feet: FRA.MM Paris to Brussels is 860,000 ft (262 km,
+  real 264 km).
+- At a third, shapes come out at their real size:
+
+| Shape | e | Retail scale (ft) | Drawn here (ft) | Real |
+| --- | --- | --- | --- | --- |
+| F18 (F/A-18D, aircraft renderer) | 8 | 109 x 168 | 36 x 56 | 40 span, 56 long |
+| NIMZ (Nimitz) | 10 | 3,276 long | 1,092 | 1,092 |
+| KRIV (Krivak) | 10 | 1,216 long | 405 | 405 |
+| T72 / ZSU23 | 8 | 90 / 63 | 30 / 21 | 31 / 21 |
+| HANGR hangar | 10 | 472 x 900 x 196 | 157 x 300 x 65 | large hangar |
+| BNK2 hardened shelter | 9 | 324 x 420 x 164 | 108 x 140 x 55 | about 80 x 120 x 30 |
+| CTWR1 control tower | 11 | 192 x 192 x 544 | 64 x 64 x 181 | 100 to 200 tall |
+| RUNWAY.SH (kept) | 10 | 6,000 long, pavement 368 wide | unchanged | 150 to 200 wide |
+
+Heights include the part of a building's mesh below its origin.
+
+**Bridges.** In ~FRA0.MM a BRDEND, a BRDMID and a BRDEND stand at z 800,293,
+803,221 and 806,101. At the shape scale (e 11) the middle spans plus or minus
+2,448 ft and each end overlaps it by 24 and 72 ft: one bridge over a river on
+the terrain. At a third there would be gaps of about 1,950 ft.
+
+**City blocks shrink.** CTYBKA to G (1,840 x 1,976 ft at the retail scale),
+TWNBKA to F (3,600 to 4,500 ft) and CITY1 to 3 (9,000 ft) are buildings and
+take the third. Checked against the city areas of the terrain texture
+in overhead and oblique captures of Ukraine and Greece: the blocks stand on the city patch, not on any
+particular texture feature, so a block shrinks in place and stays on its
+patch. In Greece the texture's street grid is near real scale (blocks about
+280 ft), and the shrunk buildings (about 100 to 400 ft) fit it where the
+retail-scale ones (up to 1,100 ft) covered several streets. Two costs remain.
+A whole cluster shrinks about its origin, so a CITY2 that covered 9,000 ft of
+a city patch covers 3,000 ft and the patch around it is texture only; shrinking
+each building about its own base would keep the footprint and is a possible
+follow-up. And in Ukraine the city texture itself is drawn coarse (its houses
+come out at about 150 to 200 ft), so real-size towers look small against it.
+Spacing does not decide it: UKR blocks stand on a checkerboard of about 2,000 ft
+cells, and CITY2 clusters about 9,500 to 12,000 ft apart.
+
+**What a player notices.** Buildings and units are a third the size in every
+axis, so their contact and hit boxes are too: bombs and guns need closer hits
+than in retail, and gaps between buildings are wider. Buildings stand where
+they were authored, so airports look sparser and a building that retail placed
+against an apron edge (FRA Chateaudun's shelters, for example) now stands a
+few hundred feet off it. The runway pavement keeps its retail width, about
+twice real (pending John). Composite runway shapes such as RNWY1 carry their
+own small structures, which stay at the shape scale with the runway.
+
+**What does not change.** Runway geometry, STRIP anchors, the ILS, AI taxi,
+landing and parking points, short-strip lengths, and ground-start slots all
+come from map-tied runways and stay as they were (validated: `--validate-ils`
+and ground-start, landing and parking probes give identical output before and
+after). Positions of every placed object are unchanged.
+
 ## Surface unit shapes: envelopes and sprites (2026-10-10)
 
 Research and implementation, slice S1 of the surface objectives round. Shapes
@@ -450,12 +548,11 @@ scenery build does not draw sprites yet.
 
 ### Size of surface units
 
-Under the scenery scale the reader's callers use (source units times
-2^(exponent - 8), taken as feet) the Krivak is 1,216 ft long and the
-Ticonderoga 1,696 ft. At the aircraft renderer's third of a foot per unit
+At the retail shape scale (source units times 2^(exponent - 8), taken as
+feet) the Krivak is 1,216 ft long and the Ticonderoga 1,696 ft. At a third
 they are 405 and 565 ft, their real lengths; the ZSU-23-4 (21 ft), M1 (32 ft)
-and T-72 (30 ft) agree too. This is recorded, not decided: the scenery scale
-is used unchanged here.
+and T-72 (30 ft) agree too. Since slice SC1 placed units are drawn at the
+third: see [placed object scale](#placed-object-scale-2026-10-10).
 
 ### Preview sheets
 

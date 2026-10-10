@@ -233,7 +233,7 @@ pub fn strip_length_ft(resources: &dyn ResourceSource, object_type: &str) -> Opt
     }
     let shape_bytes = resources.get(definition.main_shape.as_ref()?)?;
     let shape = tore_formats::shape::Shape::scenery(shape_bytes).ok()?;
-    let scale = tore_formats::shape::object_scale(shape_bytes).ok()?;
+    let scale = placed_shape_scale(&definition, shape_bytes).ok()?;
     let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
     for point in shape.faces.iter().flat_map(|face| &face.positions) {
         // The shape's third coordinate is the runway's forward axis.
@@ -251,16 +251,93 @@ pub fn strip_length_ft(resources: &dyn ResourceSource, object_type: &str) -> Opt
     Some(runway_length_ft(min * scale, max * scale, anchor))
 }
 
+/// The size a placed object is drawn at, against the retail shape scale.
+///
+/// Retail draws every shape at `2^(e-8)` feet per unit (the SH header
+/// exponent `e`), about three times real size, on a map whose positions are
+/// real feet. This game draws aircraft at real size, so placed objects are
+/// drawn at real size too (John, 2026-10-10: "runways and buildings and
+/// aircraft are all the same realistic scale"), except the objects whose size
+/// is part of the map. See docs/formats/objects-and-shapes.md, "Placed object
+/// scale".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlacedSize {
+    /// Runways and strips (`_STRIPProc`), bridges and roads: a runway's length
+    /// is a real map length and a bridge spans a river on the terrain, so
+    /// they keep the retail shape scale.
+    MapTied,
+    /// Every other placed object (buildings, theater objects, city blocks,
+    /// surface units): a third of the retail shape scale, its real size.
+    RealSize,
+}
+
+/// The fitted factor that brings a retail shape to real size: one third, the
+/// aircraft renderer's factor. Measured: at a third, an F/A-18D is 56 ft
+/// long, a Krivak 405 ft, a T-72 30 ft and a Nimitz 1,092 ft, their real
+/// sizes.
+pub const REAL_SIZE_FACTOR: f64 = 1.0 / 3.0;
+
+/// Map-tied types that the definition cannot name itself: the retail
+/// bridges and roads (FA_2.LIB). Their OBJECT records are `_OBJProc` objects
+/// like any building, and no flag or class word sets them apart (a bridge
+/// end has flags `$901`, a crane the `$20921` of a bridge middle, a road the
+/// `$0` of a tree), so they are listed by resource name. Runways need no
+/// entry: their definition names `_STRIPProc`.
+pub const MAP_TIED_TYPES: [&str; 16] = [
+    "BR1END.OT",
+    "BR1MID.OT",
+    "BR2END.OT",
+    "BR2MID.OT",
+    "BR3END.OT",
+    "BR3MID.OT",
+    "BRD1.OT",
+    "BRD2.OT",
+    "BRD3.OT",
+    "BRD4.OT",
+    "BRDEND.OT",
+    "BRDMID.OT",
+    "ROAD.OT",
+    "ROAD2.OT",
+    "ROAD4.OT",
+    "ROADC.OT",
+];
+
+impl PlacedSize {
+    /// The size rule of a placed type, from its definition.
+    pub fn of(definition: &tore_formats::static_object::Definition) -> Self {
+        let strip = definition.callbacks.iter().any(|name| name == "_STRIPProc");
+        let listed = MAP_TIED_TYPES
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(&definition.resource_name));
+        if strip || listed {
+            Self::MapTied
+        } else {
+            Self::RealSize
+        }
+    }
+    /// The factor on the retail shape scale.
+    pub fn factor(self) -> f64 {
+        match self {
+            Self::MapTied => 1.,
+            Self::RealSize => REAL_SIZE_FACTOR,
+        }
+    }
+    /// World feet of a length a record gives in retail feet at the shape
+    /// scale: an NT mount position, a shape's F2 ground offset.
+    pub fn feet(self, retail_feet: f64) -> f64 {
+        retail_feet * self.factor()
+    }
+}
+
 /// Feet per shape unit of a placed object: the reviewed SH header exponent
-/// (`2^(e-8)`), for buildings and surface units alike. Every placed object's
-/// drawn size and contact box (and so a surface unit's hit box) comes from
-/// this one value. Open question (surface-AI round, 2026-10-10): at this
-/// scale surface units draw about three times their real size (a Krivak
-/// 1,216 ft long against a real 405); a correction for NT units, once
-/// established, belongs here and nowhere else.
-pub fn placed_shape_scale(object_type: &str, shape_bytes: &[u8]) -> WorldResult<f64> {
-    let _ = object_type;
-    Ok(tore_formats::shape::object_scale(shape_bytes)?)
+/// (`2^(e-8)`) times the [`PlacedSize`] factor of its definition. Every
+/// placed object's drawn size, contact box, collision and hit box (through
+/// [`Placements::stance`]) and a runway's length come from this one value.
+pub fn placed_shape_scale(
+    definition: &tore_formats::static_object::Definition,
+    shape_bytes: &[u8],
+) -> WorldResult<f64> {
+    Ok(tore_formats::shape::object_scale(shape_bytes)? * PlacedSize::of(definition).factor())
 }
 
 impl Placements {
@@ -374,7 +451,7 @@ impl Placements {
                     }
                     self.shape_scales.insert(
                         object_type.to_owned(),
-                        placed_shape_scale(object_type, shape_bytes)?,
+                        placed_shape_scale(&definition, shape_bytes)?,
                     );
                     self.shapes.insert(object_type.to_owned(), shape);
                 }
@@ -432,7 +509,7 @@ impl Placements {
         if min.iter().any(|value| !value.is_finite()) {
             return None;
         }
-        // The reviewed SH header exponent drives both visual and contact scale.
+        // `placed_shape_scale` drives both visual and contact scale.
         let scale = self
             .shape_scales
             .get(&placement.object_type)
@@ -1042,6 +1119,81 @@ mod tests {
         let junk = BTreeMap::from([("AIRPORT.OT".to_string(), vec![0u8; 8])]);
         assert_eq!(strip_length_ft(&junk, "AIRPORT.OT"), None);
     }
+    fn definition(resource: &str, callback: &str) -> tore_formats::static_object::Definition {
+        tore_formats::static_object::Definition {
+            display_name: String::new(),
+            class_name: String::new(),
+            resource_name: resource.to_owned(),
+            main_shape: None,
+            callbacks: vec![callback.to_owned()],
+            hit_points: None,
+            category: 0,
+            radar_signature: 0,
+            infrared_signature: 0,
+            explosion: 0,
+            crater: 0,
+        }
+    }
+
+    /// A data module whose CODE section is a shape header with exponent `e`.
+    fn shape_with_exponent(e: u16) -> Vec<u8> {
+        let mut code = vec![0u8; 16];
+        code[6..8].copy_from_slice(&e.to_le_bytes());
+        let mut b = vec![0u8; 256 + code.len()];
+        b[..2].copy_from_slice(b"MZ");
+        b[60..64].copy_from_slice(&64u32.to_le_bytes());
+        b[64..68].copy_from_slice(b"PL\0\0");
+        b[68..70].copy_from_slice(&0x14cu16.to_le_bytes());
+        b[70..72].copy_from_slice(&1u16.to_le_bytes());
+        b[84..86].copy_from_slice(&32u16.to_le_bytes());
+        b[120..124].copy_from_slice(b"CODE");
+        for (off, v) in [(8, code.len()), (12, 4096), (16, code.len()), (20, 256)] {
+            b[120 + off..124 + off].copy_from_slice(&(v as u32).to_le_bytes());
+        }
+        b[256..].copy_from_slice(&code);
+        b
+    }
+
+    #[test]
+    fn placed_objects_are_real_size_and_map_tied_ones_keep_the_shape_scale() {
+        use PlacedSize::*;
+        // Runways by their callback, whatever their name.
+        assert_eq!(
+            PlacedSize::of(&definition("STRIP.OT", "_STRIPProc")),
+            MapTied
+        );
+        assert_eq!(
+            PlacedSize::of(&definition("MYFIELD.OT", "_STRIPProc")),
+            MapTied
+        );
+        // Bridges and roads by name, in any case.
+        for name in MAP_TIED_TYPES {
+            assert_eq!(PlacedSize::of(&definition(name, "_OBJProc")), MapTied);
+        }
+        assert_eq!(
+            PlacedSize::of(&definition("brdmid.ot", "_OBJProc")),
+            MapTied
+        );
+        // Buildings, city blocks and surface units are drawn at real size.
+        for (name, callback) in [
+            ("HANGR.OT", "_OBJProc"),
+            ("CTYBKA.OT", "_OBJProc"),
+            ("SA6.NT", "_GVProc"),
+            ("NIMITZ.NT", "_CARRIERProc"),
+        ] {
+            assert_eq!(PlacedSize::of(&definition(name, callback)), RealSize);
+        }
+        // HANGR.SH (e 10): 4 ft a unit in retail, 4/3 here; RUNWAY.SH keeps 4.
+        let e10 = shape_with_exponent(10);
+        let hangar = placed_shape_scale(&definition("HANGR.OT", "_OBJProc"), &e10).unwrap();
+        assert!((hangar - 4. / 3.).abs() < 1e-12);
+        let runway = placed_shape_scale(&definition("STRIP.OT", "_STRIPProc"), &e10).unwrap();
+        assert_eq!(runway, 4.);
+        // A record length in retail feet follows the same factor.
+        assert!((RealSize.feet(-225.) + 75.).abs() < 1e-12);
+        assert_eq!(MapTied.feet(-225.), -225.);
+    }
+
     #[test]
     fn the_map_edge_distance_is_measured_from_the_nearest_point_of_the_rectangle() {
         // 209 by 201 cells of 8,192 ft: the map runs 0..1,703,936 by 0..1,638,400.

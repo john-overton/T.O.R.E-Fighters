@@ -116,6 +116,25 @@ pub fn side_of_owner(redfor: Option<bool>) -> Side {
     }
 }
 
+/// An NT mount's position (`pos.x/y/z`, hull relative) in world feet, at the
+/// size the unit is drawn. The record gives retail feet at the shape scale
+/// (a Krivak's mounts lie inside its hull only there); surface units are
+/// drawn at real size ([`crate::terrain::PlacedSize::RealSize`]), so the
+/// muzzles and aim points scale with them. Axes stay in the record's order.
+pub fn mount_position_ft(mount: &tore_formats::surface_unit::Mount) -> [f64; 3] {
+    mount
+        .position
+        .map(|v| crate::terrain::PlacedSize::RealSize.feet(f64::from(v)))
+}
+
+/// A surface unit shape's F2 ground offset (the shape's bottom, read as feet
+/// at the shape scale) in world feet at the size the unit is drawn, or `None`
+/// when the shape names none.
+pub fn ground_offset_ft(shape_bytes: &[u8]) -> crate::WorldResult<Option<f64>> {
+    Ok(tore_formats::shape::contact_offset(shape_bytes)?
+        .map(|v| crate::terrain::PlacedSize::RealSize.feet(f64::from(v))))
+}
+
 /// Where a unit came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Origin {
