@@ -76,6 +76,11 @@ not that all guidance behavior has passed acceptance. **Catalog** means inventor
 only, hidden from Load Ordnance until flight support is connected under the
 [catalog availability rule](ordnance-presentation.md#catalog-availability).
 Missile presence does not authorize SAM, ship, ground-target or AI work.
+John authorized surface air defenses on 2026-10-10: the SAM and ship records
+that surface units fire have reviewed profiles, supported radar or infrared, as
+listed in [surface defenses](surface-defenses.md#sam-missiles) (the S and I
+rows above; ASROC and the anti-ship SS-N-9 stay without one). They stay
+Catalog: no aircraft carries them.
 
 Ranges are the source launch envelope converted using **6,076 feet per nmi**,
 rounded to two decimals. They are not a guaranteed intercept range. Times use
@@ -138,13 +143,13 @@ separate proposed profile setting, never inferred from these motor numbers.
 | SA14.JT (SA-14) | I* | Catalog | 0.08 to 2.47 | 0 | 22 | 20 | 3.29 | wide*/90 | N/A | 5/5 |
 | SA15.JT (SA-15) | S* | Catalog | 0.16 to 5.92 | 1 | 9 | 20 | 13.17 | wide*/90 | N/A | N/A |
 | SA16.JT (SA-16) | I* | Catalog | 0.08 to 1.32 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
-| SA19.JT (SA-19) | Hold: radar role | Catalog | 0.08 to 3.95 | 0 | 5 | 20 | 9.87 | wide*/90 | TBD | TBD |
+| SA19.JT (SA-19) | S (surface, default pending John) | Catalog | 0.08 to 3.95 | 0 | 5 | 20 | 9.87 | wide*/90 | TBD | TBD |
 | SA2A.JT (SA-2A) | S* | Catalog | 1.23 to 15.64 | 2 | 21 | 40 | 24.69 | wide*/90 | N/A | N/A |
 | SA3.JT (SA-3) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | SA6.JT (SA-6) | S* | Catalog | 1.48 to 12.34 | 2 | 21 | 20 | 13.17 | wide*/90 | N/A | N/A |
 | SA7.JT (SA-7) | I* | Catalog | 0.08 to 1.48 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
 | SA9.JT (SA-9) | I* | Catalog | 0.41 to 2.96 | 0 | 10 | 20 | 3.29 | wide*/90 | N/A | 5/5 |
-| SAN11.JT (SA-N-11) | Hold: radar role | Catalog | 0.25 to 3.95 | 2 | 8 | 40 | 16.46 | wide*/90 | TBD | TBD |
+| SAN11.JT (SA-N-11) | S (surface, default pending John) | Catalog | 0.25 to 3.95 | 2 | 8 | 40 | 16.46 | wide*/90 | TBD | TBD |
 | SAN3.JT (SA-N-3) | S* | Catalog | 0.82 to 16.46 | 2 | 8 | 180 | 16.46 | wide*/90 | N/A | N/A |
 | SAN4.JT (SA-N-4) | S* | Catalog | 0.66 to 5.76 | 2 | 8 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | SAN5.JT (SA-N-5) | I* | Catalog | 0.08 to 1.48 | 2 | 3 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
