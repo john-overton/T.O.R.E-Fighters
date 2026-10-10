@@ -3394,12 +3394,15 @@ impl State {
     }
     /// Register one imported, stationary surface object without consuming an
     /// aircraft roster index. The caller owns the explicit disjoint ID range.
+    /// `side` is the side the object fights for, [`NO_SIDE`] for neutral
+    /// scenery.
     pub fn add_ground_target(
         &mut self,
         id: u32,
         bounds: crate::airport::OrientedBox,
         hit_points: i32,
         category: u16,
+        side: Side,
     ) -> Result<()> {
         if id == 0
             || !bounds.valid()
@@ -3438,7 +3441,7 @@ impl State {
             localized_damage: LocalizedDamage::default(),
             faults: Default::default(),
             category,
-            side: NO_SIDE,
+            side,
         });
         self.ground_bounds.insert(id, bounds);
         Ok(())
@@ -7553,7 +7556,8 @@ mod tests {
             pitch: 0.,
             bank: 0.,
         };
-        s.add_ground_target(0x40000000, bounds, 17, 0x100).unwrap();
+        s.add_ground_target(0x40000000, bounds, 17, 0x100, NO_SIDE)
+            .unwrap();
         let mut destroyed = 0;
         for _ in 0..300 {
             destroyed += s
@@ -7587,7 +7591,8 @@ mod tests {
             pitch: 0.,
             bank: 0.,
         };
-        s.add_ground_target(0x40000000, bounds, 750, 0x100).unwrap();
+        s.add_ground_target(0x40000000, bounds, 750, 0x100, NO_SIDE)
+            .unwrap();
         s.targets
             .iter_mut()
             .find(|t| t.id == 0x40000000)

@@ -321,16 +321,16 @@ impl Scenery {
         code: &str,
     ) -> AppResult<()> {
         self.standing_geometry = None;
-        let sources = Placements::load(resources, code)?;
+        // The layout's placements and the ground target's, as the terrain
+        // built its scene.
+        let sources = Placements::for_terrain(resources, terrain, code)?;
         for (main_shape, error) in &sources.unreadable {
             log::warn!("Airport scene: {main_shape} retained without visual geometry: {error}");
         }
         let mut static_layers = BTreeMap::<String, crate::static_art::Image>::new();
         let mut static_float_count = 0usize;
-        for placement in &sources.layout.placements {
-            let id = 0x4000_0000u32
-                .checked_add(placement.key.ordinal)
-                .ok_or("airport object ID overflow")?;
+        for placed in sources.placed() {
+            let (id, placement) = placed?;
             let Some(shape) = sources.shapes.get(&placement.object_type) else {
                 continue;
             };

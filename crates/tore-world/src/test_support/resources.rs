@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 #[path = "../../../tore-formats/src/aircraft_schema.rs"]
 #[allow(dead_code)]
-mod schema;
+pub(crate) mod schema;
 
 /// The theater the synthetic import holds.
 pub const THEATER: &str = "UKR";

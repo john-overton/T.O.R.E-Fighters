@@ -173,6 +173,11 @@ pub struct Combat {
     dummy_types: Vec<Arc<AircraftType>>,
     dummy_configs: Vec<live::Configuration>,
     airport_objects: Vec<tore_sim::airport::StaticObject>,
+    /// The side of each scene object that has one (the surface's), applied
+    /// whenever the scene's targets are registered. Setup.
+    ground_sides: BTreeMap<u32, live::Side>,
+    /// The surface units' changing state; see [`crate::surface`].
+    pub surface: crate::surface::SurfaceState,
     /// The records of the combat tape being written, collected until the app
     /// drains them (`take_tape`); `None` when no tape is being recorded.
     /// Combat holds no file: the app owns the writer.
@@ -313,23 +318,51 @@ impl Combat {
     pub fn uses_normal_startup_defaults(&self) -> bool {
         !self.range && self.tape.is_none() && !self.clean_recording
     }
+    /// Registers the terrain's airport scene as combat targets, each with the
+    /// side its surface gives it, and starts the surface units' state.
+    pub fn add_scene_targets(&mut self, terrain: &Terrain) -> WorldResult<()> {
+        let sides = terrain.surface.object_sides.clone();
+        let previous = std::mem::replace(&mut self.ground_sides, sides);
+        if let Err(error) = self.add_airport_targets(&terrain.airport_scene) {
+            self.ground_sides = previous;
+            return Err(error);
+        }
+        self.surface = terrain.surface.fresh_state();
+        Ok(())
+    }
+    /// Registers `scene`'s objects as combat targets with the sides the last
+    /// [`Self::add_scene_targets`] gave (none before one: neutral).
     pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> WorldResult<()> {
         scene.validate().map_err(std::io::Error::other)?;
         // A new layout replaces static identities atomically in the staged state.
         let mut staged = self.state.clone();
         staged.remove_ground_targets();
         for object in &scene.objects {
-            Self::register_airport_object(&mut staged, object)?;
+            Self::register_airport_object(&mut staged, object, self.ground_side(object.id))?;
         }
         self.state = staged;
         self.airport_objects = scene.objects.clone();
         Ok(())
     }
+    /// The side scene object `id` fights for, neutral without one.
+    pub fn ground_side(&self, id: u32) -> live::Side {
+        self.ground_sides
+            .get(&id)
+            .copied()
+            .unwrap_or(tore_sim::combat::live::NO_SIDE)
+    }
     fn register_airport_object(
         state: &mut live::State,
         object: &tore_sim::airport::StaticObject,
+        side: live::Side,
     ) -> WorldResult<()> {
-        state.add_ground_target(object.id, object.bounds, object.hit_points, object.category)?;
+        state.add_ground_target(
+            object.id,
+            object.bounds,
+            object.hit_points,
+            object.category,
+            side,
+        )?;
         if let Some(target) = state.targets.iter_mut().find(|t| t.id == object.id) {
             target.signature.radar = object.radar_signature;
             target.signature.infrared = object.infrared_signature;
@@ -402,6 +435,8 @@ impl Combat {
             dummy_types: Vec::new(),
             dummy_configs: Vec::new(),
             airport_objects: Vec::new(),
+            ground_sides: BTreeMap::new(),
+            surface: Default::default(),
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
             poses: BTreeMap::new(),
@@ -1154,8 +1189,10 @@ impl Combat {
         }
         // Aircraft are spawned first, preserving their roster ordering.
         for object in &self.airport_objects {
-            Self::register_airport_object(&mut self.state, object)?;
+            let side = self.ground_side(object.id);
+            Self::register_airport_object(&mut self.state, object, side)?;
         }
+        self.surface.reset();
         if let Some(aircraft) = host {
             self.restart_render(aircraft, s, None);
         }
@@ -1818,6 +1855,8 @@ pub mod fixtures {
             dummy_types,
             dummy_configs: Vec::new(),
             airport_objects: Vec::new(),
+            ground_sides: BTreeMap::new(),
+            surface: Default::default(),
             tape: None,
             last_launcher: None,
             notes: Default::default(),

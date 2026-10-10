@@ -292,6 +292,8 @@ fn replay_reader(
                     object.bounds,
                     object.hit_points,
                     object.category,
+                    // Combat tapes predate surface sides: neutral, as recorded.
+                    tore_sim::combat::live::NO_SIDE,
                 )?;
                 if let Some(target) = state
                     .targets

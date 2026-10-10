@@ -176,6 +176,7 @@ pub fn terrain() -> Terrain {
         airfield_anchors: BTreeMap::new(),
         static_manifest: Vec::new(),
         catalog: vec![],
+        surface: Default::default(),
         layout: "TEST.MM".into(),
         condition: None,
         weather: tore_sim::environment::Environment::new(

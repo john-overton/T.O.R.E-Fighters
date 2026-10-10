@@ -90,11 +90,14 @@ impl World {
                     .into(),
             );
         }
-        let terrain = crate::terrain::Terrain::for_mission(
+        // The ground target's template joins the theater's own surface units.
+        let target = crate::surface::resolve::GroundTarget::from_spec(spec);
+        let terrain = crate::terrain::Terrain::for_mission_with(
             resources,
             &spec.theater,
             Some(spec.condition.index()),
             &spec.weather,
+            target.as_ref(),
         )?;
         let player = match hooks.player.clone() {
             Some(player) => player,
@@ -198,7 +201,7 @@ impl World {
         } else {
             Combat::with_loadout(&player, &load)?
         };
-        combat.add_airport_targets(&terrain.airport_scene)?;
+        combat.add_scene_targets(&terrain)?;
         // The King's friendly fire (stage F phase 2): kept across every
         // restart of combat.
         if !spec.friendly_fire {
