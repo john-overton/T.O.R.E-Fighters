@@ -737,3 +737,22 @@ fn reserved_ranges_do_not_overlap() {
         assert_eq!(UnitId(id).range(), IdRange::Other);
     }
 }
+
+#[test]
+fn mount_positions_scale_with_the_unit_to_real_size() {
+    // KRIVAK.NT's forward mount, z -225 retail feet, lies 75 ft aft here.
+    let mount = tore_formats::surface_unit::Mount {
+        location: 0,
+        flags: 8,
+        position: [0, 30, -225],
+        slew: [0, 0],
+        slew_limit: [0, 0],
+        kind: tore_formats::surface_unit::MountKind::Weapon,
+        store: None,
+        count: 1,
+        weight_class: 0,
+    };
+    let at = mount_position_ft(&mount);
+    assert!((at[0]).abs() < 1e-12 && (at[1] - 10.).abs() < 1e-12 && (at[2] + 75.).abs() < 1e-12);
+    assert!(ground_offset_ft(&[0; 8]).is_err());
+}

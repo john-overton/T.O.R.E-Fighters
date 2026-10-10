@@ -571,7 +571,8 @@ TORE rules (defined and fitted):
   radar position and the track come from the battery radar, which must be alive,
   on and in line of sight of the target. Losing any of those ends support; the
   missile falls back to its memory rule.
-- **Launch** is from the mount position at speed 0, boosting from the record's
+- **Launch** is from the mount position (the NT's `pos`, scaled with the unit
+  to real size, `surface::mount_position_ft`) at speed 0, boosting from the record's
   ignition time with the same motor model as air launches. Launch pitch is the
   line to the lead point clamped between 10 degrees and the mount's pitch limit
   (SA-2 15 degrees). Fitted.
@@ -1077,6 +1078,16 @@ aircraft the targets: `~QLFFAIR` (5 Super Etendards), `~QKPLNGR` (4 Yak-141) and
 
 ## Destroyed looks and drawing
 
+### Size
+
+Surface units, like buildings, are drawn at real size: a third of the retail
+shape scale (John, 2026-10-10, realistic scale; the factor is fitted). A Krivak
+is 405 ft long, a ZSU-23-4 21 ft. Their contact and hit boxes follow, so they
+are a third the size retail's were in every axis. Mount positions and the
+shape's F2 ground offset, which the records give in retail feet, take the same
+factor. Runways, bridges and roads keep the retail scale. The rule and its
+evidence: [placed object scale](../formats/objects-and-shapes.md#placed-object-scale-2026-10-10).
+
 ### Shapes the reader cannot draw yet
 
 No stand-ins (defined, John): the shape reader learns the missing shapes.
@@ -1303,6 +1314,8 @@ carry the label "default, pending John" where they appear above.
 | Fleet-template aircraft | Leave out the Yak-141s in `~QBFLT` and the Rafale M and Super Etendards in `~QFFLT` | Scheduled launches 60 and 90 minutes in, up to 1,962 ft from carriers about 900 ft long |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 2 nm; Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
+| Runway pavement width | Keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
+| Building and unit hit boxes | Real size, a third of retail's in every axis, with the drawn size | Matches John's realistic scale; retail's targets were three times larger and easier to hit |
 | Collateral damage from aircraft weapons | Surface weapons only; aircraft missiles, rockets and bombs keep doing none | Their records carry collateral radii, but turning them on changes every air-to-air fight and is outside this round |
 
 ## Provenance summary

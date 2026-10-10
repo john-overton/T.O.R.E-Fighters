@@ -207,10 +207,16 @@ reverse engineering. Later measured evidence can replace a fitted rule locally.
 | Runway damage | At zero imported hit points disable new clearance and ILS; preserve its surface for physical contact. Individual tower/building loss does not disable other runway services in this first host policy. | Fitted service consequence |
 | Missing destruction artwork | Remove the intact mesh when combat HP reaches zero, retain target/mission identity, and use the existing impact effect. Do not infer an A-suffix replacement. | Fitted visual fallback |
 
-Static geometry applies the reviewed SH CODE header scale `2^(word6-8)` to
-visible and contact geometry. `RUNWAY.SH` uses scale 4, putting its visible
-longitudinal span near -2748 through 3252 feet. That agrees with reviewed STRIP
-anchors near -2512 through 3090 feet and avoids an invisible support footprint.
+Static geometry applies one scale to visible and contact geometry,
+`terrain::placed_shape_scale`: the reviewed SH CODE header scale `2^(word6-8)`
+for runways (`_STRIPProc`), bridges and roads, whose size is part of the map,
+and a third of it for every other placed object, which puts buildings at real
+size beside real-size aircraft (John, 2026-10-10; see
+[placed object scale](../formats/objects-and-shapes.md#placed-object-scale-2026-10-10)).
+`RUNWAY.SH` uses scale 4, putting its visible longitudinal span near -2748
+through 3252 feet. That agrees with reviewed STRIP anchors near -2512 through
+3090 feet and avoids an invisible support footprint. Runway pavement keeps the
+retail width, about twice a real runway's (pending John).
 
 Runway support and the ILS datum use the authored airport ground elevation.
 Airport surfaces use no slope depth bias, and only one pass uses any constant
@@ -277,9 +283,9 @@ source height grid, the airport transform and flight contact remain unchanged.
 This fitted rendering-only correction (agent, 2026-09-23) prevents low cockpit
 views from exposing overlapping terrain through pavement. Ordered equal-depth passes separate coplanar airport details without
 changing their depth.
-Mesh scale comes from reviewed SH transform/header consumers, not the aircraft
-renderer’s one-third-foot convention. If unresolved, record a measured per-type
-scale before accepting that type. No universal guessed scale is approved here.
+Mesh scale comes from the reviewed SH header exponent and the placed-object
+rule above: map-tied objects at the header scale, all other placed objects at
+a third of it, the aircraft renderer's factor.
 
 Landing speed brackets require aircraft-specific performance values. First use
 reviewed PT/flight-model limits if their landing meaning is established. Otherwise
