@@ -1,6 +1,6 @@
 //! Manual-style weapon symbols with fitted layout and simulation-owned state.
 use crate::{
-    combat, flight,
+    aim_box, combat, flight,
     frame::FlightFrame,
     hud::{self, Paint},
 };
@@ -78,11 +78,17 @@ pub fn draw(
     zoom: f64,
     target_friendly: bool,
     target_cue: bool,
+    aim: Option<&aim_box::Marks>,
 ) {
     let s = frame.presented();
     let ro = &frame.readout;
     if target_cue {
-        draw_target(pixels, frame, color, zoom, target_friendly);
+        // The AC-130's box follows the aim point; every other aircraft's cue
+        // follows the displayed target.
+        match aim {
+            Some(aim) => draw_aim(pixels, frame, aim, color, zoom),
+            None => draw_target(pixels, frame, color, zoom, target_friendly),
+        }
     }
     draw_assigned(pixels, frame, color, zoom);
     if ro.airport.nav_mode {
@@ -321,22 +327,25 @@ fn target_cue(direction: Vector, basis: Basis, zoom: f64) -> Option<TargetCue> {
 /// Whether the HUD draws the selected target's square itself, rather than an
 /// edge arrow.
 pub fn target_in_hud(frame: &FlightFrame, zoom: f64) -> bool {
-    let s = frame.presented();
     frame
         .readout
         .targets
         .display
         .as_ref()
-        .is_some_and(|target| {
-            matches!(
-                target_cue(
-                    missiles::sub(target.position, s.position),
-                    Basis::new(s.yaw, s.pitch, s.bank),
-                    zoom,
-                ),
-                Some(TargetCue::Square(_))
-            )
-        })
+        .is_some_and(|target| point_in_hud(frame, target.position, zoom))
+}
+/// Whether a world point falls inside the HUD's own square cue region, where
+/// the HUD draws a box itself rather than an edge arrow.
+pub fn point_in_hud(frame: &FlightFrame, position: Vector, zoom: f64) -> bool {
+    let s = frame.presented();
+    matches!(
+        target_cue(
+            missiles::sub(position, s.position),
+            Basis::new(s.yaw, s.pitch, s.bank),
+            zoom,
+        ),
+        Some(TargetCue::Square(_))
+    )
 }
 fn draw_target(pixels: &mut [u8], frame: &FlightFrame, color: [u8; 3], zoom: f64, friendly: bool) {
     let s = frame.presented();
@@ -344,6 +353,18 @@ fn draw_target(pixels: &mut [u8], frame: &FlightFrame, color: [u8; 3], zoom: f64
         return;
     };
     replay_target(pixels, s, target.position, color, zoom, friendly);
+}
+
+/// The AC-130's aim-point box: the target cue, in the style of what the sight
+/// holds, at the aim point.
+fn draw_aim(
+    pixels: &mut [u8],
+    frame: &FlightFrame,
+    aim: &aim_box::Marks,
+    color: [u8; 3],
+    zoom: f64,
+) {
+    cue(pixels, frame.presented(), aim.aim, color, zoom, aim.style);
 }
 
 /// Same target cue, with position supplied by a recorded AI target selection.
@@ -354,6 +375,24 @@ pub(crate) fn replay_target(
     color: [u8; 3],
     zoom: f64,
     friendly: bool,
+) {
+    cue(
+        pixels,
+        s,
+        position,
+        color,
+        zoom,
+        aim_box::Style::Tracked { friendly },
+    );
+}
+
+fn cue(
+    pixels: &mut [u8],
+    s: &flight::State,
+    position: Vector,
+    color: [u8; 3],
+    zoom: f64,
+    style: aim_box::Style,
 ) {
     let Some(cue) = target_cue(
         missiles::sub(position, s.position),
@@ -369,7 +408,7 @@ pub(crate) fn replay_target(
     };
     match cue {
         TargetCue::Square((x, y)) => {
-            draw_target_box(&mut paint, (x, y), friendly);
+            draw_target_box(&mut paint, (x, y), style);
         }
         TargetCue::Chevron {
             point: (x, y),
@@ -461,18 +500,9 @@ fn bracket_lines((x, y): (f64, f64)) -> [((f64, f64), (f64, f64)); 8] {
     lines
 }
 
-fn draw_target_box(paint: &mut Paint<'_>, (x, y): (f64, f64), friendly: bool) {
-    for (a, b) in [
-        ((-7., -7.), (7., -7.)),
-        ((7., -7.), (7., 7.)),
-        ((7., 7.), (-7., 7.)),
-        ((-7., 7.), (-7., -7.)),
-    ] {
+fn draw_target_box(paint: &mut Paint<'_>, (x, y): (f64, f64), style: aim_box::Style) {
+    for (a, b) in aim_box::box_strokes(style) {
         paint.line((x + a.0, y + a.1), (x + b.0, y + b.1));
-    }
-    if friendly {
-        paint.line((x - 3., y - 3.), (x + 3., y + 3.));
-        paint.line((x - 3., y + 3.), (x + 3., y - 3.));
     }
 }
 
@@ -749,7 +779,16 @@ mod tests {
         };
         let mut pixels = vec![0; 640 * 480 * 4];
         assert!(!active(&frame));
-        draw(&mut pixels, &frame, &font, [0, 255, 0], 1., false, false);
+        draw(
+            &mut pixels,
+            &frame,
+            &font,
+            [0, 255, 0],
+            1.,
+            false,
+            false,
+            None,
+        );
         debug(&mut pixels, &frame, &state, &font, [0, 255, 0]);
         assert!(pixels.iter().any(|v| *v != 0));
     }
@@ -765,7 +804,7 @@ mod tests {
                     color: [0, 255, 0, 255],
                 },
                 (320., 240.),
-                friendly,
+                aim_box::Style::Tracked { friendly },
             );
             pixels
         };
@@ -1007,7 +1046,7 @@ mod tests {
                 color: [0, 255, 0, 255],
             },
             (320., 240.),
-            false,
+            aim_box::Style::Tracked { friendly: false },
         );
         let boxed: std::collections::BTreeSet<(usize, usize)> = pixels
             .chunks_exact(4)

@@ -4,6 +4,14 @@ use crate::terrain::{Terrain, UKRAINE_START};
 use std::collections::BTreeSet;
 use tore_formats::theater::CELL_FEET;
 
+/// Where [`Camera::locate`] finds a point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Locate {
+    /// The pixel the renderer draws it at.
+    On([f64; 2]),
+    /// Off screen, in this unit screen direction (x right, y down).
+    Edge([f64; 2]),
+}
 pub struct Camera {
     /// 0 main, 1 rear mirror, 2 forward panel, 3 other panel, 4 target.
     pub weather_slot: usize,
@@ -66,26 +74,55 @@ impl Camera {
         self.position[1] =
             (self.position[1] + f64::from(h * speed)).clamp(f64::from(ground + 100.0), 400_000.0);
     }
-    /// Where the renderer draws a world point in a `size` pixel view, if it is
-    /// in front of the camera and on screen.
-    pub fn project(&self, size: [u32; 2], point: [f64; 3]) -> Option<[f64; 2]> {
+    /// The camera's right, up and forward unit vectors.
+    fn axes(&self) -> ([f64; 3], [f64; 3], [f64; 3]) {
         let (sy, cy) = f64::from(self.yaw).sin_cos();
         let (sp, cp) = f64::from(self.pitch).sin_cos();
         let (sr, cr) = f64::from(self.roll).sin_cos();
-        let right = [cy * cr - sy * sp * sr, cp * sr, -sy * cr - cy * sp * sr];
-        let up = [-cy * sr - sy * sp * cr, cp * cr, sy * sr - cy * sp * cr];
-        let forward = [sy * cp, sp, cy * cp];
+        (
+            [cy * cr - sy * sp * sr, cp * sr, -sy * cr - cy * sp * sr],
+            [-cy * sr - sy * sp * cr, cp * cr, sy * sr - cy * sp * cr],
+            [sy * cp, sp, cy * cp],
+        )
+    }
+    /// Where the renderer draws a world point in a `size` pixel view, if it is
+    /// in front of the camera and on screen.
+    pub fn project(&self, size: [u32; 2], point: [f64; 3]) -> Option<[f64; 2]> {
+        match self.locate(size, point)? {
+            Locate::On(at) => Some(at),
+            Locate::Edge(_) => None,
+        }
+    }
+    /// Where a world point is in a `size` pixel view: its pixel when the
+    /// renderer draws it, else the screen direction it lies in (unit, x right,
+    /// y down). A point behind the camera keeps the sign of its bearing, like
+    /// the HUD's edge arrow, instead of flipping through perspective. `None`
+    /// only at the camera itself or for a point that is not finite.
+    pub fn locate(&self, size: [u32; 2], point: [f64; 3]) -> Option<Locate> {
+        let (right, up, forward) = self.axes();
         let d: [f64; 3] = std::array::from_fn(|i| point[i] - self.position[i]);
-        let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
-        let z = dot(forward);
-        if z <= 1. {
+        if !d.iter().all(|v| v.is_finite()) {
             return None;
         }
-        let [w, h] = size.map(f64::from);
-        let focal = h / 2. * 3f64.sqrt() * f64::from(self.zoom);
-        let x = w / 2. + focal * dot(right) / z;
-        let y = h / 2. - focal * dot(up) / z;
-        ((0. ..w).contains(&x) && (0. ..h).contains(&y)).then_some([x, y])
+        let dot = |a: [f64; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+        let z = dot(forward);
+        if z > 1. {
+            let [w, h] = size.map(f64::from);
+            let focal = h / 2. * 3f64.sqrt() * f64::from(self.zoom);
+            let x = w / 2. + focal * dot(right) / z;
+            let y = h / 2. - focal * dot(up) / z;
+            if (0. ..w).contains(&x) && (0. ..h).contains(&y) {
+                return Some(Locate::On([x, y]));
+            }
+        }
+        let (dx, dy) = (dot(right), -dot(up));
+        let length = dx.hypot(dy);
+        if length < 1e-9 {
+            // Straight behind: no lateral lean, so point right, as the HUD does.
+            return (d.iter().map(|v| v * v).sum::<f64>() > 1e-12)
+                .then_some(Locate::Edge([1., 0.]));
+        }
+        Some(Locate::Edge([dx / length, dy / length]))
     }
     pub fn uniform(&self, aspect: f32, fog: [f32; 4], sky: [u8; 3]) -> Vec<f32> {
         let (sy, cy) = self.yaw.sin_cos();
@@ -146,6 +183,43 @@ mod tests {
         // Behind the camera or off the side is not on screen.
         assert_eq!(camera.project(size, [0., 1000., -5000.]), None);
         assert_eq!(camera.project(size, [9000., 1000., 5000.]), None);
+    }
+    #[test]
+    fn locate_finds_off_screen_points_by_direction() {
+        let mut camera = Camera::new();
+        camera.position = [0.; 3];
+        camera.yaw = 0.;
+        camera.pitch = 0.;
+        camera.roll = 0.;
+        camera.zoom = 1.;
+        let size = [800, 600];
+        assert_eq!(
+            camera.locate(size, [0., 1000., 5000.]),
+            camera.project(size, [0., 1000., 5000.]).map(Locate::On)
+        );
+        // East is to the screen's right, a point above to its top; behind
+        // keeps the side of its bearing.
+        assert_eq!(
+            camera.locate(size, [9000., 0., 100.]),
+            Some(Locate::Edge([1., 0.]))
+        );
+        assert_eq!(
+            camera.locate(size, [0., 9000., 100.]),
+            Some(Locate::Edge([0., -1.]))
+        );
+        let Some(Locate::Edge([dx, dy])) = camera.locate(size, [-3000., -3000., -1000.]) else {
+            panic!("behind is an edge");
+        };
+        assert!(dx < 0. && dy > 0.);
+        // Rolled, the same point leans the other way on screen.
+        camera.roll = std::f32::consts::FRAC_PI_2;
+        let Some(Locate::Edge([dx, dy])) = camera.locate(size, [9000., 0., 100.]) else {
+            panic!("off screen");
+        };
+        assert!(dx.abs() < 1e-6 && dy.abs() > 0.99);
+        // Nothing to say about the camera's own position or a bad point.
+        assert_eq!(camera.locate(size, [0.; 3]), None);
+        assert_eq!(camera.locate(size, [f64::NAN, 0., 1.]), None);
     }
     #[test]
     fn camera_speed_is_time_based_and_clearing_keys_stops_motion() {
