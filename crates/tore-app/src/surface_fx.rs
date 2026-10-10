@@ -181,6 +181,10 @@ pub struct Tracker {
     wrecks: BTreeMap<u32, Wreck>,
     /// The fires of destroyed units and how wide each is drawn.
     fires: Vec<(Vector, f64)>,
+    /// The tick each destroyed unit died on, when the picture's source knows
+    /// it (a replay does): a wreck first seen already dead starts its smoke
+    /// then, not as if it had just died ten seconds ago.
+    deaths: BTreeMap<u32, u64>,
     serial: u32,
 }
 
@@ -297,6 +301,11 @@ impl Tracker {
         self.wrecks_of(picture);
     }
 
+    /// A replay's record of when each destroyed unit died.
+    pub fn set_deaths(&mut self, deaths: BTreeMap<u32, u64>) {
+        self.deaths = deaths;
+    }
+
     fn expire(&mut self, now: f64) {
         self.shots.retain(|_, s| {
             let look = LOOKS[s.slot];
@@ -324,10 +333,10 @@ impl Tracker {
                 if self.wrecks.contains_key(&pose.id) {
                     continue;
                 }
-                let born = if self.alive.contains(&pose.id) {
-                    picture.tick
-                } else {
-                    picture.tick.saturating_sub(wreck::WARM_TICKS)
+                let born = match self.deaths.get(&pose.id) {
+                    Some(died) if *died <= picture.tick => *died,
+                    _ if self.alive.contains(&pose.id) => picture.tick,
+                    _ => picture.tick.saturating_sub(wreck::WARM_TICKS),
                 };
                 self.wrecks.insert(
                     pose.id,
@@ -976,6 +985,33 @@ mod tests {
         assert_eq!(
             drawn(&crowded, 400.).puffs.len(),
             per_column * wreck::MAX_COLUMNS
+        );
+    }
+
+    #[test]
+    fn a_replay_that_knows_when_a_unit_died_starts_its_smoke_then() {
+        let dead = RenderSnapshot {
+            targets: vec![unit_pose(UNIT + 1, 0)],
+            ..picture(9_000)
+        };
+        // Seeking straight to a wreck: it stands warm unless told better.
+        let mut seeked = Tracker::default();
+        seeked.observe(&dead, 9_000., false);
+        assert_eq!(
+            seeked.wrecks[&(UNIT + 1)].born,
+            (9_000 - wreck::WARM_TICKS) as f64
+        );
+        let mut told = Tracker::default();
+        told.set_deaths(BTreeMap::from([(UNIT + 1, 4_000)]));
+        told.observe(&dead, 9_000., false);
+        assert_eq!(told.wrecks[&(UNIT + 1)].born, 4_000.);
+        // A death the playhead has not reached yet says nothing.
+        let mut early = Tracker::default();
+        early.set_deaths(BTreeMap::from([(UNIT + 1, 12_000)]));
+        early.observe(&dead, 9_000., false);
+        assert_eq!(
+            early.wrecks[&(UNIT + 1)].born,
+            (9_000 - wreck::WARM_TICKS) as f64
         );
     }
 
