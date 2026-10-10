@@ -940,6 +940,7 @@ pub fn render(
                 enemy_sam: tally,
                 enemy_gun: tally,
                 enemy_aaa: tally,
+                shot_down_by: None,
             };
             let report = Report {
                 outcome: Outcome::Success,

@@ -501,6 +501,8 @@ impl Digest {
 #[cfg(test)]
 mod movement_tests;
 #[cfg(test)]
+mod objective_tests;
+#[cfg(test)]
 mod parked_tests;
 #[cfg(test)]
 mod tests;

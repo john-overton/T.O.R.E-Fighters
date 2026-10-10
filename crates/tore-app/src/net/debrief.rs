@@ -111,6 +111,8 @@ fn pilot(pilot: &DebriefPilot) -> Pilot {
         enemy_sam: pilot.enemy_sam,
         enemy_gun: pilot.enemy_gun,
         enemy_aaa: pilot.enemy_aaa,
+        // The wire carries no killer name yet (protocol 22).
+        shot_down_by: None,
     }
 }
 
@@ -464,6 +466,7 @@ mod tests {
             enemy_sam: tally(seed * 3),
             enemy_gun: tally(seed * 5),
             enemy_aaa: tally(seed * 9),
+            shot_down_by: None,
         };
         Report {
             outcome: Outcome::Success,
