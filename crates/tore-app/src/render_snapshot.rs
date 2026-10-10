@@ -376,6 +376,7 @@ pub fn combat_geometry(
                 local(p.position),
                 &eye,
                 tracer_brightness(&p.weapon),
+                tracer_width(&p.weapon),
             );
         } else if !p.gun {
             // A visible thin strip marks the actual swept projectile segment.
@@ -526,6 +527,18 @@ fn tracer_brightness(weapon: &str) -> f64 {
         1.
     }
 }
+/// How wide a gun's tracer ribbon is drawn against the ordinary one: the
+/// AC-130's 105 mm round 1.75 times as wide (agent choice within John's
+/// 1.5 to 2 times, 2026-10-10), so it reads next to the 40 mm's. The ordinary
+/// ribbon is 2.4 feet across.
+pub const HOWITZER_TRACER_WIDTH: f64 = 1.75;
+fn tracer_width(weapon: &str) -> f64 {
+    if weapon == tore_sim::combat::gunship::GUNS[2] {
+        HOWITZER_TRACER_WIDTH
+    } else {
+        1.
+    }
+}
 /// The vertex color that the shader's sRGB decode turns into `linear`, so a
 /// tracer's brightness survives the decode the world vertices go through.
 fn encoded(linear: f64) -> f32 {
@@ -536,13 +549,15 @@ fn encoded(linear: f64) -> f32 {
     }
 }
 /// Camera-facing luminous ribbon over the actual swept gun segment, at
-/// `brightness` times the ordinary tracer's radiance.
+/// `brightness` times the ordinary tracer's radiance and `width` times its
+/// width.
 fn tracer(
     out: &mut Vec<f32>,
     previous: Vector,
     position: Vector,
     camera: &Camera,
     brightness: f64,
+    width: f64,
 ) {
     let level = encoded(brightness);
     let segment: Vector = std::array::from_fn(|i| position[i] - previous[i]);
@@ -560,8 +575,8 @@ fn tracer(
         // the ribbon into a line with zero screen area.
         let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
         (
-            std::array::from_fn(|i| position[i] - basis.up[i] * 0.25),
-            basis.up.map(|v| v * 0.5),
+            std::array::from_fn(|i| position[i] - basis.up[i] * 0.25 * width),
+            basis.up.map(|v| v * 0.5 * width),
             basis.right,
         )
     };
@@ -574,7 +589,7 @@ fn tracer(
         [0., 1.],
     ] {
         let pos: Vector =
-            std::array::from_fn(|i| start[i] + ribbon[i] * along + side[i] * across * 1.2);
+            std::array::from_fn(|i| start[i] + ribbon[i] * along + side[i] * across * 1.2 * width);
         out.extend([
             pos[0] as f32,
             pos[1] as f32,
@@ -824,7 +839,7 @@ mod tests {
         camera.pitch = 0.;
         for end in [[20., 0., 0.], [0., 0., 20.]] {
             let mut output = Vec::new();
-            tracer(&mut output, [0.; 3], end, &camera, 1.);
+            tracer(&mut output, [0.; 3], end, &camera, 1., 1.);
             assert_eq!(output.len(), 60);
             assert!(output.iter().all(|v| v.is_finite()));
             let points: Vec<[f32; 2]> = output.chunks_exact(10).map(|v| [v[0], v[1]]).collect();
@@ -834,7 +849,7 @@ mod tests {
             assert!(output.chunks_exact(10).all(|v| v[5] == -8.));
         }
         let mut output = Vec::new();
-        tracer(&mut output, [0.; 3], [0.; 3], &camera, 1.);
+        tracer(&mut output, [0.; 3], [0.; 3], &camera, 1., 1.);
         assert!(output.is_empty());
     }
 
@@ -857,8 +872,37 @@ mod tests {
         assert!((decode(encoded(1.5)) - 1.5).abs() < 1e-5);
         let camera = Camera::new();
         let mut output = Vec::new();
-        tracer(&mut output, [0.; 3], [20., 0., 0.], &camera, 1.5);
+        tracer(&mut output, [0.; 3], [20., 0., 0.], &camera, 1.5, 1.);
         assert!(output.chunks_exact(10).all(|v| v[6] == encoded(1.5)));
+    }
+
+    #[test]
+    fn the_105_mm_tracer_is_wider_than_the_others_and_nothing_else_changes() {
+        assert_eq!(tracer_width("C_105.JT"), HOWITZER_TRACER_WIDTH);
+        assert_eq!(tracer_width("C_40.JT"), 1.);
+        assert_eq!(tracer_width("C_25.JT"), 1.);
+        assert_eq!(tracer_width("M61A1.GN"), 1.);
+        assert!((1.5..=2.).contains(&HOWITZER_TRACER_WIDTH), "John's range");
+        // Seen side on, the ribbon's two edges are 2.4 feet apart at width 1
+        // and that much times the width otherwise; its length is untouched.
+        let mut camera = Camera::new();
+        camera.position = [0., 0., -100.];
+        let across = |width: f64| {
+            let mut output = Vec::new();
+            tracer(&mut output, [0.; 3], [20., 0., 0.], &camera, 1., width);
+            let ys: Vec<f32> = output.chunks_exact(10).map(|v| v[1]).collect();
+            let xs: Vec<f32> = output.chunks_exact(10).map(|v| v[0]).collect();
+            let span = |v: &[f32]| {
+                v.iter().cloned().fold(f32::MIN, f32::max)
+                    - v.iter().cloned().fold(f32::MAX, f32::min)
+            };
+            (f64::from(span(&ys)), f64::from(span(&xs)))
+        };
+        let (narrow, length) = across(1.);
+        let (wide, same_length) = across(HOWITZER_TRACER_WIDTH);
+        assert!((narrow - 2.4).abs() < 1e-4, "{narrow}");
+        assert!((wide / narrow - HOWITZER_TRACER_WIDTH).abs() < 1e-4);
+        assert_eq!(length, same_length);
     }
 
     #[test]

@@ -103,7 +103,13 @@ pub struct Settings {
 
 /// The manual combat commands a player has in every flight. Everything else a
 /// key can send (class cycling, station faults, damage, incoming fixtures,
-/// target ECM, jettison) is a range or development command.
+/// target ECM) is a range or development command.
+///
+/// Jettison (Shift+K) is gameplay too: it drops the selected external stores in
+/// a Quick Mission, a campaign mission and a multiplayer flight, not only on
+/// the `--live-fire` range (John, 2026-10-10). It only ever empties a
+/// non-internal station, so an aircraft with nothing external, the AC-130
+/// among them, is left as it was.
 ///
 /// The gun-group commands are gameplay: an AC-130 crew links its guns in a
 /// Quick Mission, a campaign mission and a multiplayer flight, not only on the
@@ -116,6 +122,7 @@ pub(crate) fn works_outside_range(command: Live) -> bool {
             | Live::ToggleSeekerMode
             | Live::NextGunGroup
             | Live::ToggleGunGroup
+            | Live::Jettison
     )
 }
 
@@ -255,9 +262,9 @@ impl World {
         }
     }
 
-    /// A key, button or menu combat command. The arming, seeker, designation
-    /// and gun-group commands always work; the rest are range and development
-    /// commands that need `--live-fire`.
+    /// A key, button or menu combat command. The arming, seeker, designation,
+    /// gun-group and jettison commands always work; the rest are range and
+    /// development commands that need `--live-fire`.
     fn manual_command(&mut self, cockpit: usize, command: Live, out: &mut TickOutput) {
         let seat = self.seat_of_cockpit(cockpit);
         if !self.combat.range && !works_outside_range(command) {

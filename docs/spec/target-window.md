@@ -246,4 +246,7 @@ synthetic readout on a synthetic scene with the CPU raster, no GPU and no
 retail scene (the imported instrument font is needed: `--aircraft ac130` and
 `TORE_DATA_DIR`). Modes: free, pinned, tracked, outside, range, close (rounds
 2,000 feet out: nearly the whole range arc), mask, nolos, empty, returning,
-gimbal (gimbal-text and gimbal-bitmap force an eye icon), zoom1 to zoom6.
+gimbal (gimbal-text and gimbal-bitmap force an eye icon), zoom1 to zoom6, and
+bloomN (the tracked page N ticks after a 105 mm shot, N 0 to 40: the sensor
+picture whited out by the [bloom](ac130-linked-guns.md#muzzle-flash), the
+overlay untouched).

@@ -15,6 +15,9 @@ pub struct DecoyRoll {
     pub releaser: u32,
     /// Chaff (radar) or flare (infrared).
     pub class: SeekerClass,
+    /// The number of the device rolled against: the `number` of its
+    /// release, as `combat.countermeasure` records it.
+    pub device: u64,
     /// The missile's decoy susceptibility, percent.
     pub susceptibility: u8,
     /// The device's effectiveness, percent.

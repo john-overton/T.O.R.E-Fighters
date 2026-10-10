@@ -4034,6 +4034,13 @@ impl ApplicationHandler for App {
                         let gun_flashes = self
                             .gun_flash
                             .draw(flash_now, gun_flash::mounts(&picture, flash_player));
+                        // The target camera whites out for a moment on the player's
+                        // own 105 mm shot.
+                        self.instruments.sight_bloom = if flash_player.is_some() {
+                            self.gun_flash.bloom(frame.plane.0, flash_now)
+                        } else {
+                            0.
+                        };
                         // The AC-130 gunsight's camera this frame: the sim's look
                         // carried smoothly between ticks, from the sensor turret.
                         let sight_frame = frame.readout.gunsight.as_ref().map(|gunsight| {
@@ -10999,6 +11006,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 instruments::gunsight::preview(mode).ok_or("unknown --target-cam-preview mode")?;
             panels.camera_target = preview.target.as_ref().map(|(target, _)| target.id);
             panels.cameras.insert(4, preview.scene);
+            panels.sight_bloom = preview.bloom;
             let (target, link) = preview.target.unzip();
             panels.combat = Some(instruments::CombatReadout {
                 gunsight: Some(preview.page),

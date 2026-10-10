@@ -2978,6 +2978,9 @@ impl AiWings {
                 },
                 event.actor,
             );
+            // The number this device was given, which each roll below is
+            // against.
+            let device = state.devices.released();
             // The seeker and decoy chance of each round, from the weapon it
             // carries, so no particular ownship is needed.
             let seekers: Vec<(u8, u8)> = state
@@ -3019,6 +3022,7 @@ impl AiWings {
                         projectile: projectile.id,
                         releaser: event.actor,
                         class: event.class,
+                        device,
                         susceptibility: missile.decoy_susceptibility_percent,
                         effectiveness,
                         draw: self.device_random.log().draws().last().copied(),
@@ -5969,6 +5973,10 @@ mod tests {
             combat.projectiles[0].target, None,
             "decoyed by the flare, as plane 50's own missile"
         );
+        // The roll names the flare it was against: the device just released.
+        let rolls = wings.decoy_rolls();
+        assert_eq!(rolls.len(), 1);
+        assert!(rolls[0].device > 0 && rolls[0].device == combat.devices.released());
     }
 
     #[test]

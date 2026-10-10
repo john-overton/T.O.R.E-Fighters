@@ -6,7 +6,7 @@
 use crate::{
     AppResult,
     camera::Camera,
-    gun_flash::{Mount, Tracker},
+    gun_flash::{BLOOM, Mount, Tracker},
     reel::{Gpu, HEIGHT, WIDTH},
     render_snapshot::CombatArt,
     scenery::Scenery,
@@ -30,7 +30,8 @@ struct Shot<'a> {
     /// Ticks the aircraft has flown since the first shot.
     flown: f64,
     view: View,
-    tracers: bool,
+    /// Feet out along the barrels at which the three tracers are drawn.
+    tracers: Option<f64>,
 }
 #[derive(Clone, Copy)]
 enum View {
@@ -70,105 +71,147 @@ pub fn run() -> AppResult<()> {
             fired: &burst,
             flown: 0.,
             view: side,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "outside-40mm",
             fired: &[(1, 1.)],
             flown: 0.,
             view: side,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "outside-105mm",
             fired: &[(2, 1.)],
             flown: 0.,
             view: side,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "outside-all-guns",
             fired: &all,
             flown: 0.,
             view: side,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "far-all-guns",
             fired: &all,
             flown: 0.,
             view: far,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "105mm-t0.5",
             fired: &[(2, 0.5)],
             flown: 0.5,
             view: aft,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "105mm-t4",
             fired: &[(2, 4.)],
             flown: 4.,
             view: aft,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "105mm-t10",
             fired: &[(2, 10.)],
             flown: 10.,
             view: aft,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "105mm-t30",
             fired: &[(2, 30.)],
             flown: 30.,
             view: behind,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "105mm-t90",
             fired: &[(2, 90.)],
             flown: 90.,
             view: behind,
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "105mm-t180",
             fired: &[(2, 180.)],
             flown: 180.,
             view: behind,
-            tracers: false,
+            tracers: None,
         },
         Shot {
-            name: "tracers-25mm-vs-105mm",
+            name: "tracers-25-40-105mm",
             fired: &[],
             flown: 0.,
             view: across,
-            tracers: true,
+            tracers: Some(300.),
+        },
+        Shot {
+            name: "sight-tracers-3000ft",
+            fired: &[],
+            flown: 0.,
+            view: View::Sight([-90., -25.], 3),
+            tracers: Some(3_000.),
+        },
+        Shot {
+            name: "sight-tracers-6000ft",
+            fired: &[],
+            flown: 0.,
+            view: View::Sight([-90., -25.], 3),
+            tracers: Some(6_000.),
         },
         Shot {
             name: "sight-default-105mm",
             fired: &[(2, 1.)],
             flown: 0.,
             view: View::Sight([-90., -25.], 1),
-            tracers: false,
+            tracers: None,
+        },
+        Shot {
+            name: "sight-default-105mm-t8",
+            fired: &[(2, 8.)],
+            flown: 8.,
+            view: View::Sight([-90., -25.], 1),
+            tracers: None,
+        },
+        Shot {
+            name: "sight-default-105mm-t16",
+            fired: &[(2, 16.)],
+            flown: 16.,
+            view: View::Sight([-90., -25.], 1),
+            tracers: None,
+        },
+        Shot {
+            name: "sight-default-105mm-t26",
+            fired: &[(2, 26.)],
+            flown: 26.,
+            view: View::Sight([-90., -25.], 1),
+            tracers: None,
+        },
+        Shot {
+            name: "sight-default-105mm-t36",
+            fired: &[(2, 36.)],
+            flown: 36.,
+            view: View::Sight([-90., -25.], 1),
+            tracers: None,
         },
         Shot {
             name: "sight-aft-105mm",
             fired: &[(2, 1.)],
             flown: 0.,
             view: View::Sight([-150., -10.], 1),
-            tracers: false,
+            tracers: None,
         },
         Shot {
             name: "sight-aft-105mm-t8",
             fired: &[(2, 8.)],
             flown: 8.,
             view: View::Sight([-150., -10.], 1),
-            tracers: false,
+            tracers: None,
         },
     ];
     // Midday, the retail "sunset" weather choice, and 23:00.
@@ -241,11 +284,9 @@ pub fn run() -> AppResult<()> {
             gpu.sim.effects(device, queue, &art.effects, &[], &[]);
             gpu.sim.emitters(queue, &devices, &[], &guns);
             let snapshot = RenderSnapshot {
-                projectiles: if picture.tracers {
-                    tracers(&mount)
-                } else {
-                    Vec::new()
-                },
+                projectiles: picture
+                    .tracers
+                    .map_or_else(Vec::new, |out| tracers(&mount, out)),
                 ..RenderSnapshot::default()
             };
             gpu.sim.combat(
@@ -267,6 +308,26 @@ pub fn run() -> AppResult<()> {
                 &path,
                 crate::replay::png::encode_rgba(WIDTH, HEIGHT, &pixels)?,
             )?;
+            // Through the sight, also as the instrument page shows it: the
+            // 138 x 114 picture in the page's greys, whited out by the 105's
+            // bloom, four times life size.
+            if matches!(picture.view, View::Sight(..)) {
+                let bloom = picture
+                    .fired
+                    .iter()
+                    .filter(|(slot, _)| *slot == 2)
+                    .map(|(_, before)| BLOOM.level(*before))
+                    .fold(0., f64::max);
+                let page = out.join(format!("page-{}-{light}.png", picture.name));
+                std::fs::write(
+                    &page,
+                    crate::replay::png::encode_rgba(
+                        (PAGE_WIDTH * PAGE_SCALE) as u32,
+                        (PAGE_HEIGHT * PAGE_SCALE) as u32,
+                        &page_picture(&pixels, bloom),
+                    )?,
+                )?;
+            }
             println!(
                 "Gun flash preview: {} ({} flashes, {} lights, {} puffs)",
                 path.display(),
@@ -277,6 +338,58 @@ pub fn run() -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+/// The target camera page's picture size and the enlargement of the saved
+/// stills.
+const PAGE_WIDTH: usize = 138;
+const PAGE_HEIGHT: usize = 114;
+const PAGE_SCALE: usize = 4;
+
+/// A full-size frame as the target camera page shows it: the middle of the
+/// frame at the page's shape, reduced to 138 x 114, in the page's greys with
+/// the sensor `bloom` on it, then enlarged with hard pixels.
+fn page_picture(frame: &[u8], bloom: f64) -> Vec<u8> {
+    let (width, height) = (WIDTH as usize, HEIGHT as usize);
+    let crop = height * PAGE_WIDTH / PAGE_HEIGHT;
+    let left = (width - crop) / 2;
+    let mut small = vec![0_u8; PAGE_WIDTH * PAGE_HEIGHT * 4];
+    for y in 0..PAGE_HEIGHT {
+        for x in 0..PAGE_WIDTH {
+            let (x0, x1) = (
+                left + x * crop / PAGE_WIDTH,
+                left + (x + 1) * crop / PAGE_WIDTH,
+            );
+            let (y0, y1) = (y * height / PAGE_HEIGHT, (y + 1) * height / PAGE_HEIGHT);
+            let mut sum = [0_u32; 3];
+            let mut count = 0;
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let i = (sy * width + sx) * 4;
+                    for c in 0..3 {
+                        sum[c] += u32::from(frame[i + c]);
+                    }
+                    count += 1;
+                }
+            }
+            let i = (y * PAGE_WIDTH + x) * 4;
+            for c in 0..3 {
+                small[i + c] = (sum[c] / count.max(1)) as u8;
+            }
+            small[i + 3] = 0;
+        }
+    }
+    crate::target_preview::monochrome(&mut small);
+    BLOOM.lift(&mut small, PAGE_WIDTH, PAGE_HEIGHT, bloom);
+    let mut big = vec![0_u8; small.len() * PAGE_SCALE * PAGE_SCALE];
+    for y in 0..PAGE_HEIGHT * PAGE_SCALE {
+        for x in 0..PAGE_WIDTH * PAGE_SCALE {
+            let from = ((y / PAGE_SCALE) * PAGE_WIDTH + x / PAGE_SCALE) * 4;
+            let to = (y * PAGE_WIDTH * PAGE_SCALE + x) * 4;
+            big[to..to + 4].copy_from_slice(&small[from..from + 4]);
+        }
+    }
+    big
 }
 
 fn camera(
@@ -318,15 +431,24 @@ fn camera(
     }
 }
 
-/// A 25 mm and a 105 mm tracer side by side, out along the guns' line: one
-/// tick of each round's flight at its muzzle speed.
-fn tracers(mount: &Mount) -> Vec<ProjectilePose> {
-    [(0_usize, 3450., 1), (2, 1620., 2)]
+/// A 25 mm, a 40 mm and a 105 mm tracer side by side, out along the guns'
+/// line: one tick of each round's flight at its muzzle speed (2,933 feet a
+/// second for all three, from the records).
+fn tracers(mount: &Mount, out: f64) -> Vec<ProjectilePose> {
+    [(0_usize, 2933., 1), (1, 2933., 3), (2, 2933., 2)]
         .into_iter()
         .map(|(slot, speed, id)| {
             let (muzzle, direction) = mount.muzzle(slot);
-            let out = if slot == 0 { 260. } else { 320. };
-            let position: [f64; 3] = std::array::from_fn(|i| muzzle[i] + direction[i] * out);
+            // Far out the three barrels' lines nearly meet, so the sight
+            // pictures spread them along the flight path to tell them apart.
+            let apart = if out > 1_000. {
+                (slot as f64 - 1.) * out * 0.06
+            } else {
+                0.
+            };
+            let position: [f64; 3] = std::array::from_fn(|i| {
+                muzzle[i] + direction[i] * out + mount.basis.forward[i] * apart
+            });
             ProjectilePose {
                 id,
                 owner: 0,
