@@ -383,16 +383,36 @@ impl GroundLayout {
 /// must be on the airport's paving, on a landable surface and clear of
 /// buildings. If the staggered layout cannot fit, its spacing tightens, and
 /// if none works the start is rejected with a message for the creator.
-/// The runway a `start ground auto` mission parks on until the world places
-/// starts from the ground target: `fitted`, agent decision 2026-10-10 (slice
-/// Q1), the first runway, by object id, of a friendly airport (any airport
-/// when none is friendly) that is no short strip or vertical pad and holds a
-/// ground layout for `count` aircraft. The surface layout slice (L1)
-/// replaces it with the Blue-side airfield nearest the target at least
-/// 15 nautical miles from it (surface-defenses spec, "Start placement").
+/// The runway a `start ground auto` mission parks Blue's wing on: with a
+/// ground target, the Blue-side airfield nearest the target at least 15 nm
+/// from it (docs/spec/surface-defenses.md, "Start placement"; default,
+/// pending John) that is no short strip or vertical pad and holds a ground
+/// layout for `count` aircraft. Without a target, or when no such airfield
+/// exists, the earlier rule (`fitted`, agent decision 2026-10-10, slice Q1):
+/// the first runway, by object id, of a friendly airport (any airport when
+/// none is friendly) that qualifies.
 pub fn auto_runway(world: &Terrain, count: usize) -> crate::WorldResult<u32> {
+    auto_runway_for(world, count, false)
+}
+
+/// [`auto_runway`] for either side: `red` ranks the Red-side airfields, for
+/// a Redfor human's ground start in PvP.
+pub fn auto_runway_for(world: &Terrain, count: usize, red: bool) -> crate::WorldResult<u32> {
     use tore_sim::airport::Allegiance;
     let scene = &world.airport_scene;
+    let qualifies = |id: u32| {
+        !scene.vertical_pad(id) && !scene.short_strip(id) && ground_layout(world, id, count).is_ok()
+    };
+    if let Some(starts) = &world.surface.starts {
+        let ranked = if red {
+            &starts.red_airfields
+        } else {
+            &starts.blue_airfields
+        };
+        if let Some(id) = ranked.iter().copied().find(|id| qualifies(*id)) {
+            return Ok(id);
+        }
+    }
     let usable = |friendly_only: bool| {
         let mut ids: Vec<u32> = scene
             .airports
@@ -540,6 +560,10 @@ pub struct MissionLayout {
     pub player_turn: f64,
     /// Where the enemy group sits relative to the player.
     pub enemy: EnemyAim,
+    /// Airborne with a ground target: the player's heading points at the
+    /// target and is kept, so a turn to keep the enemy on the map turns the
+    /// enemy group alone, as on a ground start (agent decision, 2026-10-10).
+    pub held_heading: bool,
 }
 
 impl MissionLayout {
@@ -559,10 +583,16 @@ impl MissionLayout {
             None => ([start.position[0], start.position[2]], start.yaw),
         };
         let enemy = aim_into_map(reference, heading, separation_ft, group, map_bounds(world));
+        let held_heading = ground.is_none() && world.surface.starts.is_some();
         Self {
-            player_turn: if ground.is_some() { 0. } else { enemy.turn },
+            player_turn: if ground.is_some() || held_heading {
+                0.
+            } else {
+                enemy.turn
+            },
             ground,
             enemy,
+            held_heading,
         }
     }
 
@@ -571,7 +601,7 @@ impl MissionLayout {
             separation_ft: self.enemy.distance_ft,
             // An airborne scene turns with the player; parked aircraft cannot,
             // so only the enemy bearing changes.
-            enemy_turn: if self.ground.is_some() {
+            enemy_turn: if self.ground.is_some() || self.held_heading {
                 self.enemy.turn
             } else {
                 0.
@@ -828,6 +858,7 @@ mod placement_tests {
             ground: None,
             player_turn: aim.turn,
             enemy: aim,
+            held_heading: false,
         };
         let plan = airborne.spawn_plan();
         assert_eq!(plan.enemy_turn, 0.);
@@ -841,6 +872,7 @@ mod placement_tests {
             ground: Some(ground.clone()),
             player_turn: 0.,
             enemy: EnemyAim::straight(5. * FEET_PER_NM),
+            held_heading: false,
         };
         assert!(parked.notice().is_none());
         let parked = MissionLayout {

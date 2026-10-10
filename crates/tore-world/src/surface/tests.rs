@@ -254,6 +254,7 @@ fn target(stem: &str, aaa: usize, sam: usize, seed: u32) -> GroundTarget {
         // Russian: equipment group 2.
         enemy_nationality: 10,
         night_stealth: false,
+        variation: layout::Variation::ON,
     }
 }
 
@@ -517,13 +518,15 @@ fn base_layout_units_keep_their_layout_ids_and_take_their_sides() {
     let terrain = Terrain::for_mission(&r, THEATER, Some(0), &Overrides::default()).unwrap();
     let surface = &terrain.surface;
     let ids: Vec<u32> = surface.units.iter().map(|u| u.id.0).collect();
-    // The SA-6, the ZSU-23 and the truck: layout ordinals 0, 1 and 3.
+    // The SA-6, the ZSU-23 and the truck: layout ordinals 0, 1 and 3; then
+    // the radar the layout adds to the SA-6's battery.
     assert_eq!(
         ids,
         [
             LAYOUT_OBJECT_BASE,
             LAYOUT_OBJECT_BASE + 1,
-            LAYOUT_OBJECT_BASE + 3
+            LAYOUT_OBJECT_BASE + 3,
+            BATTERY_RADAR_BASE,
         ]
     );
     assert_eq!(surface.units[0].side, ENEMY_SIDE);
@@ -537,7 +540,10 @@ fn base_layout_units_keep_their_layout_ids_and_take_their_sides() {
     let scene: Vec<u32> = terrain.airport_scene.objects.iter().map(|o| o.id).collect();
     assert_eq!(
         scene,
-        (0..5).map(|n| LAYOUT_OBJECT_BASE + n).collect::<Vec<_>>()
+        (0..5)
+            .map(|n| LAYOUT_OBJECT_BASE + n)
+            .chain([BATTERY_RADAR_BASE])
+            .collect::<Vec<_>>()
     );
     assert_eq!(surface.side_of(LAYOUT_OBJECT_BASE + 2), ENEMY_SIDE);
     assert_eq!(
@@ -736,4 +742,142 @@ fn reserved_ranges_do_not_overlap() {
     for id in [0xE000_0000, 0xF000_0000, 1 << 24] {
         assert_eq!(UnitId(id).range(), IdRange::Other);
     }
+}
+
+/// The spec of a mission with `target`, one enemy aircraft and Red 20 nm
+/// ahead.
+fn spec_with_enemy(target: &GroundTarget) -> MissionSpec {
+    use crate::mission::{Defense, Skill};
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.ground_target = Some(target.stem.clone());
+    spec.aaa = Defense::from_level(target.aaa).unwrap();
+    spec.sam = Defense::from_level(target.sam).unwrap();
+    spec.surface_seed = target.seed;
+    spec.enemy_nationality = target.enemy_nationality as u8;
+    spec.wings[3].count = 1;
+    spec.wings[3].skill = Skill::Average;
+    spec.separation_nm = 20;
+    spec
+}
+
+#[test]
+fn a_ground_target_starts_blue_toward_it_and_red_ahead() {
+    use crate::surface::layout::{BLUE_START_MAX_NM, BLUE_START_MIN_NM, NM_FT};
+    let r = surface_resources();
+    let spec = spec_with_enemy(&target("QUCITY", 3, 3, 5));
+    let mut world = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    let starts = world.terrain.surface.starts.clone().expect("starts");
+    let check = |world: &World| {
+        let flight = &world.cockpits[0].flight;
+        assert_eq!(
+            [flight.position[0], flight.position[2]],
+            starts.blue.map(f64::from)
+        );
+        let heading = f64::from(starts.blue_heading_deg).to_radians();
+        assert!((flight.yaw - heading).abs() < 1e-9);
+        // Blue 20 to 30 nm from the target, flying at it.
+        let to_target = [
+            f64::from(starts.target[0]) - flight.position[0],
+            f64::from(starts.target[1]) - flight.position[2],
+        ];
+        let distance = to_target[0].hypot(to_target[1]);
+        let nm = NM_FT as f64;
+        assert!(distance >= BLUE_START_MIN_NM as f64 * nm - 2.);
+        assert!(distance <= BLUE_START_MAX_NM as f64 * nm + 2.);
+        let bearing = to_target[0].atan2(to_target[1]);
+        let off = (bearing - heading + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        assert!(off.abs() < 0.5f64.to_radians(), "{off}");
+        // Red 20 nm straight ahead.
+        let red = world
+            .combat
+            .state
+            .targets
+            .iter()
+            .find(|t| t.side == ENEMY_SIDE && t.aircraft.is_some())
+            .expect("the enemy aircraft")
+            .position;
+        let ahead = [red[0] - flight.position[0], red[2] - flight.position[2]];
+        assert!((ahead[0].hypot(ahead[1]) - 20. * crate::mission_layout::FEET_PER_NM).abs() < 100.);
+        let off = (ahead[0].atan2(ahead[1]) - heading + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        assert!(off.abs() < 1f64.to_radians(), "{off}");
+    };
+    check(&world);
+    // A restart starts in the same place.
+    let player = load_player(&r);
+    world.restart(&player, &r).unwrap();
+    check(&world);
+    // Without a target the free-flight start stands, as before.
+    let plain = World::new(
+        &MissionSpec::new(THEATER, AircraftId::F18),
+        &r,
+        Seating::SinglePlayer,
+    )
+    .unwrap();
+    assert!(plain.terrain.surface.starts.is_none());
+    let free = plain.terrain.free_flight_start();
+    let flight = &plain.cockpits[0].flight;
+    assert_eq!([flight.position[0], flight.position[2]], [free[0], free[2]]);
+}
+
+fn load_player(
+    r: &BTreeMap<String, Vec<u8>>,
+) -> std::sync::Arc<crate::aircraft_type::AircraftType> {
+    crate::aircraft_type::load_type(r, AircraftId::F18).unwrap()
+}
+
+/// [`surface_resources`] with four airfields about `~QUCITY`: one beside
+/// it (anchoring it), a Blue one 20 nm west, a Red one 17 nm east and a
+/// Blue one 40 nm south.
+fn airfield_resources() -> BTreeMap<String, Vec<u8>> {
+    let mut r = surface_resources();
+    let airport = crate::test_support::resources::airport_resources();
+    for name in ["STRIP.OT", "AIRPORT.SH"] {
+        r.insert(name.into(), airport[name].clone());
+    }
+    let nm = 6_076;
+    let centre = [MIDDLE + 2_550, MIDDLE + 5_000];
+    let strip = |dx: i32, dz: i32, owner: &str| {
+        format!(
+            "obj\n\ttype STRIP.OT\n\tpos {} 0 {}\n\tangle 0 0 0\n{owner}\tflags $13\n\t.\n",
+            centre[0] + dx,
+            centre[1] + dz
+        )
+    };
+    let mut layout = String::from_utf8(r["UKR.MM"].clone()).unwrap();
+    layout += &strip(0, 3_000, "");
+    layout += &strip(-20 * nm, 0, "\tnationality3 0\n");
+    layout += &strip(17 * nm, 0, "\tnationality3 138\n");
+    layout += &strip(0, -40 * nm, "\tnationality3 0\n");
+    r.insert("UKR.MM".into(), layout.into_bytes());
+    r
+}
+
+#[test]
+fn an_automatic_ground_start_takes_the_nearest_own_airfield_15_nm_out() {
+    use crate::mission::Start;
+    let r = airfield_resources();
+    let mut spec = spec_with_enemy(&target("QUCITY", 3, 3, 2));
+    spec.start = Start::GroundAuto {
+        altitude_ft: 10_000,
+    };
+    let world = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    let surface = &world.terrain.surface;
+    // Beside a runway, the template stays.
+    assert_eq!(
+        surface.template.as_ref().unwrap().anchor,
+        Some(layout::Anchor::Runway)
+    );
+    let starts = surface.starts.as_ref().unwrap();
+    // Layout ordinals 5 to 8: beside, west (Blue), east (Red), south (Blue).
+    let strip = |n| LAYOUT_OBJECT_BASE + n;
+    assert_eq!(starts.blue_airfields, [strip(6), strip(8)]);
+    assert_eq!(starts.red_airfields, [strip(7)]);
+    assert_eq!(world.setup.ground_start, Some(strip(6)));
+    assert_eq!(
+        crate::mission_layout::auto_runway_for(&world.terrain, 1, true).unwrap(),
+        strip(7)
+    );
 }

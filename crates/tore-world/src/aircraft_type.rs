@@ -83,11 +83,18 @@ impl AircraftType {
 
     /// The player's flight state at the start of a free flight: over the
     /// theater's camera start, 2,000 feet above the ground or at 5,000 feet,
-    /// whichever is higher.
+    /// whichever is higher. With a ground target the start and heading are
+    /// the ones the surface layout placed for Blue
+    /// ([`Terrain::airborne_start`]).
     pub fn start(&self, world: &Terrain) -> flight::State {
-        let mut p = world.free_flight_start();
+        let (mut p, heading) = world.airborne_start();
         p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
         let mut state = flight::State::from_model(self.model.clone(), p);
+        if let Some(heading) = heading {
+            state.yaw = heading;
+            let forward = tore_sim::attitude::Basis::new(heading, 0., 0.).forward;
+            state.velocity = forward.map(|v| v * state.speed);
+        }
         // State velocity is ground-relative; initialize the requested airspeed
         // with advection already present so the first tick does not subtract it twice.
         for (v, wind) in state.velocity.iter_mut().zip(world.wind()) {
