@@ -1027,7 +1027,9 @@ its own. `Theater` would read better but already names the parsed T2 grid in
   `runway_view`. It holds no art, palette or render origin, reads no
   environment variable and uses no `log`, `tore_replay` or presentation module.
   The weather time, wind and cloud altitude that `TORE_WEATHER_TIME`,
-  `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set arrive as an explicit `Overrides`
+  `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set, and the experiment switch
+  `TORE_REDRAWN_AIRPORTS` ([redrawn airports](formats/redrawn-airports.md),
+  `terrain::redrawn`), arrive as an explicit `Overrides`
   that the app reads (`scenery::launch_overrides`); a recording's identity
   replaces them (`Terrain::for_recorded`). The camera type `Camera` is
   presentation geometry the simulation never reads, so it lives in the app
