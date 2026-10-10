@@ -9,10 +9,13 @@
 > <!-- tore-header v2 -->
 
 Specification, 2026-10-10, for the surface-AI round (John's request of the same
-day, with his answers). **Nothing in this document is implemented yet.** It is
-written ahead of the code so each implementation slice has numbers to test
-against; the acceptance pass at the end of the round (slice A1) updates it with
-what shipped. Retail data comes from the survey of `FA_2.LIB` and `FA.EXE`
+day, with his answers). It was written ahead of the code so each
+implementation slice has numbers to test against, and is being implemented
+slice by slice: the unit records, resolution and sides, the AAA tuning table,
+the surface weapons' flight, and the engagement controllers, batteries and
+radars are in ([implementation so far](#implementation-so-far)); the
+acceptance pass at the end of the round (slice A1) updates it with what
+shipped. Retail data comes from the survey of `FA_2.LIB` and `FA.EXE`
 described under [Provenance](#provenance-and-how-to-read-this).
 
 For a player: the Quick Mission Creator's line "Friendly ground target is [30]
@@ -601,15 +604,16 @@ TORE rules (defined and fitted):
   Kashtan carry their own radars; only the battery systems need component
   radars (answered for John's question).
 - **SS-N-9** never fires: there are no surface targets this round.
-- **Collateral damage** is new and shared with flak: every aircraft inside the
-  collateral radius takes the record's damage times the collateral percent,
-  once per burst. The aircraft a missile strikes takes its direct hit only.
-  Friendly fire off spares the shooter's side, as for a direct hit. A burst
-  is a missile striking an aircraft or the ground, or a flak shell bursting.
-  Fitted. It applies to surface weapons only this round: the aircraft
-  weapons' records carry collateral radii too (750 ft at 35 percent on most
-  missiles, 100 percent on bombs) but keep today's behaviour, no collateral
-  damage, until John decides (default, pending John).
+- **Collateral damage** follows the rule every weapon follows, in
+  [splash damage](missiles.md#splash-damage): a share of the record's damage
+  falling from the collateral percent at the burst to nothing at the radius,
+  measured to each aircraft's surface, whole in the air and halved on the
+  ground. The aircraft a missile strikes takes its direct hit only; friendly
+  fire off spares the shooter's side. A burst is a missile striking an
+  aircraft or the ground, or a flak shell bursting. A surface unit's splash
+  reaches aircraft only (see the next point), so a SAM falling back near its
+  own battery never wrecks it. John decided on 2026-10-10 that splash applies
+  to every weapon, aircraft missiles, rockets and bombs included.
 - **What a surface round can hit.** Aircraft and the terrain only: surface
   units do not fight each other this round, so a round or missile passes
   through ground objects and ships, and a launcher is never hit by its own
@@ -678,7 +682,9 @@ quarter seconds.
 
 Aim error by skill is a random angular offset per burst plus the existing
 per-round dispersion: radar guns 0.6, 0.4, 0.3 and 0.2 degrees; visual guns 1.5,
-1.0, 0.7 and 0.5 degrees for novice, average, veteran and ace. Fitted.
+1.0, 0.7 and 0.5 degrees for novice, average, veteran and ace. Fitted. A jammer
+on the target widens a radar-directed gun's aim error two times; visual guns
+are unaffected (defined, John, 2026-10-10: "fine for now").
 
 #### Flak
 
@@ -833,6 +839,38 @@ the radar."
   work for any incoming projectile.
 - HARM targets: a surface target with its radar on is a compatible emitter for
   the existing AGM-88 profile.
+
+### Implementation so far
+
+Slice W3 (2026-10-10) built the engagement controller, the batteries and the
+radars to the rules above. Where the rules leave a choice, it chose as follows
+(defined, agent, unless marked):
+
+| Rule | As built | Basis |
+| --- | --- | --- |
+| Controllers | One per gun mount (a ship's fore and aft guns turn and fire on their own, each with its magazine) and one per missile record on a unit (its rails share it); a battery has one on its radar | defined (John, 2026-10-10): the arcs of a ship's mounts differ |
+| First search | At once when a hostile enters detection range; the search period is the retry when none is eligible | fitted |
+| First engagement | The unready preparation time is the controller's first Prepare; every later one takes the ordinary time | fitted (unknown producer) |
+| Lost target, failing gates | A target no longer eligible returns to Search at once; launch gates that fail hold the lock up to 15 s, then Search (which may choose the same target again) | B42 window, fitted recovery |
+| Lock between salvos | The lock holds through the pause between bursts and salvos: the RWR lock tone and the painting state continue | defined (John, 2026-10-10) |
+| Gun bursts | A burst's rounds leave evenly over its burst time; the first engagement's opening barrage (`startupShots`) spaces its rounds by the burst's round spacing, at least a quarter second apart (KS-19: 8 shells in 2 s) | fitted |
+| Where rounds leave from | The mount: the unit's pose this tick (a moving unit fires from where it is, with its velocity) plus the hardpoint offset at real size (a third of the record's) turned by the unit's attitude, at least 5 ft above the terrain; radars and sights look from 10 ft above the unit's reference point. Nothing depends on the shape's extents | fitted |
+| RWR reception of a ground radar | The terrain test ends at least 10 ft above the ground under the radar (its antenna), so a unit whose contact volume sits low on a slope still shows its square | fitted |
+| Mount arcs | A half-arc of 0 is unrestricted on that axis (every land vehicle reads 0 for heading); otherwise the bearing (guns: and elevation) must lie inside the half-arc of the mount's rest direction, relative to the hull. A missile's launch pitch is the line to the target clamped between 10 degrees and the rail's arc | inference, fitted |
+| Altitude bands | Zone altitudes are the target's height above the unit, as the AI's envelopes take them | spec-derived (B45) |
+| Gun reach and range | A gun's launch range is its fire zone capped by its shells' reach; a round ends 15 percent (at least 500 ft) past the target; a flak shell's time fuze is its time of flight to the lead point | fitted |
+| Lead | A radar gun observes its target every tick; a visual gun every 0.5 s and leads from that stale track; both through the shared gunsight time-of-flight solution | spec-derived, fitted refresh |
+| Detection | Range, the weapon's `zone0` altitude band, the react class mask (0 attacks any class), `searchDist` read as 256 ft units, and a terrain line of sight sampled every 500 ft | retail plus fitted |
+| Radar guns | A gun is radar-directed when its record carries flag 0x4000 and a radar seeker; the barrage zone's record carries the flag without the seeker and is not | inference |
+| Battery blind | A battery is Blind while its radar is destroyed or shut down by a HARM; a radar that is merely off (no hostile near) leaves it Idle | defined (agent) |
+| Battery launcher | Each salvo leaves from the nearest launcher with a loaded rail, line of sight and the target in its launch zone; the missile is the launcher's, its support the radar's | defined (John) |
+| Optical backup | Detection and support from the first live launcher, inside half the launch range and 10 nm, preparation doubled, no emitter and no lock tone | defined (agent), default pending John |
+| Barrage zone | A target volume 60 ft square and 20 ft tall on the ground (bombs can kill it); it wakes when a hostile is within 195 x 256 ft and fires each burst with its 33 percent chance at the nearest hostile's lead point clamped into its fire zone, scattered by the record's offset-fire angles (20 degrees) | fitted |
+| Resupply hook | A unit's stock (rails, magazine, spare magazines) and a "truck in reach" flag are open to the resupply slice; with the flag set an empty gun swaps a magazine from the truck | defined (John's rule, slice SR1 builds it) |
+
+`--surface-trace` flies a scripted pass past one unit and prints the
+controller's phases, shots and bursts, radar and HARM events and the RWR
+(see [development](../DEVELOPMENT.md#surface-unit-inspection)).
 
 ### Countermeasures
 
@@ -1068,44 +1106,86 @@ tracer, each marked retail or fitted. Tags: `R` retail record value, `F` fitted,
 
 ## Parked aircraft
 
-Twenty-four templates hold parked aircraft (4 to 9 each), and three of them make
-aircraft the targets: `~QLFFAIR` (5 Super Etendards), `~QKPLNGR` (4 Yak-141) and
-`~QWTFAIR` (5 J-7 and 4 Q-5). They become **simulated aircraft on the ground**
-(defined, John: real aircraft entities, not static scenery):
+Twenty-six templates hold aircraft and twenty-five place them (4 to 9 each,
+161 aircraft of 39 types), and three of them make aircraft the targets: `~QLFFAIR` (5 Super
+Etendards), `~QKPLNGR` (4 Yak-141) and `~QWTFAIR` (5 J-7 and 4 Q-5). They are
+**simulated aircraft on the ground** (defined, John: real aircraft entities,
+not static scenery), engines off, and they never take off. The templates'
+`startTime` is not used for them.
 
-- Each has the aircraft damage model: localized damage sections, hit points from
-  its PT's OBJECT block, the aircraft volume contact test, engines off, zero
-  wreck power, and its PT class word (0x8000 fighter or 0x4000 bomber) so a kill
-  lands in the Fighter or Bomber debrief row. It is on the ground, so radar
-  cannot see it. When destroyed it explodes as type 30 like every aircraft and
-  leaves the crash crater, fire and smoke of the ground-crash path for 15
-  minutes.
-- For weapon eligibility it takes the **surface** role, so Mavericks and other
-  surface weapons can lock it; its damage and look stay an aircraft's.
+- **For weapons a parked aircraft is a surface target.** It takes the surface
+  role, so Mavericks, bombs and other surface weapons take it and air-to-air
+  missiles do not. It is on the ground, so radar cannot see it. Surface units'
+  rounds and flak pass it by, as they pass every ground object.
+- **For damage it is an aircraft.** Gun rounds meet the aircraft volume (the
+  six damage-section boxes inside a 28 ft sphere); bombs and missiles meet the
+  28 ft sphere without their fuze radius (fitted: a Mk 82's 100 ft fuze would
+  otherwise burst it at the release point). Hits are recorded by damage
+  section; hit points come from its PT's OBJECT block. Nobody is aboard and
+  nothing runs, so there are no critical (pilot) gun kills, no system faults
+  and no jammer (agent decision).
+- **Destroyed**, it explodes as every FA aircraft does (type 30, with its
+  usual variety), leaves the ground-crash crater and a fire with its smoke
+  column for 15 minutes, without the crash explosion (it did not fall), and
+  throws one fragment. On a carrier deck there is no crater. The kill carries
+  its PT class word (0x8000 fighter, 0x4000 bomber), so it lands in the
+  Fighter or Bomber debrief row; it is a ground kill, not an aircraft of the
+  roster.
+- **Fragment** (fitted). A destroyed parked aircraft whose last hits broke a
+  section throws that section's piece, tossed 45 ft/s up and 25 ft/s outward.
+  For a type the game flies it is the type's own reviewed piece where one
+  exists (the Rafale's wing and tail pieces) from the real attachment point;
+  otherwise piece 0 for a break forward and piece 1 aft or at a wing, from the
+  attachment point the type's own `_A` to `_D` shapes give (types the game
+  flies) or from the OBJECT block's `dstDebrisPos` and `dmgDebrisPos` (types it
+  does not).
 - **Not roster planes.** No plane id, no AI actor, no lineage. Retail writes
   template aircraft as `$4017` (not targets) unless flagged 0x80, and roster
-  planes would join "every enemy aircraft is a target". They never scramble or
-  take off. The templates' `startTime` is not used for them.
-- **Imported types** (MIG21, SU35, SU25, MIG29, MIG23, YAK141, MI24, C130, RAFALE
-  and F4E, by exact PT name) use their full configuration, so debris fragments
-  come off the real attachment points.
-- **Unimported types** (28 in the templates: SPE, J7E, Q5, A37, MI17, SU34, SU24,
-  MIG29M, MIG31, KA50, SFR, MIG17F, MIG21F, F16E, F5EE, M2000E, MR3E, M2000, MF1,
-  MR3, AH1, SU7, M25, M5, MIG27, F5EV, MIG29V, SU27V) use a ground-only path that
-  reads the PT's OBJECT block (names, shape, shadow, class, hit points, debris
-  positions, explosion and crater) and nothing from the flight model. There is
-  no identity whitelist and no aliasing to an imported type: `MIG21F` is not
-  `MIG21`, `RAFALEF` is not `RAFALE` (AGENTS.md). Debris fragments come from the
-  OBJECT debris positions (fitted). Any type whose shape does not read goes to
-  the shape-reader work; no stand-ins (defined, John).
-- Drawn with the PT's main shape, gear down. Placed at the template position on
-  the ground, jittered not at all.
-- **Deck aircraft are left out** (default, pending John). The fleet templates'
-  aircraft are not parked on the deck: `~QBFLT`'s four Yak-141s sit 700 to 1,023
-  ft from the Kiev's centre with `startTime 3600`, and `~QFFLT`'s eight sit 426
-  to 1,962 ft from the Clemenceau's centre with `startTime 5400`, while both
-  decks are about 900 ft long. They are scheduled launches. Parking aircraft on a
-  deck later needs the carrier's deck surface.
+  planes would join "every enemy aircraft is a target".
+- **Every type reads its own record.** The OBJECT block of the PT (names,
+  shape, class, hit points, signatures, debris positions) through one reader
+  for all 39 types, with no identity whitelist and no aliasing: `MIG21F` is
+  not `MIG21`, `RAFALEF` is not `RAFALE` (AGENTS.md). Eleven of the types are
+  ones the game flies (C130, F4E, MI24, MIG17F, MIG21, MIG23, MIG29, RAFALE,
+  SU25, SU35, YAK141); the other 28 are parked only.
+- **Drawn gear down at the aircraft size.** The shape is drawn with its gear
+  state word set, found from the shape's own geometry
+  ([gear words](../formats/objects-and-shapes.md#parked-aircraft-gear)), at the
+  aircraft convention (one third of the scenery scale), so a parked aircraft
+  matches the same type in flight. It stands on its wheels: the lowest point
+  of the gear-down shape meets the ground (fitted; the shape's recorded ground
+  offset agrees within two units for every type). Placed at the template
+  position, heading from the template, jittered not at all.
+- **Deck aircraft** (lead ruling after S2, 2026-10-10). A fleet template's
+  aircraft stands on a carrier when its spot, measured in the hull's own
+  units from the template positions, lies inside the hull's flight deck: the
+  largest area of level faces above the waterline. It keeps that spot in hull
+  units and stands at the deck's height, both scaled with the hull's placed
+  scale, so the deck and its aircraft scale together (agent decision: the
+  template positions were authored around the hull at its scenery scale).
+  All eight `~QFFLT` aircraft (3 Rafale M, 5 Super Etendards) stand on the
+  Clemenceau's deck, 89 ft up at real size (the lead kept this rule,
+  2026-10-10). The four `~QBFLT`
+  Yak-141s stay out: the Kiev's only level faces lie below its waterline, so it
+  has no deck the rule finds. An aircraft on no deck is listed with the
+  template's left-out objects.
+- **Weapons reach aircraft on an airfield** (lead ruling, 2026-10-10). A
+  runway object's shape box spans its whole airfield (the Falklands field's
+  is 7,900 by 8,100 ft and 92 ft tall) and used to take every round before
+  the 112 parked aircraft in 16 templates standing inside it. For weapons a
+  runway object (`_STRIPProc`) now has pavement-only contact: a slab over its
+  footprint from 2 ft below the runway plane to 1 ft above it. Rounds and
+  bombs reach aircraft and units standing on or beside the field and meet the
+  pavement at the plane. The landable surface (grass between runways stays
+  landable, John), aircraft collision and every other use of the shape box are
+  unchanged. A composite runway shape's built-in structures (the towers and
+  hangars drawn inside RNWY1 and the AIRPORT shapes) no longer stop weapons:
+  they are part of the runway object, not objects of their own. At real size
+  (SC1) no parked aircraft stands inside another object's contact volume.
+- **Known gap: the Kiev fleet's aircraft.** KIEV.SH has no level deck above
+  its waterline (its only level faces lie 22 units below it), so the four
+  `~QBFLT` Yak-141s stand nowhere (accepted by the lead, 2026-10-10). Parking
+  them needs the Kiev's deck surface found another way.
 - **Network.** Built from the spec on every client like other static units;
   destruction travels as the ground-destroyed event plus the usual effect and
   mark events; a surface record is sent while damaged so damage smoke shows.
@@ -1146,7 +1226,7 @@ John accepted the recommended looks.
 | Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", hp 0) at the unit's pose, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
 | Bunkers with damaged variants (~BNK5, ~BNK6, ~BNK8) | Swap to the damaged OT's shape | retail |
 | Other buildings | Removed, plus a crater and fire | current behaviour |
-| Parked aircraft | The aircraft ground-crash look: type 30 explosion, crash crater, fire and smoke for 15 minutes, debris fragments | existing aircraft path |
+| Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment | existing aircraft path |
 | Men, barrage zones | Removed | |
 
 The explosion uses the unit's own type (21 ground, 35 ship, 15 men) and crater
@@ -1251,11 +1331,11 @@ target and template lists are in
 
 | Theater | Enemy, group | Targets | Special cases | Base air defenses |
 | --- | --- | --- | --- | --- |
-| Baltics (BAL) | Russian, 2 | fleet (Kiev target; 2 Sovremennyy, 4 Krivak, Kirov, 8 Sarancha; 0 / 0); airstrip; bridge; border checkpoint; armored column (parked); forward airfield; supply base; super-hardened C&C bunker | Fleet needs the Krivak and Sovremennyy shapes; the fleet's 4 Yak-141 are scheduled launches and are left out; airstrip and forward airfield hold 13 parked aircraft | 10 / 20 (HAWK, M163, ZSU-23, Roland, 2S6 and others) |
+| Baltics (BAL) | Russian, 2 | fleet (Kiev target; 2 Sovremennyy, 4 Krivak, Kirov, 8 Sarancha; 0 / 0); airstrip; bridge; border checkpoint; armored column (parked); forward airfield; supply base; super-hardened C&C bunker | Fleet needs the Krivak and Sovremennyy shapes; the fleet's 4 Yak-141 stay out (the Kiev has no deck the rule finds); airstrip and forward airfield hold 13 parked aircraft | 10 / 20 (HAWK, M163, ZSU-23, Roland, 2S6 and others) |
 | Cuba (CUB) | Cuban, 2 | airstrip; SCUD launchers (6 SCUD targets); submarines (4 Oscar); radar installations (2 GCI among targets: emitters); cargo ships (4 cargo, 2 destroyer; 0 / 0); command HQ | SCUD shape and soldiers; GCI targets emit | 19 / 4, including 5 SA-2 |
 | Egypt (EGY) | Islamic Egyptian, 3 | small fleet (3 cargo, 2 destroyer, 2 cruiser: Jianghu, Knox; 0 / 0); small airstrip; large airstrip; command HQ; radar installation; armored column (5 M1, parked); canal defense | Group 3 lists | none |
 | Falklands (LFA) | Argentinean, 3 | cargo ships (10 / 10 at sea); patrol boats (4 Cyclone); forward SAM sites (6 Crotale targets that shoot back); Super Etendards on an airstrip (5 parked SPE targets); supply depot; command HQ (BNK9) | At sea the SAM and AAA picks cannot land on water: land units move only onto land, so those slots fall back to their retail spot (to check at acceptance) | 5 / 2 |
-| France (FRA) | French, 1 | fleet (Clemenceau target; 5 destroyer: Type 69; 0 / 0); small airfield; large airfield; supply convoy; radar installation; command HQ; aircraft factory (7 parked Rafales) | Clemenceau shape; group 1: MIS and Crotale SAMs, M113 and ZSU-23 AAA; the 5 SPE and 3 Rafale "on deck" are scheduled launches and are left out | none |
+| France (FRA) | French, 1 | fleet (Clemenceau target; 5 destroyer: Type 69; 0 / 0); small airfield; large airfield; supply convoy; radar installation; command HQ; aircraft factory (7 parked Rafales) | Clemenceau shape; group 1: MIS and Crotale SAMs, M113 and ZSU-23 AAA; the 5 SPE and 3 Rafale M stand on the Clemenceau's deck | none |
 | Greece (GRE) | Turkish, 4 | small airfield; patrol boats (0 / 0); radar stations (4 Stealth Radar 1 targets: emitters); cargo ships (0 / 0); invasion force (7 tank targets, 15 tank and 20 AFV placeholders) | Group 4 lists | 10 / 14 |
 | Iraq (IRA) | Iraqi, 2 | radar stations (Tall King targets: emitters); airfield; power station; command bunkers; armored staging area; SCUD launchers (4 SCUD); chemical weapons plant; troops withdrawing from Kuwait (8 tank targets) | `~QIRRETR` keeps 40 American `nationality3` objects on the friendly side | 13 / 10 |
 | Kuril Islands (KURILE) | Russian, 2 | small fleet (carrier pick Kiev); large fleet; hydrofoils (6 Pomornik or Sarancha); submarines in a harbor (6 / 5); planes at an airstrip (4 parked Yak-141, 10 / 8); missile silo; tank platoon (8 T-80) | The "nothing" quickpos (12501, 10000, 37432) is near the map corner: start placement and relocation clamp into the map | 2 / 0 (2 ZSU-57) |
@@ -1284,7 +1364,7 @@ layouts). Stems drop the `~Q` prefix.
 | CUB | `CFAIR`, `CCMHQ` | `CCARG`, `CLST`, `CSCUD`, `CSUB` | SA-6 | SA-2 (5), SA-6 (2) | `CFAIR`, `CCMHQ` |
 | EGY | `ELAIR`, `ESAIR` | `EARMOR`, `ECDEF`, `ECMHQ`, `ERDRI`, `ESFLT` | SA-6 (group 3) | none | `ELAIR`, `ESAIR` |
 | LFA | `LFFAIR` | `LFCARG`, `LFCMHQ`, `LFPATR`, `LFSAM`, `LFSTOR` | SA-6 (group 3) | none (Crotale is self-contained) | `LFFAIR` (targets) |
-| FRA | `FLAIR`, `FSAIR`, `FFACT` | `FCMHQ`, `FFLT`, `FRDRI`, `FSUP` | none (group 1) | none | `FLAIR`, `FSAIR`, `FFACT` |
+| FRA | `FLAIR`, `FSAIR`, `FFACT` | `FCMHQ`, `FFLT`, `FRDRI`, `FSUP` | none (group 1) | none | `FLAIR`, `FSAIR`, `FFACT`, `FFLT` (on the deck) |
 | GRE | `GRSAIR` | `GRCARG`, `GRPATR`, `GRRDR`, `GRSTOR` | none (group 4) | none | `GRSAIR` |
 | IRA | `IRFAIR` | `IRARM`, `IRCCC`, `IRCWP`, `IRPOW`, `IRRDR`, `IRRETR`, `IRSCUD` | SA-6 | SA-6 (4) | `IRFAIR` |
 | KURILE | `KPLNGR` | `KARMOR`, `KLFLT`, `KSCFT`, `KSFLT`, `KSILO`, `KSUB` | SA-6 | none | `KPLNGR` (targets) |
@@ -1360,12 +1440,10 @@ carry the label "default, pending John" where they appear above.
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
 | Supply truck numbers and stock | One truck per manned SAM or AAA slot plus one per template battery, unlimited stock, no added trucks in base layouts, two spare magazines per land gun. (The SAM rearm times of 300, 420 and 600 s are John's range, fitted within it.) | Retail slots stand about 3,300 ft apart, so a 528 ft radius covers one slot per truck |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and a Redfor human | A ground start across the map from a relocated target would mean a long flight |
-| Fleet-template aircraft | Leave out the Yak-141s in `~QBFLT` and the Rafale M and Super Etendards in `~QFFLT` | Scheduled launches 60 and 90 minutes in, up to 1,962 ft from carriers about 900 ft long |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
 | Runway pavement width | Keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
 | Building and unit hit boxes | Real size, a third of retail's in every axis, with the drawn size | Matches John's realistic scale; retail's targets were three times larger and easier to hit |
-| Collateral damage from aircraft weapons | Surface weapons only; aircraft missiles, rockets and bombs keep doing none | Their records carry collateral radii, but turning them on changes every air-to-air fight and is outside this round |
 
 ## Provenance summary
 
@@ -1373,6 +1451,6 @@ carry the label "default, pending John" where they appear above.
 | --- | --- |
 | Unit records, weapon records, template contents, rolls, equipment lists, night rule, `nationality3` pass-through, flak floors and fuze radius, burst, salvo, reload, startup shots, search and preparation times, tracking delay, target flags | retail |
 | B42 phases, missile guidance classes, decoy rules, RWR states | spec-derived |
-| Having a gun rate, magazine and reload (values fitted); the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
-| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, collateral law, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
+| Having a gun rate, magazine and reload (values fitted); splash damage for every weapon; the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
+| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
 | Unready flag producer, hit-chance rule, surface ranking terms, `zoneDist` and `maxVisDist` units, movement word units other than `w_speed`, whether retail Quick Missions activate base defenses | unknown, see [Unknowns](#unknowns) |

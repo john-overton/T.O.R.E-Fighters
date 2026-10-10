@@ -151,6 +151,39 @@ fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
     Ok(())
 }
 
+/// Each parked aircraft of `terrain` with its shape drawn gear down. A shape
+/// that does not read is left undrawn and logged.
+fn parked_shapes<'a>(
+    resources: &BTreeMap<String, Vec<u8>>,
+    terrain: &'a Terrain,
+) -> Vec<(
+    &'a tore_world::surface::parked::ParkedPose,
+    tore_formats::shape::Shape,
+)> {
+    terrain
+        .surface
+        .parked_scene
+        .iter()
+        .filter_map(|pose| {
+            let state: BTreeMap<usize, i32> =
+                pose.gear_word.map(|word| (word, 1)).into_iter().collect();
+            let shape = resources
+                .get(&pose.shape)
+                .ok_or_else(|| format!("missing {}", pose.shape))
+                .and_then(|bytes| {
+                    tore_formats::shape::Shape::with_state(bytes, &state).map_err(|e| e.to_string())
+                });
+            match shape {
+                Ok(shape) => Some((pose, shape)),
+                Err(error) => {
+                    log::warn!("Parked aircraft {} not drawn: {error}", pose.resource);
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 /// Placements without a standing combat target: destroyed, or never registered.
 fn fallen(
     geometry: &BTreeMap<u32, Vec<f32>>,
@@ -343,6 +376,14 @@ impl Scenery {
         }
         let mut static_layers = BTreeMap::<String, crate::static_art::Image>::new();
         let mut static_float_count = 0usize;
+        // Every drawn shape with its id, scale, orientation and origin.
+        let mut drawn: Vec<(
+            u32,
+            &tore_formats::shape::Shape,
+            f64,
+            tore_sim::attitude::Basis,
+            [f64; 3],
+        )> = Vec::new();
         for placed in sources.placed() {
             let (id, placement) = placed?;
             let Some(shape) = sources.shapes.get(&placement.object_type) else {
@@ -360,6 +401,18 @@ impl Scenery {
             else {
                 continue;
             };
+            drawn.push((id, shape, scale, basis, origin));
+        }
+        // The parked aircraft, gear down at the aircraft convention, where
+        // the terrain placed them (docs/spec/surface-defenses.md, "Parked
+        // aircraft"). Like every placement they hide when destroyed.
+        let parked = parked_shapes(resources, terrain);
+        drawn.extend(
+            parked
+                .iter()
+                .map(|(pose, shape)| (pose.id.0, shape, pose.scale, pose.basis, pose.origin)),
+        );
+        for (id, shape, scale, basis, origin) in drawn {
             let mut instance_vertices = Vec::new();
             // Experiment AP1: a redrawn airport draws its own pavement in
             // place of the retail airfield shape.

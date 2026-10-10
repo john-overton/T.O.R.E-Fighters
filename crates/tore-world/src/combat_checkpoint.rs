@@ -118,6 +118,10 @@ impl Combat {
             airport_objects: _,
             ground_sides: _,
             ground_looks: _,
+            // Setup: rebuilt from the surface with the scene.
+            parked: _,
+            // Setup: rebuilt with the scene.
+            weapon_boxes: _,
             surface,
             // Local: the recorder's list, owned by the app.
             tape: _,
@@ -174,6 +178,8 @@ impl Combat {
             airport_objects: _,
             ground_sides: _,
             ground_looks: _,
+            parked: _,
+            weapon_boxes: _,
             surface: surface_slot,
             tape: _,
             last_launcher: _,

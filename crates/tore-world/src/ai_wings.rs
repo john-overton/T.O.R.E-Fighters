@@ -2092,46 +2092,7 @@ impl AiWings {
         for event in &output.devices {
             self.realise_device(event, state)?;
         }
-        state.set_actor_supports(
-            self.mission
-                .actors()
-                .iter()
-                .filter(|a| a.alive())
-                .map(|actor| {
-                    let observation = actor
-                        .controller()
-                        .target()
-                        .and_then(|id| {
-                            actor
-                                .awareness()
-                                .current_observations()
-                                .find(|record| record.target.id == id)
-                        })
-                        .map(|record| {
-                            let delta =
-                                missiles::sub(record.target.position, actor.flight().position);
-                            seeker::Observation {
-                                id: record.target.id,
-                                position: record.target.position,
-                                velocity: record.velocity,
-                                quality: 1.0,
-                                off_axis: 0.0,
-                                range: missiles::length(delta),
-                            }
-                        });
-                    live::ActorSupport {
-                        owner: actor.id(),
-                        supported: observation
-                            .is_some_and(|o| actor.sensors().is_some_and(|s| s.supports(o.id))),
-                        observation,
-                        radar_position: actor.flight().position,
-                        radar_emitting: actor.flight().radar
-                            && actor.sensors().is_some_and(|s| {
-                                matches!(s.mode(), Some(sensors::Mode::Rws | sensors::Mode::Tws))
-                            }),
-                    }
-                }),
-        );
+        state.set_actor_supports(self.actor_supports());
         if state.weapon_rules == Rules::Compatibility {
             // Each round's seeker comes from the weapon it carries: its own
             // record, or a station of its owner's ownship.
@@ -2161,6 +2122,51 @@ impl AiWings {
         self.report_perceived_attacks(state, &humans, &ground);
         self.last_output = output;
         Ok(())
+    }
+
+    /// The AI aircraft's fire-control answers for the missile step: each live
+    /// actor's observation of its target, its sensors' support and its radar.
+    /// The step hands them to combat; the surface tick merges its own with
+    /// these in one `set_actor_supports` call
+    /// (docs/spec/surface-defenses.md, "SAM missiles").
+    pub fn actor_supports(&self) -> impl Iterator<Item = live::ActorSupport> + '_ {
+        self.mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive())
+            .map(|actor| {
+                let observation = actor
+                    .controller()
+                    .target()
+                    .and_then(|id| {
+                        actor
+                            .awareness()
+                            .current_observations()
+                            .find(|record| record.target.id == id)
+                    })
+                    .map(|record| {
+                        let delta = missiles::sub(record.target.position, actor.flight().position);
+                        seeker::Observation {
+                            id: record.target.id,
+                            position: record.target.position,
+                            velocity: record.velocity,
+                            quality: 1.0,
+                            off_axis: 0.0,
+                            range: missiles::length(delta),
+                        }
+                    });
+                live::ActorSupport {
+                    owner: actor.id(),
+                    supported: observation
+                        .is_some_and(|o| actor.sensors().is_some_and(|s| s.supports(o.id))),
+                    observation,
+                    radar_position: actor.flight().position,
+                    radar_emitting: actor.flight().radar
+                        && actor.sensors().is_some_and(|s| {
+                            matches!(s.mode(), Some(sensors::Mode::Rws | sensors::Mode::Tws))
+                        }),
+                }
+            })
     }
 
     /// Report observable attacks, never an opponent's private target choice.

@@ -1160,6 +1160,13 @@ impl Terrain {
             }
         }
         self.surface.courses = courses;
+        // The parked aircraft stand on the ground or their carrier's deck.
+        let (parked, unreadable) =
+            crate::surface::parked::place(resources, &self.surface, &|x, z| {
+                f64::from(self.height(x as f32, z as f32))
+            });
+        self.surface.parked_scene = parked;
+        self.surface.unreadable.extend(unreadable);
         self.airport_scene = tore_sim::airport::Scene {
             objects,
             runways,
@@ -1171,6 +1178,11 @@ impl Terrain {
             anchor_points(found).all(|p| scene.runway_surface(p[0], p[2]).is_some())
         });
         self.airfield_anchors = anchors;
+        // What the armed units fight with, read once from their records.
+        let arsenal = crate::surface::fire::Arsenal::load(&self.surface, resources, &|x, z| {
+            f64::from(self.height(x as f32, z as f32))
+        });
+        self.surface.arsenal = arsenal;
         self.airport_scene.validate().map_err(|error| error.into())
     }
 

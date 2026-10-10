@@ -18,14 +18,17 @@
 //! follow a route. Nothing here fires.
 pub mod catalog;
 mod checkpoint;
+pub mod emitters;
+pub mod fire;
 pub mod layout;
 pub mod movement;
+pub mod parked;
 pub mod resolve;
 pub mod units;
 
 pub use units::{
-    Battery, BatterySystem, GroupTransform, ParkedAircraft, StartPoints, SupplyTruck, SurfaceState,
-    SurfaceUnitState,
+    Battery, BatteryState, BatterySystem, Engager, GroupTransform, MountStock, ParkedAircraft,
+    RadarState, StartPoints, SupplyTruck, SurfaceState, SurfaceUnitState,
 };
 
 use crate::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
@@ -281,9 +284,13 @@ pub struct Surface {
     /// Every surface unit, ascending id: the base layout's NTs, then the
     /// template's objects.
     pub units: Vec<Unit>,
-    /// The template's aircraft, parked on the ground (filled in by the
-    /// parked-aircraft slice; listed here with their ids).
+    /// The template's aircraft, parked on the ground or a carrier deck,
+    /// ascending id.
     pub parked: Vec<ParkedAircraft>,
+    /// Where each parked aircraft stands and what it is, once the terrain is
+    /// known ([`parked::place`]); not in the digest, which covers what it is
+    /// built from.
+    pub parked_scene: Vec<parked::ParkedPose>,
     /// Supply trucks: those already standing in the layout and the template,
     /// and those the layout rules add.
     pub trucks: Vec<SupplyTruck>,
@@ -308,6 +315,10 @@ pub struct Surface {
     /// Why the mission's ground target stands nowhere: its template is not in
     /// the import. The mission flies without it.
     pub unresolved: Option<String>,
+    /// What the armed units, radars and batteries fight with, read from their
+    /// records when the terrain builds (not part of the digest: it follows
+    /// from the units and the import).
+    pub arsenal: fire::Arsenal,
     /// Where the two sides start with a ground target (the layout slice).
     pub starts: Option<StartPoints>,
     /// What the layout could not add (a battery radar or a supply truck
@@ -349,14 +360,13 @@ impl Surface {
     }
     /// A fresh changing state for every unit, as a mission starts.
     pub fn fresh_state(&self) -> SurfaceState {
-        SurfaceState {
-            digest: self.digest(),
-            units: self
-                .units
+        SurfaceState::new(
+            self.digest(),
+            self.units
                 .iter()
                 .map(|unit| SurfaceUnitState::new(unit.id))
                 .collect(),
-        }
+        )
     }
 
     /// FNV-1a 64 over everything resolved and placed: the template and its
@@ -417,6 +427,7 @@ impl Surface {
             h.i32s(&parked.angles);
             h.u32(parked.side.0);
             h.u8(u8::from(parked.target));
+            h.u32(parked.deck.map_or(0, |id| id.0));
         }
         h.u32(self.trucks.len() as u32);
         for truck in &self.trucks {
@@ -489,5 +500,7 @@ impl Digest {
 
 #[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod parked_tests;
 #[cfg(test)]
 mod tests;

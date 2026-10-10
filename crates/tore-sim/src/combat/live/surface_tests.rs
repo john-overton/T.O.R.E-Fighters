@@ -338,9 +338,11 @@ fn a_surface_missile_does_collateral_damage_to_other_aircraft_once() {
         .unwrap();
     let events = run_from(&mut s, 600, far());
     // The aircraft struck takes the record's damage once, the one within
-    // 750 ft 35 percent of it, the one beyond nothing.
+    // 750 ft a share falling from 35 percent at the burst to nothing at
+    // 750 ft (about 480 ft from it: 12 percent), the one beyond nothing.
     assert_eq!(hp(&s, 1), 900);
-    assert_eq!(hp(&s, 2), 1000 - 35);
+    let share = 1000 - hp(&s, 2);
+    assert!(share > 0 && share < 35, "{share}");
     assert_eq!(hp(&s, 3), 1000);
     assert_eq!(events.iter().filter(|e| **e == Event::Hit(2)).count(), 1);
     // Its jolt comes from the burst, where the missile struck the first.
@@ -352,7 +354,7 @@ fn a_surface_missile_does_collateral_damage_to_other_aircraft_once() {
     };
     let (direct, collateral) = (jolt(1).unwrap(), jolt(2).unwrap());
     assert_eq!(collateral.from, direct.from);
-    assert!((collateral.strength - 0.35).abs() < 1e-12);
+    assert!((collateral.strength - f64::from(share) / 100.).abs() < 1e-12);
     assert_eq!(jolt(3), None);
     // The missile resolves once, as a hit on the aircraft it struck.
     assert!(matches!(
@@ -366,7 +368,7 @@ fn a_surface_missile_does_collateral_damage_to_other_aircraft_once() {
 }
 
 #[test]
-fn a_surface_burst_reaches_the_ownship_and_aircraft_weapons_keep_no_collateral() {
+fn a_surface_burst_reaches_the_ownship_and_so_does_an_aircraft_weapons() {
     // A SAM striking an aircraft 400 ft ahead of the ownship.
     let mut s = scene();
     unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
@@ -389,7 +391,8 @@ fn a_surface_burst_reaches_the_ownship_and_aircraft_weapons_keep_no_collateral()
     );
     assert!(s.own().hp < before);
 
-    // The same missile fired by an aircraft: no collateral damage, as today.
+    // The same missile fired by an aircraft does collateral damage too
+    // (slice X1: every weapon whose record carries it).
     let mut s = scene();
     s.targets.push(aircraft(1, [0., 1000., 400.], 1000, REDFOR));
     s.targets
@@ -424,11 +427,11 @@ fn a_surface_burst_reaches_the_ownship_and_aircraft_weapons_keep_no_collateral()
     let events = run(&mut s, 240);
     assert!(events.contains(&Event::Hit(1)));
     assert!(
-        !events
+        events
             .iter()
-            .any(|e| matches!(e, Event::OwnshipDamaged { .. }))
+            .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 0, .. }))
     );
-    assert_eq!(s.own().hp, before);
+    assert!(s.own().hp < before);
 }
 
 #[test]
@@ -521,11 +524,13 @@ fn flak_bursts_near_a_hostile_aircraft_and_passes_a_friendly_one() {
                 at[0].abs() < 50. && at[1] < 6000. && at[1] > 5700.,
                 "{at:?}"
             );
-            assert_eq!(hp(&s, 7), 1000 - 80 * 35 / 100);
+            // The aircraft's surface is the 250 ft fuze radius from the
+            // burst: (35 - 11) percent of 80.
+            assert_eq!(hp(&s, 7), 1000 - 80 * 24 / 100);
             assert!(matches!(
                 outcomes(&mut s, id).as_slice(),
                 [Outcome {
-                    resolution: Resolution::Hit(28),
+                    resolution: Resolution::Hit(19),
                     ..
                 }]
             ));

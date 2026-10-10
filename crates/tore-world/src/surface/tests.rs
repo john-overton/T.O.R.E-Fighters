@@ -478,12 +478,16 @@ fn owners_are_rewritten_except_nationality3() {
 }
 
 #[test]
-fn fleet_aircraft_are_deck_launches_and_left_out() {
+fn fleet_aircraft_off_every_deck_stay_out() {
     let r = surface_resources();
+    // The fleet's aircraft stands 400 ft from a carrier whose fixture hull
+    // is an aircraft shape a few dozen feet across.
     let resolved = resolve_with(&r, &target("QUSFLT", 3, 3, 1));
     assert!(resolved.parked.is_empty());
     assert_eq!(resolved.site.left_out.len(), 1);
     assert_eq!(resolved.site.left_out[0].resource, "F18.PT");
+    assert_eq!(resolved.site.left_out[0].ordinal, 2);
+    assert_eq!(resolved.site.left_out[0].why, "on no carrier's deck");
     let kiev = &resolved.units[0];
     assert!(kiev.is_target());
     assert_eq!(kiev.look, DestroyedLook::DamagedShape("KIEV_A.SH".into()));
@@ -593,7 +597,7 @@ fn combat_registers_every_unit_with_its_side() {
         Some(tore_sim::combat::live::NO_SIDE)
     );
     // With a ground target, its units join with theirs, and the parked
-    // aircraft stays out of the scene until its own slice.
+    // aircraft is a parked target of its own side.
     let mut world = world_with_target(&r, &target("QUCITY", 3, 3, 9));
     let surface = world.terrain.surface.clone();
     for unit in surface.template_units() {
@@ -605,7 +609,11 @@ fn combat_registers_every_unit_with_its_side() {
             unit.resource
         );
     }
-    assert_eq!(side_in_combat(&world, SURFACE_UNIT_BASE + 16), None);
+    assert_eq!(
+        side_in_combat(&world, SURFACE_UNIT_BASE + 16),
+        Some(ENEMY_SIDE)
+    );
+    assert!(world.combat.state.is_parked(SURFACE_UNIT_BASE + 16));
     // Units explode with their own record's look; base-layout buildings keep
     // the fitted ground-object one.
     let look = |id| {
@@ -624,6 +632,7 @@ fn combat_registers_every_unit_with_its_side() {
     // A restart keeps the sides.
     world.combat.reset(&mut world.cockpits[0].flight).unwrap();
     assert_eq!(side_in_combat(&world, SURFACE_UNIT_BASE), Some(ENEMY_SIDE));
+    assert!(world.combat.state.is_parked(SURFACE_UNIT_BASE + 16));
 }
 
 #[test]
