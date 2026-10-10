@@ -86,6 +86,12 @@ X as a rudder pair elsewhere ([key placement](../INPUT.md#key-placement)).
 Ctrl+A, Ctrl+Z and Ctrl+X are the find-nearest-objects cheat that the Multi
 menu can allow.
 
+T.O.R.E binds Tab, Shift+R, Ctrl+R, `/` and Ctrl+X to the actions `fire-gun`,
+`a-g-radar`, `sight-next` and `nearest-ground`, and adds Ctrl+L (laser, `laze`)
+and Ctrl+M (delivery mode) on keys the original leaves free. All of them report
+"not implemented yet" until the air-to-ground slices land
+([key placement](../INPUT.md#key-placement)).
+
 ## Sensors and navigation
 
 | Key | Action | Confidence |

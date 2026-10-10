@@ -444,7 +444,7 @@ Default keys follow Fighters Anthology wherever the original has the command
   incoming-missile range fixture), or moved to a free neighbour (next airport,
   to Shift+N).
 - An FA key whose feature T.O.R.E lacks stays unassigned. Pressing it says "not
-  implemented yet": Shift+R (air-to-ground radar), Shift+A and Shift+G
+  implemented yet": Shift+A and Shift+G
   (AWACS and air-to-ground radar links), Shift+F (target damage), Shift+I
   (airbase inventory), Shift+J (drop tanks), Shift+D (message history) and
   Alt+F (engage the laser-designated target). U (IFF) and Ctrl+T (Show Target
@@ -484,7 +484,12 @@ Deliberate differences from FA:
 | Shift+Backslash | Pin the AC-130 gunsight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
 | Shift+' / Shift+; | Zoom the AC-130 gunsight in / out; elsewhere "not implemented yet" | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
 | Alt + arrows | Slew the AC-130 gunsight | Unused | T.O.R.E addition, John 2026-10-09 |
-| Tab | Nothing | Fire the gun | Not wired yet |
+| Tab | Fire the gun whatever is selected (`fire-gun`); says "not implemented yet" until the air-to-ground weapons land | Fire the gun | Retail key, bound by A2G slice K1 |
+| Shift+R / Ctrl+R | Air-to-ground radar on or off (`a-g-radar`); "not implemented yet" for now | The same | Retail keys, bound by K1. Ctrl+Shift+R is still the tower repeat |
+| / | Sight: next visible object (`sight-next`); "not implemented yet" for now | Designate the next visible object as the IR/laser target | Retail key, bound by K1; the sight keys serve every aircraft with a sight in the A2G design |
+| Ctrl+L | Laser on or off (`laze`); "not implemented yet" for now | Unused | T.O.R.E addition, John (A2G decision 5) |
+| Ctrl+M | Delivery mode: CCIP / LVL for bombs, BORE / CUED for missiles (`weapon-seeker-mode`) | Unused | T.O.R.E addition, A2G design 2.7; the action existed without a key |
+| Ctrl+X | Nearest ground target, under Easy targeting (`nearest-ground`); "not implemented yet" for now | Nearest ground target cheat when the Multi menu allows it | John, A2G decision 21 |
 | V | Save the view to Other View and open it | The same, then return the main view to the front | The main view stays |
 
 ## Profiles and calibration
