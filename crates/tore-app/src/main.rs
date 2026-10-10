@@ -4754,6 +4754,13 @@ impl ApplicationHandler for App {
                                 &self.scenery,
                                 presented,
                                 &frame.readout,
+                                self.world
+                                    .combat
+                                    .state
+                                    .ownship(frame.plane.0)
+                                    .map_or(tore_sim::combat::live::DEFAULT_OWNSHIP_SIDE, |own| {
+                                        own.side
+                                    }),
                                 &self.hornet.font,
                                 &self.menu.quick_sprites,
                             );

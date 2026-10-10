@@ -6,10 +6,13 @@ use crate::{
     scenery::Scenery,
     terrain::Terrain,
 };
+use tore_formats::surface_unit::class;
 use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, theater::CELL_FEET};
+use tore_sim::combat::live::{NO_SIDE, Side};
 use tore_sim::sensors::FEET_PER_NAUTICAL_MILE as NMI;
 use tore_world::readout::CockpitReadout;
+use tore_world::surface::{Unit, UnitId};
 
 const AREA: (i32, i32, i32, i32) = (12, 30, 476, 408);
 const INK: [u8; 4] = [232, 232, 218, 255];
@@ -186,6 +189,51 @@ fn is_building(resource: &str) -> bool {
     )
 }
 
+/// MCICONS.PIC's ground symbols, by column: the AAA gun, the missile
+/// launcher, the tank, the truck, the radar building, the ship and the
+/// generic cube. Which symbol means which is read from the sheet (agent
+/// decision, docs/spec/flight-map.md).
+mod icon {
+    pub const AAA: usize = 8;
+    pub const SAM: usize = 9;
+    pub const TANK: usize = 10;
+    pub const TRUCK: usize = 11;
+    pub const RADAR: usize = 12;
+    pub const SHIP: usize = 13;
+    pub const OTHER: usize = 14;
+}
+
+/// The side a symbol's tile shows: the sheet's blue row is Bluefor, its red
+/// row Redfor, and a grey tile asserts neither.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tile {
+    Neutral,
+    Friendly,
+    Hostile,
+}
+
+/// What a visually identified surface unit is drawn as: its symbol by its
+/// class, and the tile of its side against the viewer's `own` side.
+fn unit_look(unit: &Unit, own: Side) -> (usize, Tile) {
+    let symbol = match unit.class {
+        class::AAA => icon::AAA,
+        class::SAM => icon::SAM,
+        class::TANK => icon::TANK,
+        class::VEHICLE if unit.supply_truck => icon::TRUCK,
+        class::VEHICLE | class::STRUCTURE => icon::RADAR,
+        class::SHIP => icon::SHIP,
+        _ => icon::OTHER,
+    };
+    let tile = if unit.side == NO_SIDE {
+        Tile::Neutral
+    } else if unit.side == own {
+        Tile::Friendly
+    } else {
+        Tile::Hostile
+    };
+    (symbol, tile)
+}
+
 #[derive(Default)]
 pub struct Map {
     pub open: bool,
@@ -303,6 +351,7 @@ impl Map {
         scenery: &Scenery,
         state: &flight::State,
         readout: &CockpitReadout,
+        own: Side,
         font: &Font,
         sprites: &std::collections::BTreeMap<String, Sprite>,
     ) {
@@ -369,7 +418,7 @@ impl Map {
         {
             if let Some(point) = projection.point(runway.surface.center) {
                 let (x, y) = place_marker(pixels, point, &mut markers, &mut labels);
-                symbol(pixels, icons, x, y, Some(15), false);
+                symbol(pixels, icons, x, y, Some(15), Tile::Neutral);
                 let name = world
                     .airport_scene
                     .airports
@@ -436,8 +485,22 @@ impl Map {
             } else {
                 "UNKNOWN SURFACE"
             };
-            let icon = identified.then_some(if observed.airborne { 0 } else { 14 });
-            symbol(pixels, icons, x, y, icon, false);
+            // A visually identified surface unit shows what it is, on the
+            // tile of its side; anything else keeps the generic symbol.
+            let unit = (!observed.airborne && identified)
+                .then(|| world.surface.unit(UnitId(contact.id)))
+                .flatten();
+            let (icon, tile) = match unit {
+                Some(unit) => {
+                    let (symbol, tile) = unit_look(unit, own);
+                    (Some(symbol), tile)
+                }
+                None => (
+                    identified.then_some(if observed.airborne { 0 } else { icon::OTHER }),
+                    Tile::Neutral,
+                ),
+            };
+            symbol(pixels, icons, x, y, icon, tile);
             label(
                 pixels,
                 font,
@@ -482,7 +545,7 @@ impl Map {
                 / std::f64::consts::FRAC_PI_4)
                 .round() as usize
                 % 8;
-            symbol(pixels, icons, x, y, Some(heading), true);
+            symbol(pixels, icons, x, y, Some(heading), Tile::Friendly);
             label(
                 pixels,
                 font,
@@ -628,18 +691,26 @@ fn symbol(
     x: i32,
     y: i32,
     index: Option<usize>,
-    player: bool,
+    tile: Tile,
 ) {
     if let (Some(sheet), Some(index)) = (icons, index)
         && sheet.width >= (index + 1) * 24
         && sheet.height >= 20
     {
+        // The sheet's second row is the same symbols on the red tile; without
+        // it a hostile symbol is drawn grey rather than in the wrong colour.
+        let tile = if tile == Tile::Hostile && sheet.height < 40 {
+            Tile::Neutral
+        } else {
+            tile
+        };
+        let row = if tile == Tile::Hostile { 20 } else { 0 };
         for dy in 0..20 {
             for dx in 0..23 {
-                let src = (dy * sheet.width + index * 24 + dx) * 4;
+                let src = ((dy + row) * sheet.width + index * 24 + dx) * 4;
                 let mut color: [u8; 4] = sheet.rgba[src..src + 4].try_into().unwrap();
                 // Neutral tiles do not assert friend/foe knowledge.
-                if !player && color[2] > color[0] {
+                if tile == Tile::Neutral && color[2] > color[0] {
                     color = [48, 53, 60, 255];
                 }
                 Canvas(pixels).rect((x - 11 + dx as i32, y - 10 + dy as i32, 1, 1), color);
@@ -735,6 +806,111 @@ mod tests {
         ] {
             assert!(!is_building(name));
         }
+    }
+    fn unit(class: u16, side: Side, truck: bool) -> Unit {
+        use tore_world::surface::{DestroyedLook, Origin, UnitKind};
+        Unit {
+            id: UnitId(0x5000_0001),
+            origin: Origin::Added,
+            resource: "X.NT".into(),
+            kind: UnitKind::Active,
+            class,
+            name: "X".into(),
+            nationality: None,
+            side,
+            position: [0; 3],
+            angles: [0; 3],
+            flags: 0,
+            skill: 1,
+            react: None,
+            search_dist: None,
+            start_time: None,
+            route: None,
+            hit_points: 100,
+            look: DestroyedLook::Vanish,
+            explosion: None,
+            crater: None,
+            supply_truck: truck,
+            in_scene: true,
+        }
+    }
+    #[test]
+    fn a_known_surface_unit_shows_its_kind_on_the_tile_of_its_side() {
+        let (blue, red) = (Side(1), Side(2));
+        for (class, truck, symbol) in [
+            (class::AAA, false, icon::AAA),
+            (class::SAM, false, icon::SAM),
+            (class::TANK, false, icon::TANK),
+            (class::VEHICLE, true, icon::TRUCK),
+            (class::VEHICLE, false, icon::RADAR),
+            (class::STRUCTURE, false, icon::RADAR),
+            (class::SHIP, false, icon::SHIP),
+            (0x4000, false, icon::OTHER),
+        ] {
+            assert_eq!(
+                unit_look(&unit(class, red, truck), blue),
+                (symbol, Tile::Hostile),
+                "{class:#x}"
+            );
+        }
+        // A friendly unit is on the blue tile, an ownerless one on a grey
+        // tile that claims nothing, and the viewer's side decides which is
+        // which: a Redfor pilot sees Redfor units as friends.
+        assert_eq!(
+            unit_look(&unit(class::SAM, blue, false), blue).1,
+            Tile::Friendly
+        );
+        assert_eq!(
+            unit_look(&unit(class::SAM, NO_SIDE, false), blue).1,
+            Tile::Neutral
+        );
+        assert_eq!(
+            unit_look(&unit(class::SAM, red, false), red).1,
+            Tile::Friendly
+        );
+        assert_eq!(
+            unit_look(&unit(class::SAM, blue, false), red).1,
+            Tile::Hostile
+        );
+    }
+    #[test]
+    fn symbols_take_the_blue_row_for_friends_the_red_row_for_foes_and_grey_for_neither() {
+        // A two-row sheet: blue tiles on top, red tiles below.
+        let (width, height) = (24 * 17, 40);
+        let mut rgba = vec![0_u8; width * height * 4];
+        for (i, pixel) in rgba.chunks_exact_mut(4).enumerate() {
+            let blue_row = i / width < 20;
+            pixel.copy_from_slice(&if blue_row {
+                [20, 40, 200, 255]
+            } else {
+                [200, 20, 20, 255]
+            });
+        }
+        let sheet = Sprite {
+            width,
+            height,
+            rgba,
+            glyphs: vec![],
+        };
+        let at = |tile| {
+            let mut pixels = vec![0_u8; 640 * 480 * 4];
+            symbol(&mut pixels, Some(&sheet), 100, 100, Some(9), tile);
+            let i = (100 * 640 + 100) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        };
+        assert_eq!(at(Tile::Friendly), [20, 40, 200]);
+        assert_eq!(at(Tile::Hostile), [200, 20, 20]);
+        assert_eq!(at(Tile::Neutral), [48, 53, 60]);
+        // A sheet with no red row never shows a foe on a friendly tile.
+        let single = Sprite {
+            height: 20,
+            rgba: sheet.rgba[..width * 20 * 4].to_vec(),
+            ..sheet
+        };
+        let mut pixels = vec![0_u8; 640 * 480 * 4];
+        symbol(&mut pixels, Some(&single), 100, 100, Some(9), Tile::Hostile);
+        let i = (100 * 640 + 100) * 4;
+        assert_eq!(pixels[i..i + 3], [48, 53, 60]);
     }
     #[test]
     fn category_click_requires_matching_press_release_and_cancel_discards_press() {
