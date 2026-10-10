@@ -308,7 +308,12 @@ impl Combat {
         wings: Option<&crate::ai_wings::AiWings>,
         cockpit: Option<&crate::world::Cockpit>,
     ) -> Option<crate::readout::CockpitReadout> {
-        crate::readout::build(&self.state, plane, launcher, wings, cockpit)
+        let mut readout = crate::readout::build(&self.state, plane, launcher, wings, cockpit)?;
+        // Surface units' missile locks sound the same tone as the AI's.
+        let locks = &mut readout.rwr.locks;
+        locks.extend(self.surface.locks_on(plane));
+        locks.truncate(crate::readout::MAX_AI_THREATS);
+        Some(readout)
     }
     /// Player airborne startup convention: canonical gun selected and armed.
     pub fn apply_startup_weapons(&mut self) {
@@ -343,7 +348,17 @@ impl Combat {
             std::mem::replace(&mut self.ground_sides, sides),
             std::mem::replace(&mut self.ground_looks, looks),
         );
-        if let Err(error) = self.add_airport_targets(&terrain.airport_scene) {
+        // The barrage zones have no shape: they join combat with a volume of
+        // their own (docs/spec/surface-defenses.md, "Barrage zone").
+        let shapeless = crate::surface::fire::shapeless_targets(&terrain.surface);
+        let scene = if shapeless.is_empty() {
+            std::borrow::Cow::Borrowed(&terrain.airport_scene)
+        } else {
+            let mut scene = terrain.airport_scene.clone();
+            scene.objects.extend(shapeless);
+            std::borrow::Cow::Owned(scene)
+        };
+        if let Err(error) = self.add_airport_targets(&scene) {
             (self.ground_sides, self.ground_looks) = previous;
             return Err(error);
         }

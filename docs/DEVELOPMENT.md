@@ -1571,6 +1571,27 @@ so both commands read what the pack lacks from the retail media at runtime:
 `TORE_GAME_DIR`, else the source the data directory remembers, else the
 checkout's `gameassets/fighters-anthology` link.
 
+`--surface-trace THEATER [STEM]` flies the player on a scripted straight line
+past one armed unit (`--over TYPE [--index N]` or `--unit ID`) at
+`--altitude` feet above it, `--speed` knots, `--pass` feet to its side,
+starting `--from` nm short, for `--seconds`, and prints what the surface
+controllers do: phase changes, shots and gun bursts with their rate, magazine
+swaps, radar on and off, HARM shutdown rolls and battery changes, the RWR's
+ground squares, locks and tone, decoy rolls, hits, the unit's stock and a
+summary line. `--chaff S` and `--flares S` dispense while a missile is in
+flight at the jet, `--harm-at NM` puts an AGM-88 in flight at the unit's
+radar, `--kill-at S` destroys that radar, `--player-side red` flies for
+Redfor, `--condition night` darkens the sky, `--skill N` and `--rng N` fix the
+experience and the random draws, and `--near FT` follows the unit's
+neighbours too. A launcher in a SAM battery is traced with its battery's radar
+and launchers. It reads the same retail records, weapons and sensors too.
+The `surface-*` engagement battery scenarios run it.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --over SA6 --altitude 15000 --from 20 --seconds 150
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
+```
+
 ## Flight view inspection
 
 `--flight-view 0..11` preserves 0 front, 1 external, 2 oblique, 3 back and 4 up.

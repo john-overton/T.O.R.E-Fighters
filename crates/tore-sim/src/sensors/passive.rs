@@ -11,6 +11,9 @@ pub const RECEIVER_LIMIT_NMI: f64 = 50.;
 /// Scales offered by the instrument, reusing the existing warning-receiver set.
 pub const SCALE_LADDER_NMI: [f64; 5] = [5., 10., 20., 30., 50.];
 pub const DEFAULT_SCALE_INDEX: usize = 4;
+/// The least height above the terrain a ground emitter is received from,
+/// feet: its antenna (fitted, docs/spec/surface-defenses.md).
+pub const GROUND_ANTENNA_FT: f64 = 10.;
 
 /// What kind of symbol the instrument may draw. Anything not established by
 /// available data stays an unknown emitter.
@@ -66,7 +69,17 @@ pub fn emitters(
         if !distance.is_finite() || distance > RECEIVER_LIMIT_NMI {
             continue;
         }
-        if (environment.obscured)(observer.position, target.position) {
+        // A ground radar's antenna stands above the ground: the sight line
+        // ends at least [`GROUND_ANTENNA_FT`] above the terrain under it, so a
+        // unit whose contact volume sits low on a slope is not hidden by the
+        // ground it stands on.
+        let end = if ground {
+            let [x, y, z] = target.position;
+            [x, y.max((environment.ground)(x, z) + GROUND_ANTENNA_FT), z]
+        } else {
+            target.position
+        };
+        if (environment.obscured)(observer.position, end) {
             continue;
         }
         // Range is plotted only for an emitter our own sensors also observe.
@@ -243,5 +256,29 @@ mod tests {
             &environment(&ground, &clear),
         );
         assert!((found[0].bearing_rad - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    }
+    #[test]
+    fn a_ground_emitter_sunk_into_a_slope_is_received_from_its_antenna() {
+        // The terrain rises to 100 ft under the radar, whose aim point sits
+        // 2 ft below it; a sight line to the aim point grazes the hill.
+        let ground = |_: f64, z: f64| if z > 60_000. { 100. } else { 0. };
+        let terrain = |from: [f64; 3], to: [f64; 3]| {
+            (1..64).any(|i| {
+                let t = f64::from(i) / 64.;
+                let p: [f64; 3] = std::array::from_fn(|k| from[k] + (to[k] - from[k]) * t);
+                p[1] <= ground(p[0], p[2])
+            }) || to[1] <= ground(to[0], to[2])
+        };
+        let e = environment(&ground, &terrain);
+        let mut radar = target(4, [0., 98., 60_760.], false);
+        radar.airborne = false;
+        radar.radar_emitting = true;
+        let found = emitters(&observer(), std::slice::from_ref(&radar), &[], &e);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].symbol, Symbol::Ground);
+        // An aircraft is still tested at its own position.
+        let mut low = target(5, [0., 98., 60_760.], true);
+        low.radar_emitting = true;
+        assert!(emitters(&observer(), std::slice::from_ref(&low), &[], &e).is_empty());
     }
 }

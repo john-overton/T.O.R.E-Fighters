@@ -9,10 +9,13 @@
 > <!-- tore-header v2 -->
 
 Specification, 2026-10-10, for the surface-AI round (John's request of the same
-day, with his answers). **Nothing in this document is implemented yet.** It is
-written ahead of the code so each implementation slice has numbers to test
-against; the acceptance pass at the end of the round (slice A1) updates it with
-what shipped. Retail data comes from the survey of `FA_2.LIB` and `FA.EXE`
+day, with his answers). It was written ahead of the code so each
+implementation slice has numbers to test against, and is being implemented
+slice by slice: the unit records, resolution and sides, the AAA tuning table,
+the surface weapons' flight, and the engagement controllers, batteries and
+radars are in ([implementation so far](#implementation-so-far)); the
+acceptance pass at the end of the round (slice A1) updates it with what
+shipped. Retail data comes from the survey of `FA_2.LIB` and `FA.EXE`
 described under [Provenance](#provenance-and-how-to-read-this).
 
 For a player: the Quick Mission Creator's line "Friendly ground target is [30]
@@ -679,7 +682,9 @@ quarter seconds.
 
 Aim error by skill is a random angular offset per burst plus the existing
 per-round dispersion: radar guns 0.6, 0.4, 0.3 and 0.2 degrees; visual guns 1.5,
-1.0, 0.7 and 0.5 degrees for novice, average, veteran and ace. Fitted.
+1.0, 0.7 and 0.5 degrees for novice, average, veteran and ace. Fitted. A jammer
+on the target widens a radar-directed gun's aim error two times; visual guns
+are unaffected (defined, John, 2026-10-10: "fine for now").
 
 #### Flak
 
@@ -834,6 +839,38 @@ the radar."
   work for any incoming projectile.
 - HARM targets: a surface target with its radar on is a compatible emitter for
   the existing AGM-88 profile.
+
+### Implementation so far
+
+Slice W3 (2026-10-10) built the engagement controller, the batteries and the
+radars to the rules above. Where the rules leave a choice, it chose as follows
+(defined, agent, unless marked):
+
+| Rule | As built | Basis |
+| --- | --- | --- |
+| Controllers | One per gun mount (a ship's fore and aft guns turn and fire on their own, each with its magazine) and one per missile record on a unit (its rails share it); a battery has one on its radar | defined (John, 2026-10-10): the arcs of a ship's mounts differ |
+| First search | At once when a hostile enters detection range; the search period is the retry when none is eligible | fitted |
+| First engagement | The unready preparation time is the controller's first Prepare; every later one takes the ordinary time | fitted (unknown producer) |
+| Lost target, failing gates | A target no longer eligible returns to Search at once; launch gates that fail hold the lock up to 15 s, then Search (which may choose the same target again) | B42 window, fitted recovery |
+| Lock between salvos | The lock holds through the pause between bursts and salvos: the RWR lock tone and the painting state continue | defined (John, 2026-10-10) |
+| Gun bursts | A burst's rounds leave evenly over its burst time; the first engagement's opening barrage (`startupShots`) spaces its rounds by the burst's round spacing, at least a quarter second apart (KS-19: 8 shells in 2 s) | fitted |
+| Where rounds leave from | The mount: the unit's pose this tick (a moving unit fires from where it is, with its velocity) plus the hardpoint offset at real size (a third of the record's) turned by the unit's attitude, at least 5 ft above the terrain; radars and sights look from 10 ft above the unit's reference point. Nothing depends on the shape's extents | fitted |
+| RWR reception of a ground radar | The terrain test ends at least 10 ft above the ground under the radar (its antenna), so a unit whose contact volume sits low on a slope still shows its square | fitted |
+| Mount arcs | A half-arc of 0 is unrestricted on that axis (every land vehicle reads 0 for heading); otherwise the bearing (guns: and elevation) must lie inside the half-arc of the mount's rest direction, relative to the hull. A missile's launch pitch is the line to the target clamped between 10 degrees and the rail's arc | inference, fitted |
+| Altitude bands | Zone altitudes are the target's height above the unit, as the AI's envelopes take them | spec-derived (B45) |
+| Gun reach and range | A gun's launch range is its fire zone capped by its shells' reach; a round ends 15 percent (at least 500 ft) past the target; a flak shell's time fuze is its time of flight to the lead point | fitted |
+| Lead | A radar gun observes its target every tick; a visual gun every 0.5 s and leads from that stale track; both through the shared gunsight time-of-flight solution | spec-derived, fitted refresh |
+| Detection | Range, the weapon's `zone0` altitude band, the react class mask (0 attacks any class), `searchDist` read as 256 ft units, and a terrain line of sight sampled every 500 ft | retail plus fitted |
+| Radar guns | A gun is radar-directed when its record carries flag 0x4000 and a radar seeker; the barrage zone's record carries the flag without the seeker and is not | inference |
+| Battery blind | A battery is Blind while its radar is destroyed or shut down by a HARM; a radar that is merely off (no hostile near) leaves it Idle | defined (agent) |
+| Battery launcher | Each salvo leaves from the nearest launcher with a loaded rail, line of sight and the target in its launch zone; the missile is the launcher's, its support the radar's | defined (John) |
+| Optical backup | Detection and support from the first live launcher, inside half the launch range and 10 nm, preparation doubled, no emitter and no lock tone | defined (agent), default pending John |
+| Barrage zone | A target volume 60 ft square and 20 ft tall on the ground (bombs can kill it); it wakes when a hostile is within 195 x 256 ft and fires each burst with its 33 percent chance at the nearest hostile's lead point clamped into its fire zone, scattered by the record's offset-fire angles (20 degrees) | fitted |
+| Resupply hook | A unit's stock (rails, magazine, spare magazines) and a "truck in reach" flag are open to the resupply slice; with the flag set an empty gun swaps a magazine from the truck | defined (John's rule, slice SR1 builds it) |
+
+`--surface-trace` flies a scripted pass past one unit and prints the
+controller's phases, shots and bursts, radar and HARM events and the RWR
+(see [development](../DEVELOPMENT.md#surface-unit-inspection)).
 
 ### Countermeasures
 
