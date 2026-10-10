@@ -150,7 +150,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "airports": (
         "airports in the creator, the tower lists and ILS surveys",
         (
-            "menus-validate-creator", "menus-validate-ils*", "menus-snap-quick-airports",
+            "menus-validate-creator", "menus-validate-ils*", "menus-snap-quick-airports", "airport-allegiance",
             "menus-snap-quick-ground-start", "menus-snap-quick-field-*", "ai-ils-*",
         ),
     ),

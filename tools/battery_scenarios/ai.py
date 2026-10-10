@@ -902,9 +902,11 @@ def scenarios() -> list[Scenario]:
     # Formerly a known failure (lane doc): an F-22 test-harness leader
     # outruns its wingman, which chases at 800 kt, 900 ft above hills that
     # rose faster than the old 1,000 ft terrain look-ahead could see. Passes
-    # with the six-second look-ahead (2026-09-29).
-    out.append(probe("known-f22-leader-wingman-ukr3", [
-        "--theater", "UKR", "--aircraft", "f22", "--ground-start", "3",
+    # with the six-second look-ahead (2026-09-29). Since slice AL1 the wing
+    # leaves Ivano Frankivs'k under the Carpathians: Krasnodar (airport 3),
+    # where it first failed, is a Redfor field and no Blue ground start.
+    out.append(probe("known-f22-leader-wingman-ukr12", [
+        "--theater", "UKR", "--aircraft", "f22", "--ground-start", "12",
         "--maneuver", "takeoff", "--probe-wing-size", "2", "--probe-wing-only"],
         ticks=9000, check=checker(ground=True, need_takeoff=True, player_flies=True)))
     out.append(probe("regress-gun-missile-flap-su35", ["--aircraft", "su35", "--probe-enemy-aircraft", "mig29",
@@ -960,15 +962,23 @@ def scenarios() -> list[Scenario]:
         where = ["--theater", theater]
         out.append(probe(f"theater-{theater.lower()}-fight-4v4", where + fight(4, 4, "--separation", "5", *attack)))
         out.append(probe(f"theater-{theater.lower()}-fight-8v8-noattack", where + fight(8, 8, "--separation", "10"), ticks=9600))
+        # A short strip is no ground start (John, 2026-09-30), nor is a
+        # Redfor field for the Blue wing (slice AL1): the next airport that
+        # is one takes its place, and names the scenario. The Falklands and
+        # North Vietnam have no Blue field, so no ground start there.
+        airports = []
         for wanted in (1, 3):
-            # A short strip is no ground start (John, 2026-09-30): the next
-            # airport that is one takes its place, and names the scenario.
-            airport = str(ground_airport(theater, wanted))
+            found = ground_airport(theater, wanted)
+            if found is not None and found not in airports:
+                airports.append(found)
+        for airport in map(str, airports):
             out.append(probe(f"theater-{theater.lower()}-takeoff-a{airport}", where + [
                 "--ground-start", airport, "--probe-wing-size", "3", "--maneuver", "takeoff", "--separation", "50"],
                 ticks=24000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
+        if not airports:
+            continue
         out.append(probe(f"theater-{theater.lower()}-land-pair", where + [
-            "--ground-start", "1", "--probe-wing-size", "2", "--maneuver", "takeoff",
+            "--ground-start", str(airports[0]), "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
             ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True, player_flies=True)))
     # Runway ends whose 3 degree path meets terrain in the last 5 nm
@@ -983,7 +993,10 @@ def scenarios() -> list[Scenario]:
                 problems.append(f"{label} flew the gates for {times['Final'] - times['Approach']:.0f} s")
         return problems
 
-    for theater, airport in (("FRA", "9"), ("KURILE", "3"), ("NSK", "6"), ("UKR", "5"), ("UKR", "6"), ("UKR", "8"), ("UKR", "12")):
+    # Amiens (FRA 9), Burevestnik (KURILE 3), Hyon Ni (NSK 6), Donets'k and
+    # Kharkiv (UKR 5 and 6) are Redfor fields since slice AL1: the Blue wing
+    # neither starts nor is ordered to land there, so only the Blue ones stay.
+    for theater, airport in (("UKR", "8"), ("UKR", "12")):
         out.append(probe(f"ils-terrain-{theater.lower()}-a{airport}", [
             "--theater", theater, "--ground-start", airport, "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
@@ -992,9 +1005,10 @@ def scenarios() -> list[Scenario]:
     # survives, so these probes lose the player on purpose with
     # `--probe-lose-player`, 60 s after takeoff at Kharkiv and 20 s after
     # takeoff at Simferopol, where the old pilot used to crash. The lead flies
-    # the wing's waypoints, then goes home and lands.
-    out.append(probe("lost-lead-route-ukr-a6", [
-        "--theater", "UKR", "--ground-start", "6", "--probe-wing-size", "2", "--maneuver", "takeoff",
+    # the wing's waypoints, then goes home and lands. Kharkiv is a Redfor
+    # field since slice AL1, so the route probe leaves Odesa (airport 9).
+    out.append(probe("lost-lead-route-ukr-a9", [
+        "--theater", "UKR", "--ground-start", "9", "--probe-wing-size", "2", "--maneuver", "takeoff",
         "--separation", "200", "--probe-wing-only", "--probe-lose-player", "7200",
         "--probe-wing-route", "8:8:8000", "--probe-wing-route", "0:16:8000"],
         ticks=120000, timeout=2400, check=lost_lead_route_checker))
@@ -1008,7 +1022,10 @@ def scenarios() -> list[Scenario]:
             "--separation", "200", "--probe-wing-only"],
             ticks=90000, timeout=1800,
             check=land_order_checker(checker(ground=True, need_takeoff=True, need_landing=size == 2), player_lost=True)))
-    for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
+    # Blue fields (slice AL1): Odesa, Ras Al Khaimah, Florennes and Kimpo.
+    # Before it the UKR, FRA and NSK starts were Zaporizhzhya, Chateaudun and
+    # Nuchon Ni, Redfor fields.
+    for theater, airport in (("UKR", "9"), ("PGU", "2"), ("FRA", "4"), ("NSK", "9")):
         for aircraft in AIRCRAFT:
             out.append(probe(f"takeoff-{theater.lower()}-a{airport}-{aircraft}", [
                 "--theater", theater, "--ground-start", airport, "--aircraft", aircraft,

@@ -89,7 +89,9 @@ def restart_scenarios() -> list[Scenario]:
     """The Quick Mission launch and restart check, over many setups: restart must restore the accepted start."""
     out = []
     setups: dict[str, list[str]] = {}
-    for airport in (1, 2, 3, 4, 5):
+    # Blue fields only (slice AL1): Simferopol, L'viv, Odesa, Kherson and
+    # Ivano Frankivs'k.
+    for airport in (2, 8, 9, 11, 12):
         for wing in (1, 3, 5):
             setups[f"ground-{airport}-wing{wing}"] = ["--ground-start", str(airport), "--probe-wing-size", str(wing)]
     for sep in (1, 2, 5, 10, 20, 50, 75, 100, 150, 200, 300):
@@ -118,7 +120,7 @@ def scenarios() -> list[Scenario]:
     out.append(live_scenario("replay-live-free-legacy", ["--free-flight", "--legacy-flight"], frames=240))
     for sep in (1, 5, 20):
         out.append(live_scenario(f"replay-live-quick-sep{sep}", ["--launch-quick-mission", "--separation", str(sep)], frames=600, ai=3))
-    for airport in (1, 2, 5):
+    for airport in (2, 9, 11):
         for wing in (1, 3, 5):
             out.append(
                 live_scenario(
@@ -155,5 +157,5 @@ def scenarios() -> list[Scenario]:
         )
     )
     out.append(live_scenario("replay-live-audio-quick", ["--launch-quick-mission", "--separation", "5"], frames=600, audio=True, ai=3))
-    out.append(live_scenario("replay-live-audio-ground", ["--launch-quick-mission", "--ground-start", "1", "--probe-wing-size", "3"], frames=900, audio=True, tower=True, ai=3))
+    out.append(live_scenario("replay-live-audio-ground", ["--launch-quick-mission", "--ground-start", "2", "--probe-wing-size", "3"], frames=900, audio=True, tower=True, ai=3))
     return out

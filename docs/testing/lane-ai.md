@@ -395,6 +395,34 @@ leave the in-flight airport list ([rule](../spec/airports.md#short-strips), item
 - A unit test (`tools/test_battery_ai.py`, `ShortStripTests`) checks that no AI
   scenario and none of the 400 fuzz seeds starts on a short strip.
 
+### Enemy fields (airport allegiance, 2026-10-10)
+
+Since slice AL1 every airport takes its runway's layout side and the player's
+Blue wing starts only at a Blue or neutral field
+([rule](../spec/airports.md#allegiance)); the creator's `--ground-start N`
+refuses an enemy field as it refuses a short strip. What changed in the lanes:
+
+- `_strips.py` also lists each base theater's Redfor fields (the
+  `allegiance=Some(Hostile)` rows of `TORE_AIRPORT_PROBE=1`), and
+  `ground_airport` skips them too; it returns nothing for the Falklands and
+  North Vietnam, which have no Blue field, so their theater takeoff and land
+  scenarios and their wing-of-five climb-out are gone, and a fuzz seed that
+  drew a ground start there flies airborne.
+- Creator-path starts at UKR airport 1 (Zaporizhzhya, Redfor) moved to airport
+  2 (Simferopol, the lane's `GROUND_AIRPORT`); the replay recording and live
+  ground starts use Simferopol, Odesa (9) and Kherson (11), and the restart
+  setups also L'viv (8) and Ivano Frankivs'k (12).
+- `ai-takeoff-{ukr-a1,fra-a3,nsk-a5}-*` are now `-ukr-a9`, `-fra-a4` and
+  `-nsk-a9` (Odesa, Florennes, Kimpo); `ai-lost-lead-route-ukr-a6` is
+  `-ukr-a9`; `ai-known-f22-leader-wingman-ukr3` is `-ukr12`;
+  `flight-climbout-*` leaves Kherson instead of Krasnodar.
+- The ILS-terrain land orders keep the two Blue fields (UKR 8 and 12). Amiens,
+  Burevestnik, Hyon Ni, Donets'k and Kharkiv are Redfor fields where the Blue
+  wing neither starts nor is sent, so those five are gone; a Redfor wing would
+  land there, but the probe has no Redfor wing to order.
+- `ShortStripTests` also checks that no AI scenario or fuzz seed starts at an
+  enemy field.
+
 Run of the lane's theater, takeoff, ground, ILS-terrain, long-ground, record,
 determinism and all 400 fuzz scenarios (`TORE_AI_FUZZ=all`, `--jobs 6
 --windows 1`): 557 of 558 passed. The one failure is `ai-fuzz-0163`
