@@ -283,6 +283,38 @@ impl State {
     pub fn ground_look(&self, id: u32) -> Option<GroundLook> {
         self.ground_looks.get(&id).copied()
     }
+
+    /// Moves ground object `id`, a surface unit that follows a route: its
+    /// contact volume becomes `bounds` and its target row follows (aim
+    /// point in the upper half of the volume, as registration puts it,
+    /// orientation and ground-relative velocity). Hit points and everything
+    /// else stay. False if `id` is not a ground object or `bounds` is not a
+    /// valid volume.
+    pub fn move_ground_target(
+        &mut self,
+        id: u32,
+        bounds: crate::airport::OrientedBox,
+        velocity: Vector,
+    ) -> bool {
+        if !bounds.valid() || !self.ground_bounds.contains_key(&id) {
+            return false;
+        }
+        let Some(target) = self.targets.iter_mut().find(|target| target.id == id) else {
+            return false;
+        };
+        let basis = crate::attitude::Basis::new(bounds.heading, bounds.pitch, bounds.bank);
+        target.position =
+            std::array::from_fn(|i| bounds.center[i] + basis.up[i] * bounds.half[1] * 0.5);
+        target.basis = basis;
+        target.velocity = velocity;
+        self.ground_bounds.insert(id, bounds);
+        true
+    }
+
+    /// Ground object `id`'s contact volume now.
+    pub fn ground_bounds(&self, id: u32) -> Option<crate::airport::OrientedBox> {
+        self.ground_bounds.get(&id).copied()
+    }
 }
 
 /// A surface round's burst, applied after the round search of a step.
