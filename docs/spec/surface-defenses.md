@@ -1281,6 +1281,24 @@ otherwise. Template objects keep their own 0x80 flags.
 - The in-flight "Obj: Destroy" or "Obj: Survive" line in the target window
   applies to designated surface targets.
 
+### Implementation (slice O1, 2026-10-10)
+
+| Rule | As built | Basis |
+| --- | --- | --- |
+| Targets | The ground target's objects flagged 0x80 that have a combat row (a unit whose shape cannot be drawn is no target) and the parked aircraft flagged 0x80: a friendly plane's Destroy list, joined to its air requirement; a Redfor plane's Protect list. Moving routed targets count where they die; the wreck stays | defined (John) |
+| Destroyed | A surface object is destroyed when its combat row has no hit points, whoever did it (a shell, a bomb, splash, a crash). One the result cannot find is undecided, neither destroyed nor lost; before this an unknown id counted as destroyed at once. An unlisted aircraft still counts as gone | defined (agent); the unknown-id fix is the bug |
+| Friendly fire | Any surface object of the plane's side that is not named in its Destroy or Protect list: base-layout units, a template's friendly (`nationality3`) units, battery radars and supply trucks. Scenery with no side is never friendly | defined (John) |
+| PvP | `Requirements::with_ground`: Blue gets Destroy, Redfor gets Protect. A Redfor plane's own non-target units are friends: shooting one is friendly fire | defined (John) |
+| Debrief rows | A hostile surface unit's gun round at the pilot is AAA, anything else SAM (a battery missile belongs to its launcher); the unit's class word picks its kill row; splash kills credit the shooter | retail rule |
+| Names | The pilot who was shot down by a surface unit gets a **Shot down by** row (the unit's short name) and a flight message; the networked debrief does not carry it yet | opinionated (agent, 2026-10-10) |
+| Radio | A surface unit makes no hit or kill call; a Blue site's side is its own, not the AI's friend list | defined (agent) |
+| Target window | "Obj: Destroy" (Redfor: "Obj: Survive") for a ground target, destroyed or not | defined (John) |
+
+`--surface-objective THEATER STEM` flies a scripted pass at a ground target's
+defenses, drops bombs on its targets and prints the objectives and the
+debrief's tallies (see
+[development](../DEVELOPMENT.md#surface-unit-inspection)).
+
 ### Debrief
 
 - **Kills.** Surface classes land in the existing rows by class word (Ship, SAM,

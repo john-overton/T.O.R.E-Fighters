@@ -115,6 +115,7 @@ mod su35_animation;
 mod surface_drive;
 mod surface_dump;
 mod surface_lighting;
+mod surface_objective;
 mod surface_parked;
 mod surface_preview;
 mod surface_trace;
@@ -8532,6 +8533,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-drive") {
         surface_drive::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--surface-objective") {
+        surface_objective::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-parked") {

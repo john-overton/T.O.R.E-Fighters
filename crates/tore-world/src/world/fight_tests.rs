@@ -798,6 +798,7 @@ fn each_seats_debrief_inputs_name_its_own_plane() {
             ledger,
             plane: id,
             aircraft: &fates,
+            ground: &[],
             requirements: &requirements,
         };
         let friendly = seat < 2;

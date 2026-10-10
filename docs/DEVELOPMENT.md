@@ -1592,6 +1592,24 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --ove
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
 ```
 
+`--surface-objective THEATER STEM` checks a ground target's objectives and the
+debrief in the whole world. The player flies a scripted pass at the target's
+defenses (`--from` nm out, `--altitude` feet above the ground, 400 knots,
+invulnerable, so its SAMs and guns fire), then a Mk 82 is placed on every
+target every two seconds until it is down (`--kill-friendly` also bombs a
+friendly unit that is not a target). It prints the target list, the
+objectives, the outcome and the debrief's tallies at the start and at the end:
+SAM and AAA hits and launches, the kill rows, friendly fire and who shot the
+player down. `--redfor` builds the multiplayer mission and seats the human in
+the first enemy plane, so the targets are a Protect objective and a Blue plane
+drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
+`surface-objective-*` battery scenarios run it.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --redfor
+```
+
 ## Flight view inspection
 
 `--flight-view 0..11` preserves 0 front, 1 external, 2 oblique, 3 back and 4 up.
