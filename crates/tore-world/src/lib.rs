@@ -10,6 +10,7 @@ pub mod ai_wings;
 pub mod aircraft_type;
 pub mod airfield_radio;
 pub mod checkpoint;
+pub mod city;
 pub mod combat;
 pub mod combat_tape;
 pub mod comms;

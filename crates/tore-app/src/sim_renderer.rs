@@ -33,7 +33,7 @@ fn pack_world_pages(indices: &[u8]) -> Vec<u8> {
     }
     packed
 }
-fn bytes(values: &[f32]) -> Vec<u8> {
+pub(crate) fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 /// The shared `Scene` uniform, ending with the graphics `quality` and
@@ -137,6 +137,8 @@ pub struct SimRenderer {
     resample: wgpu::RenderPipeline,
     options: crate::graphics::Options,
     samples: u32,
+    /// CF0 city fill buildings, when the scenery has them.
+    pub fill: Option<crate::fill_renderer::FillRenderer>,
 }
 /// World-pass attachments for one output size. The main view, mirrors and
 /// instrument previews alternate sizes within a frame, so a few are cached.
@@ -637,6 +639,17 @@ impl SimRenderer {
             &material_layout,
             &lighting.layout,
         );
+        let fill = scenery.fill.as_ref().map(|art| {
+            crate::fill_renderer::FillRenderer::new(
+                device,
+                &shader,
+                format,
+                samples,
+                &material_layout,
+                &lighting.layout,
+                art,
+            )
+        });
         let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Celestial vertices"),
             size: 256 * 1024,
@@ -800,6 +813,7 @@ impl SimRenderer {
             resample: Self::resample_pipeline(device, format),
             options,
             samples,
+            fill,
         }
     }
     pub fn smoke(
@@ -1194,6 +1208,16 @@ impl SimRenderer {
             &self.material_layout,
             &self.lighting.layout,
         );
+        if let Some(fill) = &mut self.fill {
+            fill.rebuild(
+                device,
+                &self.shader,
+                self.format,
+                samples,
+                &self.material_layout,
+                &self.lighting.layout,
+            );
+        }
         self.vapor_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Wing vapor bindings"),
             layout: &self.p.vapor_pipeline.get_bind_group_layout(0),
@@ -1589,6 +1613,9 @@ impl SimRenderer {
             }
             queue.write_buffer(&self.spot_instances, 0, &bytes(&spot_instances(&contacts)));
         }
+        if let Some(fill) = &mut self.fill {
+            fill.prepare(queue, camera, scenery.origin);
+        }
         let destination = flare_target.as_ref().unwrap_or(target);
         let targets = &self.targets[slot];
         // Multisampled color resolves into the render-scale image when there
@@ -1643,6 +1670,11 @@ impl SimRenderer {
             pass.set_pipeline(&self.p.celestial_pipeline);
             pass.set_vertex_buffer(0, self.celestial_vertices.slice(..));
             pass.draw(0..celestial_count, 0..1);
+        }
+        // City fill buildings go before the terrain, so the depth test
+        // spares the terrain's costly texture filtering behind them.
+        if let Some(fill) = &self.fill {
+            fill.draw(&mut pass, &self.bind);
         }
         pass.set_pipeline(&self.p.terrain_pipeline);
         pass.set_bind_group(0, &self.bind, &[]);

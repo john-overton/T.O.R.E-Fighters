@@ -106,6 +106,8 @@ pub enum Purpose {
     Supply = 6,
     /// Added battery radars (layout slice).
     Radar = 7,
+    /// City fill buildings (CF0 prototype, `crate::city`).
+    CityFill = 8,
 }
 
 /// SplitMix64, seeded from (mission seed, template, object ordinal,

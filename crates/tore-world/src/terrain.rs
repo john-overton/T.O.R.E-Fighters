@@ -39,6 +39,9 @@ pub struct Terrain {
     /// template's objects, with their ids, owners and sides. The airport
     /// scene holds a contact volume for each one whose shape reads.
     pub surface: crate::surface::Surface,
+    /// Real-size scenery buildings over the city texture's light areas: the
+    /// opt-in CF0 prototype (`crate::city`), `None` unless it is switched on.
+    pub city_fill: Option<std::sync::Arc<crate::city::CityFill>>,
 }
 
 /// Launch settings that replace the mission's own weather start time, wind
@@ -963,8 +966,13 @@ impl Terrain {
             catalog,
             weather,
             surface: Default::default(),
+            city_fill: None,
         };
         out.build_airport_scene(resources, code.trim_end_matches(".MM"), target)?;
+        if crate::city::enabled() {
+            out.city_fill =
+                crate::city::CityFill::for_terrain(resources, &out).map(std::sync::Arc::new);
+        }
         Ok(out)
     }
 
@@ -1336,6 +1344,14 @@ impl Terrain {
                     .map(|at| (object.id, at))
             })
             .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+    }
+
+    /// Whether the segment `from` to `to` enters a standing city fill
+    /// building below its roof; always false without a fill.
+    pub fn fill_contact(&self, from: [f64; 3], to: [f64; 3]) -> bool {
+        self.city_fill
+            .as_ref()
+            .is_some_and(|fill| fill.contact(from, to).is_some())
     }
 
     /// Where a free flight and the free camera start: over the Ukraine

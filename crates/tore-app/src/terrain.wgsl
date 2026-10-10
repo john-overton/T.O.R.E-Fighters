@@ -347,6 +347,14 @@ fn placed_vertex(position:vec3<f32>,p:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec
 @vertex fn object_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
  return placed_vertex(position+scene.origin.xyz,position-scene.local_eye.xyz,uv,layer,color,index);
 }
+// CF0 city fill: a kit piece drawn per instance. `place.xyz` is the base
+// relative to the render origin; `turn` holds the heading's cosine and sine
+// and the height share (sinking at the draw distance, a stub when flattened).
+@vertex fn fill_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>)->VertexOut {
+ let local=vec3<f32>(position.x,position.y*turn.z,position.z);
+ let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
+ return placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,layer,color,index);
+}
 @vertex fn terrain_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) normal:vec3<f32>)->VertexOut {
  var out=world_vertex(position,uv,layer,color,index);
  out.terrain_normal=normal;return out;
@@ -439,6 +447,11 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
 // Static world textures use index255/mask cutouts without opaque backing color.
 @fragment fn airport_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{
  if in.layer>=0.0 {discard;}
+ return aircraft_color(in,surface_normal(in.direction));
+}
+// CF0 city fill: only untextured triangles reach this pass, so it needs no
+// discard and keeps the early depth test.
+@fragment fn fill_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{
  return aircraft_color(in,surface_normal(in.direction));
 }
 @fragment fn airport_fragment(in:VertexOut)->@location(0) vec4<f32>{

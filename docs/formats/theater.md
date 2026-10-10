@@ -67,6 +67,41 @@ The ocean now uses user-requested short ripples and distance/altitude filtering,
 retaining the original textures and weather colors. Whitecaps are removed. [Source contract and limits](ocean.md),
 [behavior](../spec/ocean.md), [acceptance](../baselines/ocean.md).
 
+## City texture light areas (CF0 prototype)
+
+Measured 2026-10-10 on the Ukraine art; the reader is `tore_world::city::mask`
+and the opt-in fill that uses it is `tore_world::city` (`TORE_CITY_FILL=1`).
+The terrain class and colour bytes do not mark cities
+([terrain materials](terrain-materials.md)); the city tile pictures do.
+
+- Ukraine's city art is `UKR1` (downtown, 6 placements), `UKR2` (edge, 27),
+  `UKR3` (corner, 50) and the coastal `UKR4` to `UKR6` and `UKR26` (1 each).
+  A full city is a 3 by 3 block of placements, about 16 nm across, with
+  `UKR1` in the middle; corner tiles alone make the towns. 87 placements in
+  13 touching groups.
+- The art paints built-up land in one brown ramp, palette indices 198
+  (lightest, luma about 225 at noon) to 207 (darkest, about 30); 192 to 197
+  and 208 to 215 are greens, 224 a grey-green dot, 217 to 223 blue dots, 254
+  white, 255 the water cutout. A city picture has at least half its land in
+  the ramp and at least one texel in twenty at 198 to 201; shore, field and
+  forest pictures stay under 0.35.
+- Light roofs are 198 to 202. Residential streets are one or two texel lines
+  of 200 to 203 with 224 dots; downtown streets are dark lines of 204 to 207.
+  A texel is a street when its run of either class along a row, column or
+  diagonal is at least 8 texels (1,024 ft) and at most 2 (256 ft) across.
+- At 128 ft per texel the downtown blocks are about 2,000 ft and the painted
+  roofs 500 to 1,300 ft: the art is drawn at about the retail 3x object
+  scale.
+- World to picture: texel `(tu, tv)` east and north inside the placement
+  maps to picture column and row `(tu, 255-tv)`, `(255-tv, 255-tu)`,
+  `(255-tu, tv)` or `(tv, tu)` for rotations 0 to 3, as the terrain mesh
+  draws it (picture row 0 is the north edge at rotation 0). A quarter turn
+  swaps the two diagonals.
+
+Other theaters use other ramps; they are not measured yet. The development
+aid `tore-app --city-fill-dump OUT [THEATER]` writes each city's mask and
+fill images and prints the counts.
+
 ## Mission environment and weather modules
 
 Follow-up: [native clock and turbulence research](weather.md) confirms continuous

@@ -177,6 +177,7 @@ pub fn terrain() -> Terrain {
         static_manifest: Vec::new(),
         catalog: vec![],
         surface: Default::default(),
+        city_fill: None,
         layout: "TEST.MM".into(),
         condition: None,
         weather: tore_sim::environment::Environment::new(

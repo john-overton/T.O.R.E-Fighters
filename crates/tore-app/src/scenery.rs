@@ -73,6 +73,8 @@ pub struct Scenery {
     /// so they keep sub-inch precision where 32-bit world coordinates step
     /// 1/8 foot. Zero places them in world coordinates.
     pub origin: [f64; 3],
+    /// The CF0 city fill's art, when the terrain carries a fill.
+    pub fill: Option<Arc<crate::fill_renderer::FillArt>>,
 }
 
 /// The launch overrides the environment asks for: `TORE_WEATHER_TIME` as
@@ -291,6 +293,7 @@ impl Scenery {
             fog: [0.; 4],
             haze: [0; 3],
             origin: [0.; 3],
+            fill: None,
         };
         out.resolve_palette(terrain, 0.);
         out.vertices = Self::build_mesh(
@@ -300,6 +303,15 @@ impl Scenery {
             land_texture,
         );
         out.build_static_geometry(resources, terrain, code)?;
+        if let Some(fill) = &terrain.city_fill {
+            let terrain_bytes = out.texture_indices.len();
+            out.fill = Some(Arc::new(crate::fill_renderer::FillArt::build(
+                resources,
+                fill,
+                &mut out.sky_indices,
+                |pages| (terrain_bytes + pages.len()) / 65536,
+            )?));
+        }
         out.recess_airport_terrain(terrain);
         Ok(out)
     }
@@ -747,6 +759,7 @@ pub(crate) mod tests {
             fog: [0., 1., 0., 0.],
             haze: [0; 3],
             origin: [0.; 3],
+            fill: None,
         }
     }
     #[test]

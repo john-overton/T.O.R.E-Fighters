@@ -116,9 +116,10 @@ pub fn fly(
     previous.clone_from(flight);
     flight.step_surface(pilot, |x, z| terrain.surface(x, z));
     if flight.native.is_none()
-        && terrain
+        && (terrain
             .solid_contact(previous.position, flight.position, standing)
             .is_some()
+            || terrain.fill_contact(previous.position, flight.position))
     {
         if flight.cheats.no_crashes {
             flight.rebound(previous.position);

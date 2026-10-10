@@ -23,6 +23,7 @@ mod c130_animation;
 mod camera;
 mod canvas_present;
 mod celestial;
+mod city_fill_dump;
 mod clouds;
 mod cockpit_renderer;
 mod combat_smoke;
@@ -44,6 +45,7 @@ mod f15_animation;
 mod f16_animation;
 mod f22_animation;
 mod f4_animation;
+mod fill_renderer;
 mod flight;
 mod flight_canvas;
 mod flight_map;
@@ -8483,6 +8485,8 @@ fn main() -> std::process::ExitCode {
         tore_import::Level::Warn => log::warn!("{text}"),
     });
     let interactive = startup::interactive();
+    // CF0 city fill prototype: opt-in, off unless TORE_CITY_FILL=1.
+    tore_world::city::set_enabled(std::env::var("TORE_CITY_FILL").as_deref() == Ok("1"));
     let result = std::panic::catch_unwind(|| {
         if let Some(result) = startup::self_test() {
             return result;
@@ -8517,6 +8521,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--gun-flash-preview") {
         gun_flash_preview::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--city-fill-dump") {
+        city_fill_dump::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-dump") {
