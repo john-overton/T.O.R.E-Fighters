@@ -53,6 +53,9 @@ pub(super) struct Why {
     guides: BTreeMap<u32, Guide>,
     /// This tick's decoy rolls, by projectile.
     decoys: BTreeMap<u32, DecoyRoll>,
+    /// The roll that decoyed each missile still in flight, kept after its
+    /// own tick so a late strike can name the device that fooled it.
+    decoyed_by: BTreeMap<u32, DecoyRoll>,
     /// The player's decoy rolls made between ticks, already written; the
     /// next tick's reasons and guidance trees read them.
     pub(super) pending_rolls: Vec<DecoyRoll>,
@@ -74,6 +77,18 @@ impl Why {
     /// This tick's decoy roll that decoyed `projectile`, if any.
     pub(super) fn decoyed(&self, projectile: u32) -> Option<&DecoyRoll> {
         self.decoys.get(&projectile).filter(|roll| roll.decoyed)
+    }
+
+    /// A new tick: the rolls of the last one are only kept for the missiles
+    /// they decoyed.
+    pub(super) fn next_tick(&mut self) {
+        self.decoys.clear();
+    }
+
+    /// The roll that decoyed `projectile` at any earlier tick, while it
+    /// flies, and the device it was against.
+    pub(super) fn decoyed_earlier(&self, projectile: u32) -> Option<&DecoyRoll> {
+        self.decoyed_by.get(&projectile)
     }
 
     /// A guided shot's closest approach to its target so far, and when.
@@ -173,11 +188,16 @@ pub(super) fn decoy_kind(class: SeekerClass) -> &'static str {
     }
 }
 
-/// `chaff` or `a flare`, for sentences.
-pub(super) fn decoy_name(class: SeekerClass) -> &'static str {
-    match class {
-        SeekerClass::Radar => "chaff",
-        SeekerClass::Infrared => "a flare",
+/// The device a roll was against, for sentences: `chaff #7` or `flare #12`.
+/// The number is the device's release number in the mission, as its
+/// `combat.countermeasure` entry carries it; a roll recorded without one
+/// (before the number was kept) names the kind alone.
+pub(super) fn decoy_label(roll: &DecoyRoll) -> String {
+    let kind = decoy_kind(roll.class);
+    if roll.device == 0 {
+        kind.to_owned()
+    } else {
+        format!("{kind} #{}", roll.device)
     }
 }
 
@@ -190,6 +210,10 @@ pub(super) fn decoyed_event(roll: &DecoyRoll, owner: Option<u32>) -> Event {
         .with(field::DECOY, decoy_kind(roll.class))
         .with(field::SUSCEPTIBILITY, i64::from(roll.susceptibility))
         .with(field::EFFECTIVENESS, i64::from(roll.effectiveness));
+    if roll.device > 0 {
+        // Which release fooled it: the number on its `combat.countermeasure`.
+        event = event.with(field::NUMBER, roll.device as i64);
+    }
     if let Some(owner) = owner {
         event = event.with_subject(owner);
     }
@@ -518,7 +542,7 @@ impl Recorder {
     /// followed a decoy, and the rolls kept for the outcome reasons and the
     /// guidance trees.
     pub(super) fn decoys(&mut self, tick: &Tick<'_>, frame: &Frame, events: &mut Vec<Event>) {
-        self.why.decoys.clear();
+        self.why.next_tick();
         // The player's rolls since the last tick; their entries are written.
         for roll in std::mem::take(&mut self.why.pending_rolls) {
             self.keep_roll(roll);
@@ -548,8 +572,11 @@ impl Recorder {
 
     /// A roll this tick's outcome reasons and the missile's guidance tree
     /// read.
-    fn keep_roll(&mut self, roll: DecoyRoll) {
+    pub(super) fn keep_roll(&mut self, roll: DecoyRoll) {
         self.why.decoys.insert(roll.projectile, roll);
+        if roll.decoyed {
+            self.why.decoyed_by.insert(roll.projectile, roll);
+        }
         if let Some(guide) = self.why.guides.get_mut(&roll.projectile) {
             guide.roll = Some(roll);
             guide.force = true;
@@ -756,7 +783,7 @@ impl Recorder {
                     } else {
                         "resisted"
                     },
-                    decoy_name(roll.class),
+                    decoy_label(&roll),
                     named(roll.releaser),
                     roll_reason(&roll)
                 )
@@ -794,6 +821,7 @@ impl Recorder {
         }
         frame.trees.extend(samples);
         self.why.guides.retain(|id, _| live.contains(id));
+        self.why.decoyed_by.retain(|id, _| live.contains(id));
     }
 }
 

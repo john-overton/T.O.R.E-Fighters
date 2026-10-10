@@ -856,6 +856,7 @@ mod tests {
                 .collect(),
         );
         verify_main_gear(&Shape {
+            billboards: Vec::new(),
             faces: vec![wheel, wheel_left, cloud_right, cloud_left],
             lines: vec![],
             state_words: Default::default(),

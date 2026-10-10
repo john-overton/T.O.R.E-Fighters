@@ -14,6 +14,7 @@ pub fn mission_summary(spec: &MissionSpec, aircraft: usize) -> String {
             "ground start on runway {}",
             runway.saturating_sub(RUNWAY_OBJECT_BASE)
         ),
+        Start::GroundAuto { .. } => "ground start on a runway the world picks".to_owned(),
     };
     let side = |range: std::ops::Range<usize>| -> String {
         let counts: Vec<String> = spec.wings[range]

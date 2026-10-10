@@ -492,6 +492,9 @@ pub struct Instruments {
     pub weapon_debug: bool,
     /// One pending designation request, drained by the host each frame.
     pub designation: Option<u32>,
+    /// The AC-130 target camera's bloom from a 105 mm shot, 0 to 1
+    /// ([`crate::gun_flash::BLOOM`]); the host sets it each frame.
+    pub sight_bloom: f64,
 }
 impl Default for Instruments {
     fn default() -> Self {
@@ -524,6 +527,7 @@ impl Default for Instruments {
             crosshair: None,
             weapon_debug: false,
             designation: None,
+            sight_bloom: 0.,
         }
     }
 }
@@ -1331,6 +1335,9 @@ impl Instruments {
                     {
                         let mut gray = pixels.clone();
                         crate::target_preview::monochrome(&mut gray);
+                        // A 105 mm shot whites the sensor out for a moment; the
+                        // overlay drawn after it stays readable.
+                        crate::gun_flash::BLOOM.lift(&mut gray, 138, 114, self.sight_bloom);
                         r.sprite(
                             &Sprite {
                                 width: 138,

@@ -9,7 +9,7 @@ use crate::{
     aircraft_type::{AircraftType, load_type},
     combat::Combat,
     comms, crew_voice,
-    mission::MissionSpec,
+    mission::{MissionSpec, Start},
     mission_layout,
     resources::ResourceSource,
     seats::{PlaneId, Roster},
@@ -52,6 +52,19 @@ pub struct Hooks<'a> {
 pub struct Built {
     pub world: World,
     pub restarted: Restarted,
+}
+
+/// What a mission with a ground target says until the surface layout exists:
+/// the target is carried but nothing stands at it. `None` without a target.
+/// Slice W1 removes this when it builds the surface units.
+pub(super) fn surface_gap_note(spec: &MissionSpec) -> Option<String> {
+    let target = spec.ground_target.as_deref()?;
+    Some(format!(
+        "Surface: the mission names ground target {target} (AAA {}, SAM {}, seed {}), but this build places no surface units yet; it flies without them.",
+        spec.aaa.name(),
+        spec.sam.name(),
+        spec.surface_seed
+    ))
 }
 
 impl World {
@@ -139,7 +152,22 @@ impl World {
         }
 
         let altitude = f64::from(spec.start.altitude_ft());
-        let selected_ground = spec.ground_runway();
+        // The surface layout is not built yet (slice W1): say so, once, in the
+        // log, so a mission with a target is not mistaken for a defended one.
+        if let Some(note) = surface_gap_note(spec) {
+            eprintln!("{note}");
+        }
+        let selected_ground = match spec.start {
+            Start::GroundAuto { .. } => Some(mission_layout::auto_runway(
+                &terrain,
+                if spec.fixture_wings {
+                    1
+                } else {
+                    spec.player_wing_size()
+                },
+            )?),
+            _ => spec.ground_runway(),
+        };
         if selected_ground.is_some() && !spec.researched_flight {
             return Err("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
         }

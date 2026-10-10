@@ -821,7 +821,7 @@ fn wrap_degrees(angle: f64) -> f64 {
 
 /// Preview modes for `--target-cam-preview`, which draw the page from a
 /// synthetic readout on a synthetic grey scene (no retail scene, no GPU).
-pub const PREVIEW_MODES: &str = "free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal (gimbal-text, gimbal-bitmap force an eye icon), zoom1 to zoom6";
+pub const PREVIEW_MODES: &str = "free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal (gimbal-text, gimbal-bitmap force an eye icon), zoom1 to zoom6, bloomN (the tracked page N ticks after a 105 mm shot, N from 0 to 40)";
 
 /// One synthetic page: the page, the target window's row for a tracked
 /// sight, and the scene's RGBA picture.
@@ -829,10 +829,19 @@ pub struct Preview {
     pub page: Page,
     pub target: Option<(TargetReadout, super::TargetLink)>,
     pub scene: Vec<u8>,
+    /// The sensor's bloom, 0 to 1 ([`crate::gun_flash::BLOOM`]).
+    pub bloom: f64,
 }
 
 /// A synthetic gunsight state by name (see [`PREVIEW_MODES`]).
 pub fn preview(mode: &str) -> Option<Preview> {
+    // The tracked page `N` ticks after a 105 mm shot.
+    if let Some(age) = mode.strip_prefix("bloom") {
+        let age: f64 = age.parse().ok()?;
+        let mut shown = preview("tracked")?;
+        shown.bloom = crate::gun_flash::BLOOM.level(age);
+        return Some(shown);
+    }
     let view = SightView {
         position: [0.; 3],
         yaw: 0.,
@@ -1023,6 +1032,7 @@ pub fn preview(mode: &str) -> Option<Preview> {
         page,
         target,
         scene: preview_scene(object),
+        bloom: 0.,
     })
 }
 
@@ -1094,6 +1104,16 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn the_bloom_preview_modes_follow_the_pulse() {
+        let level = |mode: &str| preview(mode).map(|p| p.bloom);
+        assert_eq!(level("bloom0"), Some(crate::gun_flash::BLOOM.peak));
+        assert_eq!(level("bloom40"), Some(0.));
+        assert!(level("bloom14").unwrap() < level("bloom8").unwrap());
+        assert_eq!(level("bloomx"), None);
+        assert_eq!(level("tracked"), Some(0.));
     }
 
     fn page(mode: &str) -> Page {

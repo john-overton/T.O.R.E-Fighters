@@ -66,7 +66,8 @@ The runtime importer follows base and variant layout placements through their OB
 prefix to explicit SH and projected PIC references. Static geometry uses the SH
 CODE header exponent for rendering and contact. All main shapes placed by the 75 reviewed layouts project with the scenery
 reader. It also preserves bounded line records, shown as one-pixel strokes, and
-selects a fitted loaded pose for the reviewed CHAP/SA2 load-count envelopes.
+selects a fitted loaded pose for the reviewed CHAP/SA2/SA3/SCD load-count envelopes
+and a rest pose for the KRIV/SOVR turret envelopes ([surface unit shapes](#surface-unit-shapes-envelopes-and-sprites-2026-10-10)).
 No callback runs. Unreviewed shape opcodes still receive diagnostics while
 placement identity remains available. [Scenery coverage and limits](../spec/terrain-detail.md).
 
@@ -349,6 +350,121 @@ and matches its explicit shape filename. Unknown source tokens remain preserved;
 extra shape slots, different selectors/classes and unsupported layouts fail.
 This is metadata inspection, not object placement or full resource resolution.
 [Definition-reader evidence](../baselines/native-strip-definition.md).
+
+## Surface unit shapes: envelopes and sprites (2026-10-10)
+
+Research and implementation, slice S1 of the surface objectives round. Shapes
+from the catalog's FA_2.LIB build; `shape_inspect FILE.SH [--scenery]` prints
+the counts below. The reader still interprets only bounded data records and
+the reviewed byte patterns named here; no imported code runs.
+
+### What the bounded reader accepts
+
+| Record | Bytes | Reader meaning |
+| --- | --- | --- |
+| `82` | count, slot, signed word triples | vertices into eight-byte slots |
+| `7a` | three signed words, slot | one vertex into the same slots (also the weather grammar's vertex) |
+| `fc` | face, see [geometry](#3-geometry-materials-and-shading) | polygon |
+| `e2` / `e0` | 14-byte name / slot | named texture / runtime decal slot |
+| `e4` | count 4, four `u, v` word pairs | texture corners for the next sprite |
+| `ea` | centre slot, width, height | sprite facing the viewer (`Shape::billboards`) |
+| `12`, `c4`, `38`, `1e`, `00` | relative links | call, transformed call, scope, scope end, return |
+| `48` | relative link | jump, followed by the export and scenery paths only |
+| `bc`, `ca`, `f6`, `42`, `40`, `44`, `ff ff` | | lines, fog, vertex colour, source name, skipped tables |
+| `f0` | x86 envelope | only the reviewed forms below; otherwise the first trampoline is the resume |
+
+Texture coordinates count PIC rows up from the bottom row: a face's `v` of 0
+is the last row of the PIC. Reading them top-down puts the Krivak's deck on
+the wrong strip of `_KRIV.PIC` and leaves holes; bottom-up covers every deck
+face. Sprite corners follow the same rule, in the order bottom left, top
+left, top right, bottom right. The game renderer's static path already flips
+`v` this way.
+
+### Reviewed f0 envelopes
+
+```mermaid
+flowchart LR
+    F0[f0 record] --> L{HARDNumLoaded prelude?}
+    L -- state path --> C[count from loaded_count_word]
+    L -- scenery path --> E[eb 05 b8 1 envelope, full load]
+    C --> E2[eb 05 b8 1 envelope, that count]
+    F0 --> H{HardpointAngle envelope?}
+    H --> R[resume at its c4, turned to the mount rest]
+    F0 --> G[guard chains and single trampoline, as before]
+```
+
+- **Loaded count** (CHAP, SA2, SA3, SCD): `mov ecx,[objId]; mov edx,hardpoint;
+  or ecx,ecx; jz +13`, a trampoline to `@HARDNumLoaded@8` that returns into
+  `eb 05 b8 01 00 00 00`, then `cmp eax,N; jb +17` (draw rail N while at least N
+  rounds remain) or `or eax,eax; jz +17` (draw while any remain). The drawing
+  arm resumes at an SH call to the missile; the skipping arm lands on the next
+  f0 record's own trampoline. The scenery path draws the full load, as it did
+  for CHAP and SA2 before. The state path reads the count from the synthetic
+  state key `shape::loaded_count_word(hardpoint)` (`0xffff0000` plus the
+  index, far above any module address); absent means none loaded. SA3 draws
+  one missile per round on hardpoint 0 (two rails), SCD one, CHAP three rails
+  at counts 1 to 3, SA2 one per hardpoint 0 to 5.
+- **Hardpoint angle** (KRIV, SOVR and their copies): `call $+5; pop ebx;
+  add ebx,N; mov ecx,hardpoint`, a trampoline to `@HardpointAngle@4` that
+  returns straight back, an optional `add ax,imm16`, `mov [ebx+6],ax`, and the
+  trampoline that resumes SH. The write lands on the first rotation word of
+  the c4 record the program resumes at (the reader checks this), so the
+  turret under it turns. The reader used to take the first trampoline, which
+  returns into x86, and failed on bytes it read as opcodes `15` (KRIV) and
+  `ec` (SOVR). The added constant equals the hardpoint heading in the NT:
+  32760 for the aft mounts of KRIVAK.NT (hardpoints 0, 1) and SOVR.NT
+  (hardpoint 1), absent for SOVR's forward mount (heading 0). The static pose
+  takes HardpointAngle as zero, the mount at rest, and turns the turret by
+  that constant about the up axis. This rest reading is an inference from
+  that match (fitted); live traverse belongs to the surface AI.
+- **Rotating radar** (`a1 _currentTicks; shl ax,6; mov [ebx+6],ax`) needs no
+  change: its single trampoline already resumes at the c4, drawn unturned.
+
+### Results
+
+| Shape | Scenery path | State path | Before |
+| --- | --- | --- | --- |
+| KRIV.SH (Krivak) | 62 faces | 62 faces | fails, "opcode 15" |
+| KRIV_A.SH | 72 faces, 4 lines | 72 faces | 72 faces, unchanged |
+| SOVR.SH (Sovremennyy) | 74 faces | 74 faces | fails, "opcode ec" |
+| SOVR_A.SH | 84 faces | 84 faces | 84 faces, unchanged |
+| SA3.SH (SA-3 Goa) | 128 faces, 64 lines | 28 / 78 / 128 faces at 0 / 1 / 2 loaded | scenery only, unchanged |
+| SCD.SH (SCUD) | 114 faces | 94 / 114 faces at 0 / 1 loaded | scenery only, unchanged |
+| CHAP.SH, SA2.SH | 49, 146 faces | 37 to 49, 62 to 146 by count | scenery only, unchanged |
+| SOLDIER.SH | 1 sprite | 1 sprite | fails, no geometry |
+| RUNNER.SH | 2 faces | 12 faces | unchanged |
+| CATGUY.SH | fails | fails | fails |
+
+Every retail shape in FA_1, FA_2, FA_4B, FA_4D and swpatch that projected
+before keeps a byte-identical result on every path, including each state
+word at -1 and 1: `crates/tore-formats/tests/shape_projection.rs` compares a
+recorded digest per shape and skips without the install.
+
+CATGUY.SH, the carrier deck crew, is a sprite whose texture corners are
+written by `_CATGUYDraw@4` from a frame table each frame; its file corners
+are zero. It needs its own reviewed animation rule, with the carriers.
+
+SOLDIER.SH is one 7 by 12 unit sprite centred 6 units up, cut from rows 150
+to 199 of SOLDIER.PIC. `Billboard::face` turns it to a viewer; the static
+scenery build does not draw sprites yet.
+
+### Size of surface units
+
+Under the scenery scale the reader's callers use (source units times
+2^(exponent - 8), taken as feet) the Krivak is 1,216 ft long and the
+Ticonderoga 1,696 ft. At the aircraft renderer's third of a foot per unit
+they are 405 and 565 ft, their real lengths; the ZSU-23-4 (21 ft), M1 (32 ft)
+and T-72 (30 ft) agree too. This is recorded, not decided: the scenery scale
+is used unchanged here.
+
+### Preview sheets
+
+`tore-app --surface-preview OUT_DIR` (first argument, no window) reads the
+retail archives directly and writes a sheet per shape with its `_A` shape
+from four sides, close views, a launcher sheet by loaded count, and every
+texture with holes in magenta. Faces the shape-file guide calls opaque
+(switch 12, or the `ee`/`fe` combinations) show their own colour through
+index-255 texels; transparent faces are cut out there.
 
 ## Whitecap shape boundary
 

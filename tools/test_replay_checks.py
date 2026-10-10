@@ -114,3 +114,54 @@ class ShotOutcomeTests(unittest.TestCase):
         ):
             problems = rr.invariant_problems(self.log(*results))
             self.assertTrue(any("shot 16777216" in p for p in problems), results)
+    def decoy_log(self, *extra):
+        import json
+
+        lines = [{"type": "aircraft", "id": 3}, {"type": "aircraft", "id": 0},
+                 {"type": "event", "tick": 0, "t": 0.0, "kind": "weapon.launch",
+                  "subject": 3, "fields": {"projectile": 16777216}},
+                 {"type": "event", "tick": 1, "t": 0.01, "kind": "combat.countermeasure",
+                  "subject": 0, "fields": {"decoy": "chaff", "number": 7}}]
+        for tick, kind, subject, obj, fields in extra:
+            event = {"type": "event", "tick": tick, "t": tick / 100, "kind": kind, "subject": subject,
+                     "fields": {"projectile": 16777216, **fields}}
+            if obj is not None:
+                event["object"] = obj
+            lines.append(event)
+        return "\n".join(json.dumps(line) for line in lines)
+
+    def test_a_numbered_decoy_must_be_a_device_that_was_released(self):
+        from battery_scenarios import _replay_record as rr  # noqa: E402
+
+        late = (4, "weapon.outcome", 3, 0, {
+            "result": "hit", "replaces": "spoofed",
+            "reason": "it was decoyed by chaff #7 from You at 0:13.5 but flew on and struck anyway"})
+        spoof = (3, "weapon.outcome", 3, 0, {"result": "spoofed"})
+        good = (2, "weapon.decoyed", 3, 0, {"decoy": "chaff", "number": 7})
+        self.assertEqual(rr.invariant_problems(self.decoy_log(good, spoof, late)), [])
+        # The same tick lists the decoy before the device that left on it.
+        self.assertEqual(rr.invariant_problems(self.decoy_log(
+            (1, "weapon.decoyed", 3, 0, {"decoy": "chaff", "number": 7}), spoof)), [])
+        # A decoy earlier than the release is wrong.
+        problems = rr.invariant_problems(self.decoy_log(
+            (0, "weapon.decoyed", 3, 0, {"decoy": "chaff", "number": 7}), spoof))
+        self.assertTrue(any("never released" in p for p in problems))
+        # An older recording has no numbers: fine.
+        old = (4, "weapon.outcome", 3, 0, {
+            "result": "hit", "replaces": "spoofed",
+            "reason": "it was spoofed but flew on and struck anyway"})
+        self.assertEqual(rr.invariant_problems(self.decoy_log(
+            (2, "weapon.decoyed", 3, 0, {"decoy": "chaff"}), spoof, old)), [])
+        # A number nobody released, a wrong kind, or a wrong releaser fails.
+        for bad in (
+            (2, "weapon.decoyed", 3, 0, {"decoy": "chaff", "number": 8}),
+            (2, "weapon.decoyed", 3, 0, {"decoy": "flare", "number": 7}),
+            (2, "weapon.decoyed", 3, 3, {"decoy": "chaff", "number": 7}),
+        ):
+            problems = rr.invariant_problems(self.decoy_log(bad, spoof))
+            self.assertTrue(any("never released" in p for p in problems), bad)
+        wrong = (4, "weapon.outcome", 3, 0, {
+            "result": "hit", "replaces": "spoofed",
+            "reason": "it was decoyed by flare #7 from You but flew on and struck anyway"})
+        problems = rr.invariant_problems(self.decoy_log(good, spoof, wrong))
+        self.assertTrue(any("late hit names flare #7" in p for p in problems))

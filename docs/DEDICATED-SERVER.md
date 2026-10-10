@@ -257,6 +257,11 @@ twice.
 | `time-of-day HH:MM`, `wind HEADING FEET-PER-SECOND`, `cloud-deck FEET` | Optional weather overrides of the condition's own, as the game's `TORE_WEATHER_TIME`, `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set them: the wind is written as they write it, a heading of -360 to 360 degrees and a speed of 0 to 200 feet a second, and the cloud deck is 0 to 400,000 feet |
 | `start airborne FEET` | 5,000 (the default), 10,000, 20,000 or 40,000 ft, the creator's choices |
 | `start ground RUNWAY [FEET]` | A ground start from a runway object, by its number in the theater's layout (the object's id is 1,073,741,824 plus it; `--check` lists the theater's runways by number and airport name). The optional altitude is the creator's altitude setting, which a ground start keeps for its airborne aircraft to clear the ground (5,000 by default). A ground start needs the hybrid flight model for humans |
+| `start ground auto [FEET]` | A ground start whose runway the world picks from the ground target (below), the creator's default when a target is set and no airport was named. Until the surface layout places starts from the target, the world takes the first friendly airport whose runway holds the wing. Needs the hybrid flight model for humans, as any ground start does |
+| `ground-target TEMPLATE` | The creator's friendly ground target (its field 30), by the name of its template mission, for example `QUCOL` (the Ukraine armored column). It must be one of the theater's targets, listed in [the Quick Mission template reference](formats/quick-templates.md#recorded-facts-from-faexe-102f); the "nothing" entry of each theater is no target, so leave the line out. Absent means no ground target |
+| `defenses aaa LEVEL sam LEVEL` | How heavily the target's anti-aircraft guns and SAM sites are manned (the creator's fields 31 and 32): `none`, `light`, `moderate` or `heavy`, which the creator words "not", "lightly", "moderately" and "heavily" and which man 0, 25, 60 and 100 percent of the template's slots. Needs a `ground-target`; absent means none of either |
+| `surface-seed N` | The whole number the target's layout is rolled from (which slots are manned, which units stand there, where). Absent or 0 means none drawn: the host draws one when the flight starts. The creator draws one each time a flight with a target starts and keeps it for restarts |
+| `enemy-nationality N` | The enemy's nationality, 0 to 59, an index into the creator's list (its field 20); it picks which equipment the target's units are drawn from. Absent means the theater's own enemy, as the creator gives it |
 | `separation-nm N` | 1, 2, 5 (the default), 10, 20, 50, 75, 100, 150, 200 or 300, the creator's choices |
 | `preset NAME` | The AI's standing orders: `free` (the default), `cap`, `intercept`, `escort`, `self-defense` or `hold` |
 | `guns-only yes/no` | The creator's air combat setting; `no` by default. With the standard load it leaves the guns loaded and unloads the missiles |
@@ -270,6 +275,13 @@ twice.
 | `loadout fuel POUNDS`, `loadout cheat yes/no`, `loadout station N WEAPON COUNT QUANTITY` | The loadout of plane 0 for a single-player start, as the creator's Load Ordnance page leaves it: the fuel, the loadout screen's Cheat, and one line for every station, in the aircraft's station order, naming its weapon's resource, its capacity and what it carries. **Used only by single player**: an open (networked) mission refuses it, since nobody flies from the start |
 | `friendly-fire on/off`, `loadouts own/any` | A networked mission's two settings that its build needs (*built, F2-1*): `friendly-fire off` spares every aircraft its own side's rounds, `loadouts any` allows Cheat loadings. The host writes them from its settings into the mission it sends, so a server's own `friendly-fire` and `loadouts` settings decide them and the mission file leaves them out; single player refuses both |
 | `plane-loadout PLANE fuel POUNDS`, `plane-loadout PLANE cheat no`, `plane-loadout PLANE station N WEAPON COUNT QUANTITY` | The loadout a player chose in the lobby for one plane of a networked mission, the same lines as `loadout` with the plane number first. *Built (EF4).* The host writes them into the mission it sends when a flight starts, so every player builds the same aircraft; a server's own file normally leaves them out, and a plane with none carries its aircraft's standard load. Each is checked as the [lobby's loadout rule](#the-lobby) says, and single player refuses them |
+
+*Status of the ground target lines:* they are read, checked against the
+theater's targets, carried to every player and shown in the lobby's creator,
+but the surface units themselves (the target's buildings, vehicles, SAMs and
+guns) are the next slices of the [surface defenses spec](spec/surface-defenses.md).
+Until they land, a mission with a target flies without them and the server's
+log says so when it builds the mission.
 
 Planes are numbered as in the game: plane 0 is the lead of friendly wing 1,
 then every other aircraft in wing order. `--check` prints the list. Every

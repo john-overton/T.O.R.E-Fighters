@@ -383,6 +383,33 @@ impl GroundLayout {
 /// must be on the airport's paving, on a landable surface and clear of
 /// buildings. If the staggered layout cannot fit, its spacing tightens, and
 /// if none works the start is rejected with a message for the creator.
+/// The runway a `start ground auto` mission parks on until the world places
+/// starts from the ground target: `fitted`, agent decision 2026-10-10 (slice
+/// Q1), the first runway, by object id, of a friendly airport (any airport
+/// when none is friendly) that is no short strip or vertical pad and holds a
+/// ground layout for `count` aircraft. The surface layout slice (L1)
+/// replaces it with the Blue-side airfield nearest the target at least
+/// 15 nautical miles from it (surface-defenses spec, "Start placement").
+pub fn auto_runway(world: &Terrain, count: usize) -> crate::WorldResult<u32> {
+    use tore_sim::airport::Allegiance;
+    let scene = &world.airport_scene;
+    let usable = |friendly_only: bool| {
+        let mut ids: Vec<u32> = scene
+            .airports
+            .iter()
+            .filter(|a| !friendly_only || a.allegiance == Allegiance::Friendly)
+            .flat_map(|a| a.runway_objects.iter().copied())
+            .filter(|id| !scene.vertical_pad(*id) && !scene.short_strip(*id))
+            .collect();
+        ids.sort_unstable();
+        ids.into_iter()
+            .find(|id| ground_layout(world, *id, count).is_ok())
+    };
+    usable(true).or_else(|| usable(false)).ok_or_else(|| {
+        "No runway in this theater holds your wing for a ground start. Choose Airborne.".into()
+    })
+}
+
 pub fn ground_layout(
     world: &Terrain,
     object: u32,

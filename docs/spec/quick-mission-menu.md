@@ -29,9 +29,8 @@ inline option selects its previous available value, wrapping to the last value.
 This also works for aircraft/theater/airport fields without opening their list;
 their existing left-click behavior is unchanged. The player's wing count wraps
 from one to its maximum, never through zero. Empty lists do nothing. Existing
-field dependencies continue to apply to editable settings. The ground-target
-section is unavailable as described below. Require a matching right
-press/release on the same field.
+field dependencies continue to apply to editable settings. Require a matching
+right press/release on the same field.
 Right-click cannot activate OK, Cancel, Exit, popup rows or controls behind a
 selector/help menu. Focus loss cancels a pending press. In the ordnance view,
 right-click retains its existing station-quantity decrement.
@@ -78,23 +77,60 @@ unknown. Further research would inspect the original dialog drawing data.
 The Aircraft menu label is vertically centered by visible glyph bounds within
 y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
 
-## Unavailable ground-target controls
+## Ground target and defenses
 
-**Opinionated**, requested by John on 2026-09-23. The ground-target, AAA and
-SAM fields remain visible but cannot be edited. Clicking anywhere in that
-sentence block, including its three value boxes, opens a small modal notice:
-"Ground targets, AAA and SAMs are not implemented yet." Left-click,
-right-click, Shift activation and keyboard activation all leave the draft
-unchanged and never open a choice list. The other creator settings remain
-available after dismissing the notice.
+The sentence block "Friendly ground target is [target] [AAA strength] defended
+by AAA and [SAM strength] defended by SAMs." is live in all sixteen theaters
+(requested by John on 2026-10-10; before that, from 2026-09-23, it showed a
+notice and changed nothing). Its words are retail data: each theater's target
+list and the four strengths "not", "lightly", "moderately" and "heavily" come
+from the executable's creator strings, and the text form of a mission file
+writes the strengths `none`, `light`, `moderate` and `heavy`
+([mission file](../DEDICATED-SERVER.md#the-mission-file)).
 
-The popup reuses the menu font and original blue OK button. OK, Enter, Space
-or Escape dismiss it; inputs cannot change settings or launch a mission through
-it. Focus loss cancels it with the other temporary menus. Agent-selected layout
-on the 640 by 480 canvas: the sentence hit region is (334,294), 278 by 49;
-the centered popup is (166,202), 308 by 88, with its two text lines at y=214
-and y=231 and its OK button at (285,255). This disables host setup controls;
-it does not implement ground targets or defense behavior.
+- **Target list.** Each theater offers its own list, whose first entry is the
+  "nothing" template (no ground target) and whose other entries are the
+  theater's template missions, in menu order
+  ([the list per theater](../formats/quick-templates.md#recorded-facts-from-faexe-102f)).
+  Clicking the field steps through the list; Shift opens it.
+- **Strengths.** Each strength steps through its four words. With the target
+  at "none" both strengths read "not" and cannot be changed: touching one says
+  "Choose a ground target first: the defenses are the target's." Setting the
+  target to none, or changing the theater, puts both back to "not" at once
+  (retail clears them when the target is none; the theater case it leaves to
+  the next change, which is not copied).
+- **Enemy nationality.** Field 20 is part of the mission. It picks the
+  equipment group the target's units are drawn from, so the mission file
+  carries it (`enemy-nationality`), and the lobby's read-only creator shows it
+  instead of "as the King's". Changing the theater resets it to the
+  theater's own enemy.
+- **Start.** With a target chosen, the Airport list of a ground start gains a
+  first row, "Automatic (near the target)", which is the default: the mission
+  says `start ground auto` and the world picks the runway from the target.
+  Naming an airport keeps that airport. Choosing no target (or a target when
+  none was set) starts the list over. Until the surface layout slice places
+  starts from the target, "automatic" takes the first friendly airport whose
+  runway holds the wing (fitted).
+- **Seed.** Pressing OK on a mission with a target draws a new number that
+  the target's layout is rolled from, so each flight can differ and a restart
+  of the same flight repeats it. The lobby sends none; the host draws it when
+  the flight starts.
+- **Lobby.** The King edits the fields like any other; everyone else sees the
+  King's choice read-only, with the same dimming rule as the other fields.
+  A multiplayer start stays airborne, so `start ground auto` does not reach
+  a lobby.
+- **Not built yet.** The units of the target, its SAMs and its guns are the
+  next slices ([surface defenses](surface-defenses.md)); until they land a
+  mission with a target flies without them and the log says so.
+
+The old notice popup (sentence hit region (334,294), 278 by 49; popup (166,202),
+308 by 88) is gone, and so is the launch refusal "Ground targets and defenses
+are not available yet." The sentence keeps its layout and word-wrapping; the
+fields are ordinary inline boxes. Snapshot states: `ground-target` (the
+theater's first target, AAA moderately, SAMs heavily), `ground-target-last`
+(its last, lightly and moderately), `ground-start-auto` (the first with a
+ground start) and `lobby-creator-view-target` (the read-only creator on a
+mission with a target); `field-30` to `field-32` open the lists.
 
 ## Mission end
 

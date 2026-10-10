@@ -1,6 +1,6 @@
 //! Building a mission from a [`MissionSpec`] and the synthetic import, headless.
 
-use super::*;
+use super::{build::surface_gap_note, *};
 use crate::{
     mission::{MissionSpec, Skill, Start},
     resources::ResourceReads,
@@ -343,4 +343,54 @@ fn an_airborne_start_takes_the_variety_speed_at_the_mission_altitude() {
         .sum::<f64>()
         .sqrt();
     assert!((ground - at_mission).abs() < 1e-6, "{ground} {at_mission}");
+}
+
+#[test]
+fn a_ground_target_builds_the_same_world_and_the_log_says_nothing_stands_there() {
+    use crate::mission::Defense;
+    let map = resources();
+    let plain = World::new(&spec(), &map, Seating::SinglePlayer).unwrap();
+    let mut with = spec();
+    assert!(surface_gap_note(&with).is_none());
+    with.ground_target = Some("QUCOL".into());
+    with.aaa = Defense::Heavy;
+    with.sam = Defense::Moderate;
+    with.surface_seed = 77;
+    // Until the surface layout exists, the target adds nothing to the world.
+    let note = surface_gap_note(&with).unwrap();
+    assert!(
+        note.contains("QUCOL") && note.contains("no surface units"),
+        "{note}"
+    );
+    let world = World::new(&with, &map, Seating::SinglePlayer).unwrap();
+    assert_eq!(
+        world.combat.state.targets.len(),
+        plain.combat.state.targets.len()
+    );
+}
+
+#[test]
+fn a_ground_start_on_auto_takes_a_runway_the_world_picks() {
+    use crate::test_support::resources::{AIRPORT_RUNWAY, airport_resources};
+    let map = airport_resources();
+    let mut auto = spec();
+    auto.start = Start::GroundAuto {
+        altitude_ft: 10_000,
+    };
+    let mut named = spec();
+    named.start = Start::Ground {
+        runway: AIRPORT_RUNWAY,
+        altitude_ft: 10_000,
+    };
+    let auto = World::new(&auto, &map, Seating::SinglePlayer).unwrap();
+    let named = World::new(&named, &map, Seating::SinglePlayer).unwrap();
+    // The synthetic theater has one runway: both park on it.
+    assert_eq!(
+        auto.cockpits[0].flight.position,
+        named.cockpits[0].flight.position
+    );
+    // No runway at all is a plain refusal, not a panic.
+    let mut none = spec();
+    none.start = Start::GroundAuto { altitude_ft: 5_000 };
+    assert!(error_of(&none, &resources()).contains("No runway"));
 }

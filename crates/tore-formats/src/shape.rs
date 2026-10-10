@@ -51,9 +51,53 @@ pub struct Line {
     pub color: u8,
     pub fog: FogMode,
 }
+/// SH `ea` sprite: a textured rectangle that always faces the viewer, as the
+/// men (SOLDIER.SH) are drawn. Its centre is an ordinary vertex slot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Billboard {
+    /// Centre in source units, in face-position order (right, forward, up).
+    pub center: [f32; 3],
+    /// Full width and height in source units; the centre is the middle.
+    pub size: [f32; 2],
+    pub texture: String,
+    /// Texture corners from the last `e4` record: bottom left, top left,
+    /// top right, bottom right, in PIC pixels with rows counted up from the
+    /// bottom row, as face texture coordinates are.
+    pub uv: Option<[[f32; 2]; 4]>,
+    pub fog: FogMode,
+    pub address: usize,
+}
+impl Billboard {
+    /// The sprite as a four-corner face spanning `right` and `up`, unit
+    /// vectors in face-position axes chosen by the viewer, in the same
+    /// corner order as `uv`.
+    pub fn face(&self, right: [f32; 3], up: [f32; 3]) -> Face {
+        let [w, h] = self.size.map(|v| v * 0.5);
+        let corner = |x: f32, y: f32| -> [f32; 3] {
+            std::array::from_fn(|i| self.center[i] + right[i] * x * w + up[i] * y * h)
+        };
+        Face {
+            positions: vec![
+                corner(-1., -1.),
+                corner(-1., 1.),
+                corner(1., 1.),
+                corner(1., -1.),
+            ],
+            colors: vec![0; 4],
+            fog: self.fog,
+            uv: self.uv.map(Vec::from).unwrap_or_default(),
+            texture: self.texture.clone(),
+            subtype: 0,
+            normal: None,
+            address: self.address,
+        }
+    }
+}
 pub struct Shape {
     pub lines: Vec<Line>,
     pub faces: Vec<Face>,
+    /// Viewer-facing sprites. Shapes made only of sprites have no faces.
+    pub billboards: Vec<Billboard>,
     pub state_words: BTreeSet<usize>,
 }
 /// FA 0x42e0c0 resolves the type's shape at +0x0f, then the F2 link at
@@ -206,6 +250,158 @@ impl StreamerDef {
     }
 }
 
+/// First synthetic state key of the HARDNumLoaded envelope. Launcher shapes
+/// (CHAP, SA2, SA3, SCD) ask the host how many rounds a hardpoint still
+/// carries and draw one rail's missile per count they pass. The key lies far
+/// above any SH module address, so it never meets a real state word.
+pub const LOADED_COUNT_BASE: usize = 0xffff_0000;
+
+/// State key for the loaded count of `hardpoint` (the native call's index).
+/// Absent from the state map means zero rounds loaded; scenery always draws
+/// the full load.
+pub const fn loaded_count_word(hardpoint: u8) -> usize {
+    LOADED_COUNT_BASE + hardpoint as usize
+}
+
+/// `68 X 68 Y c3`: the push pair an f0 record uses to hand control to a
+/// main-program thunk `Y` that returns to `X`. Returns `X` as a CODE offset.
+fn trampoline(c: &[u8], base: usize, at: usize) -> Result<usize> {
+    if slice(c, at, 1)? != [0x68]
+        || slice(c, at + 5, 1)? != [0x68]
+        || slice(c, at + 10, 1)? != [0xc3]
+    {
+        return Err(invalid("invalid shape reentry trampoline"));
+    }
+    let to = u32_at(c, at + 1)?
+        .checked_sub(base)
+        .ok_or_else(|| invalid("shape reentry underflow"))?;
+    if to >= c.len() {
+        return Err(invalid("shape reentry outside CODE"));
+    }
+    Ok(to)
+}
+
+/// Reviewed HARDNumLoaded prelude (SA3, SCD; CHAP and SA2 share it), after
+/// the f0 marker: `mov ecx,[objId]; mov edx,hardpoint; or ecx,ecx; jz +13`,
+/// then a trampoline into the main program that returns straight into the
+/// `eb 05 b8 1` envelope behind it. Returns the hardpoint index and the
+/// envelope's CODE offset; anything else is not this prelude.
+fn loaded_count_prelude(c: &[u8], base: usize, start: usize) -> Option<(u8, usize)> {
+    let b = c.get(start..start + 26)?;
+    let hardpoint = u32::from_le_bytes(b[7..11].try_into().unwrap());
+    let returns_to = u32::from_le_bytes(b[16..20].try_into().unwrap()) as usize;
+    let envelope = start + 26;
+    (b[..2] == [0x8b, 0x0d]
+        && b[6] == 0xba
+        && b[11..15] == [0x0b, 0xc9, 0x74, 0x0d]
+        && b[15] == 0x68
+        && b[20] == 0x68
+        && b[25] == 0xc3
+        && returns_to == base + envelope
+        && hardpoint < 256)
+        .then_some((hardpoint as u8, envelope))
+}
+
+/// The `eb 05 b8 01 00 00 00` envelope HARDNumLoaded returns into, followed
+/// by `cmp eax,N; jb +17` (draw while at least N rounds remain) or
+/// `or eax,eax; jz +17` (draw while any remain). Both arms land on a
+/// trampoline: the drawing arm resumes at an SH call to the missile's
+/// geometry, the skipping arm resumes inside the next f0 record. Returns the
+/// CODE offset the chosen arm resumes at.
+fn loaded_count_branch(c: &[u8], base: usize, at: usize, count: i32) -> Result<usize> {
+    if slice(c, at, 7)? != [0xeb, 5, 0xb8, 1, 0, 0, 0] {
+        return Err(invalid("unreviewed loaded-count envelope"));
+    }
+    let (draw, loaded) = if slice(c, at + 7, 2)? == [0x83, 0xf8]
+        && (1..=4).contains(&slice(c, at + 9, 1)?[0])
+        && slice(c, at + 10, 2)? == [0x72, 0x11]
+    {
+        (at + 12, count >= i32::from(c[at + 9]))
+    } else if slice(c, at + 7, 4)? == [0x0b, 0xc0, 0x74, 0x11] {
+        (at + 11, count != 0)
+    } else {
+        return Err(invalid("unreviewed loaded-count comparison"));
+    };
+    if loaded {
+        let to = trampoline(c, base, draw)?;
+        if slice(c, to, 2)? != [0x12, 0] {
+            return Err(invalid(
+                "loaded-count arm does not reference drawing records",
+            ));
+        }
+        Ok(to)
+    } else {
+        // The 17-byte jump passes the drawing trampoline, the SH call and the
+        // next record's f0 marker, landing on that record's own trampoline.
+        let skip = draw + 0x11;
+        if slice(c, skip - 2, 2)? != [0xf0, 0] {
+            return Err(invalid("loaded-count skip does not land in an f0 record"));
+        }
+        trampoline(c, base, skip)
+    }
+}
+
+/// Reviewed hardpoint-angle envelope (KRIV, SOVR), after the f0 marker:
+/// `call $+5; pop ebx; add ebx,N; mov ecx,hardpoint`, a trampoline into the
+/// main program's HardpointAngle that returns straight back, an optional
+/// `add ax,imm16`, then `mov [ebx+6],ax` and the trampoline that resumes the
+/// SH program. The write targets the heading word of the c4 transform the
+/// program resumes at, so the turret under it turns. The added constant is
+/// the hardpoint's mount heading (32760 in KRIVAK.NT and SOVR.NT for the aft
+/// mounts, absent for the forward one), and HardpointAngle is taken as zero,
+/// the mount's rest. Returns the resume offset and that rest heading in
+/// binary angle units, or `None` when the bytes are not this form.
+fn hardpoint_angle_envelope(c: &[u8], base: usize, start: usize) -> Result<Option<(usize, i16)>> {
+    let Some(b) = c.get(start..start + 17) else {
+        return Ok(None);
+    };
+    if b[..6] != [0xe8, 0, 0, 0, 0, 0x5b] || b[6..8] != [0x81, 0xc3] || b[12] != 0xb9 {
+        return Ok(None);
+    }
+    let call = start + 17;
+    if trampoline(c, base, call).ok() != Some(call + 11) {
+        return Ok(None);
+    }
+    let mut at = call + 11;
+    let mut rest = 0;
+    if slice(c, at, 2)? == [0x66, 0x05] {
+        rest = word(c, at + 2)? as i16;
+        at += 4;
+    }
+    if slice(c, at, 4)? != [0x66, 0x89, 0x43, 0x06] {
+        return Err(invalid("unreviewed hardpoint-angle write"));
+    }
+    let resume = trampoline(c, base, at + 4)?;
+    // ebx is the address after the call plus N; the write lands at ebx+6.
+    let written = start + 5 + u32_at(c, start + 8)? + 6;
+    if slice(c, resume, 1)? != [0xc4] || written != resume + 8 {
+        return Err(invalid(
+            "hardpoint angle does not write the resumed c4 rotation",
+        ));
+    }
+    Ok(Some((resume, rest)))
+}
+
+/// A c4 heading word in binary angle units (65536 a turn) as radians.
+fn heading_radians(units: i16) -> f32 {
+    f32::from(units) * std::f32::consts::TAU / 65536.
+}
+
+/// `local` placed under a transform: the translation plus the local point
+/// turned by `heading` about the up axis, forward toward right. An unturned
+/// transform keeps the plain sum the reader has always used.
+fn place(transform: [f32; 3], heading: f32, local: [f32; 3]) -> [f32; 3] {
+    if heading == 0. {
+        return std::array::from_fn(|j| transform[j] + local[j]);
+    }
+    let (sin, cos) = heading.sin_cos();
+    [
+        transform[0] + local[0] * cos + local[1] * sin,
+        transform[1] + local[1] * cos - local[0] * sin,
+        transform[2] + local[2],
+    ]
+}
+
 fn word(c: &[u8], p: usize) -> Result<i32> {
     Ok(u16_at(c, p)? as u16 as i16 as i32)
 }
@@ -228,8 +424,9 @@ impl Shape {
     pub fn with_export_state(data: &[u8], state: &BTreeMap<usize, i32>) -> Result<Self> {
         Self::project(data, state, true, false)
     }
-    /// Static scenery pose with loaded launchers. Interprets bounded drawing
-    /// records and the reviewed CHAP/SA2 visual-selection envelope only.
+    /// Static scenery pose with loaded launchers and turrets at their mount
+    /// rest. Interprets bounded drawing records and the reviewed loaded-count
+    /// (CHAP, SA2, SA3, SCD) and hardpoint-angle (KRIV, SOVR) envelopes only.
     /// No imported callback runs and no autonomous behavior is implied.
     pub fn scenery(data: &[u8]) -> Result<Self> {
         Self::project(data, &BTreeMap::new(), true, true)
@@ -245,11 +442,17 @@ impl Shape {
         let mut colors = BTreeMap::new();
         let mut faces = Vec::new();
         let mut lines = Vec::new();
+        let mut billboards = Vec::new();
+        let mut sprite_uv = None;
         let mut fog = FogMode::Enabled;
         let mut seen = BTreeSet::new();
         let mut state_words = BTreeSet::new();
         let (mut p, mut end, mut texture, mut transform) = (0, None, String::new(), [0.; 3]);
-        type Frame = (usize, Option<usize>, Option<([f32; 3], String)>);
+        // Heading of the current transform, and one a reviewed envelope gave
+        // the c4 record it resumes at.
+        let mut heading = 0f32;
+        let mut pending_heading: Option<(usize, f32)> = None;
+        type Frame = (usize, Option<usize>, Option<([f32; 3], String, f32)>);
         let mut stack: Vec<Frame> = Vec::new();
         let mut finished = false;
         for _ in 0..30000 {
@@ -261,9 +464,10 @@ impl Shape {
                 if let Some((ret, old_end, frame)) = stack.pop() {
                     p = ret;
                     end = old_end;
-                    if let Some((t, s)) = frame {
+                    if let Some((t, s, h)) = frame {
                         transform = t;
                         texture = s;
+                        heading = h;
                     }
                     continue;
                 }
@@ -272,36 +476,11 @@ impl Shape {
             }
             match op {
                 0xeb if scenery => {
-                    // CHAP/SA2: HARDNumLoaded returns through this envelope.
-                    // The static host chooses its loaded visual branch. This is
-                    // a data grammar, not a general x86 interpreter.
-                    if slice(c, p, 7)? != [0xeb, 5, 0xb8, 1, 0, 0, 0] {
-                        return Err(invalid("unreviewed scenery selection envelope"));
-                    }
-                    let draw = if slice(c, p + 7, 2)? == [0x83, 0xf8]
-                        && (1..=4).contains(&slice(c, p + 9, 1)?[0])
-                        && slice(c, p + 10, 2)? == [0x72, 0x11]
-                    {
-                        p + 12
-                    } else if slice(c, p + 7, 4)? == [0x0b, 0xc0, 0x74, 0x11] {
-                        p + 11
-                    } else {
-                        return Err(invalid("unreviewed scenery load comparison"));
-                    };
-                    if slice(c, draw, 1)? != [0x68]
-                        || slice(c, draw + 5, 1)? != [0x68]
-                        || slice(c, draw + 10, 1)? != [0xc3]
-                    {
-                        return Err(invalid("invalid scenery drawing reference"));
-                    }
-                    p = u32_at(c, draw + 1)?
-                        .checked_sub(base)
-                        .ok_or_else(|| invalid("scenery drawing reference underflow"))?;
-                    if slice(c, p, 2)? != [0x12, 0] {
-                        return Err(invalid(
-                            "scenery selection does not reference drawing records",
-                        ));
-                    }
+                    // CHAP/SA2/SA3/SCD: HARDNumLoaded returns through this
+                    // envelope. The static host chooses its loaded visual
+                    // branch. This is a data grammar, not a general x86
+                    // interpreter.
+                    p = loaded_count_branch(c, base, p, i32::MAX)?;
                 }
                 0x48 if export => p = target(p + 4, word(c, p + 2)?, c)?,
                 0x38 => {
@@ -320,14 +499,34 @@ impl Shape {
                 }
                 0xc4 => {
                     let t = target(p + 16, word(c, p + 14)?, c)?;
-                    stack.push((p + 16, end, Some((transform, texture.clone()))));
-                    transform[0] += word(c, p + 2)? as f32;
-                    transform[1] += word(c, p + 6)? as f32;
-                    transform[2] += word(c, p + 4)? as f32;
+                    stack.push((p + 16, end, Some((transform, texture.clone(), heading))));
+                    let offset = [word(c, p + 2)?, word(c, p + 6)?, word(c, p + 4)?];
+                    transform = place(transform, heading, offset.map(|v| v as f32));
+                    if let Some((at, turn)) = pending_heading.take()
+                        && at == p
+                    {
+                        heading += turn;
+                    }
                     end = None;
                     p = t;
                 }
                 0xf0 => {
+                    if !scenery
+                        && let Some((hardpoint, envelope)) = loaded_count_prelude(c, base, p + 2)
+                    {
+                        // The dynamic path draws the launcher's loaded rails from
+                        // the caller's count instead of the scenery's full load.
+                        let key = loaded_count_word(hardpoint);
+                        state_words.insert(key);
+                        let count = state.get(&key).copied().unwrap_or(0);
+                        p = loaded_count_branch(c, base, envelope, count)?;
+                        continue;
+                    }
+                    if let Some((resume, rest)) = hardpoint_angle_envelope(c, base, p + 2)? {
+                        pending_heading = Some((resume, heading_radians(rest)));
+                        p = resume;
+                        continue;
+                    }
                     let mut start = p + 2;
                     // EJECT.SH: inert presentation flag followed by the usual state guard.
                     // Do not write the flag or execute any original instruction.
@@ -384,15 +583,57 @@ impl Shape {
                     }
                     for i in 0..count {
                         let at = p + 6 + i * 6;
-                        slots.insert(
-                            dest / 8 + i,
-                            std::array::from_fn(|j| {
-                                transform[j] + word(c, at + j * 2).unwrap_or(0) as f32
-                            }),
-                        );
+                        let local =
+                            std::array::from_fn(|j| word(c, at + j * 2).unwrap_or(0) as f32);
+                        slots.insert(dest / 8 + i, place(transform, heading, local));
                     }
                     slice(c, p, 6 + count * 6)?;
                     p += 6 + count * 6;
+                }
+                0x7a => {
+                    // One vertex: three signed words and its byte slot, the
+                    // same slots `82` fills (FA dispatch, see weather/shape.rs).
+                    let slot = u16_at(c, p + 8)?;
+                    if slot % 8 == 0 {
+                        let local =
+                            std::array::from_fn(|j| word(c, p + 2 + j * 2).unwrap_or(0) as f32);
+                        slots.insert(slot / 8, place(transform, heading, local));
+                    }
+                    p += 10;
+                }
+                0xe4 => {
+                    // Sprite texture corners for the next `ea`.
+                    sprite_uv = (u16_at(c, p + 2)? == 4).then(|| {
+                        std::array::from_fn(|i| {
+                            [
+                                u16_at(c, p + 4 + i * 4).unwrap_or(0) as f32,
+                                u16_at(c, p + 6 + i * 4).unwrap_or(0) as f32,
+                            ]
+                        })
+                    });
+                    slice(c, p, 20)?;
+                    p += 20;
+                }
+                0xea => {
+                    let center = u16_at(c, p + 2)?;
+                    let size = [word(c, p + 4)? as f32, word(c, p + 6)? as f32];
+                    if center % 8 != 0 || size.iter().any(|v| *v <= 0.) {
+                        return Err(invalid("invalid shape billboard"));
+                    }
+                    let center = *slots
+                        .get(&(center / 8))
+                        .ok_or_else(|| invalid("unresolved shape billboard centre"))?;
+                    if seen.insert((p, center.map(f32::to_bits), fog as u8, 0)) {
+                        billboards.push(Billboard {
+                            center,
+                            size,
+                            texture: texture.clone(),
+                            uv: sprite_uv,
+                            fog,
+                            address: base + p,
+                        });
+                    }
+                    p += 8;
                 }
                 0xca => {
                     fog = FogMode::from_word(u16_at(c, p + 2)?);
@@ -432,7 +673,8 @@ impl Shape {
                             word(c, p + 4)? as f32,
                         ];
                         p += 6 + if flags & 2 != 0 { 3 } else { 6 };
-                        Some(n)
+                        // Directions turn with their part but do not move.
+                        Some(place([0.; 3], heading, n))
                     } else {
                         None
                     };
@@ -477,8 +719,12 @@ impl Shape {
                             }
                         }
                     }
-                    if seen.insert((addr, transform.map(f32::to_bits), fog as u8))
-                        && !(sub & 4 != 0 && texture.is_empty())
+                    if seen.insert((
+                        addr,
+                        transform.map(f32::to_bits),
+                        fog as u8,
+                        heading.to_bits(),
+                    )) && !(sub & 4 != 0 && texture.is_empty())
                     {
                         faces.push(Face {
                             positions,
@@ -536,11 +782,10 @@ impl Shape {
                         0xf2 | 0xb8 | 0x4d | 0xd0 | 0xda | 0x05 | 0x14 | 0x18 | 0x4a | 0x48
                         | 0xac => 4,
                         0xa6 => 6,
-                        0x2e | 0x50 | 0x68 | 0xea | 0xc8 => 8,
-                        0x7a | 0x0c | 0x0e | 0x10 | 0x66 | 0xe6 | 0x76 | 0x08 | 0x6c => 10,
+                        0x2e | 0x50 | 0x68 | 0xc8 => 8,
+                        0x0c | 0x0e | 0x10 | 0x66 | 0xe6 | 0x76 | 0x08 | 0x6c => 10,
                         0x78 => 12,
                         0x06 => 14,
-                        0xe4 => 20,
                         0xce => 40,
                         _ => {
                             return Err(invalid(&format!(
@@ -552,12 +797,13 @@ impl Shape {
                 }
             }
         }
-        if !finished || faces.is_empty() {
+        if !finished || (faces.is_empty() && billboards.is_empty()) {
             return Err(invalid("shape instruction bound or no geometry"));
         }
         Ok(Self {
             faces,
             lines,
+            billboards,
             state_words,
         })
     }
@@ -803,5 +1049,177 @@ mod tests {
         c[n - 2] = 7;
         assert!(Shape::parse(&module::fixture(&c)).is_err());
         assert!(Shape::parse(&module::fixture(&[0xab, 0])).is_err());
+    }
+
+    fn push_trampoline(code: &mut Vec<u8>, to: usize) {
+        code.push(0x68);
+        code.extend((0x1000 + to as u32).to_le_bytes());
+        code.extend([0x68, 0, 0, 0, 0, 0xc3]);
+    }
+
+    /// A launcher: the HARDNumLoaded prelude for `hardpoint`, the envelope
+    /// drawing one missile (colour 101) while at least two rounds remain,
+    /// then the launcher body (colour 100).
+    fn launcher(hardpoint: u8) -> Vec<u8> {
+        let mut c = vec![0xf0, 0, 0x8b, 0x0d, 0, 0, 0, 0, 0xba, hardpoint, 0, 0, 0];
+        c.extend([0x0b, 0xc9, 0x74, 0x0d]);
+        push_trampoline(&mut c, 28);
+        c.extend([0xeb, 5, 0xb8, 1, 0, 0, 0, 0x83, 0xf8, 2, 0x72, 0x11]);
+        push_trampoline(&mut c, 51);
+        c.extend([0x12, 0, 47, 0, 0xf0, 0]);
+        push_trampoline(&mut c, 68);
+        assert_eq!(c.len(), 68);
+        c.extend(program());
+        let mut missile = program();
+        missile[27] = 101;
+        c.extend(missile);
+        c
+    }
+
+    #[test]
+    fn loaded_count_draws_one_missile_per_round_in_the_state_path() {
+        let data = module::fixture(&launcher(3));
+        let key = loaded_count_word(3);
+        let colors =
+            |shape: Shape| -> Vec<u8> { shape.faces.iter().map(|f| f.colors[0]).collect() };
+        for (count, expected) in [
+            (0, vec![100]),
+            (1, vec![100]),
+            (2, vec![101, 100]),
+            (9, vec![101, 100]),
+        ] {
+            let shape = Shape::with_state(&data, &[(key, count)].into()).unwrap();
+            assert!(shape.state_words.contains(&key));
+            assert_eq!(colors(shape), expected, "count {count}");
+        }
+        // An absent count is an empty launcher; the scenery pose is fully loaded.
+        assert_eq!(colors(Shape::parse(&data).unwrap()), vec![100]);
+        let scenery = Shape::scenery(&data).unwrap();
+        assert!(scenery.state_words.is_empty());
+        assert_eq!(colors(scenery), vec![101, 100]);
+    }
+
+    #[test]
+    fn loaded_count_rejects_unreviewed_landings() {
+        let mut c = launcher(0);
+        c[55] = 0x1e; // the skip no longer lands inside an f0 record
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+        let mut c = launcher(0);
+        c[37] = 9; // compares against more rails than any reviewed launcher
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+        let mut c = launcher(0);
+        c[18] = 0x30; // the call no longer returns into the envelope
+        assert!(
+            Shape::with_state(&module::fixture(&c), &[(loaded_count_word(0), 2)].into()).is_err()
+        );
+    }
+
+    /// A turret: the HardpointAngle envelope, optionally adding `rest`, a c4
+    /// record 16 units right and the turret geometry under it. `adjust`
+    /// moves the native write away from the c4 heading word.
+    fn turret(rest: Option<i16>, adjust: u32) -> Vec<u8> {
+        let mut c = vec![0xf0, 0, 0xe8, 0, 0, 0, 0, 0x5b, 0x81, 0xc3];
+        let resume: usize = if rest.is_some() { 49 } else { 45 };
+        c.extend((resume as u32 + 8 - 13 + adjust).to_le_bytes());
+        c.extend([0xb9, 1, 0, 0, 0]);
+        push_trampoline(&mut c, 30);
+        if let Some(rest) = rest {
+            c.extend([0x66, 0x05]);
+            c.extend(rest.to_le_bytes());
+        }
+        c.extend([0x66, 0x89, 0x43, 0x06]);
+        push_trampoline(&mut c, resume);
+        assert_eq!(c.len(), resume);
+        c.extend([0xc4, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]);
+        c.extend(program());
+        c
+    }
+
+    #[test]
+    fn hardpoint_angle_turns_the_turret_to_its_mount_rest() {
+        let forward = Shape::parse(&module::fixture(&turret(None, 0))).unwrap();
+        assert_eq!(
+            forward.faces[0].positions,
+            vec![[16., 0., 0.], [26., 0., 0.], [16., 10., 0.]]
+        );
+        // KRIVAK.NT and SOVR.NT give their aft mounts heading 32760.
+        for shape in [
+            Shape::parse(&module::fixture(&turret(Some(0x7ff8), 0))).unwrap(),
+            Shape::scenery(&module::fixture(&turret(Some(0x7ff8), 0))).unwrap(),
+        ] {
+            let p = &shape.faces[0].positions;
+            assert!((p[0][0] - 16.).abs() < 1e-4 && p[0][1].abs() < 1e-4);
+            assert!((p[1][0] - 6.).abs() < 1e-3 && p[1][1].abs() < 0.02);
+            assert!((p[2][0] - 16.).abs() < 0.02 && (p[2][1] + 10.).abs() < 1e-3);
+            assert_eq!(p[2][2], 0.);
+        }
+        // The native write must land on the resumed c4 heading word.
+        assert!(Shape::parse(&module::fixture(&turret(Some(0x7ff8), 2))).is_err());
+        let mut c = turret(None, 0);
+        c[31] = 0x88; // an unreviewed write
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+    }
+
+    fn sprite() -> Vec<u8> {
+        let mut c = vec![0x7a, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0xe2, 0];
+        c.extend(b"soldier.PIC\0\0\0");
+        c.extend([0xe4, 0, 4, 0]);
+        for word in [0u16, 150, 0, 199, 29, 199, 29, 150] {
+            c.extend(word.to_le_bytes());
+        }
+        c.extend([0xea, 0, 0, 0, 7, 0, 12, 0, 0]);
+        c
+    }
+
+    #[test]
+    fn billboards_project_from_a_vertex_and_sprite_corners() {
+        let shape = Shape::scenery(&module::fixture(&sprite())).unwrap();
+        assert!(shape.faces.is_empty());
+        let [b] = shape.billboards.as_slice() else {
+            panic!("one sprite expected");
+        };
+        assert_eq!(b.center, [0., 0., 6.]);
+        assert_eq!(b.size, [7., 12.]);
+        assert_eq!(b.texture, "SOLDIER.PIC");
+        assert_eq!(
+            b.uv,
+            Some([[0., 150.], [0., 199.], [29., 199.], [29., 150.]])
+        );
+        let face = b.face([1., 0., 0.], [0., 0., 1.]);
+        assert_eq!(
+            face.positions,
+            vec![
+                [-3.5, 0., 0.],
+                [-3.5, 0., 12.],
+                [3.5, 0., 12.],
+                [3.5, 0., 0.]
+            ]
+        );
+        assert_eq!(face.uv.len(), 4);
+        assert_eq!(
+            Shape::parse(&module::fixture(&sprite()))
+                .unwrap()
+                .billboards
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn billboards_reject_unresolved_centres_and_empty_sizes() {
+        let at = sprite().len() - 9;
+        let mut c = sprite();
+        c[at + 2] = 8;
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+        let mut c = sprite();
+        c[at + 4] = 0;
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+        let c = sprite();
+        for end in 0..c.len() {
+            assert!(
+                Shape::parse(&module::fixture(&c[..end])).is_err(),
+                "end={end}"
+            );
+        }
     }
 }
