@@ -40,6 +40,21 @@ pub fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 
+static CAP: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(fill::MAX_INSTANCES);
+
+/// Sets the per-theater building budget for fills built from now on (the
+/// app's `TORE_CITY_FILL_CAP`, a measuring aid; default
+/// [`fill::MAX_INSTANCES`]).
+pub fn set_cap(cap: usize) {
+    CAP.store(cap, Ordering::Relaxed);
+}
+
+/// The per-theater building budget.
+pub fn cap() -> usize {
+    CAP.load(Ordering::Relaxed)
+}
+
 /// One fill building.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Instance {
@@ -121,11 +136,12 @@ impl CityFill {
     pub fn for_terrain(resources: &dyn ResourceSource, terrain: &Terrain) -> Option<Self> {
         let layout = {
             let mut cache = LAYOUTS.lock().unwrap_or_else(|e| e.into_inner());
-            match cache.get(&terrain.layout) {
+            let key = format!("{}#{}", terrain.layout, cap());
+            match cache.get(&key) {
                 Some(layout) => Arc::clone(layout),
                 None => {
                     let layout = Arc::new(build_layout(resources, terrain));
-                    cache.insert(terrain.layout.clone(), Arc::clone(&layout));
+                    cache.insert(key, Arc::clone(&layout));
                     layout
                 }
             }
@@ -334,7 +350,7 @@ fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
         })
         .unwrap_or_default();
     let (cities, instances, candidates) =
-        fill::place(&map, &kit, &terrain.layout, &keepouts, &names);
+        fill::place(&map, &kit, &terrain.layout, &keepouts, &names, cap());
     Layout {
         layout: terrain.layout.clone(),
         map,

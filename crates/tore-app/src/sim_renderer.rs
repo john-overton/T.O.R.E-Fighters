@@ -1614,7 +1614,7 @@ impl SimRenderer {
             queue.write_buffer(&self.spot_instances, 0, &bytes(&spot_instances(&contacts)));
         }
         if let Some(fill) = &mut self.fill {
-            fill.prepare(queue, camera, scenery.origin);
+            fill.prepare(device, queue, camera, scenery.origin);
         }
         let destination = flare_target.as_ref().unwrap_or(target);
         let targets = &self.targets[slot];

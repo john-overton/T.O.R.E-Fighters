@@ -8487,6 +8487,13 @@ fn main() -> std::process::ExitCode {
     let interactive = startup::interactive();
     // CF0 city fill prototype: opt-in, off unless TORE_CITY_FILL=1.
     tore_world::city::set_enabled(std::env::var("TORE_CITY_FILL").as_deref() == Ok("1"));
+    // A measuring aid: the per-theater building budget.
+    if let Some(cap) = std::env::var("TORE_CITY_FILL_CAP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        tore_world::city::set_cap(cap);
+    }
     let result = std::panic::catch_unwind(|| {
         if let Some(result) = startup::self_test() {
             return result;

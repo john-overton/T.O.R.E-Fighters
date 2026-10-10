@@ -1,15 +1,20 @@
 //! Where the fill puts its buildings (CF0 prototype).
 //!
 //! Each city tile is cut into 2,048 ft blocks (16 by 16 texels) and each
-//! block carries two lot grids. Core lots, 10 a side (204.8 ft), stand wholly
-//! inside a big light roof: all nine of a 3 by 3 sample grid on solid roof
-//! texels. Outer lots, 6 a side (341.3 ft), stand on the smaller light areas
-//! (the painted houses and narrow roofs): the centre and most of the samples
-//! on roof texels, and no core lot under them, so the grids never overlap. A
-//! lot is built when it keeps clear of the layout's objects and runways and
-//! the chosen building's corners stay off streets, parks and water. When a
-//! theater has more lots than the budget, the lots nearest each city's
-//! centre win, core lots first by a margin.
+//! block carries two lot grids. On the 10 a side grid (204.8 ft), a core lot
+//! stands wholly inside a big light roof (all nine of a 3 by 3 sample grid on
+//! solid roof texels) and a roof lot on a narrow roof (eight of the nine on
+//! light roof texels). On the 16 a side grid (128 ft, one lot per texel), a
+//! house lot stands on a painted house: a light texel with at least two more
+//! among its eight neighbours, and no core or roof lot under it. A lot is
+//! built when it keeps clear of the layout's objects and runways and the
+//! chosen building's corners stay off streets, parks and water.
+//!
+//! When a theater has more lots than the budget, each city gets a share by
+//! its number of tiles (a city with fewer lots than its share keeps them all
+//! and the rest is shared again). Within a city the core and roof lots
+//! nearest the centre go first, then house lots in a fixed shuffled order, so
+//! a thinned city keeps houses over all its painted area.
 //!
 //! Integer feet, whole degrees and the integer sine table throughout, seeded
 //! from the layout name alone: every client and every mission on a theater
@@ -31,12 +36,13 @@ pub const BLOCK_FT: i64 = 2_048;
 /// Lots a side in a core block: 204.8 ft lots (John's 200 ft; fitted to the
 /// texel grid).
 pub const CORE_LOTS: i64 = 10;
-/// Lots a side in an outer block: 341.3 ft lots (John's 350 ft).
-pub const OUTER_LOTS: i64 = 6;
-/// Light roof samples of nine an outer lot needs (fitted).
-pub const OUTER_HITS: u32 = 5;
-/// An outer lot with this many light samples stands on a narrow roof and
-/// builds bigger than houses (fitted).
+/// Lots a side for houses: 128 ft lots, one per texel (John, 2026-10-10:
+/// "house lots at about 100 to 150 ft").
+pub const HOUSE_LOTS: i64 = 16;
+/// Light texels of the nine around a house lot's centre it needs (fitted).
+pub const HOUSE_HITS: u32 = 3;
+/// Light roof samples of nine a roof lot needs: a narrow roof that builds
+/// low-rise on 204.8 ft lots (fitted).
 pub const ROOF_HITS: u32 = 8;
 /// The share of a city's radius, in thousandths, inside which core lots
 /// favour towers (fitted).
@@ -44,11 +50,9 @@ pub const DOWNTOWN: i64 = 350;
 /// The smallest footprint side a core lot builds, feet (fitted): big roofs
 /// get big buildings.
 pub const CORE_MIN_SIDE_FT: i64 = 50;
-/// The most buildings a theater gets (John, 2026-10-10).
-pub const MAX_INSTANCES: usize = 50_000;
-/// Over the budget, lots nearest their city's centre win; a core lot counts
-/// as this many thousandths of the city's radius nearer (fitted).
-pub const CORE_PRIORITY: i64 = 150;
+/// The most buildings a theater gets by default (John, 2026-10-10, raised
+/// from 50,000). `crate::city::set_cap` changes it for measurements.
+pub const MAX_INSTANCES: usize = 200_000;
 /// Clearance kept from a runway's airfield box, past the lot's half width.
 pub const RUNWAY_CLEARANCE_FT: i64 = 300;
 /// Clearance kept from any other layout object's box.
@@ -119,7 +123,7 @@ struct Lot {
     z: i64,
     pitch: i64,
     core: bool,
-    hits: u32,
+    house: bool,
     city: usize,
     ordinal: u32,
     long_x: bool,
@@ -206,16 +210,18 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
     let t = mask::TEXEL_FT;
     let mut out = Vec::new();
     let mut ordinal = 0u32;
-    let mut core_lots = std::collections::BTreeSet::<(i64, i64)>::new();
-    for &key in map.tiles.keys() {
-        let origin = [i64::from(key.0) * cell, i64::from(key.1) * cell];
-        for bz in 0..mask::TILE_FT / BLOCK_FT {
-            for bx in 0..mask::TILE_FT / BLOCK_FT {
-                let o = [origin[0] + bx * BLOCK_FT, origin[1] + bz * BLOCK_FT];
-                for core in [true, false] {
-                    let k = if core { CORE_LOTS } else { OUTER_LOTS };
-                    let pitch = BLOCK_FT / k;
-                    let step = BLOCK_FT / (3 * k);
+    // The 204.8 ft grid's taken cells, which house lots keep off.
+    let big_cell = |v: i64| (v * CORE_LOTS).div_euclid(BLOCK_FT);
+    let mut big_lots = std::collections::BTreeSet::<(i64, i64)>::new();
+    for houses in [false, true] {
+        let k = if houses { HOUSE_LOTS } else { CORE_LOTS };
+        let pitch = BLOCK_FT / k;
+        let step = if houses { t } else { BLOCK_FT / (3 * k) };
+        for &key in map.tiles.keys() {
+            let origin = [i64::from(key.0) * cell, i64::from(key.1) * cell];
+            for bz in 0..mask::TILE_FT / BLOCK_FT {
+                for bx in 0..mask::TILE_FT / BLOCK_FT {
+                    let o = [origin[0] + bx * BLOCK_FT, origin[1] + bz * BLOCK_FT];
                     for j in 0..k {
                         for i in 0..k {
                             let x = o[0] + (2 * i + 1) * BLOCK_FT / (2 * k);
@@ -231,24 +237,22 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                                     solid += u32::from(f & mask::SOLID != 0);
                                 }
                             }
-                            // A core lot's cell on the global core grid, and
-                            // the core cells an outer lot covers.
-                            let core_cell = |v: i64| (v * CORE_LOTS).div_euclid(BLOCK_FT);
-                            let pass = if core {
-                                solid == 9
-                            } else {
+                            let core = !houses && solid == 9;
+                            let pass = if houses {
                                 let r = pitch / 2;
-                                hits >= OUTER_HITS
-                                    && (core_cell(z - r)..=core_cell(z + r)).all(|cz| {
-                                        (core_cell(x - r)..=core_cell(x + r))
-                                            .all(|cx| !core_lots.contains(&(cx, cz)))
+                                hits >= HOUSE_HITS
+                                    && (big_cell(z - r)..=big_cell(z + r)).all(|cz| {
+                                        (big_cell(x - r)..=big_cell(x + r))
+                                            .all(|cx| !big_lots.contains(&(cx, cz)))
                                     })
+                            } else {
+                                core || hits >= ROOF_HITS
                             };
                             if !pass || keepouts.iter().any(|k| k.reaches([x, z], pitch / 2)) {
                                 continue;
                             }
-                            if core {
-                                core_lots.insert((core_cell(x), core_cell(z)));
+                            if !houses {
+                                big_lots.insert((big_cell(x), big_cell(z)));
                             }
                             // The roof's longer extent through the lot centre.
                             let run = |dx: i64, dz: i64| {
@@ -285,7 +289,7 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                                 z,
                                 pitch,
                                 core,
-                                hits,
+                                house: houses,
                                 city: city_of[&key],
                                 ordinal,
                                 long_x: run(1, 0) > run(0, 1),
@@ -301,10 +305,45 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
     out
 }
 
+/// Each city's share of `cap` by its number of tiles: a city with fewer lots
+/// than its share keeps them all and the rest is shared again among the
+/// others; leftovers go to the first cities in order.
+fn shares(cities: &[City], cap: usize) -> Vec<usize> {
+    let mut share = vec![0usize; cities.len()];
+    let mut open: Vec<usize> = (0..cities.len()).collect();
+    let mut left = cap;
+    loop {
+        let tiles: usize = open.iter().map(|&c| cities[c].tiles.len()).sum();
+        if open.is_empty() || tiles == 0 {
+            break;
+        }
+        let (full, rest): (Vec<usize>, Vec<usize>) = open
+            .iter()
+            .partition(|&&c| cities[c].candidates * tiles <= left * cities[c].tiles.len());
+        if full.is_empty() {
+            let mut given = 0;
+            for &c in &open {
+                share[c] = left * cities[c].tiles.len() / tiles;
+                given += share[c];
+            }
+            for &c in open.iter().take(left - given) {
+                share[c] += 1;
+            }
+            break;
+        }
+        for &c in &full {
+            share[c] = cities[c].candidates;
+            left -= share[c];
+        }
+        open = rest;
+    }
+    share
+}
+
 /// What each kind of lot builds: (class, weight) (fitted; towers downtown,
 /// houses on the painted house areas).
 fn weights(lot: &Lot, downtown: bool) -> &'static [(Class, u64)] {
-    match (lot.core, downtown, lot.hits >= ROOF_HITS) {
+    match (lot.core, downtown, !lot.house) {
         (true, true, _) => &[
             (Class::Tower, 45),
             (Class::Apartment, 40),
@@ -322,8 +361,8 @@ fn weights(lot: &Lot, downtown: bool) -> &'static [(Class, u64)] {
             (Class::Industrial, 20),
         ],
         (false, _, false) => &[
-            (Class::House, 70),
-            (Class::LowRise, 25),
+            (Class::House, 75),
+            (Class::LowRise, 20),
             (Class::Industrial, 5),
         ],
     }
@@ -341,6 +380,7 @@ pub fn place(
     layout: &str,
     keepouts: &[Keepout],
     names: &[([i64; 2], String)],
+    cap: usize,
 ) -> (Vec<City>, Vec<Instance>, usize) {
     let (mut cities, city_of) = cities(map, names);
     let mut lots = lots(map, &city_of, keepouts);
@@ -348,22 +388,30 @@ pub fn place(
     for lot in &lots {
         cities[lot.city].candidates += 1;
     }
-    if lots.len() > MAX_INSTANCES {
+    let stem = format!("CITYFILL:{}", layout.trim_end_matches(".MM"));
+    if lots.len() > cap {
+        let share = shares(&cities, cap);
         let key = |lot: &Lot| {
             let city = &cities[lot.city];
-            let d = trig::isqrt(
-                ((lot.x - city.center[0]).pow(2) + (lot.z - city.center[1]).pow(2)) as u128,
-            ) as i64;
-            (
-                d * 1_000 / city.radius - if lot.core { CORE_PRIORITY } else { 0 },
-                lot.ordinal,
-            )
+            let rank = if lot.house {
+                // A fixed shuffle: thinned houses stay spread out.
+                Stream::new(0, &stem, lot.ordinal, Purpose::CityFill).next_u64() >> 1
+            } else {
+                let d = trig::isqrt(
+                    ((lot.x - city.center[0]).pow(2) + (lot.z - city.center[1]).pow(2)) as u128,
+                ) as u64;
+                d * 1_000 / city.radius as u64
+            };
+            (lot.city, lot.house, rank, lot.ordinal)
         };
         lots.sort_by_key(key);
-        lots.truncate(MAX_INSTANCES);
+        let mut taken = vec![0usize; cities.len()];
+        lots.retain(|lot| {
+            taken[lot.city] += 1;
+            taken[lot.city] <= share[lot.city]
+        });
         lots.sort_by_key(|lot| lot.ordinal);
     }
-    let stem = format!("CITYFILL:{}", layout.trim_end_matches(".MM"));
     let mut out = Vec::with_capacity(lots.len());
     for lot in &lots {
         let mut stream = Stream::new(0, &stem, lot.ordinal, Purpose::CityFill);
@@ -521,8 +569,8 @@ mod tests {
     #[test]
     fn the_fill_is_the_same_every_time_and_keeps_out_of_objects() {
         let (map, kit) = (map(), kit());
-        let (cities, a, lots) = place(&map, &kit, "TEST.MM", &[], &[]);
-        let (_, b, _) = place(&map, &kit, "TEST.MM", &[], &[]);
+        let (cities, a, lots) = place(&map, &kit, "TEST.MM", &[], &[], MAX_INSTANCES);
+        let (_, b, _) = place(&map, &kit, "TEST.MM", &[], &[], MAX_INSTANCES);
         assert_eq!(a, b);
         assert!(!a.is_empty() && a.len() <= lots && lots <= MAX_INSTANCES);
         assert_eq!(cities.len(), 1);
@@ -533,7 +581,7 @@ mod tests {
                 .any(|i| i.core && kit.pieces[usize::from(i.piece)].class == Class::Tower)
         );
         // Another layout name draws other buildings on the same lots.
-        let (_, c, _) = place(&map, &kit, "OTHER.MM", &[], &[]);
+        let (_, c, _) = place(&map, &kit, "OTHER.MM", &[], &[], MAX_INSTANCES);
         assert_ne!(a, c);
         // Nothing inside an object's box and its clearance.
         let keepout = Keepout {
@@ -542,7 +590,7 @@ mod tests {
             heading: 30,
             clearance: OBJECT_CLEARANCE_FT,
         };
-        let (_, d, _) = place(&map, &kit, "TEST.MM", &[keepout], &[]);
+        let (_, d, _) = place(&map, &kit, "TEST.MM", &[keepout], &[], MAX_INSTANCES);
         assert!(d.len() < a.len());
         assert!(
             d.iter()
@@ -554,5 +602,26 @@ mod tests {
             assert_eq!(f & mask::STREET, 0);
             assert!((0..mask::TILE_FT).contains(&i64::from(i.x)));
         }
+    }
+
+    #[test]
+    fn the_budget_is_shared_by_city_size() {
+        let city = |tiles: usize, candidates: usize| City {
+            name: String::new(),
+            tiles: vec![(0, 0); tiles],
+            center: [0, 0],
+            radius: 1,
+            candidates,
+            placed: 0,
+            core: 0,
+        };
+        // A small city with few lots keeps them all; the rest is shared by
+        // tiles.
+        let cities = [city(9, 1_000), city(1, 10), city(3, 1_000)];
+        assert_eq!(shares(&cities, 130), vec![90, 10, 30]);
+        let shared = shares(&cities, 101);
+        assert_eq!(shared.iter().sum::<usize>(), 101);
+        // Enough for everyone: every lot.
+        assert_eq!(shares(&cities, 5_000), vec![1_000, 10, 1_000]);
     }
 }

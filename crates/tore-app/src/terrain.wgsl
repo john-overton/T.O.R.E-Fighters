@@ -355,6 +355,14 @@ fn placed_vertex(position:vec3<f32>,p:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec
  let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
  return placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,layer,color,index);
 }
+// CF0 city fill far level of detail: the unit box scaled to a building's
+// half footprint (`size.xy`) and height (`turn.z`, feet), in the colour
+// index `place.w`.
+@vertex fn fill_box_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) size:vec4<f32>)->VertexOut {
+ let local=vec3<f32>(position.x*size.x,position.y*turn.z,position.z*size.y);
+ let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
+ return placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,-1.0,color,place.w);
+}
 @vertex fn terrain_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) normal:vec3<f32>)->VertexOut {
  var out=world_vertex(position,uv,layer,color,index);
  out.terrain_normal=normal;return out;
@@ -453,6 +461,25 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
 // discard and keeps the early depth test.
 @fragment fn fill_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{
  return aircraft_color(in,surface_normal(in.direction));
+}
+// CF0 city fill far boxes: the surface lighting without the shadow lookups,
+// flare light or panel sheen, so a distant box costs little per pixel.
+@fragment fn fill_far_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ let normal=surface_normal(in.direction);
+ var color=in.color;
+ if surface.sun.w>0.0 {
+  let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
+  let facing=max(dot(normal,surface.sun.xyz),0.0);
+  let visibility=sunlight_transmission(surface.origin.y+in.direction.y)*surface.reserved.x;
+  let tint=mix(vec3<f32>(1.0),solar_tint(surface.reserved.y),0.65);
+  let skyward=clamp(normal.y*0.5+0.5,0.0,1.0);
+  let ambient=mix(vec3<f32>(0.12,0.14,0.18),vec3<f32>(0.28,0.32,0.39),skyward);
+  let night=vec3<f32>(mix(0.20,0.32,skyward)+0.30*max(dot(normal,surface.moon.xyz),0.0));
+  color=color*(mix(night,ambient,day)+0.90*facing*visibility*tint);
+ }
+ if in.fog_enabled!=0u {color=aerial_perspective(color,in.direction,in.altitude);}
+ else {color=cloud_occlusion(color,in.direction,in.altitude);}
+ return vec4<f32>(color,1.0);
 }
 @fragment fn airport_fragment(in:VertexOut)->@location(0) vec4<f32>{
  if in.layer<0.0 {discard;}
