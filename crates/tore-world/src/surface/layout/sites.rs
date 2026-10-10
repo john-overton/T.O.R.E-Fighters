@@ -97,7 +97,13 @@ pub(super) fn objects(surface: &Surface, types: &mut dyn FnMut(&str) -> TypeInfo
             item: Item::Unit(i),
             retail: xz(unit.position),
             heading: unit.angles[0],
-            rule: Rule::of(unit),
+            // A carrier with aircraft on its deck carries them: it stays
+            // where they stand (their deck spots are measured from it).
+            rule: if surface.parked.iter().any(|p| p.deck == Some(unit.id)) {
+                Rule::Fixed
+            } else {
+                Rule::of(unit)
+            },
             info: types(&unit.resource),
             target: unit.is_target(),
             routed: unit.route.is_some(),

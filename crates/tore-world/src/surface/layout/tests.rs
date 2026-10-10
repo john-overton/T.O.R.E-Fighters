@@ -5,8 +5,8 @@
 use super::{sites::Rule, *};
 use crate::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
 use crate::surface::{
-    BATTERY_RADAR_BASE, Battery, BatterySystem, DestroyedLook, IdRange, LeftOut, SUPPLY_TRUCK_BASE,
-    SupplyTruck, TemplateSite, UnitKind,
+    BATTERY_RADAR_BASE, Battery, BatterySystem, DestroyedLook, IdRange, LeftOut, ParkedAircraft,
+    SUPPLY_TRUCK_BASE, SupplyTruck, TemplateSite, UnitKind,
     catalog::{Entry, Family},
     resolve::GroundTarget,
 };
@@ -979,5 +979,46 @@ fn a_routed_unit_neither_jitters_nor_relocates() {
             (tank.position, tank.angles),
             (units[7].position, units[7].angles)
         );
+    }
+}
+
+#[test]
+fn a_carrier_with_aircraft_on_its_deck_keeps_its_spot() {
+    // Its deck aircraft are measured from where the template puts it
+    // (`parked::deck_offset`), so it carries them by not moving.
+    let grid = Grid::uniform(128, ground::WATER_CLASS, 0);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let fleet = || {
+        vec![
+            unit(t(0), "CLEM.NT", class::SHIP, [MID, MID], ENEMY_SIDE),
+            unit(
+                t(1),
+                "KRIVAK.NT",
+                class::SHIP,
+                [MID + 3_000, MID],
+                ENEMY_SIDE,
+            ),
+        ]
+    };
+    for seed in 0..6 {
+        let mut s = surface(fleet(), Some(target(seed, JITTER_ONLY)));
+        s.parked.push(ParkedAircraft {
+            id: t(2),
+            resource: "SPE.PT".into(),
+            position: [MID + 40, 0, MID + 200],
+            angles: [0; 3],
+            nationality: Some(0x83),
+            side: ENEMY_SIDE,
+            target: false,
+            deck: Some(t(0)),
+        });
+        lay(&mut s, &ground, &[]);
+        let carrier = s.unit(t(0)).unwrap();
+        assert_eq!(
+            (carrier.position, carrier.angles),
+            (fleet()[0].position, fleet()[0].angles),
+            "seed {seed}"
+        );
+        assert_eq!(s.parked[0].position, [MID + 40, 0, MID + 200]);
     }
 }
