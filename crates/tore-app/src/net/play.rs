@@ -244,11 +244,17 @@ impl App {
     /// the controllers, as a tick of single player takes them.
     fn session_controls(&mut self, sensors: tore_sim::sensors::Controls) -> Controls {
         let frame = self.net_flight.as_ref().and_then(|f| f.frame.as_ref());
-        if let Some(service) = frame.and_then(|f| f.readout.as_ref()?.airport.service.as_ref()) {
+        if let Some(frame) = frame
+            && let Some(service) = frame
+                .readout
+                .as_ref()
+                .and_then(|r| r.airport.service.as_ref())
+        {
             self.instruments.navigation.refresh(
                 &self.world.terrain.airport_scene,
                 service,
                 self.world.cockpits[OWN].flight.position,
+                self.world.roster.redfor(frame.plane),
             );
             for button in std::mem::take(&mut self.instruments.navigation.pending) {
                 if let Some(id) = self.instruments.navigation.control(button) {

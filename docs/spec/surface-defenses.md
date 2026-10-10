@@ -277,12 +277,15 @@ Further rules, all retail data unless noted:
   2026-10-10). In all 12 layouts every SAM and AAA unit near a runway has the
   runway's own side, and no runway stands inside the launch reach of the
   other side's base defenses. A ground start at a field of the player's side
-  is therefore quiet. The airport list and `--ground-start` still offer every
-  airport, enemy-owned ones included (airports are imported as neutral), so a
-  Blue wing that starts at an enemy field, such as Polotsk (Baltics), Taetan
-  or Wonsan (South Korea) or Longtian (Taiwan), meets that field's ZSU-23s
-  (0.3 to 0.6 nm from the runway) and SAMs as soon as it is airborne: the
-  defenders engage airborne hostiles only.
+  is therefore quiet. Before slice AL1 the airport list and `--ground-start`
+  offered every airport, enemy-owned ones included (airports were imported as
+  neutral), so a Blue wing that started at an enemy field, such as Polotsk
+  (Baltics), Taetan or Wonsan (South Korea) or Longtian (Taiwan), met that
+  field's ZSU-23s (0.3 to 0.6 nm from the runway) and SAMs as soon as it was
+  airborne. Since AL1 (John, 2026-10-10) every airport takes its runway's
+  side and the player starts only at its own side's or a neutral field
+  ([airport allegiance](airports.md#allegiance)), so a ground start is always
+  under friendly guns.
 - **In PvP the Redfor players defend the target** (defined, John). Template
   units are Redfor: they engage Blue aircraft only. Base-layout units take their
   layout side, so a Redfor player raiding a friendly airfield meets its SAMs.

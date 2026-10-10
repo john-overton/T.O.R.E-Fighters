@@ -475,6 +475,20 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         quick.apply(13, index);
         quick.apply(33, 0);
         quick.apply(4, 2);
+        // The ground-start list is the player's side's and neutral fields
+        // only (slice AL1): none the world holds for the other side.
+        for object in quick.offered_airports(index) {
+            let scene = &world.airport_scene;
+            let serves = scene
+                .runway(*object)
+                .and_then(|r| scene.airports.iter().find(|a| a.id == r.airport))
+                .is_some_and(|a| a.serves(false));
+            if !serves {
+                m.problems.push(format!(
+                    "theater {code} offers runway {object:#x}, not a Blue or neutral field"
+                ));
+            }
+        }
         for separation in 0..SEPARATION_NM.len() {
             for altitude in 0..4 {
                 quick.apply(17, separation);

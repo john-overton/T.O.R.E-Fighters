@@ -782,6 +782,7 @@ fn land_at_selected_reports_a_refused_site_to_the_pilot_and_the_journal() {
         &world.terrain.airport_scene,
         &world.terrain.airfield_anchors,
         &world.cockpits[0].airport_service,
+        false,
     );
     let commanded = input(
         &world,

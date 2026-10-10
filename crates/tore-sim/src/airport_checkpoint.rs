@@ -181,6 +181,7 @@ mod tests {
             alive: true,
             speed_fps: 20.,
             ground_clearance_ft: 0.,
+            redfor: false,
         }
     }
 
