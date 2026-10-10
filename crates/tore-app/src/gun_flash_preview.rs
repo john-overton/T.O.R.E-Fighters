@@ -171,13 +171,18 @@ pub fn run() -> AppResult<()> {
             tracers: false,
         },
     ];
-    for (light, hour) in [("day", 13), ("dusk", 19), ("night", 23)] {
+    // Midday, the retail "sunset" weather choice, and 23:00.
+    for (light, condition, time) in [
+        ("day", None, Some([13, 0])),
+        ("dusk", Some(4), None),
+        ("night", None, Some([23, 0])),
+    ] {
         let overrides = Overrides {
-            time: Some([hour, 0]),
+            time,
             wind: None,
             cloud_altitude: Some(0),
         };
-        let world = Terrain::for_mission(resources, &theater, None, &overrides)?;
+        let world = Terrain::for_mission(resources, &theater, condition, &overrides)?;
         let mut scenery = Scenery::build(resources, &world)?;
         let mut gpu = pollster::block_on(Gpu::new(&scenery))?;
         let art = CombatArt::load(resources)?;
