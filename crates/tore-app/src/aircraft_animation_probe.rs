@@ -1111,6 +1111,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     if let Some(source) = &f14_sources {
         failures.extend(f14::combinations(source, &airframe, &neutral, out)?);
     }
+    if id == AircraftId::Ac130 {
+        failures.extend(ac130::sight_poses(&airframe, &neutral, out)?);
+    }
     if let Some(source) = &x31_sources {
         failures.extend(x31_combinations(
             &airframe, &neutral, &raw.faces, out, source,

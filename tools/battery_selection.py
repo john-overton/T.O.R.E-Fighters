@@ -74,7 +74,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "flight-fight-*", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
             "flight-combatsmoke-*", "flight-missileacceptance-*", "flight-jettison-*", "flight-bay-*",
-            "flight-wreckcontact-*",
+            "flight-wreckcontact-*", "flight-ac130-*",
             "flight-countermeasures-*", "replay-combat-smoke-*", "menus-combat-smoke-*",
         ),
     ),
@@ -619,6 +619,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/probe_invariants.rs", AI_CORE, "AI probe checks"),
     _r("crates/tore-app/src/formation_trace.rs", ("ai-fights", "ai-orders"), "formation trace"),
     _r("crates/tore-app/src/combat_smoke.rs", ("flight-combat",), "combat smoke"),
+    _r("crates/tore-app/src/gunsight_probe.rs", ("flight-combat",), "AC-130 gunsight probe"),
     _r("crates/tore-app/src/missile_acceptance.rs", ("flight-combat",), "missile acceptance"),
     _r("crates/tore-app/src/tape_file.rs", ("combat-tapes", "flight-combat", "replay-cli"), "tape files"),
     _r("crates/tore-app/src/navigation.rs", ("flight-landing", "airports", "ai-airfield", "menus-creator"), "navigation and airport lists"),

@@ -298,3 +298,86 @@ fn wheels(reference: &[Face], pose: &[Face], travel: f64, scale: f32, metric: &m
         || right - left < 11.99
         || metric.reviewed_wheel_rigidity_error > EPSILON;
 }
+
+/// The gunsight's barrel poses (S9, 2026-10-09): all three guns at the default
+/// view's (-90, -25) degrees, then each gun at the four corners of its own arc
+/// with the others at the default, drawn through the same transformed
+/// geometry the renderer uses. The sim's own-airframe check (`clear_airframe`)
+/// marks each corner; the ones it rejects are in the sheet too, so the
+/// extreme the sim refuses can be seen against the wing and nacelles.
+/// Writes `ac130-sight-poses.ppm` (one row a pose), `.csv` and an OBJ per pose.
+pub(super) fn sight_poses(
+    airframe: &Airframe,
+    neutral: &State,
+    out: &Path,
+) -> AppResult<Vec<String>> {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    use tore_sim::combat::gunship;
+    let pose_of = |aims: [[f64; 2]; 3]| {
+        let mut state = neutral.clone();
+        state.gun_aim = aims.map(|[heading, elevation]| [heading / PI, elevation / FRAC_PI_2]);
+        airframe.animation_faces(&state)
+    };
+    let default = [-FRAC_PI_2, -25_f64.to_radians()];
+    let reference = pose_of([[-FRAC_PI_2, 0.]; 3]);
+    let mut poses = vec![pose_of([default; 3])];
+    let mut rows =
+        String::from("pose,gun,heading_deg,elevation_deg,clear_of_airframe,changed_faces\n");
+    let changed = |pose: &[Face]| {
+        let before = keyed(&reference);
+        keyed(pose)
+            .into_iter()
+            .filter(|(key, face)| {
+                before
+                    .get(key)
+                    .is_none_or(|old| old.positions != face.positions)
+            })
+            .count()
+    };
+    writeln!(rows, "0,all,-90,-25,true,{}", changed(&poses[0]))?;
+    let mut failures = Vec::new();
+    for gun in 0..3 {
+        if !gunship::clear_airframe(gun, default[0], default[1]) {
+            failures.push(format!(
+                "AC130 {} at the default view is not clear of the airframe",
+                gunship::NAMES[gun]
+            ));
+        }
+        for (heading, elevation) in [(-1., -1.), (-1., 1.), (1., -1.), (1., 1.)] {
+            let aim = [
+                -FRAC_PI_2 + heading * gunship::HEADING_ARC[gun],
+                elevation * gunship::ELEVATION_ARC[gun],
+            ];
+            let mut aims = [default; 3];
+            aims[gun] = aim;
+            let pose = pose_of(aims);
+            let clear = gunship::clear_airframe(gun, aim[0], aim[1]);
+            let moved = changed(&pose);
+            writeln!(
+                rows,
+                "{},{},{:.1},{:.1},{clear},{moved}",
+                poses.len(),
+                gunship::NAMES[gun],
+                aim[0].to_degrees(),
+                aim[1].to_degrees()
+            )?;
+            if !pose
+                .iter()
+                .all(|face| face.positions.iter().flatten().all(|v| v.is_finite()))
+            {
+                failures.push(format!(
+                    "AC130 sight pose {} {} has non-finite geometry",
+                    gunship::NAMES[gun],
+                    poses.len()
+                ));
+            }
+            poses.push(pose);
+        }
+    }
+    for (index, pose) in poses.iter().enumerate() {
+        write_obj(&out.join(format!("ac130-sight-{index}.obj")), pose)?;
+    }
+    fs::write(out.join("ac130-sight-poses.csv"), rows)?;
+    contact_sheet(&out.join("ac130-sight-poses.ppm"), &reference, &poses)?;
+    Ok(failures)
+}
