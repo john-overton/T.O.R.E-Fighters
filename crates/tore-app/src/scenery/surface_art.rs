@@ -1008,4 +1008,33 @@ mod tests {
                 .is_empty()
         );
     }
+
+    #[test]
+    fn a_parked_aircraft_piece_draws_with_its_own_shape() {
+        let mut art = SurfaceArt::default();
+        let model = |at| Model {
+            shape: triangle(at),
+            scale: 1.,
+        };
+        art.debris
+            .insert(0x5000_0008, [Some(model(0.)), Some(model(20.))]);
+        let piece = |variant| crate::snapshot::DebrisPose {
+            owner: 0x5000_0008,
+            draw: crate::snapshot::Draw::Hidden,
+            position: [10., 5., 10.],
+            attitude: [0.; 3],
+            variant,
+        };
+        let draw = |pieces: Vec<crate::snapshot::DebrisPose>| {
+            let picture = crate::snapshot::RenderSnapshot {
+                debris: pieces,
+                ..Default::default()
+            };
+            positions(&art.frame(&picture, &|_| true, &Camera::new(), [0.; 3], 0.))
+        };
+        // Piece 0 is the `_B` shape, piece 1 the `_D`; no piece, nothing.
+        assert_eq!(draw(vec![piece(Some(0))])[0], [10., 5., 10.]);
+        assert_eq!(draw(vec![piece(Some(1))])[0], [30., 5., 10.]);
+        assert!(draw(vec![piece(None)]).is_empty());
+    }
 }
