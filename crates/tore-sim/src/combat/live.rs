@@ -38,7 +38,11 @@ mod observation_reference;
 #[cfg(test)]
 mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
+mod parked;
+#[cfg(test)]
+mod parked_tests;
 pub mod rewind;
+pub use parked::{ParkedAircraft, ParkedSite};
 mod surface;
 pub use surface::{
     GroundLook, Refused, SURFACE_PROJECTILE_ID_BASE, SURFACE_PROJECTILE_RESERVE, SurfaceRound,
@@ -1365,6 +1369,9 @@ pub struct State {
     next_surface_shot: u32,
     /// How each ground object that has a unit record explodes when destroyed.
     ground_looks: BTreeMap<u32, GroundLook>,
+    /// The parked aircraft among the targets, by id, with their crash sites
+    /// ([`State::add_parked_aircraft`]).
+    parked: BTreeMap<u32, ParkedSite>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -2534,6 +2541,7 @@ impl State {
             surface_rounds: BTreeMap::new(),
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
             ground_looks: BTreeMap::new(),
+            parked: BTreeMap::new(),
         }
     }
     /// A state with no ownship whose aircraft rows count from 0: an open
@@ -2872,8 +2880,9 @@ impl State {
     fn command_of(&mut self, own: &mut Ownship, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
-                self.targets
-                    .retain(|t| self.ground_bounds.contains_key(&t.id));
+                self.targets.retain(|t| {
+                    self.ground_bounds.contains_key(&t.id) || self.parked.contains_key(&t.id)
+                });
                 own.sensors.clear_selection();
                 own.hud_selection = None;
                 own.sight_hold = None;
@@ -2882,11 +2891,9 @@ impl State {
             }
             Command::TargetDistance(distance) => {
                 if (1..=1_000_000).contains(&distance) {
-                    for target in self
-                        .targets
-                        .iter_mut()
-                        .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                    {
+                    for target in self.targets.iter_mut().filter(|t| {
+                        !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                    }) {
                         target.position = std::array::from_fn(|i| {
                             launcher.position[i] + launcher.basis.forward[i] * f64::from(distance)
                         });
@@ -2900,11 +2907,9 @@ impl State {
                 own.mounted = Seeker::default();
             }
             Command::TargetHeat(value) => {
-                for t in self
-                    .targets
-                    .iter_mut()
-                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                {
+                for t in self.targets.iter_mut().filter(|t| {
+                    !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                }) {
                     t.heat = match value {
                         0 => Heat::Unknown,
                         1 => Heat::Engine {
@@ -2931,11 +2936,9 @@ impl State {
                 }
             }
             Command::ToggleTargetRadar => {
-                for t in self
-                    .targets
-                    .iter_mut()
-                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                {
+                for t in self.targets.iter_mut().filter(|t| {
+                    !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                }) {
                     t.radar_emitting = !t.radar_emitting;
                 }
             }
@@ -2979,11 +2982,9 @@ impl State {
             Command::DamagePlayer => own.pending_damage = true,
             Command::ToggleTargetJammer => {
                 self.target_jammer = !self.target_jammer;
-                for t in self
-                    .targets
-                    .iter_mut()
-                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                {
+                for t in self.targets.iter_mut().filter(|t| {
+                    !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                }) {
                     t.jammer_active = self.target_jammer;
                 }
             }
@@ -3417,16 +3418,17 @@ impl State {
             side,
         });
     }
-    /// Replace imported scene objects without changing aircraft or fixture IDs.
+    /// Replace imported scene objects, parked aircraft included, without
+    /// changing aircraft or fixture IDs.
     pub fn remove_ground_targets(&mut self) {
-        self.projectiles.retain(|p| {
-            !p.target
-                .is_some_and(|id| self.ground_bounds.contains_key(&id))
-        });
-        self.targets
-            .retain(|t| !self.ground_bounds.contains_key(&t.id));
+        let (bounds, parked) = (&self.ground_bounds, &self.parked);
+        let scene = |id: u32| bounds.contains_key(&id) || parked.contains_key(&id);
+        self.projectiles
+            .retain(|p| !p.target.is_some_and(|id| scene(id)));
+        self.targets.retain(|t| !scene(t.id));
         self.ground_bounds.clear();
         self.ground_looks.clear();
+        self.parked.clear();
         for own in &mut self.ownships {
             own.sensors.clear_selection();
             own.hud_selection = None;
@@ -3510,7 +3512,7 @@ impl State {
         self.note_devices(DeviceNote::Cleared(self.tick));
         self.debris.clear();
         self.targets
-            .retain(|t| self.ground_bounds.contains_key(&t.id));
+            .retain(|t| self.ground_bounds.contains_key(&t.id) || self.parked.contains_key(&t.id));
         let id = self.next_target_id;
         self.next_target_id = self
             .next_target_id
@@ -4221,6 +4223,8 @@ impl State {
         let mut sources = Vec::new();
         // Score changes, owner and whether it is a kill, applied after the loop.
         let mut scored: Vec<(u32, bool)> = Vec::new();
+        // Parked aircraft destroyed this tick, for their crash sites.
+        let mut parked_wrecks: Vec<u32> = Vec::new();
         // Jammer deception on target hits takes the first ownship's ECM record.
         let fixture_ecm = ships.first().map(|own| own.config.ecm);
         let friendly_fire_off = self.friendly_fire == FriendlyFire::Off;
@@ -4563,7 +4567,10 @@ impl State {
                         // radius remains a separate damage rule and does not turn
                         // a long runway into a giant interception sphere.
                         bounds.segment_fraction(p.previous, p.position)
-                    } else if is_gun(w) && t.role == TargetRole::Aircraft {
+                    } else if is_gun(w)
+                        && (t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id))
+                    {
+                        // A parked aircraft has the same aircraft volume.
                         if let Some(v) = past(t.id) {
                             rewound_contact(p, v, hitbox)
                         } else {
@@ -4755,7 +4762,9 @@ impl State {
                         super::systems::deception_chance(
                             ecm,
                             w.seeker.signature,
-                            self.target_jammer && !self.ground_bounds.contains_key(&t.id),
+                            self.target_jammer
+                                && !self.ground_bounds.contains_key(&t.id)
+                                && !self.parked.contains_key(&t.id),
                         )
                     });
                     // A jammer defeats missiles, never a surface gun's rounds.
@@ -4793,8 +4802,12 @@ impl State {
                     let critical = critical_hit(t, w, section, scaled);
                     let applied = if critical { t.hp } else { scaled.min(t.hp) };
                     t.hp -= applied;
-                    if t.role == TargetRole::Aircraft {
+                    // A parked aircraft takes damage by section like any
+                    // aircraft (no system faults: nothing is running).
+                    if t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id) {
                         t.localized_damage.record(section, scaled, t.initial_hp);
+                    }
+                    if t.role == TargetRole::Aircraft {
                         if t.hp > 0 {
                             t.faults
                                 .hit(scaled, t.initial_hp, |n| draw(&mut self.rng, n));
@@ -4851,7 +4864,11 @@ impl State {
                     if t.hp == 0 {
                         // A ground object explodes as its unit record says,
                         // leaving its crater on land.
-                        let (explosion, crater) = if t.role == TargetRole::Aircraft {
+                        let parked = self.parked.contains_key(&t.id);
+                        if parked {
+                            parked_wrecks.push(t.id);
+                        }
+                        let (explosion, crater) = if t.role == TargetRole::Aircraft || parked {
                             (super::blast::AIRCRAFT, 0)
                         } else if let Some(look) = self.ground_looks.get(&t.id) {
                             (
@@ -4904,6 +4921,9 @@ impl State {
                 self.projectiles.iter().map(|p| p.id).collect();
             self.rewinds.retain(|id, _| flying.contains(id));
             self.surface_rounds.retain(|id, _| flying.contains(id));
+        }
+        for id in parked_wrecks {
+            self.parked_destroyed(id);
         }
         for burst in &bursts {
             self.apply_burst(
