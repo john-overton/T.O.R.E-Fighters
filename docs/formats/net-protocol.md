@@ -997,6 +997,7 @@ for messages), at the busy moments when the tracks move.
 | Aircraft speed (a device) | 1/4 ft/s | coarser |
 | Devices from 0 to 1 | 1/255 | yes |
 | Elevator, aileron, rudder | 1/127 | yes |
+| AC-130 gun-mount angles (heading over pi, elevation over a right angle) | 1/32,767 (1/127 before protocol 21) | coarser (replays keep 1/127) |
 | Thrust-vectoring rates | 1/4096 rad/s | yes |
 | Rotor speed (a share of 100 percent) | 1/1000, up to 2 | yes |
 | Rotor disk tilt | 1/256 rad, up to 127 steps either way | not recorded |
@@ -1041,7 +1042,8 @@ through 32,767). Axis order is vector pitch, vector yaw, conversion, collective.
 Only vector yaw permits negative positions; other positions cover 0 through
 32,767. An absent block means zero rates and no absolute positions.
 The cockpit stores readout also carries the authoritative six gun angles
-and linked mask for the predicting player, whose remote entity is excluded.
+(at 1/32,767 since protocol 21, 1/127 before) and linked mask for the
+predicting player, whose remote entity is excluded.
 Combat command codes 26 and 27 select a gun-group candidate and toggle its
 membership. Device mask interpolation is discrete.
 
@@ -1124,8 +1126,10 @@ varint) and whether it is aimed at this player; a debris piece's owner, the
 aircraft whose model draws it (1 and 6) and its damage variant (1 and 3); a
 pilot's aircraft. An aircraft's slow groups are its devices (present, six
 levels at 1/255, three control surfaces at 1/127, the throttle at 1/255, actual vector pitch/conversion/collective at 1/255
-and actual vector yaw at 1/127, six normalized gun-mount angles at 1/127 and
-a three-bit linked-gun mask; an
+and actual vector yaw at 1/127, six normalized gun-mount angles at 1/32,767
+in 16 signed bits each (1/127 in 8 bits before protocol 21: a client remakes
+an AC-130's rounds along this train, and 1/127 left them up to 0.7 degrees
+off the host's) and a three-bit linked-gun mask; an
 aircraft without devices sends only the present bit), its engine (lit,
 afterburner, flame, three rates as signed varints), its damage (hit points,
 initial hit points and six sections as signed varints, the structural
@@ -2417,9 +2421,10 @@ again with an observer; the capture format did not change for it.
   AC-130 gunsight (slice S4): the Inputs frame's
   [gunsight block](#inputs-as-built) and its ninth change bit, the sight's
   combat commands 28 and 29, the readout's [gunsight](#the-gunsight) group
-  (31 parts), and the standby stream's seat inputs, which carry the sight
-  with the rest of the controls. Protocol 21 is the gunsight project's one
-  bump.
+  (31 parts), the standby stream's seat inputs, which carry the sight
+  with the rest of the controls, and the six gun-mount angles at 1/32,767 in
+  the entity's devices and the readout's stores (slice G5). Protocol 21 is
+  the gunsight project's one bump.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

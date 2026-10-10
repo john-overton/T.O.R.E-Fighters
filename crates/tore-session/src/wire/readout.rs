@@ -35,6 +35,7 @@
 //! first, as the host does.
 
 use super::bits::{self, read_u32};
+use super::entity::GUN_AIM_STEPS;
 use super::flat::{self, Kind, List, ListRaw, Schema, Slow};
 use super::snapshot::{BASELINE_BACK_BITS, HISTORY_SNAPSHOTS, MAX_BASELINE_BACK, PENDING_PACKETS};
 use super::{WireError, WireResult};
@@ -913,7 +914,7 @@ impl QReadout {
             stores
                 .gun_aim
                 .iter()
-                .map(|a| q(a.clamp(-1., 1.), 1. / 127.)),
+                .map(|a| q(a.clamp(-1., 1.), 1. / GUN_AIM_STEPS)),
         )
         .chain(stores.ammo.iter().map(|a| i64::from(*a)))
         .collect();
@@ -1269,7 +1270,7 @@ impl QReadout {
                 .ok()
                 .filter(|v| *v <= 7)
                 .ok_or(bad("gun group"))?,
-            gun_aim: std::array::from_fn(|i| v(pick(st, 5 + i), 1. / 127.)),
+            gun_aim: std::array::from_fn(|i| v(pick(st, 5 + i), 1. / GUN_AIM_STEPS)),
         };
         if stores
             .gun_aim

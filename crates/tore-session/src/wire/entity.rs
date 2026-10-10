@@ -163,8 +163,12 @@ pub struct Devices {
     pub lift_levels: [u8; 3],
     /// Actual vector yaw, in signed 1/127 units.
     pub vector_yaw: i8,
-    /// Interleaved normalized gun heading/elevation for the three AC-130 guns.
-    pub gun_aim: [i8; 6],
+    /// Interleaved normalized gun heading/elevation for the three AC-130
+    /// guns, in 1/[`GUN_AIM_STEPS`] of the device unit (heading over pi,
+    /// elevation over a right angle). Finer than the control surfaces since
+    /// protocol 21: a client remakes the guns' rounds along this train, and
+    /// 1/127 put them up to 0.7 degrees off the host's (gunsight G5).
+    pub gun_aim: [i16; 6],
     pub gun_group: u8,
 }
 
@@ -427,6 +431,9 @@ impl Field {
 const BIT: Field = Field::Unsigned(1, 1);
 const LEVEL: Field = Field::Unsigned(8, 255);
 const SURFACE: Field = Field::Signed(8, -127);
+const GUN_ANGLE: Field = Field::Signed(16, -(GUN_AIM_STEPS as i64));
+/// Steps in the gun angles' device unit, either way.
+pub const GUN_AIM_STEPS: f64 = 32_767.;
 
 const DEVICES: &[Field] = &[
     BIT,
@@ -444,12 +451,12 @@ const DEVICES: &[Field] = &[
     LEVEL,
     LEVEL,
     SURFACE,
-    SURFACE,
-    SURFACE,
-    SURFACE,
-    SURFACE,
-    SURFACE,
-    SURFACE,
+    GUN_ANGLE,
+    GUN_ANGLE,
+    GUN_ANGLE,
+    GUN_ANGLE,
+    GUN_ANGLE,
+    GUN_ANGLE,
     Field::Unsigned(3, 7),
 ];
 const ENGINE: &[Field] = &[BIT, BIT, BIT, Field::Int32, Field::Int32, Field::Int32];
@@ -745,7 +752,7 @@ impl EntityState {
                     throttle: g(0, 10) as u8,
                     lift_levels: std::array::from_fn(|i| g(0, 11 + i) as u8),
                     vector_yaw: g(0, 14) as i8,
-                    gun_aim: std::array::from_fn(|i| g(0, 15 + i) as i8),
+                    gun_aim: std::array::from_fn(|i| g(0, 15 + i) as i16),
                     gun_group: g(0, 21) as u8,
                 });
                 if devices.is_none()
@@ -844,7 +851,7 @@ impl EntityState {
             && let Some(d) = a.devices
             && (d.surfaces.contains(&i8::MIN)
                 || d.vector_yaw == i8::MIN
-                || d.gun_aim.contains(&i8::MIN)
+                || d.gun_aim.contains(&i16::MIN)
                 || d.gun_group > 7)
         {
             return Err(WireError::Invalid("control surface"));

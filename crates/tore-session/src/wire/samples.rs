@@ -224,7 +224,7 @@ pub fn entities() -> Vec<Entity> {
                     throttle: 230,
                     lift_levels: [12, 127, 254],
                     vector_yaw: -45,
-                    gun_aim: [-64, 0, -70, 10, -80, -30],
+                    gun_aim: [-16_384, 0, -17_920, 2_560, -20_480, -7_680],
                     gun_group: 5,
                 }),
                 engine: EngineState {

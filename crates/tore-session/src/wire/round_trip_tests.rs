@@ -61,7 +61,7 @@ pub(crate) fn entity(rng: &mut SplitMix64, kind: EntityKind, id: u32) -> Entity 
                 throttle: rng.below(256) as u8,
                 lift_levels: std::array::from_fn(|_| rng.below(256) as u8),
                 vector_yaw: signed(rng, 127) as i8,
-                gun_aim: std::array::from_fn(|_| signed(rng, 127) as i8),
+                gun_aim: std::array::from_fn(|_| signed(rng, 32_767) as i16),
                 gun_group: rng.below(8) as u8,
             }),
             engine: EngineState {
