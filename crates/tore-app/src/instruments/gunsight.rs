@@ -15,6 +15,7 @@ use tore_sim::{
     combat::{
         gunship::{self, Notice, Sight},
         gunship_impact::Impact,
+        gunsight,
         live::Readiness,
     },
 };
@@ -32,7 +33,8 @@ const BOX: (i32, i32, i32, i32) = (45, 92, 46, 20);
 /// How long a one-off notice stays on the activity row, in combat ticks (2 s).
 const NOTICE_TICKS: u64 = 240;
 /// The widest arc, in degrees either side of the neutral heading and
-/// elevation: the box spans it (C_25).
+/// elevation: the box spans it (C_25). Forward is its right edge, aft its
+/// left.
 const BOX_HEADING: f64 = 60.;
 const BOX_ELEVATION: f64 = 60.;
 /// Each gun's arc half-widths, degrees: heading then elevation, the sim's own
@@ -106,6 +108,9 @@ pub struct Gun {
     pub fitted: bool,
     pub linked: bool,
     pub status: Readiness,
+    /// The gun's maximum range in feet (its record's firing zone): the range
+    /// ring's full scale.
+    pub maximum_range_ft: f64,
 }
 
 /// A notice for the activity row.
@@ -168,6 +173,13 @@ impl Page {
             fitted: station(slot).is_some(),
             linked: stores.gun_group & (1 << slot) != 0,
             status: g.status[slot],
+            maximum_range_ft: station(slot).map_or(0., |i| {
+                f64::from(
+                    config.stations[i].weapon.seeker.zones[1]
+                        .maximum_range
+                        .max(0),
+                )
+            }),
         });
         let candidate = (0..3).find(|slot| station(*slot) == Some(stores.selected()));
         let trains = std::array::from_fn(|slot| {
@@ -292,37 +304,74 @@ fn stamp(r: &mut Raster, pixels: &Pixels) {
     }
 }
 
+/// The camera centre: four short ticks, 3 to 5 pixels out, with a clear gap
+/// at the middle so the pipper's dot reads when it sits on the centre.
 fn crosshair() -> Pixels {
     let (cx, cy) = CENTRE;
     let mut p = Vec::new();
-    for d in 2..=4 {
+    for d in 3..=5 {
         p.extend([(cx - d, cy), (cx + d, cy), (cx, cy - d), (cx, cy + d)]);
     }
     p
 }
 
-/// The pipper: a circle of radius 9, four ticks from 6 to 13 pixels out and a
-/// centre dot. Dashed, the circle loses every other 15 degrees.
-fn pipper(cx: i32, cy: i32, dashed: bool, dot: bool) -> Pixels {
+/// The pipper's thin ring: radius 9, one pixel thick (the fighter HUD's LCOS
+/// circle).
+const RING: f64 = 9.;
+/// The range arc: two pixels thick, hugging the ring's outside (HUD radii 10
+/// and 11).
+const ARC_OUTER: f64 = 11.5;
+
+/// The LCOS pipper (weapon_hud.rs `draw_gun_solution`): a thin ring, a bolder
+/// range arc round it and a centre dot. The arc starts at twelve o'clock and
+/// runs clockwise for `range_arc` of the circle: absent at the gun's maximum
+/// range, half at half range, full inside 100 feet
+/// ([`tore_sim::combat::gunsight::range_arc_fraction`]). `dashed` takes every
+/// other 30 degrees from the thin ring (the range arc stays whole: it is the
+/// range, not the state); `dot` draws the centre dot.
+fn pipper(cx: i32, cy: i32, range_arc: f64, dashed: bool, dot: bool) -> Pixels {
     let mut p = Pixels::new();
-    for i in 0..360 {
-        if dashed && (i / 15) % 2 == 1 {
-            continue;
+    let reach = ARC_OUTER.ceil() as i32;
+    for dy in -reach..=reach {
+        for dx in -reach..=reach {
+            let d = f64::from(dx).hypot(f64::from(dy));
+            // Clockwise from twelve o'clock, in degrees.
+            let theta = f64::from(dx)
+                .atan2(f64::from(-dy))
+                .to_degrees()
+                .rem_euclid(360.);
+            // Dashes are 30 degrees long, centred on twelve o'clock.
+            let gap = dashed && ((theta + 15.) / 30.).floor() as i32 % 2 == 1;
+            let thin = !gap && (RING - 0.5..RING + 0.5).contains(&d);
+            let arc = (RING + 0.5..ARC_OUTER).contains(&d) && theta / 360. < range_arc;
+            if thin || arc {
+                p.push((cx + dx, cy + dy));
+            }
         }
-        let t = f64::from(i).to_radians();
-        let point = (
-            cx + (t.cos() * 9.).round() as i32,
-            cy + (t.sin() * 9.).round() as i32,
-        );
-        if !p.contains(&point) {
-            p.push(point);
-        }
-    }
-    for d in 6..=13 {
-        p.extend([(cx - d, cy), (cx + d, cy), (cx, cy - d), (cx, cy + d)]);
     }
     if dot {
-        p.push((cx, cy));
+        p.extend([
+            (cx, cy),
+            (cx - 1, cy),
+            (cx + 1, cy),
+            (cx, cy - 1),
+            (cx, cy + 1),
+        ]);
+    }
+    p
+}
+
+/// Another linked gun's impact: a small hollow diamond (radius 3), so it
+/// cannot be taken for the candidate's dot or ring.
+fn other_impact(cx: i32, cy: i32) -> Pixels {
+    let mut p = Pixels::new();
+    for d in 0..3 {
+        p.extend([
+            (cx + d, cy - 3 + d),
+            (cx + 3 - d, cy + d),
+            (cx - d, cy + 3 - d),
+            (cx - 3 + d, cy - d),
+        ]);
     }
     p
 }
@@ -344,7 +393,7 @@ fn square(cx: i32, cy: i32, side: i32) -> Pixels {
     p
 }
 
-/// Where a pipper centre may sit: inside the page with room for its ticks,
+/// Where a pipper centre may sit: inside the page with room for its ring,
 /// else on the page edge along the line from the middle.
 fn park(point: (f64, f64)) -> (i32, i32) {
     let margin = 13.;
@@ -472,7 +521,9 @@ pub(super) fn draw(
         gun_label(r, f, page, slot, 3 + slot as i32 * 11);
     }
     // Symbology.
-    let mut marks = crosshair();
+    let mut marks = Pixels::new();
+    // The centre ticks give way to the pipper's own dot when it sits on them.
+    let mut centre_ticks = true;
     if let Some(view) = &page.view {
         if let Some((x, y)) = page.mark.and_then(|point| view.project(point)) {
             let (x, y) = (x.round() as i32, y.round() as i32);
@@ -485,7 +536,7 @@ pub(super) fn draw(
             }
             if let Some(impact) = page.impacts[slot] {
                 let (x, y) = pipper_at(view, impact.point());
-                marks.extend((-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (x + dx, y + dy))));
+                marks.extend(other_impact(x, y));
             }
         }
         if let Some((slot, impact)) = lead.and_then(|s| Some((s, page.impacts[s]?))) {
@@ -496,8 +547,21 @@ pub(super) fn draw(
                 || matches!(impact, Impact::Spent { .. });
             let dot =
                 !(matches!(impact, Impact::Spent { .. }) || status == Readiness::MaximumRange);
-            marks.extend(pipper(x, y, dashed, dot));
+            // The range arc follows the straight-line range to the impact;
+            // rounds that spend in the air are at or past the maximum.
+            let range_arc = match impact {
+                Impact::Spent { .. } => 0.,
+                _ => gunsight::range_arc_fraction(
+                    impact.range_ft(),
+                    page.guns[slot].maximum_range_ft,
+                ),
+            };
+            marks.extend(pipper(x, y, range_arc, dashed, dot));
+            centre_ticks = !(dot && (x - CENTRE.0).abs() <= 4 && (y - CENTRE.1).abs() <= 4);
         }
+    }
+    if centre_ticks {
+        marks.extend(crosshair());
     }
     stamp(r, &marks);
     // Status row, with the eye icon ahead of the camera-limit notice.
@@ -608,8 +672,9 @@ fn arcs_box(r: &mut Raster, page: &Page) {
     let (bx, by, bw, bh) = BOX;
     r.rect(bx, by, bw, bh, BOX_FILL);
     let heading = |h: f64| -> f64 { wrap_degrees(h.to_degrees() + 90.) };
+    // Forward (positive dh) is the right edge, aft the left (John, 2026-10-09).
     let to_x =
-        |dh: f64| f64::from(bx + 1) + (BOX_HEADING - dh) / (2. * BOX_HEADING) * f64::from(bw - 3);
+        |dh: f64| f64::from(bx + 1) + (BOX_HEADING + dh) / (2. * BOX_HEADING) * f64::from(bw - 3);
     let to_y =
         |e: f64| f64::from(by + 1) + (BOX_ELEVATION - e) / (2. * BOX_ELEVATION) * f64::from(bh - 3);
     let look_dh = heading(page.look[0]);
@@ -627,7 +692,7 @@ fn arcs_box(r: &mut Raster, page: &Page) {
         }
     }
     // The candidate's own arc, in corner brackets.
-    let (left, right) = (to_x(arc.0).round() as i32, to_x(-arc.0).round() as i32);
+    let (left, right) = (to_x(-arc.0).round() as i32, to_x(arc.0).round() as i32);
     let (top, bottom) = (to_y(arc.1).round() as i32, to_y(-arc.1).round() as i32);
     for (cx, dx) in [(left, 1), (right, -1)] {
         for (cy, dy) in [(top, 1), (bottom, -1)] {
@@ -725,11 +790,11 @@ fn arcs_box(r: &mut Raster, page: &Page) {
         let overshoot_y = look_e.abs() / BOX_ELEVATION;
         if beyond_x && overshoot_x >= overshoot_y {
             let y = to_y(look_e.clamp(-BOX_ELEVATION, BOX_ELEVATION)).round() as i32;
-            // Forward (positive) is the left edge.
+            // Forward (positive) is the right edge.
             let (x0, dir) = if look_dh > 0. {
-                (bx - 2, -1)
-            } else {
                 (bx + bw + 1, 1)
+            } else {
+                (bx - 2, -1)
             };
             for (col, half) in [(0, 2), (1, 1), (2, 0)] {
                 r.rect(x0 + dir * col, y - half, 1, half * 2 + 1, INK);
@@ -756,7 +821,7 @@ fn wrap_degrees(angle: f64) -> f64 {
 
 /// Preview modes for `--target-cam-preview`, which draw the page from a
 /// synthetic readout on a synthetic grey scene (no retail scene, no GPU).
-pub const PREVIEW_MODES: &str = "free, pinned, tracked, outside, range, mask, nolos, empty, returning, gimbal (gimbal-text, gimbal-bitmap force an eye icon), zoom1 to zoom6";
+pub const PREVIEW_MODES: &str = "free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal (gimbal-text, gimbal-bitmap force an eye icon), zoom1 to zoom6";
 
 /// One synthetic page: the page, the target window's row for a tracked
 /// sight, and the scene's RGBA picture.
@@ -780,11 +845,14 @@ pub fn preview(mode: &str) -> Option<Preview> {
         let focal = f64::from(H) / 2. * 3f64.sqrt() * f64::from(view.zoom);
         [dx * depth / focal, -dy * depth / focal, depth]
     };
-    let ground = |dx: f64, dy: f64| Impact::Ground {
+    // The guns' impact range sets the pipper's range arc: 13,000 feet is the
+    // full scale, so 7,300 feet (1.2 NM) draws 44 percent of the circle.
+    let ground_at = |dx: f64, dy: f64, range_ft: f64| Impact::Ground {
         point: at(dx, dy),
-        seconds: 4.,
-        range_ft: 9000.,
+        seconds: range_ft / 2000.,
+        range_ft,
     };
+    let ground = |dx: f64, dy: f64| ground_at(dx, dy, 7_300.);
     let degrees = |h: f64, e: f64| [h.to_radians(), e.to_radians()];
     let mut page = Page {
         sight: Sight::Free,
@@ -795,6 +863,7 @@ pub fn preview(mode: &str) -> Option<Preview> {
             fitted: true,
             linked: true,
             status: Readiness::Ready,
+            maximum_range_ft: 13_000.,
         }; 3],
         candidate: Some(0),
         impacts: [Some(ground(0., 0.)), None, Some(ground(16., -8.))],
@@ -809,7 +878,7 @@ pub fn preview(mode: &str) -> Option<Preview> {
         limit_notice: false,
         eye: EYE_ICON,
         bearing: "9:00 LO".into(),
-        range: "1.8 NM".into(),
+        range: "1.2 NM".into(),
         view: Some(view),
     };
     page.guns[1].linked = false;
@@ -827,36 +896,34 @@ pub fn preview(mode: &str) -> Option<Preview> {
             page.mark = Some(at(10., -8.));
             page.zoom = 4;
             page.look = degrees(-80., -30.);
+            let gun = |linked, status| Gun {
+                fitted: true,
+                linked,
+                status,
+                maximum_range_ft: 13_000.,
+            };
             page.guns = [
-                Gun {
-                    fitted: true,
-                    linked: false,
-                    status: Readiness::Ready,
-                },
-                Gun {
-                    fitted: true,
-                    linked: true,
-                    status: Readiness::GunSlewing,
-                },
-                Gun {
-                    fitted: true,
-                    linked: false,
-                    status: Readiness::Empty,
-                },
+                gun(false, Readiness::Ready),
+                gun(true, Readiness::GunSlewing),
+                gun(false, Readiness::Empty),
             ];
             page.candidate = Some(1);
-            page.impacts = [None, Some(ground(-4., 8.)), None];
+            page.impacts = [None, Some(ground_at(-4., 8., 4_900.)), None];
             page.trains[1] = degrees(-86., -28.);
             page.bearing = "8:00 LO".into();
-            page.range = "2.1 NM".into();
+            page.range = "0.8 NM".into();
         }
         "tracked" | "outside" => {
             page.sight = Sight::Tracked(7);
             page.mark = Some(at(0., -1.));
-            page.impacts = [Some(ground(0., -1.)), None, Some(ground(4., 1.))];
+            page.impacts = [
+                Some(ground_at(0., -1., 3_000.)),
+                None,
+                Some(ground_at(4., 1., 3_000.)),
+            ];
             page.candidate = Some(2);
             page.bearing = "7:00 LO".into();
-            page.range = "3.4 NM".into();
+            page.range = "0.5 NM".into();
             object = Some((at(0., -1.), 11, 8));
             target = Some((
                 TargetReadout {
@@ -864,7 +931,7 @@ pub fn preview(mode: &str) -> Option<Preview> {
                     name: "ZSU-23-4 SHILKA".into(),
                     damage: 0.2,
                     bearing: "7:00 LO".into(),
-                    metric: "3.4 NM".into(),
+                    metric: "0.5 NM".into(),
                     objective: Some(crate::target_window::TargetObjective::Destroy),
                     activity: "MOVING 20 KTS".into(),
                     goal: "N",
@@ -877,7 +944,11 @@ pub fn preview(mode: &str) -> Option<Preview> {
                 page.look = degrees(-200., -20.);
                 page.guns[2].status = Readiness::GunArc;
                 page.guns[0].status = Readiness::GunArc;
-                page.impacts = [Some(ground(70., 6.)), None, Some(ground(62., 10.))];
+                page.impacts = [
+                    Some(ground_at(70., 6., 9_000.)),
+                    None,
+                    Some(ground_at(62., 10., 9_000.)),
+                ];
                 page.trains = [
                     degrees(-150., -18.),
                     degrees(-90., -20.),
@@ -893,7 +964,17 @@ pub fn preview(mode: &str) -> Option<Preview> {
                 seconds: 10.,
                 range_ft: 13_000.,
             });
-            page.range = "2.9 NM".into();
+            page.range = "2.4 NM".into();
+        }
+        "close" => {
+            // Nearly full range arc: the guns' rounds land 2,000 feet out.
+            page.impacts = [
+                Some(ground_at(0., 0., 2_000.)),
+                None,
+                Some(ground_at(16., -8., 2_000.)),
+            ];
+            page.bearing = "9:00 LO".into();
+            page.range = "0.3 NM".into();
         }
         "mask" => status(&mut page, Readiness::TerrainMask),
         "nolos" => {
@@ -1041,16 +1122,52 @@ mod tests {
     #[test]
     fn a_trained_gun_puts_the_pipper_on_the_crosshair() {
         let r = render(&page("free"));
-        // The centre dot, the ring nine pixels out and a tick to 13.
-        assert!(ink(&r, 69, 57));
-        assert!(ink(&r, 69 + 9, 57) && ink(&r, 69, 57 - 9));
-        assert!(ink(&r, 69 + 13, 57) && ink(&r, 69 - 13, 57));
-        // The crosshair's own ticks, 2 to 4 pixels out, sit inside the ring.
-        assert!(ink(&r, 69 + 3, 57) && ink(&r, 69, 57 + 4));
-        // A white halo surrounds the ink.
-        assert_eq!(r.at(69 + 14, 57), WHITE);
-        // The other linked gun's impact is a 3 x 3 dot, offset 16 and 8.
-        assert!(ink(&r, 69 + 16, 57 - 8) && ink(&r, 69 + 17, 57 - 7));
+        // The centre dot (a small plus) and the thin ring nine pixels out.
+        assert!(ink(&r, 69, 57) && ink(&r, 69 + 1, 57) && ink(&r, 69, 57 - 1));
+        assert!(ink(&r, 69 + 9, 57) && ink(&r, 69 - 9, 57) && ink(&r, 69, 57 - 9));
+        // The crosshair's ticks give way to the dot: nothing 3 to 5 out.
+        assert!(!ink(&r, 69 + 4, 57) && !ink(&r, 69, 57 + 4));
+        // A white halo surrounds the ink, and nothing sticks out past the ring.
+        assert_eq!(r.at(69 + 12, 57), WHITE);
+        assert_ne!(r.at(69 + 13, 57), WHITE);
+        // The other linked gun's impact is a small diamond, offset 16 and 8.
+        assert!(ink(&r, 69 + 16, 57 - 8 - 3) && ink(&r, 69 + 16 + 3, 57 - 8));
+        assert!(!ink(&r, 69 + 16, 57 - 8));
+    }
+
+    #[test]
+    fn the_range_arc_runs_clockwise_from_twelve_and_grows_as_the_range_closes() {
+        // 7,300 feet of 13,000: 44 percent. Ten pixels out from the centre,
+        // the band is ink at twelve and three o'clock and not at six or nine.
+        let r = render(&page("free"));
+        assert!(ink(&r, 69, 57 - 10) && ink(&r, 69 + 10, 57));
+        assert!(!ink(&r, 69, 57 + 10) && !ink(&r, 69 - 10, 57));
+        // The thin ring is whole either way.
+        assert!(ink(&r, 69, 57 + 9) && ink(&r, 69 - 9, 57));
+        // Closer in, the arc is longer: 2,000 feet draws about 85 percent, so
+        // nine o'clock is covered and the last sliver before twelve is not.
+        let close = render(&page("close"));
+        assert!(ink(&close, 69 - 10, 57) && ink(&close, 69, 57 + 10));
+        assert!(!ink(&close, 69 - 2, 57 - 10));
+        // The scale is the shared LCOS fit: none at the maximum, half at half.
+        assert_eq!(gunsight::range_arc_fraction(13_000., 13_000.), 0.);
+        assert_eq!(gunsight::range_arc_fraction(6_500., 13_000.), 0.5);
+        let count_band = |p: &Pixels| {
+            p.iter()
+                .filter(|(x, y)| f64::from(x - 69).hypot(f64::from(y - 57)) >= 9.5)
+                .count()
+        };
+        let (none, half, full) = (
+            pipper(69, 57, 0., false, true),
+            pipper(69, 57, 0.5, false, true),
+            pipper(69, 57, 1., false, true),
+        );
+        assert_eq!(count_band(&none), 0);
+        assert!(count_band(&half) > 20 && count_band(&full) > 2 * count_band(&half) - 6);
+        // A dashed pipper drops the thin ring's gaps but keeps the whole arc.
+        let dashed = pipper(69, 57, 1., true, true);
+        assert!(dashed.len() < full.len());
+        assert_eq!(count_band(&dashed), count_band(&full));
     }
 
     #[test]
@@ -1063,14 +1180,14 @@ mod tests {
             live
         });
         let dashed = render(&p);
-        // The impact is 70 pixels right of the centre: the pipper parks with
-        // its right tick on the page edge, 13 pixels from its centre.
+        // The other gun's impact is 70 pixels right of the centre: its
+        // diamond parks with its right corner 13 pixels in from the page edge.
         let (px, py) = park((69. + 70., 57. + 6.));
         assert!(
-            (W - 14..W).contains(&px) && ink(&live, px, py),
-            "dot at {px},{py}"
+            (W - 14..W).contains(&px) && ink(&live, px, py - 3),
+            "diamond at {px},{py}"
         );
-        // CANNOT BEAR dashes the ring: fewer ring pixels than the live one.
+        // CANNOT BEAR dashes the thin ring: fewer ring pixels than the live one.
         let ring = |r: &Raster| count(r, W - 24, 57 + 6 - 11, 23, 23);
         assert!(
             ring(&dashed) < ring(&live),
@@ -1091,10 +1208,14 @@ mod tests {
     fn beyond_range_the_ring_has_no_centre_dot() {
         let r = render(&page("range"));
         // The pipper is dashed at the last point the rounds reach, 22 above
-        // the middle: no dot there. The crosshair still marks the centre.
+        // the middle: no dot there and no range arc. The crosshair's ticks
+        // still mark the centre.
         assert!(!ink(&r, 69, 57 - 22));
-        assert!(ink(&r, 69 + 9, 57 - 22) || ink(&r, 69 - 9, 57 - 22) || ink(&r, 69, 57 - 31));
-        assert!(ink(&r, 69 + 3, 57));
+        // The thin ring is dashed 30 degrees on, 30 off, centred on twelve
+        // o'clock: drawn at the top, a gap at three o'clock.
+        assert!(ink(&r, 69, 57 - 22 - 9) && !ink(&r, 69 + 9, 57 - 22));
+        assert!(!ink(&r, 69, 57 - 22 - 10));
+        assert!(ink(&r, 69 + 4, 57) && ink(&r, 69, 57 + 4));
     }
 
     #[test]
@@ -1147,19 +1268,53 @@ mod tests {
             assert!(ink(&free, x, 92), "top edge {x}");
         }
         // Outside it (a sight behind the aircraft) the outline dashes and an
-        // arrowhead sits right of the box.
+        // arrowhead sits left of the box: aft is the left edge.
         let outside = render(&page("outside"));
         assert!(!(45..91).all(|x| ink(&outside, x, 92)));
         assert!(
-            count(&outside, 91, 96, 6, 12) >= 3,
-            "arrowhead right of the box"
+            count(&outside, 42, 96, 3, 12) >= 3,
+            "arrowhead left of the box"
         );
+        assert_eq!(count(&free, 42, 96, 3, 12), 0);
         assert_eq!(count(&free, 91, 96, 6, 12), 0);
-        // Forward is the left edge: a sight ahead puts the arrowhead left.
+        // Forward is the right edge: a sight ahead puts the arrowhead right.
         let mut ahead = page("free");
         ahead.look = [(-10_f64).to_radians(), (-20_f64).to_radians()];
         let ahead = render(&ahead);
-        assert!(count(&ahead, 38, 96, 7, 12) >= 3);
+        assert!(count(&ahead, 91, 96, 6, 12) >= 3);
+        assert_eq!(count(&ahead, 42, 96, 3, 12), 0);
+    }
+
+    #[test]
+    fn the_arcs_box_puts_forward_on_the_right_and_aft_on_the_left() {
+        // The 25 trained forward (heading -40) and aft (-140): the 2 x 2 dot
+        // or ring lands in the right or left half of the box (45 to 90).
+        let train = |heading: f64| {
+            let mut p = page("free");
+            p.look = gunship::DEFAULT_LOOK;
+            p.trains[2] = [heading.to_radians(), (-25_f64).to_radians()];
+            p.guns[2].linked = true;
+            render(&p)
+        };
+        let side = |r: &Raster, x0: i32, x1: i32| count(r, x0, 93, x1 - x0, 18);
+        // The default free view has the 25 (the candidate ring) and the 105
+        // (a dot) both near the middle; compare the 105 as it moves.
+        let (front, aft) = (train(-40.), train(-140.));
+        assert!(
+            side(&front, 78, 90) > side(&aft, 78, 90),
+            "forward is right"
+        );
+        assert!(side(&aft, 46, 58) > side(&front, 46, 58), "aft is left");
+        // The camera's own square follows: a look 40 degrees forward of abeam
+        // sits right of the middle, 40 aft left of it.
+        let square = |heading: f64| {
+            let mut p = page("free");
+            p.look = [heading.to_radians(), (-25_f64).to_radians()];
+            render(&p)
+        };
+        let (front, aft) = (square(-50.), square(-130.));
+        assert!(side(&front, 74, 90) > side(&aft, 74, 90));
+        assert!(side(&aft, 46, 62) > side(&front, 46, 62));
     }
 
     #[test]
@@ -1291,6 +1446,7 @@ mod tests {
             "tracked",
             "outside",
             "range",
+            "close",
             "mask",
             "nolos",
             "empty",
