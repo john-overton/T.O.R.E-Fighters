@@ -111,6 +111,7 @@ mod static_art;
 mod su25_animation;
 mod su27_animation;
 mod su35_animation;
+mod surface_dump;
 mod surface_lighting;
 mod tape_file;
 mod target_info;
@@ -2415,7 +2416,7 @@ impl App {
                                 if c.uses_normal_startup_defaults() {
                                     c.apply_startup_weapons();
                                 }
-                                c.add_airport_targets(&self.world.terrain.airport_scene)?;
+                                c.add_scene_targets(&self.world.terrain)?;
                                 Ok((c, view))
                             }) {
                                 Ok((c, view)) => {
@@ -7043,7 +7044,7 @@ fn ai_probe_run(
         .map_err(|e| e.to_string())?;
     let mut combat = combat::Combat::new(hornet, resources, false)?;
     let mut combat_view = combat_view::CombatView::new(&combat, combat.own_id(), resources)?;
-    combat.add_airport_targets(&world.airport_scene)?;
+    combat.add_scene_targets(world)?;
     // The same launch layout a flown mission uses, including a ground start
     // when `--ground-start` chose a runway.
     let mut flight = hornet.start(world);
@@ -8504,6 +8505,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--gun-flash-preview") {
         gun_flash_preview::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--surface-dump") {
+        surface_dump::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--surface-sheets") {
+        surface_dump::sheets()?;
         return Ok(Outcome::Done);
     }
     diagnostics::stage("argument parsing and startup options");
