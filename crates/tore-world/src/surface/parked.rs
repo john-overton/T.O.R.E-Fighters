@@ -70,6 +70,28 @@ pub fn deck_spot(
     heading_deg: i32,
     aircraft: [i32; 3],
 ) -> Option<DeckSpot> {
+    let spot = deck_offset(
+        deck,
+        authored_scale,
+        placed_scale,
+        carrier,
+        heading_deg,
+        aircraft,
+    );
+    deck.contains(spot.units).then_some(spot)
+}
+
+/// The spot of an aircraft resolution already put on `deck`, whether or not
+/// it still lies inside the outline: a relocated fleet's whole-foot rounding
+/// may nudge an edge spot out, and it stays on its deck.
+pub fn deck_offset(
+    deck: &Deck,
+    authored_scale: f64,
+    placed_scale: f64,
+    carrier: [i32; 3],
+    heading_deg: i32,
+    aircraft: [i32; 3],
+) -> DeckSpot {
     let basis = Basis::new(f64::from(heading_deg).to_radians(), 0., 0.);
     let offset = [
         f64::from(aircraft[0] - carrier[0]),
@@ -78,15 +100,14 @@ pub fn deck_spot(
     ];
     let right = tore_sim::attitude::dot(offset, basis.right) / authored_scale;
     let forward = tore_sim::attitude::dot(offset, basis.forward) / authored_scale;
-    let units = [right as f32, forward as f32];
-    deck.contains(units).then(|| DeckSpot {
-        units,
+    DeckSpot {
+        units: [right as f32, forward as f32],
         feet: [
             right * placed_scale,
             f64::from(deck.height) * placed_scale,
             forward * placed_scale,
         ],
-    })
+    }
 }
 
 /// A carrier's hull as the deck rule needs it.
@@ -110,7 +131,12 @@ impl Hull {
         Some(Self {
             deck,
             authored_scale: object_scale(bytes).ok()?,
-            placed_scale: crate::terrain::placed_shape_scale(&unit.resource, bytes).ok()?,
+            placed_scale: crate::terrain::placed_shape_scale(
+                &tore_formats::static_object::Definition::parse(resources.get(&unit.resource)?)
+                    .ok()?,
+                bytes,
+            )
+            .ok()?,
         })
     }
 }
@@ -221,15 +247,14 @@ pub fn place(
                         Hull::of(resources, carrier, &shape)
                     });
                     let hull = hull.as_ref().ok_or("the carrier's hull has no deck")?;
-                    let spot = deck_spot(
+                    let spot = deck_offset(
                         &hull.deck,
                         hull.authored_scale,
                         hull.placed_scale,
                         carrier.position,
                         carrier.angles[0],
                         parked.position,
-                    )
-                    .ok_or("off the carrier's deck")?;
+                    );
                     let [cx, cy, cz] = carrier.position.map(f64::from);
                     let base = height(cx, cz) + cy;
                     let turn = Basis::new(f64::from(carrier.angles[0]).to_radians(), 0., 0.);

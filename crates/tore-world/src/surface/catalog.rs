@@ -54,6 +54,33 @@ pub enum Family {
     Aircraft,
 }
 
+/// The HAWK battery's radar element (docs/spec/surface-defenses.md, "SAM
+/// batteries"). The LIB has no HAWK radar, so this TORE-defined type takes
+/// the Straight Flush record's numbers (hit points, vehicle class,
+/// signatures, explosion) and draws a LIB radar shape: SRDR2, John's pick
+/// from the radar shape sheet (2026-10-10, decision 12.2). No archive holds this name.
+pub const HAWK_RADAR: &str = "HAWKRDR.NT";
+/// The record the HAWK radar takes its numbers from.
+pub const HAWK_RADAR_BASIS: &str = "SFLUSH.NT";
+/// The shape the HAWK radar draws: John chose SRDR2 (2026-10-10).
+pub const HAWK_RADAR_SHAPE: &str = "SRDR2.SH";
+/// Its display name.
+pub const HAWK_RADAR_NAME: &str = "HAWK Radar";
+
+/// The HAWK radar's static definition, for the scene: the Straight Flush
+/// record's with the HAWK radar's shape and name. `None` when the import
+/// lacks either.
+pub fn hawk_radar_definition(
+    resources: &dyn ResourceSource,
+) -> Option<tore_formats::static_object::Definition> {
+    let mut definition = Definition::parse(resources.get(HAWK_RADAR_BASIS)?).ok()?;
+    resources.get(HAWK_RADAR_SHAPE)?;
+    definition.main_shape = Some(HAWK_RADAR_SHAPE.to_owned());
+    definition.display_name = HAWK_RADAR_NAME.to_owned();
+    definition.resource_name = HAWK_RADAR.to_owned();
+    Some(definition)
+}
+
 /// The default hit points of a static object whose record names none, as
 /// the airport scene gives it.
 const DEFAULT_HIT_POINTS: i32 = 100;
@@ -111,6 +138,9 @@ impl<'a> Catalog<'a> {
     }
 
     fn read(&self, resource: &str) -> Result<Entry, String> {
+        if resource == HAWK_RADAR {
+            return self.hawk_radar();
+        }
         let bytes = self
             .resources
             .get(resource)
@@ -182,6 +212,26 @@ impl<'a> Catalog<'a> {
             }
             _ => Err(format!("{resource}: not a surface object type")),
         }
+    }
+
+    /// [`HAWK_RADAR`]: the Straight Flush's entry under the HAWK radar's
+    /// name and shape.
+    fn hawk_radar(&self) -> Result<Entry, String> {
+        if !self.has(HAWK_RADAR_SHAPE) {
+            return Err(format!("missing {HAWK_RADAR_SHAPE}; re-import media"));
+        }
+        let mut entry = self.read(HAWK_RADAR_BASIS)?;
+        entry.resource = HAWK_RADAR.to_owned();
+        entry.name = HAWK_RADAR_NAME.to_owned();
+        if let Some(unit) = &entry.unit {
+            let mut unit = SurfaceUnit::clone(unit);
+            unit.resource = HAWK_RADAR.to_owned();
+            unit.short_name = HAWK_RADAR_NAME.to_owned();
+            unit.name = HAWK_RADAR_NAME.to_owned();
+            unit.shape = Some(HAWK_RADAR_SHAPE.to_owned());
+            entry.unit = Some(Arc::new(unit));
+        }
+        Ok(entry)
     }
 
     /// Ships swap to their `_A` shape; men and invisible units vanish; the

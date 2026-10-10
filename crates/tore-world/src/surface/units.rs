@@ -124,6 +124,27 @@ impl GroupTransform {
     }
 }
 
+/// Where the two sides start with a ground target (filled by the layout
+/// slice; docs/spec/surface-defenses.md, "Start placement"): Red within
+/// 5 nm of the target, Blue the mission's separation from Red.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StartPoints {
+    /// The targets' placed centroid, x and z feet: the point the starts
+    /// follow.
+    pub target: [i32; 2],
+    /// Red's start, x and z feet: the enemy group's placement point.
+    pub red: [i32; 2],
+    /// Blue's airborne start, x and z feet.
+    pub blue: [i32; 2],
+    /// Blue's heading at its start, whole degrees clockwise from north: at
+    /// the target.
+    pub blue_heading_deg: i32,
+    /// The theater runways (object ids) a ground start may use, nearest the
+    /// target first and at least 15 nm from it: Blue's side, then Red's.
+    pub blue_airfields: Vec<u32>,
+    pub red_airfields: Vec<u32>,
+}
+
 /// One unit's changing state. Its hit points stay in combat's target row
 /// (`live::State`), which the checkpoint already codes; the controller and
 /// resupply slices add their fields here.

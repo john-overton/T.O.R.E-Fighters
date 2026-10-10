@@ -176,7 +176,8 @@ pub(super) fn deck_scene(out: &Path, media: &Media, art: &mut Art) -> AppResult<
     let hull_bytes = media.get(carrier.hull)?;
     let deck = flight_deck(&Shape::scenery(&hull_bytes)?).ok_or("CLEM.SH has no deck")?;
     let authored = object_scale(&hull_bytes)?;
-    let placed = tore_world::terrain::placed_shape_scale(carrier.unit, &hull_bytes)?;
+    let definition = tore_formats::static_object::Definition::parse(&media.get(carrier.unit)?)?;
+    let placed = tore_world::terrain::placed_shape_scale(&definition, &hull_bytes)?;
     let (mut clem, _) = carrier_assembly(media, art, carrier, false)?;
     // The assembly is drawn at the scenery scale; the game places the hull
     // at the placed scale.

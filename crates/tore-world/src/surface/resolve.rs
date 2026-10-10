@@ -53,6 +53,11 @@ pub struct GroundTarget {
     pub enemy_nationality: usize,
     /// Night, and a friendly wing flies an F-117 or a B-2.
     pub night_stealth: bool,
+    /// Jitter and relocation, both on in a mission; the preview tools turn
+    /// them off to show the retail spot.
+    pub variation: super::layout::Variation,
+    /// The creator's enemy distance, nm: Blue starts this far from Red.
+    pub separation_nm: u32,
 }
 
 impl GroundTarget {
@@ -68,6 +73,8 @@ impl GroundTarget {
             seed: spec.surface_seed,
             enemy_nationality: usize::from(spec.enemy_nationality),
             night_stealth: night_stealth(spec),
+            variation: super::layout::Variation::ON,
+            separation_nm: spec.separation_nm,
         })
     }
 }
@@ -88,11 +95,12 @@ pub enum Purpose {
     Roll = 1,
     /// Which type fills a placeholder.
     Pick = 2,
-    /// Jitter offset (layout slice).
+    /// Jitter offset, and a fleet's common move (layout slice).
     Offset = 3,
     /// Jitter heading (layout slice).
     Heading = 4,
-    /// The template's relocation (layout slice).
+    /// The template's relocation, its objects' local moves, and the starts
+    /// (layout slice).
     Group = 5,
     /// Added supply trucks (layout slice).
     Supply = 6,
@@ -249,6 +257,7 @@ pub fn template(
         objects: template.objects.len(),
         removed: Vec::new(),
         left_out: Vec::new(),
+        anchor: None,
     };
     let mut units = Vec::new();
     let mut parked = Vec::new();
