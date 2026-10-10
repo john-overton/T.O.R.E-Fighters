@@ -1528,8 +1528,10 @@ and readout baselines, the event queue and its numbers, the name table, the
 own-state baselines) starts afresh, the Seated message names the flight,
 and every Snapshot and Own state section, every Names message and every
 Inputs section carries it. A client starts its own afresh at the Seated
-message or at the first section of a later flight, whichever comes first,
-and drops a section of an earlier flight that arrives late (an Own state
+message, at the first section of a later flight or at a Names message of a
+later flight, whichever comes first (a packet's messages are read before its
+sections, so a Names message the client dropped would leave the flight's
+table short), and drops a section of an earlier flight that arrives late (an Own state
 section of the client's flight must still name a baseline it has; one of a
 later flight must name none). The host drops Inputs of another flight.
 Reliable delivery keeps a Names message of the earlier flight before the

@@ -3316,11 +3316,13 @@ impl Host {
         let ids: Vec<ConnectionId> = self
             .peers
             .iter()
-            .filter(|(_, peer)| {
+            .filter(|(id, peer)| {
                 peer.stage == Stage::Seated
                     && peer.seat.is_some_and(|seat| {
                         tick % u64::from(tps) == crate::wire::snapshot_phase(seat.0, tps)
                     })
+                    // Stage K: none before Resumed names the flight.
+                    && !self.awaiting_resume(**id)
             })
             .map(|(id, _)| *id)
             .collect();

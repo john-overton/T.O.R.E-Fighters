@@ -1923,6 +1923,15 @@ impl Client {
                 self.event(ClientEvent::SeatRefused(reason));
             }
             Message::Names(names) => {
+                // A later flight's names start that flight, as its first
+                // section would: messages are read before the packet's
+                // sections, so dropping them would leave the flight's table
+                // short and its next Names out of order.
+                if let Some(wire) = &self.wire
+                    && FlightOrder::of(names.flight, wire.flight) == FlightOrder::Later
+                {
+                    self.begin_flight(names.flight);
+                }
                 let ready = self
                     .wire
                     .as_mut()

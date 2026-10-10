@@ -9919,7 +9919,15 @@ were.
 - A new flight starts the wire state afresh (baselines, names, events) but
   keeps the prediction, the clocks and the other aircraft's histories: the
   others hold still through the gap and then jump to the present, as after a
-  [stall](#a-stalled-game-stays-connected-ef-k).
+  [stall](#a-stalled-game-stays-connected-ef-k). The new host sends a player
+  that came back no snapshot until it has answered its Resume, even once it
+  is live: before Resumed the connection has no flight of the new host.
+  *Fixed 2026-10-10 (agent decision):* a game whose Resume came after the
+  new host went live was sent snapshots of a placeholder flight; the client
+  dropped that flight's first Names message (a packet's messages are read
+  before its sections), started the flight at the snapshot, and refused the
+  next Names as out of order, leaving with a protocol error. The client now
+  also starts a later flight at its Names message.
 - A player in the lobby resumes into the lobby, and an observer's watch starts
   again. The mission is built again only when its number or text differs.
 

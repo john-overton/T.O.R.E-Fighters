@@ -1344,6 +1344,57 @@ fn a_late_joiner_follows_a_migration() {
     );
 }
 
+/// A player whose Resume reaches the new host after it went live (its game
+/// slow to answer, here a long round trip to the new host): the new host
+/// sends it no snapshot before Resumed names its flight. A snapshot of the
+/// placeholder flight started that flight on the client, whose name table
+/// had dropped the Names message ahead of it (messages are read before a
+/// packet's sections), so the next Names was refused as out of order and
+/// the client left with a protocol error (the flaky `net-window-migrate`).
+#[test]
+fn a_late_resume_gets_no_snapshot_before_resumed() {
+    let (mut rig, first, second) = flying(20, true);
+    let late = (1..rig.games.len())
+        .find(|&g| g != first && g != second)
+        .unwrap();
+    rig.run(Duration::from_secs(1));
+    // The late player's link to standby 1 has a 0.8 second round trip: it
+    // connects within the resume window, and its Resume arrives after the
+    // new host went live.
+    let slow = LinkConfig::for_round_trip(800 * MS, 0., 0., 0.);
+    let (a, b) = (rig.games[late].address(), rig.games[first].address());
+    rig.net.set_link_both(a, b, slow);
+    rig.cut(0);
+    // Whatever the old host had on the way has arrived.
+    rig.run(Duration::from_millis(100));
+    let mut seen = rig.games[late].seen;
+    let mut early = 0;
+    let resumed = rig.run_until(Duration::from_secs(6), |r| {
+        let game = &r.games[late];
+        let resumed = game.client.migration_counts().resumed;
+        if game.seen > seen && resumed == 0 {
+            early += 1;
+        }
+        seen = game.seen;
+        resumed == 1
+    });
+    assert!(resumed, "the late player resumes");
+    let (_, took_at, _, _) = rig.takeovers[0].clone();
+    assert!(
+        !rig.host_of(first).resuming(),
+        "the new host went live before the late Resume came"
+    );
+    assert_eq!(early, 0, "snapshots before Resumed");
+    assert!(
+        rig.run_until(Duration::from_secs(2), |r| r.games[late]
+            .snapshot_after(took_at)
+            .is_some()),
+        "the late player has snapshots again"
+    );
+    assert!(rig.flying(late));
+    assert_eq!(rig.games[late].client.server(), rig.games[first].address());
+}
+
 /// The lobby moves to a better host (a handover in the lobby, as the host's
 /// own succession update makes one): the old house's player resumes with
 /// the new host as itself, the crown kept, rather than being dropped as
