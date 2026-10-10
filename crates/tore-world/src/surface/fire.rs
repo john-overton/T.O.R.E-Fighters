@@ -772,6 +772,15 @@ pub enum Trace {
         unit: UnitId,
         mount: usize,
     },
+    /// A truck rearmed every empty rail of the unit.
+    Rearm {
+        unit: UnitId,
+    },
+    /// A truck added a spare magazine to the gun on hardpoint `mount`.
+    Refill {
+        unit: UnitId,
+        mount: usize,
+    },
     Radar {
         unit: UnitId,
         on: bool,

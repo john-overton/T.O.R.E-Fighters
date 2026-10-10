@@ -1134,7 +1134,10 @@ impl World {
     /// aircraft in the air: the AI's and the humans'. Nothing happens in a
     /// mission without armed surface units.
     fn step_surface(&mut self) {
-        use crate::surface::fire::{self, Aircraft};
+        use crate::surface::{
+            fire::{self, Aircraft},
+            movement, supply,
+        };
         if self.terrain.surface.arsenal.is_empty() {
             return;
         }
@@ -1183,12 +1186,26 @@ impl World {
             ground: &ground,
             daylight,
         };
+        // A live friendly supply truck within 0.1 mile sets each unit's
+        // `supply` flag before the controllers read it, and its timers
+        // deliver after them (docs/spec/surface-defenses.md, "Resupply").
+        // A truck on a route is measured where it is now.
+        let delivery = supply::step(
+            &terrain.surface,
+            &mut self.combat.surface,
+            &self.combat.state,
+            &|unit, state| {
+                let at = movement::unit_pose(unit, state, terrain).position;
+                [at[0], at[2]]
+            },
+        );
         let stepped = fire::step(
             &terrain.surface,
             &mut self.combat.surface,
             &mut self.combat.state,
             &scene,
         );
+        supply::deliver(&terrain.surface, &mut self.combat.surface, delivery);
         let ai: Vec<_> = self
             .ai_wings
             .as_ref()
