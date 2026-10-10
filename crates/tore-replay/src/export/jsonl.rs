@@ -112,8 +112,29 @@ fn header_line(recording: &Recording) -> String {
             w.extent_ft.map_or("null".into(), |e| {
                 format!("[{},{}]", json::exact(e[0]), json::exact(e[1]))
             }),
-        )
-        .finish();
+        );
+    // Format 3's additions appear only when the recording has them.
+    let mut world = world;
+    if let Some(t) = &w.ground_target {
+        world = world.raw(
+            "ground_target",
+            Object::new()
+                .str("stem", &t.stem)
+                .int("aaa", t.aaa)
+                .int("sam", t.sam)
+                .int("seed", t.seed)
+                .int("enemy_nationality", t.enemy_nationality)
+                .bool("night_stealth", t.night_stealth)
+                .bool("jitter", t.jitter)
+                .bool("relocate", t.relocate)
+                .int("separation_nm", t.separation_nm)
+                .finish(),
+        );
+    }
+    if w.airfield_scene != 0 {
+        world = world.int("airfield_scene", w.airfield_scene);
+    }
+    let world = world.finish();
     let mut extra = Object::new();
     for (k, v) in &h.extra {
         extra = extra.str(k, v);
@@ -177,6 +198,51 @@ fn header_line(recording: &Recording) -> String {
         .bool("complete", recording.complete())
         .raw("problems", problems)
         .raw("units", units)
+        .finish()
+}
+
+/// A surface unit that follows a route, at a sampled tick.
+fn surface_line(tick: u64, u: &crate::model::SurfaceState) -> String {
+    Object::new()
+        .str("type", "surface")
+        .int("tick", tick)
+        .raw("t", seconds(tick))
+        .int("id", u.id)
+        .raw(
+            "pos_ft",
+            format!(
+                "[{},{},{}]",
+                json::exact(u.position[0]),
+                json::exact(u.position[1]),
+                json::exact(u.position[2])
+            ),
+        )
+        .raw(
+            "att_deg",
+            format!(
+                "[{},{},{}]",
+                json::number(u.attitude[0].to_degrees(), 3),
+                json::number(u.attitude[1].to_degrees(), 3),
+                json::number(u.attitude[2].to_degrees(), 3)
+            ),
+        )
+        .bool("wrecked", u.wrecked)
+        .finish()
+}
+
+/// A launcher's rails or a gun's reserve after a change.
+fn stock_line(tick: u64, s: &crate::model::SurfaceStock) -> String {
+    Object::new()
+        .str("type", "surface_stock")
+        .int("tick", tick)
+        .raw("t", seconds(tick))
+        .int("unit", s.unit)
+        .int("mount", s.mount)
+        .int("loaded", s.loaded)
+        .raw(
+            "reserve",
+            s.reserve.map_or("null".into(), |r| r.to_string()),
+        )
         .finish()
 }
 
@@ -356,6 +422,26 @@ pub fn write_jsonl(
             .finish();
         line(&mut out, text, &mut stats)?;
     }
+    for u in recording.surface_units() {
+        let text = Object::new()
+            .str("type", "surface_unit")
+            .int("id", u.id)
+            .str("name", &u.name)
+            .str("label", &u.label)
+            .str("side", u.side.name())
+            .int("hit_points", u.hit_points)
+            .raw(
+                "pos_ft",
+                format!(
+                    "[{},{},{}]",
+                    json::exact(u.position[0]),
+                    json::exact(u.position[1]),
+                    json::exact(u.position[2])
+                ),
+            )
+            .finish();
+        line(&mut out, text, &mut stats)?;
+    }
     let first = recording.first_tick().unwrap_or(0);
     let mut last_trees: HashMap<(u32, String), TreeSample> = HashMap::new();
     for frame in recording.frames(from, to) {
@@ -370,6 +456,15 @@ pub fn write_jsonl(
                 line(&mut out, sample_line(tick, s), &mut stats)?;
                 stats.samples += 1;
             }
+        }
+        if (tick - first).is_multiple_of(step) {
+            for u in frame.surface.iter().filter(|u| wanted(Some(u.id))) {
+                line(&mut out, surface_line(tick, u), &mut stats)?;
+                stats.samples += 1;
+            }
+        }
+        for stock in frame.surface_stock.iter().filter(|s| wanted(Some(s.unit))) {
+            line(&mut out, stock_line(tick, stock), &mut stats)?;
         }
         if options.trees {
             for tree in frame.trees.iter().filter(|t| wanted(Some(t.subject))) {

@@ -32,6 +32,21 @@ impl Default for SummaryOptions {
     }
 }
 
+/// What a surface unit's supply and loss events add up to.
+#[derive(Default)]
+struct SurfaceCounts {
+    rearms: u32,
+    refills: u32,
+    destroyed: Option<u64>,
+}
+
+/// An id that names a surface unit: a registered one, or one in the
+/// reserved range (`0x4000_0000` and up).
+fn is_surface(recording: &Recording, id: u32) -> bool {
+    recording.surface_info(id).is_some() && recording.aircraft_info(id).is_none()
+        || (id >= super::text::SURFACE_IDS && recording.aircraft_info(id).is_none())
+}
+
 #[derive(Default)]
 struct Stats {
     airborne: u64,
@@ -124,6 +139,9 @@ fn key_event(kind_name: &str) -> bool {
         || kind_name.starts_with("aircraft.")
         || (kind_name.starts_with("flight.") && kind_name != kind::FLIGHT_EFFECT)
         || kind_name.starts_with("system.")
+        || kind_name == kind::SURFACE_WRECK
+        || kind_name == kind::SURFACE_REARM
+        || kind_name == kind::SURFACE_REFILL
         || kind_name == kind::PLAYER_BOOKMARK
 }
 
@@ -150,6 +168,9 @@ pub fn write_summary(
         .aircraft()
         .map(|a| (a.id, Stats::default()))
         .collect();
+    // What the surface units did (format 3 names them), apart from the
+    // aircraft: rearms, refills and destroyed wrecks by unit.
+    let mut surface_counts: BTreeMap<u32, SurfaceCounts> = BTreeMap::new();
     let mut shots: Vec<Shot> = Vec::new();
     let mut shot_by_projectile: HashMap<u32, usize> = HashMap::new();
     for frame in recording.frames(0, u64::MAX) {
@@ -233,6 +254,21 @@ pub fn write_summary(
                         stats.entry(killer).or_default().kills += 1;
                     }
                 }
+                kind::SURFACE_REARM => {
+                    if let Some(id) = subject {
+                        surface_counts.entry(id).or_default().rearms += 1;
+                    }
+                }
+                kind::SURFACE_REFILL => {
+                    if let Some(id) = subject {
+                        surface_counts.entry(id).or_default().refills += 1;
+                    }
+                }
+                kind::SURFACE_WRECK => {
+                    if let Some(id) = subject {
+                        surface_counts.entry(id).or_default().destroyed = Some(tick);
+                    }
+                }
                 kind::COMBAT_COUNTERMEASURE => {
                     let slot = match e.string(field::DECOY) {
                         Some("chaff") => 0,
@@ -283,6 +319,16 @@ pub fn write_summary(
         }
     }
     let end = recording.last_tick().unwrap_or(0);
+    // Surface units are not aircraft: the ones that shot, were hit or died
+    // get their own section.
+    let surface_stats: BTreeMap<u32, Stats> = stats
+        .keys()
+        .copied()
+        .filter(|id| is_surface(recording, *id))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .filter_map(|id| stats.remove(&id).map(|st| (id, st)))
+        .collect();
     for st in stats.values_mut() {
         if let Some((activity, since)) = st.current.take() {
             // Activity time counts while the aircraft is alive.
@@ -501,6 +547,51 @@ pub fn write_summary(
                 .map(|(activity, ticks)| format!("{activity} {}", seconds(**ticks)))
                 .collect();
             writeln!(o, "  AI activity: {}", parts.join(", "))?;
+        }
+    }
+
+    if !surface_stats.is_empty() || !surface_counts.is_empty() {
+        heading(o, "Surface units")?;
+        let ids: std::collections::BTreeSet<u32> = surface_stats
+            .keys()
+            .chain(surface_counts.keys())
+            .copied()
+            .collect();
+        for id in ids {
+            let st = surface_stats.get(&id);
+            let counts = surface_counts.get(&id);
+            let mut title = names.who(id);
+            if let Some(info) = recording.surface_info(id) {
+                title = format!(
+                    "{title} ({}; {}; {} hp)",
+                    info.name,
+                    info.side.name(),
+                    thousands(f64::from(info.hit_points))
+                );
+            }
+            writeln!(o, "{title}")?;
+            writeln!(
+                o,
+                "  shots {} | hits {} | kills {}",
+                st.map_or(0, |s| s.shots),
+                st.map_or(0, |s| s.hits),
+                st.map_or(0, |s| s.kills),
+            )?;
+            if let Some(counts) = counts {
+                let mut parts = Vec::new();
+                if let Some(at) = counts.destroyed {
+                    parts.push(format!("destroyed at {}", clock(at)));
+                }
+                if counts.rearms > 0 {
+                    parts.push(format!("rearmed {} times", counts.rearms));
+                }
+                if counts.refills > 0 {
+                    parts.push(format!("magazines refilled {} times", counts.refills));
+                }
+                if !parts.is_empty() {
+                    writeln!(o, "  {}", parts.join(" | "))?;
+                }
+            }
         }
     }
 

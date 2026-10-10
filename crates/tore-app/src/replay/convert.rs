@@ -445,9 +445,14 @@ pub fn pilot_pose(state: &replay::EscapeeState) -> PilotPose {
 /// A live effect as a recording keeps it: a hit, kill or ground strike
 /// with a reviewed explosion type keeps that type.
 pub fn effect_kind(kind: live::EffectKind, blast: Option<u8>) -> replay::EffectKind {
+    // A flak burst has its own code (format 3) with the explosion type it
+    // showed, 27 or 28, so a replay lights and puffs it as flight does.
+    if kind == live::EffectKind::Flak
+        && let Some(explosion) = blast.filter(|b| tore_sim::combat::blast::explosion(*b).is_some())
+    {
+        return replay::EffectKind::Flak { explosion };
+    }
     let on = match kind {
-        // A flak burst is recorded as the air explosion it shows until the
-        // replay format carries it (slice RP1).
         live::EffectKind::Hit | live::EffectKind::Flak => Some(replay::Strike::Hit),
         live::EffectKind::Destroyed => Some(replay::Strike::Destroyed),
         live::EffectKind::Ground => Some(replay::Strike::Ground),
@@ -489,6 +494,7 @@ fn live_effect_kind(kind: replay::EffectKind) -> Option<(live::EffectKind, Optio
             },
             Some(explosion),
         ),
+        replay::EffectKind::Flak { explosion } => (live::EffectKind::Flak, Some(explosion)),
         replay::EffectKind::Crater(_) | replay::EffectKind::Fire | replay::EffectKind::Other(_) => {
             return None;
         }
