@@ -27,6 +27,7 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 }
 
 mod broad;
+mod collateral;
 #[cfg(test)]
 mod gunship_impact_tests;
 #[cfg(test)]
@@ -4261,8 +4262,8 @@ impl State {
             }
         }
         let mut candidates: Vec<usize> = Vec::new();
-        // Surface rounds' bursts, applied after the search.
-        let mut bursts: Vec<surface::Burst> = Vec::new();
+        // Every round's collateral bursts, applied after the search.
+        let mut bursts: Vec<collateral::Burst> = Vec::new();
         self.projectiles.retain_mut(|p| {
             let owned = p.weapon.clone();
             let w = owned.as_ref().unwrap_or_else(|| {
@@ -4273,9 +4274,10 @@ impl State {
             let eased = (easy && !is_gun(w)).then(|| eased_weapon(w));
             let w = eased.as_ref().unwrap_or(w);
             // A surface unit's round, and its shooter's side: who is hostile
-            // to its flak fuze and whom friendly fire spares from its bursts.
+            // to its flak fuze, and whom friendly fire spares from any
+            // round's hits and bursts.
             let surface = self.surface_rounds.get(&p.id).copied();
-            let owner_side = if surface.is_some() {
+            let owner_side = if surface.is_some() || friendly_fire_off {
                 ships
                     .iter()
                     .find(|o| o.aircraft == p.owner)
@@ -4286,6 +4288,15 @@ impl State {
                 NO_SIDE
             };
             let surface_gun = surface.is_some() && is_gun(w);
+            let shooter = collateral::Shooter {
+                side: if friendly_fire_off {
+                    owner_side
+                } else {
+                    NO_SIDE
+                },
+                surface: surface.is_some(),
+                ownship: by_ownship,
+            };
             let hitbox = if easy {
                 crate::cheats::EASY_AIMING_HITBOX
             } else {
@@ -4315,8 +4326,14 @@ impl State {
                 if surface.is_some_and(|round| round.flak) {
                     // A flak shell that reaches the end of its life bursts there.
                     impacts.push((p.position, EffectKind::Flak, w.effects.object_explosion, 0));
-                    bursts.push(surface::Burst::new(
-                        p, w, owner_side, p.position, None, true,
+                    bursts.push(collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        p.position,
+                        collateral::Detonation::Air,
+                        None,
+                        true,
                     ));
                 } else {
                     self.ledger.resolve(p.id, Resolution::Missed);
@@ -4475,16 +4492,7 @@ impl State {
             let mut first: Option<(f64, Option<Hit>)> = None;
             // With friendly fire off, no round damages an aircraft of its
             // shooter's own side, the shooter included.
-            let shooter_side = if friendly_fire_off {
-                ships
-                    .iter()
-                    .find(|o| o.aircraft == p.owner)
-                    .map(|o| o.side)
-                    .or_else(|| target_sides.get(&p.owner).copied())
-                    .unwrap_or(NO_SIDE)
-            } else {
-                NO_SIDE
-            };
+            let shooter_side = shooter.side;
             let spares =
                 |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
             // The round's swept segment widened by its fuze, for the first
@@ -4641,7 +4649,15 @@ impl State {
                             p.previous[i] + (p.position[i] - p.previous[i]) * at
                         });
                         impacts.push((position, EffectKind::Flak, w.effects.object_explosion, 0));
-                        bursts.push(surface::Burst::new(p, w, owner_side, position, None, true));
+                        bursts.push(collateral::Burst::new(
+                            p,
+                            w,
+                            shooter,
+                            position,
+                            collateral::Detonation::Air,
+                            None,
+                            true,
+                        ));
                         return false;
                     }
                 }
@@ -4650,8 +4666,14 @@ impl State {
                 if first.is_none() && round.end_tick.is_some_and(|end| p.age >= end) {
                     if round.flak {
                         impacts.push((p.position, EffectKind::Flak, w.effects.object_explosion, 0));
-                        bursts.push(surface::Burst::new(
-                            p, w, owner_side, p.position, None, true,
+                        bursts.push(collateral::Burst::new(
+                            p,
+                            w,
+                            shooter,
+                            p.position,
+                            collateral::Detonation::Air,
+                            None,
+                            true,
                         ));
                     } else {
                         self.ledger.resolve(p.id, Resolution::Missed);
@@ -4676,6 +4698,22 @@ impl State {
                     impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
                     if by_ownship {
                         scored.push((p.owner, false));
+                    }
+                    let burst = collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        position,
+                        if wreck.role == TargetRole::Aircraft {
+                            collateral::Detonation::Air
+                        } else {
+                            collateral::Detonation::Ground
+                        },
+                        Some(wreck.id),
+                        false,
+                    );
+                    if burst.collateral() {
+                        bursts.push(burst);
                     }
                     return false;
                 }
@@ -4733,18 +4771,17 @@ impl State {
                                 ) / 100.,
                             }));
                         }
-                        if surface.is_some() {
-                            let burst = surface::Burst::new(
-                                p,
-                                w,
-                                owner_side,
-                                position,
-                                Some(r.target.id),
-                                false,
-                            );
-                            if burst.collateral() {
-                                bursts.push(burst);
-                            }
+                        let burst = collateral::Burst::new(
+                            p,
+                            w,
+                            shooter,
+                            position,
+                            collateral::Detonation::Air,
+                            Some(r.target.id),
+                            false,
+                        );
+                        if burst.collateral() {
+                            bursts.push(burst);
                         }
                     }
                     return false;
@@ -4867,20 +4904,37 @@ impl State {
                         };
                         impacts.push((position, EffectKind::Destroyed, explosion, crater));
                     }
-                    if surface.is_some() {
-                        let burst =
-                            surface::Burst::new(p, w, owner_side, position, Some(t.id), false);
-                        if burst.collateral() {
-                            bursts.push(burst);
-                        }
+                    // A round on an aircraft bursts in the air; on a ground
+                    // object or ship, at ground level.
+                    let burst = collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        position,
+                        if t.role == TargetRole::Aircraft {
+                            collateral::Detonation::Air
+                        } else {
+                            collateral::Detonation::Ground
+                        },
+                        Some(t.id),
+                        false,
+                    );
+                    if burst.collateral() {
+                        bursts.push(burst);
                     }
                 } else {
                     self.ledger.resolve(p.id, Resolution::Missed);
-                    if surface.is_some() {
-                        let burst = surface::Burst::new(p, w, owner_side, position, None, false);
-                        if burst.collateral() {
-                            bursts.push(burst);
-                        }
+                    let burst = collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        position,
+                        collateral::Detonation::Ground,
+                        None,
+                        false,
+                    );
+                    if burst.collateral() {
+                        bursts.push(burst);
                     }
                     events.push(Event::Ground);
                     if water(position[0], position[2]) {
@@ -4910,11 +4964,13 @@ impl State {
                 burst,
                 &rows,
                 friendly_fire_off,
-                surface::Outputs {
+                &water,
+                collateral::Outputs {
                     events: &mut events,
                     strikes: &mut strikes,
                     ownship_hits: &mut ownship_hits,
                     impacts: &mut impacts,
+                    scored: &mut scored,
                 },
             );
         }

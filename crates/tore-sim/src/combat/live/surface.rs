@@ -38,23 +38,15 @@
 //!   as it passes within its record's fuze radius of a hostile aircraft
 //!   in flight. The burst is an [`EffectKind::Flak`] effect with the record's
 //!   own explosion type.
-//! - A surface missile or flak burst does collateral damage: every aircraft
-//!   within the record's collateral radius, other than one the round struck
-//!   directly, takes the record's damage times its collateral percent, once.
-//!   Friendly fire off spares the shooter's side, as for direct hits.
-//!   Aircraft weapons keep today's rule (no collateral damage).
+//! - A surface round's collateral damage (`collateral.rs`, the rule every
+//!   weapon follows) reaches aircraft only.
 //!
 //! The explosion a destroyed ground object shows comes from its unit's record
 //! when the host gives one ([`State::set_ground_look`]).
-use super::{
-    DamageSection, EffectKind, HitRecord, LocalizedDamage, MAX_HIT_RECORDS, MAX_PROJECTILES,
-    NO_SIDE, OwnRow, Projectile, Side, State, Strike, damage_class, draw, is_gun, sub,
-};
+use super::{EffectKind, MAX_PROJECTILES, Projectile, State, is_gun};
 use crate::attitude::{Vector, dot};
 use crate::combat::gun_round::{self, service_ticks};
-use crate::combat::ledger::{Kill, Resolution};
-use crate::combat::live::Event;
-use crate::combat::missiles::{self, Flight, LaunchMode, Motion, Rules, TargetRole, seeker};
+use crate::combat::missiles::{self, Flight, LaunchMode, Motion, Rules, seeker};
 use crate::combat::{FallState, axial_speed, commanded_speed, engine_phase, launch_speed};
 use tore_formats::weapons::Weapon;
 
@@ -327,198 +319,6 @@ impl State {
     /// Ground object `id`'s contact volume now.
     pub fn ground_bounds(&self, id: u32) -> Option<crate::airport::OrientedBox> {
         self.ground_bounds.get(&id).copied()
-    }
-}
-
-/// A surface round's burst, applied after the round search of a step.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct Burst {
-    pub projectile: u32,
-    pub owner: u32,
-    pub owner_side: Side,
-    pub station: usize,
-    pub position: Vector,
-    pub damage: [i16; 5],
-    pub radius: f64,
-    pub percent: i32,
-    pub flags: u32,
-    /// The aircraft the round struck directly, which takes no collateral.
-    pub exclude: Option<u32>,
-    /// The burst is the round's outcome (a flak shell that struck nothing):
-    /// the ledger records it as a hit if it damaged anyone.
-    pub resolves: bool,
-}
-impl Burst {
-    pub fn new(
-        p: &Projectile,
-        w: &Weapon,
-        owner_side: Side,
-        position: Vector,
-        exclude: Option<u32>,
-        resolves: bool,
-    ) -> Self {
-        Self {
-            projectile: p.id,
-            owner: p.owner,
-            owner_side,
-            station: p.station,
-            position,
-            damage: w.damage.by_class,
-            radius: f64::from(w.damage.collateral_radius.max(0)),
-            percent: i32::from(w.damage.collateral_percent.max(0)),
-            flags: w.flags,
-            exclude,
-            resolves,
-        }
-    }
-    /// Whether the burst reaches anyone at all.
-    pub fn collateral(&self) -> bool {
-        self.radius > 0. && self.percent > 0
-    }
-    fn nominal(&self, category: u16) -> i32 {
-        i32::from(self.damage[damage_class(category)]).max(0) * self.percent / 100
-    }
-}
-
-/// An ownship's share of a burst, in the step's ownship-hit form: row, amount,
-/// section, direct gun hit, owner and weapon flags.
-pub(super) type OwnshipHit = (usize, i32, DamageSection, bool, u32, u32);
-
-/// The tick's shared lists a burst adds to.
-pub(super) struct Outputs<'a> {
-    pub events: &'a mut Vec<Event>,
-    pub strikes: &'a mut Vec<Strike>,
-    pub ownship_hits: &'a mut Vec<OwnshipHit>,
-    pub impacts: &'a mut Vec<(Vector, EffectKind, u8, u8)>,
-}
-
-impl State {
-    /// Applies one burst's collateral damage to every aircraft in its radius:
-    /// AI aircraft rows at once, ownships through the step's ownship hits.
-    pub(super) fn apply_burst(
-        &mut self,
-        burst: &Burst,
-        rows: &[OwnRow],
-        friendly_fire_off: bool,
-        out: Outputs<'_>,
-    ) {
-        let spares = |side: Side| {
-            friendly_fire_off && burst.owner_side != NO_SIDE && side == burst.owner_side
-        };
-        let within = |position: Vector| {
-            let d = sub(position, burst.position);
-            dot(d, d) <= burst.radius * burst.radius
-        };
-        let mut total: u32 = 0;
-        if burst.collateral() {
-            for (n, r) in rows.iter().enumerate() {
-                let t = &r.target;
-                if Some(t.id) == burst.exclude
-                    || t.hp <= 0
-                    || !t.body_present()
-                    || spares(t.side)
-                    || !within(t.position)
-                {
-                    continue;
-                }
-                let base = burst.nominal(t.category);
-                if base <= 0 {
-                    continue;
-                }
-                let amount = super::super::systems::damage_amount(
-                    u16::try_from(base).unwrap_or(u16::MAX),
-                    100,
-                    draw(&mut self.rng, 40) as u8,
-                );
-                let section = LocalizedDamage::section(burst.position, t);
-                out.ownship_hits
-                    .push((n, amount, section, false, burst.owner, burst.flags));
-                out.events.push(Event::Jolt(super::Jolt {
-                    target: t.id,
-                    from: burst.position,
-                    strength: f64::from(base) / 100.,
-                }));
-                total = total.saturating_add(u32::try_from(amount).unwrap_or(0));
-            }
-            for t in &mut self.targets {
-                if t.role != TargetRole::Aircraft
-                    || Some(t.id) == burst.exclude
-                    || t.hp <= 0
-                    || !t.body_present()
-                    || spares(t.side)
-                    || !within(t.position)
-                {
-                    continue;
-                }
-                let nominal = burst.nominal(t.category);
-                if nominal <= 0 {
-                    continue;
-                }
-                out.events.push(Event::Jolt(super::Jolt {
-                    target: t.id,
-                    from: burst.position,
-                    strength: f64::from(nominal) / 100.,
-                }));
-                let section = LocalizedDamage::section(burst.position, t);
-                let applied = nominal.min(t.hp);
-                t.hp -= applied;
-                t.localized_damage.record(section, nominal, t.initial_hp);
-                if t.hp > 0 {
-                    let rng = &mut self.rng;
-                    t.faults.hit(nominal, t.initial_hp, |n| draw(rng, n));
-                }
-                if self.history.len() == MAX_HIT_RECORDS {
-                    self.history.remove(0);
-                }
-                self.history.push(HitRecord {
-                    tick: self.tick,
-                    target: t.id,
-                    station: burst.station,
-                    class: damage_class(t.category),
-                    nominal,
-                    applied,
-                    hp_after: t.hp,
-                });
-                let credit = Kill {
-                    owner: burst.owner,
-                    victim: t.id,
-                    category: t.category,
-                    aircraft: true,
-                };
-                if applied > 0 {
-                    self.ledger.damaged(credit);
-                }
-                out.events.push(Event::Hit(t.id));
-                out.strikes.push(Strike {
-                    owner: burst.owner,
-                    victim: t.id,
-                    weapon_flags: burst.flags,
-                    destroyed: t.hp == 0,
-                    amount: applied,
-                });
-                if t.hp == 0 {
-                    self.ledger.kill(credit);
-                    out.events.push(Event::Destroyed(t.id));
-                    out.impacts.push((
-                        t.position,
-                        EffectKind::Destroyed,
-                        crate::combat::blast::AIRCRAFT,
-                        0,
-                    ));
-                }
-                total = total.saturating_add(u32::try_from(applied).unwrap_or(0));
-            }
-        }
-        if burst.resolves {
-            self.ledger.resolve(
-                burst.projectile,
-                if total > 0 {
-                    Resolution::Hit(total)
-                } else {
-                    Resolution::Missed
-                },
-            );
-        }
     }
 }
 
