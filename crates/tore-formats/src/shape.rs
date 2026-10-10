@@ -263,6 +263,110 @@ pub const fn loaded_count_word(hardpoint: u8) -> usize {
     LOADED_COUNT_BASE + hardpoint as usize
 }
 
+/// Synthetic state key that asks for a shape's damaged look: while it is
+/// nonzero, the state and export paths follow `ac` (jump to damage) records
+/// to the damaged model the shape carries inside itself, as the carrier
+/// towers (NIMZT, KITTT, CLEMT, WASPT) do. Absent or zero draws the intact
+/// model, as before. The scenery pose is always intact. Ships swap to their
+/// separate `_A` shape instead. Like the loaded-count keys it lies above any
+/// module address and is not listed in `state_words`.
+pub const DAMAGED_WORD: usize = 0xfffe_0000;
+
+/// Synthetic state key for the deck crew sprite frame (CATGUY.SH): the value
+/// `_CATGUYDraw@4` would return, the frame index (0 to 10) in the high 16
+/// bits and the sprite row (0 to 5) in the low 16. Absent means frame 0,
+/// row 0, the pose the scenery path always draws (fitted: the native frame
+/// choice is not traced). Listed in `state_words` of a shape that reads it.
+pub const SPRITE_FRAME_WORD: usize = 0xfffd_0000;
+
+/// FNV-1a 64 of the 217-byte frame-table envelope in CATGUY.SH after its f0
+/// marker, with the five absolute address words (the object id it pushes,
+/// the two trampolines' return addresses and thunks) zeroed. Only a digest
+/// is recorded, never the bytes.
+const SPRITE_FRAME_DIGEST: u64 = 0x299d_236a_a736_e79f;
+const SPRITE_FRAME_LEN: usize = 217;
+const SPRITE_FRAME_ADDRESSES: [std::ops::Range<usize>; 5] =
+    [3..7, 10..14, 15..19, 207..211, 212..216];
+
+/// Where the envelope's three frame tables sit after its start: sprite
+/// widths in source units, left texture columns and frame widths in texels,
+/// eleven dwords each.
+const SPRITE_FRAME_TABLES: [usize; 3] = [0x15d, 0x105, 0x131];
+const SPRITE_FRAMES: u32 = 11;
+
+/// A sprite the reviewed frame envelope rewrites before the SH program
+/// draws it: the `e4` and `ea` records it writes, the new width and corners.
+#[derive(Clone, Copy)]
+struct SpritePatch {
+    corners_at: usize,
+    sprite_at: usize,
+    width: f32,
+    uv: [[f32; 2]; 4],
+}
+
+/// Reviewed deck-crew envelope (CATGUY.SH), after the f0 marker: a native
+/// call to `_CATGUYDraw@4` with the object id, which returns the frame in
+/// the high word and the row in the low word, then position-relative
+/// arithmetic that writes the following `ea` sprite's width from one table
+/// and its four `e4` corners from the other two: columns `left + 1` and
+/// `left + width - 1`, rows `row * 79 + 10` and `row * 79 + 68` counted
+/// down a 480-row PIC, stored counted up (`479 - y`), and a trampoline that
+/// resumes SH at the `7a` vertex before those records. Recognised by its
+/// digest; `frame` is the value the native call would return. Returns the
+/// resume offset and the patch, or `None` when the bytes are not this form.
+fn sprite_frame_envelope(
+    c: &[u8],
+    base: usize,
+    start: usize,
+    frame: i32,
+) -> Result<Option<(usize, SpritePatch)>> {
+    let Some(bytes) = c.get(start..start + SPRITE_FRAME_LEN) else {
+        return Ok(None);
+    };
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for (i, b) in bytes.iter().enumerate() {
+        let b = if SPRITE_FRAME_ADDRESSES.iter().any(|r| r.contains(&i)) {
+            0
+        } else {
+            *b
+        };
+        hash = (hash ^ u64::from(b)).wrapping_mul(0x100_0000_01b3);
+    }
+    if hash != SPRITE_FRAME_DIGEST {
+        return Ok(None);
+    }
+    let resume = start + SPRITE_FRAME_LEN;
+    if trampoline(c, base, start + 9)? != start + 20
+        || trampoline(c, base, resume - 11)? != resume
+        || slice(c, resume, 1)? != [0x7a]
+        || slice(c, resume + 10, 1)? != [0xe4]
+        || slice(c, resume + 30, 1)? != [0xea]
+    {
+        return Err(invalid(
+            "sprite frame envelope does not resume on its sprite",
+        ));
+    }
+    let (index, row) = ((frame as u32) >> 16, (frame as u32) & 0xffff);
+    if index >= SPRITE_FRAMES || row > 5 {
+        return Err(invalid("sprite frame outside its tables"));
+    }
+    let [width, left, span] =
+        SPRITE_FRAME_TABLES.map(|table| u32_at(c, start + table + 4 * index as usize));
+    let (width, left, span) = (width? as f32, left? as f32, span? as f32);
+    let (u0, u1) = (left + 1., left + span - 1.);
+    let top = (479 - (row * 79 + 10)) as f32;
+    let bottom = (479 - (row * 79 + 68)) as f32;
+    Ok(Some((
+        resume,
+        SpritePatch {
+            corners_at: resume + 10,
+            sprite_at: resume + 30,
+            width,
+            uv: [[u0, bottom], [u0, top], [u1, top], [u1, bottom]],
+        },
+    )))
+}
+
 /// `68 X 68 Y c3`: the push pair an f0 record uses to hand control to a
 /// main-program thunk `Y` that returns to `X`. Returns `X` as a CODE offset.
 fn trampoline(c: &[u8], base: usize, at: usize) -> Result<usize> {
@@ -382,6 +486,40 @@ fn hardpoint_angle_envelope(c: &[u8], base: usize, start: usize) -> Result<Optio
     Ok(Some((resume, rest)))
 }
 
+/// Reviewed low-memory envelope (the carriers NIMZ, KITT, CLEM, WASP, their
+/// `_A` shapes and towers, and CATGUY), after the f0 marker: `cmp byte
+/// [_lowMemory],0; jz` over a resume trampoline and the SH arm behind it, then
+/// a second resume trampoline. Both trampolines enter the same interpreter
+/// thunk and resume on the byte after themselves. The arm is a `48` jump to
+/// the shape's reduced model or `00 00`, nothing drawn (CATGUY). A machine
+/// with the memory the game asks for takes the jump over the arm, so the
+/// reader always resumes after the second trampoline: the full model. Returns
+/// that offset, or `None` when the bytes are not this form.
+fn low_memory_envelope(c: &[u8], base: usize, start: usize) -> Result<Option<usize>> {
+    let Some(b) = c.get(start..start + 9) else {
+        return Ok(None);
+    };
+    if b[..2] != [0x80, 0x3d] || b[6] != 0 || b[7] != 0x74 {
+        return Ok(None);
+    }
+    let first = start + 9;
+    let arm = first + 11;
+    let arm_len = match c.get(arm..arm + 2) {
+        Some([0x48, 0]) => 4,
+        Some([0, 0]) => 2,
+        _ => return Ok(None),
+    };
+    let second = arm + arm_len;
+    if usize::from(b[8]) != 11 + arm_len
+        || trampoline(c, base, first).ok() != Some(arm)
+        || trampoline(c, base, second).ok() != Some(second + 11)
+        || slice(c, first + 6, 4)? != slice(c, second + 6, 4)?
+    {
+        return Err(invalid("unreviewed low-memory envelope"));
+    }
+    Ok(Some(second + 11))
+}
+
 /// A c4 heading word in binary angle units (65536 a turn) as radians.
 fn heading_radians(units: i16) -> f32 {
     f32::from(units) * std::f32::consts::TAU / 65536.
@@ -444,6 +582,7 @@ impl Shape {
         let mut lines = Vec::new();
         let mut billboards = Vec::new();
         let mut sprite_uv = None;
+        let mut sprite_patch: Option<SpritePatch> = None;
         let mut fog = FogMode::Enabled;
         let mut seen = BTreeSet::new();
         let mut state_words = BTreeSet::new();
@@ -483,6 +622,9 @@ impl Shape {
                     p = loaded_count_branch(c, base, p, i32::MAX)?;
                 }
                 0x48 if export => p = target(p + 4, word(c, p + 2)?, c)?,
+                0xac if !scenery && state.get(&DAMAGED_WORD).is_some_and(|v| *v != 0) => {
+                    p = target(p + 4, word(c, p + 2)?, c)?;
+                }
                 0x38 => {
                     let t = target(p + 3, word(c, p + 1)?, c)?;
                     if t <= p {
@@ -520,6 +662,23 @@ impl Shape {
                         state_words.insert(key);
                         let count = state.get(&key).copied().unwrap_or(0);
                         p = loaded_count_branch(c, base, envelope, count)?;
+                        continue;
+                    }
+                    let frame = if scenery {
+                        0
+                    } else {
+                        state.get(&SPRITE_FRAME_WORD).copied().unwrap_or(0)
+                    };
+                    if let Some((resume, patch)) = sprite_frame_envelope(c, base, p + 2, frame)? {
+                        if !scenery {
+                            state_words.insert(SPRITE_FRAME_WORD);
+                        }
+                        sprite_patch = Some(patch);
+                        p = resume;
+                        continue;
+                    }
+                    if let Some(resume) = low_memory_envelope(c, base, p + 2)? {
+                        p = resume;
                         continue;
                     }
                     if let Some((resume, rest)) = hardpoint_angle_envelope(c, base, p + 2)? {
@@ -612,11 +771,17 @@ impl Shape {
                         })
                     });
                     slice(c, p, 20)?;
+                    if let Some(patch) = sprite_patch.filter(|patch| patch.corners_at == p) {
+                        sprite_uv = Some(patch.uv);
+                    }
                     p += 20;
                 }
                 0xea => {
                     let center = u16_at(c, p + 2)?;
-                    let size = [word(c, p + 4)? as f32, word(c, p + 6)? as f32];
+                    let mut size = [word(c, p + 4)? as f32, word(c, p + 6)? as f32];
+                    if let Some(patch) = sprite_patch.filter(|patch| patch.sprite_at == p) {
+                        size[0] = patch.width;
+                    }
                     if center % 8 != 0 || size.iter().any(|v| *v <= 0.) {
                         return Err(invalid("invalid shape billboard"));
                     }
@@ -1158,6 +1323,75 @@ mod tests {
         let mut c = turret(None, 0);
         c[31] = 0x88; // an unreviewed write
         assert!(Shape::parse(&module::fixture(&c)).is_err());
+    }
+
+    /// A carrier header: the low-memory envelope whose arm is `arm` (a `48`
+    /// jump to the reduced model, or `00 00`), the full model (colour 100)
+    /// after the second trampoline, then the reduced model (colour 101).
+    fn low_memory(arm: &[u8]) -> Vec<u8> {
+        let mut c = vec![0xf0, 0, 0x80, 0x3d, 0, 0x20, 0, 0, 0, 0x74];
+        c.push(11 + arm.len() as u8);
+        push_trampoline(&mut c, 22);
+        c.extend(arm);
+        let full = c.len() + 11;
+        push_trampoline(&mut c, full);
+        c.extend(program());
+        let reduced = c.len();
+        let mut small = program();
+        small[27] = 101;
+        c.extend(small);
+        if arm[0] == 0x48 {
+            let rel = (reduced - 26) as u16;
+            c[24..26].copy_from_slice(&rel.to_le_bytes());
+        }
+        c
+    }
+
+    #[test]
+    fn low_memory_envelope_draws_the_full_model_on_every_path() {
+        let colors =
+            |shape: Shape| -> Vec<u8> { shape.faces.iter().map(|f| f.colors[0]).collect() };
+        for arm in [&[0x48, 0, 0, 0][..], &[0, 0][..]] {
+            let data = module::fixture(&low_memory(arm));
+            assert_eq!(colors(Shape::parse(&data).unwrap()), vec![100]);
+            assert_eq!(colors(Shape::scenery(&data).unwrap()), vec![100]);
+            let export = Shape::with_export_state(&data, &BTreeMap::new()).unwrap();
+            assert_eq!(colors(export), vec![100]);
+        }
+    }
+
+    #[test]
+    fn low_memory_envelope_rejects_unreviewed_forms() {
+        let mut c = low_memory(&[0x48, 0, 0, 0]);
+        c[10] = 0x0d; // the jz no longer lands on the second trampoline
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+        let mut c = low_memory(&[0x48, 0, 0, 0]);
+        c[12] = 0x30; // the first trampoline no longer resumes on the arm
+        assert!(Shape::scenery(&module::fixture(&c)).is_err());
+        let mut c = low_memory(&[0x48, 0, 0, 0]);
+        c[32] = 0x99; // the two trampolines enter different thunks
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+    }
+
+    #[test]
+    fn damaged_key_follows_jump_to_damage_in_the_state_paths_only() {
+        let mut c = vec![0xac, 0, 0, 0];
+        c.extend(program());
+        let rel = (c.len() - 4) as u16;
+        c[2..4].copy_from_slice(&rel.to_le_bytes());
+        let mut damaged = program();
+        damaged[27] = 102;
+        c.extend(damaged);
+        let data = module::fixture(&c);
+        let color = |shape: Shape| shape.faces[0].colors[0];
+        let hit = BTreeMap::from([(DAMAGED_WORD, 1)]);
+        assert_eq!(color(Shape::with_state(&data, &hit).unwrap()), 102);
+        assert_eq!(color(Shape::with_export_state(&data, &hit).unwrap()), 102);
+        let intact = Shape::with_state(&data, &BTreeMap::from([(DAMAGED_WORD, 0)])).unwrap();
+        assert!(intact.state_words.is_empty());
+        assert_eq!(color(intact), 100);
+        assert_eq!(color(Shape::parse(&data).unwrap()), 100);
+        assert_eq!(color(Shape::scenery(&data).unwrap()), 100);
     }
 
     fn sprite() -> Vec<u8> {

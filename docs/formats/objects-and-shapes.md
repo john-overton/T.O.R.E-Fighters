@@ -433,7 +433,7 @@ flowchart LR
 | CHAP.SH, SA2.SH | 49, 146 faces | 37 to 49, 62 to 146 by count | scenery only, unchanged |
 | SOLDIER.SH | 1 sprite | 1 sprite | fails, no geometry |
 | RUNNER.SH | 2 faces | 12 faces | unchanged |
-| CATGUY.SH | fails | fails | fails |
+| CATGUY.SH | 1 sprite | 1 sprite | fails (taught in S2, [below](#carriers-islands-and-deck-crew-2026-10-10)) |
 
 Every retail shape in FA_1, FA_2, FA_4B, FA_4D and swpatch that projected
 before keeps a byte-identical result on every path, including each state
@@ -442,7 +442,8 @@ recorded digest per shape and skips without the install.
 
 CATGUY.SH, the carrier deck crew, is a sprite whose texture corners are
 written by `_CATGUYDraw@4` from a frame table each frame; its file corners
-are zero. It needs its own reviewed animation rule, with the carriers.
+are zero. Slice S2 reads that envelope; see
+[carriers, islands and deck crew](#carriers-islands-and-deck-crew-2026-10-10).
 
 SOLDIER.SH is one 7 by 12 unit sprite centred 6 units up, cut from rows 150
 to 199 of SOLDIER.PIC. `Billboard::face` turns it to a viewer; the static
@@ -465,6 +466,180 @@ from four sides, close views, a launcher sheet by loaded count, and every
 texture with holes in magenta. Faces the shape-file guide calls opaque
 (switch 12, or the `ee`/`fe` combinations) show their own colour through
 index-255 texels; transparent faces are cut out there.
+
+## Carriers, islands and deck crew (2026-10-10)
+
+Research and implementation, slice S2 of the surface objectives round. Same
+build and tools as the section above; FA.EXE is the 1.02F build the quick
+template tables were read from.
+
+### Low-memory envelope
+
+Every carrier hull, `_A` hull and island opens with the same f0 record:
+`cmp byte [_lowMemory],0; jz` over a trampoline and a short SH arm, then a
+second trampoline. Both trampolines enter `do_start_interp` and resume on the
+byte after themselves, so both are resume points, not native calls. The arm
+is a `48` jump to a reduced model at the end of the shape (CATGUY's arm is
+`00 00`: draw nothing). A machine with the memory the game asks for skips the
+arm and resumes after the second trampoline, at the full model. The import
+names come from each shape's `.idata`; only these 12 shapes and CATGUY test
+`_lowMemory`.
+
+The reader used to take the first trampoline. The scenery and export paths
+then followed the `48` jump and drew the reduced model (NIMZ: 28 faces and 16
+lines), and the state path, which does not follow `48` jumps, ran into the
+second trampoline's bytes and ended with no geometry. The reader now
+recognises the envelope (the `jz` length must land on the second trampoline,
+both trampolines must resume on themselves and share one thunk) and takes the
+full model on every path. Records after it are the detail selectors `c8`
+(jump to level of detail), `a6` (jump to detail level) and `ac` (jump to
+damage), skipped as before, so the nearest detail draws.
+
+### Damaged islands
+
+The hulls carry their damage in separate `_A` shapes. The islands carry it
+inside: an `ac` record at the top of each island jumps to a damaged copy
+textured with `_NIMZT_A`, `_KITTTD`, `_CLEMT_A` or `_WASPT_A`. The state and
+export paths follow `ac` while the synthetic state key
+`shape::DAMAGED_WORD` (`0xfffe0000`) is nonzero; absent or zero draws the
+intact island, and the scenery path is always intact. The key is not listed
+in `state_words`, so no recorded digest changed; every other shape with an
+`ac` record behaves as before unless a caller sets the key, and only the four
+islands were reviewed with it.
+
+### Results
+
+| Shape | Before: scenery / state | Now, every path | Damage key |
+| --- | --- | --- | --- |
+| NIMZ.SH (Eisenhower) | 28 faces, 16 lines (reduced) / fails | 98 faces | 98 |
+| NIMZ_A.SH | 41 faces, 16 lines / fails | 98 faces | 98 |
+| KITT.SH (Kitty Hawk) | 23 faces / fails | 232 faces | 232 |
+| KITT_A.SH | 45 faces / fails | 233 faces | 233 |
+| CLEM.SH (Clemenceau) | 18 faces / fails | 96 faces (10 lines on the export path) | 96 |
+| CLEM_A.SH | 27 faces / fails | 98 faces (10 lines on the export path) | 98 |
+| WASP.SH (Wasp) | 65 faces / fails | 139 faces | 139 |
+| WASP_A.SH | 65 faces / fails | 140 faces | 140 |
+| NIMZT.SH (island) | 14 faces / fails | 48 faces | 48, damaged |
+| KITTT.SH | 28 faces / fails | 77 faces | 64, damaged |
+| CLEMT.SH | 36 faces / fails | 66 faces | 66, damaged |
+| WASPT.SH | 58 faces / fails | 85 faces | 83, damaged |
+| CATGUY.SH (deck crew) | fails / fails | 1 sprite | 1 sprite |
+
+Every face record of each full model is reached; the only records left
+unread are the lower levels of detail (the low-memory jump lands on one of
+them) and, for the islands, the damaged copy. The twelve carrier entries of the digest manifest
+(`tests/data/shape-projection-digests.txt`) were refreshed on purpose; no
+other entry changed. All 13 shapes pass `tools/check_shape_roundtrip.py`.
+
+`XNIMZ.SH`, `XKITT.SH`, `XCLEM.SH` and `XWASP.SH` are not used in flight:
+FA.EXE names them beside the reference room's `.INF` and picture strings.
+They read cleanly and stay in the manifest unchanged.
+
+### Parts spawned with a carrier
+
+FA.EXE spawns each carrier's island and deck parts from a table: names at
+`0x50cbd0` (Eisenhower), `0x50cc18` (Wasp), `0x50cc38` (Kitty Hawk) and
+`0x50cc80` (Clemenceau), each followed by signed word triples (right, up,
+forward, in world units) and headings in binary angle units. The spawning
+loop (`0x4bdd34` for the Eisenhower) turns each offset by the carrier's
+attitude and adds it to the carrier's position (`0x411d10`).
+
+| Carrier | Catapult officer (CATGUY.NT) | Tractors (MULE_A, MULE_B, MULE_C) | Island |
+| --- | --- | --- | --- |
+| Eisenhower | -15, 0, 1011; heading 32760 | (292, 0, -408), (205, 0, -158), (-387, 0, -729) | `~NIMZT.OT` at 360, 0, -195 |
+| Kitty Hawk | -15, 0, 1011; 32760 | (252, 0, -408), (205, 0, -158), (-347, 0, -729) | `~KITTT.OT` at 300, 0, -190 |
+| Clemenceau | 70, 20, 1420; 32760 | (330, 0, -700), (466, 0, 700), (-410, 0, -729) | `~CLEMT.OT` at 380, 0, 230 |
+| Wasp | none | MULE_A only, (80, 0, 320) | `~WASPT.OT` at 0, 0, 0 |
+
+Tractor headings are -20384, 4004 and -3276 (Wasp: -25116); islands 0. The
+loop is skipped in two game modes (word `0x520a50` equal to 3 or 12), not
+traced further.
+
+Every height is 0 (the Clemenceau's officer 20), yet the island shapes reach
+down to their ground offset (F2 word +8, which FA 0x42e0c0 reads to stand an
+object on the ground): NIMZT -236 and CLEMT -224 world units, KITTT and WASPT
+0, the tractors 0, CATGUY -6 (its sprite is centred on its origin), and the
+parked Rafale and Super Etendard -18 and -16. Something lifts the parts onto
+the deck; the rule is not traced. The preview stands each part on the hull's
+deck by its ground offset (fitted). That puts the deck crew's feet, the
+tractors' wheels, the aircraft's wheels and every island's base on the deck,
+and the hull numbers on the Eisenhower and Kitty Hawk islands above it.
+Against it: the Eisenhower then stands 832 ft (277 ft at a third) above the
+waterline, where its real mast top is about 207 ft; with the island's origin
+on the deck instead it stands 596 ft (199 ft), and the lower third of the
+island, with its hull number, hangs below the deck. This is an open question
+for the slice that places carriers.
+
+### Flight decks
+
+The flat deck is the height shared by the largest area of level faces. The
+outline is the convex hull of those faces (right, forward), in source units;
+times 4 for feet at the scenery scale, which is what the carriers' own
+placement offsets and the template positions use.
+
+| Hull | Deck height | Level deck area | Outline (right, forward), source units |
+| --- | --- | --- | --- |
+| NIMZ | 63 units: 252 ft scenery, 84 ft at a third | 159,865 sq units | (-136,123) (-128,-210) (-75,-307) (-27,-307) (54,-295) (127,-198) (127,214) (30,512) (-43,512) (-136,200) |
+| KITT | 58: 232 ft, 77 ft | 128,172 | (-112,140) (-99,-239) (-76,-312) (-40,-394) (1,-386) (69,-372) (81,-325) (101,-242) (101,174) (48,409) (-33,409) |
+| CLEM | 67: 268 ft, 89 ft | 182,008 | (-126,97) (-118,-323) (83,-323) (131,-94) (131,496) (-65,496) (-126,172) |
+| WASP | 58: 232 ft, 77 ft | 65,950 | (-67,-288) (-58,-298) (-39,-317) (39,-317) (100,-259) (100,-207) (67,200) (58,295) (-58,295) (-67,286) |
+
+The Wasp's level faces at 58 cover only about half its deck rectangle (more
+level faces lie at 49 and 33 units, and some deck faces are not level), so
+its outline is partial. Kitty Hawk also has smaller level areas at 50 and 22
+units. The areas sum level faces and count overlaps twice. The Clemenceau
+template `~QFFLT` parks its eight aircraft inside the CLEM outline.
+
+### Extents at both scales
+
+The hulls' source units, at the scenery scale (times 4, as feet) and at a
+third of that (the aircraft convention):
+
+| Hull | Length | Beam | Real length |
+| --- | --- | --- | --- |
+| NIMZ | 819 units: 3,276 ft, 1,092 ft | 263: 1,052 ft, 351 ft | 1,092 ft |
+| KITT | 819: 3,276 ft, 1,092 ft | 213: 852 ft, 284 ft | 1,069 ft |
+| CLEM | 819: 3,276 ft, 1,092 ft | 257: 1,028 ft, 343 ft | 869 ft |
+| WASP | 633: 2,532 ft, 844 ft | 200: 800 ft, 267 ft | 844 ft |
+
+At a third, the Eisenhower, Kitty Hawk and Wasp lengths match the real ships;
+the Clemenceau is modelled at the Eisenhower's length. The scale is
+unchanged here.
+
+### Deck crew sprite
+
+CATGUY.SH draws one sprite. Its f0 envelope calls `_CATGUYDraw@4` with the
+object id, which returns the frame in the high word and the row in the low
+word, then rewrites the next `ea` sprite's width and its four `e4` corners
+from three eleven-entry tables in the shape: width 8 units (12 for frame 9),
+columns `left + 1` to `left + width - 1` of the 640 by 480 PIC, rows
+`row * 79 + 10` to `row * 79 + 68` counted down and stored counted up
+(`479 - y`). The reader recognises the 217-byte envelope by a recorded
+FNV-1a digest with its five address words zeroed (no bytes are recorded),
+checks that both trampolines resume where expected and that the resume lands
+on the `7a`, `e4`, `ea` sprite records, and applies the same tables. The
+synthetic state key `shape::SPRITE_FRAME_WORD` (`0xfffd0000`) carries the
+value the native call returns; absent, and always on the scenery path, it is
+frame 0, row 0 (fitted: the frame choice is not traced). Frames past 10 or
+rows past 5 are errors.
+
+The sprite's centre is its origin, 8 by 12 units at scale 1, so it needs its
+ground offset (-6) to stand on the deck. A `68` record before the texture
+switches between `CATF.PIC` (front) and `CATB.PIC` (back), most likely by the
+viewer's side; it is not decoded. The scenery path draws the front; the state
+path draws the back, because it does not follow the `48` jump over the
+second texture (the reader's existing rule for that path).
+
+### Preview
+
+`--surface-preview` adds sheets for the four hulls with their `_A` shapes,
+the four islands with their damage branch, a sheet per carrier with its
+island and deck parts placed from the table above (intact and damaged, four
+sides, plus close views), and the `~QFFLT` fleet: the Clemenceau with its
+parked aircraft, and the whole fleet from above and from a quarter with each
+ship ringed. Escort placeholders take the first unit of the theater's default
+enemy group list; the surface round's resolution picks among them. The
+preview prints each deck's height and outline.
 
 ## Whitecap shape boundary
 
@@ -729,6 +904,11 @@ SRDR1, SRDR2; Tall King `KING.OT`; passive radars; microwave relays; MISTRK, the
 
 ### Shape reader status for NTs
 
+Survey before the reader work of 2026-10-10. Every shape in the table below
+now projects on every path: see
+[surface unit shapes](#surface-unit-shapes-envelopes-and-sprites-2026-10-10)
+and [carriers, islands and deck crew](#carriers-islands-and-deck-crew-2026-10-10).
+
 `shape_inspect` on all 115 NT main and `_A` shapes (with the state path rather
 than the scenery path): all ground vehicles, all AAA, 13 of 17 SAMs, all
 non-carrier ships except two, the Kiev and every `_A` except the carriers read
@@ -743,8 +923,8 @@ cleanly. These fail:
 | `NIMZ`, `KITT`, `CLEM`, `WASP` and their `_A` shapes | "No geometry" | Projection ends with no faces; likely a level-of-detail or state branch the reader does not take; the four carrier tower OTs (`~NIMZT`, `~KITTT`, `~CLEMT`, `~WASPT`) fail the same way |
 
 `CHAP.SH` and `SA2.SH` fail the state path too and use a fitted static pose.
-Among OTs, 163 of 170 project; `CRATER.SH`, the four carrier towers and the
-absent `TREE1`/`TREE2` do not
+Among OTs, 163 of 170 projected at that survey; `CRATER.SH`, the four carrier
+towers (now read) and the absent `TREE1`/`TREE2` did not
 ([retail terrain review](../baselines/retail-terrain-review.md#object-findings)).
 Every ship has a `_A` damaged shape; no ground vehicle or SAM has one, and
 `DEST.OT` ("Destroyed Vehicle", hp 0, `DEST.SH`) is the wreck object.
