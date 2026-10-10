@@ -123,16 +123,20 @@ impl GroupTransform {
 }
 
 /// One unit's changing state. Its hit points stay in combat's target row
-/// (`live::State`), which the checkpoint already codes; the controller,
-/// movement and resupply slices add their fields here.
+/// (`live::State`), which the checkpoint already codes; the controller and
+/// resupply slices add their fields here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SurfaceUnitState {
     pub id: UnitId,
+    /// A unit that follows a route: where it is and how it is moving. `None`
+    /// until its first tick (and for every unit with no route), when it
+    /// stands where the mission put it.
+    pub mover: Option<super::movement::Mover>,
 }
 
 impl SurfaceUnitState {
     pub fn new(id: UnitId) -> Self {
-        Self { id }
+        Self { id, mover: None }
     }
 }
 

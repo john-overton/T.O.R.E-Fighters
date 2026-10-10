@@ -111,6 +111,7 @@ mod static_art;
 mod su25_animation;
 mod su27_animation;
 mod su35_animation;
+mod surface_drive;
 mod surface_dump;
 mod surface_lighting;
 mod surface_preview;
@@ -8520,6 +8521,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-dump") {
         surface_dump::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--surface-drive") {
+        surface_drive::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-sheets") {

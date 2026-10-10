@@ -808,6 +808,8 @@ pub fn snapshot(
             .collect(),
         pilots: frame.escapees.iter().map(pilot_pose).collect(),
         models: presentation.models.clone(),
+        // A recording holds no surface units yet (the replay slice, RP1).
+        surface: Vec::new(),
     }
 }
 

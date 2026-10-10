@@ -698,28 +698,61 @@ Ships use the same controllers per mount, with arcs `slewLimitH` (60 to 150
 degrees each side) and `slewLimitP` relative to the hull heading, and mount
 positions from the hardpoints (retail). Carriers (Eisenhower, Kitty Hawk,
 Clemenceau, Wasp, Kiev) fight with their Phalanx and Sea Sparrow, or SA-N-3,
-SA-N-9 and AAA30 for the Kiev, and are otherwise static targets. Template ships
-are stationary (retail: `speed 0`, no waypoints). Ship movement exists for later
-campaigns. Ships are never resupplied; their SAM rails are finite as in retail
-and their guns have an unlimited reserve.
+SA-N-9 and AAA30 for the Kiev, and are otherwise static targets. Ships are
+never resupplied; their SAM rails are finite as in retail and their guns have an
+unlimited reserve. The one template with sailing ships is `~QTCARGO`, see
+[Movement](#movement).
 
 ### Movement
 
-Only `~QUCOL` (the Ukraine armored column) moves in a Quick Mission (retail:
-every other template object has `speed 0` and no waypoints).
+Five Quick Mission templates carry routes (retail: every other object has `speed
+0` and no waypoints). The reader exposes the route of each; the closing waypoint
+(flag 2) sits at 0 0 0, so a route's path is the unit's start plus its legs.
 
-- Nine tanks each follow their own route: five waypoints, `w_speed` 50 ft/s, the
-  routes offset 400 ft apart so the formation is in the data. One route is about
-  58,600 ft (9.6 nm), computed from the template: at 50 ft/s it takes about 20
-  minutes.
-- Follower (fitted): steer toward the next waypoint at the unit's turn rate (15
-  degrees per second for tanks), accelerate at 5 ft/s squared to the waypoint
-  speed, clamp to terrain height every tick, pitch and bank to the local slope,
-  stop at the end waypoint and stay. A destroyed tank stops where it died. No
-  collision avoidance (the routes do not cross).
-- Ships later use the same follower on water, without terrain clamp, at 5
-  degrees per second and 1 ft/s squared.
-- Guns fire while moving (fitted; retail behaviour unknown).
+| Template | Who moves | Route |
+| --- | --- | --- |
+| `~QUCOL` | Nine tanks | Three legs at 50 ft/s, 58,600 to 62,600 ft each (9.6 to 10.3 nm), the tanks 400 ft apart in a column that merges on the first point |
+| `~QTCARGO` | Three CARGO2 target ships | One leg at 16 ft/s (9.5 knots) to a common point, 87,100 to 101,800 ft |
+| `~QUFACT`, `~QUBUNK` | One truck each | Legs at 50 ft/s, 6,100 ft and 72,200 ft |
+| `~QFACT` (not offered) | One truck | A copy of `~QUFACT`'s |
+
+A routed template is never relocated or jittered (its units follow roads and sea
+lanes), so the routes are in the same frame as the units. A tank column takes
+about 20 minutes to drive its route; the cargo ships take 90 to 100 minutes.
+
+The follower (fitted: the retail waypoint consumer is untraced):
+
+- **Steering.** Turn toward the next leg's point at the record's `_turnRate`
+  (182 units per degree per second: 15 degrees a second for tanks, 5 for
+  ships, 45 for trucks). A unit turns in place if it must.
+- **Speed.** Accelerate and brake at 5 ft/s squared on land and 1 ft/s squared
+  at sea (the record's `_acc` units are unknown) toward the leg's `w_speed`,
+  never above the record's `_maxSpeed`. A turn sharper than 45 degrees slows
+  the unit to a quarter of the leg speed until it points along the leg again.
+- **Legs.** A leg counts as reached inside two turning-circle radii of its point
+  (at least 25 ft), so a point the unit cannot turn onto never makes it circle;
+  the corner is rounded, not cut square. The last point is approached at the
+  braking speed and reached exactly (within 4 ft the unit stands on it).
+- **Terrain.** A land unit stands on the terrain height every tick and tilts to
+  the local slope (pitch and bank from the height field 30 ft either side). A
+  ship keeps the water level it started at and stays level: its route is
+  authored on water, and the terrain grid's 8,192 ft cells are too coarse to say
+  where a harbour or a river ends (the Vietnam cargo route crosses cells
+  classed as land).
+- **Stops.** A unit stands on the end of its route for good. A destroyed unit
+  stops at once, where it died, and stays.
+- **No collision.** Units neither avoid each other nor block aircraft: the
+  tanks of `~QUCOL` merge on the first point, and the three cargo ships end on
+  one point. Planes fly through a routed unit (agent decision: the scene's
+  contact box at its start would otherwise stay solid where it no longer
+  stands).
+- **Fire.** Guns fire while moving (fitted; retail behaviour unknown). The unit
+  fires from where it is: its combat target (aim point, velocity, orientation),
+  its hit box and its mounts follow the pose every tick.
+
+The state of a moving unit is a position, heading, speed, leg and halt reason in
+whole units (1/65536 ft, 2^32 binary angles), so a checkpoint resumes the march
+exactly and the path is a function of the mission and the tick alone.
 
 ### Experience
 

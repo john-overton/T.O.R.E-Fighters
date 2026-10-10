@@ -3,7 +3,10 @@
 //! are their combat target rows, which `live::State`'s coder already carries
 //! (template ids included); this codes the per-unit state the surface slices
 //! add, with the digest of the surface it belongs to.
-use super::{SurfaceState, SurfaceUnitState, UnitId};
+use super::{
+    SurfaceState, SurfaceUnitState, UnitId,
+    movement::{Halt, Mover},
+};
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 
 impl Checkpoint for UnitId {
@@ -15,7 +18,25 @@ impl Checkpoint for UnitId {
     }
 }
 
-tore_sim::checkpoint_struct!(SurfaceUnitState { id });
+tore_sim::checkpoint_enum!(Halt {
+    Moving = 0,
+    Arrived = 1,
+    Destroyed = 2,
+});
+
+tore_sim::checkpoint_struct!(Mover {
+    x,
+    y,
+    z,
+    heading,
+    pitch,
+    bank,
+    speed,
+    leg,
+    halt,
+});
+
+tore_sim::checkpoint_struct!(SurfaceUnitState { id, mover });
 
 tore_sim::checkpoint_struct!(SurfaceState { digest, units });
 
