@@ -54,6 +54,7 @@ mod flight_watch;
 mod formation_trace;
 mod graphics;
 mod graphics_screen;
+mod gunsight_view;
 mod hud;
 mod hud_aperture;
 mod il76_animation;
@@ -276,6 +277,8 @@ struct App {
     researched_flight: bool,
     native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
     flight_clock: flight::Clock,
+    /// The AC-130 gunsight camera's look smoothing and framing zoom.
+    sight: gunsight_view::Sight,
     /// Situation music observations; audio only, never read by the simulation.
     flight_music: flight_music::Observer,
     /// The RWR warning tones' lock memory, reset with each flight.
@@ -4006,6 +4009,27 @@ impl ApplicationHandler for App {
                                 .expect("the presented seat flies a plane"),
                         };
                         let presented = frame.presented();
+                        // The AC-130 gunsight's camera this frame: the sim's look
+                        // carried smoothly between ticks, from the sensor turret.
+                        let sight_frame = frame.readout.gunsight.as_ref().map(|gunsight| {
+                            let tracked = gunsight.sight.tracked().and_then(|_| {
+                                self.combat_view
+                                    .display_position(&self.world.combat, &frame.readout)
+                            });
+                            let alpha = if self.flight_ui.frozen() {
+                                1.
+                            } else {
+                                self.flight_clock.remainder / flight::DT
+                            };
+                            self.sight.frame(
+                                gunsight.look,
+                                frame.flight.ticks,
+                                alpha,
+                                &combat::launcher(presented),
+                                self.input.sight().1,
+                                tracked,
+                            )
+                        });
                         if self.performance.measuring() {
                             if let Some(client) = net_frame {
                                 self.performance.network_tick(client.tick);
@@ -4167,7 +4191,39 @@ impl ApplicationHandler for App {
                                 if self.instruments.pages.contains(&page)
                                     && if page == 4 { target_due } else { other_due }
                                 {
-                                    let camera = if page == 4 {
+                                    let camera = if page == 4
+                                        && let Some(sight_frame) = &sight_frame
+                                    {
+                                        // The gunsight looks along the sight; a tracked
+                                        // object keeps the automatic framing, from the
+                                        // sensor turret.
+                                        let mut from_eye = presented.clone();
+                                        from_eye.position =
+                                            gunsight_view::eye(&combat::launcher(presented));
+                                        let framed = (frame
+                                            .readout
+                                            .gunsight
+                                            .as_ref()
+                                            .is_some_and(|g| g.sight.tracked().is_some()))
+                                        .then(|| {
+                                            self.combat_view.framed_target_camera(
+                                                &self.world.combat,
+                                                &frame.readout,
+                                                &from_eye,
+                                                &self.hornet,
+                                                &self.world.terrain,
+                                                &self.scenery,
+                                            )
+                                        })
+                                        .flatten();
+                                        match framed {
+                                            Some(camera) => {
+                                                self.sight.fitted_zoom = camera.zoom;
+                                                camera
+                                            }
+                                            None => gunsight_view::camera(&sight_frame.view),
+                                        }
+                                    } else if page == 4 {
                                         let Some(camera) = self.combat_view.framed_target_camera(
                                             &self.world.combat,
                                             &frame.readout,
@@ -4331,6 +4387,28 @@ impl ApplicationHandler for App {
                             self.instruments.controls(),
                             self.instruments.rcs_scale_nmi(),
                         ));
+                        if let (Some(page), Some(sight_frame)) = (
+                            self.instruments
+                                .combat
+                                .as_mut()
+                                .and_then(|c| c.gunsight.as_mut()),
+                            &sight_frame,
+                        ) {
+                            page.present(
+                                sight_frame.look,
+                                self.input.sight().1,
+                                sight_frame.view,
+                                frame
+                                    .readout
+                                    .gunsight
+                                    .as_ref()
+                                    .and_then(|g| g.sight.tracked())
+                                    .and_then(|_| {
+                                        self.combat_view
+                                            .display_position(&self.world.combat, &frame.readout)
+                                    }),
+                            );
+                        }
                         if let (Some(readout), Some(wings)) = (
                             self.instruments.combat.as_mut(),
                             self.world.ai_wings.as_ref(),
@@ -8394,6 +8472,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut countermeasure_preview = None;
     let mut maneuver = String::from("level");
     let mut panel_snapshot = None;
+    let mut target_cam_preview: Option<String> = None;
     let mut hud_snapshot: Option<String> = None;
     let mut hud_snapshot_state = String::from("forward");
     let mut systems_preview: Vec<usize> = Vec::new();
@@ -9112,6 +9191,17 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     .split(',').map(str::parse).collect::<Result<Vec<usize>, _>>()?;
                 if systems_preview.iter().any(|i| !(1..=35).contains(i)) { return Err("--systems-preview indices must be 1..35".into()); }
             }
+            "--target-cam-preview" => {
+                let mode = args.next().ok_or("--target-cam-preview needs a mode")?;
+                if instruments::gunsight::preview(&mode).is_none() {
+                    return Err(format!(
+                        "--target-cam-preview modes: {}",
+                        instruments::gunsight::PREVIEW_MODES
+                    )
+                    .into());
+                }
+                target_cam_preview = Some(mode);
+            }
             "--panel-snapshot" => {
                 panel_snapshot = Some(args.next().ok_or("--panel-snapshot needs output path")?)
             }
@@ -9337,7 +9427,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it. --target-cam-preview MODE (with --panel-snapshot, default page 4) draws the AC-130 gunsight page from a synthetic readout on a synthetic scene: free, pinned, tracked, outside, range, mask, nolos, empty, returning, gimbal, gimbal-text, gimbal-bitmap, zoom1..zoom6.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -9471,6 +9561,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if countermeasure_preview.is_some() && capture_terrain.is_none() {
         return Err("--countermeasure-preview requires --capture-flight".into());
+    }
+    if target_cam_preview.is_some() && panel_snapshot.is_none() {
+        return Err("--target-cam-preview requires --panel-snapshot".into());
     }
     if !systems_preview.is_empty() && panel_snapshot.is_none() {
         return Err("--systems-preview requires --panel-snapshot".into());
@@ -10723,7 +10816,26 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         let mut panels = instruments::Instruments::default();
         panels.palette = hornet.daylight_palette();
-        let r = panels.page(instrument_page.unwrap_or(7), &hornet, &state);
+        if let Some(mode) = &target_cam_preview {
+            // The AC-130 gunsight page from a synthetic readout on a synthetic
+            // scene, drawn by the same CPU raster as the flight screen.
+            let preview =
+                instruments::gunsight::preview(mode).ok_or("unknown --target-cam-preview mode")?;
+            panels.camera_target = preview.target.as_ref().map(|(target, _)| target.id);
+            panels.cameras.insert(4, preview.scene);
+            let (target, link) = preview.target.unzip();
+            panels.combat = Some(instruments::CombatReadout {
+                gunsight: Some(preview.page),
+                target,
+                target_link: link.unwrap_or_default(),
+                ..Default::default()
+            });
+        }
+        let r = panels.page(
+            instrument_page.unwrap_or(if target_cam_preview.is_some() { 4 } else { 7 }),
+            &hornet,
+            &state,
+        );
         let mut f = std::fs::File::create(path)?;
         write!(
             f,
@@ -12002,6 +12114,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         researched_flight,
         native_tables,
         flight_clock: flight::Clock { remainder: 0. },
+        sight: gunsight_view::Sight::default(),
         flight_music: Default::default(),
         rwr_warnings: Default::default(),
         vapor: probe_vapor,
