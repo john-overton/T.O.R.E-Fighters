@@ -1128,6 +1128,8 @@ impl Terrain {
                 course.fit(&object.bounds, ground);
             }
         }
+        // Units that share a route drive side by side, not on one line.
+        crate::surface::movement::set_lanes(&mut courses);
         self.surface.courses = courses;
         // The parked aircraft stand on the ground or their carrier's deck.
         let (parked, unreadable) =

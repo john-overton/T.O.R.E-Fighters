@@ -35,6 +35,7 @@ fn course(speed: f64, ship: bool) -> Course {
         acceleration: if ship { 1. } else { 5. },
         ship,
         rig: None,
+        lane: 0.,
     }
 }
 
@@ -626,4 +627,116 @@ fn a_machine_told_where_a_unit_is_places_its_target_and_box() {
         mover_of(&client, TANK_ID).unwrap().halt,
         mover_of(&host, TANK_ID).unwrap().halt
     );
+}
+
+/// A course on the shared route south then east from `start`, with a hit box
+/// `beam` feet wide.
+fn shared(start: [i32; 3], beam: f64) -> Course {
+    Course {
+        legs: vec![
+            Leg {
+                to: [0., -3000.],
+                speed: 50.,
+            },
+            Leg {
+                to: [4000., -3000.],
+                speed: 50.,
+            },
+        ],
+        start,
+        start_angles: [180, 0, 0],
+        rig: Some(super::movement::Rig {
+            centre: [0.; 3],
+            half: [beam / 2., 5., 15.],
+        }),
+        ..course(50., false)
+    }
+}
+
+#[test]
+fn units_on_one_route_take_lanes_side_by_side_and_finish_apart() {
+    use super::movement::{LANE_BEAMS, set_lanes};
+    let mut courses = std::collections::BTreeMap::new();
+    // A column of three on one road (the widest hull 12 ft), and a truck on
+    // a road of its own.
+    for (n, beam) in [10., 12., 11.].into_iter().enumerate() {
+        courses.insert(
+            UnitId(SURFACE_UNIT_BASE + n as u32),
+            shared([0, 0, 400 * n as i32], beam),
+        );
+    }
+    let mut alone = shared([9000, 0, 0], 12.);
+    alone.legs[1].to = [9000., -9000.];
+    courses.insert(UnitId(SURFACE_UNIT_BASE + 9), alone.clone());
+    let original = courses.clone();
+    set_lanes(&mut courses);
+    let spacing = (LANE_BEAMS * 12.).round();
+    assert_eq!(spacing, 18.);
+    let lanes: Vec<f64> = (0..3)
+        .map(|n| courses[&UnitId(SURFACE_UNIT_BASE + n)].lane)
+        .collect();
+    assert_eq!(lanes, [-spacing, 0., spacing]);
+    // Driving south, right of travel is west; at the corner (south then
+    // east) the mitre keeps the full lane width on both legs; at the end
+    // (driving east) right is south.
+    let leg = |n: u32, j: usize| courses[&UnitId(SURFACE_UNIT_BASE + n)].legs[j].to;
+    assert_eq!(leg(1, 0), [0., -3000.]);
+    assert_eq!(leg(1, 1), [4000., -3000.]);
+    assert_eq!(leg(2, 0), [-18., -3018.]);
+    assert_eq!(leg(0, 0), [18., -2982.]);
+    assert_eq!(leg(2, 1), [4000., -3018.]);
+    assert_eq!(leg(0, 1), [4000., -2982.]);
+    // Starts do not move; the lone truck keeps its route.
+    for n in 0..3 {
+        assert_eq!(
+            courses[&UnitId(SURFACE_UNIT_BASE + n)].start,
+            [0, 0, 400 * n as i32]
+        );
+    }
+    assert_eq!(courses[&UnitId(SURFACE_UNIT_BASE + 9)], alone);
+    // The same input always gives the same lanes.
+    let mut again = original;
+    set_lanes(&mut again);
+    assert_eq!(again, courses);
+}
+
+#[test]
+fn a_column_on_one_route_ends_side_by_side_in_the_world() {
+    // Three tanks on one road, as `~QUCOL` has nine.
+    let mut r = routed_resources();
+    let z = MIDDLE + 8000;
+    let mut text = String::from("textFormat\r\n");
+    for n in 0..3 {
+        text += &routed(
+            "MOVER.NT",
+            [MIDDLE, 0, z + 400 * n],
+            180,
+            -1 - n,
+            &[[MIDDLE, 0, z - 800], [MIDDLE + 800, 0, z - 800]],
+            50,
+        );
+    }
+    r.insert("~QUCOL.M".into(), text.into_bytes());
+    let mut w = world_with_target(&r, &target("QUCOL", 0, 0, 3));
+    let courses = &w.terrain.surface.courses;
+    assert_eq!(courses.len(), 3);
+    let beam = 2. * courses[&UnitId(TANK_ID)].rig.unwrap().half[0];
+    let spacing = (super::movement::LANE_BEAMS * beam).round();
+    assert!(spacing > 0.);
+    step(&mut w, 120 * 120);
+    let ends: Vec<[f64; 3]> = (0..3)
+        .map(|n| {
+            let mover = mover_of(&w, TANK_ID + n).unwrap();
+            assert_eq!(mover.halt, Halt::Arrived, "tank {n}");
+            mover.position()
+        })
+        .collect();
+    // Driving east at the end, the lanes lie north to south across the
+    // road, one lane apart, the middle tank on the authored point.
+    assert_eq!(ends[1][0], f64::from(MIDDLE + 800));
+    assert_eq!(ends[1][2], f64::from(z - 800));
+    for (n, end) in ends.iter().enumerate() {
+        assert_eq!(end[0], f64::from(MIDDLE + 800));
+        assert_eq!(end[2], f64::from(z - 800) + spacing * (1. - n as f64));
+    }
 }

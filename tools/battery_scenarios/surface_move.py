@@ -7,7 +7,10 @@ place against its route; a follow-up run steps the surface alone to 1,300 s
 where it died). `surface-cargo-sailing` sails the three `~QTCARGO` cargo ships
 (one leg at 16 ft/s, all to one point) the same way. Positions come from
 `--surface-drive`; the expected paths are the retail routes (surface-AI round
-survey, 2026-10-10). See docs/spec/surface-defenses.md, "Movement".
+survey, 2026-10-10), each moved into its own lane: units that share a route
+drive side by side, 1.5 of the widest hull beam apart, centred on the authored
+path, so they finish next to each other instead of on one spot (lead ruling
+after M1). See docs/spec/surface-defenses.md, "Movement".
 """
 import math
 import re
@@ -32,6 +35,52 @@ CARGO_STARTS = {0: (733800, 739908), 1: (739266, 745010), 2: (744324, 750154)}
 CARGO_LEGS = [(672213, 678321)]
 
 ACCELERATION = {"tank": 5.0, "ship": 1.0}
+
+LANE = re.compile(r"^surface-drive: unit (0x[0-9a-f]+) lane (-?\d+) legs ((?:-?\d+,-?\d+ ?)+)$", re.M)
+
+
+def lanes(output: str):
+    """unit ordinal -> (lane feet, [(x, z) of each leg as driven])."""
+    found = {}
+    for m in LANE.finditer(output):
+        legs = [tuple(int(v) for v in pair.split(",")) for pair in m.group(3).split()]
+        found[int(m.group(1), 16) & 0xFFFFFF] = (int(m.group(2)), legs)
+    return found
+
+
+def lane_problems(output: str, starts, authored) -> tuple[list[str], dict]:
+    """Every unit of the group has its own lane, centred on the authored path and evenly spaced; each
+    driven point lies its lane's width (or more at a corner) off the authored one, and the last points
+    are side by side, one lane apart. Returns the problems and each unit's driven legs."""
+    problems = []
+    found = lanes(output)
+    driven = {}
+    for ordinal in starts:
+        if ordinal not in found:
+            problems.append(f"no lane line for unit {ordinal}")
+            continue
+        driven[ordinal] = found[ordinal][1]
+    if problems:
+        return problems, driven
+    order = sorted(starts)
+    offsets = [found[o][0] for o in order]
+    spacing = offsets[1] - offsets[0] if len(offsets) > 1 else 0
+    if spacing <= 0:
+        problems.append(f"lanes are not spread: {offsets}")
+    for k, lane in enumerate(offsets):
+        want = (k - (len(offsets) - 1) / 2) * spacing
+        if abs(lane - want) > 1:
+            problems.append(f"unit {order[k]} lane {lane}, expected {want} (centred, {spacing} ft apart)")
+    for ordinal, (lane, legs) in ((o, found[o]) for o in order):
+        for j, (point, base) in enumerate(zip(legs, authored)):
+            off = math.dist(point, base)
+            if off < abs(lane) - 1.5 or off > 2 * abs(lane) + 1.5:
+                problems.append(f"unit {ordinal} point {j} is {off:.1f} ft off the route, its lane is {lane}")
+    ends = [found[o][1][-1] for o in order]
+    for a, b in zip(ends, ends[1:]):
+        if abs(math.dist(a, b) - spacing) > 1.5:
+            problems.append(f"route ends {a} and {b} are not one lane ({spacing} ft) apart")
+    return problems, driven
 
 
 def travelled(kind: str, speed: float, seconds: float) -> float:
@@ -85,9 +134,18 @@ def route_problems(found, starts, legs, kind: str, speed: float, times, slack: f
     return problems
 
 
+def route_problems_by_unit(found, starts, driven, kind, speed, times, slack):
+    problems = []
+    for ordinal, start in starts.items():
+        if ordinal in driven:
+            problems += route_problems(found, {ordinal: start}, driven[ordinal], kind, speed, times, slack)
+    return problems
+
+
 def ucol_problems(output: str) -> list[str]:
     found = rows(output)
-    problems = route_problems(found, UCOL_STARTS, UCOL_LEGS, "tank", 50.0, (60, 600), slack=450.0)
+    problems, driven = lane_problems(output, UCOL_STARTS, UCOL_LEGS)
+    problems += route_problems_by_unit(found, UCOL_STARTS, driven, "tank", 50.0, (60, 600), slack=450.0)
     # At 10 s every tank has just reached 50 ft/s on its first leg, 250 ft along.
     for ordinal, start in UCOL_STARTS.items():
         row = found.get((10, ordinal))
@@ -105,25 +163,26 @@ def ucol_problems(output: str) -> list[str]:
                 problems.append(f"the tank destroyed at 100 s did not stop where it died: {early} then {late}")
             if early and not (UCOL_STARTS[1][1] - 6000 < early[2] < UCOL_STARTS[1][1] - 3000):
                 problems.append(f"the tank destroyed at 100 s died at {early[:3]}, expected 3,000 to 6,000 ft along")
-        elif late[6] != "arrived" or (late[0], late[2]) != (float(UCOL_LEGS[-1][0]), float(UCOL_LEGS[-1][1])) or late[4] != 0.0:
-            problems.append(f"unit {ordinal} did not stand on the end of its route at 1300 s: {late}")
+        elif ordinal not in driven or late[6] != "arrived" or (late[0], late[2]) != tuple(map(float, driven[ordinal][-1])) or late[4] != 0.0:
+            problems.append(f"unit {ordinal} did not stand on the end of its lane at 1300 s: {late}")
     return problems
 
 
 def cargo_problems(output: str) -> list[str]:
     found = rows(output)
-    problems = route_problems(found, CARGO_STARTS, CARGO_LEGS, "ship", 16.0, (30, 300, 3000), slack=60.0)
+    problems, driven = lane_problems(output, CARGO_STARTS, CARGO_LEGS)
+    problems += route_problems_by_unit(found, CARGO_STARTS, driven, "ship", 16.0, (30, 300, 3000), slack=60.0)
     for ordinal in CARGO_STARTS:
         row = found.get((300, ordinal))
-        if row and abs(row[3] - 225.0) > 1.0:
+        if row and abs(row[3] - 225.0) > 1.5:
             problems.append(f"ship {ordinal} heads {row[3]}, the route runs to 225")
         if row and row[1] != 0.0:
             problems.append(f"ship {ordinal} left the water level: y {row[1]}")
-    # All three end on the one point; the shortest route first, the longest after 6,300 s.
+    # All three end side by side at the one point; the shortest route first, the longest after 6,300 s.
     for ordinal in CARGO_STARTS:
         late = found.get((6500, ordinal))
-        if late is None or late[6] != "arrived" or (late[0], late[2]) != (float(CARGO_LEGS[-1][0]), float(CARGO_LEGS[-1][1])):
-            problems.append(f"ship {ordinal} did not stand on the end of its route at 6500 s: {late}")
+        if ordinal not in driven or late is None or late[6] != "arrived" or (late[0], late[2]) != tuple(map(float, driven[ordinal][-1])):
+            problems.append(f"ship {ordinal} did not stand on the end of its lane at 6500 s: {late}")
     first = found.get((5500, 0))
     if first is None or first[6] != "arrived" or found.get((5500, 1), ("", "", "", "", "", "", ""))[6] != "moving":
         problems.append("the shortest route should be done at 5,500 s and the middle one not")
