@@ -51,8 +51,9 @@ pub const DOWNTOWN: i64 = 350;
 /// get big buildings.
 pub const CORE_MIN_SIDE_FT: i64 = 50;
 /// The most buildings a theater gets by default (John, 2026-10-10, raised
-/// from 50,000). `crate::city::set_cap` changes it for measurements.
-pub const MAX_INSTANCES: usize = 200_000;
+/// from 50,000 to 200,000, then 500,000). `crate::city::set_cap` changes it
+/// for measurements.
+pub const MAX_INSTANCES: usize = 500_000;
 /// Clearance kept from a runway's airfield box, past the lot's half width.
 pub const RUNWAY_CLEARANCE_FT: i64 = 300;
 /// Clearance kept from any other layout object's box.

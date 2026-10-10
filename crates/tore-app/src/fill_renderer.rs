@@ -1,57 +1,78 @@
-//! City fill buildings, CF0 prototype (`tore_world::city`): one shared
-//! vertex batch per kit piece, drawn instanced. Each view picks the
-//! buildings near enough to draw from 8,192 ft chunks, culls whole chunks
-//! behind the camera, and sinks small buildings into the ground before their
-//! size-ordered draw distance, so houses go first and towers last (10 nm).
-//! Past a nearer, size-ordered distance a building draws as its far level of
-//! detail: its footprint box in its dominant colour, every one of them in a
-//! single instanced draw with no texture pass. Knocked-down buildings draw
-//! as a low stub. Fill buildings cast no shadow in this prototype.
+//! City fill buildings, CF0 prototype (`tore_world::city`), drawn in three
+//! tiers out to 30 nm (John, 2026-10-10): full detail (the kit piece with its
+//! textures) inside 20 nm, a blend band from 20 to 25 nm where each building
+//! turns from its far box to full detail at its own fixed distance, and the
+//! far box (its footprint in its dominant colour, untextured, a cheap
+//! shader) from 25 to 30 nm. Buildings sink into the ground over the last
+//! nautical mile, and anything smaller than one pixel on screen is not drawn.
+//!
+//! The per-view work is on the GPU: a compute pass culls every building
+//! against the view and writes the full detail lists per piece and the far
+//! box list, and indirect draws read them (one per piece and pass, plus one
+//! for every far box). The CPU writes one small uniform per view. Knocked-down
+//! buildings draw as a low stub (0.08 of their height, in the cull shader).
+//! Fill buildings cast no shadow yet.
 
 use crate::{AppResult, camera::Camera};
 use std::{collections::BTreeMap, ops::Range, sync::Arc};
-use tore_world::city::{CityFill, kit::Class};
+use tore_world::city::CityFill;
 
-/// Feet per culling chunk side.
-pub const CHUNK_FT: f64 = 8_192.;
-/// The farthest any fill building draws: 10 nm (John, 2026-10-10).
-pub const DRAW_FT: f64 = 10. * 6_076.115_49;
-/// The last share of a building's draw distance over which it sinks into the
-/// ground instead of popping out (fitted).
-pub const SINK_SHARE: f64 = 0.15;
-/// A flattened building's height, as a share of its standing height (fitted).
-pub const FLAT_SHARE: f32 = 0.08;
-/// Views that may draw in one submission, each with its own instance range.
-const SLOTS: u64 = 8;
-/// Floats per instance: base relative to the render origin, then cosine,
-/// sine and height share of the heading.
-const INSTANCE_FLOATS: usize = 8;
-/// Floats per far box instance: base relative to the render origin and the
-/// colour index, cosine, sine and height in feet, then the half footprint.
-const BOX_FLOATS: usize = 12;
+const NM: f64 = 6_076.115_49;
 
-/// The draw distance of a piece class, before zoom (fitted, size-ordered).
-pub fn draw_distance(class: Class) -> f64 {
-    let nm = match class {
-        Class::House => 4.,
-        Class::Industrial | Class::LowRise => 6.,
-        Class::Apartment => 8.,
-        Class::Tower => 10.,
-    };
-    nm * 6_076.115_49
+/// The tier distances, nautical miles, and the smallest drawn size, pixels.
+/// `TORE_CITY_FILL_TIERS=FULL,BLEND,DRAW,MIN_PX[,DETAIL_PX]` changes them
+/// (a measuring aid).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tiers {
+    /// Full detail inside this.
+    pub full_nm: f64,
+    /// The blend band ends here; far boxes beyond.
+    pub blend_nm: f64,
+    /// Nothing beyond this.
+    pub draw_nm: f64,
+    /// Buildings smaller than this on screen are not drawn (fitted).
+    pub min_px: f64,
+    /// Buildings smaller than this on screen draw as far boxes even inside
+    /// the full detail range (0: distance alone decides).
+    pub detail_px: f64,
 }
 
-/// Where a piece class changes to its far box, before zoom (fitted,
-/// size-ordered).
-pub fn lod_distance(class: Class) -> f64 {
-    let nm = match class {
-        Class::House => 0.75,
-        Class::Industrial | Class::LowRise => 1.25,
-        Class::Apartment => 2.,
-        Class::Tower => 3.,
-    };
-    nm * 6_076.115_49
+impl Default for Tiers {
+    fn default() -> Self {
+        Self {
+            full_nm: 20.,
+            blend_nm: 25.,
+            draw_nm: 30.,
+            min_px: 1.,
+            detail_px: 0.,
+        }
+    }
 }
+
+impl Tiers {
+    pub fn from_env() -> Self {
+        let mut tiers = Self::default();
+        if let Ok(text) = std::env::var("TORE_CITY_FILL_TIERS") {
+            let v: Vec<f64> = text.split(',').filter_map(|s| s.parse().ok()).collect();
+            if v.len() >= 4 {
+                tiers = Self {
+                    full_nm: v[0],
+                    blend_nm: v[1],
+                    draw_nm: v[2],
+                    min_px: v[3],
+                    detail_px: v.get(4).copied().unwrap_or(0.),
+                };
+            }
+        }
+        tiers
+    }
+}
+
+/// The length over which a building sinks into the ground before the draw
+/// distance (fitted).
+pub const SINK_FT: f64 = NM;
+/// Views that may draw in one submission, each with its own uniform.
+const SLOTS: usize = 8;
 
 /// The unit far box: four walls and a roof, x and z from -1 to 1, y from 0
 /// to 1, untextured.
@@ -73,29 +94,23 @@ fn unit_box() -> Vec<f32> {
     out
 }
 
-/// A chunk's buildings that share one draw distance: the distance and their
-/// indices.
-type DistanceGroup = (f64, Vec<u32>);
-
-/// The fill's art for one scenery: the kit's vertices and each building's
-/// fixed placement, chunked.
+/// The fill's art for one scenery: the kit's vertices, the piece table and
+/// every building's fixed record for the cull pass.
 pub struct FillArt {
     pub fill: Arc<CityFill>,
     /// Kit vertices, ten floats each, base-centred feet (x right, y up, z
-    /// forward).
+    /// forward), then the unit far box.
     pub vertices: Vec<f32>,
     /// Each piece's vertex ranges: untextured triangles, then textured ones.
     pub ranges: Vec<[Range<u32>; 2]>,
-    /// The unit far box's vertex range, after the pieces.
+    /// The unit far box's vertex range.
     pub box_range: Range<u32>,
-    /// Each piece's draw distance and far box distance.
-    distances: Vec<(f64, f64)>,
-    /// Each piece's far box colour: its dominant palette index by area.
-    colors: Vec<f32>,
-    /// Each building's world base, cosine and sine.
-    places: Vec<([f64; 3], [f32; 2])>,
-    /// Per chunk, its buildings grouped by draw distance, farthest first.
-    chunks: BTreeMap<(i64, i64), Vec<DistanceGroup>>,
+    /// Per piece: its first slot in the full detail list, colour, half
+    /// footprint, height and radius (the cull shader's `Piece`).
+    piece_table: Vec<u32>,
+    /// Per building: world base, piece, cosine, sine, hash and flags (the
+    /// cull shader's `Inst`), eight words each.
+    records: Vec<u32>,
 }
 
 impl FillArt {
@@ -222,55 +237,57 @@ impl FillArt {
         let box_start = (vertices.len() / 10) as u32;
         vertices.extend(unit_box());
         let box_range = box_start..(vertices.len() / 10) as u32;
-        let distances: Vec<(f64, f64)> = layout
-            .kit
-            .pieces
-            .iter()
-            .map(|p| (draw_distance(p.class), lod_distance(p.class)))
-            .collect();
         let one = tore_world::surface::layout::trig::ONE as f64;
-        let mut places = Vec::with_capacity(layout.instances.len());
-        let mut chunks = BTreeMap::<(i64, i64), BTreeMap<u64, Vec<u32>>>::new();
+        // The full detail list holds, per piece, room for every building of
+        // that piece.
+        let mut per_piece = vec![0u32; layout.kit.pieces.len()];
+        for i in &layout.instances {
+            per_piece[usize::from(i.piece)] += 1;
+        }
+        let mut piece_table = Vec::with_capacity(per_piece.len() * 8);
+        let mut offset = 0u32;
+        for (n, p) in layout.kit.pieces.iter().enumerate() {
+            let radius = ((p.half[0] * p.half[0] + p.half[1] * p.half[1]) as f64).sqrt() as f32;
+            piece_table.extend([
+                offset,
+                colors[n].to_bits(),
+                (p.half[0] as f32).to_bits(),
+                (p.half[1] as f32).to_bits(),
+                (p.height as f32).to_bits(),
+                radius.to_bits(),
+                0,
+                0,
+            ]);
+            offset += per_piece[n];
+        }
+        let mut records = Vec::with_capacity(layout.instances.len() * 8);
         for (n, i) in layout.instances.iter().enumerate() {
             let heading = i32::from(i.heading);
-            places.push((
-                [f64::from(i.x), f64::from(fill.base[n]), f64::from(i.z)],
-                [
-                    (tore_world::surface::layout::trig::cos(heading) as f64 / one) as f32,
-                    (tore_world::surface::layout::trig::sin(heading) as f64 / one) as f32,
-                ],
-            ));
-            let key = (
-                (f64::from(i.x) / CHUNK_FT).floor() as i64,
-                (f64::from(i.z) / CHUNK_FT).floor() as i64,
-            );
-            let limit = distances[usize::from(i.piece)].0;
-            chunks
-                .entry(key)
-                .or_default()
-                .entry(u64::MAX - limit.to_bits())
-                .or_default()
-                .push(n as u32);
+            let cos = (tore_world::surface::layout::trig::cos(heading) as f64 / one) as f32;
+            let sin = (tore_world::surface::layout::trig::sin(heading) as f64 / one) as f32;
+            // A fixed per-building number in [0, 1): where in the blend band
+            // it turns to full detail.
+            let mut h = (n as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            h ^= h >> 29;
+            let hash = (h >> 40) as f32 / (1u64 << 24) as f32;
+            records.extend([
+                (i.x as f32).to_bits(),
+                fill.base[n].to_bits(),
+                (i.z as f32).to_bits(),
+                u32::from(i.piece),
+                cos.to_bits(),
+                sin.to_bits(),
+                hash.to_bits(),
+                u32::from(fill.hidden[n]),
+            ]);
         }
-        let chunks = chunks
-            .into_iter()
-            .map(|(key, groups)| {
-                let groups = groups
-                    .into_iter()
-                    .map(|(bits, members)| (f64::from_bits(u64::MAX - bits), members))
-                    .collect();
-                (key, groups)
-            })
-            .collect();
         Ok(Self {
             fill: Arc::clone(fill),
             vertices,
             ranges,
             box_range,
-            distances,
-            colors,
-            places,
-            chunks,
+            piece_table,
+            records,
         })
     }
 
@@ -278,90 +295,43 @@ impl FillArt {
     pub fn vertex_bytes(&self) -> u64 {
         self.vertices.len() as u64 * 4
     }
+
+    /// Buildings in the art.
+    pub fn len(&self) -> usize {
+        self.records.len() / 8
+    }
 }
 
-/// What the last prepared view drew.
+/// What a view drew, read back from the GPU on request (a measuring aid).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Stats {
-    /// Buildings drawn, near and far.
-    pub instances: usize,
-    /// ... of which as far boxes.
+    /// Buildings drawn at full detail (inside the blend band's far edge).
+    pub full: usize,
+    /// Buildings drawn as far boxes.
     pub boxes: usize,
-    pub draws: usize,
-    /// Instance ring bytes on the GPU.
-    pub ring_bytes: u64,
-    /// CPU time picking and writing the view's buildings, microseconds.
-    pub prepare_us: u64,
 }
 
 pub struct FillRenderer {
     art: Arc<FillArt>,
+    tiers: Tiers,
     vertices: wgpu::Buffer,
-    /// Near and far instance rings, each `SLOTS` slots of its capacity.
-    instances: Ring,
-    boxes: Ring,
-    slot: u64,
-    /// Per piece in view: its two vertex ranges and its instances.
-    draws: Vec<([Range<u32>; 2], Range<u32>)>,
-    /// This view's far boxes, in the box ring.
-    box_draw: Range<u32>,
+    records: wgpu::Buffer,
+    counts: wgpu::Buffer,
+    full: wgpu::Buffer,
+    boxes: wgpu::Buffer,
+    args: wgpu::Buffer,
+    readback: wgpu::Buffer,
+    params: Vec<wgpu::Buffer>,
+    binds: Vec<wgpu::BindGroup>,
+    slot: usize,
+    /// The bind group of the last prepared view, and whether it drew.
+    prepared: bool,
+    flattened_version: u64,
+    cull: wgpu::ComputePipeline,
+    finish: wgpu::ComputePipeline,
     solid: wgpu::RenderPipeline,
     decal: wgpu::RenderPipeline,
     far: wgpu::RenderPipeline,
-    /// Per-piece scratch for the counting sort.
-    counts: Vec<u32>,
-    picked: Vec<(u16, [f32; INSTANCE_FLOATS])>,
-    data: Vec<f32>,
-    box_data: Vec<f32>,
-    pub stats: Stats,
-}
-
-/// A growable instance ring: `SLOTS` slots of `capacity` instances.
-struct Ring {
-    buffer: wgpu::Buffer,
-    capacity: u64,
-    stride: u64,
-    label: &'static str,
-}
-
-impl Ring {
-    fn new(device: &wgpu::Device, label: &'static str, stride: u64, capacity: u64) -> Self {
-        Self {
-            buffer: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: SLOTS * capacity * stride,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            capacity,
-            stride,
-            label,
-        }
-    }
-    /// Writes `data` (`count` instances) into `slot`, growing the ring when
-    /// it does not fit; returns the first instance index.
-    fn write(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        slot: u64,
-        count: u64,
-        data: &[f32],
-    ) -> u32 {
-        if count > self.capacity {
-            *self = Self::new(device, self.label, self.stride, count.next_power_of_two());
-        }
-        let first = slot * self.capacity;
-        queue.write_buffer(
-            &self.buffer,
-            first * self.stride,
-            &crate::sim_renderer::bytes(data),
-        );
-        first as u32
-    }
-    fn bytes(&self) -> u64 {
-        SLOTS * self.capacity * self.stride
-    }
 }
 
 fn pipelines(
@@ -385,7 +355,7 @@ fn pipelines(
     let near = [
         vertex.clone(),
         wgpu::VertexBufferLayout {
-            array_stride: (INSTANCE_FLOATS * 4) as u64,
+            array_stride: 32,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![5=>Float32x4,6=>Float32x4],
         },
@@ -393,7 +363,7 @@ fn pipelines(
     let far = [
         vertex,
         wgpu::VertexBufferLayout {
-            array_stride: (BOX_FLOATS * 4) as u64,
+            array_stride: 48,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![5=>Float32x4,6=>Float32x4,7=>Float32x4],
         },
@@ -473,6 +443,9 @@ fn pipelines(
     ]
 }
 
+/// Words in the cull uniform.
+const PARAM_WORDS: usize = 32;
+
 impl FillRenderer {
     pub fn new(
         device: &wgpu::Device,
@@ -484,23 +457,172 @@ impl FillRenderer {
         art: &Arc<FillArt>,
     ) -> Self {
         use wgpu::util::DeviceExt;
-        let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("City fill kit vertices"),
-            contents: &crate::sim_renderer::bytes(&art.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
+        let storage = |label: &str, contents: &[u8], usage: wgpu::BufferUsages| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage,
+            })
+        };
+        let words = |w: &[u32]| w.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>();
+        let n = art.len().max(1) as u64;
+        let pieces = art.ranges.len();
+        let vertices = storage(
+            "City fill kit vertices",
+            &crate::sim_renderer::bytes(&art.vertices),
+            wgpu::BufferUsages::VERTEX,
+        );
+        let records = storage(
+            "City fill buildings",
+            &words(&art.records),
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        );
+        let piece_table = storage(
+            "City fill pieces",
+            &words(&art.piece_table),
+            wgpu::BufferUsages::STORAGE,
+        );
+        let counts = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("City fill counts"),
+            size: (pieces as u64 + 1) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
         });
-        let instances = Ring::new(
-            device,
-            "City fill instances",
-            (INSTANCE_FLOATS * 4) as u64,
-            4_096,
+        let full = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("City fill full detail list"),
+            size: n * 32,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
+        let boxes = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("City fill far box list"),
+            size: n * 48,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
+        // Indirect draws: each piece's solid and textured ranges, then the
+        // far box; instance counts start at zero.
+        let mut args = Vec::with_capacity((2 * pieces + 1) * 4);
+        // First instance stays 0 (a non-zero one needs a device feature):
+        // each piece's draws bind the full detail list at that piece's slot.
+        for range in &art.ranges {
+            for r in range {
+                args.extend([r.end - r.start, 0, r.start, 0]);
+            }
+        }
+        args.extend([
+            art.box_range.end - art.box_range.start,
+            0,
+            art.box_range.start,
+            0,
+        ]);
+        let args = storage(
+            "City fill indirect draws",
+            &words(&args),
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
         );
-        let boxes = Ring::new(
-            device,
-            "City fill far boxes",
-            (BOX_FLOATS * 4) as u64,
-            4_096,
-        );
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("City fill count readback"),
+            size: (pieces as u64 + 1) * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("City fill cull"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("fill_cull.wgsl").into()),
+        });
+        let entry = |binding: u32, ty: wgpu::BufferBindingType| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let read = wgpu::BufferBindingType::Storage { read_only: true };
+        let write = wgpu::BufferBindingType::Storage { read_only: false };
+        let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("City fill cull bindings"),
+            entries: &[
+                entry(0, read),
+                entry(1, read),
+                entry(2, wgpu::BufferBindingType::Uniform),
+                entry(3, write),
+                entry(4, write),
+                entry(5, write),
+                entry(6, write),
+            ],
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("City fill cull layout"),
+            bind_group_layouts: &[&bind_layout],
+            push_constant_ranges: &[],
+        });
+        let compute = |entry: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+        let cull = compute("cull");
+        let finish = compute("finish");
+        let params: Vec<wgpu::Buffer> = (0..SLOTS)
+            .map(|_| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("City fill cull view"),
+                    size: (PARAM_WORDS * 4) as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect();
+        let binds = params
+            .iter()
+            .map(|p| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("City fill cull bindings"),
+                    layout: &bind_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: records.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: piece_table.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: p.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: counts.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: full.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: boxes.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: args.as_entire_binding(),
+                        },
+                    ],
+                })
+            })
+            .collect();
         let [solid, decal, far] = pipelines(
             device,
             shader,
@@ -511,24 +633,28 @@ impl FillRenderer {
         );
         Self {
             art: Arc::clone(art),
+            tiers: Tiers::from_env(),
             vertices,
-            instances,
+            records,
+            counts,
+            full,
             boxes,
+            args,
+            readback,
+            params,
+            binds,
             slot: 0,
-            draws: Vec::new(),
-            box_draw: 0..0,
+            prepared: false,
+            flattened_version: 0,
+            cull,
+            finish,
             solid,
             decal,
             far,
-            counts: vec![0; art.ranges.len()],
-            picked: Vec::new(),
-            data: Vec::new(),
-            box_data: Vec::new(),
-            stats: Stats::default(),
         }
     }
 
-    /// Rebuilds the pipelines for a new sample count.
+    /// Rebuilds the render pipelines for a new sample count.
     pub fn rebuild(
         &mut self,
         device: &wgpu::Device,
@@ -548,177 +674,138 @@ impl FillRenderer {
         );
     }
 
-    /// Picks this view's buildings and writes them into the next slot.
-    pub fn prepare(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        camera: &Camera,
-        origin: [f64; 3],
-    ) {
-        let started = std::time::Instant::now();
-        self.draws.clear();
-        self.picked.clear();
-        self.box_data.clear();
-        self.box_draw = 0..0;
-        let art = &self.art;
-        let fill = &art.fill;
-        let eye = camera.position;
-        let (sy, cy) = f64::from(camera.yaw).sin_cos();
-        let (sp, cp) = f64::from(camera.pitch).sin_cos();
-        let forward = [sy * cp, sp, cy * cp];
-        let zoom = f64::from(camera.zoom).clamp(1., 4.);
-        let reach = DRAW_FT * zoom;
-        let chunk_radius = CHUNK_FT * std::f64::consts::FRAC_1_SQRT_2 + 400.;
-        let lo = (
-            ((eye[0] - reach) / CHUNK_FT).floor() as i64,
-            ((eye[2] - reach) / CHUNK_FT).floor() as i64,
-        );
-        let hi = (
-            ((eye[0] + reach) / CHUNK_FT).floor() as i64,
-            ((eye[2] + reach) / CHUNK_FT).floor() as i64,
-        );
-        for (&(cx, cz), groups) in art.chunks.range((lo.0, lo.1)..=(hi.0, hi.1)) {
-            if cz < lo.1 || cz > hi.1 {
-                continue;
-            }
-            let first = groups[0].1[0] as usize;
-            let center = [
-                (cx as f64 + 0.5) * CHUNK_FT,
-                fill.base[first] as f64,
-                (cz as f64 + 0.5) * CHUNK_FT,
-            ];
-            let d: [f64; 3] = std::array::from_fn(|i| center[i] - eye[i]);
-            let nearest = d[0].hypot(d[2]) - chunk_radius;
-            if nearest > reach {
-                continue;
-            }
-            if d[0] * forward[0] + d[1] * forward[1] + d[2] * forward[2] < -chunk_radius {
-                continue;
-            }
-            for (limit, members) in groups {
-                // Groups run farthest first: the rest are out of reach too.
-                if nearest >= limit * zoom {
-                    break;
-                }
-                for &n in members {
-                    let n = n as usize;
-                    if fill.hidden[n] {
-                        continue;
-                    }
-                    let i = &fill.layout.instances[n];
-                    let (place, turn) = art.places[n];
-                    let dx = place[0] - eye[0];
-                    let dz = place[2] - eye[2];
-                    let dy = place[1] - eye[1];
-                    let distance = (dx * dx + dy * dy + dz * dz).sqrt();
-                    let (limit, lod) = art.distances[usize::from(i.piece)];
-                    let (limit, lod) = (limit * zoom, lod * zoom);
-                    if distance >= limit {
-                        continue;
-                    }
-                    let sink = ((limit - distance) / (limit * SINK_SHARE)).min(1.) as f32;
-                    let height = if fill.is_flattened(n) { FLAT_SHARE } else { 1. } * sink;
-                    let local = [
-                        (place[0] - origin[0]) as f32,
-                        (place[1] - origin[1]) as f32,
-                        (place[2] - origin[2]) as f32,
-                    ];
-                    if distance < lod {
-                        self.picked.push((
-                            i.piece,
-                            [
-                                local[0], local[1], local[2], 0., turn[0], turn[1], height, 0.,
-                            ],
-                        ));
-                    } else {
-                        let piece = &fill.layout.kit.pieces[usize::from(i.piece)];
-                        self.box_data.extend([
-                            local[0],
-                            local[1],
-                            local[2],
-                            art.colors[usize::from(i.piece)],
-                            turn[0],
-                            turn[1],
-                            height * piece.height as f32,
-                            0.,
-                            piece.half[0] as f32,
-                            piece.half[1] as f32,
-                            0.,
-                            0.,
-                        ]);
-                    }
-                }
-            }
-        }
-        self.counts.iter_mut().for_each(|c| *c = 0);
-        for (piece, _) in &self.picked {
-            self.counts[usize::from(*piece)] += 1;
-        }
-        let mut starts = Vec::with_capacity(self.counts.len());
-        let mut total = 0u32;
-        for &c in &self.counts {
-            starts.push(total);
-            total += c;
-        }
-        self.data.clear();
-        self.data.resize(total as usize * INSTANCE_FLOATS, 0.);
-        let mut cursor = starts.clone();
-        for (piece, values) in &self.picked {
-            let at = cursor[usize::from(*piece)] as usize * INSTANCE_FLOATS;
-            self.data[at..at + INSTANCE_FLOATS].copy_from_slice(values);
-            cursor[usize::from(*piece)] += 1;
-        }
-        let boxes = (self.box_data.len() / BOX_FLOATS) as u32;
-        self.slot = (self.slot + 1) % SLOTS;
-        if total > 0 {
-            let first =
-                self.instances
-                    .write(device, queue, self.slot, u64::from(total), &self.data);
-            for (piece, &count) in self.counts.iter().enumerate() {
-                let range = art.ranges[piece].clone();
-                if count == 0 || range.iter().all(Range::is_empty) {
-                    continue;
-                }
-                let start = first + starts[piece];
-                self.draws.push((range, start..start + count));
-            }
-        }
-        if boxes > 0 {
-            let first =
-                self.boxes
-                    .write(device, queue, self.slot, u64::from(boxes), &self.box_data);
-            self.box_draw = first..first + boxes;
-        }
-        self.stats = Stats {
-            instances: (total + boxes) as usize,
-            boxes: boxes as usize,
-            draws: self.draws.len() * 2 + usize::from(boxes > 0),
-            ring_bytes: self.instances.bytes() + self.boxes.bytes(),
-            prepare_us: started.elapsed().as_micros() as u64,
-        };
+    /// GPU bytes: kit, building records, the two lists, counts and draws.
+    pub fn gpu_bytes(&self) -> u64 {
+        self.vertices.size()
+            + self.records.size()
+            + self.full.size()
+            + self.boxes.size()
+            + self.counts.size()
+            + self.args.size()
     }
 
-    /// Draws the prepared view's buildings: solid art, then texture details.
+    /// Records this view's cull: clears the counts, culls every building and
+    /// sets the indirect draws. `size` is the world pass's pixel size.
+    pub fn prepare(
+        &mut self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        camera: &Camera,
+        origin: [f64; 3],
+        size: [u32; 2],
+    ) {
+        let fill = &self.art.fill;
+        // Knocked-down buildings: refresh the records' flags.
+        let version = fill.version();
+        if version != self.flattened_version {
+            self.flattened_version = version;
+            let mut records = self.art.records.clone();
+            for n in 0..self.art.len() {
+                records[n * 8 + 7] =
+                    u32::from(fill.hidden[n]) | (u32::from(fill.is_flattened(n)) << 1);
+            }
+            let bytes: Vec<u8> = records.iter().flat_map(|v| v.to_le_bytes()).collect();
+            queue.write_buffer(&self.records, 0, &bytes);
+        }
+        let (sy, cy) = camera.yaw.sin_cos();
+        let (sp, cp) = camera.pitch.sin_cos();
+        let (sr, cr) = camera.roll.sin_cos();
+        let right = [cy * cr - sy * sp * sr, cp * sr, -sy * cr - cy * sp * sr];
+        let up = [-cy * sr - sy * sp * cr, cp * cr, sy * sr - cy * sp * cr];
+        let forward = [sy * cp, sp, cy * cp];
+        let height = (size[1] as f32 * camera.view_fraction).max(1.);
+        let aspect = size[0] as f32 / height;
+        let f = 1.732_050_8 * camera.zoom.max(0.01);
+        let zoom = f64::from(camera.zoom).clamp(1., 4.);
+        let eye: [f32; 3] = std::array::from_fn(|i| (camera.position[i] - origin[i]) as f32);
+        let t = self.tiers;
+        let mut p = [0f32; PARAM_WORDS];
+        p[0..3].copy_from_slice(&origin.map(|v| v as f32));
+        p[4..7].copy_from_slice(&eye);
+        p[8..11].copy_from_slice(&forward);
+        p[12..15].copy_from_slice(&right);
+        p[16..19].copy_from_slice(&up);
+        p[20] = (t.full_nm * NM * zoom) as f32;
+        p[21] = (t.blend_nm * NM * zoom) as f32;
+        p[22] = (t.draw_nm * NM * zoom) as f32;
+        p[23] = SINK_FT as f32;
+        p[24] = aspect / f * 1.05;
+        p[25] = 1. / f * 1.05;
+        p[26] = f * height * 0.5;
+        p[27] = t.min_px as f32;
+        let mut bytes: Vec<u8> = p.iter().flat_map(|v| v.to_le_bytes()).collect();
+        bytes[28 * 4..29 * 4].copy_from_slice(&(self.art.len() as u32).to_le_bytes());
+        bytes[29 * 4..30 * 4].copy_from_slice(&(self.art.ranges.len() as u32).to_le_bytes());
+        bytes[30 * 4..31 * 4].copy_from_slice(&(t.detail_px as f32).to_le_bytes());
+        self.slot = (self.slot + 1) % SLOTS;
+        queue.write_buffer(&self.params[self.slot], 0, &bytes);
+        encoder.clear_buffer(&self.counts, 0, None);
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("City fill cull"),
+            timestamp_writes: None,
+        });
+        pass.set_bind_group(0, &self.binds[self.slot], &[]);
+        pass.set_pipeline(&self.cull);
+        pass.dispatch_workgroups((self.art.len() as u32).div_ceil(256).max(1), 1, 1);
+        pass.set_pipeline(&self.finish);
+        pass.dispatch_workgroups((self.art.ranges.len() as u32 + 1).div_ceil(64), 1, 1);
+        drop(pass);
+        self.prepared = true;
+    }
+
+    /// Draws the prepared view: far boxes, then each piece's solid art and
+    /// texture details, all indirect.
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, bind: &'a wgpu::BindGroup) {
-        if self.draws.is_empty() && self.box_draw.is_empty() {
+        if !self.prepared {
             return;
         }
         pass.set_bind_group(0, bind, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
-        if !self.box_draw.is_empty() {
-            pass.set_pipeline(&self.far);
-            pass.set_vertex_buffer(1, self.boxes.buffer.slice(..));
-            pass.draw(self.art.box_range.clone(), self.box_draw.clone());
-        }
-        pass.set_vertex_buffer(1, self.instances.buffer.slice(..));
+        let pieces = self.art.ranges.len() as u64;
+        pass.set_pipeline(&self.far);
+        pass.set_vertex_buffer(1, self.boxes.slice(..));
+        pass.draw_indirect(&self.args, 2 * pieces * 16);
         for (kind, pipeline) in [&self.solid, &self.decal].into_iter().enumerate() {
             pass.set_pipeline(pipeline);
-            for (vertices, instances) in &self.draws {
-                if !vertices[kind].is_empty() {
-                    pass.draw(vertices[kind].clone(), instances.clone());
+            for (p, range) in self.art.ranges.iter().enumerate() {
+                let first = u64::from(self.art.piece_table[p * 8]) * 32;
+                if !range[kind].is_empty() && first < self.full.size() {
+                    pass.set_vertex_buffer(1, self.full.slice(first..));
+                    pass.draw_indirect(&self.args, (2 * p as u64 + kind as u64) * 16);
                 }
             }
         }
+    }
+
+    /// Reads back what the last view drew (waits for the GPU; a measuring
+    /// aid).
+    pub fn stats(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> AppResult<Stats> {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(&self.counts, 0, &self.readback, 0, self.counts.size());
+        queue.submit([encoder.finish()]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |r| {
+                let _ = tx.send(r);
+            });
+        device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(60)),
+        })?;
+        rx.recv()??;
+        let counts: Vec<u32> = self
+            .readback
+            .slice(..)
+            .get_mapped_range()
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        self.readback.unmap();
+        let (boxes, full) = counts.split_last().map_or((0, &[][..]), |(b, f)| (*b, f));
+        Ok(Stats {
+            full: full.iter().map(|&c| c as usize).sum(),
+            boxes: boxes as usize,
+        })
     }
 }

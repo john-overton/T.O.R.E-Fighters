@@ -264,13 +264,15 @@ pub fn run() -> AppResult<()> {
                 &path,
                 crate::replay::png::encode_rgba(crate::reel::WIDTH, crate::reel::HEIGHT, &pixels)?,
             )?;
-            let stats = gpu.sim.fill.as_ref().map(|f| f.stats).unwrap_or_default();
+            let stats = match &gpu.sim.fill {
+                Some(f) => f.stats(&gpu.device, &gpu.queue)?,
+                None => Default::default(),
+            };
             println!(
-                "render: {} ({} buildings, {} as far boxes, in {} draws)",
+                "render: {} ({} buildings at full detail, {} as far boxes)",
                 path.display(),
-                stats.instances,
+                stats.full,
                 stats.boxes,
-                stats.draws
             );
         }
     }
@@ -300,10 +302,7 @@ pub fn run() -> AppResult<()> {
             gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
             let heading = v[3].to_radians();
             let mut times = Vec::with_capacity(frames);
-            let mut drawn = 0usize;
-            let mut boxes = 0usize;
-            let mut ring = 0u64;
-            let mut prepare_us = 0u64;
+            let (mut full, mut boxes, mut samples) = (0usize, 0usize, 0usize);
             for frame in 0..frames + 30 {
                 let along = frame.saturating_sub(30) as f64 * v[4];
                 let x = v[0] + along * heading.sin();
@@ -333,10 +332,15 @@ pub fn run() -> AppResult<()> {
                 })?;
                 if frame >= 30 {
                     times.push(started.elapsed().as_secs_f64() * 1e3);
-                    drawn += gpu.sim.fill.as_ref().map_or(0, |f| f.stats.instances);
-                    prepare_us += gpu.sim.fill.as_ref().map_or(0, |f| f.stats.prepare_us);
-                    boxes += gpu.sim.fill.as_ref().map_or(0, |f| f.stats.boxes);
-                    ring = ring.max(gpu.sim.fill.as_ref().map_or(0, |f| f.stats.ring_bytes));
+                    // Every 20th frame, untimed: what it drew.
+                    if frame % 20 == 0
+                        && let Some(f) = &gpu.sim.fill
+                    {
+                        let stats = f.stats(&gpu.device, &gpu.queue)?;
+                        full += stats.full;
+                        boxes += stats.boxes;
+                        samples += 1;
+                    }
                 }
             }
             let mut sorted = times.clone();
@@ -344,7 +348,7 @@ pub fn run() -> AppResult<()> {
             let mean = times.iter().sum::<f64>() / times.len() as f64;
             let p = |q: f64| sorted[((sorted.len() - 1) as f64 * q).round() as usize];
             println!(
-                "bench fill {}: {} frames at {}x{}, mean {:.3} ms, p50 {:.3}, p95 {:.3}, max {:.3}, {:.0} buildings drawn per frame ({:.0} as far boxes), {:.3} ms CPU picking them, instance rings {} KiB",
+                "bench fill {}: {} frames at {}x{}, mean {:.3} ms, p50 {:.3}, p95 {:.3}, max {:.3}, per frame {:.0} buildings at full detail and {:.0} as far boxes, fill GPU memory {} KiB",
                 if on { "on" } else { "off" },
                 times.len(),
                 size[0],
@@ -353,10 +357,9 @@ pub fn run() -> AppResult<()> {
                 p(0.5),
                 p(0.95),
                 p(1.0),
-                drawn as f64 / times.len() as f64,
-                boxes as f64 / times.len() as f64,
-                prepare_us as f64 / 1e3 / times.len() as f64,
-                ring / 1024
+                full as f64 / samples.max(1) as f64,
+                boxes as f64 / samples.max(1) as f64,
+                gpu.sim.fill.as_ref().map_or(0, |f| f.gpu_bytes()) / 1024
             );
             means.push(mean);
         }
