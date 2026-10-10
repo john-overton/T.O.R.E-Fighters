@@ -380,8 +380,9 @@ or a recording, so determinism and the golden fingerprints are untouched.
 **When a gun flashes.** Each round a gun lets go flashes once, so the flash
 follows whatever fire rate the gun has. The signal is a gunship round that is
 new in the picture: single player sees the simulation's own rounds, a networked
-client sees the rounds it makes again from the host's gun bursts (other players'
-AC-130s too), and a replay sees its recorded rounds. All three keep a round's
+client sees the rounds it makes again (its own linked guns from its trigger,
+other players' AC-130s from the host's gun bursts), and a replay sees its
+recorded rounds. All three keep a round's
 number for its whole flight, so no new wire field or recording field is needed.
 A replay seek, a restart or a stall of more than two seconds starts afresh
 without flashing the rounds already in the air.
@@ -389,7 +390,7 @@ without flashing the rounds already in the air.
 ```mermaid
 flowchart LR
   SP[Single player: simulation rounds] --> P[Rounds in the picture]
-  MP[Online: rounds remade from host gun bursts] --> P
+  MP[Online: own rounds from the trigger, others from host gun bursts] --> P
   RP[Replay: recorded rounds] --> P
   P -->|a round number not seen last frame| S[One shot of that gun]
   S --> F[Flash on the barrel tip as drawn now]
@@ -472,9 +473,32 @@ status are the host's, a round trip late, like the barrels. Other players see
 the barrels follow the sight through the entity's gun devices (protocol 18).
 The always-on targeting applies even when the King turns cheats off.
 
+**Rounds online** (gunsight slice G5, agent decisions). The host sends no
+rounds, only gun bursts, so every client makes the rounds again
+([architecture](../ARCHITECTURE.md#the-client-session)). An AC-130's round leaves the
+tip of its barrel along the barrel, with the train the client draws it with,
+exactly as the host fires it (`gunship::muzzle`, `gunship::direction`, the
+gun's own muzzle velocity); it never leaves along the nose. The seat's own
+linked guns all fire at once from its trigger, each on its own cadence, with
+the readout's gun group, each gun's may-fire rule (READY or advisory) and its
+rounds; another player's AC-130 fires from its burst events with the train its
+pose was drawn with at each round's release tick. Since protocol 21 the six
+gun angles travel at 1/32,767 of their unit (16 bits) in the entity's devices
+and the owner's readout. At the old 1/127 a remade stream landed a steady 50
+to 70 feet from the host's at a 6,000-foot slant (up to 0.7 degrees of train),
+more than two draws of the guns' own spread differ; at 1/32,767 it lands as
+the host's does (measured in `net::guns` tests: mean miss between a client's
+round and the host's 27 to 35 feet, all of it spread, and the two streams'
+centres within 2 to 22 feet, the same as with the host's exact train). A
+readout a round trip late changes nothing while the guns hold a train, as they
+do in an orbit; while they slew, the seat's rounds leave the barrels as drawn,
+a round trip behind the host's.
+
 Host, clients and replay receive actual heading/elevation and membership. The
 six angle values use slot order C_25, C_40, C_105 and interleaved heading/elevation;
-heading is divided by pi, elevation by pi/2 for bounded presentation transport.
+heading is divided by pi, elevation by pi/2 for bounded presentation transport
+(1/32,767 steps on the wire since protocol 21; replays keep 1/127, which only
+draws the barrels, because a replay records its rounds).
 Membership is a separate three-bit mask. Tracking state is fixed-tick owned;
 local animation does not choose the target or decide whether a gun can fire.
 

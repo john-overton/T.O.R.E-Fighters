@@ -3350,8 +3350,11 @@ only the tick-cost figure reads the process's clock.
   marks with the simulation's own rules; chaff and flares are flown again from
   their release events, as the replay viewer already does; explosions and hit
   flashes age locally from their spawn; other aircraft's gun rounds are drawn
-  from burst events, and its own at once from its trigger. None of these change
-  the simulation, which the host alone runs.
+  from burst events, and its own at once from its trigger, every linked gun
+  of an AC-130 on its own cadence. An AC-130's rounds leave the barrel tips
+  along the drawn train (the entity's gun devices, or the owner's readout),
+  as the host's do ([linked guns](spec/ac130-linked-guns.md#feedback-and-shared-state)).
+  None of these change the simulation, which the host alone runs.
 - **Presents the cues addressed to it**: HUD lines, radio calls with their
   recordings, the tower, weapon release sounds, rumble, the mission result
   calls, and the debrief the host sends when the player leaves.

@@ -13,6 +13,12 @@
 //! ordinary [`ProjectilePose`]s with `gun: true` and the tracer flag, so the
 //! drawing that already shows a host's rounds shows them.
 //!
+//! An AC-130's guns are trained (docs/spec/ac130-linked-guns.md): a round
+//! of one leaves the tip of its barrel along the barrel, as the host's does
+//! ([`gunship::muzzle`], [`gunship::direction`]), with the barrel's train as
+//! the picture draws it (the snapshot's gun devices). The seat's own linked
+//! guns all fire at once from its trigger, each on its own cadence.
+//!
 //! *Agent decisions:* the spread of a round comes from a number only this
 //! side knows (the host seeds it with the round's projectile number, which no
 //! message carries), so a round's line can differ from the host's within the
@@ -23,15 +29,24 @@
 //! along its velocity to the round's release tick; a burst the host has not
 //! closed yet is drawn as running on, and the rounds it overran are taken
 //! back when the closing event comes (the picture's delay keeps that from
-//! showing in practice).
-use crate::snapshot::{AircraftPose, ProjectilePose, RenderSnapshot};
-use std::collections::{BTreeMap, VecDeque};
+//! showing in practice); an AC-130's rounds take the train its pose had at
+//! the round's release tick, from the poses the client has drawn (the
+//! nearest two, blended), and the seat's own take the train its aircraft is
+//! drawn with now, the host's newest readout's; the seat's own linked guns
+//! fire while the readout says each may (armed, loaded and not blocked by
+//! the airframe), solved or not, as the host's do.
+use crate::snapshot::{AircraftPose, DEVICES, GUN_AIM, ProjectilePose, RenderSnapshot};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    f64::consts::{FRAC_PI_2, PI},
+};
 use tore_formats::aircraft::AircraftId;
 use tore_session::wire::events::{ReceivedEvent, WireEvent};
 use tore_sim::{
     attitude::{Basis, Vector},
     combat::{
         gun_round::{self, Cadence, Round},
+        gunship,
         live::{self, Launcher, Readiness, Station},
     },
 };
@@ -58,6 +73,10 @@ const FIRED_KEPT_TICKS: u64 = 480;
 const OWN_IDS: u32 = 0xF000_0000;
 const OTHER_IDS: u32 = 0xE000_0000;
 
+/// An AC-130's gun train in the snapshot's device units, by gun slot:
+/// heading over pi, elevation over a right angle.
+pub type GunAim = [[f64; 2]; 3];
+
 /// What a client frame brings that the rounds need.
 pub struct Inputs<'a> {
     /// The newest predicted tick, which is the host tick the aircraft's last
@@ -71,6 +90,9 @@ pub struct Inputs<'a> {
     pub plane: u32,
     /// The seat's aircraft as drawn: position, nose and speed.
     pub own: Launcher,
+    /// The seat's AC-130 gun train as its aircraft is drawn (zero on any
+    /// other aircraft).
+    pub gun_aim: GunAim,
     /// What the newest readout says of the selected station, when one has
     /// come.
     pub stores: Option<Stores>,
@@ -92,17 +114,67 @@ pub struct Stores {
     pub rounds: u16,
     /// The host tick the readout shows.
     pub tick: u64,
+    /// An AC-130's gun group, when the seat flies one.
+    pub group: Option<Group>,
+}
+
+/// What a readout says of an AC-130's guns, by gun slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Group {
+    /// The gun's station in the loadout, when it is installed.
+    pub stations: [Option<usize>; 3],
+    /// The guns linked to fire together.
+    pub linked: [bool; 3],
+    /// The gun may fire: its readiness is READY or only advisory
+    /// ([`Readiness::gun_may_fire`]).
+    pub may_fire: [bool; 3],
+    /// Rounds at the gun.
+    pub rounds: [u16; 3],
 }
 
 impl Stores {
-    /// The weapon page of `readout`.
-    pub fn of(readout: &CockpitReadout) -> Self {
+    /// The weapon page of `readout`, for an aircraft loaded as `config`.
+    pub fn of(readout: &CockpitReadout, config: &live::Configuration) -> Self {
         let selected = readout.stores.selected();
+        let group = gunship::State::new(config)
+            .zip(readout.gunsight.as_ref())
+            .map(|(group, sight)| Group {
+                stations: group.stations,
+                linked: std::array::from_fn(|slot| readout.stores.gun_group & (1 << slot) != 0),
+                may_fire: sight.status.map(Readiness::gun_may_fire),
+                rounds: group
+                    .stations
+                    .map(|station| station.map_or(0, |s| readout.stores.rounds(s))),
+            });
         Self {
             selected,
             ready: readout.estimates.readiness == Readiness::Ready,
             rounds: readout.stores.rounds(selected),
             tick: readout.tick,
+            group,
+        }
+    }
+
+    /// The stations the trigger fires, each with its gun slot on an AC-130
+    /// and whether it may fire and its rounds: the linked guns when the
+    /// selected station is one of an AC-130's, as the host fires them, else
+    /// the selected station.
+    fn firing(&self) -> Vec<(usize, Option<usize>, bool, u16)> {
+        match self.group {
+            Some(group) if group.stations.contains(&Some(self.selected)) => (0..3)
+                .filter(|slot| group.linked[*slot])
+                .filter_map(|slot| {
+                    group.stations[slot].map(|station| {
+                        (
+                            station,
+                            Some(slot),
+                            group.may_fire[slot],
+                            group.rounds[slot],
+                        )
+                    })
+                })
+                .collect(),
+            _ => vec![(self.selected, None, self.ready, self.rounds)],
         }
     }
 }
@@ -179,10 +251,11 @@ struct Other {
 /// The rounds a client draws.
 #[derive(Default)]
 pub struct Guns {
-    /// The seat's trigger schedule for its selected gun.
-    cadence: Cadence,
-    /// The station `cadence` is for.
-    station: Option<usize>,
+    /// The seat's trigger schedule for each gun station it has fired, kept
+    /// (as the host keeps them) so a gun's tracers run on.
+    cadences: BTreeMap<usize, Cadence>,
+    /// The stations the trigger fired last frame.
+    firing: Vec<usize>,
     /// The seat's rounds, each with a number that stays with it while the
     /// rounds before it leave the air.
     own: Vec<(u32, Round)>,
@@ -190,9 +263,9 @@ pub struct Guns {
     own_serial: u32,
     /// The tick the seat's rounds have been made to.
     own_tick: u64,
-    /// The ticks the seat's own rounds left, for counting the rounds it has
-    /// left against a readout older than they are.
-    fired: VecDeque<u64>,
+    /// The ticks and stations the seat's own rounds left, for counting the
+    /// rounds each gun has left against a readout older than they are.
+    fired: VecDeque<(u64, usize)>,
     bursts: Vec<Burst>,
     /// The rounds each other aircraft's gun has let go, by shooter and station,
     /// as far as its bursts have told.
@@ -203,6 +276,9 @@ pub struct Guns {
     next_id: u32,
     /// The number the next round of another aircraft gets.
     next_serial: u32,
+    /// Each AC-130's gun train as the pictures drew it, by host tick, for
+    /// the train at a round's release.
+    trains: BTreeMap<u32, VecDeque<(u64, GunAim)>>,
 }
 
 impl Guns {
@@ -352,65 +428,90 @@ impl Guns {
             self.own_tick = input.tick;
         }
         self.own_tick = self.own_tick.max(input.tick.saturating_sub(MAX_CATCH_UP));
-        let selected = input.stores.map(|stores| stores.selected);
-        if selected != self.station {
-            self.cadence.discard();
-            self.station = selected;
+        // The gun stations the trigger fires, with what each may do.
+        let firing: Vec<_> = input
+            .stores
+            .map(|stores| stores.firing())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(index, slot, ready, rounds)| {
+                let station = input
+                    .config
+                    .stations
+                    .get(index)
+                    .filter(|station| live::is_gun(&station.weapon))?;
+                // Rounds left: the readout's, less what has left since it
+                // was made.
+                let since = input.stores.map_or(0, |stores| {
+                    self.fired
+                        .iter()
+                        .filter(|(tick, s)| *s == index && *tick > stores.tick)
+                        .count()
+                });
+                Some((
+                    index,
+                    slot,
+                    station,
+                    ready,
+                    usize::from(rounds).saturating_sub(since),
+                ))
+            })
+            .collect();
+        // A station the trigger no longer fires lets go of its trigger, as
+        // changing weapon does.
+        for index in &self.firing {
+            if !firing.iter().any(|(station, ..)| station == index)
+                && let Some(cadence) = self.cadences.get_mut(index)
+            {
+                cadence.discard();
+            }
         }
-        // The station's gun, when the weapon page has a gun selected.
-        let gun = selected
-            .and_then(|station| input.config.stations.get(station))
-            .filter(|station| live::is_gun(&station.weapon));
-        // Rounds left: the readout's, less what has left since it was made.
-        let left = input.stores.map_or(0, |stores| {
-            let since = self
-                .fired
-                .iter()
-                .filter(|tick| **tick > stores.tick)
-                .count();
-            usize::from(stores.rounds).saturating_sub(since)
-        });
-        let ready = input.stores.is_some_and(|stores| stores.ready);
+        self.firing = firing.iter().map(|(index, ..)| *index).collect();
+        let mut left: Vec<usize> = firing.iter().map(|f| f.4).collect();
         for tick in self.own_tick + 1..=input.tick {
             let back = (input.tick - tick) as f64 / 120.;
             self.own
                 .retain_mut(|(_, round)| round.step(tick, &around.ground));
-            let Some(station) = gun else {
-                continue;
-            };
-            let fired = self.cadence.step(
-                &station.weapon,
-                input.trigger && input.own.alive,
-                ready && left > 0 && self.own.len() < MAX_ROUNDS,
-                tick,
-            );
-            let Some(fired) = fired else { continue };
-            self.fired.push_back(tick);
-            let launcher = input.own;
-            let position: Vector =
-                std::array::from_fn(|i| launcher.position[i] - launcher.velocity[i] * back);
-            let muzzle = muzzle(position, launcher.basis, station.mount);
-            let seed = [self.next_id, input.plane, self.station.unwrap_or(0) as u32];
-            self.next_id = self.next_id.wrapping_add(1);
-            if let Some(mut round) = Round::release(
-                &station.weapon,
-                muzzle,
-                launcher.basis.forward,
-                launcher.speed_fps,
-                seed,
-                tick,
-                fired.tracer,
-            ) && round.step(tick, &around.ground)
-            {
-                self.own_serial = self.own_serial.wrapping_add(1);
-                self.own.push((self.own_serial, round));
+            // In slot order, as the host steps the linked guns.
+            for (k, (index, slot, station, ready, _)) in firing.iter().enumerate() {
+                let fired = self.cadences.entry(*index).or_default().step(
+                    &station.weapon,
+                    input.trigger && input.own.alive,
+                    *ready && left[k] > 0 && self.own.len() < MAX_ROUNDS,
+                    tick,
+                );
+                let Some(fired) = fired else { continue };
+                left[k] -= 1;
+                self.fired.push_back((tick, *index));
+                let launcher = Launcher {
+                    position: std::array::from_fn(|i| {
+                        input.own.position[i] - input.own.velocity[i] * back
+                    }),
+                    ..input.own
+                };
+                let (muzzle, direction) = gun_line(launcher, station, *slot, input.gun_aim);
+                let seed = [self.next_id, input.plane, *index as u32];
+                self.next_id = self.next_id.wrapping_add(1);
+                if let Some(mut round) = Round::release(
+                    &station.weapon,
+                    muzzle,
+                    direction,
+                    launcher.speed_fps,
+                    seed,
+                    tick,
+                    fired.tracer,
+                ) && round.step(tick, &around.ground)
+                {
+                    self.own_serial = self.own_serial.wrapping_add(1);
+                    self.own.push((self.own_serial, round));
+                }
             }
         }
         self.own_tick = input.tick;
         while self
             .fired
             .front()
-            .is_some_and(|tick| tick + FIRED_KEPT_TICKS < input.tick)
+            .is_some_and(|(tick, _)| tick + FIRED_KEPT_TICKS < input.tick)
         {
             self.fired.pop_front();
         }
@@ -427,6 +528,7 @@ impl Guns {
             self.others_tick = now;
         }
         self.others_tick = self.others_tick.max(now.saturating_sub(MAX_CATCH_UP));
+        self.note_trains(now, picture);
         for tick in self.others_tick + 1..=now {
             self.others
                 .retain_mut(|other| other.round.step(tick, &around.ground));
@@ -438,6 +540,52 @@ impl Guns {
             Some(last) => last + BACKLOG_TICKS >= now,
             None => burst.first + OPEN_BURST_TICKS > now,
         });
+    }
+
+    /// Remembers the gun train of every AC-130 `picture` draws at host tick
+    /// `now`, for the rounds let go at the ticks before it.
+    fn note_trains(&mut self, now: u64, picture: &RenderSnapshot) {
+        for pose in &picture.targets {
+            let Some(aim) = drawn_train(pose) else {
+                continue;
+            };
+            let train = self.trains.entry(pose.id).or_default();
+            // A picture that went back (a restart, a seek) starts again.
+            if train.back().is_some_and(|(tick, _)| *tick > now) {
+                train.clear();
+            }
+            match train.back_mut() {
+                Some((tick, last)) if *tick == now => *last = aim,
+                _ => train.push_back((now, aim)),
+            }
+        }
+        for train in self.trains.values_mut() {
+            while train
+                .front()
+                .is_some_and(|(tick, _)| tick + BACKLOG_TICKS + MAX_CATCH_UP < now)
+            {
+                train.pop_front();
+            }
+        }
+        self.trains.retain(|_, train| !train.is_empty());
+    }
+
+    /// The gun train `shooter`'s pose had at host tick `tick`: the nearest
+    /// two the pictures drew, blended, or the nearest one.
+    fn train_at(&self, shooter: u32, tick: u64) -> Option<GunAim> {
+        let train = self.trains.get(&shooter)?;
+        let after = train.iter().position(|(t, _)| *t >= tick);
+        Some(match after {
+            Some(0) => train[0].1,
+            Some(k) => {
+                let ((t0, a), (t1, b)) = (train[k - 1], train[k]);
+                let f = (tick - t0) as f64 / (t1 - t0) as f64;
+                std::array::from_fn(|slot| {
+                    std::array::from_fn(|i| a[slot][i] + (b[slot][i] - a[slot][i]) * f)
+                })
+            }
+            None => train.back()?.1,
+        })
     }
 
     /// The rounds of every burst due at host tick `tick`, flown on to `now`.
@@ -470,9 +618,17 @@ impl Guns {
                 if now - release > BACKLOG_TICKS || self.others.len() >= MAX_ROUNDS {
                     continue;
                 }
+                let gun = gun_slot(pose, station).map(|slot| {
+                    let train = self
+                        .train_at(burst.shooter, release)
+                        .or_else(|| drawn_train(pose))
+                        .unwrap_or_default();
+                    (slot, train)
+                });
                 if let Some(round) = other_round(
                     pose,
                     station,
+                    gun,
                     release,
                     now,
                     gun_round::tracer(&station.weapon, burst.base + n),
@@ -506,10 +662,13 @@ fn other_id(serial: u32) -> u32 {
 }
 
 /// One round of another aircraft, let go at `release` and flown on to `now`
-/// from where the aircraft drawn at `now` was then.
+/// from where the aircraft drawn at `now` was then. `gun` is an AC-130
+/// gun's slot and its train at `release`.
+#[allow(clippy::too_many_arguments)]
 fn other_round(
     pose: &AircraftPose,
     station: &Station,
+    gun: Option<(usize, GunAim)>,
     release: u64,
     now: u64,
     tracer: bool,
@@ -517,16 +676,29 @@ fn other_round(
     next_id: &mut u32,
 ) -> Option<Round> {
     let back = (now - release) as f64 / 120.;
-    let position: Vector = std::array::from_fn(|i| pose.position[i] - pose.velocity[i] * back);
     let [yaw, pitch, bank] = pose.attitude;
-    let basis = Basis::new(yaw, pitch, bank);
     let speed = pose.velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let launcher = Launcher {
+        position: std::array::from_fn(|i| pose.position[i] - pose.velocity[i] * back),
+        basis: Basis::new(yaw, pitch, bank),
+        speed_fps: speed,
+        velocity: pose.velocity,
+        bay_ready: true,
+        radar_power: false,
+        radar: false,
+        jammer: false,
+        alive: true,
+        body_present: true,
+        controls: Default::default(),
+    };
+    let (slot, train) = gun.unzip();
+    let (muzzle, direction) = gun_line(launcher, station, slot, train.unwrap_or_default());
     let seed = [*next_id, pose.id, 0];
     *next_id = next_id.wrapping_add(1);
     let mut round = Round::release(
         &station.weapon,
-        muzzle(position, basis, station.mount),
-        basis.forward,
+        muzzle,
+        direction,
         speed,
         seed,
         release,
@@ -540,14 +712,58 @@ fn other_round(
     Some(round)
 }
 
-/// Where a gun at `mount` (feet right, up and forward of the aircraft's
-/// centre) leaves an aircraft at `position` facing `basis`.
-fn muzzle(position: Vector, basis: Basis, mount: Vector) -> Vector {
-    std::array::from_fn(|i| {
-        position[i]
-            + basis.right[i] * mount[0]
-            + basis.up[i] * mount[1]
-            + basis.forward[i] * mount[2]
+/// Where a round of `station` leaves an aircraft flying as `launcher`, and
+/// the line it leaves along before its spread: an AC-130 gun (its `slot`)
+/// from the tip of its barrel along the barrel, trained as `aim` says (the
+/// host's [`gunship::muzzle`] and [`gunship::direction`]); any other gun
+/// from its mount along the nose. A barrel with no train drawn (zero, which
+/// no gun's arc reaches) points as its mesh lies, as the drawn barrel and
+/// its flash do.
+fn gun_line(
+    launcher: Launcher,
+    station: &Station,
+    slot: Option<usize>,
+    aim: GunAim,
+) -> (Vector, Vector) {
+    match slot {
+        Some(slot) if aim[slot] != [0., 0.] => {
+            let [heading, elevation] = aim[slot];
+            let (heading, elevation) = (heading * PI, elevation * FRAC_PI_2);
+            (
+                gunship::muzzle(slot, launcher, heading, elevation),
+                gunship::direction(launcher, heading, elevation),
+            )
+        }
+        Some(slot) => crate::gun_flash::Mount {
+            position: launcher.position,
+            basis: launcher.basis,
+            gun_aim: aim,
+        }
+        .muzzle(slot),
+        None => (
+            gunship::world_mount(launcher, station.mount),
+            launcher.basis.forward,
+        ),
+    }
+}
+
+/// The slot of `station`'s gun on `pose`'s aircraft, when it is an AC-130's
+/// trained gun.
+fn gun_slot(pose: &AircraftPose, station: &Station) -> Option<usize> {
+    (pose.aircraft == Some(AircraftId::Ac130))
+        .then(|| {
+            gunship::GUNS
+                .iter()
+                .position(|gun| station.weapon.source.eq_ignore_ascii_case(gun))
+        })
+        .flatten()
+}
+
+/// The gun train an AC-130's pose is drawn with.
+fn drawn_train(pose: &AircraftPose) -> Option<GunAim> {
+    (pose.aircraft == Some(AircraftId::Ac130)).then(|| {
+        let devices = pose.devices.unwrap_or([0.; DEVICES]);
+        std::array::from_fn(|slot| [devices[GUN_AIM + slot * 2], devices[GUN_AIM + slot * 2 + 1]])
     })
 }
 
@@ -664,6 +880,7 @@ mod tests {
             ready: true,
             rounds: 2_000,
             tick: 0,
+            group: None,
         })
     }
 
@@ -755,6 +972,7 @@ mod tests {
                     trigger: pulls(tick),
                     plane: SHOOTER,
                     own: launcher(tick),
+                    gun_aim: GunAim::default(),
                     stores: ready(),
                     config: &config,
                     events: &[],
@@ -778,7 +996,9 @@ mod tests {
                     );
                     assert!(dist(ours.previous, theirs.previous) < 0.01);
                 }
-                if guns.fired.back() == Some(&tick) && released.last() != Some(&tick) {
+                if guns.fired.back().map(|(t, _)| t) == Some(&tick)
+                    && released.last() != Some(&tick)
+                {
                     released.push(tick);
                 }
             }
@@ -814,6 +1034,7 @@ mod tests {
                     trigger: pulls(tick),
                     plane: SHOOTER,
                     own: launcher(tick),
+                    gun_aim: GunAim::default(),
                     stores: ready(),
                     config: &config,
                     events: &[],
@@ -889,6 +1110,7 @@ mod tests {
                         trigger: false,
                         plane: 3,
                         own: launcher(tick),
+                        gun_aim: GunAim::default(),
                         stores: own,
                         config: &config,
                         events: &events,
@@ -939,6 +1161,7 @@ mod tests {
                     trigger: false,
                     plane: 3,
                     own: launcher(tick),
+                    gun_aim: GunAim::default(),
                     stores: None,
                     config: &config,
                     events,
@@ -1006,6 +1229,7 @@ mod tests {
             trigger: false,
             plane: SHOOTER,
             own: launcher(99),
+            gun_aim: GunAim::default(),
             stores: None,
             config: &config,
             events: &[],
@@ -1056,6 +1280,7 @@ mod tests {
                 trigger: false,
                 plane: 3,
                 own: launcher(tick),
+                gun_aim: GunAim::default(),
                 stores: None,
                 config: &config,
                 events: if tick == 101 { &events } else { &[] },
@@ -1083,5 +1308,602 @@ mod tests {
         assert!(previous.is_empty() && gone.len() == rounds);
         assert_eq!(own_id(5), OWN_IDS + 5);
         assert_eq!(other_id(0x1234_5678), OTHER_IDS + 0x0234_5678);
+    }
+
+    /// An AC-130 in a left orbit at 4,500 feet over flat ground, its three
+    /// guns linked and trained by the host's own sight (the default view),
+    /// firing a long burst: the rounds a client remakes leave the right
+    /// barrels along their train and land where the host's land.
+    mod ac130 {
+        use super::*;
+        use tore_world::{
+            mission::{MissionSpec, Start},
+            test_support::resources::{THEATER, gunship_resources},
+            world::{Seating, World},
+        };
+
+        const HELD: std::ops::Range<u64> = 600..1_500;
+        const RUN: u64 = 2_400;
+        /// The round trip the readout's train is late by: 100 ms.
+        const RTT: u64 = 12;
+        const ALTITUDE: f64 = 4_500.;
+        const SPEED: f64 = 400.;
+
+        fn config() -> live::Configuration {
+            let mut spec = MissionSpec::new(THEATER, AircraftId::Ac130);
+            spec.start = Start::Airborne { altitude_ft: 5_000 };
+            let world = World::new(&spec, &gunship_resources(), Seating::SinglePlayer).unwrap();
+            world.combat.state.own().configuration().clone()
+        }
+
+        /// A coordinated 25 degree left turn (the yaw falls; a negative bank
+        /// lifts the right wing).
+        fn launcher(tick: u64) -> Launcher {
+            let seconds = tick as f64 / 120.;
+            let bank = -25_f64.to_radians();
+            let rate = -32.174 * bank.abs().tan() / SPEED;
+            let yaw0: f64 = 0.3;
+            let yaw = yaw0 + rate * seconds;
+            let basis = Basis::new(yaw, 0., bank);
+            let r = SPEED / rate;
+            Launcher {
+                position: [
+                    2_000. + r * (yaw0.cos() - yaw.cos()),
+                    ALTITUDE,
+                    -3_000. + r * (yaw.sin() - yaw0.sin()),
+                ],
+                basis,
+                speed_fps: SPEED,
+                velocity: basis.forward.map(|v| v * SPEED),
+                bay_ready: true,
+                radar_power: true,
+                radar: true,
+                jammer: false,
+                alive: true,
+                body_present: true,
+                controls: tore_sim::sensors::Controls::default(),
+            }
+        }
+
+        /// The host after each tick's step.
+        struct Tick {
+            flying: Vec<live::Projectile>,
+            /// The train the step fired with, in device units.
+            aim: GunAim,
+            stores: Stores,
+        }
+
+        struct Host {
+            ticks: Vec<Tick>,
+            /// Release tick and station of every round, in order.
+            fired: Vec<(u64, usize)>,
+            /// Where each round, by id, came down.
+            impacts: BTreeMap<u32, Vector>,
+            /// Each round's station and release tick, by id.
+            rounds: BTreeMap<u32, (usize, u64)>,
+        }
+
+        fn ground(_: f64, _: f64) -> f64 {
+            0.
+        }
+
+        /// Where a round whose last tick ran from `previous` to `position`
+        /// meets the ground, carried on along that tick's line.
+        fn landing(previous: Vector, position: Vector) -> Vector {
+            let d: Vector = std::array::from_fn(|i| position[i] - previous[i]);
+            if d[1] >= 0. {
+                return position;
+            }
+            let k = position[1] / -d[1];
+            std::array::from_fn(|i| position[i] + d[i] * k)
+        }
+
+        fn host(config: &live::Configuration) -> Host {
+            let mut state = State::open_mission();
+            state
+                .add_ownship(
+                    Ownship::new(SHOOTER, live::DEFAULT_OWNSHIP_SIDE, config.clone(), true)
+                        .unwrap(),
+                )
+                .unwrap();
+            let group = state.own_mut().gunship.as_mut().expect("an AC-130");
+            group.included = [true; 3];
+            let stations = group.stations;
+            let mut run = Host {
+                ticks: Vec::new(),
+                fired: Vec::new(),
+                impacts: BTreeMap::new(),
+                rounds: BTreeMap::new(),
+            };
+            let mut last: BTreeMap<u32, (Vector, Vector)> = BTreeMap::new();
+            for tick in 0..RUN {
+                state.step(
+                    &[OwnshipInput {
+                        aircraft: SHOOTER,
+                        held: HELD.contains(&tick),
+                        launcher: launcher(tick),
+                    }],
+                    ground,
+                );
+                let mut flying = state.projectiles.clone();
+                flying.sort_by_key(|p| p.id);
+                for p in &flying {
+                    if let std::collections::btree_map::Entry::Vacant(round) =
+                        run.rounds.entry(p.id)
+                    {
+                        round.insert((p.station, tick));
+                        run.fired.push((tick, p.station));
+                    }
+                }
+                for (id, (previous, position)) in &last {
+                    if !flying.iter().any(|p| p.id == *id) {
+                        run.impacts.insert(*id, landing(*previous, *position));
+                    }
+                }
+                last = flying
+                    .iter()
+                    .map(|p| (p.id, (p.previous, p.position)))
+                    .collect();
+                let own = state.own();
+                let group = own.gunship.as_ref().unwrap();
+                let devices = group.normalized_devices();
+                run.ticks.push(Tick {
+                    flying,
+                    aim: std::array::from_fn(|slot| [devices[slot * 2], devices[slot * 2 + 1]]),
+                    stores: Stores {
+                        selected: own.selected,
+                        ready: false,
+                        rounds: own.rounds(own.selected),
+                        tick,
+                        group: Some(Group {
+                            stations,
+                            linked: group.included,
+                            may_fire: group.status.map(Readiness::gun_may_fire),
+                            rounds: stations.map(|s| s.map_or(0, |s| own.rounds(s))),
+                        }),
+                    },
+                });
+            }
+            run
+        }
+
+        /// The train as the wire carries it (the snapshot's devices and the
+        /// readout's stores), at `steps` either way.
+        fn quantized(aim: GunAim, steps: f64) -> GunAim {
+            aim.map(|gun| gun.map(|v| (v * steps).round() / steps))
+        }
+        fn wire(aim: GunAim) -> GunAim {
+            quantized(aim, tore_session::wire::entity::GUN_AIM_STEPS)
+        }
+        /// Before protocol 21's finer gun angles: 1/127.
+        fn old_wire(aim: GunAim) -> GunAim {
+            quantized(aim, 127.)
+        }
+
+        /// The client's impacts agree with the host's as well as two draws
+        /// of the spread do: no worse round, and the stream's centre no
+        /// further off, than with the host's train exactly, give or take
+        /// `slack` feet.
+        fn within(wired: &Agreement, tolerance: &Agreement, slack: f64) -> bool {
+            (0..3).all(|slot| {
+                wired.worst[slot] <= tolerance.worst[slot] + slack
+                    && wired.centre[slot] <= tolerance.centre[slot] + slack
+            })
+        }
+
+        /// What a client drew of each round, by picture id: its weapon, the
+        /// line it was first drawn on, and where it came down.
+        #[derive(Default)]
+        struct Drawn {
+            first: BTreeMap<u32, (String, Vector, Vector)>,
+            order: Vec<u32>,
+            last: BTreeMap<u32, (Vector, Vector)>,
+            impacts: BTreeMap<u32, Vector>,
+        }
+        impl Drawn {
+            fn note(&mut self, picture: &RenderSnapshot) {
+                for p in &picture.projectiles {
+                    if let std::collections::btree_map::Entry::Vacant(first) =
+                        self.first.entry(p.id)
+                    {
+                        first.insert((p.weapon.clone(), p.previous, p.direction));
+                        self.order.push(p.id);
+                    }
+                }
+                let ids: Vec<u32> = picture.projectiles.iter().map(|p| p.id).collect();
+                for (id, (previous, position)) in &self.last {
+                    if !ids.contains(id) {
+                        self.impacts.insert(*id, landing(*previous, *position));
+                    }
+                }
+                self.last = picture
+                    .projectiles
+                    .iter()
+                    .map(|p| (p.id, (p.previous, p.position)))
+                    .collect();
+            }
+            /// The rounds of gun `slot` in the order they were drawn.
+            fn of(&self, slot: usize) -> Vec<u32> {
+                self.order
+                    .iter()
+                    .copied()
+                    .filter(|id| self.first[id].0.eq_ignore_ascii_case(gunship::GUNS[slot]))
+                    .collect()
+            }
+        }
+
+        /// How a client's rounds compare with the host's, gun by gun: the
+        /// rounds paired in order, the worst and mean miss between paired
+        /// impacts, and how far apart the two streams' mean impact points
+        /// are.
+        #[derive(Debug)]
+        struct Agreement {
+            rounds: [usize; 3],
+            worst: [f64; 3],
+            mean: [f64; 3],
+            centre: [f64; 3],
+        }
+
+        fn agreement(host: &Host, drawn: &Drawn, config: &live::Configuration) -> Agreement {
+            let stations = gunship::State::new(config).unwrap().stations;
+            let mut out = Agreement {
+                rounds: [0; 3],
+                worst: [0.; 3],
+                mean: [0.; 3],
+                centre: [0.; 3],
+            };
+            for (slot, gun) in stations.into_iter().enumerate() {
+                let ours = drawn.of(slot);
+                let theirs: Vec<u32> = host
+                    .rounds
+                    .iter()
+                    .filter(|(_, (station, _))| Some(*station) == gun)
+                    .map(|(id, _)| *id)
+                    .collect();
+                assert_eq!(ours.len(), theirs.len(), "gun {slot}: rounds drawn");
+                let pairs: Vec<(Vector, Vector)> = ours
+                    .iter()
+                    .zip(&theirs)
+                    .filter_map(|(a, b)| Some((*drawn.impacts.get(a)?, *host.impacts.get(b)?)))
+                    .collect();
+                assert!(!pairs.is_empty(), "gun {slot}: no impacts");
+                let n = pairs.len() as f64;
+                out.rounds[slot] = pairs.len();
+                for (a, b) in &pairs {
+                    out.worst[slot] = out.worst[slot].max(dist(*a, *b));
+                    out.mean[slot] += dist(*a, *b) / n;
+                }
+                let centre = |k: usize| -> Vector {
+                    std::array::from_fn(|i| pairs.iter().map(|p| [p.0, p.1][k][i]).sum::<f64>() / n)
+                };
+                out.centre[slot] = dist(centre(0), centre(1));
+            }
+            out
+        }
+
+        fn angle(a: Vector, b: Vector) -> f64 {
+            let dot: f64 = (0..3).map(|i| a[i] * b[i]).sum();
+            let norm = |v: Vector| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+            (dot / norm(a) / norm(b)).clamp(-1., 1.).acos().to_degrees()
+        }
+
+        /// Every round drawn left its gun's barrel tip along the barrel the
+        /// host fired it with, not the nose: within the gun's spread and
+        /// `slack` degrees, from within `reach` feet of the host's muzzle.
+        fn check_barrels(
+            host: &Host,
+            drawn: &Drawn,
+            config: &live::Configuration,
+            slack: f64,
+            reach: f64,
+        ) {
+            let stations = gunship::State::new(config).unwrap().stations;
+            for (slot, gun) in stations.into_iter().enumerate() {
+                let theirs: Vec<u64> = host
+                    .fired
+                    .iter()
+                    .filter(|(_, station)| Some(*station) == gun)
+                    .map(|(tick, _)| *tick)
+                    .collect();
+                for (id, release) in drawn.of(slot).iter().zip(theirs) {
+                    let (_, muzzle, direction) = &drawn.first[id];
+                    let at = launcher(release);
+                    let [h, e] = host.ticks[release as usize].aim[slot];
+                    let (h, e) = (h * PI, e * FRAC_PI_2);
+                    let barrel = gunship::direction(at, h, e);
+                    let tip = gunship::muzzle(slot, at, h, e);
+                    assert!(
+                        angle(*direction, barrel) < 0.25 + slack,
+                        "gun {slot} round at {release}: {} degrees off the barrel",
+                        angle(*direction, barrel)
+                    );
+                    assert!(angle(*direction, at.basis.forward) > 30.);
+                    assert!(
+                        dist(*muzzle, tip) < reach,
+                        "gun {slot} round at {release}: {} ft from the muzzle",
+                        dist(*muzzle, tip)
+                    );
+                }
+            }
+        }
+
+        /// The seat's own rounds with `aim(tick)` as its drawn train and
+        /// `stores(tick)` as its readout, drawn every tick.
+        fn own(
+            host: &Host,
+            config: &live::Configuration,
+            first_id: u32,
+            late: u64,
+            train: &dyn Fn(GunAim) -> GunAim,
+        ) -> Drawn {
+            let none = |_: AircraftId| &[][..];
+            let around = around(&ground, &none);
+            let mut guns = Guns {
+                next_id: first_id,
+                ..Guns::default()
+            };
+            let mut drawn = Drawn::default();
+            for tick in 0..RUN {
+                let seen = &host.ticks[tick.saturating_sub(late) as usize];
+                let mut picture = RenderSnapshot::default();
+                guns.step(
+                    &Inputs {
+                        tick,
+                        render_tick: tick as f64,
+                        trigger: HELD.contains(&tick),
+                        plane: SHOOTER,
+                        own: launcher(tick),
+                        gun_aim: train(seen.aim),
+                        stores: Some(seen.stores),
+                        config,
+                        events: &[],
+                    },
+                    &around,
+                    &mut picture,
+                );
+                drawn.note(&picture);
+            }
+            drawn
+        }
+
+        /// A round takes the train its shooter was drawn with at its release
+        /// tick, blended between the pictures either side of it, even when
+        /// its burst arrives late.
+        #[test]
+        fn a_late_round_takes_the_train_drawn_at_its_release() {
+            let pose = |aim: f64| {
+                let mut devices = [0.; DEVICES];
+                devices[GUN_AIM] = aim;
+                AircraftPose {
+                    id: SHOOTER,
+                    aircraft: Some(AircraftId::Ac130),
+                    devices: Some(devices),
+                    ..AircraftPose::default()
+                }
+            };
+            let mut guns = Guns::default();
+            for (tick, aim) in [(100, -0.4), (110, -0.6)] {
+                let picture = RenderSnapshot {
+                    targets: vec![pose(aim)],
+                    ..RenderSnapshot::default()
+                };
+                guns.note_trains(tick, &picture);
+            }
+            let heading = |tick| guns.train_at(SHOOTER, tick).unwrap()[0][0];
+            assert!((heading(105) + 0.5).abs() < 1e-12);
+            assert_eq!(heading(90), -0.4);
+            assert_eq!(heading(120), -0.6);
+            assert_eq!(guns.train_at(3, 105), None);
+            // Another aircraft's pose keeps no train.
+            let mut f18 = pose(-0.5);
+            f18.aircraft = Some(AircraftId::F18);
+            assert_eq!(drawn_train(&f18), None);
+        }
+
+        /// The seat's rounds with the host's own train, readout and round
+        /// numbers are the host's rounds exactly, on every linked gun.
+        #[test]
+        fn the_seats_own_linked_guns_fire_the_hosts_rounds() {
+            let config = config();
+            let host = host(&config);
+            let none = |_: AircraftId| &[][..];
+            let around = around(&ground, &none);
+            let mut guns = Guns::default();
+            for tick in 0..RUN {
+                let seen = &host.ticks[tick as usize];
+                let mut picture = RenderSnapshot::default();
+                guns.step(
+                    &Inputs {
+                        tick,
+                        render_tick: tick as f64,
+                        trigger: HELD.contains(&tick),
+                        plane: SHOOTER,
+                        own: launcher(tick),
+                        gun_aim: seen.aim,
+                        stores: Some(seen.stores),
+                        config: &config,
+                        events: &[],
+                    },
+                    &around,
+                    &mut picture,
+                );
+                assert_eq!(
+                    picture.projectiles.len(),
+                    seen.flying.len(),
+                    "tick {tick}: rounds in the air"
+                );
+                for (ours, theirs) in picture.projectiles.iter().zip(&seen.flying) {
+                    assert_eq!(ours.tracer, theirs.tracer, "tick {tick}");
+                    assert!(
+                        dist(ours.position, theirs.position) < 0.01,
+                        "tick {tick}: {:?} against {:?}",
+                        ours.position,
+                        theirs.position
+                    );
+                }
+            }
+            let per_gun = |station: Option<usize>| {
+                host.fired
+                    .iter()
+                    .filter(|(_, s)| Some(*s) == station)
+                    .count()
+            };
+            let stations = gunship::State::new(&config).unwrap().stations;
+            assert!(
+                per_gun(stations[0]) > 100 && per_gun(stations[1]) > 5 && per_gun(stations[2]) >= 2
+            );
+        }
+
+        /// As a client draws them: the train is the readout's (a round trip
+        /// late, at the wire's 1/127) and the spread its own. The rounds
+        /// leave the right barrels and land as near the host's as the
+        /// host's own spread lets two rounds land.
+        #[test]
+        fn the_seats_own_linked_guns_leave_their_barrels_and_land_with_the_hosts() {
+            let config = config();
+            let host = host(&config);
+            // The tolerance: the host's train exactly, a spread of its own.
+            let spread = own(&host, &config, 100_000, 0, &|aim| aim);
+            let tolerance = agreement(&host, &spread, &config);
+            let drawn = own(&host, &config, 100_000, RTT, &wire);
+            check_barrels(&host, &drawn, &config, 0.05, 0.1);
+            let late = agreement(&host, &drawn, &config);
+            let old = agreement(
+                &host,
+                &own(&host, &config, 100_000, RTT, &old_wire),
+                &config,
+            );
+            eprintln!(
+                "own, spread only: {tolerance:?}\nown, wire train: {late:?}\nown, 1/127 train: {old:?}"
+            );
+            assert!(
+                within(&late, &tolerance, 5.),
+                "{late:?} against {tolerance:?}"
+            );
+            // The coarser train the wire carried before missed by more than
+            // the spread does, the same way every round.
+            assert!(
+                !within(&old, &tolerance, 5.),
+                "{old:?} against {tolerance:?}"
+            );
+        }
+
+        /// Another player's AC-130 from its burst events and its drawn pose:
+        /// the rounds leave its barrels along the train it is drawn with and
+        /// land with the host's.
+        #[test]
+        fn another_ac130s_linked_guns_leave_their_barrels_and_land_with_the_hosts() {
+            let config = config();
+            let host = host(&config);
+            let stations = gunship::State::new(&config).unwrap().stations;
+            let mut events: Vec<(u64, ReceivedEvent)> = Vec::new();
+            let mut number = 0;
+            for station in stations.into_iter().flatten() {
+                let weapon = &config.stations[station].weapon;
+                let fired: Vec<(u64, bool)> = host
+                    .fired
+                    .iter()
+                    .filter(|(_, s)| *s == station)
+                    .map(|(tick, _)| (*tick, false))
+                    .collect();
+                for (first, length, closed) in announced(weapon, &fired) {
+                    for (at, length) in [
+                        (first + DELAY, None),
+                        (closed.max(first + DELAY), Some(length)),
+                    ] {
+                        number += 1;
+                        events.push((
+                            at,
+                            ReceivedEvent {
+                                number,
+                                tick: first as u32,
+                                event: WireEvent::GunBurst {
+                                    shooter: SHOOTER,
+                                    station: station as u8,
+                                    length,
+                                },
+                            },
+                        ));
+                    }
+                }
+            }
+            let usual = |id: AircraftId| {
+                if id == AircraftId::Ac130 {
+                    &config.stations[..]
+                } else {
+                    &[][..]
+                }
+            };
+            let around = around(&ground, &usual);
+            let run = |train: &dyn Fn(GunAim) -> GunAim| {
+                let mut guns = Guns::default();
+                let mut drawn = Drawn::default();
+                for tick in DELAY..RUN + DELAY {
+                    let shown = tick - DELAY;
+                    let now: Vec<ReceivedEvent> = events
+                        .iter()
+                        .filter(|(at, _)| *at == tick)
+                        .map(|(_, event)| event.clone())
+                        .collect();
+                    let at = launcher(shown);
+                    let mut devices = [0.; DEVICES];
+                    for (slot, [h, e]) in train(host.ticks[shown as usize].aim)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        devices[GUN_AIM + slot * 2] = h;
+                        devices[GUN_AIM + slot * 2 + 1] = e;
+                    }
+                    let mut picture = RenderSnapshot {
+                        targets: vec![AircraftPose {
+                            id: SHOOTER,
+                            aircraft: Some(AircraftId::Ac130),
+                            position: at.position,
+                            attitude: at.basis.angles(),
+                            velocity: at.velocity,
+                            devices: Some(devices),
+                            airborne: true,
+                            ..AircraftPose::default()
+                        }],
+                        ..RenderSnapshot::default()
+                    };
+                    guns.step(
+                        &Inputs {
+                            tick,
+                            render_tick: shown as f64,
+                            trigger: false,
+                            plane: 3,
+                            own: launcher(tick),
+                            gun_aim: GunAim::default(),
+                            stores: None,
+                            config: &config,
+                            events: &now,
+                        },
+                        &around,
+                        &mut picture,
+                    );
+                    drawn.note(&picture);
+                }
+                drawn
+            };
+            let tolerance = agreement(&host, &run(&|aim| aim), &config);
+            let drawn = run(&wire);
+            // A round is placed back along the pose's velocity from where it
+            // is drawn, which an orbit bends away from by a little.
+            check_barrels(&host, &drawn, &config, 0.05, 2.);
+            let wired = agreement(&host, &drawn, &config);
+            let old = agreement(&host, &run(&old_wire), &config);
+            eprintln!(
+                "other, spread only: {tolerance:?}\nother, wire train: {wired:?}\nother, 1/127 train: {old:?}"
+            );
+            assert!(
+                within(&wired, &tolerance, 5.),
+                "{wired:?} against {tolerance:?}"
+            );
+            assert!(
+                !within(&old, &tolerance, 5.),
+                "{old:?} against {tolerance:?}"
+            );
+        }
     }
 }

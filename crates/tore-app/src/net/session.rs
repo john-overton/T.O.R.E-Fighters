@@ -1784,7 +1784,11 @@ impl NetSession {
             trigger: self.trigger,
             plane: frame.plane.0,
             own: crate::combat::launcher(&frame.presented),
-            stores: frame.readout.as_ref().map(guns::Stores::of),
+            gun_aim: frame.presented.gun_aim,
+            stores: frame
+                .readout
+                .as_ref()
+                .map(|readout| guns::Stores::of(readout, &frame.config)),
             config: &frame.config,
             events: &frame.events,
         };
