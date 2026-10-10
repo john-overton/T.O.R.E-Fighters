@@ -1,6 +1,6 @@
 //! Building a mission from a [`MissionSpec`] and the synthetic import, headless.
 
-use super::{build::surface_gap_note, *};
+use super::*;
 use crate::{
     mission::{MissionSpec, Skill, Start},
     resources::ResourceReads,
@@ -346,23 +346,22 @@ fn an_airborne_start_takes_the_variety_speed_at_the_mission_altitude() {
 }
 
 #[test]
-fn a_ground_target_builds_the_same_world_and_the_log_says_nothing_stands_there() {
+fn a_ground_target_missing_from_the_import_flies_without_it_and_says_why() {
     use crate::mission::Defense;
     let map = resources();
     let plain = World::new(&spec(), &map, Seating::SinglePlayer).unwrap();
+    assert!(plain.terrain.surface.unresolved.is_none());
     let mut with = spec();
-    assert!(surface_gap_note(&with).is_none());
     with.ground_target = Some("QUCOL".into());
     with.aaa = Defense::Heavy;
     with.sam = Defense::Moderate;
     with.surface_seed = 77;
-    // Until the surface layout exists, the target adds nothing to the world.
-    let note = surface_gap_note(&with).unwrap();
-    assert!(
-        note.contains("QUCOL") && note.contains("no surface units"),
-        "{note}"
-    );
+    // The synthetic import keeps no templates, as imports made before the
+    // surface round do not: nothing stands at the target.
     let world = World::new(&with, &map, Seating::SinglePlayer).unwrap();
+    let why = world.terrain.surface.unresolved.as_deref().unwrap();
+    assert!(why.contains("~QUCOL.M"), "{why}");
+    assert!(world.terrain.surface.template.is_none());
     assert_eq!(
         world.combat.state.targets.len(),
         plain.combat.state.targets.len()

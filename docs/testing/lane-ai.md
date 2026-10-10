@@ -63,6 +63,7 @@ minutes cost about 4 minutes.
 | Creator objectives | `ai-objective-*` | ten group setups (`--probe-group GROUP:CHOICE[:survive]`: free, CAP, targets, protection, self-defense, hold, required survival on either side) at four fight sizes; the debrief's targets, protected aircraft and SUCCESS or FAILURE must match the aircraft left alive ([debrief rules](../spec/debrief.md)) |
 | Order drills | `ai-orders-cycle-*` | the four player wing orders cycled twelve times through a fight, in the air and after a ground start; every order must be answered |
 | Damaged aircraft | `ai-damaged-*` | twelve recovery faults, each with hits or gunfire and a second fault, for 20 minutes under weapons hold |
+| Surface units | `surface-*` | `surface-resolve-all` runs `--surface-dump --all`: all 124 offered ground target templates at every defense level with three seeds, each base layout and each template in its scene at heavy defenses. Template objects, `<sam>` and `<aaa>` slots, targets at heavy and at none, and base-layout SAM and AAA by side must equal the retail survey; light and moderate must man 25 and 60 percent of the slots within 3 points; a second run must repeat every digest ([surface defenses](../spec/surface-defenses.md)). Until the import keeps the templates, the dump reads them from the retail media (`TORE_GAME_DIR`, the remembered source or the `gameassets` link) |
 
 ## What is checked
 

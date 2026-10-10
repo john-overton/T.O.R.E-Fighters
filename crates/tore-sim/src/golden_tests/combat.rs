@@ -853,6 +853,7 @@ fn guns_and_damage(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         },
         30,
         0x100,
+        crate::combat::live::NO_SIDE,
     )
     .expect("ground target");
     for tick in 0..1_800u64 {

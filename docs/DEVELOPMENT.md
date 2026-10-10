@@ -1518,6 +1518,31 @@ TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --
 A cache made before the explosion sounds and sheets were added re-imports on
 first start, as any stale cache does. See [the evidence](baselines/explosions.md).
 
+## Surface unit inspection
+
+`--surface-dump` prints a theater's surface units as a mission resolves them
+([surface defenses](spec/surface-defenses.md)): each unit's id, type, side,
+position, destroyed look and whether the scene can draw it, the removed
+defense slots and the surface digest. Name a ground target template to add
+its units; defenses default to heavy and the enemy to the theater's own.
+`--all` resolves every offered template at every defense level, which the
+`surface-resolve-all` battery scenario checks against the retail survey.
+`--surface-sheets` renders each template at its retail spot from above and
+closer, heavy defenses, seed 1, with a marker per unit (red Redfor, blue Blue,
+a white ring for a target, yellow parked aircraft, green supply trucks,
+magenta a unit whose shape does not read yet). No window opens.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump TVIET QTSAM --defenses 2 3 --surface-seed 7
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-dump --all
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-sheets .local/surface-sheets UKR:QUCITY TVIET
+```
+
+The import does not keep the templates or the unit types only they name yet,
+so both commands read what the pack lacks from the retail media at runtime:
+`TORE_GAME_DIR`, else the source the data directory remembers, else the
+checkout's `gameassets/fighters-anthology` link.
+
 ## Flight view inspection
 
 `--flight-view 0..11` preserves 0 front, 1 external, 2 oblique, 3 back and 4 up.

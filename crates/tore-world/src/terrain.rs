@@ -35,6 +35,10 @@ pub struct Terrain {
     /// Authoritative environment. One instance per world, so every camera,
     /// mirror and panel resolves the same instant.
     pub weather: tore_sim::environment::Environment,
+    /// The mission's surface units: the layout's NTs and the ground target
+    /// template's objects, with their ids, owners and sides. The airport
+    /// scene holds a contact volume for each one whose shape reads.
+    pub surface: crate::surface::Surface,
 }
 
 /// Launch settings that replace the mission's own weather start time, wind
@@ -182,6 +186,9 @@ pub struct Placements {
     /// Main shapes the bounded projector could not read, with the reason. Such
     /// a placement stays in the manifest without geometry.
     pub unreadable: Vec<(String, String)>,
+    /// The ground target template's placements, with their surface ids
+    /// (`0x5000_0000` range), after the layout's.
+    pub surface: Vec<(u32, tore_formats::mission::Placement)>,
 }
 
 /// Where one placed shape stands in the world.
@@ -244,6 +251,18 @@ pub fn strip_length_ft(resources: &dyn ResourceSource, object_type: &str) -> Opt
     Some(runway_length_ft(min * scale, max * scale, anchor))
 }
 
+/// Feet per shape unit of a placed object: the reviewed SH header exponent
+/// (`2^(e-8)`), for buildings and surface units alike. Every placed object's
+/// drawn size and contact box (and so a surface unit's hit box) comes from
+/// this one value. Open question (surface-AI round, 2026-10-10): at this
+/// scale surface units draw about three times their real size (a Krivak
+/// 1,216 ft long against a real 405); a correction for NT units, once
+/// established, belongs here and nowhere else.
+pub fn placed_shape_scale(object_type: &str, shape_bytes: &[u8]) -> WorldResult<f64> {
+    let _ = object_type;
+    Ok(tore_formats::shape::object_scale(shape_bytes)?)
+}
+
 impl Placements {
     pub fn load(resources: &dyn ResourceSource, code: &str) -> WorldResult<Self> {
         let layout_name = format!("{code}.MM");
@@ -253,64 +272,119 @@ impl Placements {
                 .get(&layout_name)
                 .ok_or_else(|| format!("missing airport layout {layout_name}"))?,
         )?;
-        let mut definitions = BTreeMap::new();
-        let mut shapes = BTreeMap::new();
-        let mut shape_scales = BTreeMap::new();
-        let mut runway_anchors = BTreeMap::new();
-        let mut strip_boxes = BTreeMap::new();
-        let mut unreadable = Vec::new();
+        let mut out = Self {
+            layout: tore_formats::mission::Layout {
+                resource: String::new(),
+                map: None,
+                sides: Default::default(),
+                placements: Vec::new(),
+            },
+            definitions: BTreeMap::new(),
+            shapes: BTreeMap::new(),
+            shape_scales: BTreeMap::new(),
+            runway_anchors: BTreeMap::new(),
+            strip_boxes: BTreeMap::new(),
+            unreadable: Vec::new(),
+            surface: Vec::new(),
+        };
         for placement in &layout.placements {
-            if definitions.contains_key(&placement.object_type) {
-                continue;
-            }
-            let definition = tore_formats::static_object::Definition::parse(
-                resources.get(&placement.object_type).ok_or_else(|| {
-                    format!(
-                        "{}: missing placed definition {}; re-import media",
-                        layout_name, placement.object_type
-                    )
-                })?,
-            )?;
-            if let Some(main_shape) = &definition.main_shape {
-                let shape_bytes = resources.get(main_shape).ok_or_else(|| {
-                    format!(
-                        "{}: missing shape {} referred by {}; re-import media",
-                        layout_name, main_shape, placement.object_type
-                    )
-                })?;
-                let parsed = tore_formats::shape::Shape::scenery(shape_bytes);
-                match parsed {
-                    Ok(shape) => {
-                        if definition.callbacks.iter().any(|name| name == "_STRIPProc")
-                            && let Some(boxes) = tore_formats::shape::contact_boxes(shape_bytes)?
-                            && let Some(anchor) = boxes.iter().find(|b| b.id == 0x11)
-                        {
-                            runway_anchors.insert(
-                                placement.object_type.clone(),
-                                anchor.midpoint().map(f64::from),
-                            );
-                            strip_boxes.insert(placement.object_type.clone(), boxes.clone());
-                        }
-                        shape_scales.insert(
-                            placement.object_type.clone(),
-                            tore_formats::shape::object_scale(shape_bytes)?,
-                        );
-                        shapes.insert(placement.object_type.clone(), shape);
-                    }
-                    Err(error) => unreadable.push((main_shape.clone(), error.to_string())),
-                }
-            }
-            definitions.insert(placement.object_type.clone(), definition);
+            out.add_type(resources, &layout_name, &placement.object_type)?;
         }
-        Ok(Self {
-            layout,
-            definitions,
-            shapes,
-            shape_scales,
-            runway_anchors,
-            strip_boxes,
-            unreadable,
-        })
+        out.layout = layout;
+        Ok(out)
+    }
+
+    /// The layout's placements and the surface's template placements, as the
+    /// terrain built its scene from them: what the scenery draws.
+    pub fn for_terrain(
+        resources: &dyn ResourceSource,
+        terrain: &Terrain,
+        code: &str,
+    ) -> WorldResult<Self> {
+        let mut out = Self::load(resources, code)?;
+        out.add_surface(resources, &terrain.surface)?;
+        Ok(out)
+    }
+
+    /// Adds the surface's template placements and reads their types.
+    pub fn add_surface(
+        &mut self,
+        resources: &dyn ResourceSource,
+        surface: &crate::surface::Surface,
+    ) -> WorldResult<()> {
+        for (id, placement) in &surface.placements {
+            self.add_type(resources, &placement.key.layout, &placement.object_type)?;
+            self.surface.push((id.0, placement.clone()));
+        }
+        Ok(())
+    }
+
+    /// Every placement with its object id: the layout's (`0x4000_0000` plus
+    /// ordinal), then the template's.
+    pub fn placed(
+        &self,
+    ) -> impl Iterator<Item = WorldResult<(u32, &tore_formats::mission::Placement)>> + '_ {
+        self.layout
+            .placements
+            .iter()
+            .map(|placement| {
+                crate::surface::UnitId::layout(placement.key.ordinal)
+                    .map(|id| (id.0, placement))
+                    .ok_or_else(|| "airport object ID overflow".into())
+            })
+            .chain(
+                self.surface
+                    .iter()
+                    .map(|(id, placement)| Ok((*id, placement))),
+            )
+    }
+
+    /// Reads a placed type's definition and main shape, once.
+    fn add_type(
+        &mut self,
+        resources: &dyn ResourceSource,
+        source: &str,
+        object_type: &str,
+    ) -> WorldResult<()> {
+        if self.definitions.contains_key(object_type) {
+            return Ok(());
+        }
+        let definition = tore_formats::static_object::Definition::parse(
+            resources.get(object_type).ok_or_else(|| {
+                format!("{source}: missing placed definition {object_type}; re-import media")
+            })?,
+        )?;
+        if let Some(main_shape) = &definition.main_shape {
+            let shape_bytes = resources.get(main_shape).ok_or_else(|| {
+                format!(
+                    "{source}: missing shape {main_shape} referred by {object_type}; re-import media"
+                )
+            })?;
+            let parsed = tore_formats::shape::Shape::scenery(shape_bytes);
+            match parsed {
+                Ok(shape) => {
+                    if definition.callbacks.iter().any(|name| name == "_STRIPProc")
+                        && let Some(boxes) = tore_formats::shape::contact_boxes(shape_bytes)?
+                        && let Some(anchor) = boxes.iter().find(|b| b.id == 0x11)
+                    {
+                        self.runway_anchors
+                            .insert(object_type.to_owned(), anchor.midpoint().map(f64::from));
+                        self.strip_boxes
+                            .insert(object_type.to_owned(), boxes.clone());
+                    }
+                    self.shape_scales.insert(
+                        object_type.to_owned(),
+                        placed_shape_scale(object_type, shape_bytes)?,
+                    );
+                    self.shapes.insert(object_type.to_owned(), shape);
+                }
+                Err(error) => self
+                    .unreadable
+                    .push((main_shape.clone(), error.to_string())),
+            }
+        }
+        self.definitions.insert(object_type.to_owned(), definition);
+        Ok(())
     }
 
     /// Where `placement` stands on ground `ground` feet high, or `None` when it
@@ -329,7 +403,22 @@ impl Placements {
         let support_height = ground;
         let mut min = [f64::INFINITY; 3];
         let mut max = [f64::NEG_INFINITY; 3];
-        for point in shape.faces.iter().flat_map(|face| &face.positions) {
+        // A viewer-facing sprite (the men) spans its width across either
+        // horizontal axis and its height upward from its centre.
+        let sprites = shape.billboards.iter().flat_map(|sprite| {
+            let [w, h] = sprite.size.map(|v| v * 0.5);
+            let c = sprite.center;
+            [
+                [c[0] - w, c[1] - w, c[2] - h],
+                [c[0] + w, c[1] + w, c[2] + h],
+            ]
+        });
+        for point in shape
+            .faces
+            .iter()
+            .flat_map(|face| face.positions.iter().copied())
+            .chain(sprites)
+        {
             let mapped = [
                 f64::from(point[0]),
                 f64::from(point[2]),
@@ -409,7 +498,19 @@ impl Terrain {
         condition: Option<usize>,
         overrides: &Overrides,
     ) -> WorldResult<Self> {
-        Self::build(resources, code, condition, None, overrides)
+        Self::build(resources, code, condition, None, overrides, None)
+    }
+
+    /// [`Self::for_mission`] with the Quick Mission ground target, whose
+    /// template's units join the surface and the airport scene.
+    pub fn for_mission_with(
+        resources: &dyn ResourceSource,
+        code: &str,
+        condition: Option<usize>,
+        overrides: &Overrides,
+        target: Option<&crate::surface::resolve::GroundTarget>,
+    ) -> WorldResult<Self> {
+        Self::build(resources, code, condition, None, overrides, target)
     }
 
     /// Rebuilds the world a mission recording was flown in from its recorded,
@@ -424,6 +525,7 @@ impl Terrain {
             recorded.condition,
             Some(recorded),
             &Overrides::default(),
+            None,
         )
     }
 
@@ -433,6 +535,7 @@ impl Terrain {
         condition: Option<usize>,
         recorded: Option<&Recorded>,
         overrides: &Overrides,
+        target: Option<&crate::surface::resolve::GroundTarget>,
     ) -> WorldResult<Self> {
         let required = |n: &str| {
             resources
@@ -537,8 +640,9 @@ impl Terrain {
             static_manifest: Vec::new(),
             catalog,
             weather,
+            surface: Default::default(),
         };
-        out.build_airport_scene(resources, code.trim_end_matches(".MM"))?;
+        out.build_airport_scene(resources, code.trim_end_matches(".MM"), target)?;
         Ok(out)
     }
 
@@ -549,20 +653,21 @@ impl Terrain {
         &mut self,
         resources: &dyn ResourceSource,
         code: &str,
+        target: Option<&crate::surface::resolve::GroundTarget>,
     ) -> WorldResult<()> {
         use tore_sim::airport::{
             Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
         };
-        let sources = Placements::load(resources, code)?;
+        let mut sources = Placements::load(resources, code)?;
+        self.surface = Self::resolve_surface(resources, &sources.layout, target)?;
+        sources.add_surface(resources, &self.surface)?;
         let mut objects = Vec::new();
         let mut runways = Vec::new();
         let mut airports = Vec::new();
         let mut anchors = BTreeMap::new();
-        for placement in &sources.layout.placements {
+        for placed in sources.placed() {
+            let (id, placement) = placed?;
             let definition = &sources.definitions[&placement.object_type];
-            let id = 0x4000_0000u32
-                .checked_add(placement.key.ordinal)
-                .ok_or("airport object ID overflow")?;
             self.static_manifest.push((
                 id,
                 placement.key.clone(),
@@ -686,6 +791,12 @@ impl Terrain {
                 });
             }
         }
+        // A unit is in the scene, and so a combat target, when its shape gave
+        // it a contact volume.
+        let placed: BTreeSet<u32> = objects.iter().map(|o: &StaticObject| o.id).collect();
+        for unit in &mut self.surface.units {
+            unit.in_scene = placed.contains(&unit.id.0);
+        }
         self.airport_scene = tore_sim::airport::Scene {
             objects,
             runways,
@@ -698,6 +809,46 @@ impl Terrain {
         });
         self.airfield_anchors = anchors;
         self.airport_scene.validate().map_err(|error| error.into())
+    }
+
+    /// The surface a layout and an optional ground target resolve to.
+    fn resolve_surface(
+        resources: &dyn ResourceSource,
+        layout: &tore_formats::mission::Layout,
+        target: Option<&crate::surface::resolve::GroundTarget>,
+    ) -> WorldResult<crate::surface::Surface> {
+        use crate::surface::{catalog::Catalog, resolve};
+        let mut catalog = Catalog::new(resources);
+        let base = resolve::layout(layout, &mut catalog);
+        let mut unresolved = None;
+        let template = match target {
+            Some(target) => {
+                let name = format!("~{}.M", target.stem.to_ascii_uppercase());
+                match resources.get(&name) {
+                    Some(bytes) => {
+                        let template = tore_formats::quick_template::Template::parse(&name, bytes)?;
+                        Some(resolve::template(
+                            &template,
+                            target,
+                            &mut catalog,
+                            layout.map.as_deref(),
+                        )?)
+                    }
+                    // An import made before it kept the templates: the
+                    // mission flies, and says why nothing stands there.
+                    None => {
+                        unresolved = Some(format!(
+                            "the import has no ground target template {name}; re-import media"
+                        ));
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        let mut surface = resolve::surface(base, template)?;
+        surface.unresolved = unresolved;
+        Ok(surface)
     }
 
     /// The AI's view of one runway, with its airfield points when known.

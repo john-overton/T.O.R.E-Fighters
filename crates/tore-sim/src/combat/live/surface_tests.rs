@@ -71,9 +71,9 @@ fn unit(s: &mut State, id: u32, center: Vector, side: Side) {
         },
         100,
         0x800,
+        side,
     )
     .unwrap();
-    s.targets.iter_mut().find(|t| t.id == id).unwrap().side = side;
 }
 fn aircraft(id: u32, position: Vector, hp: i32, side: Side) -> Target {
     let mut t = target(id, position, hp, 0x80);

@@ -27,6 +27,7 @@ pub mod score;
 pub mod seats;
 pub mod situation;
 pub mod snapshot;
+pub mod surface;
 pub mod target_window;
 pub mod terrain;
 pub mod world;
