@@ -219,6 +219,34 @@ pub struct Around<'a> {
     pub ground: &'a dyn Fn(f64, f64) -> f64,
     /// The stations of an aircraft type's usual loadout.
     pub stations: &'a dyn Fn(AircraftId) -> &'a [Station],
+    /// The mission's surface units and their arms, which every client
+    /// builds from the mission (protocol 22); `None` where no surface
+    /// rounds are made (a recorded flight).
+    pub surface: Option<&'a tore_world::surface::Surface>,
+}
+
+/// A surface unit's gun burst, as its events tell it (protocol 22).
+#[derive(Clone, Debug, PartialEq)]
+struct SurfaceBurst {
+    unit: u32,
+    mount: usize,
+    target: Option<u32>,
+    /// The first round's direction, azimuth from +z towards +x and
+    /// elevation, radians.
+    aim: [f64; 2],
+    /// The host tick of its first round.
+    first: u64,
+    /// Its schedule: `rounds` over `span` ticks.
+    rounds: u32,
+    span: u64,
+    /// The rounds it fired when it ended short of its schedule.
+    cut: Option<u32>,
+    /// Rounds made so far.
+    made: u32,
+    /// The lead's azimuth and elevation at the first round, from the
+    /// target as this client draws it: later rounds turn from `aim` as the
+    /// lead turns from it.
+    lead: Option<[f64; 2]>,
 }
 
 /// A gun burst of another aircraft, as its events tell it.
@@ -245,6 +273,8 @@ struct Other {
     station: usize,
     burst: u64,
     release: u64,
+    /// Its place in a surface burst (protocol 22); 0 for an aircraft's.
+    index: u32,
     round: Round,
 }
 
@@ -279,6 +309,13 @@ pub struct Guns {
     /// Each AC-130's gun train as the pictures drew it, by host tick, for
     /// the train at a round's release.
     trains: BTreeMap<u32, VecDeque<(u64, GunAim)>>,
+    /// Surface units' bursts (protocol 22).
+    surface_bursts: Vec<SurfaceBurst>,
+    /// The rounds each surface gun has let go, by unit and hardpoint, as
+    /// far as its bursts have told: its tracer pattern runs on.
+    surface_ordinals: BTreeMap<(u32, usize), u64>,
+    /// The host tick each surface round's life ends at, by its number.
+    surface_ends: BTreeMap<u32, u64>,
 }
 
 impl Guns {
@@ -301,6 +338,9 @@ impl Guns {
                 u64::from(received.tick),
                 *length,
             );
+        }
+        for received in input.events {
+            self.note_surface(received);
         }
         self.step_own(input, around);
         self.step_others(input, around, picture);
@@ -378,6 +418,128 @@ impl Guns {
                 &other.round,
             )
         })
+    }
+
+    /// A surface unit's burst event (protocol 22): it opens a burst with its
+    /// schedule, or cuts the one that began at the same tick short.
+    fn note_surface(&mut self, received: &ReceivedEvent) {
+        let first = u64::from(received.tick);
+        match &received.event {
+            WireEvent::SurfaceBurst {
+                unit,
+                mount,
+                target,
+                aim,
+                rounds,
+                span,
+            } => self.surface_bursts.push(SurfaceBurst {
+                unit: *unit,
+                mount: usize::from(*mount),
+                target: *target,
+                aim: aim.map(tore_session::wire::entity::radians),
+                first,
+                rounds: u32::from(*rounds).max(1),
+                span: u64::from(*span).max(1),
+                cut: None,
+                made: 0,
+                lead: None,
+            }),
+            WireEvent::SurfaceBurstEnd { unit, mount, fired } => {
+                let mount = usize::from(*mount);
+                if let Some(burst) = self
+                    .surface_bursts
+                    .iter_mut()
+                    .find(|b| b.unit == *unit && b.mount == mount && b.first == first)
+                {
+                    burst.cut = Some(u32::from(*fired));
+                    // Rounds made past the cut that it never fired.
+                    let fired = u32::from(*fired);
+                    if burst.made > fired {
+                        let made = burst.made;
+                        burst.made = fired;
+                        let ordinal = self.surface_ordinals.entry((*unit, mount)).or_default();
+                        *ordinal = ordinal.saturating_sub(u64::from(made - fired));
+                        let overran: Vec<u32> = self
+                            .others
+                            .iter()
+                            .filter(|o| {
+                                o.shooter == *unit
+                                    && o.station == mount
+                                    && o.burst == first
+                                    && o.index >= fired
+                            })
+                            .map(|o| o.serial)
+                            .collect();
+                        self.others.retain(|o| !overran.contains(&o.serial));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Every surface burst's rounds due at host tick `tick`, flown on to
+    /// `now`, as [`Guns::make_others`] makes an aircraft's.
+    fn make_surface(&mut self, tick: u64, now: u64, around: &Around<'_>, picture: &RenderSnapshot) {
+        let Some(surface) = around.surface else {
+            self.surface_bursts.clear();
+            return;
+        };
+        let mut bursts = std::mem::take(&mut self.surface_bursts);
+        for burst in &mut bursts {
+            loop {
+                let limit = burst.cut.unwrap_or(burst.rounds).min(burst.rounds);
+                if burst.made >= limit {
+                    break;
+                }
+                let release = surface_release(burst.first, burst.made, burst);
+                if release > tick {
+                    break;
+                }
+                burst.made += 1;
+                let key = (burst.unit, burst.mount);
+                let ordinal = {
+                    let n = self.surface_ordinals.entry(key).or_default();
+                    *n += 1;
+                    *n - 1
+                };
+                if now - release > BACKLOG_TICKS || self.others.len() >= MAX_ROUNDS {
+                    continue;
+                }
+                let Some((round, end)) = surface_round(
+                    surface,
+                    burst,
+                    release,
+                    now,
+                    ordinal,
+                    around,
+                    picture,
+                    &mut self.next_id,
+                ) else {
+                    continue;
+                };
+                self.next_serial = self.next_serial.wrapping_add(1);
+                if let Some(end) = end {
+                    self.surface_ends.insert(self.next_serial, end);
+                }
+                self.others.push(Other {
+                    serial: self.next_serial,
+                    shooter: burst.unit,
+                    station: burst.mount,
+                    burst: burst.first,
+                    release,
+                    index: burst.made - 1,
+                    round,
+                });
+            }
+        }
+        // A burst stays until its schedule is over and its rounds are made.
+        bursts.retain(|b| {
+            let limit = b.cut.unwrap_or(b.rounds).min(b.rounds);
+            b.made < limit || b.first + b.span + BACKLOG_TICKS >= now
+        });
+        bursts.retain(|b| b.first + b.span + OPEN_BURST_TICKS > now);
+        self.surface_bursts = bursts;
     }
 
     /// A burst event of another aircraft: it opens a burst, or closes the open
@@ -530,10 +692,16 @@ impl Guns {
         self.others_tick = self.others_tick.max(now.saturating_sub(MAX_CATCH_UP));
         self.note_trains(now, picture);
         for tick in self.others_tick + 1..=now {
-            self.others
-                .retain_mut(|other| other.round.step(tick, &around.ground));
+            let ends = &self.surface_ends;
+            self.others.retain_mut(|other| {
+                ends.get(&other.serial).is_none_or(|end| tick < *end)
+                    && other.round.step(tick, &around.ground)
+            });
             self.make_others(tick, now, around, picture);
+            self.make_surface(tick, now, around, picture);
         }
+        let alive: std::collections::BTreeSet<u32> = self.others.iter().map(|o| o.serial).collect();
+        self.surface_ends.retain(|serial, _| alive.contains(serial));
         self.others_tick = now;
         // Bursts that are over, or were never closed, are done with.
         self.bursts.retain(|burst| match burst.last {
@@ -642,6 +810,7 @@ impl Guns {
                         station: burst.station,
                         burst: burst.first,
                         release,
+                        index: 0,
                         round,
                     });
                 }
@@ -650,6 +819,129 @@ impl Guns {
         self.bursts = bursts;
     }
 }
+
+/// The host tick round `k` of a surface burst leaves at: the first tick at
+/// or after `first + k * span / rounds`, the host controller's schedule
+/// ([`tore_sim::ai::surface::Controller::burst`]).
+fn surface_release(first: u64, k: u32, burst: &SurfaceBurst) -> u64 {
+    let n = u64::from(burst.rounds.max(1));
+    first + (u64::from(k) * burst.span).div_ceil(n)
+}
+
+/// Azimuth (from +z towards +x) and elevation of `d`, radians.
+fn azimuth_elevation(d: Vector) -> [f64; 2] {
+    [d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2]))]
+}
+
+/// The unit vector at azimuth and elevation `[a, e]`.
+fn from_azimuth_elevation([a, e]: [f64; 2]) -> Vector {
+    [e.cos() * a.sin(), e.sin(), e.cos() * a.cos()]
+}
+
+/// One round of a surface burst, let go at `release` and flown on to `now`,
+/// with the host tick its life ends at (a little past the target's range,
+/// as the host's): from the unit's mount (a moving unit's where the picture
+/// draws it), along the first round's direction turned as the lead on the
+/// target the picture draws has turned since the first round, a radar gun
+/// observing every tick and a visual one every half second. The round's
+/// first picture shows it leaving the muzzle.
+#[allow(clippy::too_many_arguments)]
+fn surface_round(
+    surface: &tore_world::surface::Surface,
+    burst: &mut SurfaceBurst,
+    release: u64,
+    now: u64,
+    ordinal: u64,
+    around: &Around<'_>,
+    picture: &RenderSnapshot,
+    next_id: &mut u32,
+) -> Option<(Round, Option<u64>)> {
+    use tore_world::surface::{UnitId, fire};
+    let arms = surface.arsenal.arms(UnitId(burst.unit))?;
+    let weapon = arms
+        .weapons
+        .iter()
+        .find(|w| w.mounts.iter().any(|m| m.index == burst.mount))?;
+    let arc = weapon.mounts.iter().find(|m| m.index == burst.mount)?;
+    let moving = picture.surface.iter().find(|p| p.id.0 == burst.unit);
+    let place = match moving {
+        Some(pose) => {
+            let [yaw, pitch, bank] = pose.attitude;
+            fire::Place {
+                origin: pose.position,
+                eye: pose.position,
+                basis: Basis::new(yaw, pitch, bank),
+                heading: yaw,
+                velocity: [0.; 3],
+            }
+        }
+        None => arms.place(None),
+    };
+    let muzzle = place.mount(arc, around.ground);
+    let radar = matches!(weapon.kind, fire::Kind::Gun { radar: true, .. });
+    // The target as drawn now, taken back to the tick the gun observed it.
+    let target = burst.target.and_then(|id| {
+        std::iter::once(&picture.player)
+            .chain(&picture.targets)
+            .find(|pose| pose.id == id && pose.aircraft.is_some())
+    });
+    let lead = target.map(|pose| {
+        let seen = if radar {
+            release
+        } else {
+            burst.first + (release - burst.first) / VISUAL_REFRESH_TICKS * VISUAL_REFRESH_TICKS
+        };
+        let back = (now as f64 - seen as f64) / 120.;
+        let age = (release - seen) as f64 / 120.;
+        let observed = tore_sim::combat::gunsight::TargetObservation {
+            position: std::array::from_fn(|i| {
+                pose.position[i] - pose.velocity[i] * back + pose.velocity[i] * age
+            }),
+            velocity: pose.velocity,
+        };
+        let point = fire::gun_aim_point(weapon, &place, muzzle, observed);
+        let d: Vector = std::array::from_fn(|i| point[i] - muzzle[i]);
+        (
+            azimuth_elevation(d),
+            d.iter().map(|v| v * v).sum::<f64>().sqrt(),
+        )
+    });
+    let direction = match lead {
+        Some(([a, e], _)) => {
+            let [a0, e0] = *burst.lead.get_or_insert([a, e]);
+            from_azimuth_elevation([burst.aim[0] + (a - a0), burst.aim[1] + (e - e0)])
+        }
+        None => from_azimuth_elevation(burst.aim),
+    };
+    let end = lead
+        .and_then(|(_, distance)| {
+            live::ticks_to_range(&weapon.record, fire::gun_end_range(distance))
+        })
+        .map(|ticks| release + ticks);
+    let seed = [*next_id, burst.unit, burst.mount as u32];
+    *next_id = next_id.wrapping_add(1);
+    let speed = place.velocity.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let mut round = Round::release(
+        &weapon.record,
+        muzzle,
+        direction,
+        speed,
+        seed,
+        release,
+        live::surface_tracer(&weapon.record, ordinal),
+    )?;
+    for tick in release..=now {
+        if end.is_some_and(|end| tick >= end) || !round.step(tick, &around.ground) {
+            return None;
+        }
+    }
+    round.previous = muzzle;
+    Some((round, end))
+}
+
+/// Ticks a visual surface gun holds its look at its target (0.5 s), as the
+/// host's controller does.
+const VISUAL_REFRESH_TICKS: u64 = 60;
 
 /// The picture's number for the seat's round `serial`, in its own block.
 fn own_id(serial: u32) -> u32 {
@@ -888,7 +1180,11 @@ mod tests {
         ground: &'a dyn Fn(f64, f64) -> f64,
         stations: &'a dyn Fn(AircraftId) -> &'a [Station],
     ) -> Around<'a> {
-        Around { ground, stations }
+        Around {
+            ground,
+            stations,
+            surface: None,
+        }
     }
 
     fn shooter_pose(tick: u64) -> AircraftPose {
@@ -1905,5 +2201,130 @@ mod tests {
                 "{old:?} against {tolerance:?}"
             );
         }
+    }
+
+    /// A surface with one ZSU-23 (the table's Shilka on the synthetic
+    /// cannon's record) at the middle of the map, heading north.
+    fn shilka() -> (tore_world::surface::Surface, u32) {
+        use tore_world::surface::{
+            UnitId,
+            fire::{Arms, MountArc, WeaponArms},
+        };
+        let unit = UnitId(tore_world::surface::SURFACE_UNIT_BASE + 4);
+        let mut record = gun((10, 1, 8));
+        record.source = "ZSU23.JT".into();
+        let arc = MountArc {
+            index: 0,
+            rest: [0., 0.],
+            limit: [0., 0.],
+            offset: [0., 6., 2.],
+        };
+        let (weapon, stock) =
+            WeaponArms::gun(record, "ZSU23", arc, 2, false, [4, 4, 4, 4], 0).expect("a table row");
+        let mut surface = tore_world::surface::Surface::default();
+        surface.arsenal.units.push(Arms {
+            unit,
+            position: [10_000., 100., 10_000.],
+            heading: 0.,
+            skill: 2,
+            side: tore_sim::combat::live::Side(2),
+            react: 0,
+            search_limit: None,
+            ship: false,
+            weapons: vec![weapon],
+            radar: None,
+            battery: None,
+            loads: vec![stock],
+            npc: [4, 4, 4, 4],
+        });
+        (surface, unit.0)
+    }
+
+    /// Protocol 22: a surface unit's burst is remade from its event alone,
+    /// owned by the unit, leaving its mount on the burst's schedule along
+    /// the first round's line, turning with the target as the picture draws
+    /// it, each round's first picture showing it at the muzzle, and the
+    /// rounds past an early end taken back.
+    #[test]
+    fn a_surface_burst_is_remade_from_its_schedule_and_cut_short() {
+        let (surface, unit) = shilka();
+        let flat = |_: f64, _: f64| 0.;
+        let no_stations = |_: AircraftId| -> &[Station] { &[] };
+        let around = Around {
+            ground: &flat,
+            stations: &no_stations,
+            surface: Some(&surface),
+        };
+        // The target: the seat's own jet, crossing east 4,000 ft north and
+        // 3,000 ft up.
+        let target = |tick: u64| AircraftPose {
+            id: 0,
+            aircraft: Some(AircraftId::F18),
+            position: [10_000. - 2_000. + tick as f64 * 5., 3_100., 14_000.],
+            velocity: [600., 0., 0.],
+            ..AircraftPose::default()
+        };
+        // Azimuth 0 (north), elevation 0.6 rad, 2^-16 of a turn.
+        let aim = [0, (0.6 / std::f64::consts::TAU * 65_536.).round() as u16];
+        let mut guns = Guns::default();
+        guns.note_surface(&ReceivedEvent {
+            number: 1,
+            tick: 100,
+            event: WireEvent::SurfaceBurst {
+                unit,
+                mount: 0,
+                target: Some(0),
+                aim,
+                rounds: 10,
+                span: 60,
+            },
+        });
+        let mut picture = RenderSnapshot::default();
+        let mut directions = Vec::new();
+        for now in 99..=130 {
+            picture.tick = now;
+            picture.player = target(now);
+            let before: std::collections::BTreeSet<u32> =
+                guns.others.iter().map(|o| o.serial).collect();
+            guns.step_others_to(now, &around, &picture);
+            for other in guns.others.iter().filter(|o| !before.contains(&o.serial)) {
+                assert_eq!(other.shooter, unit, "owned by the unit");
+                assert_eq!(other.release, now, "made at its release tick");
+                let muzzle = [10_000., 106., 10_002.];
+                for (at, want) in other.round.previous.iter().zip(muzzle) {
+                    assert!((at - want).abs() < 1e-9, "at the muzzle");
+                }
+                directions.push(other.round.direction);
+            }
+        }
+        // 10 rounds over 60 ticks: one every 6 ticks from 100, six by 130.
+        let released: Vec<u64> = guns.others.iter().map(|o| o.release).collect();
+        assert_eq!(released, [100, 106, 112, 118, 124, 130]);
+        // The first leaves along the event's line (the gun's spread is a
+        // quarter degree), the later ones turn east with the crossing jet.
+        let first = directions[0];
+        let along = [0f64.sin() * 0.6f64.cos(), 0.6f64.sin(), 0.6f64.cos()];
+        let cos = (0..3).map(|i| first[i] * along[i]).sum::<f64>();
+        assert!(cos > 0.5f64.to_radians().cos(), "{first:?}");
+        assert!(directions[5][0] > first[0] + 0.01, "turned with the target");
+        // The host ends the burst after 4 rounds: the rest are taken back
+        // and no more are made.
+        guns.note_surface(&ReceivedEvent {
+            number: 2,
+            tick: 100,
+            event: WireEvent::SurfaceBurstEnd {
+                unit,
+                mount: 0,
+                fired: 4,
+            },
+        });
+        for now in 131..=170 {
+            picture.tick = now;
+            picture.player = target(now);
+            guns.step_others_to(now, &around, &picture);
+        }
+        let released: Vec<u64> = guns.others.iter().map(|o| o.release).collect();
+        assert!(released.iter().all(|r| *r <= 118), "{released:?}");
+        assert_eq!(guns.surface_ordinals[&(unit, 0)], 4);
     }
 }

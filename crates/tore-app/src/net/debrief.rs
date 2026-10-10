@@ -111,8 +111,8 @@ fn pilot(pilot: &DebriefPilot) -> Pilot {
         enemy_sam: pilot.enemy_sam,
         enemy_gun: pilot.enemy_gun,
         enemy_aaa: pilot.enemy_aaa,
-        // The wire carries no killer name yet (protocol 22).
-        shot_down_by: None,
+        // The surface unit that destroyed the airframe (protocol 22).
+        shot_down_by: pilot.shot_down_by.clone(),
     }
 }
 
@@ -466,7 +466,7 @@ mod tests {
             enemy_sam: tally(seed * 3),
             enemy_gun: tally(seed * 5),
             enemy_aaa: tally(seed * 9),
-            shot_down_by: None,
+            shot_down_by: (seed == 1).then(|| "SA-6".to_owned()),
         };
         Report {
             outcome: Outcome::Success,
@@ -492,6 +492,29 @@ mod tests {
             let wire = tore_session::host::debrief_message(&report_in);
             assert_eq!(report(&wire), report_in);
         }
+    }
+
+    /// The surface unit that shot the pilot down reaches the page's Shot
+    /// down by row in a networked game too (protocol 22, slice O1's row).
+    #[test]
+    fn the_unit_that_shot_the_pilot_down_survives_the_wire() {
+        let wire = tore_session::host::debrief_message(&full());
+        assert_eq!(wire.player.shot_down_by.as_deref(), Some("SA-6"));
+        let bytes = tore_session::wire::messages::Message::Debrief(Box::new(wire))
+            .encode()
+            .unwrap();
+        let tore_session::wire::messages::Message::Debrief(back) =
+            tore_session::wire::messages::Message::decode(
+                tore_session::wire::messages::kind::DEBRIEF,
+                &bytes,
+            )
+            .unwrap()
+        else {
+            panic!("a debrief");
+        };
+        let page = report(&back);
+        assert_eq!(page.player.shot_down_by.as_deref(), Some("SA-6"));
+        assert_eq!(page.wingman.unwrap().shot_down_by, None);
     }
 
     #[test]

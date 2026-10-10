@@ -4,12 +4,15 @@
 //! units, a checkpoint mid-route resumes exactly). No retail data.
 use super::{
     movement::{Course, Halt, Leg, Mover, unit_pose},
-    tests::{HEADER, MIDDLE, fields, surface_resources, target, world_with_target},
+    tests::{target, world_with_target},
     *,
 };
-use crate::{seats::SeatInput, test_support::resources::schema, world::TickOutput};
+use crate::{
+    seats::SeatInput,
+    test_support::surface::{MIDDLE, routed, routed_resources},
+    world::TickOutput,
+};
 use std::f64::consts::PI;
-use tore_formats::surface_unit::class;
 use tore_sim::attitude::Basis;
 
 /// The follower's step, 120 Hz.
@@ -274,102 +277,9 @@ fn the_state_is_exact_and_repeats() {
 
 // ---- in a world ---------------------------------------------------------
 
-/// A synthetic movable tank: turn rate 2,730, top speed 50.
-fn mover_nt(stem: &str, class: u16, turn: i32, max_speed: i32) -> Vec<u8> {
-    let object = |name: &str| -> Option<String> {
-        Some(match name {
-            "structType" => "3".into(),
-            "typeSize" => "186".into(),
-            "ot_names" => "ot_names".into(),
-            "shape" => "shape".into(),
-            "obj_class" => class.to_string(),
-            "hitPoints" => "100".into(),
-            "expType" => "21".into(),
-            "craterSize" => "6".into(),
-            "utilProc" => "_GVProc".into(),
-            "_turnRate" => turn.to_string(),
-            "_maxSpeed" => max_speed.to_string(),
-            "_cornerSpeed" => "50".into(),
-            "_acc" | "_dacc" => "50".into(),
-            _ => return None,
-        })
-    };
-    let npc = |name: &str| -> Option<String> { (name == "numHards").then(|| "0".to_owned()) };
-    let mut text = String::from(HEADER);
-    text += &fields(schema::OBJECT, &object);
-    text += &fields(schema::NPC, &npc);
-    text += &format!(
-        ":ot_names\nstring \"{stem}\"\nstring \"Synthetic {stem}\"\nstring \"{stem}.NT\"\n"
-    );
-    text += &format!(":shape\nstring \"{stem}.SH\"\nend\n");
-    text.into_bytes()
-}
-
-/// One waypoint block of a route.
-fn waypoint(index: usize, flags: &str, head: &str, at: [i32; 3], speed: i32) -> String {
-    format!(
-        "\tw_index {index}\r\n\tw_flags {flags}\r\n\tw_goal 0\r\n\tw_next 0\r\n\tw_pos2 {head} {} {} {}\r\n\tw_speed {speed}\r\n\tw_wng 0 0 0 0\r\n\tw_react 0 0 0\r\n\tw_searchDist 0\r\n\tw_preferredTargetId 0\r\n\tw_name \r\n\r\n",
-        at[0], at[1], at[2]
-    )
-}
-
-/// An object that follows a route, and the route.
-fn routed(ty: &str, at: [i32; 3], angle: i32, alias: i32, legs: &[[i32; 3]], speed: i32) -> String {
-    let mut text = format!(
-        "obj\r\n\ttype {ty}\r\n\tpos {} {} {}\r\n\tangle {angle} 0 0\r\n\tnationality2 137\r\n\tflags $93\r\n\tspeed 0\r\n\talias {alias}\r\n\t.\r\n",
-        at[0], at[1], at[2]
-    );
-    text += &format!("waypoint2 {}\r\n", legs.len() + 2);
-    text += &waypoint(0, "1", "0 0", at, 0);
-    for (n, leg) in legs.iter().enumerate() {
-        text += &waypoint(n + 1, "$4", "1 0", *leg, speed);
-    }
-    text += &waypoint(legs.len() + 1, "2", "0 0", [0, 0, 0], 0);
-    text += &format!("  w_for {alias}\r\n\t.\r\n");
-    text
-}
-
 const TANK_ID: u32 = SURFACE_UNIT_BASE;
 const BOAT_ID: u32 = SURFACE_UNIT_BASE + 1;
 const STANDING_ID: u32 = SURFACE_UNIT_BASE + 2;
-
-/// The synthetic import with a routed template: a tank on a short route with
-/// a corner, a boat (which keeps its water level) and a tank that
-/// stands still.
-fn routed_resources() -> std::collections::BTreeMap<String, Vec<u8>> {
-    let mut r = surface_resources();
-    let shape = r["F18.SH"].clone();
-    for (stem, class, turn, max) in [
-        ("MOVER", class::TANK, 2730, 50),
-        ("BOAT", class::SHIP, 910, 50),
-        ("STAND", class::TANK, 2730, 50),
-    ] {
-        r.insert(format!("{stem}.NT"), mover_nt(stem, class, turn, max));
-        r.insert(format!("{stem}.SH"), shape.clone());
-    }
-    r.insert("BOAT_A.SH".into(), shape);
-    let z = MIDDLE + 8000;
-    let mut text = String::from("textFormat\r\n");
-    text += &routed(
-        "MOVER.NT",
-        [MIDDLE, 0, z],
-        180,
-        -1,
-        &[[MIDDLE, 0, z - 800], [MIDDLE + 800, 0, z - 800]],
-        50,
-    );
-    text += &routed(
-        "BOAT.NT",
-        [MIDDLE + 2000, 0, z],
-        180,
-        -2,
-        &[[MIDDLE + 2000, 0, z - 5000]],
-        16,
-    );
-    text += "obj\r\n\ttype STAND.NT\r\n\tpos 524288 0 540000\r\n\tangle 0 0 0\r\n\tnationality2 137\r\n\tflags $13\r\n\tspeed 0\r\n\talias -3\r\n\t.\r\n";
-    r.insert("~QUCOL.M".into(), text.into_bytes());
-    r
-}
 
 fn world() -> crate::world::World {
     world_with_target(&routed_resources(), &target("QUCOL", 0, 0, 3))

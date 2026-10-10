@@ -312,6 +312,7 @@ impl Regenerate for NetEffects<'_> {
             &Around {
                 ground: &ground,
                 stations: &stations,
+                surface: None,
             },
             &picture,
         );

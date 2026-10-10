@@ -102,6 +102,9 @@ pub struct NetFlight {
     revival_said: Option<(Instant, bool)>,
     /// The AI flies the plane while the player is away (slice F2-A).
     pub(crate) idle: crate::net::away::Idle,
+    /// The surface units' states last put into the game's copy of the
+    /// mission (protocol 22).
+    surface_units: std::collections::BTreeMap<u32, tore_session::wire::events::SurfaceUnitView>,
 }
 
 impl App {
@@ -632,6 +635,7 @@ impl App {
             score_board: false,
             revival_said: None,
             idle: Default::default(),
+            surface_units: Default::default(),
         });
         true
     }
@@ -686,6 +690,12 @@ impl App {
             {
                 target.hp = 0;
             }
+        }
+        // The surface units as the host has them: hit points, radars,
+        // launcher rails and spare magazines (protocol 22).
+        if flight.surface_units != frame.surface_units {
+            surface_units_to_world(&mut self.world, &frame.surface_units);
+            flight.surface_units.clone_from(&frame.surface_units);
         }
         self.combat_view.show_picture(frame.picture.clone());
 
@@ -919,6 +929,61 @@ pub struct Seen {
     pub was_burning: bool,
 }
 
+/// Puts the surface units' states a client frame holds into the game's
+/// never-stepped copy of the mission (protocol 22), so every screen that
+/// reads a combat row or the surface state (the scenery's rails and wrecks,
+/// the flight map) sees the host's: each told unit's hit points, radar and
+/// stock, and every other unit as the mission built it (a destroyed one
+/// stays destroyed).
+pub(crate) fn surface_units_to_world(
+    world: &mut tore_world::world::World,
+    told: &std::collections::BTreeMap<u32, tore_session::wire::events::SurfaceUnitView>,
+) {
+    use tore_sim::combat::missiles::TargetRole;
+    use tore_world::surface::{MountStock, UnitId};
+    let surface = &world.terrain.surface;
+    let combat = &mut world.combat;
+    for target in combat
+        .state
+        .targets
+        .iter_mut()
+        .filter(|t| t.role == TargetRole::Surface)
+    {
+        match told.get(&target.id) {
+            Some(view) => {
+                target.hp = if target.hp <= 0 { target.hp } else { view.hp };
+                target.radar_emitting = view.radar;
+            }
+            None if surface.unit(UnitId(target.id)).is_some() => target.radar_emitting = false,
+            None => {}
+        }
+    }
+    for arms in &surface.arsenal.units {
+        let Some(state) = combat.surface.unit_mut(arms.unit) else {
+            continue;
+        };
+        match told.get(&arms.unit.0) {
+            Some(view) => {
+                let mut mounts = arms.loads.clone();
+                for (stock, seen) in mounts.iter_mut().zip(&view.mounts) {
+                    if let Some(rails) = seen.rails {
+                        stock.loaded = u32::from(rails);
+                    }
+                    if seen.spares.is_some() {
+                        stock.reserve = seen.spares.map(u32::from);
+                    }
+                }
+                state.mounts = mounts;
+                state.armed = true;
+            }
+            None => {
+                state.mounts = Vec::<MountStock>::new();
+                state.armed = false;
+            }
+        }
+    }
+}
+
 impl TickPresenter<'_> {
     /// Presents one networked frame as single player presents ticks: the
     /// events the host sent as HUD lines, speech, sounds and rumble, and
@@ -1027,7 +1092,10 @@ impl TickPresenter<'_> {
                 | WireEvent::GroundDestroyed { .. }
                 | WireEvent::Countermeasure { .. }
                 | WireEvent::Launch { .. }
-                | WireEvent::GunBurst { .. } => {}
+                | WireEvent::GunBurst { .. }
+                | WireEvent::SurfaceBurst { .. }
+                | WireEvent::SurfaceBurstEnd { .. }
+                | WireEvent::SurfaceUnit(_) => {}
             }
         }
         if weapon_cycled {
@@ -1298,5 +1366,96 @@ mod tests {
         assert_eq!(copy.roster.plane(new.plane).unwrap().slot, new.slot);
         // The game seats its player in it as it seats any plane.
         copy.take_plane(SeatId(0), new.plane).unwrap();
+    }
+
+    /// Protocol 22: the surface units the host told of take their hit
+    /// points, radar and spares in the game's copy of the mission; the
+    /// others are as built, and a destroyed one stays destroyed.
+    #[test]
+    fn told_surface_units_reach_the_games_copy_of_the_mission() {
+        use tore_session::wire::events::{MountView, SurfaceUnitView};
+        use tore_world::surface::{SURFACE_UNIT_BASE, UnitId};
+        use tore_world::test_support::surface::{spec_with_target, surface_resources, target};
+        let spec = spec_with_target(&target("QUCITY", 3, 3, 9));
+        let mut world = tore_world::world::World::new(
+            &spec,
+            &surface_resources(),
+            tore_world::world::Seating::Open,
+        )
+        .unwrap();
+        let bunker = SURFACE_UNIT_BASE + 12;
+        let gun = UnitId(SURFACE_UNIT_BASE + 6);
+        // A gun with a magazine and spares, as the surface's arms give one.
+        let arms = world
+            .terrain
+            .surface
+            .arsenal
+            .units
+            .iter()
+            .find(|a| a.unit == gun)
+            .cloned();
+        let row = |world: &tore_world::world::World, id: u32| {
+            world
+                .combat
+                .state
+                .targets
+                .iter()
+                .find(|t| t.id == id)
+                .map(|t| (t.hp, t.radar_emitting))
+                .unwrap()
+        };
+        let (full, _) = row(&world, bunker);
+        let mut told = std::collections::BTreeMap::new();
+        told.insert(
+            bunker,
+            SurfaceUnitView {
+                unit: bunker,
+                hp: full - 7,
+                radar: true,
+                mounts: Vec::new(),
+            },
+        );
+        if let Some(arms) = &arms {
+            told.insert(
+                gun.0,
+                SurfaceUnitView {
+                    unit: gun.0,
+                    hp: row(&world, gun.0).0,
+                    radar: false,
+                    mounts: arms
+                        .loads
+                        .iter()
+                        .map(|_| MountView {
+                            rails: None,
+                            spares: Some(0),
+                        })
+                        .collect(),
+                },
+            );
+        }
+        super::surface_units_to_world(&mut world, &told);
+        assert_eq!(row(&world, bunker), (full - 7, true));
+        if arms.is_some() {
+            let state = world.combat.surface.unit(gun).unwrap();
+            assert!(state.armed);
+            assert!(
+                state
+                    .mounts
+                    .iter()
+                    .all(|m| m.reserve.is_none_or(|r| r == 0))
+            );
+        }
+        // Told nothing more: as built again, but a destroyed one stays so.
+        world
+            .combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == bunker)
+            .unwrap()
+            .hp = 0;
+        super::surface_units_to_world(&mut world, &std::collections::BTreeMap::new());
+        assert_eq!(row(&world, bunker), (0, false));
+        assert!(!world.combat.surface.unit(gun).unwrap().armed);
     }
 }
