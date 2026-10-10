@@ -82,7 +82,8 @@ tore_sim::checkpoint_struct!(SurfaceUnitState {
     resupply,
 });
 
-// The trace, locks, painting and places are rebuilt every surface tick.
+// The trace, locks, painting, places and bursts are rebuilt every surface
+// tick.
 tore_sim::checkpoint_struct!(SurfaceState {
     digest,
     units,
@@ -94,6 +95,7 @@ tore_sim::checkpoint_struct!(SurfaceState {
     locks = Vec::new(),
     painting = Vec::new(),
     places = Default::default(),
+    bursts = Vec::new(),
 });
 
 impl SurfaceState {
