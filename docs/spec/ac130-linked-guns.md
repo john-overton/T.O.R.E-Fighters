@@ -46,6 +46,13 @@ took the stick for slewing (John, 2026-10-09). Group actions are meaningful only
 on AC-130; on the AC-130 the D-pad's range-reset and damage-test uses are off.
 Existing combat buttons and left-stick cyclic remain available. These keys and
 gestures are agent decisions dated 2026-10-05, moved on 2026-10-09.
+The keys work in every flight with an AC-130 as the player's aircraft: Quick
+Mission, campaign and mission files, and a multiplayer flight (the server
+applies them), and a replay shows the link. They are gameplay commands, not
+range fixtures, and do not need `--live-fire`. A regression on 2026-10-09 let
+the world refuse them outside the range; the fix is in
+`world/commands.rs` (`works_outside_range`) and the tests are in
+`world/gun_link_tests.rs`.
 
 The ordinary Fire action releases every enabled gun that has ammunition, is not
 failed or lost, and whose own airframe is not in the line of fire. It needs no
