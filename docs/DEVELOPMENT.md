@@ -1108,7 +1108,8 @@ the retail airfield shape, in flights and in replays
 `--airfield-sheets OUTPUT_DIRECTORY [--all] [THEATER ...]` renders one redrawn
 airport of each plan (`--all`: every one) overhead, oblique, from short final
 and along the parking row; with the switch unset it renders the same views of
-the retail airfields.
+the retail airfields. Redrawn airports carry runway, approach, PAPI and taxiway
+lights; `TORE_AIRFIELD_LIGHTS=0` hides them.
 
 `TORE_WEATHER_SMOOTH=0|1` selects stepped or smooth weather presentation (default
 1). Smooth mode blends source time/altitude colors and neighboring horizon/fog

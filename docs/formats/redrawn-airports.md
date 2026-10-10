@@ -147,6 +147,57 @@ All `fitted`, agent choices of 2026-10-10 from usual real layouts:
   line's start. They are targets like the retail buildings (John,
   2026-10-10). Their object ids are `0x40F0_0000` up, inside the layout range.
 
+## Lights
+
+The retail game has no airfield lights: no light objects in any layout, no
+light geometry in the runway shapes, and the world's only point lights are
+burning flares, afterburners and gunfire
+([surface lighting](../spec/surface-lighting.md)). A redrawn airport adds its
+own, as requested by John on 2026-10-10. All placements and looks are
+`fitted`, agent choices from the usual real installations.
+
+| Lights | Where | Colour | Seen |
+| --- | --- | --- | --- |
+| Runway edge | every 200 ft along both edges, 3 ft out | white | all round, 6 nm |
+| Threshold and end bars | across each marked end, 10 ft apart | green toward the approach, red toward the runway | within 90 degrees of their face, 6 and 4 nm |
+| Approach (ALSF-II in outline) | the ILS runway's marked ends: a five-light barrette every 100 ft to 2,400 ft, a crossbar 100 ft wide at 1,000 ft, red side barrettes over the inner 1,000 ft, a flasher on each station from 1,000 ft out sequenced toward the threshold twice a second | white, red side rows | within 30 degrees of the approach, 10 nm (flashers 12) |
+| PAPI | four lights on the approach's left abeam the ILS aim point (1,000 ft in), 50 ft from the edge and 30 ft apart | each white above its angle, red below: 2.5, 2.83, 3.17 and 3.5 degrees from the outermost in | within 30 degrees of the approach, 8 nm |
+| Taxiway edge | every 200 ft along both edges, 3 ft out, where the edge borders grass | blue | all round, 2 nm |
+
+On the 3 degree path the PAPI shows two white and two red. The approach light
+rows are one table (`terrain::redrawn::lights::approach_rows`).
+
+Lights are drawn as points, a little larger as they near, dimmed with
+distance, haze and cloud (dimmed as a surface at a third of their distance is,
+so they carry farther than terrain) and by daylight: full at night, fading
+through dusk with the flares' night rule, gone by day except the PAPI at a
+quarter. They are tested against the world depth without writing it, like the
+flares, and drawn in two instanced batches (steady lights uploaded once per
+scene, flashers rewritten each frame from the world's tick clock, so a replay
+flashes as its flight did). `TORE_AIRFIELD_LIGHTS=0` hides them. Kiev's field
+has about 1,000 lights; Ukraine about 13,000.
+
+## Short strips under the redraw
+
+The redraw keeps every retail runway length, so the 22 dirt strips (DTSTRP,
+1,074 ft) stay short strips: no ground start, no tower service, no AI home
+([short strips](../spec/airports.md#short-strips)). They are also vertical pads
+by type (`Scene::vertical_pad`), which keeps conventional aircraft off them
+whatever their length.
+
+Lengthening them (not built; John to decide): all 22 lie on flat cells at
+0 ft with nothing higher within 2 nm, so a 3,500 or 4,000 ft strip needs no
+cut or fill. Laid forward from the retail threshold, three would cross a
+water cell (Toncri, Al Turas, Deleite; Deleite whichever way it is laid, the
+other two clear when laid back from the far end), and laid backward San Carlos
+would cover a Roland site; the other 18 are clear of water and layout objects
+every way. It would take: a plan length the scene uses for the
+runway (its length, approach centre and ILS, now the retail shape's),
+`terrain::strip_length_ft` (the Quick Mission's list) and the vertical-pad
+rule learning the redraw, a pad plan with taxiway and apron at real size, and
+the short-strip text in the airport spec. The 2,000 ft rule itself needs no
+change: a 3,500 ft strip clears it.
+
 ## Retail runway art (inventory)
 
 The 13 retail runway shapes each use one texture atlas of their own name
@@ -175,6 +226,8 @@ size the same art covers about 1.5 to 4 ft per texel.
 | Widths, taxiway offsets, apron sizes, link positions, building lines, extras counts | fitted (agent) |
 | Marking bands, cut-away order, fillet size, apron variation, building rule distances | fitted (agent) |
 | `TORE_REDRAWN_AIRPORTS` honoured by replays (recordings do not keep it yet) | opinionated (agent) |
+| Airfield lights exist | opinionated (John, 2026-10-10) |
+| Light spacing, colours, ranges, approach pattern, PAPI placement and day share | fitted (agent) |
 
 None of this is retail parity: retail drew its airfields at about 3x.
 
