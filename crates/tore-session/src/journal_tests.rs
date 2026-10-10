@@ -517,6 +517,10 @@ fn gunner(seat: u8, tick: u64) -> SeatInput {
     };
     let command = |c| vec![SeatCommand::Combat(c)];
     let commands = match phase {
+        // Ctrl+7 then Ctrl+8, as the keys send them in the ordinary game:
+        // link the second gun to the first (the range is not involved).
+        10 => vec![SeatCommand::Manual(live::Command::NextGunGroup)],
+        11 => vec![SeatCommand::Manual(live::Command::ToggleGunGroup)],
         200 => command(live::Command::SightPinGround),
         400 => command(live::Command::ClearDesignation),
         500 => command(live::Command::ClearDesignation),
@@ -573,7 +577,10 @@ fn a_standby_replays_the_gunsight_slew_bit_for_bit() {
             .gunship
             .as_ref()
             .unwrap();
-        looks.insert(host.tick(), (guns.look, guns.sight, guns.headings));
+        looks.insert(
+            host.tick(),
+            (guns.look, guns.sight, guns.headings, guns.mask()),
+        );
         if host.tick().is_multiple_of(30) {
             checkpoints.insert(host.tick(), host.checkpoint().unwrap());
         }
@@ -585,10 +592,12 @@ fn a_standby_replays_the_gunsight_slew_bit_for_bit() {
     assert!(
         looks
             .values()
-            .any(|(_, sight, _)| matches!(sight, tore_sim::combat::gunship::Sight::Pinned(_))),
+            .any(|(_, sight, _, _)| matches!(sight, tore_sim::combat::gunship::Sight::Pinned(_))),
         "the gunner pinned the ground"
     );
     assert_ne!(first.2, looks[&600].2, "the guns trained");
+    assert_eq!(first.3, 0b001, "the first gun alone to start");
+    assert_eq!(looks[&600].3, 0b011, "the keys linked a second gun");
 
     let bytes = stream(&spec, &host, &journal);
     let mut twin = fresh(&spec, &import);
@@ -607,10 +616,11 @@ fn a_standby_replays_the_gunsight_slew_bit_for_bit() {
                     .gunship
                     .as_ref()
                     .unwrap();
-                let (look, sight, headings) = looks[&twin.tick()];
+                let (look, sight, headings, mask) = looks[&twin.tick()];
                 assert_eq!(guns.look.map(f64::to_bits), look.map(f64::to_bits));
                 assert_eq!(guns.sight, sight);
                 assert_eq!(guns.headings.map(f64::to_bits), headings.map(f64::to_bits));
+                assert_eq!(guns.mask(), mask, "the gun link replays");
                 if let Some(expected) = checkpoints.get(&twin.tick()) {
                     assert!(
                         twin.checkpoint().unwrap() == *expected,

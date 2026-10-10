@@ -40,6 +40,8 @@ mod command_tests;
 mod commands;
 #[cfg(test)]
 mod crowd;
+#[cfg(test)]
+mod gun_link_tests;
 // What the world does with an AI lead's data link work (stage G, slice G4).
 #[cfg(test)]
 mod datalink_assign_tests;

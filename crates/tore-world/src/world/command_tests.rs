@@ -187,12 +187,7 @@ fn old_combat(world: &mut World, command: Live) {
 
 /// The old handler for a key, button or menu combat command.
 fn old_manual(world: &mut World, command: Live) {
-    if !world.combat.range
-        && !matches!(
-            command,
-            Live::ToggleArm | Live::ClearDesignation | Live::ToggleSeekerMode
-        )
-    {
+    if !world.combat.range && !super::commands::works_outside_range(command) {
         return;
     }
     world.combat.cancel();

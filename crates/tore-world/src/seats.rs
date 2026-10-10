@@ -433,8 +433,8 @@ pub enum SeatCommand {
     /// A combat command from a key, a button or the menu: arming, the seeker
     /// mode, clearing the designation, jettison and the range and development
     /// commands. It lets go of the trigger first and puts the payload weight
-    /// right afterwards. Outside `--live-fire` only the arming, seeker and
-    /// designation commands take effect.
+    /// right afterwards. Outside `--live-fire` only the arming, seeker,
+    /// designation and AC-130 gun-group commands take effect.
     Manual(live::Command),
     /// Put a new target on the range (`--live-fire` only).
     RangeReset,
