@@ -41,7 +41,8 @@ NORMAL_STATES = [
 QUICK_STATES = [
     "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
     "ordnance-message", "ordnance-message-long", "debrief", "debrief-2", "debrief-3", "debrief-4",
-    "debrief-5", "debrief-success", "objectives", "ground-start", "airports", "ground-start-auto", "ground-target", "ground-target-last", "field-30",
+    "debrief-5", "debrief-success", "objectives", "ground-start", "airports",
+    "ground-start-auto", "ground-target", "ground-target-last",
     "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
     # Stage L (slice L4): the lobby's creator and Load Ordnance with items not every player has dimmed.
     "lobby-creator-gaps", "lobby-creator-gap-notice", "lobby-creator-gap-theaters", "lobby-ordnance-gaps",
