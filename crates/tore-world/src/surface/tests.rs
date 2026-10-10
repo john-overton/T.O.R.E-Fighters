@@ -20,10 +20,10 @@ use tore_formats::{
     surface_unit::class,
 };
 
-const HEADER: &str = "[brent's_relocatable_format]\n";
+pub(super) const HEADER: &str = "[brent's_relocatable_format]\n";
 
 /// One line per field of `layout`; `value` overrides a field by name.
-fn fields(layout: &[(&str, &str)], value: &dyn Fn(&str) -> Option<String>) -> String {
+pub(super) fn fields(layout: &[(&str, &str)], value: &dyn Fn(&str) -> Option<String>) -> String {
     let mut text = String::new();
     for &(kind, name) in layout {
         let given = value(name);
@@ -116,11 +116,11 @@ fn placeholder_class(placeholder: Placeholder) -> u16 {
 }
 
 /// Where the fixture's objects stand: the middle of the synthetic theater.
-const MIDDLE: i32 = AIRPORT_AT as i32;
+pub(super) const MIDDLE: i32 = AIRPORT_AT as i32;
 
 /// The synthetic import with every equipment-list type, a few named types,
 /// a base layout with surface units on both sides and two templates.
-fn surface_resources() -> BTreeMap<String, Vec<u8>> {
+pub(super) fn surface_resources() -> BTreeMap<String, Vec<u8>> {
     let mut r = resources();
     let shape = r["F18.SH"].clone();
     let add_nt = |r: &mut BTreeMap<String, Vec<u8>>, stem: &str, bytes: Vec<u8>| {
@@ -245,7 +245,7 @@ fn fleet_template() -> String {
         )
 }
 
-fn target(stem: &str, aaa: usize, sam: usize, seed: u32) -> GroundTarget {
+pub(super) fn target(stem: &str, aaa: usize, sam: usize, seed: u32) -> GroundTarget {
     GroundTarget {
         stem: stem.into(),
         aaa,
@@ -548,7 +548,7 @@ fn base_layout_units_keep_their_layout_ids_and_take_their_sides() {
 }
 
 /// A mission whose spec names `target`, built as the creator's would be.
-fn world_with_target(r: &BTreeMap<String, Vec<u8>>, target: &GroundTarget) -> World {
+pub(super) fn world_with_target(r: &BTreeMap<String, Vec<u8>>, target: &GroundTarget) -> World {
     use crate::mission::Defense;
     let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
     spec.ground_target = Some(target.stem.clone());

@@ -1672,6 +1672,8 @@ impl Client {
             debris: drawn.debris,
             pilots,
             models: mission.models.clone(),
+            // Moving surface units reach clients with the network slice (N1).
+            surface: Vec::new(),
         };
         // The newest readout, its contacts placed around the drawn plane.
         let mut readout = self.wire.as_ref().and_then(|wire| {

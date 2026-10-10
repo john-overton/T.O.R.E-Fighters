@@ -797,6 +797,15 @@ impl Terrain {
         for unit in &mut self.surface.units {
             unit.in_scene = placed.contains(&unit.id.0);
         }
+        // A unit that follows a route takes its hit box from the scene's.
+        let mut courses = std::mem::take(&mut self.surface.courses);
+        for (id, course) in &mut courses {
+            if let Some(object) = objects.iter().find(|object| object.id == id.0) {
+                let ground = f64::from(self.height(course.start[0] as f32, course.start[2] as f32));
+                course.fit(&object.bounds, ground);
+            }
+        }
+        self.surface.courses = courses;
         self.airport_scene = tore_sim::airport::Scene {
             objects,
             runways,
@@ -848,6 +857,15 @@ impl Terrain {
         };
         let mut surface = resolve::surface(base, template)?;
         surface.unresolved = unresolved;
+        // The units that follow a route (Quick Mission columns and ships).
+        for unit in surface.units.iter().filter(|unit| unit.route.is_some()) {
+            if let Ok(entry) = catalog.entry(&unit.resource)
+                && let Some(record) = &entry.unit
+                && let Some(course) = crate::surface::movement::Course::of(unit, record)
+            {
+                surface.courses.insert(unit.id, course);
+            }
+        }
         Ok(surface)
     }
 
