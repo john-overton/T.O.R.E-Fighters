@@ -1,4 +1,4 @@
-"""Lane: ai. Surface units: ground target resolution and base-layout air defenses.
+"""Lane: ai. Surface units: ground target resolution, layout and base-layout air defenses.
 
 `surface-resolve-all` runs `--surface-dump --all`: every offered Quick Mission
 ground target template of every theater resolved at every defense level with
@@ -6,7 +6,20 @@ three seeds, each theater's base layout, and each template placed in its
 theater's scene at heavy defenses. It checks the counts against the retail
 survey (template objects, `<sam>` and `<aaa>` slots, targets per template,
 base-layout SAM and AAA by side), the 0, 25, 60 and 100 percent rolls, and that
-a second run repeats every digest. See docs/spec/surface-defenses.md.
+a second run repeats every digest.
+
+`surface-relocate-sweep` runs `--surface-dump --sweep`: every offered template
+placed at heavy defenses with seeds 1 to 20. Every placement passes the site
+rules, the anchored templates are exactly the expected ones and never move, at
+least 60 percent of the other placements relocate, the batteries and trucks
+keep their rules, each base layout forms its batteries, and a second run
+repeats the digests.
+
+`surface-start-placement` runs `--surface-dump --starts`: one mission per
+theater with a ground target and a 50 nm enemy distance. Red starts within
+5 nm of the target; Blue starts 50 nm from Red toward its own side, heading
+at the target; both on the map. See
+docs/spec/surface-defenses.md.
 
 The engagement scenarios run `--surface-trace`, which flies the player on a
 scripted straight line past one surface unit and prints what its controller
@@ -174,8 +187,9 @@ def sa6_engage_problems(output: str) -> list[str]:
     problems: list[str] = []
     run = runs(output)[0]
     unit = subject(run)
-    prepare = first(run, rf"^phase {unit} w0 Prepare")
-    track = first(run, rf"^phase {unit} w0 Track")
+    # A launcher in a battery fights through its battery's controller.
+    prepare = first(run, rf"^(phase {unit} w0|battery \d+) Prepare")
+    track = first(run, rf"^(phase {unit} w0|battery \d+) Track")
     shots = [t for t, text in events(run) if text.startswith(f"shot {unit} ") and " rounds 1 " in text]
     if prepare is None or not near(track, prepare + 36.0):
         problems.append(f"preparation {prepare} to lock {track}: expected 36 s")
@@ -199,8 +213,9 @@ def sa2_low_problems(output: str) -> list[str]:
     it, but it never launches."""
     problems: list[str] = []
     run = runs(output)[0]
-    unit = subject(run)
-    if first(run, rf"^radar {unit} on") is None:
+    m = RADAR.search(run)
+    radar = m.group(1) if m else subject(run)
+    if first(run, rf"^radar {radar} on") is None:
         problems.append("the SA-2's radar never came on")
     s = summary(run)
     if s.get("ground-square") != "true":
@@ -244,16 +259,16 @@ def harm_problems(output: str) -> list[str]:
     else:
         if not near(first(harm, rf"^radar {radar} off"), shut):
             problems.append("the radar did not go off with the shutdown")
-        if not near(first(harm, r"^battery 0 Blind"), shut):
+        if not near(first(harm, r"^battery \d+ Blind"), shut):
             problems.append("the battery did not go Blind with the shutdown")
         back = [t for t, text in events(harm) if text == f"radar {radar} on" and t > shut]
         if not back or not near(back[0], shut + 30.0):
             problems.append(f"the radar came back at {back[:1]}, expected 30 s after {shut}")
     kill = first(killed, r"^killed ")
-    blind = first(killed, r"^battery 0 Blind")
+    blind = first(killed, r"^battery \d+ Blind")
     if kill is None or not near(blind, kill):
         problems.append(f"killing the radar at {kill} did not blind the battery ({blind})")
-    after = [text for t, text in events(killed) if kill is not None and t > kill and text.startswith("battery 0 ")]
+    after = [text for t, text in events(killed) if kill is not None and t > kill and text.startswith("battery ")]
     if after:
         problems.append(f"the battery left Blind after its radar died: {after[:2]}")
     if any(t > (kill or 0) for t, text in events(killed) if text.startswith("shot ")):
@@ -282,9 +297,9 @@ def battery_sa2_problems(output: str) -> list[str]:
         problems.append("no optical launch in daylight")
     if s.get("lock-tone") != "false":
         problems.append("a lock tone from a blind battery")
-    if first(optical, r"^battery 0 .*optical") is None:
+    if first(optical, r"^battery \d+ .*optical") is None:
         problems.append("the battery never went to its optical backup")
-    if summary(night).get("missiles") != "0" or first(night, r"^battery 0 Blind") is None:
+    if summary(night).get("missiles") != "0" or first(night, r"^battery \d+ Blind") is None:
         problems.append(f"at night a blind SA-2 battery fired or did not go Blind: {summary(night)}")
     return problems
 
@@ -357,7 +372,7 @@ def barrage_problems(output: str) -> list[str]:
 
 def base_defenses_problems(output: str) -> list[str]:
     """Cuba's base layout: an enemy SA-2 engages a Blue jet, and Blue's M163s
-    engage a Redfor one."""
+    engage a Redfor one, whose RWR shows their radar."""
     problems: list[str] = []
     red, blue = (runs(output) + ["", ""])[:2]
     m = SUBJECT.search(red)
@@ -366,6 +381,10 @@ def base_defenses_problems(output: str) -> list[str]:
     m = SUBJECT.search(blue)
     if not m or m.group(3) != "1" or int(summary(blue).get("rounds", "0")) == 0:
         problems.append(f"the Blue M163 did not engage a Redfor jet: {summary(blue)}")
+    # Guantanamo's M163 stands low on a slope: its radar must still show
+    # (reception ends at its antenna, above the ground).
+    if summary(blue).get("ground-square") != "true":
+        problems.append("the Blue M163's radar never showed on the Redfor jet's RWR")
     return problems
 
 
@@ -375,6 +394,125 @@ TRACE_NOTES = ("Reads the surface records the import does not keep yet from the 
 
 def trace(*args: str) -> list[str]:
     return ["--surface-trace", *args]
+# Templates that stay at their retail spot, by the anchoring rule over their
+# contents (docs/spec/surface-defenses.md, "Relocation"), measured on the
+# retail data (surface-AI round, slice L1, 2026-10-10): the plan's 31 with
+# ~QPGSRUN by its target beside a dirt strip, plus ~QTCARGO and ~QUFACT
+# (routes, lead ruling) and ~QCCMHQ (its centroid 0.6 nm from a dirt strip).
+ANCHORED = {
+    "QAPFAIR": "runway", "QAPHELO": "runway", "QBAIR": "runway", "QBBRD": "bridge-or-road",
+    "QBFAIR": "strip", "QCCMHQ": "runway", "QCFAIR": "runway", "QELAIR": "runway",
+    "QESAIR": "runway", "QFFACT": "strip", "QFLAIR": "runway", "QFSAIR": "runway",
+    "QGRSAIR": "strip", "QIRFAIR": "runway", "QKPLNGR": "runway", "QLFFAIR": "runway",
+    "QNSFAIR": "runway", "QPGFAIR": "runway", "QPGSRUN": "town", "QSPFAIR": "runway",
+    "QTBARG": "town", "QTBRDG": "bridge-or-road", "QTBUNK": "strip", "QTCARGO": "route",
+    "QTSTRG": "town", "QTTRUCK": "bridge-or-road", "QUBRI": "bridge-or-road", "QUCITY": "town",
+    "QUCOL": "route", "QUFACT": "route", "QUSTRIP": "strip", "QVLAIR": "runway",
+    "QVSAIR": "runway", "QWTFAIR": "runway",
+}
+
+# Base-layout batteries per theater (SA-2, SA-3, SA-6, HAWK), from the plan's
+# list (section 3.11): Cuba 5 SA-2 and 2 SA-6, North Vietnam 13 SA-2, the
+# Baltics' 4 HAWK in two sites, Panama 3 SA-6 and a HAWK pair, the SA-6 sites
+# of Iraq, Pakistan, the Persian Gulf, South Korea and Taiwan.
+BASE_BATTERIES = {
+    "BAL": (0, 0, 0, 2), "CUB": (5, 0, 2, 0), "IRA": (0, 0, 4, 0), "TVIET": (13, 0, 0, 0),
+    "SPA": (0, 0, 2, 0), "APA": (0, 0, 3, 1), "PGU": (0, 0, 3, 0), "NSK": (0, 0, 4, 0),
+    "WTA": (0, 0, 2, 0),
+}
+
+SWEEP_LINE = re.compile(
+    r"^surface-sweep: (\S+) (\S+) seed (\d+) anchor (\S+) moved-ft (\d+) rotation (\d+) units (\d+) "
+    r"trucks (\d+) batteries (\d+) problems (\d+) digest (0x[0-9a-f]+)$",
+    re.M,
+)
+BASE_BATTERY_LINE = re.compile(
+    r"^surface-base-batteries: (\S+) batteries (\d+) sa2 (\d+) sa3 (\d+) sa6 (\d+) hawk (\d+) adopted (\d+) "
+    r"added (\d+) launchers (\d+) in-batteries (\d+) ",
+    re.M,
+)
+
+
+def relocate_sweep_problems(output: str) -> list[str]:
+    """Site rules, anchors, relocation share, base batteries, repeated digests."""
+    problems: list[str] = []
+    first, _, again = output.partition("$ then 1:")
+    digests: dict[tuple, str] = {}
+    anchors: dict[str, str] = {}
+    free = moved = 0
+    for m in SWEEP_LINE.finditer(first):
+        stem, seed, anchor, distance = m.group(2), int(m.group(3)), m.group(4), int(m.group(5))
+        digests[(stem, seed)] = m.group(11)
+        anchors.setdefault(stem, anchor)
+        if anchors[stem] != anchor:
+            problems.append(f"{stem}: anchor {anchor} with seed {seed}, {anchors[stem]} before")
+        if anchor == "none":
+            free += 1
+            moved += distance > 0
+        elif distance:
+            problems.append(f"{stem}: anchored ({anchor}) but moved {distance} ft with seed {seed}")
+    if len(anchors) != len(SURVEY) - 16:
+        problems.append(f"{len(anchors)} templates swept, expected {len(SURVEY) - 16}")
+    want = {stem: anchor for stem, anchor in ANCHORED.items()}
+    got = {stem: anchor for stem, anchor in anchors.items() if anchor != "none"}
+    if got != want:
+        extra = sorted(set(got.items()) - set(want.items()))
+        missing = sorted(set(want.items()) - set(got.items()))
+        problems.append(f"anchored templates differ: extra {extra}, missing {missing}")
+    if free and moved < 0.6 * free:
+        problems.append(f"only {moved} of {free} free placements relocated")
+    for line in re.findall(r"^surface-sweep-problem: .*$", first, re.M)[:20]:
+        problems.append(line)
+    bases = {m.group(1): m for m in BASE_BATTERY_LINE.finditer(first)}
+    for theater, m in bases.items():
+        counts = tuple(int(m.group(i)) for i in range(3, 7))
+        if counts != BASE_BATTERIES.get(theater, (0, 0, 0, 0)):
+            problems.append(f"{theater} base batteries (SA-2, SA-3, SA-6, HAWK) {counts}, expected {BASE_BATTERIES.get(theater, (0, 0, 0, 0))}")
+        if m.group(9) != m.group(10):
+            problems.append(f"{theater}: {m.group(10)} of {m.group(9)} battery launchers in batteries")
+    if len(bases) != 16:
+        problems.append(f"{len(bases)} base layouts, expected 16")
+    repeats = 0
+    for m in SWEEP_LINE.finditer(again):
+        key = (m.group(2), int(m.group(3)))
+        repeats += 1
+        if digests.get(key) != m.group(11):
+            problems.append(f"{key}: digest {digests.get(key)} then {m.group(11)}")
+    if repeats != 2 * (len(SURVEY) - 16):
+        problems.append(f"second run placed {repeats} times, expected {2 * (len(SURVEY) - 16)}")
+    return problems
+
+
+START_LINE = re.compile(
+    r"^surface-start: (\S+) (\S+) red-target-nm (-?[\d.]+) blue-red-nm ([\d.]+) separation-nm (\d+) "
+    r"side-off-deg ([\d.]+) heading-off-deg ([\d.]+) blue-on-map (\d) red-on-map (\d) front (\d)$",
+    re.M,
+)
+
+
+def start_placement_problems(output: str) -> list[str]:
+    """Red within 5 nm of the target; Blue the separation from Red toward its side, at the target; on the map."""
+    problems: list[str] = []
+    lines = list(START_LINE.finditer(output))
+    if len(lines) != 16:
+        problems.append(f"{len(lines)} theaters checked, expected 16")
+    for m in lines:
+        theater = m.group(1)
+        red, blue, separation, side_off, heading_off = (float(m.group(i)) for i in (3, 4, 5, 6, 7))
+        if not 0.0 <= red <= 5.01:
+            problems.append(f"{theater}: Red starts {red} nm from the target")
+        # A map too small for the separation shortens it; none of the 16 is.
+        if abs(blue - separation) > 0.05:
+            problems.append(f"{theater}: Blue starts {blue} nm from Red, separation {separation:.0}")
+        # The spread is 30 degrees about a whole-degree bearing.
+        if m.group(10) == "1" and side_off > 31.0:
+            problems.append(f"{theater}: Blue starts {side_off} degrees off its side of the front")
+        # Blue's heading is a whole degree.
+        if heading_off > 0.6:
+            problems.append(f"{theater}: Blue heads {heading_off} degrees off the target")
+        if (m.group(8), m.group(9)) != ("1", "1"):
+            problems.append(f"{theater}: a start is off the map")
+    return problems
 
 
 def scenarios() -> list[Scenario]:
@@ -412,31 +550,30 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="surface-harm", lane="ai", timeout=400,
-            args=trace("VLA", "QVRDRI", "--surface-seed", "4", "--unit", "0x5000000d", "--battery-near",
+            args=trace("VLA", "QVRDRI", "--surface-seed", "4", "--unit", "0x5000000d",
                        "--skill", "3", "--rng", "2", "--aircraft", "f16c", "--altitude", "20000",
                        "--from", "25", "--harm-at", "10", "--seconds", "200", "--invulnerable"),
-            then=[Step(trace("VLA", "QVRDRI", "--surface-seed", "4", "--unit", "0x5000000d", "--battery-near",
+            then=[Step(trace("VLA", "QVRDRI", "--surface-seed", "4", "--unit", "0x5000000d",
                              "--skill", "3", "--aircraft", "f16c", "--altitude", "20000", "--from", "25",
                              "--kill-at", "140", "--seconds", "220", "--invulnerable"), timeout=300)],
             check=harm_problems,
-            notes=TRACE_NOTES + " --battery-near forms the battery the layout slice will form; the AGM-88 is put "
-                  "in flight from the jet directly (no designation of ground emitters yet).",
+            notes=TRACE_NOTES + " The AGM-88 is put in flight from the jet directly (no designation of ground "
+                  "emitters yet).",
         ),
         Scenario(
             name="surface-battery-sa2", lane="ai", timeout=400,
-            args=trace("TVIET", "--over", "SA2A", "--index", "6", "--battery-near", "--altitude", "20000",
+            args=trace("TVIET", "--over", "SA2A", "--index", "6", "--altitude", "20000",
                        "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots"),
             then=[
-                Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--battery-near", "--altitude", "20000",
+                Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--altitude", "20000",
                            "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots",
                            "--kill-at", "1"), timeout=300),
-                Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--battery-near", "--altitude", "20000",
+                Step(trace("TVIET", "--over", "SA2A", "--index", "6", "--altitude", "20000",
                            "--from", "20", "--seconds", "200", "--invulnerable", "--quiet-shots",
                            "--kill-at", "1", "--condition", "night"), timeout=300),
             ],
             check=battery_sa2_problems,
-            notes=TRACE_NOTES + " The North Vietnam SA-2 with a GCI within 2 nm; --battery-near stands in for the "
-                  "layout slice's battery forming.",
+            notes=TRACE_NOTES + " The North Vietnam SA-2 whose battery adopted a GCI.",
         ),
         Scenario(
             name="surface-zsu23-gun", lane="ai", timeout=300,
@@ -467,5 +604,21 @@ def scenarios() -> list[Scenario]:
                              "--speed", "300", "--from", "4", "--seconds", "90", "--quiet-shots",
                              "--invulnerable"), timeout=300)],
             check=base_defenses_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-relocate-sweep", lane="ai",
+            args=["--surface-dump", "--sweep"], timeout=600,
+            expect=[r"^surface-sweep: 2160 placements, \d+ relocated, 0 problems, 0 errors$"],
+            forbid=[r"^surface-sweep: error"],
+            then=[Step(["--surface-dump", "--sweep", "--seeds", "2"], timeout=300)],
+            check=relocate_sweep_problems,
+            notes="Reads the templates from the retail media until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-start-placement", lane="ai",
+            args=["--surface-dump", "--starts"], timeout=300,
+            expect=[r"^surface-start: 16 theaters$"],
+            check=start_placement_problems,
+            notes="Reads the templates from the retail media until the import keeps them.",
         ),
     ]

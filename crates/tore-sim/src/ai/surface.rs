@@ -86,8 +86,8 @@ pub fn aim_error_deg(skill: i32, radar: bool) -> f64 {
     }
 }
 /// How much a radar-directed gun's aim error widens while its target's
-/// radio-frequency jammer is on. Visual guns are unaffected. Default, pending
-/// John (fitted 2026-10-10): jammers degrade radar-directed AAA.
+/// radio-frequency jammer is on. Visual guns are unaffected. Defined (John,
+/// 2026-10-10: a factor of 2 is "fine for now").
 pub const JAMMED_RADAR_GUN_ERROR_FACTOR: f64 = 2.0;
 
 /// The controller's coarse phase, for the trace, the RWR lock feed and tests.
@@ -116,7 +116,7 @@ pub enum Phase {
 impl Phase {
     /// Track, Fire or Pause: the unit holds a lock on its target, the RWR's
     /// painting state and lock tone. The lock holds between bursts and
-    /// salvos (fitted).
+    /// salvos (defined, John, 2026-10-10).
     pub fn locked(self) -> bool {
         matches!(self, Phase::Track | Phase::Fire | Phase::Pause)
     }

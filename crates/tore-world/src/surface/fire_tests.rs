@@ -293,9 +293,15 @@ fn agm88() -> Weapon {
     w
 }
 
-/// An arc of `rest` plus or minus `limit` degrees; 0 is unrestricted.
+/// An arc of `rest` plus or minus `limit` degrees (0 is unrestricted), its
+/// mount 10 ft up.
 fn arc(index: usize, rest: [f64; 2], limit: [f64; 2]) -> MountArc {
-    MountArc { index, rest, limit }
+    MountArc {
+        index,
+        rest,
+        limit,
+        offset: [0., 10., 0.],
+    }
 }
 const FREE: [f64; 2] = [0., 0.];
 /// NPC times (search, unready, attack, retarget), quarter seconds: the SA-6's
@@ -340,7 +346,6 @@ fn placed(id: u32, resource: &str, class: u16, x: f64, z: f64, skill: i32) -> Pl
         unit: UnitId(id),
         position: [x, 0., z],
         heading: 0.,
-        muzzle_height: MUZZLE_HEIGHT_FT,
         skill,
         side: RED,
         react: 0,
@@ -930,7 +935,7 @@ fn a_battery_detects_from_its_radar_fires_the_nearest_launcher_and_the_radar_sup
     // Its missile is the launcher's, supported from the radar's position.
     let support = f.supports.iter().find(|s| s.owner == NEAR).unwrap();
     assert!(support.supported && support.radar_emitting);
-    assert_eq!(support.radar_position, [0., MUZZLE_HEIGHT_FT, 0.]);
+    assert_eq!(support.radar_position, [0., EYE_HEIGHT_FT, 0.]);
     // The lock tone and painting are the radar's.
     assert_eq!(f.state.locks_on(JET), vec![3]);
     assert_eq!(f.state.painting(JET), vec![RADAR]);
@@ -1037,11 +1042,8 @@ fn the_surface_state_round_trips_mid_fight() {
     f.jet.position = [0., 15_000., 40_000.];
     f.run(38 * TPS);
     let copy = round_trip(&f.state, &Models::default()).expect("it round-trips");
-    let mut expected = f.state.clone();
-    expected.trace.clear();
-    expected.locks.clear();
-    expected.painting.clear();
-    assert_eq!(copy, expected);
+    assert_eq!(copy, f.state);
+    assert!(copy.places.is_empty() && copy.locks.is_empty());
     assert!(copy.batteries.iter().any(|b| b != &BatteryState::default()));
     assert!(
         copy.units
@@ -1053,4 +1055,51 @@ fn the_surface_state_round_trips_mid_fight() {
     let mut reset = f.state.clone();
     reset.reset();
     assert_eq!(reset, f.surface.fresh_state());
+}
+
+#[test]
+fn a_moving_unit_fires_from_where_it_is_with_its_mount_turned() {
+    use crate::surface::movement::{Halt, Mover};
+    let zsu = placed(ZSU_ID, "ZSU23.NT", 0x0800, 0., 0., 1)
+        .with_gun(zsu23(), "ZSU23", arc(0, FREE, [0., 90.]), 0)
+        .radar(false, None);
+    let mut f = Fixture::new(vec![zsu], Vec::new());
+    // The unit has driven 2,000 ft east and turned to head east (90
+    // degrees), moving at 50 ft/s.
+    let fine = 65_536.;
+    f.state.unit_mut(UnitId(ZSU_ID)).unwrap().mover = Some(Mover {
+        x: (2_000. * fine) as i64,
+        y: 0,
+        z: 0,
+        heading: i32::MAX / 2 + 1,
+        pitch: 0,
+        bank: 0,
+        speed: (50. * fine) as i32,
+        leg: 1,
+        halt: Halt::Moving,
+    });
+    f.jet.position = [2_000., 1_000., 3_000.];
+    f.run(22 * TPS);
+    assert!(f.rounds() > 0);
+    let place = f.state.place(&f.surface.arsenal.units[0]);
+    assert!((place.origin[0] - 2_000.).abs() < 1e-6);
+    assert!((place.velocity[0] - 50.).abs() < 1e-6);
+    // A mount 3 ft forward of the hull centre sits 3 ft east once the hull
+    // heads east.
+    let mount = MountArc {
+        offset: [0., 10., 3.],
+        ..f.surface.arsenal.units[0].weapons[0].mounts[0]
+    };
+    let at = place.mount(&mount, &|_, _| 0.);
+    assert!(
+        (at[0] - 2_003.).abs() < 1e-6 && at[2].abs() < 1e-6,
+        "{at:?}"
+    );
+    assert!((at[1] - 10.).abs() < 1e-6);
+    // A mount at ground level is lifted clear of the terrain.
+    let low = MountArc {
+        offset: [0., 0., 0.],
+        ..mount
+    };
+    assert!((place.mount(&low, &|_, _| 0.)[1] - MUZZLE_CLEARANCE_FT).abs() < 1e-6);
 }

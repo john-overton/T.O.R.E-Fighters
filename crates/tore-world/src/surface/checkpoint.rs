@@ -5,6 +5,7 @@
 //! add, with the digest of the surface it belongs to.
 use super::{
     BatteryState, Engager, MountStock, RadarState, SurfaceState, SurfaceUnitState, UnitId,
+    movement::{Halt, Mover},
     units::Seen,
 };
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
@@ -22,6 +23,24 @@ tore_sim::checkpoint_struct!(MountStock {
     loaded,
     reserve,
     ordinal,
+});
+
+tore_sim::checkpoint_enum!(Halt {
+    Moving = 0,
+    Arrived = 1,
+    Destroyed = 2,
+});
+
+tore_sim::checkpoint_struct!(Mover {
+    x,
+    y,
+    z,
+    heading,
+    pitch,
+    bank,
+    speed,
+    leg,
+    halt,
 });
 
 tore_sim::checkpoint_struct!(Seen {
@@ -51,6 +70,7 @@ tore_sim::checkpoint_struct!(BatteryState {
 
 tore_sim::checkpoint_struct!(SurfaceUnitState {
     id,
+    mover,
     armed,
     engagers,
     mounts,
@@ -58,7 +78,7 @@ tore_sim::checkpoint_struct!(SurfaceUnitState {
     supply,
 });
 
-// The trace, locks and painting are rebuilt every surface tick.
+// The trace, locks, painting and places are rebuilt every surface tick.
 tore_sim::checkpoint_struct!(SurfaceState {
     digest,
     units,
@@ -69,6 +89,7 @@ tore_sim::checkpoint_struct!(SurfaceState {
     trace = Vec::new(),
     locks = Vec::new(),
     painting = Vec::new(),
+    places = Default::default(),
 });
 
 impl SurfaceState {

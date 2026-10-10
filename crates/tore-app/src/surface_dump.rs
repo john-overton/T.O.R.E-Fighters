@@ -11,11 +11,19 @@
 //!   every theater at every defense level with seeds 1 to N (3 by default),
 //!   builds each theater with every template at heavy defenses, and prints a
 //!   line per resolution for the `surface-resolve-all` battery scenario.
-//! - `--surface-sheets OUT_DIR [THEATER[:STEM] ...]` renders each template at
-//!   its retail spot from above, heavy defenses, seed 1, with a marker per
-//!   unit: red Redfor, blue Blue, a ring for targets, yellow for parked
-//!   aircraft, green for supply trucks, magenta for units whose shape the
+//! - `--surface-sheets OUT_DIR [--variants] [THEATER[:STEM] ...]` renders
+//!   each template from above, heavy defenses: at its retail spot (no jitter,
+//!   no relocation, seed 1), and with `--variants` also placed with seeds 1
+//!   and 2. A marker per unit: red Redfor, blue Blue, a ring for targets,
+//!   yellow for parked aircraft, green for supply trucks, cyan for battery
+//!   radars, orange for battery launchers, magenta for units whose shape the
 //!   reader cannot draw yet.
+//! - `--surface-dump --sweep [--seeds N] [THEATER ...]` places every
+//!   template with seeds 1 to N (20) and reports the site rules each breaks,
+//!   and each theater's base-layout batteries; `--surface-dump --starts
+//!   [THEATER ...]` builds a mission per theater and reports where Blue and
+//!   Red start. The `surface-relocate-sweep` and `surface-start-placement`
+//!   scenarios.
 //!
 //! The import does not keep the templates or the unit types only they name
 //! yet, so both commands add what the pack lacks from the retail `FA_2.LIB`
@@ -33,8 +41,9 @@ use tore_formats::{
     surface_unit::class,
 };
 use tore_world::surface::{
-    IdRange, Surface, UnitId,
+    IdRange, Origin, Surface, UnitId,
     catalog::Catalog,
+    layout::{self, Variation},
     resolve::{self, GroundTarget},
 };
 
@@ -43,7 +52,7 @@ use tore_world::surface::{
 /// read from the retail media: `TORE_GAME_DIR`, else the source the data
 /// directory remembers, else the checkout's `gameassets/fighters-anthology`
 /// link. Returns how many were added.
-fn with_retail_surface(resources: &mut BTreeMap<String, Vec<u8>>) -> AppResult<usize> {
+pub(crate) fn with_retail_surface(resources: &mut BTreeMap<String, Vec<u8>>) -> AppResult<usize> {
     let data = crate::assets::data_directory()?;
     let candidates = std::env::var_os("TORE_GAME_DIR")
         .map(std::path::PathBuf::from)
@@ -94,6 +103,10 @@ fn theater_index(code: &str) -> AppResult<usize> {
         .ok_or_else(|| format!("{code}: no ground targets for theater {base}").into())
 }
 
+/// The enemy distance the dumps place Blue at from Red, nm, unless
+/// `--separation` says otherwise (the creator's 20 nm entry).
+const DUMP_SEPARATION_NM: u32 = 20;
+
 fn overrides() -> Overrides {
     Overrides {
         time: Some([12, 0]),
@@ -110,7 +123,11 @@ pub fn run() -> AppResult<()> {
     let mut nationality = None;
     let mut night = false;
     let mut all = false;
-    let mut seeds = 3u32;
+    let mut sweep = false;
+    let mut starts = false;
+    let mut seeds = None;
+    let mut variation = Variation::ON;
+    let mut separation = DUMP_SEPARATION_NM;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut next = || {
@@ -124,17 +141,28 @@ pub fn run() -> AppResult<()> {
             "--enemy-nationality" => nationality = Some(next()?.parse()?),
             "--night-stealth" => night = true,
             "--all" => all = true,
-            "--seeds" => seeds = next()?.parse()?,
+            "--sweep" => sweep = true,
+            "--starts" => starts = true,
+            "--no-jitter" => variation.jitter = false,
+            "--no-relocate" => variation.relocate = false,
+            "--separation" => separation = next()?.parse()?,
+            "--seeds" => seeds = Some(next()?.parse()?),
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
     }
     let resources = resources()?;
     if all {
-        return resolve_all(&resources, seeds);
+        return resolve_all(&resources, seeds.unwrap_or(3));
+    }
+    if sweep {
+        return relocate_sweep(&resources, seeds.unwrap_or(20), &positional);
+    }
+    if starts {
+        return start_placement(&resources, &positional);
     }
     let [theater, rest @ ..] = positional.as_slice() else {
-        return Err("--surface-dump THEATER [STEM] [--defenses AAA SAM] [--surface-seed N] [--enemy-nationality N] [--night-stealth] | --all [--seeds N]".into());
+        return Err("--surface-dump THEATER [STEM] [--defenses AAA SAM] [--surface-seed N] [--enemy-nationality N] [--night-stealth] [--no-jitter] [--no-relocate] | --all [--seeds N] | --sweep [--seeds N] [THEATER...] | --starts [THEATER...]".into());
     };
     let index = theater_index(theater)?;
     let target = match rest {
@@ -146,6 +174,8 @@ pub fn run() -> AppResult<()> {
             seed,
             enemy_nationality: nationality.unwrap_or(tables::ENEMY_NATIONALITY[index]),
             night_stealth: night,
+            variation,
+            separation_nm: separation,
         }),
         _ => return Err("--surface-dump takes one template".into()),
     };
@@ -161,6 +191,111 @@ fn side(surface_side: tore_sim::combat::live::Side) -> &'static str {
         2 => "red",
         _ => "neutral",
     }
+}
+
+/// The layout's lines: the template's anchor and move, every battery and
+/// supply truck, the starts and what could not be added.
+fn print_layout(surface: &Surface) {
+    if let Some(site) = &surface.template {
+        let t = surface.transform;
+        println!(
+            "surface: layout anchor {} jitter {} relocate {} transform rotation {} translation {} {} pivot {} {} moved-ft {}",
+            site.anchor.map_or("none", layout::Anchor::name),
+            u8::from(site.settings.variation.jitter),
+            u8::from(site.settings.variation.relocate),
+            t.rotation_deg,
+            t.translation[0],
+            t.translation[1],
+            t.pivot[0],
+            t.pivot[1],
+            moved_ft(surface),
+        );
+    }
+    for battery in &surface.batteries {
+        let radar = surface.unit(battery.radar);
+        println!(
+            "surface: battery {:?} side {} radar {:#010x} {} {} launchers {} truck {}",
+            battery.system,
+            side(battery.side),
+            battery.radar.0,
+            radar.map_or("?", |u| u.resource.as_str()),
+            if battery.radar_added {
+                "added"
+            } else {
+                "adopted"
+            },
+            battery
+                .launchers
+                .iter()
+                .map(|id| format!("{:#010x}", id.0))
+                .collect::<Vec<_>>()
+                .join(","),
+            battery
+                .truck
+                .map_or("none".into(), |id| format!("{:#010x}", id.0)),
+        );
+    }
+    for truck in &surface.trucks {
+        let unit = surface.unit(truck.id);
+        let served = truck.serves.and_then(|id| surface.unit(id));
+        let gap = match (unit, served) {
+            (Some(u), Some(s)) => {
+                let d = [
+                    f64::from(u.position[0] - s.position[0]),
+                    f64::from(u.position[2] - s.position[2]),
+                ];
+                format!(" gap-ft {:.0}", d[0].hypot(d[1]))
+            }
+            _ => String::new(),
+        };
+        println!(
+            "surface: truck {:#010x} {} {} serves {}{gap}",
+            truck.id.0,
+            unit.map_or("?", |u| u.resource.as_str()),
+            if truck.added { "added" } else { "standing" },
+            truck
+                .serves
+                .map_or("any".into(), |id| format!("{:#010x}", id.0)),
+        );
+    }
+    if let Some(starts) = &surface.starts {
+        let nm = |a: [i32; 2], b: [i32; 2]| {
+            f64::from(a[0] - b[0]).hypot(f64::from(a[1] - b[1])) / layout::NM_FT as f64
+        };
+        println!(
+            "surface: starts target {} {} red {} {} red-target-nm {:.1} blue {} {} blue-red-nm {:.1} heading {} blue-airfields {} red-airfields {}",
+            starts.target[0],
+            starts.target[1],
+            starts.red[0],
+            starts.red[1],
+            nm(starts.red, starts.target),
+            starts.blue[0],
+            starts.blue[1],
+            nm(starts.blue, starts.red),
+            starts.blue_heading_deg,
+            ids(&starts.blue_airfields),
+            ids(&starts.red_airfields),
+        );
+    }
+    for note in &surface.layout_notes {
+        println!("surface: layout note: {note}");
+    }
+}
+
+fn ids(list: &[u32]) -> String {
+    if list.is_empty() {
+        return "none".into();
+    }
+    list.iter()
+        .map(|id| format!("{id:#010x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// How far the relocation moved the template's targets' centroid, feet.
+fn moved_ft(surface: &Surface) -> i64 {
+    let t = surface.transform.translation.map(i64::from);
+    layout::trig::isqrt((t[0] * t[0] + t[1] * t[1]) as u128) as i64
 }
 
 fn print_surface(theater: &str, surface: &Surface) {
@@ -183,6 +318,7 @@ fn print_surface(theater: &str, surface: &Surface) {
                 placeholder: Some(p),
                 ..
             } => format!(" slot <{}>", p.name()),
+            Origin::Added => " added".into(),
             _ => String::new(),
         };
         println!(
@@ -235,6 +371,7 @@ fn print_surface(theater: &str, surface: &Surface) {
     if let Some(why) = &surface.unresolved {
         println!("surface: unresolved ground target: {why}");
     }
+    print_layout(surface);
     for (name, why) in &surface.unreadable {
         println!("surface: unreadable {name}: {why}");
     }
@@ -246,12 +383,15 @@ fn print_surface(theater: &str, surface: &Surface) {
             .count()
     };
     println!(
-        "surface: totals units {} layout {} template {} parked {} trucks {} targets {} not-drawn {} unreadable {}",
+        "surface: totals units {} layout {} template {} parked {} trucks {} added-trucks {} batteries {} added-radars {} targets {} not-drawn {} unreadable {}",
         surface.units.len(),
         count(IdRange::Layout),
         count(IdRange::Template),
         surface.parked.len(),
         surface.trucks.len(),
+        count(IdRange::SupplyTruck),
+        surface.batteries.len(),
+        count(IdRange::BatteryRadar),
         surface.targets().count(),
         surface.units.iter().filter(|u| !u.in_scene).count(),
         surface.unreadable.len()
@@ -317,6 +457,8 @@ fn resolve_all(resources: &BTreeMap<String, Vec<u8>>, seeds: u32) -> AppResult<(
                         seed,
                         enemy_nationality: nationality,
                         night_stealth: false,
+                        variation: Variation::ON,
+                        separation_nm: DUMP_SEPARATION_NM,
                     };
                     let mut catalog = Catalog::new(resources);
                     let resolved = match resolve::template(
@@ -365,6 +507,8 @@ fn resolve_all(resources: &BTreeMap<String, Vec<u8>>, seeds: u32) -> AppResult<(
                 seed: 1,
                 enemy_nationality: nationality,
                 night_stealth: false,
+                variation: Variation::ON,
+                separation_nm: DUMP_SEPARATION_NM,
             };
             match Terrain::for_mission_with(
                 resources,
@@ -402,6 +546,280 @@ fn resolve_all(resources: &BTreeMap<String, Vec<u8>>, seeds: u32) -> AppResult<(
     Ok(())
 }
 
+/// The stems `--sweep` and `--starts` cover: every offered template but the
+/// "nothing" ones, of the named theaters or of all.
+fn jobs(wanted: &[String]) -> AppResult<Vec<(usize, &'static str, Vec<&'static str>)>> {
+    let mut out = Vec::new();
+    for (index, theater) in tables::THEATERS.iter().enumerate() {
+        if !wanted.is_empty() && !wanted.iter().any(|w| w.eq_ignore_ascii_case(theater)) {
+            continue;
+        }
+        let stems = tables::TEMPLATES[index]
+            .iter()
+            .copied()
+            .filter(|stem| !stem.ends_with("NOTH"))
+            .collect();
+        out.push((index, *theater, stems));
+    }
+    if out.is_empty() {
+        return Err(format!("no theater among {wanted:?}").into());
+    }
+    Ok(out)
+}
+
+fn heavy(stem: &str, index: usize, seed: u32) -> GroundTarget {
+    GroundTarget {
+        stem: stem.to_owned(),
+        aaa: 3,
+        sam: 3,
+        seed,
+        enemy_nationality: tables::ENEMY_NATIONALITY[index],
+        night_stealth: false,
+        variation: Variation::ON,
+        separation_nm: DUMP_SEPARATION_NM,
+    }
+}
+
+/// `--surface-dump --sweep [--seeds N] [THEATER...]`: every offered
+/// template of every (named) theater placed at heavy defenses with seeds 1
+/// to N (20 by default): its anchor and move, the site rules it breaks
+/// ([`Terrain::audit_surface`]'s), its batteries and trucks against their
+/// rules, and its digest; each theater's base-layout batteries. For the
+/// `surface-relocate-sweep` scenario.
+fn relocate_sweep(
+    resources: &BTreeMap<String, Vec<u8>>,
+    seeds: u32,
+    wanted: &[String],
+) -> AppResult<()> {
+    let (mut placements, mut relocated, mut problems, mut errors) =
+        (0usize, 0usize, 0usize, 0usize);
+    for (index, theater, stems) in jobs(wanted)? {
+        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides())?;
+        let base = &terrain.surface;
+        let count = |system| base.batteries.iter().filter(|b| b.system == system).count();
+        use tore_world::surface::BatterySystem as S;
+        let in_battery: usize = base.batteries.iter().map(|b| b.launchers.len()).sum();
+        let launchers = base
+            .units
+            .iter()
+            .filter(|u| S::of_launcher(&u.resource).is_some() && u.side.0 != 0)
+            .count();
+        println!(
+            "surface-base-batteries: {theater} batteries {} sa2 {} sa3 {} sa6 {} hawk {} adopted {} added {} launchers {launchers} in-batteries {in_battery} notes {} digest {:#018x}",
+            base.batteries.len(),
+            count(S::Sa2),
+            count(S::Sa3),
+            count(S::Sa6),
+            count(S::Hawk),
+            base.batteries.iter().filter(|b| !b.radar_added).count(),
+            base.batteries.iter().filter(|b| b.radar_added).count(),
+            base.layout_notes.len(),
+            base.digest(),
+        );
+        let site = tore_world::terrain::SurfaceSite::load(resources, theater)?;
+        for stem in stems {
+            for seed in 1..=seeds {
+                placements += 1;
+                let surface = match site.place(
+                    resources,
+                    &terrain.theater,
+                    Some(&heavy(stem, index, seed)),
+                ) {
+                    Ok(surface) => surface,
+                    Err(error) => {
+                        errors += 1;
+                        println!("surface-sweep: error {theater} {stem} seed {seed}: {error}");
+                        continue;
+                    }
+                };
+                let mut broken = site.audit(resources, &terrain.theater, &surface);
+                broken.extend(rule_problems(&surface));
+                let anchor = surface.template.as_ref().and_then(|t| t.anchor);
+                if anchor.is_some() && !surface.transform.is_identity() {
+                    broken.push("an anchored template moved".into());
+                }
+                if !surface.transform.is_identity() {
+                    relocated += 1;
+                }
+                problems += broken.len();
+                for problem in &broken {
+                    println!("surface-sweep-problem: {theater} {stem} seed {seed}: {problem}");
+                }
+                println!(
+                    "surface-sweep: {theater} {stem} seed {seed} anchor {} moved-ft {} rotation {} units {} trucks {} batteries {} problems {} digest {:#018x}",
+                    anchor.map_or("none", layout::Anchor::name),
+                    moved_ft(&surface),
+                    surface.transform.rotation_deg,
+                    surface.template_units().count(),
+                    surface
+                        .units
+                        .iter()
+                        .filter(|u| u.id.range() == IdRange::SupplyTruck)
+                        .count(),
+                    surface.batteries.len(),
+                    broken.len(),
+                    surface.digest(),
+                );
+            }
+        }
+    }
+    println!(
+        "surface-sweep: {placements} placements, {relocated} relocated, {problems} problems, {errors} errors"
+    );
+    if errors > 0 {
+        return Err(format!("{errors} placements failed").into());
+    }
+    Ok(())
+}
+
+/// The battery and truck rules a placed surface breaks: battery sizes
+/// against their caps, one added truck per manned slot and per template
+/// battery, each 200 to 400 ft from the unit it serves.
+fn rule_problems(surface: &Surface) -> Vec<String> {
+    let mut out = Vec::new();
+    for battery in &surface.batteries {
+        if battery.launchers.len() > battery.system.cap() {
+            out.push(format!(
+                "{:?} battery of {:#010x} has {} launchers",
+                battery.system,
+                battery.launchers[0].0,
+                battery.launchers.len()
+            ));
+        }
+        if battery.launchers[0].range() == IdRange::Template && battery.truck.is_none() {
+            out.push(format!(
+                "battery of {:#010x} has no truck",
+                battery.launchers[0].0
+            ));
+        }
+    }
+    let slots = surface
+        .template_units()
+        .filter(|u| {
+            matches!(&u.origin, Origin::Template { placeholder: Some(p), .. } if p.is_defense())
+        })
+        .count();
+    let template_batteries = surface
+        .batteries
+        .iter()
+        .filter(|b| b.launchers[0].range() == IdRange::Template)
+        .count();
+    let added = surface.trucks.iter().filter(|t| t.added).count();
+    if added != slots + template_batteries && surface.layout_notes.is_empty() {
+        out.push(format!(
+            "{added} added trucks for {slots} manned slots and {template_batteries} batteries"
+        ));
+    }
+    for truck in surface.trucks.iter().filter(|t| t.added) {
+        let (Some(unit), Some(served)) = (
+            surface.unit(truck.id),
+            truck.serves.and_then(|id| surface.unit(id)),
+        ) else {
+            continue;
+        };
+        let d2 = (i64::from(unit.position[0] - served.position[0])).pow(2)
+            + (i64::from(unit.position[2] - served.position[2])).pow(2);
+        let [lo, hi] = layout::TRUCK_FT;
+        if d2 < (lo - 1).pow(2) || d2 > (hi + 1).pow(2) {
+            out.push(format!(
+                "truck {:#010x} stands {d2} sq ft from {:#010x}",
+                truck.id.0, served.id.0
+            ));
+        }
+    }
+    out
+}
+
+/// `--surface-dump --starts [THEATER...]`: for one template per theater
+/// (the first that relocates with seed 1, else the first), builds the
+/// mission with a ground target, an airborne start at 20,000 ft and a 50 nm
+/// enemy distance, and prints where Blue and Red start: Red's aircraft from
+/// the target, Blue from Red and its bearing off the line toward its own
+/// side, Blue's heading off the target, and whether both are on the map. For
+/// the `surface-start-placement` scenario.
+fn start_placement(resources: &BTreeMap<String, Vec<u8>>, wanted: &[String]) -> AppResult<()> {
+    use tore_world::{
+        mission::{Defense, MissionSpec, Skill, Start},
+        world::{Seating, World},
+    };
+    let mut checked = 0;
+    for (index, theater, stems) in jobs(wanted)? {
+        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides())?;
+        let site = tore_world::terrain::SurfaceSite::load(resources, theater)?;
+        let stem = stems
+            .iter()
+            .copied()
+            .find(|stem| {
+                site.place(resources, &terrain.theater, Some(&heavy(stem, index, 1)))
+                    .is_ok_and(|s| !s.transform.is_identity())
+            })
+            .unwrap_or(stems[0]);
+        let mut spec = MissionSpec::new(theater, tore_formats::aircraft::AircraftId::F18);
+        spec.ground_target = Some(stem.to_owned());
+        spec.aaa = Defense::Heavy;
+        spec.sam = Defense::Heavy;
+        spec.surface_seed = 1;
+        spec.enemy_nationality = tables::ENEMY_NATIONALITY[index] as u8;
+        spec.wings[3].count = 1;
+        spec.wings[3].skill = Skill::Average;
+        spec.separation_nm = 50;
+        spec.start = Start::Airborne {
+            altitude_ft: 20_000,
+        };
+        let world = World::new(&spec, resources, Seating::SinglePlayer)?;
+        let Some(starts) = world.terrain.surface.starts.clone() else {
+            println!("surface-start: {theater} {stem} no starts");
+            continue;
+        };
+        let nm = layout::NM_FT as f64;
+        let target = starts.target.map(f64::from);
+        let blue = world.cockpits[0].flight.position;
+        let yaw = world.cockpits[0].flight.yaw;
+        let red = world
+            .combat
+            .state
+            .targets
+            .iter()
+            .filter(|t| t.side == tore_world::ai_wings::ENEMY_SIDE && t.aircraft.is_some())
+            .map(|t| t.position)
+            .next();
+        let angle = |v: [f64; 2]| v[0].atan2(v[1]).to_degrees();
+        let off = |a: f64, b: f64| ((a - b + 540.).rem_euclid(360.) - 180.).abs();
+        // Red's aircraft from the target; Blue from Red, on which side; Blue's
+        // heading against the line to the target.
+        let red_target_nm = red.map_or(-1., |r| (r[0] - target[0]).hypot(r[2] - target[1]) / nm);
+        let from_red = red.map_or([0.; 2], |r| [blue[0] - r[0], blue[2] - r[2]]);
+        let blue_red_nm = from_red[0].hypot(from_red[1]) / nm;
+        let side_off = site.front().map_or(0., |front| {
+            let toward = [
+                (front.blue[0] - front.red[0]) as f64,
+                (front.blue[1] - front.red[1]) as f64,
+            ];
+            off(angle(from_red), angle(toward))
+        });
+        let heading_off = off(
+            yaw.to_degrees(),
+            angle([target[0] - blue[0], target[1] - blue[2]]),
+        );
+        let extent = [
+            (terrain.theater.cols as f64 - 1.) * f64::from(tore_formats::theater::CELL_FEET),
+            (terrain.theater.rows as f64 - 1.) * f64::from(tore_formats::theater::CELL_FEET),
+        ];
+        let on_map =
+            |p: [f64; 3]| (0. ..=extent[0]).contains(&p[0]) && (0. ..=extent[1]).contains(&p[2]);
+        println!(
+            "surface-start: {theater} {stem} red-target-nm {red_target_nm:.2} blue-red-nm {blue_red_nm:.2} separation-nm {} side-off-deg {side_off:.1} heading-off-deg {heading_off:.1} blue-on-map {} red-on-map {} front {}",
+            spec.separation_nm,
+            u8::from(on_map(blue)),
+            u8::from(red.is_some_and(on_map)),
+            u8::from(site.front().is_some()),
+        );
+        checked += 1;
+    }
+    println!("surface-start: {checked} theaters");
+    Ok(())
+}
+
 /// `T72.NT x3, SA3.NT x9`.
 fn summary(names: &[&str]) -> String {
     let mut counts = BTreeMap::<&str, usize>::new();
@@ -419,7 +837,25 @@ fn summary(names: &[&str]) -> String {
 pub fn sheets() -> AppResult<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
     let Some((out, wanted)) = args.split_first() else {
-        return Err("--surface-sheets OUTPUT_DIRECTORY [THEATER[:STEM] ...]".into());
+        return Err("--surface-sheets OUTPUT_DIRECTORY [--variants] [THEATER[:STEM] ...]".into());
+    };
+    // `--variants`: the retail spot (no jitter, no relocation) and two
+    // seeds with both on; otherwise the retail spot alone.
+    let all_variants = wanted.iter().any(|w| w == "--variants");
+    let wanted: Vec<String> = wanted
+        .iter()
+        .filter(|w| *w != "--variants")
+        .cloned()
+        .collect();
+    let wanted = wanted.as_slice();
+    let variants: &[(&str, Variation, u32)] = if all_variants {
+        &[
+            ("retail", Variation::OFF, 1),
+            ("seed1", Variation::ON, 1),
+            ("seed2", Variation::ON, 2),
+        ]
+    } else {
+        &[("retail", Variation::OFF, 1)]
     };
     let out = Path::new(out);
     std::fs::create_dir_all(out)?;
@@ -455,14 +891,19 @@ pub fn sheets() -> AppResult<()> {
     let mut gpu: Option<Gpu> = None;
     for (theater, stems) in jobs {
         let index = theater_index(&theater)?;
-        for stem in stems {
+        for (stem, (variant, variation, seed)) in stems
+            .iter()
+            .flat_map(|stem| variants.iter().map(move |variant| (stem.clone(), *variant)))
+        {
             let target = GroundTarget {
                 stem: stem.clone(),
                 aaa: 3,
                 sam: 3,
-                seed: 1,
+                seed,
                 enemy_nationality: tables::ENEMY_NATIONALITY[index],
                 night_stealth: false,
+                variation,
+                separation_nm: DUMP_SEPARATION_NM,
             };
             let world = Terrain::for_mission_with(
                 &resources,
@@ -505,7 +946,7 @@ pub fn sheets() -> AppResult<()> {
                         marker.draw(&mut pixels, at, view == "top");
                     }
                 }
-                let path = out.join(format!("{theater}-{stem}-{view}.png"));
+                let path = out.join(format!("{theater}-{stem}-{variant}-{view}.png"));
                 std::fs::write(
                     &path,
                     crate::replay::png::encode_rgba(WIDTH, HEIGHT, &pixels)?,
@@ -573,9 +1014,24 @@ fn marks(world: &Terrain, surface: &Surface) -> Vec<([f64; 3], Marker)> {
         [x, f64::from(world.height(x as f32, z as f32)) + 20., z]
     };
     let mut out = Vec::new();
-    for unit in surface.template_units() {
+    let radars: std::collections::BTreeSet<UnitId> =
+        surface.batteries.iter().map(|b| b.radar).collect();
+    let launchers: std::collections::BTreeSet<UnitId> = surface
+        .batteries
+        .iter()
+        .flat_map(|b| b.launchers.iter().copied())
+        .collect();
+    let template_or_added = surface
+        .units
+        .iter()
+        .filter(|u| u.id.range() != IdRange::Layout || radars.contains(&u.id));
+    for unit in template_or_added {
         let color = if !unit.in_scene {
             [255, 0, 255]
+        } else if radars.contains(&unit.id) {
+            [0, 230, 230]
+        } else if launchers.contains(&unit.id) {
+            [255, 150, 0]
         } else if unit.supply_truck {
             [40, 220, 60]
         } else if unit.side.0 == 1 {

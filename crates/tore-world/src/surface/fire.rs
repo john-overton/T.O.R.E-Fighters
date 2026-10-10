@@ -17,10 +17,12 @@
 //!   CIWS turn and fire on their own); a unit's missile mounts of one record
 //!   share one controller, and each salvo round leaves from a loaded rail
 //!   whose arc covers the target.
-//! - Rounds leave from the unit's reference point raised by
-//!   [`MUZZLE_HEIGHT_FT`] (ships [`SHIP_MUZZLE_HEIGHT_FT`]): the hardpoint
-//!   positions' scale is not established, and engagement must not depend on
-//!   shape extents.
+//! - Rounds leave from the mount: the unit's pose this tick (a moving unit
+//!   fires from where it is) plus the hardpoint offset at real size
+//!   ([`super::mount_position_ft`]) turned by the unit's attitude, at least
+//!   [`MUZZLE_CLEARANCE_FT`] above the terrain. Radars and sights look from
+//!   [`EYE_HEIGHT_FT`] above the unit's reference point. Nothing depends on
+//!   the shape's extents.
 //! - A mount arc of 0 on an axis is unrestricted (every land vehicle reads 0
 //!   for heading); otherwise the target's bearing (guns: and elevation) must
 //!   lie within the half-arc of the mount's rest direction, relative to the
@@ -58,11 +60,12 @@ use tore_sim::{
     },
 };
 
-/// Height above a land unit's reference point that its rounds leave from,
+/// Height above a unit's reference point its radar or sight looks from,
 /// feet (fitted).
-pub const MUZZLE_HEIGHT_FT: f64 = 10.;
-/// The same for a ship (fitted).
-pub const SHIP_MUZZLE_HEIGHT_FT: f64 = 50.;
+pub const EYE_HEIGHT_FT: f64 = 10.;
+/// A round always leaves at least this high above the terrain under it, so
+/// a mount at ground level does not fire into the ground (fitted).
+pub const MUZZLE_CLEARANCE_FT: f64 = 5.;
 /// Line of sight samples the terrain at least this often, feet.
 const LOS_STEP_FT: f64 = 500.;
 const LOS_MAX_SAMPLES: usize = 64;
@@ -131,6 +134,9 @@ pub struct MountArc {
     pub rest: [f64; 2],
     /// Half-arc about the rest direction, degrees; 0 is unrestricted.
     pub limit: [f64; 2],
+    /// The hardpoint's position relative to the hull at real size, feet:
+    /// right, up, forward.
+    pub offset: Vector,
 }
 
 impl MountArc {
@@ -190,7 +196,6 @@ pub struct Arms {
     pub position: Vector,
     /// Hull heading, radians.
     pub heading: f64,
-    pub muzzle_height: f64,
     pub skill: i32,
     pub side: Side,
     /// The `react` attack mask (aircraft class bits); 0 attacks any class.
@@ -213,13 +218,59 @@ pub struct Arms {
 }
 
 impl Arms {
-    /// The point its rounds leave from.
-    pub fn muzzle(&self) -> Vector {
-        [
-            self.position[0],
-            self.position[1] + self.muzzle_height,
-            self.position[2],
-        ]
+    /// Where the unit stands this tick: its mover's pose for a unit that
+    /// follows a route, else where the mission put it.
+    pub fn place(&self, state: Option<&super::SurfaceUnitState>) -> Place {
+        match state.and_then(|s| s.mover) {
+            Some(mover) => {
+                let origin = mover.position();
+                Place {
+                    origin,
+                    eye: [origin[0], origin[1] + EYE_HEIGHT_FT, origin[2]],
+                    basis: mover.basis(),
+                    heading: mover.attitude()[0],
+                    velocity: mover.velocity(),
+                }
+            }
+            None => Place {
+                origin: self.position,
+                eye: [
+                    self.position[0],
+                    self.position[1] + EYE_HEIGHT_FT,
+                    self.position[2],
+                ],
+                basis: Basis::new(self.heading, 0., 0.),
+                heading: self.heading,
+                velocity: [0.; 3],
+            },
+        }
+    }
+}
+
+/// A unit's pose for this tick's fight.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Place {
+    /// The unit's reference point on the ground, feet.
+    pub origin: Vector,
+    /// Where its radar or sight looks from.
+    pub eye: Vector,
+    pub basis: Basis,
+    /// Hull heading, radians.
+    pub heading: f64,
+    pub velocity: Vector,
+}
+
+impl Place {
+    /// The muzzle of mount `arc`: the hardpoint offset turned by the unit's
+    /// attitude, kept [`MUZZLE_CLEARANCE_FT`] above the terrain.
+    pub fn mount(&self, arc: &MountArc, ground: &dyn Fn(f64, f64) -> f64) -> Vector {
+        let [x, y, z] = arc.offset;
+        let b = &self.basis;
+        let mut point: Vector = std::array::from_fn(|i| {
+            self.origin[i] + b.right[i] * x + b.up[i] * y + b.forward[i] * z
+        });
+        point[1] = point[1].max(ground(point[0], point[2]) + MUZZLE_CLEARANCE_FT);
+        point
     }
 }
 
@@ -305,11 +356,6 @@ impl Arsenal {
                 unit: unit.id,
                 position,
                 heading: f64::from(unit.angles[0]).to_radians(),
-                muzzle_height: if ship {
-                    SHIP_MUZZLE_HEIGHT_FT
-                } else {
-                    MUZZLE_HEIGHT_FT
-                },
                 skill: unit.skill.clamp(0, 3),
                 side: unit.side,
                 react: unit.react.map_or(0, |react| react[0]),
@@ -610,6 +656,7 @@ pub fn mount_arc(index: usize, mount: &tore_formats::surface_unit::Mount) -> Mou
         index,
         rest: mount.slew.map(|v| f64::from(v) / UNITS_PER_DEGREE),
         limit: mount.slew_limit.map(|v| f64::from(v) / UNITS_PER_DEGREE),
+        offset: super::mount_position_ft(mount),
     }
 }
 
@@ -887,6 +934,14 @@ pub fn step(
         return Stepped::default();
     }
     state.arm(arsenal);
+    // Where every armed unit stands this tick: a moving unit fires and looks
+    // from its current pose.
+    let places: BTreeMap<UnitId, Place> = arsenal
+        .units
+        .iter()
+        .map(|arms| (arms.unit, arms.place(state.unit(arms.unit))))
+        .collect();
+    state.places = places;
     // Each surface id's combat row, and whether it stands.
     let rows: BTreeMap<u32, usize> = live
         .targets
@@ -951,10 +1006,11 @@ pub fn step(
             .collect();
         // Detection from the radar, or with the optical backup from the
         // first live launcher.
+        let eye = |arms: &Arms| state.place(arms).eye;
         let from = if radar_ok {
-            radar.map(Arms::muzzle)
+            radar.map(eye)
         } else {
-            launchers.first().map(|arms| arms.muzzle())
+            launchers.first().map(|arms| eye(arms))
         };
         let weapon = &battery.weapon;
         let mut launch = weapon.launch;
@@ -1003,10 +1059,11 @@ pub fn step(
                 .iter()
                 .filter_map(|arms| {
                     let rail = state.rail_for(arms, weapon, aircraft.position)?;
-                    let d = sub(aircraft.position, arms.muzzle());
+                    let from = state.place(arms).eye;
+                    let d = sub(aircraft.position, from);
                     let distance = length(d);
                     (launch.contains(distance, d[1])
-                        && line_of_sight(arms.muzzle(), aircraft.position, scene.ground))
+                        && line_of_sight(from, aircraft.position, scene.ground))
                     .then_some((distance, arms.unit, rail))
                 })
                 .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
@@ -1042,10 +1099,11 @@ pub fn step(
         if let (Some(fire), Some((_, launcher, rail))) = (outcome.fire, chosen) {
             let arms = arsenal.arms(launcher).expect("a chosen launcher is armed");
             // The track comes from the radar, or the launcher's own sight.
+            let own = state.place(arms).eye;
             let track_from = if radar_on {
-                radar.map_or(arms.muzzle(), Arms::muzzle)
+                radar.map_or(own, |r| state.place(r).eye)
             } else {
-                arms.muzzle()
+                own
             };
             fire_missiles(
                 state,
@@ -1069,8 +1127,9 @@ pub fn step(
                 .chain(lock)
                 .collect();
             for target in targets {
+                let own = state.place(arms).eye;
                 let (radar_position, emitting, supported) = if radar_on {
-                    let position = radar.map_or(arms.muzzle(), Arms::muzzle);
+                    let position = radar.map_or(own, |r| state.place(r).eye);
                     let sees = aircraft_by_id.get(&target).is_some_and(|a| {
                         length(sub(a.position, position)) <= weapon.detection.max_range
                             && line_of_sight(position, a.position, scene.ground)
@@ -1078,12 +1137,12 @@ pub fn step(
                     (position, true, sees)
                 } else if optical {
                     let sees = aircraft_by_id.get(&target).is_some_and(|a| {
-                        length(sub(a.position, arms.muzzle())) <= launch.max_range
-                            && line_of_sight(arms.muzzle(), a.position, scene.ground)
+                        length(sub(a.position, own)) <= launch.max_range
+                            && line_of_sight(own, a.position, scene.ground)
                     });
-                    (arms.muzzle(), false, sees)
+                    (own, false, sees)
                 } else {
-                    (arms.muzzle(), false, false)
+                    (own, false, false)
                 };
                 let Some(observation) = observe(radar_position, target) else {
                     continue;
@@ -1157,7 +1216,8 @@ fn step_weapon(
     in_flight: &BTreeSet<(u32, u32)>,
     supports: &mut Vec<ActorSupport>,
 ) {
-    let muzzle = arms.muzzle();
+    let place = state.place(arms);
+    let muzzle = place.eye;
     let barrage = match weapon.kind {
         Kind::Barrage { activation_ft, .. } => Some(activation_ft),
         _ => None,
@@ -1210,7 +1270,7 @@ fn step_weapon(
             let (bearing, elevation) = bearing_elevation(d);
             let arc = &weapon.mounts[0];
             weapon.launch.contains(length(d), d[1])
-                && arc.covers_heading((bearing - arms.heading).to_degrees())
+                && arc.covers_heading((bearing - place.heading).to_degrees())
                 && arc.covers_elevation(elevation)
                 && line_of_sight(muzzle, aircraft.position, scene.ground)
         }
@@ -1367,7 +1427,7 @@ fn fire_missiles(
     observation: Option<seeker::Observation>,
     scene: &Scene<'_>,
 ) {
-    let muzzle = arms.muzzle();
+    let place = state.place(arms);
     let Some(target) = observation else { return };
     for round in 0..fire.rounds {
         let rail = if round == 0 {
@@ -1382,6 +1442,7 @@ fn fire_missiles(
             .find(|arc| arc.index == rail)
             .copied()
             .unwrap_or(weapon.mounts[0]);
+        let muzzle = place.mount(&arc, scene.ground);
         let (bearing, elevation) = bearing_elevation(sub(target.position, muzzle));
         let direction = direction_at(bearing, arc.launch_pitch(elevation));
         let shot = SurfaceShot {
@@ -1390,7 +1451,7 @@ fn fire_missiles(
             mount: rail,
             position: muzzle,
             direction,
-            velocity: [0.; 3],
+            velocity: place.velocity,
             target: Some(target.id),
             observation: Some(target),
             ordinal: 0,
@@ -1413,7 +1474,6 @@ fn fire_missiles(
             opening: false,
             flak: false,
         });
-        let _ = scene;
     }
 }
 
@@ -1431,7 +1491,8 @@ fn fire_gun(
     aircraft: &Aircraft,
     scene: &Scene<'_>,
 ) {
-    let muzzle = arms.muzzle();
+    let place = state.place(arms);
+    let muzzle = place.mount(&weapon.mounts[0], scene.ground);
     let mount = weapon.mounts[0].index;
     let (radar, flak, barrage) = match weapon.kind {
         Kind::Gun { radar, flak } => (radar, flak, None),
@@ -1492,9 +1553,9 @@ fn fire_gun(
     let launcher = live::Launcher {
         radar_power: true,
         position: muzzle,
-        basis: Basis::new(arms.heading, 0., 0.),
-        speed_fps: 0.,
-        velocity: [0.; 3],
+        basis: place.basis,
+        speed_fps: length(place.velocity),
+        velocity: place.velocity,
         bay_ready: true,
         radar: true,
         jammer: false,
@@ -1550,7 +1611,7 @@ fn fire_gun(
                 mount,
                 position: muzzle,
                 direction,
-                velocity: [0.; 3],
+                velocity: place.velocity,
                 target: Some(aircraft.id),
                 observation: None,
                 ordinal: stock.ordinal,

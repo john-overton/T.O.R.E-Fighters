@@ -761,12 +761,22 @@ impl World {
                 &mut cockpit.flight,
                 &input.pilot,
                 &self.terrain,
+                // A unit that follows a route leaves the scene's box at its
+                // start behind: it is not solid there, and (agent decision)
+                // not solid where it drives, so planes fly through it.
                 &mut self
                     .combat
                     .state
                     .targets
                     .iter()
                     .filter(|target| target.hp > 0)
+                    .filter(|target| {
+                        !self
+                            .terrain
+                            .surface
+                            .courses
+                            .contains_key(&crate::surface::UnitId(target.id))
+                    })
                     .map(|target| target.id),
             );
             if let Some(error) = cockpit.flight.native_fault() {
@@ -834,6 +844,9 @@ impl World {
             .map(|(cockpit, input)| (cockpit.plane.0, combat::gun_rewind(input.tick, input.view)))
             .filter(|(_, ticks)| *ticks > 0)
             .collect();
+        // The units that follow a route move first, so this tick's fire and
+        // hits meet them where they are now.
+        self.combat.step_surface(&self.terrain);
         let mut flights: Vec<(u32, &mut flight::State)> = self
             .cockpits
             .iter_mut()

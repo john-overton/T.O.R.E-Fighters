@@ -149,7 +149,7 @@ pub(super) fn step(
                 .map_or(sensor, |b| b.weapon.detection.max_range.max(sensor)),
             other => other.range(),
         };
-        let from = arms.muzzle();
+        let from = state.place(arms).eye;
         let hostile = alive
             && scene.aircraft.iter().any(|aircraft| {
                 arms.side != live::NO_SIDE

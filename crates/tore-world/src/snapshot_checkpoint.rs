@@ -14,7 +14,7 @@
 
 use super::{
     AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
-    ProjectilePose, RenderSnapshot,
+    ProjectilePose, RenderSnapshot, SurfacePose,
 };
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 use tore_sim::combat::live::EffectKind;
@@ -29,6 +29,15 @@ tore_sim::checkpoint_struct!(RenderSnapshot {
     debris,
     pilots,
     models,
+    surface,
+});
+
+tore_sim::checkpoint_struct!(SurfacePose {
+    id,
+    position,
+    attitude,
+    shape,
+    wrecked,
 });
 
 // Which airframe draws a pose: nothing, a model's batch or the player's.
@@ -316,6 +325,15 @@ mod tests {
             })
             .collect(),
             models: vec![AircraftId::F18, AircraftId::Mig29, AircraftId::F22n],
+            surface: (0..2)
+                .map(|n| SurfacePose {
+                    id: crate::surface::UnitId(0x5000_0000 + n),
+                    position: [t + f64::from(n), 256., 2. * t],
+                    attitude: [0.5, 0.01 * f64::from(n), -0.02],
+                    shape: (n == 1).then(|| "T72.SH".to_string()),
+                    wrecked: n == 1,
+                })
+                .collect(),
         }
     }
 

@@ -14,17 +14,20 @@
 //! combat registers each unit as a target with its side, and keeps the
 //! units' changing state ([`SurfaceUnitState`]) in its checkpointed state.
 //!
-//! This module resolves and identifies; it never moves or fires anything.
+//! This module resolves and identifies; [`movement`] moves the units that
+//! follow a route. Nothing here fires.
 pub mod catalog;
 mod checkpoint;
 pub mod emitters;
 pub mod fire;
+pub mod layout;
+pub mod movement;
 pub mod resolve;
 pub mod units;
 
 pub use units::{
     Battery, BatteryState, BatterySystem, Engager, GroupTransform, MountStock, ParkedAircraft,
-    RadarState, SupplyTruck, SurfaceState, SurfaceUnitState,
+    RadarState, StartPoints, SupplyTruck, SurfaceState, SurfaceUnitState,
 };
 
 use crate::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
@@ -116,6 +119,25 @@ pub fn side_of_owner(redfor: Option<bool>) -> Side {
         Some(false) => FRIENDLY_SIDE,
         None => NO_SIDE,
     }
+}
+
+/// An NT mount's position (`pos.x/y/z`, hull relative) in world feet, at the
+/// size the unit is drawn. The record gives retail feet at the shape scale
+/// (a Krivak's mounts lie inside its hull only there); surface units are
+/// drawn at real size ([`crate::terrain::PlacedSize::RealSize`]), so the
+/// muzzles and aim points scale with them. Axes stay in the record's order.
+pub fn mount_position_ft(mount: &tore_formats::surface_unit::Mount) -> [f64; 3] {
+    mount
+        .position
+        .map(|v| crate::terrain::PlacedSize::RealSize.feet(f64::from(v)))
+}
+
+/// A surface unit shape's F2 ground offset (the shape's bottom, read as feet
+/// at the shape scale) in world feet at the size the unit is drawn, or `None`
+/// when the shape names none.
+pub fn ground_offset_ft(shape_bytes: &[u8]) -> crate::WorldResult<Option<f64>> {
+    Ok(tore_formats::shape::contact_offset(shape_bytes)?
+        .map(|v| crate::terrain::PlacedSize::RealSize.feet(f64::from(v))))
 }
 
 /// Where a unit came from.
@@ -250,6 +272,9 @@ pub struct TemplateSite {
     /// Ordinals of the defense slots whose roll failed.
     pub removed: Vec<u32>,
     pub left_out: Vec<LeftOut>,
+    /// Why the template stays at its retail spot (the layout slice), `None`
+    /// when it may relocate.
+    pub anchor: Option<layout::Anchor>,
 }
 
 /// The mission's resolved surface. See the module comment.
@@ -269,6 +294,10 @@ pub struct Surface {
     /// The template's rigid move (identity until the layout slice relocates
     /// it).
     pub transform: GroupTransform,
+    /// The units that follow a route, by id: what [`movement`] needs to drive
+    /// them. Routed templates are never relocated or jittered, so the routes
+    /// are in the same frame as the units.
+    pub courses: BTreeMap<UnitId, movement::Course>,
     pub template: Option<TemplateSite>,
     /// The side of every scene object by id: units and owned layout
     /// placements alike. Absent ids are neutral.
@@ -285,6 +314,11 @@ pub struct Surface {
     /// records when the terrain builds (not part of the digest: it follows
     /// from the units and the import).
     pub arsenal: fire::Arsenal,
+    /// Where the two sides start with a ground target (the layout slice).
+    pub starts: Option<StartPoints>,
+    /// What the layout could not add (a battery radar or a supply truck
+    /// whose type the import lacks), for the log and the dump.
+    pub layout_notes: Vec<String>,
 }
 
 impl Surface {
@@ -330,10 +364,10 @@ impl Surface {
         )
     }
 
-    /// FNV-1a 64 over everything resolved: the template and its settings,
-    /// the group transform, then every unit (id, type, position, angles,
-    /// owner, side, flags, skill), every parked aircraft, supply truck and
-    /// battery, in id order. Integers are little endian, strings length
+    /// FNV-1a 64 over everything resolved and placed: the template and its
+    /// settings, the group transform, then every unit (id, type, position,
+    /// angles, owner, side, flags, skill), every parked aircraft, supply
+    /// truck and battery, in id order, and the starts. Integers are little endian, strings length
     /// prefixed, so every platform computes the same value. A machine whose
     /// digest differs from the host's built a different surface.
     pub fn digest(&self) -> u64 {
@@ -348,6 +382,9 @@ impl Surface {
                 h.u32(site.settings.seed);
                 h.u32(site.settings.enemy_nationality as u32);
                 h.u8(u8::from(site.settings.night_stealth));
+                h.u32(site.settings.separation_nm);
+                h.u8(u8::from(site.settings.variation.jitter)
+                    | u8::from(site.settings.variation.relocate) << 1);
             }
             None => h.u8(0),
         }
@@ -404,6 +441,22 @@ impl Surface {
             }
             h.u32(battery.truck.map_or(0, |id| id.0));
         }
+        match &self.starts {
+            Some(starts) => {
+                h.u8(1);
+                h.i32s(&starts.target);
+                h.i32s(&starts.red);
+                h.i32s(&starts.blue);
+                h.i32(starts.blue_heading_deg);
+                for fields in [&starts.blue_airfields, &starts.red_airfields] {
+                    h.u32(fields.len() as u32);
+                    for id in fields {
+                        h.u32(*id);
+                    }
+                }
+            }
+            None => h.u8(0),
+        }
         h.finish()
     }
 }
@@ -439,5 +492,7 @@ impl Digest {
     }
 }
 
+#[cfg(test)]
+mod movement_tests;
 #[cfg(test)]
 mod tests;

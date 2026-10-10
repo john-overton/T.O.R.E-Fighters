@@ -8,7 +8,7 @@
 //!     [--enemy-nationality N] [--aircraft ID] [--over TYPE [--index N] | --unit ID]
 //!     [--altitude FT] [--speed KT] [--pass FT] [--from NM] [--seconds S]
 //!     [--condition NAME] [--chaff S] [--flares S] [--harm-at NM] [--kill-at S]
-//!     [--player-side red] [--battery-near] [--invulnerable] [--quiet-shots]
+//!     [--player-side red] [--invulnerable] [--quiet-shots]
 //! ```
 //!
 //! The aircraft flies north (or along `--heading`) at `--altitude` feet above
@@ -20,9 +20,8 @@
 //! every S seconds while a missile is in flight at the aircraft;
 //! `--harm-at NM` puts an AGM-88 in flight at the unit's radar from the
 //! aircraft when it is that close; `--kill-at S` destroys the radar (the
-//! battery's, or the unit itself) at S seconds. `--battery-near` forms a SAM
-//! battery around the unit with the nearest radar of its system within 2 nm
-//! when the layout slice has not (the battery scenarios before it merges).
+//! battery's, or the unit itself) at S seconds. A battery launcher fights in
+//! the battery the layout formed; the trace follows its radar and launchers.
 //!
 //! The import does not keep the ground target templates and the types only
 //! they name yet, so the trace adds what the pack lacks from the retail
@@ -45,7 +44,7 @@ use tore_world::{
     mission::{Condition, Defense, MissionSpec},
     seats::{SeatCommand, SeatId, SeatInput},
     surface::{
-        Battery, BatterySystem, IdRange, Surface, UnitId,
+        IdRange, Surface, UnitId,
         fire::{Arsenal, Trace},
     },
     world::{Seating, TickOutput, World},
@@ -81,7 +80,6 @@ struct Options {
     harm_at_nm: Option<f64>,
     kill_at: Option<f64>,
     red: bool,
-    battery_near: bool,
     invulnerable: bool,
     quiet_shots: bool,
     all_units: bool,
@@ -114,7 +112,6 @@ fn options() -> AppResult<Options> {
         harm_at_nm: None,
         kill_at: None,
         red: false,
-        battery_near: false,
         invulnerable: false,
         quiet_shots: false,
         all_units: false,
@@ -162,7 +159,6 @@ fn options() -> AppResult<Options> {
             "--harm-at" => o.harm_at_nm = Some(next()?.parse()?),
             "--kill-at" => o.kill_at = Some(next()?.parse()?),
             "--player-side" => o.red = next()?.eq_ignore_ascii_case("red"),
-            "--battery-near" => o.battery_near = true,
             "--invulnerable" => o.invulnerable = true,
             "--quiet-shots" => o.quiet_shots = true,
             "--all-units" => o.all_units = true,
@@ -273,53 +269,6 @@ fn subject(o: &Options, surface: &Surface, player_side: live::Side) -> AppResult
         .get(o.index)
         .map(|u| u.id)
         .ok_or_else(|| format!("no hostile armed {wanted} number {}", o.index).into())
-}
-
-/// A battery around `launcher`: its system's launchers of its side within
-/// 1 nm and the nearest radar of the system's element type within 2 nm (the
-/// layout slice's rule, for the trace until it merges).
-fn battery_near(surface: &Surface, launcher: UnitId) -> Option<Battery> {
-    let unit = surface.unit(launcher)?;
-    let system = BatterySystem::of_launcher(&unit.resource)?;
-    let radar_type = system.radar()?;
-    let at = |id: UnitId| {
-        surface
-            .unit(id)
-            .map(|u| [f64::from(u.position[0]), f64::from(u.position[2])])
-    };
-    let here = at(launcher)?;
-    let distance = |p: [f64; 2]| (p[0] - here[0]).hypot(p[1] - here[1]);
-    let mut launchers: Vec<UnitId> = surface
-        .units
-        .iter()
-        .filter(|u| {
-            u.side == unit.side
-                && u.resource.eq_ignore_ascii_case(&unit.resource)
-                && at(u.id).is_some_and(|p| distance(p) <= FEET_PER_NM)
-        })
-        .map(|u| u.id)
-        .take(system.cap())
-        .collect();
-    if !launchers.contains(&launcher) {
-        launchers.insert(0, launcher);
-        launchers.truncate(system.cap());
-    }
-    let radar = surface
-        .units
-        .iter()
-        .filter(|u| u.side == unit.side && u.resource.eq_ignore_ascii_case(radar_type))
-        .filter_map(|u| at(u.id).map(|p| (distance(p), u.id)))
-        .filter(|(d, _)| *d <= 2. * FEET_PER_NM)
-        .min_by(|a, b| a.0.total_cmp(&b.0))?
-        .1;
-    Some(Battery {
-        system,
-        side: unit.side,
-        radar,
-        radar_added: false,
-        launchers,
-        truck: None,
-    })
 }
 
 fn distance(a: Vector, b: Vector) -> f64 {
@@ -465,23 +414,7 @@ pub fn run() -> AppResult<()> {
             }
         }
     }
-    if o.skill.is_some() || (o.battery_near && world.terrain.surface.batteries.is_empty()) {
-        reload_arsenal(&mut world, &resources);
-    }
-    if o.battery_near && world.terrain.surface.batteries.is_empty() {
-        let battery = battery_near(&world.terrain.surface, unit)
-            .ok_or("--battery-near: no battery system launcher or no radar within 2 nm")?;
-        println!(
-            "surface-trace: battery {:?} radar {:#x} launchers {:?}",
-            battery.system,
-            battery.radar.0,
-            battery
-                .launchers
-                .iter()
-                .map(|id| format!("{:#x}", id.0))
-                .collect::<Vec<_>>()
-        );
-        world.terrain.surface.batteries.push(battery);
+    if o.skill.is_some() {
         reload_arsenal(&mut world, &resources);
     }
     if let Some(rng) = o.rng {
@@ -541,6 +474,12 @@ pub fn run() -> AppResult<()> {
     if radar != unit {
         println!("surface-trace: radar {:#x}", radar.0);
     }
+    let subject_battery = surface
+        .arsenal
+        .batteries
+        .iter()
+        .find(|b| b.launchers.contains(&unit))
+        .map(|b| b.index);
     // The units the summary counts and the trace follows: the subject, its
     // radar and its battery's launchers.
     let focus: BTreeSet<UnitId> = surface
@@ -650,7 +589,7 @@ pub fn run() -> AppResult<()> {
                 .surface
                 .arsenal
                 .arms(radar)
-                .map(|a| a.muzzle());
+                .map(|a| world.combat.surface.place(a).eye);
             if let Some(target) = target
                 && distance(target, position) <= at * FEET_PER_NM
             {
@@ -684,7 +623,10 @@ pub fn run() -> AppResult<()> {
         world.step(std::slice::from_ref(&input), &mut out)?;
         // The surface's own trace.
         for trace in &world.combat.surface.trace {
-            let followed = about(trace).is_none_or(|id| focus.contains(&id));
+            let followed = match trace {
+                Trace::Battery { battery, .. } => Some(*battery) == subject_battery,
+                _ => about(trace).is_none_or(|id| focus.contains(&id)),
+            };
             if !followed {
                 if o.all_units {
                     line(t, describe(trace));
@@ -923,7 +865,7 @@ pub fn run() -> AppResult<()> {
 }
 
 /// Rebuilds the arsenal and the surface state after the trace changed the
-/// surface (a battery formed, an experience set).
+/// surface (an experience set).
 fn reload_arsenal(world: &mut World, resources: &BTreeMap<String, Vec<u8>>) {
     let terrain = &world.terrain;
     let arsenal = Arsenal::load(&terrain.surface, resources, &|x, z| {

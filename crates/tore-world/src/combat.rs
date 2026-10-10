@@ -822,6 +822,7 @@ impl Combat {
                 }
                 models
             },
+            surface: self.surface_poses(),
         }
     }
     /// once a mission's AI has placed its aircraft.

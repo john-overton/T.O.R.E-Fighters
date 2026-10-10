@@ -327,7 +327,11 @@ many others survive.
 - Footprint clearance from every fixed template object and theater layout
   object, plus 300 ft from every runway's box.
 - Up to 8 candidates per object from the same stream; if none passes, the
-  original retail position is used. Positions round to whole feet and headings
+  original retail position is used (the relocated one in a relocated
+  template). An NT structure (the GCI radar site) stays put like a building.
+- Footprints are boxes from each type's shape vertex bounds at the placed
+  scale (the one scale seam, so they follow any rescale); a placed unit is
+  tested as the circle around its box, so its heading does not matter. Positions round to whole feet and headings
   to the retail angle unit; heights then come from the terrain as for any
   placement.
 
@@ -357,14 +361,21 @@ test.
 | A target lies within 2,000 ft of a theater layout object (built into a town, harbor or base) | `~QAPHELO`, `~QTBARG`, `~QPGSRUN`, `~QTSTRG`, `~QUCITY` |
 | It has routes | `~QUCOL` |
 
-That is 31 anchored templates. The other 77 offered non-empty templates
-relocate; the 16 "nothing" templates have no objects. The per-theater split is
+That is 31 anchored templates by the plan's survey. Measured by the rule on the
+retail data (slice L1) it is 34: runways are theater layout objects too, so
+`~QPGSRUN` (a target 1,000 ft from a dirt strip) anchors by the town rule; a
+dirt strip (`DTSTRP`, a `_STRIPProc` runway) counts as a runway, so `~QCCMHQ`
+(its centroid 0.6 nm from one) anchors; and every routed template anchors
+(`~QTCARGO`, `~QUFACT` besides `~QUCOL`). The other 74 offered non-empty
+templates relocate; the 16 "nothing" templates have no objects. The
+`surface-relocate-sweep` battery scenario pins the list. The per-theater split is
 in [Per-theater notes](#per-theater-notes).
 
 **Group transform.** A relocatable template moves as a rigid group: a rotation
 about its targets' centroid by a whole number of degrees (0 to 359) and a
-translation, computed with an integer cosine and sine table (degrees scaled by
-2^16) and 64-bit integer arithmetic, rounded half away from zero to whole feet.
+translation, computed with an integer cosine and sine table (whole degrees,
+scaled by 2^30 so a step is under a thousandth of a foot over 40 nm) and
+64-bit integer arithmetic, rounded half away from zero to whole feet.
 Per-object jitter is applied in the template's own frame before the transform,
 so spacing rules hold after the move.
 
@@ -384,32 +395,40 @@ the retail spot is the fallback). Radius ranges are default, pending John.
 ### Start placement
 
 With a ground target the airborne scene is placed from the target instead of the
-theater centre. All of it comes from the seed and is inside the digest.
+theater centre (defined, John, 2026-10-10: request item 7). All of it comes
+from the seed and is inside the digest.
 
-- **Blue (attackers).** The player starts 20 to 30 nm (seeded) from the target's
-  centroid, on the bearing from the target toward the Blue side of the front
-  axis, plus or minus 30 degrees (seeded), heading at the target, at the chosen
-  altitude. If the point does not fit the map, the bearing is searched one
-  degree at a time, as the enemy-placement rule already does
-  ([Keeping the enemy on the map](quick-mission-menu.md#keeping-the-enemy-on-the-map)).
-  Friendly wings 2 and 3 keep their offsets. (20 to 30 nm and 30 degrees:
-  default, pending John.)
-- **Red (defenders, AI or human).** The existing separation rule places them
-  ahead of Blue at the selected separation, so Red moves with Blue and the
-  target. A separation shorter than the start distance puts Red between Blue
-  and the target; a longer one puts Red beyond it, over the defenses.
+- **Red (defenders, AI or human).** The Redfor flight starts within 5 nm of the
+  targets' centroid, defending it: a seeded spot in that disc that is on the
+  map (one grid cell inside its edge); the centroid itself if none of 8 tries
+  is. The enemy group is placed there, turned to face Blue.
+- **Blue (attackers).** Blue starts the mission's enemy distance (the
+  creator's separation: 50, 75, 100, 150 nm and the rest of the list) from
+  Red's start, on the bearing toward the Blue side of the front axis, plus or
+  minus 30 degrees (seeded; default, pending John), heading at the target, at
+  the chosen altitude. If the point does not fit the map the bearing is
+  searched one degree at a time, as the enemy-placement rule does
+  ([Keeping the enemy on the map](quick-mission-menu.md#keeping-the-enemy-on-the-map));
+  if no bearing fits at the full distance, the farthest that does, a mile at
+  a time. Friendly wings 2 and 3 keep their offsets from the player.
 - **Ground starts.** An explicit runway choice is kept. With none picked, the
   default runway becomes the Blue-side airfield nearest the target that is at
   least 15 nm from it; a Redfor human ground start in PvP uses the Red-side
-  airfield nearest the target under the same rule (default, pending John).
+  airfield nearest the target under the same rule (default, pending John). An
+  airfield's side is its owner's; an unowned one takes its side of the front.
+  The airfield must hold the wing (no short strip or vertical pad); with none,
+  the earlier rule stands (the first friendly airport's runway that holds the
+  wing). Red still starts by the target.
+- The target point is the targets' placed centroid. A theater with no front
+  (no owned placements on one side) starts Blue toward the middle of the map
+  (fitted).
 - No ground target: unchanged.
 
 ```mermaid
 flowchart LR
-    T[Target centroid] -->|20 to 30 nm, bearing toward Blue side, plus or minus 30 degrees| B[Blue start, heading at target]
-    B -->|selected separation, ahead| R[Red start]
-    R -.->|separation longer than the start distance| Beyond[Red beyond the target, over the defenses]
-    R -.->|separation shorter| Between[Red between Blue and the target]
+    T[Target centroid] -->|seeded spot within 5 nm| R[Red start, defending]
+    R -->|enemy distance setting, bearing toward Blue side, plus or minus 30 degrees| B[Blue start, heading at the target]
+    B -.->|heads at| T
 ```
 
 ### The units of the movement and range words
@@ -574,7 +593,8 @@ TORE rules (defined and fitted):
   radar position and the track come from the battery radar, which must be alive,
   on and in line of sight of the target. Losing any of those ends support; the
   missile falls back to its memory rule.
-- **Launch** is from the mount position at speed 0, boosting from the record's
+- **Launch** is from the mount position (the NT's `pos`, scaled with the unit
+  to real size, `surface::mount_position_ft`) at speed 0, boosting from the record's
   ignition time with the same motor model as air launches. Launch pitch is the
   line to the lead point clamped between 10 degrees and the mount's pitch limit
   (SA-2 15 degrees). Fitted.
@@ -663,7 +683,7 @@ Aim error by skill is a random angular offset per burst plus the existing
 per-round dispersion: radar guns 0.6, 0.4, 0.3 and 0.2 degrees; visual guns 1.5,
 1.0, 0.7 and 0.5 degrees for novice, average, veteran and ace. Fitted. A jammer
 on the target widens a radar-directed gun's aim error two times; visual guns
-are unaffected (fitted; default, pending John).
+are unaffected (defined, John, 2026-10-10: "fine for now").
 
 #### Flak
 
@@ -703,28 +723,61 @@ Ships use the same controllers per mount, with arcs `slewLimitH` (60 to 150
 degrees each side) and `slewLimitP` relative to the hull heading, and mount
 positions from the hardpoints (retail). Carriers (Eisenhower, Kitty Hawk,
 Clemenceau, Wasp, Kiev) fight with their Phalanx and Sea Sparrow, or SA-N-3,
-SA-N-9 and AAA30 for the Kiev, and are otherwise static targets. Template ships
-are stationary (retail: `speed 0`, no waypoints). Ship movement exists for later
-campaigns. Ships are never resupplied; their SAM rails are finite as in retail
-and their guns have an unlimited reserve.
+SA-N-9 and AAA30 for the Kiev, and are otherwise static targets. Ships are
+never resupplied; their SAM rails are finite as in retail and their guns have an
+unlimited reserve. The one template with sailing ships is `~QTCARGO`, see
+[Movement](#movement).
 
 ### Movement
 
-Only `~QUCOL` (the Ukraine armored column) moves in a Quick Mission (retail:
-every other template object has `speed 0` and no waypoints).
+Five Quick Mission templates carry routes (retail: every other object has `speed
+0` and no waypoints). The reader exposes the route of each; the closing waypoint
+(flag 2) sits at 0 0 0, so a route's path is the unit's start plus its legs.
 
-- Nine tanks each follow their own route: five waypoints, `w_speed` 50 ft/s, the
-  routes offset 400 ft apart so the formation is in the data. One route is about
-  58,600 ft (9.6 nm), computed from the template: at 50 ft/s it takes about 20
-  minutes.
-- Follower (fitted): steer toward the next waypoint at the unit's turn rate (15
-  degrees per second for tanks), accelerate at 5 ft/s squared to the waypoint
-  speed, clamp to terrain height every tick, pitch and bank to the local slope,
-  stop at the end waypoint and stay. A destroyed tank stops where it died. No
-  collision avoidance (the routes do not cross).
-- Ships later use the same follower on water, without terrain clamp, at 5
-  degrees per second and 1 ft/s squared.
-- Guns fire while moving (fitted; retail behaviour unknown).
+| Template | Who moves | Route |
+| --- | --- | --- |
+| `~QUCOL` | Nine tanks | Three legs at 50 ft/s, 58,600 to 62,600 ft each (9.6 to 10.3 nm), the tanks 400 ft apart in a column that merges on the first point |
+| `~QTCARGO` | Three CARGO2 target ships | One leg at 16 ft/s (9.5 knots) to a common point, 87,100 to 101,800 ft |
+| `~QUFACT`, `~QUBUNK` | One truck each | Legs at 50 ft/s, 6,100 ft and 72,200 ft |
+| `~QFACT` (not offered) | One truck | A copy of `~QUFACT`'s |
+
+A routed template is never relocated or jittered (its units follow roads and sea
+lanes), so the routes are in the same frame as the units. A tank column takes
+about 20 minutes to drive its route; the cargo ships take 90 to 100 minutes.
+
+The follower (fitted: the retail waypoint consumer is untraced):
+
+- **Steering.** Turn toward the next leg's point at the record's `_turnRate`
+  (182 units per degree per second: 15 degrees a second for tanks, 5 for
+  ships, 45 for trucks). A unit turns in place if it must.
+- **Speed.** Accelerate and brake at 5 ft/s squared on land and 1 ft/s squared
+  at sea (the record's `_acc` units are unknown) toward the leg's `w_speed`,
+  never above the record's `_maxSpeed`. A turn sharper than 45 degrees slows
+  the unit to a quarter of the leg speed until it points along the leg again.
+- **Legs.** A leg counts as reached inside two turning-circle radii of its point
+  (at least 25 ft), so a point the unit cannot turn onto never makes it circle;
+  the corner is rounded, not cut square. The last point is approached at the
+  braking speed and reached exactly (within 4 ft the unit stands on it).
+- **Terrain.** A land unit stands on the terrain height every tick and tilts to
+  the local slope (pitch and bank from the height field 30 ft either side). A
+  ship keeps the water level it started at and stays level: its route is
+  authored on water, and the terrain grid's 8,192 ft cells are too coarse to say
+  where a harbour or a river ends (the Vietnam cargo route crosses cells
+  classed as land).
+- **Stops.** A unit stands on the end of its route for good. A destroyed unit
+  stops at once, where it died, and stays.
+- **No collision.** Units neither avoid each other nor block aircraft: the
+  tanks of `~QUCOL` merge on the first point, and the three cargo ships end on
+  one point. Planes fly through a routed unit (agent decision: the scene's
+  contact box at its start would otherwise stay solid where it no longer
+  stands).
+- **Fire.** Guns fire while moving (fitted; retail behaviour unknown). The unit
+  fires from where it is: its combat target (aim point, velocity, orientation),
+  its hit box and its mounts follow the pose every tick.
+
+The state of a moving unit is a position, heading, speed, leg and halt reason in
+whole units (1/65536 ft, 2^32 binary angles), so a checkpoint resumes the march
+exactly and the path is a function of the mission and the tick alone.
 
 ### Experience
 
@@ -794,13 +847,14 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 
 | Rule | As built | Basis |
 | --- | --- | --- |
-| Controllers | One per gun mount (a ship's fore and aft guns turn and fire on their own, each with its magazine) and one per missile record on a unit (its rails share it); a battery has one on its radar | defined (agent): the arcs of a ship's mounts differ |
+| Controllers | One per gun mount (a ship's fore and aft guns turn and fire on their own, each with its magazine) and one per missile record on a unit (its rails share it); a battery has one on its radar | defined (John, 2026-10-10): the arcs of a ship's mounts differ |
 | First search | At once when a hostile enters detection range; the search period is the retry when none is eligible | fitted |
 | First engagement | The unready preparation time is the controller's first Prepare; every later one takes the ordinary time | fitted (unknown producer) |
 | Lost target, failing gates | A target no longer eligible returns to Search at once; launch gates that fail hold the lock up to 15 s, then Search (which may choose the same target again) | B42 window, fitted recovery |
-| Lock between salvos | The lock holds through the pause between bursts and salvos: the RWR lock tone and the painting state continue | fitted |
+| Lock between salvos | The lock holds through the pause between bursts and salvos: the RWR lock tone and the painting state continue | defined (John, 2026-10-10) |
 | Gun bursts | A burst's rounds leave evenly over its burst time; the first engagement's opening barrage (`startupShots`) spaces its rounds by the burst's round spacing, at least a quarter second apart (KS-19: 8 shells in 2 s) | fitted |
-| Where rounds leave from | The unit's reference point raised 10 ft (ships 50 ft); the hardpoint offsets' scale is not established, so engagement never depends on shape size | fitted |
+| Where rounds leave from | The mount: the unit's pose this tick (a moving unit fires from where it is, with its velocity) plus the hardpoint offset at real size (a third of the record's) turned by the unit's attitude, at least 5 ft above the terrain; radars and sights look from 10 ft above the unit's reference point. Nothing depends on the shape's extents | fitted |
+| RWR reception of a ground radar | The terrain test ends at least 10 ft above the ground under the radar (its antenna), so a unit whose contact volume sits low on a slope still shows its square | fitted |
 | Mount arcs | A half-arc of 0 is unrestricted on that axis (every land vehicle reads 0 for heading); otherwise the bearing (guns: and elevation) must lie inside the half-arc of the mount's rest direction, relative to the hull. A missile's launch pitch is the line to the target clamped between 10 degrees and the rail's arc | inference, fitted |
 | Altitude bands | Zone altitudes are the target's height above the unit, as the AI's envelopes take them | spec-derived (B45) |
 | Gun reach and range | A gun's launch range is its fire zone capped by its shells' reach; a round ends 15 percent (at least 500 ft) past the target; a flak shell's time fuze is its time of flight to the lead point | fitted |
@@ -847,7 +901,7 @@ real life fight as batteries: one search radar element and its launchers
 | SA-2 Guideline | SA2A (one object draws a six-rail site) | Fan Song with Spoon Rest | yes | 1 site | GCI.NT, the Tall King radar and the only radar object with a sensor (50 nm). Retail's North Vietnam layout already stands 9 GCI radars among its 13 SA-2 sites |
 | SA-3 Goa | SA3 | Low Blow with Flat Face | yes | 4 | GCI.NT |
 | SA-6 Gainful | SA6 | 1S91 Straight Flush | yes | 4 | SFLUSH.NT ("Straight Flush Radar", 50 hp, SA6SFR shape) |
-| MIM-23 HAWK | HAWK | PAR acquisition and HPIR illuminator | yes | 6 | No LIB object. A defined element "HAWK Radar": a TORE record with the Straight Flush record's numbers (50 hp, vehicle class 0x0200, signatures) and a LIB radar shape John picks from a render sheet; SRDR1 recommended (default, pending John) |
+| MIM-23 HAWK | HAWK | PAR acquisition and HPIR illuminator | yes | 6 | No LIB object. A defined element "HAWK Radar": a TORE record with the Straight Flush record's numbers (50 hp, vehicle class 0x0200, signatures) and a LIB radar shape: SRDR2 ("Stealth Radar 2"), John's pick from the render sheet of the LIB's radar shapes (defined, John, 2026-10-10) |
 | Crotale | ASA5 | acquisition unit, each firing unit has its own tracking radar | no, self-contained | | |
 | Roland, SA-15, 2S6 | | on the vehicle | no | | |
 | SA-9, SA-13, Chaparral, MANPADS, SCUD | | infrared or optical | no | | |
@@ -875,18 +929,29 @@ flowchart TD
    single linkage within 1 nm (6,076 ft), in the template's own frame for
    template units and in the world for base-layout units. Templates and base
    layouts never share a battery.
-2. A cluster larger than the system's cap is split: launchers in ascending id
-   order each join the nearest group still under the cap, seeded by the
-   lowest-id launcher.
+2. A cluster larger than the system's cap is split into as few batteries as
+   the cap allows. Seeds: the lowest-id launcher, then each time the launcher
+   farthest from every seed (lower id on a tie); the other launchers, in
+   ascending id order, join the nearest seed's battery still under the cap
+   (defined, agent: a reading of the plan's rule that keeps batteries
+   together on the ground).
 3. **Adoption.** An existing radar of the system's element type (GCI for SA-2
-   and SA-3, SFLUSH for SA-6) on the same side within 2 nm of the battery's
+   and SA-3, SFLUSH for SA-6) on the same side within 3.5 nm of the battery's
    centroid, not already adopted, becomes its radar (nearest first, lower id on a
-   tie), keeping its id, flags and place. North Vietnam's base GCIs and template
-   radars such as `~QCLST`'s two GCI targets are adopted this way.
+   tie), keeping its id, flags and place. A template battery adopts only a
+   template radar and a base-layout battery only a layout radar. North
+   Vietnam's base GCIs and template radars such as `~QCLST`'s two GCI targets
+   are adopted this way when they stand within reach (see the per-theater
+   notes for North Vietnam).
 4. **New element.** Otherwise a radar is added: 600 to 1,000 ft from the
    launcher centroid (1,000 to 1,500 ft from an SA2A site's centre, outside the
-   six-rail ring), with the jitter validity rules, moving with its template's
-   group transform. Added radars are never targets.
+   six-rail ring), with the jitter validity rules and clear of its launchers,
+   moving with its template's group transform; if no candidate stands, the
+   first drawn. Added radars are never targets. Base layouts draw their
+   radars from seed 0, so a base layout looks the same in every flight. A
+   battery whose radar element the import cannot place (its record or shape
+   missing) is not formed and its launchers stay self-contained, so a mission
+   always builds.
 5. Each template battery also gets one MISTRK supply truck ([Resupply](#resupply)).
 
 Base layouts gain batteries too: Cuba (5 SA-2, 2 SA-6), North Vietnam (13 SA-2
@@ -937,8 +1002,12 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
   and picks are untouched. One per slot because retail slots are spread out
   (median nearest-slot distance 3,280 ft, and only 13 percent of slots have
   another slot within 0.2 mile, measured over 1,770 slots), so a truck at 528 ft
-  serves essentially one slot. Placed 200 to 400 ft from the unit it serves, in
-  the jitter frame, with the same validity rules; ownership is the slot's.
+  serves essentially one slot. A battery's own truck serves its first launcher
+  that has no slot truck (a named launcher), else its first launcher. Placed
+  200 to 400 ft from the unit it serves (after that unit's jitter), with the
+  same validity rules and clear of it; the first drawn spot when none stands;
+  ownership is the slot's. Ids `0x5800_0000` up, in the order of the units
+  served (a slot's truck before its battery's).
   Trucks are passive units, targetable, Vehicle class (0x0200), and move with the
   defended group's relocation. Never targets. Number and placement: fitted
   (default, pending John).
@@ -1079,6 +1148,16 @@ aircraft the targets: `~QLFFAIR` (5 Super Etendards), `~QKPLNGR` (4 Yak-141) and
   mark events; a surface record is sent while damaged so damage smoke shows.
 
 ## Destroyed looks and drawing
+
+### Size
+
+Surface units, like buildings, are drawn at real size: a third of the retail
+shape scale (John, 2026-10-10, realistic scale; the factor is fitted). A Krivak
+is 405 ft long, a ZSU-23-4 21 ft. Their contact and hit boxes follow, so they
+are a third the size retail's were in every axis. Mount positions and the
+shape's F2 ground offset, which the records give in retail feet, take the same
+factor. Runways, bridges and roads keep the retail scale. The rule and its
+evidence: [placed object scale](../formats/objects-and-shapes.md#placed-object-scale-2026-10-10).
 
 ### Shapes the reader cannot draw yet
 
@@ -1238,25 +1317,40 @@ layouts). Stems drop the `~Q` prefix.
 
 | Theater | Anchored (jitter only) | Relocated as a group | Battery systems in templates | Base-layout batteries | Parked aircraft templates |
 | --- | --- | --- | --- | --- | --- |
-| BAL | `BAIR`, `BBRD`, `BFAIR` | `BACOL`, `BFLT`, `BSHAR`, `BSPPY`, `BXING` | SA-6 | HAWK (4 launchers) | `BAIR`, `BFAIR` |
-| CUB | `CFAIR` | `CCARG`, `CCMHQ`, `CLST`, `CSCUD`, `CSUB` | SA-6 | SA-2 (5), SA-6 (2) | `CFAIR`, `CCMHQ` |
+| BAL | `BAIR`, `BBRD`, `BFAIR` | `BACOL`, `BFLT`, `BSHAR`, `BSPPY`, `BXING` | SA-6 | HAWK (4 launchers, 2 batteries) | `BAIR`, `BFAIR` |
+| CUB | `CFAIR`, `CCMHQ` | `CCARG`, `CLST`, `CSCUD`, `CSUB` | SA-6 | SA-2 (5), SA-6 (2) | `CFAIR`, `CCMHQ` |
 | EGY | `ELAIR`, `ESAIR` | `EARMOR`, `ECDEF`, `ECMHQ`, `ERDRI`, `ESFLT` | SA-6 (group 3) | none | `ELAIR`, `ESAIR` |
 | LFA | `LFFAIR` | `LFCARG`, `LFCMHQ`, `LFPATR`, `LFSAM`, `LFSTOR` | SA-6 (group 3) | none (Crotale is self-contained) | `LFFAIR` (targets) |
 | FRA | `FLAIR`, `FSAIR`, `FFACT` | `FCMHQ`, `FFLT`, `FRDRI`, `FSUP` | none (group 1) | none | `FLAIR`, `FSAIR`, `FFACT` |
 | GRE | `GRSAIR` | `GRCARG`, `GRPATR`, `GRRDR`, `GRSTOR` | none (group 4) | none | `GRSAIR` |
 | IRA | `IRFAIR` | `IRARM`, `IRCCC`, `IRCWP`, `IRPOW`, `IRRDR`, `IRRETR`, `IRSCUD` | SA-6 | SA-6 (4) | `IRFAIR` |
 | KURILE | `KPLNGR` | `KARMOR`, `KLFLT`, `KSCFT`, `KSFLT`, `KSILO`, `KSUB` | SA-6 | none | `KPLNGR` (targets) |
-| TVIET | `TBARG`, `TBRDG`, `TBUNK`, `TSTRG`, `TTRUCK` | `TAAA`, `TCARGO`, `TCOMM`, `TSAM` | SA-2 (`TSAM`), SA-6 | SA-2 (13, with 9 GCI to adopt) | none |
+| TVIET | `TBARG`, `TBRDG`, `TBUNK`, `TCARGO`, `TSTRG`, `TTRUCK` | `TAAA`, `TCOMM`, `TSAM` | SA-2 (`TSAM`), SA-6 | SA-2 (13 batteries; 6 of the 9 GCI adopted at 3.5 nm, 7 radars added; the 3 GCI 8 to 13 nm off stay standalone, always on) | none |
 | SPA | `SPFAIR` | `SPASA`, `SPCMHQ`, `SPFRU`, `SPSAM`, `SPSUP` | SA-3 (`SPSAM`, 9 launchers), SA-6 | SA-6 (2) | `SPFAIR` |
 | APA | `APFAIR`, `APHELO` | `APBLK`, `APCMHQ`, `APPATR`, `APSAM` | SA-2 (`APSAM`), SA-6 | HAWK (2), SA-6 (3) | `APFAIR`, `APHELO` |
 | PGU | `PGFAIR`, `PGSRUN` | `PGPATR`, `PGRDR`, `PGSAM`, `PGWSHP` | SA-3 (`PGSAM`, 9 launchers, GCI to adopt), SA-6 | SA-6 (3) | `PGFAIR`, `PGSRUN`, `PGSAM` |
 | NSK | `NSFAIR` | `NSARM`, `NSBORD`, `NSCOL`, `NSFOA`, `NSSUP` | SA-6 | SA-6 (4) | `NSFAIR` |
 | WTA | `WTFAIR` | `WTCARG`, `WTHYDO`, `WTLAND`, `WTPATR`, `WTWARS` | SA-6 | SA-6 (2) | `WTFAIR` (targets) |
-| UKR | `UBRI`, `UCITY`, `UCOL`, `USTRIP` | `UFACT`, `ULFLT`, `UNUKE`, `USFLT` | SA-6 | none | `USTRIP` |
+| UKR | `UBRI`, `UCITY`, `UCOL`, `UFACT`, `USTRIP` | `ULFLT`, `UNUKE`, `USFLT` | SA-6 | none | `USTRIP` |
 | VLA | `VLAIR`, `VSAIR` | `VARMOR`, `VCMHQ`, `VRDRI`, `VSFLT`, `VSUP` | SA-6 | none | `VLAIR`, `VSAIR` |
 
 Base-layout battery counts are launchers by type; how many batteries they make
-depends on the 1 nm clustering. The single-player regression cases fly Ukraine
+depends on the 1 nm clustering (measured: Cuba 5 SA-2 and 2 SA-6 batteries,
+the Baltics 2 HAWK, Panama 3 SA-6 and 1 HAWK, Iraq 4, Pakistan 2, the Persian
+Gulf 3, South Korea 4 and Taiwan 2 SA-6). In the North Vietnam layout one GCI
+stands 1.9 nm from an SA-2 site, five more 2.2 to 3.2 nm off and three 8.0,
+12.5 and 13.4 nm off. At the 3.5 nm adoption default (default, pending John;
+the lead raised it from 2 nm on 2026-10-10 because retail pairs these GCIs
+with SA-2 sites) six are adopted and seven batteries get an added radar; the
+three far GCIs stay standalone radars, always on.
+
+Some relocatable templates never find a site in 20 seeds and stay at their
+retail spot: the mixed land and sea ones (`CSUB`, `LFPATR`, `APPATR`,
+`PGPATR`, `PGWSHP`; a rigid move does not keep a coastline), the Kuril
+Islands' (`KSCFT`, `KSUB`, `KSILO`, `KARMOR`; small islands), and the SAM
+networks spread over 15 nm or more of uneven ground (`TAAA`, `TSAM`, `APSAM`,
+`APBLK`, `GRSTOR`). Over all 74 relocatable templates 78 percent of seeded
+placements relocate. The single-player regression cases fly Ukraine
 and France and the golden tests use Ukraine; neither layout has base air
 defenses, so activating them should leave those unchanged.
 
@@ -1297,16 +1391,17 @@ carry the label "default, pending John" where they appear above.
 
 | Decision | Default | Why |
 | --- | --- | --- |
-| Relocation and start numbers | Unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts 20 to 30 nm from the target, plus or minus 30 degrees off the line from its own side | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
-| HAWK radar element's shape | SRDR1 ("Stealth Radar 1") after John sees a sheet of the LIB's radar shapes (SRDR1, SRDR2, LTRACK, SFLUSH, KING) | The LIB has no HAWK radar; this reuses retail art |
+| Relocation and start numbers | Unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
+| HAWK radar element's shape | Settled: SRDR2 (John, 2026-10-10), from the sheet of the LIB's radar shapes (SRDR1, SRDR2, LTRACK, SFLUSH, KING) | The LIB has no HAWK radar; this reuses retail art |
 | Optical backup for SA-2 and SA-3 | Yes: a blind battery may launch in daylight inside half range with no RWR warning before launch; SA-6 and HAWK stay blind | Both real systems had optical tracking; keeps a killed radar from making the site harmless at short range |
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
 | Supply truck numbers and stock | One truck per manned SAM or AAA slot plus one per template battery, unlimited stock, no added trucks in base layouts, two spare magazines per land gun. (The SAM rearm times of 300, 420 and 600 s are John's range, fitted within it.) | Retail slots stand about 3,300 ft apart, so a 528 ft radius covers one slot per truck |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and a Redfor human | A ground start across the map from a relocated target would mean a long flight |
 | Fleet-template aircraft | Leave out the Yak-141s in `~QBFLT` and the Rafale M and Super Etendards in `~QFFLT` | Scheduled launches 60 and 90 minutes in, up to 1,962 ft from carriers about 900 ft long |
-| Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 2 nm; Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
+| Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
-| Jammers against radar-directed AAA | A jammer on the target doubles a radar-directed gun's aim error; visual guns are unaffected | Radar fire control is what a jammer works against; the factor is one named constant |
+| Runway pavement width | Keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
+| Building and unit hit boxes | Real size, a third of retail's in every axis, with the drawn size | Matches John's realistic scale; retail's targets were three times larger and easier to hit |
 | Collateral damage from aircraft weapons | Surface weapons only; aircraft missiles, rockets and bombs keep doing none | Their records carry collateral radii, but turning them on changes every air-to-air fight and is outside this round |
 
 ## Provenance summary

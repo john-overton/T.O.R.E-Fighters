@@ -294,6 +294,8 @@ impl Client {
             debris: drawn.debris,
             pilots: drawn.pilots,
             models: mission.models.clone(),
+            // Moving surface units reach clients with the network slice (N1).
+            surface: Vec::new(),
         };
         Some(ObserverFrame {
             flight,

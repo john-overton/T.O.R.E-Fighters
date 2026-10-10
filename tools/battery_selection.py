@@ -433,6 +433,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-formats/src/executable.rs", ("menus-validate", "replay-settings"), "importer data"),
     _r("crates/tore-formats/src/module.rs", ("menus-validate", "replay-settings"), "importer data"),
     _r("crates/tore-formats/src/dcl.rs", ("menus-validate", "replay-settings"), "importer decompression"),
+    _r("crates/tore-formats/src/surface_set.rs", ("menus-validate", "replay-settings", "net-builds"), "what the import keeps for ground targets"),
+    _r("crates/tore-formats/src/surface_set/*", ("menus-validate", "replay-settings", "net-builds"), "what the import keeps for ground targets"),
     _r("crates/tore-formats/src/lib.rs", ("menus-validate", "flight-maneuvers", "ai-fights"), "tore-formats public surface"),
     _r("crates/tore-formats/*", ("menus-validate", "menus-creator", "flight-maneuvers", "ai-fights"), "tore-formats, unmapped file"),
     # tore-input and friends.
@@ -447,6 +449,18 @@ RULES: tuple[Rule, ...] = (
     _r(
         "crates/tore-import/src/source.rs", ("menus-validate", "replay-settings", "net-builds"),
         "the import's source entry (build and importer); nothing in single player reads it",
+    ),
+    _r(
+        "crates/tore-import/src/import.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "what the import selects and writes (net-content-builds imports the 1.0 disc)",
+    ),
+    _r(
+        "crates/tore-import/src/surface.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "the ground target data marker and lookups",
+    ),
+    _r(
+        "crates/tore-import/src/pack.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "the pack markers every start checks",
     ),
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
@@ -632,6 +646,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
     _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
+    _r("crates/tore-app/src/surface_drive.rs", ("surface",), "the surface movement drive"),
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
     _r("crates/tore-app/src/replay/net_convert.rs", ("net-convert",), "converting a capture into a replay"),
@@ -691,6 +706,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/render.py", ("flight-views",), "render capture scenarios", windowed=True, unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/ai.py", LANE_SMOKE["ai"], "AI scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/surface.py", ("surface",), "surface unit scenarios", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/surface_move.py", ("surface",), "surface movement scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/_ai_fuzz.py", LANE_SMOKE["ai"], "AI fuzz scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/_ai_fuzz_cmd.py", LANE_SMOKE["ai"], "AI fuzz command", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/_debrief.py", LANE_SMOKE["ai"] + LANE_SMOKE["flight"], "the debrief kill and hit check shared by the AI and flight lanes", unit_tests=("test_battery_ai", "test_battery_flight")),

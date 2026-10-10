@@ -172,13 +172,38 @@ pub struct BatteryState {
     pub optical: bool,
 }
 
+/// Where the two sides start with a ground target (filled by the layout
+/// slice; docs/spec/surface-defenses.md, "Start placement"): Red within
+/// 5 nm of the target, Blue the mission's separation from Red.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StartPoints {
+    /// The targets' placed centroid, x and z feet: the point the starts
+    /// follow.
+    pub target: [i32; 2],
+    /// Red's start, x and z feet: the enemy group's placement point.
+    pub red: [i32; 2],
+    /// Blue's airborne start, x and z feet.
+    pub blue: [i32; 2],
+    /// Blue's heading at its start, whole degrees clockwise from north: at
+    /// the target.
+    pub blue_heading_deg: i32,
+    /// The theater runways (object ids) a ground start may use, nearest the
+    /// target first and at least 15 nm from it: Blue's side, then Red's.
+    pub blue_airfields: Vec<u32>,
+    pub red_airfields: Vec<u32>,
+}
+
 /// One unit's changing state. Its hit points stay in combat's target row
 /// (`live::State`), which the checkpoint already codes. A unit is armed from
 /// its [`super::fire::Arms`] on the first surface tick (and again after a
-/// restart clears it).
+/// restart clears it); the resupply slice adds its fields here.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceUnitState {
     pub id: UnitId,
+    /// A unit that follows a route: where it is and how it is moving. `None`
+    /// until its first tick (and for every unit with no route), when it
+    /// stands where the mission put it.
+    pub mover: Option<super::movement::Mover>,
     pub armed: bool,
     /// One per weapon of its arms, in order.
     pub engagers: Vec<Engager>,
@@ -195,6 +220,7 @@ impl SurfaceUnitState {
     pub fn new(id: UnitId) -> Self {
         Self {
             id,
+            mover: None,
             armed: false,
             engagers: Vec::new(),
             mounts: Vec::new(),
@@ -229,7 +255,7 @@ impl SurfaceUnitState {
 /// Every unit's changing state, in the surface's unit order, with the digest
 /// of the surface it belongs to, so a checkpoint never restores over a
 /// different one; the batteries' controllers; and the surface's random draws.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct SurfaceState {
     pub digest: u64,
     pub units: Vec<SurfaceUnitState>,
@@ -246,6 +272,21 @@ pub struct SurfaceState {
     pub locks: Vec<(u32, u8)>,
     /// This tick's painting emitters, (aircraft, emitter id).
     pub painting: Vec<(u32, u32)>,
+    /// Every armed unit's pose this tick. Not checkpointed: rebuilt every
+    /// surface tick from the units' movers.
+    pub places: std::collections::BTreeMap<UnitId, super::fire::Place>,
+}
+
+/// Equal when the checkpointed state is: the per-tick trace, locks,
+/// painting and places are rebuilt by the next surface tick.
+impl PartialEq for SurfaceState {
+    fn eq(&self, other: &Self) -> bool {
+        self.digest == other.digest
+            && self.units == other.units
+            && self.batteries == other.batteries
+            && self.rng == other.rng
+            && self.harm_rolled == other.harm_rolled
+    }
 }
 
 impl SurfaceState {
@@ -270,6 +311,7 @@ impl SurfaceState {
         self.trace.clear();
         self.locks.clear();
         self.painting.clear();
+        self.places.clear();
     }
     pub fn unit(&self, id: UnitId) -> Option<&SurfaceUnitState> {
         self.units
@@ -325,14 +367,22 @@ impl SurfaceState {
         target: [f64; 3],
     ) -> Option<usize> {
         let unit = self.unit(arms.unit)?;
-        let muzzle = arms.muzzle();
+        let place = self.place(arms);
+        let muzzle = place.eye;
         let bearing = (target[0] - muzzle[0]).atan2(target[2] - muzzle[2]);
         weapon
             .mounts
             .iter()
             .filter(|m| unit.mounts.get(m.index).is_some_and(|s| s.loaded > 0))
-            .find(|m| super::fire::covers(m, (bearing - arms.heading).to_degrees()))
+            .find(|m| super::fire::covers(m, (bearing - place.heading).to_degrees()))
             .map(|m| m.index)
+    }
+    /// Where `arms`' unit stands this tick ([`super::fire::Arms::place`]).
+    pub fn place(&self, arms: &super::fire::Arms) -> super::fire::Place {
+        self.places
+            .get(&arms.unit)
+            .copied()
+            .unwrap_or_else(|| arms.place(self.unit(arms.unit)))
     }
     /// The seeker classes (2 infrared, 3 radar) of the surface missile locks
     /// held on aircraft `plane` this tick, for the RWR tone
