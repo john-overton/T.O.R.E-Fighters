@@ -151,6 +151,42 @@ const EXISTING: [Subject; 4] = [
     },
 ];
 
+/// The LIB radar shapes the HAWK battery's radar element may draw (it has no
+/// LIB radar of its own; decision 12.2, John chose SRDR2), with the HAWK
+/// launcher beside them for scale: `--surface-preview OUT hawk-radar`.
+const HAWK_RADAR_CANDIDATES: [Subject; 6] = [
+    Subject {
+        shape: "SRDR1.SH",
+        damaged: Damaged::None,
+        note: "SRDR1, Stealth Radar 1 (SRDR1.NT)",
+    },
+    Subject {
+        shape: "SRDR2.SH",
+        damaged: Damaged::None,
+        note: "SRDR2, Stealth Radar 2 (SRDR2.NT): the HAWK radar (John, 2026-10-10)",
+    },
+    Subject {
+        shape: "SA6LTR.SH",
+        damaged: Damaged::None,
+        note: "Long Track (LTRACK.NT)",
+    },
+    Subject {
+        shape: "SA6SFR.SH",
+        damaged: Damaged::None,
+        note: "Straight Flush (SFLUSH.NT), the SA-6 battery radar",
+    },
+    Subject {
+        shape: "KING.SH",
+        damaged: Damaged::None,
+        note: "Tall King (GCI.NT), the SA-2 and SA-3 battery radar",
+    },
+    Subject {
+        shape: "HAWK.SH",
+        damaged: Damaged::None,
+        note: "HAWK launcher (HAWK.NT), for scale",
+    },
+];
+
 /// Launchers whose rails empty as rounds leave, with each hardpoint the
 /// shape asks about and the counts to draw.
 const LAUNCHERS: [(&str, &[u8], &[i32]); 4] = [
@@ -1140,8 +1176,10 @@ fn fleet_scene(out: &Path, media: &Media, art: &mut Art) -> AppResult<()> {
 
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
-    let [out] = args.as_slice() else {
-        return Err("--surface-preview OUTPUT_DIRECTORY".into());
+    let (out, hawk_radar) = match args.as_slice() {
+        [out] => (out, false),
+        [out, what] if what == "hawk-radar" => (out, true),
+        _ => return Err("--surface-preview OUTPUT_DIRECTORY [hawk-radar]".into()),
     };
     let out = Path::new(out);
     std::fs::create_dir_all(out)?;
@@ -1157,6 +1195,12 @@ pub fn run() -> AppResult<()> {
         textures: BTreeMap::new(),
         font: Font::parse(&media.get("WIN11.FNT")?)?,
     };
+    if hawk_radar {
+        for subject in &HAWK_RADAR_CANDIDATES {
+            sheet(out, &media, &mut art, subject, "hawk-radar")?;
+        }
+        return Ok(());
+    }
     for subject in NEW {
         sheet(out, &media, &mut art, subject, "new")?;
     }

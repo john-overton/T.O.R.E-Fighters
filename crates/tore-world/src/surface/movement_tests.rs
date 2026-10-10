@@ -471,7 +471,15 @@ fn a_moving_tank_keeps_its_target_and_hit_box_with_it() {
     assert_eq!(pose.position, mover.position());
     let standing = surface.unit(UnitId(STANDING_ID)).unwrap();
     let pose = unit_pose(standing, w.combat.surface.unit(standing.id), &w.terrain);
-    assert_eq!(pose.position, [524288., 256., 540000.]);
+    // Where the layout placed it (a tank without a route jitters).
+    assert_eq!(
+        pose.position,
+        [
+            f64::from(standing.position[0]),
+            256.,
+            f64::from(standing.position[2])
+        ]
+    );
     assert_eq!(pose.velocity, [0.; 3]);
 }
 

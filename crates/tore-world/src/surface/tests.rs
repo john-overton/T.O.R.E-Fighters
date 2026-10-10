@@ -254,6 +254,8 @@ pub(super) fn target(stem: &str, aaa: usize, sam: usize, seed: u32) -> GroundTar
         // Russian: equipment group 2.
         enemy_nationality: 10,
         night_stealth: false,
+        variation: layout::Variation::ON,
+        separation_nm: 5,
     }
 }
 
@@ -517,13 +519,15 @@ fn base_layout_units_keep_their_layout_ids_and_take_their_sides() {
     let terrain = Terrain::for_mission(&r, THEATER, Some(0), &Overrides::default()).unwrap();
     let surface = &terrain.surface;
     let ids: Vec<u32> = surface.units.iter().map(|u| u.id.0).collect();
-    // The SA-6, the ZSU-23 and the truck: layout ordinals 0, 1 and 3.
+    // The SA-6, the ZSU-23 and the truck: layout ordinals 0, 1 and 3; then
+    // the radar the layout adds to the SA-6's battery.
     assert_eq!(
         ids,
         [
             LAYOUT_OBJECT_BASE,
             LAYOUT_OBJECT_BASE + 1,
-            LAYOUT_OBJECT_BASE + 3
+            LAYOUT_OBJECT_BASE + 3,
+            BATTERY_RADAR_BASE,
         ]
     );
     assert_eq!(surface.units[0].side, ENEMY_SIDE);
@@ -537,7 +541,10 @@ fn base_layout_units_keep_their_layout_ids_and_take_their_sides() {
     let scene: Vec<u32> = terrain.airport_scene.objects.iter().map(|o| o.id).collect();
     assert_eq!(
         scene,
-        (0..5).map(|n| LAYOUT_OBJECT_BASE + n).collect::<Vec<_>>()
+        (0..5)
+            .map(|n| LAYOUT_OBJECT_BASE + n)
+            .chain([BATTERY_RADAR_BASE])
+            .collect::<Vec<_>>()
     );
     assert_eq!(surface.side_of(LAYOUT_OBJECT_BASE + 2), ENEMY_SIDE);
     assert_eq!(
@@ -755,4 +762,165 @@ fn mount_positions_scale_with_the_unit_to_real_size() {
     let at = mount_position_ft(&mount);
     assert!((at[0]).abs() < 1e-12 && (at[1] - 10.).abs() < 1e-12 && (at[2] + 75.).abs() < 1e-12);
     assert!(ground_offset_ft(&[0; 8]).is_err());
+}
+
+/// The spec of a mission with `target`, one enemy aircraft and Red 20 nm
+/// ahead.
+fn spec_with_enemy(target: &GroundTarget) -> MissionSpec {
+    use crate::mission::{Defense, Skill};
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.ground_target = Some(target.stem.clone());
+    spec.aaa = Defense::from_level(target.aaa).unwrap();
+    spec.sam = Defense::from_level(target.sam).unwrap();
+    spec.surface_seed = target.seed;
+    spec.enemy_nationality = target.enemy_nationality as u8;
+    spec.wings[3].count = 1;
+    spec.wings[3].skill = Skill::Average;
+    spec.separation_nm = 20;
+    spec
+}
+
+#[test]
+fn a_ground_target_puts_red_by_it_and_blue_the_separation_away() {
+    use crate::surface::layout::{NM_FT, RED_START_NM};
+    let r = surface_resources();
+    let spec = spec_with_enemy(&target("QUCITY", 3, 3, 5));
+    let mut world = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    let starts = world.terrain.surface.starts.clone().expect("starts");
+    let nm = NM_FT as f64;
+    let gap = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    let target = starts.target.map(f64::from);
+    let red_start = starts.red.map(f64::from);
+    // Red within 5 nm of the target, Blue the 20 nm separation from Red.
+    assert!(gap(red_start, target) <= RED_START_NM as f64 * nm);
+    assert!((gap(starts.blue.map(f64::from), red_start) - 20. * nm).abs() <= 2.);
+    let check = |world: &World| {
+        let flight = &world.cockpits[0].flight;
+        let blue = [flight.position[0], flight.position[2]];
+        assert_eq!(blue, starts.blue.map(f64::from));
+        let heading = f64::from(starts.blue_heading_deg).to_radians();
+        assert!((flight.yaw - heading).abs() < 1e-9);
+        // Flying at the target.
+        let to_target = [target[0] - blue[0], target[1] - blue[1]];
+        let off = (to_target[0].atan2(to_target[1]) - heading + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        assert!(off.abs() < 0.5f64.to_radians(), "{off}");
+        // The enemy aircraft starts on Red's spot.
+        let red = world
+            .combat
+            .state
+            .targets
+            .iter()
+            .find(|t| t.side == ENEMY_SIDE && t.aircraft.is_some())
+            .expect("the enemy aircraft")
+            .position;
+        assert!(
+            gap([red[0], red[2]], red_start) < 100.,
+            "{red:?} {red_start:?}"
+        );
+    };
+    check(&world);
+    // A restart starts in the same place.
+    let player = load_player(&r);
+    world.restart(&player, &r).unwrap();
+    check(&world);
+    // Without a target the free-flight start stands, as before.
+    let plain = World::new(
+        &MissionSpec::new(THEATER, AircraftId::F18),
+        &r,
+        Seating::SinglePlayer,
+    )
+    .unwrap();
+    assert!(plain.terrain.surface.starts.is_none());
+    let free = plain.terrain.free_flight_start();
+    let flight = &plain.cockpits[0].flight;
+    assert_eq!([flight.position[0], flight.position[2]], [free[0], free[2]]);
+}
+
+fn load_player(
+    r: &BTreeMap<String, Vec<u8>>,
+) -> std::sync::Arc<crate::aircraft_type::AircraftType> {
+    crate::aircraft_type::load_type(r, AircraftId::F18).unwrap()
+}
+
+/// [`surface_resources`] with four airfields about `~QUCITY`: one beside
+/// it (anchoring it), a Blue one 20 nm west, a Red one 17 nm east and a
+/// Blue one 40 nm south.
+fn airfield_resources() -> BTreeMap<String, Vec<u8>> {
+    let mut r = surface_resources();
+    let airport = crate::test_support::resources::airport_resources();
+    for name in ["STRIP.OT", "AIRPORT.SH"] {
+        r.insert(name.into(), airport[name].clone());
+    }
+    let nm = 6_076;
+    let centre = [MIDDLE + 2_550, MIDDLE + 5_000];
+    let strip = |dx: i32, dz: i32, owner: &str| {
+        format!(
+            "obj\n\ttype STRIP.OT\n\tpos {} 0 {}\n\tangle 0 0 0\n{owner}\tflags $13\n\t.\n",
+            centre[0] + dx,
+            centre[1] + dz
+        )
+    };
+    let mut layout = String::from_utf8(r["UKR.MM"].clone()).unwrap();
+    layout += &strip(0, 3_000, "");
+    layout += &strip(-20 * nm, 0, "\tnationality3 0\n");
+    layout += &strip(17 * nm, 0, "\tnationality3 138\n");
+    layout += &strip(0, -40 * nm, "\tnationality3 0\n");
+    r.insert("UKR.MM".into(), layout.into_bytes());
+    r
+}
+
+#[test]
+fn an_automatic_ground_start_takes_the_nearest_own_airfield_15_nm_out() {
+    use crate::mission::Start;
+    let r = airfield_resources();
+    let mut spec = spec_with_enemy(&target("QUCITY", 3, 3, 2));
+    spec.start = Start::GroundAuto {
+        altitude_ft: 10_000,
+    };
+    let world = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    let surface = &world.terrain.surface;
+    // Beside a runway, the template stays.
+    assert_eq!(
+        surface.template.as_ref().unwrap().anchor,
+        Some(layout::Anchor::Runway)
+    );
+    let starts = surface.starts.as_ref().unwrap();
+    // Layout ordinals 5 to 8: beside, west (Blue), east (Red), south (Blue).
+    let strip = |n| LAYOUT_OBJECT_BASE + n;
+    assert_eq!(starts.blue_airfields, [strip(6), strip(8)]);
+    assert_eq!(starts.red_airfields, [strip(7)]);
+    assert_eq!(world.setup.ground_start, Some(strip(6)));
+    assert_eq!(
+        crate::mission_layout::auto_runway_for(&world.terrain, 1, true).unwrap(),
+        strip(7)
+    );
+}
+
+#[test]
+fn the_hawk_radar_draws_srdr2_with_the_straight_flush_record() {
+    use crate::surface::catalog::{HAWK_RADAR, HAWK_RADAR_NAME, hawk_radar_definition};
+    let r = surface_resources();
+    let mut catalog = Catalog::new(&r);
+    let hawk = catalog.entry(HAWK_RADAR).unwrap();
+    let flush = catalog.entry("SFLUSH.NT").unwrap();
+    assert_eq!(
+        (hawk.resource.as_str(), hawk.name.as_str()),
+        (HAWK_RADAR, HAWK_RADAR_NAME)
+    );
+    assert_eq!(
+        (hawk.class, hawk.hit_points),
+        (flush.class, flush.hit_points)
+    );
+    let unit = hawk.unit.as_ref().unwrap();
+    assert_eq!(unit.shape.as_deref(), Some("SRDR2.SH"));
+    assert_eq!(unit.signatures, flush.unit.as_ref().unwrap().signatures);
+    let definition = hawk_radar_definition(&r).unwrap();
+    assert_eq!(definition.main_shape.as_deref(), Some("SRDR2.SH"));
+    // Without its shape the element cannot be placed.
+    let mut without = r.clone();
+    without.remove("SRDR2.SH");
+    assert!(hawk_radar_definition(&without).is_none());
+    assert!(Catalog::new(&without).entry(HAWK_RADAR).is_err());
 }
