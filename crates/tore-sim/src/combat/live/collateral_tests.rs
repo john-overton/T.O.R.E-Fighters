@@ -411,6 +411,7 @@ fn a_collateral_kill_is_credited_to_its_shooter() {
         GroundLook {
             explosion: 21,
             crater: 6,
+            burns: false,
         }
     ));
     let mut taxiing = aircraft(4, [0., 10., 150.], RED);
