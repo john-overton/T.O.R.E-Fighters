@@ -56,6 +56,8 @@ pub struct GroundTarget {
     /// Jitter and relocation, both on in a mission; the preview tools turn
     /// them off to show the retail spot.
     pub variation: super::layout::Variation,
+    /// The creator's enemy distance, nm: Blue starts this far from Red.
+    pub separation_nm: u32,
 }
 
 impl GroundTarget {
@@ -72,6 +74,7 @@ impl GroundTarget {
             enemy_nationality: usize::from(spec.enemy_nationality),
             night_stealth: night_stealth(spec),
             variation: super::layout::Variation::ON,
+            separation_nm: spec.separation_nm,
         })
     }
 }

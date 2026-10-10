@@ -255,6 +255,7 @@ pub(super) fn target(stem: &str, aaa: usize, sam: usize, seed: u32) -> GroundTar
         enemy_nationality: 10,
         night_stealth: false,
         variation: layout::Variation::ON,
+        separation_nm: 5,
     }
 }
 
@@ -761,34 +762,32 @@ fn spec_with_enemy(target: &GroundTarget) -> MissionSpec {
 }
 
 #[test]
-fn a_ground_target_starts_blue_toward_it_and_red_ahead() {
-    use crate::surface::layout::{BLUE_START_MAX_NM, BLUE_START_MIN_NM, NM_FT};
+fn a_ground_target_puts_red_by_it_and_blue_the_separation_away() {
+    use crate::surface::layout::{NM_FT, RED_START_NM};
     let r = surface_resources();
     let spec = spec_with_enemy(&target("QUCITY", 3, 3, 5));
     let mut world = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
     let starts = world.terrain.surface.starts.clone().expect("starts");
+    let nm = NM_FT as f64;
+    let gap = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
+    let target = starts.target.map(f64::from);
+    let red_start = starts.red.map(f64::from);
+    // Red within 5 nm of the target, Blue the 20 nm separation from Red.
+    assert!(gap(red_start, target) <= RED_START_NM as f64 * nm);
+    assert!((gap(starts.blue.map(f64::from), red_start) - 20. * nm).abs() <= 2.);
     let check = |world: &World| {
         let flight = &world.cockpits[0].flight;
-        assert_eq!(
-            [flight.position[0], flight.position[2]],
-            starts.blue.map(f64::from)
-        );
+        let blue = [flight.position[0], flight.position[2]];
+        assert_eq!(blue, starts.blue.map(f64::from));
         let heading = f64::from(starts.blue_heading_deg).to_radians();
         assert!((flight.yaw - heading).abs() < 1e-9);
-        // Blue 20 to 30 nm from the target, flying at it.
-        let to_target = [
-            f64::from(starts.target[0]) - flight.position[0],
-            f64::from(starts.target[1]) - flight.position[2],
-        ];
-        let distance = to_target[0].hypot(to_target[1]);
-        let nm = NM_FT as f64;
-        assert!(distance >= BLUE_START_MIN_NM as f64 * nm - 2.);
-        assert!(distance <= BLUE_START_MAX_NM as f64 * nm + 2.);
-        let bearing = to_target[0].atan2(to_target[1]);
-        let off = (bearing - heading + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+        // Flying at the target.
+        let to_target = [target[0] - blue[0], target[1] - blue[1]];
+        let off = (to_target[0].atan2(to_target[1]) - heading + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
             - std::f64::consts::PI;
         assert!(off.abs() < 0.5f64.to_radians(), "{off}");
-        // Red 20 nm straight ahead.
+        // The enemy aircraft starts on Red's spot.
         let red = world
             .combat
             .state
@@ -797,12 +796,10 @@ fn a_ground_target_starts_blue_toward_it_and_red_ahead() {
             .find(|t| t.side == ENEMY_SIDE && t.aircraft.is_some())
             .expect("the enemy aircraft")
             .position;
-        let ahead = [red[0] - flight.position[0], red[2] - flight.position[2]];
-        assert!((ahead[0].hypot(ahead[1]) - 20. * crate::mission_layout::FEET_PER_NM).abs() < 100.);
-        let off = (ahead[0].atan2(ahead[1]) - heading + std::f64::consts::PI)
-            .rem_euclid(std::f64::consts::TAU)
-            - std::f64::consts::PI;
-        assert!(off.abs() < 1f64.to_radians(), "{off}");
+        assert!(
+            gap([red[0], red[2]], red_start) < 100.,
+            "{red:?} {red_start:?}"
+        );
     };
     check(&world);
     // A restart starts in the same place.
@@ -880,4 +877,31 @@ fn an_automatic_ground_start_takes_the_nearest_own_airfield_15_nm_out() {
         crate::mission_layout::auto_runway_for(&world.terrain, 1, true).unwrap(),
         strip(7)
     );
+}
+
+#[test]
+fn the_hawk_radar_draws_srdr2_with_the_straight_flush_record() {
+    use crate::surface::catalog::{HAWK_RADAR, HAWK_RADAR_NAME, hawk_radar_definition};
+    let r = surface_resources();
+    let mut catalog = Catalog::new(&r);
+    let hawk = catalog.entry(HAWK_RADAR).unwrap();
+    let flush = catalog.entry("SFLUSH.NT").unwrap();
+    assert_eq!(
+        (hawk.resource.as_str(), hawk.name.as_str()),
+        (HAWK_RADAR, HAWK_RADAR_NAME)
+    );
+    assert_eq!(
+        (hawk.class, hawk.hit_points),
+        (flush.class, flush.hit_points)
+    );
+    let unit = hawk.unit.as_ref().unwrap();
+    assert_eq!(unit.shape.as_deref(), Some("SRDR2.SH"));
+    assert_eq!(unit.signatures, flush.unit.as_ref().unwrap().signatures);
+    let definition = hawk_radar_definition(&r).unwrap();
+    assert_eq!(definition.main_shape.as_deref(), Some("SRDR2.SH"));
+    // Without its shape the element cannot be placed.
+    let mut without = r.clone();
+    without.remove("SRDR2.SH");
+    assert!(hawk_radar_definition(&without).is_none());
+    assert!(Catalog::new(&without).entry(HAWK_RADAR).is_err());
 }

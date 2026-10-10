@@ -1281,7 +1281,7 @@ impl Terrain {
 
     /// Where an airborne mission's lead starts, and its heading in radians
     /// when the mission's ground target placed it (docs/spec/surface-defenses.md,
-    /// "Start placement": Blue 20 to 30 nm from the target, heading at it);
+    /// "Start placement": Blue the enemy distance from Red, heading at the target);
     /// otherwise the free-flight start with no heading of its own.
     pub fn airborne_start(&self) -> ([f64; 3], Option<f64>) {
         let mut position = self.free_flight_start();

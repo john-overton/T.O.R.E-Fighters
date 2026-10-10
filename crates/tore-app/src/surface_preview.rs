@@ -152,18 +152,18 @@ const EXISTING: [Subject; 4] = [
 ];
 
 /// The LIB radar shapes the HAWK battery's radar element may draw (it has no
-/// LIB radar of its own; decision 12.2, SRDR1 recommended), with the HAWK
+/// LIB radar of its own; decision 12.2, John chose SRDR2), with the HAWK
 /// launcher beside them for scale: `--surface-preview OUT hawk-radar`.
 const HAWK_RADAR_CANDIDATES: [Subject; 6] = [
     Subject {
         shape: "SRDR1.SH",
         damaged: Damaged::None,
-        note: "SRDR1, Stealth Radar 1 (SRDR1.NT): the HAWK radar default",
+        note: "SRDR1, Stealth Radar 1 (SRDR1.NT)",
     },
     Subject {
         shape: "SRDR2.SH",
         damaged: Damaged::None,
-        note: "SRDR2, Stealth Radar 2 (SRDR2.NT)",
+        note: "SRDR2, Stealth Radar 2 (SRDR2.NT): the HAWK radar (John, 2026-10-10)",
     },
     Subject {
         shape: "SA6LTR.SH",

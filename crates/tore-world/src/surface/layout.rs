@@ -14,8 +14,9 @@
 //!   element added.
 //! - **Supply trucks.** Each manned `<sam>` and `<aaa>` slot and each
 //!   template battery gets a truck.
-//! - **Starts.** Blue's airborne start and the airfields a ground start may
-//!   use follow the target.
+//! - **Starts.** Red starts by the target, Blue the mission's separation
+//!   from Red heading at it; the airfields a ground start may use follow
+//!   the target.
 //!
 //! Everything comes from the mission's surface seed through
 //! [`super::resolve::Stream`] (one stream per template, object and purpose)
@@ -98,12 +99,13 @@ pub const ANCHOR_RUNWAY_NM: i64 = 1;
 /// A template with a target this close to a theater layout object stays.
 pub const ANCHOR_TOWN_FT: i64 = 2_000;
 
-// Starts (docs/spec/surface-defenses.md, "Start placement"): "default,
-// pending John" (decision 12.1 and 12.6).
-/// Blue's airborne start: distance from the target, nm, and spread off the
-/// bearing toward Blue's side, degrees.
-pub const BLUE_START_MIN_NM: i64 = 20;
-pub const BLUE_START_MAX_NM: i64 = 30;
+// Starts (docs/spec/surface-defenses.md, "Start placement"): John's rule,
+// 2026-10-10 (request item 7): Red within 5 nm of the target, defending it;
+// Blue the mission's separation from Red. The spread and the airfield
+// distance are "default, pending John" (decisions 12.1 and 12.6).
+/// Red's start: within this of the targets' centroid, nm.
+pub const RED_START_NM: i64 = 5;
+/// Blue's start: spread off the bearing toward Blue's side, degrees.
 pub const BLUE_START_SPREAD_DEG: i32 = 30;
 /// A start stays this many grid cells inside the map (the enemy placement
 /// rule's margin, `mission_layout::MAP_MARGIN_CELLS`).
@@ -117,8 +119,10 @@ pub const AIRFIELD_MIN_NM: i64 = 15;
 /// one battery (single linkage).
 pub const BATTERY_CLUSTER_FT: i64 = NM_FT;
 /// An existing radar of the system's element type this close to the
-/// battery's centroid is adopted, feet.
-pub const BATTERY_ADOPT_FT: i64 = 2 * NM_FT;
+/// battery's centroid is adopted, feet: 3.5 nm (lead's call, 2026-10-10,
+/// so retail North Vietnam's GCIs pair with their SA-2 sites; the plan's
+/// first default was 2 nm).
+pub const BATTERY_ADOPT_FT: i64 = 7 * NM_FT / 2;
 /// An added radar stands this far from the launchers' centroid, feet; an
 /// SA-2 site's outside its six-rail ring.
 pub const BATTERY_RADAR_FT: [i64; 2] = [600, 1_000];

@@ -16,8 +16,9 @@ keep their rules, each base layout forms its batteries, and a second run
 repeats the digests.
 
 `surface-start-placement` runs `--surface-dump --starts`: one mission per
-theater with a ground target. Blue starts 20 to 30 nm from the target toward
-its own side and heading at it, Red 20 nm ahead, both on the map. See
+theater with a ground target and a 50 nm enemy distance. Red starts within
+5 nm of the target; Blue starts 50 nm from Red toward its own side, heading
+at the target; both on the map. See
 docs/spec/surface-defenses.md.
 """
 import re
@@ -222,31 +223,33 @@ def relocate_sweep_problems(output: str) -> list[str]:
 
 
 START_LINE = re.compile(
-    r"^surface-start: (\S+) (\S+) blue-nm ([\d.]+) side-off-deg ([\d.]+) heading-off-deg ([\d.]+) "
-    r"red-nm (-?[\d.]+) blue-on-map (\d) red-on-map (\d) front (\d)$",
+    r"^surface-start: (\S+) (\S+) red-target-nm (-?[\d.]+) blue-red-nm ([\d.]+) separation-nm (\d+) "
+    r"side-off-deg ([\d.]+) heading-off-deg ([\d.]+) blue-on-map (\d) red-on-map (\d) front (\d)$",
     re.M,
 )
 
 
 def start_placement_problems(output: str) -> list[str]:
-    """Blue 20 to 30 nm out toward its side, at the target; Red 20 nm ahead; on the map."""
+    """Red within 5 nm of the target; Blue the separation from Red toward its side, at the target; on the map."""
     problems: list[str] = []
     lines = list(START_LINE.finditer(output))
     if len(lines) != 16:
         problems.append(f"{len(lines)} theaters checked, expected 16")
     for m in lines:
         theater = m.group(1)
-        blue, side_off, heading_off, red = (float(m.group(i)) for i in (3, 4, 5, 6))
-        if not 19.99 <= blue <= 30.01:
-            problems.append(f"{theater}: Blue starts {blue} nm from the target")
+        red, blue, separation, side_off, heading_off = (float(m.group(i)) for i in (3, 4, 5, 6, 7))
+        if not 0.0 <= red <= 5.01:
+            problems.append(f"{theater}: Red starts {red} nm from the target")
+        # A map too small for the separation shortens it; none of the 16 is.
+        if abs(blue - separation) > 0.05:
+            problems.append(f"{theater}: Blue starts {blue} nm from Red, separation {separation:.0}")
         # The spread is 30 degrees about a whole-degree bearing.
-        if m.group(9) == "1" and side_off > 31.0:
+        if m.group(10) == "1" and side_off > 31.0:
             problems.append(f"{theater}: Blue starts {side_off} degrees off its side of the front")
-        if heading_off > 0.5:
+        # Blue's heading is a whole degree.
+        if heading_off > 0.6:
             problems.append(f"{theater}: Blue heads {heading_off} degrees off the target")
-        if abs(red - 20.0) > 0.1:
-            problems.append(f"{theater}: Red starts {red} nm from Blue, separation 20")
-        if (m.group(7), m.group(8)) != ("1", "1"):
+        if (m.group(8), m.group(9)) != ("1", "1"):
             problems.append(f"{theater}: a start is off the map")
     return problems
 

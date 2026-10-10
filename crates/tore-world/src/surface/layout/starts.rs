@@ -1,8 +1,8 @@
 //! Start placement with a ground target (docs/spec/surface-defenses.md,
-//! "Start placement"): Blue's airborne start follows the target, and the
-//! airfields a ground start may use are ranked by their distance from it.
-//! Red is placed from Blue by the creator's separation rule
-//! (`mission_layout::MissionLayout::plan`), so it follows the target too.
+//! "Start placement"; John, 2026-10-10): Red starts within 5 nm of the
+//! target, defending it; Blue starts the mission's separation from Red,
+//! heading at the target; the airfields a ground start may use are ranked
+//! by their distance from the target.
 use super::{centroid, distance2, ground::CELL_FT, sites::START_ORDINAL, trig, xz, *};
 use crate::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
 use crate::surface::{StartPoints, Surface};
@@ -45,40 +45,50 @@ pub(super) fn place(surface: &Surface, ground: &Ground<'_>) -> Option<StartPoint
         Purpose::Group,
     );
     let extent = ground.extent();
-    // Toward Blue's side of the front; without one, toward the map's
-    // middle (fitted).
+    let margin = START_MARGIN_CELLS * CELL_FT;
+    // Red defends the target: a seeded spot within RED_START_NM of its
+    // centroid that is on the map; the centroid itself when none of the
+    // tries is.
+    let red = (0..JITTER_CANDIDATES)
+        .map(|_| {
+            let d = disc(&mut draws, RED_START_NM * NM_FT);
+            [target[0] + d[0], target[1] + d[1]]
+        })
+        .find(|at| ground.inside(*at, margin))
+        .unwrap_or(target);
+    // Blue starts the mission's separation from Red, toward Blue's side of
+    // the front (toward the map's middle without one, fitted), spread by a
+    // seeded turn.
     let toward = match &ground.front {
         Some(front) => [front.blue[0] - front.red[0], front.blue[1] - front.red[1]],
-        None => [extent[0] / 2 - target[0], extent[1] / 2 - target[1]],
+        None => [extent[0] / 2 - red[0], extent[1] / 2 - red[1]],
     };
-    let base = trig::bearing(toward);
-    let distance = BLUE_START_MIN_NM * NM_FT
-        + draws.below(((BLUE_START_MAX_NM - BLUE_START_MIN_NM) * NM_FT + 1) as u64) as i64;
-    let bearing = base + spread(&mut draws, BLUE_START_SPREAD_DEG);
+    let bearing = trig::bearing(toward) + spread(&mut draws, BLUE_START_SPREAD_DEG);
+    let separation = i64::from(site.settings.separation_nm) * NM_FT;
     // Off the map, the bearing is searched one degree at a time, clockwise
-    // first, as the enemy placement does.
-    let margin = START_MARGIN_CELLS * CELL_FT;
-    let fitted = (0..=180)
+    // first, as the enemy placement does; when no bearing fits at the full
+    // separation, the farthest that fits, a mile at a time.
+    let turns: Vec<i32> = (0..=180)
         .flat_map(|step: i32| {
             std::iter::once(step).chain((step != 0 && step != 180).then_some(-step))
         })
-        .map(|turn| bearing + turn)
-        .map(|b| {
-            let d = trig::along(b, distance);
-            (b, [target[0] + d[0], target[1] + d[1]])
-        })
-        .find(|(_, at)| ground.inside(*at, margin));
-    let (bearing, blue) = fitted.unwrap_or_else(|| {
-        let d = trig::along(bearing, distance);
-        let clamp = |v: i64, hi: i64| v.clamp(margin, (hi - margin).max(margin));
-        (
-            bearing,
-            [
-                clamp(target[0] + d[0], extent[0]),
-                clamp(target[1] + d[1], extent[1]),
-            ],
-        )
-    });
+        .collect();
+    let mut fitted = None;
+    let mut distance = separation;
+    while fitted.is_none() && distance >= 0 {
+        fitted = turns
+            .iter()
+            .map(|turn| bearing + turn)
+            .map(|b| {
+                let d = trig::along(b, distance);
+                (b, [red[0] + d[0], red[1] + d[1]])
+            })
+            .find(|(_, at)| ground.inside(*at, margin));
+        distance -= NM_FT;
+    }
+    let (_, blue) = fitted.unwrap_or((bearing, red));
+    // Blue heads at the target.
+    let heading = trig::bearing([target[0] - blue[0], target[1] - blue[1]]);
     // Airfields at least the minimum away, nearest first (lower id on a
     // tie), by the side that owns them; an unowned one by its side of the
     // front, or both sides' without a front.
@@ -118,8 +128,9 @@ pub(super) fn place(surface: &Surface, ground: &Ground<'_>) -> Option<StartPoint
     let whole = |v: i64| i32::try_from(v).unwrap_or(i32::MAX);
     Some(StartPoints {
         target: target.map(whole),
+        red: red.map(whole),
         blue: blue.map(whole),
-        blue_heading_deg: trig::wrap(bearing + 180),
+        blue_heading_deg: heading,
         blue_airfields: blue_fields,
         red_airfields: red_fields,
     })

@@ -392,22 +392,22 @@ the retail spot is the fallback). Radius ranges are default, pending John.
 ### Start placement
 
 With a ground target the airborne scene is placed from the target instead of the
-theater centre. All of it comes from the seed and is inside the digest.
+theater centre (defined, John, 2026-10-10: request item 7). All of it comes
+from the seed and is inside the digest.
 
-- **Blue (attackers).** The player starts 20 to 30 nm (seeded) from the target's
-  centroid, on the bearing from the target toward the Blue side of the front
-  axis, plus or minus 30 degrees (seeded), heading at the target, at the chosen
-  altitude. If the point does not fit the map, the bearing is searched one
-  degree at a time, as the enemy-placement rule already does
-  ([Keeping the enemy on the map](quick-mission-menu.md#keeping-the-enemy-on-the-map)).
-  Friendly wings 2 and 3 keep their offsets. (20 to 30 nm and 30 degrees:
-  default, pending John.)
-- **Red (defenders, AI or human).** The existing separation rule places them
-  ahead of Blue at the selected separation, so Red moves with Blue and the
-  target. When the enemy group does not fit the map ahead, only the enemy's
-  bearing turns (as on a ground start), so Blue keeps heading at the target
-  (defined, agent). A separation shorter than the start distance puts Red between Blue
-  and the target; a longer one puts Red beyond it, over the defenses.
+- **Red (defenders, AI or human).** The Redfor flight starts within 5 nm of the
+  targets' centroid, defending it: a seeded spot in that disc that is on the
+  map (one grid cell inside its edge); the centroid itself if none of 8 tries
+  is. The enemy group is placed there, turned to face Blue.
+- **Blue (attackers).** Blue starts the mission's enemy distance (the
+  creator's separation: 50, 75, 100, 150 nm and the rest of the list) from
+  Red's start, on the bearing toward the Blue side of the front axis, plus or
+  minus 30 degrees (seeded; default, pending John), heading at the target, at
+  the chosen altitude. If the point does not fit the map the bearing is
+  searched one degree at a time, as the enemy-placement rule does
+  ([Keeping the enemy on the map](quick-mission-menu.md#keeping-the-enemy-on-the-map));
+  if no bearing fits at the full distance, the farthest that does, a mile at
+  a time. Friendly wings 2 and 3 keep their offsets from the player.
 - **Ground starts.** An explicit runway choice is kept. With none picked, the
   default runway becomes the Blue-side airfield nearest the target that is at
   least 15 nm from it; a Redfor human ground start in PvP uses the Red-side
@@ -415,7 +415,7 @@ theater centre. All of it comes from the seed and is inside the digest.
   airfield's side is its owner's; an unowned one takes its side of the front.
   The airfield must hold the wing (no short strip or vertical pad); with none,
   the earlier rule stands (the first friendly airport's runway that holds the
-  wing).
+  wing). Red still starts by the target.
 - The target point is the targets' placed centroid. A theater with no front
   (no owned placements on one side) starts Blue toward the middle of the map
   (fitted).
@@ -423,10 +423,9 @@ theater centre. All of it comes from the seed and is inside the digest.
 
 ```mermaid
 flowchart LR
-    T[Target centroid] -->|20 to 30 nm, bearing toward Blue side, plus or minus 30 degrees| B[Blue start, heading at target]
-    B -->|selected separation, ahead| R[Red start]
-    R -.->|separation longer than the start distance| Beyond[Red beyond the target, over the defenses]
-    R -.->|separation shorter| Between[Red between Blue and the target]
+    T[Target centroid] -->|seeded spot within 5 nm| R[Red start, defending]
+    R -->|enemy distance setting, bearing toward Blue side, plus or minus 30 degrees| B[Blue start, heading at the target]
+    B -.->|heads at| T
 ```
 
 ### The units of the movement and range words
@@ -864,7 +863,7 @@ real life fight as batteries: one search radar element and its launchers
 | SA-2 Guideline | SA2A (one object draws a six-rail site) | Fan Song with Spoon Rest | yes | 1 site | GCI.NT, the Tall King radar and the only radar object with a sensor (50 nm). Retail's North Vietnam layout already stands 9 GCI radars among its 13 SA-2 sites |
 | SA-3 Goa | SA3 | Low Blow with Flat Face | yes | 4 | GCI.NT |
 | SA-6 Gainful | SA6 | 1S91 Straight Flush | yes | 4 | SFLUSH.NT ("Straight Flush Radar", 50 hp, SA6SFR shape) |
-| MIM-23 HAWK | HAWK | PAR acquisition and HPIR illuminator | yes | 6 | No LIB object. A defined element "HAWK Radar": a TORE record with the Straight Flush record's numbers (50 hp, vehicle class 0x0200, signatures) and a LIB radar shape John picks from a render sheet; SRDR1 recommended (default, pending John) |
+| MIM-23 HAWK | HAWK | PAR acquisition and HPIR illuminator | yes | 6 | No LIB object. A defined element "HAWK Radar": a TORE record with the Straight Flush record's numbers (50 hp, vehicle class 0x0200, signatures) and a LIB radar shape: SRDR2 ("Stealth Radar 2"), John's pick from the render sheet of the LIB's radar shapes (defined, John, 2026-10-10) |
 | Crotale | ASA5 | acquisition unit, each firing unit has its own tracking radar | no, self-contained | | |
 | Roland, SA-15, 2S6 | | on the vehicle | no | | |
 | SA-9, SA-13, Chaparral, MANPADS, SCUD | | infrared or optical | no | | |
@@ -899,7 +898,7 @@ flowchart TD
    (defined, agent: a reading of the plan's rule that keeps batteries
    together on the ground).
 3. **Adoption.** An existing radar of the system's element type (GCI for SA-2
-   and SA-3, SFLUSH for SA-6) on the same side within 2 nm of the battery's
+   and SA-3, SFLUSH for SA-6) on the same side within 3.5 nm of the battery's
    centroid, not already adopted, becomes its radar (nearest first, lower id on a
    tie), keeping its id, flags and place. A template battery adopts only a
    template radar and a base-layout battery only a layout radar. North
@@ -1278,7 +1277,7 @@ layouts). Stems drop the `~Q` prefix.
 | GRE | `GRSAIR` | `GRCARG`, `GRPATR`, `GRRDR`, `GRSTOR` | none (group 4) | none | `GRSAIR` |
 | IRA | `IRFAIR` | `IRARM`, `IRCCC`, `IRCWP`, `IRPOW`, `IRRDR`, `IRRETR`, `IRSCUD` | SA-6 | SA-6 (4) | `IRFAIR` |
 | KURILE | `KPLNGR` | `KARMOR`, `KLFLT`, `KSCFT`, `KSFLT`, `KSILO`, `KSUB` | SA-6 | none | `KPLNGR` (targets) |
-| TVIET | `TBARG`, `TBRDG`, `TBUNK`, `TCARGO`, `TSTRG`, `TTRUCK` | `TAAA`, `TCOMM`, `TSAM` | SA-2 (`TSAM`), SA-6 | SA-2 (13 batteries; 1 of the 9 GCI adopted at 2 nm, 12 radars added) | none |
+| TVIET | `TBARG`, `TBRDG`, `TBUNK`, `TCARGO`, `TSTRG`, `TTRUCK` | `TAAA`, `TCOMM`, `TSAM` | SA-2 (`TSAM`), SA-6 | SA-2 (13 batteries; 6 of the 9 GCI adopted at 3.5 nm, 7 radars added; the 3 GCI 8 to 13 nm off stay standalone, always on) | none |
 | SPA | `SPFAIR` | `SPASA`, `SPCMHQ`, `SPFRU`, `SPSAM`, `SPSUP` | SA-3 (`SPSAM`, 9 launchers), SA-6 | SA-6 (2) | `SPFAIR` |
 | APA | `APFAIR`, `APHELO` | `APBLK`, `APCMHQ`, `APPATR`, `APSAM` | SA-2 (`APSAM`), SA-6 | HAWK (2), SA-6 (3) | `APFAIR`, `APHELO` |
 | PGU | `PGFAIR`, `PGSRUN` | `PGPATR`, `PGRDR`, `PGSAM`, `PGWSHP` | SA-3 (`PGSAM`, 9 launchers, GCI to adopt), SA-6 | SA-6 (3) | `PGFAIR`, `PGSRUN`, `PGSAM` |
@@ -1290,10 +1289,12 @@ layouts). Stems drop the `~Q` prefix.
 Base-layout battery counts are launchers by type; how many batteries they make
 depends on the 1 nm clustering (measured: Cuba 5 SA-2 and 2 SA-6 batteries,
 the Baltics 2 HAWK, Panama 3 SA-6 and 1 HAWK, Iraq 4, Pakistan 2, the Persian
-Gulf 3, South Korea 4 and Taiwan 2 SA-6). In the North Vietnam layout only one
-GCI stands within 2 nm of an SA-2 site; six more stand 2.2 to 3.2 nm off and
-two 8 and 13 nm off, so twelve of its thirteen batteries get an added radar at
-the 2 nm default.
+Gulf 3, South Korea 4 and Taiwan 2 SA-6). In the North Vietnam layout one GCI
+stands 1.9 nm from an SA-2 site, five more 2.2 to 3.2 nm off and three 8.0,
+12.5 and 13.4 nm off. At the 3.5 nm adoption default (default, pending John;
+the lead raised it from 2 nm on 2026-10-10 because retail pairs these GCIs
+with SA-2 sites) six are adopted and seven batteries get an added radar; the
+three far GCIs stay standalone radars, always on.
 
 Some relocatable templates never find a site in 20 seeds and stay at their
 retail spot: the mixed land and sea ones (`CSUB`, `LFPATR`, `APPATR`,
@@ -1342,14 +1343,14 @@ carry the label "default, pending John" where they appear above.
 
 | Decision | Default | Why |
 | --- | --- | --- |
-| Relocation and start numbers | Unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts 20 to 30 nm from the target, plus or minus 30 degrees off the line from its own side | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
-| HAWK radar element's shape | SRDR1 ("Stealth Radar 1") after John sees a sheet of the LIB's radar shapes (SRDR1, SRDR2, LTRACK, SFLUSH, KING) | The LIB has no HAWK radar; this reuses retail art |
+| Relocation and start numbers | Unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
+| HAWK radar element's shape | Settled: SRDR2 (John, 2026-10-10), from the sheet of the LIB's radar shapes (SRDR1, SRDR2, LTRACK, SFLUSH, KING) | The LIB has no HAWK radar; this reuses retail art |
 | Optical backup for SA-2 and SA-3 | Yes: a blind battery may launch in daylight inside half range with no RWR warning before launch; SA-6 and HAWK stay blind | Both real systems had optical tracking; keeps a killed radar from making the site harmless at short range |
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
 | Supply truck numbers and stock | One truck per manned SAM or AAA slot plus one per template battery, unlimited stock, no added trucks in base layouts, two spare magazines per land gun. (The SAM rearm times of 300, 420 and 600 s are John's range, fitted within it.) | Retail slots stand about 3,300 ft apart, so a 528 ft radius covers one slot per truck |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and a Redfor human | A ground start across the map from a relocated target would mean a long flight |
 | Fleet-template aircraft | Leave out the Yak-141s in `~QBFLT` and the Rafale M and Super Etendards in `~QFFLT` | Scheduled launches 60 and 90 minutes in, up to 1,962 ft from carriers about 900 ft long |
-| Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 2 nm; Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
+| Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
 | Collateral damage from aircraft weapons | Surface weapons only; aircraft missiles, rockets and bombs keep doing none | Their records carry collateral radii, but turning them on changes every air-to-air fight and is outside this round |
 

@@ -358,6 +358,7 @@ impl Surface {
                 h.u32(site.settings.seed);
                 h.u32(site.settings.enemy_nationality as u32);
                 h.u8(u8::from(site.settings.night_stealth));
+                h.u32(site.settings.separation_nm);
                 h.u8(u8::from(site.settings.variation.jitter)
                     | u8::from(site.settings.variation.relocate) << 1);
             }
@@ -420,6 +421,7 @@ impl Surface {
             Some(starts) => {
                 h.u8(1);
                 h.i32s(&starts.target);
+                h.i32s(&starts.red);
                 h.i32s(&starts.blue);
                 h.i32(starts.blue_heading_deg);
                 for fields in [&starts.blue_airfields, &starts.red_airfields] {

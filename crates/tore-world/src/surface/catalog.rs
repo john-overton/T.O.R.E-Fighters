@@ -48,13 +48,13 @@ pub enum Family {
 /// The HAWK battery's radar element (docs/spec/surface-defenses.md, "SAM
 /// batteries"). The LIB has no HAWK radar, so this TORE-defined type takes
 /// the Straight Flush record's numbers (hit points, vehicle class,
-/// signatures, explosion) and draws a LIB radar shape: SRDR1, default,
-/// pending John (decision 12.2). No archive holds this name.
+/// signatures, explosion) and draws a LIB radar shape: SRDR2, John's pick
+/// from the radar shape sheet (2026-10-10, decision 12.2). No archive holds this name.
 pub const HAWK_RADAR: &str = "HAWKRDR.NT";
 /// The record the HAWK radar takes its numbers from.
 pub const HAWK_RADAR_BASIS: &str = "SFLUSH.NT";
-/// The shape the HAWK radar draws (default, pending John).
-pub const HAWK_RADAR_SHAPE: &str = "SRDR1.SH";
+/// The shape the HAWK radar draws: John chose SRDR2 (2026-10-10).
+pub const HAWK_RADAR_SHAPE: &str = "SRDR2.SH";
 /// Its display name.
 pub const HAWK_RADAR_NAME: &str = "HAWK Radar";
 

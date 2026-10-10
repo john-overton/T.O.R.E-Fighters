@@ -1528,10 +1528,10 @@ type, side, position, destroyed look and whether the scene can draw it (added
 trucks and radars marked `added`), the removed defense slots, the template's
 anchor and group move, every SAM battery (its radar, adopted or added, its
 launchers and truck), every supply truck with the unit it serves and its gap,
-the starts (target point, Blue's start and heading, the ranked airfields), what
+the starts (target point, Red's and Blue's starts, Blue's heading, the ranked airfields), what
 the layout could not add, and the surface digest. Name a ground target
 template to add its units; defenses default to heavy and the enemy to the
-theater's own. `--no-jitter` and `--no-relocate` show the retail spot.
+theater's own and the enemy distance to 20 nm (`--separation N`). `--no-jitter` and `--no-relocate` show the retail spot.
 `--all` resolves every offered template at every defense level, which the
 `surface-resolve-all` battery scenario checks against the retail survey.
 `--sweep [--seeds N] [THEATER ...]` places every offered template with seeds

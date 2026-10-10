@@ -561,8 +561,8 @@ pub struct MissionLayout {
     /// Where the enemy group sits relative to the player.
     pub enemy: EnemyAim,
     /// Airborne with a ground target: the player's heading points at the
-    /// target and is kept, so a turn to keep the enemy on the map turns the
-    /// enemy group alone, as on a ground start (agent decision, 2026-10-10).
+    /// target and is kept, and the enemy group alone turns toward Red's
+    /// start, as on a ground start (agent decision, 2026-10-10).
     pub held_heading: bool,
 }
 
@@ -582,7 +582,22 @@ impl MissionLayout {
             Some(g) => ([g.slots[0][0], g.slots[0][2]], g.heading),
             None => ([start.position[0], start.position[2]], start.yaw),
         };
-        let enemy = aim_into_map(reference, heading, separation_ft, group, map_bounds(world));
+        // With a ground target Red starts where the surface layout put it,
+        // by the target (John, 2026-10-10): the group is aimed at that point
+        // from wherever the player starts, in the air or on a runway.
+        let enemy = match &world.surface.starts {
+            Some(starts) => {
+                let red = starts.red.map(f64::from);
+                let to = [red[0] - reference[0], red[1] - reference[1]];
+                let distance_ft = to[0].hypot(to[1]);
+                EnemyAim {
+                    turn: (to[0].atan2(to[1]) - heading).rem_euclid(std::f64::consts::TAU),
+                    distance_ft,
+                    requested_ft: distance_ft,
+                }
+            }
+            None => aim_into_map(reference, heading, separation_ft, group, map_bounds(world)),
+        };
         let held_heading = ground.is_none() && world.surface.starts.is_some();
         Self {
             player_turn: if ground.is_some() || held_heading {

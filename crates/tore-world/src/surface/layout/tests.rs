@@ -122,6 +122,7 @@ fn target(seed: u32, variation: Variation) -> GroundTarget {
         enemy_nationality: 10,
         night_stealth: false,
         variation,
+        separation_nm: 20,
     }
 }
 
@@ -572,7 +573,7 @@ fn relocation_never_changes_the_rolls_or_the_counts() {
 }
 
 #[test]
-fn blue_starts_from_the_target_toward_its_own_side() {
+fn red_defends_the_target_and_blue_starts_the_separation_away() {
     let grid = Grid::land(128);
     let mid = i64::from(MID);
     let front = Front {
@@ -593,6 +594,11 @@ fn blue_starts_from_the_target_toward_its_own_side() {
     ];
     let ground = Ground::new(&grid, Vec::new(), runways, Some(front));
     let margin = START_MARGIN_CELLS * ground::CELL_FT;
+    let gap = |a: [i32; 2], b: [i32; 2]| {
+        let d = [i64::from(a[0] - b[0]), i64::from(a[1] - b[1])];
+        d[0].pow(2) + d[1].pow(2)
+    };
+    let mut reds = std::collections::BTreeSet::new();
     for seed in 0..30 {
         let mut s = surface(site_units(), Some(target(seed, Variation::OFF)));
         s.object_sides.insert(l(2).0, FRIENDLY_SIDE);
@@ -601,50 +607,67 @@ fn blue_starts_from_the_target_toward_its_own_side() {
         let starts = s.starts.clone().expect("starts");
         // The targets' centroid: the SAM and the bunker.
         assert_eq!(starts.target, [MID + 250, MID + 250]);
-        let blue = starts.blue.map(i64::from);
-        let from = [
-            blue[0] - i64::from(starts.target[0]),
-            blue[1] - i64::from(starts.target[1]),
-        ];
+        // Red within 5 nm of it, at a seeded spot.
+        assert!(gap(starts.red, starts.target) <= (RED_START_NM * NM_FT).pow(2));
+        reds.insert(starts.red);
+        // Blue the separation (20 nm) from Red, toward Blue (south) within
+        // the spread, heading at the target, on the map.
         assert!(in_band(
-            from[0].pow(2) + from[1].pow(2),
-            [BLUE_START_MIN_NM * NM_FT, BLUE_START_MAX_NM * NM_FT]
+            gap(starts.blue, starts.red),
+            [20 * NM_FT, 20 * NM_FT]
         ));
-        // Toward Blue (south) within the spread, heading back at the target,
-        // on the map.
-        let bearing = trig::bearing(from);
+        let from_red = [
+            i64::from(starts.blue[0] - starts.red[0]),
+            i64::from(starts.blue[1] - starts.red[1]),
+        ];
+        let bearing = trig::bearing(from_red);
         assert!(
             trig::signed(bearing - 180).abs() <= BLUE_START_SPREAD_DEG,
             "{bearing}"
         );
-        assert_eq!(starts.blue_heading_deg, trig::wrap(bearing + 180));
-        assert!(ground.inside(blue, margin));
-        // Airfields 15 nm or more away, nearest first, by owner, else by
-        // their side of the front.
+        let to_target = [
+            i64::from(starts.target[0] - starts.blue[0]),
+            i64::from(starts.target[1] - starts.blue[1]),
+        ];
+        assert_eq!(starts.blue_heading_deg, trig::bearing(to_target));
+        assert!(ground.inside(starts.blue.map(i64::from), margin));
+        // Airfields 15 nm or more from the target, nearest first, by owner,
+        // else by their side of the front.
         assert_eq!(starts.blue_airfields, [l(2).0, l(3).0]);
         assert_eq!(starts.red_airfields, [l(4).0]);
     }
+    assert!(reds.len() > 20, "Red's spot varies with the seed");
     // A target near the south edge: the bearing turns until Blue fits.
-    let near_edge: Vec<Unit> = site_units()
-        .into_iter()
-        .map(|mut u| {
-            u.position[2] -= MID - 40_000;
-            u
-        })
-        .collect();
-    let mut s = surface(near_edge, Some(target(2, Variation::OFF)));
+    let near_edge = || {
+        site_units()
+            .into_iter()
+            .map(|mut u| {
+                u.position[2] -= MID - 40_000;
+                u
+            })
+            .collect::<Vec<Unit>>()
+    };
+    let mut s = surface(near_edge(), Some(target(2, Variation::OFF)));
     lay(&mut s, &ground, &[]);
     let starts = s.starts.unwrap();
-    let blue = starts.blue.map(i64::from);
-    assert!(ground.inside(blue, margin));
-    let from = [
-        blue[0] - i64::from(starts.target[0]),
-        blue[1] - i64::from(starts.target[1]),
-    ];
+    assert!(ground.inside(starts.blue.map(i64::from), margin));
+    assert!(ground.inside(starts.red.map(i64::from), margin));
     assert!(in_band(
-        from[0].pow(2) + from[1].pow(2),
-        [BLUE_START_MIN_NM * NM_FT, BLUE_START_MAX_NM * NM_FT]
+        gap(starts.blue, starts.red),
+        [20 * NM_FT, 20 * NM_FT]
     ));
+    // A separation longer than the map: the farthest that fits.
+    let mut far = target(2, Variation::OFF);
+    far.separation_nm = 300;
+    let mut s = surface(site_units(), Some(far));
+    lay(&mut s, &ground, &[]);
+    let starts = s.starts.unwrap();
+    assert!(ground.inside(starts.blue.map(i64::from), margin));
+    let d2 = gap(starts.blue, starts.red);
+    assert!(
+        d2 < (300 * NM_FT).pow(2) && d2 > (60 * NM_FT).pow(2),
+        "{d2}"
+    );
 }
 
 /// Launchers and radars for the battery tests: template SA-6s and SA-2s
@@ -688,7 +711,7 @@ fn battery_units() -> Vec<Unit> {
             [MID + 3_000, MID - 40_000],
             ENEMY_SIDE,
         ),
-        // Base layout: SA-3s with a GCI 3 nm off (too far) and one 1 nm off;
+        // Base layout: SA-3s with a GCI 4 nm off (too far) and one 1 nm off;
         // a friendly SA-6 never joins an enemy battery.
         unit(l(0), "SA3.NT", class::SAM, [MID - 100_000, MID], ENEMY_SIDE),
         unit(l(1), "SA3.NT", class::SAM, [MID - 99_000, MID], ENEMY_SIDE),
@@ -696,7 +719,7 @@ fn battery_units() -> Vec<Unit> {
             l(2),
             "GCI.NT",
             class::STRUCTURE,
-            [MID - 99_500, MID + 3 * 6_076],
+            [MID - 99_500, MID + 4 * 6_076],
             ENEMY_SIDE,
         ),
         unit(
@@ -932,4 +955,28 @@ fn a_fleet_moves_as_one_in_a_template_that_stays() {
     );
     // The flagship moved off its retail spot.
     assert_ne!(at(&s.units[0]), [i64::from(MID), i64::from(MID)]);
+}
+
+#[test]
+fn a_routed_unit_neither_jitters_nor_relocates() {
+    // Its legs are authored in the template's frame, so the unit and its
+    // template stay exactly where retail put them (movement follows them).
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut units = site_units();
+    units[7].route = Some(tore_formats::quick_template::Route {
+        alias: 7,
+        waypoints: Vec::new(),
+    });
+    for seed in 0..10 {
+        let mut s = surface(units.clone(), Some(target(seed, Variation::ON)));
+        lay(&mut s, &ground, &[]);
+        assert_eq!(s.template.as_ref().unwrap().anchor, Some(Anchor::Route));
+        assert!(s.transform.is_identity());
+        let tank = s.unit(t(7)).unwrap();
+        assert_eq!(
+            (tank.position, tank.angles),
+            (units[7].position, units[7].angles)
+        );
+    }
 }

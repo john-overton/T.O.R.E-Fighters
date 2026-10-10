@@ -103,6 +103,10 @@ fn theater_index(code: &str) -> AppResult<usize> {
         .ok_or_else(|| format!("{code}: no ground targets for theater {base}").into())
 }
 
+/// The enemy distance the dumps place Blue at from Red, nm, unless
+/// `--separation` says otherwise (the creator's 20 nm entry).
+const DUMP_SEPARATION_NM: u32 = 20;
+
 fn overrides() -> Overrides {
     Overrides {
         time: Some([12, 0]),
@@ -123,6 +127,7 @@ pub fn run() -> AppResult<()> {
     let mut starts = false;
     let mut seeds = None;
     let mut variation = Variation::ON;
+    let mut separation = DUMP_SEPARATION_NM;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut next = || {
@@ -140,6 +145,7 @@ pub fn run() -> AppResult<()> {
             "--starts" => starts = true,
             "--no-jitter" => variation.jitter = false,
             "--no-relocate" => variation.relocate = false,
+            "--separation" => separation = next()?.parse()?,
             "--seeds" => seeds = Some(next()?.parse()?),
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
@@ -169,6 +175,7 @@ pub fn run() -> AppResult<()> {
             enemy_nationality: nationality.unwrap_or(tables::ENEMY_NATIONALITY[index]),
             night_stealth: night,
             variation,
+            separation_nm: separation,
         }),
         _ => return Err("--surface-dump takes one template".into()),
     };
@@ -252,18 +259,20 @@ fn print_layout(surface: &Surface) {
         );
     }
     if let Some(starts) = &surface.starts {
-        let d = [
-            f64::from(starts.blue[0] - starts.target[0]),
-            f64::from(starts.blue[1] - starts.target[1]),
-        ];
+        let nm = |a: [i32; 2], b: [i32; 2]| {
+            f64::from(a[0] - b[0]).hypot(f64::from(a[1] - b[1])) / layout::NM_FT as f64
+        };
         println!(
-            "surface: starts target {} {} blue {} {} heading {} distance-nm {:.1} blue-airfields {} red-airfields {}",
+            "surface: starts target {} {} red {} {} red-target-nm {:.1} blue {} {} blue-red-nm {:.1} heading {} blue-airfields {} red-airfields {}",
             starts.target[0],
             starts.target[1],
+            starts.red[0],
+            starts.red[1],
+            nm(starts.red, starts.target),
             starts.blue[0],
             starts.blue[1],
+            nm(starts.blue, starts.red),
             starts.blue_heading_deg,
-            d[0].hypot(d[1]) / layout::NM_FT as f64,
             ids(&starts.blue_airfields),
             ids(&starts.red_airfields),
         );
@@ -449,6 +458,7 @@ fn resolve_all(resources: &BTreeMap<String, Vec<u8>>, seeds: u32) -> AppResult<(
                         enemy_nationality: nationality,
                         night_stealth: false,
                         variation: Variation::ON,
+                        separation_nm: DUMP_SEPARATION_NM,
                     };
                     let mut catalog = Catalog::new(resources);
                     let resolved = match resolve::template(
@@ -498,6 +508,7 @@ fn resolve_all(resources: &BTreeMap<String, Vec<u8>>, seeds: u32) -> AppResult<(
                 enemy_nationality: nationality,
                 night_stealth: false,
                 variation: Variation::ON,
+                separation_nm: DUMP_SEPARATION_NM,
             };
             match Terrain::for_mission_with(
                 resources,
@@ -565,6 +576,7 @@ fn heavy(stem: &str, index: usize, seed: u32) -> GroundTarget {
         enemy_nationality: tables::ENEMY_NATIONALITY[index],
         night_stealth: false,
         variation: Variation::ON,
+        separation_nm: DUMP_SEPARATION_NM,
     }
 }
 
@@ -720,10 +732,10 @@ fn rule_problems(surface: &Surface) -> Vec<String> {
 
 /// `--surface-dump --starts [THEATER...]`: for one template per theater
 /// (the first that relocates with seed 1, else the first), builds the
-/// mission with a ground target, an airborne start at 20,000 ft and Red 20
-/// nm ahead, and prints where Blue and Red start: Blue's distance from the
-/// target, its bearing off the line toward its own side, its heading off the
-/// target, Red's distance from Blue, and whether both are on the map. For
+/// mission with a ground target, an airborne start at 20,000 ft and a 50 nm
+/// enemy distance, and prints where Blue and Red start: Red's aircraft from
+/// the target, Blue from Red and its bearing off the line toward its own
+/// side, Blue's heading off the target, and whether both are on the map. For
 /// the `surface-start-placement` scenario.
 fn start_placement(resources: &BTreeMap<String, Vec<u8>>, wanted: &[String]) -> AppResult<()> {
     use tore_world::{
@@ -750,7 +762,7 @@ fn start_placement(resources: &BTreeMap<String, Vec<u8>>, wanted: &[String]) -> 
         spec.enemy_nationality = tables::ENEMY_NATIONALITY[index] as u8;
         spec.wings[3].count = 1;
         spec.wings[3].skill = Skill::Average;
-        spec.separation_nm = 20;
+        spec.separation_nm = 50;
         spec.start = Start::Airborne {
             altitude_ft: 20_000,
         };
@@ -763,18 +775,6 @@ fn start_placement(resources: &BTreeMap<String, Vec<u8>>, wanted: &[String]) -> 
         let target = starts.target.map(f64::from);
         let blue = world.cockpits[0].flight.position;
         let yaw = world.cockpits[0].flight.yaw;
-        let to_blue = [blue[0] - target[0], blue[2] - target[1]];
-        let distance = to_blue[0].hypot(to_blue[1]) / nm;
-        let angle = |v: [f64; 2]| v[0].atan2(v[1]).to_degrees();
-        let off = |a: f64, b: f64| ((a - b + 540.).rem_euclid(360.) - 180.).abs();
-        let side_off = site.front().map_or(0., |front| {
-            let toward = [
-                (front.blue[0] - front.red[0]) as f64,
-                (front.blue[1] - front.red[1]) as f64,
-            ];
-            off(angle(to_blue), angle(toward))
-        });
-        let heading_off = off(yaw.to_degrees(), angle([-to_blue[0], -to_blue[1]]));
         let red = world
             .combat
             .state
@@ -783,15 +783,33 @@ fn start_placement(resources: &BTreeMap<String, Vec<u8>>, wanted: &[String]) -> 
             .filter(|t| t.side == tore_world::ai_wings::ENEMY_SIDE && t.aircraft.is_some())
             .map(|t| t.position)
             .next();
+        let angle = |v: [f64; 2]| v[0].atan2(v[1]).to_degrees();
+        let off = |a: f64, b: f64| ((a - b + 540.).rem_euclid(360.) - 180.).abs();
+        // Red's aircraft from the target; Blue from Red, on which side; Blue's
+        // heading against the line to the target.
+        let red_target_nm = red.map_or(-1., |r| (r[0] - target[0]).hypot(r[2] - target[1]) / nm);
+        let from_red = red.map_or([0.; 2], |r| [blue[0] - r[0], blue[2] - r[2]]);
+        let blue_red_nm = from_red[0].hypot(from_red[1]) / nm;
+        let side_off = site.front().map_or(0., |front| {
+            let toward = [
+                (front.blue[0] - front.red[0]) as f64,
+                (front.blue[1] - front.red[1]) as f64,
+            ];
+            off(angle(from_red), angle(toward))
+        });
+        let heading_off = off(
+            yaw.to_degrees(),
+            angle([target[0] - blue[0], target[1] - blue[2]]),
+        );
         let extent = [
             (terrain.theater.cols as f64 - 1.) * f64::from(tore_formats::theater::CELL_FEET),
             (terrain.theater.rows as f64 - 1.) * f64::from(tore_formats::theater::CELL_FEET),
         ];
         let on_map =
             |p: [f64; 3]| (0. ..=extent[0]).contains(&p[0]) && (0. ..=extent[1]).contains(&p[2]);
-        let red_nm = red.map_or(-1., |r| (r[0] - blue[0]).hypot(r[2] - blue[2]) / nm);
         println!(
-            "surface-start: {theater} {stem} blue-nm {distance:.2} side-off-deg {side_off:.1} heading-off-deg {heading_off:.1} red-nm {red_nm:.2} blue-on-map {} red-on-map {} front {}",
+            "surface-start: {theater} {stem} red-target-nm {red_target_nm:.2} blue-red-nm {blue_red_nm:.2} separation-nm {} side-off-deg {side_off:.1} heading-off-deg {heading_off:.1} blue-on-map {} red-on-map {} front {}",
+            spec.separation_nm,
             u8::from(on_map(blue)),
             u8::from(red.is_some_and(on_map)),
             u8::from(site.front().is_some()),
@@ -885,6 +903,7 @@ pub fn sheets() -> AppResult<()> {
                 enemy_nationality: tables::ENEMY_NATIONALITY[index],
                 night_stealth: false,
                 variation,
+                separation_nm: DUMP_SEPARATION_NM,
             };
             let world = Terrain::for_mission_with(
                 &resources,
