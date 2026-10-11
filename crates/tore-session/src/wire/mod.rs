@@ -64,7 +64,7 @@ mod migration_tests;
 #[cfg(test)]
 mod phase2_tests;
 #[cfg(test)]
-mod readout_a2g_tests;
+pub(crate) mod readout_a2g_tests;
 #[cfg(test)]
 mod readout_tests;
 #[cfg(test)]

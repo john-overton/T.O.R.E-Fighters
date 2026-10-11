@@ -115,6 +115,8 @@ struct Game {
     /// the enemy it pursues (the fixtures' AI fires nothing guided).
     shooter: bool,
     armed: bool,
+    /// A laser bomber's run (protocol 23, slice NA).
+    a2g: Option<crate::wire::readout_a2g_tests::A2gPilot>,
 }
 
 impl Game {
@@ -147,6 +149,9 @@ impl Game {
                 .pilot
                 .pursuing
                 .is_some_and(|p| (6_000. ..9_000.).contains(&p.range));
+        }
+        if let Some(run) = &mut self.a2g {
+            run.drive(now, &mut controls);
         }
         controls
     }
@@ -204,10 +209,21 @@ impl Rig {
 
     /// [`Rig::new`] over `resources` (a real import, say).
     fn with_resources(spec: MissionSpec, resources: Arc<BTreeMap<String, Vec<u8>>>) -> Self {
+        Self::with_settings(spec, resources, &[])
+    }
+
+    /// [`Rig::with_resources`] with these host settings.
+    fn with_settings(
+        spec: MissionSpec,
+        resources: Arc<BTreeMap<String, Vec<u8>>>,
+        settings: &[(u8, u32)],
+    ) -> Self {
         let net = SimNetwork::new(41);
         net.set_default_link(LinkConfig::for_round_trip(40 * MS, 0., 0., 0.));
         let socket = net.bind(host_address()).unwrap();
-        let mut host = Host::new(spec, Arc::clone(&resources), config(31)).unwrap();
+        let mut config = config(31);
+        config.settings.extend_from_slice(settings);
+        let mut host = Host::new(spec, Arc::clone(&resources), config).unwrap();
         host.set_standbys_enabled(true);
         let client = Client::connect(
             ClientConfig {
@@ -251,6 +267,7 @@ impl Rig {
             asking: None,
             shooter: false,
             armed: false,
+            a2g: None,
         });
         assert!(
             rig.run_until(Duration::from_secs(2), |r| r.games[0]
@@ -330,6 +347,7 @@ impl Rig {
             asking: None,
             shooter: false,
             armed: false,
+            a2g: None,
         });
         let index = self.games.len() - 1;
         assert!(
@@ -339,6 +357,35 @@ impl Rig {
                 .is_some()),
             "{callsign} joins"
         );
+        index
+    }
+
+    /// A laser bomber's game joins for `plane` (protocol 23, slice NA): the
+    /// synthetic laser bomber's Cheat loading in place of the standard load,
+    /// then it cruises and flies the run.
+    fn join_bomber(&mut self, callsign: &str, plane: u32) -> usize {
+        let index = self.join(callsign, plane, true);
+        self.games[index].a2g = Some(Default::default());
+        assert!(
+            self.run_until(Duration::from_secs(2), |r| r.games[index]
+                .client
+                .lobby()
+                .and_then(|l| l.me())
+                .is_some_and(|me| me.slot.is_some())),
+            "{callsign} holds a slot"
+        );
+        self.games[index]
+            .client
+            .send_loadout(Some(tore_world::test_support::resources::a2g_loadout()));
+        assert!(
+            self.run_until(Duration::from_secs(2), |r| r.games[index]
+                .client
+                .lobby()
+                .and_then(|l| l.me())
+                .is_some_and(|me| me.loadout)),
+            "{callsign}'s loadout is taken"
+        );
+        self.games[index].client.set_ready(true);
         index
     }
 
@@ -1706,6 +1753,86 @@ fn a_takeover_carries_the_ground_target_and_every_player_resumes_on_it() {
             frame.surface_units.get(&STANDING).map(|v| v.hp),
             Some(hurt),
             "{callsign} is told the hurt tank"
+        );
+    }
+}
+
+/// Protocol 23, slice NA: three laser bombers (the synthetic F/A-18D's pod
+/// and two GBU-10s) pin their sights, set their lasers by hand and release;
+/// the host is cut off while the bombs fly. The standby's world at T codes
+/// to the old host's (the sights, lasers and guided flights are in the
+/// checkpoint), and the new host holds every pinned sight, every hand-set
+/// laser and the bombs' flights, which end there.
+#[test]
+fn a_takeover_carries_the_laser_bombers_sights_lasers_and_bombs() {
+    use crate::settings::{LoadoutRule, number};
+    use tore_sim::combat::sight::SightMode;
+    let mut spec = crate::wire::readout_a2g_tests::a2g_spec();
+    spec.loadout = None;
+    spec.wings[0].count = 4;
+    let mut resources = tore_world::test_support::surface::routed_resources();
+    tore_world::test_support::resources::add_a2g_stores(&mut resources);
+    let mut rig = Rig::with_settings(
+        spec,
+        Arc::new(resources),
+        &[(number::LOADOUTS, LoadoutRule::Any.value())],
+    );
+    let planes = [1, 2, 3];
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join_bomber(callsign, plane);
+    }
+    rig.fly();
+    let (first, _) = rig.standbys();
+    // Past every release (a bomb leaves four seconds after a game flies).
+    rig.run(Duration::from_secs(5));
+    let flights = |world: &World| -> Vec<u32> {
+        world
+            .combat
+            .state
+            .guided_flights()
+            .map(|(id, _)| id)
+            .collect()
+    };
+    let before = flights(&rig.host().world);
+    assert!(!before.is_empty(), "bombs are guiding at the cut");
+    rig.record_from = Some(rig.host().world.tick());
+    rig.run(Duration::from_millis(500));
+    rig.cut(0);
+    assert!(rig.run_until(Duration::from_secs(3), |r| !r.takeovers.is_empty()));
+    rig.record_from = None;
+    let (game, _, tick, coded) = rig.takeovers[0].clone();
+    assert_eq!(game, first);
+    assert!(
+        rig.checkpoints.get(&tick) == Some(&coded),
+        "the standby's world at T differs from the old host's"
+    );
+    let at_t = rig.world_of(&coded);
+    for plane in planes {
+        let own = at_t.combat.state.ownship(plane).unwrap();
+        assert!(
+            matches!(own.sight.map(|s| s.mode), Some(SightMode::Pinned(_))),
+            "plane {plane}'s pinned sight at T"
+        );
+        assert!(
+            own.laser.manual.is_some() || own.laser.point.is_some(),
+            "plane {plane}'s laser at T"
+        );
+    }
+    assert!(!flights(&at_t).is_empty(), "bombs in flight at T");
+    rig.back_after_cut(Duration::from_secs(5));
+    // The bombs fly on and end on the new host.
+    assert!(
+        rig.run_until(Duration::from_secs(60), |r| flights(
+            r.host_of(first).world()
+        )
+        .is_empty()),
+        "the bombs end on the new host"
+    );
+    let new = rig.host_of(first).world();
+    for plane in planes {
+        assert!(
+            new.combat.state.guided_impact(plane).is_some(),
+            "plane {plane}'s bomb ended on the new host"
         );
     }
 }

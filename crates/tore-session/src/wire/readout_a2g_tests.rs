@@ -191,6 +191,53 @@ pub(crate) fn a2g_commands(tick: u64) -> (Vec<SeatCommand>, bool) {
     (commands, (360..364).contains(&tick))
 }
 
+/// A player's game flying [`a2g_commands`]'s run by its clock: the A-G
+/// radar and the laser bomb a second after it first flies, the pin at two,
+/// Ctrl+L at three, the trigger from four seconds for a quarter second. For
+/// the session tests (standbys, takeovers) that carry its state.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct A2gPilot {
+    flying_since: Option<std::time::Duration>,
+    given: usize,
+}
+
+impl A2gPilot {
+    /// Adds the run's commands and trigger due at `now` to `controls`.
+    pub(crate) fn drive(
+        &mut self,
+        now: std::time::Duration,
+        controls: &mut crate::client::Controls,
+    ) {
+        use std::time::Duration;
+        let since = now.saturating_sub(*self.flying_since.get_or_insert(now));
+        let schedule: [(Duration, &[SeatCommand]); 3] = [
+            (
+                Duration::from_secs(1),
+                &[
+                    SeatCommand::Combat(Combat::ToggleAirGround),
+                    SeatCommand::CycleWeapon { forward: true },
+                ],
+            ),
+            (
+                Duration::from_secs(2),
+                &[SeatCommand::Combat(Combat::SightPinGround)],
+            ),
+            (
+                Duration::from_secs(3),
+                &[SeatCommand::Combat(Combat::ToggleLaser)],
+            ),
+        ];
+        while let Some((at, commands)) = schedule.get(self.given) {
+            if since < *at {
+                break;
+            }
+            controls.commands.extend_from_slice(commands);
+            self.given += 1;
+        }
+        controls.trigger = (Duration::from_secs(4)..Duration::from_millis(4_250)).contains(&since);
+    }
+}
+
 #[test]
 fn a_laser_bombers_readout_comes_through_a_connection_as_the_host_built_it() {
     let mut world = a2g_world();
