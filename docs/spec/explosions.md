@@ -83,6 +83,8 @@ rest of the explosion's two seconds. Each puff stands on the ground, growing
 from 0.12 to 0.5 of the width across, and is lit by the scene like the
 craters, not self-lit like the fireball.
 
+Cluster bombs (agent design, 2026-10-10): the five cluster records explode as type 18 on land and water with no crater, and a ground burst of that family also draws 28 small bomblet flashes over 1,200 feet, derived from the burst's position alone; see [ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes).
+
 Crash site: crash explosion type 35 on land, 34 in water; crater size 6
 (192 feet across); fire size 100 feet; `&FIRE.5K` loop full within 100 feet and
 silent at 2,000 feet; smoke puffs every tenth of a second from 20 feet

@@ -11,6 +11,8 @@
 //! `SMOKE.PIC` dust (or white spray on water) that races outward from the
 //! blast and fades (docs/spec/explosions.md, "Shockwave"). It is drawn from
 //! the effect alone, so replays and every networked client show it too.
+pub mod cluster;
+
 use crate::camera::Camera;
 use crate::snapshot::{EffectPose, MarkPose};
 use std::collections::BTreeMap;
@@ -375,8 +377,39 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
             opacity: 1.,
             emissive: true,
         });
+        bomblets(art, effect, elapsed, &mut out);
     }
     out
+}
+
+/// The small ground flashes of a cluster burst that are playing `elapsed`
+/// ticks into it (docs/spec/ordnance-presentation.md, "Cluster bombs").
+fn bomblets(art: &Art, effect: &EffectPose, elapsed: u16, out: &mut Vec<Sprite>) {
+    for flash in cluster::derive(effect) {
+        let Some(sheet) = explosion_sheet(flash.kind).filter(|&sheet| art.present[sheet]) else {
+            continue;
+        };
+        let Some(played) = elapsed
+            .checked_sub(flash.start)
+            .filter(|played| *played < cluster::FLASH_TICKS)
+        else {
+            continue;
+        };
+        let (_, layout) = SHEETS[sheet];
+        let frame = u32::from(played) * u32::from(layout.frames) / u32::from(cluster::FLASH_TICKS);
+        out.push(Sprite {
+            position: flash.position,
+            extent: [
+                flash.width / 2.,
+                flash.width * f64::from(layout.height) / f64::from(layout.width),
+            ],
+            mode: Mode::Standing,
+            cell: layout.cell(frame as u16),
+            layer: sheet,
+            opacity: 1.,
+            emissive: true,
+        });
+    }
 }
 
 pub struct EffectRenderer {
@@ -840,5 +873,52 @@ mod tests {
             sprites(&missing, &[], &[mark(MarkKind::Crater(3), 0, 1.)]).len(),
             0
         );
+    }
+
+    #[test]
+    fn a_cluster_burst_adds_small_ground_flashes_that_play_out_with_it() {
+        let art = Art::synthetic();
+        let burst = |kind, ticks| effect(kind, Some(18), ticks);
+        let drawn = |kind, ticks| sprites(&art, &[burst(kind, ticks)], &[]);
+        // The burst itself is the one AIRSML flash the original draws; the
+        // flashes come after it.
+        let all = drawn(EffectKind::Ground, 120);
+        assert_eq!(SHEETS[all[0].layer].0, "AIRSML.PIC");
+        let flashes = |kind, ticks| drawn(kind, ticks).split_off(1);
+        // At its first tick only the flashes that start at once are playing.
+        let first = flashes(EffectKind::Ground, 120);
+        let starting = cluster::derive(&burst(EffectKind::Ground, 120))
+            .iter()
+            .filter(|f| f.start == 0)
+            .count();
+        assert_eq!(first.len(), starting);
+        assert!(first.iter().all(|s| s.mode == Mode::Standing && s.emissive));
+        // Midway most are playing, spread around the burst.
+        let middle = flashes(EffectKind::Ground, 60);
+        assert!(middle.len() > 10 && middle.len() <= cluster::BOMBLETS);
+        assert!(middle.iter().any(|s| s.position[0] > 100.));
+        assert!(middle.iter().any(|s| s.position[0] < 100.));
+        // Each plays its twelve frames over half a second; none outlives the
+        // burst's last tick.
+        assert!(flashes(EffectKind::Ground, 1).is_empty());
+        let frames: std::collections::BTreeSet<u32> =
+            middle.iter().map(|s| s.cell[0].to_bits()).collect();
+        assert!(frames.len() > 1, "flashes are at different frames");
+        // Anything else of the same type draws none: a gun hit on an
+        // aircraft, or a bomb's ground burst.
+        assert_eq!(drawn(EffectKind::Hit, 60).len(), 1);
+        assert_eq!(
+            sprites(&art, &[effect(EffectKind::Ground, Some(21), 60)], &[])
+                .iter()
+                .filter(|s| s.layer == 0)
+                .count(),
+            0
+        );
+        // A missing flash sheet skips its flashes only.
+        let mut missing = Art::synthetic();
+        missing.present[19] = false;
+        let some = sprites(&missing, &[burst(EffectKind::Ground, 60)], &[]);
+        assert!(some.iter().all(|s| s.layer != 19));
+        assert!(some.len() > 1);
     }
 }

@@ -45,9 +45,16 @@ internal-fuel validation. This does not assert every full-capacity combination
 can take off.
 
 The audit pins what it must find, so a partial import cannot pass with fewer
-checks (2026-10-08): all 40 supported weapon records and all 4 tank records
-present, 36 aircraft, nine recovered weapon rows, exactly 1,464 weapon
-placements and 146 tank placements. A missing record, or a count that moves,
+checks (2026-10-08): all supported weapon records and all 4 tank records
+present, 36 aircraft, nine recovered weapon rows, and exact weapon and tank
+placement counts. The A2G round (2026-10-10) raised the supported records from
+40 to 54 (14 bomb, pack, cluster and LAU-10 records) and the weapon placements
+from 1,464 to 2,251 before W2; tank placements stay 146. It also audits the two novelty
+bombs (Boulder, Moose) apart from the 54: every aircraft gives them no
+capacity and refuses them without Cheat loading, 160 station and record pairs
+take them under Cheat loading, a loadout carrying one fails validation once
+Cheat loading is off, and the normal and Cheat catalogs are checked against the
+station rules on all 36 aircraft (the novelty bombs only in the Cheat catalog). It also loads the two laser designator pods (Pave Spike, Pave Knife) on every station that takes them, 130 placements, checking the one-pod rule, the pod's removal by a weapon, the catalog lists and the pod's restoration through the saved mission. A missing record, or a count that moves,
 fails the run; raise the pins in `crates/tore-app/src/ordnance_audit.rs` and
 here when the supported list, the tanks or the roster change on purpose.
 Slice W2 of the air-to-ground round (2026-10-10) added seven air-to-ground
@@ -56,7 +63,7 @@ records and 1,802 weapon placements, measured with `--validate-ordnance` on the
 surface-data import (the tank and recovered-row counts are unchanged). Slice W1 added the laser bombs, the JDAMs and the
 laser missiles (GBU-10E, GBU-10, GBU-10E Paveway, GBU-27, GBU-28, GBU-29,
 GBU-29/P, GBU-30, AS-14, AS 30L, AT-12): with W2's, 58 supported records and
-2,359 weapon placements, measured the same way (2026-10-11).
+2,359 weapon placements, measured the same way (2026-10-11). With the X1 records merged on top the audit reads 72 supported records and 3,146 weapon placements (pins in `ordnance_audit.rs`).
 
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is
@@ -72,7 +79,7 @@ Source and app/extractor binary asset guards passed, as did the documentation
 check. The wrapped Linux GPU smoke test presented its requested screen.
 
 The source audit passed for all 36 retail aircraft: nine recovered weapon rows,
-1,464 compatible supported-weapon placements and 146 tank placements. It also
+1,464 compatible supported-weapon placements (2,251 from the A2G round) and 146 tank placements. It also
 checks explicit rejection of overlapping tank/weapon loads, genuinely older
 loads without tank records, unarmed aircraft and restoring an empty row with
 plus. The F-14 zero/one/two-tank probe passed. All 36 scenarios in the final

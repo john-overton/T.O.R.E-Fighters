@@ -33,6 +33,8 @@ pub use agm::{CueEmitter, MAX_HARM_CUE};
 #[cfg(test)]
 mod bomb_tests;
 mod broad;
+#[cfg(test)]
+mod cluster_tests;
 mod collateral;
 #[cfg(test)]
 mod delivery_tests;
@@ -69,8 +71,10 @@ pub use surface::{
     SurfaceShot, flak_explosion, is_flak, surface_tracer, ticks_to_range,
 };
 
-/// Rounds one loaded store holds: a rocket pod's rockets, else 1.
-fn pod_rounds(w: &Weapon) -> u32 {
+/// Rounds one loaded store holds: a rocket pod's rockets, else 1 (retail's
+/// `HARDPodHack` multiplies a loaded station's count by it, for the player,
+/// the AI and every wing member alike).
+pub fn pod_rounds(w: &Weapon) -> u32 {
     if super::ballistics::is_pod(w) {
         u32::from(w.burst.projectiles_in_pod.unsigned_abs())
     } else {

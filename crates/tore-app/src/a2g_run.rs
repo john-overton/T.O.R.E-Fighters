@@ -23,6 +23,8 @@
 //!   `--dive DEG`, released when the bomb sight's mean impact reaches the
 //!   target (bombs), or one second in (rockets). `--hold S` keeps the trigger
 //!   down that long, `--repeat N` presses N times `--gap S` apart.
+//! - `cluster` ([`cluster`]): the `release` pass with a cluster bomb, then
+//!   the splash on every surface target and the bomblet flashes.
 //! - `laser`, `jdam`, `at2` ([`guided`]): the guided weapons, released on
 //!   the HUD's release range cue, with `--laser-off S`, `--buddy ID`,
 //!   `--turn-away S` and `--condition C` of their own.
@@ -55,6 +57,7 @@ use tore_world::{
 };
 
 mod ccip;
+mod cluster;
 mod guided;
 pub mod guided_preview;
 mod level;
@@ -202,6 +205,7 @@ pub fn run() -> AppResult<()> {
     let mut scene = Scene::new(&o, &resources)?;
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
+        "cluster" => cluster::run(&mut scene, &o)?,
         kind @ ("maverick" | "harm" | "antiship" | "sarh") => {
             missile::run(&mut scene, &o, kind, &resources)?
         }
@@ -215,7 +219,7 @@ pub fn run() -> AppResult<()> {
         }
         other => {
             return Err(format!(
-                "unknown --attack {other}; kinds: release, ccip, level, rocket, maverick, harm, antiship, sarh, laser, jdam, at2"
+                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, maverick, harm, antiship, sarh, laser, jdam, at2"
             )
             .into());
         }
