@@ -28,8 +28,11 @@
 //! the sight and the laser keep working for the weapons the human left
 //! guiding), and [`Ownship::restore`] puts it back when a human takes the
 //! aircraft again (slice FX-J; docs/ARCHITECTURE.md, "What a returning
-//! player keeps").
+//! player keeps"). Its ground-attack part is the aircraft's
+//! [`StrikeCockpit`], the same record a human and an AI striker fly with
+//! (slice ST-C).
 
+use super::cockpit::{StrikeCockpit, StrikeTarget};
 use super::{
     AIRCRAFT_RADIUS_FT, Configuration, Launcher, LocalizedDamage, Ownship, Side, SystemFaults,
     Target,
@@ -39,10 +42,7 @@ use crate::ai::{
     threat::{DispenserStore, SeekerClass},
     weapon_service::{Rounds, StoreState},
 };
-use crate::combat::{
-    delivery::DeliveryMode, gunship, laser::Laser, missiles::LaunchMode, sight::Sight,
-    sight::SightInput,
-};
+use crate::combat::{gunship, sight::SightInput};
 use crate::combat::{missiles::TargetRole, missiles::seeker::Heat, threats::ThreatService};
 use crate::sensors::Picks;
 use crate::sensors::{self, Sensors};
@@ -92,30 +92,26 @@ pub struct AiHandback {
 /// AI, kept by combat while the AI flies it and put back when a human takes
 /// it again ([`Ownship::kept`], [`Ownship::restore`]). Stores, damage and
 /// sensors go to the AI and come back by the conversion above; this is the
-/// rest: the weapon, its modes, the sight, the laser and the pilot's picks.
+/// rest: the strike cockpit (the weapon, its modes, the sight, the laser,
+/// the target) and the human's own extras. It reads as its cockpit
+/// (`kept.laser` is `kept.cockpit.laser`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Kept {
     /// The aircraft's side, for the spot its laser keeps while the AI flies.
     pub side: Side,
-    /// The selected station, and whether a weapon is armed (NAV otherwise).
-    pub selected: usize,
-    pub armed: bool,
-    /// The seeker mode (CUED or BORESIGHT).
-    pub launch_mode: LaunchMode,
-    /// The bomb sight's mode, Ctrl+M's choice included.
-    pub delivery_mode: DeliveryMode,
+    /// The strike cockpit as the human left it: the selected station and
+    /// armed state, the seeker and bomb sight modes (Ctrl+M's choice
+    /// included), the targeting sight (its look, what it tracks or pins, its
+    /// zoom) and the laser (the hand setting, Ctrl+L, included), with the
+    /// designated object as its target. The sight and the laser are stepped
+    /// while the AI flies, so a track follows its object and a laser lases
+    /// for the weapons the human left guiding.
+    pub cockpit: StrikeCockpit,
     /// The stations that held something this mission: an emptied or
     /// jettisoned pod keeps or loses its row as the human left it.
     pub ever_loaded: Vec<bool>,
     /// The AC-130's gunsight and gun group, as left.
     pub gunship: Option<gunship::State>,
-    /// The targeting sight: its look, what it tracks or pins, its zoom.
-    /// Stepped while the AI flies, so a track follows its object and a
-    /// laser stays on its point.
-    pub sight: Option<Sight>,
-    /// The laser, the hand setting (Ctrl+L) included. Stepped while the AI
-    /// flies: it lases for the weapons the human left guiding.
-    pub laser: Laser,
     /// The designation and the A-G flag.
     pub picks: Picks,
     /// Easy targeting's HUD memory and the views' sight hold.
@@ -145,10 +141,16 @@ impl Ownship {
         };
         Kept {
             side: self.side,
-            selected: self.selected,
-            armed: self.armed,
-            launch_mode: self.launch_mode,
-            delivery_mode: self.delivery_mode,
+            cockpit: StrikeCockpit {
+                target: self.designated().map(StrikeTarget::Object),
+                sight: self.cockpit.sight.map(|mut sight| {
+                    sight.input = neutral(sight.input);
+                    sight.request = None;
+                    sight.notice = None;
+                    sight
+                }),
+                ..self.cockpit.clone()
+            },
             ever_loaded: self.ever_loaded.clone(),
             gunship: self.gunship.clone().map(|mut group| {
                 group.input = neutral(group.input);
@@ -156,13 +158,6 @@ impl Ownship {
                 group.notice = None;
                 group
             }),
-            sight: self.sight.map(|mut sight| {
-                sight.input = neutral(sight.input);
-                sight.request = None;
-                sight.notice = None;
-                sight
-            }),
-            laser: self.laser,
             picks: self.sensors.picks(),
             hud_selection: self.hud_selection,
             sight_hold: self.sight_hold,
@@ -185,26 +180,28 @@ impl Ownship {
         if kept.ever_loaded.len() == self.ever_loaded.len() {
             self.ever_loaded.clone_from(&kept.ever_loaded);
         }
-        self.armed = kept.armed && !self.config.stations.is_empty();
-        if kept.selected < self.config.stations.len() {
-            self.selected = kept.selected;
+        let left = &kept.cockpit;
+        self.cockpit.armed = left.armed && !self.config.stations.is_empty();
+        if left.selected < self.config.stations.len() {
+            self.cockpit.selected = left.selected;
         }
-        self.launch_mode = kept.launch_mode;
-        self.delivery_mode = kept.delivery_mode;
+        self.cockpit.launch_mode = left.launch_mode;
+        self.cockpit.delivery_mode = left.delivery_mode;
         if let (Some(group), Some(left)) = (&mut self.gunship, &kept.gunship)
             && group.stations == left.stations
         {
             *group = left.clone();
         }
-        if let (Some(sight), Some(left)) = (&mut self.sight, kept.sight)
+        if let (Some(sight), Some(left)) = (&mut self.cockpit.sight, left.sight)
             && sight.sensor == left.sensor
         {
             *sight = left;
         }
         if self.config.sight_sensor().is_some_and(|s| s.laser) {
-            self.laser = kept.laser;
+            self.cockpit.laser = left.laser;
         }
         self.sensors.restore_picks(kept.picks);
+        self.sync_target();
         self.hud_selection = kept.hud_selection;
         self.sight_hold = kept.sight_hold;
         self.shots = kept.shots;

@@ -3,14 +3,14 @@
 //! "The targeting sight", "The laser" and "Buddy lasing"). The AC-130's
 //! gunsight steps with its guns (`step_gunship`); every other aircraft with
 //! a laser designator or a FLIR steps here.
-use super::{Kept, Launcher, NO_SIDE, Ownship, Projectile, State, Target, projectile_weapon};
+use super::cockpit::{Cockpits, StrikeCockpit};
+use super::{Launcher, NO_SIDE, Ownship, Projectile, Side, State, Target, projectile_weapon};
 use crate::attitude::Vector;
 use crate::combat::{
     laser::{self, LaserInputs, LaserSpot},
     sight::{self, SightObject, SightRequest},
 };
 use crate::sensors::Weather;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 /// What the sight and the laser read of the state this tick.
@@ -22,23 +22,16 @@ pub(super) struct Context<'a, G> {
     pub tick: u64,
 }
 
-/// The ownships, and the aircraft the AI flies with a human's sight kept,
+/// The aircraft with a laser sight in their strike cockpit (the ownships,
+/// the aircraft the AI flies with a human's sight kept, the AI strikers)
 /// with one of their own laser weapons in flight: their lasers stay on under
 /// the automatic rule.
-pub(super) fn laser_owners(
-    ships: &[Ownship],
-    kept: &BTreeMap<u32, Kept>,
-    projectiles: &[Projectile],
-) -> BTreeSet<u32> {
-    let lasing: BTreeSet<u32> = ships
+pub(super) fn laser_owners(cockpits: Cockpits<'_>, projectiles: &[Projectile]) -> BTreeSet<u32> {
+    let ships = cockpits.ships;
+    let lasing: BTreeSet<u32> = cockpits
         .iter()
-        .filter(|own| own.sight.is_some_and(|sight| sight.sensor.laser))
-        .map(|own| own.aircraft)
-        .chain(
-            kept.iter()
-                .filter(|(_, kept)| kept.sight.is_some_and(|sight| sight.sensor.laser))
-                .map(|(aircraft, _)| *aircraft),
-        )
+        .filter(|(_, _, cockpit)| cockpit.sight.is_some_and(|sight| sight.sensor.laser))
+        .map(|(aircraft, _, _)| aircraft)
         .collect();
     if lasing.is_empty() {
         return lasing;
@@ -58,18 +51,13 @@ impl Ownship {
         if let Some(group) = &mut self.gunship {
             group.request = Some(request);
         }
-        if let Some(sight) = &mut self.sight {
+        if let Some(sight) = &mut self.cockpit.sight {
             sight.request = Some(request);
         }
     }
     /// A laser weapon is selected and armed.
     pub fn laser_weapon_selected(&self) -> bool {
-        self.armed
-            && self
-                .config
-                .stations
-                .get(self.selected)
-                .is_some_and(|s| laser::is_laser_weapon(&s.weapon))
+        self.cockpit.laser_weapon_armed(&self.config)
     }
 }
 
@@ -86,7 +74,7 @@ pub(super) fn step<G: Fn(f64, f64) -> f64>(
     targets: &[Target],
     cx: &Context<'_, G>,
 ) {
-    let Some(sight) = own.sight.as_mut() else {
+    let Some(sight) = own.cockpit.sight.as_mut() else {
         return;
     };
     let objects: Vec<SightObject> = targets
@@ -133,7 +121,7 @@ pub(super) fn step<G: Fn(f64, f64) -> f64>(
         laser::weather_scale(cx.weather, eye[1], point[1])
     });
     let automatic = own.laser_weapon_selected() || cx.laser_owners.contains(&own.aircraft);
-    own.laser.step(
+    own.cockpit.laser.step(
         LaserInputs {
             designator: (sensor.laser && alive).then_some(sensor.range_ft),
             held,
@@ -166,22 +154,36 @@ pub(super) fn row_launcher(row: &Target) -> Launcher {
     }
 }
 
-/// The targeting sight and the laser a human left in an aircraft the AI
-/// flies now (its row `row`), for a tick (slice FX-J). Nobody slews the
-/// sight or presses its keys: a track follows its object, a pin stays on
-/// its ground and a free sight looks where it was left. The laser keeps its
+/// How the AI flies a strike cockpit's sight.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Pilot {
+    /// A human's cockpit kept while the AI flies (slice FX-J): the sight
+    /// designates nothing and follows nothing new.
+    Kept,
+    /// An AI striker's own cockpit: the sight takes the cockpit's target
+    /// object as its track, as a human's sight takes the designation.
+    Striker,
+}
+
+/// The targeting sight and the laser of a strike cockpit the AI flies (its
+/// row `row`), for a tick: a human's left cockpit (slice FX-J) or an AI
+/// striker's. Nobody slews the sight or presses its keys: a track follows
+/// its object, a pin stays on its ground and a free sight looks where it was
+/// left; an AI striker's sight takes its target object. The laser keeps its
 /// own rules: on by hand while the sight holds a point, off by hand, or on
 /// by the automatic rule while one of the aircraft's own laser weapons is
-/// in flight (no weapon is selected and armed while the AI flies). The
-/// sight designates nothing: the AI's sensors are its own.
-pub(super) fn step_kept<G: Fn(f64, f64) -> f64>(
-    kept: &mut Kept,
-    aircraft: u32,
+/// in flight (the AI turns its laser on by hand). The sight designates
+/// nothing: the AI's sensors are its own.
+pub(super) fn step_flown<G: Fn(f64, f64) -> f64>(
+    cockpit: &mut StrikeCockpit,
+    (aircraft, side): (u32, Side),
+    pilot: Pilot,
     row: &Target,
     targets: &[Target],
     cx: &Context<'_, G>,
 ) {
-    let Some(sight) = kept.sight.as_mut() else {
+    let target = cockpit.target_object();
+    let Some(sight) = cockpit.sight.as_mut() else {
         return;
     };
     let launcher = row_launcher(row);
@@ -194,9 +196,16 @@ pub(super) fn step_kept<G: Fn(f64, f64) -> f64>(
             velocity: t.velocity,
             alive: t.hp > 0,
             airborne: false,
-            friendly: t.side != NO_SIDE && t.side == kept.side,
+            friendly: t.side != NO_SIDE && t.side == side,
         })
         .collect();
+    if pilot == Pilot::Striker
+        && let Some(id) = target
+        && sight.target() != Some(id)
+        && objects.iter().any(|o| o.id == id && o.alive)
+    {
+        sight.track(id);
+    }
     let range = sight.sensor.range_ft;
     sight.step(launcher, &objects, cx.ground, range, cx.tick);
     let sensor = sight.sensor;
@@ -210,7 +219,7 @@ pub(super) fn step_kept<G: Fn(f64, f64) -> f64>(
     let weather = held.map_or(1., |(point, _)| {
         laser::weather_scale(cx.weather, eye[1], point[1])
     });
-    kept.laser.step(
+    cockpit.laser.step(
         LaserInputs {
             designator: (sensor.laser && launcher.alive).then_some(sensor.range_ft),
             held,
@@ -229,9 +238,10 @@ fn sub(a: Vector, b: Vector) -> Vector {
 
 impl State {
     /// Every laser spot this tick: one for each aircraft that is lasing, a
-    /// human's or one the AI flies with the laser its human left on.
+    /// human's, one the AI flies with the laser its human left on, or an AI
+    /// striker's.
     pub fn laser_spots(&self) -> Vec<LaserSpot> {
-        super::guided::spots(&self.ownships, &self.kept)
+        super::guided::spots(self.cockpits_with(&self.ownships))
     }
     /// The spot `aircraft`'s laser weapons home on: its own while it lases,
     /// else the spot of another aircraft of its side nearest `from` (buddy
