@@ -18,6 +18,13 @@ use crate::attitude::{Vector, dot};
 use std::f64::consts::{FRAC_PI_2, PI};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 
+/// Whether the aircraft's record gets the linked-gun gunsight: the AC-130.
+/// The bombing class reads the same test
+/// ([`crate::models::strike_class`]).
+pub fn has_linked_guns(aircraft: AircraftId) -> bool {
+    aircraft == AircraftId::Ac130
+}
+
 pub const GUNS: [&str; 3] = ["C_25.JT", "C_40.JT", "C_105.JT"];
 pub const NAMES: [&str; 3] = ["25MM", "40MM", "105MM"];
 
@@ -187,7 +194,7 @@ impl Default for State {
 }
 impl State {
     pub fn new(config: &Configuration) -> Option<Self> {
-        if config.aircraft != AircraftId::Ac130 {
+        if !has_linked_guns(config.aircraft) {
             return None;
         }
         let stations = GUNS.map(|source| {

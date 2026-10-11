@@ -9,6 +9,7 @@ pub mod mig21;
 pub mod mig23;
 pub mod mig29;
 pub mod rafale_c;
+pub mod strike_class;
 pub mod su25;
 pub mod su27;
 pub mod su35;
