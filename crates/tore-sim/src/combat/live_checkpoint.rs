@@ -62,6 +62,8 @@ crate::checkpoint_enum!(Readiness {
     GroupEmpty = 22,
     GunObscured = 23,
     TerrainMask = 24,
+    NoEmitter = 25,
+    TrackLost = 26,
 });
 
 // The AC-130's player-directed gun mounts and gunsight: the actual slewed
@@ -465,6 +467,8 @@ crate::checkpoint_struct!(Ownship {
     hud_selection,
     sight_hold,
     friendlies,
+    painted_by,
+    harm_cue,
     emitters,
     missile_threats,
     hp,

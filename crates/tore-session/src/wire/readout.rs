@@ -479,9 +479,11 @@ fn readiness_code(r: Readiness) -> i64 {
         R::GroupEmpty => 22,
         R::GunObscured => 23,
         R::TerrainMask => 24,
+        R::NoEmitter => 25,
+        R::TrackLost => 26,
     }
 }
-const READINESS: [Readiness; 25] = [
+const READINESS: [Readiness; 27] = [
     Readiness::Ready,
     Readiness::Safe,
     Readiness::BayClosed,
@@ -507,6 +509,8 @@ const READINESS: [Readiness; 25] = [
     Readiness::GroupEmpty,
     Readiness::GunObscured,
     Readiness::TerrainMask,
+    Readiness::NoEmitter,
+    Readiness::TrackLost,
 ];
 
 fn status_code(s: seeker::Status) -> i64 {
@@ -1374,6 +1378,8 @@ impl QReadout {
             in_range: pick(es, 8) != 0,
             hit_percent: u8::try_from(pick(es, 9)).map_err(|_| bad("hit percentage"))?,
             solution_seconds: opt(es, 10).map(|t| v(t, SECONDS)),
+            // Host-built: not on the wire before protocol 23 (slice NA).
+            harm: None,
         };
 
         let row = |list: usize| -> WireResult<Option<TargetRow>> {

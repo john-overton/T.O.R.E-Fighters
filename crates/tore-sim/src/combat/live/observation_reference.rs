@@ -92,6 +92,14 @@ pub(super) fn observe(
         &environment,
     );
     own.bore_observation = None;
+    // Added with the air-to-ground missiles (slice W2), after the copy was
+    // taken: the HARM cue, the HARM and Maverick BORE and the A-G track.
+    own.harm_cue = super::agm::harm_emitters(
+        own,
+        &launcher,
+        state.targets.iter().chain(peers(rows, k)),
+        &obscured,
+    );
     let index = own.selected;
     let w = &own.config.stations[index].weapon;
     if let Some(profile) =
@@ -107,7 +115,9 @@ pub(super) fn observe(
         {
             own.launch_mode = LaunchMode::Boresight;
         }
-        if profile.guidance == Guidance::Infrared && own.designated().is_some() {
+        if (profile.guidance == Guidance::Infrared || profile.holds_on_angles())
+            && own.designated().is_some()
+        {
             own.launch_mode = LaunchMode::Cued;
         }
         let assigned = if own.launch_mode == LaunchMode::Cued {
@@ -137,7 +147,7 @@ pub(super) fn observe(
             let bore = own.launch_mode == LaunchMode::Boresight;
             let cap = bore.then(|| profile.search_cap());
             // Mounted IR may choose a stronger return. Released missiles keep identity.
-            if bore && profile.guidance == Guidance::Infrared {
+            if bore && (profile.guidance == Guidance::Infrared || profile.holds_on_angles()) {
                 own.mounted.target = None;
                 own.mounted.acquired = false;
                 own.mounted.missing = 0;
@@ -165,10 +175,14 @@ pub(super) fn observe(
                 })
                 .collect();
             if bore {
-                own.bore_observation = observations
-                    .iter()
-                    .min_by(|a, b| seeker::compare_returns(a, b, profile))
-                    .copied();
+                own.bore_observation = if profile.holds_on_angles() {
+                    super::agm::harm_candidate(&observations, &own.painted_by, w, &launcher)
+                } else {
+                    observations
+                        .iter()
+                        .min_by(|a, b| seeker::compare_returns(a, b, profile))
+                        .copied()
+                };
             }
             if bore && profile.guidance == Guidance::Active {
                 // The HUD estimate never pre-locks or assigns an active-radar shot.
@@ -178,7 +192,16 @@ pub(super) fn observe(
             {
                 let supported: Vec<_> = observations
                     .into_iter()
-                    .filter(|o| own.sensors.supports(o.id))
+                    .filter(|o| {
+                        super::agm::ownship_supports(
+                            own,
+                            Some(profile),
+                            w,
+                            &launcher,
+                            o.id,
+                            state.targets.iter().find(|t| t.id == o.id),
+                        )
+                    })
                     .collect();
                 own.mounted.step(
                     missiles::Profile {
@@ -187,6 +210,9 @@ pub(super) fn observe(
                     },
                     &supported,
                 );
+            } else if bore && profile.holds_on_angles() {
+                let candidate: Vec<_> = own.bore_observation.into_iter().collect();
+                own.mounted.step(profile, &candidate);
             } else {
                 own.mounted.step(profile, &observations);
             }
