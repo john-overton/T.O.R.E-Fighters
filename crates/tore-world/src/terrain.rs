@@ -1027,9 +1027,12 @@ impl Terrain {
         self.place_surface(resources, &sources, code);
         // Experiment AP1: redrawn airports move and add their buildings
         // after the surface has placed, so its layout is the retail one.
-        self.redrawn = redrawn::apply(resources, &mut sources, plans, |x, z| {
+        let mut parked = std::mem::take(&mut self.surface.parked);
+        let built = redrawn::apply(resources, &mut sources, plans, &mut parked, |x, z| {
             f64::from(self.height(x as f32, z as f32))
-        })?;
+        });
+        self.surface.parked = parked;
+        self.redrawn = built?;
         sources.add_surface(resources, &self.surface)?;
         let mut objects = Vec::new();
         let mut runways = Vec::new();

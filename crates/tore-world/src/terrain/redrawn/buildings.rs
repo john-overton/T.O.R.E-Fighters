@@ -179,7 +179,6 @@ pub fn relay(
         return out;
     }
     let mut lines: Vec<Line> = lines.iter().map(Line::new).collect();
-    let own_strips: Vec<&Strip> = strips.iter().filter(|s| own.contains(&s.index)).collect();
     // The airfield's buildings, in layout order.
     let mut movable = Vec::new();
     for (index, placement) in sources.layout.placements.iter().enumerate() {
@@ -202,15 +201,7 @@ pub fn relay(
             f64::from(placement.position[0]),
             f64::from(placement.position[2]),
         );
-        if !own_strips.iter().any(|s| s.zone_contains(x, z)) {
-            continue;
-        }
-        let distance = |s: &Strip| (s.origin[0] - x).hypot(s.origin[2] - z);
-        let nearest = strips
-            .iter()
-            .min_by(|a, b| distance(a).total_cmp(&distance(b)))
-            .map(|s| s.index);
-        if nearest.is_none_or(|n| !own.contains(&n)) {
+        if !belongs(x, z, own, strips) {
             continue;
         }
         movable.push((index, frame.local([x, 0., z])));
@@ -371,4 +362,90 @@ pub fn relay(
         }
     }
     out
+}
+
+/// Whether a world point belongs to the airfield of strips `own`: inside one
+/// of their grown footprints and nearer to one of them than to any other.
+fn belongs(x: f64, z: f64, own: &[usize], strips: &[Strip]) -> bool {
+    let own_strips = || strips.iter().filter(|s| own.contains(&s.index));
+    if !own_strips().any(|s| s.zone_contains(x, z)) {
+        return false;
+    }
+    let distance = |s: &Strip| (s.origin[0] - x).hypot(s.origin[2] - z);
+    strips
+        .iter()
+        .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+        .is_some_and(|s| own.contains(&s.index))
+}
+
+/// Parking spots on the aprons for aircraft the retail templates stood on
+/// what is now grass: two rows at a quarter and three quarters of each
+/// apron's depth, a spot every 120 ft along it, clear of the AI's slots.
+pub const SPOT_SPACING_FT: f64 = 120.;
+const SPOT_CLEAR_FT: f64 = 100.;
+
+pub fn apron_spots(aprons: &[(Point, Point)], ai_slots: &[Point]) -> Vec<Point> {
+    let mut out = Vec::new();
+    for (min, max) in aprons {
+        let size = [max[0] - min[0], max[1] - min[1]];
+        let long = usize::from(size[1] > size[0]);
+        let deep = 1 - long;
+        let count = (size[long] / SPOT_SPACING_FT).floor() as usize;
+        for row in [0.25, 0.75] {
+            for i in 0..count {
+                let mut p = [0.; 2];
+                p[long] = min[long] + SPOT_SPACING_FT * (i as f64 + 0.5);
+                p[deep] = min[deep] + size[deep] * row;
+                if ai_slots.iter().all(|s| length(sub(*s, p)) >= SPOT_CLEAR_FT) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Moves each parked template aircraft of the airfield that stands off the
+/// pavement (`on_pavement`, frame coordinates) to the nearest free apron
+/// spot, keeping its heading. Deck aircraft stay on their carriers. Returns
+/// how many moved.
+pub fn snap_parked(
+    parked: &mut [crate::surface::ParkedAircraft],
+    frame: &Frame,
+    own: &[usize],
+    strips: &[Strip],
+    spots: &[Point],
+    on_pavement: &dyn Fn(Point) -> bool,
+) -> usize {
+    let mut used = vec![false; spots.len()];
+    let mut moved = 0;
+    for aircraft in parked.iter_mut().filter(|a| a.deck.is_none()) {
+        let (x, z) = (
+            f64::from(aircraft.position[0]),
+            f64::from(aircraft.position[2]),
+        );
+        if !belongs(x, z, own, strips) {
+            continue;
+        }
+        let local = frame.local([x, 0., z]);
+        if on_pavement(local) {
+            continue;
+        }
+        let best = (0..spots.len()).filter(|i| !used[*i]).min_by(|a, b| {
+            length(sub(spots[*a], local))
+                .total_cmp(&length(sub(spots[*b], local)))
+                .then(a.cmp(b))
+        });
+        if let Some(i) = best {
+            used[i] = true;
+            let w = frame.world(spots[i]);
+            aircraft.position = [
+                w[0].round() as i32,
+                aircraft.position[1],
+                w[2].round() as i32,
+            ];
+            moved += 1;
+        }
+    }
+    moved
 }

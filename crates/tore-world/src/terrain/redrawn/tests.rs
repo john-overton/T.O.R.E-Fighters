@@ -1,4 +1,4 @@
-use super::geometry::{contains, overlap_area, signed_area};
+use super::geometry::{contains, dot, overlap_area, signed_area};
 use super::layout::{compose, designator};
 use super::*;
 use crate::terrain::{Overrides, Terrain};
@@ -382,4 +382,143 @@ fn the_ils_runway_gets_edge_threshold_papi_and_approach_lights() {
             assert!(light.position[1] >= 3.);
         }
     }
+}
+
+#[test]
+fn every_junction_gets_curved_corners_and_open_mouths() {
+    let plans = builtin();
+    // STRIP1 has a taxiway meeting the angled strip and a dog-leg; STRIP3A a
+    // rapid exit at 30 degrees.
+    for object_type in ["STRIP1.OT", "STRIP3A.OT", "STRIP.OT"] {
+        let plan = single(&plans, object_type);
+        let (materials, patches) = compose(&[(&plan, [0., 0.])], None, 0.);
+        let fillet = materials.iter().position(|m| m.name == "fillet").unwrap();
+        let fillets: Vec<_> = patches.iter().filter(|p| p.material == fillet).collect();
+        // Some corners are not square: their grid axes are not at 90 degrees.
+        let angled = fillets
+            .iter()
+            .filter(|p| dot(p.grid.u, p.grid.v).abs() > 0.05)
+            .count();
+        if object_type != "STRIP.OT" {
+            assert!(angled > 0, "{object_type}: no angled corner");
+        }
+        // Where a later taxiway joins, the earlier one runs on with its
+        // centreline only.
+        let mouth = materials
+            .iter()
+            .position(|m| m.name == "taxiway_mouth")
+            .unwrap();
+        assert!(materials[mouth].paint.contains(&Paint::TaxiwayCentre));
+        assert!(!materials[mouth].paint.contains(&Paint::Taxiway));
+        assert!(patches.iter().any(|p| p.material == mouth), "{object_type}");
+        // A fillet's paved corner meets its pavement: each cell of it is one
+        // copy, at fractions up to (1, 1).
+        for patch in &fillets {
+            let cells = patch.cells();
+            assert_eq!(cells.len(), 1, "{object_type}");
+            assert!(
+                cells[0]
+                    .1
+                    .iter()
+                    .any(|f| (f[0] - 1.).abs() < 1e-6 && (f[1] - 1.).abs() < 1e-6)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_pair_keeps_the_ils_runways_far_end_marked() {
+    let plans = builtin();
+    let links = plans
+        .iter()
+        .find(|p| p.pair.as_ref().is_some_and(|pair| pair.base == "STRIP7.OT"))
+        .unwrap();
+    let pair = links.pair.as_ref().unwrap();
+    assert!(!pair.unmark.iter().any(|(name, _)| name == "R0"));
+    let pair3 = plans
+        .iter()
+        .find(|p| p.pair.as_ref().is_some_and(|pair| pair.base == "STRIP3.OT"))
+        .unwrap();
+    assert_eq!(
+        pair3.pair.as_ref().unwrap().unmark,
+        vec![("R1".to_owned(), true)]
+    );
+    // The base's far-end threshold bars are drawn.
+    let (base, tile) = (single(&plans, "STRIP7.OT"), single(&plans, "STRIP7A.OT"));
+    let (materials, patches) = compose(
+        &[(&base, [0., 0.]), (&tile, [3452., 8899.])],
+        Some(links),
+        0.,
+    );
+    let threshold = materials
+        .iter()
+        .position(|m| m.name == "runway_threshold")
+        .unwrap();
+    let length = base.runway_length_ft.unwrap();
+    assert!(
+        patches
+            .iter()
+            .any(|p| p.material == threshold && contains(&p.poly, [0., length - 75.]))
+    );
+}
+
+#[test]
+fn template_aircraft_on_grass_move_to_free_apron_spots() {
+    use super::buildings::{Strip, apron_spots, snap_parked};
+    let aprons = [([100., 0.], [500., 1000.])];
+    let spots = apron_spots(&aprons, &[[300., 500.]]);
+    // Two rows a quarter and three quarters deep, every 120 ft, none by the
+    // AI slot.
+    assert!(
+        spots
+            .iter()
+            .all(|p| (p[0] - 200.).abs() < 1e-9 || (p[0] - 400.).abs() < 1e-9)
+    );
+    assert!(
+        spots
+            .iter()
+            .all(|p| (p[0] - 300.).hypot(p[1] - 500.) >= 100.)
+    );
+    assert_eq!(spots.len(), 16);
+    let frame = Frame {
+        origin: [10_000., 0., 10_000.],
+        right: [1., 0., 0.],
+        forward: [0., 0., 1.],
+    };
+    let strip = Strip {
+        index: 0,
+        origin: [10_000., 0., 10_000.],
+        center: [10_000., 0., 10_500.],
+        half: [500., 1., 1_000.],
+        right: [1., 0., 0.],
+        forward: [0., 0., 1.],
+    };
+    let aircraft = |x: i32, z: i32, deck: bool| crate::surface::ParkedAircraft {
+        id: crate::surface::UnitId(0x5000_0001),
+        resource: "F18.PT".into(),
+        position: [x, 0, z],
+        angles: [45, 0, 0],
+        nationality: None,
+        side: tore_sim::combat::live::NO_SIDE,
+        target: false,
+        deck: deck.then_some(crate::surface::UnitId(0x5000_0000)),
+    };
+    let mut parked = vec![
+        aircraft(9_000, 10_100, false),  // on grass west of the field
+        aircraft(10_300, 10_600, false), // already on the apron
+        aircraft(9_000, 10_200, true),   // on a carrier's deck
+        aircraft(40_000, 40_000, false), // another field's
+    ];
+    let on_pavement = |p: Point| {
+        aprons
+            .iter()
+            .any(|(min, max)| p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1])
+    };
+    let moved = snap_parked(&mut parked, &frame, &[0], &[strip], &spots, &on_pavement);
+    assert_eq!(moved, 1);
+    assert_eq!(parked[0].position, [10_200, 0, 10_060]);
+    assert_eq!(parked[0].angles, [45, 0, 0]);
+    assert_eq!(parked[1].position, [10_300, 0, 10_600]);
+    assert_eq!(parked[2].position, [9_000, 0, 10_200]);
+    assert_eq!(parked[3].position, [40_000, 0, 40_000]);
 }

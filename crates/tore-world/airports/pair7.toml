@@ -13,7 +13,7 @@
 [pair]
 base = "STRIP7.OT"
 tile = "STRIP7A.OT"
-unmark = ["R0:far"]
+unmark = []
 
 [[taxiway]]
 name = "east link"

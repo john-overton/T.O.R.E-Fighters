@@ -23,6 +23,8 @@ pub enum Paint {
     Threshold,
     /// A yellow taxiway centreline and yellow edge lines.
     Taxiway,
+    /// The yellow centreline alone: a taxiway across a junction's mouth.
+    TaxiwayCentre,
     /// A runway number board without its board: the board's texels become
     /// the runway's own plain asphalt.
     Digit,

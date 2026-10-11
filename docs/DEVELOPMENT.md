@@ -1106,8 +1106,9 @@ is drawn and flown from its runway type's real-size redrawn plan instead of
 the retail airfield shape, in flights and in replays
 ([redrawn airports](formats/redrawn-airports.md)). Single player only.
 `--airfield-sheets OUTPUT_DIRECTORY [--all] [THEATER ...]` renders one redrawn
-airport of each plan (`--all`: every one) overhead, oblique, from short final
-and along the parking row; with the switch unset it renders the same views of
+airport of each plan (`--all`: every one) overhead, oblique, from short final,
+along the parking row, toward the runway's far end and over a taxiway junction;
+with the switch unset it renders the same views of
 the retail airfields. Redrawn airports carry runway, approach, PAPI and taxiway
 lights; `TORE_AIRFIELD_LIGHTS=0` hides them.
 

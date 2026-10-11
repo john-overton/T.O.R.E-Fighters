@@ -167,6 +167,8 @@ pub struct Built {
     moved: Vec<(usize, Placement)>,
     /// Placements added after the layout's own.
     added: Vec<Placement>,
+    /// Parked template aircraft moved off the grass onto the aprons.
+    pub snapped: usize,
 }
 
 impl Built {
@@ -197,6 +199,7 @@ pub(super) fn apply(
     resources: &dyn crate::resources::ResourceSource,
     sources: &mut Placements,
     plans: &Plans,
+    parked: &mut [crate::surface::ParkedAircraft],
     height: impl Fn(f64, f64) -> f64,
 ) -> WorldResult<Vec<Built>> {
     if plans.is_empty() {
@@ -383,6 +386,24 @@ pub(super) fn apply(
             &mut taken,
             &mut added_count,
         );
+        // Template aircraft the retail field stood on grass go to the aprons.
+        let mut aprons = Vec::new();
+        for (plan, offset) in &parts {
+            for apron in &plan.aprons {
+                aprons.push((
+                    geometry::add(apron.min, *offset),
+                    geometry::add(apron.max, *offset),
+                ));
+            }
+        }
+        let slots: Vec<Point> = a.map(|a| a.parking.to_vec()).unwrap_or_default();
+        let spots = buildings::apron_spots(&aprons, &slots);
+        let on_pavement = |p: Point| {
+            patches
+                .iter()
+                .any(|patch| geometry::contains(&patch.poly, p))
+        };
+        let snapped = buildings::snap_parked(parked, &frame, &own, &zones, &spots, &on_pavement);
         let id = |index: usize| -> WorldResult<u32> {
             Ok(
                 crate::surface::UnitId::layout(sources.layout.placements[index].key.ordinal)
@@ -403,6 +424,7 @@ pub(super) fn apply(
             lights: airport_lights,
             moved: relaid.moved,
             added: relaid.added,
+            snapped,
         };
         apply_edits(std::slice::from_ref(&built), sources);
         if let Some(tile_id) = tile_id {
@@ -417,6 +439,7 @@ pub(super) fn apply(
                 lights: Vec::new(),
                 moved: Vec::new(),
                 added: Vec::new(),
+                snapped: 0,
             });
         }
         out.push(built);

@@ -2,10 +2,10 @@
 //! and corner fillets, cut so no two overlap, each with the texture grid its
 //! material repeats on.
 use super::geometry::{
-    Point, Poly, add, band, bounds, ccw, contains, cross, direction, dot, minus_all, overlap_area,
-    rect, right_of, scale, signed_area, sub, unit,
+    Point, Poly, add, band, bounds, ccw, contains, cross, direction, dot, length, minus_all,
+    overlap_area, rect, right_of, scale, signed_area, sub, unit,
 };
-use super::plan::{Along, Material, Numbers, Plan, RunwaySpec};
+use super::plan::{Along, Material, Numbers, Paint, Plan, RunwaySpec};
 
 /// Runway markings along the runway from each threshold, feet (`fitted`,
 /// agent, from the usual real layout).
@@ -20,7 +20,8 @@ const FILLET_SHARE: f64 = 0.7;
 
 /// How a material repeats over a patch: copies laid on a grid of `cell`
 /// feet from `origin`, texture columns along `u` and rows along `v` (unit
-/// axes of the runway frame).
+/// axes of the runway frame, square to each other except in a fillet laid
+/// into an angled corner).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Grid {
     pub origin: Point,
@@ -45,9 +46,13 @@ impl Patch {
     /// The patch cut at its grid lines.
     pub fn cells(&self) -> Vec<Cell> {
         let g = &self.grid;
+        // The axes need not be square (a fillet in an angled corner): solve
+        // p = origin + u * cell0 * i + v * cell1 * j.
+        let (cu, cv) = (scale(g.u, g.cell[0]), scale(g.v, g.cell[1]));
+        let det = cross(cu, cv);
         let to_grid = |p: Point| {
             let d = sub(p, g.origin);
-            [dot(d, g.u) / g.cell[0], dot(d, g.v) / g.cell[1]]
+            [cross(d, cv) / det, cross(cu, d) / det]
         };
         let from_grid = |q: Point| {
             add(
@@ -91,8 +96,18 @@ struct Element {
     poly: Poly,
     material: usize,
     grid: Grid,
-    /// A taxiway leg: start, end, half width, plan index, taxiway index.
-    leg: Option<(Point, Point, f64, usize, usize)>,
+    leg: Option<Leg>,
+}
+
+/// A taxiway leg: its ends, half width, plan, taxiway and place in it.
+#[derive(Clone, Copy)]
+struct Leg {
+    a: Point,
+    b: Point,
+    half: f64,
+    part: usize,
+    taxiway: usize,
+    index: usize,
 }
 
 /// The patches of one or more plans laid out together in the first plan's
@@ -184,97 +199,167 @@ pub fn compose(
             );
         }
     }
-    let raw: Vec<(Poly, Option<usize>)> = runways
+    // A junction's mouth: where a later taxiway joins, the earlier one is
+    // drawn without its edge lines (its centreline stays).
+    let mut mouth_of = std::collections::BTreeMap::new();
+    for element in &taxiways {
+        if let std::collections::btree_map::Entry::Vacant(slot) = mouth_of.entry(element.material) {
+            let mut plain = materials[element.material].clone();
+            plain.name = format!("{}_mouth", plain.name);
+            for paint in &mut plain.paint {
+                if *paint == Paint::Taxiway {
+                    *paint = Paint::TaxiwayCentre;
+                }
+            }
+            slot.insert(materials.len());
+            materials.push(plain);
+        }
+    }
+    let raw: Vec<Poly> = runways
         .iter()
         .chain(&taxiways)
         .chain(&aprons)
-        .map(|e| (e.poly.clone(), e.leg.map(|l| l.4)))
+        .map(|e| e.poly.clone())
         .collect();
     let mut covered: Vec<Poly> = Vec::new();
     let mut patches = Vec::new();
-    for element in runways.iter().chain(&taxiways).chain(&aprons) {
+    for (i, element) in runways.iter().chain(&taxiways).chain(&aprons).enumerate() {
         let near: Vec<Poly> = covered
             .iter()
             .filter(|c| overlap_area(&element.poly, c) > super::geometry::SLIVER_AREA)
             .cloned()
             .collect();
-        for piece in minus_all(&element.poly, &near) {
-            patches.push(Patch {
-                poly: piece,
-                material: element.material,
-                grid: element.grid.clone(),
-            });
+        let pieces = minus_all(&element.poly, &near);
+        let mouths = match element.leg {
+            Some(leg) => mouths(&leg, &taxiways[i - runways.len() + 1..]),
+            None => Vec::new(),
+        };
+        for piece in pieces {
+            let mut rest = vec![piece];
+            for mouth in &mouths {
+                let mut next = Vec::new();
+                for part in rest {
+                    let inside = super::geometry::intersect(&part, mouth);
+                    if inside.len() >= 3
+                        && signed_area(&inside).abs() > super::geometry::SLIVER_AREA
+                    {
+                        patches.push(Patch {
+                            poly: ccw(inside),
+                            material: mouth_of[&element.material],
+                            grid: element.grid.clone(),
+                        });
+                    }
+                    next.extend(super::geometry::minus(&part, mouth));
+                }
+                rest = next;
+            }
+            for part in rest {
+                patches.push(Patch {
+                    poly: part,
+                    material: element.material,
+                    grid: element.grid.clone(),
+                });
+            }
         }
         covered.push(element.poly.clone());
     }
-    // Curved corners where a taxiway meets another element square on.
+    // Curved corners wherever a taxiway leg meets or crosses another
+    // element's edge, at any angle, and on the inside of a taxiway's bends.
     let mut fillets: Vec<Poly> = Vec::new();
-    for element in &taxiways {
-        let Some((a, b, half, part, id)) = element.leg else {
+    for (l, element) in taxiways.iter().enumerate() {
+        let Some(leg) = element.leg else {
             continue;
         };
-        let Some(fillet) = mat(part, "fillet") else {
+        let Some(fillet) = mat(leg.part, "fillet") else {
             continue;
         };
-        for (end, other) in [(b, a), (a, b)] {
-            let d = unit(sub(end, other));
-            for (target, owner) in &raw {
-                if *owner == Some(id) || !contains(target, end) {
+        let d = unit(sub(leg.b, leg.a));
+        let n = right_of(d);
+        let side = (FILLET_SHARE * 2. * leg.half).max(20.);
+        let span = sub(leg.b, leg.a);
+        for (t, target) in raw.iter().enumerate() {
+            let other = t
+                .checked_sub(runways.len())
+                .and_then(|k| taxiways.get(k))
+                .and_then(|e| e.leg);
+            if t == runways.len() + l {
+                continue;
+            }
+            // A bend: only the next leg of the same taxiway, on the inside.
+            let bend = other.filter(|o| o.taxiway == leg.taxiway);
+            if let Some(o) = bend
+                && o.index != leg.index + 1
+            {
+                continue;
+            }
+            for (at, p, q) in crossings(target, leg.a, leg.b) {
+                let probe = add(leg.a, scale(span, (at + 0.5 / length(span)).min(1.)));
+                let entering = contains(target, probe);
+                let inward = if entering { d } else { scale(d, -1.) };
+                let e = unit(sub(q, p));
+                if dot(e, d).abs() > 0.97 {
                     continue;
                 }
-                let Some((edge_a, edge_b)) = crossed_edge(target, other, end) else {
-                    continue;
-                };
-                let e = unit(sub(edge_b, edge_a));
-                if dot(e, d).abs() > 0.02 {
-                    continue;
-                }
-                let n = right_of(d);
-                let side = (FILLET_SHARE * 2. * half).max(20.);
+                let centre = add(leg.a, scale(span, at));
                 for s in [1., -1.] {
-                    let start = add(other, scale(n, s * half));
-                    let Some(c) = line_hit(start, d, edge_a, e) else {
+                    let out = scale(n, s);
+                    if let Some(o) = bend
+                        && (!entering || dot(out, unit(sub(o.b, o.a))) <= 0.)
+                    {
+                        continue;
+                    }
+                    let Some(c) = line_hit(add(centre, scale(out, leg.half)), d, p, e) else {
                         continue;
                     };
-                    let square = ccw(vec![
+                    let along = if dot(e, out) < 0. { scale(e, -1.) } else { e };
+                    // The pavement met must run on along the corner's whole
+                    // side: not so at the outside of an L where two
+                    // taxiways' ends overlap.
+                    let beyond = add(add(c, scale(along, side * 0.9)), scale(inward, 2.));
+                    let backed = raw
+                        .iter()
+                        .enumerate()
+                        .any(|(r, poly)| r != runways.len() + l && contains(poly, beyond));
+                    if !backed {
+                        continue;
+                    }
+                    let quad = ccw(vec![
                         c,
-                        add(c, scale(n, s * side)),
-                        sub(add(c, scale(n, s * side)), scale(d, side)),
-                        sub(c, scale(d, side)),
+                        add(c, scale(along, side)),
+                        sub(add(c, scale(along, side)), scale(inward, side)),
+                        sub(c, scale(inward, side)),
                     ]);
                     let clear = raw
                         .iter()
-                        .map(|(p, _)| p)
                         .chain(&fillets)
-                        .all(|p| overlap_area(&square, p) < 1.);
+                        .all(|poly| overlap_area(&quad, poly) < 1.);
                     if !clear {
                         continue;
                     }
                     patches.push(Patch {
-                        poly: square.clone(),
+                        poly: quad.clone(),
                         material: fillet,
                         grid: Grid {
-                            origin: sub(add(c, scale(n, s * side)), scale(d, side)),
-                            u: d,
-                            v: scale(n, -s),
+                            origin: sub(add(c, scale(along, side)), scale(inward, side)),
+                            u: inward,
+                            v: scale(along, -1.),
                             cell: [side, side],
                         },
                     });
-                    fillets.push(square);
+                    fillets.push(quad);
                 }
-                break;
             }
         }
     }
     (materials, patches)
 }
 
-/// The edge of convex `poly` that the segment from `outside` to `inside`
-/// crosses, if any.
-fn crossed_edge(poly: &[Point], outside: Point, inside: Point) -> Option<(Point, Point)> {
+/// Where segment `a`..`b` crosses the edges of convex `poly`: the share of
+/// the way along it and the edge crossed, in order.
+fn crossings(poly: &[Point], a: Point, b: Point) -> Vec<(f64, Point, Point)> {
     let n = poly.len();
-    let d = sub(inside, outside);
-    let mut best: Option<(f64, Point, Point)> = None;
+    let d = sub(b, a);
+    let mut out = Vec::new();
     for i in 0..n {
         let (p, q) = (poly[i], poly[(i + 1) % n]);
         let e = sub(q, p);
@@ -282,16 +367,52 @@ fn crossed_edge(poly: &[Point], outside: Point, inside: Point) -> Option<(Point,
         if denom.abs() < 1e-9 {
             continue;
         }
-        let t = cross(sub(p, outside), e) / denom;
-        let s = cross(sub(p, outside), d) / denom;
+        let t = cross(sub(p, a), e) / denom;
+        let s = cross(sub(p, a), d) / denom;
         if (0. ..=1.).contains(&t) && (-1e-6..=1. + 1e-6).contains(&s) {
-            // The last crossing before `inside` is where the leg enters.
-            if best.is_none_or(|(bt, ..)| t > bt) {
-                best = Some((t, p, q));
-            }
+            out.push((t, p, q));
         }
     }
-    best.map(|(_, p, q)| (p, q))
+    out.sort_by(|x, y| x.0.total_cmp(&y.0));
+    out
+}
+
+/// The mouths later taxiway legs open in `leg`: their overlap with it,
+/// kept to the side they come from when they end inside it, so the far
+/// edge line runs on.
+fn mouths(leg: &Leg, later: &[Element]) -> Vec<Poly> {
+    let d = unit(sub(leg.b, leg.a));
+    let n = right_of(d);
+    let own = band(leg.a, leg.b, leg.half, leg.half);
+    let mut out: Vec<Poly> = Vec::new();
+    for element in later {
+        let Some(other) = element.leg else {
+            continue;
+        };
+        let mut mouth = super::geometry::intersect(&own, &element.poly);
+        if mouth.len() < 3 || signed_area(&mouth).abs() <= super::geometry::SLIVER_AREA {
+            continue;
+        }
+        let offset = |p: Point| dot(sub(p, leg.a), n);
+        let inside = |p: Point| offset(p).abs() <= leg.half + 1.;
+        let ends = [other.a, other.b];
+        if let Some(outside) = match (inside(ends[0]), inside(ends[1])) {
+            (true, false) => Some(ends[1]),
+            (false, true) => Some(ends[0]),
+            _ => None,
+        } {
+            // Keep the half of the leg facing the joining taxiway.
+            let s = offset(outside).signum();
+            mouth = super::geometry::clip(&mouth, scale(n, -s), -dot(leg.a, scale(n, s)));
+            if mouth.len() < 3 {
+                continue;
+            }
+        }
+        for piece in super::geometry::minus_all(&ccw(mouth), &out) {
+            out.push(piece);
+        }
+    }
+    out
 }
 
 fn line_hit(p: Point, d: Point, q: Point, e: Point) -> Option<Point> {
@@ -532,7 +653,7 @@ fn taxiway_elements(
     out: &mut Vec<Element>,
 ) {
     let half = width * 0.5;
-    for leg in points.windows(2) {
+    for (index, leg) in points.windows(2).enumerate() {
         let (a, b) = (leg[0], leg[1]);
         let d = unit(sub(b, a));
         let n = right_of(d);
@@ -569,7 +690,14 @@ fn taxiway_elements(
             poly: band(a, b, half, half),
             material,
             grid,
-            leg: Some((a, b, half, part, id)),
+            leg: Some(Leg {
+                a,
+                b,
+                half,
+                part,
+                taxiway: id,
+                index,
+            }),
         });
     }
 }

@@ -1,7 +1,9 @@
 //! `--airfield-sheets OUTPUT_DIRECTORY [--all] [THEATER ...]`: offscreen
 //! renders of the redrawn airports (experiment AP1,
 //! docs/formats/redrawn-airports.md), one airport of each plan (`--all`:
-//! every one), overhead and oblique, at noon with no clouds. The airports
+//! every one), overhead, oblique, from short final, along the parking
+//! row, down the runway to its far end and over the first taxiway
+//! junction, at noon with no clouds. The airports
 //! and cameras are chosen from the redrawn scene; the scene drawn follows
 //! `TORE_REDRAWN_AIRPORTS`, so a run with it unset renders the same views of
 //! the retail airfields for a before and after pair.
@@ -86,7 +88,21 @@ pub fn run() -> AppResult<()> {
                 ("top", box_.center, heading, 84.0f64, 1.9 * reach),
                 ("oblique", box_.center, heading, 24.0, 2.3 * reach),
             ];
+            // The far end of the ILS runway (on a pair, where it runs on
+            // into the second tile).
+            if let Some(runway) = plan_world.airport_scene.runway(built.strip_id) {
+                let far = built.frame.world([0., runway.length_ft]);
+                views.push(("far-end", far, heading, 10.0, 1800.));
+            }
             if let Some(anchors) = &built.anchors {
+                // The taxi-out corner, a junction with its curved corners.
+                views.push((
+                    "junction",
+                    anchors.taxi_out[1],
+                    heading + std::f64::consts::FRAC_PI_4,
+                    32.0,
+                    700.,
+                ));
                 views.push(("threshold", built.frame.origin, heading, 9.0, 900.));
                 let nose = anchors.parking_heading;
                 let slot = anchors.parking[4];

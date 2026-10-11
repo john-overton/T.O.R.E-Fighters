@@ -142,9 +142,14 @@ fn paint(copy: &mut Pic, material: &Material, inks: &Inks, plain: Option<&Pic>) 
                     }
                 }
             }
-            Paint::Taxiway => {
+            Paint::Taxiway | Paint::TaxiwayCentre => {
                 let across = if material.along == Along::U { h } else { w };
-                for line in [1, across / 2, across - 2] {
+                let lines = if *mark == Paint::Taxiway {
+                    vec![1, across / 2, across - 2]
+                } else {
+                    vec![across / 2]
+                };
+                for line in lines {
                     if material.along == Along::U {
                         for col in 0..w {
                             set(copy, col, line, inks.yellow);

@@ -94,7 +94,7 @@ and the retail runway centrelines it keeps.
 | --- | --- |
 | `applies_to`, `runway_length_ft`, `ils_runway` | The STRIP type, the retail runway length checked against its shape, and whether the first runway lies on the retail ILS line (not for second tiles) |
 | `grass_margin_ft` | Landable grass around the pavement |
-| `[pair]` `base`, `tile`, `unmark` | A pair plan's two types and the base runway ends (`R1:near`) that run on into the tile and lose their markings |
+| `[pair]` `base`, `tile`, `unmark` | A pair plan's two types and the base runway ends (`R1:far`) that run on into the tile and lose their markings; the ILS runway (`R0`) keeps both ends marked, since its threshold is set in from the pavement's end |
 | `[[material]]` `name`, `pic`, `rect`, `tile_ft`, `along`, `paint`, `variants` | A texel rectangle `[x, y, w, h]` of a retail PIC; the feet one copy covers along its columns and rows (0 across a runway or taxiway: its width); which texture axis runs along the element (`v` default, `u`); markings painted into a copy (`edges`, `centre`, `threshold`, `taxiway`, `digit`); other rectangles of the same size picked per copy |
 | `[[runway]]` `from`, `heading`, `length`, `width`, `pad`, `touchdown`, `numbers`, `marked_near`, `marked_far` | Near threshold, heading against the frame in degrees, length, width, paved run before each threshold, touchdown zone length, designators (`false` for none, default from the world heading), whether each end has threshold markings |
 | `[[taxiway]]` `width`, `points` | A polyline of straight legs at any angle, ends squared off half a width past each point |
@@ -122,9 +122,16 @@ All `fitted`, agent choices of 2026-10-10 from usual real layouts:
 - Overlaps are cut away, not layered: runways first, then taxiways, then
   aprons, each cut into convex pieces, so no two pavement pieces share a spot
   and nothing z-fights. Angled runways and taxiways are cut the same way.
-- Where a taxiway leg ends square on another element's edge, a curved corner
+- Wherever a taxiway leg meets another element's edge, at any angle, through a
+  bend in its own polyline or where it crosses another taxiway, a curved corner
   piece from the atlas's fillet art (sides 0.7 of the taxiway width) fills each
-  corner, if it touches no other pavement.
+  inside corner. The piece is a parallelogram along the two edges, so angled
+  junctions get it too. It is left out where it would touch other pavement,
+  where the two edges run within about 14 degrees of parallel, and on the
+  outside of an L where the pavement met does not run on along its whole side.
+- Junction mouths: where a later taxiway meets an earlier one, the earlier
+  one's piece across the mouth is drawn with its centre line only, so its edge
+  lines stop at the junction instead of running across it.
 - Textures repeat on a grid from each element's start, one copy per cell,
   inset half a texel so atlas neighbours never bleed in. Apron copies pick one
   of the material's rectangles and mirror it from a fixed hash of the cell.
@@ -146,6 +153,12 @@ All `fitted`, agent choices of 2026-10-10 from usual real layouts:
   (TANKER.NT) behind every third parking slot and a truck (TRUCK.NT) at each
   line's start. They are targets like the retail buildings (John,
   2026-10-10). Their object ids are `0x40F0_0000` up, inside the layout range.
+- Parked template aircraft: an airfield template's parked aircraft that now
+  stands off the pavement, and belongs to the airfield by the building rule,
+  moves to the nearest free apron spot, keeping its heading. Spots are two rows
+  on each apron, a quarter and three quarters deep, every 120 ft, at least
+  100 ft from the plan's AI parking slots. Aircraft on carrier decks never
+  move; one with no free spot stays where it was.
 
 ## Lights
 
@@ -254,13 +267,17 @@ the wire: each machine rebuilds it from its own import and build. The plan:
 ## Limits
 
 - Lone second tiles and pads have no AI points (as in retail, whose points for
-  them lie off their pavement); the AI uses the runway fallback there.
+  them lie off their pavement); the AI uses the runway fallback there. Adding
+  them is not cheap: a lone tile's STRIP anchors are copies of its base's, so
+  its ILS and approach line lie beside the tile's pavement, not on it. AI
+  points there need either a runway paved along that line (changing how eight
+  variant airfields look) or a moved ILS (breaking "ILS unchanged"). Pads are
+  vertical pads by type, which no conventional AI uses. AI homes on lone tiles
+  (for example Al Arish1) are as before the redraw.
 - A pair's tile is placed at the measured offset, which varies by up to 250 ft
   between layouts; link taxiways overlap generously to cover it.
-- Square corners where a taxiway meets at an angle (fillets only fit square
-  junctions); a taxiway's edge lines run across the mouths of later junctions.
-- The retail parked aircraft of airfield templates stand at their template
-  spots, which may now be grass.
+- A junction mouth clears only the earlier taxiway's edge lines; a runway's
+  edge stripes still run past a taxiway's end, as on real fields.
 
 ## Validation (2026-10-10, surface-data import)
 
@@ -284,5 +301,18 @@ the wire: each machine rebuilds it from its own import and build. The plan:
   exactly, the runway and approach line do not move, buildings move onto the
   line, markings paint where they belong, and wrong plans are refused.
 - `--airfield-sheets OUTPUT_DIRECTORY [--all] [THEATER ...]` renders one airport
-  of each plan overhead, oblique, from short final and along the parking row
-  ([development](../DEVELOPMENT.md)).
+  of each plan overhead, oblique, from short final, along the parking row, down
+  the runway toward its far end (for pairs, where it meets the second tile)
+  and over the first taxiway junction ([development](../DEVELOPMENT.md)).
+- Round 5 (2026-10-10, after the AL1 merge): fillets at every junction,
+  junction mouths, the pair ILS runway's far end marked, and template aircraft
+  on aprons. Switch off: guard SAME 52 against `sf-51b2d613`, `--validate-maps`
+  identical to the base build. Switch on: all 75 layouts build;
+  `--validate-ils` 578 ends, 0 problems, identical to switch off; airport
+  sides (`--airport-allegiance`: offered fields and AI homes) identical on and
+  off. Probes at one Blue airport per plan (Berezovka and L'viv STRIP,
+  Bournemouth STRIP1, Pyong Taek STRIP2, El-Nakab STRIP3 with 3A, Ras Nasrani
+  STRIP4, Southampton STRIP5 with 5A, Kimpo STRIP6 with 6A, Athinai and
+  Liepaja STRIP7 with 7A) all reach `Parked` with 0 anomalies and three
+  ground-start slots. Polotsk, Taetan, Wonsan and Longtian now have hostile
+  AAA by the field that downs takeoffs, as on retail, so they left the list.
