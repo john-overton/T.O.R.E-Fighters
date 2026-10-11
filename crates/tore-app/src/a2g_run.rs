@@ -49,6 +49,7 @@ use tore_world::{
 
 mod ccip;
 mod guided;
+pub mod guided_preview;
 mod level;
 pub mod preview;
 mod release;

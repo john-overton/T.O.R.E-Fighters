@@ -49,7 +49,7 @@ pub(super) const OPTIONS: [&str; 4] = ["--laser-off", "--buddy", "--turn-away", 
 const BUDDY_SEAT: SeatId = SeatId(1);
 
 #[derive(Default)]
-struct Extra {
+pub(super) struct Extra {
     laser_off: Option<f64>,
     buddy: Option<AircraftId>,
     turn_away: Option<f64>,
@@ -81,14 +81,14 @@ fn extra() -> AppResult<Extra> {
 }
 
 /// The two seats of a buddy run: the buddy's plane.
-struct Buddy {
+pub(super) struct Buddy {
     plane: u32,
     commands: Vec<SeatCommand>,
 }
 
 /// Builds the mission, seats the attacker (and the buddy), fits the store and
 /// picks the target, as `Scene::new` does for the other kinds.
-fn scene(
+pub(super) fn scene(
     o: &Options,
     e: &Extra,
     resources: &BTreeMap<String, Vec<u8>>,
