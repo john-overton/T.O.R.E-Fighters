@@ -54,7 +54,7 @@ bombs (Boulder, Moose) apart from the 54: every aircraft gives them no
 capacity and refuses them without Cheat loading, 160 station and record pairs
 take them under Cheat loading, a loadout carrying one fails validation once
 Cheat loading is off, and the normal and Cheat catalogs are checked against the
-station rules on all 36 aircraft (the novelty bombs only in the Cheat catalog). A missing record, or a count that moves,
+station rules on all 36 aircraft (the novelty bombs only in the Cheat catalog). It also loads the two laser designator pods (Pave Spike, Pave Knife) on every station that takes them, 130 placements, checking the one-pod rule, the pod's removal by a weapon, the catalog lists and the pod's restoration through the saved mission. A missing record, or a count that moves,
 fails the run; raise the pins in `crates/tore-app/src/ordnance_audit.rs` and
 here when the supported list, the tanks or the roster change on purpose.
 

@@ -9,6 +9,7 @@ use tore_sim::combat::{
     live::TankStore,
     loading,
     loadout::{Loadout, NOVELTY_WEAPONS, SUPPORTED_WEAPONS},
+    sight::{DESIGNATOR_PODS, DesignatorStore},
 };
 use tore_world::mission::{LoadoutSpec, MissionSpec};
 
@@ -24,6 +25,8 @@ const TANK_PLACEMENTS: usize = 146;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
 const NOVELTY_PLACEMENTS: usize = 160;
+/// Station and designator-pod pairs the normal rules accept (A2G decision 7).
+const POD_PLACEMENTS: usize = 130;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {
@@ -53,6 +56,15 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             Ok(Weapon::parse(name, bytes)?)
         })
         .collect::<AppResult<Vec<_>>>()?;
+    let pods = DESIGNATOR_PODS
+        .iter()
+        .map(|name| {
+            let bytes = data
+                .get(*name)
+                .ok_or_else(|| format!("ordnance audit missing designator pod record {name}"))?;
+            Ok(DesignatorStore::parse(name, bytes)?)
+        })
+        .collect::<AppResult<Vec<_>>>()?;
     let tanks = data
         .iter()
         .filter(|(name, _)| name.ends_with(".GAS"))
@@ -76,6 +88,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let mut total_weapons = 0;
     let mut total_tanks = 0;
     let mut novelty_cases = 0;
+    let mut pod_cases = 0;
     let mut recovered = 0;
     for id in AircraftId::ALL {
         let aircraft = Aircraft::parse(
@@ -159,6 +172,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         }
         assert_roundtrip(&standard, &standard, &aircraft, data)?;
         novelty_cases += check_novelty(&standard, &novelty, id.pt())?;
+        pod_cases += check_pods(&standard, &pods, &aircraft, data)?;
         let mut weapon_cases = 0;
         let mut offered = std::collections::BTreeSet::new();
         let mut tank_cases = 0;
@@ -279,6 +293,16 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         weapons.len(),
         tanks.len()
     );
+    if pod_cases != POD_PLACEMENTS {
+        return Err(format!(
+            "ordnance audit checked {pod_cases} designator pod placements, expected {POD_PLACEMENTS}"
+        )
+        .into());
+    }
+    println!(
+        "ordnance audit: {} designator pods, {pod_cases} pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
+        pods.len()
+    );
     println!(
         "ordnance audit: {} novelty records, {novelty_cases} Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
         novelty.len()
@@ -322,6 +346,77 @@ fn check_catalog(
         }
     }
     Ok((normal.len(), cheat.len()))
+}
+
+/// The laser designator pods (decision 7) on every station the normal rules
+/// give them: each loads in place of the station's weapon, the aircraft's one
+/// pod moves when a second is loaded, the pod survives the saved mission and
+/// goes when a weapon takes the station back, and the normal catalog lists
+/// exactly the pods some station takes. Returns the placements.
+fn check_pods(
+    standard: &Loadout,
+    pods: &[DesignatorStore],
+    aircraft: &Aircraft,
+    data: &BTreeMap<String, Vec<u8>>,
+) -> AppResult<usize> {
+    let pt = aircraft.id.pt();
+    let mut placements = 0;
+    let mut offered = std::collections::BTreeSet::new();
+    for pod in pods {
+        let slots: Vec<usize> = (0..standard.configuration.stations.len())
+            .filter(|slot| standard.designator_capacity(*slot, pod) > 0)
+            .collect();
+        for &slot in &slots {
+            let mut draft = standard.clone();
+            draft.load_designator(slot, pod.clone())?;
+            if draft.designator(slot) != Some(pod) || draft.quantities[slot] != 0 {
+                return Err(format!("{pt} station {slot} did not take {}", pod.source).into());
+            }
+            assert_roundtrip(&draft, standard, aircraft, data)?;
+            // A weapon taking the station back removes the pod.
+            let weapon = draft.configuration.stations[slot].weapon.clone();
+            let mut back = draft.clone();
+            if back.capacity(slot, &weapon) > 0 {
+                back.change(slot, 1);
+                if back.designator(slot).is_some() {
+                    return Err(
+                        format!("{pt} station {slot} kept {} under a weapon", pod.source).into(),
+                    );
+                }
+            }
+            // One pod to an aircraft: the next one moves it.
+            for other in pods.iter().filter(|other| other.source != pod.source) {
+                let mut second = draft.clone();
+                if second.load_designator(slot, other.clone()).is_ok()
+                    && (second.configuration.designator_pods.len() != 1
+                        || second.designator(slot) != Some(other))
+                {
+                    return Err(format!("{pt} carries more than one designator pod").into());
+                }
+            }
+            placements += 1;
+        }
+        if !slots.is_empty() {
+            offered.insert(pod.source.clone());
+        }
+    }
+    let listed = crate::ordnance::designator_sources(standard, data, false)?;
+    if listed
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        != offered
+    {
+        return Err(format!(
+            "{pt} normal catalog lists pods {listed:?}, the rules accept {offered:?}"
+        )
+        .into());
+    }
+    let cheat = crate::ordnance::designator_sources(standard, data, true)?;
+    if cheat.len() != pods.len() {
+        return Err(format!("{pt} Cheat catalog lists pods {cheat:?}").into());
+    }
+    Ok(placements)
 }
 
 /// Boulder and Moose (decision 16): the normal Load Ordnance rules give them

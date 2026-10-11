@@ -327,10 +327,21 @@ impl LoadoutSpec {
                 .stations
                 .iter()
                 .zip(&load.quantities)
-                .map(|(station, &quantity)| StationLoad {
-                    weapon: station.weapon.source.clone(),
-                    count: station.count,
-                    quantity,
+                .enumerate()
+                .map(|(slot, (station, &quantity))| match load.designator(slot) {
+                    // A laser designator pod hangs where a weapon would: the
+                    // row names the pod's SEE record and carries none of the
+                    // station's weapon (X1, decision 7).
+                    Some(pod) => StationLoad {
+                        weapon: pod.source.clone(),
+                        count: station.count,
+                        quantity: 0,
+                    },
+                    None => StationLoad {
+                        weapon: station.weapon.source.clone(),
+                        count: station.count,
+                        quantity,
+                    },
                 })
                 .collect(),
         }
@@ -365,8 +376,16 @@ impl LoadoutSpec {
         }
         base.cheat = self.cheat;
         base.fuel_lbs = self.fuel_lbs;
+        let mut pods = Vec::new();
         for (index, load) in self.stations.iter().enumerate() {
             let station = &mut base.configuration.stations[index];
+            if load.weapon.ends_with(".SEE") {
+                // A laser designator pod on this station (decision 7): the
+                // station keeps its own weapon, unloaded.
+                base.quantities[index] = 0;
+                pods.push((index, load.weapon.clone()));
+                continue;
+            }
             if station.weapon.source != load.weapon {
                 let bytes = resources
                     .get(&load.weapon)
@@ -401,6 +420,13 @@ impl LoadoutSpec {
                 station.quantity = tank.quantity;
             }
             base.configuration.refresh_tanks()?;
+        }
+        for (index, name) in pods {
+            let bytes = resources
+                .get(&name)
+                .ok_or_else(|| format!("missing loadout resource {name}"))?;
+            let pod = tore_sim::combat::sight::DesignatorStore::parse(&name, bytes)?;
+            base.load_designator(index, pod)?;
         }
         base.refresh_equipment()?;
         Ok(base)

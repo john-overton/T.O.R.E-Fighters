@@ -11,6 +11,7 @@ use tore_formats::{Pic, weapons::Weapon};
 use tore_sim::{
     combat::live::OwnshipInput,
     combat::loadout::{EditableStation, Loadout, novelty, supported},
+    combat::sight::{DESIGNATOR_PODS, DesignatorStore},
     models::FlightModel,
 };
 type Rect = (i32, i32, i32, i32);
@@ -23,6 +24,7 @@ const STATIONS_PER_PAGE: usize = 6;
 enum CatalogEntry {
     Weapon(usize),
     Tank(usize),
+    Designator(usize),
 }
 #[derive(Clone, Copy)]
 enum RetainedKind {
@@ -35,6 +37,8 @@ enum DragSource {
     Station(usize),
     TankCatalog(usize),
     TankStation(usize),
+    DesignatorCatalog(usize),
+    DesignatorStation(usize),
 }
 struct Drag {
     source: DragSource,
@@ -73,6 +77,10 @@ pub struct Ordnance {
     catalog: Vec<Weapon>,
     tanks: Vec<tore_sim::combat::live::TankStore>,
     tank_catalog: Vec<tore_sim::combat::live::TankStore>,
+    /// The laser designator pods (Pave Spike, Pave Knife) the import has, and
+    /// the ones the catalog lists.
+    designators: Vec<DesignatorStore>,
+    designator_catalog: Vec<DesignatorStore>,
     sprites: BTreeMap<String, Sprite>,
     category: usize,
     pages: [usize; 2],
@@ -178,6 +186,10 @@ impl Ordnance {
             .filter(|(name, _)| name.ends_with(".GAS"))
             .map(|(name, bytes)| tore_sim::combat::live::TankStore::parse(name, bytes))
             .collect::<tore_formats::Result<Vec<_>>>()?;
+        let designators = DESIGNATOR_PODS
+            .iter()
+            .filter_map(|name| DesignatorStore::parse(name, data.get(*name)?).ok())
+            .collect::<Vec<_>>();
         let mut ordnance = Self {
             loadout,
             visible: true,
@@ -185,6 +197,8 @@ impl Ordnance {
             catalog: vec![],
             tanks,
             tank_catalog: vec![],
+            designators,
+            designator_catalog: vec![],
             sprites,
             category: 0,
             pages: [0; 2],
@@ -285,6 +299,18 @@ impl Ordnance {
             })
             .cloned()
             .collect();
+        // Laser designator pods go on pod stations (decision 7); Cheat loading
+        // lists both. The lobby's page does not offer them ([`Self::page_entries`]).
+        self.designator_catalog = self
+            .designators
+            .iter()
+            .filter(|pod| {
+                load.cheat
+                    || (0..load.hardpoints.len())
+                        .any(|slot| load.designator_capacity(slot, pod) > 0)
+            })
+            .cloned()
+            .collect();
         self.pages = [0; 2];
         self.selected = None;
     }
@@ -292,7 +318,7 @@ impl Ordnance {
         for row in self.loadout.editable_stations() {
             if self.loaded_tank(&row).is_some() {
                 self.retained_kind.insert(row.hardpoint, RetainedKind::Tank);
-            } else if self.loaded_weapon(&row).is_some() {
+            } else if self.loaded_weapon(&row).is_some() || self.loaded_designator(&row).is_some() {
                 self.retained_kind
                     .insert(row.hardpoint, RetainedKind::Weapon);
             }
@@ -311,6 +337,16 @@ impl Ordnance {
                 CatalogEntry::Weapon(index)
                     if row.weapon.is_some_and(|slot| {
                         self.loadout.capacity(slot, &self.catalog[index]) > 0
+                    }) =>
+                {
+                    return RetainedKind::Weapon;
+                }
+                // A pod hangs on the weapon row.
+                CatalogEntry::Designator(index)
+                    if row.weapon.is_some_and(|slot| {
+                        self.loadout
+                            .designator_capacity(slot, &self.designator_catalog[index])
+                            > 0
                     }) =>
                 {
                     return RetainedKind::Weapon;
@@ -338,6 +374,11 @@ impl Ordnance {
                 .is_some_and(|quantity| *quantity > 0)
         })
     }
+    /// The weapon slot of `row` when a laser designator pod hangs on it.
+    fn loaded_designator(&self, row: &EditableStation) -> Option<usize> {
+        row.weapon
+            .filter(|slot| self.loadout.designator(*slot).is_some())
+    }
     fn loaded_tank(&self, row: &EditableStation) -> Option<usize> {
         row.tank.filter(|slot| {
             self.loadout
@@ -360,6 +401,14 @@ impl Ordnance {
         };
         if let Some(slot) = self.loaded_tank(&row) {
             return self.edit_loadout(|load| load.change_tank(slot, direction));
+        }
+        // One pod to an aircraft: minus takes it off, plus has nothing to add.
+        if let Some(slot) = self.loaded_designator(&row) {
+            return if direction < 0 {
+                self.edit_loadout(|load| load.unload_designator(slot))
+            } else {
+                Action::None
+            };
         }
         let weapon = self.loaded_weapon(&row).or_else(|| {
             matches!(self.empty_kind(&row), RetainedKind::Weapon)
@@ -412,6 +461,13 @@ impl Ordnance {
                 }
                 self.edit_loadout(|load| load.select(slot, weapon))
             }
+            CatalogEntry::Designator(index) => {
+                let Some(slot) = row.weapon else {
+                    return self.cannot_load();
+                };
+                let pod = self.designator_catalog[index].clone();
+                self.edit_loadout(|load| load.load_designator(slot, pod))
+            }
         }
     }
 
@@ -438,6 +494,29 @@ impl Ordnance {
                 self.selected = Some(CatalogEntry::Tank(index));
                 let tank = self.tank_catalog[index].clone();
                 self.edit_loadout(|load| load.select_tank(slot, tank))
+            }
+            DragSource::DesignatorCatalog(index) => {
+                let Some(slot) = row.weapon else {
+                    return self.cannot_load();
+                };
+                self.selected = Some(CatalogEntry::Designator(index));
+                let pod = self.designator_catalog[index].clone();
+                self.edit_loadout(|load| load.load_designator(slot, pod))
+            }
+            DragSource::DesignatorStation(index) => {
+                let Some(pod) = self
+                    .station_row(index)
+                    .and_then(|row| row.weapon)
+                    .and_then(|slot| self.loadout.designator(slot).cloned())
+                else {
+                    return Action::None;
+                };
+                let Some(target) = row.weapon else {
+                    return self.cannot_load();
+                };
+                self.selected = None;
+                // The aircraft's one pod moves to the new station.
+                self.edit_loadout(|load| load.load_designator(target, pod))
             }
             DragSource::Station(index) => {
                 let Some(source) = self.station_row(index).and_then(|row| row.weapon) else {
@@ -467,6 +546,14 @@ impl Ordnance {
             DragSource::TankCatalog(index) => {
                 tank_thumbnail(&self.sprites, &self.tank_catalog[index])
             }
+            DragSource::DesignatorCatalog(index) => {
+                designator_thumbnail(&self.sprites, &self.designator_catalog[index])
+            }
+            DragSource::DesignatorStation(index) => self
+                .station_row(index)
+                .and_then(|row| row.weapon)
+                .and_then(|slot| self.loadout.designator(slot))
+                .and_then(|pod| designator_thumbnail(&self.sprites, pod)),
             DragSource::Station(index) => self
                 .station_row(index)
                 .and_then(|row| row.weapon)
@@ -493,6 +580,11 @@ impl Ordnance {
         if self.category == 1 {
             (0..self.tank_catalog.len())
                 .map(CatalogEntry::Tank)
+                .chain(
+                    (0..self.designator_catalog.len())
+                        .filter(|_| !self.lobby)
+                        .map(CatalogEntry::Designator),
+                )
                 .chain(weapons)
                 .collect()
         } else {
@@ -537,10 +629,13 @@ impl Ordnance {
             Some(id @ 100..=107) => self.card_index(id).map(|entry| match entry {
                 CatalogEntry::Weapon(index) => DragSource::Catalog(index),
                 CatalogEntry::Tank(index) => DragSource::TankCatalog(index),
+                CatalogEntry::Designator(index) => DragSource::DesignatorCatalog(index),
             }),
             Some(id @ 200..=231) => self.station_row(id - 200).and_then(|row| {
                 if self.loaded_tank(&row).is_some() {
                     Some(DragSource::TankStation(id - 200))
+                } else if self.loaded_designator(&row).is_some() {
+                    Some(DragSource::DesignatorStation(id - 200))
                 } else {
                     self.loaded_weapon(&row)
                         .map(|_| DragSource::Station(id - 200))
@@ -617,6 +712,14 @@ impl Ordnance {
                         self.station = source;
                         return self.edit_loadout(|load| load.unload_tank(slot));
                     }
+                    DragSource::DesignatorStation(source) => {
+                        let Some(slot) = self.station_row(source).and_then(|row| row.weapon) else {
+                            return Action::None;
+                        };
+                        self.selected = None;
+                        self.station = source;
+                        return self.edit_loadout(|load| load.unload_designator(slot));
+                    }
                     _ => {}
                 }
             }
@@ -680,6 +783,7 @@ impl Ordnance {
             .iter()
             .map(|s| (s.store.as_ref().map(|t| t.source.clone()), s.quantity))
             .collect();
+        let pods_before = self.loadout.configuration.designator_pods.clone();
         let rollback = self.loadout.clone();
         let fuel = self.loadout.fuel_lbs;
         self.message = None;
@@ -706,6 +810,10 @@ impl Ordnance {
             .any(|((station, count), (source, _, old_count))| {
                 *count > *old_count || (*count > 0 && station.weapon.source != *source)
             });
+        // A pod hung or taken off sounds as a weapon does.
+        if pods_before != self.loadout.configuration.designator_pods && !weapon_added {
+            return Action::OrdnanceWeapon;
+        }
         if tank_before != tank_after && !weapon_added {
             return Action::OrdnanceFuel;
         }
@@ -802,6 +910,7 @@ impl Ordnance {
             12 => {
                 self.remember_occupants();
                 self.loadout.quantities.fill(0);
+                self.loadout.configuration.designator_pods.clear();
                 let _ = self.loadout.clear_tanks();
                 self.menu = false;
             }
@@ -813,6 +922,7 @@ impl Ordnance {
                 // Toggling unloads every station, then rebuilds the catalog.
                 self.remember_occupants();
                 self.loadout.quantities.fill(0);
+                self.loadout.configuration.designator_pods.clear();
                 let _ = self.loadout.clear_tanks();
                 self.loadout.cheat = !self.loadout.cheat;
                 self.rebuild_catalog();
@@ -842,7 +952,10 @@ impl Ordnance {
                 let Some(row) = self.station_row(self.station) else {
                     return Action::None;
                 };
-                if self.loaded_weapon(&row).is_some() || self.loaded_tank(&row).is_some() {
+                if self.loaded_weapon(&row).is_some()
+                    || self.loaded_tank(&row).is_some()
+                    || self.loaded_designator(&row).is_some()
+                {
                     self.selected = None;
                     return self.change_station(self.station, 1, true);
                 }
@@ -975,6 +1088,15 @@ impl Ordnance {
                     self.selected == Some(CatalogEntry::Tank(index)),
                     true,
                 ),
+                CatalogEntry::Designator(index) => designator_card(
+                    &mut c,
+                    &self.sprites,
+                    &self.designator_catalog[index],
+                    x,
+                    y,
+                    self.selected == Some(CatalogEntry::Designator(index)),
+                    true,
+                ),
                 CatalogEntry::Weapon(index) => {
                     card(
                         &mut c,
@@ -1065,6 +1187,20 @@ impl Ordnance {
                         None,
                     );
                 }
+            } else if let Some(pod) = self
+                .loaded_designator(row)
+                .and_then(|slot| self.loadout.designator(slot))
+            {
+                designator_card(
+                    &mut c,
+                    &self.sprites,
+                    pod,
+                    x + 3,
+                    y + 14,
+                    self.station == index,
+                    false,
+                );
+                c.text(font, "1 loaded (max 1)", x + 3, y + 52, None);
             } else if let Some(slot) = self.loaded_weapon(row) {
                 let station = &self.loadout.configuration.stations[slot];
                 let quantity = self.loadout.quantities[slot];
@@ -1325,6 +1461,54 @@ fn guidance(w: &Weapon) -> &'static str {
         4 => "passive rdr",
         _ => "",
     }
+}
+/// A laser designator pod's card: its name, its weight and "laser" in the
+/// seeker corner (A2G decision 7).
+fn designator_card(
+    c: &mut Canvas,
+    sprites: &BTreeMap<String, Sprite>,
+    pod: &DesignatorStore,
+    x: i32,
+    y: i32,
+    selected: bool,
+    catalog: bool,
+) {
+    card_outline(c, x, y, selected);
+    if let Some(icon) = designator_thumbnail(sprites, pod) {
+        c.blit(
+            icon,
+            (
+                x + (CARD_WIDTH - icon.width as i32) / 2,
+                y - 1 + (CARD_HEIGHT - icon.height as i32) / 2,
+            ),
+            0,
+            icon.width,
+            1.,
+        );
+    }
+    let font = &sprites[if selected { "WPNYELLOW" } else { "QUICKFONT" }];
+    let mut name = pod.name.clone();
+    while text_width(font, &name) > 111 && !name.is_empty() {
+        name.pop();
+    }
+    c.text(font, &name, x, y + 25, None);
+    if catalog {
+        let font = &sprites["WPNBLUE"];
+        c.text(font, &format!("{} lbs", pod.weight_lbs), x, y + 37, None);
+        c.text(
+            font,
+            "laser",
+            x + 111 - text_width(font, "laser"),
+            y + 37,
+            None,
+        );
+    }
+}
+fn designator_thumbnail<'a>(
+    sprites: &'a BTreeMap<String, Sprite>,
+    pod: &DesignatorStore,
+) -> Option<&'a Sprite> {
+    sprites.get(&format!("${}.PIC", pod.source.trim_end_matches(".SEE")))
 }
 fn tank_card(
     c: &mut Canvas,
@@ -1872,6 +2056,23 @@ pub fn catalog_sources(
     Ok(ui.catalog.iter().map(|w| w.source.clone()).collect())
 }
 
+/// The designator pod names the page's weapon catalog offers for `load`,
+/// normal or under Cheat loading.
+pub fn designator_sources(
+    load: &Loadout,
+    data: &BTreeMap<String, Vec<u8>>,
+    cheat: bool,
+) -> AppResult<Vec<String>> {
+    let mut load = load.clone();
+    load.cheat = cheat;
+    let ui = Ordnance::new(load, data)?;
+    Ok(ui
+        .designator_catalog
+        .iter()
+        .map(|pod| pod.source.clone())
+        .collect())
+}
+
 fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let mut ui = Ordnance::new(load.clone(), data)?;
     let mut pixels = vec![0; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
@@ -2229,6 +2430,8 @@ mod tests {
             catalog,
             tanks: vec![],
             tank_catalog: vec![],
+            designators: vec![],
+            designator_catalog: vec![],
             sprites,
             category: 0,
             pages: [0; 2],
@@ -3155,5 +3358,119 @@ mod tests {
         assert_eq!(word(0x2236f, 3), "SARH");
         assert_eq!(word(0x2a06f, 3), "active rdr");
         assert_eq!(word(0x2204f, 4), "passive rdr");
+    }
+    fn with_pod_station() -> Ordnance {
+        let mut ui = fixture();
+        // Station 1 hangs a pod: the retail pod-station flags and weight class.
+        ui.loadout.hardpoints[1].flags = 0x1785;
+        ui.loadout.hardpoints[1].weight_class = 32;
+        ui.designators = vec![DesignatorStore {
+            source: "PAVESPK.SEE".into(),
+            name: "Pave Spike".into(),
+            sensor: tore_sim::combat::sight::SightSensor {
+                laser: true,
+                range_ft: 60_760.,
+                gimbal: tore_sim::combat::sight::Gimbal::Hemisphere,
+                eye: [0., -5., 0.],
+                default_look: [0., -0.17],
+            },
+            weight_lbs: 425,
+            flags: 1,
+        }];
+        ui.rebuild_catalog();
+        ui
+    }
+    #[test]
+    fn a_designator_pod_is_listed_loaded_moved_and_taken_off_like_any_store() {
+        let mut ui = with_pod_station();
+        assert_eq!(ui.designator_catalog.len(), 1);
+        // The air-to-surface page lists the pod after the tanks and before the
+        // weapons; the air-to-air page lists none.
+        ui.activate(4);
+        assert_eq!(ui.page_entries()[0], CatalogEntry::Designator(0));
+        ui.activate(3);
+        assert!(
+            ui.page_entries()
+                .iter()
+                .all(|entry| !matches!(entry, CatalogEntry::Designator(_)))
+        );
+        ui.activate(4);
+        // Click the card and a station that takes it: the pod replaces the
+        // weapon, which is unloaded, and the station shows the pod.
+        ui.activate(100);
+        assert_eq!(ui.selected, Some(CatalogEntry::Designator(0)));
+        // Station 0 is an air-to-air rail: it cannot hang a pod.
+        assert_eq!(ui.load_selected(0), Action::None);
+        assert!(ui.loadout.designator(0).is_none());
+        assert_eq!(ui.activate(201), Action::OrdnanceWeapon);
+        assert!(ui.loadout.designator(1).is_some());
+        assert_eq!(ui.loadout.quantities[1], 0);
+        let row = ui.station_row(1).unwrap();
+        assert_eq!(ui.loaded_designator(&row), Some(1));
+        // One pod to an aircraft and nothing to add to it: a click does
+        // nothing, and the card page can still be drawn.
+        assert_eq!(ui.activate(201), Action::None);
+        assert_eq!(ui.loadout.configuration.designator_pods.len(), 1);
+        let mut pixels = vec![0; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
+        ui.render(&mut pixels);
+        // Right-click takes it off; the weapon's quantity stays unloaded.
+        ui.station = 1;
+        assert_eq!(ui.change_station(1, -1, false), Action::OrdnanceWeapon);
+        assert!(ui.loadout.designator(1).is_none());
+        assert_eq!(ui.loadout.quantities[1], 0);
+        // A weapon taking the station back removes the pod.
+        ui.activate(101);
+        ui.loadout
+            .load_designator(1, ui.designators[0].clone())
+            .unwrap();
+        ui.loadout.quantities[1] = 1;
+        ui.loadout.refresh_equipment().unwrap();
+        assert!(ui.loadout.designator(1).is_none());
+    }
+    #[test]
+    fn a_designator_pod_drags_between_stations_and_off_to_the_catalog() {
+        let mut ui = with_pod_station();
+        ui.activate(4);
+        // A second pod station (flags and weight class as the first).
+        ui.loadout.hardpoints[0].flags = 0x1785;
+        ui.loadout.hardpoints[0].weight_class = 32;
+        ui.drop_store(DragSource::DesignatorCatalog(0), 1);
+        assert!(ui.loadout.designator(1).is_some());
+        // Dragged to the other pod station, the aircraft's one pod moves.
+        assert_eq!(
+            ui.drop_store(DragSource::DesignatorStation(1), 0),
+            Action::OrdnanceWeapon
+        );
+        assert!(ui.loadout.designator(0).is_some() && ui.loadout.designator(1).is_none());
+        // Dragged to a station that cannot take it, nothing changes.
+        assert_eq!(
+            ui.drop_store(DragSource::DesignatorStation(0), 2),
+            Action::None
+        );
+        assert!(ui.loadout.designator(0).is_some());
+        assert!(
+            ui.drag_thumbnail(DragSource::DesignatorStation(0))
+                .is_none(),
+            "no art in the fixture"
+        );
+        // Unload All and the Cheat toggle take the pod off.
+        ui.activate(12);
+        assert!(ui.loadout.configuration.designator_pods.is_empty());
+        ui.drop_store(DragSource::DesignatorCatalog(0), 1);
+        ui.activate(13);
+        assert!(ui.loadout.configuration.designator_pods.is_empty());
+        // Cheat loading lists the pod whatever the aircraft's stations.
+        assert_eq!(ui.designator_catalog.len(), 1);
+    }
+    #[test]
+    fn the_lobbys_page_does_not_offer_designator_pods() {
+        let mut ui = with_pod_station();
+        ui.lobby = true;
+        ui.activate(4);
+        assert!(
+            ui.page_entries()
+                .iter()
+                .all(|entry| !matches!(entry, CatalogEntry::Designator(_)))
+        );
     }
 }

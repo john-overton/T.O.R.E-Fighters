@@ -5,9 +5,12 @@
 `a2g-catalog` runs `--validate-ordnance`, whose audit now also covers the 14
 bomb, cluster bomb and pod records the A2G round added (Mk 84, FAB-250, -500
 and -1000, Mk 82 3-pack, Snakeye, 6-pack and 7-pack, CBU-87, CBU-97, Mk 20,
-RBK-250, RBK-500 and LAU-10) and the novelty bombs:
+RBK-250, RBK-500 and LAU-10), the Pave Spike and Pave Knife pods and the novelty
+bombs:
 
 * all 54 supported records are found and every compatible station takes them;
+* each laser designator pod loads on every station that takes it, one to an aircraft,
+  and survives the saved mission;
 * the normal catalog offers exactly what some station of the aircraft accepts,
   for every one of the 36 aircraft, and never Boulder or Moose;
 * Cheat loading lists every supported record and both novelty bombs, and no
@@ -64,6 +67,7 @@ def scenarios() -> list[Scenario]:
             timeout=600,
             expect=[
                 r"ordnance audit: 36 aircraft, 9 recovered weapon stations, \d+ weapon placements, 146 tank placements, \d+ weapon and 4 tank records; passed",
+                r"ordnance audit: 2 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
                 r"ordnance audit: 2 novelty records, 160 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],

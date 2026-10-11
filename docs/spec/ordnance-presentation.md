@@ -78,8 +78,32 @@ With the 40 records supported before, the list holds 54. MK82 itself was
 already listed. Rows carry no change to any aircraft's default stations: each
 aircraft's flyable defaults are still its reviewed set, so these stores load
 only through the page, a saved loadout or Cheat. The other air-to-ground
-records (guided bombs, JDAMs, the remaining missiles and the Pave pods) join
+records (guided bombs, JDAMs and the remaining missiles) join
 the list in the slices that make them work.
+
+### Laser designator pods
+
+The Pave Spike (`PAVESPK`) and Pave Knife (`PAVEKNF`) laser pods load on any
+pod station, the retail equipment rule T1 implemented (decision 7;
+[air-to-ground](air-to-ground.md)). The page lists them in the air-to-surface
+catalog after the tanks and before the weapons, each as a card with the
+original `$PAVESPK` or `$PAVEKNF` thumbnail, the pod's name, its weight and
+"laser" in the seeker corner. Normal loading lists a pod when some station of the
+aircraft can hang it; Cheat loading lists both.
+
+A pod takes the station's place: loading one leaves the station's weapon
+unloaded (and a tank on the same mount off), and a weapon or tank taking the
+station back removes the pod. An aircraft carries one pod: loading a second, or
+dragging the loaded one to another pod station, moves it. The station shows the
+pod card and "1 loaded (max 1)"; a click on it adds nothing, a right-click or a
+drag onto the catalog takes it off, and Unload All and the Cheat toggle take it
+off. A pod hung or taken off plays the weapon cue (opinionated, agent). The
+lobby's page does not offer pods: a multiplayer loadout carries weapons and
+tanks until the multiplayer slice carries pods. The saved loadout names the pod's
+SEE record on the station's row with none of the station's weapon, so the
+mission the page builds, a saved mission text and the checks of
+the loadout spec all keep it (agent decision). The ordnance audit loads each pod on every
+station that takes it and restores it through the saved mission.
 
 ### Novelty bombs are Cheat only
 
