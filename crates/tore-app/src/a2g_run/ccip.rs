@@ -208,6 +208,7 @@ impl Tracker {
     pub fn update(&mut self, scene: &Scene, pipper: Option<Vector>) {
         let state = &scene.world.combat.state;
         let tick = state.tick();
+        let bomb = ballistics::is_bomb(&scene.station().weapon);
         for p in state
             .projectiles
             .iter()
@@ -234,6 +235,8 @@ impl Tracker {
                 .map(|m| (m.position, "ground"))
                 .chain(state.effects.iter().filter_map(|e| {
                     let kind = match e.kind {
+                        // A dud's puff of dirt: the bullet-on-land dust burst.
+                        EffectKind::Ground if bomb && matches!(e.blast, Some(15 | 16)) => "dud",
                         EffectKind::Ground => "ground",
                         EffectKind::Hit => "hit",
                         EffectKind::Destroyed => "destroyed",

@@ -98,6 +98,9 @@ pub enum FriendlyFire {
 pub const INCOMING_OWNER: u32 = u32::MAX;
 pub const MAX_EFFECTS: usize = 64;
 pub const MAX_HIT_RECORDS: usize = 128;
+/// The puff a dud bomb raises: the original's bullet-on-land explosion, its
+/// smallest dust burst (explosion type 15; docs/spec/explosions.md).
+const DUD_PUFF: u8 = 15;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
 const BAY_RELEASE_TICKS: u64 = 360;
 /// Fitted: the bay stays open 1 second after a release so the weapon clears.
@@ -5232,6 +5235,16 @@ impl State {
                     );
                     if burst.collateral() {
                         bursts.push(burst);
+                    }
+                } else if super::ballistics::is_bomb(w) && !armed {
+                    // A bomb that reaches the ground before its fuze arms is a
+                    // dud: no burst, no splash, no crater, only a puff of dirt
+                    // where it lands (opinionated, lead, 2026-10-10;
+                    // docs/spec/air-to-ground.md, "Warnings").
+                    self.ledger.resolve(p.id, Resolution::Missed);
+                    events.push(Event::Ground);
+                    if !water(position[0], position[2]) {
+                        impacts.push((position, EffectKind::Ground, DUD_PUFF, 0));
                     }
                 } else {
                     self.ledger.resolve(p.id, Resolution::Missed);

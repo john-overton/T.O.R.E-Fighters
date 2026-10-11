@@ -318,3 +318,85 @@ fn imp_counts_down_the_last_bombs_fall() {
     let later = s.own().delivery.as_ref().unwrap().falling.unwrap();
     assert!((first - later - 1.).abs() < 0.02, "{first} {later}");
 }
+
+/// Drops one Mk 82 (five seconds to arm, 2,000 ft splash at 100 percent) from a
+/// level pass at `altitude` over a ground target placed where it lands, and
+/// returns the target's hit points, the craters and the ground effects' blasts.
+fn drop_on_target(altitude: f64) -> (i32, usize, Vec<Option<u8>>) {
+    let mut w = mk82();
+    w.damage.fuze_arm_t = 20;
+    w.damage.fuze_radius = 0;
+    w.damage.collateral_radius = 2_000;
+    w.damage.collateral_percent = 100;
+    w.effects.land_explosion = 21;
+    w.effects.crater_size = 3;
+    let mut s = carrying(w, 4);
+    let launcher = pass(altitude, 0., 450., 0.);
+    let release = ReleaseState::from_station(&launcher, &s.own().configuration().stations[1], 0);
+    let impact = predict_impact(release, |_, _| 0.).unwrap().position;
+    // 300 ft beside the mean impact: inside the splash wherever the scatter
+    // takes the bomb.
+    designate_ground(&mut s, impact[0] + 300., impact[2]);
+    step(&mut s, true, launcher);
+    assert_eq!(bombs(&s), 1);
+    let mut blasts = Vec::new();
+    for _ in 0..(10 * 120) {
+        step(&mut s, false, away());
+        blasts.extend(
+            s.effects
+                .iter()
+                .filter(|e| matches!(e.kind, EffectKind::Ground) && e.ticks > 0)
+                .map(|e| e.blast),
+        );
+        if s.projectiles.is_empty() {
+            break;
+        }
+    }
+    let hp = s.targets.iter().find(|t| t.id == TARGET).unwrap().hp;
+    let craters = s
+        .marks
+        .iter()
+        .filter(|m| matches!(m.kind, crate::combat::blast::MarkKind::Crater(_)))
+        .count();
+    (hp, craters, blasts)
+}
+
+#[test]
+fn a_bomb_that_lands_before_its_fuze_arms_is_a_dud() {
+    // From 50 ft it falls 1.8 s (3.4 s at most with the scatter lofting it),
+    // short of the 5 s arm time: LOW, and on the ground a puff of dirt with
+    // no burst, splash or crater.
+    let low = solve_low(50.);
+    assert!(low);
+    let (hp, craters, blasts) = drop_on_target(50.);
+    assert_eq!(hp, 1_000, "a dud hurt the target");
+    assert_eq!(craters, 0);
+    assert!(!blasts.is_empty());
+    // The bullet-on-land dust burst, after its variety roll (types 15, 16).
+    let puff = |b: &Option<u8>| matches!(b, Some(15 | 16));
+    assert!(blasts.iter().all(puff), "{blasts:?}");
+    // From 800 ft (7 s, 5.9 s at least) it is armed: the burst, its splash
+    // and a crater.
+    assert!(!solve_low(800.));
+    let (hp, craters, blasts) = drop_on_target(800.);
+    assert!(
+        hp < 1_000,
+        "the armed burst missed: hp {hp} craters {craters} {blasts:?}"
+    );
+    assert_eq!(craters, 1);
+    assert!(!blasts.iter().any(puff), "{blasts:?}");
+}
+
+/// Whether the sight warns LOW for the five-second Mk 82 at `altitude`.
+fn solve_low(altitude: f64) -> bool {
+    let mut w = mk82();
+    w.damage.fuze_arm_t = 20;
+    let mut s = carrying(w, 4);
+    step(&mut s, false, pass(altitude, 0., 450., 0.));
+    s.own()
+        .delivery
+        .as_ref()
+        .unwrap()
+        .warnings
+        .contains(&Warning::Low)
+}
