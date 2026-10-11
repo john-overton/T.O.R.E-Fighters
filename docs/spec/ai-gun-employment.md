@@ -94,6 +94,14 @@ and hit events remain the evidence of physical fire, not the activity label.
 Original alignment tolerance, skill-dependent gun accuracy and tracking policy
 remain unknown. Next research would recover bounded contracts for those behaviors.
 
+## Strafing
+
+An AI striker's gun run against a ground target (AI strike round, slice
+ST-T2) keeps this section's burst policy (0.5 s of fire, 0.5 s of recovery,
+the gun's own cadence, rounds along the barrel from the mount), but aims the
+gun's ground cue at a seeded point in John's skill circle per burst instead of
+tracking an aircraft: [how the AI flies a pass](ai-strike.md#how-the-ai-flies-a-pass).
+
 ## Acceptance
 
 - Restore valid station/lock/path after expiry without losing the target; repeat

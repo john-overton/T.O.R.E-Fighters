@@ -1412,6 +1412,17 @@ floor is active (fitted, agent decision 2026-09-28, after the bug battery saw
 undamaged AI aircraft fly into hills at full G while still turning toward a
 target, or ease into a rising hillside at 2 G; the airfield terrain correction
 already levels the wings the same way).
+A striker's attack steers alone may ask for two more handlings (AI strike
+round, slice ST-T2; fitted, agent; [how the AI flies a
+pass](ai-strike.md#how-the-ai-flies-a-pass)). **Roll and pull**: the lift is
+rolled onto the wanted direction and pulled, so a nose-down change of 30
+degrees or more that needs more than a 1 G push rolls inverted and pulls
+(retail's dive bomb roll-in), at the aircraft's full roll rate, with the load
+held off while the lift is more than 45 degrees from its bank. **Planned dive**:
+the terrain floor is the dive's planned pull-out (the physical pull-out arc at
+the AI's G limit plus 1 s of sink, bottoming out 1,000 ft over the highest
+ground ahead) instead of the floor above. Every other motion, air combat
+included, is flown exactly as described here.
 Invert the model's loaded stick-to-G mapping, with low-speed authority floored
 at 0.01 only for division, and clamp pitch input to [-1, 1]. Rudder stays zero.
 For the researched model, this includes its flap-adjusted minimum speed,
