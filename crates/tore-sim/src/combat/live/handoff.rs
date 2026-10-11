@@ -228,6 +228,11 @@ impl super::State {
     pub fn kept(&self, aircraft: u32) -> Option<&Kept> {
         self.kept.get(&aircraft)
     }
+    /// Every aircraft the AI flies with a human's cockpit kept, in aircraft
+    /// order, for the replay to follow their lasers and designations.
+    pub fn kept_cockpits(&self) -> impl Iterator<Item = (u32, &Kept)> {
+        self.kept.iter().map(|(aircraft, kept)| (*aircraft, kept))
+    }
     /// Takes what a human left set in `aircraft`'s cockpit, for the human
     /// who takes it now.
     pub fn take_kept(&mut self, aircraft: u32) -> Option<Kept> {

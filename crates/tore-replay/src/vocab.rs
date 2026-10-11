@@ -607,6 +607,10 @@ pub mod field {
     pub const STATE: &str = "state";
     /// How a laser was turned on: automatic or by hand.
     pub const HOW: &str = "how";
+    /// A flag: the cockpit is one a human gave back to the AI, which flies
+    /// the aircraft while its laser and designation stay as the human left
+    /// them (slice FX-K). Absent when a human flies it.
+    pub const KEPT: &str = "kept";
     /// Why a laser is masked.
     pub const MASK: &str = "mask";
     /// How a ground target was designated: [`super::designate`].
