@@ -362,6 +362,12 @@ pub const TERRAIN_IGNORED_FT: f64 = 300.0;
 pub const ROLLOUT_ELEVATOR: f64 = -0.5;
 /// Spec-derived: the rollout ends below 1 ft/s.
 pub const ROLLOUT_STOPPED_FPS: f64 = 1.0;
+/// Fitted (agent decision, slice CL-AP 2026-10-11): approaching an anchor
+/// it stops at, a taxiing aircraft holds the speed from which this
+/// deceleration stops it there (never below [`SLOW_TAXI_FPS`]). At full
+/// taxi speed the stop used to run about 90 ft past the anchor, off the end
+/// of a taxiway corner.
+pub const STOP_APPROACH_DECEL_FPS2: f64 = 2.0;
 /// Fitted: a taxi-in anchor counts as reached within this distance.
 pub const ANCHOR_REACHED_FT: f64 = 30.0;
 /// Spec-derived: throttle closed within 200 ft of the parking slot.
@@ -387,8 +393,29 @@ const NOSEWHEEL_YAW_RATE_RAD_S: f64 = 0.3;
 const NOSEWHEEL_FULL_SPEED_FPS: f64 = 40.0;
 /// Fitted: ground heading error, degrees, to requested turn rate, deg/s.
 const GROUND_HEADING_GAIN: f64 = 1.0;
+/// Fitted (agent decision, slice CL-AP 2026-10-11): on the ground a held
+/// heading error builds a rudder trim at this rate per degree per second,
+/// up to [`GROUND_TRIM_LIMIT`], so a steady crosswind on the takeoff roll,
+/// the rollout or the taxiway no longer leaves the aircraft holding a
+/// heading 7 degrees off and running onto the grass (a Vladivostok takeoff
+/// drifted 158 ft off the centre line). It learns only while rolling and
+/// within [`GROUND_TRIM_ERROR_DEG`] of the heading it wants, so a turn onto
+/// the next taxiway does not wind it up.
+pub const GROUND_TRIM_GAIN: f64 = 0.02;
+pub const GROUND_TRIM_LIMIT: f64 = 0.6;
+pub const GROUND_TRIM_ERROR_DEG: f64 = 15.0;
+/// Below this ground speed the rudder trim is held, feet per second.
+const GROUND_TRIM_SPEED_FPS: f64 = 5.0;
 /// Fitted: taxi pure-pursuit look-ahead.
 const TAXI_LOOKAHEAD_FT: f64 = 80.0;
+/// Fitted (agent decision, slice CL-AP 2026-10-11, for John's "ensure AI
+/// actually taxi on taxiways instead of grass"): taxiing along a leg the
+/// aircraft aims at the point this far ahead of it on the line from the
+/// leg's start to its anchor, not at the anchor itself. Aiming at an anchor
+/// thousands of feet away turned a steady nosewheel bias (a crosswind) into
+/// a drift of over 100 ft off the runway or taxiway; along the line it is a
+/// few feet. 120 ft keeps the heading loop well damped at taxi speed.
+pub const TAXI_LEG_LOOKAHEAD_FT: f64 = 120.0;
 
 /// What the aircraft knows about itself and its clearances this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -524,6 +551,8 @@ pub struct Sequence {
     climb_away: Option<u64>,
     /// A hazard was judged not catastrophic: abort at the next step.
     abort: bool,
+    /// Rudder trim learned on the ground ([`GROUND_TRIM_GAIN`]).
+    ground_trim: f64,
 }
 
 impl Sequence {
@@ -633,6 +662,7 @@ impl Sequence {
             go_arounds: 0,
             climb_away: None,
             abort: false,
+            ground_trim: 0.0,
         }
     }
 
@@ -848,6 +878,9 @@ impl Sequence {
 
     fn enter(&mut self, phase: Phase, s: &Situation) {
         self.phase = phase;
+        // Each ground phase learns its own trim: the wind acts on a rolling
+        // and a taxiing aircraft differently.
+        self.ground_trim = 0.0;
         self.leg = 0;
         self.leg_origin = s.position;
         self.stopping = false;
@@ -884,8 +917,14 @@ impl Sequence {
                 let anchored = self.runway.anchors.is_some();
                 let near = anchored && to_spot <= SPOT_SHORTCUT_FT;
                 if due && s.turn_clear && ((near && self.queue_leg.is_none()) || s.runway_free) {
+                    // Fitted (agent decision, slice CL-AP 2026-10-11): an
+                    // aircraft queued on the taxi-out legs taxis them out
+                    // even when it waits within the shortcut distance of
+                    // the spot. The fourth of a wing waits on the parallel
+                    // taxiway abeam the spot, and went straight to the
+                    // takeoff roll from there, on the taxiway.
                     self.enter(
-                        if anchored && !near {
+                        if anchored && (!near || self.queue_leg.is_some()) {
                             Phase::Taxi
                         } else {
                             Phase::LineUp
@@ -901,7 +940,7 @@ impl Sequence {
             }
             Phase::Taxi => {
                 let anchors = self.runway.anchors.expect("taxi legs need anchors");
-                if to_spot <= SPOT_SHORTCUT_FT || self.leg > 3 {
+                if (to_spot <= SPOT_SHORTCUT_FT && self.queue_leg.is_none()) || self.leg > 3 {
                     self.enter(Phase::LineUp, s);
                 } else if self.stopping {
                     if stopped {
@@ -1100,6 +1139,32 @@ impl Sequence {
         }
     }
 
+    /// Rudder for a ground heading: the proportional rudder plus the trim
+    /// a held error has built up ([`GROUND_TRIM_GAIN`]).
+    fn steer(&mut self, s: &Situation, heading_deg: f64) -> f64 {
+        let error = wrap_deg(heading_deg - s.heading_deg);
+        if horizontal(s.velocity) >= GROUND_TRIM_SPEED_FPS && error.abs() < GROUND_TRIM_ERROR_DEG {
+            self.ground_trim = (self.ground_trim + GROUND_TRIM_GAIN * error / 120.0)
+                .clamp(-GROUND_TRIM_LIMIT, GROUND_TRIM_LIMIT);
+        }
+        (ground_yaw(s, heading_deg) + self.ground_trim).clamp(-1.0, 1.0)
+    }
+
+    /// Where the current taxi leg starts: the previous anchor, or for the
+    /// first leg out the start position and for the first leg in the
+    /// landing point (so the rollout end is reached along the runway's
+    /// centre line). Without anchors, where the leg began.
+    fn taxi_leg_start(&self) -> [f64; 3] {
+        match (self.phase, self.runway.anchors) {
+            (Phase::Taxi, Some(anchors)) if self.leg > 0 => anchors.taxi_out[self.leg.min(4) - 1],
+            (Phase::TaxiClear, Some(anchors)) if self.leg > 0 => {
+                anchors.taxi_in[self.leg.min(4) - 1]
+            }
+            (Phase::TaxiClear, Some(_)) => self.landing_point(),
+            _ => self.leg_origin,
+        }
+    }
+
     /// Fitted parking spot without anchors: toward the far end, one spot per
     /// slot, alternating sides of the centerline.
     fn park_point(&self, s: &Situation) -> [f64; 3] {
@@ -1139,17 +1204,38 @@ impl Sequence {
                 } else {
                     self.taxi_in_target()
                 };
-                let heading = bearing_deg(s.position, target);
+                let aim = leg_aim(
+                    s.position,
+                    self.taxi_leg_start(),
+                    target,
+                    TAXI_LEG_LOOKAHEAD_FT,
+                );
+                let heading = bearing_deg(s.position, aim);
                 let error = wrap_deg(heading - s.heading_deg).abs();
                 let parking_close = self.phase == Phase::TaxiClear
                     && self.parking_leg()
                     && horizontal_distance(s.position, target) <= PARK_THROTTLE_OFF_FT;
                 if self.stopping || parking_close {
-                    command.control = ground(0.0, 0.0, ground_yaw(s, heading));
+                    command.control = ground(0.0, 0.0, self.steer(s, heading));
                 } else {
-                    let speed = taxi_speed(error);
+                    let mut speed = taxi_speed(error);
+                    // Slow for an anchor it stops at (the first one out,
+                    // every one in), so it stops there, not 90 ft on.
+                    let stops = if self.phase == Phase::Taxi {
+                        self.leg == 0
+                    } else {
+                        !self.parking_leg()
+                    };
+                    if stops {
+                        let d = horizontal_distance(s.position, target);
+                        speed = speed.min(
+                            (2.0 * STOP_APPROACH_DECEL_FPS2 * d)
+                                .sqrt()
+                                .max(SLOW_TAXI_FPS),
+                        );
+                    }
                     let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed);
-                    command.control = ground(throttle, 0.0, ground_yaw(s, heading));
+                    command.control = ground(throttle, 0.0, self.steer(s, heading));
                     command.brakes = brakes;
                 }
                 if self.phase == Phase::TaxiClear {
@@ -1171,15 +1257,28 @@ impl Sequence {
                     (heading, speed)
                 } else {
                     let distance = horizontal_distance(s.position, self.spot);
-                    let aim = self.point(self.spot, -(distance - LINEUP_AIM_STEP_FT).max(0.0), 0.0);
+                    let mut back = (distance - LINEUP_AIM_STEP_FT).max(0.0);
+                    // Fitted (agent decision, slice CL-AP 2026-10-11): never
+                    // aim farther back than the last taxi anchor, which
+                    // stands on the centre line behind the spot where the
+                    // taxiway meets it. Aiming as far back as it was away
+                    // took a wingman queued on that taxiway across the
+                    // grass behind it.
+                    if let Some(anchors) = self.runway.anchors {
+                        let (along, cross) = self.frame(anchors.taxi_out[3], self.spot);
+                        if along < 0.0 && cross.abs() <= CENTERLINE_TOLERANCE_FT {
+                            back = back.min(-along);
+                        }
+                    }
+                    let aim = self.point(self.spot, -back, 0.0);
                     let heading = bearing_deg(s.position, aim);
                     (heading, taxi_speed(wrap_deg(heading - s.heading_deg).abs()))
                 };
                 if self.stopping {
-                    command.control = ground(0.0, 0.0, ground_yaw(s, heading));
+                    command.control = ground(0.0, 0.0, self.steer(s, heading));
                 } else {
                     let (throttle, brakes) = taxi_throttle(horizontal(s.velocity), speed);
-                    command.control = ground(throttle, 0.0, ground_yaw(s, heading));
+                    command.control = ground(throttle, 0.0, self.steer(s, heading));
                     command.brakes = brakes;
                 }
             }
@@ -1209,7 +1308,7 @@ impl Sequence {
                 };
                 let (along, cross) = self.frame(s.position, self.spot);
                 let heading = course + (-cross).atan2(400.0).to_degrees().clamp(-5.0, 5.0);
-                command.control = ground(1.0, pitch, ground_yaw(s, heading));
+                command.control = ground(1.0, pitch, self.steer(s, heading));
                 command.brakes = false;
                 command.flaps_down = true;
                 command.afterburner = s.has_afterburner
@@ -1331,7 +1430,7 @@ impl Sequence {
             Phase::Rollout => {
                 let (_, cross) = self.frame(s.position, self.landing_point());
                 let heading = course + (-cross).atan2(500.0).to_degrees().clamp(-10.0, 10.0);
-                command.control = ground(0.0, ROLLOUT_ELEVATOR, ground_yaw(s, heading));
+                command.control = ground(0.0, ROLLOUT_ELEVATOR, self.steer(s, heading));
                 command.flaps_down = true;
             }
         }
@@ -1555,6 +1654,19 @@ fn ground_yaw(s: &Situation, heading_deg: f64) -> f64 {
     let authority = NOSEWHEEL_YAW_RATE_RAD_S
         * (s.speed_fps.max(horizontal(s.velocity)) / NOSEWHEEL_FULL_SPEED_FPS).clamp(0.0, 1.0);
     (rate / authority.max(0.05)).clamp(-1.0, 1.0)
+}
+
+/// The point `lookahead` feet ahead of `position`'s projection on the line
+/// from `from` to `to`, never past `to` (see [`TAXI_LEG_LOOKAHEAD_FT`]).
+fn leg_aim(position: [f64; 3], from: [f64; 3], to: [f64; 3], lookahead: f64) -> [f64; 3] {
+    let leg = sub(to, from);
+    let length = horizontal(leg);
+    if length < 1.0 {
+        return to;
+    }
+    let along = (dot2(sub(position, from), leg) / length).clamp(0.0, length);
+    let at = ((along + lookahead) / length).min(1.0);
+    [from[0] + leg[0] * at, to[1], from[2] + leg[2] * at]
 }
 
 fn recheck_ticks(seconds: f64) -> u64 {
@@ -1915,6 +2027,161 @@ mod tests {
         situation.tick = 600;
         s.step(&situation);
         assert_eq!(s.phase(), Phase::LineUp);
+    }
+
+    /// A field laid out like the redrawn base plans: parallel taxiway 450 ft
+    /// right, cross taxiway 190 ft behind the threshold, apron beyond.
+    fn anchored() -> RunwayView {
+        let p = |x: f64, z: f64| [x, 0., z];
+        RunwayView {
+            center: [0., 0., 4000.],
+            anchors: Some(AirfieldAnchors {
+                taxi_out: [p(450., 1300.), p(450., -190.), p(225., -190.), p(0., -190.)],
+                takeoff_spot: p(0., 0.),
+                takeoff_heading: 0.,
+                landing_point: p(0., 1000.),
+                landing_heading: 0.,
+                taxi_in: [p(0., 7750.), p(225., 7750.), p(420., 7750.), p(450., 4600.)],
+                parking: std::array::from_fn(|k| p(900., 2000. + 250. * k as f64)),
+                parking_heading: -std::f64::consts::FRAC_PI_2,
+            }),
+            ..runway()
+        }
+    }
+
+    fn on_ground(position: [f64; 3], heading_deg: f64, speed_fps: f64) -> Situation {
+        let h = heading_deg.to_radians();
+        Situation {
+            position,
+            velocity: [speed_fps * h.sin(), 0., speed_fps * h.cos()],
+            heading_deg,
+            speed_fps,
+            on_ground: true,
+            agl_ft: 8.,
+            ..on_final(&landing(), 0., 0., speed_fps)
+        }
+    }
+
+    /// Slice CL-AP: taxiing along a leg the aircraft aims a little ahead on
+    /// the leg's line, so a sideways error is steered out within a few
+    /// hundred feet instead of being carried toward an anchor far away.
+    #[test]
+    fn taxiing_aims_along_the_leg_not_at_its_far_anchor() {
+        let from = [0., 0., 0.];
+        let to = [0., 0., 3000.];
+        let aim = leg_aim([60., 0., 500.], from, to, TAXI_LEG_LOOKAHEAD_FT);
+        assert_eq!(aim, [0., 0., 620.]);
+        // Past the end it aims at the anchor.
+        assert_eq!(
+            leg_aim([0., 0., 2950.], from, to, TAXI_LEG_LOOKAHEAD_FT),
+            to
+        );
+        // From the side of the line, the heading back to it is steep.
+        let heading = bearing_deg([60., 0., 500.], aim);
+        assert!(heading < -25., "{heading}");
+    }
+
+    /// Slice CL-AP: a heading error held on the ground (a crosswind on the
+    /// roll) builds rudder trim; a large error (a turn) does not.
+    #[test]
+    fn a_held_heading_error_on_the_ground_builds_rudder_trim() {
+        let start = GroundStart {
+            runway: anchored(),
+            end: ApproachEnd::Near,
+            order: 1,
+        };
+        let mut seq = Sequence::departure(start, [0., 0., -100.], None);
+        let s = on_ground([0., 0., 500.], 355., 150.);
+        let first = seq.steer(&s, 0.);
+        for _ in 0..240 {
+            seq.steer(&s, 0.);
+        }
+        let later = seq.steer(&s, 0.);
+        assert!(later > first + 0.1, "{first} -> {later}");
+        assert!(seq.ground_trim <= GROUND_TRIM_LIMIT);
+        let mut turning = Sequence::departure(start, [0., 0., -100.], None);
+        for _ in 0..240 {
+            turning.steer(&on_ground([0., 0., 500.], 270., 20.), 0.);
+        }
+        assert_eq!(turning.ground_trim, 0.0);
+    }
+
+    /// Slice CL-AP: the fourth of a wing waits on the parallel taxiway
+    /// abeam the takeoff spot, inside the leg shortcut distance. It taxis
+    /// its legs out; it neither lines up nor rolls from the taxiway.
+    #[test]
+    fn a_wingman_queued_abeam_the_spot_taxis_its_legs() {
+        let start = GroundStart {
+            runway: anchored(),
+            end: ApproachEnd::Near,
+            order: 3,
+        };
+        let position = [450., 0., -4.];
+        let mut seq = Sequence::departure(start, position, None);
+        let s = on_ground(position, 180., 0.);
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::Taxi);
+        assert_eq!(seq.leg(), 1);
+        let s = Situation {
+            tick: 2,
+            ..on_ground([450., 0., -60.], 180., 20.)
+        };
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::Taxi, "the shortcut skipped its legs");
+    }
+
+    /// Slice CL-AP: lining up from the cross taxiway the aircraft aims no
+    /// farther back than the anchor where that taxiway meets the centre
+    /// line, so it stays on the taxiway rather than cutting behind it.
+    #[test]
+    fn lining_up_aims_no_farther_back_than_the_last_anchor() {
+        let start = GroundStart {
+            runway: anchored(),
+            end: ApproachEnd::Near,
+            order: 1,
+        };
+        let position = [-400., 0., -190.];
+        let mut seq = Sequence::departure(start, position, None);
+        seq.queue_leg = None;
+        let s = on_ground(position, 90., 10.);
+        seq.step(&s);
+        assert_eq!(seq.phase(), Phase::LineUp);
+        let step = seq.step(&Situation { tick: 2, ..s });
+        let Control::Ground { yaw, .. } = step.command.control else {
+            panic!("ground control");
+        };
+        // Heading 90 toward (0, -190) needs no turn; the old aim 350 ft
+        // behind the spot asked for a right turn toward the grass.
+        assert!(yaw.abs() < 0.05, "{yaw}");
+    }
+
+    /// Slice CL-AP: approaching an anchor it stops at, a taxiing aircraft
+    /// slows so it stops there rather than 90 ft on.
+    #[test]
+    fn taxiing_slows_for_the_anchor_it_stops_at() {
+        let mut seq = landing();
+        seq.runway = anchored();
+        seq.phase = Phase::TaxiClear;
+        seq.leg = 2;
+        seq.slot = Some(0);
+        seq.leg_origin = [225., 0., 7750.];
+        let ground = |seq: &mut Sequence, s: &Situation| {
+            let step = seq.step(s);
+            match step.command.control {
+                Control::Ground { throttle, .. } => (throttle, step.command.brakes),
+                Control::Air(_) => panic!("ground control"),
+            }
+        };
+        let near = on_ground([380., 0., 7750.], 90., 50.);
+        assert!(
+            ground(&mut seq.clone(), &near).1,
+            "no brakes 40 ft before the stop at 50 ft/s"
+        );
+        let mut far = seq.clone();
+        far.leg = 1;
+        far.leg_origin = [0., 0., 7750.];
+        let (throttle, brakes) = ground(&mut far, &on_ground([-300., 0., 7750.], 90., 40.));
+        assert!(!brakes && throttle > 0.0, "{throttle} {brakes}");
     }
 }
 

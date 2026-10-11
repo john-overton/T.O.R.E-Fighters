@@ -55,4 +55,5 @@ crate::checkpoint_struct!(Sequence {
     go_arounds,
     climb_away,
     abort,
+    ground_trim,
 } shared { runway });
