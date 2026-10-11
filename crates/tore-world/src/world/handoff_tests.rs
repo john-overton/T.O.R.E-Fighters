@@ -751,3 +751,37 @@ fn the_tick_after_a_handoff_is_deterministic() {
     assert_eq!(first.len(), 10);
     assert_eq!(first, run());
 }
+
+/// Retail multiplies every loaded station's count by `projsInPod` at mission
+/// start (`HARDPodHack`): an AI plane's or wing member's rocket pods hold the
+/// same rockets as the player's, so the plane a human takes carries what the
+/// loadout says, and the pod weighs the same whoever flies it.
+#[test]
+fn ai_rocket_pods_hold_their_rockets_like_the_players() {
+    let world = armed_mission();
+    let mut config = world.combat.own().configuration().clone();
+    let pod = 0;
+    config.stations[pod].internal = false;
+    config.stations[pod].weapon.flags &= !0x80;
+    config.stations[pod].weapon.weight = 190;
+    config.stations[pod].weapon.burst.projectiles_in_pod = 19;
+    config.stations[pod].count = 2;
+    let ammo = config.ammunition(&[2; 8][..config.stations.len()]).unwrap();
+    assert_eq!(ammo[pod], 38);
+    let specs = ai_wings::station_specs(&config, false);
+    assert_eq!(specs[pod].store.rounds, Rounds::Finite(38));
+    assert!((specs[pod].external_round_lbs * 19. - 190.).abs() < 1e-9);
+    // A part-loaded station counts the pods it carries.
+    let loaded = ai_wings::station_specs_loaded(&config, &[1; 8][..config.stations.len()], false);
+    assert_eq!(loaded[pod].store.rounds, Rounds::Finite(19));
+    // An ordinary store is still one round a unit.
+    for (index, station) in config.stations.iter().enumerate() {
+        if index != pod && live::pod_rounds(&station.weapon) == 1 && !live::is_gun(&station.weapon)
+        {
+            assert_eq!(
+                specs[index].store.rounds,
+                Rounds::Finite(u32::from(station.count))
+            );
+        }
+    }
+}

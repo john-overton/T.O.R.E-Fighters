@@ -3747,12 +3747,20 @@ fn carried_loadout(
                     .iter()
                     .find(|pod| pod.station == index)
                     .filter(|_| station.weapon.source == "SUU16.JT")
-                    .map_or(rounds, |pod| {
-                        let units = (rounds & !FAILED)
-                            .div_ceil(pod.rounds_per_pod.max(1))
-                            .min(pod.quantity);
-                        units | (rounds & FAILED)
-                    });
+                    .map_or_else(
+                        // A rocket pod's rockets are `projsInPod` a pod.
+                        || {
+                            let each = tore_sim::combat::live::pod_rounds(&station.weapon);
+                            let units = u32::from(rounds & !FAILED).div_ceil(each);
+                            units as u16 | (rounds & FAILED)
+                        },
+                        |pod| {
+                            let units = (rounds & !FAILED)
+                                .div_ceil(pod.rounds_per_pod.max(1))
+                                .min(pod.quantity);
+                            units | (rounds & FAILED)
+                        },
+                    );
                 StationLoad {
                     weapon: station.weapon.source.clone(),
                     count: station.count,
