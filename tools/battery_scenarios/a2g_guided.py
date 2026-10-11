@@ -19,6 +19,14 @@ position at release (a standing gun of the Vietnam truck park `~QTTRUCK`) and fl
 to it: the object is destroyed. The same at a `~QUCOL` tank, which drives on at
 50 ft/s: the bomb lands on the stored point and the tank is gone from it.
 
+`a2g-bar`: slice FX-H, the level T for guided bombs. A guided bomb in LVL holds the held
+trigger for the T's bar, which stands two fifths in from the reach's far edge; the run
+(`--release bar`) turns onto the designated object, holds the trigger from the
+designation and leaves the release to combat. An F-16C's GBU-30 from 12,000 ft at 450 kt
+(a standing gun of the truck park) and its GBU-10 on its own Pave Spike from 8,000 ft at
+400 kt (a tank of the armored column) each release once, with the aim within 60 ft of the
+bar, and hit within 60 ft.
+
 `a2g-laser-missile`: an Su-25 lases with its built-in designator and its AS-14 homes
 on its own spot and destroys a tank.
 
@@ -35,7 +43,7 @@ RELEASE = re.compile(
     re.M,
 )
 SIGHT = re.compile(
-    r"^a2g-run: release-sight t=\S+ kind (\w+) range (\S+) reach (\S+) in-reach (\w+) advisory (\S+) buddy (\w+) laser (\w+)$",
+    r"^a2g-run: release-sight t=\S+ kind (\w+) range (\S+) reach (\S+) in-reach (\w+) advisory (\S+) buddy (\w+) laser (\w+)(?: .*)?$",
     re.M,
 )
 IMPACT = re.compile(
@@ -168,6 +176,41 @@ def jdam_problems(output: str) -> list[str]:
     return problems
 
 
+BAR_SIGHT = re.compile(
+    r"^a2g-run: release-sight t=\S+ kind (\w+) .* in-reach (\w+) .* bar (\S+) along (\S+) seconds \S+ steer (\S+)$",
+    re.M,
+)
+
+
+def bar_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != 2:
+        return [f"{len(parts)} runs finished, want 2"]
+    problems: list[str] = []
+    for label, run, kind in (
+        ("GBU-30 at the bar", parts[0], "Coordinate"),
+        ("GBU-10 at the bar", parts[1], "Laser"),
+    ):
+        release, _, impact, target = _one(run, label, problems)
+        if len(RELEASE.findall(run)) != 1:
+            problems.append(f"{label}: {len(RELEASE.findall(run))} releases, want one")
+        if release and (release.group(2), release.group(3)) != (kind, "Guiding"):
+            problems.append(f"{label}: released {release.group(0)}")
+        bar = BAR_SIGHT.search(run)
+        if bar is None:
+            problems.append(f"{label}: no release sight with the T")
+        elif bar.group(4) in ("none", "") or not (-60 <= float(bar.group(4)) <= 60):
+            problems.append(f"{label}: released {bar.group(4)} ft from the bar")
+        elif abs(float(bar.group(5))) > 10:
+            problems.append(f"{label}: released {bar.group(5)} degrees off the stem")
+        if impact and float(impact.group(3)) > 60:
+            problems.append(f"{label}: came down {impact.group(3)} ft from the target")
+        if not _killed(run, target):
+            problems.append(f"{label}: the target was not destroyed")
+        _countdown(run, label, problems)
+    return problems
+
+
 def missile_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 1:
@@ -245,6 +288,18 @@ def scenarios() -> list[Scenario]:
             then=[Step(["--a2g-run", "UKR", "QUCOL", *jdam], timeout=300)],
             check=jdam_problems,
             notes="GBU-30 in cloud on a standing gun, then at a tank that drives on.",
+        ),
+        Scenario(
+            name="a2g-bar", lane="flight",
+            args=["--a2g-run", "TVIET", "QTTRUCK", "--attack", "jdam", "--aircraft", "f16c", "--load", "GBU30",
+                  "--station", "2", "--count", "2", "--altitude", "12000", "--speed", "450", "--from", "9",
+                  "--seconds", "150", "--condition", "clear", "--release", "bar"],
+            timeout=300,
+            then=[Step(["--a2g-run", "UKR", "QUCOL", "--attack", "laser", "--aircraft", "f16c", "--load", "GBU10",
+                        "--station", "2", "--count", "2", "--altitude", "8000", "--speed", "400", "--from", "9",
+                        "--seconds", "150", "--release", "bar"], timeout=300)],
+            check=bar_problems,
+            notes="Guided bombs in LVL: a held trigger releases at the T's bar (JDAM, then Pave Spike laser bomb).",
         ),
         Scenario(
             name="a2g-laser-missile", lane="flight",

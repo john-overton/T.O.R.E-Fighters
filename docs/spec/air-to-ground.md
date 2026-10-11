@@ -667,9 +667,10 @@ designated ground object or a pinned point from any channel, the sight or Enter.
   the CCIP pipper, so the bombs can still be aimed (agent).
 - **Overflown** (D below zero): the stem and marker go and the text reads
   OVERFLY. More than 60 s out, the stem is dashed.
-- The same T serves guided bombs in level flight, with the release range
-  indicator (below) instead of the time-to-release cue when the bomb can reach
-  the target already.
+- The same T serves guided bombs in level flight, built on the guided
+  reach instead of the unguided impact point: see
+  [Guided bomb release range indicator](#guided-bomb-release-range-indicator)
+  (built, slice FX-H).
 
 ```mermaid
 stateDiagram-v2
@@ -697,7 +698,8 @@ fly-out of the guided motion, as the missiles' maximum range is computed), the
 target caret, and IN RNG when the target lies between them. Above the scale,
 `R 6.2` target range. In LVL the T's release marker reaches the crossbar when
 the target enters the maximum reach, so a level pass with a JDAM is "fly the
-stem, release at the bar". This is John's "range indicator for when to drop"
+stem, release at the bar" (see "The level T for guided bombs" below for where
+the bar stands). This is John's "range indicator for when to drop"
 (opinionated, John, 2026-10-10, decision 4); the reach computation is an
 opinionated (agent) design (below). Retail gives only "when you're in range and have a
 good hit probability" (retail manual p. 125) and no release range cue.
@@ -736,8 +738,46 @@ Built (slice W1, `combat::guided`, `weapon_hud/guided.rs`), agent choices:
   (y 284), the caret at the aim's ground range (clamped to the scale), `R 6.2`
   above (y 206); IN RNG blinks at 2 Hz on the line below the store name, else
   the advisory (NO LASER, MASK, OUT OF REACH, NO TARGET) takes it.
-- **Not built**: LVL's "release at the bar" for a JDAM (H1's level solution
-  covers unguided bombs only; the guided sight's reach is there for it).
+
+**The level T for guided bombs** (built, slice FX-H, 2026-10-11; John asked for
+"release at the bar" and whether it is the same as hold to release: it is the
+same feature, now also for guided bombs). It applies to the guided bombs
+(laser bombs and the JDAMs, not the laser missiles or the AT-2) and uses the
+status word LVL, chosen by the same rule as for an unguided bomb: on selecting
+the bomb with a ground target designated (for a JDAM, the sight's held point
+also counts; for a laser bomb, a laser spot) and the flight path within 10
+degrees of level, else the plain scale (the status word stays ARM). Ctrl+M
+switches between the two.
+
+- **The bar.** Stands at a ground range of the **reach's far edge less two
+  fifths of the reach** from the aircraft (opinionated, agent: John's words
+  were "when the target enters the reach", but the far edge is where the glide
+  only just gets there at the end of its 60 s life, and a release a little
+  inside it shortens the flight and the time a laser must hold; the choice was
+  measured, see the [baseline](../baselines/air-to-ground.md)). Time to
+  release is the aim's ground range less the bar's, over the ground speed
+  (the track held).
+- **Drawing** (as the unguided T, same crossbar, stem and marker): the stem
+  stands at the aim's bearing from the ground track, the marker rides down it
+  to the crossbar at 0 s (top at 15 s or more, dashed beyond 60 s). The text
+  row below the store name reads `REL 0:12`; once the bar is passed it is the
+  IN RNG cue as before; `OVERFLY` when the aim is nearer than the reach's
+  near edge or behind the aircraft. A laser bomb draws the T only with a spot
+  to home on (the NO LASER and MASK advisories take the row otherwise); a
+  weapon with no reach (too high or too fast: OUT OF REACH) has no T and the
+  trigger is a plain press.
+- **Release.** A held trigger releases once, on the tick the aim reaches the
+  bar (within three ticks of ground travel, as the unguided T), when the aim
+  lies inside the reach and within 10 degrees of the ground track (opinionated,
+  agent: the stem says where to point and the glide's own turn does the
+  rest). A press let go before the bar drops nothing. After the window, or in
+  the plain scale, the trigger is a plain press. It is host simulation (the
+  fire loop reads the guided sight the same tick), so it works online and in
+  replays; the cues reach clients in the guided sight group.
+- **Measured** (`--a2g-run --release bar`, level passes): F-16C GBU-30 and
+  GBU-10, F/A-18D GBU-29/P and A-10 GBU-30 and Pave Way at 4,000 to 15,000 ft
+  and 350 to 550 kt: every release came within 8 ft of the bar and every bomb
+  hit within 56 ft and killed its target (see the baseline).
 
 **Retail JDAMs are "optical", not GPS** ([optical](../formats/missiles.md#optical)):
 GBU-29, GBU-29/P and GBU-30 home on the object designated at release, follow it
@@ -880,20 +920,29 @@ Built (W2), with these rules (opinionated, agent, where not labelled):
   edge arrow, [aim box](ac130-linked-guns.md#the-aim-box-on-every-view)).
 - Weapon text adds `LSR 4.3` (laser range, nm) blinking at 2 Hz while lasing,
   `LSR RDY`, or `MASK`; `BUD 4.3` for a buddy spot; and `TTI 0:12` while an own
-  laser or GPS weapon flies (the `TTI` row is not drawn on the HUD yet, see
-  [Not built](#not-built); the targeting page's TTI row is). All opinionated (John, 2026-10-10: "the hud with a
+  laser or GPS weapon flies (built, slice FX-H; the targeting page has its own
+  TTI row). All opinionated (John, 2026-10-10: "the hud with a
   range indicator"); text layout fitted.
   Built (slice P1, `weapon_hud/laser.rs`): the box is 12 by 8 pixels, the
   letter sits to its right (**L** own, **B** a buddy's), the text rows start at
   x=207, y=307 and step 12 pixels (own laser row, then a `BUD` row; the `TTI`
-  row is the one that is not built: slice W1 supplies
-  `CockpitReadout::weapon_tti`, the plane's guided weapons in flight with their
-  seconds to impact, and the tick the last one ended, and only the targeting page
-  reads it), and the boxes and rows draw
+  row is built by slice FX-H, below), and the boxes and rows draw
   on any selection, in every mode but NAV. Lit for the first quarter second of
   each half second when blinking (combat tick mod 60 below 30). The edge arrow
   is the target cue's own chevron. A masked laser draws no box (its spot is
   gone) and a laser that is ready draws none (there is no spot yet).
+  **The `TTI` row** (built, slice FX-H, 2026-10-11; John: "let's add time to
+  impact on hud"; layout agent): it stands directly under the laser rows (the
+  first row at y=307 when there is no laser text, the second at 319, the third
+  at 331), on any selection and in every mode but NAV, and does not blink. It
+  shows the oldest of the aircraft's guided weapons in flight whose time to
+  impact is known (`CockpitReadout::weapon_tti`, laser bombs and missiles, JDAMs
+  and the AT-2), `TTI 0:12` counting down, with `X3` after it when several fly
+  (the readout lists up to four), and `IMPACT` for the second after the last
+  one ended, the same slot as the targeting page's row. A bomb with no
+  guidance (unguided) keeps the right column's `IMP 0:12` for the last bomb
+  while it is selected; the TTI row is for guided weapons only. Online it is
+  read from the readout like the page's row (protocol 23).
 
 ### Warnings
 
@@ -1251,9 +1300,11 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
 | Release range scale | x=390, the missile scale | spec-derived |
 | Guided bomb glide | along the nose at 90 percent of the speed; 14 ft/s squared down to 278 ft/s; 6,370 units a second (about 35 degrees a second); no fall while guiding; 60 s life | retail data |
+| Level T for guided bombs: bar | the reach's far edge less 2/5 of the reach; hold releases within 3 ticks of the bar, aim within 10 degrees of the track | opinionated (agent; John asked for release at the bar) |
 | Guided reach search | 32 samples across zone 1's ground range, 12 bisections an edge; a missile shows its zone 1 | opinionated (agent) |
 | AT-2 launcher sight | the target inside the launcher's 45 degree zone-1 cone with a clear line (the 25 ft rule), every tick; any loss permanent | opinionated (lead ruling, 2026-10-10) on retail data |
 | Guided weapons in flight listed for the time to impact | 4, oldest first | plan section 9 |
+| HUD TTI row | under the laser rows from y=307, x=207, 12 px steps; oldest known time, `X3` count, IMPACT for 1 s | opinionated (John, 2026-10-11); layout agent |
 | JDAM release range (retail optical) | 30,000 ft; 7,500 ft at night, 3,000 ft in cloud or fog | retail data; replaced by the reach scale (opinionated, John) |
 | HUD laser box | 12 by 8 reference pixels | fitted |
 | Cluster final speed | 278 ft/s, deceleration 14; no effect on a bomb's path | retail data |
@@ -1269,10 +1320,6 @@ records (ranges, weights, counts) are in the inventory above.
 The acceptance pass ([baseline](../baselines/air-to-ground.md#not-run-and-not-built))
 found these promised or specified items unbuilt:
 
-- LVL's "release at the bar" for a JDAM (the level solution covers unguided
-  bombs; a JDAM's reach scale tells the pilot when to drop).
-- The HUD's `TTI` row for a laser or GPS weapon in flight (the targeting page's
-  row is drawn).
 - `Ctrl+M` on the [keyboard map](../tore-keyboard-map.html) (a browser check and
   a README image recapture are due).
 - Online (protocol 23, slice NA): the cues are the host's, drawn a round trip

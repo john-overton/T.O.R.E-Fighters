@@ -1377,7 +1377,7 @@ pub fn bomb_sight() -> tore_world::readout::BombSight {
 /// wire's grid (protocol 23).
 pub fn guided() -> tore_sim::combat::guided::GuidedSight {
     use tore_sim::combat::delivery::Reach;
-    use tore_sim::combat::guided::{Advisory, GuidedSight};
+    use tore_sim::combat::guided::{Advisory, GuidedLevel, GuidedSight};
     use tore_sim::combat::missiles::Guidance;
     GuidedSight {
         kind: Guidance::Laser,
@@ -1391,6 +1391,10 @@ pub fn guided() -> tore_sim::combat::guided::GuidedSight {
         }),
         in_reach: true,
         advisory: Some(Advisory::Masked),
+        level: Some(GuidedLevel {
+            steering_rad: -240. / 4096.,
+            ground_speed_fps: 760.,
+        }),
     }
 }
 

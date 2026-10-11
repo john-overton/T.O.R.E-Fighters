@@ -227,7 +227,8 @@ fn rung_project(
 /// The HUD's weapon status word (docs/spec/air-to-ground.md, "Status word and
 /// mode choice"; retail printer 0x409030): NAV with NAV selected, LCOS or
 /// SAFE for a gun, CCIP or LVL for an unguided bomb as its sight is set, ARM
-/// for a rocket pod and every guided store.
+/// for a rocket pod and every guided store (a guided bomb in LVL says LVL from
+/// its own HUD code, `weapon_hud/guided.rs`).
 pub fn status_word(
     nav: bool,
     gun: bool,
