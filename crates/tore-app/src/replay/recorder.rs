@@ -3286,6 +3286,127 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_laser_and_designation_kept_while_the_ai_flies_are_still_recorded() {
+        use tore_sim::combat::laser::LaserState;
+        let (mut recorder, receiver) = Recorder::detached(64, &[]);
+        let mut combat = fixture::combat(
+            fixture::models(),
+            (0..7).map(|i| (i % 3, [0.; 3])).collect(),
+        );
+        let player = fixture::player();
+        let scene = fixture::scene(combat.state.own().configuration());
+        let snapshot = fixture::snapshots(&mut combat, &scene, true, &player)[1].clone();
+        let mut ui = flight_ui::FlightUi::default();
+        let ground = 0x5000_0001;
+        combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| !t.airborne)
+            .expect("the fixture has ground objects")
+            .id = ground;
+        // A second human, lasing a spot and designating a ground object.
+        const BUDDY: u32 = 7;
+        let config = combat.state.own().configuration().clone();
+        let mut buddy = tore_sim::combat::live::Ownship::new(
+            BUDDY,
+            tore_sim::combat::live::DEFAULT_OWNSHIP_SIDE,
+            config,
+            false,
+        )
+        .unwrap();
+        buddy.sensors.hold(ground);
+        buddy.laser.state = LaserState::Lasing;
+        buddy.laser.point = Some([0., 0., 50.]);
+        combat.state.add_ownship(buddy).unwrap();
+        tick(&mut recorder, &mut combat, &snapshot, 0, &mut ui);
+        tick(&mut recorder, &mut combat, &snapshot, 1, &mut ui);
+        // The human drops: the AI flies on with the cockpit kept. Its spot
+        // runs 100 feet a tick, then the laser goes off, then the human
+        // clears the designation.
+        let gone = combat.state.remove_ownship(BUDDY).unwrap();
+        combat.state.keep(BUDDY, gone.kept());
+        for n in 0..40u64 {
+            let mut kept = combat.state.take_kept(BUDDY).unwrap();
+            kept.laser.point = Some([100. * n as f64, 0., 50.]);
+            combat.state.keep(BUDDY, kept);
+            tick(&mut recorder, &mut combat, &snapshot, 2 + n, &mut ui);
+        }
+        let mut kept = combat.state.take_kept(BUDDY).unwrap();
+        kept.laser.state = LaserState::Off;
+        kept.laser.point = None;
+        kept.picks.selected = None;
+        combat.state.keep(BUDDY, kept);
+        tick(&mut recorder, &mut combat, &snapshot, 42, &mut ui);
+        tick(&mut recorder, &mut combat, &snapshot, 43, &mut ui);
+        // A second dropped human lases, then the aircraft is destroyed with
+        // the laser on: the recording ends the laser and the designation.
+        let config = combat.state.own().configuration().clone();
+        let mut lost = tore_sim::combat::live::Ownship::new(
+            9,
+            tore_sim::combat::live::DEFAULT_OWNSHIP_SIDE,
+            config,
+            false,
+        )
+        .unwrap();
+        lost.sensors.hold(ground);
+        lost.laser.state = LaserState::Lasing;
+        lost.laser.point = Some([5., 0., 5.]);
+        combat.state.add_ownship(lost).unwrap();
+        tick(&mut recorder, &mut combat, &snapshot, 44, &mut ui);
+        let lost = combat.state.remove_ownship(9).unwrap();
+        combat.state.keep(9, lost.kept());
+        tick(&mut recorder, &mut combat, &snapshot, 45, &mut ui);
+        combat.state.take_kept(9);
+        tick(&mut recorder, &mut combat, &snapshot, 46, &mut ui);
+        tick(&mut recorder, &mut combat, &snapshot, 47, &mut ui);
+        let frames = frames(&receiver);
+        let mine = |kind: &str| -> Vec<(u64, Event)> {
+            frames
+                .iter()
+                .flat_map(|f| f.events.iter().map(move |e| (f.tick, e.clone())))
+                .filter(|(_, e)| e.kind == kind && e.subject == Some(BUDDY))
+                .collect()
+        };
+        let spots = mine(kind::PLAYER_LASER_SPOT);
+        assert!(
+            spots.len() >= 3,
+            "the spot is followed in the gap: {spots:?}"
+        );
+        assert!(spots.iter().all(|(_, e)| e.flag(field::KEPT) == Some(true)));
+        let lasers = mine(kind::PLAYER_LASER);
+        let states: Vec<(u64, &str, Option<bool>)> = lasers
+            .iter()
+            .map(|(t, e)| (*t, e.string(field::STATE).unwrap(), e.flag(field::KEPT)))
+            .collect();
+        // The laser comes on while a human flies, and goes off in the gap.
+        assert_eq!(states, [(0, "lasing", None), (42, "off", Some(true))]);
+        let designations = mine(kind::PLAYER_DESIGNATE);
+        let channels: Vec<(u64, &str, Option<bool>)> = designations
+            .iter()
+            .map(|(t, e)| (*t, e.string(field::CHANNEL).unwrap(), e.flag(field::KEPT)))
+            .collect();
+        assert_eq!(channels, [(0, "visual", None), (42, "cleared", Some(true))]);
+        // The destroyed aircraft's laser and designation end with it, once.
+        let ended = |kind: &str| -> Vec<(u64, &str)> {
+            frames
+                .iter()
+                .flat_map(|f| f.events.iter().map(move |e| (f.tick, e)))
+                .filter(|(_, e)| e.kind == kind && e.subject == Some(9))
+                .map(|(t, e)| {
+                    let word = e.string(field::STATE).or(e.string(field::CHANNEL));
+                    (t, word.unwrap())
+                })
+                .collect()
+        };
+        assert_eq!(ended(kind::PLAYER_LASER), [(44, "lasing"), (46, "off")]);
+        assert_eq!(
+            ended(kind::PLAYER_DESIGNATE),
+            [(44, "visual"), (46, "cleared")]
+        );
+    }
+
     /// Records the fixture's two snapshots for the seat that flies `plane` and
     /// returns the frames and the roster the recording registered.
     fn record_for(
