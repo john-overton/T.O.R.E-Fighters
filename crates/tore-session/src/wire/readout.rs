@@ -1738,6 +1738,8 @@ impl QReadout {
             gunsight,
             seeker,
             estimates,
+            // Host-built until protocol 23 carries it (slice NA).
+            bomb_sight: None,
             targets,
             sensors,
             visual,

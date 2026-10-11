@@ -1338,6 +1338,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 locked: true,
             }),
         },
+        bomb_sight: None,
         estimates: Estimates {
             readiness: Readiness::Ready,
             guidance_available: true,
