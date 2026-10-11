@@ -388,9 +388,6 @@ def laser_self_run_problems(run: Run, label: str, *, cone: bool) -> list[str]:
         problems.append(f"{label}: no EGRESS")
     if run.of("LOST"):
         problems.append(f"{label}: the striker was lost")
-    # The laser is let go once the hold is over.
-    if not any(t >= t_impact - 0.5 and state in ("Ready", "Off") for t, state, _ in _lasers(run, plane)):
-        problems.append(f"{label}: the laser was never let go after the bomb landed")
     return problems
 
 

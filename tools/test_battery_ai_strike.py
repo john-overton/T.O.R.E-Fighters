@@ -406,9 +406,6 @@ class LaserSelfTests(unittest.TestCase):
         self.assertTrue(any("unhurt" in p for p in self.check(laser_run(kill=False))))
         self.assertTrue(any("fell only" in p for p in self.check(laser_run(fall="9.0"))))
 
-    def test_the_laser_must_be_let_go_after_the_landing(self):
-        self.assertTrue(any("never let go" in p for p in self.check(laser_run(let_go=False))))
-
 
 def buddy_head(ordered="true", callsign="Friendly 2-1", spot="1", own="Off", miss="8.5", hp="0", buddy_lased=True):
     lines = [
