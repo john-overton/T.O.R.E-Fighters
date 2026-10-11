@@ -126,8 +126,10 @@ lower edge of the vertical bars is the same scale on every aircraft; the
 manual's "stall rather than sink" mark for the jets is fitted to it rather
 than computed. The cluster is a list of marks, a pure function of the flight
 state, so each row is tested by what it puts where; `--hud-snapshot PATH
-[--hud-snapshot-state forward|hover|converting|low]` draws the HUD of
-`--aircraft` headless. Radar height and the stability label are conditional
+[--hud-snapshot-state forward|hover|converting|low|laser-lsr|laser-bud|laser-both|
+laser-ready|laser-mask|laser-edge]` draws the HUD of
+`--aircraft` headless (the `laser-*` states add the [laser box and
+text](air-to-ground.md#laser-on-the-hud) over a forward flight). Radar height and the stability label are conditional
 rows, so the trimmed `forward` and `hover` states at 3,000 ft and Damper show
 neither; `low` hovers 45 ft over the ground at stability Off and shows both.
 

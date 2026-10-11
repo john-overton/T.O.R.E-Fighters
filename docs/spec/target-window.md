@@ -256,12 +256,118 @@ overlay untouched).
 
 ## Targeting page
 
-Specified in [air-to-ground](air-to-ground.md#the-targeting-page), not yet
-built. On an aircraft with a laser or FLIR sight (or with a buddy's laser spot
-valid for a selected laser weapon), the camera 4 target display becomes a
-targeting pod page whenever the sight is pinned, slewed, lasing, or an
-air-to-ground weapon is selected: it shows the pod's view, a flashing **LASE**
-cue (**BUDDY** when the spot is someone else's), the laser range and the
-weapon's time to impact. Otherwise this window is unchanged, and the AC-130
-keeps its [gunsight page](#ac-130-gunsight). The window already names a ground
-object once one is designated.
+Opinionated, requested by John on 2026-10-10 (the target display shows when it
+is lasing, and shows when the spot is someone else's; decision 8 puts a
+targeting pod page on every aircraft with a FLIR or a laser, using the AC-130
+sight keys). The layout, the show rule and the buddy form are agent choices.
+Retail shows the weapon's own view in the IR/Laser window after launch; the
+weapon camera in the flight views already does that, so this page keeps the
+pod view. The sight, the laser and the buddy rule are specified in
+[air-to-ground](air-to-ground.md#the-targeting-sight); this section covers
+what the page and its camera show. The AC-130 keeps its
+[gunsight page](#ac-130-gunsight), whose look this page does not change.
+
+### When it shows
+
+The target display (camera slot 4, Shift+4) is the targeting page instead of the
+plain window when any of these holds, and the plain window otherwise:
+
+- **Sight aircraft** (F-16C, A-10, Su-25, V-22 with a laser; Rafale, X-31,
+  F-22, AV-8B, AH-64, MiG-29, Su-27, Su-35 with a FLIR; any aircraft carrying
+  a Pave Spike or Pave Knife pod): the sight is pinned or tracking an object,
+  or slewed off its default look, or the laser is on (lasing or masked), or a
+  ground weapon is selected (a bomb, a rocket pod, a laser weapon or a ground
+  missile).
+- **An aircraft with no sight**, in the buddy form: a laser weapon is selected
+  and a buddy's laser spot is shown for it (the readout carries the laser then).
+  With no buddy spot it is the plain window.
+
+```mermaid
+flowchart TD
+    A[Camera 4 page] --> G{AC-130?}
+    G -->|yes| GS[Gunsight page]
+    G -->|no| S{Has a sight?}
+    S -->|yes| W{Pinned, tracking, slewed, laser on, or ground weapon?}
+    W -->|yes| TP[Targeting page, sight form]
+    W -->|no| PW[Plain target window]
+    S -->|no| B{Laser weapon and buddy spot?}
+    B -->|yes| BP[Targeting page, buddy form]
+    B -->|no| PW
+```
+
+### The camera
+
+- **Eye and direction.** The camera looks along the sight's body-relative
+  look angles (heading, elevation) from the sensor's eye: four feet under the
+  aircraft's centre for a pod, the aircraft's centre for a built-in sensor
+  (fitted). It follows the aircraft's bank and turn, roll 0. The default
+  look is straight ahead and 10 degrees down (fitted).
+- **Zoom.** The AC-130's six steps (vertical fields of 30, 15, 7.5, 3.75,
+  1.875 and 0.94 degrees), on the same zoom keys. A tracked object keeps the
+  automatic framing of the target window (on the eye-to-target line, at most
+  one nautical mile behind the object), whatever the step.
+- **Between ticks.** The look is carried smoothly between the 120 Hz ticks, as
+  the gunsight's is; the picture refreshes at 24 Hz.
+- **Buddy form.** The camera looks from the aircraft at the buddy's spot, on
+  the target window's camera line (at most a nautical mile behind the spot). It
+  picks the zoom step that frames a spot area about 500 feet tall (fitted).
+  There are no slew, pin or zoom keys here: the aircraft has no sight to move.
+- **Gimbal.** A pod looks anywhere in the hemisphere below the aircraft, a
+  built-in sensor in its cone ([gimbal](air-to-ground.md#the-targeting-sight)).
+  Against the edge the status row reads GIMBAL LIMIT after the AC-130's eye icon.
+- Camera slot 4 keeps its semantics for the city-fill rule: the picture is the
+  slot 4 camera and draws the full-detail scene as the plain window does.
+
+### The page (138 x 114 screen pixels)
+
+Marks are ink `[20,20,20]` with a one pixel white halo (the status rows, the
+laser rows and the crosshair), or plain ink (name and activity rows), as on the
+gunsight page. Fonts and positions:
+
+| Element | Where | Content |
+| --- | --- | --- |
+| Name row | y=3, centred | The target's name (tracking), PIN (pinned), SLEW, RETURN; the lasing pilot's callsign when the laser row is BUDDY (and in the buddy form, `LASER SPOT` before it is known) |
+| Activity row | y=16 | The target's activity (tracking); ZOOM n (free or pinned); NO GROUND POINT or L TO DROP for two seconds; empty in the buddy form |
+| Laser row | y=28, centred, halo | **LASE** (own spot, blinking twice a second), **BUDDY** (someone else's spot, blinking), **LSR RDY** (the sight holds a point, laser off), **MASK** (wanted, blocked); nothing without a laser |
+| Second row | y=39, centred, halo | **BUDDY**, blinking, under LASE or LSR RDY or MASK when a buddy's spot is also shown |
+| Crosshair | The camera centre | Four 3 pixel ticks, 3 to 5 pixels out |
+| Track square | 11 x 11 on the object | Tracking |
+| Pin square | 7 x 7 on the point | Pinned, and the buddy spot |
+| Status row | y=72, centred, halo | GIMBAL LIMIT after the eye icon; OUT OF RANGE or TERRAIN MASK when the laser is masked for those reasons |
+| Objective row | y=82 | As the target window (tracking) |
+| Time to impact | y=92, centred, halo | **TTI m:ss** for the aircraft's oldest laser or GPS weapon in flight, **IMPACT** for a second at the hit; empty until the weapon slice supplies it |
+| Clock bearing, range | y=103 | Clock bearing and Hi/Lo from the aircraft to the sight's point; the range reads laser range while the row is LASE, LSR RDY or MASK (the sensor to the point), the range to the buddy's spot for BUDDY, the target window's alternating range and speed when tracking with the laser off, else the range to the sight's point |
+| Goal, skill dots, damage bar | Top right | As the target window (tracking only) |
+
+The range reads in nautical miles with one decimal, or whole feet under one
+nautical mile (`4.3 NM`, `5200 FT`). The two blinking rows are lit for a
+quarter second and dark for a quarter second (the combat tick mod 60 below 30
+at 120 Hz); the others do not blink.
+
+**Laser row states.** LASE means the spot is on the point and the laser works
+(the laser state machine in [air-to-ground](air-to-ground.md#the-laser)). MASK
+names its reason on the status row: out of range (including the halving in
+cloud and fog), outside the gimbal, or terrain across the line. BUDDY shows when
+the spot the aircraft's laser weapons would home on is a buddy's, either
+because the aircraft has no designator, or has one that is off.
+
+### Preview
+
+`--panel-snapshot OUT.ppm --target-cam-preview MODE` draws the page from a
+synthetic readout on the same synthetic grey scene the gunsight preview uses
+(no GPU, no retail scene; `TORE_DATA_DIR` for the instrument font, and
+`--aircraft f16c` or any imported aircraft: the page is the same). Modes:
+`lase` (a tank, LASE and range), `lase-off` (the dark half of the blink),
+`lase-mask` / `lase-mask-range`, `lase-mask-terrain`, `lase-pin`, `ready`,
+`slew`, `limit`, `tti`, `impact`, `buddy` (a sight aircraft whose weapon homes
+on a buddy's spot), `both` (own LASE with a second BUDDY row), `buddy-nosight`
+(the buddy form), `flir` and `flir-tracked` (no laser rows). The HUD's laser box
+is `--hud-snapshot OUT.ppm --hud-snapshot-state laser-lsr|laser-bud|laser-both|
+laser-ready|laser-mask|laser-edge`
+([HUD](air-to-ground.md#laser-on-the-hud)).
+
+The host builds the page from the readout (`combat_view::readout`, which calls
+`instruments::targeting::Page::new`), completes it with the presented look and
+camera, and the instrument window draws it
+(`instruments/targeting.rs`). The lasing pilot's callsign comes from the lobby
+in a networked game; in single player a buddy spot has no owner to name.
