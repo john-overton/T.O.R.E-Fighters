@@ -209,6 +209,14 @@ turning back. This is horizontal separation, not a 30000-foot altitude goal.
 B15 establishes the shared target-offset frame. Dive-bomb rollout, jink path
 and complete attack trajectories remain open.
 
+**T.O.R.E strike AI (opinionated, John, 2026-10-11).** Retail chooses these
+passes by dice and moves each released AI bomb to within 100 ft of its target.
+T.O.R.E does neither: the pass is a fixed function of perceived threat and
+available speed, limited by the aircraft's bombing class and weapon, and the AI
+flies the pass and releases from the player's own solutions with skill-scaled
+precision. The B14 pass shapes above still apply to each pass. The full
+behaviour, with labels, is in [AI strike](ai-strike.md#pass-choice).
+
 ## B15: Pursuit reference frame and speed regulation
 
 Executable-confirmed for `homepos` with a valid target and positive duration.
@@ -264,6 +272,13 @@ Family binding and catalog counts remain in the experience spec.
 | AC-130 | Ground attack repeatedly requests a circle with speed halfway between corner and maximum | Target pose and orbit parameters; six circle-argument meanings and weapon firing sector remain unresolved |
 | Large/airliner | Handles hit and evade; hit requests a downward pitch from 0 through -24 degrees and speed operand 2000 | Damage event and aircraft limits; positive speed clamp prevents assuming literal 2000-unit achieved flight |
 | MOTH | Fighter-derived air behavior with distinct ground attack and shorter egress operands | Exact special-aircraft configuration and maneuver consumers; no ordinary aircraft alias |
+
+For the T.O.R.E strike behaviour of these families (heavies level-bomb from a
+minimum of 5,000 ft AGL raised by threat, helicopters pop up, the AC-130
+orbits with its radius and height taken from its guns' reach, and the bombing
+class taken from the imported record rather than a list), see
+[AI strike](ai-strike.md#bombing-class), [heavy bombers](ai-strike.md#heavy-bombers)
+and [AC-130](ai-strike.md#ac-130).
 
 ## B30: Surface behavior
 

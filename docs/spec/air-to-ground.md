@@ -1115,6 +1115,33 @@ and slows to its final speed of 278 ft/s (retail data). Whether anything makes i
 fall is an [unknown](#unknowns); the fitted fallback is the bomb parabola from its
 current state.
 
+## The AI and these weapons
+
+Specified 2026-10-11, **not built yet**; the full behaviour is in [AI
+strike](ai-strike.md). What it means here:
+
+- **One cockpit, two pilots.** The ground-attack state (target, selected store,
+  CCIP or LVL, seeker mode, sight, laser) becomes one record per aircraft that a
+  human edits with keys and the AI edits from its strike controller. When the AI
+  takes a plane it continues the human's attack, if it thinks it is safe; a human
+  taking an AI striker finds its target, store, mode and laser.
+- **The AI uses the player's systems.** It flies the pass through control
+  inputs and releases through the same release function, CCIP and LVL
+  solutions, guided reach and lock flow, with the same bomb scatter. There is no
+  retail-style re-aim. Skill sets how close it releases: an Ace on the solution,
+  a Novice up to 30% of the weapon's error budget off ([definition and worked
+  numbers](ai-strike.md#skill-and-release-precision)).
+- **AI lasing.** An AI with a designator lases like a player, its spot is an
+  ordinary spot (a [buddy spot](#buddy-lasing) for others), an AI laser-bomb
+  carrier drops only on a spot that will exist, and a wingman can be ordered to
+  "Lase my target" ([lasing](ai-strike.md#lasing)).
+- **Bombing class sets the player's default bomb mode.** A heavy bomber selects
+  LVL whatever its attitude; every other class keeps the [H1
+  rule](#status-word-and-mode-choice). Both modes stay available on every
+  aircraft ([bombing class](ai-strike.md#bombing-class)).
+- **Wing orders** Alt+E, Alt+R and Alt+F accept a ground target
+  ([orders](ai-strike.md#orders-from-the-flight-lead)).
+
 ## Keys
 
 Retail keys are marked; the rest are TORE additions. All were free before this
@@ -1311,7 +1338,7 @@ records (ranges, weights, counts) are in the inventory above.
 | Cluster splash | 2,200, 2,500, 1,600, 1,500, 2,500 ft at 100 percent | retail data |
 | Fuze radius | 300 ft slick, 100 ft cluster and guided | retail data |
 | Pack sizes | 3, 6, 7 bombs, released in one instant | retail data |
-| AI release tolerance (for the future AI round) | impact within max(1,000 ft, range/8); AI bombs re-aimed within 100 ft of the target | retail data, spec-derived ([AI](ai.md)) |
+| AI release tolerance | impact within max(1,000 ft, range/8), used as the AI's error budget; retail re-aims AI bombs within 100 ft of the target, which T.O.R.E does not do | retail data; budget opinionated (agent), no re-aim opinionated (John, 2026-10-11) ([AI strike](ai-strike.md#skill-and-release-precision)) |
 | Release altitude advice | 3,000 ft lightly defended, 5,000 ft or more defended; about 1 nmi of range per 1,000 ft of drop altitude | retail manual (advice, not enforced) |
 | Stairstep bombing | drop at 65 to 70 percent hit probability | retail manual (advice) |
 
