@@ -433,7 +433,8 @@ own as `your laser`.
 Weapon classes are `bomb`, `rocket`, `missile`, `gun` and `other`. Since this
 slice an unguided rocket pod (several rockets, no seeker) is a **rocket**,
 where recordings from before were `other`; a guided glide bomb (the laser
-bombs and the JDAMs) is a **bomb**, where it was a missile. The Tacview file
+bombs and the JDAMs) is a **bomb**, where it was a missile; a converted
+network capture classes them the same (slice NA). The Tacview file
 types them `Weapon+Rocket` and `Weapon+Bomb`, and a replay of an older
 recording reads them as it recorded them.
 
