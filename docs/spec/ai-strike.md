@@ -11,8 +11,12 @@
 Specification, 2026-10-11, for the AI strike round (slice ST-S). Status:
 **specified, partly built**: the ground picture ([What the AI
 knows](#what-the-ai-knows), and the threat inputs of [Perceived threat and
-available speed](#perceived-threat-and-available-speed)) is built (ST-P); no
-AI attacks the ground yet. John asked for AI that attacks the ground and
+available speed](#perceived-threat-and-available-speed)) is built (ST-P), the
+strike cockpit and shared release (ST-C), and the strike tactics for
+fighters, attack jets and heavies (ST-T: target, store and pass choice, the
+skill circle, release, exit, re-attack, defence and home; [How the AI flies a
+pass](#how-the-ai-flies-a-pass)). Helicopters, the AC-130, AI lasing beyond its
+own designator, orders and takeover are later slices. John asked for AI that attacks the ground and
 authorised the work for this round (answers of 2026-10-11, folded in below). The
 slices that build it are listed in [Source notes](#source-notes).
 
@@ -119,7 +123,8 @@ All opinionated (John, 2026-10-11: "one cockpit, two pilots" and
 Built (slice ST-C): the record, the shared release and the AI's entry to it
 are described in [architecture](../ARCHITECTURE.md#the-strike-cockpit). The AI
 releases on the shared solution with no re-aim; when it releases, and its
-skill's aim for unguided weapons, are the strike tactics' (not yet built).
+skill's aim for unguided weapons, are the strike tactics' ([How the AI flies a
+pass](#how-the-ai-flies-a-pass)).
 
 ## What the AI knows
 
@@ -222,7 +227,7 @@ applies:
 | Case | Pass |
 | --- | --- |
 | Seeker missiles and HARM (stand-off) | Fast-high when energy is Good, else straight run; the approach ends at the store's release range. Retail's guided release rule is the model: a guided round only inside 10,000 ft or half the weapon's maximum range, one guided round in flight at a time (retail, [weapons](../formats/weapons.md#ai-release-against-ground-targets)) |
-| Rockets | Straight run with a shallow dive; pop-up under threat Missiles |
+| Rockets | Straight run with a shallow dive. The pop-up under threat Missiles is not flown with rockets (fitted, agent, ST-T): a rocket flies along the nose, and after a low pop the dive that points the nose at the target is steeper than the AI's terrain floor allows, so the run would end with no rocket fired |
 | Guns (strafing) | Straight run; attack jets strafe after their bombs and rockets are gone |
 | Laser bombs, JDAMs | Level run (or a shallow run) to the weapon's reach |
 | Taken over with LVL kept | Level run whatever the table says |
@@ -447,6 +452,36 @@ stateDiagram-v2
     Home --> [*]
 ```
 
+## How the AI flies a pass
+
+Built in slice ST-T (`tore_sim::ai::strike`, the bridge
+`tore_world::ai_wings::strike`). The AI flies every pass through the same
+input-only steering adapter as every other AI maneuver (a heading, a
+flight-path pitch and a speed; [AI behaviour](ai.md)), so what it can fly is
+what that adapter and the AI's terrain floor (6 s of travel ahead) allow. The
+retail pass shapes above are kept; the rules below are how they are flown.
+All fitted (agent, 2026-10-11) unless marked.
+
+| Rule | Value |
+| --- | --- |
+| Who | An AI aircraft with a ground picture (the Strike role or an ordered ground target) of the Fighter, Attack or Heavy class. Helicopters and the gunship keep their existing behaviour until their slice |
+| Choice point | 10 nm from the target, or at once inside it; again at each turn back |
+| Target | The ordered one; else for an anti-radiation carrier the objective's SAM radars, then AAA radars, then other radars, nearest first, two attackers at most (SEAD); else the selector's (nearest briefed, then seen opportunity targets) |
+| Store | Anti-radiation at a radar first; under threat Missiles stand-off first (seeker, radar AGM, JDAM, laser, bombs, rockets); otherwise bombs, JDAM, laser, seeker, radar AGM, rockets. A laser store only with the aircraft's own designator, its laser on by hand while selected (other spots are the lasing slice's). A heavy carries no rockets into a pass |
+| Aim | The pass's seeded draw (mission seed: the aircraft's roster seed; aircraft id; pass number), unguided only. A moving target is also led by its ground speed times the cue's time of fall |
+| Approach | Flown at the aim point. A pop-up comes down to 500 ft over the target by its pull point, 10,000 ft out (16,000 ft for rockets), then pulls 25 degrees over the line of sight at corner speed for at least 4 s and until the target is 15 degrees down. A dive approaches its roll-in point (the dive's height, at least max(10,000 ft, 2R), where the aim is 30 degrees down) and starts the dive there, since the adapter noses over wings level instead of retail's inverted pull |
+| Flying the cue | Across the track the heading turns by the angle between the aim and the line the cue sweeps along. In a straight run, pop-up or dive the flight path is turned by three times the angle between the cue and a point 600 ft short of the aim (no more than 8 degrees over the line to the target) until the cue is within 600 to 900 ft short, then held, so the cue creeps across the aim; a cue that overshoots by the circle is flown again. While the cue is more than 3,000 ft short the pass flies its own line. A push that would ask the adapter for less than 0.3 G is flown wings level (a banked push turns the wrong way). Level runs, fast-high bomb runs and guided weapons hold their height and steer the cue (or the aim) across |
+| Release | When the host's shared release test passes (the cue within 5% of R of the aim, or a guided weapon's reach), in the pass's final or a pop-up's pull, with the cue inside the store's zone 1 range, above the floor for a dive or level release, and not while the sight warns LOW or FRAG. One trigger call a pass (a pack leaves whole); rockets fire one at the record's cadence while the cue stays inside the circle, at most 8. Seeker missiles fire on the lock (inside zone 1 from the mount, within 10,000 ft or half the zone-1 maximum, an emitting target for a HARM, one guided round at a time) through the AI's own missile release, observed on the ground target |
+| Exit | Retail's: a jink of four 3 s legs at maximum speed (12 degrees up, 10 degrees to the side the draw picks) inside 10,000 ft, then 10 degrees up at maximum speed, levelling 2,000 ft over the altitude the strike began at (a dive's exit climbs back to the dive's height), turning back at max(30,000 ft, 2R) (a heavy at 50,000 ft) |
+| Defend | A B47 defence (missile or gunfire) or a fighter inside 5 nm within 45 degrees of its nose hands the flying back. Once no warning has sounded for 10 s it resumes at ingress if [safe](#egress-re-attack-and-going-home) (the safe test as written, confirmed by John on 2026-10-11); if not, it egresses to the exit distance and resumes only if safe by then, else goes home |
+| Home | No target or no usable store left: the mission's own return (a landing order with a runway, else the leader flies home) |
+
+Known limits, each an effect of flying through the input-only adapter and the
+terrain floor rather than a rule: the dive is held to about 50 degrees at
+5,000 ft by the floor; a pop-up from low with rockets cannot dive steeply
+enough (hence the straight run above); and the column's own guns can bring a
+striker down at a pop-up's low altitude.
+
 ## SEAD
 
 HARM carriers in a Strike wing take the objective's radars first: SAM radars,
@@ -456,8 +491,11 @@ keeps homing while the object stays in the missile's 45 degree cone, even if
 the radar shuts down ([air-to-ground edge cases](air-to-ground.md#edge-cases)).
 The retail Wild Weasel idea ("attack enemy air defenses", manual p. 169) is the
 source; the order of radars and the fire range are opinionated (John,
-2026-10-11, decision 15) with the details agent. HARM eligibility for the AI is
-[unknown](#unknowns).
+2026-10-11, decision 15) with the details agent. HARM eligibility for the AI
+follows retail ([weapons](../formats/weapons.md#ai-release-against-ground-targets)):
+any surface target, the lock only while it emits; T.O.R.E fires it inside
+the AI's fire range (100,000 ft for the AGM-88) while the target's radar
+emits.
 
 ## Helicopters
 
@@ -603,7 +641,7 @@ strike order or a takeover of a striking plane.
 | Release circle radius (Ace, Experienced, Average, Novice) | 100 m (328 ft), 175 m (574 ft), 250 m (820 ft), 325 m (1,066 ft) | opinionated (John, 2026-10-11) |
 | Aim offset draw | 90% inside the circle, uniform by area; 10% in the ring R to 2R | 90/10 opinionated (John, 2026-10-11); ring extent opinionated (agent) |
 | Draw seed | mission seed, aircraft id, pass number | opinionated (agent) |
-| Guided weapons | the same offset moves the JDAM stored point and the laser spot | opinionated (John, 2026-10-11) |
+| Guided weapons | no offset: the JDAM stores the target's point, the laser spot sits on the target, seekers lock on it | opinionated (John, 2026-10-11) |
 | Release on the aim point within | 5% of `R` | fitted |
 | Scatter | up to 3 degrees in heading and pitch, as the player | retail |
 | Threat levels | Clear, Air (fighter within 30 nm), Guns, Missiles | opinionated (agent) |
