@@ -1336,13 +1336,12 @@ impl App {
             // nearest ground target (slice G1).
             "a-g-radar" => return self.air_ground_key(),
             "nearest-ground" => return self.nearest_ground_key(),
+            // The laser and the targeting sight's next object (slice T1).
+            "laze" => return self.laze_key(),
+            "sight-next" => return self.sight_next_key(),
             // A2G keys (K1): bound and listed, not wired to the sim yet.
-            "laze" | "sight-next" | "fire-gun" => {
-                let label = match name.as_str() {
-                    "laze" => "Laser",
-                    "sight-next" => "Sight: next visible object",
-                    _ => "Fire the gun",
-                };
+            "fire-gun" => {
+                let label = "Fire the gun";
                 println!("{name}: not implemented yet");
                 self.flight_ui
                     .message(format!("{label}: not implemented yet"));
@@ -1740,21 +1739,21 @@ impl App {
                 self.queue(seats::SeatCommand::RangeReset);
                 Action::None
             }
-            // Retail's Backslash designates the IR/laser target, which only
-            // the AC-130's gunsight has here; the other aircraft say so like
-            // the other retail keys whose feature is missing. The pin key
-            // and the zoom keys are the same on every aircraft but act on
-            // the gunsight alone.
-            Command::SightDesignate | Command::SightPinGround if !self.input.gunsight() => {
+            // Retail's Backslash designates the IR/laser target: the
+            // AC-130's gunsight and the targeting sight of every aircraft
+            // with a laser designator or a FLIR (slice T1). The others say
+            // they have none. The pin key and the zoom keys act on the sight
+            // alone.
+            Command::SightDesignate | Command::SightPinGround if !self.has_sight() => {
                 self.flight_ui
                     .message(if command == Command::SightDesignate {
-                        "IR/laser designate: not implemented yet"
+                        "IR/laser designate: no targeting sight"
                     } else {
-                        "Pin ground point: AC-130 gunsight only"
+                        "Pin ground point: no targeting sight"
                     });
                 Action::Click
             }
-            Command::SightZoom(_) if !self.input.gunsight() => {
+            Command::SightZoom(_) if !self.has_sight() => {
                 self.flight_ui
                     .message("Bomb camera zoom: not implemented yet");
                 Action::Click
@@ -2080,6 +2079,50 @@ impl App {
     }
     /// Ctrl+X: the nearest hostile ground object, with the Easy targeting
     /// cheat (or the AC-130's sight) only.
+    /// The aircraft in flight has a sight the sight keys act on: the
+    /// AC-130's gunsight, or a targeting sight (a laser designator or a
+    /// FLIR).
+    fn has_sight(&self) -> bool {
+        self.input.gunsight()
+            || net::play::current_frame(&self.world, &self.net_flight, &self.net)
+                .readout
+                .sight
+                .is_some()
+    }
+    /// Ctrl+L: the laser on or off by hand (docs/spec/air-to-ground.md, "The
+    /// laser"). Says so on an aircraft without a designator.
+    fn laze_key(&mut self) -> Action {
+        let laser = net::play::current_frame(&self.world, &self.net_flight, &self.net)
+            .readout
+            .laser;
+        let Some(laser) = laser.filter(|laser| laser.designator) else {
+            self.flight_ui.message("Laser: no laser designator");
+            return Action::Click;
+        };
+        use tore_sim::combat::laser::LaserState;
+        let on = laser.manual.unwrap_or(matches!(
+            laser.state,
+            LaserState::Lasing | LaserState::Masked
+        ));
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::ToggleLaser,
+        ));
+        self.flight_ui
+            .message(if on { "Laser off" } else { "Laser on" });
+        Action::None
+    }
+    /// `/`: the sight tracks the next visible ground object.
+    fn sight_next_key(&mut self) -> Action {
+        if !self.has_sight() {
+            self.flight_ui
+                .message("Sight: next visible object: no targeting sight");
+            return Action::Click;
+        }
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::SightNext,
+        ));
+        Action::None
+    }
     fn nearest_ground_key(&mut self) -> Action {
         if !self.flight_ui.cheats.easy_targeting && !self.input.gunsight() {
             self.flight_ui
