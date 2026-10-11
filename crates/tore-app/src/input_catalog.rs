@@ -556,66 +556,44 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd(
         "sight-designate",
-        "Gunsight: designate under crosshair (AC-130)",
+        "Sight: designate under crosshair",
         Weapons,
         &["\\"],
     ),
     cmd(
         "sight-pin",
-        "Gunsight: pin ground point (AC-130)",
+        "Sight: pin ground point",
         Weapons,
         &["Shift-\\"],
     ),
-    cmd(
-        "sight-zoom-in",
-        "Gunsight: zoom in (AC-130)",
-        Weapons,
-        &["Shift-'"],
-    ),
-    cmd(
-        "sight-zoom-out",
-        "Gunsight: zoom out (AC-130)",
-        Weapons,
-        &["Shift-;"],
-    ),
-    e(
-        "sight-x",
-        "Gunsight: slew left/right (AC-130)",
-        Weapons,
-        Axis,
-        &[],
-    ),
-    e(
-        "sight-y",
-        "Gunsight: slew up/down (AC-130)",
-        Weapons,
-        Axis,
-        &[],
-    ),
+    cmd("sight-zoom-in", "Sight: zoom in", Weapons, &["Shift-'"]),
+    cmd("sight-zoom-out", "Sight: zoom out", Weapons, &["Shift-;"]),
+    e("sight-x", "Sight: slew left/right", Weapons, Axis, &[]),
+    e("sight-y", "Sight: slew up/down", Weapons, Axis, &[]),
     e(
         "sight-left",
-        "Gunsight: slew left (AC-130)",
+        "Sight: slew left",
         Weapons,
         Hold,
         &["Alt-ArrowLeft"],
     ),
     e(
         "sight-right",
-        "Gunsight: slew right (AC-130)",
+        "Sight: slew right",
         Weapons,
         Hold,
         &["Alt-ArrowRight"],
     ),
     e(
         "sight-up",
-        "Gunsight: slew up (AC-130)",
+        "Sight: slew up",
         Weapons,
         Hold,
         &["Alt-ArrowUp"],
     ),
     e(
         "sight-down",
-        "Gunsight: slew down (AC-130)",
+        "Sight: slew down",
         Weapons,
         Hold,
         &["Alt-ArrowDown"],
@@ -1651,6 +1629,80 @@ mod tests {
         assert_eq!(kinds("sight-x"), [Kind::Axis]);
         assert_eq!(kinds("sight-y"), [Kind::Axis]);
         assert_eq!(kinds("sight-left"), [Kind::Hold]);
+    }
+    /// Every key the flight's own key handler acts on is a catalog stock
+    /// key, so the controls screen lists it, can move it, and CONTROLS.md
+    /// and the keyboard map can be checked against it. The only keys that
+    /// do anything without being listed are the original's keys whose
+    /// feature is not built: they say "not implemented yet".
+    #[test]
+    fn every_key_the_flight_acts_on_is_a_catalog_key() {
+        use crate::flight_ui::{Command, FlightUi};
+        // Original keys that only answer "not implemented yet". Alt+F loses
+        // its place here when the wing's engage-laser-target order is built.
+        const NOT_BUILT: [&str; 7] = [
+            "Alt-f", "Shift-a", "Shift-d", "Shift-f", "Shift-g", "Shift-i", "Shift-j",
+        ];
+        let mut names: Vec<String> = ('a'..='z').map(String::from).collect();
+        names.extend(('0'..='9').map(String::from));
+        names.extend((1..=12).map(|n| format!("F{n}")));
+        names.extend(
+            [
+                "-",
+                "=",
+                "[",
+                "]",
+                "\\",
+                ";",
+                "'",
+                ",",
+                ".",
+                "/",
+                "`",
+                "Space",
+                "Enter",
+                "Tab",
+                "Backspace",
+                "Insert",
+                "Delete",
+                "Home",
+                "End",
+                "PageUp",
+                "PageDown",
+                "ArrowUp",
+                "ArrowDown",
+                "ArrowLeft",
+                "ArrowRight",
+                "Numpad5",
+            ]
+            .map(String::from),
+        );
+        let listed: std::collections::BTreeSet<&str> = ENTRIES
+            .iter()
+            .flat_map(|e| e.keys.iter().copied())
+            .collect();
+        let mut unlisted = Vec::new();
+        for name in &names {
+            for mask in 0..8u8 {
+                let (ctrl, alt, shift) = (mask & 1 != 0, mask & 2 != 0, mask & 4 != 0);
+                let chord = format!(
+                    "{}{}{}{name}",
+                    if ctrl { "Ctrl-" } else { "" },
+                    if alt { "Alt-" } else { "" },
+                    if shift { "Shift-" } else { "" },
+                );
+                if listed.contains(chord.as_str()) || NOT_BUILT.contains(&chord.as_str()) {
+                    continue;
+                }
+                if FlightUi::default().key(name, shift, ctrl, alt, &[]) != Command::None {
+                    unlisted.push(chord);
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "keys the flight acts on that the catalog does not list: {unlisted:?}"
+        );
     }
     #[test]
     fn scope_range_keys_follow_the_manual() {

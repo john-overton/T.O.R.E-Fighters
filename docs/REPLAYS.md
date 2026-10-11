@@ -1449,7 +1449,10 @@ after, and no landings.
 With the interface hidden (H) the lines and shapes stay and their words
 go. `TORE_REPLAY_MARKS=1` draws the marks in the promo [reel
 renderer](#promo-reel-capture), which otherwise never shows them, so the
-marks can be checked without a window.
+marks can be checked without a window. `TORE_REPLAY_TRAILS=1` does the same
+for the flight path trails (R). Both are drawn relative to the render origin,
+as the rest of the combat geometry is, so they sit on their aircraft however
+far from the map's corner the flight is.
 
 ### Sound
 
