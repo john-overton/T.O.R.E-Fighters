@@ -122,9 +122,11 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
   King's choice read-only, with the same dimming rule as the other fields.
   A multiplayer start stays airborne, so `start ground auto` does not reach
   a lobby.
-- **Not built yet.** The units of the target, its SAMs and its guns are the
-  next slices ([surface defenses](surface-defenses.md)); until they land a
-  mission with a target flies without them and the log says so.
+- **What the flight gets.** The target's template, its SAMs, guns, ships,
+  supply trucks and parked aircraft are built from these fields and the seed,
+  defend the target and make it the mission's objective
+  ([surface defenses](surface-defenses.md)). A template the import does not
+  hold leaves the mission without it, and the log says so.
 
 The old notice popup (sentence hit region (334,294), 278 by 49; popup (166,202),
 308 by 88) is gone, and so is the launch refusal "Ground targets and defenses

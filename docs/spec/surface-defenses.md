@@ -10,12 +10,12 @@
 
 Specification, 2026-10-10, for the surface-AI round (John's request of the same
 day, with his answers). It was written ahead of the code so each
-implementation slice has numbers to test against, and is being implemented
-slice by slice: the unit records, resolution and sides, the AAA tuning table,
-the surface weapons' flight, and the engagement controllers, batteries and
-radars are in ([implementation so far](#implementation-so-far)); the
-acceptance pass at the end of the round (slice A1) updates it with what
-shipped. Retail data comes from the survey of `FA_2.LIB` and `FA.EXE`
+implementation slice had numbers to test against, and it now describes what
+shipped: every section below is built, with the choices each slice made in
+its "as built" tables ([engagement](#implementation-so-far),
+[objectives](#implementation-slice-o1-2026-10-10), [resupply](#how-it-runs)).
+The per-theater acceptance (slice A1) is in
+[the surface defenses baseline](../baselines/surface-defenses.md). Retail data comes from the survey of `FA_2.LIB` and `FA.EXE`
 described under [Provenance](#provenance-and-how-to-read-this).
 
 For a player: the Quick Mission Creator's line "Friendly ground target is [30]
@@ -890,7 +890,7 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 | Radar guns | A gun is radar-directed when its record carries flag 0x4000 and a radar seeker; the barrage zone's record carries the flag without the seeker and is not | inference |
 | Battery blind | A battery is Blind while its radar is destroyed or shut down by a HARM; a radar that is merely off (no hostile near) leaves it Idle | defined (agent) |
 | Battery launcher | Each salvo leaves from the nearest launcher with a loaded rail, line of sight and the target in its launch zone; the missile is the launcher's, its support the radar's | defined (John) |
-| Optical backup | Detection and support from the first live launcher, inside half the launch range and 10 nm, preparation doubled, no emitter and no lock tone | defined (agent), default pending John |
+| Optical backup | Detection and support from the first live launcher, inside half the launch range and 10 nm, preparation doubled, no emitter and no lock tone | defined (John, 2026-10-10, the agent's recommendation) |
 | Barrage zone | A target volume 60 ft square and 20 ft tall on the ground (bombs can kill it); it wakes when a hostile is within 195 x 256 ft and fires each burst with its 33 percent chance at the nearest hostile's lead point clamped into its fire zone, scattered by the record's offset-fire angles (20 degrees) | fitted |
 | Resupply hook | A unit's stock (rails, magazine, spare magazines) and a "truck in reach" flag that the [resupply](#resupply) step sets each tick before the controllers read it; with the flag set an empty gun swaps a magazine from the truck, and an Empty unit returns to Search once a rail or magazine is loaded | defined (John's rule, built in slice SR1) |
 
@@ -998,8 +998,8 @@ radar; a launcher cannot be a HARM target. The radar's shutdown roll blinds the
 battery while it is off.
 
 **Radar killed.** The battery goes Blind: no new launches, and missiles in
-flight lose support and fall to their memory rule. Recommended degraded mode
-(defined, agent; default, pending John): SA-2 and SA-3 keep their real optical
+flight lose support and fall to their memory rule. Degraded mode (defined,
+John, 2026-10-10, accepting the agent's recommendation): SA-2 and SA-3 keep their real optical
 backup (the Fan Song's optical sight, the SA-3's TV tracker). In Clear, Cloudy,
 Dawn or Sunset conditions (not Night or Foggy) a blind SA-2 or SA-3 battery may
 still launch at a target inside half its launch range and within 10 nm, with
@@ -1036,14 +1036,14 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
   ownership is the slot's. Ids `0x5800_0000` up, in the order of the units
   served (a slot's truck before its battery's).
   Trucks are passive units, targetable, Vehicle class (0x0200), and move with the
-  defended group's relocation. Never targets. Number and placement: fitted
-  (default, pending John).
+  defended group's relocation. Never targets. Number and placement: fitted,
+  agreed by John (2026-10-10).
 - **Base layouts get no added trucks** (including no truck for their batteries);
-  their units are resupplied only by trucks already standing in them (default,
-  pending John).
+  their units are resupplied only by trucks already standing in them (agreed by
+  John, 2026-10-10).
 - **Reach.** A live supply truck of the same side within 528 ft (horizontal) of
   a unit resupplies it. One truck serves every unit in range at once. Trucks
-  carry unlimited stock (fitted; default, pending John).
+  carry unlimited stock (fitted; agreed by John, 2026-10-10).
 - **SAM rails** (John, 2026-10-10: SAMs take about 5 to 10 minutes to rearm from
   trucks). While a launcher has an empty rail and a truck is in range, a rearm
   timer runs; when it completes, **all** the launcher's empty rails are refilled
@@ -1275,19 +1275,17 @@ unit; a T-80 drawn on its origin hid its hull in the ground). Ships keep
 their waterline and buildings their authored depth: their F2 offsets lie well
 below their geometry (Krivak -100 against -26, the bunkers -176 against -88).
 
-### Shapes the reader cannot draw yet
+### Shapes the reader learned
 
-No stand-ins (defined, John): the shape reader learns the missing shapes.
-
-| Shape | Units | Today |
-| --- | --- | --- |
-| SA3.SH, SCD.SH | SA-3 (`~QSPSAM`, `~QPGSAM`, 9 targets each), SCUD (`~QCSCUD`, `~QIRSCUD`) | Fail on opcode `eb` (the loaded-count envelope the reader already reviews for CHAP and SA2) |
-| KRIV.SH | Krivak (named in `~QBFLT`; `<destroyer>` in group 2 picks it) | Opcode `15` unsupported |
-| SOVR.SH | Sovremennyy | Opcode `ec` unsupported |
-| SOLDIER.SH (also RUNNER, CATGUY) | Soldiers in `~QPGFAIR`, `~QCSCUD`, `~QPGSAM` | Fail |
-| NIMZ, KITT, CLEM, WASP, their `_A` shapes and tower OTs | Carriers | "No geometry" |
-
-All other NT shapes read. See [the shape guide](../formats/objects-and-shapes.md#nt-surface-unit-layout).
+No stand-ins (defined, John): the shape reader learned the shapes it could not
+draw at the start of the round, so every unit draws with its own retail shape.
+SA3 and SCD use the loaded-count envelope, KRIV and SOVR the hardpoint-angle
+envelope, SOLDIER, RUNNER and CATGUY are sprites, and the carriers NIMZ, KITT,
+CLEM and WASP with their `_A` hulls and islands take the full model past the
+low-memory branch. Details: [surface unit
+shapes](../formats/objects-and-shapes.md#surface-unit-shapes-envelopes-and-sprites-2026-10-10)
+and [carriers](../formats/objects-and-shapes.md#carriers-islands-and-deck-crew-2026-10-10).
+Only the A_M1939 barrage zones have no shape; they are a target volume.
 
 ### Destroyed looks
 
@@ -1428,7 +1426,7 @@ otherwise. Template objects keep their own 0x80 flags.
 | Friendly fire | Any surface object of the plane's side that is not named in its Destroy or Protect list: base-layout units, a template's friendly (`nationality3`) units, battery radars and supply trucks. Scenery with no side is never friendly | defined (John) |
 | PvP | `Requirements::with_ground`: Blue gets Destroy, Redfor gets Protect. A Redfor plane's own non-target units are friends: shooting one is friendly fire | defined (John) |
 | Debrief rows | A hostile surface unit's gun round at the pilot is AAA, anything else SAM (a battery missile belongs to its launcher); the unit's class word picks its kill row; splash kills credit the shooter | retail rule |
-| Names | The pilot who was shot down by a surface unit gets a **Shot down by** row (the unit's short name) and a flight message; the networked debrief does not carry it yet | opinionated (agent, 2026-10-10) |
+| Names | The pilot who was shot down by a surface unit gets a **Shot down by** row (the unit's short name) and a flight message; the networked debrief carries it since protocol 22 | opinionated (agent, 2026-10-10), kept by the lead after John saw it in the plan |
 | Radio | A surface unit makes no hit or kill call; a Blue site's side is its own, not the AI's friend list | defined (agent) |
 | Target window | "Obj: Destroy" (Redfor: "Obj: Survive") for a ground target, destroyed or not | defined (John) |
 
@@ -1453,29 +1451,42 @@ debrief's tallies (see
 
 ## Multiplayer
 
+Built in protocol 22 (slice N1, 2026-10-10); the wire layout is in
+[the protocol document](../formats/net-protocol.md#the-surface-world-protocol-22)
+and the player's view in [the multiplayer guide](../MULTIPLAYER.md#ground-targets-online).
+
 - **Authority.** The host (or dedicated server) runs all surface AI, movement,
-  firing and damage. Every client builds the same surface world from the mission
-  text and checks the digest ([Jitter](#jitter)): placement, relocation,
+  firing, resupply and damage. Every client builds the same surface world from
+  the mission text and the seed the host draws, and checks the digest
+  ([Jitter](#jitter)) at seating and at a resume: placement, relocation,
   batteries, trucks, parked aircraft and both sides' starts all come from the
-  seed, so none of it crosses the wire. Static units never send state.
+  seed, so none of it crosses the wire. A game whose surface differs is refused
+  in plain words. Standing, untouched units never send state.
 - **Entity kind.** A fifth network entity kind, "surface" (defined, John), for
-  moving units, damaged units and launchers whose rails changed: position,
-  heading, damage level in eighths, radar on, destroyed, loaded rails. Limit 128
-  per snapshot, relevance-banded like aircraft.
-- **Events.** Ground-destroyed (every surface death), launch and projectile
-  entities (SAMs, with a surface owner), a burst event for AAA with tracers (the
-  client remakes the rounds from the unit's mount), an effect for flak bursts
-  (host-decided position; flak shells are never remade on clients, they are
-  invisible in flight), and the usual marks for wreck fires and craters.
+  units that drive or sail: position, ground-relative velocity, heading, pitch,
+  bank and whether it is a wreck (the host's pose; clients do not step units).
+  Limit 128 per snapshot.
+- **Unit states.** A Surface unit event carries a unit's hit points, radar on
+  or off, launcher rails and spare magazines when they change, and at a seat or
+  resume for every unit not as built; a gun's loaded rounds are not sent.
+- **Fire.** SAMs travel as ordinary launch and projectile entities with the unit
+  as owner. An AAA burst is one Surface burst event (unit, hardpoint, target,
+  first round's direction, rounds and ticks); the client remakes the rounds from
+  the unit's mount, turning later rounds with the target it draws, and a burst
+  cut short ends with a Surface burst end event. Flak shells are never remade;
+  the burst is an Effect carrying its explosion type (27 for the KS-12, 28 for
+  the KS-19). Wreck fires and craters are the host's marks.
 - **Late join and rejoin.** The destroyed list covers base and template units;
-  moving units arrive in the next snapshot; radar state arrives in the seat's
-  readout; the digest rides in the seat and rejoin messages. The surface state
-  (hit points, damage sections, controller phases and clocks, battery Blind
-  state, magazines, reserves, rails, rearm timers, radar state and timers, route
-  progress) is part of the mission checkpoint, so host migration carries it.
+  moving units arrive in the next snapshot; the RWR's ground squares, locks and
+  painting arrive in the seat's readout; the digest rides in the seat and resume
+  messages. The surface state (hit points, damage sections, controller phases
+  and clocks, battery Blind state, magazines, reserves, rails, rearm timers,
+  radar state and timers, route progress) is part of the mission checkpoint, so
+  host migration carries it.
 - **Sides.** Friendly fire off spares same-side aircraft from surface rounds too.
-- The protocol rises to 22 for these messages; the wire layout is specified in
-  [the protocol document](../formats/net-protocol.md) when slice N1 lands.
+  In PvP Redfor humans start by the target (airborne) and defend it; a Redfor
+  ground start on Red's own airfield is not built online.
+- **Debrief.** The networked debrief carries "Shot down by".
 
 ## Replays
 
@@ -1509,7 +1520,7 @@ target and template lists are in
 | Baltics (BAL) | Russian, 2 | fleet (Kiev target; 2 Sovremennyy, 4 Krivak, Kirov, 8 Sarancha; 0 / 0); airstrip; bridge; border checkpoint; armored column (parked); forward airfield; supply base; super-hardened C&C bunker | Fleet needs the Krivak and Sovremennyy shapes; the fleet's 4 Yak-141 stay out (the Kiev has no deck the rule finds); airstrip and forward airfield hold 13 parked aircraft | 10 / 20 (HAWK, M163, ZSU-23, Roland, 2S6 and others) |
 | Cuba (CUB) | Cuban, 2 | airstrip; SCUD launchers (6 SCUD targets); submarines (4 Oscar); radar installations (2 GCI among targets: emitters); cargo ships (4 cargo, 2 destroyer; 0 / 0); command HQ | SCUD shape and soldiers; GCI targets emit | 19 / 4, including 5 SA-2 |
 | Egypt (EGY) | Islamic Egyptian, 3 | small fleet (3 cargo, 2 destroyer, 2 cruiser: Jianghu, Knox; 0 / 0); small airstrip; large airstrip; command HQ; radar installation; armored column (5 M1, parked); canal defense | Group 3 lists | none |
-| Falklands (LFA) | Argentinean, 3 | cargo ships (10 / 10 at sea); patrol boats (4 Cyclone); forward SAM sites (6 Crotale targets that shoot back); Super Etendards on an airstrip (5 parked SPE targets); supply depot; command HQ (BNK9) | At sea the SAM and AAA picks cannot land on water: land units move only onto land, so those slots fall back to their retail spot (to check at acceptance) | 5 / 2 |
+| Falklands (LFA) | Argentinean, 3 | cargo ships (10 / 10 at sea); patrol boats (4 Cyclone); forward SAM sites (6 Crotale targets that shoot back); Super Etendards on an airstrip (5 parked SPE targets); supply depot; command HQ (BNK9) | The cargo template's 10 SAM and 10 AAA slots stand on the shore where retail put them, so a rigid move rarely keeps them on land: it relocates in 2 of 20 seeds and stays at its retail spot otherwise (acceptance: all 20 slots manned at heavy, seed 1 at the retail spot) | 5 / 2 |
 | France (FRA) | French, 1 | fleet (Clemenceau target; 5 destroyer: Type 69; 0 / 0); small airfield; large airfield; supply convoy; radar installation; command HQ; aircraft factory (7 parked Rafales) | Clemenceau shape; group 1: MIS and Crotale SAMs, M113 and ZSU-23 AAA; the 5 SPE and 3 Rafale M stand on the Clemenceau's deck | none |
 | Greece (GRE) | Turkish, 4 | small airfield; patrol boats (0 / 0); radar stations (4 Stealth Radar 1 targets: emitters); cargo ships (0 / 0); invasion force (7 tank targets, 15 tank and 20 AFV placeholders) | Group 4 lists | 10 / 14 |
 | Iraq (IRA) | Iraqi, 2 | radar stations (Tall King targets: emitters); airfield; power station; command bunkers; armored staging area; SCUD launchers (4 SCUD); chemical weapons plant; troops withdrawing from Kuwait (8 tank targets) | `~QIRRETR` keeps 40 American `nationality3` objects on the friendly side | 13 / 10 |
@@ -1557,9 +1568,9 @@ depends on the 1 nm clustering (measured: Cuba 5 SA-2 and 2 SA-6 batteries,
 the Baltics 2 HAWK, Panama 3 SA-6 and 1 HAWK, Iraq 4, Pakistan 2, the Persian
 Gulf 3, South Korea 4 and Taiwan 2 SA-6). In the North Vietnam layout one GCI
 stands 1.9 nm from an SA-2 site, five more 2.2 to 3.2 nm off and three 8.0,
-12.5 and 13.4 nm off. At the 3.5 nm adoption default (default, pending John;
-the lead raised it from 2 nm on 2026-10-10 because retail pairs these GCIs
-with SA-2 sites) six are adopted and seven batteries get an added radar; the
+12.5 and 13.4 nm off. At the 3.5 nm adoption distance (John, 2026-10-10; the
+lead raised it from 2 nm because retail pairs these GCIs with SA-2 sites) six
+are adopted and seven batteries get an added radar; the
 three far GCIs stay standalone radars, always on.
 
 Some relocatable templates never find a site in 20 seeds and stay at their
@@ -1604,21 +1615,29 @@ so). Each row has a fitted stand-in above.
 
 ## Decisions pending
 
-Open decisions with the default that will be built unless John changes it. All
-carry the label "default, pending John" where they appear above.
+Open decisions, built with the default shown unless John changes it. All
+carry the label "default, pending John" where they appear above. The settled
+ones follow in their own table.
 
 | Decision | Default | Why |
 | --- | --- | --- |
-| Relocation and start numbers | Unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
-| HAWK radar element's shape | Settled: SRDR2 (John, 2026-10-10), from the sheet of the LIB's radar shapes (SRDR1, SRDR2, LTRACK, SFLUSH, KING) | The LIB has no HAWK radar; this reuses retail art |
-| Optical backup for SA-2 and SA-3 | Yes: a blind battery may launch in daylight inside half range with no RWR warning before launch; SA-6 and HAWK stay blind | Both real systems had optical tracking; keeps a killed radar from making the site harmless at short range |
+| Relocation and start numbers | John found the target variance fine (2026-10-10); the numbers stay fitted: unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
-| Supply truck numbers and stock | One truck per manned SAM or AAA slot plus one per template battery, unlimited stock, no added trucks in base layouts, two spare magazines per land gun. (The SAM rearm times of 300, 420 and 600 s are John's range, fitted within it.) | Retail slots stand about 3,300 ft apart, so a 528 ft radius covers one slot per truck |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and a Redfor human | A ground start across the map from a relocated target would mean a long flight |
-| Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
+| Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (confirmed by John, 2026-10-10; the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
-| Runway pavement width | Keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
 | Building and unit hit boxes | Real size, a third of retail's in every axis, with the drawn size | Matches John's realistic scale; retail's targets were three times larger and easier to hit |
+
+Settled during the round:
+
+| Decision | Settled | Why |
+| --- | --- | --- |
+| HAWK radar element's shape | Settled: SRDR2 (John, 2026-10-10), from the sheet of the LIB's radar shapes (SRDR1, SRDR2, LTRACK, SFLUSH, KING) | The LIB has no HAWK radar; this reuses retail art |
+| Optical backup for SA-2 and SA-3 | Settled, yes (John, 2026-10-10): a blind battery may launch in daylight inside half range with no RWR warning before launch; SA-6 and HAWK stay blind | Both real systems had optical tracking; keeps a killed radar from making the site harmless at short range |
+| Supply truck numbers and stock | Agreed by John (2026-10-10): one truck per manned SAM or AAA slot plus one per template battery, unlimited stock, no added trucks in base layouts, two spare magazines per land gun. (The SAM rearm times of 300, 420 and 600 s are John's range, fitted within it.) | Retail slots stand about 3,300 ft apart, so a 528 ft radius covers one slot per truck |
+| Runway pavement width | Deferred by John (2026-10-10): keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
+| Jammers against radar-directed AAA | Factor 2 on the aim error, "fine for now" (John, 2026-10-10) | Visual guns are unaffected |
+| Lock tone between salvos, one controller per ship gun mount | Yes (John, 2026-10-10) | See [implementation so far](#implementation-so-far) |
 
 ## Provenance summary
 
