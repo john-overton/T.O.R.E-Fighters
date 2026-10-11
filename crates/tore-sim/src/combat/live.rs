@@ -10207,7 +10207,7 @@ fn guide_owned<'a>(
             return;
         }
         let desired = unit(sub(motion.aim(p.position, point), p.position));
-        let heading = missiles::commanded_heading(p.direction, motion.velocity, desired);
+        let heading = missiles::commanded_heading(p.direction, motion.path(), desired);
         p.direction = missiles::steer(&w.movement, p.age, p.direction, heading);
     }
 }

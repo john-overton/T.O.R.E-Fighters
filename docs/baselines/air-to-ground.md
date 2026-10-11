@@ -91,7 +91,7 @@ classes are the spec's [weapon classes](../spec/air-to-ground.md#weapon-classes)
 | LAU10 | LAU-10 Rocket Pod | 6 | 25 | A-4E, F-16C | Built, flown |
 | AT2 | AT-2 Swatter | 7 | 27 | Mi-24, AH-64, A-10 | Built, flown; Hits, does not kill a T-80 (80 of 200 hit points left) |
 | AGM65G | AGM-65G Maverick | 8 | 25 | A-10, F/A-18D, F-16C, AV-8B | Built, flown |
-| AGM65A | AGM-65A Maverick | 8 | 25 | A-10, F/A-18D | Built, flown; Hits to about 4 nmi; from 5 nmi and beyond it falls short (see Findings) |
+| AGM65A | AGM-65A Maverick | 8 | 25 | A-10, F/A-18D | Built, flown; FX-M fixes the early ground impact, hits through 8 nmi (see Findings) |
 | AGM84E | AGM-84E SLAM | 8 | 24 | F/A-18D, F-15 | Built, flown |
 | AGM88 | AGM-88 HARM | 9 | 26 | F-4G, F/A-18D, F-16C | Built, flown |
 | AGM45 | AGM-45B Shrike | 9 | 26 | A-4E, F-4G | Built, flown |
@@ -251,8 +251,27 @@ sight and goes blind for good when the launcher turns away.
 
 CUED is a designation (A-G page, FLIR or Enter) with the seeker locked on it;
 BORE fires at the hottest ground object near the bore with nothing designated
-(here a 100 hit point object north of the column, not a tank). The AGM-65A
-falls short beyond about 4.5 nmi; see Findings.
+(here a 100 hit point object north of the column, not a tank).
+
+The rows marked FX-M use `fx-agm65` from `387372d1` with the path-holding fix,
+Linux x86_64 debug build, 2026-10-11. The same `--a2g-run` command path and a
+private copy of `surface-data` were used. Local before/after logs are under
+`.local/tmp-fx-agm65/runs/{before,after}`. These rows supersede the failing
+AGM-65A reach measurements; other rows retain their A1 results. Unless stated,
+FX-M passes start at 3,000 ft and 350 kt over `UKR QUCOL`, on the A-G page in
+CUED, with 90 seconds allowed. `--from` is the starting separation, before
+the designation and lock delay. This is implementation validation, not retail
+comparison.
+
+FX-M validation passed: formatting, strict workspace Clippy, all 5,601 workspace
+tests (82 ignored), workspace and binary builds, all 344 Python tests, source
+and binary asset checks, and the documentation check. The changed-file battery
+passed 55/55, followed by the explicit five-pass `a2g-maverick` scenario. Its
+new 6 nmi AGM-65A shot ended 23 ft from the tank, still Locked, with 20/200 hit
+points left. The single-player guard against `sf-51b2d613` gave SAME 47 /
+DIFFERENT 5: only the five known `smoke-evidence-f18` tape headers changed from
+version 7 to 8. No wire golden or simulation fingerprint was updated. Logs are
+under `.local/tmp-fx-agm65/`; no windowed or retail comparison was run.
 
 | Carrier | Store | Pass | Result |
 | --- | --- | --- | --- |
@@ -262,10 +281,13 @@ falls short beyond about 4.5 nmi; see Findings.
 | F-16C | AGM65G | BORE | BORE launch, seeker Locked; end 1211 ft from the target (last Locked); target 0/100 |
 | AV-8B | AGM65G | designated on the FLIR (M, T), CUED | CUED launch, seeker Locked; end 20 ft from the target (last Locked); target 0/200 |
 | A-10 | AGM65A | Enter picks the target, CUED | CUED launch, seeker Locked; end 27 ft from the target (last Locked); target 20/200 |
-| F/A-18D | AGM65A | A-G page, CUED, 4 nmi | CUED launch, seeker Locked; end 27 ft from the target (last Locked); target 20/200 |
-| F/A-18D | AGM65A | A-G page, 5 nmi | CUED launch, seeker Locked; end 207 ft from the target (last Locked); target 181/200 |
-| F/A-18D | AGM65A | A-G page, 6 nmi | CUED launch, seeker Locked; end 953 ft from the target (last Locked); target 200/200 |
-| A-10 | AGM65A | A-G page, 6 nmi | CUED launch, seeker Locked; end 961 ft from the target (last Locked); target 200/200 |
+| F/A-18D | AGM65A | FX-M, 4 nmi | CUED launch, seeker Locked; end 28 ft from the target (last Locked); target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 5 nmi | both end 17 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 6 nmi | both end 23 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 7 nmi | end 16 and 24 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 8 nmi | both end 18 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 8 nmi, 1,000 ft, 350 and 300 kt respectively | end 24 and 20 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65G | FX-M, 9.5 nmi | both end 24 ft from the target, Locked; target 0/200 |
 | F/A-18D | AGM84E | A-G page, CUED, 12 nmi | CUED launch, seeker Locked; end 82 ft from the target (last Locked); target 0/100 |
 | F-15 | AGM84E | BORE | BORE launch, seeker Locked; end 719 ft from the target (last Locked); target 0/100 |
 
@@ -392,12 +414,18 @@ saw the real cockpit; this pass did not open a window.
 
 ## Findings
 
-- **AGM-65A falls short at long range.** From a 3,000 ft pass on the A-G page it
-  hits at 4 nmi (27 ft), misses by 207 ft at 5 nmi and by about 950 ft at 6 nmi,
-  well inside its 8.23 nmi record range. It glides down and reaches the ground
-  short of a moving tank. The AGM-65G, with a faster and longer-burning record,
-  hits from 6 nmi. Not investigated (this may be the older record's energy, not a
-  fault); a reach probe would settle it.
+- **AGM-65A early ground impact fixed (FX-M).** The sag flag adds up to
+  80 ft/s of downward motion after burnout. Steering aimed only the velocity,
+  so the coasting missile sank under its line of sight and hit the ground early.
+  Before the fix, the F/A-18D shot missed by 207 ft at 5 nmi and 953 ft at 6 nmi;
+  the A-10 shot missed by 961 ft at 6 nmi. Energy was not the cause. The
+  [fitted path correction](../spec/missiles.md#drop-launch-sag-and-cruise-profile)
+  now gives the class 8 results above without changing propulsion, sag or cruise
+  constants. The AGM-65G also reaches from 9.5 nmi (24 ft, target killed), where
+  the A-10 shot previously missed by 1,313 ft. Synthetic tests check the dive
+  from 1,024 ft with 953 ft/s coast speed and 80 ft/s sink, plus a full combat
+  shot with the correction off and on. The `a2g-maverick` battery includes the
+  AGM-65A from 6 nmi. The HUD estimate's omission of future terrain remains open.
 - **BORE can pick a ground object that is not a tank.** The Maverick's BORE shot
   picks the hottest return in its bore cone; on `~QUCOL` that is one of two 100
   hit point static objects (ids 0x40000090 and 0x40000091) north of the column.

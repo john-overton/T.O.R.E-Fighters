@@ -47,6 +47,7 @@ crate::checkpoint_struct!(Motion {
     sink,
     sags,
     cruise,
+    holds_path,
 });
 
 crate::checkpoint_struct!(Solution { point, seconds });
@@ -109,11 +110,13 @@ mod tests {
             sink: 17.28,
             sags: true,
             cruise: Some(cruise),
+            holds_path: true,
         };
         assert_eq!(round_trip(&motion, &models).unwrap(), motion);
         let plain = Motion {
             cruise: None,
             sags: false,
+            holds_path: false,
             ..motion
         };
         assert_eq!(round_trip(&plain, &models).unwrap(), plain);

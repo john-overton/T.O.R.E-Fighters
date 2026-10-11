@@ -320,7 +320,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
         let aim = motion.aim(p.position, point);
         let desired = missiles::commanded_heading(
             p.direction,
-            motion.velocity,
+            motion.path(),
             unit(missiles::sub(aim, p.position)),
         );
         let next = missiles::steer(&w.movement, p.age, p.direction, desired);
