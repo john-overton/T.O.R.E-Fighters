@@ -590,7 +590,20 @@ fn draw_ground(
     let area = projection.area;
     for y in area.1..area.1 + area.3 {
         for x in area.0..area.0 + area.2 {
-            let [east, north] = projection.world(x, y);
+            let [mut east, mut north] = projection.world(x, y);
+            // A pixel row or column that starts exactly on the theater's far
+            // edge is still the theater's last cell, not the void beyond it
+            // (a view held against the north edge starts there).
+            let (width, height) = (
+                world.theater.cols as f64 * f64::from(CELL_FEET),
+                world.theater.rows as f64 * f64::from(CELL_FEET),
+            );
+            if (width..width + projection.feet_per_pixel).contains(&east) {
+                east = width - 1e-3;
+            }
+            if (height..height + projection.feet_per_pixel).contains(&north) {
+                north = height - 1e-3;
+            }
             let col = (east / f64::from(CELL_FEET)).floor() as i32;
             let row = (north / f64::from(CELL_FEET)).floor() as i32;
             let rgb = match world.theater.lookup(col, row, 1) {
