@@ -36,7 +36,11 @@ forward nozzle/nacelle neutral. On the AC-130 View+right stick slews the gunsigh
 View+D-pad Up and Down pick and link its guns (the range reset and damage test
 they carry elsewhere are off there), View+A designates under the crosshair and
 View+A held half a second pins the ground. Other aircraft keep their original
-modifier look/rudder/fixture mappings.
+modifier look/rudder/fixture mappings. The sight rows are for every aircraft with
+a laser designator or a FLIR: their keyboard keys work on all of them, while the
+gamepad defaults above are the AC-130's. Bind your own button or stick to any
+sight row in the controls screen to use it on another aircraft. Tab holds the
+gun whatever is selected and has no gamepad default.
 The full profile remains visible in Controls. See [input contexts](INPUT.md).
 
 **Keys that depend on the aircraft.** On the AV-8 and Yak-141, Z and X step the
@@ -152,16 +156,16 @@ and a gamepad's View+stick defaults avoid the problem.
 | Previous weapon / NAV | [ | - | View + X |
 | Next gun candidate (AC-130) | Ctrl+7 | - | View + D-pad up |
 | Link/unlink candidate gun (AC-130) | Ctrl+8 | - | View + D-pad down |
-| Gunsight: designate under crosshair (AC-130) | Backslash | - | View + A (tap) |
-| Gunsight: pin ground point (AC-130) | Shift+Backslash | - | View + A (hold half a second) |
-| Gunsight: zoom in (AC-130) | Shift+Apostrophe | - | - |
-| Gunsight: zoom out (AC-130) | Shift+Semicolon | - | - |
-| Gunsight: slew left/right (AC-130) | - | - | View + Right stick X |
-| Gunsight: slew up/down (AC-130) | - | - | View + Right stick Y |
-| Gunsight: slew left (AC-130) | Alt+Left | - | - |
-| Gunsight: slew right (AC-130) | Alt+Right | - | - |
-| Gunsight: slew up (AC-130) | Alt+Up | - | - |
-| Gunsight: slew down (AC-130) | Alt+Down | - | - |
+| Sight: designate under crosshair | Backslash | - | View + A (tap) |
+| Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
+| Sight: zoom in | Shift+Apostrophe | - | - |
+| Sight: zoom out | Shift+Semicolon | - | - |
+| Sight: slew left/right | - | - | View + Right stick X |
+| Sight: slew up/down | - | - | View + Right stick Y |
+| Sight: slew left | Alt+Left | - | - |
+| Sight: slew right | Alt+Right | - | - |
+| Sight: slew up | Alt+Up | - | - |
+| Sight: slew down | Alt+Down | - | - |
 | Next radar target | T | - | View + A |
 | Previous radar target | Shift+T | - | - |
 | Select visual target | Enter or Apostrophe | - | - |
