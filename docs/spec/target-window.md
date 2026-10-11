@@ -335,7 +335,7 @@ gunsight page. Fonts and positions:
 | Pin square | 7 x 7 on the point | Pinned, and the buddy spot |
 | Status row | y=72, centred, halo | GIMBAL LIMIT after the eye icon; OUT OF RANGE or TERRAIN MASK when the laser is masked for those reasons |
 | Objective row | y=82 | As the target window (tracking) |
-| Time to impact | y=92, centred, halo | **TTI m:ss** for the aircraft's oldest laser or GPS weapon in flight, **IMPACT** for a second at the hit; empty until the weapon slice supplies it |
+| Time to impact | y=92, centred, halo | **TTI m:ss** for the aircraft's oldest laser or GPS weapon in flight, **IMPACT** for a second at the hit. Filled by slice W1 from the readout's guided weapons in flight (the oldest one whose time can be worked out, its seconds rounded up) and the tick the last one ended |
 | Clock bearing, range | y=103 | Clock bearing and Hi/Lo from the aircraft to the sight's point; the range reads laser range while the row is LASE, LSR RDY or MASK (the sensor to the point), the range to the buddy's spot for BUDDY, the target window's alternating range and speed when tracking with the laser off, else the range to the sight's point |
 | Goal, skill dots, damage bar | Top right | As the target window (tracking only) |
 

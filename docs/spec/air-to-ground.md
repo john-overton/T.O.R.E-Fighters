@@ -413,6 +413,31 @@ Built (T1), agent choices on the rules above:
   laser's point while masked (`Laser::point`); the release range halving for a
   laser weapon is `laser::weather_scale` (slice W1 applies it).
 
+Built (slice W1, `live::guided`), the laser weapons, agent choices on the rules
+above:
+
+- **At release** a spot must lie inside the weapon's zone 1 about the aircraft
+  (45 degrees in heading and pitch, the record's range times the laser weather
+  share on the line to the spot): the plane's own spot first, else the nearest
+  same-side spot. With a spot in reach the weapon guides on it. With no spot at
+  all (no laser on, no buddy lasing) it waits: it may lock **once** onto a spot
+  that comes inside its 45 degree nose cone (lead ruling, 2026-10-10, following
+  this spec's warnings table: "can still pick one up"). With spots that are all
+  out of reach it leaves blind, as retail.
+- **In flight** it follows the laser of the aircraft whose spot it took: the spot
+  while that laser lases, the laser's point while it is masked (retail: weather
+  and masking never break a lock already made). Guidance is lost for good when
+  that laser is off or ready (Ctrl+L, the sight dropped, the target destroyed
+  with no pin, the aircraft gone) or its point leaves the weapon's 45 degree
+  cone, checked every tick. A new designation moves the laser to the new
+  target, so the weapon follows it if it lies inside the cone and goes blind if
+  not: retail's retargeting, with no separate rule.
+- **Not guiding**, a laser bomb (waiting or blind) falls on the bomb equation
+  from where it is (fitted; see [unknowns](#unknowns)); a laser missile flies
+  straight on with its motor and sag.
+- The spot a weapon homes on is its aircraft's or a buddy's by aircraft id and
+  side, so the buddy rule and a later AI round use the same code.
+
 ### Buddy lasing
 
 **Retail has no buddy lasing**: a laser weapon needs its own launcher's
@@ -660,12 +685,45 @@ target caret, and IN RNG when the target lies between them. Above the scale,
 the target enters the maximum reach, so a level pass with a JDAM is "fly the
 stem, release at the bar". This is John's "range indicator for when to drop"
 (opinionated, John, 2026-10-10, decision 4); the reach computation is an
-opinionated (agent) design: starting from the unguided throw, which the bomb
-always makes good, steps that double search outward and inward with the guided
-weapon's own fly-out at a point that far ahead along the release's ground
-track, then bisection closes each edge to 10 ft (slice H1 built the search, W1
-supplies the guided fly-out and draws the scale). Retail gives only "when you're in range and have a
+opinionated (agent) design (below). Retail gives only "when you're in range and have a
 good hit probability" (retail manual p. 125) and no release range cue.
+
+Built (slice W1, `combat::guided`, `weapon_hud/guided.rs`), agent choices:
+
+- **The glide** (retail data): a laser bomb or JDAM leaves along the nose at
+  the record's launch speed (`launchRetard` 90: 90 percent of the aircraft's
+  speed), slows at 14 ft/s squared toward 278 ft/s and turns at 6,370 units a
+  second (about 35 degrees a second), and does not fall while it guides (the
+  records have neither the bomb flag 0x10 nor the gravity flag 0x4). Its life
+  is 60 s. So the reach is a slant distance fixed by the release speed: about
+  22,500 ft from 450 kt, a little more from faster releases. A higher release
+  spends more of it going down: from 8,000 ft level at 450 kt the reach runs
+  8,000 to about 19,000 ft ahead, from 15,000 ft at 480 kt 15,000 to about
+  18,100 ft, and above about 20,000 ft at 350 kt nothing ahead is reachable.
+- **The reach**: the ground ranges straight ahead along the ground track that
+  lie inside zone 1 at release (45 degrees in heading and pitch about the
+  nose, the record's range times the laser weather share for a laser weapon)
+  and that the glide reaches within its life. The fly-out flies the turn tick
+  by tick, as the bomb does, then works out the straight rest from the
+  record's slowdown. 32 samples across the zone's ground range, then 12
+  bisections on each edge of the first good stretch. The near edge is the 45
+  degree cone (in level flight, the height), the far edge the glide. A laser
+  missile or the AT-2 shows its zone 1 instead (no fly-out; fitted). Slice
+  H1's `Reach::search` starts from the unguided throw, which a glide with no
+  fall does not make good, so W1 searches the samples instead and returns
+  H1's `Reach` type.
+- **The aim**: the laser spot (the plane's own, else a buddy's), the JDAM's
+  point (the designated ground object, else the sight's held point) or the
+  AT-2's designated object. `R` is its ground range. IN RNG means the aim
+  itself lies in zone 1 and the glide reaches it (and for the AT-2 that the
+  launcher sees it).
+- **The scale**: the missiles' scale at x=390 (y 230 to 282), the far edge's
+  ground range in nautical miles at the top (y 218), the near edge's below
+  (y 284), the caret at the aim's ground range (clamped to the scale), `R 6.2`
+  above (y 206); IN RNG blinks at 2 Hz on the line below the store name, else
+  the advisory (NO LASER, MASK, OUT OF REACH, NO TARGET) takes it.
+- **Not built**: LVL's "release at the bar" for a JDAM (H1's level solution
+  covers unguided bombs only; the guided sight's reach is there for it).
 
 **Retail JDAMs are "optical", not GPS** ([optical](../formats/missiles.md#optical)):
 GBU-29, GBU-29/P and GBU-30 home on the object designated at release, follow it
@@ -730,7 +788,9 @@ retail behaviour; the reach scale serves both.
   Built (slice P1, `weapon_hud/laser.rs`): the box is 12 by 8 pixels, the
   letter sits to its right (**L** own, **B** a buddy's), the text rows start at
   x=207, y=307 and step 12 pixels (own laser row, then a `BUD` row; the `TTI`
-  row follows when the weapon slice supplies it), and the boxes and rows draw
+  row follows when the weapon slice supplies it: slice W1 supplies
+  `CockpitReadout::weapon_tti`, the plane's guided weapons in flight with their
+  seconds to impact, and the tick the last one ended), and the boxes and rows draw
   on any selection, in every mode but NAV. Lit for the first quarter second of
   each half second when blinking (combat tick mod 60 below 30). The edge arrow
   is the target cue's own chevron. A masked laser draws no box (its spot is
@@ -746,10 +806,10 @@ the station could not release at all:
 | LOW | The predicted fall time is shorter than the record's fuze arm time: the bomb will not explode. A bomb that reaches the ground before its fuze arms is a dud: no burst, no splash and no crater, only a small puff of dirt (the bullet-on-land dust burst) where it lands, and nothing on water. Opinionated (lead, 2026-10-10): the retail ground-impact path (`0x4c1dbc`) has not been read for an arm test, so whether the original duds such a bomb is unknown (next step: trace the arm check before `0x4c1dbc`). The fuze already kept an unarmed bomb from striking a target directly |
 | FRAG | At the predicted impact time the aircraft is inside the record's collateral radius of the impact point; splash can hurt the shooter (retail manual p. 126, no number given). The aircraft is taken along its ground track at its ground speed and no lower than it is now: a dive is taken to be pulled out at once, a climb keeps climbing (fitted; flying a dive on would put every dive release inside its own splash). For a slick bomb that lands under the aircraft, FRAG means flying lower than the splash radius |
 | BAY | A bay aircraft with the bay closed, as today (retail BAY; release refused "Can't deploy, Open weapon bay door") |
-| NO TARGET | A guided weapon that needs a designation has none |
+| NO TARGET | A guided weapon that needs a designation has none. Built (slice W1): a JDAM with no designated ground object and no sight point, and an AT-2 with no designated object, read NO TARGET and are not released (the existing `NoTarget` readiness; the plan's `NoGroundTarget` name was not needed) |
 | NO TRACK | A SARH missile's A-G track is lost |
-| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic; MASK when the line is blocked) |
-| OUT OF REACH | A guided bomb's reach does not cover the target |
+| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic; MASK when the line is blocked). Built (slice W1): advisories in the guided sight, never readiness codes, so release is not blocked; MASK when the plane's own laser is wanted but masked and no other spot exists |
+| OUT OF REACH | A guided bomb's reach does not cover the target. Built (slice W1): the aim lies outside zone 1 or beyond the glide (for the AT-2, also out of the launcher's sight); advisory |
 | OVERFLY | LVL, passed the target |
 | NO EMITTER | A HARM with no emitter to fire at |
 
@@ -778,6 +838,25 @@ this round.
 | 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G on at release (retail); surface seekers see surface rows without the air notch | profiled, hidden |
 | 11 | SARH AGMs | AS7, AS15 | 21 | Needs A-G on at release and for the whole flight, target inside zone 1 (45 degrees) from the launcher; lost: unguided | AS7 partly; AS15 missing |
 | 12 | Laser AGMs | AS14, AS30, AT12 | 24 to 25 | Class 4's lock rule on a powered, cruising missile | missing |
+
+Built (slice W1): classes 4, 5, 7 and 12 fly on their own guidance kinds
+(`missiles::Guidance::Laser`, `Coordinate` and `Command`, read from the
+signature and the type flags: signature 1 with 0x400 is laser; a guided
+signature-0 record with no bomb flag and none of 0x200 and 0x400 is command
+with the launcher flag 0x100 and coordinate without it). They have no missile
+profile and never use the old pursuit. The laser rules are in
+[the laser](#the-laser), the glide and the reach in the [release range
+indicator](#guided-bomb-release-range-indicator). A JDAM stores the designated
+ground object's position, else the sight's held point, at release if it lies
+inside zone 1 (no weather), and flies to it whatever moves afterwards; outside
+zone 1 it falls. The AT-2 needs a designated object inside zone 1 with a clear
+line at launch; it is steered at the object (its cruise profile) while the
+launcher lives, the object stands, the object stays inside the missile's 45
+degree nose cone and inside the launcher's zone-1 cone with a clear line (the
+launcher's sight, lead ruling, 2026-10-10); any loss is permanent and it flies
+straight on. All eleven records of classes 4, 5 and 12 are in the catalog; the
+AT-2 already was. Only the player's releases are guided: AI aircraft still drop
+nothing on the ground.
 
 Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work. Novelty
 Boulder and Moose are Cheat catalog only ([decisions pending](#decisions-pending)).
@@ -1063,6 +1142,10 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL stem dashed | more than 60 s out | opinionated (agent) |
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
 | Release range scale | x=390, the missile scale | spec-derived |
+| Guided bomb glide | along the nose at 90 percent of the speed; 14 ft/s squared down to 278 ft/s; 6,370 units a second (about 35 degrees a second); no fall while guiding; 60 s life | retail data |
+| Guided reach search | 32 samples across zone 1's ground range, 12 bisections an edge; a missile shows its zone 1 | opinionated (agent) |
+| AT-2 launcher sight | the target inside the launcher's 45 degree zone-1 cone with a clear line (the 25 ft rule), every tick; any loss permanent | opinionated (lead ruling, 2026-10-10) on retail data |
+| Guided weapons in flight listed for the time to impact | 4, oldest first | plan section 9 |
 | JDAM release range (retail optical) | 30,000 ft; 7,500 ft at night, 3,000 ft in cloud or fog | retail data; replaced by the reach scale (opinionated, John) |
 | HUD laser box | 12 by 8 reference pixels | fitted |
 | Cluster final speed | 278 ft/s, deceleration 14; no effect on a bomb's path | retail data |
@@ -1114,7 +1197,7 @@ filled in with something plausible.
 | Whether "LASER SEEKER DAMAGED" zeroes the designator | The designator works while its aircraft lives | Trace the damage writer that indexes the message table |
 | How a guided bomb moves after losing its target: it holds attitude and slows to 278 ft/s; whether anything makes it fall | The bomb parabola from its current state (fitted) | Trace motion types 1 and 2 in the move routine |
 | Which objects carry night flag 0x1000000 | No night rule | Scan the object type flags |
-| What a player sees firing an optical weapon (JDAM, AT-2) with no target | Released unguided | Trace the fire path before the release routine and the HUD readiness |
+| What a player sees firing an optical weapon (JDAM, AT-2) with no target | Release refused with NO TARGET (opinionated, agent, the warnings table; slice W1) | Trace the fire path before the release routine and the HUD readiness |
 | Whether the release-point ground height differs from the ground directly below (a cache detail) | Ground directly below the release point | Trace the height cache writers |
 | What object type 43 draws, so what a cluster burst looks like in single player | Presentation-only flashes (opinionated, agent) | Trace type 43 in the draw code |
 | World axis of the pack stagger | The store's own lateral axis | Read the theater axis convention |

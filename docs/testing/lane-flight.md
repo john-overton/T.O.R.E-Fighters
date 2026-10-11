@@ -36,8 +36,9 @@ about 1 G well below the top speed.
 ## Air-to-ground weapons
 
 `a2g-*` (scenario files
-[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py) and
-[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py)) runs
+[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py),
+[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py) and
+[`a2g_guided.py`](../../tools/battery_scenarios/a2g_guided.py)) runs
 `--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND`, which flies a scripted
 straight pass at a ground target of a Quick Mission, invulnerable, and attacks through the
 real player path: the weapon keys select the station and the trigger releases. A store the
@@ -52,6 +53,11 @@ weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run
 | `a2g-rocket-ccip` | `--attack rocket`: an A-4E's LAU-61s in a 10 degree dive on a truck, fired once the rocket pipper says IN RNG, held a second | Rockets hit and destroy the truck; a rocket that bursts on the ground does so within a foot of the pipper of the tick it was fired on ([rockets](../spec/air-to-ground.md#rockets-and-guns)) |
 | `a2g-warnings` | `--attack ccip` with an A-4E's Mk 82 from a 30 degree dive at 300 ft, a level pass at 400 ft and one at 1,500 ft | LOW and FRAG, FRAG only, and neither; the LOW bomb lands a dud (a puff, nothing destroyed), the others burst ([warnings](../spec/air-to-ground.md#warnings)) |
 | `a2g-rocket-pod` | An A-4E's two LAU-61 pods tapped three times, held for a second and held until empty; two LAU-10 pods held for two seconds | 38 rockets in the pods, one a press; four or five in a second held, a quarter second apart on the game's quarter-second clock; all 38 when held on; the LAU-10 pods hold 8 and fire one however long the trigger is held ([rockets](../spec/air-to-ground.md#rockets)) |
+| `a2g-laser-self` | `--attack laser` over `~QUCOL`: an F-16C designates a T-80 from the A-G page (T), its Pave Spike lases automatically with the GBU-10 selected, and the bomb is released from 15,000 ft at 480 kt on the HUD's IN RNG cue; again with Ctrl+L turning the laser off 20 s after the release | The bomb leaves at 90 percent of the speed, guiding on aircraft 0's spot from inside its reach, its time to impact counts down, and it destroys the tank; with the laser off it goes from guiding to blind, falls and misses, and the tank is unhurt ([the laser](../spec/air-to-ground.md#the-laser)) |
+| `a2g-laser-buddy` | Two seats (Open seating): an Su-25 two miles behind designates with Ctrl+X (Easy targeting) and lases by hand; an F/A-18D, which has no designator, drops a GBU-10 from 12,000 ft | The release guides on the Su-25's spot (buddy yes, own laser off), lands within 40 ft of the tank and destroys it ([buddy lasing](../spec/air-to-ground.md#buddy-lasing)) |
+| `a2g-jdam-cloud` | `--attack jdam --condition cloudy`: an F-16C's GBU-30 from 12,000 ft at a standing object of the TVIET truck park, then at a `~QUCOL` tank that drives on at 50 ft/s | The first lands on the stored point and destroys the object; the second lands within 40 ft of the stored point and at least 500 ft from the tank, which is unhurt ([guided bomb release range indicator](../spec/air-to-ground.md#guided-bomb-release-range-indicator)) |
+| `a2g-laser-missile` | `--attack laser`: an Su-25's AS-14 from 3,000 ft, on its built-in designator's spot | Released guiding on its own spot; ends guiding within 60 ft and destroys the tank ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
+| `a2g-at2` | `--attack at2`: a Mi-24 300 ft up, 2 nmi out at 60 kt, launches an AT-2 at a `~QUCOL` tank (Easy targeting's Ctrl+X: it has no ground page); again turning 90 degrees away 2 s after the launch | The AT-2 is command guided and hits (the T-80 takes 120 of its 200 hit points); turning away makes it blind for good, it never guides again and misses ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
 
 ## Powered-lift scenarios (VTOL overhaul)
 
