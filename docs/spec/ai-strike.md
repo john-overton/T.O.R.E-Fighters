@@ -56,7 +56,7 @@ John's answers change the shape of it. All of these are opinionated (John,
 
 | Retail | This spec |
 | --- | --- |
-| AI bombs are moved to land within 100 ft of the target | **No re-aim.** The AI flies the pass through control inputs and releases from the same delivery and guided solutions a player uses. Skill sets how closely it releases ([Skill](#skill-and-release-precision)) |
+| AI bombs are moved to land within 100 ft of the target | **No re-aim.** The AI flies the pass through control inputs and releases from the same delivery and guided solutions a player uses. Skill sets the release circle ([Skill](#skill-and-release-precision)) |
 | The pass is a random choice | **No dice.** The pass is a fixed function of perceived threat and available speed, limited by bombing class and weapon ([Pass choice](#pass-choice)) |
 | A heavy bomber flies a high pass at 10,000 ft or more | Heavies bomb level from a minimum of 5,000 ft AGL, or the mission's airborne height if higher, raised by perceived threat ([Heavies](#heavy-bombers)) |
 | No buddy lasing | The AI lases for its wing and for you, and drops on your spot ([Lasing](#lasing)) |
@@ -247,65 +247,86 @@ this order. Fields are in [the aircraft table](../formats/fa-aircraft.csv).
 ## Skill and release precision
 
 **The principle (opinionated, John, 2026-10-11):** the AI flies the pass
-through control inputs and releases from the shared solutions. Top skill
-releases on the solution. The lowest skill deviates by up to 30%. Higher skill,
-higher precision.
+through control inputs and releases from the shared solutions. A better pilot
+puts the weapon closer to the target. John's rule is a circle around the target
+that grows as skill goes down.
 
-**The definition (opinionated, agent; confirm the exact form with John).** It
-is deterministic: no random draw.
+**The release circle (opinionated, John, 2026-10-11).** The radius `R` comes
+from the aircraft's experience level ([AI experience](ai-experience.md)), 75 m
+more for each level down:
 
-- The skill factor `s` comes from the aircraft's experience level
-  ([AI experience](ai-experience.md)): **Ace 0, Experienced 0.10, Average 0.20,
-  Novice 0.30**.
-- Every delivery has an **error budget** `B`, a length:
-  - Unguided bombs and rockets: `B = max(1,000 ft, slant range to the target / 8)`,
-    the retail release tolerance (retail, `0x4c3163`; retail used it as the
-    pass or fail gate, here it is the length the skill fraction is taken of).
-  - Guided bombs and seeker missiles: `B` is the **reach**, the ground range
-    window between the weapon's minimum and maximum reach at the release altitude
-    and speed ([guided reach](air-to-ground.md#guided-bomb-release-range-indicator)).
-- The AI aims at a point shifted from the target by `s x B`. For unguided
-  weapons the shift is along the ground track, **short** of the target on the
-  first pass at it and **long** on the second, alternating on each re-attack (a
-  low-skill pilot walks his bombs over the target). For guided weapons the shift
-  is in release timing: the AI releases `s x B` of ground range **earlier** than
-  an Ace would (the player's T bar is the far edge of the reach less 2/5 of the
-  reach, so even a Novice at 0.30 stays inside it).
-- The AI releases when its predicted mean impact (CCIP, the LVL cue) or its
-  reach test is within **5% of `B`** of that aim point (fitted), flying the pipper
-  there with its stick and rudder. The bomb then scatters as a player's does.
+| Level | `R` (m) | `R` (ft) |
+| --- | ---: | ---: |
+| Ace | 100 | 328 |
+| Experienced | 175 | 574 |
+| Average | 250 | 820 |
+| Novice | 325 | 1,066 |
 
-**Worked numbers** (arithmetic of this spec, not a measurement; unguided shifts
-are short of the target on the first pass and long on the second; the scatter is
-the retail 3 degrees in heading and pitch, 0.0524 of the range):
+- **The AI releases only when the aim cue puts the predicted impact inside its
+  circle**: the pipper in CCIP, the T in LVL, the rocket impact for rockets. It
+  flies the cue to the aim point drawn below with its stick and rudder and
+  drops when it arrives. An Ace therefore holds the pipper within 100 m of the target; a
+  Novice lets it be 325 m off. (Opinionated, John, 2026-10-11.)
+- **A seeded draw picks the aim offset for each pass.** The draw is a
+  deterministic function of the mission seed, the aircraft id and the pass
+  number (the first pass at a target is 1, each re-attack adds one), so every
+  host and every replay agrees. It gives a point on the ground, an offset from
+  the target, that the AI aims the cue at. In 90% of passes the offset is
+  inside the circle, uniform by area (distance `R x sqrt(u)`, a uniform
+  bearing); in 10% it is in the ring from `R` to `2R` (distance
+  `R x sqrt(1 + 3u)`, a uniform bearing). The mean offset inside the circle is
+  two thirds of `R`. The 90% and the circle are John's; the ring's extent and
+  the seed inputs are an agent choice (opinionated, agent; see
+  [Confirm with John](#confirm-with-john)). The AI flies the cue to the
+  drawn point and releases when the cue is within 5% of `R` (fitted) of it, so
+  a ring draw releases outside the circle: that is the 10% John asked for.
+  (Opinionated, agent.)
+- **The weapon's scatter is on top**, as for the player: up to 3 degrees in
+  heading and pitch for bombs (the retail 0.0524 of the range), the rocket and
+  gun spreads of their records. The scatter is the retail dice and stays as it
+  is.
+- **Guided weapons.** The same circle offsets the **aim point**, not the
+  release timing: a JDAM's stored point is the target shifted by the drawn
+  offset, and an AI that lases places its **laser spot** at the drawn offset
+  from the target. A laser bomb follows the spot, so it lands there. The reach
+  window and lock rules for release are unchanged ([guided
+  reach](air-to-ground.md#guided-bomb-release-range-indicator)). Seeker missiles
+  and HARM are judged by their lock, not by the circle.
+- **No retail re-aim.** Nothing moves a bomb after it leaves; the circle is
+  where the pilot aims.
 
-| Case | B | Ace | Experienced | Average | Novice | Scatter alone |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Mk 82 dive: 30 degrees, 6,000 ft slant, release at 3,000 ft AGL | max(1,000, 750) = 1,000 ft | 0 | 100 ft | 200 ft | 300 ft | about 310 ft across the track |
-| Mk 82 level: 6,000 ft AGL, 450 kt (760 ft/s), 19.4 s fall, 14,700 ft travel, 15,900 ft slant | max(1,000, 1,990) = 1,990 ft | 0 | 199 ft | 398 ft | 597 ft | about 770 ft across the track |
-| GBU-10 (illustration: reach 3.0 nmi long, 450 kt) | 3.0 nmi | releases at the bar, far edge less 1.2 nmi | 0.3 nmi earlier | 0.6 nmi earlier | 0.9 nmi earlier (0.3 nmi inside the far edge, about 7 s sooner) | none: the bomb steers |
+**Worked numbers** (arithmetic of this spec, not a measurement; the draws shown
+are chosen to illustrate; the scatter is the retail 3 degrees, 0.0524 of the
+range):
 
-Reading: a Novice Mk 82 in the dive is aimed 300 ft off, the size of the slick
-bomb's 300 ft fuze radius ([records](air-to-ground.md#weapon-records)), so its
-single bombs often land outside it; an Ace's mean impact is on the target. In
-level flight the player's own scatter already spreads bombs hundreds of feet,
-and the skill shift is of the same order. A guided bomb is accurate for every
-skill because it steers; the cost of low skill is margin, and a lost spot or a
-missed gimbal is what loses the weapon.
+| Case | Ace (328 ft) | Experienced (574 ft) | Average (820 ft) | Novice (1,066 ft) |
+| --- | --- | --- | --- | --- |
+| Mk 82 dive: 30 degrees, 6,000 ft slant. Scatter alone about 310 ft across the track | Aim 164 ft out for a draw `u` = 0.25; bombs land about 164 ft plus up to 310 ft scatter from the target | Aim 287 ft out; the slick's 300 ft fuze radius is hit by the lucky bombs | Aim 410 ft out | Aim 533 ft out, bombs spread beyond a fuze radius |
+| Mk 82 level: 6,000 ft AGL, 450 kt, 19.4 s fall, 15,900 ft slant. Scatter alone about 770 ft across the track | Aim 164 ft out; scatter dominates | Aim 287 ft out | Aim 410 ft out | Aim 533 ft out; scatter and aim are of the same order |
+| GBU-10 on a spot | Spot 164 ft out for the same draw; the bomb steers to the spot, so it lands about 164 ft from the target | Spot 287 ft out | Spot 410 ft out | Spot 533 ft out |
+| JDAM (stored point) | Point 164 ft out; the bomb flies to the point and its own tolerance | Point 287 ft out | Point 410 ft out | Point 533 ft out |
+| The same pass with a ring draw (10%), `u` = 0.25 | `R x sqrt(1.75)` = 434 ft | 759 ft | 1,085 ft | 1,410 ft |
+
+Every distance in the first four rows is `R x sqrt(0.25)`, half of `R`; a draw
+of `u` = 1 would put the aim on the circle's edge (R). Reading: an Ace's
+unguided bombs land within a few hundred feet and the scatter is most of the
+miss; a Novice's aim alone can lose the fuze radius of a Mk 82 (300 ft) on most
+passes. A guided bomb is as accurate as its aim point, so low skill moves the
+guided weapon's whole result by the circle; it does not hide in the scatter.
 
 ## Weapons and releases
 
-| Store | Pass | Releases when | Budget `B` |
+| Store | Pass | Releases when | Circle |
 | --- | --- | --- | --- |
-| Unguided bombs, packs | Table above | CCIP mean impact, or the LVL cue, on the aim point (a pack leaves in one instant, [packs](air-to-ground.md#release-modes-and-packs)) | Tolerance |
-| Rockets | Straight run, shallow dive, or pop-up | Rocket impact on the aim point, at the record's cadence | Tolerance |
+| Unguided bombs, packs | Table above | CCIP mean impact, or the LVL cue, on the aim point (a pack leaves in one instant, [packs](air-to-ground.md#release-modes-and-packs)) | Cue inside `R` |
+| Rockets | Straight run, shallow dive, or pop-up | Rocket impact on the aim point, at the record's cadence | Cue inside `R` |
 | Guns | Straight run | The existing gun employment ([AI guns](ai-gun-employment.md)), unchanged | none |
-| Laser bombs, laser missiles | Level or shallow run; then an offset turn holding the target inside the designator's gimbal until impact (fitted) | Target inside the reach and a spot will exist (own designator, or a same-side spot); with none, the store is not chosen | Reach |
-| JDAM | Level run | Target point stored, inside the reach | Reach |
-| Mavericks, AS-14, AS-30 | Fast-high or straight | Seeker locked on the target inside zone 1 ([lock flow](air-to-ground.md#the-seekers-and-the-lock-flow)) | Reach |
-| Radar AGMs (AS-7, AS-15, AGM-84A, AM-39, AS-16) | Straight run | Radar track at release, held through the flight (the AI support rule, [B45](ai.md#b45-seeker-visibility-launch-eligibility-and-ammunition)) | Reach |
-| HARM | Fast-high; fire at maximum range, exit | A HARM candidate inside the zone ([HARM cue](air-to-ground.md#missiles-and-the-harm-boresight-cue)) | Reach |
-| AT-2 (Mi-24) | Helicopter pop-up; hold the line until impact | Target inside the launcher's cone with a clear line | Reach |
+| Laser bombs, laser missiles | Level or shallow run; then an offset turn holding the target inside the designator's gimbal until impact (fitted) | Target inside the reach and a spot will exist (own designator, or a same-side spot); with none, the store is not chosen | Spot offset by the draw |
+| JDAM | Level run | Target point stored, offset by the draw, inside the reach | Point offset by the draw |
+| Mavericks, AS-14, AS-30 | Fast-high or straight | Seeker locked on the target inside zone 1 ([lock flow](air-to-ground.md#the-seekers-and-the-lock-flow)) | Lock |
+| Radar AGMs (AS-7, AS-15, AGM-84A, AM-39, AS-16) | Straight run | Radar track at release, held through the flight (the AI support rule, [B45](ai.md#b45-seeker-visibility-launch-eligibility-and-ammunition)) | Lock |
+| HARM | Fast-high; fire at maximum range, exit | A HARM candidate inside the zone ([HARM cue](air-to-ground.md#missiles-and-the-harm-boresight-cue)) | Lock |
+| AT-2 (Mi-24) | Helicopter pop-up; hold the line until impact | Target inside the launcher's cone with a clear line | Lock |
 
 Store choice is retail's ([B45](ai.md#b45-seeker-visibility-launch-eligibility-and-ammunition)):
 bombs, rockets and ground missiles only against the surface; air-to-air
@@ -527,10 +548,11 @@ strike order or a takeover of a striking plane.
 
 | Figure | Value | Label |
 | --- | --- | --- |
-| Skill factors (Ace, Experienced, Average, Novice) | 0, 0.10, 0.20, 0.30 of the error budget | opinionated (John, 2026-10-11, the 30%); steps agent |
-| Error budget, unguided | max(1,000 ft, slant range / 8) | retail tolerance |
-| Error budget, guided and seeker | the weapon's reach | opinionated (agent) |
-| Release on the solution within | 5% of the budget | fitted |
+| Release circle radius (Ace, Experienced, Average, Novice) | 100 m (328 ft), 175 m (574 ft), 250 m (820 ft), 325 m (1,066 ft) | opinionated (John, 2026-10-11) |
+| Aim offset draw | 90% inside the circle, uniform by area; 10% in the ring R to 2R | 90/10 opinionated (John, 2026-10-11); ring extent opinionated (agent) |
+| Draw seed | mission seed, aircraft id, pass number | opinionated (agent) |
+| Guided weapons | the same offset moves the JDAM stored point and the laser spot | opinionated (John, 2026-10-11) |
+| Release on the aim point within | 5% of `R` | fitted |
 | Scatter | up to 3 degrees in heading and pitch, as the player | retail |
 | Threat levels | Clear, Air (fighter within 30 nm), Guns, Missiles | opinionated (agent) |
 | Energy | Good at or above corner speed | opinionated (agent) |
@@ -571,13 +593,13 @@ Alt+E, Alt+R and Alt+W receiver behaviour, HARM and missile release gates, skill
 These are agent choices that carry a decision of John's. Each has a default
 and is open to change.
 
-1. **The 30% definition.** Skill factor 0 / 0.10 / 0.20 / 0.30 of an error
-   budget (the retail release tolerance for unguided weapons, the reach for
-   guided ones), short then long on alternate passes for unguided weapons, early
-   release for guided ones. Alternatives: scale the weapon's scatter instead, or
-   take the fraction of the fuze radius.
+1. **The ring, R to 2R.** John said 90% of passes inside the circle and 10%
+   outside. The spec puts the 10% in the ring from `R` to `2R`, uniform by
+   area, with the same seeded draw (mission seed, aircraft id, pass number).
+   Alternatives: a wider ring (3R), a miss only along the track, or no ring and
+   a simple 10% chance of no release on that pass.
 2. **Skill source.** The aircraft's own experience level, the same four levels
-   as air combat.
+   as air combat. Alternative: the wing's or the mission's skill setting.
 3. **Threat and energy levels, the release floor, and the order in the
    pass table**, especially "Missiles gives a pop-up" and "Guns gives a dive
    from above".

@@ -35,11 +35,17 @@ PENDING = "pending ST-T: the AI does not take a ground target yet (plan section 
 LINE = re.compile(r"^ai-strike: (\S+)(?: (.*))?$", re.M)
 FIELD = re.compile(r'(\w+)=("[^"]*"|\S+)')
 
-# Horizontal miss, in feet, a bomb pass may end within, by skill 0 (Novice) to 3
-# (Ace). Fitted placeholders for the behaviour scenarios: John's answer 2
-# (2026-10-11) is that the top skill releases on the solution and the lowest
-# deviates by up to 30 percent, which ST-S states in feet and ST-T applies.
-MISS_FT_MAX = {0: 600.0, 1: 450.0, 2: 350.0, 3: 250.0}
+# John's release circle (2026-10-11, docs/spec/ai-strike.md#skill-and-release-precision), in
+# feet, by skill 0 (Novice), 1 (Average), 2 (Experienced), 3 (Ace): 325, 250, 175 and 100 m.
+CIRCLE_FT = {0: 1066.0, 1: 820.0, 2: 574.0, 3: 328.0}
+# The bomb's own scatter, on top of the aim offset: the worst of the specced cases is the level
+# Mk 82 (about 770 ft across the track); the dive is about 310 ft.
+SCATTER_FT = 800.0
+# Horizontal miss, in feet, a bomb pass may end within. The seeded aim offset is inside the circle
+# 90% of passes and inside the ring R to 2R on the other 10%, and a run does not know which it
+# drew, so the limit is the ring's outer edge plus the scatter. ST-T tightens it for runs whose
+# reported aim offset is inside the circle (the driver prints no release aim offset yet).
+MISS_FT_MAX = {skill: 2 * r + SCATTER_FT for skill, r in CIRCLE_FT.items()}
 # A rocket or a guided weapon is judged by the target, not a miss distance.
 SKILLS = (0, 1, 2, 3)
 EVENT_KINDS = ("RELEASE", "IMPACT", "KILL", "EGRESS", "LOST")
@@ -346,7 +352,7 @@ def scenarios() -> list[Scenario]:
             check=lambda out: strike_problems(out, _runs(BOMB_RUNS, hit=False)),
             notes="An A-4E's Mk 82 on the TVIET truck park: each pass (straight, pop-up, fast-high, dive, "
                   "level) forced once at skill 2 and skills 0, 1 and 3 on the dive. Each run names its "
-                  "pass, releases, ends the bomb within the skill's miss, leaves and is not lost.",
+                  "pass, releases, ends the bomb within the skill's miss limit (twice the release circle plus 800 ft of scatter: 2,932, 2,440, 1,948 and 1,456 ft for skills 0 to 3), leaves and is not lost.",
         ),
         Scenario(
             name="ai-strike-rockets", lane="flight",

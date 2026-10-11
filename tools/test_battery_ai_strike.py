@@ -232,6 +232,11 @@ class StrikeTests(unittest.TestCase):
         self.assertTrue(any("from the target" in p for p in s.strike_problems(self.good(3, miss=too_far), self.wanted(3))))
         self.assertEqual(s.strike_problems(self.good(0, miss=s.MISS_FT_MAX[3] + 1), self.wanted(0)), [])
 
+    def test_the_limits_are_the_ring_edge_plus_scatter_and_grow_as_skill_falls(self):
+        self.assertEqual([round(s.MISS_FT_MAX[k]) for k in (0, 1, 2, 3)], [2932, 2440, 1948, 1456])
+        self.assertEqual([round(s.CIRCLE_FT[k] / 3.28084) for k in (3, 2, 1, 0)], [100, 175, 250, 325])
+        self.assertTrue(s.MISS_FT_MAX[0] > s.MISS_FT_MAX[1] > s.MISS_FT_MAX[2] > s.MISS_FT_MAX[3])
+
     def test_a_lost_striker_or_no_egress_fails(self):
         lost = run(2, "dive", named="dive", releases=[10.0], impacts=[(27.0, 50)], egress=33.0, lost=40.0)
         self.assertTrue(any("was lost" in p for p in s.strike_problems(lost, self.wanted())))
