@@ -79,7 +79,13 @@ def semantic_log_problems(text: str) -> list[str]:
                 text_ = d.get("text", "")
                 if not text_.strip() or (k != "comms.hud" and not f.get("speaker")):
                     problems.append(f"empty delivered line at {d['t']}s: {f}")
-                key = (f.get("speaker"), text_)
+                # The same line twice in 0.2 s is a stutter only when one
+                # trigger made it. Two different triggers are two real events:
+                # an "I'm hit" call is made for every guided hit (docs/spec/
+                # radio-chatter.md), so two missiles striking one aircraft a
+                # few ticks apart, or a splash and a direct hit, call twice and
+                # the variant roll can pick the same line (1 in 5).
+                key = (f.get("speaker"), text_, f.get("trigger"))
                 last = delivered.get(key)
                 if last is not None and d["t"] - last < 0.2 and k != "comms.hud":
                     problems.append(f"{f.get('speaker')} said '{text_}' twice within 0.2 s at {d['t']}s")

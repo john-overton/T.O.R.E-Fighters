@@ -1,6 +1,7 @@
 //! `--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM]
 //! [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly]
-//! [--record PATH [--verify-render]] [--run-on] [--vulnerable]`: a
+//! [--record PATH [--verify-render]] [--run-on] [--vulnerable] [--no-relocate]
+//! [--no-jitter] [--shuttle] [--follow-terrain]`: a
 //! development aid and the battery's check of the ground target's objectives
 //! (docs/spec/surface-defenses.md, "Objectives, scoring and debrief"). No
 //! window opens; the whole mission tick runs as in the game.
@@ -25,6 +26,19 @@
 //! the launchers the pass emptied. The battery's `replay-surface` scenario
 //! uses them. `--vulnerable` takes the invulnerability away, so the defenses
 //! can shoot the player down.
+//!
+//! `--no-relocate` (and `--no-jitter`) fly the template at its retail spot,
+//! as the preview tools show it. `--shuttle` flies the line back and forth
+//! across the site for the whole run instead of once, so the defenses keep
+//! firing, empty their rails and the trucks rearm them. `--follow-terrain`
+//! holds `--altitude` above the ground under the aircraft, never below the
+//! site's own height plus `--altitude`, so a line over hills does not fly
+//! into them (a crashed player is ignored by the defenses). With `--run-on` it is
+//! the per-theater acceptance run of docs/baselines/surface-defenses.md. The
+//! run ends with a `surface-objective: summary` line: the template's units,
+//! batteries and trucks, the shots by kind (template units and base-layout
+//! units apart), rearms and refills, kills and the times of the first shot,
+//! the first missile and the last target's fall, and when the player crashed.
 use crate::{AppResult, replay, snapshot::RenderSnapshot, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -36,7 +50,8 @@ use tore_world::{
     debrief,
     mission::{Defense, MissionSpec, Skill, WingSpec},
     seats::{SeatId, SeatInput},
-    world::{Seating, TickOutput, World},
+    surface::{IdRange, Surface, UnitId, fire::Trace},
+    world::{Hooks, Seating, TickOutput, World},
 };
 
 const SEAT: SeatId = SeatId(0);
@@ -60,6 +75,10 @@ struct Options {
     verify: bool,
     run_on: bool,
     vulnerable: bool,
+    no_relocate: bool,
+    no_jitter: bool,
+    shuttle: bool,
+    follow_terrain: bool,
 }
 
 fn options() -> AppResult<Options> {
@@ -78,6 +97,10 @@ fn options() -> AppResult<Options> {
         verify: false,
         run_on: false,
         vulnerable: false,
+        no_relocate: false,
+        no_jitter: false,
+        shuttle: false,
+        follow_terrain: false,
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -99,12 +122,16 @@ fn options() -> AppResult<Options> {
             "--verify-render" => o.verify = true,
             "--run-on" => o.run_on = true,
             "--vulnerable" => o.vulnerable = true,
+            "--no-relocate" => o.no_relocate = true,
+            "--no-jitter" => o.no_jitter = true,
+            "--shuttle" => o.shuttle = true,
+            "--follow-terrain" => o.follow_terrain = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
     }
     let [theater, stem] = positional.as_slice() else {
-        return Err("--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM] [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly] [--record PATH [--verify-render]] [--run-on] [--vulnerable]".into());
+        return Err("--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM] [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly] [--record PATH [--verify-render]] [--run-on] [--vulnerable] [--no-relocate] [--no-jitter] [--shuttle] [--follow-terrain]".into());
     };
     o.theater = theater.to_ascii_uppercase();
     o.stem = stem.trim_start_matches('~').to_ascii_uppercase();
@@ -179,7 +206,20 @@ pub fn run() -> AppResult<()> {
     } else {
         Seating::SinglePlayer
     };
-    let mut world = World::new(&spec, &resources, seating)?;
+    let variation = tore_world::surface::layout::Variation {
+        jitter: !o.no_jitter,
+        relocate: !o.no_relocate,
+    };
+    let mut world = World::build(
+        &spec,
+        &resources,
+        seating,
+        &mut Hooks {
+            ground_variation: Some(variation),
+            ..Hooks::default()
+        },
+    )?
+    .world;
     if let Some(why) = &world.terrain.surface.unresolved {
         return Err(format!("the ground target stands nowhere: {why}").into());
     }
@@ -234,6 +274,8 @@ pub fn run() -> AppResult<()> {
             );
         }
     }
+    let mut tally = Tally::default();
+    print_layout(&surface);
     let first = capture(&world)?;
     print("start", &first);
     let mut record = o
@@ -290,15 +332,32 @@ pub fn run() -> AppResult<()> {
     for tick in 0..(o.seconds * 120.) as u64 {
         let t = tick as f64 / 120.;
         {
+            // Along the line, and back again when shuttling.
+            let leg = 2. * o.from_nm * FEET_PER_NM;
+            let flown = speed * t;
+            let (along, sign) = if o.shuttle && flown % (2. * leg) >= leg {
+                (2. * leg - flown % (2. * leg), -1.)
+            } else if o.shuttle {
+                (flown % (2. * leg), 1.)
+            } else {
+                (flown, 1.)
+            };
+            let x = start[0] + forward[0] * along;
+            let z = start[2] + forward[2] * along;
+            let y = if o.follow_terrain {
+                altitude.max(f64::from(world.terrain.height(x as f32, z as f32)) + o.altitude)
+            } else {
+                altitude
+            };
             let flight = &mut world.cockpits[0].flight;
-            flight.position = [
-                start[0] + forward[0] * speed * t,
-                altitude,
-                start[2] + forward[2] * speed * t,
-            ];
-            flight.velocity = [forward[0] * speed, 0., forward[2] * speed];
+            flight.position = [x, y, z];
+            flight.velocity = [forward[0] * speed * sign, 0., forward[2] * speed * sign];
             flight.speed = speed;
-            flight.yaw = heading;
+            flight.yaw = if sign > 0. {
+                heading
+            } else {
+                heading + std::f64::consts::PI
+            };
             flight.pitch = 0.;
             flight.bank = 0.;
             flight.vertical_speed = 0.;
@@ -364,6 +423,7 @@ pub fn run() -> AppResult<()> {
         if let Some(record) = &mut record {
             record.after(&mut world, &out);
         }
+        tally.tick(&world, t, &targets);
         // Stop when every target has fallen and the friendly one too.
         if !o.run_on
             && t > over_at + 4.
@@ -403,6 +463,8 @@ pub fn run() -> AppResult<()> {
         if let Some(record) = &mut record {
             record.after(&mut world, &out);
         }
+        let t = world.tick() as f64 / 120.;
+        tally.tick(&world, t, &targets);
     }
     for id in &targets {
         if let Some(row) = world.combat.state.targets.iter().find(|row| row.id == *id) {
@@ -414,6 +476,7 @@ pub fn run() -> AppResult<()> {
     }
     let last = capture(&world)?;
     print("end", &last);
+    tally.print(&world, &surface, &targets, &last);
     for objective in &last.objectives {
         println!("surface-objective: sentence {}", objective.sentence());
     }
@@ -551,4 +614,153 @@ fn row_dead(world: &World, id: u32) -> bool {
 
 fn world_has_row(world: &World, id: u32) -> bool {
     world.combat.state.targets.iter().any(|row| row.id == id)
+}
+
+/// The template's units, batteries and trucks as the run flies them.
+fn print_layout(surface: &Surface) {
+    let template: Vec<_> = surface.template_units().collect();
+    let class = |bit: u16| template.iter().filter(|u| u.class & bit != 0).count();
+    let in_template = |id: UnitId| id.range() == IdRange::Template;
+    let batteries: Vec<String> = surface
+        .batteries
+        .iter()
+        .filter(|b| b.launchers.iter().any(|id| in_template(*id)))
+        .map(|b| format!("{:?}", b.system))
+        .collect();
+    let trucks = surface
+        .trucks
+        .iter()
+        .filter(|t| in_template(t.id) || t.serves.is_some_and(in_template))
+        .count();
+    let armed = template
+        .iter()
+        .filter(|u| surface.arsenal.arms(u.id).is_some())
+        .count();
+    let (anchor, relocate, moved) = surface.template.as_ref().map_or(("none", 0, 0.), |site| {
+        let t = surface.transform.translation;
+        (
+            site.anchor
+                .map_or("none", tore_world::surface::layout::Anchor::name),
+            u8::from(site.settings.variation.relocate),
+            f64::from(t[0]).hypot(f64::from(t[1])) / FEET_PER_NM,
+        )
+    });
+    println!(
+        "surface-objective: layout units {} armed {armed} sam {} aaa {} ships {} batteries {} [{}] trucks {trucks} parked {} anchor {anchor} relocate {relocate} moved-nm {moved:.1} layout-units {}",
+        template.len(),
+        class(0x1000),
+        class(0x0800),
+        class(0x2000),
+        batteries.len(),
+        batteries.join(","),
+        surface.parked_scene.len(),
+        surface.layout_units().count(),
+    );
+}
+
+/// What the defenses did during the run, from the surface tick's trace.
+#[derive(Default)]
+struct Tally {
+    /// (template unit, record) shots: rounds or missiles.
+    missiles: [u32; 2],
+    rounds: [u32; 2],
+    flak: [u32; 2],
+    refused: u32,
+    by_record: std::collections::BTreeMap<String, u32>,
+    rearms: u32,
+    refills: u32,
+    swaps: u32,
+    first_shot: Option<f64>,
+    first_missile: Option<f64>,
+    all_down: Option<f64>,
+    crashed: Option<f64>,
+}
+
+impl Tally {
+    fn tick(&mut self, world: &World, t: f64, targets: &[u32]) {
+        for line in &world.combat.surface.trace {
+            match line {
+                Trace::Shot {
+                    unit,
+                    record,
+                    rounds,
+                    refused,
+                    flak,
+                    ..
+                } => {
+                    let at = usize::from(
+                        unit.range() != IdRange::Template
+                            && unit.range() != IdRange::BatteryRadar
+                            && unit.range() != IdRange::SupplyTruck,
+                    );
+                    let missile = !tore_sim::combat::surface_guns::is_surface_gun(record);
+                    if missile {
+                        self.missiles[at] += rounds;
+                        self.first_missile.get_or_insert(t);
+                    } else if *flak {
+                        self.flak[at] += rounds;
+                    } else {
+                        self.rounds[at] += rounds;
+                    }
+                    if *rounds > 0 {
+                        self.first_shot.get_or_insert(t);
+                    }
+                    self.refused += refused;
+                    *self.by_record.entry(record.clone()).or_default() += rounds;
+                }
+                Trace::Rearm { .. } => self.rearms += 1,
+                Trace::Refill { .. } => self.refills += 1,
+                Trace::Swap { .. } => self.swaps += 1,
+                _ => {}
+            }
+        }
+        if self.crashed.is_none() && world.cockpits[0].flight.crashed {
+            self.crashed = Some(t);
+        }
+        if self.all_down.is_none()
+            && !targets.is_empty()
+            && targets.iter().all(|id| row_dead(world, *id))
+        {
+            self.all_down = Some(t);
+        }
+    }
+
+    fn print(&self, world: &World, surface: &Surface, targets: &[u32], report: &debrief::Report) {
+        let down = targets.iter().filter(|id| row_dead(world, **id)).count();
+        let template_dead = surface
+            .template_units()
+            .filter(|u| world_has_row(world, u.id.0) && row_dead(world, u.id.0))
+            .count();
+        let time = |v: Option<f64>| v.map_or("-".into(), |t| format!("{t:.1}"));
+        let records: Vec<String> = self
+            .by_record
+            .iter()
+            .map(|(record, n)| format!("{}:{n}", record.trim_end_matches(".JT")))
+            .collect();
+        println!(
+            "surface-objective: summary outcome {} targets {down}/{} template-dead {template_dead} missiles {} rounds {} flak {} layout-missiles {} layout-rounds {} layout-flak {} refused {} swaps {} rearms {} refills {} first-shot-s {} first-missile-s {} all-down-s {} crashed-s {} end-s {:.1} sam-hits {}/{} aaa-hits {}/{} records [{}]",
+            report.outcome.label(),
+            targets.len(),
+            self.missiles[0],
+            self.rounds[0],
+            self.flak[0],
+            self.missiles[1],
+            self.rounds[1],
+            self.flak[1],
+            self.refused,
+            self.swaps,
+            self.rearms,
+            self.refills,
+            time(self.first_shot),
+            time(self.first_missile),
+            time(self.all_down),
+            time(self.crashed),
+            world.tick() as f64 / 120.,
+            report.player.enemy_sam.hit,
+            report.player.enemy_sam.launched,
+            report.player.enemy_aaa.hit,
+            report.player.enemy_aaa.launched,
+            records.join(","),
+        );
+    }
 }

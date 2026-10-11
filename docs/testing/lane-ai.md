@@ -423,7 +423,11 @@ refuses an enemy field as it refuses a short strip. What changed in the lanes:
 - The ILS-terrain land orders keep the two Blue fields (UKR 8 and 12). Amiens,
   Burevestnik, Hyon Ni, Donets'k and Kharkiv are Redfor fields where the Blue
   wing neither starts nor is sent, so those five are gone; a Redfor wing would
-  land there, but the probe has no Redfor wing to order.
+  land there, but the probe has no Redfor wing to order. No Blue field can
+  stand in: `--validate-ils` at 51b2d613 lists only those seven runway ends
+  whose 3 degree path meets terrain in the last 5 nm, and UKR 8 and 12 are the
+  only Blue ones (checked in slice A1). Restoring the five needs a probe option
+  that seats the wing on Redfor.
 - `ShortStripTests` also checks that no AI scenario or fuzz seed starts at an
   enemy field.
 

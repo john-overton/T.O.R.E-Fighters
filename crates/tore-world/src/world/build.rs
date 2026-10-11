@@ -46,6 +46,9 @@ pub struct Hooks<'a> {
     /// Tidies a weapon's display name as the game's loadout screen does, for
     /// every weapon of the player's load.
     pub weapon_label: Option<&'a dyn Fn(&mut Weapon)>,
+    /// Jitter and relocation of the ground target, both on in a mission
+    /// (`None`); development tools turn relocation off to fly the retail spot.
+    pub ground_variation: Option<crate::surface::layout::Variation>,
 }
 
 /// A mission just built: the world, and what starting it reported.
@@ -91,7 +94,10 @@ impl World {
             );
         }
         // The ground target's template joins the theater's own surface units.
-        let target = crate::surface::resolve::GroundTarget::from_spec(spec);
+        let mut target = crate::surface::resolve::GroundTarget::from_spec(spec);
+        if let (Some(target), Some(variation)) = (target.as_mut(), hooks.ground_variation) {
+            target.variation = variation;
+        }
         let terrain = crate::terrain::Terrain::for_mission_with(
             resources,
             &spec.theater,

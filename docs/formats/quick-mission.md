@@ -292,9 +292,11 @@ against `FA.EXE`; no bytes are embedded.
    compare is byte-exact, so case handling depends on the tokenizer at 0x432700
    (not traced), and a reader should accept both.
 8. Template `flags` keep their bits: 0x80 objects are the destroy targets that
-   the debrief counts. All template objects are on the ground (`pos` y 0) and
-   stationary (`speed 0`, no waypoints), except `~QUCOL` (Ukraine armored
-   column): 9 tanks with 5-waypoint routes at `w_speed 50`.
+   the debrief counts. All template objects are on the ground (`pos` y 0) with
+   `speed 0`; five templates give some objects `waypoint2` routes (the Ukraine
+   armored column `~QUCOL`, the North Vietnam cargo ships `~QTCARGO`, a truck in
+   `~QUFACT` and in the unreferenced `~QFACT` and `~QUBUNK`; see
+   [routes](quick-templates.md#routes)).
 9. If the ground target is none, both defense fields are cleared (see
    [initialization](#initialization-and-dependent-fields)).
 
@@ -310,37 +312,12 @@ The retail sentence labels for both are "not", "lightly", "moderately" and
 
 ### Placeholder unit lists and equipment groups
 
-Placeholder lists (`FA.EXE` 0x4f2e68 to 0x4f31b0), one column per equipment group:
-
-| Placeholder | Group 0 | Group 1 | Group 2 | Group 3 | Group 4 |
-| --- | --- | --- | --- | --- | --- |
-| `<sam>` | FIM92, ROLAND, CHAP | MIS, ASA5 | SA6, SA7, SA9, SA13, SA14, SA15, 2S6 | M113, CHAP, SA6, SA9, SA14, ASA5 | M113, CHAP, ASA5, SA7, SA13 |
-| `<aaa>` | M163, M113 | M113, ZSU23 | ZSU23, ZSU57 | M113, ZSU23, ZSU57, ZIF31 | ZSU23, ZIF31, M113 |
-| `<aaa>` at night vs F-117 or B-2 | ZSU23, skill 0 | same | same | same | same |
-| `<tank>` | M1, M2 | T80, T90 | T72, T80, T90 | T72, M1, M2 | M1, M2 |
-| `<afv>` | M113, HUMVEE | M113, HUMVEE | BMP2, BTR80 | M113, BMP2, BTR80 | M113, HUMVEE |
-| `<vehicle>` | TRUCK, TANKER | TRUCK, TANKER, SRDR1, SRDR2 | TRUCK, TANKER, LTRACK, SFLUSH | TRUCK, TANKER, LTRACK, SFLUSH | TRUCK, TANKER, LTRACK |
-| `<small>`, `<hovercraft>` | SL100, LCAC, SESHDW | SL100 | PMORN, SARAN | SARAN | SL100 |
-| `<destroyer>` | TICON | TYPE69 | KRIVAK, JIANC | JIANE, KNOX | JIANE, KNOX |
-| `<cruiser>` | IOWA, TICON | TYPE69 | KIROV, SOVR, JIANC | JIANE, KNOX | JIANE, KNOX |
-| `<carrier>` | NIMZ, WASP | CLEM | KIEV | KIEV | NIMZ |
-| `<cargo>` | CARGO, SACRAM | CARGO | CARGO, OLEKMA | CARGO | CARGO |
-
+Each placeholder draws from one list per equipment group, and the enemy
+nationality (field 20) picks the group. The lists, the nationality to group
+table and their `FA.EXE` addresses are recorded in
+[the template facts](quick-templates.md#recorded-facts-from-faexe-102f).
 M113 is an APC with a machine gun and is a legal `<sam>` pick in groups 3 and 4
 and a legal `<aaa>` pick in groups 0, 1, 3 and 4; retail's list is preserved.
-`<vehicle>`, `<small>` and `<hovercraft>` appear in no shipped template. Placeholder
-tokens are matched case-insensitively (templates write `<SAM>`, `<sam>`,
-`<CARGO>`).
-
-Equipment group by enemy nationality (word table 0x4f1e58, indexed by field 20):
-
-| Group | Nationalities (creator index) |
-| --- | --- |
-| 0 | American (0), British (1), German (4), Belgian (5), Japanese (8), South Korean (11), Lithuanian (17), Polish (18), Columbian (35), Pakistani (36), Italian (42), Swedish (43), Norwegian (45), Spanish (46), Portuguese (47), Austrian (48), Danish (49), Dutch (50), Canadian (51), Australian (55), Philippine (56) |
-| 1 | French (3), Sudanese (32) |
-| 2 | Chinese (2), North Korean (9), Russian (10), Estonian (15), Latvian (16), Belorussian (19), North Vietnamese (20), Ukrainian (22), Iraqi (23), Iranian (24), Cuban (33), Panamanian (34), Indian (37), Afghani (38), Finnish (44), Bulgarian (52), Hungarian (53), Romanian (54) |
-| 3 | Syrian (12), Islamic Egyptian (14), Libyan (31), Argentinean (57), Serbian (59) |
-| 4 | Jordanian (6), Israeli (7), Arab Egyptian (13), South Vietnamese (21), Kuwaiti (25), Saudi Arabian (26), Omani (27), UAE (28), Qatari (29), Bahraini (30), Taiwanese (39), Greek (40), Turkish (41), Bosnian (58) |
 
 With the default enemy per theater ([initialization](#initialization-and-dependent-fields)):
 Egypt and the Falklands draw group 3, France group 1, Greece group 4 and the
@@ -349,34 +326,10 @@ ships, not the template.
 
 ### Template grammar
 
-A template is the text mission grammar of the theater `.MM` files with these
-differences. The reader is separate from the strict theater reader so the theater
-path keeps its grammar.
-
-- `type` may be a placeholder in angle brackets (`<sam>`, `<aaa>`, `<tank>`,
-  `<afv>`, `<vehicle>`, `<small>`, `<hovercraft>`, `<destroyer>`, `<cruiser>`,
-  `<carrier>`, `<cargo>`, `<nothing>`). A named type is written with or without
-  the `.NT`, `.OT` or `.PT` suffix (both spellings occur: `~QUCOL.M` writes
-  `<tank>`, `~QTSAM.M` writes `KS12.NT`).
-- Object fields: `pos`, `angle`, one of `nationality`, `nationality2` or
-  `nationality3`, `flags`, `speed`, `alias`, `skill`, `react` (three words),
-  `searchDist`, `startTime`. Flags and react words occur in decimal or `$` hex.
-- `quickpos` and `quickPos` (18 templates carry it, all "nothing" templates).
-- `waypoint2 N` blocks per routed object: `w_index`, `w_flags` (1 start, 4 leg,
-  2 end), `w_goal`, `w_next`, `w_pos2`, `w_speed` (feet per second, see
-  [the spec](../spec/surface-defenses.md#the-units-of-the-movement-and-range-words)),
-  `w_wng`, `w_react`, `w_searchDist`, `w_preferredTargetId`, `w_name`, and
-  `w_for <alias>` closing the block. The manual (p. 209) allows up to ten
-  waypoints.
-
-Census of the 129 templates: 5,315 objects. Placeholders: 891 `<sam>`, 879
-`<aaa>`, 298 `<tank>`, 244 `<afv>`, 44 `<destroyer>`, 31 `<cargo>`, 14
-`<cruiser>`, 8 `<small>`, 6 `<hovercraft>`, 4 `<carrier>`. Skill: 1 (average) on
-3,752 objects, 2 on 136, 3 on 143, 0 on 3. `react`: mostly `$c000 $0 $0` (attack
-fighters and bombers) or `$c000 $3fff $0` (also defend against every other
-class). `searchDist`: 0 (3,985), 1 (37), 25 (12). 159 objects carry `startTime`
-(values 60 to 5,400, seconds assumed): 98 aircraft, 40 NTs and 21 tank or AFV
-placeholders; the field's meaning is not traced. Largest template: 127 objects.
+A template is the theater `.MM` text grammar with placeholders, `quickpos` and
+`waypoint2` routes; its own bounded reader keeps the theater path's grammar
+unchanged. The grammar, the routes, the owner fields and the census are in
+[the template format](quick-templates.md#template-files).
 
 ### Template list and target names per theater
 

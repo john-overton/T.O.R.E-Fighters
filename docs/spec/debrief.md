@@ -213,14 +213,15 @@ AI's respawn of its own aircraft. Each aircraft the mission started with is
 the root of a *lineage*, and every aircraft a revival or a respawn adds
 continues one (docs/ARCHITECTURE.md, "Death, revival and lives"). Retail has
 no respawns, so every rule here is an agent decision of the lobby pass's
-follow-up F1, 2026-10-09, **pending John**; he asked only that a respawned
-objective aircraft "should still say objective".
+follow-up F1, 2026-10-09; he asked that a respawned objective aircraft
+"should still say objective" and on 2026-10-10 found the counting rules below
+fine.
 
 | Rule | Provenance |
 | --- | --- |
 | An objective names a lineage. Every aircraft of an objective lineage is an objective wherever the original is: the target window's "Obj: Destroy" or "Obj: Survive", the AI's own target and escort lists (an intercepting AI wingman goes after the respawn too), and the network readout a client is sent | John asked for it, 2026-10-09; the rule is an agent decision |
-| A destroy objective counts each lineage once. It is destroyed the first time any aircraft of it is lost, so the objective can be met although the lineage flies again; shooting the respawn down later is credited as a kill as usual and changes no objective count | agent decision, pending John |
-| A protect objective fails on the first loss of a protected lineage, as it would without respawns; the respawned aircraft still shows "Obj: Survive" | agent decision, pending John |
+| A destroy objective counts each lineage once. It is destroyed the first time any aircraft of it is lost, so the objective can be met although the lineage flies again; shooting the respawn down later is credited as a kill as usual and changes no objective count | agent decision, accepted by John (2026-10-10) |
+| A protect objective fails on the first loss of a protected lineage, as it would without respawns; the respawned aircraft still shows "Obj: Survive" | agent decision, accepted by John (2026-10-10) |
 | A player's revived aircraft is asked what its lineage was asked: the same targets and friendly objectives | agent decision |
 | With no target group, the targets are every aircraft of the other side the mission started with, human-flown ones too, one lineage each. Before this, a networked flight counted only the AI's aircraft | agent decision; the table's retail rule, applied to every enemy aircraft |
 | A networked mission gives every aircraft its objectives when it is built (the group objective of its wing, the groups that must survive), so a player who takes one in flight is asked what the mission asks of that aircraft. Before this a player who took an aircraft by handoff had no objectives: the target window never read "Obj:", and the debrief listed no friendly objective | agent decision (a fault found by follow-up F1) |

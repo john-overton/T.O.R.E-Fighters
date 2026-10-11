@@ -66,13 +66,33 @@ neither has a known consumer. `expType` is 21 for ground units, 35 for ships and
 the GCI, 15 for men. `craterSize` is 6 for ground units, 0 for ships, 1 or 0 for
 men. The debris positions (`dmgDebrisPos`, `dstDebrisPos`) are all zero on NTs.
 
+Other OBJECT fields as NTs use them: `utilProc` is `_GVProc` (ground vehicles
+and ships), `_CARRIERProc` (5 carriers), `_OBJProc` (GCI radar, men,
+structures) or a unit's own proc (CATGUY, EJECT). `sigs[0..4]` is
+100/100/100/100/0 for ground units, 150 to 300 for ships, 100/100/50/10 for the
+Sea Shadow and 100/100/25/25 for small boats; `sigs[3]` is radar and `sigs[2]`
+infrared per the [radar spec](../spec/radar.md). `maxVisDist` is 78 (men 59,
+SA-2 391, GCI 195): 78, 195 and 391 match 20,000, 50,000 and 100,000 ft at 256
+ft per unit (inference). OBJECT `flags` read 0x4000000 on SA2A, 0x2000000 on
+M1939, KS12 and KS19, 0x801 on the Mule objects and 0xc8331, 0x108331 and
+0x1c8131 on carriers; their meaning is unknown.
+
+There is no radar-to-launcher link anywhere in the data: every launcher carries
+its own missile, and the missile's seeker zone is its search volume. The site
+pieces (revetments `SA3SITE.OT`, `HAWKSITE.OT`; radar vehicles LTRACK, SFLUSH,
+SRDR1, SRDR2; Tall King `KING.OT`; passive radars; microwave relays; MISTRK)
+carry no weapons. The SAM batteries TORE builds around a search radar are a
+design rule ([SAM batteries](../spec/surface-defenses.md#sam-batteries)). For
+comparison, the archive's OTs number 83 structures, 74 other objects (city,
+houses, crates, rocks, roads, flags) and 13 airports (`_STRIPProc`).
+
 ## Hardpoints: arcs, rest direction, ammunition
 
 | Field | Meaning |
 | --- | --- |
 | `name` | location byte, 0 on every NT |
 | `flags` | 8 or 10; bit `0x2` is not understood |
-| `pos.x/y/z` | mount position in hull source units (scale not established) |
+| `pos.x/y/z` | mount position in hull source units; TORE places mounts at a third of the record's feet, the real-size rule of [placed object scale](objects-and-shapes.md#placed-object-scale-2026-10-10) (fitted) |
 | `slewH`, `slewP` | rest direction of the mount, hull relative, heading and pitch |
 | `slewLimitH`, `slewLimitP` | half-arc either side of the rest direction |
 | `defaultTypeName` | the JT or SEE record |
@@ -105,7 +125,8 @@ one: the main shape's stem plus `_A.SH` (`nimz.SH` and `NIMZ_A.SH`, `knx.SH` and
 `KNX_A.SH`). The import test confirms all 32 exist in `FA_2.LIB`. No ground
 unit, SAM or man has a variant shape. The archive holds one wreck object,
 `DEST.OT` ("Destroyed Vehicle", shape `dest.SH`); which units leave it is not
-traced, and the reader exposes the name only as a candidate. `expType` selects
+traced. TORE swaps a destroyed vehicle, launcher or gun to it (fitted,
+[destroyed looks](../spec/surface-defenses.md#destroyed-looks)). `expType` selects
 the explosion ([explosions](explosions.md)).
 
 ## Supply trucks
