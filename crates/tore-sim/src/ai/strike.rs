@@ -32,6 +32,11 @@
 //!   is safe (the spec's safe test), else egresses and goes home unless it
 //!   is safe by the exit distance.
 //!
+//! - **Lase** ([`lase`], slice ST-L): a striker with its own designator that
+//!   releases a laser weapon holds its spot on the target in an offset turn
+//!   until the weapon is down, then exits; a lase duty (the wing order) and a
+//!   designator lasing for its wing's carriers fly the same hold.
+//!
 //! Helicopters and the gunship keep their existing behaviour (slice ST-F):
 //! [`Strike::flies`] says no for them.
 use super::Experience;
@@ -44,6 +49,14 @@ use crate::attitude::Vector;
 use crate::combat::delivery::DeliveryMode;
 use crate::models::strike_class::StrikeClass;
 use crate::sensors::FEET_PER_NAUTICAL_MILE;
+
+#[path = "strike_lase.rs"]
+mod lase;
+pub use lase::{
+    LASE_BANK_MARGIN_DEG, LASE_CONE_EXIT_FT, LASE_MAX_TICKS, LASE_MIN_TICKS, LASE_RADIUS_MIN_FT,
+    LASE_RADIUS_TURNS, LASE_REACH_SHARE, LASE_WAIT_TICKS, Lase, LaseEnd, LaseInputs, LaseSensor,
+    LaseUntil, WingFacts, bank_cap_deg, lase_radius_ft, orbit_speed_fps, turn_rate_deg,
+};
 
 /// Feet in a metre, for John's release circle (given in metres).
 pub const FEET_PER_METRE: f64 = 1. / 0.3048;
@@ -165,6 +178,12 @@ pub const ROCKETS_PER_PASS: u32 = 8;
 /// Guided weapons and seekers: the run ends this close (fitted, the
 /// straight run's).
 pub const GUIDED_EXIT_FT: f64 = 2_000.;
+/// The descent of a level run whose glide bomb cannot reach from its height
+/// or speed, feet per second (fitted, agent).
+pub const GLIDE_DESCENT_FPS: f64 = 400.;
+/// A laser carrier waiting for a buddy's spot closes on the target until it
+/// is this many fire ranges from it, then gives up (fitted, agent).
+pub const SPOT_WAIT_RANGES: f64 = 1.5;
 /// While every briefed target is fully attacked the striker re-chooses this
 /// often (fitted).
 pub const WAIT_TICKS: u64 = 2 * 120;
@@ -281,6 +300,10 @@ pub struct Solution {
     /// One of this aircraft's guided rounds is flying at the target (retail
     /// fires one guided round at a time).
     pub guided_in_flight: bool,
+    /// The guided weapon's glide can reach a point ahead from here at all
+    /// (the sight has a reach); true for every other store. A glide bomb
+    /// released from too high or too slow runs out of life before it lands.
+    pub reach_ok: bool,
 }
 
 /// The host's per-step description (see the module notes).
@@ -295,6 +318,8 @@ pub struct Inputs {
     /// (Quick Mission's altitude setting); `None` when unknown.
     pub mission_height_ft: Option<f64>,
     pub solution: Option<Solution>,
+    /// The laser and the spots around it (slice ST-L).
+    pub lase: LaseInputs,
 }
 
 /// Where the striker flies this tick: a heading and a flight-path pitch,
@@ -335,6 +360,8 @@ pub struct Selection {
     /// gate, feet (zero offset for a guided store).
     pub aim_ft: [f64; 2],
     pub gate_ft: f64,
+    /// The laser is wanted on now, with a designator of its own (slice
+    /// ST-L): the pass of a laser store, or its hold.
     pub laser: bool,
 }
 
@@ -355,6 +382,8 @@ pub struct Context<'a> {
     pub recovering: bool,
     /// The strike targets of the other members of its wing.
     pub mates: &'a [u32],
+    /// What its wing's designators and laser carriers are doing (slice ST-L).
+    pub wing: WingFacts,
     /// The aircraft's ceiling, feet above sea level.
     pub ceiling_ft: f64,
 }
@@ -378,6 +407,8 @@ pub enum Phase {
     Defend,
     /// Done: no target or no store left, or sent home.
     Home,
+    /// Holding a laser spot on a target in an offset turn ([`lase`]).
+    Lase,
 }
 
 /// A pass's stage.
@@ -440,6 +471,15 @@ pub struct Strike {
     /// It left after a defence because it was not safe: at the exit
     /// distance it resumes only if safe, else goes home.
     withdrawn: bool,
+    /// The lase in progress: the hold after its own laser bomb, a duty, or
+    /// the wing's (slice ST-L).
+    lase: Option<Lase>,
+    /// It has a laser designator of its own (last step's inputs).
+    designator: bool,
+    /// It has a laser store with rounds left (last step's inputs).
+    laser_rounds: bool,
+    /// The AI turned the laser on by hand ([`Strike::laser_set`]).
+    laser_set: bool,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -472,6 +512,10 @@ impl Strike {
             warned: None,
             threat: ThreatLevel::Clear,
             withdrawn: false,
+            lase: None,
+            designator: false,
+            laser_rounds: false,
+            laser_set: false,
             inputs: None,
         }
     }
@@ -549,7 +593,7 @@ impl Strike {
                 [0.; 2]
             },
             gate_ft: self.gate_ft,
-            laser: kind == StoreKind::Laser,
+            laser: kind == StoreKind::Laser && self.laser_target().is_some(),
         })
     }
 
@@ -578,8 +622,15 @@ impl Strike {
         if self.cruise_ft.is_none() {
             self.cruise_ft = Some(own.position[1]);
         }
+        self.designator = cx.inputs.designator;
+        self.laser_rounds = cx
+            .inputs
+            .stores
+            .iter()
+            .any(|s| s.kind == StoreKind::Laser && s.rounds > 0);
         if cx.recovering {
             self.phase = Phase::Home;
+            self.lase = None;
         }
         if self.phase == Phase::Home {
             return order;
@@ -590,6 +641,9 @@ impl Strike {
             if self.phase != Phase::Defend {
                 self.enter(Phase::Defend, cx.tick);
                 self.released = 0;
+                // A threat ends a lase (spec, "Lasing"): the weapon on the
+                // spot goes blind, as for a player who stops lasing.
+                self.lase = None;
             }
             return order;
         }
@@ -606,10 +660,13 @@ impl Strike {
                 self.exit(cx);
             }
         }
+        if let Some(order) = self.step_lase(cx) {
+            return order;
+        }
         let solution = self.solution(cx);
         let target_at = solution
             .map(|s| s.target_position)
-            .or_else(|| self.target.and_then(|id| known_position(cx.picture, id)));
+            .or_else(|| self.focus_position(cx));
         let target_alive = match (self.target, solution) {
             (Some(_), Some(s)) => s.target_alive,
             (Some(id), None) => standing(cx.picture, id),
@@ -660,17 +717,22 @@ impl Strike {
                     }
                 }
             }
-            Phase::Attack | Phase::Defend | Phase::Home => {}
+            Phase::Attack | Phase::Defend | Phase::Home | Phase::Lase => {}
         }
         // The choice may have changed the target or ended the strike.
         let solution = self.solution(cx);
         let target_at = solution
             .map(|s| s.target_position)
-            .or_else(|| self.target.and_then(|id| known_position(cx.picture, id)));
+            .or_else(|| self.focus_position(cx));
         match self.phase {
-            Phase::Home | Phase::Defend => order,
+            Phase::Home | Phase::Defend | Phase::Lase => order,
             Phase::Ingress | Phase::Wait => {
-                let point = target_at.or_else(|| objective_point(cx.picture));
+                let point = target_at
+                    .or_else(|| objective_point(cx.picture))
+                    .or_else(|| {
+                        self.spot_wait_point(cx)
+                            .filter(|_| self.phase == Phase::Wait)
+                    });
                 order.steer = point.map(|p| self.cruise_steer(cx, p, SpeedRequest::Corner));
                 order.activity = Some(Activity::Pursuing);
                 order
@@ -704,6 +766,14 @@ impl Strike {
                 }
             },
         }
+    }
+
+    /// Where the picture knows the striker's target stands, or the target of
+    /// its lase duty when it has no other.
+    fn focus_position(&self, cx: &Context<'_>) -> Option<Vector> {
+        self.target
+            .or_else(|| self.lase.map(|l| l.target))
+            .and_then(|id| known_position(cx.picture, id))
     }
 
     /// The host's solution, when it is for the current selection.
@@ -758,6 +828,29 @@ impl Strike {
         let inputs = cx.inputs;
         let own = cx.own;
         let Some(target) = self.pick_target(cx) else {
+            // A designator with nothing to strike with waits for its wing's
+            // laser carriers: they choose, it lases (slice ST-L).
+            if inputs.designator
+                && cx.wing.carriers
+                && !inputs
+                    .stores
+                    .iter()
+                    .any(|s| s.rounds > 0 && s.kind != StoreKind::Command)
+            {
+                self.enter(Phase::Wait, cx.tick);
+                self.target = None;
+                return;
+            }
+            // A laser carrier that wants only a buddy's spot looks for one
+            // while it closes on the target, and gives up inside its fire
+            // range (slice ST-L).
+            if let Some(point) = self.spot_wait_point(cx)
+                && horizontal(own.position, point) > SPOT_WAIT_RANGES * self.laser_fire_range(cx)
+            {
+                self.enter(Phase::Wait, cx.tick);
+                self.target = None;
+                return;
+            }
             let waiting = cx
                 .picture
                 .briefed()
@@ -791,7 +884,7 @@ impl Strike {
                 inputs.class,
                 threat,
                 facts,
-                inputs.designator,
+                spot_assured(cx, target),
             ),
         };
         let Some(store) = store else {
@@ -855,6 +948,42 @@ impl Strike {
         self.enter(Phase::Attack, cx.tick);
     }
 
+    /// A laser carrier with no designator in its wing and nothing else to
+    /// drop that found no target with a buddy's spot on it (the caller has
+    /// asked [`Self::pick_target`]), and the target it would wait for.
+    fn spot_wait_point(&self, cx: &Context<'_>) -> Option<Vector> {
+        let inputs = cx.inputs;
+        let laser = inputs
+            .stores
+            .iter()
+            .any(|s| s.kind == StoreKind::Laser && s.rounds > 0);
+        let other = inputs.stores.iter().any(|s| {
+            s.rounds > 0
+                && !matches!(
+                    s.kind,
+                    StoreKind::Laser | StoreKind::AntiRadiation | StoreKind::Command
+                )
+        });
+        (laser && !other && !inputs.designator && !cx.wing.designator)
+            .then(|| {
+                cx.picture
+                    .ordered()
+                    .and_then(|id| known_position(cx.picture, id))
+                    .or_else(|| objective_point(cx.picture))
+            })
+            .flatten()
+    }
+
+    /// The laser store's fire range, feet (zero with none).
+    fn laser_fire_range(&self, cx: &Context<'_>) -> f64 {
+        cx.inputs
+            .stores
+            .iter()
+            .filter(|s| s.kind == StoreKind::Laser && s.rounds > 0)
+            .map(|s| s.fire_range_ft)
+            .fold(0., f64::max)
+    }
+
     /// The target the striker attacks next: the ordered one, an
     /// anti-radiation carrier's radars (SAM, then AAA), else the selector's.
     fn pick_target(&self, cx: &Context<'_>) -> Option<u32> {
@@ -863,17 +992,35 @@ impl Strike {
         let anti_radiation = stores
             .iter()
             .any(|s| s.kind == StoreKind::AntiRadiation && s.rounds > 0);
+        let spot_any =
+            cx.inputs.designator || cx.wing.designator || !cx.inputs.lase.spot_targets.is_empty();
         let other = stores.iter().any(|s| {
             s.rounds > 0
                 && s.kind != StoreKind::AntiRadiation
                 && s.kind != StoreKind::Command
-                && (s.kind != StoreKind::Laser || cx.inputs.designator)
+                && (s.kind != StoreKind::Laser || spot_any)
         });
+        // A laser carrier with no designator, no designator in its wing and
+        // nothing else to drop attacks only what a buddy's spot lies on.
+        let buddy_only = !cx.inputs.designator
+            && !cx.wing.designator
+            && !stores.iter().any(|s| {
+                s.rounds > 0
+                    && !matches!(
+                        s.kind,
+                        StoreKind::Laser | StoreKind::AntiRadiation | StoreKind::Command
+                    )
+            });
         let attackers = |id: u32| cx.mates.iter().filter(|m| **m == id).count() as u32;
         let usable = |_: u16| anti_radiation || other;
-        let candidates = cx
+        let mut candidates = cx
             .picture
             .strike_candidates(own, cx.side, &attackers, &usable);
+        if buddy_only {
+            for c in &mut candidates {
+                c.usable &= cx.inputs.lase.spot_targets.contains(&c.id.0);
+            }
+        }
         let ordered = candidates
             .iter()
             .any(|c| c.source == StrikeSource::Ordered && c.valid && c.side != cx.side);
@@ -1011,7 +1158,15 @@ impl Strike {
             release: None,
             activity: Some(Activity::Attacking),
         };
-        let hold = self.hold_ft.unwrap_or(own.position[1]);
+        let mut hold = self.hold_ft.unwrap_or(own.position[1]);
+        // A glide bomb the sight says cannot reach from here (too high, or
+        // too slow for its life) is approached in a descent to a height it
+        // can (fitted, agent, slice ST-L); never below the release floor.
+        if kind.level_run() && solution.is_some_and(|s| !s.reach_ok) {
+            let lowest = own.position[1] - own.agl_ft + floor;
+            hold = (hold - GLIDE_DESCENT_FPS / 120.).max(lowest.min(hold));
+            self.hold_ft = Some(hold);
+        }
         let speed = if pass == Pass::FastHigh {
             SpeedRequest::Maximum
         } else {
@@ -1236,7 +1391,11 @@ impl Strike {
                 // A bomb, a guided weapon or a seeker leaves once a pass;
                 // the run then exits (a dive climbs out first).
                 if kind != StoreKind::Rocket && pass != Pass::Dive {
-                    self.exit(cx);
+                    // A laser weapon on the aircraft's own spot is held on
+                    // the target until it lands (slice ST-L).
+                    if !(kind == StoreKind::Laser && self.hold_after_release(cx)) {
+                        self.exit(cx);
+                    }
                 } else if kind != StoreKind::Rocket {
                     self.segment_to(Segment::Climb, cx.tick);
                 }
@@ -1382,6 +1541,13 @@ pub fn choose_pass(i: PassInputs) -> PassChoice {
             }
         }
     }
+}
+
+/// A spot is assured on `target` (spec, "Lasing"): the aircraft's own
+/// designator, a designator in its wing, or a same-side spot already on the
+/// target.
+pub fn spot_assured(cx: &Context<'_>, target: u32) -> bool {
+    cx.inputs.designator || cx.wing.designator || cx.inputs.lase.spot_targets.contains(&target)
 }
 
 /// What the striker knows of a target for the store choice.

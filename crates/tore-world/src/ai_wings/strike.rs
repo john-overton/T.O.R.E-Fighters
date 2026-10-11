@@ -17,11 +17,11 @@
 //! [`AiWings::release_seeker`] for its seeker missiles. With no striker it
 //! costs one scan of the actors and changes nothing.
 use super::AiWings;
-use tore_sim::ai::strike::{self, Inputs, Solution, Store, StoreKind};
+use tore_sim::ai::strike::{self, Inputs, LaseInputs, LaseSensor, Solution, Store, StoreKind};
 use tore_sim::ai::weapon_service::{Rounds, StationId};
 use tore_sim::attitude::Vector;
 use tore_sim::combat::delivery::Warning;
-use tore_sim::combat::live::{self, ReleaseAim, StrikeTarget};
+use tore_sim::combat::live::{self, GuidedMode, ReleaseAim, StrikeCockpit, StrikeTarget};
 use tore_sim::combat::missiles::{self, Flight, LaunchMode, Motion, seeker};
 use tore_sim::combat::{FallState, ballistics, guided, launch_speed};
 
@@ -42,6 +42,7 @@ pub(super) fn step(
         .filter(|a| a.strikes() && a.airfield_phase().is_none())
         .map(|a| a.id())
         .collect();
+    state.release_ai_lasers(&strikers);
     for id in strikers {
         let Some(config) = wings.configs.get(&id) else {
             continue;
@@ -60,6 +61,16 @@ pub(super) fn step(
         let designator = config.sight_sensor().is_some_and(|s| s.laser);
         // A cockpit a human left keeps the human's bomb sight mode.
         let kept = state.kept(id).is_some();
+        // The laser: held on the target the tactics name (a laser pass, the
+        // hold after the release, a lase duty), else left to the automatic
+        // rule (slice ST-L).
+        let laser_target = actor.strike().and_then(strike::Strike::laser_target);
+        let lasing = laser_target.or_else(|| actor.strike().and_then(strike::Strike::lasing));
+        let mut laser_set = actor.strike().is_some_and(strike::Strike::laser_set);
+        if let Some(cockpit) = state.ai_cockpit_mut(id, side, config) {
+            laser_set = hold_laser(cockpit, kept, laser_target, laser_set);
+        }
+        let lase = lase_inputs(state, id, side, config, lasing);
         let solution = selection.and_then(|sel| {
             let station = usize::from(sel.station.0);
             let w = &config.stations.get(station)?.weapon;
@@ -71,9 +82,6 @@ pub(super) fn step(
             if !kept {
                 cockpit.delivery_mode = sel.mode;
             }
-            if sel.laser && designator {
-                cockpit.laser.manual = Some(true);
-            }
             let row = state.targets.iter().find(|t| t.id == sel.target)?;
             let (position, velocity, alive) = (row.position, row.velocity, row.hp > 0);
             let emitting = row.radar_emitting;
@@ -81,7 +89,7 @@ pub(super) fn step(
                 .projectiles
                 .iter()
                 .any(|p| p.owner == id && p.target == Some(sel.target) && p.guidance.is_some());
-            let (impact, seconds, warning, due) = if sel.kind.seeker() {
+            let (impact, seconds, warning, due, reach_ok) = if sel.kind.seeker() {
                 let due = seeker_due(
                     sel.kind,
                     w,
@@ -90,7 +98,7 @@ pub(super) fn step(
                     position,
                     emitting,
                 );
-                (None, None, false, due)
+                (None, None, false, due, true)
             } else {
                 let delivery = state.strike_delivery(id, config, &launcher, &ground);
                 let ccip = delivery.as_ref().and_then(|d| d.ccip);
@@ -104,8 +112,20 @@ pub(super) fn step(
                     offset_ft: sel.aim_ft,
                     gate_ft: sel.gate_ft,
                 };
-                let due = state.strike_release_due(id, config, &launcher, aim, &ground);
-                (impact, ccip.map(|c| c.seconds), warning, due)
+                let sight = guided_kind(w)
+                    .then(|| state.strike_guided_sight(id, config, &launcher, &ground))
+                    .flatten();
+                let (due, reach_ok) = match &sight {
+                    // A guided bomb: due on its sight's range cue; and whether
+                    // its glide can reach from here at all (it cannot from
+                    // too high or too slow).
+                    Some(sight) => (live::guided_due(sight), sight.reach.is_some()),
+                    None => (
+                        state.strike_release_due(id, config, &launcher, aim, &ground),
+                        true,
+                    ),
+                };
+                (impact, ccip.map(|c| c.seconds), warning, due, reach_ok)
             };
             Some(Solution {
                 station: sel.station,
@@ -118,6 +138,7 @@ pub(super) fn step(
                 due,
                 warning,
                 guided_in_flight,
+                reach_ok,
             })
         });
         let inputs = Inputs {
@@ -126,10 +147,111 @@ pub(super) fn step(
             designator,
             mission_height_ft: None,
             solution,
+            lase,
         };
         if let Some(actor) = wings.mission.actor_mut(id) {
             actor.set_strike_inputs(inputs);
+            actor.set_laser_set(laser_set);
         }
+    }
+}
+
+/// A guided bomb or missile whose reach the cockpit's guided sight works out.
+fn guided_kind(w: &tore_formats::weapons::Weapon) -> bool {
+    guided::kind(w).is_some()
+}
+
+/// Holds an AI cockpit's laser on `target`, or lets it go: the sight tracks
+/// the object and the laser is on by hand while the tactics want a spot
+/// (the pass of a laser store, the hold after its release, a lase duty), and
+/// off again when they do not. A cockpit a human left keeps the human's hand
+/// setting: off stays off, and a laser the human left on stays on; the AI
+/// turns off only what it turned on (`set`, which it returns the new value
+/// of).
+fn hold_laser(cockpit: &mut StrikeCockpit, kept: bool, target: Option<u32>, set: bool) -> bool {
+    match target {
+        Some(id) => {
+            if cockpit.target != Some(StrikeTarget::Object(id)) {
+                cockpit.target = Some(StrikeTarget::Object(id));
+            }
+            if let Some(sight) = cockpit.sight.as_mut()
+                && sight.target() != Some(id)
+            {
+                sight.track(id);
+            }
+            if kept && cockpit.laser.manual == Some(false) {
+                return set;
+            }
+            if cockpit.laser.manual != Some(true) {
+                cockpit.laser.manual = Some(true);
+                return true;
+            }
+            set
+        }
+        None => {
+            if cockpit.laser.manual == Some(true) && (!kept || set) {
+                cockpit.laser.manual = None;
+            }
+            false
+        }
+    }
+}
+
+/// What the tactics read of the laser: the designator, the mask last step,
+/// the aircraft's own laser weapons in flight, weapons guiding on its spot,
+/// the objects other aircraft's spots of its side lie on, and where the lased
+/// target stands.
+fn lase_inputs(
+    state: &live::State,
+    id: u32,
+    side: live::Side,
+    config: &live::Configuration,
+    lasing: Option<u32>,
+) -> LaseInputs {
+    let cockpit = state.strike_cockpit(id);
+    let sensor = config
+        .sight_sensor()
+        .filter(|s| s.laser)
+        .map(|s| LaseSensor {
+            gimbal: s.gimbal,
+            reach_ft: cockpit
+                .map(|c| c.laser.limit_ft)
+                .filter(|reach| *reach > 0.)
+                .unwrap_or(s.range_ft),
+        });
+    let own_flight = state.guided_flights().any(|(_, f)| {
+        f.owner == id && f.kind == missiles::Guidance::Laser && f.mode != GuidedMode::Blind
+    });
+    let on_spot = state.guided_flights().any(|(_, f)| {
+        f.spot_owner == Some(id)
+            && f.kind == missiles::Guidance::Laser
+            && f.mode == GuidedMode::Guiding
+    });
+    let mut spot_targets: Vec<u32> = if side == live::NO_SIDE {
+        Vec::new()
+    } else {
+        state
+            .laser_spots()
+            .into_iter()
+            .filter(|spot| spot.owner != id && spot.side == side)
+            .filter_map(|spot| spot.target)
+            .collect()
+    };
+    spot_targets.sort_unstable();
+    spot_targets.dedup();
+    LaseInputs {
+        sensor,
+        mask: cockpit.and_then(|c| c.laser.mask),
+        own_flight,
+        on_spot,
+        spot_targets,
+        target: lasing.and_then(|id| {
+            state
+                .targets
+                .iter()
+                .find(|t| t.id == id)
+                .map(|t| (t.position, t.hp > 0))
+        }),
     }
 }
 
@@ -222,6 +344,53 @@ fn seeker_due(
 }
 
 impl AiWings {
+    /// AI aircraft `id` carries a laser designator (its own, or a pod) and
+    /// flies the strike tactics (helicopters and the gunship do not yet,
+    /// slice ST-F), so it can lase for another's weapon (slice ST-L).
+    pub fn can_lase(&self, id: u32) -> bool {
+        self.configs.get(&id).is_some_and(|c| {
+            strike::Strike::flies(c.strike_class) && c.sight_sensor().is_some_and(|s| s.laser)
+        })
+    }
+
+    /// Orders AI aircraft `id` to lase ground object `target` for as long as
+    /// `until` says (docs/spec/ai-strike.md, "Lasing"; the wing order "Lase
+    /// my target" calls this). It flies an offset turn of radius max(3 nm,
+    /// 1.2 turn radii) about the target above the release floor, with the
+    /// spot on it, so a same-side laser weapon, a player's or an AI's, can
+    /// home on it; the player's readout names the aircraft as the buddy. The
+    /// duty ends at `until`, when the target dies, when the aircraft has to
+    /// defend, or at [`Self::cancel_lase`]. An aircraft with no ground
+    /// picture is ordered the target to make one; the order is cleared with
+    /// the duty. Returns false for an aircraft that is not an AI aircraft
+    /// with a designator.
+    pub fn order_lase(&mut self, id: u32, target: u32, until: strike::LaseUntil) -> bool {
+        if !self.can_lase(id) {
+            return false;
+        }
+        self.mission
+            .actor_mut(id)
+            .is_some_and(|actor| actor.lase_for(target, until))
+    }
+
+    /// Ends AI aircraft `id`'s lase duty. Returns whether one ended.
+    pub fn cancel_lase(&mut self, id: u32) -> bool {
+        self.mission
+            .actor_mut(id)
+            .is_some_and(|actor| actor.stop_lase())
+    }
+
+    /// The callsign the readout names AI aircraft `id` by, "Friendly 2-1":
+    /// the buddy spot's owner on a player's targeting page (slice ST-L).
+    pub fn callsign(&self, id: u32) -> Option<String> {
+        self.slot(id).map(|slot| slot.label())
+    }
+
+    /// The object AI aircraft `id` is lasing, if it is.
+    pub fn lasing_for(&self, id: u32) -> Option<u32> {
+        self.mission.actor(id).and_then(|actor| actor.lasing())
+    }
+
     /// Forces AI aircraft `id`'s pass and store (the headless driver's
     /// coverage runs, docs/testing/lane-flight.md). Returns false for an id
     /// that is not a striker.
@@ -350,3 +519,7 @@ impl AiWings {
         emitted
     }
 }
+
+#[cfg(test)]
+#[path = "strike_tests.rs"]
+mod tests;

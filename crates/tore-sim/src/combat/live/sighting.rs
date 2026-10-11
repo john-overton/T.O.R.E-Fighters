@@ -237,6 +237,19 @@ fn sub(a: Vector, b: Vector) -> Vector {
 }
 
 impl State {
+    /// Lets go of the laser the AI turned on by hand (slice ST-L) in the own
+    /// cockpits of every AI aircraft not in `striking`: an aircraft whose
+    /// lase duty or strike has ended no longer steps in the strike bridge, so
+    /// nothing else would turn its laser off. A cockpit a human left keeps
+    /// its hand setting.
+    pub fn release_ai_lasers(&mut self, striking: &[u32]) {
+        for (aircraft, ai) in &mut self.ai_cockpits {
+            if ai.cockpit.laser.manual == Some(true) && !striking.contains(aircraft) {
+                ai.cockpit.laser.manual = None;
+            }
+        }
+    }
+
     /// Every laser spot this tick: one for each aircraft that is lasing, a
     /// human's, one the AI flies with the laser its human left on, or an AI
     /// striker's.

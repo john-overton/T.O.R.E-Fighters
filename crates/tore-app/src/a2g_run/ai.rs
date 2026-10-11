@@ -12,6 +12,7 @@
 //! --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N]
 //!     [--station N] [--count N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level]
 //!     [--handback S [--mode ccip|lvl] [--trigger]] [--order KIND [--order-at S]]
+//!     [--choose-store] [--buddy ID]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S]
 //! ```
@@ -35,6 +36,15 @@
 //!   the order `--order-at S` seconds into the pass (5 by default). Kinds:
 //!   see [`ORDERS`]; the orders the strike round adds join that table.
 //!
+//! - `--choose-store`: the AI chooses its own store instead of the fitted
+//!   one (slice ST-L): a laser store only with a spot assured.
+//! - `--buddy ID`: a second seat flies aircraft ID as a buddy of the striker
+//!   (slice ST-L): a scripted pass 1 nm ahead of the striker, 3,000 ft right
+//!   and 1,000 ft higher, which designates the nearest ground object with
+//!   Ctrl+X and lases it by hand (Ctrl+L). The striker is then ordered onto
+//!   what the buddy designated. A striker with no designator of its own drops
+//!   on the buddy's spot; the RELEASE line names the spot's owner.
+//!
 //! What it prints, in this order, then one `summary` and `done`:
 //!
 //! - `setup`: the aircraft, store, target, skill, forced profile, handback
@@ -52,6 +62,14 @@
 //!   nautical mile past its closest approach).
 //! - `LOST`: the striker was destroyed, crashed, ejected or left the AI.
 //! - `ACTIVITY`: what the AI says it is doing, each time that changes.
+//! - `PHASE`: the striker's strike phase (ingress, attack, lase, exit, ...)
+//!   each time it changes (slice ST-L); `HOLD` every five seconds of a lase
+//!   hold: its range from the target, height above it, speed and bank.
+//! - `LASER plane=P state=S mask=M`: the laser of the striker, and of the
+//!   buddy when there is one, each time its state or mask changes (slice
+//!   ST-L). The summary counts the seconds a laser weapon of the run was in
+//!   flight guiding (`fall_s`) and how many of them the spot it followed was
+//!   lost (`blind_s`).
 //!
 //! The hooks the strike slices fill are in one place, [`hooks`]: ST-T makes
 //! the AI take the target and report its profile, ST-K reports what a takeover
@@ -70,12 +88,13 @@ use tore_sim::{
     combat::{
         blast::MarkKind,
         delivery::DeliveryMode,
-        live::{self, Command, EffectKind},
+        laser::{LaserState, Mask},
+        live::{self, Command, EffectKind, GuidedMode},
     },
 };
 use tore_world::{
-    mission::{Defense, MissionSpec, Skill},
-    seats::{PlaneId, SeatCommand, SeatId},
+    mission::{Defense, MissionSpec, Skill, WingSpec},
+    seats::{PlaneId, SeatCommand, SeatId, SeatInput},
     world::{OrderOutcome, Seating, TickOutput, World},
 };
 
@@ -180,6 +199,9 @@ pub(crate) struct Config {
     pub trigger: bool,
     pub order: Option<(&'static str, PlayerOrder)>,
     pub order_at: f64,
+    /// `--choose-store`: the AI chooses its own store (the fitted one is not
+    /// forced), as in a mission; a buddy run does too.
+    pub choose: bool,
 }
 
 impl Config {
@@ -264,7 +286,7 @@ mod hooks {
         world: &mut World,
         plane: PlaneId,
         target: u32,
-        station: usize,
+        station: Option<usize>,
         forced: Option<Profile>,
     ) -> &'static str {
         let Some(wings) = world.ai_wings.as_mut() else {
@@ -273,7 +295,7 @@ mod hooks {
         if !wings.set_strike_order(plane.0, Some(target)) {
             return "not-ai-flown";
         }
-        wings.force_strike(plane.0, forced.map(Profile::pass), Some(station));
+        wings.force_strike(plane.0, forced.map(Profile::pass), station);
         if forced.is_some() { "forced" } else { "chosen" }
     }
 
@@ -306,6 +328,24 @@ mod hooks {
     pub(super) fn order_command(order: PlayerOrder) -> SeatCommand {
         SeatCommand::WingOrder(order)
     }
+}
+
+/// `--buddy ID`: the buddy's aircraft (the shared parser skips the option).
+fn buddy_option() -> AppResult<Option<tore_formats::aircraft::AircraftId>> {
+    let args: Vec<String> = std::env::args().collect();
+    args.windows(2)
+        .find(|pair| pair[0] == "--buddy")
+        .map(|pair| tore_formats::aircraft::AircraftId::parse(&pair[1]))
+        .transpose()
+        .map_err(Into::into)
+}
+
+/// The buddy of a striker run: its plane, the commands it is to send and
+/// whether it has designated.
+struct Buddy {
+    plane: PlaneId,
+    commands: Vec<SeatCommand>,
+    designated: Option<u32>,
 }
 
 /// A straight pass: where the striker starts and what it flies.
@@ -343,12 +383,18 @@ fn pass(scene: &Scene, o: &Options) -> AppResult<Pass> {
 /// Puts `plane`'s cockpit on the pass at `along` feet from its start and
 /// `right` feet to the right of it.
 fn place(world: &mut World, plane: PlaneId, pass: &Pass, along: f64, right: f64) {
+    place_at(world, plane, pass, [along, right, 0.]);
+}
+
+/// As [`place`], `up` feet higher.
+fn place_at(world: &mut World, plane: PlaneId, pass: &Pass, [along, right, up]: [f64; 3]) {
     let Some(cockpit) = world.cockpits.iter_mut().find(|c| c.plane == plane) else {
         return;
     };
     let side = [pass.heading.cos(), 0., -pass.heading.sin()];
-    let position: Vector =
-        std::array::from_fn(|i| pass.start[i] + pass.forward[i] * along + side[i] * right);
+    let position: Vector = std::array::from_fn(|i| {
+        pass.start[i] + pass.forward[i] * along + side[i] * right + if i == 1 { up } else { 0. }
+    });
     let flight = &mut cockpit.flight;
     flight.position = position;
     flight.velocity = pass.forward.map(|v| v * pass.speed);
@@ -362,12 +408,24 @@ fn place(world: &mut World, plane: PlaneId, pass: &Pass, along: f64, right: f64)
 }
 
 /// One mission step. `human` is whether the main seat flies a plane.
-fn step(scene: &mut Scene, human: bool, trigger: bool) -> AppResult<()> {
+fn step(scene: &mut Scene, human: bool, trigger: bool, buddy: Option<&mut Buddy>) -> AppResult<()> {
     if human {
         return scene.step(trigger);
     }
-    scene.recorded(|world, out| world.step(&[], out))
+    let inputs: Vec<SeatInput> = buddy
+        .map(|b| SeatInput {
+            seat: WINGMAN_SEAT,
+            tick: scene.world.tick(),
+            commands: std::mem::take(&mut b.commands),
+            ..SeatInput::default()
+        })
+        .into_iter()
+        .collect();
+    scene.recorded(|world, out| world.step(&inputs, out))
 }
+
+/// What a laser last showed: its state and why it was masked.
+type LaserShown = (LaserState, Option<Mask>);
 
 /// Everything the watcher reports about the striker.
 struct Watch {
@@ -386,6 +444,14 @@ struct Watch {
     lost: Option<f64>,
     activity: Option<Activity>,
     profile: Option<Profile>,
+    /// The strike phase last reported.
+    phase: Option<tore_sim::ai::strike::Phase>,
+    /// The planes whose lasers are reported, and what each last showed.
+    lasers: Vec<(u32, Option<LaserShown>)>,
+    /// Ticks a laser weapon of the run flew guiding, and ticks of those its
+    /// spot was gone (masked or off).
+    fall_ticks: u64,
+    blind_ticks: u64,
 }
 
 impl Watch {
@@ -405,6 +471,10 @@ impl Watch {
             lost: None,
             activity: None,
             profile: None,
+            phase: None,
+            lasers: vec![(plane.0, None)],
+            fall_ticks: 0,
+            blind_ticks: 0,
         }
     }
 }
@@ -460,7 +530,65 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
         w.profile = Some(profile);
         println!("ai-strike: PROFILE t={t:.3} name={}", profile.label());
     }
+    if let Some(phase) = scene
+        .actor(w.plane)
+        .and_then(|a| a.strike())
+        .map(|s| s.phase())
+        && w.phase != Some(phase)
+    {
+        w.phase = Some(phase);
+        println!("ai-strike: PHASE t={t:.3} name={phase:?}");
+    }
+    // The offset turn of a lase hold, every five seconds.
+    if w.phase == Some(tore_sim::ai::strike::Phase::Lase)
+        && tick.is_multiple_of(600)
+        && let (Some((p, v)), Some(tp)) = (scene.striker_at(w.plane), target_at)
+    {
+        let bank = scene
+            .actor(w.plane)
+            .map_or(f64::NAN, |a| a.flight().bank.to_degrees());
+        println!(
+            "ai-strike: HOLD t={t:.3} range_ft={:.0} above_ft={:.0} speed_kt={:.0} bank_deg={bank:.0}",
+            horizontal(p, tp),
+            p[1] - tp[1],
+            v / FPS_PER_KNOT,
+        );
+    }
     let state = &scene.world.combat.state;
+    for (plane, last) in &mut w.lasers {
+        let now = state
+            .strike_cockpit(*plane)
+            .map(|c| (c.laser.state, c.laser.mask));
+        if now != *last {
+            *last = now;
+            if let Some((laser_state, mask)) = now {
+                let range = state
+                    .strike_cockpit(*plane)
+                    .map_or(0., |c| c.laser.range_ft);
+                println!(
+                    "ai-strike: LASER t={t:.3} plane={plane} state={laser_state:?} mask={} range_ft={range:.0}",
+                    mask.map_or("none".to_owned(), |m| format!("{m:?}"))
+                );
+            }
+        }
+    }
+    // The fall of the run's laser weapons: guiding, and with the spot there.
+    let guiding: Vec<_> = state
+        .guided_flights()
+        .filter(|(_, f)| f.mode == GuidedMode::Guiding && f.owner != u32::MAX)
+        .filter(|(_, f)| f.spot_owner.is_some())
+        .collect();
+    if !guiding.is_empty() {
+        w.fall_ticks += 1;
+        let seen = guiding.iter().all(|(_, f)| {
+            f.spot_owner
+                .and_then(|owner| state.strike_cockpit(owner))
+                .is_some_and(|c| c.laser.state == LaserState::Lasing)
+        });
+        if !seen {
+            w.blind_ticks += 1;
+        }
+    }
     // Releases: rounds of the striker not seen before.
     let fresh: Vec<_> = state
         .projectiles
@@ -500,8 +628,20 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
                 )
             },
         );
+        let guided = scene
+            .world
+            .combat
+            .state
+            .guided_flight(id)
+            .map_or(String::new(), |f| {
+                format!(
+                    " guided={:?} spot_owner={}",
+                    f.mode,
+                    f.spot_owner.map_or("none".to_owned(), |o| o.to_string())
+                )
+            });
         println!(
-            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim}",
+            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim}{guided}",
             w.releases,
             if name.is_empty() { "unknown" } else { &name },
         );
@@ -670,6 +810,18 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     spec.surface_seed = o.seed;
     spec.wings[0].skill = skill;
     spec.wings[0].count = if ordering { 2 } else { 1 };
+    let buddy_aircraft = buddy_option()?;
+    if buddy_aircraft.is_some() && (ordering || cfg.handback.is_some()) {
+        return Err("--buddy is a run of its own: no --order or --handback".into());
+    }
+    if let Some(buddy) = buddy_aircraft {
+        spec.wings[1] = WingSpec {
+            aircraft: buddy,
+            count: 1,
+            ..spec.wings[0]
+        };
+        spec.cheats.easy_targeting = true;
+    }
     spec.validate()?;
     let mut world = World::new(&spec, resources, Seating::Open)?;
     if let Some(why) = &world.terrain.surface.unresolved {
@@ -702,6 +854,25 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         record: None,
     };
     let pass = pass(&scene, o)?;
+    let mut buddy = match buddy_aircraft {
+        Some(_) => {
+            let plane = scene
+                .world
+                .roster
+                .planes()
+                .iter()
+                .find(|p| MissionSpec::wing_index(p.slot.wing) == 1 && p.slot.member == 0)
+                .map(|p| p.id)
+                .ok_or("no buddy plane")?;
+            scene.world.take_plane(WINGMAN_SEAT, plane)?;
+            Some(Buddy {
+                plane,
+                commands: Vec::new(),
+                designated: None,
+            })
+        }
+        None => None,
+    };
     let row = scene.target_row().ok_or("the target has no row")?;
     let (target_at, hp) = (row.position, row.hp);
     {
@@ -747,7 +918,18 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         scene.world.give_back_plane(SEAT)?;
     }
     let mut watch = Watch::new(striker, target);
-    let note = hooks::assign(&mut scene.world, striker, target, station, cfg.profile);
+    if let Some(b) = &buddy {
+        watch.lasers.push((b.plane.0, None));
+    }
+    // A buddy run lets the AI choose its store: a laser store needs a spot.
+    let forced_station = (buddy.is_none() && !cfg.choose).then_some(station);
+    let note = hooks::assign(
+        &mut scene.world,
+        striker,
+        target,
+        forced_station,
+        cfg.profile,
+    );
     println!(
         "ai-strike: PROFILE t=0.000 name=none requested={} note={note}",
         cfg.profile.map_or("none", Profile::label)
@@ -845,8 +1027,50 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                 mode.label()
             );
         }
+        // The buddy flies its scripted pass, designates and lases; the
+        // striker is ordered onto what it designated.
+        if let Some(b) = buddy.as_mut() {
+            let t = tick as f64 / 120.;
+            place_at(
+                &mut scene.world,
+                b.plane,
+                &pass,
+                [pass.speed * t + FEET_PER_NM, 3_000., 1_000.],
+            );
+            let own = scene.world.combat.state.ownship(b.plane.0);
+            let designated = own.and_then(|own| own.designated());
+            let laser = own.map(|own| own.laser);
+            match designated {
+                None if tick % 60 == 0 => {
+                    b.commands.push(SeatCommand::Combat(Command::NearestGround))
+                }
+                None => {}
+                Some(id) => {
+                    if b.designated.is_none() {
+                        b.designated = Some(id);
+                        scene.target = id;
+                        watch.target = id;
+                        let note = hooks::assign(
+                            &mut scene.world,
+                            striker,
+                            id,
+                            forced_station,
+                            cfg.profile,
+                        );
+                        println!(
+                            "ai-strike: DESIGNATE t={:.3} target={id:#010x} buddy={} note={note}",
+                            scene.seconds(),
+                            b.plane.0
+                        );
+                    }
+                    if laser.is_some_and(|l| !l.wanted()) && tick % 60 == 30 {
+                        b.commands.push(SeatCommand::Combat(Command::ToggleLaser));
+                    }
+                }
+            }
+        }
         let trigger = human && cfg.trigger && scene.selected();
-        step(&mut scene, human, trigger)?;
+        step(&mut scene, human, trigger, buddy.as_mut())?;
         for reply in &scene.out.orders {
             let (result, message) = match &reply.outcome {
                 OrderOutcome::Given { message } => ("given", message),
@@ -876,7 +1100,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let t = scene.seconds();
     let hp_end = scene.target_row().map(|r| r.hp);
     println!(
-        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={}",
+        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={} fall_s={:.1} blind_s={:.1}",
         t - started,
         watch.profile.map_or("none", Profile::label),
         watch.releases,
@@ -897,6 +1121,8 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                 Rounds::Finite(n) => n.to_string(),
                 Rounds::Unlimited => "unlimited".to_owned(),
             }),
+        watch.fall_ticks as f64 / 120.,
+        watch.blind_ticks as f64 / 120.,
     );
     if watch.releases == 0 {
         println!("ai-strike: no release");

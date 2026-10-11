@@ -41,7 +41,7 @@ mod cockpit;
 mod cockpit_tests;
 pub use cockpit::{
     AiCockpit, GUIDED_LATE_SHARE, ReleaseAim, StrikeCockpit, StrikeRelease, StrikeTarget,
-    is_strike_store,
+    guided_due, is_strike_store,
 };
 mod collateral;
 #[cfg(test)]

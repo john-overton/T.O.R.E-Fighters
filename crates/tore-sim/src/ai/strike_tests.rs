@@ -121,6 +121,7 @@ fn inputs(stores: Vec<Store>, solution: Option<Solution>) -> Inputs {
         designator: false,
         mission_height_ft: None,
         solution,
+        lase: LaseInputs::default(),
     }
 }
 
@@ -136,6 +137,7 @@ fn solution(target: Vector, impact: Vector, due: bool) -> Solution {
         due,
         warning: false,
         guided_in_flight: false,
+        reach_ok: true,
     }
 }
 
@@ -160,6 +162,7 @@ impl World {
             defending: false,
             recovering: false,
             mates: &[],
+            wing: WingFacts::default(),
             ceiling_ft: 50_000.,
         }
     }
@@ -666,4 +669,649 @@ fn a_strike_round_trips_through_a_checkpoint_and_steps_on_identically() {
     let coded = to_bytes(&strike, &models).unwrap();
     let restored: Strike = from_bytes(&coded, &models).unwrap();
     assert!(restored.inputs().is_none());
+}
+
+// AI lasing (slice ST-L): the hold, the duty, the wing's lase, the spot
+// assurance.
+
+use crate::combat::laser::Mask;
+use crate::combat::sight::Gimbal;
+
+const FEET_PER_NM: f64 = FEET_PER_NAUTICAL_MILE;
+
+fn laser_store() -> Store {
+    store(2, StoreKind::Laser)
+}
+
+/// A hemisphere pod 10 nm of reach, as the F-16C's Pave Spike.
+fn pod() -> LaseSensor {
+    LaseSensor {
+        gimbal: Gimbal::Hemisphere,
+        reach_ft: 60_760.,
+    }
+}
+
+/// A built-in sensor: the cone about the nose, 60 degrees to search and 45 to
+/// track.
+fn cone() -> LaseSensor {
+    LaseSensor {
+        gimbal: Gimbal::Cone {
+            search: 60f64.to_radians(),
+            track: 45f64.to_radians(),
+        },
+        reach_ft: 60_760.,
+    }
+}
+
+/// A designator striker over a still target: laser store, no solution.
+fn lasing_world(sensor: Option<LaseSensor>) -> World {
+    let mut world = quiet_world();
+    world.inputs = inputs(vec![laser_store()], None);
+    world.inputs.designator = sensor.is_some();
+    world.inputs.lase = LaseInputs {
+        sensor,
+        target: Some((TARGET_AT, true)),
+        ..LaseInputs::default()
+    };
+    world
+}
+
+fn context_at<'a>(world: &'a World, tick: u64, velocity: Vector) -> Context<'a> {
+    Context {
+        velocity,
+        ..world.context(tick)
+    }
+}
+
+#[test]
+fn the_orbit_is_three_nautical_miles_or_one_point_two_turn_radii() {
+    let three = 3. * FEET_PER_NM;
+    assert!((LASE_RADIUS_MIN_FT - three).abs() < 1e-9);
+    // A fighter's turn radius is far inside three miles.
+    assert!((lase_radius_ft(600., 7., 60_760.) - three).abs() < 1e-9);
+    // A heavy turning at 2 G at 1,200 ft/s needs more: 1.2 turn radii.
+    let heavy = lase_radius_ft(1_200., 2., 1.0e6);
+    assert!((heavy - 1.2 * turn_radius_ft(1_200., 2.)).abs() < 1e-9);
+    assert!(heavy > three);
+    // Never beyond 80 percent of the laser's reach.
+    assert!((lase_radius_ft(1_200., 2., 20_000.) - 16_000.).abs() < 1e-9);
+}
+
+#[test]
+fn a_pods_gimbal_limits_the_bank_by_the_targets_depression() {
+    // A target 45 degrees down abeam: tan(bank) <= tan(45) / sin(90), less
+    // the 5 degree margin.
+    assert!((bank_cap_deg(10_000., 10_000., 90.) - 40.).abs() < 1e-6);
+    // Nearer the nose the bank may be steeper.
+    assert!((bank_cap_deg(10_000., 10_000., 30.) - (2f64.atan().to_degrees() - 5.)).abs() < 1e-6);
+    // Dead ahead: only the 80 degree stop.
+    assert!((bank_cap_deg(10_000., 10_000., 0.) - 80.).abs() < 1e-6);
+    // A target on the other side of the turn does not bind.
+    assert!((bank_cap_deg(10_000., 10_000., -90.) - 80.).abs() < 1e-6);
+    // Not below the aircraft: no bank toward it.
+    assert_eq!(bank_cap_deg(-100., 10_000., 90.), 0.);
+    // The speed a level orbit needs for that bank: v^2 = g r tan(depression).
+    let v = orbit_speed_fps(10_000., 10_000., 1_000.);
+    let bank = (v * v / (32.174 * 10_000.)).atan().to_degrees();
+    assert!((bank - 40.).abs() < 1e-6, "{bank}");
+    // Capped at the corner speed, and unlimited when the target is not below.
+    assert_eq!(orbit_speed_fps(10_000., 10_000., 100.), 100.);
+    assert_eq!(orbit_speed_fps(0., 10_000., 600.), 600.);
+    // A one second horizon: the heading rate that gives a bank at a speed.
+    let rate = turn_rate_deg(40., 600.);
+    assert!((600. * rate.to_radians() / 32.174).atan().to_degrees() - 40. < 1e-6);
+}
+
+/// Flies `strike` for `seconds` with a point-mass aircraft that follows its
+/// steering as the input adapter does (a heading error turns into a bank of
+/// `atan(v * rate / g)` within 75 degrees, rolled at 120 degrees a second,
+/// the speed request met at 20 ft/s^2) and returns, for every tick, the
+/// target's elevation in the aircraft's body frame (positive above the wing
+/// plane, degrees), the range and the bank.
+fn fly(
+    strike: &mut Strike,
+    world: &mut World,
+    seconds: u64,
+    mut each: impl FnMut(u64, &mut Strike, &mut World),
+) -> Vec<(f64, f64, f64)> {
+    let g = 32.174;
+    let mut bank: f64 = 0.;
+    let mut log = Vec::new();
+    for tick in 0..seconds * 120 {
+        let own = &world.own;
+        let heading = own.heading_deg.to_radians();
+        let speed = own.speed.0;
+        let velocity = [heading.sin() * speed, 0., heading.cos() * speed];
+        each(tick, strike, world);
+        let order = {
+            let cx = context_at(world, tick, velocity);
+            strike.step(&cx)
+        };
+        let Some(steer) = order.steer else {
+            break;
+        };
+        // The adapter: bank from the heading error over one second.
+        let error = angle_difference(world.own.heading_deg, steer.heading_deg).to_radians();
+        let wanted = (speed.max(125.) * error / g)
+            .atan()
+            .to_degrees()
+            .clamp(-75., 75.);
+        bank += (wanted - bank).clamp(-1., 1.);
+        let rate = g * bank.to_radians().tan() / speed.max(1.);
+        let own = &mut world.own;
+        own.heading_deg = (own.heading_deg + rate.to_degrees() / 120.).rem_euclid(360.);
+        let heading = own.heading_deg.to_radians();
+        own.position[0] += heading.sin() * speed / 120.;
+        own.position[2] += heading.cos() * speed / 120.;
+        let wanted_speed = match steer.speed {
+            SpeedRequest::Explicit(s) => s.0.max(own.limits.minimum.0),
+            SpeedRequest::Corner => own.limits.corner.0,
+            SpeedRequest::Maximum => own.limits.maximum.0,
+        };
+        own.speed.0 += (wanted_speed - speed).clamp(-20. / 120., 20. / 120.);
+        own.bank_deg = bank;
+        // Where the target is in the body frame.
+        let d: Vector = std::array::from_fn(|i| TARGET_AT[i] - own.position[i]);
+        let range = d[0].hypot(d[2]);
+        let up = {
+            let right = [heading.cos(), 0., -heading.sin()];
+            let b = bank.to_radians();
+            [b.sin() * right[0], b.cos(), b.sin() * right[2]]
+        };
+        let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let elevation = ((d[0] * up[0] + d[1] * up[1] + d[2] * up[2]) / length)
+            .asin()
+            .to_degrees();
+        log.push((elevation, range, bank));
+        let cx = Context {
+            ..world.context(tick)
+        };
+        let _ = cx;
+    }
+    log
+}
+
+#[test]
+fn a_pod_holds_the_target_under_its_wings_through_a_bombs_fall() {
+    // Released 17,000 ft from the target at 12,000 ft and 700 ft/s (the
+    // reach of a GBU-10): 50 s of fall.
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 12_000., TARGET_AT[2] - 17_000.], 700.);
+    world.own.limits.corner = ScalarSpeed(700.);
+    let mut strike = Strike::new(1);
+    strike.set_inputs(world.inputs.clone());
+    strike.lase_for(TARGET, LaseUntil::TargetDies);
+    let log = fly(&mut strike, &mut world, 60, |_, _, _| {});
+    assert_eq!(log.len(), 60 * 120, "the hold never gave the flying up");
+    // The target stays under the wing plane (a little slack while rolling in
+    // and for the one-second bank law) and inside the laser's reach.
+    let worst = log.iter().map(|l| l.0).fold(f64::MIN, f64::max);
+    assert!(
+        worst < 2.,
+        "the target rose {worst} degrees above the wings"
+    );
+    let far = log.iter().map(|l| l.1).fold(0., f64::max);
+    assert!(
+        far < 60_760.,
+        "the target left the laser's reach at {far} ft"
+    );
+    // It is a turn, not a run: the aircraft ends up having turned about the
+    // target.
+    let banked = log.iter().filter(|l| l.2.abs() > 10.).count();
+    assert!(banked > log.len() / 2, "mostly flying a turn");
+    assert!(world.own.position[1] > 11_999.);
+}
+
+#[test]
+fn the_hold_slows_a_fast_aircraft_so_the_orbit_fits_the_gimbal() {
+    // 12,000 ft over the target, an orbit of 3 nm: 700 ft/s needs a 56
+    // degree bank (too steep: the target is 33 degrees down); the hold asks
+    // for the speed that fits.
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 12_000., TARGET_AT[2] - 17_000.], 700.);
+    let mut strike = Strike::new(1);
+    strike.set_inputs(world.inputs.clone());
+    strike.lase_for(TARGET, LaseUntil::TargetDies);
+    let order = strike.step(&world.context(0));
+    let steer = order.steer.expect("the hold flies");
+    let SpeedRequest::Explicit(speed) = steer.speed else {
+        panic!("{:?}", steer.speed);
+    };
+    let radius = lase_radius_ft(700., 7., 60_760.);
+    let bank = (speed.0 * speed.0 / (32.174 * radius)).atan().to_degrees();
+    let depression = (12_000f64 / radius).atan().to_degrees();
+    assert!(bank < depression, "{bank} against {depression}");
+    assert!(speed.0 < 700.);
+    assert_eq!(order.activity, Some(Activity::Attacking));
+}
+
+#[test]
+fn a_cone_holds_its_nose_on_the_target_and_a_duty_turns_away_inside_the_exit() {
+    let mut world = lasing_world(Some(cone()));
+    let mut strike = Strike::new(1);
+    strike.set_inputs(world.inputs.clone());
+    strike.lase_for(TARGET, LaseUntil::TargetDies);
+    let steer = strike.step(&world.context(0)).steer.unwrap();
+    assert_eq!(steer.heading_deg, 0.);
+    assert_eq!(steer.speed, SpeedRequest::Corner);
+    // Off to the side it points at the target.
+    world.own.position = [6_000., 5_000., 0.];
+    let steer = strike.step(&world.context(1)).steer.unwrap();
+    assert!((steer.heading_deg - bearing_deg(world.own.position, TARGET_AT)).abs() < 1e-9);
+    // Inside the exit distance it cannot follow a target it is flying
+    // over: the duty exits, and turns back to hold again.
+    world.own.position = [0., 5_000., TARGET_AT[2] - 1_500.];
+    let order = strike.step(&world.context(2));
+    assert_eq!(strike.phase(), Phase::Exit);
+    assert!(order.steer.is_some());
+    assert_eq!(strike.lasing(), Some(TARGET), "the duty stands");
+    world.own.position = [0., 6_000., TARGET_AT[2] + 31_000.];
+    strike.step(&world.context(3));
+    assert_eq!(strike.phase(), Phase::TurnBack);
+    strike.step(&world.context(4));
+    assert_eq!(strike.phase(), Phase::Lase);
+}
+
+#[test]
+fn a_laser_release_with_its_own_designator_holds_the_spot_until_the_bomb_lands() {
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 8_000., 6_000.], 600.);
+    let mut strike = Strike::new(9);
+    world.inputs.solution = Some(Solution {
+        station: StationId(2),
+        ..solution(TARGET_AT, [0., 0., 0.], false)
+    });
+    // The pass: a level run with the laser wanted.
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.laser_target(), Some(TARGET));
+    assert!(strike.selection().unwrap().laser);
+    // Due: the bomb goes, and the hold begins instead of the exit.
+    world.inputs.solution = Some(Solution {
+        station: StationId(2),
+        due: true,
+        ..solution(TARGET_AT, [0., 0., 0.], true)
+    });
+    let order = strike.step(&world.context(30));
+    assert!(order.release.is_some());
+    assert_eq!(strike.phase(), Phase::Lase);
+    assert_eq!(strike.laser_target(), Some(TARGET));
+    // The bomb flies: still holding, a long way on.
+    world.inputs.lase.own_flight = true;
+    for tick in 31..120 * 40 {
+        let order = strike.step(&world.context(tick));
+        assert!(order.steer.is_some() && order.release.is_none(), "{tick}");
+        assert_eq!(strike.phase(), Phase::Lase, "{tick}");
+    }
+    // The bomb lands: the exit.
+    world.inputs.lase.own_flight = false;
+    let order = strike.step(&world.context(120 * 40));
+    assert_eq!(strike.phase(), Phase::Exit);
+    assert!(order.steer.is_some());
+    assert_eq!(strike.laser_target(), None, "the laser is let go");
+    assert!(!strike.selection().unwrap().laser);
+}
+
+#[test]
+fn the_hold_is_not_judged_finished_in_its_first_two_seconds() {
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 8_000., 6_000.], 600.);
+    world.inputs.solution = Some(Solution {
+        station: StationId(2),
+        due: true,
+        ..solution(TARGET_AT, [0., 0., 0.], true)
+    });
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    strike.step(&world.context(1));
+    assert_eq!(strike.phase(), Phase::Lase);
+    // The bomb is not in the list yet: still holding.
+    world.inputs.solution = None;
+    strike.step(&world.context(2));
+    assert_eq!(strike.phase(), Phase::Lase);
+}
+
+#[test]
+fn a_carrier_without_a_designator_exits_after_its_release() {
+    let mut world = lasing_world(None);
+    world.inputs.lase.spot_targets = vec![TARGET];
+    world.own = own([0., 8_000., 6_000.], 600.);
+    world.inputs.solution = Some(Solution {
+        station: StationId(2),
+        due: true,
+        ..solution(TARGET_AT, [0., 0., 0.], true)
+    });
+    let mut strike = Strike::new(9);
+    strike.step(&world.context(0));
+    strike.step(&world.context(1));
+    assert_eq!(strike.phase(), Phase::Exit);
+    assert_eq!(strike.laser_target(), None);
+}
+
+#[test]
+fn a_duty_ends_by_time_by_impact_by_the_target_dying_or_by_a_threat() {
+    let ready = |until| {
+        let mut world = lasing_world(Some(pod()));
+        world.own = own([0., 12_000., TARGET_AT[2] - 20_000.], 600.);
+        let mut strike = Strike::new(1);
+        strike.set_inputs(world.inputs.clone());
+        strike.lase_for(TARGET, until);
+        (world, strike)
+    };
+    // Seconds: from the first step.
+    let (world, mut strike) = ready(LaseUntil::Seconds(10.));
+    strike.step(&world.context(500));
+    assert_eq!(strike.phase(), Phase::Lase);
+    strike.step(&world.context(500 + 10 * 120 - 1));
+    assert_eq!(strike.phase(), Phase::Lase);
+    strike.step(&world.context(500 + 10 * 120));
+    assert_ne!(strike.phase(), Phase::Lase);
+    assert_eq!(strike.lasing(), None);
+
+    // Impact: after a weapon was seen guiding on the spot and has landed.
+    let (mut world, mut strike) = ready(LaseUntil::Impact);
+    strike.step(&world.context(0));
+    world.inputs.lase.on_spot = true;
+    strike.step(&world.context(100));
+    world.inputs.lase.on_spot = false;
+    strike.step(&world.context(101));
+    assert_eq!(strike.phase(), Phase::Lase, "two seconds at least");
+    strike.step(&world.context(LASE_MIN_TICKS));
+    assert_ne!(strike.phase(), Phase::Lase);
+    // With no weapon ever seen it waits two minutes.
+    let (world, mut strike) = ready(LaseUntil::Impact);
+    strike.step(&world.context(0));
+    strike.step(&world.context(120 * 119));
+    assert_eq!(strike.phase(), Phase::Lase);
+    strike.step(&world.context(120 * 120));
+    assert_ne!(strike.phase(), Phase::Lase);
+
+    // The target dying ends any of them.
+    let (mut world, mut strike) = ready(LaseUntil::TargetDies);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Lase);
+    world.inputs.lase.target = Some((TARGET_AT, false));
+    strike.step(&world.context(100));
+    assert_ne!(strike.phase(), Phase::Lase);
+
+    // A threat the aircraft has to defend against ends it too.
+    let (world, mut strike) = ready(LaseUntil::TargetDies);
+    strike.step(&world.context(0));
+    let mut cx = world.context(10);
+    cx.defending = true;
+    strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Defend);
+    assert_eq!(strike.lasing(), None);
+
+    // Cancelled by the caller.
+    let (world, mut strike) = ready(LaseUntil::TargetDies);
+    strike.step(&world.context(0));
+    assert!(strike.stop_lase());
+    assert_eq!(strike.lasing(), None);
+    assert!(!strike.stop_lase());
+    strike.step(&world.context(1));
+    assert_ne!(strike.phase(), Phase::Lase);
+
+    // An aircraft with no designator cannot lase.
+    let (mut world, mut strike) = ready(LaseUntil::TargetDies);
+    world.inputs.lase.sensor = None;
+    strike.step(&world.context(0));
+    assert_ne!(strike.phase(), Phase::Lase);
+}
+
+#[test]
+fn a_duty_wants_the_laser_on_its_target_with_no_store() {
+    let mut world = lasing_world(Some(pod()));
+    world.inputs.stores = Vec::new();
+    let mut strike = Strike::new(1);
+    strike.lase_for(TARGET, LaseUntil::TargetDies);
+    assert_eq!(
+        strike.laser_target(),
+        Some(TARGET),
+        "wanted from the order on"
+    );
+    strike.step(&world.context(0));
+    assert_eq!(strike.laser_target(), Some(TARGET));
+    assert_eq!(strike.selection(), None, "no store: nothing to select");
+}
+
+#[test]
+fn a_designator_with_nothing_to_drop_lases_for_its_wings_carriers() {
+    // A designator aircraft, no ground store, a carrier in its wing that has
+    // chosen the target.
+    let mut world = lasing_world(Some(pod()));
+    world.inputs.stores = Vec::new();
+    world.own = own([0., 8_000., TARGET_AT[2] - 30_000.], 600.);
+    let mut strike = Strike::new(1);
+    let mut cx = world.context(0);
+    cx.wing = WingFacts {
+        designator: false,
+        carriers: true,
+        escort: None,
+    };
+    // At the choice there is nothing to strike with: it waits for the
+    // carriers rather than going home.
+    strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Wait);
+    // A carrier chose the target: the designator lases it.
+    let mut cx = world.context(300);
+    cx.wing = WingFacts {
+        designator: false,
+        carriers: true,
+        escort: Some(TARGET),
+    };
+    let order = strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Lase);
+    assert_eq!(strike.laser_target(), Some(TARGET));
+    assert!(order.steer.is_some());
+    // The carriers still want the spot, then their bombs are on it, then it
+    // is done.
+    let mut cx = world.context(600);
+    cx.wing.escort = Some(TARGET);
+    strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Lase);
+    world.inputs.lase.on_spot = true;
+    let mut cx = world.context(1_000);
+    cx.wing.escort = None;
+    strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Lase, "bombs still on its spot");
+    world.inputs.lase.on_spot = false;
+    let mut cx = world.context(1_200);
+    cx.wing.escort = None;
+    strike.step(&cx);
+    assert_ne!(strike.phase(), Phase::Lase);
+    // With no carriers left it goes home instead of waiting.
+    let mut cx = world.context(1_400);
+    cx.wing = WingFacts::default();
+    for tick in [1_400, 1_600, 1_800] {
+        cx.tick = tick;
+        strike.step(&cx);
+    }
+    assert_eq!(strike.phase(), Phase::Home);
+}
+
+#[test]
+fn a_designator_that_has_stores_of_its_own_strikes_with_them() {
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 8_000., TARGET_AT[2] - 30_000.], 600.);
+    let mut strike = Strike::new(1);
+    let mut cx = world.context(0);
+    cx.wing = WingFacts {
+        designator: false,
+        carriers: true,
+        escort: Some(TARGET),
+    };
+    strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.lasing(), None);
+}
+
+#[test]
+fn a_laser_store_is_chosen_only_with_a_spot_assured() {
+    // No designator, nothing else to drop: with no spot it waits while
+    // there is room to close on the target, then gives up.
+    let mut world = lasing_world(None);
+    world.own = own([0., 8_000., 0.], 600.);
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Wait);
+    // Waiting, it flies at the target.
+    let order = strike.step(&world.context(10));
+    assert!(order.steer.is_some());
+    // Inside 1.5 fire ranges: nothing to drop, so it goes home.
+    world.own.position[2] = TARGET_AT[2] - 12_000.;
+    for tick in [300, 600, 900] {
+        strike.step(&world.context(tick));
+    }
+    assert_eq!(strike.phase(), Phase::Home);
+
+    // A same-side spot on the target assures it.
+    let mut world = lasing_world(None);
+    world.own = own([0., 8_000., 0.], 600.);
+    world.inputs.lase.spot_targets = vec![TARGET];
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.kind, Some(StoreKind::Laser));
+    // A spot on some other object does not.
+    let mut world = lasing_world(None);
+    world.own = own([0., 8_000., 0.], 600.);
+    world.inputs.lase.spot_targets = vec![0x6000_0099];
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Wait);
+
+    // A designator in its wing assures it.
+    let mut world = lasing_world(None);
+    world.own = own([0., 8_000., 0.], 600.);
+    let mut strike = Strike::new(1);
+    let mut cx = world.context(0);
+    cx.wing.designator = true;
+    strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Attack);
+    // A bomb as well as the laser store: bombs first, with no spot.
+    let mut world = lasing_world(None);
+    world.inputs.stores = vec![laser_store(), bomb(2)];
+    world.own = own([0., 8_000., 0.], 600.);
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.kind, Some(StoreKind::Bomb));
+}
+
+#[test]
+fn a_glide_bomb_that_cannot_reach_is_approached_in_a_descent_to_its_floor() {
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 15_000., TARGET_AT[2] - 36_000.], 700.);
+    world.inputs.solution = Some(Solution {
+        station: StationId(2),
+        reach_ok: false,
+        ..solution(TARGET_AT, [0., 0., 0.], false)
+    });
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    let held = strike.hold_ft.expect("a hold");
+    strike.step(&world.context(120));
+    assert!(strike.hold_ft.unwrap() < held, "descending");
+    assert!((held - strike.hold_ft.unwrap() - GLIDE_DESCENT_FPS / 120.).abs() < 1.);
+    // It settles at the release floor over the ground, not below.
+    for tick in 120..120 * 60 {
+        strike.step(&world.context(tick));
+    }
+    let floor = strike.hold_ft.unwrap();
+    assert!((floor - (15_000. - 15_000. + release_floor_ft(ThreatLevel::Clear))).abs() < 1.);
+    // With a reach it holds its height.
+    world.inputs.solution = Some(Solution {
+        station: StationId(2),
+        ..solution(TARGET_AT, [0., 0., 0.], false)
+    });
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    let held = strike.hold_ft;
+    strike.step(&world.context(120));
+    assert_eq!(strike.hold_ft, held);
+}
+
+#[test]
+fn a_lase_in_progress_round_trips_through_a_checkpoint() {
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 12_000., TARGET_AT[2] - 20_000.], 600.);
+    let mut strike = Strike::new(7);
+    strike.lase_for(TARGET, LaseUntil::Seconds(30.));
+    for tick in 0..300 {
+        strike.step(&world.context(tick));
+    }
+    let models = Models::default();
+    let coded = to_bytes(&strike, &models).unwrap();
+    let mut twin: Strike = from_bytes(&coded, &models).unwrap();
+    assert_eq!(twin, strike);
+    assert_eq!(twin.phase(), Phase::Lase);
+    for tick in 300..600 {
+        let a = strike.step(&world.context(tick));
+        let b = twin.step(&world.context(tick));
+        assert_eq!(a, b, "tick {tick}");
+    }
+    assert_eq!(twin, strike);
+}
+
+#[test]
+fn a_gimbal_mask_levels_the_wings_and_the_range_is_kept_inside_the_reach() {
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 12_000., TARGET_AT[2] - 12_000.], 600.);
+    let mut strike = Strike::new(1);
+    strike.lase_for(TARGET, LaseUntil::TargetDies);
+    strike.step(&world.context(0));
+    // Masked by the gimbal: no turn toward the target.
+    world.inputs.lase.mask = Some(Mask::Gimbal);
+    world.own.heading_deg = 90.;
+    let steer = strike.step(&world.context(60)).steer.unwrap();
+    let turn = angle_difference(90., steer.heading_deg);
+    let side = strike.lase.unwrap().side;
+    assert!(turn * side <= 0., "{turn}");
+}
+
+#[test]
+fn the_wing_facts_a_mate_offers_are_its_designator_its_laser_rounds_and_its_target() {
+    // A carrier that has chosen a laser store: it needs a spot on its target.
+    let mut world = lasing_world(None);
+    world.own = own([0., 8_000., 0.], 600.);
+    world.inputs.lase.spot_targets = vec![TARGET];
+    let mut carrier = Strike::new(1);
+    assert!(!carrier.is_carrier() && !carrier.is_designator());
+    carrier.step(&world.context(0));
+    assert_eq!(carrier.needs_spot(), Some(TARGET));
+    assert!(carrier.is_carrier());
+    assert!(!carrier.is_designator());
+    // A designator is not a carrier, and needs no spot.
+    let world = lasing_world(Some(pod()));
+    let mut designator = Strike::new(2);
+    designator.step(&world.context(0));
+    assert_eq!(designator.needs_spot(), None);
+    assert!(designator.is_designator() && !designator.is_carrier());
+    // A carrier gone home, or defending, is neither.
+    carrier.step(&{
+        let mut cx = world.context(10);
+        cx.recovering = true;
+        cx
+    });
+    assert!(!carrier.is_carrier());
+    assert_eq!(carrier.needs_spot(), None);
+}
+
+#[test]
+fn a_duty_given_in_the_middle_of_a_defence_resumes_when_the_threat_has_gone() {
+    let mut world = lasing_world(Some(pod()));
+    world.own = own([0., 12_000., TARGET_AT[2] - 20_000.], 600.);
+    let mut strike = Strike::new(1);
+    strike.set_inputs(world.inputs.clone());
+    let mut cx = world.context(0);
+    cx.defending = true;
+    strike.step(&cx);
+    assert_eq!(strike.phase(), Phase::Defend);
+    // The order arrives while it defends: it waits, then holds.
+    strike.lase_for(TARGET, LaseUntil::TargetDies);
+    assert_eq!(strike.phase(), Phase::Defend);
+    strike.step(&world.context(WARNING_TICKS + 1));
+    assert_eq!(strike.phase(), Phase::Lase);
+    assert_eq!(strike.lasing(), Some(TARGET));
 }
