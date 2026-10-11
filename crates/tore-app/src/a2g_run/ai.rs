@@ -11,7 +11,8 @@
 //! ```text
 //! --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N]
 //!     [--station N] [--count N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level]
-//!     [--handback S [--mode ccip|lvl] [--trigger]] [--order KIND [--order-at S]]
+//!     [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]]
+//!     [--order KIND [--order-at S]]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S]
 //! ```
@@ -29,7 +30,11 @@
 //!   (and `--mode` of the bomb sight) and gives the aircraft back to the AI
 //!   `S` seconds into the pass, for the takeover tests. `--trigger` has the
 //!   human hold the trigger from the selection on (pickle and hold), so a
-//!   bomb is released, and reported, before the handoff.
+//!   bomb is released, and reported, before the handoff. `--laser` has the
+//!   human turn the laser on by hand (Ctrl+L) once the store is selected.
+//!   `--take-back S`: the seat takes the aircraft again `S` seconds after the
+//!   handback, and the run ends there with what the human finds (slice
+//!   ST-K, docs/spec/ai-strike.md "Takeover and handback").
 //! - `--order KIND`: wing orders. The seat leads a two-ship wing on the
 //!   scripted pass, designates the target and gives the wingman (the striker)
 //!   the order `--order-at S` seconds into the pass (5 by default). Kinds:
@@ -41,6 +46,12 @@
 //!   and order.
 //! - `start`: the striker's place at tick 0 (range to the target, altitude).
 //! - `HANDBACK`, `ORDER`: the handoff and the order, with what was kept.
+//! - `TAKEOVER`: what the AI continues after a handback (target, station,
+//!   bomb sight mode), or `none`.
+//! - `KEPT`: the kept cockpit while the AI flies it (mode, laser hand
+//!   setting and state, selected station), each time that changes.
+//! - `TAKEBACK`: a `--take-back`: what the human finds (designation,
+//!   station, mode, laser, rounds left).
 //! - `PROFILE name=P requested=R`: the pass the AI reports it flies. `none`
 //!   until slice ST-T reports one (see [`reported_profile`]).
 //! - `RELEASE`: a store left the striker (time, store, station, height above
@@ -178,6 +189,11 @@ pub(crate) struct Config {
     /// `--trigger`: the human leg holds the trigger once the store is
     /// selected (pickle and hold), so the human releases before it hands back.
     pub trigger: bool,
+    /// `--laser`: the human leg turns the laser on by hand.
+    pub laser: bool,
+    /// `--take-back S`: the seat takes the aircraft again `S` seconds after
+    /// the handback.
+    pub take_back: Option<f64>,
     pub order: Option<(&'static str, PlayerOrder)>,
     pub order_at: f64,
 }
@@ -237,8 +253,13 @@ impl Config {
         if self.handback.is_some() && self.order.is_some() {
             return Err("--handback and --order are separate runs: pick one".into());
         }
-        if (self.mode.is_some() || self.trigger) && self.handback.is_none() {
-            return Err("--mode and --trigger set the human leg: they need --handback".into());
+        if (self.mode.is_some() || self.trigger || self.laser || self.take_back.is_some())
+            && self.handback.is_none()
+        {
+            return Err(
+                "--mode, --trigger, --laser and --take-back set the human legs: they need --handback"
+                    .into(),
+            );
         }
         if records {
             return Err("--record and --render are not built for --pilot ai (slice ST-RA)".into());
@@ -298,6 +319,37 @@ mod hooks {
             0.
         };
         Some((distance, inside || !unguided, s.pass_number()))
+    }
+
+    /// Slice ST-K: what the AI continues after a handback: the target, the
+    /// kept station and the bomb sight mode.
+    pub(super) fn takeover(actor: &AiActor) -> Option<(u32, Option<usize>, DeliveryMode)> {
+        actor
+            .strike()
+            .and_then(|s| s.takeover())
+            .map(|t| (t.target, t.station.map(|s| usize::from(s.0)), t.mode))
+    }
+
+    /// Slice ST-K: the kept cockpit in words (mode, laser hand setting and
+    /// state, selected station), while the AI flies with it.
+    pub(super) fn kept_words(state: &live::State, plane: PlaneId) -> Option<String> {
+        let kept = state.kept(plane.0)?;
+        Some(format!(
+            "mode={} laser={} lasing={} selected={}",
+            kept.delivery_mode.label(),
+            hand_words(kept.laser.manual),
+            if kept.laser.lasing() { "yes" } else { "no" },
+            kept.selected
+        ))
+    }
+
+    /// The laser hand setting (Ctrl+L) in words.
+    pub(super) fn hand_words(manual: Option<bool>) -> &'static str {
+        match manual {
+            Some(true) => "hand-on",
+            Some(false) => "hand-off",
+            None => "auto",
+        }
     }
 
     /// Slice ST-O: give a wing order that carries a ground target. Today the
@@ -783,6 +835,8 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     }
     let mut ordered = false;
     let mut handed = !human || ordering;
+    let mut handed_at: Option<f64> = None;
+    let mut kept_line: Option<String> = None;
     let started = scene.seconds();
     for tick in 0..(o.seconds * 120.) as u64 {
         if human {
@@ -801,6 +855,20 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                         .is_some_and(|own| own.delivery_mode != mode)
                 {
                     scene.queue(SeatCommand::Combat(Command::ToggleSeekerMode));
+                }
+                // `--laser`: on by hand (a laser that is on by the automatic
+                // rule takes two presses: off by hand, then on by hand).
+                if cfg.laser
+                    && scene.selected()
+                    && scene.commands.is_empty()
+                    && scene
+                        .world
+                        .combat
+                        .state
+                        .ownship(striker.0)
+                        .is_some_and(|own| own.laser.manual != Some(true))
+                {
+                    scene.queue(SeatCommand::Combat(Command::ToggleLaser));
                 }
             }
             if ordering
@@ -826,24 +894,72 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         if let (Some(at), false) = (cfg.handback, handed)
             && leg_t >= at
         {
-            let (designated, selected, mode) = {
+            let (designated, selected, mode, laser) = {
                 let own = scene
                     .world
                     .combat
                     .state
                     .ownship(striker.0)
                     .ok_or("no ownship to hand back")?;
-                (own.designated(), own.selected, own.delivery_mode)
+                (
+                    own.designated(),
+                    own.selected,
+                    own.delivery_mode,
+                    own.laser.manual,
+                )
             };
             scene.world.give_back_plane(SEAT)?;
             handed = true;
             human = false;
+            handed_at = Some(scene.seconds());
             println!(
-                "ai-strike: HANDBACK t={:.3} designated={} selected={selected} mode={}",
+                "ai-strike: HANDBACK t={:.3} designated={} selected={selected} mode={} laser={}",
                 scene.seconds(),
                 designated.map_or("none".to_owned(), |id| format!("{id:#010x}")),
-                mode.label()
+                mode.label(),
+                hooks::hand_words(laser)
             );
+            match scene.actor(striker).and_then(hooks::takeover) {
+                Some((target, station, mode)) => println!(
+                    "ai-strike: TAKEOVER t={:.3} target={target:#010x} station={} mode={}",
+                    scene.seconds(),
+                    station.map_or("ai".to_owned(), |s| s.to_string()),
+                    mode.label()
+                ),
+                None => println!("ai-strike: TAKEOVER t={:.3} none", scene.seconds()),
+            }
+        }
+        // `--take-back`: the seat takes the aircraft again and the run ends
+        // with what the human finds.
+        if let (Some(after), Some(at)) = (cfg.take_back, handed_at)
+            && scene.seconds() >= at + after
+            && scene.actor(striker).is_some_and(AiActor::alive)
+        {
+            scene.world.take_plane(SEAT, striker)?;
+            let own = scene
+                .world
+                .combat
+                .state
+                .ownship(striker.0)
+                .ok_or("no ownship after the take")?;
+            println!(
+                "ai-strike: TAKEBACK t={:.3} designated={} selected={} mode={} laser={} rounds={}",
+                scene.seconds(),
+                own.designated()
+                    .map_or("none".to_owned(), |id| format!("{id:#010x}")),
+                own.selected,
+                own.delivery_mode.label(),
+                hooks::hand_words(own.laser.manual),
+                own.rounds(station)
+            );
+            break;
+        }
+        if handed_at.is_some()
+            && let Some(words) = hooks::kept_words(&scene.world.combat.state, striker)
+            && kept_line.as_deref() != Some(words.as_str())
+        {
+            println!("ai-strike: KEPT t={:.3} {words}", scene.seconds());
+            kept_line = Some(words);
         }
         let trigger = human && cfg.trigger && scene.selected();
         step(&mut scene, human, trigger)?;
@@ -920,6 +1036,8 @@ mod tests {
                 "--order" => c.set_order(it.next().unwrap())?,
                 "--handback" => c.handback = Some(it.next().unwrap().parse()?),
                 "--trigger" => c.trigger = true,
+                "--laser" => c.laser = true,
+                "--take-back" => c.take_back = Some(it.next().unwrap().parse()?),
                 other => panic!("{other}"),
             }
         }
@@ -975,5 +1093,22 @@ mod tests {
         .unwrap();
         assert!(c.check(None, false).is_ok());
         assert_eq!(c.mode, Some(DeliveryMode::Level));
+        // The takeover legs (slice ST-K) need a handback too.
+        let c = config(&["--pilot", "ai", "--laser"]).unwrap();
+        assert!(c.check(None, false).is_err());
+        let c = config(&["--pilot", "ai", "--take-back", "40"]).unwrap();
+        assert!(c.check(None, false).is_err());
+        let c = config(&[
+            "--pilot",
+            "ai",
+            "--handback",
+            "5",
+            "--laser",
+            "--take-back",
+            "40",
+        ])
+        .unwrap();
+        assert!(c.check(None, false).is_ok());
+        assert_eq!((c.laser, c.take_back), (true, Some(40.)));
     }
 }
