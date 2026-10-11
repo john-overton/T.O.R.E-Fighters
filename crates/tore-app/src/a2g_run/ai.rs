@@ -459,6 +459,8 @@ struct Watch {
     gun_rounds: BTreeMap<u32, ((u32, u32), Vector)>,
     /// A gun run's bursts by (pass, burst): each is one release.
     bursts: BTreeMap<(u32, u32), Burst>,
+    /// The last combat tick whose hits on the target were counted.
+    hits_tick: u64,
 }
 
 /// One gun burst of a strafing run: its release number, the rounds fired,
@@ -468,6 +470,11 @@ struct Burst {
     n: usize,
     fired: usize,
     ends: Vec<Vector>,
+    /// Rounds that ended within 50 ft of the target where it stood then.
+    near: usize,
+    /// Rounds that struck the target, and the hit points they took.
+    hits: usize,
+    damage: i32,
     last_fired: f64,
     reported: bool,
 }
@@ -477,6 +484,9 @@ struct Burst {
 const BURST_DONE_SECONDS: f64 = 0.75;
 /// A gun round that ends this close above the ground there reached it.
 const ROUND_GROUND_FT: f64 = 100.;
+/// A gun round that ends this close to the target (horizontally, where the
+/// target stands then) counts as near it.
+const NEAR_FT: f64 = 50.;
 
 impl Watch {
     fn new(plane: PlaneId, target: u32) -> Self {
@@ -497,6 +507,7 @@ impl Watch {
             profile: None,
             gun_rounds: BTreeMap::new(),
             bursts: BTreeMap::new(),
+            hits_tick: 0,
         }
     }
 
@@ -769,7 +780,9 @@ fn trace(scene: &Scene, w: &Watch, tick: u64, target_at: Option<Vector>) {
 /// round, with the burst's own aim draw and `burst=B rounds_left=N`) and one
 /// `IMPACT` once its rounds have ended: `miss_ft` from the target to the
 /// middle of the rounds that reached the ground, `rounds`, `ground` (how
-/// many reached it) and `near` (how many ended within 50 ft of the target).
+/// many reached it), `near` (how many ended within 50 ft of the target where
+/// it stood as each ended), `hits` (how many struck it: a round inside its
+/// volume) and `damage` (the hit points they took).
 fn observe_guns(scene: &Scene, w: &mut Watch, t: f64, target_at: Option<Vector>) {
     let state = &scene.world.combat.state;
     let key = scene.actor(w.plane).and_then(hooks::burst);
@@ -837,6 +850,9 @@ fn observe_guns(scene: &Scene, w: &mut Watch, t: f64, target_at: Option<Vector>)
                     n: w.releases,
                     fired: 0,
                     ends: Vec::new(),
+                    near: 0,
+                    hits: 0,
+                    damage: 0,
                     last_fired: t,
                     reported: false,
                 },
@@ -854,14 +870,34 @@ fn observe_guns(scene: &Scene, w: &mut Watch, t: f64, target_at: Option<Vector>)
         .copied()
         .filter(|id| !state.projectiles.iter().any(|p| p.id == *id))
         .collect();
+    let standing = scene.target_row().map(|r| r.position);
     for id in gone {
         let (key, last) = w.gun_rounds.remove(&id).expect("tracked");
-        if last[1] - scene.ground(last[0], last[2]) <= ROUND_GROUND_FT
-            && let Some(burst) = w.bursts.get_mut(&key)
-        {
+        let Some(burst) = w.bursts.get_mut(&key) else {
+            continue;
+        };
+        // Against the target where it stands as the round ends.
+        if standing.is_some_and(|tp| horizontal(last, tp) <= NEAR_FT) {
+            burst.near += 1;
+        }
+        if last[1] - scene.ground(last[0], last[2]) <= ROUND_GROUND_FT {
             burst.ends.push(last);
         }
     }
+    // Hits on the target since the last tick, to the latest burst (the
+    // striker is the only one shooting at it).
+    let tick = state.tick();
+    if let Some(burst) = w.bursts.values_mut().max_by_key(|b| b.n) {
+        for hit in state
+            .history
+            .iter()
+            .filter(|h| h.target == w.target && h.tick > w.hits_tick)
+        {
+            burst.hits += 1;
+            burst.damage += hit.applied;
+        }
+    }
+    w.hits_tick = tick;
     for (id, (_, last)) in w.gun_rounds.iter_mut() {
         if let Some(p) = state.projectiles.iter().find(|p| p.id == *id) {
             *last = p.position;
@@ -881,16 +917,10 @@ fn observe_guns(scene: &Scene, w: &mut Watch, t: f64, target_at: Option<Vector>)
             let k = burst.ends.len() as f64;
             std::array::from_fn::<f64, 3, _>(|i| burst.ends.iter().map(|e| e[i]).sum::<f64>() / k)
         });
-        let near = target_at.map_or(0, |tp| {
-            burst
-                .ends
-                .iter()
-                .filter(|e| horizontal(**e, tp) <= 50.)
-                .count()
-        });
+        let (near, hits, damage) = (burst.near, burst.hits, burst.damage);
         match (middle, target_at) {
             (Some(m), Some(tp)) => println!(
-                "ai-strike: IMPACT t={t:.3} n={} miss_ft={:.1} at={:.0},{:.0},{:.0} rounds={} ground={} near={near}",
+                "ai-strike: IMPACT t={t:.3} n={} miss_ft={:.1} at={:.0},{:.0},{:.0} rounds={} ground={} near={near} hits={hits} damage={damage}",
                 burst.n,
                 horizontal(m, tp),
                 m[0],
@@ -900,7 +930,7 @@ fn observe_guns(scene: &Scene, w: &mut Watch, t: f64, target_at: Option<Vector>)
                 burst.ends.len(),
             ),
             _ => println!(
-                "ai-strike: IMPACT t={t:.3} n={} miss_ft=nan rounds={} ground={} near={near}",
+                "ai-strike: IMPACT t={t:.3} n={} miss_ft=nan rounds={} ground={} near={near} hits={hits} damage={damage}",
                 burst.n,
                 burst.fired,
                 burst.ends.len()
