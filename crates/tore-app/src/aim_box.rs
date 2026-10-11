@@ -194,6 +194,22 @@ fn square() -> Vec<Stroke> {
     ]
 }
 
+/// Half the laser spot's rectangular box, in HUD pixels: the retail IR and
+/// laser TD box is 12 by 8 reference pixels (plan 4.7, fitted).
+pub const LASER_HALF: (f64, f64) = (6., 4.);
+
+/// The strokes of the laser spot's rectangular box about its centre, in HUD
+/// pixels: the same four-sided outline as the target square, wider than tall.
+pub fn laser_box_strokes() -> [Stroke; 4] {
+    let (w, h) = LASER_HALF;
+    [
+        ((-w, -h), (w, -h)),
+        ((w, -h), (w, h)),
+        ((w, h), (-w, h)),
+        ((-w, h), (-w, -h)),
+    ]
+}
+
 /// The diamond's four sides about its centre, for a half width `half`.
 pub fn diamond_strokes(half: f64) -> [Stroke; 4] {
     [

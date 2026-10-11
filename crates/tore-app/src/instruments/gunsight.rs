@@ -20,14 +20,14 @@ use tore_sim::{
     },
 };
 
-const INK: [u8; 4] = [20, 20, 20, 255];
-const WHITE: [u8; 4] = [255, 255, 255, 255];
+pub(super) const INK: [u8; 4] = [20, 20, 20, 255];
+pub(super) const WHITE: [u8; 4] = [255, 255, 255, 255];
 const GREY: [u8; 4] = [110, 110, 110, 255];
 const BOX_FILL: [u8; 4] = [206, 206, 206, 255];
-const W: i32 = SCREEN.2;
-const H: i32 = SCREEN.3;
+pub(super) const W: i32 = SCREEN.2;
+pub(super) const H: i32 = SCREEN.3;
 /// The camera centre, where the crosshair sits.
-const CENTRE: (i32, i32) = (W / 2, H / 2);
+pub(super) const CENTRE: (i32, i32) = (W / 2, H / 2);
 /// The arcs box: x, y, width, height (plan 2.4).
 const BOX: (i32, i32, i32, i32) = (45, 92, 46, 20);
 /// How long a one-off notice stays on the activity row, in combat ticks (2 s).
@@ -273,7 +273,7 @@ fn at_camera_limit(look: [f64; 2]) -> bool {
 
 /// "9:00 LO": the clock bearing of an offset from the nose and the Hi/Lo
 /// label against the level plane (the target window's rules).
-fn bearing_label(offset: Vector, yaw: f64) -> String {
+pub(super) fn bearing_label(offset: Vector, yaw: f64) -> String {
     let relative = offset[0].atan2(offset[2]) - yaw;
     let hour = (relative.rem_euclid(std::f64::consts::TAU) / (std::f64::consts::PI / 6.)).round()
         as u8
@@ -289,10 +289,10 @@ fn bearing_label(offset: Vector, yaw: f64) -> String {
     format!("{}:00{level}", if hour == 0 { 12 } else { hour })
 }
 
-type Pixels = Vec<(i32, i32)>;
+pub(super) type Pixels = Vec<(i32, i32)>;
 
 /// Draws a symbol: a white halo, then the ink.
-fn stamp(r: &mut Raster, pixels: &Pixels) {
+pub(super) fn stamp(r: &mut Raster, pixels: &Pixels) {
     let inside = |&(x, y): &(i32, i32)| (0..W).contains(&x) && (0..H).contains(&y);
     for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
         for &(x, y) in pixels.iter().filter(|p| inside(p)) {
@@ -306,7 +306,7 @@ fn stamp(r: &mut Raster, pixels: &Pixels) {
 
 /// The camera centre: four short ticks, 3 to 5 pixels out, with a clear gap
 /// at the middle so the pipper's dot reads when it sits on the centre.
-fn crosshair() -> Pixels {
+pub(super) fn crosshair() -> Pixels {
     let (cx, cy) = CENTRE;
     let mut p = Vec::new();
     for d in 3..=5 {
@@ -377,7 +377,7 @@ fn other_impact(cx: i32, cy: i32) -> Pixels {
 }
 
 /// A square outline `side` pixels across, centred.
-fn square(cx: i32, cy: i32, side: i32) -> Pixels {
+pub(super) fn square(cx: i32, cy: i32, side: i32) -> Pixels {
     let (lo, hi) = (-(side / 2), side / 2);
     let mut p = Vec::new();
     for d in lo..=hi {
@@ -435,7 +435,7 @@ pub enum EyeIcon {
 pub const EYE_ICON: EyeIcon = EyeIcon::Bitmap;
 
 /// The hand-drawn eyeball, row by row.
-const EYE_BITMAP: [&str; 5] = [
+pub(super) const EYE_BITMAP: [&str; 5] = [
     "..#####..",
     ".#..#..#.",
     "#..###..#",
@@ -454,7 +454,7 @@ fn status_row(page: &Page) -> (&'static str, bool) {
     }
 }
 
-fn text_width(f: &Font, s: &str) -> i32 {
+pub(super) fn text_width(f: &Font, s: &str) -> i32 {
     s.glyph_codes()
         .map(|ch| f.glyphs[ch as usize].advance as i32)
         .sum()
@@ -1039,7 +1039,7 @@ pub fn preview(mode: &str) -> Option<Preview> {
 /// A synthetic grey scene: soft noise, a diagonal road, and a dark block for
 /// the object (`centre x, y` pixels and half-size), drawn with alpha 255 like
 /// an aircraft or static object in the real readback.
-fn preview_scene(object: Option<(Vector, i32, i32)>) -> Vec<u8> {
+pub(super) fn preview_scene(object: Option<(Vector, i32, i32)>) -> Vec<u8> {
     let (w, h) = (W as usize, H as usize);
     let mut pixels = vec![0u8; w * h * 4];
     let hash = |x: i32, y: i32| -> f64 {

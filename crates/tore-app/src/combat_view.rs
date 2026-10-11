@@ -468,6 +468,9 @@ pub fn readout(
             )
         }),
         gunsight: crate::instruments::gunsight::Page::new(ro, config, s),
+        // The targeting page of an aircraft with a laser or FLIR sight, or its
+        // buddy form (docs/spec/target-window.md, "Targeting page").
+        targeting: crate::instruments::targeting::Page::new(ro, config, s),
         chaff: ro.countermeasures.chaff,
         flares: ro.countermeasures.flares,
         target: ro.targets.display.as_ref().map(|target| {
