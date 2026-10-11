@@ -174,6 +174,9 @@ pub struct Setup {
     pub mission: Option<(f64, f64)>,
     /// The accepted runway start.
     pub ground_start: Option<u32>,
+    /// The runway Enemy Wing 1 parks on, for an enemy ground start (slice
+    /// CL-R). The parked layout itself is the mission layout's.
+    pub enemy_ground_start: Option<u32>,
     /// The player flies the hybrid model, the default; `--legacy-flight` turns
     /// it off.
     pub researched_flight: bool,
@@ -473,6 +476,12 @@ impl World {
             let airfields = ai_wings::Airfields::from_world(
                 &self.terrain,
                 parked.as_ref().map(mission_layout::GroundLayout::departure),
+            )
+            .with_enemy_departure(
+                layout
+                    .as_ref()
+                    .and_then(|layout| layout.enemy_ground.as_ref())
+                    .map(mission_layout::GroundLayout::departure),
             );
             let humans: &[ai_wings::HumanSlot] = if open {
                 &[]

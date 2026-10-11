@@ -134,19 +134,17 @@ impl World {
         let service = tore_sim::airport::Service::new(&self.terrain.airport_scene)
             .map_err(std::io::Error::other)?;
         let turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
-        // The mission's home base: the one every cockpit checks, or with no
-        // cockpit the ground start's airport.
-        let home = match self.cockpits.first() {
-            Some(cockpit) => cockpit.result.home_base(),
-            None => ai_wings::outcome::home_base(
-                &self.terrain,
-                self.combat
-                    .mission_layout
-                    .as_ref()
-                    .and_then(|layout| layout.ground.as_ref())
-                    .map(|ground| ground.airport),
-            ),
+        // The mission's home base for the plane's side: its side's ground
+        // start airport (Blue's, or Redfor's for an enemy ground start,
+        // slice CL-R), none for a side that starts in the air.
+        let layout = self.combat.mission_layout.as_ref();
+        let parked = if self.roster.redfor(plane) {
+            layout.and_then(|layout| layout.enemy_ground.as_ref())
+        } else {
+            layout.and_then(|layout| layout.ground.as_ref())
         };
+        let home =
+            ai_wings::outcome::home_base(&self.terrain, parked.map(|ground| ground.airport));
         let wings = self.ai_wings.as_mut().ok_or("no AI flies this mission")?;
         let target = wings
             .mission()

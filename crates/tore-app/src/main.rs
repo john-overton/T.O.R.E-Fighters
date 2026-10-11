@@ -7663,6 +7663,7 @@ fn ai_probe_run(
         setup: world::Setup {
             mission: Some(mission_start),
             ground_start: parked.as_ref().map(|ground| ground.object),
+            enemy_ground_start: None,
             researched_flight: flight_researched,
             native_tables: None,
             ai: None,
@@ -12770,6 +12771,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         setup: world::Setup {
             mission: None,
             ground_start,
+            enemy_ground_start: None,
             researched_flight,
             native_tables: native_tables.clone(),
             ai: None,

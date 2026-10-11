@@ -300,6 +300,11 @@ impl World {
         if let Some(runway) = self.setup.ground_start {
             hash.update(&runway.to_le_bytes());
         }
+        // Only when there is one, so a mission without keeps its hash.
+        if let Some(runway) = self.setup.enemy_ground_start {
+            hash.update(b"enemy ground start");
+            hash.update(&runway.to_le_bytes());
+        }
         hash.finish()
     }
 

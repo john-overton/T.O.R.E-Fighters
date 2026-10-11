@@ -442,3 +442,60 @@ fn a_ground_start_on_auto_takes_a_runway_the_world_picks() {
     none.start = Start::GroundAuto { altitude_ft: 5_000 };
     assert!(error_of(&none, &resources()).contains("No runway"));
 }
+
+#[test]
+fn an_enemy_ground_start_parks_enemy_wing_one_at_a_redfor_field() {
+    use crate::mission::EnemyStart;
+    use crate::seats::{PlaneId, SeatId};
+    use crate::test_support::resources::{AIRPORT_RUNWAY, owned_airport_resources};
+    use tore_sim::ai::launch::Side;
+    let red = owned_airport_resources(Some(137));
+    let mut auto = spec();
+    auto.enemy_start = EnemyStart::GroundAuto;
+    let mut named = spec();
+    named.enemy_start = EnemyStart::Ground {
+        runway: AIRPORT_RUNWAY,
+    };
+    for spec in [&auto, &named] {
+        let mut world = World::new(spec, &red, Seating::SinglePlayer).unwrap();
+        assert_eq!(world.setup.enemy_ground_start, Some(AIRPORT_RUNWAY));
+        let wings = world.ai_wings.as_ref().unwrap();
+        let parked: Vec<_> = wings
+            .mission()
+            .actors()
+            .iter()
+            .filter(|actor| actor.ground_start().is_some())
+            .map(|actor| (actor.identity().side, actor.identity().wing))
+            .collect();
+        assert_eq!(parked.len(), 2, "{parked:?}");
+        assert!(
+            parked
+                .iter()
+                .all(|(side, wing)| *side == crate::ai_wings::ENEMY_SIDE && *wing == 0)
+        );
+        // The player's side flies as before.
+        assert!((world.cockpits[0].flight.position[1] - 10_000.).abs() < 1e-6);
+        step(&mut world, 120);
+    }
+    // A Blue field is the other side's: refused by name, and auto finds none.
+    let blue = owned_airport_resources(Some(12));
+    assert!(error_of(&named, &blue).contains("is a Blue airfield"));
+    assert!(error_of(&auto, &blue).contains("No Redfor runway"));
+    // Online a Redfor human takes the parked lead, and its home is the field.
+    let mut open = auto.clone();
+    open.wings[0].count = 1;
+    let mut world = World::new(&open, &red, Seating::Open).unwrap();
+    let lead = world
+        .roster
+        .planes()
+        .iter()
+        .find(|plane| plane.slot.wing.side == Side::Enemy && plane.slot.member == 0)
+        .map(|plane| plane.id)
+        .unwrap();
+    world.take_plane(SeatId(0), lead).unwrap();
+    let cockpit = &world.cockpits[0];
+    assert_eq!(cockpit.plane, lead);
+    assert!(cockpit.flight.research.as_ref().is_some_and(|r| r.on_ground));
+    assert!(cockpit.result.home_base().is_some());
+    assert!(world.roster.redfor(lead) && lead != PlaneId(0));
+}
