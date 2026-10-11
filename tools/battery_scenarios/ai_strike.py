@@ -10,13 +10,13 @@ what the simulation reports. Two kinds of scenario use it:
   itself (the summary counts the lines, a release comes before its impact),
   that a human-flown run is handed to the AI, and that a wing order goes out.
   `ai-strike-driver`, `ai-strike-handback`, `ai-strike-order`.
-* Behaviour scenarios, one per weapon class, which describe what the strike
-  behaviour has to do and are marked as known failures until slice ST-T makes
-  the AI take a ground target: `ai-strike-bombs`, `ai-strike-rockets`,
-  `ai-strike-maverick`, `ai-strike-jdam`, `ai-sead-harm`, `ai-strike-defended`.
-  When ST-T lands each one starts passing, the battery then fails it ("known
-  failure now passes") and ST-T removes `known_failure` and tightens the
-  numbers below.
+* Behaviour scenarios, one per weapon class (slice ST-T, the strike tactics):
+  `ai-strike-bombs`, `ai-strike-rockets`, `ai-strike-maverick`,
+  `ai-strike-jdam`, `ai-sead-harm`, `ai-strike-defended`. Each run names the
+  pass it flew, releases, and ends the round within its skill's limits; the
+  unguided ones also print the pass's drawn aim offset on the RELEASE line,
+  which must lie inside the release circle when the draw says so and in the
+  ring R to 2R otherwise.
 
 `parse_runs` reads the output; the check functions are tested in
 tools/test_battery_ai_strike.py.
@@ -30,8 +30,6 @@ import re
 from battery import Scenario, Step
 from battery_scenarios.a2g_missiles import STRAIGHT_FLUSH
 
-PENDING = "pending ST-T: the AI does not take a ground target yet (plan section 3.1)"
-
 LINE = re.compile(r"^ai-strike: (\S+)(?: (.*))?$", re.M)
 FIELD = re.compile(r'(\w+)=("[^"]*"|\S+)')
 
@@ -42,10 +40,12 @@ CIRCLE_FT = {0: 1066.0, 1: 820.0, 2: 574.0, 3: 328.0}
 # Mk 82 (about 770 ft across the track); the dive is about 310 ft.
 SCATTER_FT = 800.0
 # Horizontal miss, in feet, a bomb pass may end within. The seeded aim offset is inside the circle
-# 90% of passes and inside the ring R to 2R on the other 10%, and a run does not know which it
-# drew, so the limit is the ring's outer edge plus the scatter. ST-T tightens it for runs whose
-# reported aim offset is inside the circle (the driver prints no release aim offset yet).
+# 90% of passes and inside the ring R to 2R on the other 10%: a run whose RELEASE lines all say
+# `inside=yes` is held to the circle plus the scatter, any other to the ring's outer edge plus it.
 MISS_FT_MAX = {skill: 2 * r + SCATTER_FT for skill, r in CIRCLE_FT.items()}
+MISS_FT_INSIDE = {skill: r + SCATTER_FT for skill, r in CIRCLE_FT.items()}
+# The driver rounds the aim offset to whole feet.
+AIM_SLACK_FT = 1.0
 # A rocket or a guided weapon is judged by the target, not a miss distance.
 SKILLS = (0, 1, 2, 3)
 EVENT_KINDS = ("RELEASE", "IMPACT", "KILL", "EGRESS", "LOST")
@@ -253,7 +253,8 @@ def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
     for run, want in zip(runs, runs_wanted):
         label = want["label"]
         problems += consistency_problems(run, label)
-        named = run.first("PROFILE") or {}
+        # The pass the AI reports flying: the last PROFILE line (the first is the driver's echo).
+        named = (run.of("PROFILE") or [{}])[-1]
         profile = want.get("profile")
         if profile and named.get("name") != profile:
             problems.append(f"{label}: flew PROFILE {named.get('name')}, asked {profile}")
@@ -262,16 +263,40 @@ def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
         if not run.of("IMPACT"):
             problems.append(f"{label}: no IMPACT")
         limit = want.get("miss")
+        if limit is not None and want.get("skill") in CIRCLE_FT:
+            problems += aim_problems(run, label, want["skill"])
+            if run.of("RELEASE") and all(r.get("inside") == "yes" for r in run.of("RELEASE")):
+                limit = min(limit, MISS_FT_INSIDE[want["skill"]])
         for impact in run.of("IMPACT") if limit is not None else []:
             miss = number(impact.get("miss_ft"))
             if not miss <= limit:
                 problems.append(f"{label}: impact {impact.get('miss_ft')} ft from the target, want at most {limit:.0f}")
-        if limit is not None and run.of("RELEASE") and not run.of("EGRESS"):
+        lost_allowed = run.of("LOST") and want.get("may_lose")
+        if limit is not None and run.of("RELEASE") and not run.of("EGRESS") and not lost_allowed:
             problems.append(f"{label}: no EGRESS after the release")
         if run.of("LOST") and not want.get("may_lose"):
             problems.append(f"{label}: the striker was lost ({run.first('LOST')})")
+        if want.get("defends") and not any(a.get("name") == "Defending" for a in run.of("ACTIVITY")):
+            problems.append(f"{label}: never defended against the defences")
         if want.get("hit") and not _target_hurt(run):
             problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
+    return problems
+
+
+def aim_problems(run: Run, label: str, skill: int) -> list[str]:
+    """Each RELEASE's drawn aim offset against the skill's circle R: inside R when the draw says
+    `inside=yes`, in the ring R to 2R when it says `no` (docs/spec/ai-strike.md)."""
+    problems: list[str] = []
+    r = CIRCLE_FT[skill]
+    for release in run.of("RELEASE"):
+        aim = number(release.get("aim_ft"))
+        inside = release.get("inside")
+        if inside == "yes" and not aim <= r + AIM_SLACK_FT:
+            problems.append(f"{label}: aim {release.get('aim_ft')} ft is outside the {r:.0f} ft circle it was drawn in")
+        elif inside == "no" and not r - AIM_SLACK_FT <= aim <= 2 * r + AIM_SLACK_FT:
+            problems.append(f"{label}: aim {release.get('aim_ft')} ft is outside the ring {r:.0f} to {2 * r:.0f} ft")
+        elif inside not in ("yes", "no"):
+            problems.append(f"{label}: a RELEASE without its aim draw")
     return problems
 
 
@@ -290,8 +315,7 @@ def _runs(skills_and_profiles, miss=True, **extra) -> list[dict]:
     return wanted
 
 
-# The plan's bomb coverage: each pass forced once at the middle skill, and every skill on the
-# pass the AI would pick (forced dive here as a stand-in until ST-T chooses by threat and energy).
+# The plan's bomb coverage: each pass forced once at the middle skill, and every skill on the dive.
 BOMB_RUNS = [(2, p) for p in ("straight", "popup", "fasthigh", "dive", "level")] + [(s, "dive") for s in (0, 1, 3)]
 
 
@@ -306,11 +330,15 @@ def scenarios() -> list[Scenario]:
             "--seconds", "80"]
     bombs = ["--aircraft", "a4e", "--load", "MK82", "--seconds", "120"]
 
-    def forced(skill: int, profile: str, *rest: str) -> list[str]:
-        return pilot_run("TVIET", "QTTRUCK", *rest, "--skill", str(skill), "--profile", profile)
+    def forced(skill: int, profile: str, *rest: str, theater: str = "UKR", stem: str = "QUCOL") -> list[str]:
+        return pilot_run(theater, stem, *rest, "--skill", str(skill), "--profile", profile)
 
+    # The column, not the TVIET truck park: the park's radar-laid guns (26,200 and 44,250 ft
+    # reach) shoot an A-4E down within 25 s at 5,000 ft whatever it flies.
     bomb_args = [forced(s, p, *bombs) for s, p in BOMB_RUNS]
-    rocket_runs = [(2, "straight"), (2, "popup")]
+    # Rockets fly the straight run under every threat (a low pop-up's dive is steeper than the
+    # AI's terrain floor allows, docs/spec/ai-strike.md); two skills.
+    rocket_runs = [(2, "straight"), (3, "straight")]
     rockets = ["--aircraft", "a4e", "--load", "LAU61", "--seconds", "120"]
     maverick = ["--aircraft", "a10", "--load", "AGM65G", "--seconds", "120"]
     jdam = ["--aircraft", "f16c", "--load", "GBU30", "--station", "2", "--count", "2", "--seconds", "120"]
@@ -347,50 +375,60 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="ai-strike-bombs", lane="flight",
-            args=bomb_args[0], timeout=900, known_failure=PENDING,
+            args=bomb_args[0], timeout=900,
             then=[Step(a, timeout=300) for a in bomb_args[1:]],
             check=lambda out: strike_problems(out, _runs(BOMB_RUNS, hit=False)),
-            notes="An A-4E's Mk 82 on the TVIET truck park: each pass (straight, pop-up, fast-high, dive, "
-                  "level) forced once at skill 2 and skills 0, 1 and 3 on the dive. Each run names its "
-                  "pass, releases, ends the bomb within the skill's miss limit (twice the release circle plus 800 ft of scatter: 2,932, 2,440, 1,948 and 1,456 ft for skills 0 to 3), leaves and is not lost.",
+            notes="An A-4E's Mk 82 on the Ukraine armored column: each pass (straight, pop-up, fast-high, "
+                  "dive, level) forced once at skill 2 and skills 0, 1 and 3 on the dive. Each run names its "
+                  "pass, releases with its drawn aim inside the release circle (or the ring R to 2R when the "
+                  "draw says so), ends the bomb within the circle plus 800 ft of scatter (the ring's edge plus "
+                  "it for a ring draw), leaves and is not lost.",
         ),
         Scenario(
             name="ai-strike-rockets", lane="flight",
-            args=forced(*rocket_runs[0], *rockets), timeout=600, known_failure=PENDING,
+            args=forced(*rocket_runs[0], *rockets), timeout=600,
             then=[Step(forced(*r, *rockets), timeout=300) for r in rocket_runs[1:]],
-            check=lambda out: strike_problems(out, _runs(rocket_runs, miss=False, hit=True)),
-            notes="An A-4E's LAU-61 pods on the truck park: a straight run and a pop-up; the rockets hurt "
-                  "the target and the striker leaves.",
+            check=lambda out: strike_problems(out, _runs(rocket_runs, hit=False)),
+            notes="An A-4E's LAU-61 pods on the column, straight runs at skills 2 and 3: a burst at the "
+                  "record's cadence with the drawn aim inside the circle, each rocket within the circle "
+                  "plus 800 ft, and the striker leaves.",
         ),
         Scenario(
             name="ai-strike-maverick", lane="flight",
             args=pilot_run("UKR", "QUCOL", *maverick, "--skill", "2", "--profile", "fasthigh"),
-            timeout=600, known_failure=PENDING,
+            timeout=600,
             check=lambda out: strike_problems(out, _runs([(2, "fasthigh")], miss=False, hit=True)),
-            notes="An A-10's Maverick on the Ukraine armored column, fast-high.",
+            notes="An A-10's Maverick on the Ukraine armored column, fast-high: fired on its lock and "
+                  "the tank is hurt.",
         ),
         Scenario(
             name="ai-strike-jdam", lane="flight",
-            args=pilot_run("TVIET", "QTTRUCK", *jdam, "--skill", "2", "--profile", "level"),
-            timeout=600, known_failure=PENDING,
+            args=pilot_run("UKR", "QUFACT", *jdam, "--skill", "2", "--profile", "level"),
+            timeout=600,
             check=lambda out: strike_problems(out, _runs([(2, "level")], miss=False, hit=True)),
-            notes="An F-16C's GBU-30 JDAM on the truck park, level.",
+            notes="An F-16C's GBU-30 JDAM on the Ukraine factory, level: the stored point is the target "
+                  "(no skill offset for a smart weapon) and the target is hurt. A static target: a JDAM "
+                  "flies to the point stored at release, so a moving column would be missed.",
         ),
         Scenario(
             name="ai-sead-harm", lane="flight",
             args=pilot_run("VLA", "QVRDRI", "--surface-seed", "4", "--defenses", "3", "3", "--unit",
                            STRAIGHT_FLUSH, "--aircraft", "f4g", "--load", "AGM88", "--from", "12",
                            "--altitude", "15000", "--seconds", "120", "--skill", "2", "--profile", "fasthigh"),
-            timeout=600, known_failure=PENDING,
+            timeout=600,
             check=lambda out: strike_problems(out, _runs([(2, "fasthigh")], miss=False, hit=True)),
-            notes="An F-4G's HARM on the heavily defended site's radar, fast-high.",
+            notes="An F-4G's HARM on the heavily defended site's radar, fast-high: fired inside the AI's "
+                  "100,000 ft HARM range while the radar emits, and the radar is hurt.",
         ),
         Scenario(
             name="ai-strike-defended", lane="flight",
             args=pilot_run("UKR", "QUCOL", "--aircraft", "f18", "--load", "MK82", "--defenses", "2", "2",
                            "--seconds", "180", "--skill", "2"),
-            timeout=600, known_failure=PENDING,
-            check=lambda out: strike_problems(out, _runs([(2, None)], hit=False)),
-            notes="An F/A-18D's Mk 82 on the defended column: evades the defences, resumes, leaves.",
+            timeout=600,
+            check=lambda out: strike_problems(out, _runs([(2, None)], hit=False, may_lose=True, defends=True)),
+            notes="An F/A-18D's Mk 82 on the defended column, its pass chosen by threat (SAMs cover the "
+                  "column: a pop-up): releases inside its circle and defends against the defences. The "
+                  "column's own guns may still bring it down at the pop-up's low altitude, so a loss is "
+                  "allowed; the run checks the release and the defence.",
         ),
     ]

@@ -359,7 +359,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers", "flight-powered"), "cheats; Easy flight physics"),
     # tore-sim: AI.
     _r("crates/tore-sim/src/ai/surface*", ("surface",), "the surface engagement controller"),
-    _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio",), "AI"),
+    _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio", "ai-strike"), "AI"),
     # tore-sim: the flight data link's radar table.
     _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link radar table"),
     _r("crates/tore-sim/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights"), "data link sort"),
@@ -390,9 +390,9 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/lib.rs", FLIGHT_CORE + ("ai-airfield",), "tore-sim public surface"),
     _r("crates/tore-sim/*", FLIGHT_CORE + ("ai-airfield", "flight-combat"), "tore-sim, unmapped file"),
     # tore-world.
-    _r("crates/tore-world/src/ai_wings.rs", AI_CORE + ("radio",), "wing AI"),
-    _r("crates/tore-world/src/ai_wings/outcome.rs", AI_CORE + ("radio", "surface"), "the mission result rule: the surface objectives join it"),
-    _r("crates/tore-world/src/ai_wings/*", AI_CORE + ("radio",), "wing AI"),
+    _r("crates/tore-world/src/ai_wings.rs", AI_CORE + ("radio", "ai-strike"), "wing AI"),
+    _r("crates/tore-world/src/ai_wings/outcome.rs", AI_CORE + ("radio", "surface", "ai-strike"), "the mission result rule: the surface objectives join it"),
+    _r("crates/tore-world/src/ai_wings/*", AI_CORE + ("radio", "ai-strike"), "wing AI"),
     _r("crates/tore-world/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link picture"),
     _r("crates/tore-world/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights", "link-cues"), "data link picture"),
     _r("crates/tore-world/src/airfield_radio.rs", ("ai-airfield", "radio", "airports"), "tower radio"),

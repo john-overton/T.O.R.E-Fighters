@@ -31,6 +31,9 @@ impl AiWings {
                 .is_some_and(|config| station < config.stations.len());
         let emitted = if shared {
             self.release_strike(event, state, station, humans, ground)
+        } else if self.striker_seeker(event, weapon) {
+            // A striker's seeker missile at its ground target (ST-T).
+            self.release_seeker(event, state, weapon, station, humans)
         } else {
             self.realise(event, &mut state.projectiles, weapon, station, humans, None)
         };

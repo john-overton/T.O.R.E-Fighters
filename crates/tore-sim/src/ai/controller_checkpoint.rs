@@ -163,6 +163,9 @@ crate::checkpoint_struct!(ActiveManeuver {
 // calls `set_formation_observation` with the tick's traffic before the
 // actor's step, and the only read is `formation_point` inside that step.
 //
+// `strike`: per-tick scratch. The mission hands a striker's order over with
+// `set_strike` immediately before `Controller::step`, which takes it.
+//
 // `trace`: a why-record. `Controller::trace` hands it to the debug panels and
 // `thought::Record` takes no part in equality.
 crate::checkpoint_struct!(Controller {
@@ -210,6 +213,7 @@ crate::checkpoint_struct!(Controller {
 } skip {
     gun_views = Vec::new(),
     formation_traffic = Vec::new(),
+    strike = None,
     trace = crate::ai::thought::Record::default(),
 });
 

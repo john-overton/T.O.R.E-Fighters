@@ -35,6 +35,7 @@ mod record;
 pub use record::DecoyRoll;
 mod release;
 mod reports;
+mod strike;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -1970,6 +1971,7 @@ impl AiWings {
         self.lose_out_of_bounds(&mut state.ledger, |x, z| world.edge_distance_nm(x, z));
         let objects = humans.iter().map(|h| Self::human_object(h)).collect();
         ground::step(self, state, world, &ground);
+        strike::step(self, state, &ground);
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
         let output = self.advance_on_surface(objects, &mut state.targets, &ground, &|x, z| {

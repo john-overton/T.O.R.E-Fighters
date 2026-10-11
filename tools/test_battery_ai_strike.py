@@ -1,6 +1,6 @@
 """Tests for the AI strike driver's scenarios (tools/battery_scenarios/ai_strike.py): the output
-parsing, the consistency and behaviour checks, the pending markers and the battery selection
-family (AI strike round, slice ST-D)."""
+parsing, the consistency and behaviour checks, the release aim checks and the battery selection
+family (AI strike round, slices ST-D and ST-T)."""
 import sys
 import unittest
 from pathlib import Path
@@ -16,7 +16,7 @@ SETUP = (
 
 
 def run(skill=2, profile="dive", named=None, releases=(), impacts=(), kills=(), egress=None, lost=None,
-        hp="200/200", extra=()):
+        hp="200/200", extra=(), aim=(100.0, "yes")):
     """One driver run's output. `releases` and `impacts` are times; an impact is (t, miss)."""
     name = named if named is not None else "none"
     out = [
@@ -29,6 +29,7 @@ def run(skill=2, profile="dive", named=None, releases=(), impacts=(), kills=(), 
     for n, t in enumerate(releases, 1):
         out.append(
             f"ai-strike: RELEASE t={t:.3f} n={n} weapon=MK82.JT station=1 alt_ft=4900 speed_kt=450 range_ft=13000"
+            + (f" pass=1 aim_ft={aim[0]:.0f} inside={aim[1]}" if aim else "")
         )
     for n, (t, miss) in enumerate(impacts, 1):
         out.append(f"ai-strike: IMPACT t={t:.3f} n={n} miss_ft={miss} at=1.0,2.0,3.0")
@@ -229,8 +230,35 @@ class StrikeTests(unittest.TestCase):
 
     def test_a_miss_beyond_the_skills_limit_fails(self):
         too_far = s.MISS_FT_MAX[3] + 1
-        self.assertTrue(any("from the target" in p for p in s.strike_problems(self.good(3, miss=too_far), self.wanted(3))))
-        self.assertEqual(s.strike_problems(self.good(0, miss=s.MISS_FT_MAX[3] + 1), self.wanted(0)), [])
+        ring = dict(aim=(400.0, "no"))
+        self.assertTrue(any("from the target" in p for p in s.strike_problems(self.good(3, miss=too_far, **ring), self.wanted(3))))
+        self.assertEqual(s.strike_problems(self.good(0, miss=s.MISS_FT_MAX[3] + 1, aim=(1200.0, "no")), self.wanted(0)), [])
+
+    def test_an_inside_draw_is_held_to_the_circle_plus_scatter(self):
+        inside = s.MISS_FT_INSIDE[2]
+        self.assertEqual(s.strike_problems(self.good(2, miss=inside - 1), self.wanted(2)), [])
+        problems = s.strike_problems(self.good(2, miss=inside + 1), self.wanted(2))
+        self.assertTrue(any("from the target" in p for p in problems), problems)
+        ring = s.strike_problems(self.good(2, miss=inside + 1, aim=(700.0, "no")), self.wanted(2))
+        self.assertEqual(ring, [])
+
+    def test_the_aim_must_lie_where_the_draw_says(self):
+        r = s.CIRCLE_FT[1]
+        ok = s.strike_problems(self.good(1, aim=(r - 5, "yes")), self.wanted(1))
+        self.assertEqual(ok, [])
+        out = s.strike_problems(self.good(1, aim=(r + 50, "yes")), self.wanted(1))
+        self.assertTrue(any("outside the" in p and "circle" in p for p in out), out)
+        ring_low = s.strike_problems(self.good(1, aim=(r - 50, "no")), self.wanted(1))
+        self.assertTrue(any("ring" in p for p in ring_low), ring_low)
+        ring_far = s.strike_problems(self.good(1, aim=(2 * r + 50, "no")), self.wanted(1))
+        self.assertTrue(any("ring" in p for p in ring_far), ring_far)
+        missing = s.strike_problems(self.good(1, aim=None), self.wanted(1))
+        self.assertTrue(any("without its aim" in p for p in missing), missing)
+
+    def test_a_defence_is_required_where_asked(self):
+        defended = self.good(extra=("ai-strike: ACTIVITY t=12.000 name=Defending",))
+        self.assertEqual(s.strike_problems(defended, self.wanted(defends=True)), [])
+        self.assertTrue(any("never defended" in p for p in s.strike_problems(self.good(), self.wanted(defends=True))))
 
     def test_the_limits_are_the_ring_edge_plus_scatter_and_grow_as_skill_falls(self):
         self.assertEqual([round(s.MISS_FT_MAX[k]) for k in (0, 1, 2, 3)], [2932, 2440, 1948, 1456])
@@ -259,13 +287,9 @@ class ScenarioTests(unittest.TestCase):
     def setUp(self):
         self.scenarios = {sc.name: sc for sc in s.scenarios()}
 
-    def test_the_driver_scenarios_are_live_and_the_behaviour_ones_pending(self):
-        live = {"ai-strike-driver", "ai-strike-handback", "ai-strike-order"}
+    def test_every_scenario_is_live(self):
         for name, sc in self.scenarios.items():
-            if name in live:
-                self.assertEqual(sc.known_failure, "", name)
-            else:
-                self.assertIn("ST-T", sc.known_failure, name)
+            self.assertEqual(sc.known_failure, "", name)
 
     def test_the_plan_s_scenarios_exist(self):
         want = {"ai-strike-bombs", "ai-strike-rockets", "ai-strike-maverick", "ai-strike-jdam", "ai-sead-harm", "ai-strike-defended"}
@@ -313,6 +337,11 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(self.families("crates/tore-app/src/a2g_run/ai.rs"), {"a2g", "ai-strike"})
         self.assertEqual(self.families("crates/tore-app/src/a2g_run/level.rs"), {"a2g"})
         self.assertEqual(self.families("crates/tore-app/src/a2g_run.rs"), {"a2g"})
+
+    def test_the_ai_sources_select_the_strike_family(self):
+        for path in ("crates/tore-sim/src/ai/strike.rs", "crates/tore-sim/src/ai/mission.rs",
+                     "crates/tore-world/src/ai_wings/strike.rs", "crates/tore-world/src/ai_wings.rs"):
+            self.assertIn("ai-strike", self.families(path), path)
 
     def test_the_scenario_file_and_its_tests_select_the_unit_tests(self):
         rule = bs.rule_for("tools/battery_scenarios/ai_strike.py")

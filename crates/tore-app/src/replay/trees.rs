@@ -498,6 +498,13 @@ pub fn motion_branch(
     match branch {
         MotionBranch::None => ("none", String::new()),
         MotionBranch::DamageRecovery => ("damage recovery", "returning with weapons held".into()),
+        MotionBranch::Strike {
+            heading_deg,
+            pitch_deg,
+        } => (
+            "strike",
+            format!("heading {heading_deg:.0}, pitch {pitch_deg:.0}"),
+        ),
         MotionBranch::GunTracking {
             heading_deg,
             pitch_deg,
@@ -601,6 +608,7 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
     match controller.motion.branch {
         MotionBranch::None => 1,
         MotionBranch::DamageRecovery => 13,
+        MotionBranch::Strike { .. } => 14,
         MotionBranch::MissileDefense { .. } => 2,
         MotionBranch::IncomingFire { .. } => 11,
         MotionBranch::GunTracking { .. } => 12,

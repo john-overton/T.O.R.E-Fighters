@@ -327,6 +327,11 @@ pub enum MotionBranch {
         heading_deg: f64,
         pitch_deg: f64,
     },
+    /// A striker's pass, ingress or exit (docs/spec/ai-strike.md).
+    Strike {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
     /// Flying back toward an escorted aircraft or a patrol region.
     MissionRejoin {
         point: [f64; 3],

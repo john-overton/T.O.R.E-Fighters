@@ -62,7 +62,10 @@ use super::{FEET_PER_NM, FPS_PER_KNOT, Options, SEAT, Scene, ccip::Pass, fit_sto
 use crate::AppResult;
 use std::collections::BTreeMap;
 use tore_sim::{
-    ai::{controller::Activity, mission::AiActor, weapon_service::Rounds, wing::PlayerOrder},
+    ai::{
+        controller::Activity, mission::AiActor, strike::Pass as StrikePass, weapon_service::Rounds,
+        wing::PlayerOrder,
+    },
     attitude::Vector,
     combat::{
         blast::MarkKind,
@@ -82,7 +85,7 @@ const WINGMAN_SEAT: SeatId = SeatId(1);
 const DESIGNATE_SECONDS: f64 = 12.;
 /// Seconds after the last release or loss the run goes on, to see where the
 /// rounds land and the striker leaves.
-const SETTLE_SECONDS: f64 = 12.;
+const SETTLE_SECONDS: f64 = 20.;
 /// An impact is the burst nearest the round's last place within this many feet.
 const BURST_WITHIN_FT: f64 = 60.;
 /// The striker is egressing once it is this far past its closest approach
@@ -116,6 +119,26 @@ impl Profile {
             Self::FastHigh => "fasthigh",
             Self::Dive => "dive",
             Self::Level => "level",
+        }
+    }
+
+    fn pass(self) -> StrikePass {
+        match self {
+            Self::Straight => StrikePass::Straight,
+            Self::Popup => StrikePass::PopUp,
+            Self::FastHigh => StrikePass::FastHigh,
+            Self::Dive => StrikePass::Dive,
+            Self::Level => StrikePass::Level,
+        }
+    }
+
+    fn from_pass(pass: StrikePass) -> Self {
+        match pass {
+            StrikePass::Straight => Self::Straight,
+            StrikePass::PopUp => Self::Popup,
+            StrikePass::FastHigh => Self::FastHigh,
+            StrikePass::Dive => Self::Dive,
+            StrikePass::Level => Self::Level,
         }
     }
 
@@ -233,25 +256,42 @@ impl Config {
 mod hooks {
     use super::*;
 
-    /// Slice ST-T: hand the AI the target it is to strike, and force its pass
-    /// when `--profile` asks. Returns the note the `PROFILE` line carries.
-    ///
-    /// Today the AI has no strike behaviour: its wings are all built
-    /// air-to-air, its picture holds aircraft only and `MissionRole::
-    /// AirToGround` is never set (plan section 3.1), so there is nothing to
-    /// hand the target to and nothing to force.
+    /// Slice ST-T: orders the AI onto the target (an ordered ground target
+    /// outranks any briefing, docs/spec/ai-strike.md "What the AI knows"),
+    /// keeps it to the driver's store, and forces its pass when `--profile`
+    /// asks. Returns the note the `PROFILE` line carries.
     pub(super) fn assign(
-        _world: &mut World,
-        _plane: PlaneId,
-        _target: u32,
-        _forced: Option<Profile>,
+        world: &mut World,
+        plane: PlaneId,
+        target: u32,
+        station: usize,
+        forced: Option<Profile>,
     ) -> &'static str {
-        "no-strike-behaviour"
+        let Some(wings) = world.ai_wings.as_mut() else {
+            return "no-ai";
+        };
+        if !wings.set_strike_order(plane.0, Some(target)) {
+            return "not-ai-flown";
+        }
+        wings.force_strike(plane.0, forced.map(Profile::pass), Some(station));
+        if forced.is_some() { "forced" } else { "chosen" }
     }
 
     /// Slice ST-T: the pass the AI reports it is flying, if any.
-    pub(super) fn reported_profile(_actor: &AiActor) -> Option<Profile> {
-        None
+    pub(super) fn reported_profile(actor: &AiActor) -> Option<Profile> {
+        actor
+            .strike()
+            .and_then(|s| s.pass())
+            .map(Profile::from_pass)
+    }
+
+    /// The aim of the striker's current pass: the drawn offset's distance
+    /// from the target, feet, whether it lies inside the circle, and the
+    /// pass number.
+    pub(super) fn aim(actor: &AiActor) -> Option<(f64, bool, u32)> {
+        let s = actor.strike()?;
+        let (offset, inside) = s.aim();
+        Some((offset[0].hypot(offset[1]), inside, s.pass_number()))
     }
 
     /// Slice ST-O: give a wing order that carries a ground target. Today the
@@ -445,8 +485,17 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             ),
             _ => (f64::NAN, f64::NAN, f64::NAN),
         };
+        let aim = scene.actor(w.plane).and_then(hooks::aim).map_or(
+            String::new(),
+            |(offset, inside, pass)| {
+                format!(
+                    " pass={pass} aim_ft={offset:.0} inside={}",
+                    if inside { "yes" } else { "no" }
+                )
+            },
+        );
         println!(
-            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}",
+            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim}",
             w.releases,
             if name.is_empty() { "unknown" } else { &name },
         );
@@ -692,7 +741,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         scene.world.give_back_plane(SEAT)?;
     }
     let mut watch = Watch::new(striker, target);
-    let note = hooks::assign(&mut scene.world, striker, target, cfg.profile);
+    let note = hooks::assign(&mut scene.world, striker, target, station, cfg.profile);
     println!(
         "ai-strike: PROFILE t=0.000 name=none requested={} note={note}",
         cfg.profile.map_or("none", Profile::label)

@@ -57,6 +57,8 @@ use super::{Result, ScalarSpeed, SpeedLimits};
 
 #[path = "mission_observation.rs"]
 mod observation;
+#[path = "mission_strike.rs"]
+mod strike_step;
 
 // What an AI lead does with the flight data link (stage G, slice G4).
 #[path = "mission_leads.rs"]
@@ -400,6 +402,11 @@ pub struct AiActor {
     /// The ground picture of a striker (the Strike role or an ordered ground
     /// target); `None` for every other actor (docs/spec/ai-strike.md).
     ground: Option<Box<super::awareness::ground::GroundPicture>>,
+    /// The aircraft's decision seed, from its setup: a striker's skill draw
+    /// reads it (docs/spec/ai-strike.md, "Skill and release precision").
+    seed: u64,
+    /// A striker's strike state (slice ST-T); `None` for every other actor.
+    strike: Option<Box<super::strike::Strike>>,
     /// Write-only record of the latest mission step. No decision reads it.
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
@@ -470,6 +477,8 @@ impl AiActor {
             dummy: false,
             yields: Vec::new(),
             ground: None,
+            seed: setup.seed,
+            strike: None,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })
@@ -2475,6 +2484,8 @@ impl AiMission {
         // G4), after the automatic releases above so a wing released this
         // tick can take them.
         self.lead_commits(&commits, &link, &engagements, world, &mut output);
+        // Strikers with no target or store left go home (slice ST-T).
+        self.strikers_home();
         // An aircraft lost or abandoned during the tick hands over lead on
         // the same tick.
         self.refresh_leaders(world, &mut output);
@@ -2851,6 +2862,9 @@ impl AiMission {
             terrain
         };
         let actor_id = self.actors[index].id();
+        // The host's strike inputs are this step's only (slice ST-T).
+        let strike_inputs = self.actors[index].take_strike_inputs();
+        let strike_mates = self.strike_mates(index);
         let mut leader = self.leader_view(index, world, engagements);
         let clearance = self.airfield_clearance(index, world);
         if leader.as_ref().is_none_or(|l| !l.recovering) {
@@ -3417,6 +3431,9 @@ impl AiMission {
             })
             .collect();
         actor.controller.set_gun_views(gun_views);
+        // A striker's pass, flown below a B47 defence (slice ST-T).
+        let strike = actor.strike_step(tick, &own, strike_inputs, &strike_mates);
+        actor.controller.set_strike(strike);
         let stations = actor.station_views(&targets[..observed_len], &own);
         actor.trace.station_aim = actor
             .station_aim(&targets[..observed_len], &own)
