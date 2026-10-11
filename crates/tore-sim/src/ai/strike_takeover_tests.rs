@@ -130,6 +130,7 @@ fn solution(station: u8, impact: Option<Vector>, due: bool) -> Solution {
         due,
         warning: false,
         guided_in_flight: false,
+        reach_ok: true,
     }
 }
 
@@ -154,6 +155,7 @@ impl World {
                 designator: true,
                 mission_height_ft: None,
                 solution: None,
+                lase: LaseInputs::default(),
             },
         }
     }
@@ -171,6 +173,7 @@ impl World {
             defending: false,
             recovering: false,
             mates: &[],
+            wing: WingFacts::default(),
             ceiling_ft: 50_000.,
         }
     }
@@ -225,12 +228,17 @@ fn an_emptied_or_unusable_kept_station_leaves_the_store_to_the_ai() {
     strike.step(&world.context(0));
     assert_eq!(strike.selection().unwrap().station, StationId(1));
     // Laser bombs with no designator of its own are not the AI's to drop
-    // (decision 9).
+    // (decision 9) unless a spot is assured: it waits for one while it
+    // closes to 1.5 fire ranges (slice ST-L), then has nothing usable left.
     let mut world = World::new();
     world.inputs.designator = false;
     world.inputs.stores[0].rounds = 0;
     let mut strike = takeover(Some(2), DeliveryMode::Level);
     strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Wait, "waits for a buddy's spot");
+    assert!(strike.selection().is_none());
+    world.own.position = [0., 10_000., TARGET_AT[2] - 12_000.];
+    strike.step(&world.context(100_000));
     assert!(strike.home(), "nothing usable left");
     assert!(strike.takeover_done());
 }

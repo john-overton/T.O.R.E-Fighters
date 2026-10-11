@@ -53,6 +53,57 @@ impl AiActor {
         true
     }
 
+    /// Gives the actor a lase duty on ground object `target` (slice ST-L;
+    /// the wing order "Lase my target" calls this): it flies an offset turn
+    /// of radius max(3 nm, 1.2 turn radii) about the target, lasing it,
+    /// until [`LaseUntil`] says stop, the target dies, the actor defends or
+    /// [`Self::stop_lase`]. An actor with no ground picture is given one by
+    /// ordering it the target; the order stands until the duty ends. Returns
+    /// false for an actor that cannot fly it (dead, a dummy).
+    pub fn lase_for(&mut self, target: u32, until: strike::LaseUntil) -> bool {
+        if self.dummy || !self.alive() {
+            return false;
+        }
+        if !self.strikes() {
+            self.set_strike_order(Some(target));
+        }
+        if !self.strikes() {
+            return false;
+        }
+        self.strike
+            .get_or_insert_with(|| Box::new(Strike::new(self.seed)))
+            .lase_for(target, until);
+        true
+    }
+
+    /// Ends a lase duty (the order changed). Returns whether one ended.
+    pub fn stop_lase(&mut self) -> bool {
+        let Some(target) = self.strike.as_ref().and_then(|s| s.lasing()) else {
+            return false;
+        };
+        let ended = self.strike.as_mut().is_some_and(|s| s.stop_lase());
+        if ended
+            && self.strike_role() == crate::ai::engagement::StrikeRole::Cap
+            && self.strike_order() == Some(target)
+        {
+            self.set_strike_order(None);
+        }
+        ended
+    }
+
+    /// Records whether the AI turned its cockpit's laser on by hand
+    /// ([`Strike::set_laser_set`]).
+    pub fn set_laser_set(&mut self, set: bool) {
+        if let Some(strike) = self.strike.as_mut() {
+            strike.set_laser_set(set);
+        }
+    }
+
+    /// The object the actor is lasing, if it is.
+    pub fn lasing(&self) -> Option<u32> {
+        self.strike.as_ref().and_then(|s| s.lasing())
+    }
+
     /// The actor has a ground picture with work to do (the Strike role or a
     /// ground order) and flies.
     pub fn strikes(&self) -> bool {
@@ -86,6 +137,7 @@ impl AiActor {
         own: &OwnState,
         inputs: Option<Inputs>,
         mates: &[u32],
+        wing: strike::WingFacts,
     ) -> Option<Order> {
         if !self.strikes() {
             if self.strike.is_some() && self.ground.is_none() {
@@ -121,6 +173,7 @@ impl AiActor {
             defending: self.controller.defending(),
             recovering,
             mates,
+            wing,
             ceiling_ft: self.ceiling_ft(),
         };
         let strike = self.strike.as_mut()?;
@@ -187,6 +240,31 @@ impl AiMission {
             .filter(|(at, a)| *at != index && a.identity.side == side && a.identity.wing == wing)
             .filter_map(|(_, a)| a.strike_target())
             .collect()
+    }
+
+    /// What the other members of actor `index`'s wing are doing about
+    /// lasing (slice ST-L): whether a designator and laser carriers fly with
+    /// it, and the target a carrier has chosen.
+    pub(super) fn strike_wing(&self, index: usize) -> strike::WingFacts {
+        let actor = &self.actors[index];
+        let mut facts = strike::WingFacts::default();
+        if !actor.strikes() {
+            return facts;
+        }
+        let (side, wing) = (actor.identity.side, actor.identity.wing);
+        for mate in self
+            .actors
+            .iter()
+            .enumerate()
+            .filter(|(at, a)| *at != index && a.identity.side == side && a.identity.wing == wing)
+            .filter(|(_, a)| a.strikes())
+            .filter_map(|(_, a)| a.strike.as_deref())
+        {
+            facts.designator |= mate.is_designator();
+            facts.carriers |= mate.is_carrier();
+            facts.escort = facts.escort.or(mate.needs_spot());
+        }
+        facts
     }
 
     /// Ends the work of every striker that is done (no target or store

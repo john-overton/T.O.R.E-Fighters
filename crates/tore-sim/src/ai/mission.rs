@@ -2870,6 +2870,7 @@ impl AiMission {
         // The host's strike inputs are this step's only (slice ST-T).
         let strike_inputs = self.actors[index].take_strike_inputs();
         let strike_mates = self.strike_mates(index);
+        let strike_wing = self.strike_wing(index);
         let mut leader = self.leader_view(index, world, engagements);
         let clearance = self.airfield_clearance(index, world);
         if leader.as_ref().is_none_or(|l| !l.recovering) {
@@ -3437,7 +3438,7 @@ impl AiMission {
             .collect();
         actor.controller.set_gun_views(gun_views);
         // A striker's pass, flown below a B47 defence (slice ST-T).
-        let strike = actor.strike_step(tick, &own, strike_inputs, &strike_mates);
+        let strike = actor.strike_step(tick, &own, strike_inputs, &strike_mates, strike_wing);
         actor.controller.set_strike(strike);
         let stations = actor.station_views(&targets[..observed_len], &own);
         actor.trace.station_aim = actor

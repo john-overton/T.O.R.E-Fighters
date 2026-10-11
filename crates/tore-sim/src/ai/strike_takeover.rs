@@ -130,7 +130,8 @@ impl Strike {
         let attacking = match self.phase {
             Phase::Ingress | Phase::Regain | Phase::TurnBack | Phase::Wait => true,
             Phase::Attack => self.released == 0,
-            Phase::Exit | Phase::Defend | Phase::Home => false,
+            // A hold on its own laser bomb (slice ST-L) has released.
+            Phase::Exit | Phase::Defend | Phase::Home | Phase::Lase => false,
         };
         if attacking {
             self.holds_off(cx);

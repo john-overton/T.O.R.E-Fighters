@@ -6,10 +6,12 @@
 //! `inputs` is per-step scratch: the host hands it over before every mission
 //! step and the step takes it, so between steps it is always empty and a
 //! restored strike starts without it. `Context`, `Order`, `Steer`,
-//! `Selection`, `Inputs`, `Store`, `Solution`, `PassInputs`, `PassChoice`,
-//! `TargetFacts` and `AimDraw` are per-call values, never held.
+//! `Selection`, `Inputs`, `LaseInputs`, `WingFacts`, `Store`, `Solution`,
+//! `PassInputs`, `PassChoice`, `TargetFacts` and `AimDraw` are per-call
+//! values, never held. The lase in progress, and whether the aircraft has a
+//! designator and laser rounds (slice ST-L), are coded.
 
-use super::{Pass, Phase, Segment, StoreKind, Strike};
+use super::{Lase, LaseEnd, Pass, Phase, Segment, StoreKind, Strike};
 use crate::ai::awareness::ground::ThreatLevel;
 
 crate::checkpoint_enum!(Pass {
@@ -43,6 +45,25 @@ crate::checkpoint_enum!(Phase {
     Wait = 5,
     Defend = 6,
     Home = 7,
+    Lase = 8,
+});
+
+crate::checkpoint_enum!(LaseEnd {
+    Timed = 0,
+    Impact = 1,
+    Dies = 2,
+});
+
+crate::checkpoint_struct!(Lase {
+    target,
+    end,
+    ticks,
+    since,
+    side,
+    hold_ft,
+    own,
+    wing,
+    guided,
 });
 
 crate::checkpoint_enum!(Segment {
@@ -87,6 +108,10 @@ crate::checkpoint_struct!(Strike {
     threat,
     withdrawn,
     takeover,
+    lase,
+    designator,
+    laser_rounds,
+    laser_set,
 } skip {
     inputs = None,
 });

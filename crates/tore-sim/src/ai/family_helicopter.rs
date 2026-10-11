@@ -149,6 +149,14 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
         release: None,
         activity: None,
     };
+    // A helicopter flies no lasing hold (slice ST-L's hold is the fixed-wing
+    // tactics'; `AiWings::can_lase` gives it no duty): a lase is dropped.
+    if s.phase == Phase::Lase || s.lase.is_some() {
+        s.lase = None;
+        if s.phase == Phase::Lase {
+            s.enter(Phase::Ingress, cx.tick);
+        }
+    }
     if cx.defending || s.threatened(cx) {
         if s.phase != Phase::Defend {
             s.enter(Phase::Defend, cx.tick);
@@ -223,7 +231,7 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
         bank_deg: None,
     };
     match s.phase {
-        Phase::Home | Phase::Defend | Phase::Regain => order,
+        Phase::Home | Phase::Defend | Phase::Regain | Phase::Lase => order,
         Phase::Ingress | Phase::Wait | Phase::TurnBack => Order {
             steer: target_at
                 .or_else(|| objective_point(cx.picture))

@@ -596,6 +596,7 @@ impl Checkpoint for State {
             guided_impacts,
             kept,
             ai_cockpits,
+            ai_laser_armed,
             ground_looks,
             parked,
             ground_listing,
@@ -639,6 +640,7 @@ impl Checkpoint for State {
         guided_impacts.save(s, None)?;
         kept.save(s, None)?;
         ai_cockpits.save(s, None)?;
+        ai_laser_armed.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
         ground_listing.save(s, None)?;
@@ -699,6 +701,7 @@ impl Checkpoint for State {
             guided_impacts: Checkpoint::load(l, None)?,
             kept: Checkpoint::load(l, None)?,
             ai_cockpits: Checkpoint::load(l, None)?,
+            ai_laser_armed: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
             ground_listing: Checkpoint::load(l, None)?,

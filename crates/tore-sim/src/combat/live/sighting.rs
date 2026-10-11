@@ -19,6 +19,8 @@ pub(super) struct Context<'a, G> {
     pub weather: &'a Weather,
     /// The aircraft with one of their own laser weapons in flight.
     pub laser_owners: &'a BTreeSet<u32>,
+    /// The AI-flown aircraft with a laser weapon selected and armed.
+    pub armed: &'a BTreeSet<u32>,
     pub tick: u64,
 }
 
@@ -225,7 +227,10 @@ pub(super) fn step_flown<G: Fn(f64, f64) -> f64>(
             held,
             eye,
             in_gimbal,
-            automatic: cx.laser_owners.contains(&aircraft),
+            // As a player's: a laser weapon selected and armed, or one of its
+            // own in flight (the host says which AI-flown aircraft have one
+            // armed, slice ST-L).
+            automatic: cx.laser_owners.contains(&aircraft) || cx.armed.contains(&aircraft),
             weather,
         },
         |from, to| sight::clear_line(from, to, cx.ground),
@@ -237,6 +242,31 @@ fn sub(a: Vector, b: Vector) -> Vector {
 }
 
 impl State {
+    /// Says whether the AI-flown `aircraft` has a laser weapon selected and
+    /// armed, which the host works out from its configuration (slice ST-L,
+    /// at the request of the takeover slice): its laser then runs the
+    /// automatic rule as a player's does, with the spot up before the release.
+    pub fn set_ai_laser_armed(&mut self, aircraft: u32, armed: bool) {
+        if armed {
+            self.ai_laser_armed.insert(aircraft);
+        } else {
+            self.ai_laser_armed.remove(&aircraft);
+        }
+    }
+
+    /// Lets go of the laser the AI turned on by hand (slice ST-L) in the own
+    /// cockpits of every AI aircraft not in `striking`: an aircraft whose
+    /// lase duty or strike has ended no longer steps in the strike bridge, so
+    /// nothing else would turn its laser off. A cockpit a human left keeps
+    /// its hand setting.
+    pub fn release_ai_lasers(&mut self, striking: &[u32]) {
+        for (aircraft, ai) in &mut self.ai_cockpits {
+            if ai.cockpit.laser.manual == Some(true) && !striking.contains(aircraft) {
+                ai.cockpit.laser.manual = None;
+            }
+        }
+    }
+
     /// Every laser spot this tick: one for each aircraft that is lasing, a
     /// human's, one the AI flies with the laser its human left on, or an AI
     /// striker's.

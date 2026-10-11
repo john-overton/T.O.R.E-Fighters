@@ -21,6 +21,13 @@ what the simulation reports. Two kinds of scenario use it:
   which must lie inside the release circle when the draw says so and in the
   ring R to 2R otherwise.
 
+* Lasing scenarios (slice ST-L, docs/spec/ai-strike.md "Lasing"): `ai-strike-laser-self` (an F-16C's
+  Pave Spike lases its own GBU-10 through the whole fall in an offset turn, then exits; an Su-25's
+  built-in cone holds its nose on the target instead) and `ai-strike-laser-buddy` (an AI lases for
+  a player's GBU-10; an AI F-14 with only a GBU-10 and no designator drops on a player's spot; the
+  same F-14 with nobody lasing does not choose the bomb). The runs print `PHASE`, `HOLD` and
+  `LASER` lines for them.
+
 `parse_runs` reads the output; the check functions are tested in
 tools/test_battery_ai_strike.py.
 """
@@ -31,6 +38,7 @@ import math
 import re
 
 from battery import Scenario, Step
+from battery_scenarios.a2g_guided import IMPACT as A2G_IMPACT, KILL as A2G_KILL, RELEASE as A2G_RELEASE, SIGHT as A2G_SIGHT, TARGET as A2G_TARGET
 from battery_scenarios.a2g_missiles import STRAIGHT_FLUSH
 
 LINE = re.compile(r"^ai-strike: (\S+)(?: (.*))?$", re.M)
@@ -502,6 +510,169 @@ def _target_hurt(run: Run) -> bool:
     return now == "gone" or (now.lstrip("-").isdigit() and start.isdigit() and int(now) < int(start))
 
 
+# A guided bomb lands on its spot: the aim is the target itself.
+GUIDED_MISS_FT = 150.0
+# Seconds a guided weapon may fly with the spot it follows not lasing (rounding of the ticks around
+# the release and the impact).
+BLIND_S_MAX = 1.0
+# Seconds a laser bomb must have fallen for the hold to have mattered: an exit instead of the hold
+# loses the spot long before this.
+FALL_S_MIN = 20.0
+# The longest a designator pod's laser can reach, feet (10 nm).
+LASER_REACH_FT = 60760.0
+
+
+def _phases(run: Run) -> list[tuple[float, str]]:
+    return [(float(f["t"]), f["name"]) for k, f in run.lines if k == "PHASE"]
+
+
+def _lasers(run: Run, plane: str) -> list[tuple[float, str, str]]:
+    return [(float(f["t"]), f["state"], f.get("mask", "none")) for k, f in run.lines
+            if k == "LASER" and f.get("plane") == plane]
+
+
+def laser_self_run_problems(run: Run, label: str, *, cone: bool) -> list[str]:
+    """One AI laser strike on its own designator: the hold from the release to the landing, the spot
+    kept (a pod), the target destroyed, then the exit."""
+    problems = consistency_problems(run, label)
+    release, impact = run.first("RELEASE"), run.first("IMPACT")
+    plane = (run.first("start") or {}).get("plane", "0")
+    if release is None or impact is None:
+        return problems + [f"{label}: no release or no impact"]
+    if not release.get("weapon", "").startswith("GBU10"):
+        problems.append(f"{label}: released {release.get('weapon')}, want a GBU-10")
+    if release.get("guided") != "Guiding" or release.get("spot_owner") != plane:
+        problems.append(f"{label}: the bomb was {release.get('guided')} on aircraft "
+                        f"{release.get('spot_owner')}'s spot, want guiding on its own ({plane})")
+    t_release, t_impact = float(release["t"]), float(impact["t"])
+    phases = _phases(run)
+    names = [n for _, n in phases]
+    if "Lase" not in names:
+        problems.append(f"{label}: never held the spot (phases {names})")
+    else:
+        t_lase = next(t for t, n in phases if n == "Lase")
+        if abs(t_lase - t_release) > 1.0:
+            problems.append(f"{label}: the hold began at {t_lase}, the release was at {t_release}")
+        exits = [t for t, n in phases if n == "Exit" and t >= t_lase]
+        if not exits:
+            problems.append(f"{label}: never exited after the hold")
+        elif not cone and exits[0] < t_impact - 1.0:
+            # A cone cannot follow a target it is flying over (its hold ends inside 2,000 ft): the
+            # bomb keeps following the spot's last point, as a masked laser does.
+            problems.append(f"{label}: left the hold at {exits[0]}, {t_impact - exits[0]:.1f} s before the bomb landed")
+    holds = [f for k, f in run.lines if k == "HOLD"]
+    if not cone:
+        if len(holds) < 2:
+            problems.append(f"{label}: fewer than two hold readings")
+        if not any(abs(number(h.get("bank_deg"))) > 10 for h in holds):
+            problems.append(f"{label}: the hold was not a turn: {[h.get('bank_deg') for h in holds]}")
+        far = [h for h in holds if not number(h.get("range_ft")) < LASER_REACH_FT]
+        if far:
+            problems.append(f"{label}: held out of the laser's reach: {far[0]}")
+        lost = [(t, state, mask) for t, state, mask in _lasers(run, plane)
+                if t_release <= t <= t_impact and state != "Lasing"]
+        if lost:
+            problems.append(f"{label}: the spot was lost in the fall: {lost[0]}")
+        if not number(run.summary.get("blind_s")) <= BLIND_S_MAX:
+            problems.append(f"{label}: the bomb flew {run.summary.get('blind_s')} s with no spot")
+    if not number(run.summary.get("fall_s")) >= FALL_S_MIN:
+        problems.append(f"{label}: the bomb fell only {run.summary.get('fall_s')} s")
+    if not number(impact.get("miss_ft")) <= GUIDED_MISS_FT:
+        problems.append(f"{label}: landed {impact.get('miss_ft')} ft from the target, want at most {GUIDED_MISS_FT:.0f}")
+    if not _target_hurt(run):
+        problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
+    if not run.of("EGRESS"):
+        problems.append(f"{label}: no EGRESS")
+    if run.of("LOST"):
+        problems.append(f"{label}: the striker was lost")
+    return problems
+
+
+def laser_self_problems(output: str) -> list[str]:
+    """`ai-strike-laser-self`: an F-16C's Pave Spike (a hemisphere pod) and an Su-25's built-in
+    designator (a cone), each on a GBU-10 of its own."""
+    runs = parse_runs(output)
+    if len(runs) != 2:
+        return [f"{len(runs)} runs finished, want 2"]
+    return (laser_self_run_problems(runs[0], "F-16C Pave Spike", cone=False)
+            + laser_self_run_problems(runs[1], "Su-25 built-in designator", cone=True))
+
+
+def laser_buddy_problems(output: str) -> list[str]:
+    """`ai-strike-laser-buddy`: three runs. (1) An AI F-16C lases for a player's F/A-18D (the driver
+    gives the order the wing order "Lase my target" gives), which drops a GBU-10 on its spot; the
+    target page would name the F-16C by its callsign. (2) A player's F-16C lases by hand and an AI
+    F-14 with only a GBU-10 and no designator chooses the bomb and drops it on that spot. (3) The
+    same F-14 with nobody lasing does not choose the bomb."""
+    head, sep, rest = output.partition("a2g-run: done")
+    if not sep:
+        return ["the player's run did not finish"]
+    problems: list[str] = []
+    label = "AI F-16C lases for a player's GBU-10"
+    release, sight = A2G_RELEASE.search(head), A2G_SIGHT.search(head)
+    impact, target = A2G_IMPACT.search(head), A2G_TARGET.search(head)
+    ordered = re.search(r"^a2g-run: buddy-ai-ordered t=\S+ plane=(\d+) ok=(\w+)", head, re.M)
+    lasing = re.search(r'^a2g-run: buddy-lasing t=\S+ range \d+ callsign "([^"]*)"', head, re.M)
+    if ordered is None or ordered.group(2) != "true":
+        problems.append(f"{label}: the AI was not ordered to lase ({ordered and ordered.group(0)})")
+    if lasing is None:
+        problems.append(f"{label}: the AI never lased")
+    elif lasing.group(1) != "Friendly 2-1":
+        problems.append(f"{label}: the target page would name the lasing pilot {lasing.group(1)!r}, want 'Friendly 2-1'")
+    if release is None:
+        problems.append(f"{label}: nothing released")
+    elif (release.group(3), release.group(4)) != ("Guiding", "1"):
+        problems.append(f"{label}: released {release.group(0)}, want guiding on aircraft 1's spot")
+    if sight is None or (sight.group(4), sight.group(6), sight.group(7)) != ("yes", "yes", "Off"):
+        problems.append(f"{label}: at release the sight said {sight and sight.group(0)}, want IN RNG on a buddy's spot with no laser of its own")
+    if impact is None or float(impact.group(3)) > 40:
+        problems.append(f"{label}: the bomb came down {impact and impact.group(3)} ft from the tank")
+    if target is None or int(target.group(1)) != 0 or not A2G_KILL.search(head):
+        problems.append(f"{label}: the tank was not destroyed")
+
+    runs = parse_runs(rest)
+    if len(runs) != 2:
+        return problems + [f"{len(runs)} AI runs finished, want 2"]
+    drop, none = runs
+    label = "AI F-14 drops on a player's spot"
+    problems += consistency_problems(drop, label)
+    release, impact = drop.first("RELEASE"), drop.first("IMPACT")
+    buddy = (drop.first("DESIGNATE") or {}).get("buddy")
+    if buddy is None:
+        problems.append(f"{label}: the player designated nothing")
+    if release is None or impact is None:
+        return problems + [f"{label}: no release or no impact"]
+    if not release.get("weapon", "").startswith("GBU10"):
+        problems.append(f"{label}: released {release.get('weapon')}, want a GBU-10")
+    if release.get("guided") != "Guiding" or release.get("spot_owner") != buddy:
+        problems.append(f"{label}: the bomb was {release.get('guided')} on aircraft {release.get('spot_owner')}'s spot, want the player's ({buddy})")
+    t_release = float(release["t"])
+    lased = [t for t, state, _ in _lasers(drop, buddy or "") if state == "Lasing"]
+    if not lased or lased[0] > t_release:
+        problems.append(f"{label}: the player's spot was not up before the release")
+    if any(state == "Lasing" for _, state, _ in _lasers(drop, "0")):
+        problems.append(f"{label}: the F-14 has no designator, yet its laser lased")
+    if "Lase" in [n for _, n in _phases(drop)]:
+        problems.append(f"{label}: a carrier with no designator held a spot")
+    if not number(impact.get("miss_ft")) <= GUIDED_MISS_FT:
+        problems.append(f"{label}: landed {impact.get('miss_ft')} ft from the target")
+    if not _target_hurt(drop):
+        problems.append(f"{label}: the target is unhurt")
+    if not number(drop.summary.get("blind_s")) <= BLIND_S_MAX:
+        problems.append(f"{label}: the bomb flew {drop.summary.get('blind_s')} s with no spot")
+
+    label = "AI F-14 with nobody lasing"
+    problems += consistency_problems(none, label)
+    if none.of("RELEASE"):
+        problems.append(f"{label}: released with no spot assured")
+    names = [n for _, n in _phases(none)]
+    if "Attack" in names:
+        problems.append(f"{label}: flew a pass with a laser bomb and no spot ({names})")
+    if "Home" not in names:
+        problems.append(f"{label}: never gave the bomb up and went home ({names})")
+    return problems
+
+
 def _runs(skills_and_profiles, miss=True, **extra) -> list[dict]:
     wanted = []
     for skill, profile in skills_and_profiles:
@@ -587,7 +758,42 @@ def scenarios() -> list[Scenario]:
     }
     lase_args = pilot_run("UKR", "QUFACT", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
                           "--count", "2", "--order-at", "3", "--seconds", "30", "--order", "lase-my-target")
+    # The lasing runs: a GBU-10 from 15,000 ft at 480 kt for the pod (an F-16C's Pave Spike), from
+    # 8,000 ft at 400 kt for the cone (an Su-25's built-in designator).
+    gbu10 = ["--load", "GBU10", "--station", "2", "--count", "2"]
+    laser_pod = pilot_run("UKR", "QUCOL", "--aircraft", "f16c", *gbu10, "--altitude", "15000", "--speed", "480",
+                          "--from", "6", "--seconds", "200", "--skill", "2")
+    laser_cone = pilot_run("UKR", "QUCOL", "--aircraft", "su25", *gbu10, "--altitude", "8000", "--speed", "400",
+                           "--from", "6", "--seconds", "200", "--skill", "2")
+    # A player's F/A-18D drops on an AI F-16C's spot; an AI F-14 with a GBU-10 and no designator
+    # drops on a player's F-16C's spot; with nobody lasing it chooses not to.
+    ai_lases = ["--a2g-run", "UKR", "QUCOL", "--attack", "laser", "--aircraft", "f18", *gbu10, "--altitude", "12000",
+                "--speed", "450", "--from", "6", "--seconds", "120", "--buddy", "f16c", "--buddy-ai"]
+    ai_drops = pilot_run("UKR", "QUCOL", "--aircraft", "f14", *gbu10, "--altitude", "12000", "--speed", "450",
+                         "--from", "6", "--seconds", "150", "--skill", "2", "--buddy", "f16c")
+    ai_waits = pilot_run("UKR", "QUCOL", "--aircraft", "f14", *gbu10, "--altitude", "12000", "--speed", "450",
+                         "--from", "6", "--seconds", "100", "--skill", "2", "--choose-store")
     return [
+        Scenario(
+            name="ai-strike-laser-self", lane="flight",
+            args=laser_pod, timeout=600,
+            then=[Step(laser_cone, timeout=600)],
+            check=laser_self_problems,
+            notes="An AI F-16C with a Pave Spike pod drops a GBU-10 on its own spot and holds the spot on the "
+                  "tank through the 50 s fall in an offset turn (the target stays under the pod's wings, the "
+                  "bomb never goes blind), then exits; an AI Su-25's built-in cone holds its nose on the tank "
+                  "instead. Both destroy the tank.",
+        ),
+        Scenario(
+            name="ai-strike-laser-buddy", lane="flight",
+            args=ai_lases, timeout=600,
+            then=[Step(ai_drops, timeout=600), Step(ai_waits, timeout=600)],
+            check=laser_buddy_problems,
+            notes="Buddy lasing both ways. An AI F-16C, given the wing order's call, lases for a player's F/A-18D "
+                  "GBU-10 (the target page would name it Friendly 2-1). An AI F-14 with only a GBU-10 and no "
+                  "designator chooses the bomb because a player's F-16C lases the tank, and drops it on that "
+                  "spot; with nobody lasing it does not choose the bomb and goes home.",
+        ),
         Scenario(
             name="ai-strike-driver", lane="flight",
             args=smoke + ["--skill", "2", "--profile", "dive"], timeout=300,

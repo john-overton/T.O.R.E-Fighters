@@ -1,6 +1,6 @@
 """Tests for the AI strike driver's scenarios (tools/battery_scenarios/ai_strike.py): the output
 parsing, the consistency and behaviour checks, the release aim checks and the battery selection
-family (AI strike round, slices ST-D and ST-T)."""
+family (AI strike round, slices ST-D, ST-T and ST-L)."""
 import sys
 import unittest
 from pathlib import Path
@@ -406,15 +406,20 @@ class ScenarioTests(unittest.TestCase):
 
     def test_the_plan_s_scenarios_exist(self):
         want = {"ai-strike-bombs", "ai-strike-rockets", "ai-strike-maverick", "ai-strike-jdam", "ai-sead-harm",
-                "ai-strike-defended", "ai-strike-heli", "ai-strike-ac130"}
+                "ai-strike-defended", "ai-strike-heli", "ai-strike-ac130", "ai-strike-laser-self",
+                "ai-strike-laser-buddy"}
         self.assertTrue(want <= set(self.scenarios))
 
     def test_every_scenario_flies_the_ai(self):
+        """Each run has the AI fly the striker, except the lasing runs where a player drops on an
+        AI buddy's spot (`--buddy-ai`)."""
         for name, sc in self.scenarios.items():
             for args in [sc.args] + [step.args for step in sc.then]:
-                self.assertIn("--pilot", args, name)
-                self.assertEqual(args[args.index("--pilot") + 1], "ai", name)
                 self.assertEqual(args[0], "--a2g-run", name)
+                if "--pilot" in args:
+                    self.assertEqual(args[args.index("--pilot") + 1], "ai", name)
+                else:
+                    self.assertIn("--buddy-ai", args, name)
 
     def test_the_bomb_scenario_forces_each_pass_once_and_covers_every_skill(self):
         sc = self.scenarios["ai-strike-bombs"]
@@ -545,6 +550,180 @@ class QuickWingTests(unittest.TestCase):
         self.assertTrue(any("want cap" in p for p in s.quick_wing_problems(bombs)))
         idle = quick_wing_run("strike", False) + "\n" + quick_wing_run("cap", False)
         self.assertTrue(any("never released" in p for p in s.quick_wing_problems(idle)))
+def laser_run(plane="0", spot="0", phases=True, lased=True, blind="0.0", fall="49.5", miss=8.4, kill=True,
+              holds=((25.0, "15258", "-72"), (40.0, "13360", "46")), exit_at=70.783, lase_at=21.275,
+              weapon="GBU10.JT", guided="Guiding", cone=False, let_go=True):
+    """One driver run of an AI laser strike: the pass, the release, the hold, the landing, the exit."""
+    lines = [
+        SETUP.format(skill=2, profile="none").replace("A4E", "F16C").replace("MK82.JT", "GBU10.JT"),
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        f"ai-strike: start t=0.000 plane={plane} range_ft=36456 alt_ft=15000 speed_kt=480",
+        "ai-strike: PROFILE t=0.008 name=level",
+        "ai-strike: PHASE t=0.008 name=Attack",
+        f"ai-strike: LASER t=0.025 plane={plane} state=Lasing mask=none range_ft=39405",
+    ]
+    if phases:
+        lines.append(f"ai-strike: PHASE t={lase_at} name=Lase")
+    lines.append(f"ai-strike: RELEASE t=21.275 n=1 weapon={weapon} station=2 alt_ft=14733 speed_kt=508 range_ft=18535 "
+                 f"pass=1 aim_ft=0 inside=yes guided={guided} spot_owner={spot}")
+    if not cone:
+        lines += [f"ai-strike: HOLD t={t:.3f} range_ft={r} above_ft=14721 speed_kt=400 bank_deg={b}" for t, r, b in holds]
+    if not lased:
+        lines.append(f"ai-strike: LASER t=40.000 plane={plane} state=Masked mask=Gimbal range_ft=12000")
+    lines.append(f"ai-strike: PHASE t={exit_at} name=Exit")
+    lines.append(f"ai-strike: IMPACT t=70.783 n=1 miss_ft={miss} at=1.0,2.0,3.0")
+    if kill:
+        lines.append("ai-strike: KILL t=70.783 victim=0x50000001 category=0x0400 target=yes")
+    lines.append("ai-strike: EGRESS t=70.783 range_ft=20766 alt_ft=14785")
+    if let_go:
+        lines.append(f"ai-strike: LASER t=70.800 plane={plane} state=Ready mask=none range_ft=25504")
+    lines.append(
+        f"ai-strike: summary t=90.0 ran_s=90.0 profile=level releases=1 impacts=1 kills={1 if kill else 0} egress=yes "
+        f"lost=no activity=Attacking target_hp={'0' if kill else '200'}/200 closest_ft=11722 store_rounds_left=1 "
+        f"fall_s={fall} blind_s={blind}"
+    )
+    lines.append("ai-strike: done")
+    return "\n".join(lines)
+
+
+class LaserSelfTests(unittest.TestCase):
+    def check(self, pod=None, cone=None):
+        return s.laser_self_problems((pod or laser_run()) + "\n" + (cone or laser_run(cone=True, exit_at=62.0)))
+
+    def test_an_honest_pair_of_runs_passes(self):
+        self.assertEqual(self.check(), [])
+
+    def test_the_run_count_must_match(self):
+        self.assertTrue(any("1 runs" in p for p in s.laser_self_problems(laser_run())))
+
+    def test_the_hold_must_begin_at_the_release_and_last_to_the_landing(self):
+        self.assertTrue(any("never held" in p for p in self.check(laser_run(phases=False))))
+        self.assertTrue(any("hold began" in p for p in self.check(laser_run(lase_at=30.0))))
+        self.assertTrue(any("before the bomb landed" in p for p in self.check(laser_run(exit_at=50.0))))
+
+    def test_a_cone_may_leave_early_but_a_pod_may_not(self):
+        self.assertEqual(self.check(cone=laser_run(cone=True, exit_at=40.0)), [])
+
+    def test_the_hold_must_be_a_turn_inside_the_lasers_reach(self):
+        flat = ((25.0, "15258", "2"), (40.0, "13360", "1"))
+        self.assertTrue(any("not a turn" in p for p in self.check(laser_run(holds=flat))))
+        far = ((25.0, "15258", "-72"), (40.0, "70000", "46"))
+        self.assertTrue(any("out of the laser's reach" in p for p in self.check(laser_run(holds=far))))
+        self.assertTrue(any("fewer than two" in p for p in self.check(laser_run(holds=()))))
+
+    def test_a_lost_spot_or_a_blind_bomb_fails(self):
+        self.assertTrue(any("spot was lost" in p for p in self.check(laser_run(lased=False))))
+        self.assertTrue(any("with no spot" in p for p in self.check(laser_run(blind="2.2"))))
+
+    def test_the_bomb_must_be_the_aircrafts_own_and_land_on_the_tank(self):
+        self.assertTrue(any("on its own" in p for p in self.check(laser_run(spot="1"))))
+        self.assertTrue(any("want a GBU-10" in p for p in self.check(laser_run(weapon="AGM65G.JT"))))
+        self.assertTrue(any("ft from the target" in p for p in self.check(laser_run(miss=900.0))))
+        self.assertTrue(any("unhurt" in p for p in self.check(laser_run(kill=False))))
+        self.assertTrue(any("fell only" in p for p in self.check(laser_run(fall="9.0"))))
+
+
+def buddy_head(ordered="true", callsign="Friendly 2-1", spot="1", own="Off", miss="8.5", hp="0", buddy_lased=True):
+    lines = [
+        "a2g-run: setup aircraft F18 station 2 GBU10.JT count 2 rounds 2 target 0x50000001 at 999570 7 789571 hp 200",
+        f"a2g-run: buddy-ai-ordered t=0.258 plane=1 ok={ordered} target 0x50000000",
+    ]
+    if buddy_lased:
+        lines.append(f'a2g-run: buddy-lasing t=0.275 range 50089 callsign "{callsign}"')
+    lines += [
+        f"a2g-run: release-sight t=23.758 kind Laser range 17072 reach 11995..18770 in-reach yes advisory none buddy yes laser {own} bar 16060 along 1011 seconds none steer none",
+        f"a2g-run: release t=23.767 id=0 kind Laser mode Guiding spot-owner {spot} height 11998 speed 680.8 stored 999588 10 788231",
+        f"a2g-run: impact t=73.150 id=0 mode Guiding at 1000295 14 786039 target-miss {miss} point-miss 8.5 target-hp {hp} flown 49.4",
+        "a2g-run: summary released yes rounds 1",
+        "a2g-run: kill 0x50000000 class 0x0400",
+        f"a2g-run: target 0x50000000 hp {hp}/200",
+        "a2g-run: done",
+    ]
+    return "\n".join(lines)
+
+
+def buddy_drop(buddy="1", spot="1", lase_first=True, own_lased=False, phase_lase=False, miss=8.7, blind="0.0"):
+    lines = [
+        SETUP.format(skill=2, profile="none").replace("A4E", "F14").replace("MK82.JT", "GBU10.JT"),
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        "ai-strike: start t=0.000 plane=0 range_ft=36456 alt_ft=12000 speed_kt=450",
+        "ai-strike: PHASE t=0.008 name=Wait",
+        f"ai-strike: DESIGNATE t=0.008 target=0x50000000 buddy={buddy} note=chosen",
+    ]
+    if lase_first:
+        lines.append(f"ai-strike: LASER t=0.258 plane={buddy} state=Lasing mask=none range_ft=32628")
+    if own_lased:
+        lines.append("ai-strike: LASER t=2.000 plane=0 state=Lasing mask=none range_ft=30000")
+    lines += ["ai-strike: PHASE t=2.008 name=Attack"]
+    if phase_lase:
+        lines.append("ai-strike: PHASE t=26.583 name=Lase")
+    lines += [
+        f"ai-strike: RELEASE t=26.583 n=1 weapon=GBU10.JT station=2 alt_ft=12009 speed_kt=418 range_ft=15771 pass=1 aim_ft=0 inside=yes guided=Guiding spot_owner={spot}",
+        f"ai-strike: IMPACT t=77.025 n=1 miss_ft={miss} at=1.0,2.0,3.0",
+        "ai-strike: KILL t=77.025 victim=0x50000000 category=0x0400 target=yes",
+        "ai-strike: EGRESS t=77.025 range_ft=30760 alt_ft=14061",
+        f"ai-strike: summary t=97.0 ran_s=97.0 profile=level releases=1 impacts=1 kills=1 egress=yes lost=no activity=Pursuing target_hp=0/200 closest_ft=905 store_rounds_left=1 fall_s=50.4 blind_s={blind}",
+        "ai-strike: done",
+    ]
+    return "\n".join(lines)
+
+
+def buddy_none(release=False, attack=False, home=True):
+    lines = [
+        SETUP.format(skill=2, profile="none").replace("A4E", "F14").replace("MK82.JT", "GBU10.JT"),
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        "ai-strike: start t=0.000 plane=0 range_ft=36456 alt_ft=12000 speed_kt=450",
+        "ai-strike: PHASE t=0.008 name=Wait",
+    ]
+    if attack:
+        lines.append("ai-strike: PHASE t=10.000 name=Attack")
+    if home:
+        lines.append("ai-strike: PHASE t=20.008 name=Home")
+    if release:
+        lines.append("ai-strike: RELEASE t=15.000 n=1 weapon=GBU10.JT station=2 alt_ft=12000 speed_kt=418 range_ft=15771")
+    lines.append(
+        f"ai-strike: summary t=100.0 ran_s=100.0 profile=none releases={1 if release else 0} impacts=0 kills=0 egress=no lost=no "
+        "activity=Landing target_hp=200/200 closest_ft=14233 store_rounds_left=2 fall_s=0.0 blind_s=0.0"
+    )
+    if not release:
+        lines.append("ai-strike: no release")
+    lines.append("ai-strike: done")
+    return "\n".join(lines)
+
+
+class LaserBuddyTests(unittest.TestCase):
+    def check(self, head=None, drop=None, none=None):
+        return s.laser_buddy_problems("\n".join([head or buddy_head(), drop or buddy_drop(), none or buddy_none()]))
+
+    def test_an_honest_trio_passes(self):
+        self.assertEqual(self.check(), [])
+
+    def test_the_players_run_must_finish(self):
+        self.assertTrue(any("did not finish" in p for p in s.laser_buddy_problems(buddy_drop() + "\n" + buddy_none())))
+
+    def test_the_ai_must_be_ordered_lase_and_be_named(self):
+        self.assertTrue(any("not ordered" in p for p in self.check(buddy_head(ordered="false"))))
+        self.assertTrue(any("never lased" in p for p in self.check(buddy_head(buddy_lased=False))))
+        self.assertTrue(any("Friendly 2-1" in p for p in self.check(buddy_head(callsign=""))))
+
+    def test_the_players_bomb_must_home_on_the_ais_spot(self):
+        self.assertTrue(any("aircraft 1's spot" in p for p in self.check(buddy_head(spot="0"))))
+        self.assertTrue(any("buddy's spot" in p for p in self.check(buddy_head(own="Lasing"))))
+        self.assertTrue(any("came down" in p for p in self.check(buddy_head(miss="400"))))
+        self.assertTrue(any("not destroyed" in p for p in self.check(buddy_head(hp="120"))))
+
+    def test_the_ais_bomb_must_home_on_the_players_spot(self):
+        self.assertTrue(any("player's (1)" in p for p in self.check(drop=buddy_drop(spot="0"))))
+        self.assertTrue(any("not up before" in p for p in self.check(drop=buddy_drop(lase_first=False))))
+        self.assertTrue(any("no designator" in p for p in self.check(drop=buddy_drop(own_lased=True))))
+        self.assertTrue(any("held a spot" in p for p in self.check(drop=buddy_drop(phase_lase=True))))
+        self.assertTrue(any("landed" in p for p in self.check(drop=buddy_drop(miss=900.0))))
+        self.assertTrue(any("with no spot" in p for p in self.check(drop=buddy_drop(blind="3.0"))))
+
+    def test_with_nobody_lasing_the_bomb_is_not_chosen(self):
+        self.assertTrue(any("no spot assured" in p for p in self.check(none=buddy_none(release=True))))
+        self.assertTrue(any("flew a pass" in p for p in self.check(none=buddy_none(attack=True))))
+        self.assertTrue(any("went home" in p for p in self.check(none=buddy_none(home=False))))
 
 
 class SelectionTests(unittest.TestCase):
@@ -553,6 +732,9 @@ class SelectionTests(unittest.TestCase):
 
     def test_the_driver_source_selects_the_strike_and_a2g_families(self):
         self.assertEqual(self.families("crates/tore-app/src/a2g_run/ai.rs"), {"a2g", "ai-strike"})
+        self.assertEqual(self.families("crates/tore-app/src/a2g_run/guided.rs"), {"a2g", "ai-strike"})
+        for path in ("crates/tore-sim/src/combat/laser.rs", "crates/tore-sim/src/combat/live/sighting.rs"):
+            self.assertIn("ai-strike", self.families(path), path)
         self.assertEqual(self.families("crates/tore-app/src/a2g_run/level.rs"), {"a2g"})
         self.assertEqual(self.families("crates/tore-app/src/a2g_run.rs"), {"a2g", "ai-strike"})
 

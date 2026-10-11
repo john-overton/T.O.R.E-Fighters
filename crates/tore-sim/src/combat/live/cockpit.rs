@@ -378,6 +378,18 @@ impl ReleaseAim {
 /// within this share of its reach past the bar (fitted, agent).
 pub const GUIDED_LATE_SHARE: f64 = 0.05;
 
+/// A guided weapon is due for release on its sight: IN RNG and its ground
+/// range at most the level T's bar plus [`GUIDED_LATE_SHARE`] of the reach.
+pub fn guided_due(sight: &GuidedSight) -> bool {
+    let (Some(range), Some(bar), Some(reach)) =
+        (sight.ground_range_ft, sight.release_range_ft(), sight.reach)
+    else {
+        return false;
+    };
+    let window = GUIDED_LATE_SHARE * (reach.maximum_ft - reach.minimum_ft);
+    sight.in_reach && range <= bar + window
+}
+
 impl State {
     /// The strike cockpits as every stage reads them, with the ownships
     /// given separately (a step works them out of the state).
@@ -611,16 +623,9 @@ impl State {
             return false;
         };
         if crate::combat::guided::kind(w).is_some() {
-            let Some(sight) = self.strike_guided_sight(aircraft, config, launcher, ground) else {
-                return false;
-            };
-            let (Some(range), Some(bar), Some(reach)) =
-                (sight.ground_range_ft, sight.release_range_ft(), sight.reach)
-            else {
-                return false;
-            };
-            let window = GUIDED_LATE_SHARE * (reach.maximum_ft - reach.minimum_ft);
-            return sight.in_reach && range <= bar + window;
+            return self
+                .strike_guided_sight(aircraft, config, launcher, ground)
+                .is_some_and(|sight| guided_due(&sight));
         }
         let Some(solution) = self.strike_delivery(aircraft, config, launcher, ground) else {
             return false;

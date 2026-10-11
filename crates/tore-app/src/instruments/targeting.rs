@@ -223,6 +223,13 @@ pub struct Page {
     pub view: Option<SightView>,
 }
 
+/// The name a buddy's laser spot goes by on the page: the pilot's callsign
+/// in a networked game, else the AI aircraft's wing and member ("Friendly
+/// 2-1", slice ST-L), else none (the page says LASER SPOT).
+pub fn spot_owner_name(player: Option<String>, ai: Option<String>) -> Option<String> {
+    player.or(ai)
+}
+
 impl Page {
     /// The page's data from the readout; `None` when the display is not the
     /// targeting page.
@@ -783,6 +790,22 @@ mod tests {
         // the eye leads it.
         assert!(ink(&render("lase-mask-terrain"), 1, 72, 136, 10) > 0);
         assert_eq!(ink(&render("lase"), 1, 72, 136, 10), 0);
+    }
+
+    #[test]
+    fn a_buddy_spots_owner_is_a_player_s_callsign_else_the_ai_aircraft() {
+        let ai = || Some("Friendly 2-1".to_owned());
+        assert_eq!(
+            spot_owner_name(Some("Maverick".into()), ai()).as_deref(),
+            Some("Maverick")
+        );
+        assert_eq!(spot_owner_name(None, ai()).as_deref(), Some("Friendly 2-1"));
+        assert_eq!(spot_owner_name(None, None), None);
+        // The page draws it in capitals on the name row.
+        assert_eq!(
+            tore_formats::text::upper(&spot_owner_name(None, ai()).unwrap()),
+            "FRIENDLY 2-1"
+        );
     }
 
     #[test]
