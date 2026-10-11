@@ -1,4 +1,4 @@
-# Redrawn airports (experiment AP1)
+# Redrawn airports
 
 > **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
 > The thing being reverse engineered is the *experience*, not the executable. We
@@ -8,16 +8,20 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-10. An experiment behind a switch, off by
-default. John asked for "a test redraw of an airport using airport textures
+Implementation mode, 2026-10-10 (experiment AP1); the default everywhere
+since 2026-10-11 (slice FX-A, protocol 24). John asked for "a test redraw of an airport using airport textures
 but redrawn to be accurate instead of reusing the existing airports", then,
 after reviewing the redrawn Kiev ("The airport looks good"), for one plan per
 runway shape type, each theater's own runway textures with the dark asphalt
 as the fallback, larger airports keeping their strips with parking and
 taxiways on both sides, simple taxiway and edge lines, and the extra hangars
-and vehicles as targets (all 2026-10-10). With `TORE_REDRAWN_AIRPORTS=1`
-every airport of the 75 layouts is drawn and flown from its type's plan;
-unset or `0`, every airport is the retail one and nothing below runs.
+and vehicles as targets (all 2026-10-10), then for the redraw on for
+everyone online (2026-10-10) and as the default (2026-10-11). Every airport
+of the 75 layouts is drawn and flown from its type's plan in single player,
+the Quick Mission, missions, online and on the dedicated server.
+`TORE_REDRAWN_AIRPORTS=0` is a developer escape hatch for single player and
+the offline tools: every airport is the retail one and nothing below runs.
+Online games never read it ([online play and recordings](#online-play-and-recordings)).
 
 Why: each retail runway shape is a whole airfield drawn about three times real
 size across the runway (runways 368 to 760 ft wide, taxiways 160 to 290 ft),
@@ -30,18 +34,22 @@ size.
 
 | Part | With the switch on | Source |
 | --- | --- | --- |
-| Runway position, heading, length, elevation | Unchanged: the frame is the retail runway's near threshold (STRIP anchor 0x11) and its far end | retail import |
-| ILS, approach line, landing service, short-strip rule | Unchanged (they read only the above) | retail import |
+| Runway position, heading, length, elevation | Unchanged: the frame is the retail runway's near threshold (STRIP anchor 0x11) and its far end. A second tile's runway object moves onto the tile's own main runway (below) | retail import, plan for tiles |
+| ILS, approach line, landing service, short-strip rule | Unchanged (they read only the above); a second tile's follow its main runway | retail import |
 | Drawn pavement | Generated from the plan's runways, taxiways and aprons, tiled with retail runway art, markings painted in | plan, retail art |
 | Landable and contact box | The redrawn field's extent plus a grass margin; grass between runways stays landable | plan |
-| AI taxi, takeoff, landing and parking points | The plan's (the `AirfieldAnchors` roles of [native-strip](native-strip.md)); second tiles and pads have none | plan |
+| AI taxi, takeoff, landing and parking points | The plan's (the `AirfieldAnchors` roles of [native-strip](native-strip.md)); second tiles and pads have none, so the AI takes off from and lands on the runway itself and stops beside it (its runway fallback, as at retail's tiles) | plan |
 | Ground-start slots | Follow the plan's takeoff point and taxi-out legs | plan |
 | Airport buildings | Moved by rule onto the plan's building lines; extra hangars and vehicles added by rule | retail shapes, rules |
 | Terrain recess under the airport | Follows the landable box | plan |
 
-A plan whose runway length differs from the retail shape's by more than a foot
-is refused and the mission does not build, so a wrong plan is never flown
-silently.
+A plan applies only to the runway shape it was drawn for: a placement whose
+runway length differs from the plan's by more than a foot keeps its retail
+airfield (and so does its second tile). Being the default, the redraw never
+refuses a mission; with the retail import all 1,458 runway objects of the 75
+layouts are redrawn (FX-A survey, 2026-10-11). The unit tests' synthetic map
+has an 8,000 ft runway, so it keeps its retail airfield unless a test passes
+its own plan.
 
 ## The plans
 
@@ -71,9 +79,19 @@ Every placement of a type shares the frame of its shape, so one plan redraws
 all of them. A pair plan applies when a second tile (STRIP3A, 5A, 6A or 7A)
 stands within 14,000 ft of a base of its type at the same heading: the base
 draws both plans (the tile's at the offset measured in the layout, 8,900 to
-9,700 ft) and the pair's link taxiways; the tile keeps its own runway object,
-box and ILS but draws nothing itself. A tile with no base nearby (seven in the
-`~*F` layouts, one in NSK) uses its own plan alone.
+9,700 ft) and the pair's link taxiways; the tile keeps its own runway object
+and box but draws nothing itself. A tile with no base nearby (ten in the
+`~*F` developer layouts) uses its own plan alone.
+
+A tile's STRIP anchors are copies of its base's, so its retail approach line
+lies beside its own pavement (on grass between its runways, or off the
+field). Its runway object therefore flies from the tile's main runway, the
+longest in its plan: the approach line, heading and length are that
+runway's, so the ILS, a ground start and the AI's takeoff and landing are on
+pavement (agent decision, FX-A, 2026-10-11). It has no taxi points: the
+base's are up to 9,700 ft away and the tile plans have none of their own.
+A crosswise main runway (STRIP5A and STRIP6A) turns that airport's ILS by
+90 degrees from the retail one.
 
 Larger airports keep the strips retail drew, at their retail centrelines, with
 a parallel taxiway on each side, links at both ends and midfield, an apron on
@@ -241,39 +259,55 @@ size the same art covers about 1.5 to 4 ft per texel.
 | The redraw, per-type plans, theater textures with a dark asphalt fallback, strips kept, both-side parking and taxiways, painted lines, extras as targets | opinionated (John, 2026-10-10) |
 | Widths, taxiway offsets, apron sizes, link positions, building lines, extras counts | fitted (agent) |
 | Marking bands, cut-away order, fillet size, apron variation, building rule distances | fitted (agent) |
-| `TORE_REDRAWN_AIRPORTS` honoured by replays (recordings do not keep it yet) | opinionated (agent) |
+| The redraw as the default everywhere, online included | opinionated (John, 2026-10-10 and 2026-10-11) |
+| Fixed on online rather than a mission text line; the plan mismatch fallback; a second tile's runway on its main runway; the recording's airfield scene | opinionated (agent, FX-A, 2026-10-11) |
 | Airfield lights exist | opinionated (John, 2026-10-10) |
 | Light spacing, colours, ranges, approach pattern, PAPI placement and day share | fitted (agent) |
 
 None of this is retail parity: retail drew its airfields at about 3x.
 
-## Online play and recordings (planned, not built here)
+## Online play and recordings
 
-John wants the redraw on for everyone online (2026-10-10). The scene is not on
-the wire: each machine rebuilds it from its own import and build. The plan:
+Built in slice FX-A (2026-10-11). The scene is not on the wire: each machine
+rebuilds it from its own import and build.
 
-1. When the redraw becomes the default, bump the protocol (after the surface
-   round's protocol 22) so builds with and without it never meet: the added
-   buildings are targets with ids the old scene lacks, and buildings stand
-   elsewhere. Refresh `wire-golden.txt`.
-2. Until then a session could carry the switch in the mission spec (a mission
-   text line and its wire field) so the host decides for every seat; not needed
-   if it simply becomes the default.
-3. Recordings: add the airfield set to the replay header's world identity (a
-   scene version, with the replay format bump RP1 plans), so a replay rebuilds
-   the airfields it was flown on; `replay::identity::terrain` then reads it
-   instead of the viewer's switch.
+1. **Protocol 24.** The redraw's version: builds with and without it never
+   meet, since the added buildings are targets with ids the old scene lacks
+   and buildings, parked aircraft and the AI's points stand elsewhere
+   ([the protocol](net-protocol.md#the-redrawn-airports-protocol-24)).
+2. **Fixed on online.** The mission text has no airfield line and always
+   means the redraw, so the King's game, every player's, the dedicated
+   server and the bot build the same airfields; `TORE_REDRAWN_AIRPORTS=0`
+   is never read online. A text line that let a session choose was the
+   alternative, left out as more surface than a developer aid needs.
+3. **Recordings.** The header's airfield scene says which airfields a
+   flight had: 0 (absent) the retail ones, 1 the redraw
+   ([replays](../REPLAYS.md)). The viewer rebuilds what the header names,
+   whatever the switch says, so a recording from before the redraw replays
+   on the retail airfields and a new one on the redraw. A redrawn recording
+   is a format 3 file.
 
 ## Limits
 
-- Lone second tiles and pads have no AI points (as in retail, whose points for
-  them lie off their pavement); the AI uses the runway fallback there. Adding
-  them is not cheap: a lone tile's STRIP anchors are copies of its base's, so
-  its ILS and approach line lie beside the tile's pavement, not on it. AI
-  points there need either a runway paved along that line (changing how eight
-  variant airfields look) or a moved ILS (breaking "ILS unchanged"). Pads are
-  vertical pads by type, which no conventional AI uses. AI homes on lone tiles
-  (for example Al Arish1) are as before the redraw.
+- Second tiles (paired or alone) and pads have no AI taxi or parking points;
+  at a tile the AI takes off from its main runway and lands on it, then
+  stops beside it (the runway fallback). Taxi points of their own would need
+  an apron route authored per tile plan. Pads are vertical pads by type,
+  which no conventional AI uses.
+- AI homes are the nearest own field by runway centre, so moving the tiles'
+  lines onto their main runways changed four of the 160 homes the
+  `--airport-allegiance` survey lists (Baltic Red: Gdov and Vitebsk became
+  the tiles "Airport 27" and "Airport 23"; Greece Blue: "Airport 15" became
+  Iraklion; North Korea Red: Kuum Ni became "Airport 22"). The fields offered
+  to the player are unchanged. An AI flight homed on a tile parks beside its
+  runway, not on an apron.
+- A lone tile's main runway keeps the plan's markings for a tile: an end that
+  would run into the base is plain, and it has no ILS approach lights or
+  PAPI.
+- Helicopters of three helicopter templates (Cuba QCCMHQ, Panama QAPHELO,
+  Gulf QPGSRUN) stand on the grass beside a dirt pad: pads have no apron
+  spots. Of the 123 template aircraft on redrawn fields in the 108 Quick
+  Mission templates, these 6 are the only ones off the pavement.
 - A pair's tile is placed at the measured offset, which varies by up to 250 ft
   between layouts; link taxiways overlap generously to cover it.
 - A junction mouth clears only the earlier taxiway's edge lines; a runway's
@@ -316,3 +350,14 @@ the wire: each machine rebuilds it from its own import and build. The plan:
   Liepaja STRIP7 with 7A) all reach `Parked` with 0 anomalies and three
   ground-start slots. Polotsk, Taetan, Wonsan and Longtian now have hostile
   AAA by the field that downs takeoffs, as on retail, so they left the list.
+- Default (FX-A, 2026-10-11): with the redraw on by default, a survey of
+  every runway object of the 75 layouts (1,458) found every one redrawn, and
+  every runway other than the dirt strips with its aim point and departure
+  point on pavement, after moving the 440 second tiles' lines onto their main
+  runways (before: all 430 paired and 10 lone tiles had both off the
+  pavement). `--validate-ils`: 578 ends, 0 problems; it differs from the
+  retail airfields only in the tiles' lengths. AI probes (a two-ship ground
+  start, takeoff, land order at 75 s, through `Parked`, 0 anomalies) at one
+  field per base plan (UKR 8, BAL 3, EGY 10 and 11, FRA 1 and 14, GRE 1,
+  NSK 9 and 11), six paired tiles (EGY 22, FRA 24, BAL 24, GRE 13, NSK 18,
+  VLA 22) and four lone tiles (`~EGYF` 2, `~VLAF` 1, `~APAF` 1, `~SPAF` 1).

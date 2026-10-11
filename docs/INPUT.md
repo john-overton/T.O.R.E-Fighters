@@ -452,7 +452,7 @@ Default keys follow Fighters Anthology wherever the original has the command
   implemented yet": Shift+A and Shift+G
   (AWACS and air-to-ground radar links), Shift+F (target damage), Shift+I
   (airbase inventory), Shift+J (drop tanks), Shift+D (message history) and
-  Alt+F (engage the laser-designated target). U (IFF) and Ctrl+T (Show Target
+  Alt+F (engage the IR or laser target). U (IFF) and Ctrl+T (Show Target
   Info) work now, and the multiplayer keys K and Alt+Shift+E, W, B and H sit on
   keys FA leaves free ([controls](CONTROLS.md)).
 - The keypad follows FA whatever NumLock says: 0 and period release chaff and

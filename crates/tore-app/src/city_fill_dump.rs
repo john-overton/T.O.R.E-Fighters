@@ -35,15 +35,15 @@ use tore_world::{
     surface::layout::trig,
 };
 
-/// Noon, no wind, no cloud; the redrawn airports as `TORE_REDRAWN_AIRPORTS`
-/// asks.
-fn overrides() -> crate::terrain::Overrides {
-    crate::terrain::Overrides {
+/// Noon, no wind, no cloud; the redrawn airports unless
+/// `TORE_REDRAWN_AIRPORTS=0`.
+fn overrides() -> AppResult<crate::terrain::Overrides> {
+    Ok(crate::terrain::Overrides {
         time: Some([12, 0]),
         wind: None,
         cloud_altitude: Some(0),
-        redrawn_airports: crate::scenery::redrawn_airports().unwrap_or(false),
-    }
+        redrawn_airports: crate::scenery::redrawn_airports()?,
+    })
 }
 
 fn rss_kib() -> u64 {
@@ -62,8 +62,9 @@ fn world(
     theater: &str,
     on: bool,
 ) -> AppResult<(Terrain, Scenery)> {
+    let overrides = overrides()?;
     city::set_enabled(on);
-    let world = Terrain::for_mission(resources, theater, Some(0), &overrides());
+    let world = Terrain::for_mission(resources, theater, Some(0), &overrides);
     city::set_enabled(false);
     let world = world?;
     let scenery = Scenery::build(resources, &world)?;
@@ -260,8 +261,9 @@ pub fn run() -> AppResult<()> {
     let (_, off_scenery) = world(&resources, &theater, false)?;
     let rss_off = rss_kib();
     let started = Instant::now();
+    let overrides = overrides()?;
     city::set_enabled(true);
-    let on_world = Terrain::for_mission(&resources, &theater, Some(0), &overrides());
+    let on_world = Terrain::for_mission(&resources, &theater, Some(0), &overrides);
     city::set_enabled(false);
     let on_world = on_world?;
     let built = started.elapsed();

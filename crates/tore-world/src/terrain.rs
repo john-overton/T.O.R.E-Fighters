@@ -44,9 +44,14 @@ pub struct Terrain {
     /// Real-size scenery buildings over the city texture's light areas: the
     /// opt-in CF0 prototype (`crate::city`), `None` unless it is switched on.
     pub city_fill: Option<std::sync::Arc<crate::city::CityFill>>,
-    /// The redrawn airports that replace retail airfields (the AP1
-    /// experiment, [`Overrides::redrawn_airports`]); empty by default.
+    /// The redrawn airports that replace the retail airfields
+    /// ([`Overrides::redrawn_airports`], the default); empty when the
+    /// world was built with the retail airfields.
     pub redrawn: Vec<redrawn::Built>,
+    /// Whether the world was built with the redrawn airports, so a mission
+    /// recording can say which airfields it was flown on (a layout with
+    /// no airport has an empty [`Self::redrawn`] either way).
+    pub redrawn_airports: bool,
 }
 
 /// Launch settings that replace the mission's own weather start time, wind
@@ -54,7 +59,7 @@ pub struct Terrain {
 /// `TORE_WIND` and `TORE_CLOUD_ALTITUDE` (see
 /// the app's `scenery::launch_overrides`) and passes them in, so the terrain
 /// itself reads no environment variable.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Overrides {
     /// Start time: hour and minute.
     pub time: Option<[i32; 2]>,
@@ -62,10 +67,25 @@ pub struct Overrides {
     pub wind: Option<[i32; 2]>,
     /// Scattered cloud deck in feet, 0 for none.
     pub cloud_altitude: Option<i32>,
-    /// Experiment AP1: replace the airports that have a redrawn plan
-    /// ([`redrawn`]) with their real-size redraw. The app sets it from
-    /// `TORE_REDRAWN_AIRPORTS=1`; off, the scene is the retail one.
+    /// Draw and fly every airport from its type's real-size plan
+    /// ([`redrawn`]). On by default everywhere (John, 2026-10-11); off
+    /// builds the retail airfields, which the app allows in single player
+    /// as a developer escape hatch (`TORE_REDRAWN_AIRPORTS=0`). A mission
+    /// text never turns it off, so every game of a session and the server
+    /// build the same airfields.
     pub redrawn_airports: bool,
+}
+
+impl Default for Overrides {
+    /// No launch override, and the redrawn airports.
+    fn default() -> Self {
+        Self {
+            time: None,
+            wind: None,
+            cloud_altitude: None,
+            redrawn_airports: true,
+        }
+    }
 }
 
 /// Fitted grounding: align the largest aggregate horizontal pavement layer,
@@ -182,8 +202,8 @@ pub struct Recorded {
     /// Scattered cloud deck in feet, 0 for none.
     pub cloud_altitude: i32,
     pub weather_seed: i32,
-    /// Experiment AP1: rebuild with the redrawn airports. Not in the
-    /// recording; the viewer passes its own `TORE_REDRAWN_AIRPORTS`.
+    /// Rebuild with the redrawn airports: the recording's airfield scene
+    /// (a recording from before the redraw has the retail airfields).
     pub redrawn_airports: bool,
     /// The Quick Mission ground target the flight had, so the surface
     /// (template, defenses, seed, nationality, separation and so the starts)
@@ -1005,10 +1025,10 @@ impl Terrain {
             surface: Default::default(),
             city_fill: None,
             redrawn: Vec::new(),
+            redrawn_airports: false,
         };
-        let plans = redrawn::Plans::new(
-            recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports),
-        )?;
+        out.redrawn_airports = recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports);
+        let plans = redrawn::Plans::new(out.redrawn_airports)?;
         out.build_airport_scene(resources, code.trim_end_matches(".MM"), target, &plans)?;
         if crate::city::enabled() {
             out.city_fill =
@@ -1123,7 +1143,8 @@ impl Terrain {
                             / basis.up[1];
                 }
                 let anchor = sources.runway_anchors.get(&placement.object_type);
-                let length_ft = runway_length_ft(min[2], max[2], anchor.map(|a| a[2]));
+                let mut length_ft = runway_length_ft(min[2], max[2], anchor.map(|a| a[2]));
+                let mut runway_heading = heading;
                 if let Some(anchor) = anchor
                     && anchor[2] < max[2]
                     && anchor[2] >= min[2]
@@ -1134,6 +1155,12 @@ impl Terrain {
                             + basis.right[axis] * local[0]
                             + basis.forward[axis] * local[2]
                     });
+                }
+                // A redrawn second tile flies from its own main runway.
+                if let Some(line) = redraw.and_then(|built| built.runway_line) {
+                    approach_center = line.center;
+                    runway_heading = line.heading;
+                    length_ft = line.length;
                 }
                 // A redrawn airport's anchors are its plan's, or none.
                 let found = match redraw {
@@ -1165,7 +1192,7 @@ impl Terrain {
                     approach_center,
                     // ILS datum remains authored airport ground, independent of rendering bias.
                     elevation_ft: ground,
-                    heading,
+                    heading: runway_heading,
                     length_ft,
                 });
                 airports.push(Airport {

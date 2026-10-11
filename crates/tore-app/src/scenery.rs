@@ -119,14 +119,17 @@ pub fn launch_overrides() -> AppResult<Overrides> {
     })
 }
 
-/// Experiment AP1: `TORE_REDRAWN_AIRPORTS=1` replaces the airports that have
-/// a redrawn plan with their real-size redraw (docs/formats/redrawn-airports.md).
-/// Unset or `0` keeps the retail airports. A replay honours it too, since a
-/// recording does not keep it.
+/// The redrawn airports (docs/formats/redrawn-airports.md) are the default
+/// (John, 2026-10-11). `TORE_REDRAWN_AIRPORTS=0` is a developer escape
+/// hatch that builds the retail airfields for single-player launches and the
+/// offline tools; unset or `1` draws the redraw. Online sessions, the server
+/// and replays never read it: a session always flies the redraw (the mission
+/// text has no airfield line) and a replay builds the airfields its
+/// recording names.
 pub fn redrawn_airports() -> AppResult<bool> {
     match std::env::var("TORE_REDRAWN_AIRPORTS").as_deref() {
-        Err(std::env::VarError::NotPresent) | Ok("0") => Ok(false),
-        Ok("1") => Ok(true),
+        Err(std::env::VarError::NotPresent) | Ok("1") => Ok(true),
+        Ok("0") => Ok(false),
         _ => Err("TORE_REDRAWN_AIRPORTS must be 0 or 1".into()),
     }
 }

@@ -556,7 +556,9 @@ pub struct MissionSpec {
     pub condition: Condition,
     /// The start time, wind and cloud deck that replace the condition's own:
     /// what the game's `TORE_WEATHER_TIME`, `TORE_WIND` and
-    /// `TORE_CLOUD_ALTITUDE` resolve to. Resolved by the caller, so building
+    /// `TORE_CLOUD_ALTITUDE` resolve to, and the airfields (the redrawn
+    /// airports unless single player's `TORE_REDRAWN_AIRPORTS=0`; the text
+    /// form always means the redraw). Resolved by the caller, so building
     /// the mission reads no environment variable.
     pub weather: Overrides,
     pub start: Start,
@@ -2046,7 +2048,9 @@ impl Parser {
             time: self.time,
             wind: self.wind,
             cloud_altitude: self.cloud_deck,
-            redrawn_airports: false,
+            // The text has no airfield line: every mission it describes,
+            // a session's or a server's, flies the redrawn airports.
+            redrawn_airports: true,
         };
         if let Some(start) = self.start {
             spec.start = start;
@@ -2218,7 +2222,7 @@ mod tests {
             time: Some([5, 7]),
             wind: Some([-90, 45]),
             cloud_altitude: Some(12_000),
-            redrawn_airports: false,
+            redrawn_airports: true,
         };
         spec.start = Start::Ground {
             runway: RUNWAY_OBJECT_BASE + 3,

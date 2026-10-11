@@ -405,11 +405,11 @@ names are in `tore_replay::vocab`; the layout is an agent decision.
 | `weapon.dud` | the shooter | A bomb that landed before its fuze armed (the [dud rule](spec/air-to-ground.md#warnings)): `projectile`, `weapon`, where it landed, `arm_s`, `flown_s` and `reason`. Its `weapon.outcome` says missed and why. |
 | `weapon.cluster` | the shooter | A cluster bomb burst on the ground: `projectile`, `weapon`, where, and the burst's `explosion` type. The submunition flashes are drawn from that burst's explosion, so a replay shows what the flight showed. |
 | `weapon.guided` | the shooter, then the object an AT-2 or JDAM follows | A laser weapon, JDAM or AT-2 at its release (`released` true) and at each change of mode: `mode` is `waiting` (a laser weapon released with no spot, which may lock one), `guiding` or `blind` (guidance lost for good, or never had), with `from`, `guidance` (`laser`, `coordinate` or `command`), `spot_owner` and `own` (a laser weapon on its own aircraft's spot or a buddy's), the JDAM's stored point as `x_ft`, `y_ft`, `z_ft` with `stored` true, and a `reason` in words. Event kinds of the same family as the `weapon.guidance` display tree, but a separate log of what changed. |
-| `player.laser` | the lasing aircraft, then the object under the spot | An aircraft's laser designator changed state or mask: `state` (`ready`, `lasing`, `masked`, `off`), `how` (automatic or by hand), `mask` (range, gimbal or terrain), `range_ft`, and the spot's position while it lases. |
-| `player.laser_spot` | the lasing aircraft, then the object under the spot | Where the spot is while the laser is on (slice FX-R, 2026-10-11): `x_ft`, `y_ft`, `z_ft`. Written when the spot has moved more than 5 ft since the last entry and at least 12 ticks (a tenth of a second) after it, so a spot on a standing target makes none beyond the `player.laser` that turned it on, and one on a moving truck makes ten a second. The viewer follows the spot with them. |
+| `player.laser` | the lasing aircraft, then the object under the spot | An aircraft's laser designator changed state or mask: `state` (`ready`, `lasing`, `masked`, `off`), `how` (automatic or by hand), `mask` (range, gimbal or terrain), `range_ft`, and the spot's position while it lases. While the AI flies an aircraft whose human gave it back (a drop, a leave, away, a kick), the cockpit the human left keeps its laser and designation, and the entries go on for that aircraft with `kept` true (slice FX-K). When the aircraft is destroyed or leaves the mission with its laser on, one `off` entry (`reason` "its aircraft is gone") ends it. |
+| `player.laser_spot` | the lasing aircraft, then the object under the spot | Where the spot is while the laser is on (slice FX-R, 2026-10-11): `x_ft`, `y_ft`, `z_ft`. Written when the spot has moved more than 5 ft since the last entry and at least 12 ticks (a tenth of a second) after it, so a spot on a standing target makes none beyond the `player.laser` that turned it on, and one on a moving truck makes ten a second. The viewer follows the spot with them. It also follows the spot of a kept cockpit (`kept` true), so a laser bomb that goes on guiding after its pilot dropped out shows its spot. |
 | `weapon.aim` | the shooter | Where a guided weapon in the guiding mode steers (FX-R): `projectile`, `spot_owner` for a laser weapon, `x_ft`, `y_ft`, `z_ft`; written like `player.laser_spot`. The last one before a weapon goes blind is the point it was homing on then. A JDAM's stored point is in its `weapon.guided`; it makes none. |
-| `weapon.impact` | the shooter, then the ground target it had designated | A bomb or guided weapon reached the ground (FX-R), one for each bomb, duds included: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft` (where it landed), `guided`, `mode` (a guided weapon's mode at the end), `aim_x_ft`, `aim_y_ft`, `aim_z_ft` and `miss_ft` (the point it was steering for and the distance from it, when it had one), `target_ft` (distance from the designated target) and a `reason` in words (`it landed 940 ft from the point it was steering for before it went blind, 950 ft from the designated target`). |
-| `player.designate` | the aircraft, then the ground object | A flown aircraft designated a ground object or pinned a ground point, or gave one up: `channel` (`a-g radar`, `infrared`, `harm page`, `sight`, `visual`, `pin` or `cleared`), `from` (the object before) and, for a pin, its position. An air target never makes an entry. |
+| `weapon.impact` | the shooter, then the ground target it had designated | A bomb or guided weapon reached the ground (FX-R), one for each bomb, duds included: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft` (where it landed), `guided`, `mode` (a guided weapon's mode at the end), `aim_x_ft`, `aim_y_ft`, `aim_z_ft` and `miss_ft` (the point it was steering for and the distance from it, when it had one), `target_ft` (distance from the designated target) and a `reason` in words (`it landed 940 ft from the point it was steering for before it went blind, 950 ft from the designated target`). For a shooter whose human gave the aircraft back, `target_ft` reads the designation the human left and a laser weapon's `reason` for going blind reads the kept laser (FX-K). |
+| `player.designate` | the aircraft, then the ground object | A flown aircraft designated a ground object or pinned a ground point, or gave one up: `channel` (`a-g radar`, `infrared`, `harm page`, `sight`, `visual`, `pin` or `cleared`), `from` (the object before) and, for a pin, its position. An air target never makes an entry. The same kept cockpit and `kept` flag as `player.laser`; a kept designation keeps the channel the human made it by, and one the AI's aircraft lost with its life is cleared with `reason` "its aircraft is gone". |
 
 ```mermaid
 stateDiagram-v2
@@ -719,11 +719,14 @@ beyond them.
     and the starts are the flight's.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
     not 0. 0 is the retail airfields, which every recording before the field
-    has. A build that redraws the airports will give its scene a number of
-    its own, so a replay builds the airfields the flight had; until then a
-    build opens a recording of another scene with the retail airfields and
-    says so in the session log. Reserved here; no build writes anything but 0
-    yet.
+    has; 1 is the [redrawn airports](formats/redrawn-airports.md), which every
+    flight has had since they became the default (2026-10-11, protocol 24),
+    so every recording since then is a format 3 file. The viewer rebuilds the
+    scene the header names, whatever `TORE_REDRAWN_AIRPORTS` says: an old
+    recording replays on the retail airfields, a new one on the redraw. A
+    scene this build does not know (a later build's) opens with the retail
+    airfields and a warning in the session log. A change to the plans that
+    moves anything an aircraft touches takes a new number.
   - **Surface poses**: every unit that follows a route (columns, convoys,
     ships under way) as a list in each frame, keyed by its fixed id, with
     position and attitude predicted like an aircraft's, so a unit driving
@@ -792,6 +795,10 @@ beyond them.
   entries inside format 3 (2 without surface content). A recording from
   before them opens as it did and draws the marks its other air-to-ground
   events allow.
+- The `kept` flag (2026-10-11, slice FX-K) is new on `player.laser`,
+  `player.laser_spot` and `player.designate`: it marks entries of an aircraft
+  the AI flies with the cockpit a human left. Older recordings simply stop
+  those entries when the human gave the aircraft back.
 - A sample's fuel counts the internal tanks and, since 2026-09-29, the external
   tanks too (requested by John on 2026-09-29). New recordings say so with the
   header setting `fuel=internal and external tanks`, which the summary and the
@@ -2092,11 +2099,10 @@ headless workflow.
   launchers (rails) and a parked aircraft's debris piece (format 3).
 - `replay::identity::terrain` rebuilds the recorded world from the header's
   resolved settings (layout, weather choice and layer, start time, wind,
-  cloud deck and, in format 3, the ground target) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
-  `TORE_CLOUD_ALTITUDE`; `replay::identity::of` captures them from a live
-  terrain. The one switch it does read is the experiment
-  `TORE_REDRAWN_AIRPORTS` ([redrawn airports](formats/redrawn-airports.md)),
-  which a recording does not keep. The viewer then builds its `Scenery` from that terrain.
+  cloud deck and, in format 3, the ground target and the airfield scene) without reading `TORE_WEATHER_TIME`, `TORE_WIND`,
+  `TORE_CLOUD_ALTITUDE` or `TORE_REDRAWN_AIRPORTS`; `replay::identity::of`
+  captures them from a live terrain (`RETAIL_AIRFIELD_SCENE` 0,
+  `REDRAWN_AIRFIELD_SCENE` 1). The viewer then builds its `Scenery` from that terrain.
 - The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:
   loading, cameras, keys, drawing), `host.rs` (the `Screen::Replay`
   plumbing in the app), `panels.rs` (the debug panels and the chunk cache
