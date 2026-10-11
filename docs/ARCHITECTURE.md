@@ -1983,6 +1983,55 @@ identically), and in `tore-session` a rejoin through a real host
 (`a_game_that_rejoins_reads_its_planes_sight_and_laser_as_it_left_them`,
 `a_laser_bomb_guides_on_across_a_drop_and_a_rejoin`).
 
+#### The strike cockpit
+
+*Built (slice ST-C, 2026-10-11; [AI strike](spec/ai-strike.md#one-cockpit-two-pilots),
+John: "one cockpit, two pilots").* An aircraft's ground-attack state is one
+record, `live::StrikeCockpit` (`tore-sim` `combat/live/cockpit.rs`): the
+target (`StrikeTarget::Object` or `Point`, or none), the selected station
+and armed state, the seeker mode (CUED or BORE), the bomb sight's mode (CCIP
+or LVL), the targeting sight and the laser with its hand setting. It lives in
+one of three places, always the same type:
+
+| Who flies | Where the record is | Who edits it |
+| --- | --- | --- |
+| A human | `Ownship::cockpit` | The keys. The designation's home stays the sensors; combat copies the designated object into the target at each step (`Ownship::sync_target`), so every reader sees the designation |
+| The AI, in a plane a human gave back | `Kept::cockpit` ([what a returning player keeps](#what-a-returning-player-keeps)) | The AI's release (store and target); the sight and the laser step on |
+| An AI striker | `State::ai_cockpit_mut` (an `AiCockpit` by aircraft, made on first use) | The AI's strike controller (target, station, laser by hand); its sight takes the target object as its track |
+
+`Ownship` and `Kept` read as their cockpit (`own.selected` is
+`own.cockpit.selected`), so existing readers are unchanged. `State::strike_cockpit`
+finds an aircraft's record wherever it is. Combat steps every kept and AI
+cockpit's sight and laser at the start of a tick, from the aircraft's row; all
+their spots are laser spots like a human's (own weapons, buddies of the side),
+and a guided weapon finds its launcher's laser by aircraft in any of the
+three places.
+
+**One release** (`State::release_round`): a human's trigger and the AI turn a
+station's store into rounds the same way: a bomb pack leaves whole at its
+offsets with its scatter from combat's random stream, a pod fires one rocket
+along the nose, a guided air-to-ground weapon takes its spot or stored point
+(`guided::release`), and a laser weapon's release keeps the cockpit's laser
+on. The delivery solution (`delivery_of`), the guided sight (`guided::sight`)
+and the guided part of readiness (`StrikeCockpit::guided_readiness`) are
+shared too. The AI enters through `State::release_strike` (from `tore-world`
+`ai_wings/release.rs`), which checks `strike_readiness` and numbers the rounds
+from the AI's own projectile range; its rounds carry their weapon record. AI
+bombs, rocket pods and guided air-to-ground stores take this path; AI
+missiles with a seeker profile and guns keep `AiWings::realise`.
+
+**When the AI releases** is the strike tactics' call (ST-T):
+`State::strike_delivery` and `strike_guided_sight` give it what a human's HUD
+shows, and `State::strike_release_due` says whether the release is due on the
+shared solution. Skill enters only for unguided weapons, through a
+`ReleaseAim` (the pass's aim offset from the target and the release gate
+radius, John's precision rule); smart weapons use the targeting systems at
+every skill.
+
+The AI cockpits are mission state in the combat checkpoint, after `kept`; the
+`Ownship` and `Kept` coders carry the cockpit as one record. An entry goes
+when its aircraft is destroyed or gone.
+
 #### The AI with several humans
 
 *Built (B3).* The host hands the AI one `HumanAircraft` for each human-flown
