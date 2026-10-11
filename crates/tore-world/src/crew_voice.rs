@@ -2018,6 +2018,7 @@ mod tests {
             id,
             enemy,
             flight,
+            colour: flight,
             position,
             alive: true,
         };

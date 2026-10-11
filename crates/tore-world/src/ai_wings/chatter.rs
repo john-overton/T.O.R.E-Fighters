@@ -219,8 +219,15 @@ impl FuelLevel {
 pub struct Member {
     pub id: u32,
     pub enemy: bool,
-    /// Flight number from 0; the player's flight is 0.
+    /// Flight number from 0; the player's flight is 0. It identifies the
+    /// flight (friendly flights first, then the enemy's); the radio's colour
+    /// name is [`Member::colour`].
     pub flight: u8,
+    /// The flight's colour in its own side's list, from 0: each side's first
+    /// flight is Red, the next Blue, and so on, so a Redfor flight never
+    /// takes a Bluefor flight's place in the list (CL-R2, John 2026-10-11:
+    /// the tower called the Redfor wingman "Blue two"; `fitted`).
+    pub colour: u8,
     /// Position in the flight from 0; the player is position 0 of flight 0.
     pub position: u8,
     pub alive: bool,
@@ -321,8 +328,10 @@ impl AiWings {
     }
 
     /// Radio labels and listeners for every AI aircraft. `fitted` flight
-    /// numbering: the player's flight is the first (Red), then the other
+    /// numbering: the player's flight is the first, then the other
     /// populated friendly wings, then the enemy wings, each in setup order.
+    /// The colour each is called by counts within its own side, so the
+    /// enemy's first flight is Red as the player's is.
     pub fn radio_members(&self) -> Vec<Member> {
         let mut flights: Vec<(bool, u8)> = vec![(false, 1)];
         for slot in &self.slots {
@@ -340,6 +349,7 @@ impl AiWings {
                     id: slot.id,
                     enemy: key.0,
                     flight: flights.iter().position(|f| *f == key).unwrap_or(0) as u8,
+                    colour: crate::radio_calls::colour_of(&flights, key),
                     position: slot.member_number.saturating_sub(1),
                     alive: self.mission.actor(slot.id).is_some_and(AiActor::alive),
                 }
@@ -586,15 +596,17 @@ mod tests {
         // Player's flight: Red two and three; the enemy pair is the next flight.
         let summary: Vec<_> = members
             .iter()
-            .map(|m| (m.id, m.enemy, m.flight, m.position))
+            .map(|m| (m.id, m.enemy, m.flight, m.colour, m.position))
             .collect();
+        // The enemy pair is the next flight by number, and the first of its
+        // own side by colour: Red, not Blue (CL-R2).
         assert_eq!(
             summary,
             [
-                (1, false, 0, 1),
-                (2, false, 0, 2),
-                (3, true, 1, 0),
-                (4, true, 1, 1)
+                (1, false, 0, 0, 1),
+                (2, false, 0, 0, 2),
+                (3, true, 1, 0, 0),
+                (4, true, 1, 0, 1)
             ]
         );
     }

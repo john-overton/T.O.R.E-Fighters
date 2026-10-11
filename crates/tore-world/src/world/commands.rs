@@ -483,7 +483,7 @@ impl World {
         let flight = crate::radio_calls::members(&self.roster, self.ai_wings.as_ref(), |_| true)
             .iter()
             .find(|member| member.id == plane.0)
-            .map(|member| member.flight);
+            .map(|member| member.colour);
         // A wingman that cannot see the target itself still takes an Engage
         // order when a flightmate's track of it is in the picture (G3b).
         let datalink = &self.datalink;

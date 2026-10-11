@@ -151,16 +151,28 @@ impl From<Attacker> for journal::Attacker {
     }
 }
 
+/// The colour slot of the flight `key` (side is enemy, wing number) among
+/// `flights`, the mission's flights: how many flights of its own side come
+/// before it. Each side's first flight is Red.
+pub(crate) fn colour_of(flights: &[(bool, u8)], key: (bool, u8)) -> u8 {
+    flights
+        .iter()
+        .filter(|f| f.0 == key.0 && f.1 < key.1)
+        .count() as u8
+}
+
 /// "Red two": flight colour and position word. A flight past the eighth has
-/// no colour in the original; TORE names it by number (fitted).
+/// no colour in the original; TORE names it by number (fitted). The colour
+/// counts the flights of the member's own side, so a Redfor flight is never
+/// named from the Bluefor list (CL-R2).
 pub fn label(member: &Member) -> String {
     let position = POSITIONS
         .get(usize::from(member.position))
         .copied()
         .unwrap_or("?");
-    match FLIGHTS.get(usize::from(member.flight)) {
+    match FLIGHTS.get(usize::from(member.colour)) {
         Some(colour) => format!("{colour} {position}"),
-        None => format!("Flight {} {position}", member.flight + 1),
+        None => format!("Flight {} {position}", member.colour + 1),
     }
 }
 
@@ -252,7 +264,7 @@ pub fn battle_hearers(
         })
         .map(|listener| {
             Hearer::named(listener.seat, label.clone())
-                .saying(battle_words(member.flight, words(listener)))
+                .saying(battle_words(member.colour, words(listener)))
                 .on(comms::Net::Battle)
         })
         .collect()
@@ -1290,6 +1302,7 @@ pub fn members(
             id: plane.id.0,
             enemy: key.0,
             flight: flights.iter().position(|f| *f == key).unwrap_or(0) as u8,
+            colour: colour_of(&flights, key),
             position: plane.slot.member,
             alive: match plane.pilot {
                 Pilot::Human(_) => human_alive(plane.id),
@@ -1444,11 +1457,36 @@ mod tests {
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect()
     }
+    /// CL-R2: a side's flights are coloured from its own list.
+    #[test]
+    fn each_side_names_its_flights_from_its_own_list() {
+        // Bluefor wings 1 and 3, Redfor wings 1 and 2, as the radio lists them.
+        let flights = [(false, 1), (false, 3), (true, 1), (true, 2)];
+        let colours: Vec<u8> = flights.iter().map(|k| colour_of(&flights, *k)).collect();
+        assert_eq!(colours, [0, 1, 0, 1]);
+        let redfor = |flight, colour, position| Member {
+            id: 9,
+            enemy: true,
+            flight,
+            colour,
+            position,
+            alive: true,
+        };
+        assert_eq!(label(&redfor(2, 0, 1)), "Red two");
+        assert_eq!(label(&redfor(3, 1, 0)), "Blue one");
+        // The battle net's colour is the same list.
+        assert_eq!(battle_label(&redfor(2, 0, 0)), "Net Red one");
+        assert_eq!(
+            battle_words(0, Phrase::default().raw("Contact", None)).text,
+            "Red, Contact"
+        );
+    }
     fn member(id: u32, enemy: bool, flight: u8, position: u8) -> Member {
         Member {
             id,
             enemy,
             flight,
+            colour: flight,
             position,
             alive: true,
         }

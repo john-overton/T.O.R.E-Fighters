@@ -869,6 +869,36 @@ fn radio_members_from_the_roster_match_the_ai_wings() {
     );
 }
 
+/// CL-R2 (John 2026-10-11): the tower called the Redfor wingman "Blue two"
+/// because the enemy flight was numbered after the friendly ones. Each side
+/// names its flights from its own list, so the Redfor flight is Red and its
+/// wingman is "Red two", in the AI's members and in the roster's.
+#[test]
+fn a_redfor_flight_is_called_by_its_own_sides_colours() {
+    let world = mission();
+    let wings = world.ai_wings.as_ref().unwrap();
+    for members in [
+        wings.radio_members(),
+        radio_calls::members(&world.roster, Some(wings), |_| true),
+    ] {
+        let enemy: Vec<_> = members.iter().filter(|m| m.enemy).collect();
+        assert!(!enemy.is_empty());
+        for member in &enemy {
+            // Another flight than the player's, with the first colour of its side.
+            assert_ne!(member.flight, 0);
+            assert_eq!(member.colour, 0, "{member:?}");
+            assert!(
+                radio_calls::label(member).starts_with("Red "),
+                "{}",
+                radio_calls::label(member)
+            );
+        }
+        let friendly: Vec<_> = members.iter().filter(|m| !m.enemy).collect();
+        // Friendly flights come first, so their colours are their numbers.
+        assert!(friendly.iter().all(|m| m.colour == m.flight));
+    }
+}
+
 /// The mission result call comes from the core for every seat, whatever the
 /// audio: once, two seconds after the result is decided, to a seat that holds
 /// it under its own label.
