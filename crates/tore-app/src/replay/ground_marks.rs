@@ -744,11 +744,8 @@ pub fn geometry(
     height: f64,
     out: &mut Vec<f32>,
 ) {
-    let shift = |p: [f64; 3]| -> [f64; 3] { std::array::from_fn(|i| p[i] - origin[i]) };
-    let mut relative = Camera::new();
-    relative.position = shift(camera.position);
-    [relative.yaw, relative.pitch, relative.roll] = [camera.yaw, camera.pitch, camera.roll];
-    relative.zoom = camera.zoom;
+    let shift = |p: [f64; 3]| trails::relative(p, origin);
+    let relative = trails::relative_camera(camera, origin);
     let camera = &relative;
     let prims: Vec<Prim> = prims
         .iter()

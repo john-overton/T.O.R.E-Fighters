@@ -60,9 +60,49 @@ fn length(v: [f64; 3]) -> f64 {
     v.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
+/// A world position moved to be relative to the render `origin`.
+pub fn relative(point: [f64; 3], origin: [f64; 3]) -> [f64; 3] {
+    sub(point, origin)
+}
+
+/// `camera` with its position relative to the render `origin`: the eye that
+/// matches combat geometry, which is built relative to the origin so its
+/// vertices keep their precision far from the map's corner.
+pub fn relative_camera(camera: &Camera, origin: [f64; 3]) -> Camera {
+    let mut moved = Camera::new();
+    moved.position = relative(camera.position, origin);
+    [moved.yaw, moved.pitch, moved.roll] = [camera.yaw, camera.pitch, camera.roll];
+    moved.zoom = camera.zoom;
+    moved
+}
+
+/// [`ribbon`] for world positions: the points and the eye are moved by the
+/// render `origin` first, because combat geometry is relative to it. Drawn
+/// without that, a trail lands the origin's distance (up to several miles
+/// along each axis) from the aircraft it follows.
+pub fn ribbon_world(
+    out: &mut Vec<f32>,
+    points: &[[f64; 3]],
+    color: [u8; 3],
+    camera: &Camera,
+    origin: [f64; 3],
+    height: f64,
+) {
+    let points: Vec<[f64; 3]> = points.iter().map(|p| relative(*p, origin)).collect();
+    ribbon(
+        out,
+        &points,
+        color,
+        &relative_camera(camera, origin),
+        height,
+    );
+}
+
 /// Appends camera-facing ribbons along `points` to combat geometry, in its
 /// ten-float emissive vertex format, about [`WIDTH`] pixels wide on a view
-/// `height` pixels tall at every distance.
+/// `height` pixels tall at every distance. `points` and `camera` must be in
+/// the space the geometry is in, relative to the render origin; use
+/// [`ribbon_world`] for world positions.
 pub fn ribbon(
     out: &mut Vec<f32>,
     points: &[[f64; 3]],
@@ -225,6 +265,66 @@ mod tests {
             960.,
         );
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_trail_far_from_the_map_corner_lands_on_the_aircraft_it_follows() {
+        // Combat geometry is relative to the render origin, a cell-rounded
+        // copy of the eye. A trail drawn from world positions must be moved
+        // by it, or it lands the origin's distance away.
+        let mut camera = Camera::new();
+        camera.position = [310_000.4, 8_000., -215_000.7];
+        camera.yaw = 0.7;
+        camera.pitch = -0.1;
+        camera.roll = 0.;
+        let origin = camera.position.map(|v| (v / 1024.).round() * 1024.);
+        // A path ahead of and below the camera, ending at the aircraft.
+        let points = [
+            [310_900., 7_800., -214_000.],
+            [311_300., 7_850., -213_500.],
+            [311_800., 7_900., -213_000.],
+        ];
+        let mut out = Vec::new();
+        ribbon_world(&mut out, &points, [255, 0, 0], &camera, origin, 960.);
+        assert_eq!(out.len(), 2 * 6 * 10);
+        assert!(out.iter().all(|v| v.is_finite()));
+        // The vertices project, through the eye moved the same way, to the
+        // pixels the world points project to through the real eye.
+        let eye = relative_camera(&camera, origin);
+        let size = [1280, 960];
+        let mut hits = 0;
+        for point in points {
+            let wanted = camera.project(size, point).unwrap();
+            let near = out.chunks_exact(10).any(|v| {
+                let at = std::array::from_fn(|k| f64::from(v[k]));
+                eye.project(size, at)
+                    .is_some_and(|p| (p[0] - wanted[0]).hypot(p[1] - wanted[1]) < 3.)
+            });
+            hits += usize::from(near);
+        }
+        assert_eq!(hits, 3);
+        // Every vertex is a few feet from its point in the origin's frame,
+        // not hundreds of thousands of feet out.
+        let local = points.map(|p| relative(p, origin));
+        assert!(out.chunks_exact(10).all(|v| {
+            let at: [f64; 3] = std::array::from_fn(|k| f64::from(v[k]));
+            local.iter().any(|p| length(sub(at, *p)) < 100.)
+        }));
+        assert!(out.iter().step_by(10).all(|x| x.abs() < 10_000.));
+    }
+
+    #[test]
+    fn the_relative_eye_keeps_its_aim() {
+        let mut camera = Camera::new();
+        camera.position = [5_000., 100., -7_000.];
+        [camera.yaw, camera.pitch, camera.roll] = [1.2, 0.3, 0.1];
+        camera.zoom = 2.;
+        let moved = relative_camera(&camera, [4_096., 0., -8_192.]);
+        assert_eq!(moved.position, [904., 100., 1_192.]);
+        assert_eq!(
+            [moved.yaw, moved.pitch, moved.roll, moved.zoom],
+            [1.2, 0.3, 0.1, 2.]
+        );
     }
 
     #[test]
