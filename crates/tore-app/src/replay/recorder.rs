@@ -1196,11 +1196,7 @@ impl Recorder {
             .filter(|(id, _)| !shots.contains_key(id))
             .map(|(id, shot)| (*id, *shot))
             .collect();
-        for effect in frame
-            .new_effects
-            .iter()
-            .filter(|e| e.kind == replay::EffectKind::Ground)
-        {
+        for effect in frame.new_effects.iter().filter(|e| is_ground_burst(e.kind)) {
             let nearest = vanished
                 .iter()
                 .enumerate()
@@ -1892,6 +1888,21 @@ pub fn cheats_on(cheats: &tore_sim::cheats::Cheats) -> Vec<String> {
 
 fn ground_height(world: &terrain::Terrain, position: [f64; 3]) -> f64 {
     world.surface(position[0], position[2]).height
+}
+
+/// Whether a recorded effect is a weapon striking the ground: the plain
+/// ground effect of recordings before explosion types, or a blast on the
+/// ground (what every ground burst is now, and what `combat.ground_impact`
+/// is written for once each).
+fn is_ground_burst(kind: replay::EffectKind) -> bool {
+    matches!(
+        kind,
+        replay::EffectKind::Ground
+            | replay::EffectKind::Blast {
+                on: replay::Strike::Ground,
+                ..
+            }
+    )
 }
 
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -3172,6 +3183,77 @@ mod tests {
             frames[1].new_effects[1].duration_ticks,
             u32::from(current.effects[1].ticks)
         );
+    }
+
+    #[test]
+    fn a_ground_burst_writes_one_ground_impact_naming_the_weapon_that_vanished() {
+        use tore_world::snapshot::EffectPose;
+        // A bare ground effect (a recording from before explosion types) and
+        // a blast on the ground (every ground burst since) each write one.
+        for blast in [None, Some(18)] {
+            let (mut recorder, receiver) = Recorder::detached(64, &[]);
+            let mut combat = fixture::combat(
+                fixture::models(),
+                (0..7).map(|i| (i % 3, [0.; 3])).collect(),
+            );
+            let player = fixture::player();
+            let scene = fixture::scene(combat.state.own().configuration());
+            let [_, mut flying] = fixture::snapshots(&mut combat, &scene, true, &player);
+            flying.effects.clear();
+            let shot = flying.projectiles[0].clone();
+            let mut ui = flight_ui::FlightUi::default();
+            tick(&mut recorder, &mut combat, &flying, 10, &mut ui);
+            // The weapon is gone and its burst stands where it was.
+            let mut landed = flying.clone();
+            landed.projectiles.retain(|p| p.id != shot.id);
+            landed.effects = vec![EffectPose {
+                kind: tore_sim::combat::live::EffectKind::Ground,
+                position: shot.position,
+                ticks: 20,
+                blast,
+            }];
+            tick(&mut recorder, &mut combat, &landed, 11, &mut ui);
+            // The same burst a tick on, one tick shorter: not a new one.
+            landed.effects[0].ticks -= 1;
+            tick(&mut recorder, &mut combat, &landed, 12, &mut ui);
+            let frames: Vec<Frame> = receiver
+                .try_iter()
+                .filter_map(|m| match m {
+                    Message::Frame(f) => Some(*f),
+                    _ => None,
+                })
+                .collect();
+            let impacts: Vec<(usize, &Event)> = frames
+                .iter()
+                .enumerate()
+                .flat_map(|(i, f)| f.events.iter().map(move |e| (i, e)))
+                .filter(|(_, e)| e.kind == kind::COMBAT_GROUND_IMPACT)
+                .collect();
+            assert_eq!(
+                impacts.len(),
+                1,
+                "blast {blast:?}: once, on the tick it lands"
+            );
+            let (frame, event) = impacts[0];
+            assert_eq!(frame, 1);
+            assert_eq!(event.subject, Some(shot.owner));
+            assert_eq!(event.id(field::PROJECTILE), Some(shot.id));
+            assert!(event.id(field::WEAPON).is_some());
+            assert_eq!(event.num(field::X_FT), Some(shot.position[0]));
+            assert_eq!(event.num(field::Z_FT), Some(shot.position[2]));
+        }
+    }
+
+    #[test]
+    fn only_a_strike_on_the_ground_counts_as_a_ground_burst() {
+        use tore_sim::combat::live::EffectKind as Live;
+        let kind = |live, blast| convert::effect_kind(live, blast);
+        assert!(is_ground_burst(kind(Live::Ground, None)));
+        assert!(is_ground_burst(kind(Live::Ground, Some(18))));
+        assert!(!is_ground_burst(kind(Live::Hit, Some(18))));
+        assert!(!is_ground_burst(kind(Live::Destroyed, Some(18))));
+        assert!(!is_ground_burst(kind(Live::Flak, Some(27))));
+        assert!(!is_ground_burst(kind(Live::Launch, None)));
     }
 
     #[test]

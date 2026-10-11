@@ -56,8 +56,9 @@ pub mod kind {
     /// A warhead burst in the air near its target. Subject: shooter. Object:
     /// target. Fields: `projectile`, `miss_ft`, `damage`.
     pub const COMBAT_AIRBURST: &str = "combat.airburst";
-    /// A weapon hit the ground. Subject: shooter. Fields: `projectile`,
-    /// `weapon`.
+    /// A weapon burst on the ground, once per burst. Subject: shooter. Fields:
+    /// `x_ft`, `y_ft`, `z_ft`, and `projectile`, `weapon` when a weapon
+    /// vanished that tick.
     pub const COMBAT_GROUND_IMPACT: &str = "combat.ground_impact";
     /// A chaff cartridge or flare left an aircraft. Subject: the aircraft.
     /// Fields: `decoy` (Text: chaff or flare), `number` (Int: the device's
