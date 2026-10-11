@@ -185,7 +185,7 @@ surface-target radar weapons: **A-G must be on at release**. AS-7 and AS-15 (fla
 0x200) need A-G on for the whole flight and the target inside their zone 1 (45
 degrees, range included) as seen from the launcher. The gun's LCOS solves against
 a designated ground object as it does for an aircraft, so strafing a designated
-tank shows the pipper on it. Tab is meant to fire the gun whatever is selected (retail key; not built, see [Not built](#not-built)).
+tank shows the pipper on it. Tab fires the gun whatever is selected ([the gun key](#the-gun-key)).
 
 **Remote ground targeting.** A friendly aircraft with the J-STARS plane flag above
 1,000 ft feeds the A-G and HARM pages (retail data). None is imported; out of
@@ -802,6 +802,48 @@ retail behaviour; the reach scale serves both.
 - **Guns.** The LCOS solves against a designated ground object (see
   [support](#the-air-to-ground-radar)).
 
+### The gun key
+
+Built (slice FX-T, 2026-10-11). Tab, held, fires the aircraft's gun whatever
+store is selected, so a pilot can strafe between bomb runs without cycling
+weapons. The key is retail (decision 21); the rules below are opinionated
+(agent decision, John asked for the key to fire the gun on 2026-10-11) because
+the retail routine was not traced.
+
+- **Same gun as the trigger.** The gun fires exactly as it does with the gun
+  selected and the trigger held: the record's rate and burst, the ammunition
+  count (it falls round by round), the dispersion cone, the tracers, the sound
+  and the muzzle flash. A held Tab and a held trigger on the gun do not add up;
+  they are one trigger.
+- **The selected store is left alone.** The selection, the bay request, the
+  seeker lock, the delivery mode and the selected store's READY text do not
+  change. With a bomb selected, Tab strafes and the trigger still drops the
+  bomb, the two together if both are held. The gun is internal, so Tab never
+  opens a weapon bay.
+- **Armed only.** Tab follows the trigger's own gates: the system must be armed
+  (NAV and SAFE stay safe), the aircraft alive and the gun loaded. The station
+  is the first gun that has rounds left, else the first gun. An aircraft with
+  no gun does nothing, silently.
+- **The AC-130.** Its selected station is already a gun, so Tab is a second
+  trigger on the linked guns, with the same cadence; it adds no gun.
+- **The HUD.** While Tab is down and the selected store is not a gun, the weapon
+  area of the HUD shows the gun's readout in place of the store's: the round
+  count and name, LCOS (or SAFE), the pipper or NO SOL, and the range arc. It
+  goes back to the store when the key comes up. Opinionated: a pilot strafing
+  wants the gun sight, and the store's cue would only compete with it.
+- **Keys.** `fire-gun` is a hold action, remappable in the controls screen
+  like the trigger, with no gamepad default. Ctrl+Tab is a different key
+  (instrument next). A pause, a menu or losing focus lets go of it, as of the
+  trigger.
+- **Online and in replays.** Tab goes to the host as a combat command pair,
+  `GunKeyDown` and `GunKeyUp` (extended combat codes 3 and 4;
+  [net protocol](../formats/net-protocol.md)). The host fires; the client
+  draws its own tracers from the key and its readout (armed, rounds), as it
+  does for the trigger, and the host decides every hit. A replay holds the
+  commands as `player.command` events ("gun-key-down", "gun-key-up") and the
+  rounds as ordinary gun rounds. A flight resumed or rejoined starts with the
+  key up.
+
 ### Missiles and the HARM boresight cue
 
 - **IR AGMs** (Maverick AGM-65A and G, SLAM). Retail cues: the seeker diamond
@@ -1089,7 +1131,7 @@ round. The generated [controls list](../CONTROLS.md) and the
 | Sight: designate, pin, drop, slew, zoom | Backslash, Shift+Backslash, L or ;, Alt+arrows, Shift+' and Shift+; (now every aircraft with a sight) | AC-130 bindings | retail keys, AC-130 design |
 | Laze on or off | Ctrl+L | none | opinionated (John, 2026-10-10) |
 | Delivery mode: CCIP and LVL for bombs, BORE and CUED for missiles | Ctrl+M (the existing seeker-mode action gains a key) | none | opinionated (agent) |
-| Fire the gun whatever is selected | Tab (not built: answers "not implemented yet") | none | retail |
+| Fire the gun whatever is selected (hold) | Tab ([the gun key](#the-gun-key)) | none | retail key, rules opinionated (agent) |
 | Nearest ground target (Easy targeting cheat) | Ctrl+X | none | retail cheat |
 | Jettison air-to-ground stores | Shift+K | as today | retail, exists |
 | Bay doors | O | as today | retail, exists |
@@ -1278,10 +1320,6 @@ records (ranges, weights, counts) are in the inventory above.
 The acceptance pass ([baseline](../baselines/air-to-ground.md#not-run-and-not-built))
 found these promised or specified items unbuilt:
 
-- Tab, "fire the gun whatever is selected" (decision 21): the key is bound and
-  answers "not implemented yet".
-- A viewer overlay for laser spots and designations: replays carry the events
-  (`player.laser`, `player.designate`, `weapon.guided`), the viewer draws no spot.
 - `Ctrl+M` on the [keyboard map](../tore-keyboard-map.html) (a browser check and
   a README image recapture are due).
 - Online (protocol 23, slice NA): the cues are the host's, drawn a round trip

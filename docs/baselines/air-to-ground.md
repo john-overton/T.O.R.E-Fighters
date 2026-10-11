@@ -466,9 +466,9 @@ saw the real cockpit; this pass did not open a window.
 
 Not built:
 
-- A viewer overlay for laser spots and designations: replays and recordings carry
-  the events (`player.laser`, `player.designate`, `weapon.guided`), the viewer
-  draws no laser spot.
+- A viewer overlay for laser spots and designations: not built in this pass;
+  built afterwards (FX-R, 2026-10-11, B in the replay viewer, see
+  [laser and bomb marks](../REPLAYS.md#laser-and-bomb-marks)).
 - Tab (fire the gun whatever is selected), above.
 - `Ctrl+M` on [the keyboard map](../tore-keyboard-map.html): the map's rules call
   for a browser check of all five sheets at two sizes and a README image

@@ -138,6 +138,7 @@ fn key_event(kind_name: &str) -> bool {
         || kind_name == kind::WEAPON_RELEASE
         || kind_name == kind::WEAPON_DUD
         || kind_name == kind::WEAPON_CLUSTER
+        || kind_name == kind::WEAPON_IMPACT
         || kind_name == kind::WEAPON_GUIDED
         || kind_name.starts_with("combat.")
         || kind_name.starts_with("aircraft.")

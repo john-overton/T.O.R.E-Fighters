@@ -277,7 +277,9 @@ fn frame(mut scene: Scene, shot: &Shot, font: &Font) -> AppResult<Vec<u8>> {
         None,
         (s.bank, 1.),
     );
-    weapon_hud::draw(&mut layer, &frame, font, HUD_GREEN, 1., false, true, None);
+    weapon_hud::draw(
+        &mut layer, &frame, font, HUD_GREEN, 1., false, true, None, false,
+    );
     let mut rgba = preview::backdrop(s, target);
     for (pixel, hud) in rgba.chunks_exact_mut(4).zip(layer.chunks_exact(4)) {
         if hud[3] != 0 {

@@ -428,6 +428,14 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
         }
         kind::WEAPON_DUD => format!("{shot} from {s} was a dud{}", because(event)),
         kind::WEAPON_CLUSTER => format!("{shot} from {s} burst and scattered its submunitions"),
+        kind::WEAPON_IMPACT => format!(
+            "{shot} from {s} landed{}",
+            opt(event, field::REASON)
+                .map(|r| format!(": {r}"))
+                .unwrap_or_default()
+        ),
+        kind::WEAPON_AIM => format!("{shot} from {s} steering point moved"),
+        kind::PLAYER_LASER_SPOT => format!("{s} laser spot moved"),
         kind::WEAPON_GUIDED => {
             let mode = opt(event, field::MODE).unwrap_or_else(|| "?".into());
             let follows = event

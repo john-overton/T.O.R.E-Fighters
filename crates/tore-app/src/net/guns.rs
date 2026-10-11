@@ -86,6 +86,8 @@ pub struct Inputs<'a> {
     pub render_tick: f64,
     /// Whether the seat's trigger is held now.
     pub trigger: bool,
+    /// Whether the gun key (Tab) is held now.
+    pub gun_key: bool,
     /// The seat's plane.
     pub plane: u32,
     /// The seat's aircraft as drawn: position, nose and speed.
@@ -116,6 +118,9 @@ pub struct Stores {
     pub tick: u64,
     /// An AC-130's gun group, when the seat flies one.
     pub group: Option<Group>,
+    /// The gun Tab fires while a store that is not a gun is selected: its
+    /// station, whether the system is armed and its rounds.
+    pub key_gun: Option<(usize, bool, u16)>,
 }
 
 /// What a readout says of an AC-130's guns, by gun slot.
@@ -152,6 +157,12 @@ impl Stores {
             rounds: readout.stores.rounds(selected),
             tick: readout.tick,
             group,
+            key_gun: config
+                .stations
+                .get(selected)
+                .filter(|station| !live::is_gun(&station.weapon))
+                .and_then(|_| live::key_gun_station(config, |i| readout.stores.rounds(i)))
+                .map(|index| (index, readout.stores.armed, readout.stores.rounds(index))),
         }
     }
 
@@ -188,6 +199,9 @@ impl Stores {
 pub struct Fire {
     key: crate::combat::FireInput,
     pad: crate::combat::FireInput,
+    /// Tab, the gun key (`GunKeyDown` and `GunKeyUp`; a trigger release lets
+    /// go of it too, as the host's does).
+    gun: bool,
 }
 
 impl Fire {
@@ -204,12 +218,20 @@ impl Fire {
                 SeatCommand::ReleaseTrigger => {
                     self.key.cancel();
                     self.pad.cancel();
+                    self.gun = false;
                 }
+                SeatCommand::Combat(live::Command::GunKeyDown) => self.gun = true,
+                SeatCommand::Combat(live::Command::GunKeyUp) => self.gun = false,
                 _ => {}
             }
         }
         self.pad.space(pad, false, false);
         self.key.held || self.pad.held
+    }
+
+    /// Whether the gun key is held after the last turn.
+    pub fn gun_key(&self) -> bool {
+        self.gun
     }
 }
 
@@ -591,7 +613,7 @@ impl Guns {
         }
         self.own_tick = self.own_tick.max(input.tick.saturating_sub(MAX_CATCH_UP));
         // The gun stations the trigger fires, with what each may do.
-        let firing: Vec<_> = input
+        let mut firing: Vec<_> = input
             .stores
             .map(|stores| stores.firing())
             .unwrap_or_default()
@@ -616,9 +638,34 @@ impl Guns {
                     station,
                     ready,
                     usize::from(rounds).saturating_sub(since),
+                    // The gun selected fires from Tab as it does from the
+                    // trigger.
+                    input.trigger || input.gun_key,
                 ))
             })
             .collect();
+        // Tab with another store selected: the aircraft's gun has a pass of
+        // its own, armed or not as the readout says (the host also holds it
+        // back for a failed station, which the client cannot see).
+        if input.gun_key
+            && let Some((index, armed, rounds)) = input.stores.and_then(|s| s.key_gun)
+            && let Some(station) = input.config.stations.get(index)
+        {
+            let since = input.stores.map_or(0, |stores| {
+                self.fired
+                    .iter()
+                    .filter(|(tick, s)| *s == index && *tick > stores.tick)
+                    .count()
+            });
+            firing.push((
+                index,
+                None,
+                station,
+                armed,
+                usize::from(rounds).saturating_sub(since),
+                true,
+            ));
+        }
         // A station the trigger no longer fires lets go of its trigger, as
         // changing weapon does.
         for index in &self.firing {
@@ -635,10 +682,10 @@ impl Guns {
             self.own
                 .retain_mut(|(_, round)| round.step(tick, &around.ground));
             // In slot order, as the host steps the linked guns.
-            for (k, (index, slot, station, ready, _)) in firing.iter().enumerate() {
+            for (k, (index, slot, station, ready, _, held)) in firing.iter().enumerate() {
                 let fired = self.cadences.entry(*index).or_default().step(
                     &station.weapon,
-                    input.trigger && input.own.alive,
+                    *held && input.own.alive,
                     *ready && left[k] > 0 && self.own.len() < MAX_ROUNDS,
                     tick,
                 );
@@ -1173,7 +1220,72 @@ mod tests {
             rounds: 2_000,
             tick: 0,
             group: None,
+            key_gun: None,
         })
+    }
+
+    /// Tab with a bomb selected makes the client's own rounds as the trigger
+    /// does with the gun selected: the same rounds on the same ticks, the
+    /// same tracers; and a disarmed aircraft makes none.
+    #[test]
+    fn the_gun_key_makes_the_own_rounds_the_trigger_would() {
+        let weapon = gun((4, 3, 2));
+        let mut config = configuration(&weapon);
+        let mut bomb = config.stations[0].clone();
+        bomb.weapon.source = "MK82.JT".into();
+        bomb.weapon.flags = 0x22012;
+        config.stations.push(bomb);
+        let ground = |_: f64, _: f64| -100_000.;
+        let stations = |_: AircraftId| &[][..];
+        let around = around(&ground, &stations);
+        let run = |trigger: bool, gun_key: bool, stores: Option<Stores>| {
+            let mut guns = Guns::default();
+            let mut made = Vec::new();
+            for tick in 0..TICKS {
+                let mut picture = RenderSnapshot::default();
+                guns.step(
+                    &Inputs {
+                        tick,
+                        render_tick: tick as f64,
+                        trigger: trigger && pulls(tick),
+                        gun_key: gun_key && pulls(tick),
+                        plane: SHOOTER,
+                        own: launcher(tick),
+                        gun_aim: GunAim::default(),
+                        stores,
+                        config: &config,
+                        events: &[],
+                    },
+                    &around,
+                    &mut picture,
+                );
+                made.push(
+                    picture
+                        .projectiles
+                        .iter()
+                        .map(|p| (p.tracer, p.position.map(f64::to_bits)))
+                        .collect::<Vec<_>>(),
+                );
+            }
+            (made, guns.fired.len())
+        };
+        let trigger = run(true, false, ready());
+        assert!(trigger.1 > 20, "the reference fired: {}", trigger.1);
+        let bomb_selected = |armed: bool| {
+            Some(Stores {
+                selected: 1,
+                ready: true,
+                rounds: 2,
+                key_gun: Some((0, armed, 2_000)),
+                ..ready().unwrap()
+            })
+        };
+        let key = run(false, true, bomb_selected(true));
+        assert_eq!(key, trigger, "Tab makes the trigger's rounds");
+        // The trigger alone, with the bomb selected, makes none.
+        assert_eq!(run(true, false, bomb_selected(true)).1, 0);
+        // Disarmed: none.
+        assert_eq!(run(false, true, bomb_selected(false)).1, 0);
     }
 
     fn around<'a>(
@@ -1266,6 +1378,7 @@ mod tests {
                     tick,
                     render_tick: tick as f64,
                     trigger: pulls(tick),
+                    gun_key: false,
                     plane: SHOOTER,
                     own: launcher(tick),
                     gun_aim: GunAim::default(),
@@ -1328,6 +1441,7 @@ mod tests {
                     tick,
                     render_tick: tick as f64,
                     trigger: pulls(tick),
+                    gun_key: false,
                     plane: SHOOTER,
                     own: launcher(tick),
                     gun_aim: GunAim::default(),
@@ -1404,6 +1518,7 @@ mod tests {
                         tick,
                         render_tick: shown as f64,
                         trigger: false,
+                        gun_key: false,
                         plane: 3,
                         own: launcher(tick),
                         gun_aim: GunAim::default(),
@@ -1455,6 +1570,7 @@ mod tests {
                     tick,
                     render_tick: tick as f64,
                     trigger: false,
+                    gun_key: false,
                     plane: 3,
                     own: launcher(tick),
                     gun_aim: GunAim::default(),
@@ -1504,6 +1620,23 @@ mod tests {
         assert!(!fire.turn(&[], false));
         assert!(fire.turn(&[key(true, false, false)], false));
         assert!(!fire.turn(&[SeatCommand::ReleaseTrigger], false));
+        // The gun key is its own: down and up, and a trigger release lets go.
+        let tab = |down| {
+            SeatCommand::Combat(if down {
+                live::Command::GunKeyDown
+            } else {
+                live::Command::GunKeyUp
+            })
+        };
+        let mut fire = Fire::default();
+        assert!(!fire.gun_key());
+        assert!(!fire.turn(&[tab(true)], false), "Tab is not the trigger");
+        assert!(fire.gun_key());
+        fire.turn(&[tab(false)], false);
+        assert!(!fire.gun_key());
+        fire.turn(&[tab(true)], false);
+        fire.turn(&[SeatCommand::ReleaseTrigger], false);
+        assert!(!fire.gun_key());
     }
 
     #[test]
@@ -1523,6 +1656,7 @@ mod tests {
             tick: 99,
             render_tick: 99.,
             trigger: false,
+            gun_key: false,
             plane: SHOOTER,
             own: launcher(99),
             gun_aim: GunAim::default(),
@@ -1574,6 +1708,7 @@ mod tests {
                 tick,
                 render_tick: tick as f64,
                 trigger: false,
+                gun_key: false,
                 plane: 3,
                 own: launcher(tick),
                 gun_aim: GunAim::default(),
@@ -1757,6 +1892,7 @@ mod tests {
                             may_fire: group.status.map(Readiness::gun_may_fire),
                             rounds: stations.map(|s| s.map_or(0, |s| own.rounds(s))),
                         }),
+                        key_gun: None,
                     },
                 });
             }
@@ -1947,6 +2083,7 @@ mod tests {
                         tick,
                         render_tick: tick as f64,
                         trigger: HELD.contains(&tick),
+                        gun_key: false,
                         plane: SHOOTER,
                         own: launcher(tick),
                         gun_aim: train(seen.aim),
@@ -2013,6 +2150,7 @@ mod tests {
                         tick,
                         render_tick: tick as f64,
                         trigger: HELD.contains(&tick),
+                        gun_key: false,
                         plane: SHOOTER,
                         own: launcher(tick),
                         gun_aim: seen.aim,
@@ -2168,6 +2306,7 @@ mod tests {
                             tick,
                             render_tick: shown as f64,
                             trigger: false,
+                            gun_key: false,
                             plane: 3,
                             own: launcher(tick),
                             gun_aim: GunAim::default(),

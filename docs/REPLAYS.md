@@ -165,7 +165,7 @@ player's ownship, and the first aircraft is the one watched.
 | AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
 | Data link | `datalink.member`, `datalink.lock`, `datalink.unlock`, `datalink.assign`, `datalink.clear`, `datalink.acknowledge` and `datalink.sort_warning`: what changed in each flight's shared picture, from the data link's journal ([below](#data-link-events)) |
-| Air to ground | The bombs, rockets and guided weapons of the [air-to-ground round](spec/air-to-ground.md), in [their own section](#air-to-ground-events): `weapon.release` for each trigger call that lets go of bombs or rockets (a pack is one entry listing its rounds in order), `weapon.dud`, `weapon.cluster`, `weapon.guided` for a laser or GPS weapon's release and each change of guidance, `player.laser` and `player.designate`. A bomb's fall is the projectile's ordinary track, one pose a tick |
+| Air to ground | The bombs, rockets and guided weapons of the [air-to-ground round](spec/air-to-ground.md), in [their own section](#air-to-ground-events): `weapon.release` for each trigger call that lets go of bombs or rockets (a pack is one entry listing its rounds in order), `weapon.dud`, `weapon.cluster`, `weapon.guided` for a laser or GPS weapon's release and each change of guidance, `player.laser` and `player.designate`, and, so the viewer can [draw them](#laser-and-bomb-marks), `player.laser_spot` and `weapon.aim` (where a spot or a weapon's aim point is, at most ten times a second) and `weapon.impact` (where a bomb landed and how far from its aim). A bomb's fall is the projectile's ordinary track, one pose a tick |
 | Surface units (format 3) | The surface world of a [ground target mission](spec/surface-defenses.md): `surface.burst` for each gun burst or missile salvo of a unit, `surface.phase` for the engagement it is in, `surface.rearm` and `surface.refill` when a supply truck rearms a launcher or gives a gun a magazine (with what it holds after), `surface.radar` when a radar comes on, goes off or is shut down by an anti-radiation missile, and `surface.wreck` with the unit's fire (its width, sized by its hit points). The rounds and missiles are ordinary `weapon.launch` and `weapon.outcome` events owned by the unit's id, and an aircraft's loss to one says `it was shot down by an SA-6` |
 | Audio | `audio.effect` (impacts, explosions, and each chaff cartridge's and flare's release sound, marked `own` when the player's own aircraft released it), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
 | Player and system | `player.command` (combat commands and trigger releases), `player.view_target` (the target your target views follow, from the first frame and again whenever it changes, including when the sensors drop it and the views hold it by sight within visual range, and when it goes to none), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
@@ -406,6 +406,9 @@ names are in `tore_replay::vocab`; the layout is an agent decision.
 | `weapon.cluster` | the shooter | A cluster bomb burst on the ground: `projectile`, `weapon`, where, and the burst's `explosion` type. The submunition flashes are drawn from that burst's explosion, so a replay shows what the flight showed. |
 | `weapon.guided` | the shooter, then the object an AT-2 or JDAM follows | A laser weapon, JDAM or AT-2 at its release (`released` true) and at each change of mode: `mode` is `waiting` (a laser weapon released with no spot, which may lock one), `guiding` or `blind` (guidance lost for good, or never had), with `from`, `guidance` (`laser`, `coordinate` or `command`), `spot_owner` and `own` (a laser weapon on its own aircraft's spot or a buddy's), the JDAM's stored point as `x_ft`, `y_ft`, `z_ft` with `stored` true, and a `reason` in words. Event kinds of the same family as the `weapon.guidance` display tree, but a separate log of what changed. |
 | `player.laser` | the lasing aircraft, then the object under the spot | An aircraft's laser designator changed state or mask: `state` (`ready`, `lasing`, `masked`, `off`), `how` (automatic or by hand), `mask` (range, gimbal or terrain), `range_ft`, and the spot's position while it lases. |
+| `player.laser_spot` | the lasing aircraft, then the object under the spot | Where the spot is while the laser is on (slice FX-R, 2026-10-11): `x_ft`, `y_ft`, `z_ft`. Written when the spot has moved more than 5 ft since the last entry and at least 12 ticks (a tenth of a second) after it, so a spot on a standing target makes none beyond the `player.laser` that turned it on, and one on a moving truck makes ten a second. The viewer follows the spot with them. |
+| `weapon.aim` | the shooter | Where a guided weapon in the guiding mode steers (FX-R): `projectile`, `spot_owner` for a laser weapon, `x_ft`, `y_ft`, `z_ft`; written like `player.laser_spot`. The last one before a weapon goes blind is the point it was homing on then. A JDAM's stored point is in its `weapon.guided`; it makes none. |
+| `weapon.impact` | the shooter, then the ground target it had designated | A bomb or guided weapon reached the ground (FX-R), one for each bomb, duds included: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft` (where it landed), `guided`, `mode` (a guided weapon's mode at the end), `aim_x_ft`, `aim_y_ft`, `aim_z_ft` and `miss_ft` (the point it was steering for and the distance from it, when it had one), `target_ft` (distance from the designated target) and a `reason` in words (`it landed 940 ft from the point it was steering for before it went blind, 950 ft from the designated target`). |
 | `player.designate` | the aircraft, then the ground object | A flown aircraft designated a ground object or pinned a ground point, or gave one up: `channel` (`a-g radar`, `infrared`, `harm page`, `sight`, `visual`, `pin` or `cleared`), `from` (the object before) and, for a pin, its position. An air target never makes an entry. |
 
 ```mermaid
@@ -438,7 +441,8 @@ network capture classes them the same (slice NA). The Tacview file
 types them `Weapon+Rocket` and `Weapon+Bomb`, and a replay of an older
 recording reads them as it recorded them.
 
-What reads them: the debug log carries every event; the summary lists the
+What reads them: the viewer draws them as [laser and bomb
+marks](#laser-and-bomb-marks); the debug log carries every event; the summary lists the
 releases, duds, cluster bursts and guided modes among its key events; Tacview
 shows all of them as `Debug` events; `--recording-diff` compares them as part
 of the event categories. The battery scenario `replay-a2g` records a bomb
@@ -783,6 +787,11 @@ beyond them.
   and a recording from before them has no releases and no lit flames: its
   chaff and flares were short effects, which the viewer does not draw, as
   flight no longer draws them.
+- The viewer's [laser and bomb marks](#laser-and-bomb-marks) came this way
+  (2026-10-11): `player.laser_spot`, `weapon.aim` and `weapon.impact` are new
+  entries inside format 3 (2 without surface content). A recording from
+  before them opens as it did and draws the marks its other air-to-ground
+  events allow.
 - A sample's fuel counts the internal tanks and, since 2026-09-29, the external
   tanks too (requested by John on 2026-09-29). New recordings say so with the
   header setting `fuel=internal and external tanks`, which the summary and the
@@ -1167,6 +1176,7 @@ as in flight.
 | M / X | The [right-click menu](#the-right-click-menu) on the selected aircraft / close every panel |
 | Right-click | The right-click menu on the aircraft, weapon or ground object under the pointer |
 | R / Shift+R | Trails on or off / next trail length |
+| B | [Laser and bomb marks](#laser-and-bomb-marks) on or off (on at first, for a recording that has any) |
 | H | Hide or show the whole interface and the pointer |
 | P | Save the view without the interface as a PNG |
 | Esc | The [pause menu](#pause-menu); again, or Resume replay, to close it |
@@ -1198,7 +1208,7 @@ imported tree the same rows are authored.
 | Pref > Sound... | The Sound/Music Prefs screen over the paused replay, as in flight |
 | Pref > Time > Paused | Closes the menu, leaving the replay paused if it was playing and playing if it was paused |
 | Pref > Time > Slow-motion, 1x, 2x, 4x, 8x | Playback at 0.5x to 8x forwards once the menu closes; the menu stays open, as flight's time rows do |
-| Pref > Name labels? / Mission timer? / Flight path trails? / Comms panel? | The same switches as N, T, R and C, with On or Off beside them |
+| Pref > Name labels? / Mission timer? / Flight path trails? / Laser and bomb marks? / Comms panel? | The same switches as N, T, R, B and C, with On or Off beside them |
 | Resume replay | Closes the menu |
 | Keyboard shortcuts | The replay's keys, as in the table above |
 
@@ -1377,9 +1387,10 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
   They are drawn in the 3D view, so terrain and aircraft hide them, from
   path samples ten times a second plus where the aircraft is drawn now.
   Colours and lengths are fitted.
+- **Laser and bomb marks** (B, on at first): see [below](#laser-and-bomb-marks).
 - **Hide UI** (H or the Hide button): hides the bar, labels, subtitles,
-  timer, debug panels, the right-click menu and the pointer; trails stay as
-  chosen, and playback and camera keys keep working. H brings the
+  timer, debug panels, the right-click menu and the pointer; trails and the
+  marks' lines and shapes stay as chosen (their words go with the labels), and playback and camera keys keep working. H brings the
   interface back; the pause menu still opens over the hidden interface.
 - **Screenshots** (P): the 3D view without any interface, at the view's
   size (up to 1920x1080), saved as
@@ -1391,6 +1402,47 @@ Trails, fallen buildings and the weather need the whole recording read
 once. A background pass does that when the viewer opens, a second at a
 time; until it has reached a moment, trails there are shorter and the sky
 waits at the last moment it has reached.
+
+### Laser and bomb marks
+
+John asked on 2026-10-11 for the replay to draw laser spots, "useful to
+troubleshoot failed drops". B switches the marks (Pref > Laser and bomb
+marks? in the pause menu; `--replay-ui marks`). They are on at first, and
+drawn only for a recording that has [air-to-ground events](#air-to-ground-events);
+an older recording, or any other, shows nothing and the toast says so. They are
+in the 3D view like trails: lines and shapes a fixed size on screen at any
+range, hidden by terrain and aircraft, and the words beside them print with
+the name labels. The code is `tore-app/src/replay/ground_marks.rs`; the
+colours, shapes and words are agent choices (2026-10-11).
+
+| Mark | What it shows |
+| --- | --- |
+| Laser spot | A cross in a ring where the spot is while its aircraft lases, with a line from the aircraft and `YOUR LASER` or `FRIENDLY 1-2 LASER`. Green is the recording player's own laser, cyan a friendly buddy's, red or green any other side's. The spot follows `player.laser_spot` entries, so it moves with a moving target |
+| Masked laser | A dim, hollow ring at the last spot with a dashed line and `MASKED: GIMBAL` (or range, terrain), while the laser is wanted but cannot see the point. It goes with `off` or `ready` |
+| Designation | A square on the ground object an aircraft has designated (or its pinned point), in the aircraft's side colour, with `YOUR TARGET (A-G RADAR)`; it goes when the designation is given up |
+| Guided weapon | A line from the weapon to the point it steers for and a shape there (a ring for a spot, a diamond for a JDAM's stored point), in the colour of the spot it follows; `GUIDING ON YOUR LASER`, `GUIDING TO STORED POINT`, or yellow `WAITING: NO LASER SPOT YET` for a laser weapon with none yet |
+| Blind weapon | Orange, with a dashed line to the point it last steered for and the reason it gave: `BLIND: YOUR LASER WENT OFF`, `BLIND: THE LASER SPOT LEFT ITS 45 DEGREE CONE`, `BLIND: EVERY LASER SPOT WAS OUT OF ITS REACH AT RELEASE` |
+| Landing | A magenta X in a ring for twenty seconds after a bomb lands, a dashed line to the point it steered for and `IMPACT 42 FT FROM AIM, 1,300 FT FROM TARGET` (`BLIND IMPACT` after it went blind, `DUD` for one that landed before its fuze armed) |
+
+So a failed drop reads from the pictures: the weapon's line ends on the spot
+while the spot is where the pilot wanted it, or it turns orange when a laser
+goes off, or the landing sits far from both marks. Seen from the air the
+spot, the aircraft's line and the weapon's line are all there; the object
+view (O) on the weapon follows it down.
+
+What the recording must hold: the spot's position at any moment, and the
+aim of each weapon. `player.laser` only says when a laser changes state, so
+the recorder (slice FX-R) also writes `player.laser_spot` and `weapon.aim`
+as the spot and the point move, and `weapon.impact` when a bomb lands. They
+are new events inside the format (a reader that does not know them skips
+them), so recordings made before them still open. They show the spot where
+its laser came on and a weapon's aim where it began guiding, but nothing
+after, and no landings.
+
+With the interface hidden (H) the lines and shapes stay and their words
+go. `TORE_REPLAY_MARKS=1` draws the marks in the promo [reel
+renderer](#promo-reel-capture), which otherwise never shows them, so the
+marks can be checked without a window.
 
 ### Sound
 
@@ -1500,7 +1552,7 @@ For checking the viewer without a keyboard:
 tore-app --watch-replay FILE --capture-replay OUT.ppm --replay-tick N \
     [--flight-view 0..11] [--replay-aircraft ID] [--replay-drone] \
     [--replay-look-at aircraft:ID|ground:ID|weapon:ID] \
-    [--replay-ui labels,timer,trails,comms,subtitles] [--replay-clean] \
+    [--replay-ui labels,timer,trails,marks,comms,subtitles] [--replay-clean] \
     [--replay-menu '?'|pref|time|help|graphics|sound|controls]
 ```
 

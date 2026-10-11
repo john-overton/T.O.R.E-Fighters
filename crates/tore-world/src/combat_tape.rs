@@ -67,6 +67,8 @@ pub fn command_name(c: Command) -> String {
         Command::NearestGround => "nearest-ground",
         Command::ToggleLaser => "laze",
         Command::SightNext => "sight-next",
+        Command::GunKeyDown => "gun-key-down",
+        Command::GunKeyUp => "gun-key-up",
         Command::ToggleArm => "arm",
         Command::Jettison => "jettison",
         Command::ReplaceTarget => "target",
@@ -121,6 +123,8 @@ pub fn command(s: &str) -> Option<Command> {
         Command::NearestGround,
         Command::ToggleLaser,
         Command::SightNext,
+        Command::GunKeyDown,
+        Command::GunKeyUp,
         Command::ToggleArm,
         Command::Jettison,
         Command::ReplaceTarget,
@@ -182,6 +186,8 @@ mod tests {
             (Command::NearestGround, "nearest-ground"),
             (Command::ToggleLaser, "laze"),
             (Command::SightNext, "sight-next"),
+            (Command::GunKeyDown, "gun-key-down"),
+            (Command::GunKeyUp, "gun-key-up"),
         ] {
             assert_eq!(command_name(command), name);
             assert_eq!(super::command(name), Some(command));

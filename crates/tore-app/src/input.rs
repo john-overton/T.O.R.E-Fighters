@@ -51,7 +51,7 @@ bind keyboard Shift-r a-g-radar press\n\
 bind keyboard Ctrl-l laze press\n\
 bind keyboard / sight-next press\n\
 bind keyboard Ctrl-m weapon-seeker-mode press\n\
-bind keyboard Tab fire-gun press\n\
+bind keyboard Tab fire-gun hold\n\
 bind keyboard Ctrl-x nearest-ground press\n\
 bind keyboard Shift-e eject press\n\
 bind keyboard n airport-nav press\n\

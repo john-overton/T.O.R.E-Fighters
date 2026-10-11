@@ -70,9 +70,21 @@ pub fn ribbon(
     camera: &Camera,
     height: f64,
 ) {
+    ribbon_wide(out, points, color, camera, height, WIDTH);
+}
+
+/// [`ribbon`] with a width of `width` pixels of a 480-line view.
+pub fn ribbon_wide(
+    out: &mut Vec<f32>,
+    points: &[[f64; 3]],
+    color: [u8; 3],
+    camera: &Camera,
+    height: f64,
+    width: f64,
+) {
     let eye = camera.position;
     let focal = height / 2. * 3f64.sqrt() * f64::from(camera.zoom.max(0.01));
-    let pixels = WIDTH * height / 480.;
+    let pixels = width * height / 480.;
     let (sy, cy) = f64::from(camera.yaw).sin_cos();
     let (sp, cp) = f64::from(camera.pitch).sin_cos();
     let forward = [sy * cp, sp, cy * cp];

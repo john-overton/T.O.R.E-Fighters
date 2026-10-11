@@ -411,6 +411,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Replay viewer | I / F / G | AI thinking / telemetry panel of the selected aircraft / guidance panel of its newest missile in flight, on or off |
 | Replay viewer | M / X | Debug menu on the selected aircraft / close every debug panel |
 | Replay viewer | R / Shift+R | Flight path trails on or off / next trail length (10, 30, 60, 120 or 300 seconds) |
+| Replay viewer | B | Laser spots, designations, guided weapons and bomb landings drawn in the 3D view, on or off (on at first for a recording that has them) |
 | Replay viewer | H | Hide or show the whole interface and the pointer; playback and camera keys keep working |
 | Replay viewer | P | Save the view, without the interface, as a PNG in `screenshots/` |
 | Replay viewer | Esc | The pause menu, over the view even with the interface hidden: pauses playback; Esc again or Resume replay plays on as before, ? > End Replay goes back to the Replays screen, and the Control tab opens the controls screen |
