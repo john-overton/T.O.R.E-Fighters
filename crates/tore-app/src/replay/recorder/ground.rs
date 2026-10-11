@@ -125,8 +125,13 @@ impl Context<'_> {
         self.notes.get(&shot.weapon)
     }
 
-    /// The row of a ground object (anything not in the air) by id.
+    /// The row of a ground object by id: a surface object of the mission
+    /// (a unit, a ship, a parked aircraft), never an aircraft of the flights,
+    /// which may stand on a runway for a while.
     fn ground_row(&self, id: u32) -> Option<&live::Target> {
+        if !super::convert::is_surface_id(id) {
+            return None;
+        }
         self.tick
             .combat
             .state

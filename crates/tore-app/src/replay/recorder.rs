@@ -1108,11 +1108,9 @@ impl Recorder {
                     event = event.with(field::SURFACE, true);
                     if event.get(field::RANGE_FT).is_none()
                         && let Some(row) = aim.and_then(|id| {
-                            tick.combat
-                                .state
-                                .targets
-                                .iter()
-                                .find(|row| row.id == id && !row.airborne)
+                            tick.combat.state.targets.iter().find(|row| {
+                                row.id == id && !row.airborne && convert::is_surface_id(id)
+                            })
                         })
                     {
                         event = event.with(field::RANGE_FT, distance(shot.position, row.position));
@@ -3188,13 +3186,15 @@ mod tests {
         let scene = fixture::scene(combat.state.own().configuration());
         let snapshot = fixture::snapshots(&mut combat, &scene, true, &player)[1].clone();
         let mut ui = flight_ui::FlightUi::default();
-        let ground = combat
+        // A ground object of the mission's surface world.
+        let ground = 0x5000_0001;
+        combat
             .state
             .targets
-            .iter()
+            .iter_mut()
             .find(|t| !t.airborne)
             .expect("the fixture has ground objects")
-            .id;
+            .id = ground;
         tick(&mut recorder, &mut combat, &snapshot, 0, &mut ui);
         // Designate a ground object, then let the laser go ready, lase,
         // mask and stop; ticks that change nothing add nothing.
