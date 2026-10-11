@@ -953,18 +953,8 @@ impl Strike {
     /// asked [`Self::pick_target`]), and the target it would wait for.
     fn spot_wait_point(&self, cx: &Context<'_>) -> Option<Vector> {
         let inputs = cx.inputs;
-        let laser = inputs
-            .stores
-            .iter()
-            .any(|s| s.kind == StoreKind::Laser && s.rounds > 0);
-        let other = inputs.stores.iter().any(|s| {
-            s.rounds > 0
-                && !matches!(
-                    s.kind,
-                    StoreKind::Laser | StoreKind::AntiRadiation | StoreKind::Command
-                )
-        });
-        (laser && !other && !inputs.designator && !cx.wing.designator)
+        let laser = self.carries_only_laser(cx);
+        (laser && !inputs.designator && !cx.wing.designator)
             .then(|| {
                 cx.picture
                     .ordered()
@@ -972,6 +962,18 @@ impl Strike {
                     .or_else(|| objective_point(cx.picture))
             })
             .flatten()
+    }
+
+    /// The striker has a laser store with rounds and no other store it could
+    /// drop on a target (an anti-radiation or other missile counts as one).
+    fn carries_only_laser(&self, cx: &Context<'_>) -> bool {
+        let stores = &cx.inputs.stores;
+        stores
+            .iter()
+            .any(|s| s.kind == StoreKind::Laser && s.rounds > 0)
+            && !stores
+                .iter()
+                .any(|s| s.rounds > 0 && !matches!(s.kind, StoreKind::Laser | StoreKind::Command))
     }
 
     /// The laser store's fire range, feet (zero with none).
@@ -1002,21 +1004,12 @@ impl Strike {
         });
         // A laser carrier with no designator, no designator in its wing and
         // nothing else to drop attacks only what a buddy's spot lies on.
-        let buddy_only = !cx.inputs.designator
-            && !cx.wing.designator
-            && !stores.iter().any(|s| {
-                s.rounds > 0
-                    && !matches!(
-                        s.kind,
-                        StoreKind::Laser | StoreKind::AntiRadiation | StoreKind::Command
-                    )
-            });
         let attackers = |id: u32| cx.mates.iter().filter(|m| **m == id).count() as u32;
         let usable = |_: u16| anti_radiation || other;
         let mut candidates = cx
             .picture
             .strike_candidates(own, cx.side, &attackers, &usable);
-        if buddy_only {
+        if self.carries_only_laser(cx) && !cx.inputs.designator && !cx.wing.designator {
             for c in &mut candidates {
                 c.usable &= cx.inputs.lase.spot_targets.contains(&c.id.0);
             }

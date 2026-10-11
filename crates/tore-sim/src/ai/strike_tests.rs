@@ -1315,3 +1315,26 @@ fn a_duty_given_in_the_middle_of_a_defence_resumes_when_the_threat_has_gone() {
     assert_eq!(strike.phase(), Phase::Lase);
     assert_eq!(strike.lasing(), Some(TARGET));
 }
+
+#[test]
+fn the_buddy_spot_rules_bind_laser_carriers_only() {
+    // An anti-radiation carrier needs no spot to take a radar, and a
+    // carrier with a laser bomb and a HARM is not held to the spots either.
+    for stores in [
+        vec![store(0, StoreKind::AntiRadiation)],
+        vec![store(0, StoreKind::AntiRadiation), laser_store()],
+    ] {
+        let world = World {
+            own: own([0., 15_000., 0.], 700.),
+            picture: picture(
+                &[ground(TARGET, TARGET_AT, 0x1000, site(30_000., 0., true))],
+                vec![TARGET],
+            ),
+            inputs: inputs(stores, None),
+        };
+        let mut strike = Strike::new(1);
+        strike.step(&world.context(0));
+        assert_eq!(strike.phase(), Phase::Attack);
+        assert_eq!(strike.kind, Some(StoreKind::AntiRadiation));
+    }
+}
