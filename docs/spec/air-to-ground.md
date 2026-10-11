@@ -270,6 +270,27 @@ Air-to-Surface group, as the manual instructs (retail manual p. 120, decision 7)
 In retail a laser weapon needs only that its own launcher carries a working
 signature-1 sensor with a nonzero count, so a loaded pod counts.
 
+Built (T1). Which gimbal a record gets is one rule over the SEE fields (fitted):
+a record with weight (an external store: PAVESPK and PAVEKNF 425 lb, AAS38
+350 lb) or an all-round zone is a pod with the hemisphere below the aircraft;
+any other is built in, with a cone of its zone 0 heading (search, 60 degrees on
+every retail record) and zone 1 heading (track, 45 degrees). The cone is
+measured as the root sum square of the body heading and elevation. A laser
+record wins over a FLIR record on the same aircraft, and a loaded pod wins over
+both. A pod's eye sits 4 ft below the aircraft's centre, a built-in sensor's at
+the centre (fitted). The laser's reach and a FLIR sight's `/` range are the
+record's zone 0 maximum (60,760 ft on every laser, 91,140 ft on AAS38, AV8IR and
+SU37I, 54,684 ft on the MiG-29, Su-27 and AC-130 FLIRs; retail data). The
+AC-130 keeps its gunsight and has no separate targeting sight.
+
+A loaded pod takes a weapon station whose flags carry 0x400, under the retail
+equipment rule (the station's bit 1 needs the record's bit 1; the station's
+weight class over the pod's 425 lb caps it), one pod an aircraft; it replaces
+the station's weapon and any tank on that hardpoint, adds its weight, and comes
+off when a weapon or a tank takes the station. Cheat loading puts it on any
+station. The sim side is built (`Loadout::load_designator`); the Load Ordnance
+page does not offer the pods yet (the catalog card is a follow-up).
+
 ### The sight
 
 The AC-130 sight is generalised for every aircraft with a sight and the
@@ -280,6 +301,25 @@ Shift+;), the same ground march and the same masking rule. A fighter's default
 look is straight ahead, 10 degrees down (fitted). The tracked object becomes the
 designation. Label: opinionated (John, 2026-10-10: the target display shows
 lasing), reusing the AC-130 design.
+
+Built (T1), each an agent choice unless marked:
+
+- The sight of a fighter sees only objects on the ground (units, structures,
+  ships, parked aircraft). It never tracks a flying aircraft, so the air-to-air
+  designation rules are unchanged on every FLIR aircraft.
+- A designated ground object (T or a click on a ground page, Enter, Ctrl+X)
+  becomes the sight's track, and the sight's track designates its object while
+  it holds it. When the track ends (a pin, L, or the object destroyed, which
+  leaves the sight pinned on the ground it looked at) the designation that was
+  the track clears.
+- **`/`** lists the visible ground objects: standing, not friendly, within the
+  sensor's reach, inside its gimbal and with a clear terrain line from the eye.
+  The first press takes the one nearest the line of sight; each further press
+  steps to the next one to the right by body heading, wrapping to the leftmost
+  (the Enter rule of the ground pages). It works on the AC-130's gunsight too.
+- Outside a built-in sensor's search cone the camera stops at the edge with the
+  gimbal notice; a pod stops at the aircraft's horizontal plane as the AC-130's
+  dome does.
 
 ### The laser
 
@@ -353,6 +393,26 @@ Whether "LASER SEEKER DAMAGED" (a retail damage message) switches the designator
 off is an [unknown](#unknowns); the fallback is that the designator works while
 its aircraft lives.
 
+Built (T1), agent choices on the rules above:
+
+- The laser's limit is the record's reach times the retail laser weather
+  selector on the line from the eye to the point (50 percent when the altitudes
+  between them meet a cloud deck or fog, the same test the ground pages use).
+  The checks run in order, reach, gimbal (a built-in sensor's 45 degree track
+  cone, a pod's hemisphere), then terrain, and the first that fails names the
+  mask.
+- Ctrl+L before the sight holds anything is remembered: the laser lases as soon
+  as the sight tracks or pins. A manual on ends when the sight stops holding a
+  point, so the next track starts in Ready; a manual off ends at Ctrl+L or the
+  next laser weapon release.
+- "A laser weapon" is signature 1 with flag 0x400 (retail data). The automatic
+  rule reads the selected station while armed, and any of the aircraft's own
+  laser weapons still in flight.
+- The laser is off while its aircraft is destroyed.
+- Weapons read `State::laser_spot_for` (own first, else a buddy's) and the
+  laser's point while masked (`Laser::point`); the release range halving for a
+  laser weapon is `laser::weather_scale` (slice W1 applies it).
+
 ### Buddy lasing
 
 **Retail has no buddy lasing**: a laser weapon needs its own launcher's
@@ -380,6 +440,12 @@ What the player sees, own spot against buddy spot:
 | HUD weapon text | `LSR 4.3` (nm, flashing while lasing) | `BUD 4.3` (nm from the player's aircraft to the spot, flashing) |
 | Range | laser range from the player's aircraft to the spot | the same, to the buddy's spot |
 | Both exist | the row reads LASE and a second small BUDDY row sits beneath it | |
+
+Built (T1): "nearest" is nearest the aircraft whose weapon asks, then the lower
+aircraft id. Only human-flown aircraft lase this round (no AI strike), so a
+buddy is another player or, in single player, nobody yet. The readout carries
+the spot the plane's weapons home on, whether it is its own, its range and its
+owner, plus a second buddy spot when both exist.
 
 An aircraft with no sight of its own (a MiG-23 with an F-16C overhead) still
 gets the page: with a laser weapon selected and a buddy spot valid, the target

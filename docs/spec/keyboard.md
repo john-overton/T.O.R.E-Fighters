@@ -89,9 +89,12 @@ menu can allow.
 T.O.R.E binds Tab, Shift+R, Ctrl+R, `/` and Ctrl+X to the actions `fire-gun`,
 `a-g-radar`, `sight-next` and `nearest-ground`, and adds Ctrl+L (laser, `laze`)
 and Ctrl+M (delivery mode) on keys the original leaves free. Shift+R, Ctrl+R
-(the A-G page) and Ctrl+X (the nearest hostile ground target, Easy targeting
-only) work; the others report "not implemented yet" until their air-to-ground
-slices land ([key placement](../INPUT.md#key-placement)).
+(the A-G page), Ctrl+X (the nearest hostile ground target, Easy targeting
+only), `/` (the targeting sight's next visible ground object) and Ctrl+L (the
+laser by hand) work; the others report "not implemented yet" until their
+air-to-ground slices land ([key placement](../INPUT.md#key-placement)). `/` and
+Backslash act on every aircraft with a laser designator or a FLIR, not only with
+an advanced targeting option ([the targeting sight](air-to-ground.md#the-targeting-sight)).
 
 ## Sensors and navigation
 
