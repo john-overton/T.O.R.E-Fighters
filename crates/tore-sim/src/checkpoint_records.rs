@@ -187,6 +187,8 @@ crate::checkpoint_struct!(Configuration {
     external_fuel_lbs,
     engines,
     wreck_power,
+    sight,
+    designator_pods,
 } shared { sensors });
 
 #[cfg(test)]
@@ -407,6 +409,8 @@ mod tests {
             engines: 2,
             wreck_power: crate::wreck::Power::default(),
             sensors: profiles(),
+            sight: None,
+            designator_pods: vec![],
         }
     }
 

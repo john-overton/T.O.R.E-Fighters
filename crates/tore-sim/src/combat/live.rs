@@ -42,6 +42,9 @@ mod handoff;
 mod observation;
 #[cfg(test)]
 mod observation_reference;
+mod sighting;
+#[cfg(test)]
+mod sighting_tests;
 #[cfg(test)]
 mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
@@ -221,10 +224,17 @@ pub enum Command {
     /// Ctrl+X: the nearest hostile ground object, only with the Easy
     /// targeting cheat on (a retail cheat key).
     NearestGround,
-    /// Backslash on the AC-130: track the object under the gunsight's
-    /// crosshair, else pin the ground there. Nothing on other aircraft.
+    /// Ctrl+L: the laser on or off by hand, on an aircraft with a laser
+    /// designator (docs/spec/air-to-ground.md, "The laser").
+    ToggleLaser,
+    /// `/`: the targeting sight tracks the next visible ground object.
+    SightNext,
+    /// Backslash on an aircraft with a targeting sight (the AC-130's
+    /// gunsight included): track the object under the crosshair, else pin
+    /// the ground there.
     SightDesignate,
-    /// Shift+Backslash on the AC-130: pin the ground under the crosshair.
+    /// Shift+Backslash on an aircraft with a targeting sight: pin the ground
+    /// under the crosshair.
     SightPinGround,
     ToggleArm,
     Jettison,
@@ -403,6 +413,12 @@ pub struct Configuration {
     pub wreck_power: crate::wreck::Power,
     /// Imported sensor capability, resolved by parsed record channel.
     pub sensors: sensors::SensorProfiles,
+    /// The targeting sight of the aircraft's own laser or FLIR record
+    /// ([`super::sight::fixed_sight`]); [`Configuration::sight_sensor`] puts
+    /// a loaded designator pod first.
+    pub sight: Option<super::sight::SightSensor>,
+    /// Laser designator pods loaded on weapon stations (decision 7).
+    pub designator_pods: Vec<super::sight::DesignatorPod>,
 }
 impl Configuration {
     /// Convert installed quantities to logical rounds: a gun pod's rounds,
@@ -448,6 +464,12 @@ impl Configuration {
                 return Err(super::invalid("invalid gun pod configuration"));
             }
             mass += i64::from(pod.quantity) * i64::from(pod.weight_lbs);
+        }
+        for pod in &self.designator_pods {
+            if pod.station >= self.stations.len() || pod.store.weight_lbs < 0 {
+                return Err(super::invalid("invalid designator pod configuration"));
+            }
+            mass += i64::from(pod.store.weight_lbs);
         }
         let mut fuel = [0.; 9];
         let mut used = [false; 9];
@@ -762,6 +784,7 @@ impl Configuration {
         // Sensors resolve by parsed record channel, so a missing device is an
         // explicit state rather than another aircraft's radar.
         let profiles = sensors::SensorProfiles::from_source(a, &mut read)?;
+        let sight = super::sight::fixed_sight(a, &mut read)?;
         let station = |record: Option<&String>| {
             record.and_then(|record| {
                 a.hardpoints.iter().position(|h| {
@@ -867,6 +890,8 @@ impl Configuration {
             rwr_hardpoint,
             ecm_hardpoint,
             sensors: profiles,
+            sight,
+            designator_pods: vec![],
             fixed_external_equipment_lbs,
             tanks,
             gun_pods,
@@ -1286,6 +1311,11 @@ pub struct Ownship {
     pub selected: usize,
     /// AC-130 fixed-tick barrel angles and linked membership.
     pub gunship: Option<super::gunship::State>,
+    /// The targeting sight of an aircraft with a laser designator or a FLIR
+    /// (the AC-130's is its gunsight, in `gunship`).
+    pub sight: Option<super::sight::Sight>,
+    /// The laser designator: off on an aircraft without one.
+    pub laser: super::laser::Laser,
     pub armed: bool,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
@@ -1624,6 +1654,10 @@ impl Ownship {
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let sensors = Sensors::new(config.sensors.clone());
         let gunship = super::gunship::State::new(&config);
+        let sight = gunship
+            .is_none()
+            .then(|| config.sight_sensor().map(super::sight::Sight::new))
+            .flatten();
         Ok(Self {
             aircraft,
             side,
@@ -1656,6 +1690,8 @@ impl Ownship {
             ever_loaded,
             selected: 0,
             gunship,
+            sight,
+            laser: Default::default(),
             sensors,
             emitters: vec![],
             missile_threats: super::threats::ThreatService::new(aircraft),
@@ -2923,11 +2959,15 @@ impl State {
     /// (x right, y up, -127 to 127) and the zoom step (1 to 6, 0 for the
     /// default). Held until set again; nothing without an AC-130 gun group.
     pub fn set_sight_input(&mut self, aircraft: u32, deflection: [i8; 2], zoom: u8) {
-        if let Some(group) = self
-            .ownship_mut(aircraft)
-            .and_then(|own| own.gunship.as_mut())
-        {
-            group.input = super::gunship::SightInput { deflection, zoom };
+        let Some(own) = self.ownship_mut(aircraft) else {
+            return;
+        };
+        let input = super::gunship::SightInput { deflection, zoom };
+        if let Some(group) = own.gunship.as_mut() {
+            group.input = input;
+        }
+        if let Some(sight) = own.sight.as_mut() {
+            sight.input = input;
         }
     }
     /// A manual range or cockpit command for one ownship.
@@ -3148,15 +3188,16 @@ impl State {
                 if let Some(group) = &mut own.gunship {
                     group.drop_hold();
                 }
-            }
-            Command::SightDesignate => {
-                if let Some(group) = &mut own.gunship {
-                    group.request = Some(super::gunship::SightRequest::Designate);
+                if let Some(sight) = &mut own.sight {
+                    sight.drop_hold();
                 }
             }
-            Command::SightPinGround => {
-                if let Some(group) = &mut own.gunship {
-                    group.request = Some(super::gunship::SightRequest::Pin);
+            Command::SightDesignate => own.request_sight(super::sight::SightRequest::Designate),
+            Command::SightPinGround => own.request_sight(super::sight::SightRequest::Pin),
+            Command::SightNext => own.request_sight(super::sight::SightRequest::Next),
+            Command::ToggleLaser => {
+                if own.config.sight_sensor().is_some_and(|s| s.laser) {
+                    own.laser.toggle();
                 }
             }
             Command::ToggleArm => {
@@ -3894,6 +3935,9 @@ impl State {
             self.ownship_rows
                 .extend(rows.iter().map(|r| r.target.clone()));
         }
+        // The aircraft with one of their own laser weapons in flight: their
+        // lasers stay on (docs/spec/air-to-ground.md, "The laser").
+        let laser_owners = sighting::laser_owners(&ships, &self.projectiles);
         // These observations read fixed rows and change only their ownship.
         // Readiness and every release remain below, in aircraft id order.
         // Fitted: at least two active cockpits amortize a scoped dispatch.
@@ -3931,6 +3975,19 @@ impl State {
                         easy_targeting: self.cheats.easy_targeting,
                         tick: self.tick,
                         ground: &ground,
+                    },
+                );
+            }
+            if own.sight.is_some() {
+                sighting::step(
+                    own,
+                    launcher,
+                    &self.targets,
+                    &sighting::Context {
+                        ground: &ground,
+                        weather: &self.sensor_weather,
+                        laser_owners: &laser_owners,
+                        tick: self.tick,
                     },
                 );
             }
@@ -4209,6 +4266,9 @@ impl State {
                             self.rewinds.insert(self.next_shot, ticks);
                         }
                         own.shots += 1;
+                        if super::laser::is_laser_weapon(w) {
+                            own.laser.note_release();
+                        }
                         self.next_shot += 1;
                         fired = true;
                         events.push(Event::Fired {
@@ -6101,6 +6161,8 @@ mod tests {
                 infrared_hardpoint: None,
                 rwr_hardpoint: None,
                 sensors: sensor_profiles(),
+                sight: None,
+                designator_pods: vec![],
             },
             true,
         )

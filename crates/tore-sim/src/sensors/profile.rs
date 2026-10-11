@@ -367,7 +367,8 @@ impl SensorProfiles {
                 0 if visual.is_none() => {
                     visual = Some(VisualProfile::from_seeker(name, &seeker, 0)?)
                 }
-                // Laser designators keep their own channel and are not used here.
+                // Laser designators and the FLIR as a targeting sight are read
+                // by `combat::sight::fixed_sight`.
                 _ => {}
             }
         }
