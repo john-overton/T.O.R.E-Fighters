@@ -4,6 +4,7 @@ mod aim_marks;
 mod envelope;
 pub mod front_view;
 pub mod gunsight;
+pub mod targeting;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
 use tore_formats::text::GlyphCodes;
 use tore_formats::{Pic, font::Font};
@@ -438,6 +439,9 @@ pub struct CombatReadout {
     pub target: Option<crate::target_window::Readout>,
     /// The AC-130's gunsight page; `None` on every other aircraft.
     pub gunsight: Option<gunsight::Page>,
+    /// The targeting page of an aircraft with a laser or FLIR sight, or the
+    /// buddy form of it; `None` when the display is the plain target window.
+    pub targeting: Option<targeting::Page>,
     pub scope: scope::Scope,
     pub rcs: scope::Rcs,
     pub rwr: scope::Rwr,
@@ -1343,11 +1347,12 @@ impl Instruments {
             ),
             4 => {
                 let gunsight = self.combat.as_ref().and_then(|c| c.gunsight.as_ref());
+                let targeting = self.combat.as_ref().and_then(|c| c.targeting.as_ref());
                 let shown = self
                     .combat
                     .as_ref()
                     .and_then(|c| c.target.as_ref().map(|target| (target, &c.target_link)));
-                if shown.is_some() || gunsight.is_some() {
+                if shown.is_some() || gunsight.is_some() || targeting.is_some() {
                     r.rect(0, 0, SCREEN.2, SCREEN.3, [185, 185, 185, 255]);
                     if self.camera_target == shown.map(|(target, _)| target.id)
                         && let Some(pixels) = self.cameras.get(&4)
@@ -1373,6 +1378,8 @@ impl Instruments {
                 }
                 if let Some(page) = gunsight {
                     gunsight::draw(&mut r, f, page, shown);
+                } else if let Some(page) = targeting {
+                    targeting::draw(&mut r, f, page, shown);
                 } else if let Some((target, link)) = shown {
                     let ink = [20, 20, 20, 255];
                     let fit = |value: &str, limit: usize| {

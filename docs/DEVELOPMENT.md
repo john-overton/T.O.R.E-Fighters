@@ -1617,6 +1617,23 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --ove
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
 ```
 
+`--hud-a2g-preview OUT_DIR` draws the HUD's bomb and rocket sights
+([air-to-ground HUD](spec/air-to-ground.md#the-hud-in-air-to-ground-modes))
+without a window: for each frame it builds the TVIET truck park's Quick
+Mission, places the aircraft, steps the world so combat solves the sight, and
+draws the flight HUD and the weapon HUD over a plain sky and ground with the
+target marked. It writes each frame twice its size (`NAME.png`: CCIP beyond,
+near and inside the range, off the HUD, LOW, FRAG and IMP on an F/A-18D, the
+dot trail on an F-16C, the level "T" far out, at 10 s, 2 s and the release,
+off track and OVERFLY on an F-4B, the rocket pipper on an A-4E) and contact
+sheets `sheet-N.png`. `--a2g-run` flies the same sights through the trigger
+(`--attack ccip`, `level`, `rocket`; [flight lane](testing/lane-flight.md#air-to-ground-weapons)).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --hud-a2g-preview .local/hud-a2g
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --a2g-run UKR QUCOL --aircraft f4b --load MK82 --attack level --altitude 5000 --speed 450 --from 2
+```
+
 `--surface-fx-preview OUT_DIR [SCENE ...]` renders what the surface defenses
 look like, offscreen, by day, at dusk and at night: `flak` (the KS-12 and
 KS-19 bursts over North Vietnam, wide and close to the jet), `zsu23` and

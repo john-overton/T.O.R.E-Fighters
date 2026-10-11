@@ -24,6 +24,7 @@ use tore_sim::{
     airport::Service,
     attitude::Vector,
     combat::{
+        delivery::{Ccip, Delivery, DeliveryMode, LevelRelease, Warning},
         guided::GuidedSight,
         gunship::{self, Sight, SightNotice},
         gunship_impact::Impact,
@@ -95,6 +96,9 @@ pub struct CockpitReadout {
     pub seeker: SeekerReadout,
     /// What the weapon page and HUD estimate for the selected station.
     pub estimates: Estimates,
+    /// The bomb or rocket sight, while an unguided bomb or a rocket pod is
+    /// selected and armed.
+    pub bomb_sight: Option<BombSight>,
     /// The designated, displayed and view targets.
     pub targets: Targets,
     /// Radar and infrared contacts, plots, strobes and trails.
@@ -353,6 +357,43 @@ pub struct Estimates {
     pub hit_percent: u8,
     /// Seconds the missile would fly to the observed target.
     pub solution_seconds: Option<f64>,
+}
+
+/// What the HUD's bomb or rocket sight shows for the selected station
+/// (docs/spec/air-to-ground.md, "The HUD in air-to-ground modes"): the
+/// delivery solution combat worked out on the last tick
+/// ([`tore_sim::combat::delivery`]). Host-built; a networked client has none
+/// until the wire carries it (protocol 23, slice NA).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BombSight {
+    /// CCIP or LVL; always CCIP for rockets.
+    pub mode: DeliveryMode,
+    /// A rocket pod: ARM and the rocket pipper.
+    pub rocket: bool,
+    /// The impact point and its range arc, when the round comes down.
+    pub ccip: Option<Ccip>,
+    /// The level release, in LVL with a ground target.
+    pub level: Option<LevelRelease>,
+    /// LOW, FRAG and OVERFLY, in that order.
+    pub warnings: Vec<Warning>,
+    /// Seconds until the plane's last released bomb lands.
+    pub falling: Option<f64>,
+}
+impl BombSight {
+    pub fn of(delivery: &Delivery) -> Self {
+        Self {
+            mode: delivery.mode,
+            rocket: delivery.rocket,
+            ccip: delivery.ccip,
+            level: delivery.level,
+            warnings: delivery.warnings.clone(),
+            falling: delivery.falling,
+        }
+    }
+    /// The first warning, for the readiness slot.
+    pub fn warning(&self) -> Option<Warning> {
+        self.warnings.first().copied()
+    }
 }
 
 /// Where a target is and how hurt: what the HUD square, the target window and
@@ -887,6 +928,11 @@ pub fn build(
         guided: own.guided_sight,
         weapon_tti: weapon_tti(state, plane),
         guided_impact_tick: state.guided_impact(plane),
+        bomb_sight: own
+            .delivery
+            .as_ref()
+            .filter(|d| own.armed && d.station == own.selected)
+            .map(BombSight::of),
         seeker: SeekerReadout {
             status: own.mounted.status,
             target: own.mounted.target,

@@ -493,7 +493,8 @@ crate::checkpoint_struct!(Ownship {
     gun_cadence,
     bay_release,
     bay_hold_until,
-} shared { config } skip { guided_sight = None });
+    delivery_mode,
+} shared { config } skip { delivery = None, guided_sight = None });
 
 impl Checkpoint for State {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {

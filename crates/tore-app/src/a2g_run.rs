@@ -25,6 +25,13 @@
 //! - `laser`, `jdam`, `at2` ([`guided`]): the guided weapons, released on
 //!   the HUD's release range cue, with `--laser-off S`, `--buddy ID`,
 //!   `--turn-away S` and `--condition C` of their own.
+//! - `ccip` ([`ccip`]): a dive (or level) pass with a bomb, released when the
+//!   HUD's own CCIP pipper covers the target.
+//! - `level` ([`level`]): the A-G page designates the target, the bomb is
+//!   selected (LVL) and the trigger is held through a level pass; combat
+//!   releases at the "T"'s cue.
+//! - `rocket` ([`rocket`]): a shallow dive with a pod, fired when the rocket
+//!   pipper covers the target, held `--hold S`.
 use crate::{AppResult, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -40,8 +47,12 @@ use tore_world::{
     world::{Seating, TickOutput, World},
 };
 
+mod ccip;
 mod guided;
+mod level;
+pub mod preview;
 mod release;
+mod rocket;
 
 const SEAT: SeatId = SeatId(0);
 pub(crate) const FEET_PER_NM: f64 = 6_076.;
@@ -159,7 +170,19 @@ pub fn run() -> AppResult<()> {
     let mut scene = Scene::new(&o, &resources)?;
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
-        other => return Err(format!("unknown --attack {other}; kinds: release").into()),
+        "ccip" | "level" | "rocket" => {
+            scene.print_record();
+            match o.attack.as_str() {
+                "ccip" => ccip::run(&mut scene, &o)?,
+                "level" => level::run(&mut scene, &o)?,
+                _ => rocket::run(&mut scene, &o)?,
+            }
+        }
+        other => {
+            return Err(
+                format!("unknown --attack {other}; kinds: release, ccip, level, rocket").into(),
+            );
+        }
     }
     scene.finish();
     println!("a2g-run: done");
@@ -288,6 +311,34 @@ impl Scene {
         self.world
             .step(std::slice::from_ref(&input), &mut self.out)?;
         Ok(())
+    }
+
+    /// Queues a seat command for the next step.
+    pub fn queue(&mut self, command: SeatCommand) {
+        self.commands.push(command);
+    }
+
+    /// The attack record's fuze, splash and range, which the sight's
+    /// warnings and arc read.
+    fn print_record(&self) {
+        let w = &self.station().weapon;
+        println!(
+            "a2g-run: record {} fuze-arm {:.2} s fuze-radius {} collateral {} zone1-max {} name {}",
+            w.source,
+            f64::from(w.damage.fuze_arm_t) / 4.,
+            w.damage.fuze_radius,
+            w.damage.collateral_radius,
+            w.seeker.zones[1].maximum_range,
+            w.hud_name
+        );
+        println!(
+            "a2g-run: target {:#010x} {}",
+            self.target,
+            self.world
+                .combat
+                .ground_name(self.target)
+                .unwrap_or("unnamed")
+        );
     }
 
     /// Whether the attack station is selected and armed.
