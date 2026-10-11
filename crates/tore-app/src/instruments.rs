@@ -14,6 +14,8 @@ pub const HEIGHT: usize = 160;
 /// The page screen inside the window: x, y, width, height. Page content is
 /// drawn in screen coordinates, with (0, 0) at this rectangle's top-left.
 pub const SCREEN: (i32, i32, i32, i32) = (12, 20, 138, 114);
+/// Scope channels the M key cycles: radar, infrared and the HARM page.
+pub const CHANNELS: usize = 3;
 /// Left edges of the four button click areas, which share one top edge and size.
 const BUTTON_X: [i32; 4] = [18, 48, 78, 108];
 const BUTTON_Y: i32 = 134;
@@ -481,7 +483,7 @@ pub struct Instruments {
     /// used by the radar scope and, capped at 50 miles, by the RWR.
     pub radar_range: usize,
     pub rcs_range: usize,
-    /// Requested scope channel: 0 radar, 1 infrared.
+    /// Requested scope channel: 0 radar, 1 infrared, 2 the HARM page.
     pub channel: usize,
     pub history: bool,
     pub pressed: Option<(usize, usize)>,
@@ -753,18 +755,18 @@ impl Instruments {
             .min(tore_sim::sensors::RANGE_LADDER_NMI.len() - 1)]
         .min(RWR_MAX_SCALE_NMI)
     }
-    /// The on-screen M button cycles the available radar and infrared
-    /// channels. Availability is decided by the simulation, not here.
+    /// The on-screen M button cycles the radar, infrared and HARM channels.
+    /// Availability is decided by the simulation, not here.
     pub fn cycle_channel(&mut self) {
-        self.channel = (self.channel + 1) % 2;
+        self.channel = (self.channel + 1) % CHANNELS;
         self.pressed_contact = None;
     }
     pub fn controls(&self) -> tore_sim::sensors::Controls {
         tore_sim::sensors::Controls {
-            channel: if self.channel == 0 {
-                tore_sim::sensors::Channel::Radar
-            } else {
-                tore_sim::sensors::Channel::Infrared
+            channel: match self.channel {
+                0 => tore_sim::sensors::Channel::Radar,
+                1 => tore_sim::sensors::Channel::Infrared,
+                _ => tore_sim::sensors::Channel::Harm,
             },
             range_index: self
                 .radar_range
@@ -1132,7 +1134,20 @@ impl Instruments {
                                 continue;
                             }
                             let colour = if contact.selected { BRIGHT } else { GREEN };
-                            r.rect(x - 2, y - 2, 5, 5, colour);
+                            match contact.symbol {
+                                tore_sim::sensors::GroundSymbol::Square => {
+                                    r.rect(x - 2, y - 2, 5, 5, colour)
+                                }
+                                tore_sim::sensors::GroundSymbol::Dot => {
+                                    r.rect(x - 1, y - 1, 2, 2, colour)
+                                }
+                                tore_sim::sensors::GroundSymbol::Cross => {
+                                    for d in -2..=2 {
+                                        r.rect(x + d, y + d, 1, 1, colour);
+                                        r.rect(x + d, y - d, 1, 1, colour);
+                                    }
+                                }
+                            }
                             if let Some(marks) = scope.marks_on(contact.id) {
                                 draw_link_marks(&mut r, f, (x, y), marks, scope.tick, colour);
                             }
@@ -1145,9 +1160,13 @@ impl Instruments {
                                 );
                                 r.line((x, y), tip, colour);
                             }
-                            if contact.selected {
+                            if contact.selected && contact.wide_bars {
                                 r.rect(x - 7, y - 3, 2, 7, colour);
                                 r.rect(x + 6, y - 3, 2, 7, colour);
+                            } else if contact.selected {
+                                // Bars 10 pixels apart around a ground dot.
+                                r.rect(x - 5, y - 3, 2, 7, colour);
+                                r.rect(x + 4, y - 3, 2, 7, colour);
                             } else if self.hovered == Some(contact.id) {
                                 for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
                                     r.rect(x + dx, y + dy, 1, 1, colour);
@@ -1902,6 +1921,8 @@ mod picking_tests {
             acquired: false,
             stale: false,
             trail: vec![],
+            symbol: tore_sim::sensors::GroundSymbol::Square,
+            wide_bars: true,
         }
     }
     fn readout(contacts: Vec<scope::Contact>) -> CombatReadout {
@@ -2110,6 +2131,8 @@ mod link_cue_tests {
             acquired: false,
             stale: false,
             trail: vec![],
+            symbol: tore_sim::sensors::GroundSymbol::Square,
+            wide_bars: true,
         }
     }
 

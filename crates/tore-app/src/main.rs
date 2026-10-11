@@ -3,6 +3,7 @@
 // CLI/probe output stays on stdout; startup diagnostics also go to session logs.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod a10_animation;
+mod a2g_radar;
 mod a310_animation;
 mod a4e_animation;
 mod a7_animation;
@@ -1190,11 +1191,10 @@ impl App {
                     {
                         self.flight_ui.message("Hook unavailable for this aircraft");
                     } else if command == tore_input::PilotCommand::Toggle(tore_input::Switch::Radar)
-                        && self.instruments.channel != 0
+                        && self.radar_key_returns()
                     {
-                        // The same rule as the keyboard: returning to the radar
-                        // channel comes before spending the power switch.
-                        self.instruments.channel = 0;
+                        // The same rule as the keyboard: returning to the air
+                        // radar comes before spending the power switch.
                     } else {
                         self.input.queue(command);
                         self.announce_stability(command);
@@ -1331,14 +1331,16 @@ impl App {
             "range-target" => Command::RangeReset,
             "sight-designate" => Command::SightDesignate,
             "sight-pin" => Command::SightPinGround,
+            // The air-to-ground radar page and the Easy targeting cheat's
+            // nearest ground target (slice G1).
+            "a-g-radar" => return self.air_ground_key(),
+            "nearest-ground" => return self.nearest_ground_key(),
             // A2G keys (K1): bound and listed, not wired to the sim yet.
-            "a-g-radar" | "laze" | "sight-next" | "fire-gun" | "nearest-ground" => {
+            "laze" | "sight-next" | "fire-gun" => {
                 let label = match name.as_str() {
-                    "a-g-radar" => "Air-to-ground radar",
                     "laze" => "Laser",
                     "sight-next" => "Sight: next visible object",
-                    "fire-gun" => "Fire the gun",
-                    _ => "Nearest ground target",
+                    _ => "Fire the gun",
                 };
                 println!("{name}: not implemented yet");
                 self.flight_ui
@@ -1814,10 +1816,9 @@ impl App {
                     self.flight_ui.message("Hook unavailable for this aircraft");
                     return Action::None;
                 }
-                // Returning to the active radar channel comes first, so the
-                // radar power switch is not spent leaving the passive page.
-                if switch == tore_input::Switch::Radar && self.instruments.channel != 0 {
-                    self.instruments.channel = 0;
+                // Returning to the air radar comes first, so the radar power
+                // switch is not spent leaving the passive page or A-G.
+                if switch == tore_input::Switch::Radar && self.radar_key_returns() {
                     return Action::Click;
                 }
                 self.input.queue(tore_input::PilotCommand::Toggle(switch));
@@ -1978,15 +1979,23 @@ impl App {
                 Action::Click
             }
             Command::Mode => {
-                // Cycles the available sensor channels. Radar search and track
-                // modes follow the selected display range automatically.
-                self.instruments.cycle_channel();
-                if !net::play::current_frame(&self.world, &self.net_flight, &self.net)
+                // Cycles the available sensor channels: radar, infrared and,
+                // with an anti-radiation weapon aboard, the HARM page. Radar
+                // search and track modes follow the selected display range.
+                let sensors = net::play::current_frame(&self.world, &self.net_flight, &self.net)
                     .readout
                     .sensors
-                    .available(self.instruments.controls().channel)
-                {
+                    .clone();
+                let mut skipped_infrared = false;
+                for _ in 0..instruments::CHANNELS {
                     self.instruments.cycle_channel();
+                    let channel = self.instruments.controls().channel;
+                    if sensors.available(channel) {
+                        break;
+                    }
+                    skipped_infrared |= channel == tore_sim::sensors::Channel::Infrared;
+                }
+                if skipped_infrared {
                     self.flight_ui.message("No infrared sensor is installed.");
                 }
                 Action::Click
@@ -2008,6 +2017,78 @@ impl App {
                 Action::Click
             }
         }
+    }
+    /// R while the scope is off the air radar (the IR or HARM page, or A-G):
+    /// back to the air radar, without spending the power switch. Retail R
+    /// turns the air radar on and A-G off.
+    fn radar_key_returns(&mut self) -> bool {
+        let air_ground = net::play::current_frame(&self.world, &self.net_flight, &self.net)
+            .readout
+            .sensors
+            .air_ground;
+        if air_ground {
+            self.instruments.channel = 0;
+            self.queue(seats::SeatCommand::Combat(
+                tore_sim::combat::live::Command::ToggleAirGround,
+            ));
+            self.flight_ui.message("Air-Air Radar on");
+            return true;
+        }
+        if self.instruments.channel != 0 {
+            self.instruments.channel = 0;
+            return true;
+        }
+        false
+    }
+    /// Ctrl+R or Shift+R: the radar's air-to-ground page on or off
+    /// (docs/spec/air-to-ground.md, "The air-to-ground radar").
+    fn air_ground_key(&mut self) -> Action {
+        let (working, on) = {
+            let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+            (
+                frame
+                    .readout
+                    .sensors
+                    .available(tore_sim::sensors::Channel::Radar)
+                    && !frame.readout.damage.radar_failed,
+                !frame.readout.sensors.air_ground,
+            )
+        };
+        if !working && on {
+            self.flight_ui.message("No working radar found");
+            return Action::Click;
+        }
+        if on {
+            // The page is the radar's: the scope returns to it, and a radar
+            // switched off comes on (retail's ground radar has no switch).
+            self.instruments.channel = 0;
+            if self.net_flight.is_none() && !self.world.cockpits[OWN].flight.radar {
+                self.input
+                    .queue(tore_input::PilotCommand::Toggle(tore_input::Switch::Radar));
+            }
+        }
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::ToggleAirGround,
+        ));
+        self.flight_ui.message(if on {
+            "Air-Ground Radar on"
+        } else {
+            "Air-Ground Radar off"
+        });
+        Action::Click
+    }
+    /// Ctrl+X: the nearest hostile ground object, with the Easy targeting
+    /// cheat (or the AC-130's sight) only.
+    fn nearest_ground_key(&mut self) -> Action {
+        if !self.flight_ui.cheats.easy_targeting && !self.input.gunsight() {
+            self.flight_ui
+                .message("Nearest ground target: Easy targeting cheat only");
+            return Action::Click;
+        }
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::NearestGround,
+        ));
+        Action::None
     }
     fn open_controls(&mut self, context: &'static str) {
         let mut editor = controls_editor::Editor::new(
@@ -8575,6 +8656,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-objective") {
         surface_objective::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--a2g-radar") {
+        a2g_radar::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-parked") {
