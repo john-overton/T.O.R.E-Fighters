@@ -287,11 +287,17 @@ mod hooks {
 
     /// The aim of the striker's current pass: the drawn offset's distance
     /// from the target, feet, whether it lies inside the circle, and the
-    /// pass number.
+    /// pass number. A smart weapon aims at the target itself (0 ft).
     pub(super) fn aim(actor: &AiActor) -> Option<(f64, bool, u32)> {
         let s = actor.strike()?;
         let (offset, inside) = s.aim();
-        Some((offset[0].hypot(offset[1]), inside, s.pass_number()))
+        let unguided = s.selection().is_none_or(|sel| sel.kind.unguided());
+        let distance = if unguided {
+            offset[0].hypot(offset[1])
+        } else {
+            0.
+        };
+        Some((distance, inside || !unguided, s.pass_number()))
     }
 
     /// Slice ST-O: give a wing order that carries a ground target. Today the
