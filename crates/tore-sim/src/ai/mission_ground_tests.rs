@@ -671,3 +671,138 @@ fn a_ground_picture_round_trips_and_refreshes_on_alike() {
         assert_eq!(coded(&twin), coded(&mission), "tick {tick}");
     }
 }
+
+/// One bomb store for a striker's inputs (slice ST-T2).
+fn strike_inputs() -> crate::ai::strike::Inputs {
+    use crate::ai::strike::{Inputs, Store, StoreKind};
+    Inputs {
+        class: crate::models::strike_class::StrikeClass::Attack,
+        stores: vec![Store {
+            station: crate::ai::weapon_service::StationId(1),
+            kind: StoreKind::Bomb,
+            rounds: 4,
+            cadence_ticks: 30,
+            fire_range_ft: 10_000.,
+            minimum_range_ft: 0.,
+            maximum_range_ft: 20_000.,
+            round_speed_fps: None,
+            release_speed_share: 1.,
+            fuze_arm_s: 1.,
+            frag_radius_ft: 300.,
+        }],
+        designator: false,
+        mission_height_ft: None,
+        solution: None,
+    }
+}
+
+#[test]
+fn cap_actors_never_fly_a_strike_handling_and_take_no_strike_inputs() {
+    // Slice ST-T2: the roll and pull and the planned dive floor reach only a
+    // striker's attack steers. Two CAP fights, one host handing strike
+    // inputs to every actor every tick and one not, fly tick for tick alike,
+    // and every actor's adapter stays plain.
+    let fight = || {
+        let mut mission = AiMission::new();
+        mission.push(actor(1, 1));
+        let mut enemy = AiActor::new(setup(
+            2,
+            2,
+            0,
+            [0., ALTITUDE, 12. * NMI],
+            std::f64::consts::PI,
+        ))
+        .unwrap();
+        enemy.flight_mut().pitch = 0.;
+        mission.push(enemy);
+        mission
+    };
+    let (mut plain, mut handed) = (fight(), fight());
+    for tick in 0..600 {
+        let world = |mission: &AiMission| -> Vec<WorldObject> {
+            mission
+                .actors()
+                .iter()
+                .map(|a| object(a, a.identity().side.0))
+                .collect()
+        };
+        for actor in handed.actors.iter_mut() {
+            actor.set_strike_inputs(strike_inputs());
+        }
+        let a = plain.step(&world(&plain), &flat, TimeOfDay(tick)).unwrap();
+        let b = handed
+            .step(&world(&handed), &flat, TimeOfDay(tick))
+            .unwrap();
+        assert_eq!(a, b, "tick {tick}");
+        for (x, y) in plain.actors().iter().zip(handed.actors()) {
+            assert_eq!(x.flight(), y.flight(), "tick {tick}");
+            assert!(y.strike().is_none());
+            assert_eq!(
+                y.adapter.strike_handling(),
+                crate::ai::strike::Handling::PLAIN
+            );
+        }
+    }
+    assert_eq!(coded(&plain), coded(&handed));
+}
+
+#[test]
+fn a_striker_under_weapons_hold_flies_no_pass_until_the_hold_lifts() {
+    // Slice ST-T2: the hold preset (or a hold fire order) holds the passes
+    // too, not only the release; the strike starts from its ingress when the
+    // hold lifts.
+    let mut mission = mission_with(actor(STRIKER, 1));
+    mission
+        .actor_mut(STRIKER)
+        .unwrap()
+        .set_strike_order(Some(100));
+    let assignment = |stance| crate::ai::engagement::Assignment {
+        stance,
+        ..mission.actor(STRIKER).unwrap().assignment().clone()
+    };
+    let held = assignment(crate::ai::engagement::Stance::WeaponsHold);
+    let free = mission.actor(STRIKER).unwrap().assignment().clone();
+    mission.actor_mut(STRIKER).unwrap().set_assignment(held);
+    let scene = [tank(100, 3., 0.)];
+    let world = |mission: &AiMission| -> Vec<WorldObject> {
+        mission.actors().iter().map(|a| object(a, 1)).collect()
+    };
+    for tick in 0..240 {
+        observe(&mut mission, tick, &scene);
+        mission
+            .actor_mut(STRIKER)
+            .unwrap()
+            .set_strike_inputs(strike_inputs());
+        mission
+            .step(&world(&mission), &flat, TimeOfDay(tick))
+            .unwrap();
+        let striker = mission.actor(STRIKER).unwrap();
+        assert!(
+            striker
+                .strike()
+                .is_none_or(|s| s.phase() == crate::ai::strike::Phase::Ingress)
+        );
+        assert_eq!(
+            striker.adapter.strike_handling(),
+            crate::ai::strike::Handling::PLAIN
+        );
+    }
+    mission.actor_mut(STRIKER).unwrap().set_assignment(free);
+    let mut attacked = false;
+    for tick in 240..480 {
+        observe(&mut mission, tick, &scene);
+        mission
+            .actor_mut(STRIKER)
+            .unwrap()
+            .set_strike_inputs(strike_inputs());
+        mission
+            .step(&world(&mission), &flat, TimeOfDay(tick))
+            .unwrap();
+        attacked |= mission
+            .actor(STRIKER)
+            .unwrap()
+            .strike()
+            .is_some_and(|s| s.phase() == crate::ai::strike::Phase::Attack);
+    }
+    assert!(attacked, "the strike goes on once the hold lifts");
+}

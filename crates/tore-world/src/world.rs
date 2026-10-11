@@ -1101,6 +1101,9 @@ impl World {
             // The humans' locked targets (G2): the data link's picture of
             // what the humans attack, read after combat and before the step.
             bridge.set_link(&self.datalink);
+            // A heavy striker's floor reads the mission's airborne height
+            // (slice ST-T2).
+            bridge.set_mission_height(self.setup.mission.map(|(altitude, _)| altitude));
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             // The A-G page lists aircraft only in an airfield sequence.
             for (id, attached) in bridge.airfield_attachment() {

@@ -709,6 +709,11 @@ pub struct AiWings {
     /// The highest the world's ground reaches over each square, worked out
     /// at the first step: the mission's shortcut for sight lines above it.
     ground_ceiling: Option<std::sync::Arc<tore_sim::ground_ceiling::GroundCeiling>>,
+    /// The mission's airborne height, feet (the Quick Mission altitude
+    /// setting): a heavy striker's release floor (slice ST-T2). The host sets
+    /// it before every step; `None` lets a striker use the height it was
+    /// tasked at.
+    mission_height_ft: Option<f64>,
 }
 
 struct PendingGun {
@@ -1276,6 +1281,7 @@ impl AiWings {
             last_output: tore_sim::ai::mission::MissionOutput::default(),
             decoy_rolls: Vec::new(),
             ground_ceiling: None,
+            mission_height_ft: None,
         })
     }
 
@@ -1985,7 +1991,15 @@ impl AiWings {
             .collect();
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
-                if live::is_gun(&weapon)
+                if live::is_gun(&weapon) && self.striker_gun(event) {
+                    // A striker's gun run (slice ST-T2).
+                    let key = (event.actor, event.station.0);
+                    let ordinal = *self.gun_ordinals.entry(key).or_default();
+                    let emitted =
+                        self.release_strafe(event, &mut state.projectiles, &weapon, ordinal);
+                    aim_latest(state, emitted, event.target);
+                    *self.gun_ordinals.get_mut(&key).unwrap() += u64::from(emitted);
+                } else if live::is_gun(&weapon)
                     && self
                         .mission
                         .actor(event.actor)

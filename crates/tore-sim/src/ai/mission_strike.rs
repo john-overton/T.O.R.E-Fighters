@@ -81,6 +81,18 @@ impl AiActor {
             return None;
         }
         let inputs = inputs?;
+        // Weapons held (the hold preset or a hold fire order): no attack
+        // passes; the rest of the controller flies (formation, CAP), and the
+        // strike starts again from its ingress when the hold lifts (slice
+        // ST-T2, opinionated agent).
+        if self.controller.weapons_held()
+            || self.assignment.stance == super::super::engagement::Stance::WeaponsHold
+        {
+            if let Some(strike) = self.strike.as_mut() {
+                strike.stand_down(tick);
+            }
+            return None;
+        }
         let picture = self.ground.as_deref()?;
         let warnings = self.recent_warnings(tick, picture);
         let recovering = self.damage_return.is_some()

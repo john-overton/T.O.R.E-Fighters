@@ -2,10 +2,11 @@
 //!
 //! Every field the next step reads is coded: the phase and its start, the
 //! pass, the target and store, the pass count that seeds the next aim, the
-//! drawn aim, the final's line, the release count and the exit's heading.
+//! drawn aim, the final's line, the release count, the exit's heading, a gun
+//! run's burst state and the height the striker was tasked at.
 //! `inputs` is per-step scratch: the host hands it over before every mission
 //! step and the step takes it, so between steps it is always empty and a
-//! restored strike starts without it. `Context`, `Order`, `Steer`,
+//! restored strike starts without it. `Context`, `Order`, `Steer`, `Handling`,
 //! `Selection`, `Inputs`, `Store`, `Solution`, `PassInputs`, `PassChoice`,
 //! `TargetFacts` and `AimDraw` are per-call values, never held.
 
@@ -18,6 +19,8 @@ crate::checkpoint_enum!(Pass {
     FastHigh = 2,
     Dive = 3,
     Level = 4,
+    Laydown = 5,
+    Strafe = 6,
 });
 
 crate::checkpoint_enum!(StoreKind {
@@ -29,6 +32,7 @@ crate::checkpoint_enum!(StoreKind {
     Seeker = 5,
     RadarAgm = 6,
     AntiRadiation = 7,
+    Gun = 8,
 });
 
 crate::checkpoint_enum!(Phase {
@@ -82,6 +86,12 @@ crate::checkpoint_struct!(Strike {
     warned,
     threat,
     withdrawn,
+    burst,
+    burst_open,
+    recovery_until,
+    cue_across_sum,
+    cue_last,
+    tasked_agl_ft,
 } skip {
     inputs = None,
 });

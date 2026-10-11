@@ -228,6 +228,8 @@ impl AiWings {
             decoy_rolls: _,
             // Setup: worked out from the world's terrain, which never changes.
             ground_ceiling: _,
+            // Setup: the host sets it before every step (slice ST-T2).
+            mission_height_ft: _,
         } = self;
         reports.save(s, None)?;
         slots.save(s, None)?;
@@ -310,6 +312,8 @@ impl AiWings {
             last_output: _,
             decoy_rolls: _,
             ground_ceiling: _,
+            // Setup: the host sets it before every step (slice ST-T2).
+            mission_height_ft: _,
         } = self;
         *reports = Checkpoint::load(l, None)?;
         *slots = Checkpoint::load(l, None)?;
