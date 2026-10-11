@@ -56,7 +56,7 @@ John's answers change the shape of it. All of these are opinionated (John,
 
 | Retail | This spec |
 | --- | --- |
-| AI bombs are moved to land within 100 ft of the target | **No re-aim.** The AI flies the pass through control inputs and releases from the same delivery and guided solutions a player uses. Skill sets the release circle ([Skill](#skill-and-release-precision)) |
+| AI bombs are moved to land within 100 ft of the target | **No re-aim.** The AI flies the pass through control inputs and releases from the same delivery and guided solutions a player uses. Skill sets the release circle for unguided weapons ([Skill](#skill-and-release-precision)) |
 | The pass is a random choice | **No dice.** The pass is a fixed function of perceived threat and available speed, limited by bombing class and weapon ([Pass choice](#pass-choice)) |
 | A heavy bomber flies a high pass at 10,000 ft or more | Heavies bomb level from a minimum of 5,000 ft AGL, or the mission's airborne height if higher, raised by perceived threat ([Heavies](#heavy-bombers)) |
 | No buddy lasing | The AI lases for its wing and for you, and drops on your spot ([Lasing](#lasing)) |
@@ -285,13 +285,14 @@ more for each level down:
   heading and pitch for bombs (the retail 0.0524 of the range), the rocket and
   gun spreads of their records. The scatter is the retail dice and stays as it
   is.
-- **Guided weapons.** The same circle offsets the **aim point**, not the
-  release timing: a JDAM's stored point is the target shifted by the drawn
-  offset, and an AI that lases places its **laser spot** at the drawn offset
-  from the target. A laser bomb follows the spot, so it lands there. The reach
-  window and lock rules for release are unchanged ([guided
-  reach](air-to-ground.md#guided-bomb-release-range-indicator)). Seeker missiles
-  and HARM are judged by their lock, not by the circle.
+- **Unguided weapons only.** The circle applies to unguided bombs, packs and
+  rockets. Smart weapons use the targeting and laser systems as the player
+  does, which are hard to get wrong at any skill (opinionated, John,
+  2026-10-11): an AI that lases holds its **laser spot** on the target, a
+  JDAM's stored point is the designated target, and seeker missiles and HARM
+  are judged by their lock. Skill does not move a guided weapon's aim point.
+  The reach window and lock rules for release are unchanged ([guided
+  reach](air-to-ground.md#guided-bomb-release-range-indicator)).
 - **No retail re-aim.** Nothing moves a bomb after it leaves; the circle is
   where the pilot aims.
 
@@ -303,16 +304,14 @@ range):
 | --- | --- | --- | --- | --- |
 | Mk 82 dive: 30 degrees, 6,000 ft slant. Scatter alone about 310 ft across the track | Aim 164 ft out for a draw `u` = 0.25; bombs land about 164 ft plus up to 310 ft scatter from the target | Aim 287 ft out; the slick's 300 ft fuze radius is hit by the lucky bombs | Aim 410 ft out | Aim 533 ft out, bombs spread beyond a fuze radius |
 | Mk 82 level: 6,000 ft AGL, 450 kt, 19.4 s fall, 15,900 ft slant. Scatter alone about 770 ft across the track | Aim 164 ft out; scatter dominates | Aim 287 ft out | Aim 410 ft out | Aim 533 ft out; scatter and aim are of the same order |
-| GBU-10 on a spot | Spot 164 ft out for the same draw; the bomb steers to the spot, so it lands about 164 ft from the target | Spot 287 ft out | Spot 410 ft out | Spot 533 ft out |
-| JDAM (stored point) | Point 164 ft out; the bomb flies to the point and its own tolerance | Point 287 ft out | Point 410 ft out | Point 533 ft out |
 | The same pass with a ring draw (10%), `u` = 0.25 | `R x sqrt(1.75)` = 434 ft | 759 ft | 1,085 ft | 1,410 ft |
 
-Every distance in the first four rows is `R x sqrt(0.25)`, half of `R`; a draw
+Every distance in the first two rows is `R x sqrt(0.25)`, half of `R`; a draw
 of `u` = 1 would put the aim on the circle's edge (R). Reading: an Ace's
 unguided bombs land within a few hundred feet and the scatter is most of the
 miss; a Novice's aim alone can lose the fuze radius of a Mk 82 (300 ft) on most
-passes. A guided bomb is as accurate as its aim point, so low skill moves the
-guided weapon's whole result by the circle; it does not hide in the scatter.
+passes. Guided weapons are not in the table: they aim at the target at every
+skill.
 
 ## Weapons and releases
 
@@ -321,8 +320,8 @@ guided weapon's whole result by the circle; it does not hide in the scatter.
 | Unguided bombs, packs | Table above | CCIP mean impact, or the LVL cue, on the aim point (a pack leaves in one instant, [packs](air-to-ground.md#release-modes-and-packs)) | Cue inside `R` |
 | Rockets | Straight run, shallow dive, or pop-up | Rocket impact on the aim point, at the record's cadence | Cue inside `R` |
 | Guns | Straight run | The existing gun employment ([AI guns](ai-gun-employment.md)), unchanged | none |
-| Laser bombs, laser missiles | Level or shallow run; then an offset turn holding the target inside the designator's gimbal until impact (fitted) | Target inside the reach and a spot will exist (own designator, or a same-side spot); with none, the store is not chosen | Spot offset by the draw |
-| JDAM | Level run | Target point stored, offset by the draw, inside the reach | Point offset by the draw |
+| Laser bombs, laser missiles | Level or shallow run; then an offset turn holding the target inside the designator's gimbal until impact (fitted) | Target inside the reach and a spot will exist (own designator, or a same-side spot); with none, the store is not chosen | none: spot on the target |
+| JDAM | Level run | Target point stored, inside the reach | none: point on the target |
 | Mavericks, AS-14, AS-30 | Fast-high or straight | Seeker locked on the target inside zone 1 ([lock flow](air-to-ground.md#the-seekers-and-the-lock-flow)) | Lock |
 | Radar AGMs (AS-7, AS-15, AGM-84A, AM-39, AS-16) | Straight run | Radar track at release, held through the flight (the AI support rule, [B45](ai.md#b45-seeker-visibility-launch-eligibility-and-ammunition)) | Lock |
 | HARM | Fast-high; fire at maximum range, exit | A HARM candidate inside the zone ([HARM cue](air-to-ground.md#missiles-and-the-harm-boresight-cue)) | Lock |
