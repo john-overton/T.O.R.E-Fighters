@@ -485,6 +485,8 @@ mod tests {
             crate::ai_wings::takeover::Tasking {
                 role: tore_sim::ai::engagement::StrikeRole::Strike,
                 order: Some(0x5000_0001),
+                class_order: vec![0x5000_0002, 0x5000_0003],
+                lase: Some(0x5000_0004),
             },
         );
         wings.mission_skill.insert(

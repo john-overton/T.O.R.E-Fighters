@@ -2019,12 +2019,12 @@ on the wire.
 
 A take and a give-back rebuild the AI actor, so the bridge also keeps the
 actor's air-to-ground tasking while a human flies it (`AiWings::handed_tasking`,
-coded after the handed-over skills): its role (CAP or Strike) and its ordered
-ground target, taken in `remove_actor` and put back in `insert_actor` (a
+coded after the handed-over skills): its role (CAP or Strike), its ordered
+ground target, a class order's targets and its lase order, taken in `remove_actor` and put back in `insert_actor` (a
 give-back, or a take that failed), before the takeover above. A human who takes
 a Strike wing's plane and gives it back returns it to its strike; a wingman
-keeps its ground order. A revived aircraft takes none. ST-O's class and lase
-orders belong in the same record once that slice merges.
+keeps its ground order, class order or lase order. A revived aircraft takes
+none.
 
 Tests: `tore-sim` `ai/strike_takeover_tests.rs` (kept store and LVL pass,
 an emptied kept station, stand-off and resume, the guiding hold, the

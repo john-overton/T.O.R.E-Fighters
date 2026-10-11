@@ -386,6 +386,30 @@ impl super::AiActor {
     pub fn lase_order(&self) -> Option<u32> {
         self.lase
     }
+    /// Puts back the ground orders a flight lead had given, as they stood
+    /// (slice ST-K: a human's take and give-back keeps them): the ordered
+    /// target, a class order's targets and the lase order. Unlike the order
+    /// calls above it clears nothing else, so the caller passes the whole
+    /// set.
+    pub fn restore_ground_orders(
+        &mut self,
+        order: Option<u32>,
+        class_order: Vec<u32>,
+        lase: Option<u32>,
+    ) {
+        self.set_strike_order(order);
+        match &mut self.ground {
+            Some(picture) => picture.set_class_order(class_order),
+            None if !class_order.is_empty() => {
+                let mut picture = GroundPicture::new(StrikeRole::Cap);
+                picture.set_class_order(class_order);
+                self.ground = Some(Box::new(picture));
+            }
+            None => {}
+        }
+        self.lase = lase;
+        self.tidy_ground();
+    }
     /// Ends every order a flight lead gave onto the ground (a strike, a class
     /// or a lase order), and the strike they started. The Strike role and its
     /// briefing, which a mission set, are left alone.

@@ -104,15 +104,18 @@ impl AiWings {
 }
 
 /// An AI aircraft's air-to-ground tasking that a take and a give-back must
-/// not lose (ST-O's finding): its role (CAP or Strike) and its ordered
-/// ground target. A human who takes a Strike wing's plane and gives it back
-/// returns it to the strike; a wingman ordered onto a ground target keeps
-/// the order. ST-O's class order and lase order join this record when that
-/// slice merges (agent decision, slice ST-K).
+/// not lose (ST-O's finding): its role (CAP or Strike), its ordered ground
+/// target, a class order's targets (Alt+W) and the object it was ordered to
+/// lase (Alt+G). A human who takes a Strike wing's plane and gives it back
+/// returns it to the strike; a wingman ordered onto the ground keeps the
+/// order (agent decision, slice ST-K; class and lase orders added at the
+/// integration, ST-INT).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tasking {
     pub role: StrikeRole,
     pub order: Option<u32>,
+    pub class_order: Vec<u32>,
+    pub lase: Option<u32>,
 }
 
 impl Tasking {
@@ -121,17 +124,31 @@ impl Tasking {
         let tasking = Self {
             role: actor.strike_role(),
             order: actor.strike_order(),
+            class_order: actor
+                .ground_picture()
+                .map(|g| g.class_order().to_vec())
+                .unwrap_or_default(),
+            lase: actor.lase_order(),
         };
-        (tasking.role != StrikeRole::Cap || tasking.order.is_some()).then_some(tasking)
+        (tasking.role != StrikeRole::Cap
+            || tasking.order.is_some()
+            || !tasking.class_order.is_empty()
+            || tasking.lase.is_some())
+        .then_some(tasking)
     }
     /// Gives `actor` this tasking again.
     pub fn apply(&self, actor: &mut AiActor) {
         actor.set_strike_role(self.role);
-        actor.set_strike_order(self.order);
+        actor.restore_ground_orders(self.order, self.class_order.clone(), self.lase);
     }
 }
 
-tore_sim::checkpoint_struct!(Tasking { role, order });
+tore_sim::checkpoint_struct!(Tasking {
+    role,
+    order,
+    class_order,
+    lase
+});
 
 impl AiWings {
     /// Keeps the tasking of `actor` (aircraft `id`, leaving the AI for a

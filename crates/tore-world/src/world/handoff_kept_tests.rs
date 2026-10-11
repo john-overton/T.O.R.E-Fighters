@@ -903,3 +903,88 @@ fn a_take_and_a_give_back_keep_the_planes_strike_role_and_ground_order() {
     }
     assert_eq!(copy.checkpoint().unwrap(), world.checkpoint().unwrap());
 }
+
+/// ST-K's follow-up at the integration: a wingman's class order (Alt+W)
+/// and lase order (Alt+G, ST-O) also come back with the plane after a take
+/// and a give-back, across a checkpoint taken while the human flies.
+#[test]
+fn a_take_and_a_give_back_keep_the_planes_class_and_lase_orders() {
+    let world = world_at(5_000);
+    let targets =
+        crate::ai_wings::outcome::ground_targets(&world.terrain.surface, &world.combat.state);
+    assert!(targets.len() >= 2, "the template has two ground targets");
+    let mut class = vec![targets[0], targets[1]];
+    class.sort_unstable();
+    let seat = SeatId(1);
+    for order in ["class", "lase"] {
+        let mut world = world_at(5_000);
+        {
+            let actor = world
+                .ai_wings
+                .as_mut()
+                .unwrap()
+                .mission_mut()
+                .actor_mut(PLANE.0)
+                .unwrap();
+            match order {
+                "class" => actor.order_strike_class(class.clone()),
+                _ => actor.order_lase(targets[0]),
+            }
+        }
+        tick(
+            &mut world,
+            &[MissionCommand::Take { seat, plane: PLANE }],
+            Some(seat),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+        assert!(world.combat.state.ownship(PLANE.0).is_some());
+        let kept = world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .handed_tasking(PLANE.0)
+            .cloned()
+            .expect("the tasking is kept while the human flies");
+        match order {
+            "class" => assert_eq!((kept.class_order.clone(), kept.lase), (class.clone(), None)),
+            _ => assert_eq!((kept.class_order.len(), kept.lase), (0, Some(targets[0]))),
+        }
+        let bytes = world.checkpoint().unwrap();
+        let mut copy = world_at(5_000);
+        copy.restore(&bytes).unwrap();
+        for w in [&mut world, &mut copy] {
+            fly(w, Some(seat), 60);
+            tick(
+                w,
+                &[MissionCommand::GiveBack { seat }],
+                None,
+                Vec::new(),
+                Vec::new(),
+                false,
+            );
+            let actor = w
+                .ai_wings
+                .as_ref()
+                .unwrap()
+                .mission()
+                .actor(PLANE.0)
+                .unwrap();
+            match order {
+                "class" => {
+                    assert_eq!(
+                        actor.ground_picture().map(|g| g.class_order().to_vec()),
+                        Some(class.clone())
+                    );
+                    assert_eq!(actor.lase_order(), None);
+                }
+                _ => {
+                    assert_eq!(actor.lase_order(), Some(targets[0]));
+                    assert_eq!(actor.strike_order(), None);
+                }
+            }
+        }
+        assert_eq!(copy.checkpoint().unwrap(), world.checkpoint().unwrap());
+    }
+}
