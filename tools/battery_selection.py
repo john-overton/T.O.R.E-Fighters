@@ -663,6 +663,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
     _r("crates/tore-app/src/surface_drive.rs", ("surface",), "the surface movement drive"),
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
+    _r("crates/tore-app/src/blast_preview.rs", ("replay-cli",), "the explosion and cluster burst preview (offscreen renders)"),
     _r("crates/tore-app/src/a2g_radar.rs", ("a2g",), "the ground pages drive"),
     _r("crates/tore-app/src/a2g_run*", ("a2g",), "the air-to-ground attack driver"),
     _r("crates/tore-app/src/surface_objective.rs", ("surface", "replay-recording"), "the ground target objective drive, which also records the run"),
