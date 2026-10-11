@@ -91,6 +91,7 @@ pub(super) fn run(
         ground + o.altitude,
         aim[2] - forward[2] * o.from_nm * FEET_PER_NM,
     ];
+    terrain_line(scene, "setup", start, aim);
     let along = |t: f64| -> Vector { std::array::from_fn(|i| start[i] + forward[i] * speed * t) };
 
     let mut air_ground_sent = false;
@@ -157,7 +158,11 @@ pub(super) fn run(
             .combat
             .state
             .view(scene.owner)
-            .map_or(Readiness::Safe, |view| view.readiness(launcher));
+            .map_or(Readiness::Safe, |view| {
+                view.at(launcher)
+                    .with_terrain(&|x, z| scene.ground(x, z))
+                    .readiness()
+            });
         // In BORE with `--unit` the trigger waits until the cue's candidate
         // is that unit.
         let wanted = if how == "none" {
@@ -200,6 +205,12 @@ pub(super) fn run(
             if let Some(path) = &o.render {
                 render(scene, resources, path)?;
             }
+            terrain_line(
+                scene,
+                "release",
+                launcher.position,
+                scene.target_row().map_or(aim, |r| r.position),
+            );
             pressed = Some(t);
         }
         let trigger = pressed.is_some_and(|at| t < at + PRESS);
@@ -392,8 +403,9 @@ fn print_cue(scene: &Scene, t: f64) {
 fn print_bore(scene: &Scene, weapon: &Weapon, profile: Profile, t: f64) {
     let launcher = scene.launcher();
     let ground = |x: f64, z: f64| scene.ground(x, z);
-    let obscured =
-        |from: Vector, to: Vector| tore_sim::combat::live::terrain_hit(from, to, &ground).is_some();
+    let obscured = |from: Vector, to: Vector| {
+        !tore_sim::combat::missiles::launch_line_clear(from, to, &ground)
+    };
     let view = seeker::View {
         position: launcher.position,
         basis: launcher.basis,
@@ -547,4 +559,28 @@ fn id(id: Option<u32>) -> String {
 
 fn distance(a: Vector, b: Vector) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
+/// Sample the measured route for repeatable ridge cases, independent of the
+/// weapon's range cue. Positive mask means terrain rises above the sight line.
+fn terrain_line(scene: &Scene, label: &str, from: Vector, to: Vector) {
+    let distance = (to[0] - from[0]).hypot(to[2] - from[2]);
+    let samples = (distance / 128.).ceil().max(2.) as u32;
+    let mut peak = f64::NEG_INFINITY;
+    let mut mask = f64::NEG_INFINITY;
+    let mut ridge_at = 0.;
+    for i in 1..samples {
+        let share = f64::from(i) / f64::from(samples);
+        let p: Vector = std::array::from_fn(|axis| from[axis] + (to[axis] - from[axis]) * share);
+        let height = scene.ground(p[0], p[2]);
+        if height > peak {
+            peak = height;
+            ridge_at = share * distance;
+        }
+        mask = mask.max(height - p[1]);
+    }
+    println!(
+        "a2g-run: terrain {label} from {:.0} {:.0} {:.0} target {:.0} {:.0} {:.0} peak {:.0} at {:.0} mask {:.0}",
+        from[0], from[1], from[2], to[0], to[1], to[2], peak, ridge_at, mask
+    );
 }

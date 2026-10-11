@@ -209,11 +209,13 @@ impl World {
     /// The readout of `cockpit`'s plane: combat's, with the plane's share of
     /// the flight data link ([`crate::datalink::DataLink::readout`]).
     fn readout_of(&self, cockpit: &Cockpit, launcher: Launcher) -> Option<CockpitReadout> {
-        let mut readout = self.combat.cockpit_readout(
+        let ground = |x: f64, z: f64| f64::from(self.terrain.height(x as f32, z as f32));
+        let mut readout = self.combat.cockpit_readout_with_terrain(
             cockpit.plane.0,
             launcher,
             self.ai_wings.as_ref(),
             Some(cockpit),
+            Some(&ground),
         )?;
         readout.link = self.datalink.readout(cockpit.plane.0);
         Some(readout)

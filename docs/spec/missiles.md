@@ -739,8 +739,9 @@ it does not change the motor, the 32 ft/s² sag, its 80 ft/s cap or the cruise
 heights. Air-to-air missiles and SAMs retain their existing steering. This
 correction is not a recovered original steering rule. The
 [air-to-ground baseline](../baselines/air-to-ground.md#class-8-infrared-air-to-ground-missiles)
-records the measured reach. The HUD fly-out still ignores terrain along the
-future path, so its estimate is not a promise of a hit.
+records the measured reach. The range envelope remains terrain-independent;
+the terrain-aware fly-out time follows the clearance rule below. Neither is a
+promise of a hit.
 
 What a player sees, from the retail records:
 
@@ -767,6 +768,46 @@ estimates, so they include the drop, sag and climb. The sag's time base follows
 the documented 120 Hz service; the original's tick unit is inferred. Whether an
 unlit missile loses speed is unknown; it keeps its speed here. The lob gains no
 thinner-air benefit, since the fitted motion has no altitude drag law.
+
+### Cruise terrain clearance
+
+**Opinionated, John, 2026-10-11 (surface close-out Q7):** cruise-profile
+missiles climb over terrain along their route, then resume their record's
+profile. This applies to every record with a cruise profile, including
+Maverick, Harpoon, Exocet, SLAM, AS-7, AS-15, laser missiles, AT-2 and airborne
+lob profiles. A weapon without a cruise profile keeps its existing motion.
+
+**Fitted, agent decision, 2026-10-11:** each guided 120 Hz step samples the
+horizontal line to the remembered intercept for the next 2 nmi (12,152 ft),
+or to the target if nearer. Evenly spaced samples are at most 256 ft apart,
+including the current position and the far endpoint. Only terrain more than
+1 ft above the lower ground elevation at the missile and target endpoints
+counts as an intervening obstacle. Flat ground and sea retain the record's
+profile, including low sea cruise and the terminal descent. The clearance goal
+is 256 ft, with an extra 64 ft allowance for sampling and turning. The combined
+320 ft command tapers linearly to zero over the last 5,120 ft to the target.
+The steepest line needed to clear those samples overrides the record's aim
+only when it requires a steeper climb or a shallower descent. For terrain
+above the missile, shorten the climb distance by two seconds of current
+horizontal speed, with a 256 ft minimum, to allow time to turn. This is a
+steering command, never an altitude snap. Motor, turn limits, ignition and
+sag still apply. Once the samples permit it, the record's aim resumes.
+
+Flight and the HUD's terrain-aware time-to-impact fly-out use this same
+rule, including record-based laser and command missiles. The launch-zone
+scale, maximum range, favorable band and IN RNG remain range and energy
+estimates with no terrain penalty, as requested by John. Lock visibility is
+separate, described in [air-to-ground](air-to-ground.md#terrain-at-lock-and-launch).
+The energy envelope can therefore show an otherwise reachable shot while
+MASK or a missing track prevents a lock or launch.
+
+Measured checks are in the [terrain validation](../baselines/surface-terrain.md).
+
+These clearance numbers are not recovered original behaviour or real missile
+performance. Sampled look-ahead cannot guarantee avoidance of very narrow
+obstacles, a ridge reached before ignition, or terrain exceeding the missile's
+turn or energy limits. No new seeker visibility or loss rule is applied to a
+missile already guiding. Retail comparison is unavailable.
 
 ## What exists today and what changes
 
@@ -946,9 +987,11 @@ maximum. Actual seeker acquisition/retention volumes remain unchanged. A radar
 bore search still needs a prelaunch observation inside the selected scope and
 radar tracking limits.
 
-Prediction assumes immediate usable guidance and constant target motion, and
-omits terrain along the future path, future seeker loss, lofting and wind/gravity
-not present in the current missile model. It does not promise a kill. Compatibility
+Prediction assumes immediate usable guidance and constant target motion. It
+includes the documented drop, sag and cruise profile, but omits future seeker
+loss and forces absent from the current missile model. The energy envelope
+omits terrain; the HUD time-to-impact fly-out uses the shared
+[cruise clearance](#cruise-terrain-clearance). It does not promise a kill. Compatibility
 motion stays unchanged. The 25-foot prediction tolerance and turning-loss rule
 must be validated against live synthetic trajectories; do not label them retail.
 
@@ -957,8 +1000,11 @@ must be validated against live synthetic trajectories; do not label them retail.
 Implementation mode, requested by John on 2026-09-17. One simulation-owned
 range cue supplies imported minimum, estimated maximum, observed target range
 and in-range status to the HUD scale, target marker, radar-ready diamond and
-IN RNG label. In-range requires release readiness, a predicted intercept and a
-target between the range endpoints. A rounded hit percentage does not determine
+IN RNG label. Air-to-air in-range requires release readiness, a predicted
+intercept and a target between the range endpoints. Surface in-range uses the
+predicted intercept and range endpoints separately from lock and launch
+warnings, as specified in [terrain at lock and launch](air-to-ground.md#terrain-at-lock-and-launch).
+TERRAIN MASK remains on the readiness row while IN RNG blinks on its own row. A rounded hit percentage does not determine
 physical range validity. A cued target outside range retains its range marker at
 the corresponding end of the scale. No target or safe state supplies no range
 cue; an impossible maximum displays `--`, not a misleading zero-mile envelope.

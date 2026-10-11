@@ -346,7 +346,27 @@ impl Combat {
         wings: Option<&crate::ai_wings::AiWings>,
         cockpit: Option<&crate::world::Cockpit>,
     ) -> Option<crate::readout::CockpitReadout> {
-        let mut readout = crate::readout::build(&self.state, plane, launcher, wings, cockpit)?;
+        self.cockpit_readout_with_terrain(plane, launcher, wings, cockpit, None)
+    }
+
+    /// The mission readout with terrain available for launch checks and
+    /// cruise fly-out time, without changing the energy-only range cue.
+    pub fn cockpit_readout_with_terrain(
+        &self,
+        plane: u32,
+        launcher: Launcher,
+        wings: Option<&crate::ai_wings::AiWings>,
+        cockpit: Option<&crate::world::Cockpit>,
+        ground: Option<&dyn Fn(f64, f64) -> f64>,
+    ) -> Option<crate::readout::CockpitReadout> {
+        let mut readout = crate::readout::build_with_terrain(
+            &self.state,
+            plane,
+            launcher,
+            wings,
+            cockpit,
+            ground,
+        )?;
         if let Some(brief) = readout.target_window.as_mut()
             && brief.objective.is_none()
         {

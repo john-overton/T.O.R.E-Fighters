@@ -160,7 +160,7 @@ pub enum Readiness {
     GroupEmpty,
     /// The gun's own airframe (wing, nacelles, skin) is in the line of fire.
     GunObscured,
-    /// Terrain lies between a gun's muzzle and its aim point (AC-130).
+    /// Terrain blocks the gun aim or a surface missile's launch sight line.
     TerrainMask,
     /// An anti-radiation missile in BORE has no emitter in its cone to fire
     /// at: retail releases a HARM only at an emitting target.
@@ -2186,6 +2186,7 @@ impl<'a> OwnshipView<'a> {
         LauncherView {
             view: *self,
             launcher,
+            ground: None,
             observation: Default::default(),
             solution: Default::default(),
             readiness: Default::default(),
@@ -2240,12 +2241,59 @@ impl<'a> OwnshipView<'a> {
 pub struct LauncherView<'a> {
     view: OwnshipView<'a>,
     launcher: Launcher,
+    ground: Option<&'a dyn Fn(f64, f64) -> f64>,
     observation: std::cell::OnceCell<Option<seeker::Observation>>,
     solution: std::cell::OnceCell<Option<missiles::Solution>>,
     readiness: std::cell::OnceCell<Readiness>,
     solution_readiness: std::cell::OnceCell<Readiness>,
 }
 impl<'a> LauncherView<'a> {
+    /// Recheck surface launch visibility at this position, including between
+    /// sensor updates. No terrain enters the energy-only range envelope.
+    pub fn with_terrain(mut self, ground: &'a dyn Fn(f64, f64) -> f64) -> Self {
+        self.ground = Some(ground);
+        self.readiness = Default::default();
+        self.solution_readiness = Default::default();
+        self
+    }
+
+    fn terrain_masked(&self, point: Vector) -> bool {
+        self.ground.is_some_and(|ground| {
+            !missiles::launch_line_clear(self.launcher.position, point, ground)
+        })
+    }
+
+    /// HUD fly-out time follows the same cruise clearance as live guidance.
+    /// Launch authority and IN RNG continue to use the energy-only solution.
+    pub fn terrain_solution(&self) -> Option<missiles::Solution> {
+        let w = &self
+            .view
+            .own
+            .config
+            .stations
+            .get(self.view.own.selected)?
+            .weapon;
+        if self.view.state.weapon_rules != Rules::Spec
+            || missiles::Cruise::for_weapon(w).is_none()
+            || self.ground.is_none()
+        {
+            return self.mounted_solution();
+        }
+        let profile = missiles::Profile::for_weapon(w)?;
+        let observed = self.weapon_observation()?;
+        missiles::intercept_with_terrain(
+            &w.movement,
+            Motion::launch(w, self.launcher.velocity, self.launcher.position[1]),
+            self.launcher.position,
+            self.launcher.basis.forward,
+            observed.position,
+            observed.velocity,
+            0,
+            profile.guidance_ticks,
+            self.ground,
+        )
+    }
+
     fn compute_readiness(&self) -> Readiness {
         let launcher = self.launcher;
         if !launcher.alive || self.view.own.hp <= 0 {
@@ -2348,6 +2396,9 @@ impl<'a> LauncherView<'a> {
                     Readiness::NoTarget
                 };
             }
+            if surface && bore.is_some_and(|o| self.terrain_masked(o.position)) {
+                return Readiness::TerrainMask;
+            }
             if bore.is_some_and(|o| {
                 missiles::length(sub(o.position, launcher.position))
                     < f64::from(w.seeker.zones[1].minimum_range.max(0))
@@ -2370,6 +2421,10 @@ impl<'a> LauncherView<'a> {
         }
         if !t.body_present() {
             return Readiness::TargetDestroyed;
+        }
+        if profile.is_some_and(|p| p.role == TargetRole::Surface) && self.terrain_masked(t.position)
+        {
+            return Readiness::TerrainMask;
         }
         if w.seeker.signature == 3 && profile.is_some_and(|p| p.needs_air_ground()) {
             // A surface radar weapon is released on the A-G track (retail).
@@ -2447,6 +2502,9 @@ impl<'a> LauncherView<'a> {
     }
 
     pub fn can_lock(&self) -> bool {
+        if self.ground.is_some() && self.launch_solution() == Readiness::TerrainMask {
+            return false;
+        }
         if self.view.own.config.stations.is_empty() {
             return false;
         }
@@ -2631,7 +2689,11 @@ impl<'a> LauncherView<'a> {
                 .zones[1]
                 .minimum_range,
         );
-        self.readiness() == Readiness::Ready
+        let surface = missiles::Profile::for_weapon(
+            &self.view.own.config.stations[self.view.own.selected].weapon,
+        )
+        .is_some_and(|p| p.role == TargetRole::Surface);
+        (surface || self.readiness() == Readiness::Ready)
             && self
                 .estimated_max_range()
                 .is_some_and(|max| max > min && (min..=max).contains(&o.range))
@@ -4364,7 +4426,10 @@ impl State {
                         own.gun_readiness(slot)
                     }
                 } else {
-                    view(self, own).readiness(launcher)
+                    view(self, own)
+                        .at(launcher)
+                        .with_terrain(&ground)
+                        .readiness()
                 };
                 let bay_waits = own.bay_waits(launcher);
                 // A pending bay release lapses if the shot is no longer wanted or the
@@ -10318,7 +10383,10 @@ fn guide_owned<'a>(
         if !measured && dot(sub(point, p.position), motion.velocity) <= 0. {
             return;
         }
-        let desired = unit(sub(motion.aim(p.position, point), p.position));
+        let desired = unit(sub(
+            motion.aim_over_terrain(p.position, point, ground),
+            p.position,
+        ));
         let heading = missiles::commanded_heading(p.direction, motion.path(), desired);
         p.direction = missiles::steer(&w.movement, p.age, p.direction, heading);
     }

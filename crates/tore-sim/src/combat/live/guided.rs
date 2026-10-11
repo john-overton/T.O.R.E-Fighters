@@ -219,7 +219,7 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
                 zone(
                     s.position,
                     laser_scale(weather, launcher.position, s.position),
-                )
+                ) && missiles::launch_line_clear(launcher.position, s.position, ground)
             });
             if let Some(spot) = usable {
                 flight.mode = Mode::Guiding;
@@ -241,7 +241,7 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
         Guidance::Command => {
             if let Some((point, id)) = designated_point(own, kind, targets)
                 && zone(point, 1.)
-                && sight::clear_line(launcher.position, point, ground)
+                && missiles::launch_line_clear(launcher.position, point, ground)
             {
                 flight.mode = Mode::Guiding;
                 flight.point = Some(point);
@@ -294,6 +294,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
             );
             if let Some(spot) = choose(&spots, flight.owner, side, p.position, |s| {
                 guided::in_cone(w, p.position, nose, s.position)
+                    && missiles::launch_line_clear(p.position, s.position, cx.ground)
             }) {
                 flight.mode = Mode::Guiding;
                 flight.spot_owner = Some(spot.owner);
@@ -338,7 +339,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     if flight.mode == Mode::Guiding
         && let (Some(point), Some(motion)) = (flight.point, p.motion.as_mut())
     {
-        let aim = motion.aim(p.position, point);
+        let aim = motion.aim_over_terrain(p.position, point, cx.ground);
         let desired = missiles::commanded_heading(
             p.direction,
             motion.path(),
@@ -347,7 +348,15 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
         let next = missiles::steer(&w.movement, p.age, p.direction, desired);
         motion.turn(p.direction, next);
         p.direction = next;
-        flight.seconds = guided::time_to(w, *motion, p.position, p.direction, point, p.age);
+        flight.seconds = guided::time_to_with_terrain(
+            w,
+            *motion,
+            p.position,
+            p.direction,
+            point,
+            p.age,
+            Some(cx.ground),
+        );
     } else if let Some((fall, start)) = flight.fall {
         let elapsed = (p.age - start) as f64 / 120.;
         let here = fall.position(elapsed);
@@ -430,8 +439,18 @@ pub(super) fn sight<G: Fn(f64, f64) -> f64>(
                 .copied()
                 .collect();
             all.extend(own.laser.spot(own.aircraft, own.side));
-            if let Some(spot) = choose(&all, own.aircraft, own.side, launcher.position, |_| true) {
+            if let Some(spot) = choose(&all, own.aircraft, own.side, launcher.position, |s| {
+                missiles::launch_line_clear(launcher.position, s.position, cx.ground)
+            }) {
                 (Some(spot.position), spot.owner != own.aircraft, None)
+            } else if let Some(spot) =
+                choose(&all, own.aircraft, own.side, launcher.position, |_| true)
+            {
+                (
+                    Some(spot.position),
+                    spot.owner != own.aircraft,
+                    Some(Advisory::Masked),
+                )
             } else if own.laser.state == LaserState::Masked {
                 (own.laser.point, false, Some(Advisory::Masked))
             } else {
@@ -441,7 +460,17 @@ pub(super) fn sight<G: Fn(f64, f64) -> f64>(
         }
         Guidance::Coordinate | Guidance::Command => {
             let aim = designated_point(own, kind, cx.targets).map(|(p, _)| p);
-            (aim, false, aim.is_none().then_some(Advisory::NoTarget))
+            let advisory = if aim.is_none() {
+                Some(Advisory::NoTarget)
+            } else if kind == Guidance::Command
+                && aim
+                    .is_some_and(|p| !missiles::launch_line_clear(launcher.position, p, cx.ground))
+            {
+                Some(Advisory::Masked)
+            } else {
+                None
+            };
+            (aim, false, advisory)
         }
         Guidance::Supported | Guidance::Active | Guidance::Infrared | Guidance::Emitter => {
             return None;
@@ -470,10 +499,10 @@ pub(super) fn sight<G: Fn(f64, f64) -> f64>(
     });
     let ground_range = aim.map(|point| guided::ground_range(point, launcher.position));
     let slant_range = aim.map(|point| distance(point, launcher.position));
-    // A laser weapon with no spot to home on is never IN RNG, whatever the
-    // designated object's range.
+    // A missing spot cannot supply an aim. MASK is a separate advisory,
+    // never a terrain penalty on the range/energy cue.
     let spotless = matches!(advisory, Some(Advisory::NoLaser | Advisory::Masked));
-    let in_reach = !spotless
+    let in_reach = advisory != Some(Advisory::NoLaser)
         && aim.is_some_and(|point| {
             guided::in_release_zone(w, launcher.position, launcher.basis, point, scale)
                 && (!guided::is_glide_bomb(w) || {
@@ -492,8 +521,6 @@ pub(super) fn sight<G: Fn(f64, f64) -> f64>(
                     )
                     .is_some()
                 })
-                && (kind != Guidance::Command
-                    || sight::clear_line(launcher.position, point, cx.ground))
         });
     if advisory.is_none() && aim.is_some() && !in_reach {
         advisory = Some(Advisory::OutOfReach);

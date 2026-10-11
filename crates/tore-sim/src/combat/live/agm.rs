@@ -190,6 +190,7 @@ pub(super) fn harm_emitters<'a>(
                 emitting: true,
             });
         } else if held == Some(t.id)
+            && !obscured(view.position, t.position)
             && missiles::geometry(
                 &w.seeker.zones[0],
                 view.position,

@@ -101,11 +101,13 @@ pub(super) fn observe_ownship(
         &environment,
     );
     own.bore_observation = None;
+    let surface_obscured =
+        |from: Vector, to: Vector| !missiles::launch_line_clear(from, to, context.ground);
     own.harm_cue = super::agm::harm_emitters(
         own,
         &launcher,
         context.targets.iter().chain(peers(context.rows, own_index)),
-        &obscured,
+        &surface_obscured,
     );
     let index = own.selected;
     let Some(station) = own.config.stations.get(index) else {
@@ -166,11 +168,18 @@ pub(super) fn observe_ownship(
                 own.mounted.acquired = false;
                 own.mounted.missing = 0;
             }
+            let seeker_obscured = |from: Vector, to: Vector| {
+                if profile.role == TargetRole::Surface {
+                    surface_obscured(from, to)
+                } else {
+                    obscured(from, to)
+                }
+            };
             let view = seeker::View {
                 position: launcher.position,
                 basis: launcher.basis,
                 cap,
-                obscured: &obscured,
+                obscured: &seeker_obscured,
             };
             let observations: Vec<_> = context
                 .targets

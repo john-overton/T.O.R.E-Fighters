@@ -433,11 +433,12 @@ above:
 - **At release** a spot must lie inside the weapon's zone 1 about the aircraft
   (45 degrees in heading and pitch, the record's range times the laser weather
   share on the line to the spot): the plane's own spot first, else the nearest
-  same-side spot. With a spot in reach the weapon guides on it. With no spot at
+  same-side spot. With a terrain-visible spot in reach the weapon guides on it. With no spot at
   all (no laser on, no buddy lasing) it waits: it may lock **once** onto a spot
   that comes inside its 45 degree nose cone (lead ruling, 2026-10-10, following
   this spec's warnings table: "can still pick one up"). With spots that are all
-  out of reach it leaves blind, as retail.
+  out of reach or hidden from the shooter it leaves blind. The terrain gate is
+  the opinionated rule in [terrain at lock and launch](#terrain-at-lock-and-launch).
 - **In flight** it follows the laser of the aircraft whose spot it took: the spot
   while that laser lases, the laser's point while it is masked (retail: weather
   and masking never break a lock already made). Guidance is lost for good when
@@ -731,13 +732,16 @@ Built (slice W1, `combat::guided`, `weapon_hud/guided.rs`), agent choices:
 - **The aim**: the laser spot (the plane's own, else a buddy's), the JDAM's
   point (the designated ground object, else the sight's held point) or the
   AT-2's designated object. `R` is its ground range. IN RNG means the aim
-  itself lies in zone 1 and the glide reaches it (and for the AT-2 that the
-  launcher sees it).
+  itself lies in zone 1 and the glide reaches it. Visibility is separate,
+  including for AT-2, as in [terrain at lock and launch](#terrain-at-lock-and-launch).
 - **The scale**: the missiles' scale at x=390 (y 230 to 282), the far edge's
   ground range in nautical miles at the top (y 218), the near edge's below
   (y 284), the caret at the aim's ground range (clamped to the scale), `R 6.2`
   above (y 206); IN RNG blinks at 2 Hz on the line below the store name, else
-  the advisory (NO LASER, MASK, OUT OF REACH, NO TARGET) takes it.
+  the advisory (NO LASER, MASK, OUT OF REACH, NO TARGET) takes it. When the
+  energy cue is IN RNG but the line is masked, MASK remains visible on the
+  readiness row below it (y 295); an actual release failure such as OPENING BAY takes
+  priority on that row.
 
 **The level T for guided bombs** (built, slice FX-H, 2026-10-11; John asked for
 "release at the bar" and whether it is the same as hold to release: it is the
@@ -912,6 +916,46 @@ Built (W2), with these rules (opinionated, agent, where not labelled):
   ground object or ship by range and radar signature alone, without the air
   radar's clutter notch (fitted).
 
+### Terrain at lock and launch
+
+**Opinionated, John, 2026-10-11 (surface close-out Q7):** a seeker needs a
+clear terrain line from the launcher to the target or laser spot at lock and
+at launch. The launch-zone and IN RNG cues describe range and energy only.
+Terrain does not reduce the range scale. The fitted surface prelaunch line
+check samples at most 256 ft apart, stopping 25 ft short of the target to
+exclude its own ground endpoint. It is bounded to 4,096 intervals on unusually
+long lines. The old eight probes over a whole seeker range could skip a ridge
+near the target. Existing in-flight lock-loss sampling stays unchanged. Losing the contact can still remove
+the target's cue because there is no observed target to range.
+
+- Mavericks and SLAM, CUED or BORE, already reject masked seeker returns.
+  HARM and Shrike do too, even when the masked ground radar is emitting.
+  Their mounted seeker loses its lock; no candidate reads NO TARGET or
+  NO EMITTER, and an unsettled seeker reads ACQUIRING.
+- Active and supported ground radar weapons already need a terrain-visible
+  A-G track and observe through the terrain gate. A lost track reads NO TRACK.
+  All profiled surface missiles also recheck the launcher's current terrain
+  line at release and in the cockpit readout, so a stale contact cannot grant
+  a launch. A still-designated blocked line reads the existing TERRAIN MASK.
+  A masked HARM emitter is absent from its cue, not drawn as a shutdown radar.
+- Laser weapons check the shooter's line to the spot, including a buddy's
+  spot. A spot visible only to the designator grants no lock. The guided sight
+  reads MASK; release remains allowed but unguided, as in the warnings table.
+  The first acquisition by a weapon released waiting for a spot also checks
+  the weapon's line. An already-guiding laser weapon keeps its existing
+  angle-only loss rule, including following the laser's point while masked.
+- AT-2 already checks its launcher's line at release and while guiding.
+  A blocked launch line now reads MASK separately from the range estimate;
+  release is still possible but unguided. GPS JDAM coordinates need no seeker
+  visibility and are unchanged.
+
+Measured checks are in the [terrain validation](../baselines/surface-terrain.md).
+
+The range cue is not a promise that the path is clear. Cruise-profile weapons
+use the shared fitted [terrain clearance](missiles.md#cruise-terrain-clearance)
+rule after launch. IR memory and reacquisition, active seeker loss, supported
+track loss, and HARM's angle-only in-flight hold remain as specified above.
+
 ### Laser on the HUD
 
 - The laser point is marked with the retail IR/laser **rectangular TD box**
@@ -956,7 +1000,7 @@ the station could not release at all:
 | BAY | A bay aircraft with the bay closed, as today (retail BAY; release refused "Can't deploy, Open weapon bay door") |
 | NO TARGET | A guided weapon that needs a designation has none. Built (slice W1): a JDAM with no designated ground object and no sight point, and an AT-2 with no designated object, read NO TARGET and are not released (the existing `NoTarget` readiness; the plan's `NoGroundTarget` name was not needed) |
 | NO TRACK | A SARH missile's A-G track is lost |
-| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic; MASK when the line is blocked). Built (slice W1): advisories in the guided sight, never readiness codes, so release is not blocked; MASK when the plane's own laser is wanted but masked and no other spot exists |
+| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic; MASK when the line is blocked). Built (slice W1): advisories in the guided sight, never readiness codes, so release is not blocked; MASK when the plane's own laser is wanted but masked and no other visible spot exists, or when a buddy spot is hidden from the shooter |
 | OUT OF REACH | A guided bomb's reach does not cover the target. Built (slice W1): the aim lies outside zone 1 or beyond the glide (for the AT-2, also out of the launcher's sight); advisory |
 | OVERFLY | LVL, passed the target |
 | NO EMITTER | A HARM with no emitter to fire at |
