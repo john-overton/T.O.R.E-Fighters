@@ -35,8 +35,9 @@ about 1 G well below the top speed.
 
 ## Air-to-ground weapons
 
-`a2g-*` (scenario file
-[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py)) runs
+`a2g-*` (scenario files
+[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py) and
+[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py)) runs
 `--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND`, which flies a scripted
 straight pass at a ground target of a Quick Mission, invulnerable, and attacks through the
 real player path: the weapon keys select the station and the trigger releases. A store the
@@ -46,6 +47,10 @@ weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run
 | Scenario | What it flies | What must hold |
 | --- | --- | --- |
 | `a2g-bomb-motion` | Over `~QUCOL`: an A-4E Mk 82 from a level pass at 5,000 ft and 450 kt, an F-4B Mk 82 from a 30 degree dive released 3,000 ft above the target, an A-4E Mk 82 AIR 7-pack and an A-4E Snakeye, each released when the bomb sight's mean impact reaches the target | The solution obeys the bomb equation (fall and throw within 0.01 s and 2 ft); every bomb bursts within 2 ft of its own path and within the 3 degree scatter's reach of the mean point, its scatter within 3 degrees; the 7-pack is seven bombs in one tick for one round at the retail stagger and 66 percent of the speed; the Snakeye falls as long as the slick bomb and throws 66 percent as far ([bomb motion](../spec/air-to-ground.md#bomb-motion)) |
+| `a2g-ccip-dive` | `--attack ccip` over the TVIET truck park: an F/A-18D's Mk 82 in a 30 degree dive from 2,000 ft, released when the HUD's CCIP pipper covers the truck; then a longer, shallower pass from 3 nmi | The truck is destroyed; every logged sight follows the retail arc rule (full inside 0.4 of the 20,000 ft range, one step fewer each fourteenth of the rest, the bare ring from the maximum, on retail's approximate distance), its glyph is 0x20 plus the arc, IN RNG inside the range, and the arc never shrinks as the range closes ([CCIP](../spec/air-to-ground.md#ccip-the-dive-pipper)) |
+| `a2g-level-t` | `--attack level` over `~QUCOL`: an F-4B designates the column from the A-G page, selects its Mk 82 (LVL on selection) and holds the trigger through a level pass at 5,000 ft and 450 kt | Exactly one bomb, released within three ticks of ground travel past the cue with the cross-track miss inside the radius; the release time falls and the marker rides down before it; OVERFLY after; the burst inside the record's splash radius of the target ([the level T](../spec/air-to-ground.md#the-level-release-t-lvl)) |
+| `a2g-rocket-ccip` | `--attack rocket`: an A-4E's LAU-61s in a 10 degree dive on a truck, fired once the rocket pipper says IN RNG, held a second | Rockets hit and destroy the truck; a rocket that bursts on the ground does so within a foot of the pipper of the tick it was fired on ([rockets](../spec/air-to-ground.md#rockets-and-guns)) |
+| `a2g-warnings` | `--attack ccip` with an A-4E's Mk 82 from a 30 degree dive at 300 ft, a level pass at 400 ft and one at 1,500 ft | LOW and FRAG, FRAG only, and neither ([warnings](../spec/air-to-ground.md#warnings)) |
 | `a2g-rocket-pod` | An A-4E's two LAU-61 pods tapped three times, held for a second and held until empty; two LAU-10 pods held for two seconds | 38 rockets in the pods, one a press; four or five in a second held, a quarter second apart on the game's quarter-second clock; all 38 when held on; the LAU-10 pods hold 8 and fire one however long the trigger is held ([rockets](../spec/air-to-ground.md#rockets)) |
 | `a2g-cluster` | Over `~QUCOL` (scenario file [`a2g_cluster.py`](../../tools/battery_scenarios/a2g_cluster.py), attack kind `cluster`): an A-4E CBU-87 and Mk 20 from a level pass and an F-4B RBK-500 from a 30 degree dive | The burst is the type 18 family with no crater; a vehicle inside the record's splash (2,200, 1,600 and 2,500 ft) loses the record's damage times 70 percent, falling in a line to nothing at the edge, and one outside loses none; the 28 bomblet flashes the renderer derives are the same on every derivation, inside 1,200 ft of the burst and start within its first half second ([cluster flashes](../spec/ordnance-presentation.md#cluster-bomb-flashes)) |
 

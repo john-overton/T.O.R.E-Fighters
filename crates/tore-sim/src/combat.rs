@@ -6,6 +6,7 @@ pub mod ballistics;
 pub mod blast;
 pub mod countermeasures;
 pub mod debris;
+pub mod delivery;
 pub mod gun_round;
 pub mod gunship;
 pub mod gunship_impact;
