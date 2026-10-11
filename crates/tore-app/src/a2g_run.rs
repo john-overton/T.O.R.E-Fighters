@@ -22,6 +22,9 @@
 //!   `--dive DEG`, released when the bomb sight's mean impact reaches the
 //!   target (bombs), or one second in (rockets). `--hold S` keeps the trigger
 //!   down that long, `--repeat N` presses N times `--gap S` apart.
+//! - `laser`, `jdam`, `at2` ([`guided`]): the guided weapons, released on
+//!   the HUD's release range cue, with `--laser-off S`, `--buddy ID`,
+//!   `--turn-away S` and `--condition C` of their own.
 use crate::{AppResult, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -37,6 +40,7 @@ use tore_world::{
     world::{Seating, TickOutput, World},
 };
 
+mod guided;
 mod release;
 
 const SEAT: SeatId = SeatId(0);
@@ -116,6 +120,10 @@ fn options() -> AppResult<Options> {
             "--gap" => o.gap = next()?.parse()?,
             "--defenses" => o.defenses = (next()?.parse()?, next()?.parse()?),
             "--surface-seed" => o.seed = next()?.parse()?,
+            // The guided kinds' own options, read by `guided`.
+            other if guided::OPTIONS.contains(&other) => {
+                next()?;
+            }
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
@@ -145,6 +153,9 @@ pub fn run() -> AppResult<()> {
     let o = options()?;
     let mut resources = crate::reel::load_assets()?.theater_resources;
     surface_dump::with_retail_surface(&mut resources)?;
+    if guided::KINDS.contains(&o.attack.as_str()) {
+        return guided::run(&o, &resources);
+    }
     let mut scene = Scene::new(&o, &resources)?;
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
