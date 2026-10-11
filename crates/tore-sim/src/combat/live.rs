@@ -30,6 +30,8 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 mod bomb_tests;
 mod broad;
 mod collateral;
+#[cfg(test)]
+mod delivery_tests;
 mod ground_sensing;
 #[cfg(test)]
 mod ground_sensing_tests;
@@ -1357,6 +1359,12 @@ pub struct Ownship {
     bay_release: Option<(usize, u64)>,
     /// The bay stays open until this tick after a bay release.
     bay_hold_until: u64,
+    /// The bomb sight's mode (Ctrl+M): CCIP or the level release.
+    pub delivery_mode: super::delivery::DeliveryMode,
+    /// The bomb or rocket sight's solution for the selected station, worked
+    /// out every step from that step's launcher ([`super::delivery::solve`]).
+    /// Derived each step, so a checkpoint does not carry it.
+    pub delivery: Option<super::delivery::Delivery>,
 }
 
 /// Combat: what every aircraft shares, and the [`Ownship`] of each
@@ -1705,6 +1713,8 @@ impl Ownship {
             gun_cadence,
             bay_release: None,
             bay_hold_until: 0,
+            delivery_mode: Default::default(),
+            delivery: None,
         })
     }
     pub fn configuration(&self) -> &Configuration {
@@ -2970,6 +2980,27 @@ impl State {
             sight.input = input;
         }
     }
+    /// A newly selected unguided bomb starts in LVL when a ground target is
+    /// designated and the flight path is near level, else in CCIP
+    /// ([`super::delivery::DeliveryMode::chosen`]); Ctrl+M overrides it.
+    fn choose_delivery(&self, own: &mut Ownship, launcher: Launcher) {
+        if !own.armed
+            || !own
+                .config
+                .stations
+                .get(own.selected)
+                .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+        {
+            return;
+        }
+        let ground_target = own
+            .designated()
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+            .is_some_and(|t| t.role == TargetRole::Surface && t.hp > 0);
+        let v = launcher.velocity;
+        own.delivery_mode =
+            super::delivery::DeliveryMode::chosen(ground_target, v[1].atan2(v[0].hypot(v[2])));
+    }
     /// A manual range or cockpit command for one ownship.
     pub fn command(&mut self, aircraft: u32, command: Command, launcher: Launcher) {
         self.with_ownship(aircraft, |state, own| {
@@ -3090,6 +3121,18 @@ impl State {
             Command::ReleaseChaff => self.release_countermeasure(own, EffectKind::Chaff, launcher),
             Command::ReleaseFlare => self.release_countermeasure(own, EffectKind::Flare, launcher),
             Command::ToggleSeekerMode => {
+                // Ctrl+M with an unguided bomb selected switches its sight
+                // between CCIP and LVL (docs/spec/air-to-ground.md).
+                if own.armed
+                    && own
+                        .config
+                        .stations
+                        .get(own.selected)
+                        .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+                {
+                    own.delivery_mode = own.delivery_mode.toggled();
+                    return;
+                }
                 if self.weapon_rules == Rules::Compatibility || !own.guidance_available(launcher) {
                     return;
                 }
@@ -3136,15 +3179,21 @@ impl State {
                     own.release();
                 }
             }
-            Command::NextWeapon => own.select_next(),
+            Command::NextWeapon => {
+                own.select_next();
+                self.choose_delivery(own, launcher);
+            }
             Command::NextSelection => {
-                own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::PreviousSelection => {
-                own.cycle_selection(false, self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.cycle_selection(false, self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::AdvanceFromEmpty => {
-                own.advance_from_empty(self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.advance_from_empty(self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::SelectNav => {
                 own.release();
@@ -3800,6 +3849,49 @@ impl State {
             blast: Some(explosion),
         });
     }
+    /// The bomb or rocket sight's solution for `own`'s selected station this
+    /// step: against its designated ground target, with the time to impact of
+    /// the last bomb it released.
+    fn delivery_for(
+        &self,
+        own: &Ownship,
+        launcher: &Launcher,
+        ground: &impl Fn(f64, f64) -> f64,
+        clock: super::delivery::Clock,
+    ) -> Option<super::delivery::Delivery> {
+        if !own.armed || !launcher.alive {
+            return None;
+        }
+        let station = own.config.stations.get(own.selected)?;
+        let target = own
+            .designated()
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+            .filter(|t| t.role == TargetRole::Surface && t.hp > 0)
+            .map(|t| t.position);
+        let falling = self
+            .projectiles
+            .iter()
+            .filter(|p| p.owner == own.aircraft)
+            .filter_map(|p| self.bombs.get(&p.id).map(|motion| (p, motion)))
+            .max_by_key(|(p, _)| p.id)
+            .and_then(|(p, motion)| {
+                motion
+                    .fall_time(ground(p.position[0], p.position[2]))
+                    .map(|t| (t - p.age as f64 / 120.).max(0.))
+            });
+        super::delivery::solve(
+            super::delivery::Situation {
+                index: own.selected,
+                station,
+                launcher,
+                mode: own.delivery_mode,
+                target,
+                clock,
+                falling,
+            },
+            ground,
+        )
+    }
     fn push_effect(&mut self, effect: Effect) {
         if self.effects.len() == MAX_EFFECTS {
             self.effects.remove(0);
@@ -3999,6 +4091,16 @@ impl State {
             if own.gunship.is_some() {
                 step_gunship(own, k, launcher, &self.targets, &rows, &ground, self.tick);
             }
+            own.delivery = self.delivery_for(
+                own,
+                &launcher,
+                &ground,
+                super::delivery::Clock {
+                    tick: self.tick - 1,
+                    service,
+                    remainder: self.service_remainder,
+                },
+            );
             let selected = own.selected;
             let grouped = own
                 .gunship
@@ -4066,6 +4168,21 @@ impl State {
                     w.burst.game_burst_t,
                     now,
                 );
+                // LVL holds a bomb's trigger while the release cue lies ahead:
+                // a held trigger waits for the cue and releases there, once a
+                // pass (docs/spec/air-to-ground.md, "The level release T").
+                let polled = match own.delivery.as_ref().and_then(|d| d.level_trigger(index)) {
+                    Some(due) => {
+                        due && held
+                            && launcher.alive
+                            && !self.projectiles.iter().any(|p| {
+                                p.owner == own.aircraft
+                                    && p.station == index
+                                    && p.age <= super::delivery::RELEASE_GUARD_TICKS
+                            })
+                    }
+                    None => polled,
+                };
                 if polled && bay_waits && own.release_readiness == Readiness::Ready {
                     own.bay_release = Some((index, self.tick));
                     own.release_readiness = Readiness::BayClosed;
