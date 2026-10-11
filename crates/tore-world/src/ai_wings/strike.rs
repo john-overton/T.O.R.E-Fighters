@@ -101,8 +101,11 @@ pub(super) fn step(
                 (None, None, false, due)
             } else {
                 let delivery = state.strike_delivery(id, config, &launcher, &ground);
-                let ccip = delivery.as_ref().and_then(|d| d.ccip);
-                let impact = ccip.map(|c| c.impact);
+                // The cue on the target's ground, as the release test judges
+                // it (slice ST-LV).
+                let cue = delivery
+                    .as_ref()
+                    .and_then(|d| d.impact_at(ground(position[0], position[2])));
                 let warning = delivery.as_ref().is_some_and(|d| {
                     d.warnings
                         .iter()
@@ -113,7 +116,12 @@ pub(super) fn step(
                     gate_ft: sel.gate_ft,
                 };
                 let due = state.strike_release_due(id, config, &launcher, aim, &ground);
-                (impact, ccip.map(|c| c.seconds), warning, due)
+                (
+                    cue.map(|c| c.position),
+                    cue.map(|c| c.seconds),
+                    warning,
+                    due,
+                )
             };
             Some(Solution {
                 station: sel.station,

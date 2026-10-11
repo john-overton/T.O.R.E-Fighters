@@ -174,17 +174,27 @@ fn shape(p: &Projectile) -> String {
     )
 }
 
-/// The rounds, bomb paths and guided flights in flight, in release order.
+/// The rounds, bomb paths and guided flights in flight, in release order. A
+/// bomb is told by where and how fast it left, not by the way it flies on:
+/// every bomb takes its own scatter, drawn from the tick and its round number
+/// (slice ST-LV), so a human's and an AI's bombs leave alike and fly apart.
 fn released(s: &State) -> Vec<String> {
     s.projectiles
         .iter()
-        .map(|p| {
-            format!(
-                "{} {:?} {:?}",
-                shape(p),
-                s.bomb_motion(p.id),
-                s.guided_flight(p.id)
-            )
+        .map(|p| match s.bomb_motion(p.id) {
+            Some(motion) => format!(
+                "{:?} {:?} {:?}",
+                (p.owner, p.station, p.previous, p.launched_t, p.age),
+                (p.target, p.guidance.is_some(), p.incoming, p.gun_round),
+                (
+                    motion.origin,
+                    // The scatter turns the release without changing its
+                    // speed.
+                    (dot(motion.velocity(0.), motion.velocity(0.)).sqrt() * 1e6).round() / 1e6,
+                    s.guided_flight(p.id),
+                ),
+            ),
+            None => format!("{} None {:?}", shape(p), s.guided_flight(p.id)),
         })
         .collect()
 }
@@ -376,6 +386,43 @@ fn an_ai_jdam_stores_its_targets_point_as_a_humans_does() {
         (flight.mode, flight.point, flight.target),
         (GuidedMode::Guiding, Some(point), None)
     );
+}
+
+#[test]
+fn the_ai_judges_a_bomb_at_its_targets_ground_not_the_ground_under_it() {
+    // Slice ST-LV. The tank stands on a 600 ft plateau; the ground under the
+    // aircraft, 12,000 ft short of it, is at sea level. The CCIP pipper (retail)
+    // works the fall out against the ground under the release point, but the
+    // AI's release test brings the bomb down to the aim point's ground.
+    let ground = |_: f64, z: f64| if z > 8_000. { 600. } else { 0. };
+    let bombs = config(mk82(), false);
+    let mut robot = ai(mk82(), false);
+    tick(&mut robot, false);
+    let solution = robot
+        .strike_delivery(0, &bombs, &launcher(), &ground)
+        .expect("a bomb solution");
+    let ccip = solution.ccip.unwrap();
+    assert_eq!(ccip.impact[1], 0.);
+    let tank = robot
+        .targets
+        .iter()
+        .find(|t| t.id == TANK)
+        .unwrap()
+        .position;
+    let plateau = crate::combat::ballistics::impact_at(ccip.release, 600.).unwrap();
+    assert_eq!(solution.impact_at(600.), Some(plateau));
+    // Shorter than the sea-level impact by about 600 ft x 759 / 620.
+    let short = ccip.impact[2] - plateau.position[2];
+    assert!(short > 600. && short < 800., "{short}");
+    let aim_at = |point: Vector| ReleaseAim {
+        offset_ft: [point[0] - tank[0], point[2] - tank[2]],
+        gate_ft: 20.,
+    };
+    // Aimed where the bomb really lands (on the plateau): due.
+    assert!(robot.strike_release_due(0, &bombs, &launcher(), aim_at(plateau.position), &ground));
+    // Aimed at the pipper's sea-level point, beyond the plateau's edge of
+    // the fall: not due, the bomb would land short of it.
+    assert!(!robot.strike_release_due(0, &bombs, &launcher(), aim_at(ccip.impact), &ground));
 }
 
 #[test]
