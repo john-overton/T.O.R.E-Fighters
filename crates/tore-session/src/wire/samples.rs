@@ -1327,6 +1327,8 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             gun_group: 5,
         },
         gunsight: Some(gunsight()),
+        sight: None,
+        laser: None,
         seeker: SeekerReadout {
             status: seeker::Status::Locked,
             target: Some(7),

@@ -390,6 +390,25 @@ decides which statuses hold the trigger. Presentation reads the owner's
 prediction (`tore_session::client::sight`). Wire: protocol 21
 ([the gunsight](formats/net-protocol.md#the-gunsight)).
 
+The sight itself is `combat::sight` (air-to-ground slice T1;
+[spec](spec/air-to-ground.md#the-targeting-sight)): `Sight` holds the mode,
+look, aim point, seat controls, pending key and notice, and `Sight::step` is the
+one law for every sight. Its `SightSensor` names the laser flag, the reach, the
+`Gimbal` (the hemisphere below the aircraft, or a cone about the nose) and the
+eye; `fixed_sight` reads it from the aircraft's own laser or FLIR record and a
+loaded `DesignatorPod` comes first (`Configuration::sight_sensor`). The gunship
+keeps its flat fields and steps through `Sight::step` with its dome sensor
+(`gunship::sensor`), and `gunship` re-exports the sight's names. Every other
+aircraft with a sensor of that kind carries `Ownship::sight`, stepped in
+`live/sighting.rs` before the release loop: the sight sees only ground objects,
+follows a designated ground object, and its track designates through
+`Sensors::hold`. `combat::laser` holds each aircraft's `Laser` (Off, Ready,
+Lasing, Masked, the Ctrl+L override and the limits), stepped right after the
+sight; `State::laser_spots`, `laser_spot_for` and `buddy_spot` give the spots by
+owner and side for the weapons (buddy lasing). Both are in the checkpoint. The
+readout's `SightReadout` and `LaserReadout` are host-built and not on the wire
+before protocol 23.
+
 `ai::gunnery` uses the same trajectory solver with explicitly permitted visual
 or sensor observations. The controller chooses gun tracking through ordinary
 flight inputs and authorizes individual rounds. `ai_wings` rechecks barrel
