@@ -43,6 +43,16 @@ Unknown contacts do not expose aircraft identity, object name or allegiance.
 Lost contacts disappear at the next simulation step. Destroyed objects retain a
 marker only while detected, marked DESTROYED.
 
+Surface units known by sight show what they are: a visually identified SAM or
+AAA unit, tank, truck, radar or ship takes the `MCICONS.PIC` symbol of its kind
+on the tile of its side, the sheet's blue row for the viewer's own side and its
+red row for the other (agent decision, 2026-10-10; which symbol means which was
+read from the sheet: gun, launcher, tank, truck, radar building, ship, generic
+cube). A unit with no side keeps the grey tile that claims nothing. Radar-only
+contacts stay the yellow unknown placeholders and expose no allegiance. The
+symbol and side come from the mission's surface units by id; nothing the player
+has not seen is shown.
+
 ## Category controls
 
 The right rail has five buttons: Aircraft, Airfields, Buildings, Surface and

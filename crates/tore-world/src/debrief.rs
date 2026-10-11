@@ -2,7 +2,7 @@
 //! one seat's debrief shows. It lives in the mission core so a dedicated
 //! server can build each seat's report; the app keeps the screen
 //! (`crates/tore-app/src/debrief.rs`). Spec: docs/spec/debrief.md.
-use crate::ai_wings::outcome::{self, Requirements, Standing};
+use crate::ai_wings::outcome::{self, Requirements, Stance, Standing};
 use crate::seats::{Plane, PlaneId, Roster, SeatId, Slot};
 use crate::world::{Cockpit, World};
 use tore_formats::aircraft::AircraftId;
@@ -61,11 +61,17 @@ pub struct Pilot {
     pub air_to_ground: Tally,
     pub gun: Tally,
     pub bombs: Tally,
-    /// Enemy fire aimed at this pilot. SAM and AAA sites do not exist yet.
+    /// Enemy fire aimed at this pilot. Hostile aircraft feed AAM and Gun;
+    /// hostile surface units feed SAM (missiles and anything not a gun) and
+    /// AAA (gun rounds), the retail split by shooter.
     pub enemy_aam: Tally,
     pub enemy_sam: Tally,
     pub enemy_gun: Tally,
     pub enemy_aaa: Tally,
+    /// The short name of the surface unit credited with the loss of this
+    /// pilot's aircraft ("SA-6", "ZSU-23-4"), when a SAM, gun or other
+    /// surface unit shot it down. Not on the wire yet (protocol 22).
+    pub shot_down_by: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,6 +144,9 @@ pub struct Ending<'a> {
     pub wingman: Option<u32>,
     /// What the mission asks of the plane.
     pub requirements: Requirements,
+    /// Every surface object the plane knows of, from the plane's side
+    /// ([`outcome::ground`]); empty without a ground target or surface units.
+    pub ground: Vec<outcome::Ground<'a>>,
 }
 
 impl Ending<'_> {
@@ -150,6 +159,12 @@ impl Ending<'_> {
     }
     fn hostile(&self, id: u32) -> bool {
         self.airframe(id).is_some_and(|a| !a.friendly)
+    }
+    /// A surface unit on the other side from the plane whose debrief this is.
+    fn hostile_surface(&self, id: u32) -> bool {
+        self.ground
+            .iter()
+            .any(|g| g.id == id && g.stance == Stance::Hostile)
     }
     /// The mission result rule, shared with the in-flight result check.
     fn fates(&self) -> Vec<outcome::Aircraft> {
@@ -165,10 +180,18 @@ impl Ending<'_> {
     fn pilot(&self, airframe: &Airframe, standing: &Standing, kills: &[Kill]) -> Pilot {
         let id = airframe.id;
         let own = |kind: ShotKind| self.ledger.total(|k| k.owner == id && k.kind == kind);
-        // Enemy aircraft fire splits only into guns and everything else.
-        let at = |gun: bool| {
+        // Enemy fire splits only into guns and everything else; the shooter
+        // decides the row: an aircraft's is Gun or AAM, a surface unit's AAA
+        // or SAM (retail, docs/formats/debrief.md).
+        let at = |gun: bool, surface: bool| {
             self.ledger.total(|k| {
-                k.aim == Some(id) && (k.kind == ShotKind::Gun) == gun && self.hostile(k.owner)
+                k.aim == Some(id)
+                    && (k.kind == ShotKind::Gun) == gun
+                    && if surface {
+                        self.hostile_surface(k.owner)
+                    } else {
+                        self.hostile(k.owner)
+                    }
             })
         };
         let status = if airframe.ejected {
@@ -191,8 +214,15 @@ impl Ending<'_> {
             air_to_ground: own(ShotKind::AirToGround),
             gun: own(ShotKind::Gun),
             bombs: own(ShotKind::Bomb),
-            enemy_aam: at(false),
-            enemy_gun: at(true),
+            enemy_aam: at(false, false),
+            enemy_sam: at(false, true),
+            enemy_gun: at(true, false),
+            enemy_aaa: at(true, true),
+            shot_down_by: (status != Status::Alive)
+                .then(|| self.ledger.credit(id))
+                .flatten()
+                .and_then(|kill| self.ground.iter().find(|g| g.id == kill.owner))
+                .map(|g| g.name.to_owned()),
             ..Pilot::default()
         };
         for kill in kills.iter().filter(|k| k.owner == id) {
@@ -316,6 +346,10 @@ pub fn capture(world: &World, seat: SeatId) -> Option<Report> {
             &world.revival.objective_lineages(&world.roster),
         );
     }
+    // The ground target's objects join the objectives: destroy for a friendly
+    // plane, protect for a Redfor one.
+    let surface = &world.terrain.surface;
+    let requirements = requirements.with_ground(side, &outcome::ground_targets(surface, state));
     Some(report(&Ending {
         ledger: &state.ledger,
         ticks: state.tick(),
@@ -323,6 +357,7 @@ pub fn capture(world: &World, seat: SeatId) -> Option<Report> {
         aircraft,
         wingman: wingman_of(&world.roster, plane),
         requirements,
+        ground: outcome::ground(surface, state, side),
     }))
 }
 
@@ -453,6 +488,7 @@ pub fn results(world: &World) -> Vec<PlaneResult> {
             aircraft,
             wingman: None,
             requirements: Requirements::default(),
+            ground: outcome::ground(&world.terrain.surface, state, viewer),
         };
         let kills = {
             let fates = ending.fates();
@@ -460,6 +496,7 @@ pub fn results(world: &World) -> Vec<PlaneResult> {
                 ledger: ending.ledger,
                 plane: NO_VIEWER,
                 aircraft: &fates,
+                ground: &ending.ground,
                 requirements: &ending.requirements,
             }
             .kills()
@@ -482,6 +519,7 @@ pub fn results(world: &World) -> Vec<PlaneResult> {
             ledger: ending.ledger,
             plane: NO_VIEWER,
             aircraft: &fates,
+            ground: &ending.ground,
             requirements: &ending.requirements,
         };
         let airframe = Airframe {
@@ -573,6 +611,7 @@ pub fn report(end: &Ending) -> Report {
         ledger: end.ledger,
         plane: end.player.id,
         aircraft: &fates,
+        ground: &end.ground,
         requirements: &end.requirements,
     };
     let kills = standing.kills();
@@ -610,7 +649,7 @@ impl Report {
     /// One line for headless probes: outcome, objectives and both columns.
     pub fn summary(&self) -> String {
         let pilot = |p: &Pilot| {
-            format!(
+            let mut line = format!(
                 "{:?} damage={:.0}% kills={:?} ff={} a2a={}/{} dmg={} gun={}/{} a2g={}/{} bomb={}/{} enemy_aam={}/{} enemy_gun={}/{}{}",
                 p.status,
                 p.damage * 100.,
@@ -630,7 +669,18 @@ impl Report {
                 p.enemy_gun.hit,
                 p.enemy_gun.launched,
                 p.cause.map_or_else(String::new, |c| format!(" cause={c}")),
-            )
+            );
+            // Surface fire shows only when there was some, so a mission with
+            // no surface units keeps the line it always had.
+            for (name, tally) in [("enemy_sam", p.enemy_sam), ("enemy_aaa", p.enemy_aaa)] {
+                if tally.launched > 0 {
+                    line.push_str(&format!(" {name}={}/{}", tally.hit, tally.launched));
+                }
+            }
+            if let Some(unit) = &p.shot_down_by {
+                line.push_str(&format!(" shot_down_by={unit}"));
+            }
+            line
         };
         format!(
             "{} {:?} elapsed={}s player[{}] wingman[{}]",
@@ -690,6 +740,7 @@ mod tests {
                 destroy: vec![10, 11],
                 protect: vec![],
             },
+            ground: Vec::new(),
         }
     }
     #[test]
@@ -747,6 +798,7 @@ mod tests {
             ledger: end.ledger,
             plane: end.player.id,
             aircraft: &fates,
+            ground: &[],
             requirements: &end.requirements,
         };
         assert!(
@@ -946,6 +998,7 @@ mod tests {
                 .collect(),
             wingman: wingman_of(roster, PlaneId(plane)),
             requirements,
+            ground: Vec::new(),
         }
     }
     #[test]

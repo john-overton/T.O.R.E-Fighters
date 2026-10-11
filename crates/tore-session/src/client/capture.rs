@@ -28,8 +28,9 @@ use tore_sim::sensors::{Channel, Controls as Scope};
 
 /// The file's first bytes.
 pub const MAGIC: &[u8; 8] = b"TORE-CAP";
-/// The capture format's version.
-pub const FORMAT_VERSION: u16 = 4;
+/// The capture format's version: 5 since protocol 22 widened a view
+/// subject's entity kind to 3 bits.
+pub const FORMAT_VERSION: u16 = 5;
 
 /// Record kinds.
 pub mod kind {
@@ -250,7 +251,7 @@ pub fn encode_sampled(sampled: &Sampled) -> Vec<u8> {
     let _ = w.write_bits(u64::from(f.sight_zoom.min(7)), 3);
     w.write_bool(sampled.view_subject.is_some());
     if let Some(key) = sampled.view_subject {
-        let _ = w.write_bits(u64::from(key.kind.code()), 2);
+        let _ = w.write_bits(u64::from(key.kind.code()), EntityKind::CODE_BITS);
         w.write_varint(u64::from(key.id));
     }
     w.write_varint(sampled.commands.len() as u64);
@@ -290,7 +291,8 @@ pub fn decode_sampled(bytes: &[u8]) -> Result<Sampled, CaptureError> {
     }
     let sight_zoom = r.read_bits(3).map_err(bad)? as u8;
     let view_subject = if r.read_bool().map_err(bad)? {
-        let kind = EntityKind::from_code(r.read_bits(2).map_err(bad)? as u8);
+        let kind = EntityKind::from_code(r.read_bits(EntityKind::CODE_BITS).map_err(bad)? as u8)
+            .ok_or(CaptureError::Damaged("view subject"))?;
         let id = u32::try_from(r.read_varint().map_err(bad)?)
             .map_err(|_| CaptureError::Damaged("view subject"))?;
         Some(EntityKey { kind, id })

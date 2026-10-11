@@ -108,9 +108,12 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
   first row, "Automatic (near the target)", which is the default: the mission
   says `start ground auto` and the world picks the runway from the target.
   Naming an airport keeps that airport. Choosing no target (or a target when
-  none was set) starts the list over. Until the surface layout slice places
-  starts from the target, "automatic" takes the first friendly airport whose
-  runway holds the wing (fitted).
+  none was set) starts the list over. "Automatic" takes the Blue airfield
+  nearest the target at least 15 nm from it
+  ([start placement](surface-defenses.md)); when none qualifies, the first
+  Blue airport whose runway holds the wing, then the first neutral one
+  (fitted), and never an enemy field (slice AL1): with none the start is
+  refused.
 - **Seed.** Pressing OK on a mission with a target draws a new number that
   the target's layout is rolled from, so each flight can differ and a restart
   of the same flight repeats it. The lobby sends none; the host draws it when
@@ -220,15 +223,18 @@ Kurile theaters 200 miles fits only toward a corner.
 Every AI aircraft has a home runway for returning to base. The player's
 wingmen in a ground start call the departure runway home. Every other aircraft
 takes the nearest runway, measured from where it starts, that its side may
-use: a friendly field or a neutral one that grants permission, the same test
-the player's tower service applies. Allegiance is recorded from the player's
+use: a field of its own side or a neutral one that grants permission, the same
+test the player's tower service applies. Allegiance is recorded from Blue's
 side, so an enemy aircraft's own fields are the ones marked hostile, and the
 single neutral-permission flag serves both sides. Ties go to the lower runway
 number. An aircraft with no usable runway keeps its start point as home. A short
 strip (a runway under 2,000 ft, [see above](airports.md#short-strips)) is nobody's
-home. Every imported airport is currently neutral with permission, so in practice
-each aircraft takes its nearest runway. This choice is **fitted** (agent decision,
-2026-09-23).
+home. Since slice AL1 (John, 2026-10-10) every imported airport takes its
+runway's layout side ([allegiance](airports.md#allegiance)), so Blue aircraft
+go home to Blue fields and Redfor aircraft to Red ones; in North Vietnam and
+the Falklands, which have no Blue field, a Blue AI aircraft keeps its start
+point. Before AL1 every airport was neutral and each aircraft took its nearest
+runway. The nearest-runway choice is **fitted** (agent decision, 2026-09-23).
 
 ### Radar and aircraft on the ground
 
@@ -297,6 +303,23 @@ The accepted start is retained through ordnance setup and mission restart.
 
 Ground start parks the player's whole wing, friendly wing 1, at the selected
 airport. The other wings, friendly and enemy, keep the airborne launch.
+
+**Only the player's side's airports (John, 2026-10-10, slice AL1).** Each
+airport takes its runway's layout side ([allegiance](airports.md#allegiance)).
+The picker lists the player's side's airports and the neutral ones, in layout
+order, and its default is the first of them, so a Blue player no longer starts
+at Polotsk in the Baltics (an enemy field ringed by ZSU-23s) but at Siauliai,
+and in South Korea at Kimpo instead of Koksan. A Redfor pilot's picker would
+list the Red fields; the multiplayer creator stays airborne. In a theater with
+no field for the player's side (for Blue, the Falklands and North Vietnam)
+Ground is not offered: the Start field is greyed with the note "(no friendly
+airfield)", the Ground row of its list is dimmed, and choosing it, or changing
+to such a theater with Ground set, leaves the start airborne with the notice
+"No airfield of your side in this theater, so you start airborne. Ground start
+needs a friendly or neutral airfield." The `--ground-start N` option refuses an
+enemy field with "is an enemy airfield: no ground start there. Choose one of
+your side's airfields or Airborne." A dedicated server refuses a mission whose
+`start ground N` names an enemy field, before it opens its port.
 
 **No ground start on a short strip (opinionated, John 2026-09-30).** The 22
 airstrips with a runway under 2,000 ft (about 1,074 ft, in Cuba, the Falklands,

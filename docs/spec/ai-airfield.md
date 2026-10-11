@@ -40,6 +40,19 @@ lands at a short strip. A wing ordered to land at the selected airport is refuse
 one. An aircraft's home is the nearest runway that its side may use and that is
 not a short strip.
 
+## Sides
+
+Requested by John, 2026-10-10 (slice AL1). Every airport takes its runway's
+layout side ([allegiance](airports.md#allegiance)). An AI aircraft's home
+runway, landing field and return point are its own side's or neutral, never
+the other side's: Blue aircraft go home to Blue fields and Redfor aircraft to
+Red ones. A side with no field in the theater (Blue in North Vietnam and the
+Falklands) has no home runway there, so bingo and bug out fall back to the
+start point, as for any aircraft without a usable runway. A wing ordered to
+land at the selected airport is refused a field hostile to the pilot who gives
+the order, and a wing never starts at an enemy field. Neutral fields serve both
+sides (agent decision, AL1); no retail field is neutral.
+
 ## Quick Mission taxiway queue
 
 John requested on 2026-09-23 that Quick Mission wingmen begin queued near the

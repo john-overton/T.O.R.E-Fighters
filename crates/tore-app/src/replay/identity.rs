@@ -7,6 +7,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use tore_formats::theater::CELL_FEET;
+use tore_world::surface::{UnitKind, layout::Variation, resolve::GroundTarget};
 
 /// Reads a recorded identity back into launch settings, refusing values
 /// a launch could not have produced.
@@ -58,7 +59,62 @@ pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
         wind: wind_setting(identity.wind_fps)?,
         cloud_altitude,
         weather_seed,
+        target: identity
+            .ground_target
+            .as_ref()
+            .map(ground_target)
+            .transpose()?,
     })
+}
+
+/// The ground target a header holds, as the surface resolution takes it.
+fn ground_target(recorded: &tore_replay::GroundTarget) -> AppResult<GroundTarget> {
+    let level = |what: &str, value: u8| {
+        (value <= 3)
+            .then_some(usize::from(value))
+            .ok_or_else(|| format!("the recording's {what} defense level {value} does not exist"))
+    };
+    Ok(GroundTarget {
+        stem: recorded.stem.clone(),
+        aaa: level("AAA", recorded.aaa)?,
+        sam: level("SAM", recorded.sam)?,
+        seed: recorded.seed,
+        enemy_nationality: usize::from(recorded.enemy_nationality),
+        night_stealth: recorded.night_stealth,
+        variation: Variation {
+            jitter: recorded.jitter,
+            relocate: recorded.relocate,
+        },
+        separation_nm: recorded.separation_nm,
+    })
+}
+
+/// The ground target as a header keeps it.
+fn recorded_target(target: &GroundTarget) -> tore_replay::GroundTarget {
+    tore_replay::GroundTarget {
+        stem: target.stem.clone(),
+        aaa: u8::try_from(target.aaa).unwrap_or(u8::MAX),
+        sam: u8::try_from(target.sam).unwrap_or(u8::MAX),
+        seed: target.seed,
+        enemy_nationality: u8::try_from(target.enemy_nationality).unwrap_or(u8::MAX),
+        night_stealth: target.night_stealth,
+        jitter: target.variation.jitter,
+        relocate: target.variation.relocate,
+        separation_nm: target.separation_nm,
+    }
+}
+
+/// Whether the world holds surface units that act: a ground target, units
+/// that fire or drive, or parked aircraft. Its recording carries the surface
+/// tracks (format 3).
+fn has_surface(terrain: &Terrain) -> bool {
+    let surface = &terrain.surface;
+    surface.template.is_some()
+        || !surface.parked.is_empty()
+        || surface
+            .units
+            .iter()
+            .any(|unit| unit.kind == UnitKind::Active || unit.route.is_some())
 }
 
 /// The terrain's resolved identity, as a recording's header keeps it.
@@ -93,6 +149,15 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
             terrain.theater.cols.saturating_sub(1) as f64 * cell,
             terrain.theater.rows.saturating_sub(1) as f64 * cell,
         ]),
+        ground_target: terrain
+            .surface
+            .template
+            .as_ref()
+            .map(|site| recorded_target(&site.settings)),
+        // The retail airfields: the number of the redrawn-airport scene, once
+        // a build draws one, goes here (docs/REPLAYS.md, "Airfield scene").
+        airfield_scene: 0,
+        surface: has_surface(terrain),
     }
 }
 
@@ -186,6 +251,7 @@ mod tests {
                     wind: recorded.wind,
                     cloud_altitude: 12_345,
                     weather_seed: 1,
+                    target: None,
                 }
             );
             let rebuilt = Configuration::new(module(), 7, 21, 3, recorded.wind).unwrap();

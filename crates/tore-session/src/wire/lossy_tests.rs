@@ -40,10 +40,10 @@ fn run(seed: u64, snapshots: u32, loss: u64, duplicate: u64) {
     let mut rng = SplitMix64::new(seed);
     let mut host = EntitySender::new(TICKS_PER_SNAPSHOT);
     let mut client = EntityReceiver::new(TICKS_PER_SNAPSHOT);
-    let mut next_id = [0u32; 4];
+    let mut next_id = [0u32; EntityKind::ALL.len()];
     let mut world: BTreeMap<EntityKey, Entity> = BTreeMap::new();
     let mut spawn = |rng: &mut SplitMix64, world: &mut BTreeMap<EntityKey, Entity>| {
-        let kind = EntityKind::ALL[rng.below(4) as usize];
+        let kind = EntityKind::ALL[rng.below(EntityKind::ALL.len() as u64) as usize];
         let slot = &mut next_id[usize::from(kind.code())];
         *slot += 1 + rng.below(4) as u32;
         let e = entity(rng, kind, *slot);

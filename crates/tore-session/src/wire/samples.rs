@@ -4,9 +4,11 @@
 use super::chat::{ChatFrom, ChatLine, ChatSend, Quick, Receiver, Standing};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
-    EntityState, Motion, PilotState, ProjectileState, RotorState, Status,
+    EntityState, Motion, MoverState, PilotState, ProjectileState, RotorState, Status,
 };
-use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
+use super::events::{
+    EventsSection, LinkEvent, MountView, Rumble, SectionEvent, SurfaceUnitView, WireEvent,
+};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
 use super::messages::{
     Build, Content, ContentGaps, ContentItem, ContentRefused, Debrief, DebriefObjective,
@@ -327,6 +329,26 @@ pub fn entities() -> Vec<Entity> {
                 phase: ejection::Phase::Parachute,
             }),
         },
+        // A tank of a moving column (protocol 22) and a wrecked one.
+        Entity {
+            id: 0x5000_0007,
+            state: EntityState::Surface(MoverState {
+                motion: motion(5),
+                attitude: [40_000, 300, 65_300],
+                wrecked: false,
+            }),
+        },
+        Entity {
+            id: 0x5000_0009,
+            state: EntityState::Surface(MoverState {
+                motion: Motion {
+                    position: [-80_000, 1_024, 99_999],
+                    velocity: [0, 0, 0],
+                },
+                attitude: [12, 0, 0],
+                wrecked: true,
+            }),
+        },
     ]
 }
 
@@ -375,6 +397,11 @@ pub fn moved(entity: &Entity, ticks: i64) -> Entity {
         EntityState::Pilot(p) => {
             bump(&mut p.motion);
             p.phase = ejection::Phase::Landed;
+        }
+        EntityState::Surface(m) => {
+            bump(&mut m.motion);
+            m.attitude[0] = m.attitude[0].wrapping_add(90);
+            m.wrecked = !m.wrecked;
         }
     }
     next
@@ -532,6 +559,63 @@ pub fn events() -> EventsSection {
             other: 1,
             target: 70_000,
         }),
+        // Protocol 22: a surface unit's burst, its early end, and its state.
+        WireEvent::SurfaceBurst {
+            unit: 0x5000_0012,
+            mount: 1,
+            target: Some(3),
+            aim: [9_000, 4_100],
+            rounds: 96,
+            span: 120,
+        },
+        WireEvent::SurfaceBurst {
+            unit: 0x4000_0101,
+            mount: 0,
+            target: None,
+            aim: [65_535, 0],
+            rounds: 1,
+            span: 1,
+        },
+        WireEvent::SurfaceBurstEnd {
+            unit: 0x5000_0012,
+            mount: 1,
+            fired: 40,
+        },
+        WireEvent::SurfaceUnit(SurfaceUnitView {
+            unit: 0x5C00_0001,
+            hp: -3,
+            radar: true,
+            mounts: vec![
+                MountView {
+                    rails: Some(2),
+                    spares: None,
+                },
+                MountView {
+                    rails: None,
+                    spares: Some(1),
+                },
+                MountView::default(),
+            ],
+        }),
+        WireEvent::SurfaceUnit(SurfaceUnitView {
+            unit: 0x5000_0001,
+            hp: 40,
+            radar: false,
+            mounts: Vec::new(),
+        }),
+        // The flak bursts of the two calibres (types 27 and 28, P1b).
+        WireEvent::Effect {
+            kind: EffectKind::Flak,
+            position: [4_096, 640_000, -96],
+            ticks: 240,
+            blast: Some(27),
+        },
+        WireEvent::Effect {
+            kind: EffectKind::Flak,
+            position: [-4_096, 960_000, 96],
+            ticks: 120,
+            blast: Some(28),
+        },
     ];
     EventsSection {
         events: list
@@ -574,6 +658,7 @@ fn pilot(seed: u32) -> DebriefPilot {
         enemy_sam: tally(0),
         enemy_gun: tally(7),
         enemy_aaa: tally(0),
+        shot_down_by: (seed % 2 == 1).then(|| "SA-6".into()),
     }
 }
 
@@ -670,6 +755,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             },
             roster: roster(),
             destroyed: vec![1_000_001, 1_000_020],
+            surface_digest: 0x5EED_0000_DEAD_BEEF,
         })),
         Message::Roster(roster()),
         Message::Names(Names {
@@ -1332,6 +1418,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 aim120: false,
             }],
             locks: vec![3],
+            painting: vec![0x5C00_0001, 0x5000_0012],
         },
         damage: DamageReadout {
             hp: 90,
@@ -1735,6 +1822,7 @@ pub fn migration_messages() -> Vec<Message> {
             last_command: 311,
             exact: vec![1, 2, 3, 255],
             destroyed: vec![1_000_001, 7],
+            surface_digest: 0x0123_4567_89AB_CDEF,
         }))),
         Message::Resumed(Box::new(Resumed::NotFlying)),
         Message::Backlog(Box::new(backlog())),

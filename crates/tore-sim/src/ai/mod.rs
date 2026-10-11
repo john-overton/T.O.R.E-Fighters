@@ -41,6 +41,7 @@ pub mod pursuit;
 pub mod route;
 pub mod steering;
 pub mod steering_adapter;
+pub mod surface;
 pub mod tactics;
 pub mod targeting;
 pub mod thought;

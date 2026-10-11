@@ -418,7 +418,7 @@ impl EntitySender {
             .saturating_mul(8)
             .saturating_sub(EntityKind::ALL.len() * 16);
         let mut chosen: Vec<(EntityKey, BitWriter, Option<EntityState>, bool)> = Vec::new();
-        let mut counts = [0usize; 4];
+        let mut counts = [0usize; EntityKind::ALL.len()];
         let mut waiting = 0;
         let order = forced
             .iter()

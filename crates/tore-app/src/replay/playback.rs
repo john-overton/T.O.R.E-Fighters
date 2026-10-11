@@ -364,6 +364,31 @@ mod tests {
         Playback::new(Arc::new(fixture::recording(dir.path(), name)))
     }
 
+    /// A format 2 file the writer before format 3 made (the tore-replay
+    /// crate keeps one): it plays, with pictures that hold no surface units
+    /// and the draw rules its header gives.
+    #[test]
+    fn a_format_2_recording_plays_with_no_surface_content() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tore-replay/tests/golden/format2.tore-replay");
+        let recording = Arc::new(Recording::open(path).unwrap());
+        assert_eq!(recording.header().format_version, 2);
+        assert_eq!(recording.header().world.ground_target, None);
+        let (first, last) = (
+            recording.first_tick().unwrap(),
+            recording.last_tick().unwrap(),
+        );
+        let mut playback = Playback::new(Arc::clone(&recording));
+        for tick in [first, first + 10, last] {
+            let picture = playback.picture(tick, 1.);
+            assert_eq!(picture.tick, tick);
+            assert!(picture.surface.is_empty());
+            assert!(!picture.targets.is_empty() || !picture.projectiles.is_empty());
+        }
+        // The identities and the registry of a format 2 file are as ever.
+        assert_eq!(playback.identities.surface.len(), 0);
+    }
+
     #[test]
     fn a_replayed_crash_column_ages_as_flight_ages_it() {
         use tore_sim::combat::smoke;

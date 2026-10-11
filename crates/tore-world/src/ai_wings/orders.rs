@@ -78,17 +78,19 @@ pub struct LandingSite {
 }
 
 impl AiWings {
-    /// Resolve the tower's selected airport for a wing landing order.
+    /// Resolve the tower's selected airport for a wing landing order given
+    /// by a pilot of one side (`redfor`).
     ///
     /// `opinionated` (agent decision, 2026-09-23): wingmen follow the tower's
     /// own acceptance rule, so a hostile, unknown or unpermitted neutral
-    /// airport is refused. They use the player's cleared runway when the
-    /// player holds a clearance there, otherwise the longest usable runway
-    /// (lowest object id on a tie).
+    /// airport is refused, hostile as the ordering pilot's side sees it. They
+    /// use the player's cleared runway when the player holds a clearance
+    /// there, otherwise the longest usable runway (lowest object id on a tie).
     pub fn landing_site(
         scene: &Scene,
         anchors: &BTreeMap<u32, AirfieldAnchors>,
         service: &Service,
+        redfor: bool,
     ) -> Result<LandingSite, String> {
         let airport = service
             .selected()
@@ -100,7 +102,7 @@ impl AiWings {
                 "Wing order unavailable: {name} is a short strip your wingmen cannot land on"
             ));
         }
-        match airport.allegiance {
+        match airport.allegiance_for(redfor) {
             Allegiance::Hostile => {
                 return Err(format!("Wing order unavailable: {name} is hostile"));
             }
@@ -174,6 +176,7 @@ impl AiWings {
         service: &Service,
         flight: &flight::State,
         surface_ft: f64,
+        redfor: bool,
     ) {
         let player = PlayerLanding {
             position: flight.position,
@@ -185,7 +188,7 @@ impl AiWings {
             track: [flight.velocity[0], flight.velocity[2]],
         };
         let (airport, departing) =
-            Self::landing_priority(scene, service, player, self.departing.contains(&id));
+            Self::landing_priority(scene, service, player, self.departing.contains(&id), redfor);
         if departing {
             self.departing.insert(id);
         } else {
@@ -201,6 +204,7 @@ impl AiWings {
         service: &Service,
         player: PlayerLanding,
         departing: bool,
+        redfor: bool,
     ) -> (Option<u32>, bool) {
         if player.flying && player.on_ground {
             return (None, true);
@@ -216,10 +220,7 @@ impl AiWings {
         let Some((_, airport)) = scene
             .airports
             .iter()
-            .filter(|a| {
-                a.allegiance == Allegiance::Friendly
-                    || (a.allegiance == Allegiance::Neutral && a.neutral_permission)
-            })
+            .filter(|a| a.serves(redfor))
             .filter_map(|a| {
                 a.runway_objects
                     .iter()
@@ -1347,6 +1348,7 @@ mod landing_tests {
             alive: true,
             speed_fps: 300.,
             ground_clearance_ft: 0.,
+            redfor: false,
         }
     }
 
@@ -1358,7 +1360,7 @@ mod landing_tests {
     fn landing_site_needs_a_selected_airport_that_accepts_the_wing() {
         let scene = scene();
         let mut service = Service::new(&scene).unwrap();
-        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap_err();
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
         assert!(
             err.contains("no airport selected") && err.contains("Shift-A"),
             "{err}"
@@ -1366,31 +1368,43 @@ mod landing_tests {
 
         select(&scene, &mut service, 8);
         assert!(
-            AiWings::landing_site(&scene, &BTreeMap::new(), &service)
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, false)
                 .unwrap_err()
                 .contains("hostile")
         );
+        // The ordering pilot's side decides (slice AL1): the field hostile
+        // to Blue is a Redfor pilot's own, and Blue's field is hostile to it.
+        assert!(
+            !AiWings::landing_site(&scene, &BTreeMap::new(), &service, true)
+                .is_err_and(|e| e.contains("hostile"))
+        );
+        select(&scene, &mut service, 7);
+        assert!(
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, true)
+                .unwrap_err()
+                .contains("Field is hostile")
+        );
         select(&scene, &mut service, 9);
         assert!(
-            AiWings::landing_site(&scene, &BTreeMap::new(), &service)
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, false)
                 .unwrap_err()
                 .contains("permission")
         );
         select(&scene, &mut service, 10);
         assert!(
-            AiWings::landing_site(&scene, &BTreeMap::new(), &service)
+            AiWings::landing_site(&scene, &BTreeMap::new(), &service, false)
                 .unwrap_err()
                 .contains("no runway your wingmen can land on")
         );
 
         // The longest usable runway, unless the player is cleared elsewhere.
         select(&scene, &mut service, 7);
-        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap();
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
         assert_eq!(site.name, "Field");
         assert_eq!(site.runway, RunwayView::from(scene.runway(1000).unwrap()));
         service.command(&scene, plane(), Command::RequestLanding);
         assert_eq!(service.clearance().map(|c| c.1), Some(1001));
-        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap();
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
         assert_eq!(
             site.runway.object, 1001,
             "wingmen follow the player's runway"
@@ -1399,10 +1413,10 @@ mod landing_tests {
         // A destroyed runway is skipped.
         service.command(&scene, plane(), Command::CancelApproach);
         service.damage(1000, 1000);
-        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap();
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
         assert_eq!(site.runway.object, 1001);
         service.damage(1001, 1000);
-        assert!(AiWings::landing_site(&scene, &BTreeMap::new(), &service).is_err());
+        assert!(AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).is_err());
     }
 
     /// John, 2026-09-30: a short strip is off the tower's list, so a wing is
@@ -1423,17 +1437,17 @@ mod landing_tests {
         });
         let mut service = Service::new(&scene).unwrap();
         select(&scene, &mut service, 11);
-        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap_err();
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
         assert!(err.contains("no airport selected"), "{err}");
         // An airport that shrank under a selection already made is refused too.
         select(&scene, &mut service, 7);
         scene.runways[0].length_ft = 1_074.;
         scene.runways[1].length_ft = 1_074.;
-        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap_err();
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
         assert!(err.contains("short strip"), "{err}");
         // A long runway beside a short one is still used, the short one never.
         scene.runways[0].length_ft = 10_000.;
-        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap();
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
         assert_eq!(site.runway.object, 1000);
         // No side takes a short strip as home.
         let fields = Airfields::from_scene(&scene, None);
@@ -1461,13 +1475,13 @@ mod landing_tests {
         assert!(scene.vertical_pad(1004) && !scene.vertical_pad(1000));
         let mut service = Service::new(&scene).unwrap();
         select(&scene, &mut service, 7);
-        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap();
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap();
         assert_ne!(site.runway.object, 1004);
         // An airport with nothing but a pad.
         scene.airports[0].runway_objects = vec![1004];
         let mut service = Service::new(&scene).unwrap();
         select(&scene, &mut service, 7);
-        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap_err();
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service, false).unwrap_err();
         assert!(err.contains("no runway your wingmen can land on"), "{err}");
         // Nor is a pad anyone's home.
         let fields = Airfields::from_scene(&scene, None);
@@ -1488,7 +1502,7 @@ mod landing_tests {
             track: [0., 300.],
         };
         let at = |scene: &Scene, service: &Service, player| {
-            AiWings::landing_priority(scene, service, player, false).0
+            AiWings::landing_priority(scene, service, player, false, false).0
         };
         assert_eq!(at(&scene, &service, landing), Some(7));
         // Each retail gate on its own releases priority.
@@ -1544,8 +1558,9 @@ mod landing_tests {
     fn a_player_climbing_out_gear_down_does_not_claim_landing_priority() {
         let scene = scene();
         let service = Service::new(&scene).unwrap();
-        let step =
-            |player, departing| AiWings::landing_priority(&scene, &service, player, departing);
+        let step = |player, departing| {
+            AiWings::landing_priority(&scene, &service, player, departing, false)
+        };
         // Parked, gear down on runway 1001 (centre at the origin, 6,000 ft
         // long, heading north): no priority; the runway-free gate covers a
         // rolling player.

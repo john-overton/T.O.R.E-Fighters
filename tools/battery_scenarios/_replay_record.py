@@ -362,8 +362,9 @@ def scenarios() -> list[Scenario]:
     for fault in (0, 4, 7, 11, 12, 29, 30, 34, 44):
         out.append(record_scenario(f"replay-rec-fault-{fault}", ["--ai-probe-ticks", "1800", "--separation", "1", "--probe-fault", f"100:{fault}"], same_run=False))
 
-    # Ground starts, takeoffs, wings, orders.
-    for airport in (1, 2, 5):
+    # Ground starts, takeoffs, wings, orders, at Blue fields (slice AL1):
+    # Simferopol, Odesa and Kherson.
+    for airport in (2, 9, 11):
         for wing in (1, 3, 5):
             out.append(
                 record_scenario(
@@ -377,7 +378,7 @@ def scenarios() -> list[Scenario]:
         out.append(
             record_scenario(
                 f"replay-rec-order-{order}",
-                ["--ai-probe-ticks", "9000", "--ground-start", "1", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-order", f"3000:{order}"],
+                ["--ai-probe-ticks", "9000", "--ground-start", "2", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-order", f"3000:{order}"],
                 same_run=False,
                 timeout=400,
             )

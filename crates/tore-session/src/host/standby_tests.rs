@@ -717,6 +717,58 @@ fn a_warm_and_a_cold_standby_follow_a_five_minute_crowd_fight() {
     warm_and_cold(300);
 }
 
+/// Protocol 22, slice N1: a warm and a cold standby follow a ground target
+/// whose column drives: the warm one's Checks stay equal and the cold one's
+/// checkpoints arrive, and both hold the host's world, the surface's movers,
+/// rails and timers included (they are in the combat checkpoint).
+#[test]
+fn a_warm_and_a_cold_standby_follow_a_moving_ground_target() {
+    use tore_world::surface::{SURFACE_UNIT_BASE, UnitId};
+    use tore_world::test_support::surface::{routed_resources, spec_with_target, target};
+    let crowd = crowd_spec();
+    let mut spec = spec_with_target(&target("QUCOL", 0, 0, 5));
+    spec.wings = crowd.wings;
+    spec.start = crowd.start;
+    spec.separation_nm = crowd.separation_nm;
+    let mut rig = Rig::with(spec, routed_resources(), config());
+    rig.host.set_standbys_enabled(true);
+    rig.join("Viper", 0, Platform::current());
+    rig.join("Cobra", 1, other_platform());
+    rig.join("Hawk", 2, Platform::current());
+    rig.settle();
+    assert!(
+        rig.run_until(Duration::from_secs(5), |r| r.host.ready_standbys().len()
+            == 2),
+        "ready in the lobby"
+    );
+    rig.fly();
+    rig.fly_for(12);
+    let warm = rig.figures(0).unwrap();
+    assert_eq!(warm.mismatches, 0);
+    assert!(warm.checks_equal >= 1, "{warm:?}");
+    rig.holds_the_hosts_world(0);
+    rig.holds_the_hosts_world(1);
+    let tank = |world: &World| {
+        world
+            .combat
+            .surface
+            .unit(UnitId(SURFACE_UNIT_BASE))
+            .and_then(|u| u.mover)
+    };
+    let driving = tank(&rig.host.world).expect("the column drives");
+    assert!(driving.speed_feet() > 0. || driving.leg > 0);
+    for player in [0, 1] {
+        let replica = rig.players[player].standby.replica().unwrap();
+        if replica.tick() == rig.host.world.tick() {
+            assert_eq!(replica.combat.surface, rig.host.world.combat.surface);
+        }
+        assert!(
+            tank(&replica).is_some(),
+            "standby {player} holds the column"
+        );
+    }
+}
+
 #[test]
 fn a_forced_mismatch_resyncs_the_warm_standby() {
     let mut rig = Rig::new();

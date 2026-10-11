@@ -510,6 +510,7 @@ mod curves {
             Sample::Aircraft(pose) => pose.position,
             Sample::Projectile(_, position, ..) | Sample::Debris(_, position, _) => position,
             Sample::Pilot(_, position, _) => position,
+            Sample::Surface(_, position, _) => position,
         }
     }
 

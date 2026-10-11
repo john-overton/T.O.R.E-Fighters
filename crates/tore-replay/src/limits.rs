@@ -23,6 +23,10 @@ pub const MAX_EFFECTS_PER_TICK: usize = 64;
 pub const MAX_PUFFS_PER_TICK: usize = 4096;
 /// Surface object hit-point changes in one frame.
 pub const MAX_SURFACE_CHANGES_PER_TICK: usize = 4096;
+/// Surface units whose poses one frame holds (format 3).
+pub const MAX_SURFACE_UNITS: usize = 4096;
+/// Launcher and magazine changes in one frame (format 3).
+pub const MAX_SURFACE_STOCK_PER_TICK: usize = 4096;
 /// Events in one frame.
 pub const MAX_EVENTS_PER_TICK: usize = 1024;
 /// Fields on one event.
@@ -52,6 +56,8 @@ pub const MAX_HEADER_BYTES: usize = 64 << 10;
 pub const MAX_KEY_VALUES: usize = 256;
 /// Registered aircraft, and separately registered weapons.
 pub const MAX_REGISTERED: usize = 4096;
+/// Registered surface units (format 3).
+pub const MAX_REGISTERED_SURFACE: usize = 8192;
 /// Events a reader collects from one file.
 pub const MAX_EVENTS_TOTAL: usize = 4_000_000;
 /// Chunks in one file.

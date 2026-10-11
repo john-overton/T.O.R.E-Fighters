@@ -4,8 +4,10 @@
 //! (template ids included); this codes the per-unit state the surface slices
 //! add, with the digest of the surface it belongs to.
 use super::{
-    SurfaceState, SurfaceUnitState, UnitId,
+    BatteryState, Engager, MountStock, RadarState, SurfaceState, SurfaceUnitState, UnitId,
     movement::{Halt, Mover},
+    supply::Resupply,
+    units::Seen,
 };
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 
@@ -17,6 +19,12 @@ impl Checkpoint for UnitId {
         Ok(Self(u32::load(l, base.map(|b| &b.0))?))
     }
 }
+
+tore_sim::checkpoint_struct!(MountStock {
+    loaded,
+    reserve,
+    ordinal,
+});
 
 tore_sim::checkpoint_enum!(Halt {
     Moving = 0,
@@ -36,9 +44,59 @@ tore_sim::checkpoint_struct!(Mover {
     halt,
 });
 
-tore_sim::checkpoint_struct!(SurfaceUnitState { id, mover });
+tore_sim::checkpoint_struct!(Resupply { rearm, refill });
 
-tore_sim::checkpoint_struct!(SurfaceState { digest, units });
+tore_sim::checkpoint_struct!(Seen {
+    target,
+    tick,
+    position,
+    velocity,
+});
+
+tore_sim::checkpoint_struct!(Engager {
+    controller,
+    aim_error,
+    holding,
+    seen,
+});
+
+tore_sim::checkpoint_struct!(RadarState {
+    on,
+    last_hostile,
+    shutdown_until,
+});
+
+tore_sim::checkpoint_struct!(BatteryState {
+    controller,
+    optical
+});
+
+tore_sim::checkpoint_struct!(SurfaceUnitState {
+    id,
+    mover,
+    armed,
+    engagers,
+    mounts,
+    radar,
+    supply,
+    resupply,
+});
+
+// The trace, locks, painting, places and bursts are rebuilt every surface
+// tick.
+tore_sim::checkpoint_struct!(SurfaceState {
+    digest,
+    units,
+    batteries,
+    rng,
+    harm_rolled,
+} skip {
+    trace = Vec::new(),
+    locks = Vec::new(),
+    painting = Vec::new(),
+    places = Default::default(),
+    bursts = Vec::new(),
+});
 
 impl SurfaceState {
     /// Refuses a decoded state that belongs to another surface than

@@ -13,6 +13,7 @@ import time
 from battery import Scenario
 from battery_scenarios._debrief import kill_hit_problems
 from battery_scenarios._powered import powered_scenarios
+from battery_scenarios._strips import ground_airport
 
 # Original roster covered by the established fixed-wing maneuver battery.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
@@ -1000,18 +1001,23 @@ def climbout_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-climbout-{ac}",
                 lane="flight",
-                args=["--theater", "UKR", "--ground-start", "3", "--ai-probe-ticks", "16000", "--maneuver", "takeoff", "--probe-wing-size", "1", "--probe-wing-only", "--aircraft", ac, "--no-audio"],
+                # Kherson: Krasnodar (airport 3) is a Redfor field (slice AL1).
+                args=["--theater", "UKR", "--ground-start", "11", "--ai-probe-ticks", "16000", "--maneuver", "takeoff", "--probe-wing-size", "1", "--probe-wing-only", "--aircraft", ac, "--no-audio"],
                 check=check_climbout,
                 timeout=240,
             )
         )
-    # A whole wing of five leaving the first airport of every base theater.
+    # A whole wing of five leaving the first Blue airport of every base
+    # theater (slice AL1); the Falklands and North Vietnam have none.
     for theater in BASE_THEATERS:
+        airport = ground_airport(theater, 1)
+        if airport is None:
+            continue
         out.append(
             Scenario(
                 name=f"flight-climbout-wing5-{_theater_tag(theater)}",
                 lane="flight",
-                args=["--theater", theater, "--ground-start", "1", "--ai-probe-ticks", "9000", "--maneuver", "takeoff", "--probe-wing-size", "5", "--probe-wing-only", "--no-audio"],
+                args=["--theater", theater, "--ground-start", str(airport), "--ai-probe-ticks", "9000", "--maneuver", "takeoff", "--probe-wing-size", "5", "--probe-wing-only", "--no-audio"],
                 check=check_climbout,
                 timeout=240,
             )

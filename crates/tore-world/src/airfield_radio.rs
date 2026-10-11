@@ -272,6 +272,7 @@ impl AirfieldRadio {
         world: &Terrain,
         service: &Service,
         wings: Option<&AiWings>,
+        redfor: bool,
     ) -> bool {
         self.clock = now;
         if flight.crashed || flight.escape.is_some() || flight.systems.pilot.dead {
@@ -281,7 +282,7 @@ impl AirfieldRadio {
             comms.cancel_airport_because(self.seat, Reason::AircraftLost);
             return false;
         }
-        self.player(now, phrases, comms, flight, world, service, wings);
+        self.player(now, phrases, comms, flight, world, service, wings, redfor);
         true
     }
     /// Queue what the wingmen reported this tick, or cancel what a wingman's
@@ -319,6 +320,7 @@ impl AirfieldRadio {
         world: &Terrain,
         service: &Service,
         wings: Option<&AiWings>,
+        redfor: bool,
     ) {
         let supported = f.supported_at(world.surface(f.position[0], f.position[2]).height);
         if let Some(runway) = self.departure.runway {
@@ -389,7 +391,7 @@ impl AirfieldRadio {
                 .runway
                 .is_none_or(|r| self.departure.farewell && distance(f.position, r.center) > 3000.)
         {
-            self.approach.runway = approach_runway(f, world, service);
+            self.approach.runway = approach_runway(f, world, service, redfor);
         }
         if let Some(runway) = self.approach.runway {
             if !service.usable(runway.object)
@@ -624,16 +626,18 @@ impl WingStatus {
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
-fn approach_runway(f: &flight::State, world: &Terrain, service: &Service) -> Option<RunwayView> {
+fn approach_runway(
+    f: &flight::State,
+    world: &Terrain,
+    service: &Service,
+    redfor: bool,
+) -> Option<RunwayView> {
     world
         .airport_scene
         .airports
         .iter()
         .filter(|a| service.selected().is_none_or(|id| id == a.id))
-        .filter(|a| {
-            matches!(a.allegiance, tore_sim::airport::Allegiance::Friendly)
-                || (a.allegiance == tore_sim::airport::Allegiance::Neutral && a.neutral_permission)
-        })
+        .filter(|a| a.serves(redfor))
         .flat_map(|a| &a.runway_objects)
         .filter(|id| {
             service.usable(**id)
@@ -732,7 +736,7 @@ mod tests {
         f: &flight::State,
         t: f64,
     ) -> Vec<Call> {
-        if r.step_player(t, p, c, f, w, s, None) {
+        if r.step_player(t, p, c, f, w, s, None, false) {
             r.deliver(t, c);
         }
         c.due(t).into_iter().map(|d| d.call).collect()

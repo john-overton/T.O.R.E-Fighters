@@ -516,6 +516,9 @@ pub(crate) struct KeptAlive {
     failed: bool,
     /// Keepalives already noted in the log.
     noted: u64,
+    /// The host and the Keepalive packet the thread sends: a migration
+    /// (stage K) moves the connection to a new host, and the thread follows.
+    speaks_for: Option<(SocketAddr, Vec<u8>)>,
 }
 
 impl KeptAlive {
@@ -525,6 +528,7 @@ impl KeptAlive {
             thread: None,
             failed: false,
             noted: 0,
+            speaks_for: None,
         }
     }
 
@@ -533,6 +537,13 @@ impl KeptAlive {
         match client.phase() {
             tore_session::ClientPhase::Connecting => {}
             tore_session::ClientPhase::Closed => self.thread = None,
+            _ if self.thread.is_some() && self.moved(client) => {
+                // The connection moved to a new host (stage K): the thread
+                // speaks for the new connection, or a stall after the move
+                // would leave the new host hearing nothing.
+                self.thread = None;
+                self.start(client, transport);
+            }
             _ => match &self.thread {
                 Some(thread) => {
                     thread.turned();
@@ -553,6 +564,16 @@ impl KeptAlive {
         }
     }
 
+    /// Whether the client's connection is no longer the one the thread
+    /// speaks for.
+    fn moved(&self, client: &Client) -> bool {
+        client.keepalive_datagram().is_some_and(|datagram| {
+            self.speaks_for
+                .as_ref()
+                .is_none_or(|(host, sent)| *host != client.server() || *sent != datagram)
+        })
+    }
+
     fn start(&mut self, client: &Client, transport: &Transport) {
         // Over the link (the hosting game's own connection, a game that
         // took over included) there is none.
@@ -566,6 +587,7 @@ impl KeptAlive {
             return;
         };
         let (host, config) = (client.server(), self.config);
+        self.speaks_for = Some((host, datagram.clone()));
         let started = match transport {
             Transport::Udp(socket) => socket
                 .try_clone()
@@ -1798,6 +1820,7 @@ impl NetSession {
             &guns::Around {
                 ground: &ground,
                 stations: &stations,
+                surface: Some(&around.terrain.surface),
             },
             &mut picture,
         );

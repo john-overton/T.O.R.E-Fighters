@@ -195,7 +195,18 @@ crate::checkpoint_enum!(EffectKind {
 type SurfaceRound = super::SurfaceRound;
 crate::checkpoint_struct!(SurfaceRound { end_tick, flak });
 type GroundLook = super::GroundLook;
-crate::checkpoint_struct!(GroundLook { explosion, crater });
+crate::checkpoint_struct!(GroundLook {
+    explosion,
+    crater,
+    burns
+});
+
+type ParkedSite = super::ParkedSite;
+crate::checkpoint_struct!(ParkedSite {
+    ground,
+    water,
+    aircraft
+});
 
 crate::checkpoint_struct!(HitRecord {
     tick,
@@ -510,6 +521,7 @@ impl Checkpoint for State {
             surface_rounds,
             next_surface_shot,
             ground_looks,
+            parked,
         } = self;
         weapon_rules.save(s, None)?;
         ownships.save(s, None)?;
@@ -544,6 +556,7 @@ impl Checkpoint for State {
         surface_rounds.save(s, None)?;
         next_surface_shot.save(s, None)?;
         ground_looks.save(s, None)?;
+        parked.save(s, None)?;
         Ok(())
     }
 
@@ -594,6 +607,7 @@ impl Checkpoint for State {
             surface_rounds: Checkpoint::load(l, None)?,
             next_surface_shot: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
+            parked: Checkpoint::load(l, None)?,
         })
     }
 }

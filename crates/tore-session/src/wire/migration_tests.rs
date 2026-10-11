@@ -203,6 +203,7 @@ fn every_bound_is_refused_by_the_writer() {
         last_command: 0,
         exact: Vec::new(),
         destroyed: Vec::new(),
+        surface_digest: 0,
     }))));
     let mut backlog = samples::backlog();
     backlog.commands[0].offset = backlog.ticks.len() as u32;

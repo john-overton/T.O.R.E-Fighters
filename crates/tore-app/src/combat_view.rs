@@ -504,8 +504,16 @@ pub fn readout(
         rwr: rwr_readout(ro, s),
     }
 }
+/// An RWR emitter's state: bright when its radar paints this aircraft.
+fn emitter_state(painting: &[u32], id: u32) -> crate::scope::EmitterState {
+    if painting.contains(&id) {
+        crate::scope::EmitterState::Painting
+    } else {
+        crate::scope::EmitterState::Detected
+    }
+}
 fn rwr_readout(ro: &CockpitReadout, own: &flight::State) -> crate::scope::Rwr {
-    use crate::scope::{EmitterKind, EmitterState, Indicator, Rwr, RwrEmitter, RwrMissile};
+    use crate::scope::{EmitterKind, Indicator, Rwr, RwrEmitter, RwrMissile};
     use tore_sim::combat::threats::GuidanceClass;
     let operating = !ro.damage.rwr_failed && own.systems.counts[32] <= 1;
     let emitters = if operating {
@@ -523,7 +531,9 @@ fn rwr_readout(ro: &CockpitReadout, own: &flight::State) -> crate::scope::Rwr {
                     tore_sim::sensors::passive::Symbol::Aircraft => EmitterKind::EnemyAircraft,
                     tore_sim::sensors::passive::Symbol::Unknown => EmitterKind::Unknown,
                 },
-                state: EmitterState::Detected,
+                // A radar whose controller tracks or fires at this aircraft
+                // paints it: its square is bright.
+                state: emitter_state(&ro.rwr.painting, emitter.id),
             })
             .collect()
     } else {
@@ -1569,5 +1579,13 @@ mod empty_station_tests {
         c.state.own_mut().ammo.fill(7);
         c.reset(&mut f).unwrap();
         assert_eq!(c.state.own().ammo, [500, 0]);
+    }
+
+    #[test]
+    fn a_radar_that_paints_the_aircraft_shows_bright_and_the_rest_dim() {
+        use crate::scope::EmitterState;
+        assert_eq!(emitter_state(&[], 5), EmitterState::Detected);
+        assert_eq!(emitter_state(&[9, 5], 5), EmitterState::Painting);
+        assert_eq!(emitter_state(&[9], 5), EmitterState::Detected);
     }
 }

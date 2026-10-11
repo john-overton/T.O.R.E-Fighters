@@ -36,8 +36,15 @@ pub use reader::{
 };
 pub use writer::{Writer, WriterOptions, partial_path};
 
-/// The format version this build writes, and the newest it reads.
-pub const FORMAT_VERSION: u16 = 2;
+/// The newest format version this build writes and reads. A recording is
+/// written in the oldest version that holds it: version 3 only for a world
+/// with a ground target, a redrawn airfield scene or surface units (see
+/// [`World::needs_surface_format`]), version 2 for every other, byte for byte
+/// as before.
+pub const FORMAT_VERSION: u16 = 3;
+/// The format version a recording is written in unless its world needs more:
+/// the one from before the surface tracks.
+pub const BASE_FORMAT_VERSION: u16 = 2;
 
 #[cfg(test)]
 mod tests {

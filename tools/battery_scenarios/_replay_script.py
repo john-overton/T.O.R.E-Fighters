@@ -501,6 +501,8 @@ def scenarios() -> list[Scenario]:
         build(f"systems-{ac}", "systems.txt", ["--free-flight", "--no-audio", "--aircraft", ac, "--researched-flight"], lambda work, output, ac=ac: systems_check(work, output, ac))
         for ac in AIRCRAFT
     ]
+    # The ground starts leave Simferopol (UKR airport 2): airport 1,
+    # Zaporizhzhya, is a Redfor field since slice AL1.
     takeoffs = [
         build(
             f"takeoff-{ac}",
@@ -508,7 +510,7 @@ def scenarios() -> list[Scenario]:
             # at their fitted, weight-scaled liftoff speeds (the Su-25 lifts off at
             # about 15 s and climbs slowly), so their script keeps climbing longer.
             "takeoff-slow.txt" if ac in ("a4e", "su25") else "takeoff-any.txt",
-            [*quick, "--ground-start", "1", "--aircraft", ac, "--researched-flight"],
+            [*quick, "--ground-start", "2", "--aircraft", ac, "--researched-flight"],
             takeoff_any_check,
         )
         for ac in AIRCRAFT
@@ -520,8 +522,8 @@ def scenarios() -> list[Scenario]:
         build("missile", "missile.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], missile_check, ai=3),
         build("gun", "gun.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], gun_check, ai=3),
         build("eject", "eject.txt", free, eject_check),
-        build("takeoff-and-landing-request", "takeoff.txt", [*quick, "--ground-start", "1", "--probe-wing-size", "3"], takeoff_check, tower=True),
-        build("takeoff-gear-early", "takeoff-gear-early.txt", [*quick, "--ground-start", "1", "--researched-flight"], belly_check),
+        build("takeoff-and-landing-request", "takeoff.txt", [*quick, "--ground-start", "2", "--probe-wing-size", "3"], takeoff_check, tower=True),
+        build("takeoff-gear-early", "takeoff-gear-early.txt", [*quick, "--ground-start", "2", "--researched-flight"], belly_check),
         build("navigation", "nav.txt", free, nav_check),
         build("views", "views.txt", free, views_check),
         build("maneuvers", "maneuvers.txt", free, maneuvers_check),

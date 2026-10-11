@@ -63,6 +63,7 @@ pub fn header(theater: &str) -> Header {
                 deck_ft: None,
             },
             extent_ft: Some([1_695_744., 1_630_208.]),
+            ..World::default()
         },
         extra: vec![("flight_model".into(), "researched".into())],
         ..Header::default()

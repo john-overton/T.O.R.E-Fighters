@@ -162,7 +162,22 @@ impl Effects {
             }
         }
         let poses = std::iter::once(&picture.player).chain(&picture.targets);
-        for pose in poses.clone().filter(|pose| smoking(pose)) {
+        // A damaged parked aircraft smokes like one in the air, as the
+        // host's combat makes it (protocol 22: its hit points come with the
+        // Surface unit events).
+        let parked = |pose: &AircraftPose| {
+            !pose.airborne
+                && pose.damage.hp > 0
+                && pose.damage.initial_hp > 0
+                && pose.damage.fraction() >= 0.5
+                && around
+                    .terrain
+                    .surface
+                    .parked
+                    .iter()
+                    .any(|p| p.id.0 == pose.id)
+        };
+        for pose in poses.clone().filter(|pose| smoking(pose) || parked(pose)) {
             let basis = basis_of(pose);
             sources.push((
                 std::array::from_fn(|i| pose.position[i] - basis.forward[i] * 15.),

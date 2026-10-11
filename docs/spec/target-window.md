@@ -50,6 +50,9 @@ on 2026-09-21, an opinionated timing choice.
   marked must-survive in mission requirements. Destroy identifies an enemy
   explicitly required by the player's destroy assignment. Other contacts have
   no objective label. Allegiance alone does not establish a requirement.
+  The objects of the mission's ground target are objectives too: Destroy for a
+  friendly plane, Survive for an enemy-side (Redfor) one, whether or not the
+  object still stands ([surface objectives](surface-defenses.md#objectives-scoring-and-debrief)).
   In a multiplayer game "friendly" is the viewer's own side, and an aircraft a
   respawn or a revival added carries the objective of the aircraft it
   continues ([debrief, objectives in a game with

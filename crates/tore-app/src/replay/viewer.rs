@@ -1336,16 +1336,94 @@ impl Viewer {
         self.from.unwrap_or(Target::Aircraft(self.selected))
     }
 
+    /// The launcher rails as the recording had them at `tick`, in the shape
+    /// the scenery draws them from (format 3).
+    pub(super) fn rails(&self, tick: u64) -> tore_world::surface::SurfaceState {
+        use tore_world::surface::{MountStock, SurfaceState, SurfaceUnitState, UnitId};
+        let units = self
+            .tracks
+            .stock_at(tick)
+            .into_iter()
+            .map(|(unit, mounts)| {
+                let mut state = SurfaceUnitState::new(UnitId(unit));
+                state.armed = true;
+                let size = mounts.keys().max().map_or(0, |m| usize::from(*m) + 1);
+                state.mounts = vec![MountStock::default(); size];
+                for (index, stock) in mounts {
+                    state.mounts[usize::from(index)] = MountStock {
+                        loaded: stock.loaded,
+                        reserve: stock.reserve,
+                        ordinal: 0,
+                    };
+                }
+                state
+            })
+            .collect();
+        SurfaceState::new(0, units)
+    }
+
+    /// Shows the gun-flash tracker `picture`: the rounds, launches and flak
+    /// the recording holds, and the wrecks of the surface units it lost (as
+    /// the ground rows flight would have), with the tick each one died on so
+    /// a seek does not start a wreck's smoke afresh (format 3).
+    pub(super) fn observe_surface(
+        (tracks, recording): (&Tracks, &Recording),
+        tracker: &mut crate::gun_flash::Tracker,
+        picture: &RenderSnapshot,
+        (tick, now): (u64, f64),
+        mounts: &impl Fn(u32) -> Option<crate::gun_flash::Mount>,
+    ) {
+        let deaths = tracks.deaths(tick);
+        let rows: Vec<crate::snapshot::AircraftPose> = deaths
+            .keys()
+            .filter_map(|id| {
+                let unit = recording.surface_info(*id)?;
+                let position = picture
+                    .surface
+                    .iter()
+                    .find(|pose| pose.id.0 == *id)
+                    .map_or(unit.position, |pose| pose.position);
+                Some(crate::snapshot::AircraftPose {
+                    id: *id,
+                    position,
+                    crashed: true,
+                    damage: crate::snapshot::Damage {
+                        hp: 0,
+                        initial_hp: unit.hit_points,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+            })
+            .collect();
+        tracker.set_deaths(deaths);
+        if rows.is_empty() {
+            tracker.observe(picture, now, mounts);
+        } else {
+            let mut seen = picture.clone();
+            seen.targets.extend(rows);
+            tracker.observe(&seen, now, mounts);
+        }
+    }
+
     /// Ground objects of the recorded world still standing at `tick`, in id
-    /// order, with where each is.
-    fn ground_objects(&self, tick: u64) -> Vec<(u32, [f64; 3])> {
+    /// order, with where each is: a unit that follows a route is where the
+    /// recording had it, not at its starting place.
+    fn ground_objects(&self, tick: u64, picture: &RenderSnapshot) -> Vec<(u32, [f64; 3])> {
         let destroyed = self.tracks.destroyed(tick);
         self.world
             .airport_scene
             .objects
             .iter()
             .filter(|o| !destroyed.contains(&o.id))
-            .map(|o| (o.id, o.bounds.center))
+            .map(|o| {
+                let at = picture
+                    .surface
+                    .iter()
+                    .find(|pose| pose.id.0 == o.id)
+                    .map_or(o.bounds.center, |pose| pose.position);
+                (o.id, at)
+            })
             .collect()
     }
 
@@ -1368,6 +1446,17 @@ impl Viewer {
                     .find(|o| o.id == id)?;
                 if self.tracks.destroyed(tick).contains(&id) {
                     return None;
+                }
+                // A unit on a route is where it drove to, facing the way it
+                // faces now.
+                if let Some(pose) = picture.surface.iter().find(|pose| pose.id.0 == id) {
+                    let [yaw, pitch, bank] = pose.attitude;
+                    return Some(Body::new(
+                        id,
+                        pose.position,
+                        [0.; 3],
+                        Basis::new(yaw, pitch, bank),
+                    ));
                 }
                 let b = object.bounds;
                 Some(Body::new(
@@ -1392,16 +1481,22 @@ impl Viewer {
         match object {
             Target::Aircraft(id) => self.label(id),
             Target::Ground(id) => self
-                .world
-                .airport_scene
-                .objects
-                .iter()
-                .find(|o| o.id == id)
-                .and_then(|o| {
-                    [&o.name, &o.object_type]
-                        .into_iter()
-                        .find(|n| !n.trim().is_empty())
-                        .cloned()
+                .recording
+                .surface_info(id)
+                .map(|unit| unit.label.clone())
+                .filter(|label| !label.is_empty())
+                .or_else(|| {
+                    self.world
+                        .airport_scene
+                        .objects
+                        .iter()
+                        .find(|o| o.id == id)
+                        .and_then(|o| {
+                            [&o.name, &o.object_type]
+                                .into_iter()
+                                .find(|n| !n.trim().is_empty())
+                                .cloned()
+                        })
                 })
                 .unwrap_or_else(|| format!("Ground object {id}")),
             Target::Missile(id) => match self.missiles.get(&id) {
@@ -1424,7 +1519,7 @@ impl Viewer {
             .filter(|pose| pose.id == player || pose.airborne || pose.damage.hp > 0)
             .map(|pose| Target::Aircraft(pose.id))
             .chain(
-                self.ground_objects(tick)
+                self.ground_objects(tick, &picture)
                     .into_iter()
                     .map(|(id, _)| Target::Ground(id)),
             )
@@ -2835,11 +2930,25 @@ impl Viewer {
         // barrels, as live flight draws them.
         let flash_now = tick as f64 + self.clock.alpha();
         let mounts = crate::gun_flash::mounts(&picture, None);
-        self.gun_flash.observe(&picture, flash_now, &mounts);
+        Self::observe_surface(
+            (&self.tracks, &self.recording),
+            &mut self.gun_flash,
+            &picture,
+            (tick, flash_now),
+            &mounts,
+        );
         let guns = self.gun_flash.draw(flash_now, &mounts);
         renderer.emitters(devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
-        renderer.airports(self.scenery.static_geometry_where(&destroyed));
+        let rails = self.rails(tick);
+        renderer.airports(self.scenery.static_geometry_replay(&destroyed, &rails));
+        // Routed units on the move, the men, deck crew and parked aircraft
+        // pieces.
+        renderer.surface_units(&self.scenery.surface_vertices(
+            &picture,
+            &|id| !destroyed.contains(&id),
+            &camera,
+        ));
         if let Some(art) = &self.art.escape {
             renderer.escapees(
                 art,
@@ -2931,7 +3040,7 @@ impl Viewer {
             Vec::new()
         };
         self.size = size;
-        self.pickables = Self::pickables_for(picture, &labels, &self.ground_objects(tick));
+        self.pickables = Self::pickables_for(picture, &labels, &self.ground_objects(tick, picture));
         if !self.requests.is_empty() {
             self.open_requests(camera);
         }
@@ -3848,7 +3957,7 @@ mod tests {
     fn shown(v: &mut Viewer, tick: u64, camera: Camera, size: [u32; 2]) {
         v.clock.seek(tick as f64);
         let picture = v.playback.picture(tick, 1.);
-        let ground = v.ground_objects(tick);
+        let ground = v.ground_objects(tick, &picture);
         v.pickables = Viewer::pickables_for(&picture, &[], &ground);
         v.camera = camera;
         v.size = size;
@@ -4247,6 +4356,70 @@ mod tests {
         assert_eq!(v.object_name(g(9_050)), "Bunker");
         v.world.airport_scene.objects[1].object_type.clear();
         assert_eq!(v.object_name(g(9_050)), "Ground object 9050");
+    }
+
+    #[test]
+    fn the_object_view_follows_a_surface_unit_that_drives_and_names_it() {
+        use tore_world::surface::{SurfacePose, UnitId};
+        let (_dir, mut v) = with_ground("viewer-object-column");
+        v.clock.seek(FAR_AT as f64);
+        // The column's unit started at the far site and has driven 3 nmi on.
+        let drove = [
+            far_site()[0] + 3. * NMI,
+            far_site()[1],
+            far_site()[2] + 500.,
+        ];
+        let mut picture = v.playback.picture(FAR_AT, 1.);
+        picture.surface = vec![SurfacePose {
+            id: UnitId(9_050),
+            position: drove,
+            attitude: [1.0, 0.0, 0.0],
+            shape: None,
+            wrecked: false,
+        }];
+        // Listed, looked at and picked where it is, not where it began.
+        let at = |objects: Vec<(u32, [f64; 3])>| objects.iter().find(|o| o.0 == 9_050).unwrap().1;
+        assert_eq!(at(v.ground_objects(FAR_AT, &picture)), drove);
+        let plain = v.playback.picture(FAR_AT, 1.);
+        assert_eq!(
+            at(v.ground_objects(FAR_AT, &plain)),
+            far_site(),
+            "a unit with no recorded pose stands where the scene put it"
+        );
+        let body = v.body_of(&picture, FAR_AT, Target::Ground(9_050)).unwrap();
+        assert_eq!(body.position(), drove);
+        // The recording's registry names it; failing that, the scene does.
+        assert_eq!(v.object_name(Target::Ground(9_050)), "Bunker");
+        v.world.airport_scene.objects[1].name = "T-72".into();
+        assert_eq!(v.object_name(Target::Ground(9_050)), "T-72");
+    }
+
+    #[test]
+    fn launcher_rails_come_from_the_recorded_changes() {
+        use tore_replay::SurfaceStock;
+        let (_dir, mut v) = with_ground("viewer-rails");
+        let rail = |mount, loaded| SurfaceStock {
+            unit: 9_050,
+            mount,
+            loaded,
+            reserve: None,
+        };
+        v.tracks.stock = vec![(150, rail(0, 1)), (150, rail(1, 3)), (190, rail(0, 3))];
+        let loads = |tick| -> Vec<u32> {
+            v.rails(tick)
+                .unit(tore_world::surface::UnitId(9_050))
+                .map(|unit| unit.mounts.iter().map(|m| m.loaded).collect())
+                .unwrap_or_default()
+        };
+        assert!(loads(149).is_empty(), "as new until a rail changes");
+        assert_eq!(loads(150), [1, 3]);
+        assert_eq!(loads(200), [3, 3]);
+        assert!(
+            v.rails(200)
+                .unit(tore_world::surface::UnitId(9_050))
+                .unwrap()
+                .armed
+        );
     }
 
     #[test]

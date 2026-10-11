@@ -389,8 +389,10 @@ impl GroundLayout {
 /// pending John) that is no short strip or vertical pad and holds a ground
 /// layout for `count` aircraft. Without a target, or when no such airfield
 /// exists, the earlier rule (`fitted`, agent decision 2026-10-10, slice Q1):
-/// the first runway, by object id, of a friendly airport (any airport when
-/// none is friendly) that qualifies.
+/// the first runway, by object id, of an airport of the side that qualifies,
+/// else of a neutral one. Never an enemy field (slice AL1): with none of the
+/// side's own or neutral the start is refused, and the creator offers
+/// Airborne only.
 pub fn auto_runway(world: &Terrain, count: usize) -> crate::WorldResult<u32> {
     auto_runway_for(world, count, false)
 }
@@ -400,8 +402,19 @@ pub fn auto_runway(world: &Terrain, count: usize) -> crate::WorldResult<u32> {
 pub fn auto_runway_for(world: &Terrain, count: usize, red: bool) -> crate::WorldResult<u32> {
     use tore_sim::airport::Allegiance;
     let scene = &world.airport_scene;
+    // The airport of each runway, as the side sees it.
+    let allegiance = |id: u32| {
+        scene
+            .runway(id)
+            .and_then(|r| scene.airports.iter().find(|a| a.id == r.airport))
+            .filter(|a| a.serves(red))
+            .map(|a| a.allegiance_for(red))
+    };
     let qualifies = |id: u32| {
-        !scene.vertical_pad(id) && !scene.short_strip(id) && ground_layout(world, id, count).is_ok()
+        allegiance(id).is_some()
+            && !scene.vertical_pad(id)
+            && !scene.short_strip(id)
+            && ground_layout(world, id, count).is_ok()
     };
     if let Some(starts) = &world.surface.starts {
         let ranked = if red {
@@ -413,20 +426,19 @@ pub fn auto_runway_for(world: &Terrain, count: usize, red: bool) -> crate::World
             return Ok(id);
         }
     }
-    let usable = |friendly_only: bool| {
+    let usable = |own_only: bool| {
         let mut ids: Vec<u32> = scene
-            .airports
+            .runways
             .iter()
-            .filter(|a| !friendly_only || a.allegiance == Allegiance::Friendly)
-            .flat_map(|a| a.runway_objects.iter().copied())
-            .filter(|id| !scene.vertical_pad(*id) && !scene.short_strip(*id))
+            .map(|r| r.object)
+            .filter(|id| !own_only || allegiance(*id) == Some(Allegiance::Friendly))
             .collect();
         ids.sort_unstable();
-        ids.into_iter()
-            .find(|id| ground_layout(world, *id, count).is_ok())
+        ids.into_iter().find(|id| qualifies(*id))
     };
     usable(true).or_else(|| usable(false)).ok_or_else(|| {
-        "No runway in this theater holds your wing for a ground start. Choose Airborne.".into()
+        "No runway of your side in this theater holds your wing for a ground start. Choose Airborne."
+            .into()
     })
 }
 

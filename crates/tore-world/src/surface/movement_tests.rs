@@ -4,12 +4,15 @@
 //! units, a checkpoint mid-route resumes exactly). No retail data.
 use super::{
     movement::{Course, Halt, Leg, Mover, unit_pose},
-    tests::{HEADER, MIDDLE, fields, surface_resources, target, world_with_target},
+    tests::{target, world_with_target},
     *,
 };
-use crate::{seats::SeatInput, test_support::resources::schema, world::TickOutput};
+use crate::{
+    seats::SeatInput,
+    test_support::surface::{MIDDLE, routed, routed_resources},
+    world::TickOutput,
+};
 use std::f64::consts::PI;
-use tore_formats::surface_unit::class;
 use tore_sim::attitude::Basis;
 
 /// The follower's step, 120 Hz.
@@ -35,6 +38,7 @@ fn course(speed: f64, ship: bool) -> Course {
         acceleration: if ship { 1. } else { 5. },
         ship,
         rig: None,
+        lane: 0.,
     }
 }
 
@@ -273,102 +277,9 @@ fn the_state_is_exact_and_repeats() {
 
 // ---- in a world ---------------------------------------------------------
 
-/// A synthetic movable tank: turn rate 2,730, top speed 50.
-fn mover_nt(stem: &str, class: u16, turn: i32, max_speed: i32) -> Vec<u8> {
-    let object = |name: &str| -> Option<String> {
-        Some(match name {
-            "structType" => "3".into(),
-            "typeSize" => "186".into(),
-            "ot_names" => "ot_names".into(),
-            "shape" => "shape".into(),
-            "obj_class" => class.to_string(),
-            "hitPoints" => "100".into(),
-            "expType" => "21".into(),
-            "craterSize" => "6".into(),
-            "utilProc" => "_GVProc".into(),
-            "_turnRate" => turn.to_string(),
-            "_maxSpeed" => max_speed.to_string(),
-            "_cornerSpeed" => "50".into(),
-            "_acc" | "_dacc" => "50".into(),
-            _ => return None,
-        })
-    };
-    let npc = |name: &str| -> Option<String> { (name == "numHards").then(|| "0".to_owned()) };
-    let mut text = String::from(HEADER);
-    text += &fields(schema::OBJECT, &object);
-    text += &fields(schema::NPC, &npc);
-    text += &format!(
-        ":ot_names\nstring \"{stem}\"\nstring \"Synthetic {stem}\"\nstring \"{stem}.NT\"\n"
-    );
-    text += &format!(":shape\nstring \"{stem}.SH\"\nend\n");
-    text.into_bytes()
-}
-
-/// One waypoint block of a route.
-fn waypoint(index: usize, flags: &str, head: &str, at: [i32; 3], speed: i32) -> String {
-    format!(
-        "\tw_index {index}\r\n\tw_flags {flags}\r\n\tw_goal 0\r\n\tw_next 0\r\n\tw_pos2 {head} {} {} {}\r\n\tw_speed {speed}\r\n\tw_wng 0 0 0 0\r\n\tw_react 0 0 0\r\n\tw_searchDist 0\r\n\tw_preferredTargetId 0\r\n\tw_name \r\n\r\n",
-        at[0], at[1], at[2]
-    )
-}
-
-/// An object that follows a route, and the route.
-fn routed(ty: &str, at: [i32; 3], angle: i32, alias: i32, legs: &[[i32; 3]], speed: i32) -> String {
-    let mut text = format!(
-        "obj\r\n\ttype {ty}\r\n\tpos {} {} {}\r\n\tangle {angle} 0 0\r\n\tnationality2 137\r\n\tflags $93\r\n\tspeed 0\r\n\talias {alias}\r\n\t.\r\n",
-        at[0], at[1], at[2]
-    );
-    text += &format!("waypoint2 {}\r\n", legs.len() + 2);
-    text += &waypoint(0, "1", "0 0", at, 0);
-    for (n, leg) in legs.iter().enumerate() {
-        text += &waypoint(n + 1, "$4", "1 0", *leg, speed);
-    }
-    text += &waypoint(legs.len() + 1, "2", "0 0", [0, 0, 0], 0);
-    text += &format!("  w_for {alias}\r\n\t.\r\n");
-    text
-}
-
 const TANK_ID: u32 = SURFACE_UNIT_BASE;
 const BOAT_ID: u32 = SURFACE_UNIT_BASE + 1;
 const STANDING_ID: u32 = SURFACE_UNIT_BASE + 2;
-
-/// The synthetic import with a routed template: a tank on a short route with
-/// a corner, a boat (which keeps its water level) and a tank that
-/// stands still.
-fn routed_resources() -> std::collections::BTreeMap<String, Vec<u8>> {
-    let mut r = surface_resources();
-    let shape = r["F18.SH"].clone();
-    for (stem, class, turn, max) in [
-        ("MOVER", class::TANK, 2730, 50),
-        ("BOAT", class::SHIP, 910, 50),
-        ("STAND", class::TANK, 2730, 50),
-    ] {
-        r.insert(format!("{stem}.NT"), mover_nt(stem, class, turn, max));
-        r.insert(format!("{stem}.SH"), shape.clone());
-    }
-    r.insert("BOAT_A.SH".into(), shape);
-    let z = MIDDLE + 8000;
-    let mut text = String::from("textFormat\r\n");
-    text += &routed(
-        "MOVER.NT",
-        [MIDDLE, 0, z],
-        180,
-        -1,
-        &[[MIDDLE, 0, z - 800], [MIDDLE + 800, 0, z - 800]],
-        50,
-    );
-    text += &routed(
-        "BOAT.NT",
-        [MIDDLE + 2000, 0, z],
-        180,
-        -2,
-        &[[MIDDLE + 2000, 0, z - 5000]],
-        16,
-    );
-    text += "obj\r\n\ttype STAND.NT\r\n\tpos 524288 0 540000\r\n\tangle 0 0 0\r\n\tnationality2 137\r\n\tflags $13\r\n\tspeed 0\r\n\talias -3\r\n\t.\r\n";
-    r.insert("~QUCOL.M".into(), text.into_bytes());
-    r
-}
 
 fn world() -> crate::world::World {
     world_with_target(&routed_resources(), &target("QUCOL", 0, 0, 3))
@@ -626,4 +537,116 @@ fn a_machine_told_where_a_unit_is_places_its_target_and_box() {
         mover_of(&client, TANK_ID).unwrap().halt,
         mover_of(&host, TANK_ID).unwrap().halt
     );
+}
+
+/// A course on the shared route south then east from `start`, with a hit box
+/// `beam` feet wide.
+fn shared(start: [i32; 3], beam: f64) -> Course {
+    Course {
+        legs: vec![
+            Leg {
+                to: [0., -3000.],
+                speed: 50.,
+            },
+            Leg {
+                to: [4000., -3000.],
+                speed: 50.,
+            },
+        ],
+        start,
+        start_angles: [180, 0, 0],
+        rig: Some(super::movement::Rig {
+            centre: [0.; 3],
+            half: [beam / 2., 5., 15.],
+        }),
+        ..course(50., false)
+    }
+}
+
+#[test]
+fn units_on_one_route_take_lanes_side_by_side_and_finish_apart() {
+    use super::movement::{LANE_BEAMS, set_lanes};
+    let mut courses = std::collections::BTreeMap::new();
+    // A column of three on one road (the widest hull 12 ft), and a truck on
+    // a road of its own.
+    for (n, beam) in [10., 12., 11.].into_iter().enumerate() {
+        courses.insert(
+            UnitId(SURFACE_UNIT_BASE + n as u32),
+            shared([0, 0, 400 * n as i32], beam),
+        );
+    }
+    let mut alone = shared([9000, 0, 0], 12.);
+    alone.legs[1].to = [9000., -9000.];
+    courses.insert(UnitId(SURFACE_UNIT_BASE + 9), alone.clone());
+    let original = courses.clone();
+    set_lanes(&mut courses);
+    let spacing = (LANE_BEAMS * 12.).round();
+    assert_eq!(spacing, 18.);
+    let lanes: Vec<f64> = (0..3)
+        .map(|n| courses[&UnitId(SURFACE_UNIT_BASE + n)].lane)
+        .collect();
+    assert_eq!(lanes, [-spacing, 0., spacing]);
+    // Driving south, right of travel is west; at the corner (south then
+    // east) the mitre keeps the full lane width on both legs; at the end
+    // (driving east) right is south.
+    let leg = |n: u32, j: usize| courses[&UnitId(SURFACE_UNIT_BASE + n)].legs[j].to;
+    assert_eq!(leg(1, 0), [0., -3000.]);
+    assert_eq!(leg(1, 1), [4000., -3000.]);
+    assert_eq!(leg(2, 0), [-18., -3018.]);
+    assert_eq!(leg(0, 0), [18., -2982.]);
+    assert_eq!(leg(2, 1), [4000., -3018.]);
+    assert_eq!(leg(0, 1), [4000., -2982.]);
+    // Starts do not move; the lone truck keeps its route.
+    for n in 0..3 {
+        assert_eq!(
+            courses[&UnitId(SURFACE_UNIT_BASE + n)].start,
+            [0, 0, 400 * n as i32]
+        );
+    }
+    assert_eq!(courses[&UnitId(SURFACE_UNIT_BASE + 9)], alone);
+    // The same input always gives the same lanes.
+    let mut again = original;
+    set_lanes(&mut again);
+    assert_eq!(again, courses);
+}
+
+#[test]
+fn a_column_on_one_route_ends_side_by_side_in_the_world() {
+    // Three tanks on one road, as `~QUCOL` has nine.
+    let mut r = routed_resources();
+    let z = MIDDLE + 8000;
+    let mut text = String::from("textFormat\r\n");
+    for n in 0..3 {
+        text += &routed(
+            "MOVER.NT",
+            [MIDDLE, 0, z + 400 * n],
+            180,
+            -1 - n,
+            &[[MIDDLE, 0, z - 800], [MIDDLE + 800, 0, z - 800]],
+            50,
+        );
+    }
+    r.insert("~QUCOL.M".into(), text.into_bytes());
+    let mut w = world_with_target(&r, &target("QUCOL", 0, 0, 3));
+    let courses = &w.terrain.surface.courses;
+    assert_eq!(courses.len(), 3);
+    let beam = 2. * courses[&UnitId(TANK_ID)].rig.unwrap().half[0];
+    let spacing = (super::movement::LANE_BEAMS * beam).round();
+    assert!(spacing > 0.);
+    step(&mut w, 120 * 120);
+    let ends: Vec<[f64; 3]> = (0..3)
+        .map(|n| {
+            let mover = mover_of(&w, TANK_ID + n).unwrap();
+            assert_eq!(mover.halt, Halt::Arrived, "tank {n}");
+            mover.position()
+        })
+        .collect();
+    // Driving east at the end, the lanes lie north to south across the
+    // road, one lane apart, the middle tank on the authored point.
+    assert_eq!(ends[1][0], f64::from(MIDDLE + 800));
+    assert_eq!(ends[1][2], f64::from(z - 800));
+    for (n, end) in ends.iter().enumerate() {
+        assert_eq!(end[0], f64::from(MIDDLE + 800));
+        assert_eq!(end[2], f64::from(z - 800) + spacing * (1. - n as f64));
+    }
 }

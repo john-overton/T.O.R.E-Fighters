@@ -190,6 +190,14 @@ pub fn pages_with(
             p.cause.map_or_else(|| "-".into(), |c| c.to_string())
         }));
     }
+    // Only when a surface unit (a SAM site, a gun, a ship) scored the loss.
+    if player.is_some_and(|p| p.shot_down_by.is_some())
+        || wing.is_some_and(|p| p.shot_down_by.is_some())
+    {
+        outcome.push(row("Shot down by", &|p| {
+            p.shot_down_by.clone().unwrap_or_else(|| "-".into())
+        }));
+    }
     outcome.push(row("Damage", &|p| {
         format!("{}%", (p.damage * 100.).clamp(0., 100.) as u32)
     }));
@@ -743,6 +751,43 @@ mod tests {
                 .iter()
                 .any(|l| l.starts_with("Cause\toverspeed"))
         );
+    }
+    #[test]
+    fn a_surface_units_kill_names_it_and_its_fire_fills_the_sam_and_aaa_rows() {
+        let plain = Report::default();
+        assert!(
+            !pages(&plain, &text())
+                .concat()
+                .iter()
+                .any(|l| l.starts_with("Shot down by"))
+        );
+        let tally = |launched, hit| Tally {
+            launched,
+            hit,
+            damage: hit * 40,
+            ..Tally::default()
+        };
+        let shot = Report {
+            player: Pilot {
+                status: Status::Dead,
+                shot_down_by: Some("SA-6".into()),
+                enemy_sam: tally(4, 1),
+                enemy_aaa: tally(30, 3),
+                ..Pilot::default()
+            },
+            wingman: Some(Pilot {
+                status: Status::Dead,
+                shot_down_by: Some("ZSU-23-4".into()),
+                ..Pilot::default()
+            }),
+            ..Report::default()
+        };
+        let pages = pages(&shot, &text());
+        assert!(pages[1].contains(&"Shot down by\tSA-6\tZSU-23-4".to_string()));
+        // The enemy page: SAM launches and the AAA hit percentage.
+        assert!(pages[4].contains(&"    Launches\t4\t-".to_string()));
+        assert!(pages[4].contains(&"    Hit\t25% (40)\t-".to_string()));
+        assert!(pages[4].contains(&"    Hit\t10% (120)\t-".to_string()));
     }
     #[test]
     fn an_ended_mission_keeps_the_retail_layout_and_says_it_was_not_decided() {

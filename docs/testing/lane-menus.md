@@ -32,6 +32,7 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | Scenarios | What they do |
 | --- | --- |
 | `menus-validate-creator` | `--validate-creator`: loadouts for all 14 aircraft including every removed-store case, then the creator matrix, the render sweep and the input fuzz (below) |
+| `airport-allegiance` | `--airport-allegiance` (slice AL1): for every base theater, for Blue and for Redfor, the ground-start fields the creator offers and its default, each checked against the built world (the side's own or neutral, never the other side's; the creator's owner matches the imported allegiance; `start ground auto` and the AI's home runway from the map's middle and corners pick no enemy field). The summary must read `16 theaters, blue none: LFA TVIET, red none: -, 0 problems` ([allegiance](../spec/airports.md#allegiance)) |
 | `menus-validate-text` | `--validate-text`: every imported string decodes without U+FFFD and is drawable in the original fonts |
 | `menus-window-terrain-*` | Real-window captures on every base theater (clear, night), four theaters in each other weather, and ground starts in all six weathers, checked for blank, black, one-colour, dark-day and bright-night frames |
 | `menus-validate-maps`, `menus-validate-weather` | Every imported map layout and every weather module and choice |

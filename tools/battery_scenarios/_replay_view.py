@@ -19,7 +19,8 @@ from battery_scenarios import _replay_tools as tools
 # Headless probes that make the recordings the captures use.
 PROBES = {
     "attack": ["--ai-probe-ticks", "3600", "--separation", "5", "--probe-attack", "600:10"],
-    "ground": ["--ai-probe-ticks", "3600", "--ground-start", "1", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-only"],
+    # Simferopol: airport 1, Zaporizhzhya, is a Redfor field (slice AL1).
+    "ground": ["--ai-probe-ticks", "3600", "--ground-start", "2", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-only"],
     "big": ["--ai-probe-ticks", "1500", "--probe-fight", "8:8", "--separation", "5"],
     "f22": ["--ai-probe-ticks", "2400", "--aircraft", "f22", "--separation", "2", "--probe-attack", "300:10", "--probe-flight-model", "researched"],
 }
@@ -226,7 +227,8 @@ def flight_panel_scenarios() -> list[Scenario]:
     out = []
     combos = ["thought", "telemetry", "guidance", "comms", "menu", "thought,telemetry,guidance,comms,menu"]
     for panels in combos:
-        for label, extra in (("air", []), ("ground", ["--ground-start", "1"])):
+        # Simferopol: airport 1 is a Redfor field (slice AL1).
+        for label, extra in (("air", []), ("ground", ["--ground-start", "2"])):
             if extra and panels == "guidance":
                 continue
             name = panels.replace(",", "-")

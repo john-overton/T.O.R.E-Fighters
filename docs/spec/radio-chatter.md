@@ -166,7 +166,9 @@ are `<stem>.5K` in `FA_2.LIB`.
   and the weapon is unguided, that shooter announces at most one hit every 8
   seconds.
 - **Speaker and listeners.** The shooter, to its whole flight, after half a
-  second. Silenced by radio silence.
+  second. Silenced by radio silence. A SAM site, gun or ship that scores the
+  hit has no radio and says nothing (`opinionated`, agent decision,
+  2026-10-10); the victim's own "I'm hit" is unchanged.
 - **Guided weapon hits.** One of five: "Bullseye", "Impact!", "Oh, yeah!",
   "Alright!", "Good shot!". No further cooldown.
 - **Unguided weapon hits.** One of eight: "Bullseye", "He's taking damage",

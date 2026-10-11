@@ -1,6 +1,7 @@
 //! The surface unit types a mission places, read once each from the imported
 //! records: NT surface units through `tore_formats::surface_unit`, static
-//! objects (OT) and aircraft (PT) through their OBJECT block. It answers what
+//! objects (OT) through their OBJECT block and parked aircraft (PT) through
+//! `tore_formats::parked_aircraft`. It answers what
 //! resolution needs per type: its kind, class, name, hit points, destroyed
 //! look, explosion and whether it is a supply truck or a carrier. The weapon
 //! tuning joins it in the weapons slices.
@@ -9,6 +10,7 @@ use crate::resources::ResourceSource;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tore_formats::{
+    parked_aircraft::ParkedType,
     static_object::Definition,
     surface_unit::{DESTROYED_VEHICLE_OBJECT, SurfaceUnit, class},
 };
@@ -27,11 +29,18 @@ pub struct Entry {
     pub explosion: Option<u8>,
     pub crater: Option<u8>,
     pub supply_truck: bool,
-    /// A carrier (`_CARRIERProc`): its template's aircraft are scheduled deck
-    /// launches, not parked aircraft.
+    /// A carrier (`_CARRIERProc`): its template's aircraft stand on its deck
+    /// when their spot lies on it ([`super::parked::deck_spot`]).
     pub carrier: bool,
     /// The NT record, for surface units.
     pub unit: Option<Arc<SurfaceUnit>>,
+    /// The PT's OBJECT block, for parked aircraft.
+    pub aircraft: Option<Arc<ParkedType>>,
+}
+
+/// The main shape `resource` (an NT) names, if it reads.
+pub fn unit_shape(resources: &dyn ResourceSource, resource: &str) -> Option<String> {
+    SurfaceUnit::parse(resources.get(resource)?).ok()?.shape
 }
 
 /// The three record families a template or layout places.
@@ -89,6 +98,11 @@ impl<'a> Catalog<'a> {
             resources,
             entries: BTreeMap::new(),
         }
+    }
+
+    /// The import the catalog reads.
+    pub fn resources(&self) -> &'a dyn ResourceSource {
+        self.resources
     }
 
     /// Whether the import holds `name`.
@@ -152,36 +166,48 @@ impl<'a> Catalog<'a> {
                     supply_truck: unit.is_supply_truck(),
                     carrier: unit.callback == "_CARRIERProc",
                     unit: Some(Arc::new(unit)),
+                    aircraft: None,
                 })
             }
-            "OT" | "PT" => {
-                let definition =
-                    Definition::parse(bytes).map_err(|e| format!("{resource}: {e}"))?;
-                let aircraft = extension == "PT";
+            // A parked aircraft: its OBJECT block only, whatever the type
+            // (no whitelist, no aliasing).
+            "PT" => {
+                let record = ParkedType::parse(bytes).map_err(|e| format!("{resource}: {e}"))?;
                 Ok(Entry {
                     resource: resource.to_owned(),
-                    family: if aircraft {
-                        Family::Aircraft
-                    } else {
-                        Family::Object
-                    },
-                    class: definition.category,
-                    name: definition.display_name.clone(),
-                    hit_points: definition.hit_points.unwrap_or(DEFAULT_HIT_POINTS),
-                    look: if aircraft {
-                        // The aircraft ground-crash look, drawn by the
-                        // parked-aircraft path.
-                        DestroyedLook::Removed
-                    } else {
-                        self.object_look(resource)
-                    },
+                    family: Family::Aircraft,
+                    class: record.class,
+                    name: record.short_name.clone(),
+                    hit_points: record.hit_points,
+                    // The aircraft ground-crash look, drawn by the
+                    // parked-aircraft path.
+                    look: DestroyedLook::Removed,
                     // Aircraft explode as aircraft (the parked-aircraft
-                    // path); objects with their own record's look.
-                    explosion: (!aircraft).then_some(definition.explosion),
-                    crater: (!aircraft).then_some(definition.crater),
+                    // path), not with their record's look.
+                    explosion: None,
+                    crater: None,
                     supply_truck: false,
                     carrier: false,
                     unit: None,
+                    aircraft: Some(Arc::new(record)),
+                })
+            }
+            "OT" => {
+                let definition =
+                    Definition::parse(bytes).map_err(|e| format!("{resource}: {e}"))?;
+                Ok(Entry {
+                    resource: resource.to_owned(),
+                    family: Family::Object,
+                    class: definition.category,
+                    name: definition.display_name.clone(),
+                    hit_points: definition.hit_points.unwrap_or(DEFAULT_HIT_POINTS),
+                    look: self.object_look(resource),
+                    explosion: Some(definition.explosion),
+                    crater: Some(definition.crater),
+                    supply_truck: false,
+                    carrier: false,
+                    unit: None,
+                    aircraft: None,
                 })
             }
             _ => Err(format!("{resource}: not a surface object type")),

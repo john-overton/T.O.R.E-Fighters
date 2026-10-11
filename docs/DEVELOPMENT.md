@@ -1520,6 +1520,17 @@ TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --
 A cache made before the explosion sounds and sheets were added re-imports on
 first start, as any stale cache does. See [the evidence](baselines/explosions.md).
 
+`--blast-preview OUT_DIR` (first argument) renders the shockwave ring of a
+large ground explosion offscreen, without a window: a type 35 blast with a
+Mk 84 crater at 0.1, 0.35, 0.7, 1.2 and 1.7 seconds from a strike aircraft's
+height, from low beside it and from overhead, by day (and the low view at
+dusk), plus a type 21 blast and a type 34 sea blast. `TORE_PREVIEW_THEATER`
+picks the theater (default UKR):
+
+```sh
+TORE_DATA_DIR=.local/surface-data target/debug/tore-app --blast-preview .local/tmp/blast
+```
+
 ## Surface unit inspection
 
 `--surface-dump` prints a theater's surface units as a mission resolves and
@@ -1560,6 +1571,97 @@ so both commands read what the pack lacks from the retail media at runtime:
 `TORE_GAME_DIR`, else the source the data directory remembers, else the
 checkout's `gameassets/fighters-anthology` link.
 
+`--surface-trace THEATER [STEM]` flies the player on a scripted straight line
+past one armed unit (`--over TYPE [--index N]` or `--unit ID`) at
+`--altitude` feet above it, `--speed` knots, `--pass` feet to its side,
+starting `--from` nm short, for `--seconds`, and prints what the surface
+controllers do: phase changes, shots and gun bursts with their rate, magazine
+swaps, radar on and off, HARM shutdown rolls and battery changes, the RWR's
+ground squares, locks and tone, decoy rolls, hits, the unit's stock and a
+summary line. `--chaff S` and `--flares S` dispense while a missile is in
+flight at the jet, `--harm-at NM` puts an AGM-88 in flight at the unit's
+radar, `--kill-at S` destroys that radar, `--player-side red` flies for
+Redfor, `--condition night` darkens the sky, `--skill N` and `--rng N` fix the
+experience and the random draws, and `--near FT` follows the unit's
+neighbours too. For resupply, `--drain` empties the followed units' rails and
+magazines at the start, `--drain-reserve` their spare magazines too, and
+`--kill-truck-at S` destroys the supply trucks within 0.1 mile of the unit; the
+trace prints `rearm` and `refill` lines and the final stock of every followed
+unit. A launcher in a SAM battery is traced with its battery's radar
+and launchers. It reads the same retail records, weapons and sensors too.
+The `surface-*` engagement battery scenarios run it.
+
+`--surface-scene OUT_DIR THEATER STEM` renders a ground target as the game
+draws it, offscreen at 1080p (no window): it steps the whole world
+`--seconds S` (`--surface-only` steps just the moving units, for long
+marches), optionally destroys units (`--kill all`, or a comma list of
+template ordinals, unit types such as `SA3.NT`, and `within:FEET` of the
+framed units) and lets them burn for `--burn S` seconds, sets every
+launcher's rails to at most `--rails N` rounds, then writes one PNG per view
+(`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
+framing `--focus` (`routed`, `parked`, ordinals or types) within
+`--distance FT`. It draws the static scene with its wrecks and rails, the
+moving units, men and deck crew, explosions, fires and smoke. `--surface-preview
+OUT_DIR destroyed` draws one unit of each class beside its destroyed look,
+read from the records, and the four carriers with their damaged islands.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 1300 --surface-only --focus routed --distance 110 --look 300,-35
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes PGU QPGSAM --focus 8 --distance 14 --look 30,-25 --rails 1
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes FRA QFFLT --focus CLEM.NT --distance 420 --kill CLEM.NT --burn 30
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/destroyed destroyed
+```
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace IRA --over SA6 --altitude 15000 --from 20 --seconds 150
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-trace TVIET QTAAA --over KS19 --aircraft a10 --altitude 15000 --speed 300 --from 10
+```
+
+`--surface-fx-preview OUT_DIR [SCENE ...]` renders what the surface defenses
+look like, offscreen, by day, at dusk and at night: `flak` (the KS-12 and
+KS-19 bursts over North Vietnam, wide and close to the jet), `zsu23` and
+`zsu57` (muzzle flash, firing light and tracers beside a gun), `sam` (an SA-6
+leaving its rail, at the pad and up its path), `wreck` (a destroyed ZSU-23
+smoking) and `map` (the flight map over the same target). Each scene is the
+real game: it builds the mission, flies the player past the unit, steps the
+whole world and draws the frame the first flak burst, round, launch or kill
+makes through the same picture, tracker and renderer the game uses. The names
+of the frames say the scene, the light, the view and the ticks after the
+trigger. `--ground-target STEM [--defenses AAA SAM] [--surface-seed N]` sets
+the creator's ground target for a launched flight or capture
+(`--launch-quick-mission`, `--smoke-test`).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh target/debug/tore-app --surface-fx-preview .local/tmp/fx flak sam
+```
+
+`--surface-objective THEATER STEM` checks a ground target's objectives and the
+debrief in the whole world. The player flies a scripted pass at the target's
+defenses (`--from` nm out, `--altitude` feet above the ground, 400 knots,
+invulnerable, so its SAMs and guns fire), then a Mk 82 is placed on every
+target every two seconds until it is down (`--kill-friendly` also bombs a
+friendly unit that is not a target). It prints the target list, the
+objectives, the outcome and the debrief's tallies at the start and at the end:
+SAM and AAA hits and launches, the kill rows, friendly fire and who shot the
+player down. `--redfor` builds the multiplayer mission and seats the human in
+the first enemy plane, so the targets are a Protect objective and a Blue plane
+drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
+`surface-objective-*` battery scenarios run it.
+
+`--record PATH` records the run as a mission recording (a format 3 file, see
+[Mission replays](REPLAYS.md#versions-and-damage)); `--verify-render` then reads
+it back and compares every tick with the picture the run drew, printing
+`surface-objective: verify-render: PASS ticks=... missing=0 differing=0` or the
+first difference. `--run-on` keeps the run going to `--seconds` after every
+target is down, so supply trucks rearm the emptied launchers, and
+`--vulnerable` takes the player's invulnerability away, so the defenses can
+shoot it down. The `replay-surface` scenario uses all four.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --redfor
+```
+
 ## Flight view inspection
 
 `--flight-view 0..11` preserves 0 front, 1 external, 2 oblique, 3 back and 4 up.
@@ -1586,7 +1688,7 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater KUR
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~UKR1' --viewer --capture-terrain .local/ukr1.ppm
 ```
 
-`--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
+`--airport-allegiance` (imported media, no display) lists, for every base theater and for Blue and for Redfor, the ground-start airports the creator offers and checks them, the automatic ground start and the AI's home runway against the built world: none may be the other side's ([allegiance](spec/airports.md#allegiance)). `--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
 indexed artwork size, and exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the

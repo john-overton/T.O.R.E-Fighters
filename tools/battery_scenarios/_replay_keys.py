@@ -264,7 +264,8 @@ def scenarios() -> list[Scenario]:
             more=expect_events(("player.command", 1, None)),
         )
     )
-    ground = ["--launch-quick-mission", "--ground-start", "1", "--probe-wing-size", "3", "--no-audio"]
+    # Simferopol: airport 1, Zaporizhzhya, is a Redfor field (slice AL1).
+    ground = ["--launch-quick-mission", "--ground-start", "2", "--probe-wing-size", "3", "--no-audio"]
     quick = ["--launch-quick-mission", "--separation", "5", "--no-audio"]
     for seed in range(1, 6):
         out.append(keyed_flight(f"replay-keys-fuzz-free-{seed}", free, keys="wait 1", random=f"{seed}:60:flight"))

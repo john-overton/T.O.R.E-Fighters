@@ -216,8 +216,10 @@ impl SmokeRenderer {
                 .take(room),
         );
     }
-    /// Adds the AC-130 guns' blast smoke after `prepare`, drawn with the
-    /// missile puff (docs/spec/ac130-linked-guns.md#muzzle-flash).
+    /// Adds the guns' blast smoke, the surface defenses' launch clouds, flak
+    /// puffs and wreck smoke after `prepare`: the white missile puff, or the
+    /// dark aircraft puff for a flak puff or a wreck
+    /// (docs/spec/ac130-linked-guns.md#muzzle-flash).
     pub fn gun_smoke(&mut self, puffs: &[crate::gun_flash::Puff]) {
         let room = MAX_INSTANCES.saturating_sub(self.puffs.len());
         self.puffs.extend(
@@ -226,7 +228,7 @@ impl SmokeRenderer {
                 .map(|p| Sprite {
                     position: p.position,
                     radius: p.radius,
-                    cell: MISSILE_CELL,
+                    cell: if p.dark { AIRCRAFT_CELL } else { MISSILE_CELL },
                     opacity: p.opacity,
                 })
                 .take(room),

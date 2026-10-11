@@ -10,11 +10,13 @@ use crate::codec::{In, put_iv, put_uv};
 use crate::error::{Result, corrupt};
 use crate::limits::{
     MAX_AIRCRAFT, MAX_DEBRIS, MAX_ESCAPEES, MAX_PROJECTILES, MAX_SURFACE_CHANGES_PER_TICK,
+    MAX_SURFACE_STOCK_PER_TICK, MAX_SURFACE_UNITS,
 };
-use crate::model::Frame;
+use crate::model::{Frame, SurfaceStock};
 use crate::predict::{
-    AircraftPred, DebrisPred, EscapeePred, ProjectilePred, get_aircraft, get_debris, get_escapee,
-    get_projectile, put_aircraft, put_debris, put_escapee, put_projectile,
+    AircraftPred, DebrisPred, EscapeePred, ProjectilePred, SurfacePred, get_aircraft, get_debris,
+    get_escapee, get_projectile, get_surface, put_aircraft, put_debris, put_escapee,
+    put_projectile, put_surface,
 };
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -24,6 +26,14 @@ const LIST_EDIT: u64 = 1;
 const LIST_FULL: u64 = 2;
 
 const FRAME_SURFACE: u64 = 1;
+/// Format 3: the surface units' poses are present (this frame's, or the
+/// emptying of last frame's).
+const FRAME_UNITS: u64 = 1 << 1;
+/// Format 3: launcher and magazine changes follow.
+const FRAME_STOCK: u64 = 1 << 2;
+/// Format 3: the pieces of surface owners' debris follow.
+const FRAME_PIECES: u64 = 1 << 3;
+const FRAME_KNOWN: u64 = FRAME_SURFACE | FRAME_UNITS | FRAME_STOCK | FRAME_PIECES;
 
 /// How one kind of list key is written.
 trait ListKey: Copy + Eq + Hash {
@@ -182,6 +192,8 @@ pub(crate) struct FrameCoder {
     debris: HashMap<(u32, u32), DebrisPred>,
     escapee_owners: Vec<u32>,
     escapees: HashMap<(u32, u32), EscapeePred>,
+    surface_keys: Vec<u32>,
+    surface: HashMap<u32, SurfacePred>,
 }
 
 impl FrameCoder {
@@ -191,6 +203,18 @@ impl FrameCoder {
             0
         } else {
             FRAME_SURFACE
+        } | if frame.surface.is_empty() && self.surface_keys.is_empty() {
+            0
+        } else {
+            FRAME_UNITS
+        } | if frame.surface_stock.is_empty() {
+            0
+        } else {
+            FRAME_STOCK
+        } | if frame.debris_pieces.is_empty() {
+            0
+        } else {
+            FRAME_PIECES
         };
         put_uv(buf, flags);
 
@@ -244,12 +268,61 @@ impl FrameCoder {
                 last = *id;
             }
         }
+
+        if flags & FRAME_UNITS != 0 {
+            let keys: Vec<u32> = frame.surface.iter().map(|u| u.id).collect();
+            put_list(buf, &self.surface_keys, &keys);
+            // Only the units whose record says something are written, by
+            // their place in the list; the others move on as predicted.
+            let mut next = HashMap::with_capacity(keys.len());
+            let mut changed: Vec<(usize, Vec<u8>)> = Vec::new();
+            for (place, state) in frame.surface.iter().enumerate() {
+                let old = self.surface.remove(&state.id);
+                let mut record = Vec::new();
+                next.insert(state.id, put_surface(&mut record, old, state));
+                if record != [0] {
+                    changed.push((place, record));
+                }
+            }
+            put_uv(buf, changed.len() as u64);
+            let mut last = 0usize;
+            for (place, record) in &changed {
+                put_uv(buf, (place - last) as u64);
+                buf.extend_from_slice(record);
+                last = *place;
+            }
+            self.surface = next;
+            self.surface_keys = keys;
+        }
+
+        if flags & FRAME_STOCK != 0 {
+            put_uv(buf, frame.surface_stock.len() as u64);
+            let mut last = 0u32;
+            for stock in &frame.surface_stock {
+                put_iv(buf, i64::from(stock.unit) - i64::from(last));
+                put_uv(buf, u64::from(stock.mount));
+                put_uv(buf, u64::from(stock.loaded));
+                put_uv(buf, stock.reserve.map_or(0, |r| u64::from(r) + 1));
+                last = stock.unit;
+            }
+        }
+
+        if flags & FRAME_PIECES != 0 {
+            put_uv(buf, frame.debris_pieces.len() as u64);
+            let mut last = 0u32;
+            for (owner, index, piece) in &frame.debris_pieces {
+                put_iv(buf, i64::from(*owner) - i64::from(last));
+                put_uv(buf, u64::from(*index));
+                buf.push(*piece);
+                last = *owner;
+            }
+        }
     }
 
     /// Reads one frame's states into `frame`.
     pub fn get(&mut self, input: &mut In, frame: &mut Frame, version: u16) -> Result<()> {
         let flags = input.uv()?;
-        if flags & !FRAME_SURFACE != 0 {
+        if flags & !FRAME_KNOWN != 0 || (version < 3 && flags & !FRAME_SURFACE != 0) {
             return Err(corrupt("a frame has unknown flags"));
         }
 
@@ -315,6 +388,85 @@ impl FrameCoder {
                     .map_err(|_| corrupt("a surface hit point value is out of range"))?;
                 frame.surface_hp.push((id, hp));
                 last = id;
+            }
+        }
+
+        if flags & FRAME_UNITS != 0 {
+            let keys = get_list(
+                input,
+                &self.surface_keys,
+                MAX_SURFACE_UNITS,
+                "surface units",
+                true,
+            )?;
+            let changed = input.count(keys.len(), "changed surface units")?;
+            let mut records: HashMap<usize, SurfacePred> = HashMap::with_capacity(changed);
+            let mut place = 0usize;
+            for n in 0..changed {
+                let step = input.count(keys.len(), "surface unit positions")?;
+                place = if n == 0 {
+                    step
+                } else {
+                    place
+                        .checked_add(step)
+                        .ok_or_else(|| corrupt("a surface unit place overflows"))?
+                };
+                let id = *keys
+                    .get(place)
+                    .ok_or_else(|| corrupt("a surface unit place is out of range"))?;
+                if n > 0 && step == 0 {
+                    return Err(corrupt("a surface unit is listed twice"));
+                }
+                records.insert(place, get_surface(input, self.surface.remove(&id))?);
+            }
+            let mut next = HashMap::with_capacity(keys.len());
+            for (place, id) in keys.iter().enumerate() {
+                let pred = match records.remove(&place) {
+                    Some(pred) => pred,
+                    // Unchanged: the prediction holds.
+                    None => get_surface(&mut In::new(&[0]), self.surface.remove(id))?,
+                };
+                frame.surface.push(pred.state(*id));
+                next.insert(*id, pred);
+            }
+            self.surface = next;
+            self.surface_keys = keys;
+        }
+
+        if flags & FRAME_STOCK != 0 {
+            let n = input.count(MAX_SURFACE_STOCK_PER_TICK, "surface stock changes")?;
+            let mut last = 0u32;
+            for _ in 0..n {
+                let unit = u32::get(input, Some(last))?;
+                let mount = u16::try_from(input.uv()?)
+                    .map_err(|_| corrupt("a hardpoint number is out of range"))?;
+                let loaded = input.u32v()?;
+                let reserve = match input.uv()? {
+                    0 => None,
+                    n => Some(
+                        u32::try_from(n - 1)
+                            .map_err(|_| corrupt("a magazine reserve is out of range"))?,
+                    ),
+                };
+                frame.surface_stock.push(SurfaceStock {
+                    unit,
+                    mount,
+                    loaded,
+                    reserve,
+                });
+                last = unit;
+            }
+        }
+
+        if flags & FRAME_PIECES != 0 {
+            let n = input.count(MAX_DEBRIS, "debris pieces")?;
+            let mut last = 0u32;
+            for _ in 0..n {
+                let owner = u32::get(input, Some(last))?;
+                let index = input.u32v()?;
+                let piece = input.u8()?;
+                frame.debris_pieces.push((owner, index, piece));
+                last = owner;
             }
         }
         Ok(())

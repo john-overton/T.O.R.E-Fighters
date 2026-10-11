@@ -149,7 +149,10 @@ impl Scene {
     /// plane is as much a subject of the target and wing views as an AI one.
     /// `wing_of` names the wing and member of an aircraft in the roster, and
     /// whether it is friendly; `sign` turns every velocity round (a replay
-    /// played backwards). A replay builds its scene the same way.
+    /// played backwards). A replay builds its scene the same way. A surface
+    /// unit that follows a route is a subject where the picture draws it
+    /// (protocol 22): a missile a SAM launched names the unit as its owner,
+    /// and the object view of the unit is its subject's.
     pub(crate) fn of_picture(
         player: Body,
         target: Option<u32>,
@@ -157,15 +160,30 @@ impl Scene {
         wing_of: impl Fn(u32) -> Option<(bool, u8, u8)>,
         sign: f64,
     ) -> Self {
+        let posed: Vec<Body> = picture
+            .targets
+            .iter()
+            .filter(|t| t.airborne || t.damage.hp > 0)
+            .map(|t| Body::posed(t, sign))
+            .collect();
+        let moving = picture
+            .surface
+            .iter()
+            .filter(|unit| !unit.wrecked && !posed.iter().any(|b| b.id == unit.id.0))
+            .map(|unit| {
+                let [yaw, pitch, bank] = unit.attitude;
+                Body::new(
+                    unit.id.0,
+                    unit.position,
+                    [0.; 3],
+                    Basis::new(yaw, pitch, bank),
+                )
+            })
+            .collect::<Vec<_>>();
         Self::from_parts(
             player,
             target,
-            picture
-                .targets
-                .iter()
-                .filter(|t| t.airborne || t.damage.hp > 0)
-                .map(|t| Body::posed(t, sign))
-                .collect(),
+            posed.into_iter().chain(moving).collect(),
             picture
                 .targets
                 .iter()

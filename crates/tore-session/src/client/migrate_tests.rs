@@ -161,3 +161,32 @@ fn the_old_host_answering_again_stops_the_race() {
     assert_eq!(rig.players[viper].client.server(), host_address());
     assert_eq!(rig.players[viper].client.migration_counts().failed, 0);
 }
+
+/// A new host's Names message that comes before any section of its flight
+/// starts that flight, as the flight's first section would: its names are
+/// kept, so the next Names follows on instead of being refused as out of
+/// order (the client's half of the flaky `net-window-migrate`; the host's
+/// half is `a_late_resume_gets_no_snapshot_before_resumed`).
+#[test]
+fn names_of_a_later_flight_start_it_after_a_switch() {
+    use crate::wire::connection::ClientConnection;
+    use crate::wire::messages::Names;
+    use crate::wire::names::NameIndex;
+    let (mut rig, viper) = flying();
+    let client = &mut rig.players[viper].client;
+    // The wire as `switch` leaves it: a new connection's, with no flight.
+    client.wire = Some(ClientConnection::new(client.ticks_per_snapshot));
+    let names = |first: u16, name: &str| {
+        Message::Names(Names {
+            flight: 0,
+            first,
+            names: vec![name.to_owned()],
+        })
+    };
+    client.message(names(0, "AIM9M.JT"));
+    client.message(names(1, "AIM120.JT"));
+    let wire = client.wire.as_ref().unwrap();
+    assert_eq!(wire.flight, Some(0));
+    assert_eq!(wire.names.name(NameIndex(1)), Some("AIM120.JT"));
+    assert_eq!(client.phase(), ClientPhase::Flying, "no protocol error");
+}

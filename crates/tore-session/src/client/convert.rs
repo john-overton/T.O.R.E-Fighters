@@ -661,12 +661,31 @@ impl Conversion {
                             tick,
                         ));
                     }
-                    (EntityKind::Debris, Sample::Debris(_, position, attitude)) => {
+                    (EntityKind::Debris, Sample::Debris(d, position, attitude)) => {
                         frame.debris.push(replay::DebrisState {
                             owner: key.id,
                             index: 0,
                             position,
                             attitude,
+                        });
+                        // A surface owner's piece (a parked aircraft's),
+                        // format 3.
+                        if is_surface_id(key.id)
+                            && let Some(piece) = d.variant
+                        {
+                            frame.debris_pieces.push((key.id, 0, piece));
+                        }
+                    }
+                    (EntityKind::Surface, Sample::Surface(m, position, attitude)) => {
+                        frame.surface.push(replay::SurfaceState {
+                            id: key.id,
+                            position,
+                            attitude: [
+                                attitude[0].rem_euclid(std::f64::consts::TAU),
+                                attitude[1],
+                                attitude[2],
+                            ],
+                            wrecked: m.wrecked,
                         });
                     }
                     (EntityKind::Pilot, Sample::Pilot(p, position, heading)) => {
@@ -766,6 +785,15 @@ impl Conversion {
         for info in self.roster(flight) {
             writer.register_aircraft(&info)?;
         }
+        // The surface units (format 3), named as the single-player recorder
+        // names them.
+        if writer.version() >= 3
+            && let Some(world) = self.client.mission()
+        {
+            for info in surface_infos(world) {
+                writer.register_surface_unit(&info)?;
+            }
+        }
         for weapon in self.weapons(flight) {
             writer.register_weapon(&weapon)?;
         }
@@ -811,6 +839,70 @@ impl Regenerate for Nothing {
     fn frame(&mut self, _: &mut replay::Frame) -> Vec<replay::WeaponInfo> {
         Vec::new()
     }
+}
+
+/// Whether `id` is a surface object's (the theater layout's and the
+/// template's, below their shots).
+fn is_surface_id(id: u32) -> bool {
+    (tore_world::surface::LAYOUT_OBJECT_BASE..tore_world::surface::SURFACE_UNIT_END).contains(&id)
+}
+
+/// The identities of a world's surface units with combat rows (template and
+/// added units, parked aircraft, base-layout units that act), labelled as
+/// the single-player recorder labels them: `SA-6 #18`, `ZSU-23 L4`,
+/// `MISTRK +2`.
+pub fn surface_infos(world: &World) -> Vec<replay::SurfaceInfo> {
+    use tore_world::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
+    use tore_world::surface::{IdRange, LAYOUT_OBJECT_BASE, SURFACE_UNIT_BASE, UnitId, UnitKind};
+    let surface = &world.terrain.surface;
+    let mut out: Vec<replay::SurfaceInfo> = world
+        .combat
+        .state
+        .targets
+        .iter()
+        .filter(|row| {
+            let id = UnitId(row.id);
+            match id.range() {
+                IdRange::Layout => surface
+                    .unit(id)
+                    .is_some_and(|unit| unit.kind == UnitKind::Active),
+                IdRange::Template | IdRange::SupplyTruck | IdRange::BatteryRadar => true,
+                _ => false,
+            }
+        })
+        .map(|row| {
+            let unit = surface.unit(UnitId(row.id));
+            let name = unit
+                .map(|unit| unit.name.clone())
+                .or_else(|| world.combat.ground_name(row.id).map(str::to_owned))
+                .unwrap_or_else(|| format!("object {:#x}", row.id));
+            let side = unit.map_or(row.side, |unit| unit.side);
+            let label = match UnitId(row.id).range() {
+                IdRange::Template => format!("{name} #{}", row.id - SURFACE_UNIT_BASE),
+                IdRange::Layout => format!("{name} L{}", row.id - LAYOUT_OBJECT_BASE),
+                _ => format!("{name} +{}", row.id & 0x03ff_ffff),
+            };
+            replay::SurfaceInfo {
+                id: row.id,
+                name,
+                label,
+                side: if side == FRIENDLY_SIDE {
+                    replay::Side::Friendly
+                } else if side == ENEMY_SIDE {
+                    replay::Side::Enemy
+                } else if side == tore_sim::combat::live::NO_SIDE {
+                    replay::Side::Neutral
+                } else {
+                    replay::Side::Unknown
+                },
+                hit_points: row.initial_hp,
+                position: row.position,
+            }
+        })
+        .collect();
+    out.sort_by_key(|info| info.id);
+    out.dedup_by_key(|info| info.id);
+    out
 }
 
 fn first_aircraft_type(seen: &FlightSeen, key: EntityKey) -> Option<AircraftId> {

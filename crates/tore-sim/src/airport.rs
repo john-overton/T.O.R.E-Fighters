@@ -47,12 +47,36 @@ pub struct SourceKey {
     pub ordinal: u32,
 }
 
+/// An airport's owner, recorded from Blue's point of view: `Friendly` is
+/// Blue's, `Hostile` is Redfor's. [`Allegiance::seen_by`] gives a Redfor
+/// pilot's view (docs/spec/airports.md, "Allegiance").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Allegiance {
     Friendly,
     Neutral,
     Hostile,
     Unknown,
+}
+impl Allegiance {
+    /// The allegiance of a runway placed with layout owner `redfor` (the
+    /// nationality's side bit; `None` without an owner field): Blue's is
+    /// friendly, Redfor's hostile, an unowned one neutral.
+    pub fn of_owner(redfor: Option<bool>) -> Self {
+        match redfor {
+            Some(false) => Self::Friendly,
+            Some(true) => Self::Hostile,
+            None => Self::Neutral,
+        }
+    }
+    /// This allegiance as a pilot of one side sees it: Blue's view is the
+    /// recorded one, a Redfor pilot's swaps friendly and hostile.
+    pub fn seen_by(self, redfor: bool) -> Self {
+        match (self, redfor) {
+            (Self::Friendly, true) => Self::Hostile,
+            (Self::Hostile, true) => Self::Friendly,
+            (other, _) => other,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -244,6 +268,24 @@ pub struct Airport {
     pub allegiance: Allegiance,
     pub neutral_permission: bool,
 }
+impl Airport {
+    /// The airport's allegiance as a pilot of one side sees it.
+    pub fn allegiance_for(&self, redfor: bool) -> Allegiance {
+        self.allegiance.seen_by(redfor)
+    }
+    /// The tower's rule: a pilot of this side may use the airport when it is
+    /// the side's own or a neutral one that grants permission. Every list a
+    /// pilot or an AI aircraft picks a field from (the tower's, NAV's, the
+    /// wing's landing order, homes, ground starts) uses it, so an enemy
+    /// field is never offered.
+    pub fn serves(&self, redfor: bool) -> bool {
+        match self.allegiance_for(redfor) {
+            Allegiance::Friendly => true,
+            Allegiance::Neutral => self.neutral_permission,
+            Allegiance::Hostile | Allegiance::Unknown => false,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Scene {
@@ -398,6 +440,9 @@ pub struct Aircraft {
     /// Height of the aircraft's origin above its wheels' contact plane, feet.
     /// The glide path is flown by the wheels, so it is taken off the height.
     pub ground_clearance_ft: f64,
+    /// The aircraft flies for Redfor: the tower reads airport allegiance from
+    /// its side ([`Airport::allegiance_for`]).
+    pub redfor: bool,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Guidance {
@@ -671,7 +716,7 @@ impl Service {
                         reason: DeclineReason::NoAirport,
                     });
                 };
-                let reason = match a.allegiance {
+                let reason = match a.allegiance_for(aircraft.redfor) {
                     Allegiance::Hostile => Some(DeclineReason::Hostile),
                     Allegiance::Unknown => Some(DeclineReason::UnknownAllegiance),
                     Allegiance::Neutral if !a.neutral_permission => {
@@ -718,9 +763,12 @@ impl Service {
                 let (runway, end) = self.choose(scene, aircraft, id)?;
                 (id, runway, end)
             } else {
+                // Automatic guidance finds only fields the aircraft's side
+                // may use: an enemy field is never offered.
                 scene
                     .airports
                     .iter()
+                    .filter(|a| a.serves(aircraft.redfor))
                     .filter_map(|a| {
                         let (runway, end) = self.choose(scene, aircraft, a.id)?;
                         let r = scene.runway(runway)?;
@@ -943,6 +991,7 @@ mod tests {
             alive: true,
             speed_fps: 100.,
             ground_clearance_ft: 0.,
+            redfor: false,
         }
     }
     #[test]
@@ -1156,6 +1205,67 @@ mod tests {
         let x = Service::new(&s).unwrap();
         let guidance = x.guidance(&s, plane(-10000., 1000.)).unwrap();
         assert_eq!(guidance.airport, 7);
+    }
+    #[test]
+    fn a_runways_layout_owner_gives_the_airport_its_side() {
+        assert_eq!(Allegiance::of_owner(Some(false)), Allegiance::Friendly);
+        assert_eq!(Allegiance::of_owner(Some(true)), Allegiance::Hostile);
+        assert_eq!(Allegiance::of_owner(None), Allegiance::Neutral);
+        // A Redfor pilot sees friendly and hostile swapped, nothing else.
+        assert_eq!(Allegiance::Friendly.seen_by(true), Allegiance::Hostile);
+        assert_eq!(Allegiance::Hostile.seen_by(true), Allegiance::Friendly);
+        assert_eq!(Allegiance::Neutral.seen_by(true), Allegiance::Neutral);
+        assert_eq!(Allegiance::Unknown.seen_by(true), Allegiance::Unknown);
+        assert_eq!(Allegiance::Hostile.seen_by(false), Allegiance::Hostile);
+        let mut a = scene().airports.remove(0);
+        assert!(a.serves(false) && !a.serves(true));
+        a.allegiance = Allegiance::Hostile;
+        assert!(!a.serves(false) && a.serves(true));
+        // A neutral field serves both sides when it grants permission.
+        a.allegiance = Allegiance::Neutral;
+        assert!(!a.serves(false) && !a.serves(true));
+        a.neutral_permission = true;
+        assert!(a.serves(false) && a.serves(true));
+        a.allegiance = Allegiance::Unknown;
+        assert!(!a.serves(false) && !a.serves(true));
+    }
+    #[test]
+    fn the_tower_clears_a_pilot_only_at_its_own_sides_field() {
+        let s = scene();
+        let mut blue = plane(-10000., 1000.);
+        let mut red = blue;
+        red.redfor = true;
+        // Blue's field: Blue is cleared, Redfor is told it is hostile.
+        let mut x = Service::new(&s).unwrap();
+        x.command(&s, red, Command::SelectAirport(7));
+        assert_eq!(
+            x.command(&s, red, Command::RequestLanding),
+            vec![Event::Reply(Reply::Declined {
+                airport: Some(7),
+                reason: DeclineReason::Hostile
+            })]
+        );
+        x.command(&s, blue, Command::RequestLanding);
+        assert_eq!(x.clearance(), Some((7, 1000, ApproachEnd::Near)));
+        // Redfor's field: the other way round.
+        let mut s = s;
+        s.airports[0].allegiance = Allegiance::Hostile;
+        let mut x = Service::new(&s).unwrap();
+        x.command(&s, blue, Command::SelectAirport(7));
+        assert!(matches!(
+            x.command(&s, blue, Command::RequestLanding)[0],
+            Event::Reply(Reply::Declined {
+                reason: DeclineReason::Hostile,
+                ..
+            })
+        ));
+        x.command(&s, red, Command::RequestLanding);
+        assert_eq!(x.clearance(), Some((7, 1000, ApproachEnd::Near)));
+        // Automatic guidance finds only the side's own fields.
+        let x = Service::new(&s).unwrap();
+        blue.position[1] = 1000.;
+        assert!(x.guidance(&s, blue).is_none());
+        assert_eq!(x.guidance(&s, red).unwrap().airport, 7);
     }
     #[test]
     fn repeating_preserves_reply_and_approach_end() {

@@ -453,6 +453,7 @@ impl World {
                 &self.terrain.airport_scene,
                 &self.terrain.airfield_anchors,
                 &self.cockpits[cockpit].airport_service,
+                self.roster.redfor(self.cockpits[cockpit].plane),
             ) {
                 Ok(site) => Some(site),
                 Err(message) if self.ai_wings.is_some() => {

@@ -679,6 +679,20 @@ impl Host {
             return;
         };
         let spec = with_settings(file, &settings);
+        // The file's mission again, with the seed it flew on when it is the
+        // same mission (a ground target drawn at the start keeps its layout).
+        let spec = match self.spec.surface_seed {
+            seed if seed != 0 && spec.surface_seed == 0 => {
+                let mut same = spec.clone();
+                same.surface_seed = seed;
+                if same == self.spec {
+                    same
+                } else {
+                    super::with_surface_seed(spec, self.session_id, self.number.wrapping_add(1))
+                }
+            }
+            _ => super::with_surface_seed(spec, self.session_id, self.number.wrapping_add(1)),
+        };
         if spec == self.spec && settings == self.settings && self.court.locks.is_empty() {
             return;
         }

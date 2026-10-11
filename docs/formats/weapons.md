@@ -177,8 +177,8 @@ Swept relative-motion sphere intersection prevents round/target tunneling;
 eight terrain samples plus bisection find the earliest sampled ground crossing.
 This is not native polygon collision. Fuzes use source arm time/radius; damage
 subtracts the source aircraft-class entry from source target HP. Native hit
-probability, subsystem damage, immunity, collateral, debris and water effects
-remain open. Ordinary free flight stays externally clean; explicit live range
+probability, subsystem damage, immunity, debris and water effects remain open;
+collateral is now read (see [Collateral damage](#collateral-damage)). Ordinary free flight stays externally clean; explicit live range
 loads the PT weapon counts and auxiliary external equipment mass. Tank fuel is
 carried mass only, with no transfer/jettison. Released stores reduce payload
 through the existing aircraft-owned model; rack pairing, weapon-specific drag
@@ -187,6 +187,52 @@ and carried-store rendering are not recovered.
 See [live-fire validation](../baselines/live-fire.md) for controls, screenshots,
 end-to-end results and presentation approximations. This is a working test range,
 not a completed W3–W5 vanilla acceptance gate.
+
+## Collateral damage
+
+Static reading on 2026-10-10 (slice X1) of `PROJSendCollateralDamages`
+(`0x4c5670`) in FA.EXE 1.02F
+(`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`), from the
+saved research disassembly; no original code ran. It is the source of the
+[splash damage](../spec/missiles.md#splash-damage) behaviour.
+
+Arguments (stdcall, six words): the projectile's type record, the burst
+position, the projectile's own object index, the shooter's object index, one
+more excluded object index (the struck target, or none), and a share in
+percent.
+
+- It does nothing when the record's `collateralDamagePercent` (record offset
+  `0x139`) is 0. `collateralDamageRadius` is at `0x137`.
+- It walks every object slot. It skips the projectile itself, the excluded
+  index, inactive objects, objects of type 6 (projectiles) and objects whose
+  type record lacks flag bit 0x1.
+- Distance: the object's shape bounds give a half extent along the axis on
+  which the burst is farthest from the object's centre; the routine takes the
+  centre distance (fixed point, shifted right 8) minus that half extent,
+  floored at 0. Objects at or beyond the radius are skipped.
+- Sides: unless the shooter object carries bit 0x80 in byte `0x10`, the
+  shooter itself is skipped, and an object whose side bit (byte 9, bit 0x80)
+  equals the shooter's is skipped unless its object type byte is 4.
+- Amount: `percent - percent * distance / radius` (integer division), times the
+  share argument, divided by 100, written as a byte percent into a damage
+  message with the projectile's index. A zero result sends nothing. The
+  receiver applies it to the projectile's damage for the target's class, as a
+  direct hit's percent is (the direct-hit routine at `0x4c58a0` sends 100, or
+  33 to 98 on a roll, in the same byte).
+- The message is posted with a delay argument of `distance / 500 + 2`.
+
+Callers and their share argument:
+
+| Call | Context | Share | Excluded |
+| --- | --- | ---: | --- |
+| `0x4c161c` | After an object-type explosion (record byte `0x55`) at the burst point | 100 | none |
+| `0x4c1dbc` | Ground impact: crater (record byte `0x56`) and land or water explosion (`0x12d`, `0x12e`) | 70 if the record's percent is 100, else 50 | none |
+| `0x4c1e3a` | A hit on an object | 100 | the struck object |
+| `0x4c1f01` | A hit on an object whose type lacks flag 0x800 (objects with it end the call earlier, without splash) | 70 or 50 as above | the struck object |
+| `0x4c5cf1` | Another routine (not traced) | 100 | none |
+
+Unknown: what object type 4 and shooter flag 0x80 are; which targets take the
+`0x4c1e3a` path and which the `0x4c1f01` path; the delay's time unit.
 
 ## Manual weapons integration follow-up
 

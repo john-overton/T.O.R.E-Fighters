@@ -4,7 +4,9 @@
 //! steps the whole world (the live game's tick, no window, no audio) and
 //! prints, at each listed time, where every unit that follows a route is.
 //! `--kill` destroys a template object (by its ordinal in the template) at a
-//! time, to show that a destroyed unit stops where it died. `--surface-only`
+//! time, to show that a destroyed unit stops where it died. Each unit's lane
+//! (feet right of the authored path, for units that share a route) and its
+//! legs as driven are printed first. `--surface-only`
 //! steps just the surface movement (the world's other half stands still), for
 //! runs of hours of mission time.
 //!
@@ -91,6 +93,17 @@ pub fn run() -> AppResult<()> {
             course.legs[0].speed,
             course.turn_rate.to_degrees(),
             u8::from(course.ship),
+        );
+        let legs: Vec<String> = course
+            .legs
+            .iter()
+            .map(|leg| format!("{:.0},{:.0}", leg.to[0], leg.to[1]))
+            .collect();
+        println!(
+            "surface-drive: unit {:#010x} lane {:.0} legs {}",
+            id.0,
+            course.lane,
+            legs.join(" ")
         );
     }
     println!(

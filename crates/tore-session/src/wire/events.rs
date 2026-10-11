@@ -13,7 +13,7 @@
 //! journal entry about a member of the seat's flight, and the net a radio
 //! call was heard on (a bit after "important").
 
-use super::bits::{self, read_u32, read_uladder, write_uladder};
+use super::bits::{self, read_i32, read_u32, read_uladder, write_uladder};
 use super::inputs::{read_order, write_order};
 use super::names::NameIndex;
 use super::{WireError, WireResult, limits};
@@ -176,6 +176,51 @@ pub enum WireEvent {
     /// A change of the flight data link's picture about a member of the
     /// seat's flight (protocol 15, slice G7).
     Link(LinkEvent),
+    /// A surface unit's gun burst from the event's tick (protocol 22): the
+    /// client remakes its rounds from the unit's mount, the first round's
+    /// direction `aim` (azimuth from +z towards +x, elevation; 2^-16 of a
+    /// turn), and the burst's schedule, `rounds` over `span` ticks (round k
+    /// at the first tick at or after k × span / rounds), turning later
+    /// rounds with the target's drawn motion. Flak shells are not sent:
+    /// their bursts are Effects.
+    SurfaceBurst {
+        unit: u32,
+        mount: u8,
+        target: Option<u32>,
+        aim: [u16; 2],
+        rounds: u16,
+        span: u16,
+    },
+    /// The surface burst that began at the event's tick ended after `fired`
+    /// rounds, before its schedule's end (protocol 22): the target left the
+    /// gun's gates or the magazine ran dry.
+    SurfaceBurstEnd { unit: u32, mount: u8, fired: u16 },
+    /// A surface unit's state as a client draws and shows it, from the
+    /// event's tick (protocol 22): sent when it changes, and at seating for
+    /// every unit not as the mission built it.
+    SurfaceUnit(SurfaceUnitView),
+}
+
+/// The part of a surface unit's state a client draws or shows (protocol
+/// 22): its hit points, whether its radar emits, and each hardpoint's
+/// stock, in hardpoint order. A unit not in a client's list is as the
+/// mission built it: full hit points, radar off, full rails and spares.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SurfaceUnitView {
+    /// The unit's (or parked aircraft's) id.
+    pub unit: u32,
+    pub hp: i32,
+    pub radar: bool,
+    pub mounts: Vec<MountView>,
+}
+
+/// One hardpoint's stock: a launcher's loaded rails, a gun's spare
+/// magazines (a ship's guns have unlimited spares: none). A gun's loaded
+/// rounds are not sent; they change with every round.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MountView {
+    pub rails: Option<u16>,
+    pub spares: Option<u16>,
 }
 
 /// One data link journal entry as the wire carries it: the entry without its
@@ -528,6 +573,9 @@ impl WireEvent {
             Self::GunBurst { .. } => 15,
             Self::Sound { .. } => 16,
             Self::Link(_) => 17,
+            Self::SurfaceBurst { .. } => 18,
+            Self::SurfaceBurstEnd { .. } => 19,
+            Self::SurfaceUnit(_) => 20,
         }
     }
 
@@ -676,6 +724,29 @@ impl WireEvent {
                 bits::write_option(w, *from, |w, from| w.write_varint(u64::from(from)));
             }
             Self::Link(link) => link.write(w),
+            Self::SurfaceBurst {
+                unit,
+                mount,
+                target,
+                aim,
+                rounds,
+                span,
+            } => {
+                w.write_varint(u64::from(*unit));
+                let _ = w.write_bits(u64::from(*mount), 8);
+                bits::write_option(w, *target, |w, target| w.write_varint(u64::from(target)));
+                for angle in aim {
+                    let _ = w.write_bits(u64::from(*angle), 16);
+                }
+                w.write_varint(u64::from(*rounds));
+                w.write_varint(u64::from(*span));
+            }
+            Self::SurfaceBurstEnd { unit, mount, fired } => {
+                w.write_varint(u64::from(*unit));
+                let _ = w.write_bits(u64::from(*mount), 8);
+                w.write_varint(u64::from(*fired));
+            }
+            Self::SurfaceUnit(view) => view.write(w)?,
         }
         Ok(())
     }
@@ -807,7 +878,66 @@ impl WireEvent {
                 from: bits::read_option(r, read_u32)?,
             },
             17 => Self::Link(LinkEvent::read(r)?),
+            18 => Self::SurfaceBurst {
+                unit: read_u32(r)?,
+                mount: r.read_bits(8)? as u8,
+                target: bits::read_option(r, read_u32)?,
+                aim: [r.read_bits(16)? as u16, r.read_bits(16)? as u16],
+                rounds: read_u16(r)?,
+                span: read_u16(r)?,
+            },
+            19 => Self::SurfaceBurstEnd {
+                unit: read_u32(r)?,
+                mount: r.read_bits(8)? as u8,
+                fired: read_u16(r)?,
+            },
+            20 => Self::SurfaceUnit(SurfaceUnitView::read(r)?),
             _ => return Err(WireError::Invalid("event kind")),
+        })
+    }
+}
+
+/// Reads a varint that must fit 16 bits.
+fn read_u16(r: &mut BitReader<'_>) -> WireResult<u16> {
+    u16::try_from(r.read_varint()?).map_err(|_| tore_codec::CodecError::ValueOutOfRange.into())
+}
+
+impl SurfaceUnitView {
+    fn write(&self, w: &mut BitWriter) -> WireResult<()> {
+        if self.mounts.len() > limits::MOUNTS {
+            return Err(WireError::TooMany {
+                what: "surface unit hardpoints",
+                limit: limits::MOUNTS,
+            });
+        }
+        w.write_varint(u64::from(self.unit));
+        w.write_varint_signed(i64::from(self.hp));
+        w.write_bool(self.radar);
+        bits::write_count(w, self.mounts.len());
+        for mount in &self.mounts {
+            bits::write_option(w, mount.rails, |w, n| w.write_varint(u64::from(n)));
+            bits::write_option(w, mount.spares, |w, n| w.write_varint(u64::from(n)));
+        }
+        Ok(())
+    }
+
+    fn read(r: &mut BitReader<'_>) -> WireResult<Self> {
+        let unit = read_u32(r)?;
+        let hp = read_i32(r)?;
+        let radar = r.read_bool()?;
+        let count = bits::read_count(r, limits::MOUNTS, "surface unit hardpoints")?;
+        let mut mounts = Vec::with_capacity(count);
+        for _ in 0..count {
+            mounts.push(MountView {
+                rails: bits::read_option(r, read_u16)?,
+                spares: bits::read_option(r, read_u16)?,
+            });
+        }
+        Ok(Self {
+            unit,
+            hp,
+            radar,
+            mounts,
         })
     }
 }

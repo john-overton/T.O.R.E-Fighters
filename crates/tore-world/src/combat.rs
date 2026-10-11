@@ -181,6 +181,15 @@ pub struct Combat {
     ground_looks: BTreeMap<u32, live::GroundLook>,
     /// The surface units' changing state; see [`crate::surface`].
     pub surface: crate::surface::SurfaceState,
+    /// The parked aircraft, registered after the scene's objects whenever
+    /// they are, with their short names for the target window. Setup.
+    parked: Vec<(live::ParkedAircraft, String)>,
+    /// The mission's ground targets that have a combat row (the surface's
+    /// 0x80 objects), for the target window's objective line. Setup.
+    surface_targets: std::collections::BTreeSet<u32>,
+    /// The contact volume weapons meet for each scene object whose differs
+    /// from its shape's box: a runway's pavement ([`weapon_contact`]). Setup.
+    weapon_boxes: BTreeMap<u32, tore_sim::airport::OrientedBox>,
     /// The records of the combat tape being written, collected until the app
     /// drains them (`take_tape`); `None` when no tape is being recorded.
     /// Combat holds no file: the app owns the writer.
@@ -208,6 +217,35 @@ pub enum CommandNote {
 }
 /// Command notes kept between drains; the oldest are dropped first.
 const MAX_COMMAND_NOTES: usize = 64;
+
+/// The contact volume weapons meet for a runway object (`_STRIPProc`), `None`
+/// for any other object, which keeps its shape's box. A runway's shape box
+/// spans its whole airfield, aprons, parked aircraft and buildings included
+/// (the Falklands field's is 7,900 by 8,100 ft and 92 ft tall), so rounds and
+/// bombs meet a slab at the pavement instead: the shape's footprint, from 2
+/// ft below the runway plane to 1 ft above it (lead ruling, 2026-10-10).
+/// Units and aircraft standing on or beside the field are reached; the
+/// landable surface, aircraft contact and every other use of the shape box
+/// are unchanged. A composite runway shape's own structures (towers, hangars
+/// drawn in it) no longer stop weapons.
+pub fn weapon_contact(
+    object: &tore_sim::airport::StaticObject,
+    scene: &tore_sim::airport::Scene,
+) -> Option<tore_sim::airport::OrientedBox> {
+    if !object.runway {
+        return None;
+    }
+    let runway = scene.runways.iter().find(|r| r.object == object.id)?;
+    let b = object.bounds;
+    let pavement = runway.support_height(b.center[0], b.center[2])?;
+    let up = tore_sim::attitude::Basis::new(b.heading, b.pitch, b.bank).up;
+    let base = [b.center[0], pavement, b.center[2]];
+    Some(tore_sim::airport::OrientedBox {
+        center: std::array::from_fn(|i| base[i] - up[i] * 0.5),
+        half: [b.half[0], 1.5, b.half[2]],
+        ..b
+    })
+}
 
 /// Lowest airborne mission start above sea level, feet (John, 2026-09-29).
 pub const SPAWN_MIN_MSL_FT: f64 = 5000.;
@@ -308,7 +346,41 @@ impl Combat {
         wings: Option<&crate::ai_wings::AiWings>,
         cockpit: Option<&crate::world::Cockpit>,
     ) -> Option<crate::readout::CockpitReadout> {
-        crate::readout::build(&self.state, plane, launcher, wings, cockpit)
+        let mut readout = crate::readout::build(&self.state, plane, launcher, wings, cockpit)?;
+        if let Some(brief) = readout.target_window.as_mut()
+            && brief.objective.is_none()
+        {
+            brief.objective = self.ground_objective(plane, brief.id);
+        }
+        // Surface units' missile locks sound the same tone as the AI's.
+        let locks = &mut readout.rwr.locks;
+        locks.extend(self.surface.locks_on(plane));
+        locks.truncate(crate::readout::MAX_AI_THREATS);
+        // The radars painting the plane show bright on its RWR.
+        readout.rwr.painting = self.surface.painting(plane);
+        Some(readout)
+    }
+    /// What the mission asks of `plane` about target `id` when it is one of
+    /// the ground target's objects: the window says "Obj:" for those too. The
+    /// enemy side's planes (a Redfor player in a multiplayer game) must keep
+    /// them, every other plane destroys them.
+    pub fn ground_objective(
+        &self,
+        plane: u32,
+        id: u32,
+    ) -> Option<crate::target_window::TargetObjective> {
+        use crate::target_window::TargetObjective;
+        self.surface_targets.contains(&id).then(|| {
+            let redfor = self
+                .state
+                .ownship(plane)
+                .is_some_and(|own| own.side == ENEMY_SIDE);
+            if redfor {
+                TargetObjective::Survive
+            } else {
+                TargetObjective::Destroy
+            }
+        })
     }
     /// Player airborne startup convention: canonical gun selected and armed.
     pub fn apply_startup_weapons(&mut self) {
@@ -335,38 +407,77 @@ impl Combat {
                     live::GroundLook {
                         explosion: unit.explosion?,
                         crater: unit.crater?,
+                        // Wrecks that stay burn (docs/spec/surface-defenses.md,
+                        // "Destroyed looks").
+                        burns: matches!(
+                            unit.look,
+                            crate::surface::DestroyedLook::DamagedShape(_)
+                                | crate::surface::DestroyedLook::Wreck(_)
+                        ),
                     },
                 ))
             })
             .collect();
+        let parked = terrain
+            .surface
+            .parked_scene
+            .iter()
+            .map(|pose| (pose.target(), pose.name.clone()))
+            .collect();
         let previous = (
             std::mem::replace(&mut self.ground_sides, sides),
             std::mem::replace(&mut self.ground_looks, looks),
+            std::mem::replace(&mut self.parked, parked),
         );
-        if let Err(error) = self.add_airport_targets(&terrain.airport_scene) {
-            (self.ground_sides, self.ground_looks) = previous;
+        // The barrage zones have no shape: they join combat with a volume of
+        // their own (docs/spec/surface-defenses.md, "Barrage zone").
+        let shapeless = crate::surface::fire::shapeless_targets(&terrain.surface);
+        let scene = if shapeless.is_empty() {
+            std::borrow::Cow::Borrowed(&terrain.airport_scene)
+        } else {
+            let mut scene = terrain.airport_scene.clone();
+            scene.objects.extend(shapeless);
+            std::borrow::Cow::Owned(scene)
+        };
+        if let Err(error) = self.add_airport_targets(&scene) {
+            (self.ground_sides, self.ground_looks, self.parked) = previous;
             return Err(error);
         }
         self.surface = terrain.surface.fresh_state();
+        self.surface_targets =
+            crate::ai_wings::outcome::ground_targets(&terrain.surface, &self.state)
+                .into_iter()
+                .collect();
         Ok(())
     }
     /// Registers `scene`'s objects as combat targets with the sides the last
-    /// [`Self::add_scene_targets`] gave (none before one: neutral).
+    /// [`Self::add_scene_targets`] gave (none before one: neutral), then that
+    /// call's parked aircraft.
     pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> WorldResult<()> {
         scene.validate().map_err(std::io::Error::other)?;
         // A new layout replaces static identities atomically in the staged state.
         let mut staged = self.state.clone();
         staged.remove_ground_targets();
+        let weapon_boxes: BTreeMap<u32, tore_sim::airport::OrientedBox> = scene
+            .objects
+            .iter()
+            .filter_map(|object| Some((object.id, weapon_contact(object, scene)?)))
+            .collect();
         for object in &scene.objects {
             Self::register_airport_object(
                 &mut staged,
                 object,
+                weapon_boxes.get(&object.id).copied(),
                 self.ground_side(object.id),
                 self.ground_looks.get(&object.id).copied(),
             )?;
         }
+        for (parked, _) in &self.parked {
+            staged.add_parked_aircraft(parked)?;
+        }
         self.state = staged;
         self.airport_objects = scene.objects.clone();
+        self.weapon_boxes = weapon_boxes;
         Ok(())
     }
     /// The side scene object `id` fights for, neutral without one.
@@ -379,12 +490,13 @@ impl Combat {
     fn register_airport_object(
         state: &mut live::State,
         object: &tore_sim::airport::StaticObject,
+        contact: Option<tore_sim::airport::OrientedBox>,
         side: live::Side,
         look: Option<live::GroundLook>,
     ) -> WorldResult<()> {
         state.add_ground_target(
             object.id,
-            object.bounds,
+            contact.unwrap_or(object.bounds),
             object.hit_points,
             object.category,
             side,
@@ -403,6 +515,12 @@ impl Combat {
             .iter()
             .find(|o| o.id == id)
             .map(|o| o.name.as_str())
+            .or_else(|| {
+                self.parked
+                    .iter()
+                    .find(|(parked, _)| parked.id == id)
+                    .map(|(_, name)| name.as_str())
+            })
     }
     pub fn new(h: &AircraftType, data: &dyn ResourceSource, range: bool) -> WorldResult<Self> {
         let config = live::Configuration::from_source(&h.profile, |name| {
@@ -467,6 +585,9 @@ impl Combat {
             ground_sides: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
             surface: Default::default(),
+            parked: Vec::new(),
+            surface_targets: Default::default(),
+            weapon_boxes: BTreeMap::new(),
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
             poses: BTreeMap::new(),
@@ -757,6 +878,10 @@ impl Combat {
                         others.iter().find(|(own, _)| own.aircraft == piece.owner)
                     {
                         own.damage_section().map(|section| section as usize)
+                    } else if self.state.is_parked(piece.owner) {
+                        // A parked aircraft's piece: 0 is its `_B` shape,
+                        // 1 its `_D` (docs/spec/surface-defenses.md).
+                        Some(piece.variant)
                     } else {
                         self.state
                             .targets
@@ -1222,7 +1347,11 @@ impl Combat {
         for object in &self.airport_objects {
             let side = self.ground_side(object.id);
             let look = self.ground_looks.get(&object.id).copied();
-            Self::register_airport_object(&mut self.state, object, side, look)?;
+            let contact = self.weapon_boxes.get(&object.id).copied();
+            Self::register_airport_object(&mut self.state, object, contact, side, look)?;
+        }
+        for (parked, _) in &self.parked {
+            self.state.add_parked_aircraft(parked)?;
         }
         self.surface.reset();
         if let Some(aircraft) = host {
@@ -1890,6 +2019,9 @@ pub mod fixtures {
             ground_sides: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
             surface: Default::default(),
+            parked: Vec::new(),
+            surface_targets: Default::default(),
+            weapon_boxes: BTreeMap::new(),
             tape: None,
             last_launcher: None,
             notes: Default::default(),

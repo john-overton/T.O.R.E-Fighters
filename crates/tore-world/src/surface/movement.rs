@@ -100,6 +100,9 @@ pub struct Course {
     pub ship: bool,
     /// Set when the scene holds the unit; a unit with no hit box cannot move.
     pub rig: Option<Rig>,
+    /// Feet right of the authored path this unit's lane runs ([`set_lanes`]);
+    /// 0 for a unit alone on its route. The legs already carry it.
+    pub lane: f64,
 }
 
 impl Course {
@@ -147,6 +150,7 @@ impl Course {
             },
             ship,
             rig: None,
+            lane: 0.,
         })
     }
 
@@ -425,6 +429,109 @@ pub fn unit_pose(unit: &Unit, state: Option<&SurfaceUnitState>, terrain: &Terrai
         attitude: unit.angles.map(|a| f64::from(a).to_radians()),
         velocity: [0.; 3],
     }
+}
+
+/// Lane spacing in hull beams: units that share a route each drive their own
+/// lane, this many of the group's widest beam apart (fitted, lead ruling
+/// after M1, 2026-10-10).
+pub const LANE_BEAMS: f64 = 1.5;
+/// A lane's corner offset grows with the turn (a mitre, so lanes stay
+/// parallel through it) up to this many lane widths (fitted).
+const MITRE_LIMIT: f64 = 2.;
+
+/// Gives every unit that shares its route with others its own lane
+/// (docs/spec/surface-defenses.md, "Movement"). Units whose legs run through
+/// exactly the same points form a group (the nine `~QUCOL` tanks, the three
+/// `~QTCARGO` ships); in ascending id order they take lanes side by side,
+/// centred on the authored path, [`LANE_BEAMS`] of the group's widest hull
+/// beam apart (the rig's width, so the hit box at its drawn size). Each of
+/// the group's points moves right of the direction of travel by the unit's
+/// lane: across the leg that arrives at it, mitred at a corner. Starts stay
+/// where they are, so a column keeps its order and spacing along the road
+/// and the units finish side by side instead of on one spot. Offsets are
+/// whole feet, from integer route data and IEEE arithmetic only, so every
+/// machine computes the same courses. A unit alone on its route, or one
+/// without a rig, keeps its route.
+pub fn set_lanes(courses: &mut BTreeMap<UnitId, Course>) {
+    let mut groups: BTreeMap<Vec<(i64, i64)>, Vec<UnitId>> = BTreeMap::new();
+    for (id, course) in courses.iter() {
+        if course.rig.is_none() {
+            continue;
+        }
+        let key = course
+            .legs
+            .iter()
+            .map(|leg| (leg.to[0] as i64, leg.to[1] as i64))
+            .collect();
+        groups.entry(key).or_default().push(*id);
+    }
+    for members in groups.values().filter(|members| members.len() > 1) {
+        let beam = members
+            .iter()
+            .filter_map(|id| courses[id].rig)
+            .map(|rig| 2. * rig.half[0])
+            .fold(0., f64::max);
+        let spacing = (LANE_BEAMS * beam).round();
+        if spacing <= 0. {
+            continue;
+        }
+        let lead = &courses[&members[0]];
+        let first = [f64::from(lead.start[0]), f64::from(lead.start[2])];
+        let points: Vec<[f64; 2]> = lead.legs.iter().map(|leg| leg.to).collect();
+        let normals: Vec<[f64; 2]> = (0..points.len())
+            .map(|j| {
+                let before = if j == 0 { first } else { points[j - 1] };
+                let arrive = right_of(before, points[j]);
+                match points.get(j + 1) {
+                    Some(next) => mitre(arrive, right_of(points[j], *next)),
+                    None => arrive,
+                }
+            })
+            .collect();
+        let middle = (members.len() - 1) as f64 / 2.;
+        for (k, id) in members.iter().enumerate() {
+            let lane = (k as f64 - middle) * spacing;
+            let course = courses.get_mut(id).expect("a member has a course");
+            for (leg, normal) in course.legs.iter_mut().zip(&normals) {
+                leg.to = [
+                    (leg.to[0] + normal[0] * lane).round(),
+                    (leg.to[1] + normal[1] * lane).round(),
+                ];
+            }
+            course.lane = lane;
+        }
+    }
+}
+
+/// The unit vector right of travel from `from` to `to` (east, north), or
+/// zero for a leg of no length.
+fn right_of(from: [f64; 2], to: [f64; 2]) -> [f64; 2] {
+    let (dx, dz) = (to[0] - from[0], to[1] - from[1]);
+    let length = (dx * dx + dz * dz).sqrt();
+    if length == 0. {
+        [0., 0.]
+    } else {
+        [dz / length, -dx / length]
+    }
+}
+
+/// The corner offset between the lane normals of the leg arriving at a
+/// point and the leg leaving it: along their bisector, long enough to keep
+/// both lanes at full width, at most [`MITRE_LIMIT`] widths.
+fn mitre(arrive: [f64; 2], leave: [f64; 2]) -> [f64; 2] {
+    let sum = [arrive[0] + leave[0], arrive[1] + leave[1]];
+    let length = (sum[0] * sum[0] + sum[1] * sum[1]).sqrt();
+    if length < 1e-9 {
+        return arrive;
+    }
+    let bisector = [sum[0] / length, sum[1] / length];
+    let along = bisector[0] * arrive[0] + bisector[1] * arrive[1];
+    let stretch = if along > 0. {
+        (1. / along).min(MITRE_LIMIT)
+    } else {
+        MITRE_LIMIT
+    };
+    [bisector[0] * stretch, bisector[1] * stretch]
 }
 
 /// The courses of a resolved surface's units that follow a route, by unit.

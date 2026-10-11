@@ -1727,6 +1727,10 @@ fn main() -> ExitCode {
                             };
                             println!("{}: debrief objective: {}", r.name, objective.sentence());
                         }
+                        // The surface unit that shot the bot down (protocol 22).
+                        if let Some(by) = &debrief.player.shot_down_by {
+                            println!("{}: debrief shot down by {by}", r.name);
+                        }
                     }
                     ClientEvent::MissionEnded(ended) => {
                         println!("{}: {}", r.name, ended_text(&ended));
@@ -1822,6 +1826,19 @@ fn main() -> ExitCode {
                     println!(
                         "{}: watching: frames {}, aircraft {}",
                         r.name, bot.watched, bot.watched_aircraft
+                    );
+                }
+                // A ground target (protocol 22): what the frames showed.
+                if let Some(world) = bot
+                    .client
+                    .mission()
+                    .filter(|w| w.terrain.surface.template.is_some())
+                {
+                    println!(
+                        "{}: surface: digest {:016x}, {}",
+                        r.name,
+                        world.terrain.surface.digest(),
+                        bot.surface.line()
                     );
                 }
                 if let Some(line) = r.mig.as_ref().and_then(|m| m.counts_line(bot))

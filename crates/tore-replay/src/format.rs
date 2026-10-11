@@ -16,7 +16,7 @@ use crate::FORMAT_VERSION;
 use crate::codec::{FNV_OFFSET, In, fnv1a, put_text, put_u16, put_u32, put_u64, put_uv};
 use crate::error::{Error, Result, corrupt, invalid};
 use crate::limits::{MAX_HEADER_BYTES, MAX_KEY_VALUES, MAX_STRING_BYTES};
-use crate::model::{Clouds, Footer, Header, MissionKind, World};
+use crate::model::{Clouds, Footer, GroundTarget, Header, MissionKind, World};
 
 pub(crate) const MAGIC: &[u8; 8] = b"TOREREPL";
 pub(crate) const PRELUDE_BYTES: usize = 12;
@@ -40,9 +40,21 @@ pub(crate) const SECTION_CHECKSUMS: u64 = 7;
 pub(crate) const SECTION_ROTORS: u64 = 8;
 pub(crate) const SECTION_DISK_TILT: u64 = 9;
 
-pub(crate) fn prelude() -> Vec<u8> {
+/// The oldest format version that can hold `header`'s recording: 3 for a
+/// world with a ground target, a redrawn airfield scene or surface units
+/// (their tracks are format 3's), 2 for every other, which stays byte for
+/// byte what format 2 wrote.
+pub(crate) fn version_for(header: &Header) -> u16 {
+    if header.world.needs_surface_format() {
+        FORMAT_VERSION
+    } else {
+        2
+    }
+}
+
+pub(crate) fn prelude(version: u16) -> Vec<u8> {
     let mut buf = MAGIC.to_vec();
-    put_u16(&mut buf, FORMAT_VERSION);
+    put_u16(&mut buf, version);
     put_u16(&mut buf, 0);
     buf
 }
@@ -239,6 +251,15 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
     if let Some(extent) = w.extent_ft {
         lines.push(("world.extent_ft".into(), numbers(&extent)));
     }
+    if let Some(target) = &w.ground_target {
+        lines.push(("world.ground_target".into(), ground_target_text(target)?));
+    }
+    if w.airfield_scene != 0 {
+        lines.push(("world.airfield_scene".into(), w.airfield_scene.to_string()));
+    }
+    if w.surface {
+        lines.push(("world.surface".into(), "1".into()));
+    }
     for (key, value) in &header.extra {
         if key.is_empty() {
             return Err(invalid("an extra header entry has an empty key"));
@@ -261,6 +282,74 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
         )));
     }
     Ok(text.into_bytes())
+}
+
+/// The ground target as one header value:
+/// `stem,aaa,sam,seed,nationality,night_stealth,jitter,relocate,separation_nm`
+/// with the three flags as 0 or 1.
+fn ground_target_text(target: &GroundTarget) -> Result<String> {
+    if target.stem.is_empty()
+        || !target
+            .stem
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(invalid(format!(
+            "the ground target stem {:?} is not a template name",
+            target.stem
+        )));
+    }
+    Ok(format!(
+        "{},{},{},{},{},{},{},{},{}",
+        target.stem,
+        target.aaa,
+        target.sam,
+        target.seed,
+        target.enemy_nationality,
+        u8::from(target.night_stealth),
+        u8::from(target.jitter),
+        u8::from(target.relocate),
+        target.separation_nm
+    ))
+}
+
+fn parse_ground_target(text: &str) -> Result<GroundTarget> {
+    let bad = || corrupt("header entry world.ground_target is not a ground target");
+    let parts: Vec<&str> = text.split(',').collect();
+    let [
+        stem,
+        aaa,
+        sam,
+        seed,
+        nationality,
+        night,
+        jitter,
+        relocate,
+        separation,
+    ] = parts[..]
+    else {
+        return Err(bad());
+    };
+    let number = |text: &str| text.parse::<u32>().map_err(|_| bad());
+    let flag = |text: &str| match text {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(bad()),
+    };
+    if stem.is_empty() {
+        return Err(bad());
+    }
+    Ok(GroundTarget {
+        stem: stem.to_owned(),
+        aaa: u8::try_from(number(aaa)?).map_err(|_| bad())?,
+        sam: u8::try_from(number(sam)?).map_err(|_| bad())?,
+        seed: number(seed)?,
+        enemy_nationality: u8::try_from(number(nationality)?).map_err(|_| bad())?,
+        night_stealth: flag(night)?,
+        jitter: flag(jitter)?,
+        relocate: flag(relocate)?,
+        separation_nm: number(separation)?,
+    })
 }
 
 fn parse_number(key: &str, text: &str) -> Result<f64> {
@@ -332,6 +421,13 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
             "world.clouds.module" => w.clouds.module = value,
             "world.clouds.deck_ft" => w.clouds.deck_ft = Some(parse_number(&key, &value)?),
             "world.extent_ft" => w.extent_ft = Some(parse_numbers(&key, &value)?),
+            "world.ground_target" => w.ground_target = Some(parse_ground_target(&value)?),
+            "world.airfield_scene" => {
+                w.airfield_scene = value
+                    .parse()
+                    .map_err(|_| corrupt("header entry world.airfield_scene is not a number"))?
+            }
+            "world.surface" => w.surface = value == "1",
             other => {
                 if header.extra.len() >= MAX_KEY_VALUES {
                     return Err(corrupt("the header has too many entries"));
@@ -484,6 +580,19 @@ mod tests {
                     deck_ft: Some(7000.),
                 },
                 extent_ft: Some([1_703_936., 1_630_208.]),
+                ground_target: Some(GroundTarget {
+                    stem: "QUCOL".into(),
+                    aaa: 3,
+                    sam: 2,
+                    seed: 4_000_000_007,
+                    enemy_nationality: 5,
+                    night_stealth: true,
+                    jitter: true,
+                    relocate: false,
+                    separation_nm: 60,
+                }),
+                airfield_scene: 2,
+                surface: true,
             },
             extra: vec![
                 ("flight=model".into(), "researched\\hybrid".into()),
@@ -493,6 +602,9 @@ mod tests {
             ..Header::default()
         };
         let bytes = encode_header(&header).unwrap();
-        assert_eq!(decode_header(&bytes, FORMAT_VERSION).unwrap(), header);
+        assert_eq!(
+            decode_header(&bytes, header.format_version).unwrap(),
+            header
+        );
     }
 }

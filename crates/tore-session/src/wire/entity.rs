@@ -58,25 +58,40 @@ pub enum EntityKind {
     Debris,
     /// An ejected pilot.
     Pilot,
+    /// A surface unit that follows a route: a tank of a column, a cargo
+    /// ship, a supply truck (protocol 22, slice N1). Units that stand still
+    /// are built from the mission on every client and never sent.
+    Surface,
 }
 
 impl EntityKind {
     /// Every kind, in record order.
-    pub const ALL: [Self; 4] = [Self::Aircraft, Self::Projectile, Self::Debris, Self::Pilot];
+    pub const ALL: [Self; 5] = [
+        Self::Aircraft,
+        Self::Projectile,
+        Self::Debris,
+        Self::Pilot,
+        Self::Surface,
+    ];
 
-    /// The kind's 2-bit code.
+    /// The bits of a kind's code where one is written (a capture's entity
+    /// keys): 3 since protocol 22, 2 before.
+    pub const CODE_BITS: u32 = 3;
+
+    /// The kind's 3-bit code.
     pub fn code(self) -> u8 {
         match self {
             Self::Aircraft => 0,
             Self::Projectile => 1,
             Self::Debris => 2,
             Self::Pilot => 3,
+            Self::Surface => 4,
         }
     }
 
-    /// The kind of a 2-bit code (only the low two bits are read).
-    pub fn from_code(code: u8) -> Self {
-        Self::ALL[usize::from(code & 3)]
+    /// The kind of a 3-bit code; `None` for the codes no kind has.
+    pub fn from_code(code: u8) -> Option<Self> {
+        Self::ALL.get(usize::from(code)).copied()
     }
 
     /// The most records of this kind one snapshot carries.
@@ -86,6 +101,7 @@ impl EntityKind {
             Self::Projectile => limits::PROJECTILES,
             Self::Debris => limits::DEBRIS,
             Self::Pilot => limits::PILOTS,
+            Self::Surface => limits::SURFACE,
         }
     }
 
@@ -95,6 +111,7 @@ impl EntityKind {
             Self::Projectile => "projectile records",
             Self::Debris => "debris records",
             Self::Pilot => "pilot records",
+            Self::Surface => "surface unit records",
         }
     }
 }
@@ -288,6 +305,21 @@ pub struct PilotState {
     pub phase: ejection::Phase,
 }
 
+/// A surface unit that follows a route (protocol 22, slice N1): the host's
+/// `Mover` as a client draws it, its position, ground-relative velocity and
+/// heading, pitch and bank, and whether it stopped where it was destroyed.
+/// The id is the unit's (`tore_world::surface::UnitId`). The route's leg and
+/// the follower's speed command stay the host's: a client never steps a unit
+/// (lead ruling after M1), and a new host takes them from the checkpoint.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MoverState {
+    pub motion: Motion,
+    /// Heading, pitch and bank, 2^-16 of a turn.
+    pub attitude: [u16; 3],
+    /// Destroyed: its wreck stands where it stopped.
+    pub wrecked: bool,
+}
+
 /// Any entity's quantized state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EntityState {
@@ -295,6 +327,7 @@ pub enum EntityState {
     Projectile(ProjectileState),
     Debris(DebrisState),
     Pilot(PilotState),
+    Surface(MoverState),
 }
 
 /// An entity with its id.
@@ -481,6 +514,7 @@ const ROTOR: &[Field] = &[
     SURFACE,
 ];
 const PILOT: &[Field] = &[Field::Unsigned(3, 5)];
+const MOVER: &[Field] = &[BIT];
 
 /// A group of slow fields, sent only when one of them changed.
 struct Group {
@@ -511,6 +545,7 @@ const AIRCRAFT_GROUPS: &[Group] = &[
     },
 ];
 const PILOT_GROUPS: &[Group] = &[group(PILOT)];
+const MOVER_GROUPS: &[Group] = &[group(MOVER)];
 
 /// The layout of a kind's changing fields.
 struct Schema {
@@ -541,6 +576,11 @@ fn schema(kind: EntityKind) -> Schema {
             fast: 0,
             groups: PILOT_GROUPS,
         },
+        EntityKind::Surface => Schema {
+            angles: 3,
+            fast: 0,
+            groups: MOVER_GROUPS,
+        },
     }
 }
 
@@ -563,6 +603,8 @@ enum Identity {
     Pilot {
         owner: u32,
     },
+    /// A surface unit is its id: nothing more is sent.
+    Surface,
 }
 
 impl Identity {
@@ -594,6 +636,7 @@ impl Identity {
                 });
             }
             Self::Pilot { owner } => w.write_varint(u64::from(owner)),
+            Self::Surface => {}
         }
     }
 
@@ -615,6 +658,7 @@ impl Identity {
             EntityKind::Pilot => Self::Pilot {
                 owner: read_u32(r)?,
             },
+            EntityKind::Surface => Self::Surface,
         })
     }
 }
@@ -640,6 +684,7 @@ impl EntityState {
             Self::Projectile(_) => EntityKind::Projectile,
             Self::Debris(_) => EntityKind::Debris,
             Self::Pilot(_) => EntityKind::Pilot,
+            Self::Surface(_) => EntityKind::Surface,
         }
     }
 
@@ -650,6 +695,7 @@ impl EntityState {
             Self::Projectile(s) => &s.motion,
             Self::Debris(s) => &s.motion,
             Self::Pilot(s) => &s.motion,
+            Self::Surface(s) => &s.motion,
         }
     }
 
@@ -669,6 +715,7 @@ impl EntityState {
                 variant: s.variant,
             },
             Self::Pilot(s) => Identity::Pilot { owner: s.owner },
+            Self::Surface(_) => Identity::Surface,
         }
     }
 
@@ -735,6 +782,12 @@ impl EntityState {
                 angles: [s.heading, 0, 0],
                 fast: [0],
                 groups: vec![vec![phase_code(s.phase)]],
+            },
+            Self::Surface(s) => Flat {
+                motion: s.motion,
+                angles: s.attitude,
+                fast: [0],
+                groups: vec![vec![flag(s.wrecked)]],
             },
         }
     }
@@ -831,6 +884,11 @@ impl EntityState {
                 motion: flat.motion,
                 heading: flat.angles[0],
                 phase: PHASES[g(0, 0) as usize],
+            }),
+            Identity::Surface => Self::Surface(MoverState {
+                motion: flat.motion,
+                attitude: flat.angles,
+                wrecked: g(0, 0) == 1,
             }),
         })
     }

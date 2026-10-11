@@ -41,6 +41,7 @@ it carries one of these marks:
 - [Comms and chat](#comms-and-chat)
 - [Flight data link](#flight-data-link)
 - [Sim rules in multiplayer](#sim-rules-in-multiplayer)
+  - [Ground targets online](#ground-targets-online): the surface world under protocol 22
 - [Debrief](#debrief)
 - [Architecture](#architecture)
 - [Networking](#networking)
@@ -788,6 +789,44 @@ the player's side and "IFF: no reply" otherwise (fitted); Show Target Info
 identity, the displayed target with its manoeuvre, in orange, red when it
 aims at the player, and a human's callsign beneath
 ([architecture](ARCHITECTURE.md#friend-or-foe)).
+
+### Ground targets online
+
+*Built (slice N1 of the surface round, protocol 22, 2026-10-10).* A Quick
+Mission with a ground target flies online for every player, co-op and PvP,
+with the host running every surface unit ([surface
+defenses](spec/surface-defenses.md)). What a player sees:
+
+- **One battlefield for everyone.** Each game builds the target, its
+  defenses, their jitter and relocation, the SAM batteries, the supply trucks,
+  the parked and deck aircraft and both sides' starts from the mission text
+  and its seed. The host draws the seed when the mission names none, so the
+  layout is new each time a lobby flies a ground target and kept by a
+  restart. If a game builds anything differently it says so in plain words
+  and stays in the lobby instead of flying a different battlefield ("Your game
+  places this mission's ground target differently from the host's...").
+- **What moves and fires.** A column of tanks or a convoy of ships drives on
+  every screen where the host has it. SAMs launch from their rails, which
+  empty and refill when a supply truck rearms them; AAA tracers leave the guns
+  and follow their target; flak bursts flash in the air, the KS-19's larger
+  than the KS-12's. Radars painting a player show on that player's RWR.
+- **Damage and wrecks.** A hit unit's damage, a destroyed unit's wreck and
+  fire, a parked aircraft's crater, fire and broken piece, and a damaged
+  parked aircraft's smoke reach every player. The debrief's Shot down by row
+  names a SAM or gun that downed the player, as in single player.
+- **PvP.** The target's units are Redfor: Redfor players defend it (a Protect
+  line) and its radars never paint them; Bluefor attacks it (a Destroy line).
+  Redfor players start with the enemy group the layout places within 5 nm of
+  the target; a revived Redfor player comes back on its side's bearing as
+  before. *Not built:* a Redfor ground start on Red's airfield
+  (`auto_runway_for(.., true)`); a ground-start mission parks Bluefor's first
+  flight only, and Redfor starts in the air by the target.
+- **Host migration and rejoin.** A new host takes the surface from the old
+  host's checkpoint (the units' places, routes, hit points, rails, magazines,
+  timers and radars), checks every resuming player's surface digest, and
+  tells each player and each late joiner every unit not as built.
+
+The bytes are in [the wire's surface world](formats/net-protocol.md#the-surface-world-protocol-22).
 
 ## Debrief
 

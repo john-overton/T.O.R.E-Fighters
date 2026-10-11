@@ -649,6 +649,7 @@ impl Host {
                 last_command,
                 exact,
                 destroyed,
+                surface_digest: self.world.terrain.surface.digest(),
             }))),
         );
         if let Some(active) = &mut self.resuming.active {
@@ -1077,6 +1078,18 @@ impl Host {
     /// (the hook at the start of the snapshots).
     pub(super) fn resume_quiet(&self) -> bool {
         self.resuming() || self.resuming.handed_to.is_some()
+    }
+
+    /// Whether `connection` came back by its token and its Resume has not
+    /// been answered yet: it has no flight of this host until Resumed names
+    /// one, so no snapshot goes to it before then. A snapshot of the
+    /// placeholder flight would start a flight on the client whose name
+    /// table had dropped the Names message before it, and the next Names
+    /// would be refused as out of order.
+    pub(super) fn awaiting_resume(&self, connection: ConnectionId) -> bool {
+        self.resuming.active.as_ref().is_some_and(|a| {
+            a.back.get(&connection) == Some(&false) && !a.stores.contains_key(&connection)
+        })
     }
 
     // ----- The old host --------------------------------------------------

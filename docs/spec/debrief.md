@@ -30,7 +30,9 @@ greyed-out **Cancel** and a blue default **OK**. The clipboard shows five pages:
 4. **HIT PERCENTAGES**: Air-to-Air and Air-to-Ground (Launches, Hit, Failed,
    Spoofed, Jammed), Gun (Hit) and Bomb (Hit).
 5. **ENEMY HIT PERCENTAGES**, fire aimed **ON** each pilot: AAM and SAM
-   (Launches, Hit, Failed, Jammed, Spoofed), Gun (Hit) and AAA (Hit).
+   (Launches, Hit, Failed, Jammed, Spoofed), Gun (Hit) and AAA (Hit). Aircraft
+   fire fills AAM and Gun; the fire of a mission's SAM sites, guns and ships
+   fills SAM and AAA ([below](#weapon-classes)).
 
 Every table has a PLAYER and a WINGMAN column. The rocker, Page Up/Down and the
 arrow keys turn pages; Home and End jump to the first and last page. Paging
@@ -45,6 +47,13 @@ reads **MISSION ENDED** and says who ended it, and page 2 reads **MISSION
 OUTCOME : INCOMPLETE**, retail's word for a multiplayer mission cut short
 (`agent decision`, EF-F; [details](../ARCHITECTURE.md#smoke-test-fixes-ef-f)).
 Single player never shows it.
+
+When a SAM site, gun or ship shot the pilot's aircraft down, page 2's pilot
+status table gains a **Shot down by** row with the unit's short name (SA-6,
+ZSU-23-4); the flight shows the same name in a message ("Shot down by SA-6")
+when its aircraft is destroyed. Neither appears for an aircraft's kill or when
+the pilot is flying (`opinionated`, agent decision, 2026-10-10; the networked
+debrief does not carry the name yet).
 
 Closing the debrief returns to the **Quick Mission creator with every setting
 of the mission just flown**, not to the ordnance screen. Requested by John on
@@ -99,7 +108,13 @@ A store counts by its type flags, as retail does: guided (0x1) with the air flag
 Air-to-Ground; otherwise the bomb flag (0x10) is Bomb and the gun flag (0x80)
 is Gun. Unguided rockets fall in none of these and are not listed. Fire from an
 enemy aircraft at a pilot counts as Gun when it carries the gun flag and as AAM
-otherwise. SAM and AAA rows stay empty until surface defences exist.
+otherwise. Fire from an enemy surface unit (a SAM site, an anti-aircraft gun,
+a tank, a ship, a battery launcher) counts the same way with the retail
+names: a gun round is **AAA** and anything else is **SAM**, so a SCUD
+launcher's SA-9 counts as a SAM and a tank's shell as AAA. A friendly or
+neutral unit's fire is not counted. Every round or missile is one launch; a
+battery's missile belongs to the launcher that fired it (`spec-derived`
+from the retail rule, [format](../formats/debrief.md#page-contents)).
 
 Every gun projectile is one round. Whether retail counts rounds or bursts is
 unknown.
@@ -147,7 +162,21 @@ shooter the last attacker.
   Agent decision, 2026-10-09: the manual does not describe indirect kills,
   decoyed missiles or hits that did no damage.
 
-Airport and scene objects count as not friendly.
+Airport and scene objects count as not friendly. Surface units are objects
+with a side, and their kills fall in the same rows by their class word: a SAM
+launcher in SAM, a gun in AAA, a tank in Tank, a ship in Ship, a supply truck
+and a Straight Flush or HAWK radar element in Vehicle, a GCI radar in
+Structure, a parked aircraft in Fighter or Bomber by its type's class word
+(each counted in the first row of its class bits). A kill by splash or
+collateral damage credits the shooter like any other
+([splash](missiles.md#splash-damage)).
+
+**Friendly ground units.** Destroying a surface unit of the player's own side
+that is not an objective counts as Friendly fire, like an aircraft of its own
+side (retail: a same-side object not flagged as a target). That includes a
+base-layout SAM, radar or supply truck and a battery's added radar or truck,
+which are never targets. A unit with no side (scenery) is not friendly
+(`spec-derived`; John decided that it fails the mission, 2026-10-10).
 
 ### Outcome and objectives
 
@@ -158,8 +187,21 @@ Airport and scene objects count as not friendly.
 | Any friendly objective lost fails it | retail |
 | Otherwise the mission succeeds | retail |
 | Targets are the enemy group the player's flight is assigned to destroy. When the player's flight has no target group (free fire, CAP, protection, self-defence, hold), every enemy aircraft is a target, as in retail Quick Missions | agent decision, 2026-09-23; retail makes every enemy aircraft a target |
-| Friendly objectives are the aircraft the player's flight protects plus every member of a group whose survival is required, including the player when your own group's survival is required | agent decision; retail Quick Missions have none |
+| Friendly objectives are the aircraft the player's flight protects plus every member of a group whose survival is required, including the player when your own group's survival is required; a Redfor player's also include the mission's ground target | agent decision; retail Quick Missions have none |
 | "Destroyed the target." / "Failed to destroy the target." for one target; "Destroyed the N targets." when all are down; otherwise "Destroyed N of M targets." Protected sentences follow the same pattern. A sentence appears only when its list is not empty | retail |
+
+**A mission's ground target** adds its objects to the same lists
+([surface objectives](surface-defenses.md#objectives-scoring-and-debrief)).
+Every object of the template flagged 0x80, parked aircraft included, is a
+target of a friendly (Blue) plane, destroyed when its hit points are gone,
+and joins the air targets in **one combined Destroy line** ("Destroyed 2 of 5
+targets."). In a multiplayer game a plane of the enemy (Redfor) side defends
+the target: the same objects are its **Protect** objective, protected while
+they stand. A surface object the result cannot find is undecided: neither
+destroyed nor lost (an aircraft it cannot find counts as gone, as before).
+Added radars and supply trucks are never targets. Surface ids have no
+lineage. `opinionated` (John, 2026-10-10: one combined line, Redfor defends,
+a friendly ground unit destroyed fails the mission).
 
 Retail also requires a counter to reach 300 before a protect-only mission can
 succeed; what it counts is unknown, so this rule is not applied.

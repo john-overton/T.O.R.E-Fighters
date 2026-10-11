@@ -1,13 +1,21 @@
 //! Sorting a tick into events: what the host tells every player about the
 //! mission (effects, marks, destroyed ground objects, launches, gun bursts,
-//! countermeasures, sounds; wing ejections come with each seat's cues), and
+//! countermeasures, sounds; wing ejections come with each seat's cues; since
+//! protocol 22 the surface units' gun bursts and their changed states), and
 //! the mission as it stands for a player who has just been seated.
 //!
 //! [`Tracker`] keeps what the host has told about so far, so each tick only
 //! the new things become events. It reads combat's shared state after the
 //! step, so it needs no seat and runs whether or not anyone is connected.
+//!
+//! Surface units' rounds (protocol 22, slice N1) are kept apart from the
+//! aircraft's: a surface gun's burst is one Surface burst event with its
+//! schedule (from the surface tick's burst notes), closed early by a Surface
+//! burst end when the controller stops short of it; flak shells are never
+//! sent, since each burst in the air is an Effect; a surface missile is a
+//! Launch like any other, its shooter the unit.
 
-use crate::wire::events::WireEvent;
+use crate::wire::events::{SurfaceUnitView, WireEvent};
 use crate::wire::from_world;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use tore_sim::combat::live::{self, DeviceNote};
@@ -60,18 +68,40 @@ fn effect_key(effect: &live::Effect) -> EffectKey {
     )
 }
 
+/// A surface gun's burst still within its schedule: its first tick, the
+/// rounds and ticks the schedule holds, the controller firing it and the
+/// rounds it has let go so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OpenSurfaceBurst {
+    first: u64,
+    rounds: u32,
+    span: u64,
+    engager: usize,
+    fired: u32,
+}
+
+/// Ticks past a surface burst's schedule after which it is over, whatever
+/// its controller says.
+const SURFACE_BURST_SLACK_TICKS: u64 = 2;
+
 /// What the host has told every player about the mission so far.
 #[derive(Clone, Debug, Default)]
 pub struct Tracker {
-    /// The highest projectile number seen: newer ones are this tick's.
-    newest_projectile: Option<u32>,
+    /// The projectiles in the air at the last tick sorted: any other is
+    /// this tick's. (A highest number would do for the aircraft's, but the
+    /// surface's are numbered in a block of their own, protocol 22.)
+    known_projectiles: HashSet<u32>,
     /// Bursts still firing: shooter and station, first and last tick, and
     /// the ticks without a round that end it.
     bursts: BTreeMap<(u32, usize), (u64, u64, u64)>,
+    /// Surface guns' bursts within their schedule, by unit and hardpoint.
+    surface_bursts: BTreeMap<(u32, usize), OpenSurfaceBurst>,
     effects: HashSet<EffectKey>,
     newest_mark: Option<u64>,
     /// Ground objects destroyed so far.
     destroyed: BTreeSet<u32>,
+    /// Each surface unit's state as last told, by unit.
+    views: BTreeMap<u32, SurfaceUnitView>,
 }
 
 impl Tracker {
@@ -80,11 +110,16 @@ impl Tracker {
     pub fn new(world: &World) -> Self {
         let state = &world.combat.state;
         Self {
-            newest_projectile: state.projectiles.iter().map(|p| p.id).max(),
+            known_projectiles: state.projectiles.iter().map(|p| p.id).collect(),
             bursts: BTreeMap::new(),
+            surface_bursts: BTreeMap::new(),
             effects: state.effects.iter().map(effect_key).collect(),
             newest_mark: state.marks.iter().map(|m| m.serial).max(),
             destroyed: destroyed_ground(world),
+            views: from_world::surface_views(world)
+                .into_iter()
+                .map(|view| (view.unit, view))
+                .collect(),
         }
     }
 
@@ -109,17 +144,24 @@ impl Tracker {
 
         // Launches and gun bursts, from the projectiles new this tick.
         let state = &world.combat.state;
-        let newest = self.newest_projectile;
         let mut fresh: Vec<&live::Projectile> = state
             .projectiles
             .iter()
-            .filter(|p| newest.is_none_or(|n| p.id > n))
+            .filter(|p| !self.known_projectiles.contains(&p.id))
             .collect();
         fresh.sort_by_key(|p| p.id);
+        self.known_projectiles = state.projectiles.iter().map(|p| p.id).collect();
+        // A surface gun's rounds of this tick, by unit and hardpoint.
+        let mut surface_rounds: BTreeMap<(u32, usize), u32> = BTreeMap::new();
         for projectile in fresh {
-            self.newest_projectile = Some(projectile.id);
             let weapon = state.weapon(projectile);
-            if live::is_gun(weapon) {
+            if state.surface_round(projectile.id).is_some() && live::is_gun(weapon) {
+                // Flak shells are told by their bursts' Effects; other
+                // rounds by the surface burst events below.
+                *surface_rounds
+                    .entry((projectile.owner, projectile.station))
+                    .or_default() += 1;
+            } else if live::is_gun(weapon) {
                 let key = (projectile.owner, projectile.station);
                 match self.bursts.get_mut(&key) {
                     Some((_, last, _)) => *last = tick,
@@ -147,6 +189,7 @@ impl Tracker {
                 );
             }
         }
+        self.sort_surface_bursts(world, tick, &surface_rounds, &mut push);
         let ended: Vec<(u32, usize)> = self
             .bursts
             .iter()
@@ -200,6 +243,14 @@ impl Tracker {
             }
         }
 
+        // Surface units whose state a client draws or shows changed.
+        for view in from_world::surface_views(world) {
+            if self.views.get(&view.unit) != Some(&view) {
+                self.views.insert(view.unit, view.clone());
+                push(tick, Wide::Event(WireEvent::SurfaceUnit(view)));
+            }
+        }
+
         // Sounds.
         for emission in &out.emissions {
             push(tick, Wide::Event(from_world::sound_event(emission, None)));
@@ -217,9 +268,105 @@ impl Tracker {
         events
     }
 
+    /// The surface guns' bursts of the tick: each burst the surface tick
+    /// began is told with its schedule; one whose controller stopped short
+    /// of it (or whose unit died) is closed with the rounds it fired.
+    /// `rounds` are the tick's new rounds by unit and hardpoint.
+    fn sort_surface_bursts(
+        &mut self,
+        world: &World,
+        tick: u64,
+        rounds: &BTreeMap<(u32, usize), u32>,
+        push: &mut impl FnMut(u64, Wide),
+    ) {
+        let notes = &world.combat.surface.bursts;
+        let opened =
+            |key: &(u32, usize)| notes.iter().any(|note| (note.unit.0, note.mount) == *key);
+        // The rounds of a burst still running.
+        for (key, burst) in &mut self.surface_bursts {
+            if !opened(key) {
+                burst.fired += rounds.get(key).copied().unwrap_or(0);
+            }
+        }
+        // Bursts that are over.
+        let alive = |id: u32| {
+            world
+                .combat
+                .state
+                .targets
+                .iter()
+                .any(|t| t.id == id && t.hp > 0)
+        };
+        let over: Vec<(u32, usize)> = self
+            .surface_bursts
+            .iter()
+            .filter(|((unit, _), burst)| {
+                let running = world
+                    .combat
+                    .surface
+                    .unit(tore_world::surface::UnitId(*unit))
+                    .and_then(|u| u.engagers.get(burst.engager))
+                    .and_then(|e| e.controller.burst())
+                    .is_some_and(|(start, ..)| start == burst.first);
+                !running
+                    || !alive(*unit)
+                    || tick > burst.first + burst.span + SURFACE_BURST_SLACK_TICKS
+            })
+            .map(|(key, _)| *key)
+            .collect();
+        for key in over {
+            if let Some(burst) = self.surface_bursts.remove(&key)
+                && burst.fired < burst.rounds
+            {
+                push(
+                    burst.first,
+                    Wide::Event(WireEvent::SurfaceBurstEnd {
+                        unit: key.0,
+                        mount: key.1.min(255) as u8,
+                        fired: burst.fired.min(u32::from(u16::MAX)) as u16,
+                    }),
+                );
+            }
+        }
+        // Bursts begun this tick.
+        for note in notes {
+            let key = (note.unit.0, note.mount);
+            let [x, y, z] = note.direction;
+            push(
+                tick,
+                Wide::Event(WireEvent::SurfaceBurst {
+                    unit: note.unit.0,
+                    mount: note.mount.min(255) as u8,
+                    target: Some(note.target),
+                    aim: [
+                        crate::wire::bits::turn16(x.atan2(z)),
+                        crate::wire::bits::turn16(y.atan2(x.hypot(z))),
+                    ],
+                    rounds: note.rounds.min(u32::from(u16::MAX)) as u16,
+                    span: note.span.min(u64::from(u16::MAX)) as u16,
+                }),
+            );
+            let burst = OpenSurfaceBurst {
+                first: tick,
+                rounds: note.rounds,
+                span: note.span,
+                engager: note.engager,
+                fired: rounds.get(&key).copied().unwrap_or(0),
+            };
+            // A burst of one tick (a single shot) is over as it begins.
+            let running = note.rounds > burst.fired;
+            if running {
+                self.surface_bursts.insert(key, burst);
+            } else {
+                self.surface_bursts.remove(&key);
+            }
+        }
+    }
+
     /// The events that describe the mission as it stands, for a player just
     /// seated: every crater and crash-site fire and every effect still
-    /// showing, at `tick`. Destroyed ground objects travel in the Seated
+    /// showing, and every surface unit not as the mission built it (protocol
+    /// 22), at `tick`. Destroyed ground objects travel in the Seated
     /// message; smoke and contrails already in the sky are not sent (the
     /// protocol's "first snapshot").
     pub fn standing(world: &World, tick: u64) -> Vec<Timed> {
@@ -232,8 +379,22 @@ impl Tracker {
             .effects
             .iter()
             .map(|effect| Wide::Event(from_world::effect_event(&effect_pose(effect))));
+        let initial: BTreeMap<u32, i32> =
+            state.targets.iter().map(|t| (t.id, t.initial_hp)).collect();
+        let surface = from_world::surface_views(world)
+            .into_iter()
+            .filter(|view| {
+                let built = from_world::built_view(
+                    &world.terrain.surface,
+                    view.unit,
+                    initial.get(&view.unit).copied().unwrap_or(view.hp),
+                );
+                *view != built
+            })
+            .map(|view| Wide::Event(WireEvent::SurfaceUnit(view)));
         marks
             .chain(effects)
+            .chain(surface)
             .map(|event| Timed { tick, event })
             .collect()
     }
@@ -258,4 +419,129 @@ fn destroyed_ground(world: &World) -> BTreeSet<u32> {
         .filter(|target| target.role == TargetRole::Surface && target.hp <= 0)
         .map(|target| target.id)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tore_world::surface::fire::BurstNote;
+    use tore_world::surface::{SURFACE_UNIT_BASE, UnitId};
+    use tore_world::test_support::surface::{spec_with_target, surface_resources, target};
+    use tore_world::world::{Seating, TickOutput};
+
+    /// The synthetic defended site with every slot manned.
+    fn world() -> World {
+        let spec = spec_with_target(&target("QUCITY", 3, 3, 9));
+        World::new(&spec, &surface_resources(), Seating::Open).unwrap()
+    }
+
+    fn bursts(events: &[Timed]) -> Vec<(u64, WireEvent)> {
+        events
+            .iter()
+            .filter_map(|timed| match &timed.event {
+                Wide::Event(
+                    event @ (WireEvent::SurfaceBurst { .. } | WireEvent::SurfaceBurstEnd { .. }),
+                ) => Some((timed.tick, event.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A surface gun's burst is told once with its schedule, apart from the
+    /// aircraft's gun bursts; one whose controller is no longer firing it is
+    /// closed with the rounds it let go (here none), at its first tick.
+    #[test]
+    fn a_surface_burst_is_told_with_its_schedule_and_closed_when_cut_short() {
+        let mut world = world();
+        let mut tracker = Tracker::new(&world);
+        let unit = UnitId(SURFACE_UNIT_BASE + 6);
+        world.combat.surface.bursts.push(BurstNote {
+            unit,
+            mount: 0,
+            engager: 0,
+            target: 3,
+            direction: [0., 1., 1.],
+            rounds: 40,
+            span: 90,
+        });
+        let out = TickOutput::default();
+        let told = bursts(&tracker.sort(&world, &out, Vec::new(), 100));
+        assert_eq!(told.len(), 1, "{told:?}");
+        let (
+            tick,
+            WireEvent::SurfaceBurst {
+                unit: id,
+                mount,
+                target,
+                aim,
+                rounds,
+                span,
+            },
+        ) = &told[0]
+        else {
+            panic!("{told:?}");
+        };
+        assert_eq!((*tick, *id, *mount, *target), (100, unit.0, 0, Some(3)));
+        assert_eq!((*rounds, *span), (40, 90));
+        // North-going and 45 degrees up: azimuth 0, an eighth of a turn.
+        assert_eq!(*aim, [0, 8_192]);
+        // The next tick: the notes are gone (the surface tick clears them)
+        // and no controller fires the burst, so it ends with none of its
+        // rounds, told once.
+        world.combat.surface.bursts.clear();
+        let told = bursts(&tracker.sort(&world, &out, Vec::new(), 101));
+        assert_eq!(
+            told,
+            [(
+                100,
+                WireEvent::SurfaceBurstEnd {
+                    unit: unit.0,
+                    mount: 0,
+                    fired: 0
+                }
+            )]
+        );
+        assert!(bursts(&tracker.sort(&world, &out, Vec::new(), 102)).is_empty());
+    }
+
+    /// A surface unit whose hit points, radar or stock change is told once
+    /// per change, and a player seated later is told every unit that is not
+    /// as the mission built it.
+    #[test]
+    fn surface_unit_states_are_told_when_they_change_and_at_a_seat() {
+        let mut world = world();
+        let mut tracker = Tracker::new(&world);
+        let out = TickOutput::default();
+        let views = |events: &[Timed]| -> Vec<SurfaceUnitView> {
+            events
+                .iter()
+                .filter_map(|t| match &t.event {
+                    Wide::Event(WireEvent::SurfaceUnit(view)) => Some(view.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(views(&tracker.sort(&world, &out, Vec::new(), 1)).is_empty());
+        assert!(
+            views(&Tracker::standing(&world, 1)).is_empty(),
+            "all as built"
+        );
+        let id = SURFACE_UNIT_BASE + 12;
+        let row = world
+            .combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap();
+        row.hp -= 10;
+        row.radar_emitting = true;
+        let hp = row.hp;
+        let told = views(&tracker.sort(&world, &out, Vec::new(), 2));
+        assert_eq!(told.len(), 1);
+        assert_eq!((told[0].unit, told[0].hp, told[0].radar), (id, hp, true));
+        assert!(views(&tracker.sort(&world, &out, Vec::new(), 3)).is_empty());
+        let standing = views(&Tracker::standing(&world, 3));
+        assert_eq!(standing, told, "a late seat is told the hurt bunker");
+    }
 }

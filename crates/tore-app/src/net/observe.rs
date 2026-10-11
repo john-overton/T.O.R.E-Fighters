@@ -75,6 +75,9 @@ pub struct Out {
     pub aircraft: Vec<replay::AircraftInfo>,
     /// Weapons the frames name for the first time.
     pub weapons: Vec<replay::WeaponInfo>,
+    /// The surface units, named once at the start of a format 3 recording
+    /// (protocol 22).
+    pub surface_units: Vec<replay::SurfaceInfo>,
     /// The frames, in tick order.
     pub frames: Vec<replay::Frame>,
 }
@@ -117,6 +120,11 @@ pub struct Feeder {
     /// Aircraft seen flying, and those already recorded as lost.
     flying: BTreeSet<u32>,
     lost: BTreeSet<u32>,
+    /// The recording takes surface tracks (its header's world has surface
+    /// units: format 3), once the world is known.
+    surface: Option<bool>,
+    /// Each surface unit's state as last recorded, for its stock changes.
+    surface_told: BTreeMap<u32, tore_session::wire::events::SurfaceUnitView>,
 }
 
 impl Feeder {
@@ -145,6 +153,17 @@ impl Feeder {
             .into_iter()
             .flat_map(|r| r.planes.iter().map(|p| p.id))
             .collect();
+        // A world with surface units records their tracks (format 3): they
+        // are named once, before the first frame.
+        if self.surface.is_none()
+            && let Some(world) = around.world
+        {
+            let on = crate::replay::identity::of(&world.terrain).surface;
+            self.surface = Some(on);
+            if on {
+                out.surface_units = tore_session::client::convert::surface_infos(world);
+            }
+        }
         for tick in first..=newest {
             let picture = match &self.previous {
                 Some((before, previous)) if render > *before => snapshot::interpolate(
@@ -158,6 +177,42 @@ impl Feeder {
             // picture the client drew.
             let drawn = (tick == newest).then_some(&frame.picture);
             self.frame(tick, &picture, drawn, &planes, around, &mut out);
+        }
+        // The launchers' rails and the guns' spares that changed, in the
+        // newest frame (a gun's loaded rounds are not on the wire).
+        if self.surface == Some(true)
+            && let Some(last) = out.frames.last_mut()
+        {
+            for (unit, view) in &frame.surface_units {
+                let before = self.surface_told.insert(*unit, view.clone());
+                if before.as_ref() == Some(view) {
+                    continue;
+                }
+                let mount = |i: usize| before.as_ref().and_then(|b| b.mounts.get(i).copied());
+                let rails =
+                    view.mounts.iter().enumerate().any(|(i, m)| {
+                        m.rails.is_some() && mount(i).is_none_or(|b| b.rails != m.rails)
+                    });
+                for (index, m) in view.mounts.iter().enumerate() {
+                    if let Some(loaded) = m.rails.filter(|_| rails) {
+                        last.surface_stock.push(replay::SurfaceStock {
+                            unit: *unit,
+                            mount: index as u16,
+                            loaded: u32::from(loaded),
+                            reserve: None,
+                        });
+                    } else if m.spares.is_some()
+                        && mount(index).is_none_or(|b| b.spares != m.spares)
+                    {
+                        last.surface_stock.push(replay::SurfaceStock {
+                            unit: *unit,
+                            mount: index as u16,
+                            loaded: 0,
+                            reserve: m.spares.map(u32::from),
+                        });
+                    }
+                }
+            }
         }
         self.register(frame, around.roster, around.world, &mut out);
         self.next = Some(newest + 1);
@@ -216,11 +271,21 @@ impl Feeder {
             return *id;
         }
         let id = self.weapons.len() as u32;
+        // An aircraft's weapon from the mission's loadouts, a surface unit's
+        // (its owner is the unit, protocol 22) from the surface's arms.
         let known = world.and_then(|w| {
             w.combat
                 .dummy_configurations()
                 .iter()
                 .flat_map(|c| c.stations.iter().map(|s| &s.weapon))
+                .chain(
+                    w.terrain
+                        .surface
+                        .arsenal
+                        .units
+                        .iter()
+                        .flat_map(|arms| arms.weapons.iter().map(|w| &w.record)),
+                )
                 .find(|w| w.source == pose.weapon)
         });
         out.weapons.push(match known {
@@ -318,6 +383,12 @@ impl Feeder {
         self.launched.retain(|id, _| flying.contains(id));
         frame.debris = convert::debris_states(&picture.debris);
         frame.debris.truncate(replay::limits::MAX_DEBRIS);
+        // The routed surface units and a parked aircraft's pieces (format
+        // 3, protocol 22).
+        if self.surface == Some(true) {
+            frame.surface = convert::surface_states(&picture.surface);
+            frame.debris_pieces = convert::debris_pieces(&picture.debris);
+        }
         frame.escapees = picture.pilots.iter().map(convert::escapee_state).collect();
         frame.escapees.truncate(replay::limits::MAX_ESCAPEES);
         if let Some(drawn) = drawn {
@@ -551,6 +622,9 @@ fn run(
 fn write(writer: &mut replay::Writer, out: Out) -> Result<(), replay::Error> {
     for info in &out.aircraft {
         writer.register_aircraft(info)?;
+    }
+    for info in &out.surface_units {
+        writer.register_surface_unit(info)?;
     }
     for info in &out.weapons {
         writer.register_weapon(info)?;
@@ -904,6 +978,7 @@ mod tests {
                 ..RenderSnapshot::default()
             },
             events: Vec::new(),
+            surface_units: Default::default(),
         }
     }
 

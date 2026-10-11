@@ -417,6 +417,7 @@ fn single_player_objectives_are_unchanged() {
         ledger: &world.combat.state.ledger,
         plane: 0,
         aircraft: &fates,
+        ground: &[],
         requirements: &asked,
     };
     assert_eq!(asked.destroy, [ENEMY.0, ENEMY_TWO.0]);

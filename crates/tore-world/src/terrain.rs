@@ -173,6 +173,10 @@ pub struct Recorded {
     /// Scattered cloud deck in feet, 0 for none.
     pub cloud_altitude: i32,
     pub weather_seed: i32,
+    /// The Quick Mission ground target the flight had, so the surface
+    /// (template, defenses, seed, nationality, separation and so the starts)
+    /// rebuilds exactly.
+    pub target: Option<crate::surface::resolve::GroundTarget>,
 }
 
 /// The imported layout of one theater with the definitions and shapes its
@@ -330,6 +334,21 @@ impl PlacedSize {
     pub fn feet(self, retail_feet: f64) -> f64 {
         retail_feet * self.factor()
     }
+}
+
+/// Whether a placed type is a land surface unit (an NT that is not a ship,
+/// a structure or a man): it stands on the lowest point of its shape rather
+/// than on its origin (docs/spec/surface-defenses.md, "Size"; fitted: for
+/// every land unit the lowest point equals the shape's F2 ground offset
+/// within a unit, while ships and bunkers record offsets below their
+/// geometry).
+pub fn stands_on_wheels(definition: &tore_formats::static_object::Definition) -> bool {
+    use tore_formats::surface_unit::class;
+    definition
+        .resource_name
+        .to_ascii_uppercase()
+        .ends_with(".NT")
+        && definition.category & (class::SHIP | class::STRUCTURE | class::OTHER) == 0
 }
 
 /// Feet per shape unit of a placed object: the reviewed SH header exponent
@@ -779,6 +798,11 @@ impl Placements {
         ];
         let grounding_offset = if runway {
             -pavement_height(shape) * scale
+        } else if stands_on_wheels(definition) {
+            // A vehicle, launcher or gun stands on its lowest point (its
+            // shape's origin is at its turret or rails); ships keep their
+            // waterline and buildings their authored depth.
+            (-min[1]).max(0.)
         } else {
             0.
         };
@@ -840,8 +864,8 @@ impl Terrain {
 
     /// Rebuilds the world a mission recording was flown in from its recorded,
     /// resolved launch settings: layout, weather choice and layer, start time,
-    /// wind and cloud deck. No override applies, so a replay looks the same
-    /// whatever the viewer's settings are.
+    /// wind, cloud deck and ground target. No override applies, so a replay
+    /// looks the same whatever the viewer's settings are.
     #[allow(dead_code)] // Used by the mission replay viewer.
     pub fn for_recorded(resources: &dyn ResourceSource, recorded: &Recorded) -> WorldResult<Self> {
         Self::build(
@@ -850,7 +874,7 @@ impl Terrain {
             recorded.condition,
             Some(recorded),
             &Overrides::default(),
-            None,
+            recorded.target.as_ref(),
         )
     }
 
@@ -1115,9 +1139,11 @@ impl Terrain {
                         .clone()
                         .unwrap_or_else(|| format!("Airport {airport_id}")),
                     runway_objects: vec![id],
-                    // Base free flight has no mission-side player assignment.
-                    // Treat imported fields as neutral with explicit host permission.
-                    allegiance: Allegiance::Neutral,
+                    // The runway's layout owner (slice AL1, John 2026-10-10):
+                    // Blue's field is friendly, Redfor's hostile, and one
+                    // with no owner field neutral. Neutral fields grant
+                    // permission to both sides (agent decision, AL1).
+                    allegiance: Allegiance::of_owner(placement.redfor()),
                     neutral_permission: true,
                 });
             }
@@ -1136,7 +1162,16 @@ impl Terrain {
                 course.fit(&object.bounds, ground);
             }
         }
+        // Units that share a route drive side by side, not on one line.
+        crate::surface::movement::set_lanes(&mut courses);
         self.surface.courses = courses;
+        // The parked aircraft stand on the ground or their carrier's deck.
+        let (parked, unreadable) =
+            crate::surface::parked::place(resources, &self.surface, &|x, z| {
+                f64::from(self.height(x as f32, z as f32))
+            });
+        self.surface.parked_scene = parked;
+        self.surface.unreadable.extend(unreadable);
         self.airport_scene = tore_sim::airport::Scene {
             objects,
             runways,
@@ -1148,6 +1183,11 @@ impl Terrain {
             anchor_points(found).all(|p| scene.runway_surface(p[0], p[2]).is_some())
         });
         self.airfield_anchors = anchors;
+        // What the armed units fight with, read once from their records.
+        let arsenal = crate::surface::fire::Arsenal::load(&self.surface, resources, &|x, z| {
+            f64::from(self.height(x as f32, z as f32))
+        });
+        self.surface.arsenal = arsenal;
         self.airport_scene.validate().map_err(|error| error.into())
     }
 

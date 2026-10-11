@@ -250,7 +250,7 @@ pub(super) fn mission() -> World {
     let mut airport_service = Service::new(&terrain.airport_scene).unwrap();
     airport_service.command(
         &terrain.airport_scene,
-        airport_aircraft(&terrain, &flight, false),
+        airport_aircraft(&terrain, &flight, false, false),
         Command::SelectAirport(7),
     );
     let phrases = tore_formats::radio::STEMS

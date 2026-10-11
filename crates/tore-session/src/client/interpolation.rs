@@ -22,8 +22,8 @@
 
 use super::clock::{ExtraDelay, JUMP_TICKS, TICKS_PER_SECOND, ticks_of};
 use crate::wire::entity::{
-    AircraftState, DebrisState, EntityKey, EntityKind, EntityState, GUN_AIM_STEPS, PilotState,
-    ProjectileState, RATE_STEP, ROTOR_SPEED_STEP, ROTOR_TILT_STEP, SPEED_STEP, radians,
+    AircraftState, DebrisState, EntityKey, EntityKind, EntityState, GUN_AIM_STEPS, MoverState,
+    PilotState, ProjectileState, RATE_STEP, ROTOR_SPEED_STEP, ROTOR_TILT_STEP, SPEED_STEP, radians,
 };
 use crate::wire::names::NameIndex;
 use crate::wire::priority::{far_interval_ticks, far_snapshots};
@@ -35,6 +35,7 @@ use tore_sim::attitude::Basis;
 use tore_world::snapshot::{
     AircraftPose, Damage, DebrisPose, Draw, Engine, PilotPose, ProjectilePose,
 };
+use tore_world::surface::{SurfacePose, UnitId};
 
 /// An entity past its newest state goes on along its velocity for at most
 /// this many ticks (250 ms), then holds.
@@ -193,6 +194,8 @@ pub struct Drawn {
     pub projectiles: Vec<ProjectilePose>,
     pub debris: Vec<DebrisPose>,
     pub pilots: Vec<PilotPose>,
+    /// Surface units that follow a route (protocol 22), in id order.
+    pub surface: Vec<SurfacePose>,
     /// Entities drawn, and of them the ones drawn past their newest state.
     pub entities: usize,
     pub extrapolated: usize,
@@ -373,6 +376,9 @@ impl Interpolator {
                         variant: d.variant.map(usize::from),
                     })
                 }
+                (EntityKind::Surface, Sample::Surface(m, pos, att)) => {
+                    drawn.surface.push(surface_pose(id, &m, pos, att));
+                }
                 (EntityKind::Pilot, Sample::Pilot(p, pos, heading)) => {
                     let (owner, crew) = crate::wire::entity::pilot_owner(p.owner);
                     drawn.pilots.push(PilotPose {
@@ -399,6 +405,7 @@ pub(crate) enum Sample {
     Projectile(ProjectileState, [f64; 3], [f64; 3], [f64; 2]),
     Debris(DebrisState, [f64; 3], [f64; 3]),
     Pilot(PilotState, [f64; 3], f64),
+    Surface(MoverState, [f64; 3], [f64; 3]),
 }
 
 /// Velocity in feet per tick.
@@ -582,6 +589,13 @@ pub(crate) fn between(a: &EntityState, b: &EntityState, h: f64, s: f64) -> Sampl
             position,
             angle_between(radians(x.heading), radians(y.heading), s),
         ),
+        // A unit's wreck flag is the earlier state's until the later one is
+        // reached, as the other slow fields are.
+        (EntityState::Surface(x), EntityState::Surface(y)) => Sample::Surface(
+            if s < 1. { *x } else { *y },
+            position,
+            blend_attitude(x.attitude, y.attitude, s),
+        ),
         // A key never changes kind; keep the earlier state.
         _ => beyond(a, 0.),
     }
@@ -610,6 +624,21 @@ pub(crate) fn beyond(state: &EntityState, ahead: f64) -> Sample {
         ),
         EntityState::Debris(x) => Sample::Debris(*x, position, attitude(x.attitude)),
         EntityState::Pilot(x) => Sample::Pilot(*x, position, radians(x.heading)),
+        // A wreck does not slide on along its last velocity.
+        EntityState::Surface(x) if x.wrecked => Sample::Surface(*x, p, attitude(x.attitude)),
+        EntityState::Surface(x) => Sample::Surface(*x, position, attitude(x.attitude)),
+    }
+}
+
+/// A moving surface unit's pose for the picture: its yaw in 0 to 2 pi as the
+/// host's `Mover` gives it.
+fn surface_pose(id: u32, state: &MoverState, position: [f64; 3], att: [f64; 3]) -> SurfacePose {
+    SurfacePose {
+        id: UnitId(id),
+        position,
+        attitude: [att[0].rem_euclid(TAU), att[1], att[2]],
+        shape: None,
+        wrecked: state.wrecked,
     }
 }
 
