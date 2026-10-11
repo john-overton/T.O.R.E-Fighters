@@ -416,6 +416,57 @@ aircraft's own position, attitude and raw speed (no `launchRetard`) against
 the target's altitude, accepted when the predicted impact is within the larger
 of 1,000 ft and an eighth of the target distance.
 
+### AI release against ground targets
+
+Static read on 2026-10-11 (AI strike round, slice ST-R), same build; weapon
+numbers from the FA_2.LIB JT records (zone 1 at JT `+0xcf`: horizontal and
+vertical half-angles, minimum and maximum range, altitude limits). Every AI
+shot passes these gates in `_PROJServiceWeapon` (`0x4c4700`), in order:
+
+| Gate | Source | Rule |
+| --- | --- | --- |
+| Store class | `0x4c52f2..0x4c535c` | A target without class bits 0xc000 (not an aircraft) takes only stores flagged 0x20000: bombs, rockets, air-to-ground missiles, HARMs. Guns carry both class flags |
+| Mount aim | `0x4c24b0..0x4c26e1` (called `0x4c48a4`, `0x4c4ae8`, `0x4c543f`, `0x4c21ea`), `_LimitAngle` `0x412da0` | A moving mount slews toward the led target within its neutral heading and pitch plus or minus arcH and arcP (half-widths); arcs 0 mean a fixed mount, as on every missile and rocket station. A human launcher's mount slews only with hardpoint flag bit 0x8 |
+| Zone 1 | `_PROJLock` `0x4c3121..0x4c3155`, `_PROJInFOV` `0x4c2860..0x4c2b4d` | Angles about the mount's current direction, altitude difference, distance between minimum and maximum, and signature-scaled distance (distance x 100 / `COSig` percent) under the maximum. Bombs add the impact check of [AI bombs](#ai-bombs) |
+| Radar AGM | `0x4c2fbc..0x4c3011`, `0x4c31f0` | A radar-seeker surface store needs a launcher with instance `+0xde` bit 0x400 (read as "radar fitted", inferred); launching keeps that launcher emitting for 10 s |
+| Terrain line | `0x4c4b1a..0x4c4b3d` | Blocked: retry after 1 to 10 s (4 + 4 x Rand(10) quarter seconds) |
+| One guided round at a time | `0x4c4b50`, `0x4c5270..0x4c52cd` | No new guided launch while this launcher has a live guided round on the same target; retry after 1 s |
+| Half range for guided | `0x4c4b88..0x4c4bad` | Guided rounds fire only inside 10,000 ft or half the zone-1 maximum |
+| Unpowered guided | `0x4c4bbb..0x4c4c04` | Where JT word `+0x101` is 0 (GBU-10, GBU-29; 40 on AGM-65G and AT-2, 100 on AGM-88; reading it as motor time is inferred): the target must be more than 25 degrees below the horizon, or within 5,280 ft while the launcher flies at 586 ft/s (347 kt) or more |
+| Aim tolerance | `0x4c4c09..0x4c4c8e` | Heading and pitch error from the mount direction to the target at most JT byte `+0xfa` x 256 angle units, doubled inside 500 ft: guns and rockets 29.5 degrees, AGM-65 and GBU-10 43.6, Mk 82 88.6 |
+| Gun and rocket lead | `_PROJGetTargetPos` `0x4c0710..0x4c0816` | Flag 0x4000 inside 20,000 ft: lead along the target's velocity by distance over the round's maximum speed, aim 20 ft above a non-aircraft target, no drop term |
+
+Numbers a player notices: AGM-65G zone 1 is plus or minus 45 degrees, 500 to
+60,000 ft, so the AI fires inside 30,000 ft (AGM-65A 0 to 50,000 ft); LAU-10 and
+LAU-61 rockets plus or minus 45 degrees, 50 to 12,000 ft, released by zone and
+aim only, with no impact prediction; M61 and GSh-30 0 to 7,500 ft; the AC-130's
+C_25, C_40 and C_105 0 to 13,000 ft with an IR signature scale.
+
+**HARM.** AGM-88 and AGM-45 are class 0x20000, so an AI may choose them against
+any surface target, but the lock passes only while the target emits: `COSig`
+(`0x478213..0x478242`) gives signature 4 a value of 100 percent only for object
+kinds 2 and 4 (kind 2 read as a surface unit, inferred) whose `+0x11a` emitter
+deadline is in the future or whose `+0xde` bit 0x10 is set (producer open), and
+0 otherwise. A radar object's target search keeps it emitting for 2 s
+(`0x4c41c4..0x4c41f8`); a radar-weapon lock for 10 s (`PROJRadarIsOn`
+`0x4c2eb0`). In flight a target slower than 36 ft/s counts as emitting
+(`0x4c1316..0x4c136a`), so a HARM keeps homing on a site that went quiet. AI
+fire range: AGM-88 500 to 200,000 ft, fired inside 100,000 ft; AGM-45 0 to
+60,000 ft, inside 30,000 ft; plus or minus 45 degrees. Store scoring
+(`0x4c5444..0x4c5530`) does not test emission, so a HARM can be chosen against
+a silent site and then wait at the lock.
+
+**Guided bombs without guidance.** With no target, `0x4c1720` holds the current
+heading, pitch and bank and the 0x40 command slows the bomb toward `finalSpeed`
+278 ft/s (`0x4c149b..0x4c14ca`; deceleration field 14, unit open). GBU OBJ flags
+0x3006 enable two `MoveObj` terms: bit 0x2000 changes speed by about
+-32 x sin(path pitch) ft/s² (`0x437cf9..0x437d9d`), and bit 0x1000 floors the
+requested path pitch at -20 degrees once speed is under 293 ft/s or the object
+is on the ground, latched for a projectile by instance flag 0x40
+(`0x4377f6..0x437846`). So a blind GBU keeps its release attitude while it slows,
+then glides at 20 degrees to impact or the end of its life; a guided GBU that
+slows below 293 ft/s is also held at that glide and steers in heading only.
+
 ### Cluster flag 0x800000
 
 The only projectile-record test of 0x800000 is in `GRAPHICAddExp` (`0x443321`
@@ -446,7 +497,7 @@ either way (`0x44354d` onward). Damage and splash are unaffected.
 | What object type 43 draws, so what a cluster burst looks like in single player | Trace type 43 in the shape and effect draw code | Decision 13's presentation-only flashes (opinionated, agent) |
 | Meaning of launcher type bit 0x2 (`+0xa6`) | Read the NPC flag consumers | None needed: no imported aircraft sets it |
 | World axis of the pack stagger relative to north | Read the theater axis convention | Use the store's own lateral axis (fitted) |
-| How a guided bomb falls. GBU and JDAM records (GBU10 0x2a543, GBU29 0x2a043) carry neither 0x10 nor 0x4, so they never get the bomb equation; with no target the creation and loss paths call `0x4c1720`, which commands the current heading, pitch and roll (`0x4c1720` to `0x4c1752`), and the 0x40 command heads for `finalSpeed` 278 | Trace motion types 1 and 2 in `MoveObj` (`0x436c70` and peers) for any fall term | The bomb equation from the guided bomb's current state when it has no spot (plan section 5, fitted) |
+| How a guided bomb falls | Closed 2026-10-11: [AI release against ground targets](#ai-release-against-ground-targets), guided bombs without guidance | The 20 degree glide below 293 ft/s (retail) |
 
 ## Bomb sight
 
