@@ -7,7 +7,7 @@
 //! builds depends only on the recording, never on how it was watched.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, mpsc};
-use tore_replay::{Frame, Recording};
+use tore_replay::{Frame, Recording, SurfaceStock};
 
 /// Ticks between trail samples: ten a second.
 pub const SAMPLE_TICKS: u64 = 12;
@@ -41,6 +41,7 @@ pub struct Batch {
     aircraft: Vec<(u32, u64, [f32; 3])>,
     missiles: Vec<(u32, u32, u64, [f32; 3])>,
     surface: Vec<(u64, u32, i32)>,
+    stock: Vec<(u64, SurfaceStock)>,
     player: Vec<(u64, View)>,
 }
 
@@ -55,6 +56,8 @@ pub struct Tracks {
     pub missiles: BTreeMap<u32, Path>,
     /// Ground object hit point changes in tick order: tick, object, hit points.
     pub surface: Vec<(u64, u32, i32)>,
+    /// Launcher rail and gun reserve changes in tick order (format 3).
+    pub stock: Vec<(u64, SurfaceStock)>,
     /// The player's view on every tick from `first`; a tick with no frame
     /// (a gap, or no player) repeats the one before it.
     player: Vec<View>,
@@ -116,6 +119,8 @@ fn batch(
         }
         out.surface
             .extend(frame.surface_hp.iter().map(|&(id, hp)| (tick, id, hp)));
+        out.stock
+            .extend(frame.surface_stock.iter().map(|&stock| (tick, stock)));
     }
     out
 }
@@ -142,6 +147,7 @@ impl Tracks {
             path.samples.push((tick, position));
         }
         self.surface.extend(batch.surface);
+        self.stock.extend(batch.stock);
         for (tick, view) in batch.player {
             let index = tick.saturating_sub(self.first) as usize;
             // Fill a gap, or ticks before the player first appears, with the
@@ -200,6 +206,40 @@ impl Tracks {
             .filter(|(_, value)| *value <= 0)
             .map(|(id, _)| id)
             .collect()
+    }
+
+    /// When each surface object that is destroyed at `tick` was destroyed:
+    /// the tick its hit points last ran out. A wreck's smoke starts then,
+    /// however the playhead got here.
+    pub fn deaths(&self, tick: u64) -> BTreeMap<u32, u64> {
+        let mut dead = BTreeMap::new();
+        for &(when, id, value) in &self.surface {
+            if when > tick {
+                break;
+            }
+            if value <= 0 {
+                dead.entry(id).or_insert(when);
+            } else {
+                dead.remove(&id);
+            }
+        }
+        dead
+    }
+
+    /// The launcher rails and magazines as the recording left them at
+    /// `tick` (format 3): for each unit that has ever changed, the rounds on
+    /// each hardpoint it recorded. A unit not listed is as new.
+    pub fn stock_at(&self, tick: u64) -> BTreeMap<u32, BTreeMap<u16, SurfaceStock>> {
+        let mut now: BTreeMap<u32, BTreeMap<u16, SurfaceStock>> = BTreeMap::new();
+        for &(when, stock) in &self.stock {
+            if when > tick {
+                break;
+            }
+            now.entry(stock.unit)
+                .or_default()
+                .insert(stock.mount, stock);
+        }
+        now
     }
 
     /// Scans a whole recording on this thread. The background pass does the
@@ -504,5 +544,46 @@ pub(crate) mod tests {
         });
         assert_eq!(tracks.view(17), Some(view(2.)));
         assert_eq!(tracks.view(20), Some(view(3.)));
+    }
+
+    #[test]
+    fn deaths_and_rails_follow_the_recorded_changes() {
+        let frame = |tick: u64, hp: Vec<(u32, i32)>, stock: Vec<SurfaceStock>| Frame {
+            tick,
+            surface_hp: hp,
+            surface_stock: stock,
+            ..Default::default()
+        };
+        let rail = |unit, mount, loaded| SurfaceStock {
+            unit,
+            mount,
+            loaded,
+            reserve: None,
+        };
+        let frames = vec![
+            frame(10, vec![(7, 100), (8, 100)], vec![]),
+            frame(20, vec![(7, 0)], vec![rail(5, 0, 2), rail(5, 1, 3)]),
+            frame(30, vec![(8, 0)], vec![]),
+            // Unit 7 is repaired by a restart in the same recording and
+            // dies again later: its death is the last.
+            frame(40, vec![(7, 50)], vec![rail(5, 0, 3)]),
+            frame(50, vec![(7, 0)], vec![]),
+        ];
+        let mut tracks = Tracks::new(10);
+        tracks.merge(batch(&frames, &BTreeSet::new(), 0, &mut BTreeSet::new()));
+        assert!(tracks.deaths(15).is_empty());
+        assert_eq!(tracks.deaths(25), BTreeMap::from([(7, 20)]));
+        assert_eq!(tracks.deaths(35), BTreeMap::from([(7, 20), (8, 30)]));
+        assert_eq!(tracks.deaths(45), BTreeMap::from([(8, 30)]));
+        assert_eq!(tracks.deaths(60), BTreeMap::from([(7, 50), (8, 30)]));
+        assert!(tracks.stock_at(19).is_empty());
+        let at = |tick| {
+            tracks.stock_at(tick)[&5]
+                .values()
+                .map(|s| s.loaded)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at(25), [2, 3]);
+        assert_eq!(at(45), [3, 3]);
     }
 }

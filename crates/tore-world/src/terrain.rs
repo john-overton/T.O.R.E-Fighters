@@ -182,6 +182,10 @@ pub struct Recorded {
     /// Experiment AP1: rebuild with the redrawn airports. Not in the
     /// recording; the viewer passes its own `TORE_REDRAWN_AIRPORTS`.
     pub redrawn_airports: bool,
+    /// The Quick Mission ground target the flight had, so the surface
+    /// (template, defenses, seed, nationality, separation and so the starts)
+    /// rebuilds exactly.
+    pub target: Option<crate::surface::resolve::GroundTarget>,
 }
 
 /// The imported layout of one theater with the definitions and shapes its
@@ -870,8 +874,8 @@ impl Terrain {
 
     /// Rebuilds the world a mission recording was flown in from its recorded,
     /// resolved launch settings: layout, weather choice and layer, start time,
-    /// wind and cloud deck. No override applies, so a replay looks the same
-    /// whatever the viewer's settings are.
+    /// wind, cloud deck and ground target. No override applies, so a replay
+    /// looks the same whatever the viewer's settings are.
     #[allow(dead_code)] // Used by the mission replay viewer.
     pub fn for_recorded(resources: &dyn ResourceSource, recorded: &Recorded) -> WorldResult<Self> {
         Self::build(
@@ -880,7 +884,7 @@ impl Terrain {
             recorded.condition,
             Some(recorded),
             &Overrides::default(),
-            None,
+            recorded.target.as_ref(),
         )
     }
 
@@ -1158,9 +1162,11 @@ impl Terrain {
                         .clone()
                         .unwrap_or_else(|| format!("Airport {airport_id}")),
                     runway_objects: vec![id],
-                    // Base free flight has no mission-side player assignment.
-                    // Treat imported fields as neutral with explicit host permission.
-                    allegiance: Allegiance::Neutral,
+                    // The runway's layout owner (slice AL1, John 2026-10-10):
+                    // Blue's field is friendly, Redfor's hostile, and one
+                    // with no owner field neutral. Neutral fields grant
+                    // permission to both sides (agent decision, AL1).
+                    allegiance: Allegiance::of_owner(placement.redfor()),
                     neutral_permission: true,
                 });
             }

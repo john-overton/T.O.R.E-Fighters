@@ -328,6 +328,13 @@ impl Controller {
             _ => self.target,
         }
     }
+    /// The burst or salvo in progress, as `(start tick, rounds, span ticks,
+    /// rounds released)`: round k leaves at the first tick at or after
+    /// `start + k * span / rounds`. A networked host tells clients a gun
+    /// burst's schedule from it (protocol 22).
+    pub fn burst(&self) -> Option<(u64, u32, u64, u32)> {
+        self.burst.map(|b| (b.start, b.rounds, b.span, b.released))
+    }
     /// The phase's pending deadline, in ticks, where it has one.
     pub fn deadline(&self) -> Option<u64> {
         matches!(

@@ -134,8 +134,16 @@ pub fn path_words(path: Path) -> &'static str {
 /// frame's sight slew and zoom step, the sight commands 28 and 29, the
 /// readout's Gunsight group (sight, look, aim point, pipper impacts, per-gun
 /// readiness with TERRAIN MASK, notice and zoom) and the standby stream's
-/// sight (gunsight slice S4).
-pub const PROTOCOL_VERSION: u16 = 21;
+/// sight (gunsight slice S4), 22 since the surface round (slice N1): the
+/// fifth entity kind, a moving surface unit, with the kind's code widened
+/// to 3 bits in the Inputs section's view subject; the Surface burst,
+/// Surface burst end and Surface unit events (codes 18 to 20); the surface
+/// digest in the Seated message and the Resumed flight; the debrief pilot's
+/// shot-down-by name; and the readout's painting radars (scalar group 14).
+/// The ground target's text lines (`ground-target`, `defenses`,
+/// `surface-seed`, `enemy-nationality`, `start ground auto`) travel in the
+/// mission text, which the mission hash covers.
+pub const PROTOCOL_VERSION: u16 = 22;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
@@ -232,6 +240,8 @@ pub mod limits {
     pub const DEBRIS: usize = 256;
     /// Ejected pilot records in one snapshot.
     pub const PILOTS: usize = 64;
+    /// Moving surface unit records in one snapshot (protocol 22).
+    pub const SURFACE: usize = 128;
     /// Entries of a connection's name table.
     pub const NAMES: usize = 4096;
     /// Input ticks in one Inputs section.
@@ -246,4 +256,6 @@ pub mod limits {
     pub const MESSAGE: usize = 65_536;
     /// Recording stems in one radio call or order voice.
     pub const STEMS: usize = 32;
+    /// Hardpoints of one surface unit in a Surface unit event (protocol 22).
+    pub const MOUNTS: usize = 64;
 }

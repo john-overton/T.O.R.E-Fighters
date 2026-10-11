@@ -179,7 +179,11 @@ fn a_dropped_player_rejoins_its_reserved_plane_which_nobody_else_could_take() {
     let me = peer(&rig, "Viper");
     assert_eq!(me.lobby.order, order);
     assert!(matches!(pilot(&rig, 0), Pilot::Human(_)));
-    assert!(rig.host.rejoin.reserved.is_empty());
+    // The reservation ends at the host's tick after the seat (the Seated
+    // message may reach the game first).
+    assert!(rig.run_until(Duration::from_millis(100), |r| {
+        r.host.rejoin.reserved.is_empty()
+    }));
     assert!(logged_rejoin(&rig, Some(0)));
     rig.run(Duration::from_millis(300));
     no_errors(&rig);

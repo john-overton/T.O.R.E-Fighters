@@ -31,6 +31,10 @@ enum Put {
     Event(replay::Event),
     Effect(replay::EffectSpawn),
     Surface(u32),
+    /// A surface unit's hit points changed, alive (protocol 22).
+    Hp(u32, i32),
+    /// A launcher's rails or a gun's spares changed (protocol 22).
+    Stock(replay::SurfaceStock),
 }
 
 /// A flight's events, by tick.
@@ -54,6 +58,8 @@ impl Events {
             names.iter().map(|n| name(*n)).collect::<Vec<_>>().join(" ")
         };
         let mut out: Vec<(u64, Put)> = Vec::new();
+        // Each surface unit's state as last told, for its changes.
+        let mut told: BTreeMap<u32, crate::wire::events::SurfaceUnitView> = BTreeMap::new();
         for received in &seen.events {
             let tick = u64::from(received.event.tick);
             if tick < first || tick > last {
@@ -241,11 +247,32 @@ impl Events {
                 // and the weapon page are the player's hands, the order's
                 // answer is its HUD line, the aircraft's end is in its state,
                 // and sounds are made again from the recorded effects.
+                // A surface unit's gun burst, as a gun burst of the unit and
+                // its hardpoint with the schedule's length (protocol 22; the
+                // recording's surface tracks are the replay slice's).
+                WireEvent::SurfaceBurst {
+                    unit, mount, span, ..
+                } => vec![Put::Event(
+                    replay::Event::new(kind::WEAPON_GUN_BURST)
+                        .with_subject(*unit)
+                        .with(field::STATION, i64::from(*mount))
+                        .with("length_ticks", i64::from(*span)),
+                )],
+                // A surface unit's state (protocol 22): its hit points while
+                // alive (its death is the Ground destroyed event's), and its
+                // stock as the single-player recorder writes it: every rail
+                // when one changed, a gun's spares when they changed. A unit's
+                // first state is all of its stock.
+                WireEvent::SurfaceUnit(view) => {
+                    let before = told.insert(view.unit, view.clone());
+                    surface_puts(before.as_ref(), view)
+                }
                 WireEvent::OrderReply { .. }
                 | WireEvent::WeaponCycled
                 | WireEvent::Feedback { .. }
                 | WireEvent::YourAircraftExploded { .. }
-                | WireEvent::Sound { .. } => Vec::new(),
+                | WireEvent::Sound { .. }
+                | WireEvent::SurfaceBurstEnd { .. } => Vec::new(),
             };
             out.extend(events.into_iter().map(|put| (tick, put)));
         }
@@ -267,6 +294,12 @@ impl Events {
                 Put::Event(event) => frame.events.push(event),
                 Put::Effect(effect) => frame.new_effects.push(effect),
                 Put::Surface(object) => frame.surface_hp.push((object, 0)),
+                Put::Hp(object, hp) => {
+                    if !frame.surface_hp.iter().any(|(id, _)| *id == object) {
+                        frame.surface_hp.push((object, hp));
+                    }
+                }
+                Put::Stock(stock) => frame.surface_stock.push(stock),
             }
             self.next = self.put.next();
         }
@@ -276,6 +309,43 @@ impl Events {
         frame.events.truncate(replay::limits::MAX_EVENTS_PER_TICK);
         let _ = vocab::heard;
     }
+}
+
+/// What a surface unit's told state `now` adds to the recording, after
+/// `before` (none: its first).
+fn surface_puts(
+    before: Option<&crate::wire::events::SurfaceUnitView>,
+    now: &crate::wire::events::SurfaceUnitView,
+) -> Vec<Put> {
+    let mut out = Vec::new();
+    if now.hp > 0 && before.is_none_or(|b| b.hp != now.hp) {
+        out.push(Put::Hp(now.unit, now.hp));
+    }
+    let mount = |index: usize| before.and_then(|b| b.mounts.get(index).copied());
+    let rails_changed = now
+        .mounts
+        .iter()
+        .enumerate()
+        .any(|(i, m)| m.rails.is_some() && mount(i).is_none_or(|b| b.rails != m.rails));
+    for (index, m) in now.mounts.iter().enumerate() {
+        let stock = |loaded: u32, reserve: Option<u32>| {
+            Put::Stock(replay::SurfaceStock {
+                unit: now.unit,
+                mount: index as u16,
+                loaded,
+                reserve,
+            })
+        };
+        if let Some(rails) = m.rails
+            && rails_changed
+        {
+            out.push(stock(u32::from(rails), None));
+        } else if m.spares.is_some() && mount(index).is_none_or(|b| b.spares != m.spares) {
+            // A gun's loaded rounds are not on the wire: spares only.
+            out.push(stock(0, m.spares.map(u32::from)));
+        }
+    }
+    out
 }
 
 /// One data link journal entry as a replay's `datalink.*` event
@@ -341,9 +411,14 @@ pub fn datalink_event(entry: &Entry) -> replay::Event {
 /// a reviewed explosion type keeps that type (as `replay/convert.rs` in the
 /// app does for the single-player recorder).
 fn effect_kind(effect: EffectKind, explosion: Option<u8>) -> replay::EffectKind {
+    // A flak burst has its own code (format 3) with the explosion type the
+    // wire's effect carried, 27 or 28, as the single-player recorder writes.
+    if effect == EffectKind::Flak
+        && let Some(explosion) = explosion.filter(|b| blast::explosion(*b).is_some())
+    {
+        return replay::EffectKind::Flak { explosion };
+    }
     let on = match effect {
-        // A flak burst is recorded as the air explosion it shows until the
-        // replay format carries it (slice RP1).
         EffectKind::Hit | EffectKind::Flak => Some(replay::Strike::Hit),
         EffectKind::Destroyed => Some(replay::Strike::Destroyed),
         EffectKind::Ground => Some(replay::Strike::Ground),
@@ -361,5 +436,75 @@ fn effect_kind(effect: EffectKind, explosion: Option<u8>) -> replay::EffectKind 
         EffectKind::Destroyed => replay::EffectKind::Destroyed,
         EffectKind::Ground => replay::EffectKind::Ground,
         EffectKind::DebrisImpact => replay::EffectKind::DebrisImpact,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::events::{MountView, SurfaceUnitView};
+
+    /// Flak keeps its own code with the explosion the wire carried, 27 or
+    /// 28 (replay format 3), as the single-player recorder writes it.
+    #[test]
+    fn a_flak_burst_records_as_flak_with_its_explosion() {
+        for explosion in [27, 28] {
+            assert_eq!(
+                effect_kind(EffectKind::Flak, Some(explosion)),
+                replay::EffectKind::Flak { explosion }
+            );
+        }
+        assert_eq!(effect_kind(EffectKind::Flak, None), replay::EffectKind::Hit);
+    }
+
+    /// A unit's first state records its hit points and stock; later ones
+    /// what changed: every rail when one changed, a gun's spares, hit points
+    /// while alive.
+    #[test]
+    fn surface_unit_states_record_their_changes() {
+        let view = |hp: i32, rails: [u16; 2], spares: u16| SurfaceUnitView {
+            unit: 9,
+            hp,
+            radar: false,
+            mounts: vec![
+                MountView {
+                    rails: Some(rails[0]),
+                    spares: None,
+                },
+                MountView {
+                    rails: Some(rails[1]),
+                    spares: None,
+                },
+                MountView {
+                    rails: None,
+                    spares: Some(spares),
+                },
+            ],
+        };
+        let stock = |puts: &[Put]| -> Vec<(u16, u32, Option<u32>)> {
+            puts.iter()
+                .filter_map(|p| match p {
+                    Put::Stock(s) => Some((s.mount, s.loaded, s.reserve)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let hp = |puts: &[Put]| puts.iter().any(|p| matches!(p, Put::Hp(9, _)));
+        let first = view(80, [1, 1], 2);
+        let puts = surface_puts(None, &first);
+        assert!(hp(&puts));
+        assert_eq!(stock(&puts), [(0, 1, None), (1, 1, None), (2, 0, Some(2))]);
+        // One rail fires: both rails recorded, nothing else.
+        let fired = view(80, [0, 1], 2);
+        let puts = surface_puts(Some(&first), &fired);
+        assert!(!hp(&puts));
+        assert_eq!(stock(&puts), [(0, 0, None), (1, 1, None)]);
+        // A spare magazine used and a hit: the spares and the hit points.
+        let hit = view(40, [0, 1], 1);
+        let puts = surface_puts(Some(&fired), &hit);
+        assert!(hp(&puts));
+        assert_eq!(stock(&puts), [(2, 0, Some(1))]);
+        // Destroyed: its death is the Ground destroyed event's.
+        assert!(!hp(&surface_puts(Some(&hit), &view(0, [0, 1], 1))));
     }
 }

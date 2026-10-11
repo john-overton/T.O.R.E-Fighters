@@ -3,7 +3,8 @@
 use super::connection::{ClientConnection, HostConnection};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
-    EntityState, Motion, PilotState, ProjectileState, ROTOR_SPEED_MAX, RotorState, Status,
+    EntityState, Motion, MoverState, PilotState, ProjectileState, ROTOR_SPEED_MAX, RotorState,
+    Status,
 };
 use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
@@ -137,6 +138,11 @@ pub(crate) fn entity(rng: &mut SplitMix64, kind: EntityKind, id: u32) -> Entity 
                 ],
             ),
         }),
+        EntityKind::Surface => EntityState::Surface(MoverState {
+            motion: motion(rng),
+            attitude: [angle(rng), angle(rng), angle(rng)],
+            wrecked: chance(rng),
+        }),
     };
     Entity { id, state }
 }
@@ -182,6 +188,13 @@ pub(crate) fn step(rng: &mut SplitMix64, entity: &Entity, ticks: u32) -> Entity 
             wander(rng, &mut p.motion);
             if slow {
                 p.phase = f.phase;
+            }
+        }
+        (EntityState::Surface(m), EntityState::Surface(f)) => {
+            wander(rng, &mut m.motion);
+            m.attitude[rng.below(3) as usize] = angle(rng);
+            if slow {
+                m.wrecked = f.wrecked;
             }
         }
         _ => unreachable!(),

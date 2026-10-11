@@ -443,7 +443,12 @@ impl World {
             if let Some(airport) = ground_airport {
                 cockpit.airport_service.command(
                     &self.terrain.airport_scene,
-                    airport_aircraft(&self.terrain, &lead, cockpit.airport_nav_mode),
+                    airport_aircraft(
+                        &self.terrain,
+                        &lead,
+                        cockpit.airport_nav_mode,
+                        self.roster.redfor(cockpit.plane),
+                    ),
                     tore_sim::airport::Command::SelectAirport(airport),
                 );
             }
@@ -823,7 +828,12 @@ impl World {
         if self.combat.recording_tape()
             && let Some(own) = self.cockpits.first()
         {
-            let airport = airport_aircraft(&self.terrain, &own.flight, own.airport_nav_mode);
+            let airport = airport_aircraft(
+                &self.terrain,
+                &own.flight,
+                own.airport_nav_mode,
+                self.roster.redfor(own.plane),
+            );
             self.combat.record_tape(
                 format!(
                     "airport-state:{}:{}:{}",
@@ -862,6 +872,7 @@ impl World {
         out.cues.push(Cue::CombatStepped);
         for index in 0..self.cockpits.len() {
             let seat = self.seat_of_cockpit(index);
+            let redfor = self.roster.redfor(self.cockpits[index].plane);
             let cockpit = &mut self.cockpits[index];
             for airport_event in cockpit.airport_service.synchronize_health(
                 self.combat
@@ -891,7 +902,12 @@ impl World {
             }
             for event in cockpit.airport_service.step(
                 &self.terrain.airport_scene,
-                airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode),
+                airport_aircraft(
+                    &self.terrain,
+                    &cockpit.flight,
+                    cockpit.airport_nav_mode,
+                    redfor,
+                ),
             ) {
                 if matches!(event, tore_sim::airport::Event::LandingComplete { .. }) {
                     out.cues.push(Cue::Message {
@@ -914,6 +930,7 @@ impl World {
                     &cockpit.airport_service,
                     &cockpit.flight,
                     self.terrain.surface(x, z).height,
+                    self.roster.redfor(cockpit.plane),
                 );
             }
         }
@@ -1306,6 +1323,7 @@ impl World {
                 &self.terrain,
                 &cockpit.airport_service,
                 self.ai_wings.as_ref(),
+                self.roster.redfor(cockpit.plane),
             );
         }
         let listening: Vec<u8> = listeners
@@ -1494,6 +1512,7 @@ impl World {
     /// applied at the start of the tick in the order it was given.
     fn airport_command(&mut self, cockpit: usize, command: AirportInput, out: &mut TickOutput) {
         let seat = self.seat_of_cockpit(cockpit);
+        let redfor = self.roster.redfor(self.cockpits[cockpit].plane);
         let cockpit = &mut self.cockpits[cockpit];
         match command {
             AirportInput::NavMode => {
@@ -1536,8 +1555,12 @@ impl World {
                         combat::launcher(&cockpit.flight),
                     );
                 }
-                let aircraft =
-                    airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode);
+                let aircraft = airport_aircraft(
+                    &self.terrain,
+                    &cockpit.flight,
+                    cockpit.airport_nav_mode,
+                    redfor,
+                );
                 for event in
                     cockpit
                         .airport_service
@@ -1619,6 +1642,7 @@ pub fn airport_aircraft(
     world: &terrain::Terrain,
     flight: &flight::State,
     nav_mode: bool,
+    redfor: bool,
 ) -> tore_sim::airport::Aircraft {
     let supported = world
         .airport_scene
@@ -1633,6 +1657,7 @@ pub fn airport_aircraft(
         alive: !flight.crashed,
         speed_fps: flight.speed,
         ground_clearance_ft: flight.model().configuration().equipment.ground_clearance_ft,
+        redfor,
     }
 }
 

@@ -634,6 +634,30 @@ impl Scenery {
         self.static_geometry_with(looks)
     }
 
+    /// [`Self::static_geometry_where`] for a replay that also recorded the
+    /// launcher loads (format 3): `surface` holds the rails of each unit that
+    /// ever changed them, as the recording left them at this tick.
+    pub fn static_geometry_replay(
+        &mut self,
+        hidden: &BTreeSet<u32>,
+        surface: &tore_world::surface::SurfaceState,
+    ) -> &Arc<StaticGeometry> {
+        let mut looks: BTreeMap<u32, surface_art::Look> = hidden
+            .iter()
+            .filter_map(|id| Some((*id, self.surface.look(*id, false, true, None)?)))
+            .collect();
+        for unit in &surface.units {
+            let id = unit.id.0;
+            if hidden.contains(&id) {
+                continue;
+            }
+            if let Some(look) = self.surface.look(id, true, true, Some(surface)) {
+                looks.insert(id, look);
+            }
+        }
+        self.static_geometry_with(looks)
+    }
+
     /// Every placement id with standing geometry or lines, ascending.
     fn placement_ids(&self) -> BTreeSet<u32> {
         self.static_vertices

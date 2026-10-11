@@ -13,7 +13,7 @@ use tore_formats::weapons::{
 use tore_sim::{
     ai::surface::Phase,
     checkpoint::{Models, round_trip},
-    combat::live::Side,
+    combat::live::{NO_SIDE, Side},
 };
 
 const TPS: u64 = 120;
@@ -768,6 +768,34 @@ fn zsu23_bursts_empties_its_magazine_swaps_in_120_s_and_falls_silent() {
     // A 120 s swap from the truck, then a new search and preparation.
     f.run(140 * TPS);
     assert!(f.rounds() > silent);
+}
+
+/// An airfield's guns fire only at the other side's aircraft once they are
+/// airborne: never at their own side, never with no side on either end, and
+/// never at a jet still rolling on the runway. A Blue wing taking off from a
+/// Redfor field draws fire; one taking off from its own field does not.
+#[test]
+fn guns_fire_only_at_the_other_sides_airborne_aircraft() {
+    let rounds = |unit_side: Side, jet_side: Side, airborne: bool| {
+        let mut zsu = placed(ZSU_ID, "ZSU23.NT", 0x0800, 0., 0., 1)
+            .with_gun(zsu23(), "ZSU23", arc(0, FREE, [0., 90.]), 0)
+            .radar(false, None);
+        zsu.unit.side = unit_side;
+        zsu.arms.side = unit_side;
+        let mut f = Fixture::new(vec![zsu], Vec::new());
+        f.jet.side = jet_side;
+        f.jet.airborne = airborne;
+        f.jet.position = [0., 300., 2_000.];
+        f.run(30 * TPS);
+        f.rounds()
+    };
+    assert!(rounds(RED, BLUE, true) > 0, "Redfor guns engage a Blue jet");
+    assert!(rounds(BLUE, RED, true) > 0, "Blue guns engage a Redfor jet");
+    assert_eq!(rounds(RED, RED, true), 0, "never their own side");
+    assert_eq!(rounds(BLUE, BLUE, true), 0, "never their own side");
+    assert_eq!(rounds(NO_SIDE, BLUE, true), 0, "a unit with no side");
+    assert_eq!(rounds(RED, NO_SIDE, true), 0, "an aircraft with no side");
+    assert_eq!(rounds(RED, BLUE, false), 0, "not while it is on the ground");
 }
 
 #[test]

@@ -19,6 +19,7 @@ use tore_sim::ai::{
 use tore_world::mission::{
     ALTITUDES_FT, Condition, Defense, MissionSpec, Skill, Start, WingSpec, ground_targets,
 };
+pub mod allegiance;
 pub mod matrix;
 /// The aircraft fields of the five wings the AI flies. Field 6 is friendly
 /// wing 1's, which is also the player's own aircraft.
@@ -53,6 +54,34 @@ const SURVIVAL_BASE: usize = OBJECTIVE_BASE + OBJECTIVE_COUNT;
 const AUTO_AIRPORT: &str = "Automatic (near the target)";
 /// Said when the AAA or SAM strength is touched with no ground target.
 const NO_TARGET_NOTICE: &str = "Choose a ground target first: the defenses are the target's.";
+/// Said when Ground is touched in a theater with no airfield of the pilot's
+/// side (slice AL1): the start stays airborne.
+pub const NO_FIELD_NOTICE: &str = "No airfield of your side in this theater, so you start airborne. Ground start needs a friendly or neutral airfield.";
+/// The short note beside a Start locked to Airborne for that reason.
+const NO_FIELD_NOTE: &str = "(no friendly airfield)";
+
+/// One airport of a theater layout as the creator sees it for a ground start:
+/// its runway object, name, whether it is a short strip and its layout owner
+/// (`Some(true)` Redfor, `Some(false)` Blue, `None` without an owner field).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Field {
+    pub id: u32,
+    pub name: String,
+    pub short: bool,
+    pub redfor: Option<bool>,
+}
+impl Field {
+    /// The field belongs to the side opposite to a pilot of `redfor`.
+    pub fn enemy_of(&self, redfor: bool) -> bool {
+        self.redfor == Some(!redfor)
+    }
+    /// A ground start for a pilot of this side: no short strip (John,
+    /// 2026-09-30) and no field of the other side (slice AL1, John
+    /// 2026-10-10). A neutral field is offered to both sides.
+    pub fn offered_to(&self, redfor: bool) -> bool {
+        !self.short && !self.enemy_of(redfor)
+    }
+}
 /// The tint of a list row the lobby's creator dims: what not everyone has.
 const GAP_TEXT: [u8; 3] = [104, 110, 112];
 /// The same dimming on a field's grey, where [`GAP_TEXT`] would not show.
@@ -168,11 +197,18 @@ pub struct QuickMission {
     theater_codes: Vec<String>,
     theater_catalog: Vec<String>,
     start_modes: Vec<String>,
+    /// Per theater, the ground-start airports the pilot's side is offered
+    /// (names and runway objects, in layout order), from [`Self::fields`].
     airport_names: Vec<Vec<String>>,
     airport_objects: Vec<Vec<u32>>,
-    /// Per theater, the short strips (object id and name) kept off the
-    /// ground-start list: no start there for the player or any wing.
-    short_strips: Vec<Vec<(u32, String)>>,
+    /// Per theater, every airport of the layout with its owner, short
+    /// strips and the other side's fields included: what the offered lists
+    /// are cut from and what a refused `--ground-start` names.
+    fields: Vec<Vec<Field>>,
+    /// The creator's pilot flies for Redfor, so Red fields are its own.
+    /// Single player and the lobby's creator are Blue; a Redfor pilot's
+    /// picker ([`Self::set_player_redfor`]) lists the Red and neutral fields.
+    player_redfor: bool,
     selector: Option<usize>,
     cursor: usize,
     scroll: usize,
@@ -226,6 +262,16 @@ pub fn condition(value: usize) -> Option<usize> {
         5 => 5,
         _ => return None,
     })
+}
+
+/// The ground-start choices among a theater's `fields` for a pilot of one
+/// side: names and runway objects, in layout order.
+fn offered(fields: &[Field], redfor: bool) -> (Vec<String>, Vec<u32>) {
+    fields
+        .iter()
+        .filter(|field| field.offered_to(redfor))
+        .map(|field| (field.name.clone(), field.id))
+        .unzip()
 }
 
 impl QuickMission {
@@ -285,16 +331,13 @@ impl QuickMission {
             .iter()
             .map(|(code, _)| code.to_string())
             .collect();
-        let mut airport_names = Vec::new();
-        let mut airport_objects = Vec::new();
-        let mut short_strips = Vec::new();
         let mut definitions = BTreeMap::new();
-        for code in &theater_codes {
-            let (names, ids, short) = Self::airports_in(code, data, &mut definitions);
-            airport_names.push(names);
-            airport_objects.push(ids);
-            short_strips.push(short);
-        }
+        let fields: Vec<Vec<Field>> = theater_codes
+            .iter()
+            .map(|code| Self::airports_in(code, data, &mut definitions))
+            .collect();
+        let (airport_names, airport_objects) =
+            fields.iter().map(|list| offered(list, false)).unzip();
         let mut quick = Self {
             debrief: None,
             debrief_to_menu: false,
@@ -302,7 +345,8 @@ impl QuickMission {
             start_modes: vec!["Airborne".into(), "Ground".into()],
             airport_names,
             airport_objects,
-            short_strips,
+            fields,
+            player_redfor: false,
             hover: None,
             pressed: None,
             right_pressed: None,
@@ -339,21 +383,20 @@ impl QuickMission {
         quick.draft.values[20] = enemy_nationality(quick.base_theater_index());
         quick
     }
-    /// The ground-start airports of one theater layout (names and object ids),
-    /// and the short strips left off that list. `fitted`, agent decision
-    /// 2026-09-30, for John's decision of the same day: an airport whose runway
-    /// is under `tore_sim::airport::SHORT_STRIP_FT` is no ground start, for the
-    /// player or any wing. `definitions` caches, per object type, whether it is
-    /// an airport and its runway length.
+    /// Every airport of one theater layout, in layout order, with whether it
+    /// is a short strip and its owner. `fitted`, agent decision 2026-09-30,
+    /// for John's decision of the same day: an airport whose runway is under
+    /// `tore_sim::airport::SHORT_STRIP_FT` is no ground start, for the player
+    /// or any wing; nor, since slice AL1 (John, 2026-10-10), is a field of
+    /// the other side ([`Field::offered_to`]). `definitions` caches, per
+    /// object type, whether it is an airport and its runway length.
     fn airports_in(
         code: &str,
         data: &BTreeMap<String, Vec<u8>>,
         definitions: &mut BTreeMap<String, (bool, Option<f64>)>,
-    ) -> (Vec<String>, Vec<u32>, Vec<(u32, String)>) {
+    ) -> Vec<Field> {
         let name = format!("{code}.MM");
-        let mut names = Vec::new();
-        let mut ids = Vec::new();
-        let mut short = Vec::new();
+        let mut fields = Vec::new();
         if let Some(bytes) = data.get(&name)
             && let Ok(layout) = tore_formats::mission::Layout::parse(&name, bytes)
         {
@@ -373,19 +416,48 @@ impl QuickMission {
                         (airport, length)
                     });
                 if airport {
-                    let id = 0x4000_0000 + p.key.ordinal;
-                    let label = p.name.unwrap_or(p.object_type);
-                    // A strip whose shape cannot be measured stays listed.
-                    if length.is_some_and(tore_sim::airport::short_strip_length) {
-                        short.push((id, label));
-                    } else {
-                        names.push(label);
-                        ids.push(id);
-                    }
+                    let redfor = p.redfor();
+                    fields.push(Field {
+                        id: 0x4000_0000 + p.key.ordinal,
+                        name: p.name.unwrap_or(p.object_type),
+                        // A strip whose shape cannot be measured stays listed.
+                        short: length.is_some_and(tore_sim::airport::short_strip_length),
+                        redfor,
+                    });
                 }
             }
         }
-        (names, ids, short)
+        fields
+    }
+    /// Every airport of the theater at `index` (in [`Self::theater_codes`]
+    /// order), short strips and both sides' fields included.
+    pub fn theater_fields(&self, index: usize) -> &[Field] {
+        self.fields.get(index).map_or(&[], Vec::as_slice)
+    }
+    /// The ground-start airports offered in the theater at `index`, by
+    /// runway object, in the order the picker lists them.
+    pub fn offered_airports(&self, index: usize) -> &[u32] {
+        self.airport_objects.get(index).map_or(&[], Vec::as_slice)
+    }
+    /// The creator's pilot flies for Redfor (`true`) or Blue: the airport
+    /// lists become that side's and the neutral fields, and a ground start
+    /// at a field the new side cannot use starts over at its first field.
+    pub fn set_player_redfor(&mut self, redfor: bool) {
+        self.player_redfor = redfor;
+        let (names, objects) = self.fields.iter().map(|list| offered(list, redfor)).unzip();
+        self.airport_names = names;
+        self.airport_objects = objects;
+        self.draft.values[34] = 0;
+        if self.ground_unavailable() {
+            self.draft.values[33] = 0;
+        }
+    }
+    /// The selected theater has no airfield the pilot's side may start
+    /// from, so Ground is not offered and the start is airborne.
+    pub fn ground_unavailable(&self) -> bool {
+        self.airport_objects
+            .get(self.draft.values[13])
+            .is_none_or(Vec::is_empty)
     }
     /// Developer option: add one imported `~` layout variant (or, with
     /// `all`, every one) after the base theaters so a probe can run the
@@ -400,10 +472,11 @@ impl QuickMission {
             if only.is_some_and(|only| only != code) || self.theater_codes.contains(&code) {
                 continue;
             }
-            let (names, ids, short) = Self::airports_in(&code, data, &mut definitions);
+            let fields = Self::airports_in(&code, data, &mut definitions);
+            let (names, ids) = offered(&fields, self.player_redfor);
             self.airport_names.push(names);
             self.airport_objects.push(ids);
-            self.short_strips.push(short);
+            self.fields.push(fields);
             self.theater_codes.push(code.clone());
             self.theater_catalog.push(code);
             self.options.fields[13].push(label);
@@ -453,9 +526,9 @@ impl QuickMission {
         for text in &self.aircraft_names {
             out.push(("creator aircraft".into(), text.clone()));
         }
-        for (theater, names) in self.theater_codes.iter().zip(&self.airport_names) {
-            for text in names {
-                out.push((format!("airport in {theater}"), text.clone()));
+        for (theater, fields) in self.theater_codes.iter().zip(&self.fields) {
+            for field in fields.iter().filter(|field| !field.short) {
+                out.push((format!("airport in {theater}"), field.name.clone()));
             }
         }
         for (id, list) in self.options.targets.iter().enumerate() {
@@ -862,14 +935,22 @@ impl QuickMission {
         self.ground_start() && self.has_target() && self.draft.values[34] == 0
     }
     pub fn choose_ground_runway(&mut self, object: u32) -> Result<(), String> {
-        if let Some((_, name)) = self
-            .short_strips
+        if let Some(field) = self
+            .fields
             .get(self.draft.values[13])
-            .and_then(|list| list.iter().find(|(id, _)| *id == object))
+            .and_then(|list| list.iter().find(|field| field.id == object))
         {
-            return Err(format!(
-                "{name} is a short strip: no ground start there. Choose a longer runway or Airborne."
-            ));
+            let name = &field.name;
+            if field.short {
+                return Err(format!(
+                    "{name} is a short strip: no ground start there. Choose a longer runway or Airborne."
+                ));
+            }
+            if field.enemy_of(self.player_redfor) {
+                return Err(format!(
+                    "{name} is an enemy airfield: no ground start there. Choose one of your side's airfields or Airborne."
+                ));
+            }
         }
         let index = self.airport_objects[self.draft.values[13]]
             .iter()
@@ -1188,6 +1269,11 @@ impl QuickMission {
     /// host's words, when the creator is the lobby's and the aircraft or
     /// theater is in a gap.
     fn gap_in(&self, field: usize, index: usize) -> Option<&str> {
+        // Ground in a theater with no airfield of the pilot's side is dimmed
+        // and refused the same way, with its own words (slice AL1).
+        if field == 33 && index == 1 && self.ground_unavailable() {
+            return Some(NO_FIELD_NOTICE);
+        }
         if !self.lobby {
             return None;
         }
@@ -1290,6 +1376,13 @@ impl QuickMission {
         self.aircraft_selection = self.draft.values[6];
         self.selection = self.theater_index();
         self.notice = None;
+        // No airfield of the pilot's side in the theater: Ground is not
+        // offered and the start stays airborne (slice AL1).
+        if self.draft.values[33] == 1 && self.ground_unavailable() {
+            self.draft.values[33] = 0;
+            self.draft.values[34] = 0;
+            self.notice = Some(NO_FIELD_NOTICE.into());
+        }
         // The AI cannot fly the player's aircraft yet: friendly wing 1 holds
         // just the player (a lobby's wing 1 is for humans, so it keeps its size).
         if !self.lobby
@@ -2026,6 +2119,17 @@ impl QuickMission {
             self.line(&mut c, font, 35, y, &parts);
         }
         self.line(&mut c, font, 35, 357, &[("Start: ", None), ("", Some(33))]);
+        if self.ground_unavailable() && !self.lobby && self.view.is_none() {
+            // The short note beside the greyed Start: why Ground is not on
+            // offer (the notice gives the full words when it is touched).
+            let x = self
+                .controls
+                .iter()
+                .rev()
+                .find(|(id, _)| *id == 33)
+                .map_or(140, |(_, r)| r.0 + r.2 + 6);
+            c.text(font, NO_FIELD_NOTE, x, 357, Some(GAP_FIELD_TEXT));
+        }
         if self.ground_start() {
             self.line(
                 &mut c,
@@ -2212,6 +2316,10 @@ impl QuickMission {
     /// this game lacks (an aircraft or a theater not everyone has); the tint
     /// the lobby's lists use for it.
     fn view_tint(&self, id: usize) -> Option<[u8; 3]> {
+        // A Start locked to Airborne for want of a friendly field is greyed.
+        if id == 33 && self.ground_unavailable() && !self.lobby {
+            return Some(GAP_FIELD_TEXT);
+        }
         self.view?;
         let lacks = self.shown.contains_key(&id) && (id == 6 || AI_AIRCRAFT_FIELDS.contains(&id));
         let gap = self
@@ -2799,11 +2907,12 @@ mod tests {
         q.activate(ROW_BASE + 1);
         q.activate(POP_OK);
         assert_eq!(q.ground_runway(), Some(0x40000003));
+        // A theater with no field of the side takes the draft back to
+        // Airborne and says why (slice AL1).
         q.apply(13, 1);
         assert_eq!(q.draft.values[34], 0);
-        assert!(q.ground_runway().is_none());
-        assert!(q.unsupported().unwrap().contains("No imported runways"));
-        q.apply(33, 0);
+        assert!(!q.ground_start() && q.ground_runway().is_none());
+        assert_eq!(q.notice.as_deref(), Some(NO_FIELD_NOTICE));
         assert!(q.unsupported().is_none());
     }
     #[test]
@@ -3064,14 +3173,20 @@ mod tests {
         q.apply(30, 0);
         assert_eq!(q.draft.values[34], 0);
         assert_eq!(q.ground_runway(), Some(0x4000_0000));
-        // A theater with no airports can still start on auto with a target.
+        // A theater with no airports of the side has no ground start, even
+        // on auto with a target: the world would find no field (slice AL1).
         q.apply(13, 3);
-        q.apply(33, 1);
         q.airport_names[3].clear();
         q.airport_objects[3].clear();
-        assert!(q.unsupported().unwrap().contains("No imported runways"));
+        q.apply(33, 1);
+        assert!(!q.ground_start());
+        assert_eq!(q.notice.as_deref(), Some(NO_FIELD_NOTICE));
         q.apply(30, 1);
-        assert!(q.ground_auto() && q.unsupported().is_none());
+        assert!(!q.ground_auto() && q.unsupported().is_none());
+        q.apply(13, 0);
+        q.apply(33, 1);
+        q.apply(30, 1);
+        assert!(q.ground_auto());
         q.lobby = true;
         assert!(matches!(
             q.lobby_spec().unwrap().start,
@@ -3248,12 +3363,95 @@ mod tests {
         assert!(asked.iter().all(|(kind, _)| *kind != ItemKind::Weapon));
         assert!(q.gaps.is_empty());
     }
+    /// A theater's airports for the creator: `(ordinal, name, short, owner)`.
+    fn fields(list: &[(u32, &str, bool, Option<bool>)]) -> Vec<Field> {
+        list.iter()
+            .map(|(ordinal, name, short, redfor)| Field {
+                id: 0x4000_0000 + ordinal,
+                name: (*name).into(),
+                short: *short,
+                redfor: *redfor,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_picker_offers_the_pilots_side_and_neutral_fields_and_defaults_to_one() {
+        let mut q = setup();
+        q.fields[0] = fields(&[
+            (0, "Red Field", false, Some(true)),
+            (1, "Blue Field", false, Some(false)),
+            (2, "Open Field", false, None),
+            (3, "Blue Strip", true, Some(false)),
+        ]);
+        q.set_player_redfor(false);
+        q.apply(33, 1);
+        // Blue: its own and the neutral field, never the enemy's, and the
+        // default is its first, not the layout's first (an enemy field).
+        assert_eq!(&q.values(34)[..], ["Blue Field", "Open Field"]);
+        assert_eq!(q.ground_runway(), Some(0x4000_0001));
+        let error = q.choose_ground_runway(0x4000_0000).unwrap_err();
+        assert!(error.contains("Red Field is an enemy airfield"), "{error}");
+        assert_eq!(q.ground_runway(), Some(0x4000_0001));
+        // A Redfor pilot sees the Red field and the neutral one.
+        q.set_player_redfor(true);
+        q.apply(33, 1);
+        assert_eq!(&q.values(34)[..], ["Red Field", "Open Field"]);
+        assert_eq!(q.ground_runway(), Some(0x4000_0000));
+        assert!(q.choose_ground_runway(0x4000_0001).is_err());
+        q.choose_ground_runway(0x4000_0002).unwrap();
+        assert_eq!(q.ground_runway(), Some(0x4000_0002));
+    }
+
+    #[test]
+    fn a_theater_with_no_field_of_the_side_starts_airborne_and_says_why() {
+        let mut q = setup();
+        q.fields[0] = fields(&[
+            (0, "Red Field", false, Some(true)),
+            (1, "Blue Strip", true, Some(false)),
+        ]);
+        q.set_player_redfor(false);
+        assert!(q.ground_unavailable());
+        // Ground is dimmed in the Start list and refused with the notice,
+        // by a click and by the list alike; the start stays airborne.
+        assert_eq!(q.gap_in(33, 1), Some(NO_FIELD_NOTICE));
+        assert!(q.gap_in(33, 0).is_none());
+        q.activate(33);
+        assert!(!q.ground_start());
+        assert_eq!(q.notice.as_deref(), Some(NO_FIELD_NOTICE));
+        q.apply(33, 1);
+        assert!(!q.ground_start());
+        assert_eq!(q.notice.as_deref(), Some(NO_FIELD_NOTICE));
+        // The Start field is greyed.
+        assert_eq!(q.view_tint(33), Some(GAP_FIELD_TEXT));
+        assert!(matches!(
+            q.mission_spec().unwrap().start,
+            Start::Airborne { .. }
+        ));
+        // A theater change onto it takes a ground draft back to Airborne.
+        q.fields[1] = fields(&[(0, "Blue Field", false, Some(false))]);
+        q.set_player_redfor(false);
+        q.apply(13, 1);
+        q.apply(33, 1);
+        assert!(q.ground_start());
+        q.apply(13, 0);
+        assert!(!q.ground_start());
+        assert_eq!(q.notice.as_deref(), Some(NO_FIELD_NOTICE));
+        // Redfor has a field there.
+        q.set_player_redfor(true);
+        assert!(!q.ground_unavailable() && q.gap_in(33, 1).is_none());
+        q.apply(33, 1);
+        assert_eq!(q.ground_runway(), Some(0x4000_0000));
+    }
+
     #[test]
     fn a_short_strip_is_no_ground_start() {
         let mut q = setup();
-        q.airport_names[0] = vec!["Long Field".into()];
-        q.airport_objects[0] = vec![0x4000_0000];
-        q.short_strips[0] = vec![(0x4000_0003, "Goose Green".into())];
+        q.fields[0] = fields(&[
+            (0, "Long Field", false, None),
+            (3, "Goose Green", true, None),
+        ]);
+        q.set_player_redfor(false);
         // The short strip is not in the list the creator offers.
         assert_eq!(q.values(34).len(), 1);
         let error = q.choose_ground_runway(0x4000_0003).unwrap_err();
@@ -3271,6 +3469,8 @@ mod tests {
     #[test]
     fn tab_reaches_ground_controls_without_focusing_hidden_airport() {
         let mut q = setup();
+        q.airport_names[0] = vec!["First Field".into()];
+        q.airport_objects[0] = vec![0x4000_0000];
         q.focus = 32;
         q.key("Tab", false);
         assert_eq!(q.focus, 33);

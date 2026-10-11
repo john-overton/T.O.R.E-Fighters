@@ -806,6 +806,26 @@ pub struct Stepped {
     pub supports: Vec<ActorSupport>,
 }
 
+/// A gun burst that began this tick (not flak: its shells are not drawn), as
+/// a networked host tells clients of it (protocol 22): the client remakes
+/// the rounds from the first round's direction, the burst's schedule and the
+/// target's drawn motion ([`gun_aim_point`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BurstNote {
+    pub unit: UnitId,
+    /// The hardpoint the rounds leave from.
+    pub mount: usize,
+    /// The unit's controller that fires it, by index in its arms' weapons.
+    pub engager: usize,
+    pub target: u32,
+    /// The first round's direction, with the burst's aim error.
+    pub direction: Vector,
+    /// Rounds in the burst and the ticks they spread over: round k leaves
+    /// at the first tick at or after `k * span / rounds` from the first.
+    pub rounds: u32,
+    pub span: u64,
+}
+
 /// The degrees in -180..180.
 fn wrap_deg(degrees: f64) -> f64 {
     (degrees + 180.).rem_euclid(360.) - 180.
@@ -939,6 +959,7 @@ pub fn step(
     state.trace.clear();
     state.locks.clear();
     state.painting.clear();
+    state.bursts.clear();
     if arsenal.is_empty() {
         return Stepped::default();
     }
@@ -1486,6 +1507,61 @@ fn fire_missiles(
     }
 }
 
+/// The point a gun of `weapon` standing as `place` aims at from `muzzle` for
+/// a target observed as `observed`: the lead point of the shared gunsight
+/// solution (time of flight and drop), clamped into a barrage zone's fire
+/// zone. The burst's aim error is applied on top by the caller. A networked
+/// client follows the same lead when it remakes a burst's rounds from the
+/// host's first one (protocol 22).
+pub fn gun_aim_point(
+    weapon: &WeaponArms,
+    place: &Place,
+    muzzle: Vector,
+    observed: TargetObservation,
+) -> Vector {
+    let launcher = live::Launcher {
+        radar_power: true,
+        position: muzzle,
+        basis: place.basis,
+        speed_fps: length(place.velocity),
+        velocity: place.velocity,
+        bay_ready: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        body_present: true,
+        controls: Default::default(),
+    };
+    let solution = gunsight::solve_observed(&weapon.record, &launcher, [0.; 3], Some(observed))
+        .ok()
+        .flatten();
+    let mut aim = match solution {
+        Some(solution) => std::array::from_fn(|i| {
+            observed.position[i]
+                + observed.velocity[i] * solution.seconds
+                + if i == 1 { solution.drop_ft } else { 0. }
+        }),
+        None => observed.position,
+    };
+    if matches!(weapon.kind, Kind::Barrage { .. }) {
+        // Clamp the lead point into the barrage's fire zone.
+        let d = sub(aim, muzzle);
+        let horizontal = d[0].hypot(d[2]);
+        let max = weapon.launch.max_range;
+        let scale = if horizontal > max {
+            max / horizontal
+        } else {
+            1.
+        };
+        aim = [
+            muzzle[0] + d[0] * scale,
+            muzzle[1] + d[1].clamp(0., weapon.launch.max_altitude.max(0.)),
+            muzzle[2] + d[2] * scale,
+        ];
+    }
+    aim
+}
+
 /// Fires a gun's rounds of `fire` at `aircraft`: the lead point from the
 /// shared gunsight solution, the burst's aim error, the round's end at the
 /// target's range (or a flak shell's time fuze).
@@ -1559,46 +1635,7 @@ fn fire_gun(
         let engager = &state.unit(arms.unit).expect("armed").engagers[index];
         (engager.aim_error, engager.holding)
     };
-    let launcher = live::Launcher {
-        radar_power: true,
-        position: muzzle,
-        basis: place.basis,
-        speed_fps: length(place.velocity),
-        velocity: place.velocity,
-        bay_ready: true,
-        radar: true,
-        jammer: false,
-        alive: true,
-        body_present: true,
-        controls: Default::default(),
-    };
-    let solution = gunsight::solve_observed(&weapon.record, &launcher, [0.; 3], Some(observed))
-        .ok()
-        .flatten();
-    let mut aim = match solution {
-        Some(solution) => std::array::from_fn(|i| {
-            observed.position[i]
-                + observed.velocity[i] * solution.seconds
-                + if i == 1 { solution.drop_ft } else { 0. }
-        }),
-        None => observed.position,
-    };
-    if barrage.is_some() {
-        // Clamp the lead point into the barrage's fire zone.
-        let d = sub(aim, muzzle);
-        let horizontal = d[0].hypot(d[2]);
-        let max = weapon.launch.max_range;
-        let scale = if horizontal > max {
-            max / horizontal
-        } else {
-            1.
-        };
-        aim = [
-            muzzle[0] + d[0] * scale,
-            muzzle[1] + d[1].clamp(0., weapon.launch.max_altitude.max(0.)),
-            muzzle[2] + d[2] * scale,
-        ];
-    }
+    let aim = gun_aim_point(weapon, &place, muzzle, observed);
     let distance = length(sub(aim, muzzle));
     let direction = deflect(sub(aim, muzzle), offset[0], offset[1]);
     let end_tick = if flak {
@@ -1642,6 +1679,23 @@ fn fire_gun(
         // A barrage burst that does not fire still spends its time; its
         // rounds stay in the magazine.
         refused = 0;
+    }
+    if fire.burst_start && fired > 0 && !flak {
+        // The burst's schedule, for a networked host to tell its clients
+        // (protocol 22): a burst of one round is already over.
+        let (rounds, span) = state.unit(arms.unit).expect("armed").engagers[index]
+            .controller
+            .burst()
+            .map_or((fired, 1), |(_, rounds, span, _)| (rounds, span));
+        state.bursts.push(BurstNote {
+            unit: arms.unit,
+            mount,
+            engager: index,
+            target: aircraft.id,
+            direction,
+            rounds,
+            span,
+        });
     }
     if fired > 0 || refused > 0 {
         state.trace.push(Trace::Shot {

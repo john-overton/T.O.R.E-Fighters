@@ -1658,6 +1658,15 @@ the first enemy plane, so the targets are a Protect objective and a Blue plane
 drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
 `surface-objective-*` battery scenarios run it.
 
+`--record PATH` records the run as a mission recording (a format 3 file, see
+[Mission replays](REPLAYS.md#versions-and-damage)); `--verify-render` then reads
+it back and compares every tick with the picture the run drew, printing
+`surface-objective: verify-render: PASS ticks=... missing=0 differing=0` or the
+first difference. `--run-on` keeps the run going to `--seconds` after every
+target is down, so supply trucks rearm the emptied launchers, and
+`--vulnerable` takes the player's invulnerability away, so the defenses can
+shoot it down. The `replay-surface` scenario uses all four.
+
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --redfor
@@ -1689,7 +1698,7 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater KUR
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~UKR1' --viewer --capture-terrain .local/ukr1.ppm
 ```
 
-`--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
+`--airport-allegiance` (imported media, no display) lists, for every base theater and for Blue and for Redfor, the ground-start airports the creator offers and checks them, the automatic ground start and the AI's home runway against the built world: none may be the other side's ([allegiance](spec/airports.md#allegiance)). `--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
 indexed artwork size, and exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the

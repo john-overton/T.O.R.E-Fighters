@@ -224,6 +224,13 @@ impl Roster {
             .map(|index| &self.planes[index])
     }
 
+    /// Whether plane `id` flies for Redfor (an enemy wing's plane). A plane
+    /// the roster does not hold is Blue's, as single player's plane is.
+    pub fn redfor(&self, id: PlaneId) -> bool {
+        self.plane(id)
+            .is_some_and(|plane| plane.slot.wing.side.is_enemy())
+    }
+
     /// Every seat, in seat order.
     pub fn seats(&self) -> &[Seat] {
         &self.seats

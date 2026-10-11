@@ -10,254 +10,16 @@ use crate::{
     ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE},
     mission::{Condition, MissionSpec},
     terrain::{Overrides, Terrain},
-    test_support::resources::{AIRPORT_AT, THEATER, resources, schema},
+    test_support::resources::THEATER,
     world::{Seating, World},
 };
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{
     aircraft::AircraftId,
     quick_template::{Placeholder, Template, tables},
-    surface_unit::class,
 };
 
-pub(super) const HEADER: &str = "[brent's_relocatable_format]\n";
-
-/// One line per field of `layout`; `value` overrides a field by name.
-pub(super) fn fields(layout: &[(&str, &str)], value: &dyn Fn(&str) -> Option<String>) -> String {
-    let mut text = String::new();
-    for &(kind, name) in layout {
-        let given = value(name);
-        match (kind, given) {
-            ("ptr", Some(block)) => text += &format!("ptr {block}\n"),
-            ("ptr", None) => text += "dword 0\n",
-            ("symbol", given) => text += &format!("symbol {}\n", given.unwrap_or_default()),
-            (kind, given) => text += &format!("{kind} {}\n", given.unwrap_or_else(|| "0".into())),
-        }
-    }
-    text
-}
-
-/// A synthetic NT: `class`, hit points, its proc and weapon mounts
-/// (`store`, `maxItems`).
-fn nt(stem: &str, class: u16, hp: i32, util: &str, mounts: &[(&str, i32)]) -> Vec<u8> {
-    let size = 186 + 24 * mounts.len();
-    let object = |name: &str| -> Option<String> {
-        Some(match name {
-            "structType" => "3".into(),
-            "typeSize" => size.to_string(),
-            "ot_names" => "ot_names".into(),
-            "shape" => "shape".into(),
-            "obj_class" => class.to_string(),
-            "hitPoints" => hp.to_string(),
-            "expType" => "21".into(),
-            "craterSize" => "6".into(),
-            "utilProc" => util.into(),
-            _ => return None,
-        })
-    };
-    let npc = |name: &str| -> Option<String> {
-        Some(match name {
-            "numHards" => mounts.len().to_string(),
-            "hards" => "hards".into(),
-            _ => return None,
-        })
-    };
-    let mut text = String::from(HEADER);
-    text += &fields(schema::OBJECT, &object);
-    text += &fields(schema::NPC, &npc);
-    text += ":hards\n";
-    for (i, (_, items)) in mounts.iter().enumerate() {
-        text += &format!(
-            "word 8\nword 0\nword 30\nword 0\nword 0\nword 0\nword 0\nword 12740\nptr store{i}\nbyte 0\nword {items}\nbyte 0\n"
-        );
-    }
-    text += &format!(
-        ":ot_names\nstring \"{stem}\"\nstring \"Synthetic {stem}\"\nstring \"{stem}.NT\"\n"
-    );
-    text += &format!(":shape\nstring \"{stem}.SH\"\n");
-    for (i, (store, _)) in mounts.iter().enumerate() {
-        text += &format!(":store{i}\nstring \"{store}\"\n");
-    }
-    text += "end\n";
-    text.into_bytes()
-}
-
-/// A synthetic static object (OT).
-fn ot(stem: &str, class: u16, hp: i32) -> Vec<u8> {
-    let object = |name: &str| -> Option<String> {
-        Some(match name {
-            "structType" => "1".into(),
-            "ot_names" => "ot_names".into(),
-            "shape" => "shape".into(),
-            "obj_class" => class.to_string(),
-            "hitPoints" => hp.to_string(),
-            "utilProc" => "_OBJProc".into(),
-            _ => return None,
-        })
-    };
-    let mut text = String::from(HEADER);
-    text += &fields(schema::OBJECT, &object);
-    text += &format!(
-        ":ot_names\nstring \"{stem}\"\nstring \"Synthetic {stem}\"\nstring \"{stem}.OT\"\n"
-    );
-    text += &format!(":shape\nstring \"{stem}.SH\"\nend\n");
-    text.into_bytes()
-}
-
-/// The class a placeholder's picks carry in the fixture.
-fn placeholder_class(placeholder: Placeholder) -> u16 {
-    match placeholder {
-        Placeholder::Sam => class::SAM,
-        Placeholder::Aaa => class::AAA,
-        Placeholder::Tank => class::TANK,
-        Placeholder::Afv | Placeholder::Vehicle => class::VEHICLE,
-        _ => class::SHIP,
-    }
-}
-
-/// Where the fixture's objects stand: the middle of the synthetic theater.
-pub(super) const MIDDLE: i32 = AIRPORT_AT as i32;
-
-/// The synthetic import with every equipment-list type, a few named types,
-/// a base layout with surface units on both sides and two templates.
-pub(super) fn surface_resources() -> BTreeMap<String, Vec<u8>> {
-    let mut r = resources();
-    let shape = r["F18.SH"].clone();
-    let add_nt = |r: &mut BTreeMap<String, Vec<u8>>, stem: &str, bytes: Vec<u8>| {
-        r.insert(format!("{stem}.NT"), bytes);
-        r.insert(format!("{stem}.SH"), shape.clone());
-    };
-    for lists in tables::LISTS {
-        for group in lists.groups {
-            for name in group {
-                if r.contains_key(*name) {
-                    continue;
-                }
-                let stem = name.trim_end_matches(".NT");
-                let class = placeholder_class(lists.placeholder);
-                let armed = matches!(class, class::SAM | class::AAA | class::TANK);
-                let mounts: &[(&str, i32)] = if armed { &[("GUN.JT", 32767)] } else { &[] };
-                let util = if matches!(stem, "KIEV" | "NIMZ" | "CLEM") {
-                    "_CARRIERProc"
-                } else {
-                    "_GVProc"
-                };
-                add_nt(&mut r, stem, nt(stem, class, 100, util, mounts));
-            }
-        }
-    }
-    add_nt(
-        &mut r,
-        "GCI",
-        nt("GCI", class::STRUCTURE, 100, "_OBJProc", &[("GCIR.SEE", 1)]),
-    );
-    add_nt(
-        &mut r,
-        "MISTRK",
-        nt("MISTRK", class::VEHICLE, 50, "_GVProc", &[]),
-    );
-    add_nt(
-        &mut r,
-        "TROOPS",
-        nt(
-            "TROOPS",
-            class::OTHER,
-            5,
-            "_GVProc",
-            &[("SMLARMS.JT", 32767)],
-        ),
-    );
-    // Ships have a damaged `_A` shape.
-    for stem in ["KIEV", "KRIVAK", "CARGO"] {
-        r.insert(format!("{stem}_A.SH"), shape.clone());
-    }
-    for stem in ["BNK5", "~BNK5", "STORE", "DEST"] {
-        r.insert(format!("{stem}.OT"), ot(stem, class::STRUCTURE, 250));
-        r.insert(format!("{stem}.SH"), shape.clone());
-    }
-    // The base layout: an enemy SA-6 (`nationality3`), a friendly ZSU-23
-    // (`nationality3`), an enemy store (`nationality2`), an enemy supply
-    // truck and a store with no owner.
-    let place = |ty: &str, dx: i32, owner: &str| {
-        format!(
-            "obj\n\ttype {ty}\n\tpos {} 0 {}\n\tangle 0 0 0\n{owner}\tflags $13\n\t.\n",
-            MIDDLE + dx,
-            MIDDLE
-        )
-    };
-    let layout = String::from("textFormat\nmap UKR.T2\nlayer CLEAR.LAY 0\ntime 12 0\n")
-        + &place("SA6.NT", 0, "\tnationality3 152\n")
-        + &place("ZSU23.NT", 500, "\tnationality3 39\n")
-        + &place("STORE.OT", 1000, "\tnationality2 137\n")
-        + &place("MISTRK.NT", 1500, "\tnationality3 152\n")
-        + &place("STORE.OT", 2000, "");
-    r.insert("UKR.MM".into(), layout.into_bytes());
-    r.insert("~QUCITY.M".into(), test_template().into_bytes());
-    r.insert("~QUSFLT.M".into(), fleet_template().into_bytes());
-    r
-}
-
-/// One template object, at `dx` feet east of the middle.
-fn object(ty: &str, dx: i32, owner: &str, flags: &str, extra: &str) -> String {
-    format!(
-        "obj\n\ttype {ty}\n\tpos {} 0 {}\n\tangle 90 0 0\n\t{owner}\n\tflags {flags}\n\tspeed 0\n\talias {}\n{extra}\t.\n",
-        MIDDLE + dx,
-        MIDDLE + 5000,
-        dx / 100 + 1
-    )
-}
-
-/// A defended site: 6 `<sam>` and 6 `<aaa>` slots (the first `<sam>` a
-/// target), a bunker target (ordinal 12), a tank, a supply truck, a friendly
-/// `nationality3` ZSU-23 (15) and a parked aircraft target (16).
-fn test_template() -> String {
-    let mut text = String::new();
-    let mut dx = 0;
-    let mut next = || {
-        dx += 300;
-        dx
-    };
-    text += &object("<sam>", next(), "nationality2 137", "$93", "\tskill 2\n");
-    for _ in 0..5 {
-        text += &object("<sam>", next(), "nationality2 137", "$13", "");
-    }
-    for _ in 0..6 {
-        text += &object("<aaa>", next(), "nationality2 137", "$13", "\tskill 3\n");
-    }
-    text += &object("BNK5.OT", next(), "nationality2 137", "$93", "");
-    text += &object("<tank>", next(), "nationality 0", "$13", "");
-    text += &object("TRUCK.NT", next(), "nationality2 137", "$13", "");
-    text += &object("ZSU23.NT", next(), "nationality3 39", "$13", "");
-    text += &object("F18.PT", next(), "nationality2 137", "$97", "");
-    text
-}
-
-/// A fleet with a carrier target and an aircraft, which is a deck launch.
-fn fleet_template() -> String {
-    object("KIEV.NT", 0, "nationality2 137", "$93", "")
-        + &object("<destroyer>", 2000, "nationality2 137", "$13", "")
-        + &object(
-            "F18.PT",
-            400,
-            "nationality2 137",
-            "$13",
-            "\tstartTime 3600\n",
-        )
-}
-
-pub(super) fn target(stem: &str, aaa: usize, sam: usize, seed: u32) -> GroundTarget {
-    GroundTarget {
-        stem: stem.into(),
-        aaa,
-        sam,
-        seed,
-        // Russian: equipment group 2.
-        enemy_nationality: 10,
-        night_stealth: false,
-        variation: layout::Variation::ON,
-        separation_nm: 5,
-    }
-}
+pub(super) use crate::test_support::surface::{MIDDLE, surface_resources, target};
 
 fn resolve_with(
     r: &BTreeMap<String, Vec<u8>>,
@@ -878,6 +640,45 @@ fn airfield_resources() -> BTreeMap<String, Vec<u8>> {
     layout += &strip(0, -40 * nm, "\tnationality3 0\n");
     r.insert("UKR.MM".into(), layout.into_bytes());
     r
+}
+
+#[test]
+fn each_airfield_takes_its_layout_side_and_ai_homes_follow_it() {
+    use crate::ai_wings::Airfields;
+    use tore_sim::{ai::launch::Side, airport::Allegiance};
+    let r = airfield_resources();
+    let spec = MissionSpec::new(THEATER, AircraftId::F18);
+    let world = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    let scene = &world.terrain.airport_scene;
+    let strip = |n| LAYOUT_OBJECT_BASE + n;
+    let side_of = |n| {
+        let id = scene.runway(strip(n)).unwrap().airport;
+        scene
+            .airports
+            .iter()
+            .find(|a| a.id == id)
+            .unwrap()
+            .allegiance
+    };
+    // Beside the target (no owner), west (Blue), east (Red), south (Blue).
+    assert_eq!(
+        [5, 6, 7, 8].map(side_of),
+        [
+            Allegiance::Neutral,
+            Allegiance::Friendly,
+            Allegiance::Hostile,
+            Allegiance::Friendly
+        ]
+    );
+    let fields = Airfields::from_world(&world.terrain, None);
+    let at = |n| world.terrain.runway_view(strip(n)).unwrap().center;
+    let home = |n, side| fields.home(at(n), side).map(|r| r.object);
+    // Over the Red field Blue goes home to the neutral one beside the
+    // target, the nearest it may use; over a Blue field Redfor does too.
+    assert_eq!(home(7, Side::Friendly), Some(strip(5)));
+    assert_eq!(home(7, Side::Enemy), Some(strip(7)));
+    assert_eq!(home(6, Side::Enemy), Some(strip(5)));
+    assert_eq!(home(6, Side::Friendly), Some(strip(6)));
 }
 
 #[test]

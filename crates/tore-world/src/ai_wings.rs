@@ -808,17 +808,17 @@ pub struct Airfields {
 impl Airfields {
     /// `fitted`, agent decision 2026-09-23: which airfields each side may
     /// return to. It mirrors the player's tower service and airport list: a
-    /// friendly field, or a neutral one that grants permission. Allegiance is
-    /// recorded from the player's point of view, so for the enemy side a
-    /// hostile field is its own. The single neutral-permission flag is used for
-    /// both sides because no per-side permission is recorded.
+    /// field of the side, or a neutral one that grants permission
+    /// ([`Airport::serves`](tore_sim::airport::Airport::serves)). Allegiance is
+    /// recorded from Blue's point of view and taken from the runway's layout
+    /// side (slice AL1), so for the enemy side a hostile field is its own. The
+    /// single neutral-permission flag is used for both sides because no
+    /// per-side permission is recorded.
     pub fn from_scene(scene: &tore_sim::airport::Scene, departure: Option<Departure>) -> Self {
-        use tore_sim::airport::Allegiance;
         let mut runways = Vec::new();
         for airport in &scene.airports {
-            let neutral = airport.allegiance == Allegiance::Neutral && airport.neutral_permission;
-            let friendly = neutral || airport.allegiance == Allegiance::Friendly;
-            let enemy = neutral || airport.allegiance == Allegiance::Hostile;
+            let friendly = airport.serves(false);
+            let enemy = airport.serves(true);
             if !friendly && !enemy {
                 continue;
             }

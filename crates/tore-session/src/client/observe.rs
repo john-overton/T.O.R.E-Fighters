@@ -103,6 +103,9 @@ pub struct ObserverFrame {
     /// The mission-wide events released since the last frame, in tick
     /// order, once the picture reached them.
     pub events: Vec<ReceivedEvent>,
+    /// The surface units not as the mission built them, at `render_tick`
+    /// (protocol 22), as [`super::ClientFrame::surface_units`].
+    pub surface_units: std::collections::BTreeMap<u32, crate::wire::events::SurfaceUnitView>,
 }
 
 impl Client {
@@ -243,20 +246,10 @@ impl Client {
         self.stats.far_frames += drawn.far as u64;
         self.stats.far_extrapolated += drawn.far_extrapolated as u64;
 
+        let surface_units = self.surface_at(render);
         let mission = self.mission.as_ref()?;
         let mut targets = drawn.aircraft;
-        targets.extend(mission.ground.iter().map(|pose| {
-            let mut pose = pose.clone();
-            if self
-                .destroyed
-                .get(&pose.id)
-                .is_some_and(|tick| f64::from(*tick) <= render)
-            {
-                pose.damage.hp = 0;
-                pose.crashed = true;
-            }
-            pose
-        }));
+        targets.extend(self.ground_at(&mission.ground, &drawn.surface, &surface_units, render));
         self.effects
             .retain(|e| f64::from(e.tick) + f64::from(e.ticks) > render);
         let effects = self
@@ -294,14 +287,14 @@ impl Client {
             debris: drawn.debris,
             pilots: drawn.pilots,
             models: mission.models.clone(),
-            // Moving surface units reach clients with the network slice (N1).
-            surface: Vec::new(),
+            surface: self.moving_at(drawn.surface, render),
         };
         Some(ObserverFrame {
             flight,
             render_tick: render,
             picture,
             events: std::mem::take(&mut self.released),
+            surface_units,
         })
     }
 }

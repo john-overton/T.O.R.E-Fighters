@@ -424,6 +424,7 @@ fn replay_reader(
                         alive: launcher.alive,
                         speed_fps: launcher.speed_fps,
                         ground_clearance_ft: 0.,
+                        redfor: false,
                     };
                     service.step(scene, aircraft);
                     let _ = service.guidance(scene, aircraft);
@@ -457,6 +458,7 @@ fn replay_reader(
                         alive: launcher.alive,
                         speed_fps: launcher.speed_fps,
                         ground_clearance_ft: 0.,
+                        redfor: false,
                     },
                     airport_command(action).unwrap(),
                 );
@@ -476,6 +478,7 @@ fn replay_reader(
             alive: launcher.alive,
             speed_fps: launcher.speed_fps,
             ground_clearance_ft: 0.,
+            redfor: false,
         });
     }
     Err("combat tape record bound".into())
