@@ -12,7 +12,8 @@ struct Params {
  // Half-view tangents across and up, pixels per unit size at unit distance,
  // the smallest drawn size in pixels.
  view:vec4<f32>,
- // Instances, pieces, the smallest full detail size in pixels (f32 bits).
+ // Instances, pieces, the smallest full detail size in pixels (f32 bits),
+ // the shadow casting distance in feet (f32 bits).
  counts:vec4<u32>,
 }
 struct Args { vertex_count:u32, instance_count:u32, first_vertex:u32, first_instance:u32 }
@@ -24,6 +25,8 @@ struct Args { vertex_count:u32, instance_count:u32, first_vertex:u32, first_inst
 @group(0) @binding(4) var<storage,read_write> full:array<vec4<f32>>;
 @group(0) @binding(5) var<storage,read_write> boxes:array<vec4<f32>>;
 @group(0) @binding(6) var<storage,read_write> args:array<Args>;
+// Every drawn building's box, for the shadow maps.
+@group(0) @binding(7) var<storage,read_write> shadows:array<vec4<f32>>;
 
 @compute @workgroup_size(256) fn cull(@builtin(global_invocation_id) id:vec3<u32>) {
  let i=id.x;
@@ -50,6 +53,14 @@ struct Args { vertex_count:u32, instance_count:u32, first_vertex:u32, first_inst
  var detailed=dist<params.tiers.x || (dist<params.tiers.y && inst.hash<(params.tiers.y-dist)/band);
  // Smaller on screen than the detail size: the far box instead.
  if max(2.0*r,piece.height)*params.view.z<bitcast<f32>(params.counts.z)*max(dist,1.0) {detailed=false;}
+ // Drawn buildings inside the shadow distance cast their box's shadow.
+ if dist<bitcast<f32>(params.counts.w) {
+  let k=atomicAdd(&counts[params.counts.y+1u],1u);
+  let at=k*3u;
+  shadows[at]=vec4<f32>(rel,piece.color);
+  shadows[at+1u]=vec4<f32>(inst.turn,share*piece.height,0.0);
+  shadows[at+2u]=vec4<f32>(piece.half_x,piece.half_z,0.0,0.0);
+ }
  if detailed {
   let k=atomicAdd(&counts[inst.piece],1u);
   let at=(piece.offset+k)*2u;
@@ -65,12 +76,16 @@ struct Args { vertex_count:u32, instance_count:u32, first_vertex:u32, first_inst
 }
 
 // The indirect draws' instance counts: each piece's solid and textured
-// draws, then the far boxes.
+// draws, then the far boxes, then the shadow boxes.
 @compute @workgroup_size(64) fn finish(@builtin(global_invocation_id) id:vec3<u32>) {
  let p=id.x;
  let pieces_n=params.counts.y;
- if p>pieces_n {return;}
+ if p>pieces_n+1u {return;}
  let n=atomicLoad(&counts[p]);
- args[2u*p].instance_count=n;
- if p<pieces_n {args[2u*p+1u].instance_count=n;}
+ if p<pieces_n {
+  args[2u*p].instance_count=n;
+  args[2u*p+1u].instance_count=n;
+ } else {
+  args[pieces_n+p].instance_count=n;
+ }
 }

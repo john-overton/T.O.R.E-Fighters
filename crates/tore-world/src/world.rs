@@ -326,6 +326,10 @@ impl World {
         resources: &dyn ResourceSource,
     ) -> WorldResult<Restarted> {
         let open = self.combat.is_open();
+        // The city fill's knocked-down buildings stand again.
+        if let Some(fill) = &self.terrain.city_fill {
+            fill.reset();
+        }
         // A fixed seed keeps headless runs deterministic.
         self.comms.restart(1);
         self.wing_status.reset();

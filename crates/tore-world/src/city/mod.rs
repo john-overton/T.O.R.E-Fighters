@@ -55,6 +55,22 @@ pub fn cap() -> usize {
     CAP.load(Ordering::Relaxed)
 }
 
+/// A building falls where a ground burst still passes on at least this
+/// percent of its record's damage (fitted): a Mk 84's 70 percent at the
+/// burst reaches it out to 571 ft of its 1,000 ft radius; a missile's 17.5
+/// percent knocks nothing down.
+pub const FLATTEN_PERCENT: i32 = 30;
+
+/// How far a ground burst with collateral `radius` (feet) and `percent` at
+/// the burst knocks fill buildings flat: where the splash's straight-line
+/// fall-off reaches [`FLATTEN_PERCENT`].
+pub fn flatten_radius(radius: f64, percent: i32) -> f64 {
+    if percent <= FLATTEN_PERCENT || radius <= 0. {
+        return 0.;
+    }
+    radius * f64::from(percent - FLATTEN_PERCENT) / f64::from(percent)
+}
+
 /// One fill building.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Instance {
@@ -200,6 +216,18 @@ impl CityFill {
         }
     }
 
+    /// Stands every knocked-down building up again: a restarted flight
+    /// starts with the city whole.
+    pub fn reset(&self) {
+        let mut any = false;
+        for word in &self.flattened {
+            any |= word.swap(0, Ordering::Relaxed) != 0;
+        }
+        if any {
+            self.version.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     /// Whether building `n` is knocked flat.
     pub fn is_flattened(&self, n: usize) -> bool {
         self.flattened[n / 64].load(Ordering::Relaxed) & (1 << (n % 64)) != 0
@@ -320,7 +348,26 @@ impl CityFill {
 
 fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
     let base = tore_formats::theater::base_theater(&terrain.layout).unwrap_or("");
-    let map = mask::LightMap::build(resources, &terrain.environment, base);
+    // A theater with no city pictures fills its retail clusters' footprints
+    // at the retail shape scale, three times their drawn size.
+    let districts: Vec<mask::District> = terrain
+        .airport_scene
+        .objects
+        .iter()
+        .filter(|o| {
+            crate::surface::UnitId(o.id).range() == crate::surface::IdRange::Layout
+                && kit::CLUSTERS.contains(&o.object_type.as_str())
+        })
+        .map(|o| {
+            let k = fill::Keepout::of(o);
+            mask::District {
+                center: k.center,
+                half: [k.half[0] * 3, k.half[1] * 3],
+                heading: k.heading,
+            }
+        })
+        .collect();
+    let map = mask::LightMap::build(resources, &terrain.environment, base, &districts);
     let kit = kit::Kit::load(resources);
     let keepouts: Vec<fill::Keepout> = terrain
         .airport_scene
@@ -450,5 +497,20 @@ mod tests {
         );
         // Already flat: nothing more falls.
         assert_eq!(f.flatten([10_300., 0., 20_000.], 500.), 0);
+        // A restart stands it up again.
+        f.reset();
+        assert!(!f.is_flattened(0));
+        assert_eq!(f.version(), 2);
+        assert!(
+            f.contact([9_900., 250., 20_000.], [10_100., 250., 20_000.])
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn only_a_strong_ground_burst_flattens() {
+        assert_eq!(flatten_radius(1_000., 70), 1_000. * 40. / 70.);
+        assert_eq!(flatten_radius(750., 17), 0.);
+        assert_eq!(flatten_radius(0., 100), 0.);
     }
 }

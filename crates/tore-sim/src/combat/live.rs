@@ -1148,6 +1148,15 @@ pub enum EffectKind {
     /// before it, a flash of light (docs/spec/surface-defenses.md, "Flak").
     Flak,
 }
+/// A round that went off on the ground with a splash this step: where, how
+/// far its collateral reaches, and the percent of the record's damage it
+/// passes on at the burst (its record's percent times the ground share).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundBurst {
+    pub position: Vector,
+    pub radius: f64,
+    pub percent: i32,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
     pub position: Vector,
@@ -1336,6 +1345,10 @@ pub struct State {
     device_log: std::collections::VecDeque<DeviceNote>,
     /// The ownships' decoy rolls since the last drain, for recordings.
     decoy_log: std::collections::VecDeque<DecoyRoll>,
+    /// This step's ground detonations with a splash, for scenery that only
+    /// needs to know what they knocked flat (the city fill); the host drains
+    /// it after each step. Not checkpointed.
+    pub ground_bursts: Vec<GroundBurst>,
     pub debris: Vec<super::debris::Piece>,
     /// Launches, outcomes and kills by shooter, for the debrief.
     pub ledger: super::ledger::Ledger,
@@ -2531,6 +2544,7 @@ impl State {
             devices: Default::default(),
             device_log: Default::default(),
             decoy_log: Default::default(),
+            ground_bursts: Vec::new(),
             debris: Vec::new(),
             ledger: Default::default(),
             tick: 0,
@@ -4983,6 +4997,16 @@ impl State {
         }
         for id in parked_wrecks {
             self.parked_destroyed(id);
+        }
+        self.ground_bursts.clear();
+        for burst in &bursts {
+            if burst.collateral() && burst.share < 100 {
+                self.ground_bursts.push(GroundBurst {
+                    position: burst.position,
+                    radius: burst.radius,
+                    percent: burst.percent * burst.share / 100,
+                });
+            }
         }
         for burst in &bursts {
             self.apply_burst(

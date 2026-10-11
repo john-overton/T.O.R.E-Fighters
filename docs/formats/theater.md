@@ -69,26 +69,42 @@ retaining the original textures and weather colors. Whitecaps are removed. [Sour
 
 ## City texture light areas (CF0 prototype)
 
-Measured 2026-10-10 on the Ukraine art; the reader is `tore_world::city::mask`
-and the opt-in fill that uses it is `tore_world::city` (`TORE_CITY_FILL=1`).
-The terrain class and colour bytes do not mark cities
-([terrain materials](terrain-materials.md)); the city tile pictures do.
+Measured 2026-10-10 over all sixteen theaters (`tore-app --city-fill-survey`);
+the reader is `tore_world::city::mask` and the opt-in fill that uses it is
+`tore_world::city` (`TORE_CITY_FILL=1`). The terrain class and colour bytes do
+not mark cities ([terrain materials](terrain-materials.md)); the city tile
+pictures do.
 
-- Ukraine's city art is `UKR1` (downtown, 6 placements), `UKR2` (edge, 27),
-  `UKR3` (corner, 50) and the coastal `UKR4` to `UKR6` and `UKR26` (1 each).
-  A full city is a 3 by 3 block of placements, about 16 nm across, with
-  `UKR1` in the middle; corner tiles alone make the towns. 87 placements in
-  13 touching groups.
-- The art paints built-up land in one brown ramp, palette indices 198
-  (lightest, luma about 225 at noon) to 207 (darkest, about 30); 192 to 197
-  and 208 to 215 are greens, 224 a grey-green dot, 217 to 223 blue dots, 254
-  white, 255 the water cutout. A city picture has at least half its land in
-  the ramp and at least one texel in twenty at 198 to 201; shore, field and
-  forest pictures stay under 0.35.
-- Light roofs are 198 to 202. Residential streets are one or two texel lines
-  of 200 to 203 with 224 dots; downtown streets are dark lines of 204 to 207.
-  A texel is a street when its run of either class along a row, column or
-  diagonal is at least 8 texels (1,024 ft) and at most 2 (256 ft) across.
+- Fifteen theaters reuse one set of city pictures, the same indices under
+  each theater's prefix: 1 (downtown), 2 (edge), 3 (corner), 4, 5, 6 and 26
+  (coastal), 55 and 56 (towns sitting in fields) and 60 and 62 (Baltic). A
+  full city is a 3 by 3 block of placements, about 16 nm across, with 1 in
+  the middle; corner pictures alone make the smaller cities. North Vietnam
+  has none: its retail city clusters sit on jungle pictures.
+- The art paints built-up land in one ramp of palette indices, 198 to 207;
+  192 to 197 and 208 to 215 are parks and fields (sand in Egypt), 224 a
+  grey-green dot, 217 to 223 blue dots, 254 white, 255 the water cutout.
+  Each theater's reference palette (the clear-day layer, condition 0, at
+  noon) paints the ramp light to dark (Ukraine: 198 luma about 225, 207
+  about 30; Egypt 219 to 28) in every theater but North Vietnam, where it is
+  jungle green.
+- Classes from that palette: light roofs are ramp indices with luma at
+  least 115 (and 254); residential streets ramp indices with luma 100 to
+  180 and the 224 dots; downtown streets ramp indices darker than 90 and
+  224. A texel is a street when its run of either street class along a row,
+  column or diagonal is at least 8 texels (1,024 ft) and at most 2 (256 ft)
+  across.
+- A picture is city art when at least one land texel in twenty is a light
+  roof, at least one in fifty steps three or more ramp shades from its right
+  neighbour (Kurile's snow and rock, smooth ramp art, stay under one in a
+  hundred), and either at least half its land is ramp (city pictures) or it
+  has no water, at least a quarter ramp and at least half of its non-green
+  land ramp (the town pictures; shoreline pictures also carry ramp sand but
+  have water).
+- Result: city or town pictures in every theater but Kurile; North Vietnam
+  fills each retail cluster's footprint at the retail shape scale (three
+  times its drawn size) as a round village thinning from 60 to 10 percent
+  of texels toward its edge.
 - At 128 ft per texel the downtown blocks are about 2,000 ft and the painted
   roofs 500 to 1,300 ft: the art is drawn at about the retail 3x object
   scale.
@@ -98,9 +114,8 @@ The terrain class and colour bytes do not mark cities
   draws it (picture row 0 is the north edge at rotation 0). A quarter turn
   swaps the two diagonals.
 
-Other theaters use other ramps; they are not measured yet. The development
-aid `tore-app --city-fill-dump OUT [THEATER]` writes each city's mask and
-fill images and prints the counts.
+The development aid `tore-app --city-fill-dump OUT [THEATER]` writes each
+city's mask and fill images and prints the counts.
 
 ## Mission environment and weather modules
 

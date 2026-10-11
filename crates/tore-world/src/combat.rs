@@ -1510,6 +1510,16 @@ impl Combat {
             |x, z| f64::from(world.height(x as f32, z as f32)),
             |x, z| world.over_water(x, z),
         ));
+        // The city fill's buildings within a ground burst's flattening reach
+        // fall (scenery only: nothing is scored).
+        for burst in self.state.ground_bursts.drain(..) {
+            if let Some(fill) = &world.city_fill {
+                fill.flatten(
+                    burst.position,
+                    crate::city::flatten_radius(burst.radius, burst.percent),
+                );
+            }
+        }
         for (aircraft, s) in flights.iter_mut() {
             let aircraft = *aircraft;
             let Some(own) = self.state.ownship(aircraft) else {

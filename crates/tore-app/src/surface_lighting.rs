@@ -134,6 +134,9 @@ pub struct SurfaceLighting {
     pub layout: wgpu::BindGroupLayout,
     pub bind: wgpu::BindGroup,
     caster_bind: wgpu::BindGroup,
+    /// The shadow casting pipeline layout (material, projection), for
+    /// casters drawn by other renderers (the city fill).
+    pub caster_layout: wgpu::PipelineLayout,
     uniform: wgpu::Buffer,
     views: Vec<wgpu::TextureView>,
     pipeline: wgpu::RenderPipeline,
@@ -299,6 +302,7 @@ impl SurfaceLighting {
             layout,
             bind,
             caster_bind,
+            caster_layout: pipeline_layout.clone(),
             uniform,
             views,
             pipeline: make("shadow_fragment", false),
@@ -393,6 +397,35 @@ impl SurfaceLighting {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..*count, cascade as u32..cascade as u32 + 1);
             }
+        }
+    }
+}
+
+impl SurfaceLighting {
+    /// More casters after [`SurfaceLighting::draw`]: `cast` draws into each
+    /// cascade's map in turn (keeping what is there), with the projection
+    /// bound at group 1 and the cascade index given.
+    pub fn draw_more(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        mut cast: impl FnMut(&mut wgpu::RenderPass<'_>, usize),
+    ) {
+        for (cascade, view) in self.views.iter().enumerate() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("City fill shadow pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(1, &self.caster_bind, &[]);
+            cast(&mut pass, cascade);
         }
     }
 }

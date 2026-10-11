@@ -413,6 +413,7 @@ pub fn place(
         });
         lots.sort_by_key(|lot| lot.ordinal);
     }
+    let variety = format!("{stem}:VARIETY");
     let mut out = Vec::with_capacity(lots.len());
     for lot in &lots {
         let mut stream = Stream::new(0, &stem, lot.ordinal, Purpose::CityFill);
@@ -435,9 +436,27 @@ pub fn place(
             ((lot.x - city.center[0]).pow(2) + (lot.z - city.center[1]).pow(2)) as u128,
         ) as i64;
         let downtown = d * 1_000 / city.radius < DOWNTOWN;
+        // Per-city variety: each city builds its towers and apartments from
+        // its own seeded half of the kit's, so cities on the same art differ.
+        let own = |class: Class, pieces: Vec<usize>| -> Vec<usize> {
+            if !matches!(class, Class::Tower | Class::Apartment) {
+                return pieces;
+            }
+            let kept: Vec<usize> = pieces
+                .iter()
+                .copied()
+                .filter(|&p| {
+                    let key = (lot.city as u32).wrapping_mul(1_000_003) ^ p as u32;
+                    Stream::new(0, &variety, key, Purpose::CityFill)
+                        .next_u64()
+                        .is_multiple_of(2)
+                })
+                .collect();
+            if kept.is_empty() { pieces } else { kept }
+        };
         let choices: Vec<(Vec<usize>, u64)> = weights(lot, downtown)
             .iter()
-            .map(|&(class, w)| (fits(class), w))
+            .map(|&(class, w)| (own(class, fits(class)), w))
             .filter(|(pieces, _)| !pieces.is_empty())
             .collect();
         let total: u64 = choices.iter().map(|c| c.1).sum();
@@ -549,7 +568,7 @@ mod tests {
             mask::PlacedTile {
                 texture: "T.PIC".into(),
                 rotation: 1,
-                mask: Arc::new(mask::TileMask::classify(&pixels)),
+                mask: Arc::new(mask::TileMask::classify(&pixels, &mask::Classes::ukraine())),
             },
         );
         map

@@ -2,17 +2,23 @@
 //!
 //! A ground texture placement (`tmap col row texture rotation`) covers four
 //! grid cells, 32,768 ft, with a 256 by 256 indexed picture: 128 ft per
-//! texel. The Ukraine city art paints its built-up land in one brown ramp of
-//! palette indices, 198 (lightest, luma about 225 at noon) to 207 (darkest,
-//! about 30), with greens at 192 to 197 for parks and fields and 255 for the
-//! water cutout. Light roofs are 198 to 202; residential streets are long one
-//! or two texel lines of 200 to 203 with 224 dots; downtown streets are dark
-//! lines of 204 to 207.
+//! texel. Fifteen of the sixteen theaters reuse one set of city pictures
+//! (numbered 1 to 6, 26, 55, 56 and 60 in each theater's own prefix, the same
+//! indices with the theater's palette), painting built-up land in one ramp of
+//! palette indices, 198 (lightest) to 207 (darkest), with 192 to 197 for
+//! parks and fields (sand in Egypt) and 255 for the water cutout. Light roofs
+//! are the light end of the ramp; residential streets are long one or two
+//! texel lines of its middle with 224 dots; downtown streets are dark lines
+//! of its dark end. Measured 2026-10-10 over all sixteen theaters
+//! (`tore-app --city-fill-survey`).
 //!
-//! Every rule here reads palette indices, never resolved colours, so the mask
-//! is the same in every weather, at every time of day and on every machine.
-//! The index ramps were measured on the Ukraine art (fitted); other theaters
-//! need their ramps measured before this applies to them.
+//! Which ramp indices count as light or dark is read from the theater's
+//! reference palette (the clear-day layer at noon), so a theater whose
+//! palette paints the ramp differently gets its own classes; North Vietnam's
+//! paints it as jungle and has no city pictures at all, and fills its retail
+//! city clusters' footprints instead ([`LightMap::districts`]). Every rule
+//! reads palette indices through that fixed reference, never the mission's
+//! colours, so the mask is the same in every weather and on every machine.
 
 use crate::resources::ResourceSource;
 use std::{collections::BTreeMap, sync::Arc};
@@ -47,28 +53,129 @@ pub const STREET_MIN_RUN: u16 = 8;
 /// ... and at most this many texels wide across the run (256 ft; fitted).
 pub const STREET_MAX_WIDTH: u16 = 2;
 
-fn roof(index: u8) -> bool {
-    matches!(index, 198..=202 | 254)
-}
-fn light_street(index: u8) -> bool {
-    matches!(index, 200..=203 | 224 | 254)
-}
-fn dark_street(index: u8) -> bool {
-    matches!(index, 204..=207 | 224)
-}
-fn green(index: u8) -> bool {
-    matches!(index, 192..=197 | 208..=215)
+/// The texel classes of a theater's palette indices.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Classes {
+    /// The city ramp, 198 to 207.
+    pub ramp: [bool; 256],
+    /// Light roofs: ramp indices (and 254) at least [`ROOF_LUMA`] bright.
+    pub roof: [bool; 256],
+    /// Residential street lines: ramp indices between [`STREET_LUMA`]'s
+    /// bounds, and the 224 dots.
+    pub light_street: [bool; 256],
+    /// Downtown street lines: ramp indices darker than [`DARK_LUMA`], and 224.
+    pub dark_street: [bool; 256],
+    /// Parks, fields and gardens: 192 to 197 and 208 to 215.
+    pub green: [bool; 256],
 }
 
-/// Whether a ground picture is city art: at least half its land texels in
-/// the brown ramp and at least one in twenty a light roof (fitted, measured
-/// on UKR1 to UKR6 and UKR26; shoreline, field and forest tiles stay under
-/// 0.35 brown).
-pub fn is_city_tile(pixels: &[u8]) -> bool {
+/// A ramp index this bright at noon is a light roof (luma, fitted: the
+/// Ukraine ramp's 202 is 133, Egypt's 121, their 203s 107 and 103).
+pub const ROOF_LUMA: u32 = 115;
+/// A ramp index in this luma range is a residential street colour (fitted).
+pub const STREET_LUMA: [u32; 2] = [100, 180];
+/// A ramp index darker than this is a downtown street colour (fitted).
+pub const DARK_LUMA: u32 = 90;
+
+fn luma(c: [u8; 3]) -> u32 {
+    (u32::from(c[0]) * 299 + u32::from(c[1]) * 587 + u32::from(c[2]) * 114) / 1000
+}
+
+impl Classes {
+    /// The classes a reference palette gives.
+    pub fn from_palette(palette: &[[u8; 3]; 256]) -> Self {
+        let mut out = Self {
+            ramp: [false; 256],
+            roof: [false; 256],
+            light_street: [false; 256],
+            dark_street: [false; 256],
+            green: [false; 256],
+        };
+        for (i, &color) in palette.iter().enumerate() {
+            let l = luma(color);
+            let ramp = (198..=207).contains(&i);
+            out.ramp[i] = ramp;
+            out.roof[i] = (ramp || i == 254) && l >= ROOF_LUMA;
+            out.light_street[i] =
+                (ramp && (STREET_LUMA[0]..=STREET_LUMA[1]).contains(&l)) || i == 224;
+            out.dark_street[i] = (ramp && l < DARK_LUMA) || i == 224;
+            out.green[i] = matches!(i, 192..=197 | 208..=215);
+        }
+        out
+    }
+    /// The Ukraine classes, for a theater without a readable reference
+    /// palette.
+    pub fn ukraine() -> Self {
+        let mut out = Self {
+            ramp: [false; 256],
+            roof: [false; 256],
+            light_street: [false; 256],
+            dark_street: [false; 256],
+            green: [false; 256],
+        };
+        for i in 0..256 {
+            let i8 = i as u8;
+            out.ramp[i] = (198..=207).contains(&i8);
+            out.roof[i] = matches!(i8, 198..=202 | 254);
+            out.light_street[i] = matches!(i8, 200..=203 | 224 | 254);
+            out.dark_street[i] = matches!(i8, 204..=207 | 224);
+            out.green[i] = matches!(i8, 192..=197 | 208..=215);
+        }
+        out
+    }
+}
+
+/// The theater's reference palette: the clear-day weather layer (condition
+/// 0) at noon at sea level, untinted. Integer data from the import, the same
+/// whatever the mission's weather, so the classifier reads every theater's
+/// picture indices by their daylight colours on every machine.
+pub fn reference_palette(resources: &dyn ResourceSource, map: &str) -> Option<[[u8; 3]; 256]> {
+    let layer = tore_sim::environment::layer_resource(0, map).ok()?;
+    let module = tore_formats::weather::Module::parse(resources.get(&layer)?).ok()?;
+    let configuration = tore_sim::environment::Configuration::new(module, 12, 0, 0, None).ok()?;
+    let base = *configuration.base_palette();
+    let environment = tore_sim::environment::Environment::new(configuration);
+    let sample = environment.sample(0.)?;
+    Some(tore_formats::weather::expand_effects(&base, &sample, 0, 0))
+}
+
+/// Whether a ground picture is city art (fitted, 2026-10-10, over all
+/// sixteen theaters):
+///
+/// - a city picture: at least half its land in the ramp; or a town picture
+///   (55 and 56, sitting in fields): no water, at least a quarter of it in
+///   the ramp and at least half of what is not park or field green
+///   (shoreline pictures, which also have ramp sand, have water);
+/// - at least one land texel in twenty a light roof;
+/// - busy: at least one land texel in fifty stepping three or more ramp
+///   shades from its right neighbour (Kurile's snow and rock, smooth ramp
+///   art, stay under one in a hundred).
+pub fn is_city_tile(pixels: &[u8], classes: &Classes) -> bool {
     let land = pixels.iter().filter(|&&p| p != 255).count();
-    let brown = pixels.iter().filter(|&&p| (198..=207).contains(&p)).count();
-    let light = pixels.iter().filter(|&&p| (198..=201).contains(&p)).count();
-    land > 0 && brown * 2 >= land && light * 20 >= land
+    let green = pixels
+        .iter()
+        .filter(|&&p| classes.green[usize::from(p)])
+        .count();
+    let ramp = pixels
+        .iter()
+        .filter(|&&p| classes.ramp[usize::from(p)])
+        .count();
+    let light = pixels
+        .iter()
+        .filter(|&&p| classes.roof[usize::from(p)] && p != 254)
+        .count();
+    let busy = pixels
+        .chunks_exact(TEXELS)
+        .flat_map(|row| row.windows(2))
+        .filter(|w| {
+            classes.ramp[usize::from(w[0])]
+                && classes.ramp[usize::from(w[1])]
+                && w[0].abs_diff(w[1]) >= 3
+        })
+        .count();
+    let city = ramp * 2 >= land;
+    let town = land == pixels.len() && ramp * 4 >= land && ramp * 2 >= land - green;
+    land > 0 && (city || town) && light * 20 >= land && busy * 50 >= land
 }
 
 /// The flags of every texel of one city picture, in picture order (row 0 is
@@ -79,7 +186,7 @@ pub struct TileMask {
 }
 
 impl TileMask {
-    pub fn classify(pixels: &[u8]) -> Self {
+    pub fn classify(pixels: &[u8], classes: &Classes) -> Self {
         assert_eq!(pixels.len(), TEXELS * TEXELS);
         let n = TEXELS as i32;
         let at = |c: i32, r: i32| (r * n + c) as usize;
@@ -121,6 +228,8 @@ impl TileMask {
             ((1, 1), (1, -1), STREET_D1),
             ((1, -1), (1, 1), STREET_D2),
         ];
+        let light_street = |p: u8| classes.light_street[usize::from(p)];
+        let dark_street = |p: u8| classes.dark_street[usize::from(p)];
         for class in [&light_street as &dyn Fn(u8) -> bool, &dark_street] {
             for ((dc, dr), (pc, pr), flag) in directions {
                 let along = runs(class, dc, dr);
@@ -135,9 +244,9 @@ impl TileMask {
         for (i, &p) in pixels.iter().enumerate() {
             if p == 255 {
                 flags[i] |= WATER;
-            } else if green(p) {
+            } else if classes.green[usize::from(p)] {
                 flags[i] |= GREEN;
-            } else if roof(p) && flags[i] & STREET == 0 {
+            } else if classes.roof[usize::from(p)] && flags[i] & STREET == 0 {
                 flags[i] |= SITE;
             }
         }
@@ -162,39 +271,106 @@ pub struct PlacedTile {
     pub mask: Arc<TileMask>,
 }
 
+/// A retail city cluster's footprint at the retail shape scale (three times
+/// its drawn size): where a theater without city pictures puts its fill, as
+/// a round village thinning toward its edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct District {
+    pub center: [i64; 2],
+    pub half: [i64; 2],
+    pub heading: i32,
+}
+
+impl District {
+    /// The chance in a hundred that a texel centre at `x`, `z` is a site:
+    /// 60 at the middle falling to 10 at the edge of the circle round the
+    /// footprint's longer half (fitted: villages, not squares), 0 outside.
+    fn density(&self, x: i64, z: i64) -> u64 {
+        let r = self.half[0].max(self.half[1]).max(1);
+        let d2 = (x - self.center[0]).pow(2) + (z - self.center[1]).pow(2);
+        if d2 > r * r {
+            return 0;
+        }
+        let d = crate::surface::layout::trig::isqrt(d2 as u128) as i64;
+        (60 - 50 * d / r) as u64
+    }
+}
+
+/// The picture column and row of world texel `tu` east, `tv` north inside a
+/// placement turned `rotation` quarter turns, as the terrain mesh draws it.
+fn picture_texel(tu: usize, tv: usize, rotation: u8) -> (usize, usize) {
+    match rotation % 4 {
+        0 => (tu, 255 - tv),
+        1 => (255 - tv, 255 - tu),
+        2 => (255 - tu, tv),
+        _ => (tv, tu),
+    }
+}
+
 /// The theater's city tiles, by grid key (`col & !3`, `row & !3`).
 #[derive(Clone, Debug, Default)]
 pub struct LightMap {
     pub tiles: BTreeMap<(i32, i32), PlacedTile>,
+    /// The cluster footprints filled instead, when the theater has no city
+    /// pictures (North Vietnam).
+    pub districts: Vec<District>,
+}
+
+/// A fixed number below 100 for a world texel, so a district's sites are
+/// scattered the same on every machine.
+fn texel_roll(x: i64, z: i64) -> u64 {
+    let mut h = (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (z as u64).rotate_left(29);
+    h ^= h >> 31;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    (h >> 33) % 100
 }
 
 impl LightMap {
-    /// Reads every ground placement's picture once and keeps the city ones.
+    /// Reads every ground placement's picture once and keeps the city ones,
+    /// classed by the theater's reference palette. A theater with no city
+    /// pictures fills `districts` instead.
     pub fn build(
         resources: &dyn ResourceSource,
         environment: &tore_formats::theater::Environment,
         base: &str,
+        districts: &[District],
     ) -> Self {
+        let classes = reference_palette(resources, &environment.map)
+            .map_or_else(Classes::ukraine, |p| Classes::from_palette(&p));
+        let mut pictures: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
+        let mut picture = |name: &str| -> Option<Vec<u8>> {
+            pictures
+                .entry(name.to_owned())
+                .or_insert_with(|| {
+                    let pic = tore_formats::Pic::parse(resources.get(name)?).ok()?;
+                    if pic.width != TEXELS || pic.height != TEXELS || !pic.palette.is_empty() {
+                        return None;
+                    }
+                    Some(
+                        pic.pixels
+                            .iter()
+                            .zip(&pic.mask)
+                            .map(|(p, m)| if *m { *p } else { 255 })
+                            .collect(),
+                    )
+                })
+                .clone()
+        };
         let mut masks: BTreeMap<String, Option<Arc<TileMask>>> = BTreeMap::new();
         let mut tiles = BTreeMap::new();
         for (key, placement) in &environment.textures {
             let name = placement.resource_name(base);
-            let mask = masks
-                .entry(name.clone())
-                .or_insert_with(|| {
-                    let pic = tore_formats::Pic::parse(resources.get(&name)?).ok()?;
-                    if pic.width != TEXELS || pic.height != TEXELS || !pic.palette.is_empty() {
-                        return None;
-                    }
-                    let pixels: Vec<u8> = pic
-                        .pixels
-                        .iter()
-                        .zip(&pic.mask)
-                        .map(|(p, m)| if *m { *p } else { 255 })
-                        .collect();
-                    is_city_tile(&pixels).then(|| Arc::new(TileMask::classify(&pixels)))
-                })
-                .clone();
+            let mask = match masks.get(&name) {
+                Some(mask) => mask.clone(),
+                None => {
+                    let mask = picture(&name).and_then(|pixels| {
+                        is_city_tile(&pixels, &classes)
+                            .then(|| Arc::new(TileMask::classify(&pixels, &classes)))
+                    });
+                    masks.insert(name.clone(), mask.clone());
+                    mask
+                }
+            };
             if let Some(mask) = mask {
                 tiles.insert(
                     *key,
@@ -206,7 +382,68 @@ impl LightMap {
                 );
             }
         }
-        Self { tiles }
+        if !tiles.is_empty() || districts.is_empty() {
+            return Self {
+                tiles,
+                districts: Vec::new(),
+            };
+        }
+        // No city pictures: a synthetic tile per tile a district touches,
+        // north up, sites on the district's land texels.
+        let cell = TILE_FT / 4;
+        let mut keys = std::collections::BTreeSet::new();
+        for d in districts {
+            let r = d.half[0].max(d.half[1]);
+            let lo = Self::key(d.center[0] - r, d.center[1] - r);
+            let hi = Self::key(d.center[0] + r, d.center[1] + r);
+            for kz in (lo.1..=hi.1).step_by(4) {
+                for kx in (lo.0..=hi.0).step_by(4) {
+                    keys.insert((kx, kz));
+                }
+            }
+        }
+        for key in keys {
+            let ground = environment
+                .textures
+                .get(&key)
+                .and_then(|p| picture(&p.resource_name(base)).map(|px| (px, p.rotation)));
+            let mut flags = vec![0u8; TEXELS * TEXELS];
+            let mut any = false;
+            for tv in 0..TEXELS {
+                for tu in 0..TEXELS {
+                    let x = i64::from(key.0) * cell + tu as i64 * TEXEL_FT + TEXEL_FT / 2;
+                    let z = i64::from(key.1) * cell + tv as i64 * TEXEL_FT + TEXEL_FT / 2;
+                    let water = ground.as_ref().is_some_and(|(px, rotation)| {
+                        let (c, r) = picture_texel(tu, tv, *rotation);
+                        px[r * TEXELS + c] == 255
+                    });
+                    let at = (255 - tv) * TEXELS + tu;
+                    if water {
+                        flags[at] = WATER;
+                    } else {
+                        let density = districts.iter().map(|d| d.density(x, z)).max().unwrap_or(0);
+                        if texel_roll(x, z) < density {
+                            flags[at] = SITE;
+                            any = true;
+                        }
+                    }
+                }
+            }
+            if any {
+                tiles.insert(
+                    key,
+                    PlacedTile {
+                        texture: String::new(),
+                        rotation: 0,
+                        mask: Arc::new(TileMask { flags }),
+                    },
+                );
+            }
+        }
+        Self {
+            tiles,
+            districts: districts.to_vec(),
+        }
     }
 
     /// The grid key of the tile holding world point `x`, `z` (feet).
@@ -229,12 +466,7 @@ impl LightMap {
         let cell = TILE_FT / 4;
         let tu = ((x - i64::from(key.0) * cell) / TEXEL_FT).clamp(0, 255) as usize;
         let tv = ((z - i64::from(key.1) * cell) / TEXEL_FT).clamp(0, 255) as usize;
-        let (col, row) = match tile.rotation % 4 {
-            0 => (tu, 255 - tv),
-            1 => (255 - tv, 255 - tu),
-            2 => (255 - tu, tv),
-            _ => (tv, tu),
-        };
+        let (col, row) = picture_texel(tu, tv, tile.rotation);
         let flags = tile.mask.flags[row * TEXELS + col];
         // A quarter turn swaps the two diagonals.
         if tile.rotation % 2 == 1 {
@@ -270,7 +502,7 @@ mod tests {
                 p[r * TEXELS + c] = 199;
             }
         }
-        let mask = TileMask::classify(&p);
+        let mask = TileMask::classify(&p, &Classes::ukraine());
         assert_ne!(mask.flags[10 * TEXELS + 100] & STREET_AXIS, 0);
         assert_eq!(mask.flags[10 * TEXELS + 100] & SITE, 0);
         assert_ne!(mask.flags[42 * TEXELS + 42] & SITE, 0);
@@ -283,13 +515,16 @@ mod tests {
 
     #[test]
     fn city_tiles_need_brown_land_and_light_roofs() {
-        assert!(!is_city_tile(&picture(194)));
-        assert!(!is_city_tile(&picture(206)));
+        assert!(!is_city_tile(&picture(194), &Classes::ukraine()));
+        assert!(!is_city_tile(&picture(206), &Classes::ukraine()));
         let mut p = picture(206);
         for v in p.iter_mut().step_by(10) {
             *v = 199;
         }
-        assert!(is_city_tile(&p));
+        assert!(is_city_tile(&p, &Classes::ukraine()));
+        // Smooth light ramp art (snow, rock) is not a city.
+        let smooth: Vec<u8> = (0..TEXELS * TEXELS).map(|i| 199 + (i % 2) as u8).collect();
+        assert!(!is_city_tile(&smooth, &Classes::ukraine()));
     }
 
     #[test]

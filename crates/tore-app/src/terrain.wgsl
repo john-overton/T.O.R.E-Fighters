@@ -363,6 +363,16 @@ fn placed_vertex(position:vec3<f32>,p:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec
  let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
  return placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,-1.0,color,place.w);
 }
+// CF0 city fill shadow casters: the unit box per building, one entry per
+// shadow cascade (instance_index is the building here, not the cascade).
+fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,cascade:u32)->ShadowOut {
+ let local=vec3<f32>(position.x*size.x,position.y*turn.z,position.z*size.y);
+ let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
+ return shadow_out(p-scene.local_eye.xyz,vec2<f32>(0.0),-1.0,cascade);
+}
+@vertex fn fill_shadow_vertex0(@location(0) position:vec3<f32>,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) size:vec4<f32>)->ShadowOut {return fill_shadow(position,place,turn,size,0u);}
+@vertex fn fill_shadow_vertex1(@location(0) position:vec3<f32>,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) size:vec4<f32>)->ShadowOut {return fill_shadow(position,place,turn,size,1u);}
+@vertex fn fill_shadow_vertex2(@location(0) position:vec3<f32>,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) size:vec4<f32>)->ShadowOut {return fill_shadow(position,place,turn,size,2u);}
 @vertex fn terrain_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) normal:vec3<f32>)->VertexOut {
  var out=world_vertex(position,uv,layer,color,index);
  out.terrain_normal=normal;return out;

@@ -503,6 +503,8 @@ impl Checkpoint for State {
             device_log: _,
             // Why-record: the decoy rolls for a recording, drained by the host.
             decoy_log: _,
+            // Why-record: this step's ground bursts, drained by the host.
+            ground_bursts: _,
             debris,
             ledger,
             target_jammer,
@@ -589,6 +591,7 @@ impl Checkpoint for State {
             devices: Checkpoint::load(l, None)?,
             device_log: VecDeque::<DeviceNote>::new(),
             decoy_log: VecDeque::<DecoyRoll>::new(),
+            ground_bursts: Vec::new(),
             debris: Checkpoint::load(l, None)?,
             ledger: Checkpoint::load(l, None)?,
             target_jammer: Checkpoint::load(l, None)?,

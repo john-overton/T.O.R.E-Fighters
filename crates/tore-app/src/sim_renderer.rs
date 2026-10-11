@@ -663,7 +663,7 @@ impl SimRenderer {
                 format,
                 samples,
                 &material_layout,
-                &lighting.layout,
+                &lighting,
                 art,
             )
         });
@@ -1267,7 +1267,7 @@ impl SimRenderer {
                 self.format,
                 samples,
                 &self.material_layout,
-                &self.lighting.layout,
+                &self.lighting,
             );
         }
         self.vapor_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1622,6 +1622,10 @@ impl SimRenderer {
             output,
             &weather.palette,
         );
+        // The fill's cull runs first: its lists feed the shadow maps too.
+        if let Some(fill) = &mut self.fill {
+            fill.prepare(queue, encoder, camera, scenery.origin, size);
+        }
         if self
             .lighting
             .prepare(queue, camera, world, scenery, &self.countermeasures.lights)
@@ -1646,6 +1650,9 @@ impl SimRenderer {
             }
             self.lighting
                 .draw(encoder, (&self.bind, &self.vertices, self.count), &objects);
+            if let Some(fill) = &self.fill {
+                fill.draw_shadows(&self.lighting, encoder, &self.bind);
+            }
         }
         // The spotting aid covers other aircraft in the main view and the
         // mirrors, not the instrument camera panels. The ownship batch is
@@ -1669,9 +1676,6 @@ impl SimRenderer {
                     Self::spot_buffer(device, (contacts.len() as u64).next_power_of_two());
             }
             queue.write_buffer(&self.spot_instances, 0, &bytes(&spot_instances(&contacts)));
-        }
-        if let Some(fill) = &mut self.fill {
-            fill.prepare(queue, encoder, camera, scenery.origin, size);
         }
         let destination = flare_target.as_ref().unwrap_or(target);
         let targets = &self.targets[slot];

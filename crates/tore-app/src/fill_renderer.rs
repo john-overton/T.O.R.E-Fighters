@@ -3,7 +3,7 @@
 //! 5 nm): full detail (the kit piece with its textures) inside the building
 //! detail distance, a blend band a quarter beyond it where each building
 //! turns from its far box to full detail at its own fixed distance, and the
-//! far box (its footprint in its dominant colour, untextured, a cheap
+//! far box (its footprint in its brightened mean colour, untextured, a cheap
 //! shader) out to the building distance. Buildings sink into the ground over
 //! the last nautical mile, and anything smaller than one pixel on screen is
 //! not drawn. The target display (camera slot 4: the target window and the
@@ -15,7 +15,8 @@
 //! box list, and indirect draws read them (one per piece and pass, plus one
 //! for every far box). The CPU writes one small uniform per view. Knocked-down
 //! buildings draw as a low stub (0.08 of their height, in the cull shader).
-//! Fill buildings cast no shadow yet.
+//! Buildings within [`SHADOW_NM`] cast their box's shadow into the shadow
+//! maps.
 
 use crate::{AppResult, camera::Camera};
 use std::{collections::BTreeMap, ops::Range, sync::Arc};
@@ -87,6 +88,11 @@ impl Tiers {
 /// The length over which a building sinks into the ground before the draw
 /// distance (fitted).
 pub const SINK_FT: f64 = NM;
+/// Buildings nearer than this cast shadows (nautical miles, fitted). Measured
+/// at 4K over Cairo at 2,000 ft: 0.5 nm costs nothing measurable, 1 nm 1.3
+/// ms more and 3 nm 3.4 ms more, mostly in the middle and far cascades.
+/// `TORE_CITY_FILL_SHADOW_NM` changes it (a measuring aid).
+pub const SHADOW_NM: f64 = 0.5;
 /// Views that may draw in one submission, each with its own uniform.
 const SLOTS: usize = 8;
 
@@ -108,6 +114,29 @@ fn unit_box() -> Vec<f32> {
         }
     }
     out
+}
+
+/// Brightening of the far box colour over the building's mean (fitted: the
+/// close art's panel sheen and window texture read lighter than its mean).
+pub const FAR_BRIGHTEN: f64 = 1.2;
+
+/// The far box's palette index: the building's area-weighted mean colour,
+/// brightened, matched to the nearest fixed shape colour (indices 0 to 191,
+/// which the weather does not repaint).
+fn far_color(sum: [f64; 4], palette: &[[u8; 3]; 256]) -> u8 {
+    let n = sum[3].max(1e-9);
+    let want: [f64; 3] = std::array::from_fn(|k| (sum[k] / n * FAR_BRIGHTEN).min(255.));
+    (0..192u8)
+        .min_by(|&a, &b| {
+            let d = |i: u8| {
+                let c = palette[usize::from(i)];
+                (0..3)
+                    .map(|k| (f64::from(c[k]) - want[k]).powi(2))
+                    .sum::<f64>()
+            };
+            d(a).total_cmp(&d(b)).then(a.cmp(&b))
+        })
+        .unwrap_or(0)
 }
 
 /// The fill's art for one scenery: the kit's vertices, the piece table and
@@ -137,6 +166,7 @@ impl FillArt {
         fill: &Arc<CityFill>,
         pages: &mut Vec<u8>,
         first_layer: impl Fn(&Vec<u8>) -> usize,
+        palette: &[[u8; 3]; 256],
     ) -> AppResult<Self> {
         let layout = &fill.layout;
         let mut shapes = BTreeMap::<String, tore_formats::shape::Shape>::new();
@@ -144,9 +174,11 @@ impl FillArt {
         let mut vertices = Vec::new();
         let mut ranges = Vec::new();
         let mut colors = Vec::new();
-        let mut modes = BTreeMap::<String, u8>::new();
+        // Each texture's mean colour through the palette (its transparent
+        // and water texels left out), for the far boxes.
+        let mut means = BTreeMap::<String, [f64; 3]>::new();
         for piece in &layout.kit.pieces {
-            let mut weight = [0f64; 256];
+            let mut sum = [0f64; 4];
             if !shapes.contains_key(&piece.shape) {
                 let bytes = resources
                     .get(&piece.shape)
@@ -174,14 +206,18 @@ impl FillArt {
                                 .get(&name)
                                 .ok_or_else(|| format!("city fill: missing texture {name}"))?,
                         )?;
-                        let mut counts = [0usize; 256];
+                        let mut mean = [0f64; 4];
                         for (p, m) in pic.pixels.iter().zip(&pic.mask) {
                             if *m && *p != 255 {
-                                counts[usize::from(*p)] += 1;
+                                let c = palette[usize::from(*p)];
+                                for k in 0..3 {
+                                    mean[k] += f64::from(c[k]);
+                                }
+                                mean[3] += 1.;
                             }
                         }
-                        let mode = (0..256).max_by_key(|&i| (counts[i], i)).unwrap_or(0);
-                        modes.insert(name.clone(), mode as u8);
+                        let n = mean[3].max(1.);
+                        means.insert(name.clone(), [mean[0] / n, mean[1] / n, mean[2] / n]);
                         let first = first_layer(pages);
                         let image = crate::static_art::Image::append(&pic, pages, first)?;
                         images.insert(name.clone(), image);
@@ -189,7 +225,7 @@ impl FillArt {
                     images.get(&name)
                 };
                 // The face's share of the far box colour: its area in shape
-                // units, for its colour or its texture's commonest index.
+                // units, for its colour or its texture's mean colour.
                 let a = face.positions[0];
                 let mut area = 0f64;
                 for w in face.positions[1..].windows(2) {
@@ -203,11 +239,14 @@ impl FillArt {
                     ];
                     area += (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() * 0.5;
                 }
-                let index = match image {
-                    Some(_) => modes[&face.texture.to_ascii_uppercase()],
-                    None => face.colors[0],
+                let color = match image {
+                    Some(_) => means[&face.texture.to_ascii_uppercase()],
+                    None => palette[usize::from(face.colors[0])].map(f64::from),
                 };
-                weight[usize::from(index)] += area;
+                for k in 0..3 {
+                    sum[k] += color[k] * area;
+                }
+                sum[3] += area;
                 for triangle in 1..face.positions.len() - 1 {
                     let mut points = [[0f32; 10]; 3];
                     for (slot, vertex_index) in [0, triangle, triangle + 1].into_iter().enumerate()
@@ -245,10 +284,7 @@ impl FillArt {
             vertices.extend(solid);
             vertices.extend(textured);
             ranges.push([start..middle, middle..end]);
-            let dominant = (0..256)
-                .max_by(|&a, &b| weight[a].total_cmp(&weight[b]).then(a.cmp(&b)))
-                .unwrap_or(0);
-            colors.push(dominant as f32);
+            colors.push(f32::from(far_color(sum, palette)));
         }
         let box_start = (vertices.len() / 10) as u32;
         vertices.extend(unit_box());
@@ -337,6 +373,8 @@ pub struct FillRenderer {
     counts: wgpu::Buffer,
     full: wgpu::Buffer,
     boxes: wgpu::Buffer,
+    /// Every drawn building's box, for the shadow maps.
+    shadows: wgpu::Buffer,
     args: wgpu::Buffer,
     readback: wgpu::Buffer,
     params: Vec<wgpu::Buffer>,
@@ -350,6 +388,69 @@ pub struct FillRenderer {
     solid: wgpu::RenderPipeline,
     decal: wgpu::RenderPipeline,
     far: wgpu::RenderPipeline,
+    /// One shadow caster pipeline per shadow cascade.
+    shadow: [wgpu::RenderPipeline; 3],
+    /// Buildings inside this cast shadows, nautical miles.
+    shadow_nm: f64,
+}
+
+/// The box shadow casters, one pipeline per cascade (the cascade is the
+/// vertex entry, since the instance index is the building).
+fn shadow_pipelines(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    lighting: &crate::surface_lighting::SurfaceLighting,
+) -> [wgpu::RenderPipeline; 3] {
+    let buffers = [
+        wgpu::VertexBufferLayout {
+            array_stride: 40,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0=>Float32x3],
+        },
+        wgpu::VertexBufferLayout {
+            array_stride: 48,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![5=>Float32x4,6=>Float32x4,7=>Float32x4],
+        },
+    ];
+    std::array::from_fn(|cascade| {
+        let entry = format!("fill_shadow_vertex{cascade}");
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("City fill shadow casters"),
+            layout: Some(&lighting.caster_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some(&entry),
+                compilation_options: Default::default(),
+                buffers: &buffers,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("shadow_fragment"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            // The object casters' bias (surface_lighting.rs).
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 1,
+                    slope_scale: 1.,
+                    clamp: 0.,
+                },
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        })
+    })
 }
 
 fn pipelines(
@@ -471,9 +572,10 @@ impl FillRenderer {
         format: wgpu::TextureFormat,
         samples: u32,
         material_layout: &wgpu::BindGroupLayout,
-        lighting_layout: &wgpu::BindGroupLayout,
+        lighting: &crate::surface_lighting::SurfaceLighting,
         art: &Arc<FillArt>,
     ) -> Self {
+        let lighting_layout = &lighting.layout;
         use wgpu::util::DeviceExt;
         let storage = |label: &str, contents: &[u8], usage: wgpu::BufferUsages| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -502,7 +604,7 @@ impl FillRenderer {
         );
         let counts = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("City fill counts"),
-            size: (pieces as u64 + 1) * 4,
+            size: (pieces as u64 + 2) * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -520,8 +622,14 @@ impl FillRenderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
             mapped_at_creation: false,
         });
+        let shadows = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("City fill shadow boxes"),
+            size: n * 48,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
         // Indirect draws: each piece's solid and textured ranges, then the
-        // far box; instance counts start at zero.
+        // far boxes and the shadow boxes; instance counts start at zero.
         let mut args = Vec::with_capacity((2 * pieces + 1) * 4);
         // First instance stays 0 (a non-zero one needs a device feature):
         // each piece's draws bind the full detail list at that piece's slot.
@@ -530,12 +638,15 @@ impl FillRenderer {
                 args.extend([r.end - r.start, 0, r.start, 0]);
             }
         }
-        args.extend([
-            art.box_range.end - art.box_range.start,
-            0,
-            art.box_range.start,
-            0,
-        ]);
+        // The far boxes, then the shadow boxes.
+        for _ in 0..2 {
+            args.extend([
+                art.box_range.end - art.box_range.start,
+                0,
+                art.box_range.start,
+                0,
+            ]);
+        }
         let args = storage(
             "City fill indirect draws",
             &words(&args),
@@ -543,7 +654,7 @@ impl FillRenderer {
         );
         let readback = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("City fill count readback"),
-            size: (pieces as u64 + 1) * 4,
+            size: (pieces as u64 + 2) * 4,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -573,6 +684,7 @@ impl FillRenderer {
                 entry(4, write),
                 entry(5, write),
                 entry(6, write),
+                entry(7, write),
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -637,6 +749,10 @@ impl FillRenderer {
                             binding: 6,
                             resource: args.as_entire_binding(),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: shadows.as_entire_binding(),
+                        },
                     ],
                 })
             })
@@ -649,6 +765,7 @@ impl FillRenderer {
             material_layout,
             lighting_layout,
         );
+        let shadow = shadow_pipelines(device, shader, lighting);
         Self {
             art: Arc::clone(art),
             tiers: Tiers::from_options(&crate::graphics::Options::default()),
@@ -658,6 +775,7 @@ impl FillRenderer {
             counts,
             full,
             boxes,
+            shadows,
             args,
             readback,
             params,
@@ -670,6 +788,11 @@ impl FillRenderer {
             solid,
             decal,
             far,
+            shadow,
+            shadow_nm: std::env::var("TORE_CITY_FILL_SHADOW_NM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(SHADOW_NM),
         }
     }
 
@@ -686,7 +809,7 @@ impl FillRenderer {
         format: wgpu::TextureFormat,
         samples: u32,
         material_layout: &wgpu::BindGroupLayout,
-        lighting_layout: &wgpu::BindGroupLayout,
+        lighting: &crate::surface_lighting::SurfaceLighting,
     ) {
         [self.solid, self.decal, self.far] = pipelines(
             device,
@@ -694,7 +817,7 @@ impl FillRenderer {
             format,
             samples,
             material_layout,
-            lighting_layout,
+            &lighting.layout,
         );
     }
 
@@ -704,6 +827,7 @@ impl FillRenderer {
             + self.records.size()
             + self.full.size()
             + self.boxes.size()
+            + self.shadows.size()
             + self.counts.size()
             + self.args.size()
     }
@@ -766,6 +890,7 @@ impl FillRenderer {
         bytes[28 * 4..29 * 4].copy_from_slice(&(self.art.len() as u32).to_le_bytes());
         bytes[29 * 4..30 * 4].copy_from_slice(&(self.art.ranges.len() as u32).to_le_bytes());
         bytes[30 * 4..31 * 4].copy_from_slice(&(t.detail_px as f32).to_le_bytes());
+        bytes[31 * 4..32 * 4].copy_from_slice(&((self.shadow_nm * NM) as f32).to_le_bytes());
         self.slot = (self.slot + 1) % SLOTS;
         queue.write_buffer(&self.params[self.slot], 0, &bytes);
         encoder.clear_buffer(&self.counts, 0, None);
@@ -777,9 +902,29 @@ impl FillRenderer {
         pass.set_pipeline(&self.cull);
         pass.dispatch_workgroups((self.art.len() as u32).div_ceil(256).max(1), 1, 1);
         pass.set_pipeline(&self.finish);
-        pass.dispatch_workgroups((self.art.ranges.len() as u32 + 1).div_ceil(64), 1, 1);
+        pass.dispatch_workgroups((self.art.ranges.len() as u32 + 2).div_ceil(64), 1, 1);
         drop(pass);
         self.prepared = true;
+    }
+
+    /// Casts the prepared view's buildings into the shadow maps, as boxes.
+    pub fn draw_shadows(
+        &self,
+        lighting: &crate::surface_lighting::SurfaceLighting,
+        encoder: &mut wgpu::CommandEncoder,
+        bind: &wgpu::BindGroup,
+    ) {
+        if !self.prepared {
+            return;
+        }
+        let offset = (2 * self.art.ranges.len() as u64 + 1) * 16;
+        lighting.draw_more(encoder, |pass, cascade| {
+            pass.set_pipeline(&self.shadow[cascade]);
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_vertex_buffer(0, self.vertices.slice(..));
+            pass.set_vertex_buffer(1, self.shadows.slice(..));
+            pass.draw_indirect(&self.args, offset);
+        });
     }
 
     /// Draws the prepared view: far boxes, then each piece's solid art and
@@ -831,10 +976,10 @@ impl FillRenderer {
             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect();
         self.readback.unmap();
-        let (boxes, full) = counts.split_last().map_or((0, &[][..]), |(b, f)| (*b, f));
+        let pieces = self.art.ranges.len();
         Ok(Stats {
-            full: full.iter().map(|&c| c as usize).sum(),
-            boxes: boxes as usize,
+            full: counts[..pieces].iter().map(|&c| c as usize).sum(),
+            boxes: counts[pieces] as usize,
         })
     }
 }

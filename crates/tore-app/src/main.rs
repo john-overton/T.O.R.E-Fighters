@@ -8562,6 +8562,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         gun_flash_preview::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--city-fill-survey") {
+        city_fill_dump::survey()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-dump") {
         city_fill_dump::run()?;
         return Ok(Outcome::Done);

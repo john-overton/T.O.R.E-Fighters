@@ -348,6 +348,7 @@ impl Scenery {
                 fill,
                 &mut out.sky_indices,
                 |pages| (terrain_bytes + pages.len()) / 65536,
+                &out.palette,
             )?));
         }
         out.recess_airport_terrain(terrain);

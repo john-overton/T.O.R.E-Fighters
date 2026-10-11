@@ -117,6 +117,114 @@ fn use_gpu(scenery: &Scenery, gpu: &mut Option<Gpu>) -> AppResult<()> {
     Ok(())
 }
 
+/// `--city-fill-survey [THEATER ...]`: per theater, the reference palette's
+/// city-relevant colours and, per ground picture, the shares the classifier
+/// could use, and whether a retail city cluster stands on it.
+pub fn survey() -> AppResult<()> {
+    let wanted: Vec<String> = std::env::args().skip(2).collect();
+    let assets = crate::reel::load_assets()?;
+    let resources = assets.theater_resources;
+    for theater in tore_formats::quick_template::tables::THEATERS {
+        if !wanted.is_empty() && !wanted.iter().any(|w| w.eq_ignore_ascii_case(theater)) {
+            continue;
+        }
+        let layout = format!("{theater}.MM");
+        let Some(bytes) = resources.get(&layout) else {
+            println!("{theater}: no layout");
+            continue;
+        };
+        let environment = tore_formats::theater::Environment::parse(bytes)?;
+        let map = environment.map.clone();
+        let Some(palette) = mask::reference_palette(&resources, &map) else {
+            println!("{theater}: no reference palette ({map})");
+            continue;
+        };
+        let luma = |c: [u8; 3]| {
+            (u32::from(c[0]) * 299 + u32::from(c[1]) * 587 + u32::from(c[2]) * 114) / 1000
+        };
+        println!("== {theater} map {map}");
+        let line: Vec<String> = (192..256)
+            .map(|i| {
+                let c = palette[i];
+                format!("{i}:{},{},{}/{}", c[0], c[1], c[2], luma(c))
+            })
+            .collect();
+        println!("palette {}", line.join(" "));
+        // Cluster placements per texture.
+        let placements = tore_formats::mission::Layout::parse(&layout, bytes)?;
+        let mut clusters = BTreeMap::<String, usize>::new();
+        let base = tore_formats::theater::base_theater(&layout).unwrap_or("");
+        for p in &placements.placements {
+            if !city::kit::CLUSTERS.contains(&p.object_type.as_str()) {
+                continue;
+            }
+            let key = mask::LightMap::key(i64::from(p.position[0]), i64::from(p.position[2]));
+            if let Some(t) = environment.textures.get(&key) {
+                *clusters.entry(t.resource_name(base)).or_default() += 1;
+            }
+        }
+        let mut uses = BTreeMap::<String, usize>::new();
+        for t in environment.textures.values() {
+            *uses.entry(t.resource_name(base)).or_default() += 1;
+        }
+        for (name, count) in &uses {
+            let Some(pic) = resources
+                .get(name)
+                .and_then(|b| tore_formats::Pic::parse(b).ok())
+                .filter(|p| p.width == 256 && p.height == 256)
+            else {
+                continue;
+            };
+            let px: Vec<u8> = pic
+                .pixels
+                .iter()
+                .zip(&pic.mask)
+                .map(|(p, m)| if *m { *p } else { 255 })
+                .collect();
+            let land = px.iter().filter(|&&p| p != 255).count().max(1);
+            let (mut green, mut neutral, mut roof, mut dark, mut edges) = (0, 0, 0, 0, 0);
+            for (i, &p) in px.iter().enumerate() {
+                if p == 255 {
+                    continue;
+                }
+                let c = palette[usize::from(p)].map(i32::from);
+                let l = luma(palette[usize::from(p)]) as i32;
+                let is_green = c[1] >= c[0] + 12 && c[1] >= c[2];
+                let is_blue = c[2] >= c[0] + 20 && c[2] > c[1];
+                if is_green {
+                    green += 1;
+                } else if !is_blue {
+                    neutral += 1;
+                    if l >= 125 {
+                        roof += 1;
+                    }
+                    if l < 90 {
+                        dark += 1;
+                    }
+                }
+                if i % 256 < 255 && px[i + 1] != 255 {
+                    let r = luma(palette[usize::from(px[i + 1])]) as i32;
+                    if (l - r).abs() > 40 {
+                        edges += 1;
+                    }
+                }
+            }
+            let pct = |n: usize| n * 100 / land;
+            println!(
+                "  {name} used {count} clusters {} land {}% green {}% neutral {}% roof {}% dark {}% edges {}%",
+                clusters.get(name).copied().unwrap_or(0),
+                land * 100 / 65536,
+                pct(green),
+                pct(neutral),
+                pct(roof),
+                pct(dark),
+                pct(edges)
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn run() -> AppResult<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
     let usage = "--city-fill-dump OUT [THEATER] [--render NAME@X,Z,H,PITCH,YAW ...] [--bench X,Z,H,HEADING,STEP,FRAMES] [--size W,H]";
@@ -182,12 +290,28 @@ pub fn run() -> AppResult<()> {
             .or_default() += 1;
     }
     println!("cities: {}", layout.cities.len());
-    for city in &layout.cities {
+    for (n, city) in layout.cities.iter().enumerate() {
+        // Where its buildings are: the mean of its core buildings, or of all.
+        let mean = |core: bool| {
+            let (mut sx, mut sz, mut k) = (0i64, 0i64, 0i64);
+            for i in layout
+                .instances
+                .iter()
+                .filter(|i| usize::from(i.city) == n && (!core || i.core))
+            {
+                sx += i64::from(i.x);
+                sz += i64::from(i.z);
+                k += 1;
+            }
+            (k > 0).then(|| [sx / k, sz / k])
+        };
+        let focus = mean(true).or_else(|| mean(false)).unwrap_or(city.center);
         println!(
-            "  {}: {} tiles, centre {:?}, {} lots passed, {} buildings ({} core)",
+            "  {}: {} tiles, centre {:?}, focus {:?}, {} lots passed, {} buildings ({} core)",
             city.name,
             city.tiles.len(),
             city.center,
+            focus,
             city.candidates,
             city.placed,
             city.core
@@ -201,6 +325,19 @@ pub fn run() -> AppResult<()> {
         layout.instances.len(),
         hidden,
         by_class
+    );
+    let mut pictures = BTreeMap::<&str, usize>::new();
+    for tile in layout.map.tiles.values() {
+        *pictures.entry(tile.texture.as_str()).or_default() += 1;
+    }
+    println!(
+        "city pictures: {}; districts {}",
+        pictures
+            .iter()
+            .map(|(name, n)| format!("{name} x{n}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        layout.map.districts.len()
     );
     println!("fill digest: {:016x}", layout.digest());
     println!(
