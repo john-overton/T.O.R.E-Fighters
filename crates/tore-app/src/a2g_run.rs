@@ -2,9 +2,12 @@
 //! [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S]
 //! [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S]
 //! [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate HOW]
-//! [--break-at S] [--skill N] [--render OUT.png]`: a development aid and the
-//! battery's driver for air-to-ground weapons (plan section 11.2). No window
-//! opens; the whole mission tick runs as in the game.
+//! [--break-at S] [--skill N] [--render OUT.png] [--record PATH
+//! [--verify-render]]`: a development aid and the battery's driver for
+//! air-to-ground weapons (plan section 11.2). No window opens; the whole
+//! mission tick runs as in the game. `--record PATH` records the run as a
+//! mission recording and `--verify-render` reads it back and checks that
+//! every tick redraws the picture the run drew (the battery's `replay-a2g`).
 //!
 //! The player's aircraft flies a scripted straight pass at a ground target of
 //! the Quick Mission `STEM` describes, invulnerable, and attacks it through
@@ -95,9 +98,11 @@ pub(crate) struct Options {
     pub break_at: Option<f64>,
     pub skill: Option<i32>,
     pub render: Option<std::path::PathBuf>,
+    record: Option<std::path::PathBuf>,
+    verify: bool,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -126,6 +131,8 @@ fn options() -> AppResult<Options> {
         break_at: None,
         skill: None,
         render: None,
+        record: None,
+        verify: false,
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -162,6 +169,8 @@ fn options() -> AppResult<Options> {
             "--break-at" => o.break_at = Some(next()?.parse()?),
             "--skill" => o.skill = Some(next()?.parse()?),
             "--render" => o.render = Some(next()?.into()),
+            "--record" => o.record = Some(next()?.into()),
+            "--verify-render" => o.verify = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
@@ -171,6 +180,9 @@ fn options() -> AppResult<Options> {
     };
     if o.attack.is_empty() {
         return Err(USAGE.into());
+    }
+    if o.verify && o.record.is_none() {
+        return Err("--verify-render checks a --record run".into());
     }
     o.theater = theater.to_ascii_uppercase();
     o.stem = stem.trim_start_matches('~').to_ascii_uppercase();
@@ -224,7 +236,7 @@ pub fn run() -> AppResult<()> {
             .into());
         }
     }
-    scene.finish();
+    scene.finish()?;
     println!("a2g-run: done");
     Ok(())
 }
@@ -237,6 +249,8 @@ pub(crate) struct Scene {
     pub station: usize,
     pub target: u32,
     pub owner: u32,
+    /// The run as a mission recording, when `--record` asks.
+    record: Option<crate::surface_objective::Record>,
 }
 
 impl Scene {
@@ -274,7 +288,9 @@ impl Scene {
             station,
             target,
             owner,
+            record: None,
         };
+        let scene = scene.recording(o)?;
         let row = scene.target_row().ok_or("the target has no row")?;
         let own = scene.world.combat.state.own();
         let s = &own.configuration().stations[station];
@@ -290,6 +306,37 @@ impl Scene {
             row.hp
         );
         Ok(scene)
+    }
+
+    /// Starts the recording `--record` asks for, with the scene as it is.
+    fn recording(mut self, o: &Options) -> AppResult<Self> {
+        if let Some(path) = &o.record {
+            let plane = o.aircraft.label().to_owned();
+            self.record = Some(crate::surface_objective::Record::start(
+                &self.world,
+                path,
+                o.verify,
+                &plane,
+                "the air-to-ground run",
+            )?);
+        }
+        Ok(self)
+    }
+
+    /// Runs `step` as one recorded tick: the recorder sees the combat before
+    /// and the picture after.
+    fn recorded(
+        &mut self,
+        step: impl FnOnce(&mut World, &mut TickOutput) -> AppResult<()>,
+    ) -> AppResult<()> {
+        if let Some(record) = &mut self.record {
+            record.before(&mut self.world);
+        }
+        step(&mut self.world, &mut self.out)?;
+        if let Some(record) = &mut self.record {
+            record.after(&mut self.world, &self.out);
+        }
+        Ok(())
     }
 
     pub fn target_row(&self) -> Option<&tore_sim::combat::live::Target> {
@@ -351,9 +398,7 @@ impl Scene {
             commands: std::mem::take(&mut self.commands),
             ..SeatInput::default()
         };
-        self.world
-            .step(std::slice::from_ref(&input), &mut self.out)?;
-        Ok(())
+        self.recorded(|world, out| world.step(std::slice::from_ref(&input), out))
     }
 
     /// Queues a seat command for the next step.
@@ -398,7 +443,8 @@ impl Scene {
         }
     }
 
-    fn finish(&self) {
+    /// Prints the kills and the target, and finishes the recording.
+    fn finish(&mut self) -> AppResult<()> {
         let state = &self.world.combat.state;
         for kill in state
             .ledger
@@ -417,6 +463,14 @@ impl Scene {
                 row.id, row.hp, row.initial_hp
             );
         }
+        if let Some(record) = self.record.take() {
+            let report =
+                tore_world::debrief::capture(&self.world, SEAT).ok_or("the seat flies no plane")?;
+            for line in record.finish(&self.world, &report)? {
+                println!("a2g-run: {line}");
+            }
+        }
+        Ok(())
     }
 }
 

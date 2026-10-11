@@ -135,6 +135,10 @@ fn key_event(kind_name: &str) -> bool {
         || kind_name == kind::WEAPON_OUTCOME
         || kind_name == kind::WEAPON_TRACK_LOST
         || kind_name == kind::WEAPON_DECOYED
+        || kind_name == kind::WEAPON_RELEASE
+        || kind_name == kind::WEAPON_DUD
+        || kind_name == kind::WEAPON_CLUSTER
+        || kind_name == kind::WEAPON_GUIDED
         || kind_name.starts_with("combat.")
         || kind_name.starts_with("aircraft.")
         || (kind_name.starts_with("flight.") && kind_name != kind::FLIGHT_EFFECT)

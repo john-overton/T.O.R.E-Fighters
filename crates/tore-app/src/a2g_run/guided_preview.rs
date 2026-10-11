@@ -127,6 +127,8 @@ fn options(shot: &Shot) -> Options {
         break_at: None,
         skill: None,
         render: None,
+        record: None,
+        verify: false,
     }
 }
 
