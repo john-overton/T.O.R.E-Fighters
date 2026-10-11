@@ -128,6 +128,7 @@ pub fn run() -> AppResult<()> {
     let mut all = false;
     let mut sweep = false;
     let mut starts = false;
+    let mut classes = false;
     let mut seeds = None;
     let mut variation = Variation::ON;
     let mut separation = DUMP_SEPARATION_NM;
@@ -146,6 +147,7 @@ pub fn run() -> AppResult<()> {
             "--all" => all = true,
             "--sweep" => sweep = true,
             "--starts" => starts = true,
+            "--classes" => classes = true,
             "--no-jitter" => variation.jitter = false,
             "--no-relocate" => variation.relocate = false,
             "--separation" => separation = next()?.parse()?,
@@ -160,6 +162,9 @@ pub fn run() -> AppResult<()> {
     }
     if sweep {
         return relocate_sweep(&resources, seeds.unwrap_or(20), &positional);
+    }
+    if classes {
+        return class_sweep(&resources, seeds.unwrap_or(20), &positional);
     }
     if starts {
         return start_placement(&resources, &positional);
@@ -671,6 +676,51 @@ fn relocate_sweep(
     );
     if errors > 0 {
         return Err(format!("{errors} placements failed").into());
+    }
+    Ok(())
+}
+
+/// `--surface-dump --classes [--seeds N] [THEATER...]`: the terrain class
+/// rule ([`Terrain::audit_classes`]) over each theater's base layout and
+/// every offered template placed at heavy defenses with seeds 1 to N (20),
+/// and at its retail spot (no jitter, no relocation) with a `retail` tag so
+/// a fault in the data tells from one the placement made. For the
+/// `surface-class-sweep` scenario.
+fn class_sweep(
+    resources: &BTreeMap<String, Vec<u8>>,
+    seeds: u32,
+    wanted: &[String],
+) -> AppResult<()> {
+    let (mut placements, mut problems) = (0usize, 0usize);
+    for (index, theater, stems) in jobs(wanted)? {
+        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides()?)?;
+        let site = tore_world::terrain::SurfaceSite::load(resources, theater)?;
+        let base = terrain.audit_classes(resources)?;
+        placements += 1;
+        problems += base.len();
+        for problem in &base {
+            println!("surface-class-problem: {theater} base layout: {problem}");
+        }
+        for stem in stems {
+            let mut retail_target = heavy(stem, index, 1);
+            retail_target.variation = Variation::OFF;
+            let retail = site.place(resources, &terrain.theater, Some(&retail_target))?;
+            for seed in 1..=seeds {
+                let target = heavy(stem, index, seed);
+                let surface = site.place(resources, &terrain.theater, Some(&target))?;
+                let broken =
+                    site.audit_classes(resources, &terrain.theater, &surface, Some(&retail));
+                placements += 1;
+                problems += broken.len();
+                for problem in &broken {
+                    println!("surface-class-problem: {theater} {stem} seed {seed}: {problem}");
+                }
+            }
+        }
+    }
+    println!("surface-class-sweep: {placements} placements, {problems} problems");
+    if problems > 0 {
+        return Err(format!("{problems} units on the wrong terrain class").into());
     }
     Ok(())
 }

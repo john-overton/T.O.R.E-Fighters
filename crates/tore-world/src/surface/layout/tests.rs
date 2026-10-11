@@ -40,6 +40,10 @@ impl Grid {
     fn set(&mut self, col: usize, row: usize, class: u8) {
         self.cells[row * self.size + col].class = class;
     }
+    /// A shore cell drawn as the sea: the water colour with a land class.
+    fn set_sea_colour(&mut self, col: usize, row: usize) {
+        self.cells[row * self.size + col].color = ground::WATER_COLOR;
+    }
 }
 
 impl Cells for Grid {
@@ -538,6 +542,113 @@ fn a_relocated_site_obeys_the_site_rules() {
         ));
     }
     assert!(relocated >= 15, "{relocated} of 20 relocated");
+}
+
+#[test]
+fn a_cell_drawn_as_the_sea_is_water_unless_a_ground_texture_covers_it() {
+    let mut grid = Grid::land(128);
+    // Class 0 at sea level in the water colour: the Falklands' shore cells.
+    grid.set(10, 10, 0);
+    grid.set_sea_colour(10, 10);
+    // Open sea by its class byte, whatever its colour.
+    grid.set(20, 20, ground::WATER_CLASS);
+    let feet = |cell: i64| [cell * ground::CELL_FT + 100, cell * ground::CELL_FT + 100];
+    let bare = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    assert!(bare.water(feet(10)) && bare.water(feet(20)));
+    assert!(!bare.water(feet(11)));
+    // A texture placement (cell 8,8, four cells a side) draws its own shore:
+    // the class byte alone says what is water under it.
+    let tiled = Ground::new(&grid, Vec::new(), Vec::new(), None).with_tiles([(8, 8)]);
+    assert!(!tiled.water(feet(10)));
+    assert!(
+        tiled.water(feet(20)),
+        "class 1 is water under a texture too"
+    );
+}
+
+/// Whether the grid cell under a unit is the water colour with no texture
+/// over it, read straight from the cells (not from `Ground::water`).
+fn drawn_as_sea(grid: &Grid, unit: &Unit) -> bool {
+    let at = at(unit);
+    let (c, r) = (
+        (at[0] / ground::CELL_FT) as usize,
+        (at[1] / ground::CELL_FT) as usize,
+    );
+    grid.cells[r * grid.size + c].color == ground::WATER_COLOR
+}
+
+#[test]
+fn nothing_the_layout_moves_stands_on_a_shore_cell_drawn_as_the_sea() {
+    // A band of sea-coloured class-0 cells between the retail site and the
+    // east: 50 to 55 of 128 columns, all rows.
+    let mut grid = Grid::land(128);
+    for c in 50..=55 {
+        for r in 0..128 {
+            grid.set(c, r, 0);
+            grid.set_sea_colour(c, r);
+        }
+    }
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut on_band = 0;
+    for seed in 1..=40 {
+        let mut s = surface(site_units(), Some(target(seed, Variation::ON)));
+        lay(&mut s, &ground, &[]);
+        assert!(
+            class_audit(&s, &ground, None).is_empty(),
+            "seed {seed}: {:?}",
+            class_audit(&s, &ground, None)
+        );
+        for unit in &s.units {
+            assert!(!drawn_as_sea(&grid, unit), "seed {seed}: {:?}", unit.id);
+        }
+        assert!(
+            sites::audit(&s, &ground, &mut types).is_empty(),
+            "seed {seed}"
+        );
+    }
+    // Control: with a texture over the band the same seeds may stand there.
+    let tiled = Ground::new(&grid, Vec::new(), Vec::new(), None)
+        .with_tiles((12..=13).flat_map(|c| (0..32).map(move |r| (c * 4, r * 4))));
+    for seed in 1..=40 {
+        let mut s = surface(site_units(), Some(target(seed, Variation::ON)));
+        lay(&mut s, &tiled, &[]);
+        on_band += s.units.iter().filter(|u| drawn_as_sea(&grid, u)).count();
+    }
+    assert!(
+        on_band > 0,
+        "the band is reachable once a texture covers it"
+    );
+}
+
+#[test]
+fn the_class_audit_reports_a_moved_unit_on_the_wrong_class_and_spares_retail() {
+    let mut grid = Grid::land(128);
+    for c in 0..64 {
+        for r in 0..128 {
+            grid.set(c, r, ground::WATER_CLASS);
+        }
+    }
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    // A tank in the sea and a ship on land.
+    let sea = [MID - 40_000, MID];
+    let land = [MID + 40_000, MID];
+    let units = vec![
+        unit(t(0), "T72.NT", class::TANK, sea, ENEMY_SIDE),
+        unit(t(1), "CARGO.NT", class::SHIP, land, ENEMY_SIDE),
+    ];
+    let s = surface(units.clone(), Some(target(1, Variation::OFF)));
+    // Both are where retail put them: not judged. Without a retail surface
+    // to compare with, both are.
+    assert!(class_audit(&s, &ground, Some(&s)).is_empty());
+    let found = class_audit(&s, &ground, None);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(found[0].contains("a land unit on water"));
+    assert!(found[1].contains("a ship on land"));
+    // The same units moved by one foot are the layout's doing.
+    let mut moved = units;
+    moved[0].position[0] += 1;
+    let moved = surface(moved, Some(target(1, Variation::OFF)));
+    assert_eq!(class_audit(&moved, &ground, Some(&s)).len(), 1);
 }
 
 #[test]

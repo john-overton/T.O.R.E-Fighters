@@ -15,6 +15,13 @@ least 60 percent of the other placements relocate, the batteries and trucks
 keep their rules, each base layout forms its batteries, and a second run
 repeats the digests.
 
+`surface-class-sweep` runs `--surface-dump --classes`: the terrain class rule
+(land units and structures on land, ships on water) over every offered
+template placed at heavy defenses with seeds 1 to 20 and over each theater's
+base layout. A unit the layout moved, a supply truck or a battery radar it
+added must stand on its class; a unit still at its retail spot is the data's
+and is not judged (docs/spec/surface-defenses.md, "Validity").
+
 `surface-start-placement` runs `--surface-dump --starts`: one mission per
 theater with a ground target and a 50 nm enemy distance. Red starts within
 5 nm of the target; Blue starts 50 nm from Red toward its own side, heading
@@ -713,6 +720,13 @@ def scenarios() -> list[Scenario]:
             forbid=[r"^surface-sweep: error"],
             then=[Step(["--surface-dump", "--sweep", "--seeds", "2"], timeout=300)],
             check=relocate_sweep_problems,
+            notes="Reads the templates from the retail media until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-class-sweep", lane="ai",
+            args=["--surface-dump", "--classes"], timeout=600,
+            expect=[r"^surface-class-sweep: \d+ placements, 0 problems$"],
+            forbid=[r"^surface-class-problem:"],
             notes="Reads the templates from the retail media until the import keeps them.",
         ),
         Scenario(

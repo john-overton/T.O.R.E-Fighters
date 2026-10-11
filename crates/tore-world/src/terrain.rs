@@ -228,6 +228,8 @@ pub struct Placements {
     /// The ground target template's placements, with their surface ids
     /// (`0x5000_0000` range), after the layout's.
     pub surface: Vec<(u32, tore_formats::mission::Placement)>,
+    /// The grid cells the layout's ground texture placements stand on.
+    tiles: Vec<(i64, i64)>,
 }
 
 /// Where one placed shape stands in the world.
@@ -462,6 +464,20 @@ impl SurfaceSite {
         let ground = surface_ground(theater, &self.sources, &mut types);
         crate::surface::layout::audit(surface, &ground, &mut types)
     }
+
+    /// [`crate::surface::layout::class_audit`] for a surface this site
+    /// placed: every unit on the terrain class its kind needs.
+    pub fn audit_classes(
+        &self,
+        resources: &dyn ResourceSource,
+        theater: &Theater,
+        surface: &crate::surface::Surface,
+        retail: Option<&crate::surface::Surface>,
+    ) -> Vec<String> {
+        let mut types = type_infos(resources, &self.sources);
+        let ground = surface_ground(theater, &self.sources, &mut types);
+        crate::surface::layout::class_audit(surface, &ground, retail)
+    }
 }
 
 /// Every placed type's layout facts, read once each.
@@ -510,6 +526,7 @@ fn surface_ground<'t>(
         }
     }
     Ground::new(theater, objects, runways, layout_front(&sources.layout))
+        .with_tiles(sources.tiles.iter().copied())
 }
 
 /// The front of a theater layout: the centroids of its Blue-side and
@@ -658,6 +675,16 @@ impl Placements {
             strip_boxes: BTreeMap::new(),
             unreadable: Vec::new(),
             surface: Vec::new(),
+            tiles: resources
+                .get(&layout_name)
+                .and_then(|bytes| tore_formats::theater::Environment::parse(bytes).ok())
+                .map(|e| {
+                    e.textures
+                        .values()
+                        .map(|t| (i64::from(t.col), i64::from(t.row)))
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
         for placement in &layout.placements {
             out.add_type(resources, &layout_name, &placement.object_type)?;
@@ -1296,6 +1323,19 @@ impl Terrain {
             &self.surface,
             &ground,
             &mut types,
+        ))
+    }
+
+    /// [`crate::surface::layout::class_audit`] against the ground this
+    /// mission's surface was placed on.
+    pub fn audit_classes(&self, resources: &dyn ResourceSource) -> WorldResult<Vec<String>> {
+        let sources = Placements::load(resources, self.layout.trim_end_matches(".MM"))?;
+        let mut types = type_infos(resources, &sources);
+        let ground = surface_ground(&self.theater, &sources, &mut types);
+        Ok(crate::surface::layout::class_audit(
+            &self.surface,
+            &ground,
+            None,
         ))
     }
 

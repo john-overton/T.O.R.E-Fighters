@@ -489,9 +489,11 @@ The same columns.
    `net-surface-*` scenarios), recordings (`replay-surface`), and anything in
    a window.
 4. **Looks to check in game** (renders below): the Falklands forward SAM
-   site's Crotale stands on flat dark blue ground beside the sea in the
-   relocated seed 1 render; relocation keeps land units on land cells, but the
-   picture is ambiguous. The Kiev fleets' four Yak-141s stay out (the Kiev's
+   site's Crotale stood in the sea in the relocated seed 1 render: the grid
+   has shore cells of land class drawn as the sea (colour 255, no ground
+   texture over them), which the land rule accepted. The rule now counts them
+   as water (CL-M, 2026-10-11; spec, "Validity") and the `surface-class-sweep`
+   scenario checks every template and base layout. The Kiev fleets' four Yak-141s stay out (the Kiev's
    shape has no deck the rule finds).
 
 ## Renders
