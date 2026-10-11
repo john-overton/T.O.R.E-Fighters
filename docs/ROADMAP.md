@@ -1229,12 +1229,14 @@ In John's order where he gave one; each is its own planned round.
    solutions, buddy lasing, SEAD with HARMs, the Alt+F wingman order) combined
    with the remaining ground weapon systems. John placed it after this round
    (2026-10-10); it needs his go-ahead to start (AGENTS.md).
-3. **Real-scale airfields.** A redrawn-airport experiment (branch `ac-ap1`,
-   off by default behind `TORE_REDRAWN_AIRPORTS=1`): every airport redrawn at
-   real size from its runway type's plan with the theater's own textures,
-   markings, runway, approach and PAPI lights and about 12 extra targets per
-   airport; John approved the look and asked for it on for everyone online
-   (a protocol bump and the replay header's airfield scene number).
+3. **Real-scale airfields.** Built and the default (mp-fixes slice FX-A,
+   2026-10-11, protocol 24): every airport redrawn at real size from its
+   runway type's plan with the theater's own textures, markings, runway,
+   approach and PAPI lights and about 12 extra targets per airport, in single
+   player, the Quick Mission, missions, online and on the server; recordings
+   keep the airfield scene so old ones replay on the retail airfields.
+   `TORE_REDRAWN_AIRPORTS=0` keeps the retail airfields in single player for
+   developers. What remains: [redrawn airports, limits](formats/redrawn-airports.md#limits).
 4. **City fill.** Real-size scenery buildings filling the light areas of the
    city textures (branch `ac-cf0`, off by default behind `TORE_CITY_FILL=1`):
    up to 500,000 buildings drawn to 30 nm with separate graphics settings for
@@ -1247,8 +1249,9 @@ deferred narrowing it on 2026-10-10. What a narrower runway would still need:
 the strip mesh width, the runway's landable contact surface, the taxi paths,
 ground-start slot spacing, the AI landing's lateral tolerance and the ILS
 localizer width ([placed object scale](formats/objects-and-shapes.md#placed-object-scale-2026-10-10)).
-The redrawn airports of item 3 replace the pavement instead and may make this
-moot.
+The redrawn airports of item 3 (the default since protocol 24) replace the
+pavement with real-width runways, so this applies only to the retail
+airfields kept behind `TORE_REDRAWN_AIRPORTS=0`.
 
 Deferred, with no round yet:
 
@@ -1262,7 +1265,7 @@ Deferred, with no round yet:
   them to 3,500 or 4,000 ft needs no terrain work but three would cross water
   and one would cover a Roland site, and it needs a plan length for the runway
   and its ILS, the Quick Mission's strip list, the vertical-pad rule and a pad
-  plan (findings in `docs/formats/redrawn-airports.md` on branch `ac-ap1`).
+  plan (findings in [redrawn airports](formats/redrawn-airports.md#short-strips-under-the-redraw)).
 
 ---
 

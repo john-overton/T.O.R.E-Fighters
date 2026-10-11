@@ -180,6 +180,7 @@ pub fn terrain() -> Terrain {
         surface: Default::default(),
         city_fill: None,
         redrawn: Vec::new(),
+        redrawn_airports: false,
         layout: "TEST.MM".into(),
         condition: None,
         weather: tore_sim::environment::Environment::new(

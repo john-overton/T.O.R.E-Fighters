@@ -30,9 +30,10 @@ fn assert_no_overlaps(name: &str, patches: &[Patch]) {
 }
 
 #[test]
-fn the_switch_off_applies_no_plan() {
+fn the_switch_off_applies_no_plan_and_the_default_is_on() {
     assert!(Plans::new(false).unwrap().is_empty());
-    assert!(!Overrides::default().redrawn_airports);
+    assert!(!Plans::new(true).unwrap().is_empty());
+    assert!(Overrides::default().redrawn_airports);
 }
 
 #[test]
@@ -322,11 +323,24 @@ fn a_redrawn_airport_keeps_the_retail_runway_and_replaces_its_field() {
 }
 
 #[test]
-fn a_plan_for_another_runway_length_is_refused() {
+fn a_plan_for_another_runway_length_keeps_the_retail_airfield() {
     let map = synthetic_resources();
+    let retail = Terrain::for_mission(&map, "UKR", Some(0), &Overrides::default()).unwrap();
+    // The built-in STRIP plan is for the retail 5,532 ft runway; the
+    // synthetic map's is 8,000 ft, so the default build keeps it retail.
+    assert!(retail.redrawn_airports);
+    assert!(retail.redrawn.is_empty());
     let plans = synthetic_plan(&SYNTHETIC.replace("8000", "7000"));
-    let error = redrawn_terrain(&map, &plans).err().unwrap().to_string();
-    assert!(error.contains("plan expects 7000"), "{error}");
+    let terrain = redrawn_terrain(&map, &plans).unwrap();
+    assert!(terrain.redrawn.is_empty());
+    assert_eq!(
+        terrain
+            .airport_scene
+            .runway(AIRPORT_RUNWAY)
+            .unwrap()
+            .surface,
+        retail.airport_scene.runway(AIRPORT_RUNWAY).unwrap().surface
+    );
 }
 
 #[test]
@@ -521,4 +535,35 @@ fn template_aircraft_on_grass_move_to_free_apron_spots() {
     assert_eq!(parked[1].position, [10_300, 0, 10_600]);
     assert_eq!(parked[2].position, [9_000, 0, 10_200]);
     assert_eq!(parked[3].position, [40_000, 0, 40_000]);
+}
+
+/// A second tile's runway object flies from the tile's own main runway: its
+/// line's middle and both ends (10 ft in) lie on the tile's pavement, in the
+/// tile's own frame, at the scene's heading convention.
+#[test]
+fn a_second_tiles_runway_line_lies_on_its_main_runway() {
+    let plans = builtin();
+    let frame = Frame {
+        origin: [0.; 3],
+        right: [1., 0., 0.],
+        forward: [0., 0., 1.],
+    };
+    for tile in ["STRIP3A.OT", "STRIP5A.OT", "STRIP6A.OT", "STRIP7A.OT"] {
+        let plan = single(&plans, tile);
+        assert!(!plan.ils_runway, "{tile}");
+        let (_, patches) = compose(&[(&plan, [0., 0.])], None, 0.);
+        let line = RunwayLine::main(&plan, &frame, 0.).unwrap();
+        let longest = plan.runways.iter().map(|r| r.length).fold(0., f64::max);
+        assert_eq!(line.length, longest, "{tile}");
+        let d = [line.heading.sin(), line.heading.cos()];
+        for along in [0., line.length * 0.5 - 10., 10. - line.length * 0.5] {
+            let p = [line.center[0] + d[0] * along, line.center[2] + d[1] * along];
+            assert!(
+                on_pavement(&patches, p),
+                "{tile}: {p:?} is off the pavement"
+            );
+        }
+    }
+    // A base keeps the retail line.
+    assert!(single(&plans, "STRIP.OT").ils_runway);
 }

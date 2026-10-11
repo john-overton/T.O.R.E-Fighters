@@ -9,6 +9,16 @@ use std::collections::BTreeMap;
 use tore_formats::theater::CELL_FEET;
 use tore_world::surface::{UnitKind, layout::Variation, resolve::GroundTarget};
 
+/// The header's airfield scene for the retail airfields: what every
+/// recording before the redraw holds (docs/REPLAYS.md, "The airfield scene").
+pub const RETAIL_AIRFIELD_SCENE: u32 = 0;
+/// The header's airfield scene for the redrawn airports of
+/// docs/formats/redrawn-airports.md, the default since protocol 24
+/// (2026-10-11). A later change to the plans that moves anything an aircraft
+/// touches takes a new number, so an old recording is never replayed on
+/// airfields it was not flown on.
+pub const REDRAWN_AIRFIELD_SCENE: u32 = 1;
+
 /// Reads a recorded identity back into launch settings, refusing values
 /// a launch could not have produced.
 pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
@@ -59,7 +69,7 @@ pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
         wind: wind_setting(identity.wind_fps)?,
         cloud_altitude,
         weather_seed,
-        redrawn_airports: false,
+        redrawn_airports: identity.airfield_scene == REDRAWN_AIRFIELD_SCENE,
         target: identity
             .ground_target
             .as_ref()
@@ -155,25 +165,33 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
             .template
             .as_ref()
             .map(|site| recorded_target(&site.settings)),
-        // The retail airfields: the number of the redrawn-airport scene, once
-        // a build draws one, goes here (docs/REPLAYS.md, "Airfield scene").
-        airfield_scene: 0,
+        airfield_scene: if terrain.redrawn_airports {
+            REDRAWN_AIRFIELD_SCENE
+        } else {
+            RETAIL_AIRFIELD_SCENE
+        },
         surface: has_surface(terrain),
     }
 }
 
 /// Rebuilds the terrain a recording was flown in from its header's identity,
 /// reading none of the environment variables a launch honours, so a replay
-/// looks the same whatever the viewer's settings are. The one exception is
-/// the AP1 experiment's `TORE_REDRAWN_AIRPORTS`, which a recording does not
-/// keep: the viewer's own setting applies.
+/// looks the same whatever the viewer's settings are. The airfields are the
+/// header's airfield scene: a recording from before the redraw (no scene)
+/// rebuilds the retail airfields, a newer one the redrawn airports, whatever
+/// `TORE_REDRAWN_AIRPORTS` says. A scene this build does not know (a newer
+/// build's) falls back to the retail airfields, with a warning in the log.
 pub fn terrain(
     resources: &BTreeMap<String, Vec<u8>>,
     identity: &tore_replay::World,
 ) -> AppResult<Terrain> {
-    let mut recorded = recorded(identity)?;
-    recorded.redrawn_airports = crate::scenery::redrawn_airports()?;
-    Terrain::for_recorded(resources, &recorded)
+    if ![RETAIL_AIRFIELD_SCENE, REDRAWN_AIRFIELD_SCENE].contains(&identity.airfield_scene) {
+        log::warn!(
+            "Replay: the recording's airfield scene {} is not one this build draws; showing the retail airfields",
+            identity.airfield_scene
+        );
+    }
+    Terrain::for_recorded(resources, &recorded(identity)?)
 }
 
 /// The wind setting that resolves to exactly `fps`, bit for bit: `None` when
@@ -304,5 +322,43 @@ mod tests {
         let mut bad = good();
         bad.wind_fps = [3.3, 0., 4.4];
         assert!(recorded(&bad).is_err());
+    }
+
+    /// The airfields travel in the header: a redrawn world records scene 1
+    /// (a format 3 file) and replays redrawn; a recording from before the
+    /// redraw, with no scene, replays on the retail airfields whatever the
+    /// viewer's switch says, and so does a scene this build does not know.
+    #[test]
+    fn the_airfield_scene_is_recorded_and_rebuilt() {
+        let dir = crate::replay::tests::TempDir::new("airfield-scene");
+        let through_a_file = |name: &str, world: tore_replay::World| {
+            let header = tore_replay::Header {
+                world,
+                ..Default::default()
+            };
+            let path = dir.path().join(format!("{name}.tore-replay"));
+            let writer = tore_replay::Writer::create(&path, &header).unwrap();
+            let path = writer.finish(&tore_replay::Footer::default()).unwrap();
+            let recording = tore_replay::Recording::open(path).unwrap();
+            let header = recording.header();
+            (header.format_version, header.world.clone())
+        };
+        let mut w = tore_world::test_support::terrain();
+        w.layout = "UKR.MM".into();
+        w.redrawn_airports = true;
+        let (format, redrawn) = through_a_file("redrawn", of(&w));
+        assert_eq!(redrawn.airfield_scene, REDRAWN_AIRFIELD_SCENE);
+        assert_eq!(format, 3);
+        assert!(recorded(&redrawn).unwrap().redrawn_airports);
+
+        w.redrawn_airports = false;
+        let (format, retail) = through_a_file("retail", of(&w));
+        assert_eq!(retail.airfield_scene, RETAIL_AIRFIELD_SCENE);
+        assert_eq!(format, 2, "a retail world without surface stays format 2");
+        assert!(!recorded(&retail).unwrap().redrawn_airports);
+
+        let mut unknown = redrawn;
+        unknown.airfield_scene = 7;
+        assert!(!recorded(&unknown).unwrap().redrawn_airports);
     }
 }

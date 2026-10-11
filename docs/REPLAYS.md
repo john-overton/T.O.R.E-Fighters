@@ -719,11 +719,14 @@ beyond them.
     and the starts are the flight's.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
     not 0. 0 is the retail airfields, which every recording before the field
-    has. A build that redraws the airports will give its scene a number of
-    its own, so a replay builds the airfields the flight had; until then a
-    build opens a recording of another scene with the retail airfields and
-    says so in the session log. Reserved here; no build writes anything but 0
-    yet.
+    has; 1 is the [redrawn airports](formats/redrawn-airports.md), which every
+    flight has had since they became the default (2026-10-11, protocol 24),
+    so every recording since then is a format 3 file. The viewer rebuilds the
+    scene the header names, whatever `TORE_REDRAWN_AIRPORTS` says: an old
+    recording replays on the retail airfields, a new one on the redraw. A
+    scene this build does not know (a later build's) opens with the retail
+    airfields and a warning in the session log. A change to the plans that
+    moves anything an aircraft touches takes a new number.
   - **Surface poses**: every unit that follows a route (columns, convoys,
     ships under way) as a list in each frame, keyed by its fixed id, with
     position and attitude predicted like an aircraft's, so a unit driving
@@ -2096,11 +2099,10 @@ headless workflow.
   launchers (rails) and a parked aircraft's debris piece (format 3).
 - `replay::identity::terrain` rebuilds the recorded world from the header's
   resolved settings (layout, weather choice and layer, start time, wind,
-  cloud deck and, in format 3, the ground target) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
-  `TORE_CLOUD_ALTITUDE`; `replay::identity::of` captures them from a live
-  terrain. The one switch it does read is the experiment
-  `TORE_REDRAWN_AIRPORTS` ([redrawn airports](formats/redrawn-airports.md)),
-  which a recording does not keep. The viewer then builds its `Scenery` from that terrain.
+  cloud deck and, in format 3, the ground target and the airfield scene) without reading `TORE_WEATHER_TIME`, `TORE_WIND`,
+  `TORE_CLOUD_ALTITUDE` or `TORE_REDRAWN_AIRPORTS`; `replay::identity::of`
+  captures them from a live terrain (`RETAIL_AIRFIELD_SCENE` 0,
+  `REDRAWN_AIRFIELD_SCENE` 1). The viewer then builds its `Scenery` from that terrain.
 - The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:
   loading, cameras, keys, drawing), `host.rs` (the `Screen::Replay`
   plumbing in the app), `panels.rs` (the debug panels and the chunk cache
