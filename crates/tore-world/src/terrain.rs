@@ -7,6 +7,8 @@ use crate::{WorldResult, resources::ResourceSource};
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater};
 
+pub mod redrawn;
+
 /// The free-flight start over the Ukraine theaters, before the ground clamp.
 pub const UKRAINE_START: [f64; 3] = [1_070_000.0, 28_000.0, 590_000.0];
 
@@ -39,6 +41,9 @@ pub struct Terrain {
     /// template's objects, with their ids, owners and sides. The airport
     /// scene holds a contact volume for each one whose shape reads.
     pub surface: crate::surface::Surface,
+    /// The redrawn airports that replace retail airfields (the AP1
+    /// experiment, [`Overrides::redrawn_airports`]); empty by default.
+    pub redrawn: Vec<redrawn::Built>,
 }
 
 /// Launch settings that replace the mission's own weather start time, wind
@@ -54,6 +59,10 @@ pub struct Overrides {
     pub wind: Option<[i32; 2]>,
     /// Scattered cloud deck in feet, 0 for none.
     pub cloud_altitude: Option<i32>,
+    /// Experiment AP1: replace the airports that have a redrawn plan
+    /// ([`redrawn`]) with their real-size redraw. The app sets it from
+    /// `TORE_REDRAWN_AIRPORTS=1`; off, the scene is the retail one.
+    pub redrawn_airports: bool,
 }
 
 /// Fitted grounding: align the largest aggregate horizontal pavement layer,
@@ -170,6 +179,9 @@ pub struct Recorded {
     /// Scattered cloud deck in feet, 0 for none.
     pub cloud_altitude: i32,
     pub weather_seed: i32,
+    /// Experiment AP1: rebuild with the redrawn airports. Not in the
+    /// recording; the viewer passes its own `TORE_REDRAWN_AIRPORTS`.
+    pub redrawn_airports: bool,
     /// The Quick Mission ground target the flight had, so the surface
     /// (template, defenses, seed, nationality, separation and so the starts)
     /// rebuilds exactly.
@@ -639,6 +651,7 @@ impl Placements {
         code: &str,
     ) -> WorldResult<Self> {
         let mut out = Self::load(resources, code)?;
+        redrawn::reapply(resources, &terrain.redrawn, &mut out)?;
         out.add_surface(resources, &terrain.surface)?;
         Ok(out)
     }
@@ -987,8 +1000,12 @@ impl Terrain {
             catalog,
             weather,
             surface: Default::default(),
+            redrawn: Vec::new(),
         };
-        out.build_airport_scene(resources, code.trim_end_matches(".MM"), target)?;
+        let plans = redrawn::Plans::new(
+            recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports),
+        )?;
+        out.build_airport_scene(resources, code.trim_end_matches(".MM"), target, &plans)?;
         Ok(out)
     }
 
@@ -1000,6 +1017,7 @@ impl Terrain {
         resources: &dyn ResourceSource,
         code: &str,
         target: Option<&crate::surface::resolve::GroundTarget>,
+        plans: &redrawn::Plans,
     ) -> WorldResult<()> {
         use tore_sim::airport::{
             Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
@@ -1007,6 +1025,14 @@ impl Terrain {
         let mut sources = Placements::load(resources, code)?;
         self.surface = Self::resolve_surface(resources, &sources.layout, target)?;
         self.place_surface(resources, &sources, code);
+        // Experiment AP1: redrawn airports move and add their buildings
+        // after the surface has placed, so its layout is the retail one.
+        let mut parked = std::mem::take(&mut self.surface.parked);
+        let built = redrawn::apply(resources, &mut sources, plans, &mut parked, |x, z| {
+            f64::from(self.height(x as f32, z as f32))
+        });
+        self.surface.parked = parked;
+        self.redrawn = built?;
         sources.add_surface(resources, &self.surface)?;
         let mut objects = Vec::new();
         let mut runways = Vec::new();
@@ -1042,13 +1068,18 @@ impl Terrain {
                 runway,
                 ..
             } = stance;
-            let bounds = OrientedBox {
-                center,
-                half,
-                heading,
-                pitch,
-                bank,
-            };
+            let redraw = redrawn::Built::for_runway(&self.redrawn, id);
+            // A redrawn airport's contact box is its own whole airfield.
+            let bounds = redraw.map_or(
+                OrientedBox {
+                    center,
+                    half,
+                    heading,
+                    pitch,
+                    bank,
+                },
+                |built| built.surface,
+            );
             objects.push(StaticObject {
                 id,
                 source: SourceKey {
@@ -1094,8 +1125,10 @@ impl Terrain {
                             + basis.forward[axis] * local[2]
                     });
                 }
-                if let Some(found) =
-                    sources
+                // A redrawn airport's anchors are its plan's, or none.
+                let found = match redraw {
+                    Some(built) => built.anchors,
+                    None => sources
                         .strip_boxes
                         .get(&placement.object_type)
                         .and_then(|boxes| {
@@ -1106,8 +1139,9 @@ impl Terrain {
                                         + basis.forward[axis] * local[2]
                                 })
                             })
-                        })
-                {
+                        }),
+                };
+                if let Some(found) = found {
                     anchors.insert(id, found);
                 }
                 runways.push(Runway {

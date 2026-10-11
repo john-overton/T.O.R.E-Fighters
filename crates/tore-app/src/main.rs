@@ -13,6 +13,8 @@ mod aim_box;
 mod aircraft;
 mod aircraft_animation;
 mod aircraft_animation_probe;
+mod airfield_lights;
+mod airfield_sheets;
 mod assets;
 mod attitude;
 mod audio;
@@ -8558,6 +8560,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-drive") {
         surface_drive::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--airfield-sheets") {
+        airfield_sheets::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-objective") {

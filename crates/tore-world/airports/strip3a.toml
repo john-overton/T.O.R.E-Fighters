@@ -1,0 +1,130 @@
+# T.O.R.E redrawn airport plan: STRIP3A.OT (RNWY3A.SH, the north tile of STRIP3 fields). Experiment AP1, 2026-10-10.
+#
+# Opinionated (John, 2026-10-10: redraw the airports at real size from retail
+# airport textures; one plan per runway shape type; larger airports keep
+# their strips, with parking and taxiways on both sides). Sizes and positions
+# are agent choices at real-world scale (fitted); runway centrelines follow
+# the retail ones. Only applies with TORE_REDRAWN_AIRPORTS=1.
+# Feet in the runway frame: x right of the retail runway centreline, z along
+# it from its near threshold (STRIP anchor 0x11). Keys:
+# docs/formats/redrawn-airports.md.
+
+applies_to = "STRIP3A.OT"
+runway_length_ft = 5948
+ils_runway = false
+grass_margin_ft = 150
+
+[[material]]
+name = "runway_plain"
+pic = "_RNWY3A.PIC"
+rect = [1, 155, 97, 107]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "runway_centreline"
+pic = "_RNWY3A.PIC"
+rect = [1, 155, 97, 107]
+tile_ft = [0, 240]
+paint = ["edges", "centre"]
+
+[[material]]
+name = "runway_touchdown"
+pic = "_RNWY3A.PIC"
+rect = [101, 257, 97, 110]
+tile_ft = [0, 240]
+paint = ["edges", "centre"]
+
+[[material]]
+name = "runway_threshold"
+pic = "_RNWY3A.PIC"
+rect = [1, 155, 97, 107]
+tile_ft = [0, 150]
+paint = ["threshold"]
+
+[[material]]
+name = "taxiway"
+pic = "_RNWY3A.PIC"
+rect = [1, 371, 57, 96]
+tile_ft = [0, 150]
+along = "v"
+paint = ["taxiway"]
+
+[[material]]
+name = "apron"
+pic = "_RNWY3A.PIC"
+rect = [3, 7, 142, 140]
+tile_ft = [100, 100]
+
+[[material]]
+name = "fillet"
+pic = "_RNWY3A.PIC"
+rect = [1, 471, 40, 45]
+tile_ft = [50, 50]
+
+[[runway]]
+name = "R0"
+from = [892, -2152]
+length = 8100
+width = 200
+pad = 0
+touchdown = 1500
+marked_near = false
+
+[[runway]]
+name = "R1"
+from = [-1208, -2152]
+length = 6664
+width = 150
+pad = 0
+touchdown = 1500
+marked_near = false
+
+[[taxiway]]
+name = "west"
+width = 75
+points = [[-1658, -2152], [-1658, 5698]]
+
+[[taxiway]]
+name = "east"
+width = 75
+points = [[1342, -2152], [1342, 5698]]
+
+[[taxiway]]
+name = "north"
+width = 75
+points = [[-1658, 5698], [1342, 5698]]
+
+[[taxiway]]
+name = "mid"
+width = 75
+points = [[-1658, 1500], [1342, 1500]]
+
+[[taxiway]]
+name = "exit"
+width = 75
+points = [[-1208, 3000], [-1658, 3779]]
+
+[[apron]]
+name = "apron"
+min = [-2500, 0]
+max = [-1695.5, 3000]
+
+[[apron]]
+name = "apron"
+min = [1379.5, 1000]
+max = [2100, 3000]
+
+[[line]]
+from = [-2500, 0]
+to = [-2500, 3000]
+out = [-1, 0]
+
+[[line]]
+from = [2100, 1000]
+to = [2100, 3000]
+out = [1, 0]
+
+[extras]
+hangars = 4
+vehicles = false

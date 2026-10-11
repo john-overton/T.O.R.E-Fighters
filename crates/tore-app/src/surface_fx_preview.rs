@@ -277,6 +277,7 @@ fn spec(scene: &Scene, condition: Condition, time: Option<[i32; 2]>) -> AppResul
         time,
         wind: None,
         cloud_altitude: Some(0),
+        redrawn_airports: false,
     };
     spec.ground_target = Some(scene.stem.into());
     spec.aaa = Defense::from_level(scene.defenses.0).ok_or("defense level")?;

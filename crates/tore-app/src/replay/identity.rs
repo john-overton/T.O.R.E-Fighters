@@ -59,6 +59,7 @@ pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
         wind: wind_setting(identity.wind_fps)?,
         cloud_altitude,
         weather_seed,
+        redrawn_airports: false,
         target: identity
             .ground_target
             .as_ref()
@@ -163,12 +164,16 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
 
 /// Rebuilds the terrain a recording was flown in from its header's identity,
 /// reading none of the environment variables a launch honours, so a replay
-/// looks the same whatever the viewer's settings are.
+/// looks the same whatever the viewer's settings are. The one exception is
+/// the AP1 experiment's `TORE_REDRAWN_AIRPORTS`, which a recording does not
+/// keep: the viewer's own setting applies.
 pub fn terrain(
     resources: &BTreeMap<String, Vec<u8>>,
     identity: &tore_replay::World,
 ) -> AppResult<Terrain> {
-    Terrain::for_recorded(resources, &recorded(identity)?)
+    let mut recorded = recorded(identity)?;
+    recorded.redrawn_airports = crate::scenery::redrawn_airports()?;
+    Terrain::for_recorded(resources, &recorded)
 }
 
 /// The wind setting that resolves to exactly `fps`, bit for bit: `None` when
@@ -251,6 +256,7 @@ mod tests {
                     wind: recorded.wind,
                     cloud_altitude: 12_345,
                     weather_seed: 1,
+                    redrawn_airports: false,
                     target: None,
                 }
             );

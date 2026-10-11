@@ -1980,7 +1980,9 @@ headless workflow.
   resolved settings (layout, weather choice and layer, start time, wind,
   cloud deck and, in format 3, the ground target) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
   `TORE_CLOUD_ALTITUDE`; `replay::identity::of` captures them from a live
-  terrain. The viewer then builds its `Scenery` from that terrain.
+  terrain. The one switch it does read is the experiment
+  `TORE_REDRAWN_AIRPORTS` ([redrawn airports](formats/redrawn-airports.md)),
+  which a recording does not keep. The viewer then builds its `Scenery` from that terrain.
 - The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:
   loading, cameras, keys, drawing), `host.rs` (the `Screen::Replay`
   plumbing in the app), `panels.rs` (the debug panels and the chunk cache

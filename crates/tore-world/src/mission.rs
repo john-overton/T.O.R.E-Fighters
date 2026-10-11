@@ -2020,6 +2020,7 @@ impl Parser {
             time: self.time,
             wind: self.wind,
             cloud_altitude: self.cloud_deck,
+            redrawn_airports: false,
         };
         if let Some(start) = self.start {
             spec.start = start;
@@ -2191,6 +2192,7 @@ mod tests {
             time: Some([5, 7]),
             wind: Some([-90, 45]),
             cloud_altitude: Some(12_000),
+            redrawn_airports: false,
         };
         spec.start = Start::Ground {
             runway: RUNWAY_OBJECT_BASE + 3,

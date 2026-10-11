@@ -3,6 +3,7 @@
 //! fog, the per-camera weather presentation and the render origin. The
 //! simulation half is [`Terrain`]; code that needs the weather or the airport
 //! scene takes `&Terrain` alongside `&Scenery`.
+mod redrawn_pavement;
 mod runway_cutout;
 pub mod surface_art;
 
@@ -112,7 +113,20 @@ pub fn launch_overrides() -> AppResult<Overrides> {
         time,
         wind,
         cloud_altitude,
+        redrawn_airports: redrawn_airports()?,
     })
+}
+
+/// Experiment AP1: `TORE_REDRAWN_AIRPORTS=1` replaces the airports that have
+/// a redrawn plan with their real-size redraw (docs/formats/redrawn-airports.md).
+/// Unset or `0` keeps the retail airports. A replay honours it too, since a
+/// recording does not keep it.
+pub fn redrawn_airports() -> AppResult<bool> {
+    match std::env::var("TORE_REDRAWN_AIRPORTS").as_deref() {
+        Err(std::env::VarError::NotPresent) | Ok("0") => Ok(false),
+        Ok("1") => Ok(true),
+        _ => Err("TORE_REDRAWN_AIRPORTS must be 0 or 1".into()),
+    }
 }
 
 /// The terrain a launch builds: `condition` picks one of the six weather
@@ -436,6 +450,30 @@ impl Scenery {
             pages: &mut self.sky_indices,
         };
         for (id, object_type, shape, stand, lift) in drawn {
+            // Experiment AP1: a redrawn airport draws its own pavement in
+            // place of the retail airfield shape.
+            if let Some(built) = crate::terrain::redrawn::Built::for_runway(&terrain.redrawn, id) {
+                let color = shape
+                    .faces
+                    .iter()
+                    .find(|face| !face.texture.is_empty() && !face.colors.is_empty())
+                    .map_or(0., |face| {
+                        f32::from(face.colors[0]) + f32::from(face.fog as u8) * 256.
+                    });
+                let vertices = redrawn_pavement::vertices(
+                    built,
+                    resources,
+                    &mut art.layers,
+                    build.pages,
+                    |pages| (first_page + pages.len()) / 65536,
+                    color,
+                    surface_art::BUDGET - static_float_count,
+                )?;
+                static_float_count += vertices.len();
+                self.static_lines.insert(id, Vec::new());
+                self.static_vertices.insert(id, vertices);
+                continue;
+            }
             surface_art::preload(shape, resources, first_page, build.pages, &mut art.layers)?;
             let mut geometry = surface_art::Drawn::default();
             surface_art::emit(
