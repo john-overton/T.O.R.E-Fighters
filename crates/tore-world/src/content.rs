@@ -224,9 +224,9 @@ fn theater_item(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> Option<Ite
 /// decision: the other `~` records are never offered, so they stay out). The
 /// record is the only file a loadout reads for it.
 fn weapon_items(resources: &BTreeMap<String, Vec<u8>>) -> Vec<Item> {
-    const NOVELTY: [&str; 2] = ["~BLDR.JT", "~MOOSE.JT"];
     let offered = |name: &str| {
-        (name.ends_with(".JT") && (!name.starts_with('~') || NOVELTY.contains(&name)))
+        (name.ends_with(".JT")
+            && (!name.starts_with('~') || tore_sim::combat::loadout::novelty(name)))
             || tore_sim::combat::sight::DESIGNATOR_PODS.contains(&name)
     };
     resources

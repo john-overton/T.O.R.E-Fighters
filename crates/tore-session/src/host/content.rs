@@ -271,6 +271,13 @@ pub fn label_of(kind: ItemKind, key: &str, resources: &Resources) -> Option<Stri
             .label()
             .to_owned(),
         ItemKind::Theater => resources.theater_label(key).ok().flatten()?,
+        // A laser designator pod (protocol 23) is named by its record.
+        ItemKind::Weapon if key.ends_with(".SEE") => {
+            let bytes = resources.get(key)?;
+            tore_sim::combat::sight::DesignatorStore::parse(key, bytes)
+                .ok()?
+                .name
+        }
         ItemKind::Weapon => {
             let bytes = resources.get(key)?;
             tore_formats::weapons::Weapon::parse(key, bytes).ok()?.name
