@@ -10,6 +10,10 @@ launches).
 debrief has the Destroy line, the Red bot's the Protect line; the template's radars never paint the Red bot. Blue's
 capture converts into a format 3 replay with the ground target, its seed and the surface units named.
 
+`net-redfor-ground-start`: the same PvP mission with `enemy-start ground auto` (slice CL-R): the Red bot takes
+Enemy Wing 1's lead parked at the Redfor field the world picks and starts there on the ground (the bot's start
+line), Blue in the air; no radar paints the Red bot on its own field.
+
 Both read the `tore-bot` surface line (`NAME: surface: digest D, moving M, ...`, every five seconds). See
 docs/testing/lane-net.md.
 """
@@ -135,6 +139,37 @@ def drive_pvp(d: Drive) -> None:
     info.forbid(r"INCOMPLETE|^Problem", "damage")
 
 
+def drive_redfor_ground_start(d: Drive) -> None:
+    """PvP over the defended column with an enemy ground start (slice CL-R): Enemy Wing 1 parks at the Redfor field
+    nearest the target at least 15 nm from it, and the Red bot that takes its lead starts there on the ground, its
+    own side's field, while Blue starts in the air. The field's radars are Red's, so none paints the Red bot."""
+    port = d.port()
+    mission = weapons_hold(surface_mission()) + "enemy-start ground auto\n"
+    server = start_server(d, port, mission, mode="pvp", kill_limit=5, kill_owner="total", time_limit=2)
+    blue = start_bots(d, port, "blue", 60, "--callsign", "Blue", "--slot", "0")
+    red = start_bots(d, port, "red", 60, "--callsign", "Red", "--slot", "6")
+    blue.finish(120, None)
+    red.finish(120, None)
+    server.finish(60, None)
+    blue.expect(r"^Blue: seat \d+, plane 0, at tick \d+$", "a friendly plane")
+    red.expect(r"^Red: seat \d+, plane 6, at tick \d+$", "Enemy Wing 1's lead, open in PvP")
+    blue.expect(r"^Blue: start: airborne at \d+ ft$", "Blue's airborne start")
+    red.expect(r"^Red: start: on the ground at .+, a Redfor field$", "Red's ground start at its own field")
+    red.expect(r"^Red: debrief objective: (Protected|Failed to protect)", "Redfor's Protect line")
+    for problem in surface_problems(blue.text() + red.text(), ["Blue", "Red"]):
+        d.problem(problem)
+    red_line = last_surface(red.text()).get("Red")
+    if red_line and int(red_line["painted"]) > 0:
+        d.problem(f"a radar painted the Red bot on its own side's field in {red_line['painted']} frames")
+    for bot in (blue, red):
+        bot.forbid(NET_BAD, "a network problem")
+        bot.forbid(r"places this mission's ground target differently", "a surface digest refusal")
+    red.forbid(r"^Red: debrief .*[Ss]hot down by", "the Red bot shot down on its own field")
+    server.forbid(NET_BAD, "a network problem")
+    if not re.search(r"enemy wing 1 on a Redfor runway the world picks", server.text() + server_log(d)):
+        d.problem("the server's mission line does not name the enemy ground start")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -143,5 +178,9 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-surface-pvp", lane="net", args=[], driver=drive_pvp, uses=("server", "bot"), timeout=300,
+        ),
+        Scenario(
+            name="net-redfor-ground-start", lane="net", args=[], driver=drive_redfor_ground_start,
+            uses=("server", "bot"), timeout=300,
         ),
     ]

@@ -421,16 +421,27 @@ refuses an enemy field as it refuses a short strip. What changed in the lanes:
   `-nsk-a9` (Odesa, Florennes, Kimpo); `ai-lost-lead-route-ukr-a6` is
   `-ukr-a9`; `ai-known-f22-leader-wingman-ukr3` is `-ukr12`;
   `flight-climbout-*` leaves Kherson instead of Krasnodar.
-- The ILS-terrain land orders keep the two Blue fields (UKR 8 and 12). Amiens,
-  Burevestnik, Hyon Ni, Donets'k and Kharkiv are Redfor fields where the Blue
-  wing neither starts nor is sent, so those five are gone; a Redfor wing would
-  land there, but the probe has no Redfor wing to order. No Blue field can
-  stand in: `--validate-ils` at 51b2d613 lists only those seven runway ends
-  whose 3 degree path meets terrain in the last 5 nm, and UKR 8 and 12 are the
-  only Blue ones (checked in slice A1). Restoring the five needs a probe option
-  that seats the wing on Redfor.
+- The ILS-terrain land orders kept only the two Blue fields (UKR 8 and 12)
+  from AL1 until slice CL-R: Amiens, Burevestnik, Hyon Ni, Donets'k and Kharkiv
+  are Redfor fields where the Blue wing neither starts nor is sent, and no Blue
+  field can stand in (`--validate-ils` at 51b2d613 lists only those seven
+  runway ends whose 3 degree path meets terrain in the last 5 nm, checked in
+  slice A1). **Restored by the Redfor seat (slice CL-R, 2026-10-11):**
+  `--probe-redfor` (with `--probe-wing-only` and `--ground-start` at a Redfor
+  field) turns the probe's wing into Enemy Wing 1 of an open mission with an
+  enemy ground start at that field, and the probe's seat takes the parked
+  lead by the handoff a networked Redfor player uses; a one-aircraft Blue wing
+  holds its weapons at the mission's start point and the Redfor wing holds its
+  own, so only the script moves it. The same tick loop and checks then fly
+  `ai-ils-terrain-{fra-a9,kurile-a3,nsk-a6,ukr-a5,ukr-a6}` again; the wing's
+  lines read `Enemy 1-2`. The Redfor seat refuses the attack, fight, threat,
+  route, blind-wing, group, lock and aircraft options and `--record-mission`.
 - `ShortStripTests` also checks that no AI scenario or fuzz seed starts at an
-  enemy field.
+  enemy field, except a `--probe-redfor` scenario, which must start at a
+  Redfor field, and that every `--enemy-ground-start` names a Redfor field.
+- `ai-enemy-ground-start-ukr-a6` (slice CL-R) parks Enemy Wing 1 at Kharkiv
+  with `--enemy-ground-start 6` while the player's wing leaves Odesa: both
+  enemy aircraft must start parked and be flying at the end.
 
 Run of the lane's theater, takeoff, ground, ILS-terrain, long-ground, record,
 determinism and all 400 fuzz scenarios (`TORE_AI_FUZZ=all`, `--jobs 6

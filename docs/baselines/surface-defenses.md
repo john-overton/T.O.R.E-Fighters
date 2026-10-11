@@ -538,8 +538,9 @@ of this pass found.
   `--validate-ils` lists only seven runway ends whose 3 degree path meets
   terrain in the last 5 nm: Amiens (FRA 9), Burevestnik (KURILE 3), Hyon Ni
   (NSK 6), Donets'k and Kharkiv (UKR 5, 6), all Redfor, and L'viv and Ivano
-  Frankivs'k (UKR 8, 12), the two Blue ones still covered. Restoring the five
-  needs a probe option that seats the wing on Redfor ([lane notes](../testing/lane-ai.md)).
+  Frankivs'k (UKR 8, 12), the two Blue ones still covered. Slice CL-R
+  (2026-10-11) restored the five with a probe option that seats the wing on
+  Redfor, `--probe-redfor` ([lane notes](../testing/lane-ai.md)).
 - **`replay-keys-*`: a polluted profile, fixed.** All 19 windowless keyed
   flights failed with "recordings: 1 finished, 1 partial", with this build and
   with the base 51b2d613 build, because a run made straight against the shared
