@@ -74,6 +74,26 @@ impl Stat {
     }
 }
 
+/// Bits each readout part took, in the record's order (an array over 32
+/// has no `Default`).
+struct PartBits([usize; tore_session::wire::readout::PART_COUNT]);
+impl Default for PartBits {
+    fn default() -> Self {
+        Self([0; tore_session::wire::readout::PART_COUNT])
+    }
+}
+impl std::ops::Deref for PartBits {
+    type Target = [usize; tore_session::wire::readout::PART_COUNT];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for PartBits {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Default)]
 struct Link {
     host: Option<HostConnection>,
@@ -101,7 +121,7 @@ struct Link {
     late_waits: usize,
     readout: Stat,
     readout_waiting: Stat,
-    part_bits: [usize; tore_session::wire::readout::PART_COUNT],
+    part_bits: PartBits,
     /// The data link's four readout parts per snapshot, bytes.
     link_parts: Stat,
     /// The Link events' bytes per snapshot packet that carried any.

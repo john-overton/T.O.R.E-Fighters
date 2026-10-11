@@ -40,6 +40,8 @@ use super::flat::{self, Kind, List, ListRaw, Schema, Slow};
 use super::snapshot::{BASELINE_BACK_BITS, HISTORY_SNAPSHOTS, MAX_BASELINE_BACK, PENDING_PACKETS};
 use super::{WireError, WireResult};
 use std::borrow::Cow;
+
+mod a2g;
 use std::collections::{BTreeMap, VecDeque};
 use tore_codec::{BitReader, BitWriter};
 use tore_formats::aircraft::AircraftId;
@@ -53,14 +55,14 @@ use tore_sim::combat::missiles::{FiringBand, LaunchMode, seeker};
 use tore_sim::combat::threats::{EvidenceSource, GuidanceClass, ThreatRecord};
 use tore_sim::sensors::detection::Sighting;
 use tore_sim::sensors::passive::{Emitter, Symbol};
-use tore_sim::sensors::{Channel, Contact, Plot, Strobe, Support};
+use tore_sim::sensors::{Channel, Contact, GroundContact, Plot, Strobe, Support};
 use tore_world::datalink::{
     Damage as LinkDamage, Fuel, SEAT_TRACKS, TrackSource, Weapons as LinkWeapons,
 };
 use tore_world::readout::{
     self as world_readout, AirportReadout, CockpitReadout, Countermeasures, DamageReadout,
-    Estimates, GunsightReadout, InboundMissile, MapRow, MusicReadout, RwrReadout, SeekerReadout,
-    SensorReadout, Stores, TargetRow, Targets, Trail,
+    Estimates, GunsightReadout, InboundMissile, MAX_GROUND, MapRow, MusicReadout, RwrReadout,
+    SeekerReadout, SensorReadout, Stores, TargetRow, Targets, Trail,
 };
 use tore_world::readout::{LinkAssigned, LinkMark, LinkMate, LinkReadout, LinkTrack, MemberRef};
 use tore_world::snapshot::Damage;
@@ -259,6 +261,26 @@ const LINK_MATE: Schema = &[
     Kind::Slow(Slow::Bits(2, 2)),
 ];
 
+/// A ground page contact (protocol 23): the channel (radar for A-G,
+/// infrared or HARM), its position and velocity, each sent as a difference
+/// (the host refreshes a listed position four times a second and holds it
+/// between), the eligible and destroyed flags, its class word, and the
+/// aircraft and visible flags.
+const GROUND: Schema = &[
+    Kind::Slow(Slow::Bits(2, 3)),
+    D,
+    D,
+    D,
+    D,
+    D,
+    D,
+    BIT,
+    BIT,
+    Kind::Slow(Slow::Int),
+    BIT,
+    BIT,
+];
+
 /// The scalar groups.
 mod scalar {
     pub const HEADER: usize = 0;
@@ -277,7 +299,18 @@ mod scalar {
     pub const GUNSIGHT: usize = 13;
     /// The surface radars painting the plane (protocol 22).
     pub const PAINTING: usize = 14;
-    pub const COUNT: usize = 15;
+    /// The air-to-ground round's groups (protocol 23, slice NA): the
+    /// targeting sight and its sensor, the laser, the bomb or rocket sight,
+    /// the guided weapon sight, the HARM cue and the guided weapons in
+    /// flight ([`super::a2g`]).
+    pub const SIGHT: usize = 15;
+    pub const SIGHT_SENSOR: usize = 16;
+    pub const LASER: usize = 17;
+    pub const BOMB_SIGHT: usize = 18;
+    pub const GUIDED: usize = 19;
+    pub const HARM: usize = 20;
+    pub const WEAPONS_IN_FLIGHT: usize = 21;
+    pub const COUNT: usize = 22;
 }
 
 /// The lists.
@@ -298,7 +331,9 @@ mod list {
     pub const LINK_TRACKS: usize = 13;
     pub const LINK_MARKS: usize = 14;
     pub const LINK_MATES: usize = 15;
-    pub const COUNT: usize = 16;
+    /// The ground page's contacts (protocol 23, slice NA).
+    pub const GROUND: usize = 16;
+    pub const COUNT: usize = 17;
 }
 
 /// The most values a scalar group holds.
@@ -315,7 +350,7 @@ pub enum Part {
 }
 
 /// How many parts a record has.
-pub const PART_COUNT: usize = 32;
+pub const PART_COUNT: usize = 40;
 
 /// The parts in the order they are written, which is their importance:
 /// what is left out for room is what comes last.
@@ -324,6 +359,13 @@ pub const PARTS: [Part; PART_COUNT] = [
     Part::Scalar(scalar::LINK),
     Part::Scalar(scalar::STORES),
     Part::Scalar(scalar::GUNSIGHT),
+    Part::Scalar(scalar::BOMB_SIGHT),
+    Part::Scalar(scalar::GUIDED),
+    Part::Scalar(scalar::LASER),
+    Part::Scalar(scalar::SIGHT),
+    Part::Scalar(scalar::SIGHT_SENSOR),
+    Part::Scalar(scalar::HARM),
+    Part::Scalar(scalar::WEAPONS_IN_FLIGHT),
     Part::Scalar(scalar::COUNTERMEASURES),
     Part::Scalar(scalar::DAMAGE),
     Part::Scalar(scalar::SEEKER),
@@ -344,6 +386,7 @@ pub const PARTS: [Part; PART_COUNT] = [
     Part::List(list::EMITTERS),
     Part::Scalar(scalar::SENSORS),
     Part::List(list::CONTACTS),
+    Part::List(list::GROUND),
     Part::List(list::LINK_MARKS),
     Part::List(list::LINK_MATES),
     Part::List(list::LINK_TRACKS),
@@ -372,6 +415,7 @@ fn schema(list: usize) -> Schema {
         LINK_TRACK,
         LINK_MARK,
         LINK_MATE,
+        GROUND,
     ][list]
 }
 
@@ -394,6 +438,7 @@ fn limit(list: usize) -> usize {
         SEAT_TRACKS,
         MAX_LINK_MARKS,
         tore_sim::ai::launch::MAX_WING_MEMBERS,
+        MAX_GROUND,
     ][list]
 }
 
@@ -416,6 +461,13 @@ pub fn part_name(part: Part) -> &'static str {
             "link",
             "gunsight",
             "painting",
+            "sight",
+            "sight sensor",
+            "laser",
+            "bomb sight",
+            "guided",
+            "harm cue",
+            "weapons in flight",
         ][index],
         Part::List(index) => [
             "seeker observation",
@@ -434,6 +486,7 @@ pub fn part_name(part: Part) -> &'static str {
             "link tracks",
             "link marks",
             "link mates",
+            "ground contacts",
         ][index],
         Part::Trails => "trails",
     }
@@ -1068,7 +1121,20 @@ impl QReadout {
             .chain(se.available.map(flag))
             .chain(se.operating.map(flag))
             .chain(option_pair(se.radar_track_nmi.map(|n| q(n, NMI))))
+            // The ground pages' flags (protocol 23).
+            .chain([flag(se.air_ground), flag(se.harm)])
             .collect();
+        s[scalar::SIGHT] = a2g::sight_values(readout.sight.as_ref(), readout.tick);
+        s[scalar::SIGHT_SENSOR] = a2g::sensor_values(readout.sight.as_ref());
+        s[scalar::LASER] = a2g::laser_values(readout.laser.as_ref());
+        s[scalar::BOMB_SIGHT] = a2g::bomb_values(readout.bomb_sight.as_ref());
+        s[scalar::GUIDED] = a2g::guided_values(readout.guided.as_ref());
+        s[scalar::HARM] = a2g::harm_values(readout.estimates.harm.as_ref());
+        s[scalar::WEAPONS_IN_FLIGHT] = a2g::tti_values(
+            &readout.weapon_tti,
+            readout.guided_impact_tick,
+            readout.tick,
+        );
 
         let l = &mut out.lists;
         let mut one = |index: usize, id: u32, values: Vec<i64>| {
@@ -1151,6 +1217,11 @@ impl QReadout {
         }
         for c in &se.contacts {
             l[list::CONTACTS].insert(c.id, contact_values(c));
+        }
+        for g in se.ground.iter().take(MAX_GROUND) {
+            let mut values = contact_values(&g.contact);
+            values.extend([i64::from(g.class), flag(g.aircraft), flag(g.visible)]);
+            l[list::GROUND].insert(g.contact.id, values);
         }
         for st in &se.strobes {
             l[list::STROBES].insert(
@@ -1378,8 +1449,7 @@ impl QReadout {
             in_range: pick(es, 8) != 0,
             hit_percent: u8::try_from(pick(es, 9)).map_err(|_| bad("hit percentage"))?,
             solution_seconds: opt(es, 10).map(|t| v(t, SECONDS)),
-            // Host-built: not on the wire before protocol 23 (slice NA).
-            harm: None,
+            harm: a2g::harm_of(get(scalar::HARM))?,
         };
 
         let row = |list: usize| -> WireResult<Option<TargetRow>> {
@@ -1495,6 +1565,24 @@ impl QReadout {
             trail_points.extend(points.iter().map(|p| p.map(|x| v(x, COARSE_FT))));
         }
         let se = get(scalar::SENSORS);
+        let mut ground = self.lists[list::GROUND]
+            .iter()
+            .map(|(id, x)| {
+                Ok(GroundContact {
+                    contact: contact(*id, x)?,
+                    class: u16::try_from(x[9]).map_err(|_| bad("ground class"))?,
+                    aircraft: x[10] != 0,
+                    visible: x[11] != 0,
+                })
+            })
+            .collect::<WireResult<Vec<_>>>()?;
+        // Nearest the client's own plane first, as the host lists them.
+        ground.sort_by(|a, b| {
+            a.contact
+                .distance_ft
+                .total_cmp(&b.contact.distance_ft)
+                .then(a.contact.id.cmp(&b.contact.id))
+        });
         let sensors = SensorReadout {
             tick: (readout_tick as i64 + pick(se, 0)).max(0) as u64,
             selected: opt(se, 1).map(u32_of).transpose()?,
@@ -1510,11 +1598,9 @@ impl QReadout {
             strobes,
             trails,
             trail_points,
-            // The ground pages are not on the wire before protocol 23
-            // (slice NA): a client draws none.
-            air_ground: false,
-            harm: false,
-            ground: Vec::new(),
+            air_ground: pick(se, 15) != 0,
+            harm: pick(se, 16) != 0,
+            ground,
         };
         let visual = self.lists[list::VISUAL]
             .iter()
@@ -1737,24 +1823,21 @@ impl QReadout {
                 .collect(),
         };
 
+        let (weapon_tti, guided_impact_tick) =
+            a2g::tti_of(get(scalar::WEAPONS_IN_FLIGHT), readout_tick)?;
         Ok(CockpitReadout {
             plane,
             tick: readout_tick,
             stores,
             gunsight,
-            // The targeting sight and the laser are host-built and not on
-            // the wire before protocol 23 (slice NA).
-            sight: None,
-            laser: None,
-            // The guided weapon sight and the weapons in flight are
-            // host-built too (slice NA).
-            guided: None,
-            weapon_tti: Vec::new(),
-            guided_impact_tick: None,
+            sight: a2g::sight_of(get(scalar::SIGHT), get(scalar::SIGHT_SENSOR), readout_tick)?,
+            laser: a2g::laser_of(get(scalar::LASER))?,
+            guided: a2g::guided_of(get(scalar::GUIDED))?,
+            weapon_tti,
+            guided_impact_tick,
             seeker,
             estimates,
-            // Host-built until protocol 23 carries it (slice NA).
-            bomb_sight: None,
+            bomb_sight: a2g::bomb_of(get(scalar::BOMB_SIGHT))?,
             targets,
             sensors,
             visual,
@@ -2099,7 +2182,7 @@ impl ReadoutRaw {
 }
 
 /// What one readout record held.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReadoutReport {
     /// Bits of the record.
     pub bits: usize,
@@ -2108,6 +2191,17 @@ pub struct ReadoutReport {
     pub waiting: usize,
     /// Bits each part took, in [`PARTS`] order.
     pub part_bits: [usize; PART_COUNT],
+}
+
+impl Default for ReadoutReport {
+    fn default() -> Self {
+        Self {
+            bits: 0,
+            sent: 0,
+            waiting: 0,
+            part_bits: [0; PART_COUNT],
+        }
+    }
 }
 
 /// Writes the record of `now` against `base` (the readout it names, not yet

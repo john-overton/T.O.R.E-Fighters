@@ -64,6 +64,8 @@ mod migration_tests;
 #[cfg(test)]
 mod phase2_tests;
 #[cfg(test)]
+mod readout_a2g_tests;
+#[cfg(test)]
 mod readout_tests;
 #[cfg(test)]
 mod round_trip_tests;
@@ -142,8 +144,17 @@ pub fn path_words(path: Path) -> &'static str {
 /// shot-down-by name; and the readout's painting radars (scalar group 14).
 /// The ground target's text lines (`ground-target`, `defenses`,
 /// `surface-seed`, `enemy-nationality`, `start ground auto`) travel in the
-/// mission text, which the mission hash covers.
-pub const PROTOCOL_VERSION: u16 = 22;
+/// mission text, which the mission hash covers. 23 since the air-to-ground
+/// round (slice NA): the readout's Sight, Sight sensor, Laser, Bomb sight,
+/// Guided, HARM cue and Weapons in flight groups (scalar groups 15 to 21),
+/// the ground pages' flags at the end of the Sensors group and the ground
+/// page's contacts (list 16); the extended combat commands after code 31
+/// (`NearestGround` 0, `ToggleLaser` 1, `SightNext` 2), combat command 30
+/// (`ToggleAirGround`), the HARM channel (code 3) and readiness codes 25
+/// (`NoEmitter`) and 26 (`TrackLost`), which the round's slices added under
+/// 22, are part of 23's definition; a loadout row may name a laser
+/// designator pod's SEE record.
+pub const PROTOCOL_VERSION: u16 = 23;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
