@@ -302,6 +302,59 @@ pub mod kind {
     /// the wreck fire's width when it burns), `hp_before` (Int).
     pub const SURFACE_WRECK: &str = "surface.wreck";
 
+    /// A bomb, rocket or guided bomb left its station: one entry for each
+    /// trigger call, so a pack is one entry and a held rocket pod one entry
+    /// for each rocket it fires. Subject: the aircraft. Object: the ground
+    /// target it had designated, if any. Fields: `weapon` (Id), `class`
+    /// (Text: bomb or rocket), `station` (Int), `count` (Int: the rounds this
+    /// call released), `projectile` (Id: the first) and `projectiles` (Ids,
+    /// in pack order, so a round's place in the list is its pack index),
+    /// `delivery` (Text from [`super::delivery`]), `left` (Int: the rounds
+    /// the station holds after, when the aircraft is a flown one), `salvo`
+    /// (Int, rockets: this rocket's number in the run fired from the station
+    /// without a gap of a second), `range_ft` (Num: to the target at
+    /// release). Each round is also an ordinary [`WEAPON_LAUNCH`].
+    pub const WEAPON_RELEASE: &str = "weapon.release";
+    /// A bomb landed before its fuze armed and did nothing but raise a puff
+    /// of dirt (format 3 vocabulary, 2026-10-11). Subject: the shooter.
+    /// Fields: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft` (where it
+    /// landed), `arm_s` (Num: the fuze's arming time), `flown_s` (Num: how
+    /// long it fell), `reason`. The shot's [`WEAPON_OUTCOME`] says missed.
+    pub const WEAPON_DUD: &str = "weapon.dud";
+    /// A cluster bomb burst on the ground and scattered its submunitions
+    /// (the replay draws their flashes from the burst's explosion). Subject:
+    /// the shooter. Fields: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft`,
+    /// `explosion` (Int: the explosion type of the burst).
+    pub const WEAPON_CLUSTER: &str = "weapon.cluster";
+    /// A guided air-to-ground weapon (laser bomb or missile, JDAM, AT-2)
+    /// was released or changed its guidance mode. The tree channel of the
+    /// same family is [`super::channel::WEAPON_GUIDANCE`]; this is the event
+    /// log's account. Subject: the shooter. Object: the object it follows,
+    /// when it follows one. Fields: `projectile`, `weapon`, `guidance`
+    /// (Text from [`super::guidance`]), `mode` (Text from [`super::guide`]),
+    /// `from` (Text: the mode before, absent at release), `released` (Bool:
+    /// this is the release), `spot_owner` (Id: whose laser spot a laser
+    /// weapon follows) with `own` (Bool: the spot is the shooter's own, not a
+    /// buddy's), `stored` (Bool: the point is the one stored at release),
+    /// `x_ft`, `y_ft`, `z_ft` (the JDAM's stored point, or the point a laser
+    /// weapon last homed on), `reason`.
+    pub const WEAPON_GUIDED: &str = "weapon.guided";
+    /// An aircraft's laser designator changed state. Subject: the lasing
+    /// aircraft. Object: the object the spot sits on, if any. Fields:
+    /// `state` (Text from [`super::laser`]), `on` (Bool: the spot is on the
+    /// target), `how` (Text: automatic or by hand), `mask` (Text: range,
+    /// gimbal or terrain, while masked), `range_ft`, and the spot as
+    /// `x_ft`, `y_ft`, `z_ft` while it lases.
+    pub const PLAYER_LASER: &str = "player.laser";
+    /// A flown aircraft designated a ground target or pinned a ground point,
+    /// or gave one up. Subject: the aircraft. Object: the designated ground
+    /// object, absent for a pinned point or none. Fields: `channel` (Text
+    /// from [`super::designate`]: how), `from` (Id: the object before),
+    /// `x_ft`, `y_ft`, `z_ft` (the point of a pin), `reason`. Air targets
+    /// are not recorded here (the radar and the views have their own
+    /// entries).
+    pub const PLAYER_DESIGNATE: &str = "player.designate";
+
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
         WEAPON_LAUNCH,
@@ -378,6 +431,12 @@ pub mod kind {
         SURFACE_REFILL,
         SURFACE_RADAR,
         SURFACE_WRECK,
+        WEAPON_RELEASE,
+        WEAPON_DUD,
+        WEAPON_CLUSTER,
+        WEAPON_GUIDED,
+        PLAYER_LASER,
+        PLAYER_DESIGNATE,
     ];
 }
 
@@ -502,6 +561,36 @@ pub mod field {
     pub const FIRE_FT: &str = "fire_ft";
     /// Hit points before a change.
     pub const HP_BEFORE: &str = "hp_before";
+    /// A bomb or rocket's delivery: [`super::delivery`].
+    pub const DELIVERY: &str = "delivery";
+    /// Rounds one trigger call released.
+    pub const COUNT: &str = "count";
+    /// The projectiles of a release, in pack order.
+    pub const PROJECTILES: &str = "projectiles";
+    /// A rocket's number in the run fired from its station.
+    pub const SALVO: &str = "salvo";
+    /// A guided weapon's guidance: [`super::guidance`].
+    pub const GUIDANCE: &str = "guidance";
+    /// A guided weapon is at its release.
+    pub const RELEASED: &str = "released";
+    /// The aircraft whose laser spot a weapon follows.
+    pub const SPOT_OWNER: &str = "spot_owner";
+    /// The point is the one stored at release.
+    pub const STORED: &str = "stored";
+    /// The laser's state: [`super::laser`].
+    pub const STATE: &str = "state";
+    /// How a laser was turned on: automatic or by hand.
+    pub const HOW: &str = "how";
+    /// Why a laser is masked.
+    pub const MASK: &str = "mask";
+    /// How a ground target was designated: [`super::designate`].
+    pub const CHANNEL: &str = "channel";
+    /// A fuze's arming time, seconds.
+    pub const ARM_S: &str = "arm_s";
+    /// Seconds a weapon flew.
+    pub const FLOWN_S: &str = "flown_s";
+    /// An explosion's type.
+    pub const EXPLOSION: &str = "explosion";
     /// A position in feet, world axes.
     pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
     /// A velocity in feet per second, world axes.
@@ -518,6 +607,75 @@ pub mod field {
         "forward_y",
         "forward_z",
     ];
+}
+
+/// How a bomb or rocket was delivered, for the `delivery` field of
+/// `weapon.release`.
+pub mod delivery {
+    /// A bomb released with the dive pipper (CCIP) as the sight.
+    pub const CCIP: &str = "ccip";
+    /// A bomb released with the level "T" as the sight.
+    pub const LEVEL: &str = "level";
+    /// A rocket fired with the rocket pipper.
+    pub const ROCKET: &str = "rocket";
+    /// A guided bomb, which then flies its own guidance.
+    pub const GUIDED: &str = "guided";
+    /// Released by an aircraft with no bomb sight of its own (an AI wing or
+    /// a plane the recorder cannot see inside).
+    pub const UNGUIDED: &str = "unguided";
+}
+
+/// How a guided air-to-ground weapon is guided, for the `guidance` field of
+/// `weapon.guided`.
+pub mod guidance {
+    /// Follows a laser spot.
+    pub const LASER: &str = "laser";
+    /// Flies to a stored point (the JDAMs).
+    pub const COORDINATE: &str = "coordinate";
+    /// Steered at a designated object by its launcher (the AT-2).
+    pub const COMMAND: &str = "command";
+}
+
+/// A guided weapon's mode, for the `mode` and `from` fields of
+/// `weapon.guided`.
+pub mod guide {
+    /// A laser weapon released with no spot: it may lock one once.
+    pub const WAITING: &str = "waiting";
+    /// Homing.
+    pub const GUIDING: &str = "guiding";
+    /// Guidance lost for good, or never had: it falls or flies on.
+    pub const BLIND: &str = "blind";
+}
+
+/// A laser designator's state, for the `state` field of `player.laser`.
+pub mod laser {
+    /// No designator, or the sight holds no point.
+    pub const OFF: &str = "off";
+    /// The sight holds a point and the laser is off.
+    pub const READY: &str = "ready";
+    /// The spot is on the target.
+    pub const LASING: &str = "lasing";
+    /// Wanted, but out of range, outside the gimbal or blocked by terrain.
+    pub const MASKED: &str = "masked";
+}
+
+/// How a ground target was designated, for the `channel` field of
+/// `player.designate`.
+pub mod designate {
+    /// The air-to-ground radar page holds the object.
+    pub const RADAR: &str = "a-g radar";
+    /// The infrared (FLIR) page holds it.
+    pub const INFRARED: &str = "infrared";
+    /// The HARM page holds it.
+    pub const HARM: &str = "harm page";
+    /// The targeting sight tracks it.
+    pub const SIGHT: &str = "sight";
+    /// A designation without either: by sight, or the Easy targeting key.
+    pub const VISUAL: &str = "visual";
+    /// A ground point the sight holds with no object on it.
+    pub const PIN: &str = "pin";
+    /// The designation or pin was given up.
+    pub const CLEARED: &str = "cleared";
 }
 
 /// Seeker tone names, for the `tone` field of `audio.tone`.
