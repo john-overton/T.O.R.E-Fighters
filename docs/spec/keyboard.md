@@ -96,6 +96,11 @@ sight's next visible ground object) and Ctrl+L (the laser by hand)
 ([key placement](../INPUT.md#key-placement)). `/` and
 Backslash act on every aircraft with a laser designator or a FLIR, not only with
 an advanced targeting option ([the targeting sight](air-to-ground.md#the-targeting-sight)).
+The sight's other keys (Shift+Backslash to pin the ground, Alt with the arrows
+to slew, L as a second clear key, Shift+' and Shift+; to zoom) are T.O.R.E
+placements on keys the original leaves free or shares, listed in [key
+placement](../INPUT.md#key-placement); each is a catalog action the controls
+screen can move.
 
 ## Sensors and navigation
 
@@ -161,8 +166,9 @@ an advanced targeting option ([the targeting sight](air-to-ground.md#the-targeti
 | Alt+H | Tighten up / combat spread | Confirmed |
 | Alt+V | Formation high / level / low | Confirmed |
 
-Every order goes to the whole flight; there is no key to address one wingman.
-The approach orders (Alt+6 to Alt+9) first send the engage order and add the
+In the original every order goes to the whole flight; there is no key to
+address one wingman (T.O.R.E adds Alt+0 and Alt+Shift+1 to 4,
+[key placement](../INPUT.md#key-placement)). The approach orders (Alt+6 to Alt+9) first send the engage order and add the
 approach only when a hostile target exists.
 
 ## Keys the original leaves free

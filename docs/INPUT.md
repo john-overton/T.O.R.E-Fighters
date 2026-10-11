@@ -234,9 +234,11 @@ the vectoring jets, the range reset and the damage test are off on the AC-130,
 where the D-pad picks and links guns. The live-fire range reset, which took
 Backslash, is now Ctrl+Shift+Backslash.
 
-On [the keyboard map](tore-keyboard-map.html) the gunsight keys are on the Fly &
-Fight sheet, with an AC-130 legend box. The range reset is a developer fixture
-and stays off it, as the [map's rules](tore-keyboard-map-rules.md) require.
+On [the keyboard map](tore-keyboard-map.html) the sight keys are on the Fly &
+Fight sheet, with a sight legend box that also lists the AC-130's gamepad
+gestures; Tab (the gun), Ctrl+M (delivery mode) and Ctrl+R (the ground radar)
+are on that sheet too. The range reset is a developer fixture and stays off it,
+as the [map's rules](tore-keyboard-map-rules.md) require.
 
 ## In-game controls and saved preferences
 
@@ -956,9 +958,9 @@ diagnostic panel when it is shown, to clear
 both sensor and HUD display selection. A selected target outside the HUD has a
 direction chevron; the Easy targeting cheat keeps it after sensor coverage is
 lost, which grants no weapon lock. [HUD target rules](spec/gunsight-targeting.md).
-`weapon-seeker-mode` remains rebindable but has no default key; the diagnostic
-panel's mode label is clickable only while the panel is shown (**Escape → Pref →
-Weapon diagnostics?**). Supported radar weapons still need aircraft lock.
+`weapon-seeker-mode` is on Ctrl+M (delivery mode, [key placement](#key-placement)) and
+rebindable; the diagnostic panel's mode label is clickable only while the panel
+is shown (**Escape → Pref → Weapon diagnostics?**). Supported radar weapons still need aircraft lock.
 
 BORE uses a five-degree circular half-angle. Its blinking diamond marks a
 provisional contact, not a guaranteed lock; the blinking triangle on the range
@@ -1155,7 +1157,7 @@ training targets. See [behavior](spec/dummy-aircraft.md).
 ## NAV and weapon selection
 
 `[` and `]` cycle backward/forward through NAV and weapons. Selection controls
-arming; U and semicolon have no action. Old `master-arm` profile entries are
+arming. Old `master-arm` profile entries are
 accepted but do nothing. The editor offers `weapon-next` and `weapon-previous`.
 NAV INFO minus/plus select destinations; button 3 switches mission/airport mode.
 WEAPONS minus/plus select NAV/weapons; button 3 pages the store list.
@@ -1230,13 +1232,16 @@ The drone still moves while playback is paused; the Escape menu stops input.
   while paused; with Shift, 30 seconds. Home and End go to the start and end,
   Page Up and Page Down to the previous and next timeline marker.
 - **Cameras:** Tab and Shift+Tab pick the aircraft. F1 to F10 and F12 give the
-  flight views from it; F11 is not a view. Backquote switches to the drone,
+  flight views from it; F11 is not a view. O and Shift+O look at the next or
+  previous aircraft, weapon or ground object present now. Keypad 5 or Shift+/
+  recenters the look, and plus and minus zoom. Backquote switches to the drone,
   which W, A, S, D, E and Q fly; Shift is four times faster.
 - **Panels and display:** I, F and G open or close the selected aircraft's AI
   thinking, telemetry and missile guidance panels, C the Comms panel; M opens
   its right-click menu, and X closes every panel. N, T and R switch name
   labels, the mission timer and flight path trails; Shift+R steps the trail
-  length.
+  length. B draws or hides the laser spots, designations, guided weapons and
+  bomb landings in the 3D view ([the marks](REPLAYS.md#laser-and-bomb-marks)).
 - **Screenshots:** H hides the whole interface and the pointer while playback
   and camera keys keep working. P saves the view without the interface as a
   PNG.

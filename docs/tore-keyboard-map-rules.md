@@ -49,7 +49,9 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   Drone keys shown are defaults; Controls > Replay drone can rebind them.
   Flight keys the viewer does not read stay dim. Ctrl+B, the flight's "Mark
   replay moment" default, is on this sheet because its purpose is replays;
-  the sheet says it works in flight.
+  the sheet says it works in flight. The viewer's own B (laser spots,
+  designations, guided weapons and bomb landings drawn in the 3D view) shares
+  that key's cap as its first row, in the display colour.
 - The sight keys are on Fly & Fight: Backslash and Shift+Backslash
   (designate, pin ground), `/` (next visible ground object), Alt with the
   arrows (slew), Shift+' and Shift+; (zoom), L and ; (drop) and Ctrl+L (the
@@ -58,7 +60,9 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   so they no longer carry an AC- label. A small legend box in the keyboard
   plate's free top-right corner lists them with the AC-130's gamepad gestures.
   Keep those labels in step with
-  [the input guide](INPUT.md#ac-130-gunsight-controls).
+  [the input guide](INPUT.md#ac-130-gunsight-controls). The other
+  air-to-ground keys are on that sheet as well: Tab (fire the gun, held), Ctrl+M
+  on M (delivery mode) and Ctrl+R with Shift+R (the S/C badge) on R.
 - The keypad works as the navigation keys. Highlight a keypad key on the sheet
   for its command, with the same label as the key it stands for: keypad 0 and
   period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on
@@ -138,7 +142,14 @@ controls are document controls, not new game bindings.
 
 - Compare relevant normal defaults with the input catalog; check both new and
   existing entries for omissions or stale descriptions. Explicitly exclude test
-  and range bindings during this comparison.
+  and range bindings during this comparison. Groups land on sheets as follows:
+  Flight, Systems, Weapons and the sensor keys on Fly & Fight; instrument and
+  window selection, views, HUD, map and the game keys on Cockpit & View;
+  Communication on Comms; the replay drone and viewer on Replay; the
+  powered-lift keys on VTOL / Helicopters. The `input_catalog` test
+  `every_key_the_flight_acts_on_is_a_catalog_key` fails when the flight starts
+  acting on a key the catalog does not list, so a new key cannot skip the
+  catalog, CONTROLS.md and this comparison.
 - Check all five sheets in a browser at 1920×1080 and at a smaller viewport.
   Verify every modified key, modifier badge, callout and leader. Text must not
   overflow, overlap unrelated controls or rely on a tooltip to explain

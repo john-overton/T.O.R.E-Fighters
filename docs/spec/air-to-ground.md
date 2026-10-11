@@ -1320,8 +1320,6 @@ records (ranges, weights, counts) are in the inventory above.
 The acceptance pass ([baseline](../baselines/air-to-ground.md#not-run-and-not-built))
 found these promised or specified items unbuilt:
 
-- `Ctrl+M` on the [keyboard map](../tore-keyboard-map.html) (a browser check and
-  a README image recapture are due).
 - Online (protocol 23, slice NA): the cues are the host's, drawn a round trip
   late; the targeting page's camera follows the host's look (the AC-130's own
   camera turns ahead on the client); a rejoining player's sight comes back at

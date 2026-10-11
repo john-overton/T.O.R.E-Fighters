@@ -498,10 +498,9 @@ Not built:
   built afterwards (FX-R, 2026-10-11, B in the replay viewer, see
   [laser and bomb marks](../REPLAYS.md#laser-and-bomb-marks)).
 - Tab (fire the gun whatever is selected), above.
-- `Ctrl+M` on [the keyboard map](../tore-keyboard-map.html): the map's rules call
-  for a browser check of all five sheets at two sizes and a README image
-  recapture, which this headless pass cannot do. The key is in the controls
-  list and the spec.
+- `Ctrl+M` on [the keyboard map](../tore-keyboard-map.html): put there by the
+  mp-fixes keyboard pass (2026-10-11), with the browser check of all five
+  sheets and the README image recapture.
 - AI wings attacking ground targets, remote ground targeting, the bombers' bomb
   camera, stores drawn on pylons, a ripple setting (all decided out of scope).
 - Pave pods in the multiplayer lobby's loadout and in a replay's loadout.
