@@ -5687,6 +5687,11 @@ struct ProbeScript {
     trace_ticks: u64,
     /// The leader fires its own weapons from this tick.
     attack: Option<ProbeAttack>,
+    /// `--probe-redfor`: the scripted leader and its wing fly for Redfor,
+    /// as Enemy Wing 1 of an open mission whose lead the probe's seat takes
+    /// by the handoff a networked Redfor player uses, parked at the Redfor
+    /// field `--ground-start` names (slice CL-R).
+    redfor: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -6267,6 +6272,9 @@ struct ProbeWatch {
     /// Distance past each final's aim point last tick, to catch the
     /// threshold crossing.
     final_past: std::collections::BTreeMap<u32, f64>,
+    /// `--probe-redfor`: the player's wing is Enemy Wing 1 and the player
+    /// flies this plane, not plane 0.
+    redfor: Option<u32>,
 }
 
 /// Aircraft on the ground closer than this are reported as touching.
@@ -6309,7 +6317,9 @@ impl ProbeWatch {
             println!("t={tick} ({seconds:.1}s) player: {key} {}", line(player));
             self.player = Some(key);
         }
-        let priority = bridge.mission().priority_landing(ai_wings::PLAYER_ID);
+        let priority = bridge
+            .mission()
+            .priority_landing(self.redfor.unwrap_or(ai_wings::PLAYER_ID));
         if priority != self.priority {
             println!("t={tick} ({seconds:.1}s) player landing priority: {priority:?}");
             self.priority = priority;
@@ -6324,8 +6334,12 @@ impl ProbeWatch {
             };
             let f = actor.flight();
             let phase = actor.airfield_phase();
-            let own_wing =
-                slot.side == tore_sim::ai::launch::Side::Friendly && slot.wing_number == 1;
+            let own_side = if self.redfor.is_some() {
+                tore_sim::ai::launch::Side::Enemy
+            } else {
+                tore_sim::ai::launch::Side::Friendly
+            };
+            let own_wing = slot.side == own_side && slot.wing_number == 1;
             if own_wing && self.trace > 0 && tick.is_multiple_of(self.trace) {
                 println!(
                     "t={tick} ({seconds:.1}s) trace {}: {:?} leg={:?} {} thr={:.2} brake={}",
@@ -7332,6 +7346,12 @@ fn ai_probe_run(
     script: &ProbeScript,
     record: Option<&ProbeRecord>,
 ) -> AppResult<terrain::Terrain> {
+    if script.redfor {
+        if record.is_some() {
+            return Err("--probe-redfor does not record a mission".into());
+        }
+        return redfor_probe_run(ticks, quick, resources, terrain, ai_mission, script);
+    }
     // A flight starts on a fresh weather clock, as `reset_weather` gives a
     // flown one, so a terrain reused by the next matrix case starts clean.
     terrain.weather =
@@ -7445,9 +7465,24 @@ fn ai_probe_run(
     if let Some(ground) = &parked {
         mission_layout::place_on_runway(world, &mut flight, ground, 0)?;
     }
+    // An enemy ground start (`--enemy-ground-start`, slice CL-R) parks
+    // Enemy Wing 1 at its Redfor field, as a flown mission does.
+    let enemy_parked = match quick.enemy_ground_runway() {
+        Some(object) => Some(mission_layout::ground_layout(
+            world,
+            object,
+            quick.draft.values[21],
+        )?),
+        None => None,
+    };
     let airfields = ai_wings::Airfields::from_world(
         world,
         parked.as_ref().map(mission_layout::GroundLayout::departure),
+    )
+    .with_enemy_departure(
+        enemy_parked
+            .as_ref()
+            .map(mission_layout::GroundLayout::departure),
     );
     let mut bridge = ai_wings::AiWings::build_mission(
         &wings,
@@ -7456,7 +7491,7 @@ fn ai_probe_run(
         resources,
         &airfields,
     )?;
-    let mut formation_trace = formation_trace::start(&mut bridge)?;
+    let formation_trace = formation_trace::start(&mut bridge)?;
     if !script.wing_route.is_empty() {
         let route = script
             .wing_route
@@ -7472,7 +7507,7 @@ fn ai_probe_run(
         bridge.set_wing_route(ai_wings::PLAYER_ID, route);
     }
     // The last line printed for each wing's mission of opportunity.
-    let mut opportunity_notes: Vec<String> = Vec::new();
+    let opportunity_notes: Vec<String> = Vec::new();
     combat.ai_poses = !bridge.is_empty();
     if script.researched && flight.research.is_none() {
         flight.enable_research(1)?;
@@ -7501,7 +7536,7 @@ fn ai_probe_run(
     let mut airfield_radio = airfield_radio::AirfieldRadio::default();
     airfield_radio.reset(parked.as_ref().map(|g| g.runway));
     let phrases = comms::phrases(resources);
-    let mut heard = Vec::new();
+    let heard = Vec::new();
     println!(
         "AI probe layout: airport={:?} ground={:?} runway_ft={:?} anchored={:?} spacing_ft={:?} enemy_nm={:.1} requested_nm={:.1} enemy_turn_deg={:.0}",
         parked.as_ref().and_then(|g| world
@@ -7584,12 +7619,12 @@ fn ai_probe_run(
             .afterburner_thrust_lbf
             > 0.;
     }
-    let mut pilot = ProbePilot::new();
-    let mut watch = ProbeWatch {
+    let pilot = ProbePilot::new();
+    let watch = ProbeWatch {
         trace: script.trace_ticks,
         ..Default::default()
     };
-    let mut attacker = script.attack.map(|attack| {
+    let attacker = script.attack.map(|attack| {
         // As a flown mission does each frame: T and Enter skip friendlies.
         combat.state.own_mut().friendlies =
             bridge.friendly_ids(tore_sim::ai::launch::Side::Friendly);
@@ -7597,7 +7632,7 @@ fn ai_probe_run(
     });
     // A mission recording of the probe: the picture is taken the way live
     // flight takes it, and nothing it reads feeds back into the run.
-    let mut recording = match record {
+    let recording = match record {
         Some(record) => {
             combat.restart_render(combat.own_id(), &flight, Some(&bridge));
             let mut recording = start_probe_recording(
@@ -7612,11 +7647,11 @@ fn ai_probe_run(
     let mut pictures = Vec::new();
     // The released chaff and flares as each tick left them, once everything
     // released after its step had left, which is what a replay flies.
-    let mut devices = Vec::new();
+    let devices = Vec::new();
     if verify {
         pictures.push(combat.render_snapshot().clone());
     }
-    let mut encounter: std::collections::BTreeMap<u32, ProbeEncounter> = Default::default();
+    let encounter: std::collections::BTreeMap<u32, ProbeEncounter> = Default::default();
     // The same seed the live game gives its turbulence when a flight starts.
     let mut turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
     turbulence_rng.reseed_word(1);
@@ -7630,7 +7665,7 @@ fn ai_probe_run(
         &terrain,
         parked.as_ref().map(|ground| ground.airport),
     ));
-    let mut mission = world::World {
+    let mission = world::World {
         terrain,
         roster: seats::Roster::single_player(
             comms::crew(&hornet.profile),
@@ -7664,11 +7699,236 @@ fn ai_probe_run(
         setup: world::Setup {
             mission: Some(mission_start),
             ground_start: parked.as_ref().map(|ground| ground.object),
+            enemy_ground_start: None,
             researched_flight: flight_researched,
             native_tables: None,
             ai: None,
         },
     };
+    probe_fly(
+        ticks,
+        script,
+        ProbeFlight {
+            mission,
+            parked,
+            scripted,
+            pilot,
+            watch,
+            attacker,
+            recording,
+            verify,
+            pictures,
+            devices,
+            encounter,
+            formation_trace,
+            opportunity_notes,
+            heard,
+        },
+    )
+}
+
+/// `--probe-redfor`: the AI probe with its scripted leader on Redfor (slice
+/// CL-R). The creator's draft (the player's aircraft and wing size, the
+/// Redfor field `--ground-start` chose) becomes Enemy Wing 1 of an open
+/// mission with `enemy-start ground` at that field, as a lobby's Redfor
+/// ground start; a one-aircraft Blue wing holds its weapons at the
+/// mission's start point. The probe's seat takes Enemy Wing 1's parked lead
+/// by the handoff a networked player uses, and the same tick loop flies it.
+/// Probe-only choices: the wing flies alone (`--probe-wing-only`) and both
+/// sides hold their weapons, so nothing but the script moves the wing.
+fn redfor_probe_run(
+    ticks: usize,
+    quick: &mut quick_mission::QuickMission,
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    terrain: terrain::Terrain,
+    ai_mission: ai_wings::Preset,
+    script: &ProbeScript,
+) -> AppResult<terrain::Terrain> {
+    use tore_sim::ai::{engagement::GroupObjective, launch::Side};
+    use tore_world::mission::{EnemyStart, Start, WingSpec};
+    if !script.wing_only {
+        return Err("--probe-redfor flies its wing alone: add --probe-wing-only".into());
+    }
+    if script.attack.is_some()
+        || script.fight.is_some()
+        || !script.threats.is_empty()
+        || !script.wing_route.is_empty()
+        || script.blind_wing
+        || !script.groups.is_empty()
+        || !script.player_locks.is_empty()
+        || script.enemy_aircraft.is_some()
+        || script.friendly_aircraft.is_some()
+    {
+        return Err("--probe-redfor takes the takeoff, wing size, wing order, lose-player and trace options only".into());
+    }
+    if let Some(size) = script.wing_size {
+        quick.draft.values[4] = size;
+    }
+    let mut spec = quick.mission_spec()?;
+    let runway = spec
+        .ground_runway()
+        .ok_or("--probe-redfor needs --ground-start at a Redfor field")?;
+    let own = spec.wings[0];
+    spec.wings[3] = own;
+    spec.wings[0] = WingSpec { count: 1, ..own };
+    for wing in [1, 2, 4, 5] {
+        spec.wings[wing].count = 0;
+    }
+    spec.start = Start::Airborne {
+        altitude_ft: spec.start.altitude_ft(),
+    };
+    spec.enemy_start = EnemyStart::Ground { runway };
+    spec.objectives = [GroupObjective::Inherit; tore_world::mission::WINGS];
+    spec.objectives[0] = GroupObjective::Hold;
+    spec.objectives[3] = GroupObjective::Hold;
+    spec.preset = ai_mission;
+    spec.loadout = None;
+    spec.researched_flight = true;
+    spec.ai_flight_model = ai_wings::AiFlightModel::AllHybrid;
+    // The mission builds its own terrain from the spec.
+    drop(terrain);
+    let mut mission = world::World::new(&spec, resources, world::Seating::Open)?;
+    let lead = mission
+        .roster
+        .planes()
+        .iter()
+        .find(|plane| {
+            plane.slot.wing.side == Side::Enemy
+                && plane.slot.wing.index == 0
+                && plane.slot.member == 0
+        })
+        .map(|plane| plane.id)
+        .ok_or("the mission has no Enemy Wing 1 lead")?;
+    mission.take_plane(SEAT, lead)?;
+    let parked = mission
+        .combat
+        .mission_layout
+        .as_ref()
+        .and_then(|layout| layout.enemy_ground.clone());
+    let scripted = script.takeoff && parked.is_some();
+    let cockpit = &mut mission.cockpits[OWN];
+    if scripted {
+        let flight = &mut cockpit.flight;
+        flight.brake_out = false;
+        flight.throttle = 1.;
+        flight.burner = flight
+            .model()
+            .configuration()
+            .propulsion
+            .afterburner_thrust_lbf
+            > 0.;
+        cockpit.previous_flight = flight.clone();
+    }
+    let world = &mission.terrain;
+    let bridge = mission.ai_wings.as_ref().expect(PROBE_BRIDGE);
+    println!(
+        "AI probe: aircraft={} actors={} ticks={ticks} enemy_skill=None mission={ai_mission} seat=redfor plane={}",
+        own.aircraft.selection_key(),
+        bridge.len(),
+        lead.0
+    );
+    println!(
+        "AI probe layout: airport={:?} ground={:?} runway_ft={:?} anchored={:?} spacing_ft={:?}",
+        parked.as_ref().and_then(|g| world
+            .airport_scene
+            .airports
+            .iter()
+            .find(|a| a.id == g.airport)
+            .map(|a| a.name.as_str())),
+        parked.as_ref().map(|g| g.object),
+        parked.as_ref().map(|g| g.runway.length_ft.round()),
+        parked.as_ref().map(|g| g.anchored),
+        parked.as_ref().and_then(|g| g.spacing_ft),
+    );
+    for slot in bridge.slots() {
+        if let Some(home) = bridge
+            .mission()
+            .actor(slot.id)
+            .and_then(|actor| actor.home_runway())
+            .filter(|_| slot.side == Side::Enemy && slot.wing_number == 1)
+        {
+            println!(
+                "AI probe home: {} runway={} airport={:?} length_ft={:.0} vertical_pad={}",
+                slot.label(),
+                home.object,
+                world
+                    .airport_scene
+                    .airports
+                    .iter()
+                    .find(|a| a.id == home.airport)
+                    .map(|a| a.name.as_str()),
+                home.length_ft,
+                world.airport_scene.vertical_pad(home.object)
+            );
+        }
+    }
+    let formation_trace = formation_trace::start(mission.ai_wings.as_mut().expect(PROBE_BRIDGE))?;
+    let watch = ProbeWatch {
+        trace: script.trace_ticks,
+        redfor: Some(lead.0),
+        ..Default::default()
+    };
+    probe_fly(
+        ticks,
+        script,
+        ProbeFlight {
+            mission,
+            parked,
+            scripted,
+            pilot: ProbePilot::new(),
+            watch,
+            attacker: None,
+            recording: None,
+            verify: false,
+            pictures: Vec::new(),
+            devices: Vec::new(),
+            encounter: Default::default(),
+            formation_trace,
+            opportunity_notes: Vec::new(),
+            heard: Vec::new(),
+        },
+    )
+}
+
+/// What the AI probe's tick loop flies, set up by [`ai_probe_run`]: the
+/// single-player probe's own mission, or the Redfor seat's open one
+/// ([`redfor_probe_run`]).
+struct ProbeFlight {
+    mission: world::World,
+    /// The probe wing's parked start: the scripted takeoff's runway.
+    parked: Option<mission_layout::GroundLayout>,
+    scripted: bool,
+    pilot: ProbePilot,
+    watch: ProbeWatch,
+    attacker: Option<ProbeAttacker>,
+    recording: Option<replay::recorder::Recorder>,
+    verify: bool,
+    pictures: Vec<tore_world::snapshot::RenderSnapshot>,
+    devices: Vec<(u64, u64)>,
+    encounter: std::collections::BTreeMap<u32, ProbeEncounter>,
+    formation_trace: Option<formation_trace::FormationTrace>,
+    opportunity_notes: Vec<String>,
+    heard: Vec<String>,
+}
+
+/// The AI probe's tick loop and summary lines.
+fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<terrain::Terrain> {
+    let ProbeFlight {
+        mut mission,
+        parked,
+        scripted,
+        mut pilot,
+        mut watch,
+        mut attacker,
+        mut recording,
+        verify,
+        mut pictures,
+        mut devices,
+        mut encounter,
+        mut formation_trace,
+        mut opportunity_notes,
+        mut heard,
+    } = run;
     let mut output = world::TickOutput::default();
     let mut invariants = probe_invariants::ProbeInvariants::default();
     for tick in 0..ticks as u64 {
@@ -9097,6 +9357,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
     let mut ground_start_airport: Option<u32> = None;
+    let mut enemy_ground_start_airport: Option<u32> = None;
     let mut probe_script = ProbeScript::default();
     let mut separation_nm: Option<f64> = None;
     // `--ground-target STEM`, `--defenses AAA SAM`, `--surface-seed N`: the
@@ -9129,6 +9390,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         match arg.as_str() {
             "--no-controllers" => native_input = false,
             "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
+            "--enemy-ground-start" => {
+                enemy_ground_start_airport = Some(option_number(
+                    "--enemy-ground-start",
+                    &args.next().ok_or("--enemy-ground-start needs an airport number")?,
+                )?);
+            }
             "--ground-start" => {
                 ground_start_airport=Some(option_number("--ground-start", &args.next().ok_or("--ground-start needs an airport number")?)?);
             }
@@ -9153,6 +9420,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 separation_nm = Some(nm);
             }
             "--probe-wing-only" => probe_script.wing_only = true,
+            "--probe-redfor" => probe_script.redfor = true,
             "--probe-group" => {
                 let usage = "--probe-group needs GROUP:CHOICE[:survive], group 1..6";
                 let value = args.next().ok_or(usage)?;
@@ -10066,7 +10334,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --gun-flash-preview OUT_DIR (first argument) renders the AC-130 muzzle flashes, gun light, blast smoke and 105 mm tracer offscreen by day, dusk and night, outside and through the gunsight camera (TORE_PREVIEW_THEATER picks the theater). --blast-preview OUT_DIR (first argument) renders a large ground explosion's shockwave ring through its two seconds, and a water explosion's, offscreen. --surface-preview OUT_DIR (first argument) writes contact sheets of the surface-unit shapes (ships, launchers, soldiers) and their damaged shapes from four sides, read from the retail archives without opening a window (add destroyed for each class beside its destroyed look). --surface-scene OUT_DIR THEATER STEM renders a ground target in game offscreen after --seconds, with --kill, --rails and --focus (docs/DEVELOPMENT.md). --hud-a2g-preview OUT_DIR (first argument) writes review frames and sheets of the HUD's bomb and rocket sights (CCIP, the level T, the rocket pipper, LOW and FRAG) without a window. --hud-guided-preview OUT_DIR (first argument) writes review frames of the guided weapons' release range scale (JDAM, laser bomb and laser missile) without a window. --sight-preview heading,elevation,ticks holds the AC-130 sight at a body-relative look and runs the sim that many ticks first, so --capture-flight shows the aim-point box and diamond (add --combat-command sight-pin for a pinned point). --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display; --validate-ordnance checks source station coverage, weapon/tank availability and saved loads for every reviewed aircraft.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --gunsight-probe pin-orbit|fire-no-target|track-out-of-arc (with --aircraft ac130) runs a scripted AC-130 gunsight check on flat ground and prints PASS or FAIL lines, and --gunsight-dump PATH writes the orbit's gun train as CSV; --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target|sort orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member (with its radar flag) and each lock taken or dropped in the flight data link's picture; --probe-blind-wing takes the sensors from the player's wingmen, so only the data link can show them an enemy; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|75|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --gun-flash-preview OUT_DIR (first argument) renders the AC-130 muzzle flashes, gun light, blast smoke and 105 mm tracer offscreen by day, dusk and night, outside and through the gunsight camera (TORE_PREVIEW_THEATER picks the theater). --blast-preview OUT_DIR (first argument) renders a large ground explosion's shockwave ring through its two seconds, and a water explosion's, offscreen. --surface-preview OUT_DIR (first argument) writes contact sheets of the surface-unit shapes (ships, launchers, soldiers) and their damaged shapes from four sides, read from the retail archives without opening a window (add destroyed for each class beside its destroyed look). --surface-scene OUT_DIR THEATER STEM renders a ground target in game offscreen after --seconds, with --kill, --rails and --focus (docs/DEVELOPMENT.md). --hud-a2g-preview OUT_DIR (first argument) writes review frames and sheets of the HUD's bomb and rocket sights (CCIP, the level T, the rocket pipper, LOW and FRAG) without a window. --hud-guided-preview OUT_DIR (first argument) writes review frames of the guided weapons' release range scale (JDAM, laser bomb and laser missile) without a window. --sight-preview heading,elevation,ticks holds the AC-130 sight at a body-relative look and runs the sim that many ticks first, so --capture-flight shows the aim-point box and diamond (add --combat-command sight-pin for a pinned point). --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --snapshot-state map (or map-lobby) draws the creator's Map of both sides' starts and the objective area, and enemy-ground-start, enemy-ground-start-auto and enemy-airports show the Enemy start rows; --validate-creator checks all imported loadouts and restart without a display; --validate-ordnance checks source station coverage, weapon/tank availability and saved loads for every reviewed aircraft.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --gunsight-probe pin-orbit|fire-no-target|track-out-of-arc (with --aircraft ac130) runs a scripted AC-130 gunsight check on flat ground and prints PASS or FAIL lines, and --gunsight-dump PATH writes the orbit's gun train as CSV; --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-redfor (with --probe-wing-only and --ground-start at a Redfor field) seats the probe's wing on Redfor, as Enemy Wing 1 of an open mission whose parked lead the probe takes by handoff; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target|sort orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member (with its radar flag) and each lock taken or dropped in the flight data link's picture; --probe-blind-wing takes the sensors from the player's wingmen, so only the data link can show them an enemy; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|75|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own. --list also lists the hosted game on the Internet Lobby, on the master --master HOST[:PORT] names (default the public one). --find-games SECONDS [--port N] looks for games on the local network for that long, prints each one found (address, build, name, mission, players, phase, King, password, full) and exits. --browse SECONDS [--master HOST[:PORT]] lists the games on the Internet Lobby for that long, with each one's mission and players, and exits. A hosting game asks the router to forward its port (UPnP, NAT-PMP or PCP) while Options > Forward the game port on my router is on, and removes it when hosting stops; --map-port SECONDS [--port N] does the same by itself for that long and exits, to check that the router answers."
@@ -10081,7 +10349,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --convert-capture CAPTURE [--out REPLAY] turns a networked flight's capture (replays/*.tore-capture) into a replay, smoothed through every update received; it needs the import and takes the replay's name from the capture unless --out names it. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission (which refuses a short strip or an enemy airfield). The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport. --airport-allegiance lists every base theater's ground-start airports for Blue and for Redfor and checks that none is the other side's.
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission (which refuses a short strip or an enemy airfield). The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe. --enemy-ground-start N parks Enemy Wing 1 at Redfor airport N (the creator's Enemy start).\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport. --airport-allegiance lists every base theater's ground-start airports for Blue and for Redfor and checks that none is the other side's.
 Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it. --target-cam-preview MODE (with --panel-snapshot, default page 4) draws the AC-130 gunsight page from a synthetic readout on a synthetic scene: free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal, gimbal-text, gimbal-bitmap, zoom1..zoom6; the targeting page of a laser or FLIR aircraft (lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked). --hud-snapshot PATH with --hud-snapshot-state laser-lsr, laser-bud, laser-both, laser-ready, laser-mask, laser-edge, tti, tti-lsr, tti-many or tti-impact draws the HUD laser box and text and the time to impact row.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, ground-start-auto, airports, ground-target, ground-target-last, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
@@ -11780,9 +12048,47 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .map_or(0, |page| page.clamp(1, 5) - 1);
                 quick.debrief = Some(debrief);
             }
+            // The map's mission: the ground target and both ground starts
+            // the command line gives (slice CL-R).
+            if let Some(stem) = &ground_target {
+                quick.choose_ground_target(stem, target_defenses, target_seed)?;
+            }
+            if let Some(id) = enemy_ground_start_airport {
+                let object = world
+                    .airport_scene
+                    .airports
+                    .iter()
+                    .find(|a| a.id == id)
+                    .and_then(|a| a.runway_objects.first())
+                    .copied()
+                    .ok_or("Selected enemy ground-start airport is unavailable")?;
+                quick.choose_enemy_runway(object)?;
+            }
+            if snapshot_state.starts_with("map") {
+                quick.set_resources(Arc::new(theater_resources.clone()));
+            }
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
             quick.preview_selector(&snapshot_state)?;
             quick.render(&mut menu.pixels, &menu.quick_sprites, &world);
+            if snapshot_state.starts_with("map") {
+                if let Some(words) = quick.notice.as_deref().filter(|_| !quick.map_open()) {
+                    return Err(format!("the map did not open: {words}").into());
+                }
+                if let Some(plan) = quick.map_plan() {
+                    for marker in &plan.markers {
+                        println!(
+                            "creator map: {} at x={:.0} z={:.0}",
+                            marker.label, marker.position[0], marker.position[2]
+                        );
+                    }
+                    if let Some((center, radius)) = plan.objective {
+                        println!(
+                            "creator map: objective area x={:.0} z={:.0} radius={radius:.0}",
+                            center[0], center[1]
+                        );
+                    }
+                }
+            }
             use std::io::Write;
             let mut f = std::fs::File::create(&path)?;
             write!(f, "P6\n640 480\n255\n")?;
@@ -11925,11 +12231,27 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
     quick.ai_mission = ai_mission;
     quick.choose_theater_code(&theater_code, &theater_resources);
+    if probe_script.redfor {
+        // The Redfor seat's fields are the Red and neutral ones.
+        quick.set_player_redfor(true);
+    }
     if let Some(object) = ground_start {
         quick.choose_ground_runway(object)?;
     }
     if let Some(stem) = &ground_target {
         quick.choose_ground_target(stem, target_defenses, target_seed)?;
+    }
+    if let Some(id) = enemy_ground_start_airport {
+        // Enemy Wing 1's ground start at a Redfor field (slice CL-R).
+        let object = world
+            .airport_scene
+            .airports
+            .iter()
+            .find(|a| a.id == id)
+            .and_then(|a| a.runway_objects.first())
+            .copied()
+            .ok_or("Selected enemy ground-start airport is unavailable")?;
+        quick.choose_enemy_runway(object)?;
     }
     if let Some(nm) = separation_nm {
         quick.draft.values[17] = mission_layout::SEPARATION_NM
@@ -12777,6 +13099,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         setup: world::Setup {
             mission: None,
             ground_start,
+            enemy_ground_start: None,
             researched_flight,
             native_tables: native_tables.clone(),
             ai: None,
@@ -12887,7 +13210,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             i
         },
         pointer: None,
-        theater_resources: Arc::new(theater_resources),
+        theater_resources: {
+            // The creator's Map builds its mission from the same data
+            // (slice CL-R).
+            let resources = Arc::new(theater_resources);
+            quick.set_resources(Arc::clone(&resources));
+            resources
+        },
         seat_commands: Vec::new(),
         gun_key_sent: false,
         cheats_sent: None,

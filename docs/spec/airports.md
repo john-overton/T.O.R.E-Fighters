@@ -226,7 +226,8 @@ may use its own side's fields and the neutral ones, never the other side's.
   neutral airports, and in a theater with none Ground is locked to Airborne
   ([Quick Mission](quick-mission-menu.md#player-ground-start)). The dedicated
   server refuses `start ground N` at an enemy field, and its `--check` list
-  names each runway's side.
+  names each runway's side. The mirror for Redfor (slice CL-R): Enemy Wing 1's
+  ground start (`enemy-start ground N`) takes only Redfor and neutral fields.
 - **Targets.** The target window and the lock box's friend-or-foe cue read a
   runway's side, so the other side's runways show as enemy targets.
 

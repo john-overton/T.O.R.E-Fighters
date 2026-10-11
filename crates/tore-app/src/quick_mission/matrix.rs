@@ -45,7 +45,7 @@ impl Matrix<'_> {
     fn describe(quick: &QuickMission, world: &Terrain) -> String {
         let v = &quick.draft.values;
         format!(
-            "theater={} player={} weather={} alt={} sep={} start={}/{} wings=[{}x{}:{}, {}x{}:{}, {}x{}:{} | {}x{}:{}, {}x{}:{}, {}x{}:{}] orders={:?} ai={} guns_only={}",
+            "theater={} player={} weather={} alt={} sep={} start={}/{} enemy-start={}/{} wings=[{}x{}:{}, {}x{}:{}, {}x{}:{} | {}x{}:{}, {}x{}:{}, {}x{}:{}] orders={:?} ai={} guns_only={}",
             world.layout,
             quick.aircraft_files.get(v[6]).map_or("?", String::as_str),
             v[15],
@@ -53,6 +53,8 @@ impl Matrix<'_> {
             v[17],
             v[33],
             v[34],
+            v[ENEMY_START],
+            v[ENEMY_AIRPORT],
             v[4],
             v[5],
             v[6],
@@ -273,6 +275,9 @@ impl Matrix<'_> {
             !(*id == 34
                 && (!quick.ground_start()
                     || quick.airport_names[quick.draft.values[13]].is_empty()))
+                && !(*id == ENEMY_AIRPORT
+                    && (!quick.enemy_ground_start()
+                        || quick.enemy_airport_names[quick.draft.values[13]].is_empty()))
                 && matches!(quick.value(*id).as_str(), "Unavailable" | "")
         }) {
             self.problems
@@ -411,7 +416,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         if id <= 2 {
             continue;
         }
-        if len == 0 && id != 34 {
+        if len == 0 && id != 34 && id != ENEMY_AIRPORT {
             m.problems
                 .push(format!("field {id} has no dropdown values"));
         } else if len > 0 && value >= len {
@@ -486,6 +491,19 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
             if !serves {
                 m.problems.push(format!(
                     "theater {code} offers runway {object:#x}, not a Blue or neutral field"
+                ));
+            }
+        }
+        // The enemy's list is Redfor's and the neutral fields (slice CL-R).
+        for object in quick.offered_enemy_airports(index) {
+            let scene = &world.airport_scene;
+            let serves = scene
+                .runway(*object)
+                .and_then(|r| scene.airports.iter().find(|a| a.id == r.airport))
+                .is_some_and(|a| a.serves(true));
+            if !serves {
+                m.problems.push(format!(
+                    "theater {code} offers the enemy runway {object:#x}, not a Redfor or neutral field"
                 ));
             }
         }
@@ -695,7 +713,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // Loop 6: every other dropdown value once (nationalities, ordnance load,
     // and the fields the loops above do not vary).
     for id in 0..quick.draft.values.len() {
-        if matches!(id, 4..=14 | 17 | 21..=29 | 33 | 34) || quick.values(id).is_empty() {
+        if matches!(id, 4..=14 | 17 | 21..=29 | 33..=36) || quick.values(id).is_empty() {
             continue;
         }
         let saved = quick.draft.values[id];

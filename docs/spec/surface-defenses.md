@@ -289,6 +289,16 @@ Further rules, all retail data unless noted:
 - **In PvP the Redfor players defend the target** (defined, John). Template
   units are Redfor: they engage Blue aircraft only. Base-layout units take their
   layout side, so a Redfor player raiding a friendly airfield meets its SAMs.
+- **Redfor may start on the ground at its own airfield** (John, 2026-10-11:
+  "add redfor ground starts, match the quick mission creator styles"). The
+  creator's **Enemy start** (Airborne or Ground) and **Enemy airport** mirror
+  Blue's Start and Airport ([start placement](#start-placement)); they park
+  Enemy Wing 1, the flight Redfor humans take online, whether a human or the
+  AI flies it, and the other enemy wings start in the air as before. The
+  field is a Redfor or neutral one, never Blue's, so its guns and SAMs are
+  Red's own: they hold their fire at the Redfor wing, and with friendly fire
+  off no Red round touches it. A unit engages only an airborne aircraft of
+  the other side, so nothing shoots a parked aircraft of either side.
 
 ### Identifiers
 
@@ -439,12 +449,24 @@ from the seed and is inside the digest.
   a time. Friendly wings 2 and 3 keep their offsets from the player.
 - **Ground starts.** An explicit runway choice is kept. With none picked, the
   default runway becomes the Blue-side airfield nearest the target that is at
-  least 15 nm from it; a Redfor human ground start in PvP uses the Red-side
-  airfield nearest the target under the same rule (default, pending John). An
-  airfield's side is its owner's; an unowned one takes its side of the front.
-  The airfield must hold the wing (no short strip or vertical pad); with none,
-  the earlier rule stands (the first friendly airport's runway that holds the
-  wing). Red still starts by the target.
+  least 15 nm from it (default, pending John). An airfield's side is its
+  owner's; an unowned one takes its side of the front. The airfield must hold
+  the wing (no short strip or vertical pad); with none, the earlier rule
+  stands (the first friendly airport's runway that holds the wing).
+- **Enemy ground starts** (slice CL-R, John 2026-10-11). The same rule for
+  Red: an explicit Redfor or neutral runway is kept (a Blue field, a short
+  strip or a vertical pad is refused); with none picked, Enemy Wing 1 parks at
+  the Red-side airfield nearest the target at least 15 nm from it, else the
+  first Red-side runway that holds the wing. **The ground start overrides the
+  distance** (John, 2026-10-11: "for the redfor ground starts have that
+  override the distance"): Enemy Wing 1 starts at its field wherever that is,
+  not within 5 nm of the target and not at the enemy distance from Blue.
+  Everything else keeps its rule: Enemy Wings 2 and 3 start in the air within
+  5 nm of the target (or at the enemy distance from Blue with no target), and
+  Blue is still placed the enemy distance from that Red point, heading at the
+  target, so the enemy distance setting measures Blue's run to the defended
+  target, not to Red's airfield. Enemy Wing 1 must have aircraft, and it never
+  shares the player's runway.
 - The target point is the targets' placed centroid. A theater with no front
   (no owned placements on one side) starts Blue toward the middle of the map
   (fitted).
@@ -455,6 +477,7 @@ flowchart LR
     T[Target centroid] -->|seeded spot within 5 nm| R[Red start, defending]
     R -->|enemy distance setting, bearing toward Blue side, plus or minus 30 degrees| B[Blue start, heading at the target]
     B -.->|heads at| T
+    T -->|nearest Red-side field at least 15 nm away| F[Enemy Wing 1 on the ground, when Red ground-starts]
 ```
 
 ### The units of the movement and range words
@@ -1500,8 +1523,13 @@ and the player's view in [the multiplayer guide](../MULTIPLAYER.md#ground-target
   radar state and timers, route progress) is part of the mission checkpoint, so
   host migration carries it.
 - **Sides.** Friendly fire off spares same-side aircraft from surface rounds too.
-  In PvP Redfor humans start by the target (airborne) and defend it; a Redfor
-  ground start on Red's own airfield is not built online.
+  In PvP Redfor humans start by the target (airborne) and defend it, or, with
+  the mission's enemy ground start (`enemy-start ground`, slice CL-R), on the
+  ground at the Redfor field Enemy Wing 1 parks on: the host builds that
+  parking from the mission text and its seed like every other start, so every
+  game agrees. A player who takes a parked plane starts as a single-player
+  ground start does, on NAV with the departure field selected, and that
+  field is the home base its result calls check.
 - **Debrief.** The networked debrief carries "Shot down by".
 
 ## Replays
@@ -1639,7 +1667,7 @@ ones follow in their own table.
 | --- | --- | --- |
 | Relocation and start numbers | John found the target variance fine (2026-10-10); the numbers stay fitted: unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
-| Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and a Redfor human | A ground start across the map from a relocated target would mean a long flight |
+| Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and for Enemy Wing 1's ground start (slice CL-R) | A ground start across the map from a relocated target would mean a long flight |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (confirmed by John, 2026-10-10; the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
 | Building and unit hit boxes | Real size, a third of retail's in every axis, with the drawn size | Matches John's realistic scale; retail's targets were three times larger and easier to hit |
@@ -1654,6 +1682,7 @@ Settled during the round:
 | Runway pavement width | Deferred by John (2026-10-10): keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
 | Jammers against radar-directed AAA | Factor 2 on the aim error, "fine for now" (John, 2026-10-10) | Visual guns are unaffected |
 | Lock tone between salvos, one controller per ship gun mount | Yes (John, 2026-10-10) | See [implementation so far](#implementation-so-far) |
+| Redfor ground start | Built (John, 2026-10-11: "add redfor ground starts, match the quick mission creator styles"; "have that override the distance"): Enemy Wing 1 may start at a Redfor field in single player and online, chosen as Blue's start is | See [start placement](#start-placement) |
 
 ## Provenance summary
 

@@ -621,6 +621,41 @@ impl ScriptedPilot {
 }
 
 /// The planes the roster puts on the other side from the client's own.
+/// Where a seated plane starts, as `tore-bot`'s start line says it: on the
+/// ground at the nearest airport (within 3 nautical miles) with that field's
+/// side, or in the air at its altitude (slice CL-R, for the Redfor ground
+/// start scenarios).
+pub fn start_words(world: &tore_world::world::World, flight: &flight::State) -> String {
+    use tore_sim::airport::Allegiance;
+    if !flight.research.as_ref().is_some_and(|r| r.on_ground) {
+        return format!("airborne at {:.0} ft", flight.position[1]);
+    }
+    let scene = &world.terrain.airport_scene;
+    let nearest = scene
+        .runways
+        .iter()
+        .map(|runway| {
+            let c = runway.surface.center;
+            let d = (c[0] - flight.position[0]).hypot(c[2] - flight.position[2]);
+            (d, runway.airport)
+        })
+        .filter(|(d, _)| *d < 3. * 6076.)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .and_then(|(_, id)| scene.airports.iter().find(|a| a.id == id));
+    match nearest {
+        Some(airport) => format!(
+            "on the ground at {}, a {} field",
+            airport.name,
+            match airport.allegiance {
+                Allegiance::Friendly => "Blue",
+                Allegiance::Hostile => "Redfor",
+                Allegiance::Neutral | Allegiance::Unknown => "neutral",
+            }
+        ),
+        None => "on the ground away from any airfield".to_owned(),
+    }
+}
+
 pub fn enemies(client: &Client) -> BTreeSet<u32> {
     let (Some(roster), Some((_, own))) = (client.roster(), client.seat()) else {
         return BTreeSet::new();

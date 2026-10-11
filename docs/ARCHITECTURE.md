@@ -5455,7 +5455,10 @@ and the host sends every player the lobby's state whenever it changes.
 
 When the King presses Fly the host builds the mission (`World::new` with open
 seating), seats every ready player in the slot they chose with the loadout they
-armed, and starts its clock; everyone starts airborne (John, 2026-09-28). A
+armed, and starts its clock; everyone started airborne (John, 2026-09-28)
+until slice CL-R (2026-10-11) let the mission park each side's first wing at
+one of its own fields, where a player who takes a parked plane starts on NAV
+with that field selected. A
 player who joins while the mission flies takes an AI aircraft in flight, as
 stage D does, with that aircraft's loadout. When the mission ends each player
 sees the debrief, then the lobby again, still connected (John, 2026-10-01); the
@@ -5723,10 +5726,10 @@ read only, and the start rule is in the ready hint. Leave never asks.
 
 **The creator in Accept mode** (the King's Mission...). The single-player
 creator opened on `Screen::Quick` with `QuickMission::lobby` set: its OK button
-reads **Accept** and answers as OK does; Start is locked to Airborne (touching
-Start, by either mouse button, or its airport, says "Multiplayer: everyone
-starts airborne, so Start is locked to Airborne. Accept sends this mission to
-the lobby." in a notice at the lower left that does not cover the Start line);
+reads **Accept** and answers as OK does; its notice sits at the lower left,
+clear of the Start line (Start was locked to Airborne until slice CL-R,
+2026-10-11; both sides' start rows are offered since, and `lobby_spec` keeps
+them in the mission text);
 what the host cannot take is reported by Accept before anything is sent
 (`QuickMission::lobby_spec`: ground targets and unflyable aircraft, as single
 player, a developer theater layout, and a mission the text form would change).

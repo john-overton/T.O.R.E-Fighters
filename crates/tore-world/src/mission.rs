@@ -140,6 +140,42 @@ impl Start {
     }
 }
 
+/// Where Enemy Wing 1, the Redfor flight humans take online, starts: the
+/// Redfor mirror of [`Start`] (slice CL-R, John 2026-10-11: "add redfor
+/// ground starts, match the quick mission creator styles"). The other enemy
+/// wings always start in the air. The altitude setting is [`Start`]'s.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EnemyStart {
+    /// In the air where the layout puts the enemy: by the ground target, or
+    /// the separation from the player without one. Text form: no line, or
+    /// `enemy-start airborne`.
+    #[default]
+    Airborne,
+    /// Parked on a runway of a Redfor (or neutral) airfield, by its object
+    /// id, as [`Start::Ground`]. Text form `enemy-start ground RUNWAY`.
+    Ground { runway: u32 },
+    /// Parked on the Redfor airfield the world picks: with a ground target
+    /// the Red-side field nearest the target at least 15 nm from it, else
+    /// the first Red-side runway that holds the wing. Text form
+    /// `enemy-start ground auto`.
+    GroundAuto,
+}
+
+impl EnemyStart {
+    /// The start is on the ground, on a chosen runway or one the world picks.
+    pub fn on_ground(self) -> bool {
+        self != Self::Airborne
+    }
+
+    /// The chosen runway of a ground start.
+    pub fn runway(self) -> Option<u32> {
+        match self {
+            Self::Ground { runway } => Some(runway),
+            Self::Airborne | Self::GroundAuto => None,
+        }
+    }
+}
+
 /// How heavily a ground target's anti-aircraft guns or SAM sites are manned:
 /// the creator's fields 31 and 32 (retail words "not", "lightly",
 /// "moderately" and "heavily"; the text form writes the plain ones). The level
@@ -562,6 +598,8 @@ pub struct MissionSpec {
     /// the mission reads no environment variable.
     pub weather: Overrides,
     pub start: Start,
+    /// Where Enemy Wing 1 starts; see [`EnemyStart`].
+    pub enemy_start: EnemyStart,
     /// The enemy's distance in nautical miles, one of the creator's
     /// [`SEPARATION_NM`].
     pub separation_nm: u32,
@@ -643,6 +681,7 @@ impl MissionSpec {
             start: Start::Airborne {
                 altitude_ft: DEFAULT_ALTITUDE_FT,
             },
+            enemy_start: EnemyStart::Airborne,
             separation_nm: 5,
             preset: Preset::Free,
             guns_only: false,
@@ -711,6 +750,11 @@ impl MissionSpec {
     /// (`start ground auto`).
     pub fn ground_auto(&self) -> bool {
         matches!(self.start, Start::GroundAuto { .. })
+    }
+
+    /// The aircraft in Enemy Wing 1, which an enemy ground start parks.
+    pub fn enemy_wing_size(&self) -> usize {
+        self.wings[usize::from(WINGS_PER_SIDE)].count
     }
 
     /// The enemy's distance in feet.
@@ -803,6 +847,11 @@ impl MissionSpec {
             Start::Airborne { altitude_ft } => format!("airborne at {altitude_ft} ft"),
             Start::Ground { .. } | Start::GroundAuto { .. } => "ground start".to_owned(),
         };
+        let start = if self.enemy_start.on_ground() {
+            format!("{start}, enemy ground start")
+        } else {
+            start
+        };
         format!(
             "{}, {}, {start}: {} against {}",
             self.theater,
@@ -834,6 +883,30 @@ impl MissionSpec {
             && runway < RUNWAY_OBJECT_BASE
         {
             return refuse(format!("{runway} is not a runway object"));
+        }
+        if let Some(runway) = self.enemy_start.runway()
+            && runway < RUNWAY_OBJECT_BASE
+        {
+            return refuse(format!("{runway} is not a runway object"));
+        }
+        if self.enemy_start.on_ground() {
+            // Mirrors the player's ground start: something to park, on the
+            // model that stands on a runway, and not on the player's runway.
+            if self.enemy_wing_size() == 0 {
+                return refuse(
+                    "`enemy-start ground` parks enemy wing 1, which has no aircraft".into(),
+                );
+            }
+            if self.fixture_wings {
+                return refuse("`enemy-start ground` needs AI wings, not fixture wings".into());
+            }
+            if let (Some(enemy), Some(own)) = (self.enemy_start.runway(), self.ground_runway())
+                && enemy == own
+            {
+                return refuse(
+                    "the enemy cannot start on the player's runway; choose another airfield".into(),
+                );
+            }
         }
         if let Some(target) = &self.ground_target {
             let offered = ground_targets(&self.theater);
@@ -1001,6 +1074,18 @@ impl MissionSpec {
                     line(format!("start ground auto {altitude_ft}"));
                 }
             }
+        }
+        // Written only for a ground start, so a mission without one reads as
+        // it always did.
+        match self.enemy_start {
+            EnemyStart::Airborne => {}
+            EnemyStart::Ground { runway } => {
+                line(format!(
+                    "enemy-start ground {}",
+                    runway - RUNWAY_OBJECT_BASE
+                ));
+            }
+            EnemyStart::GroundAuto => line("enemy-start ground auto".to_owned()),
         }
         line(format!("separation-nm {}", self.separation_nm));
         line(format!("preset {}", self.preset.name()));
@@ -1371,6 +1456,7 @@ struct Parser {
     wind: Option<[i32; 2]>,
     cloud_deck: Option<i32>,
     start: Option<Start>,
+    enemy_start: Option<EnemyStart>,
     separation: Option<u32>,
     preset: Option<Preset>,
     guns_only: Option<bool>,
@@ -1619,6 +1705,7 @@ impl Parser {
                 once(&mut self.cloud_deck, "`cloud-deck`", feet)
             }
             "start" => self.start(words),
+            "enemy-start" => self.enemy_start(words),
             "separation-nm" => {
                 let [nm] = arguments(words, 1, "separation-nm N")? else {
                     unreachable!("one argument")
@@ -1839,6 +1926,25 @@ impl Parser {
         once(&mut self.start, "`start`", start)
     }
 
+    fn enemy_start(&mut self, words: &[&str]) -> Parsed<()> {
+        let usage = "expected `enemy-start airborne`, `enemy-start ground RUNWAY` or `enemy-start ground auto`";
+        let start = match words[1..] {
+            ["airborne"] => EnemyStart::Airborne,
+            ["ground", "auto"] => EnemyStart::GroundAuto,
+            ["ground", number] => {
+                let ordinal = whole(number, "the runway number")?;
+                if ordinal >= RUNWAY_OBJECT_BASE {
+                    return refuse(format!("{ordinal} is not a runway number"));
+                }
+                EnemyStart::Ground {
+                    runway: RUNWAY_OBJECT_BASE + ordinal,
+                }
+            }
+            _ => return refuse(usage.into()),
+        };
+        once(&mut self.enemy_start, "`enemy-start`", start)
+    }
+
     fn wing(&mut self, words: &[&str]) -> Parsed<()> {
         let [side, number, aircraft, count, skill] =
             arguments(words, 5, "wing SIDE N AIRCRAFT COUNT SKILL")?
@@ -2055,6 +2161,7 @@ impl Parser {
         if let Some(start) = self.start {
             spec.start = start;
         }
+        spec.enemy_start = self.enemy_start.unwrap_or_default();
         if let Some(nm) = self.separation {
             spec.separation_nm = nm;
         }
@@ -2658,6 +2765,50 @@ mod tests {
         assert!(high.to_text().contains("start ground 12 20000\n"));
     }
 
+    #[test]
+    fn an_enemy_ground_start_round_trips_and_is_checked() {
+        let red = format!("{BASE}wing enemy 1 MIG29.PT 2 average\n");
+        let spec = MissionSpec::from_text(&format!("{red}enemy-start ground 7\n")).unwrap();
+        assert_eq!(
+            spec.enemy_start,
+            EnemyStart::Ground {
+                runway: RUNWAY_OBJECT_BASE + 7
+            }
+        );
+        assert!(spec.to_text().contains("enemy-start ground 7\n"));
+        assert_eq!(MissionSpec::from_text(&spec.to_text()).unwrap(), spec);
+        assert!(spec.summary().contains("enemy ground start"));
+        let auto = MissionSpec::from_text(&format!("{red}enemy-start ground auto\n")).unwrap();
+        assert_eq!(auto.enemy_start, EnemyStart::GroundAuto);
+        assert!(auto.to_text().contains("enemy-start ground auto\n"));
+        // Airborne is the default and writes no line.
+        let air = MissionSpec::from_text(&format!("{red}enemy-start airborne\n")).unwrap();
+        assert_eq!(air.enemy_start, EnemyStart::Airborne);
+        assert!(!air.to_text().contains("enemy-start"));
+        for (text, words) in [
+            (
+                format!("{BASE}enemy-start ground auto\n"),
+                "enemy wing 1, which has no aircraft",
+            ),
+            (
+                format!("{red}enemy-start ground\n"),
+                "expected `enemy-start airborne`",
+            ),
+            (format!("{red}enemy-start ground x\n"), "the runway number"),
+            (
+                format!("{red}start ground 7\nenemy-start ground 7\n"),
+                "the player's runway",
+            ),
+            (
+                format!("{red}enemy-start ground 1\nenemy-start ground 2\n"),
+                "`enemy-start`",
+            ),
+        ] {
+            let error = MissionSpec::from_text(&text).unwrap_err().to_string();
+            assert!(error.contains(words), "{text:?}: {error}");
+        }
+    }
+
     /// The text of a plain mission, written before the surface settings
     /// existed: it must not change (the mission hash is the text's).
     #[test]
@@ -2676,6 +2827,7 @@ mod tests {
             "surface-seed",
             "enemy-nationality",
             "ground auto",
+            "enemy-start",
         ] {
             assert!(!text.contains(key), "{key}");
         }

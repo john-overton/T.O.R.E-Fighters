@@ -159,6 +159,14 @@ impl World {
         if selected_ground.is_some() && !spec.researched_flight {
             return Err("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
         }
+        // Enemy Wing 1's ground start (slice CL-R): a Redfor field's runway.
+        let enemy_ground =
+            mission_layout::enemy_runway(&terrain, spec.enemy_start, spec.enemy_wing_size())?;
+        if enemy_ground.is_some() && enemy_ground == selected_ground {
+            return Err(
+                "The enemy cannot start on the player's runway. Choose another airfield.".into(),
+            );
+        }
         let wings = if open {
             spec.open_wing_launches()
         } else {
@@ -182,13 +190,21 @@ impl World {
             }
             None => None,
         };
+        let enemy_layout = match enemy_ground {
+            Some(object) => Some(
+                mission_layout::ground_layout(&terrain, object, spec.enemy_wing_size())
+                    .map_err(|error| format!("Enemy wing 1's ground start: {error}"))?,
+            ),
+            None => None,
+        };
         let layout = mission_layout::MissionLayout::plan(
             &terrain,
             &start,
             ground_layout,
             &ai_wings::enemy_group_offsets(&wings),
             spec.separation_feet(),
-        );
+        )
+        .with_enemy_ground(enemy_layout);
         let ground = f64::from(terrain.height(start.position[0] as f32, start.position[2] as f32));
         // Only aircraft that start in the air need the altitude to clear the
         // ground; parked wingmen do not.
@@ -196,10 +212,13 @@ impl World {
             spec.fixture_pairs().iter().any(|(_, count)| *count > 0)
         } else {
             wings.iter().any(|wing| {
-                !wing.is_empty()
-                    && (layout.ground.is_none()
-                        || wing.wing.side.is_enemy()
-                        || wing.wing.index != 0)
+                let parked = wing.wing.index == 0
+                    && if wing.wing.side.is_enemy() {
+                        layout.enemy_ground.is_some()
+                    } else {
+                        layout.ground.is_some()
+                    };
+                !wing.is_empty() && !parked
             })
         };
         if (selected_ground.is_none() || airborne_wings) && altitude < ground + 100. {
@@ -265,6 +284,7 @@ impl World {
         let setup = Setup {
             mission: Some((altitude, fuel)),
             ground_start: selected_ground,
+            enemy_ground_start: enemy_ground,
             researched_flight: spec.researched_flight,
             native_tables: None,
             ai: (!spec.fixture_wings).then_some(AiSetup {

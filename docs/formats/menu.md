@@ -662,11 +662,11 @@ arrow (7 by 7) and the unable cross (7 by 7), beside the crown, lock and ready
 tick of EF2.
 
 **The creator in Accept mode** (the King's Mission... in the lobby) is the creator page of
-this file's Quick Mission notes with one change of label and one of lock:
-OK (387, 419) reads **Accept**, Start (field 33) and its airport (34) cannot be
-changed (a click, left or right, says "Multiplayer: everyone starts airborne,
-so Start is locked to Airborne. Accept sends this mission to the lobby."), and
-the notice box sits at the lower left (30, 438 less its height), 340 wide and
+this file's Quick Mission notes with one change of label:
+OK (387, 419) reads **Accept** (until slice CL-R, 2026-10-11, Start, field 33,
+and its airport, 34, were also locked to Airborne; both sides' start rows are
+offered since, and the opening notice reads "Multiplayer: Accept sends this
+mission to the lobby."), and the notice box sits at the lower left (30, 438 less its height), 340 wide and
 up to three lines, so it does not cover the Start line. **Load Ordnance in
 lobby mode** reads **Accept** on Fly (493, 414) and **Cancel** on Select Plane
 (363, 414), and its menu's Cheat row reads "Cheat  Off (not allowed)". Single

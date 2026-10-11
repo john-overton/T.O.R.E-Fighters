@@ -119,7 +119,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "AI takeoff, landing, return to base, ILS approaches on every theater",
         (
             "ai-takeoff-*", "ai-theater-*", "ai-ground-*", "ai-rtb-*", "ai-ils-*",
-            "ai-long-ground-land", "ai-lost-lead-*",
+            "ai-long-ground-land", "ai-lost-lead-*", "ai-enemy-ground-start-*",
         ),
     ),
     "ai-lead": (
@@ -250,8 +250,8 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-window-*",),
     ),
     "net-surface": (
-        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP",
-        ("net-surface-*",),
+        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP, and a Redfor ground start",
+        ("net-surface-*", "net-redfor-*"),
     ),
     "net-a2g": (
         "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site",

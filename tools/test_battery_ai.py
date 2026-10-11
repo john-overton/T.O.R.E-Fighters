@@ -123,10 +123,22 @@ class ShortStripTests(unittest.TestCase):
             theater = args[args.index("--theater") + 1] if "--theater" in args else "UKR"
             return theater, int(args[args.index("--ground-start") + 1])
 
+        from battery_scenarios._strips import is_enemy_field, is_short_strip
+
+        def redfor_start(theater, airport):
+            return is_enemy_field(theater, airport) and not is_short_strip(theater, airport)
+
         for s in ai.scenarios():
             found = theater_and_airport(s.args)
-            if found:
+            if found and "--probe-redfor" in s.args:
+                # The Redfor seat (slice CL-R) starts at a Redfor field instead.
+                self.assertTrue(redfor_start(*found), f"{s.name}: the Redfor seat starts on a short strip or Blue field")
+            elif found:
                 self.assertTrue(is_ground_start(*found), f"{s.name} starts on a short strip or enemy field")
+            if "--enemy-ground-start" in s.args:
+                theater = s.args[s.args.index("--theater") + 1] if "--theater" in s.args else "UKR"
+                airport = int(s.args[s.args.index("--enemy-ground-start") + 1])
+                self.assertTrue(redfor_start(theater, airport), f"{s.name}: the enemy starts on a short strip or Blue field")
         for seed in _ai_fuzz.SEEDS:
             args, _, _ = _ai_fuzz.config(seed)
             found = theater_and_airport(args)
