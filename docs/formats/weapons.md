@@ -131,7 +131,7 @@ or a complete call graph.
 | --- | --- |
 | Loading/mount | HARDCanLoad 0x452980; HARDLoad 0x452c20; HARDPos 0x4532a0; HARDPodHack 0x453710; HARDStoreWeight 0x452940 |
 | Fire/service | PROJAdd 0x4c0a90; PROJFire 0x4c2170; PROJServiceWeapon 0x4c4700; PROJProc 0x4c1f50 |
-| Movement | PROJSpeed 0x4c1120; PROJEngineState 0x4c1170; PROJMoveProc 0x4c11b0; PROJBombPos 0x4c4050 |
+| Movement | PROJSpeed 0x4c1120; PROJEngineState 0x4c1170; PROJMoveProc 0x4c11b0; PROJMakeBombEq 0x4c3eb0; PROJBombPos 0x4c4050 ([read](#bomb-motion)) |
 | Seeker | PROJInFOV 0x4c2860; PROJLock 0x4c2f20; PROJLockUpdate 0x4c0960; PROJRadarIsOn 0x4c2eb0; PROJSelectTarget 0x4c4100 |
 | Equipment/CM | HARDBestSeeker 0x452e60; HARDFindJammer 0x452ea0; HARDFindECMForObj 0x452f10; PROJLaunchDevice 0x4c39a0 |
 | Damage | PROJHitChance 0x4c3380; PROJHit 0x4c20c0; PROJDamageProc 0x4c1870; PROJSendCollateralDamages 0x4c5670; DAMAGEDoHit 0x40f970 |
@@ -233,6 +233,310 @@ Callers and their share argument:
 
 Unknown: what object type 4 and shooter flag 0x80 are; which targets take the
 `0x4c1e3a` path and which the `0x4c1f01` path; the delay's time unit.
+
+## Bomb motion
+
+Static reading on 2026-10-10 (slice R1, research mode) of FA.EXE 1.02F
+(`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`) from the
+saved disassembly, with routine names from the matching `FA.SMS`
+(`e550a67e...`). No original code ran. The 1.0 build (`c7d2c1cc...`) has the
+same arithmetic at shifted addresses (`PROJBombPos` at `0x4c03f0`, compiled
+with different registers) and the same scatter constants. Addresses below are
+1.02F.
+
+Units: positions are 1/256 ft; `_currentTicks` (`0x552928`) counts 256 per
+second ([time notes](weather.md#continuous-time-is-confirmed)); `_currentT`
+(`0x5528c8`) counts quarter seconds; angles are 65,536 per turn (the sine table
+at `0x515a48` reaches 32,767 at index 64, a quarter turn; pitch clamps at
+plus or minus `0x3ffc`). JT values are read from the record copy at `0x50d268`
+(projectile flags at `0x50d30e`, record `+0xa6`).
+
+### Bombs do not use the gravity flag
+
+A record with the bomb flag 0x10 never needs flag 0x4. The bomb flag itself
+selects a separate closed-form ballistic path:
+
+1. The projectile's creation message (proc table `0x4c1f50`, message 1 returns
+   `0x4c1f90`) tests the record's flag 0x10 and, for a bomb, builds a "bomb
+   equation" with `PROJMakeBombEq` (`0x4c3eb0`, called at `0x4c2055`), copies it
+   into a 0x24-byte block held by the instance at `+0x108` (`0x50cf88`;
+   `0x4c205a` to `0x4c207b`) and sets the object's motion type to 10
+   (`0x4c2081` to `0x4c20b3`).
+2. `MoveObj` (`0x436b30`) dispatches on the motion type (jump table `0x438228`;
+   entry 10 is `0x436fc3`). Type 10 sets the position from
+   `PROJBombPos(equation, _currentTicks - releaseTick)` (`0x436fc3` to
+   `0x436fd8`) every service and skips the speed and turn steps.
+3. The flag 0x4 sink at `0x4c14cf` (the missile sag in
+   [missile notes](missiles.md#release-sag-and-cruise-profile)) only changes
+   the altitude that type 10 overwrites, so it would not matter for a bomb.
+
+The equation block (`0x4c3eb0`):
+
+| Offset | Meaning |
+| --- | --- |
+| `+0x00` | Release position x, y (up), z |
+| `+0x0c` | Impact point x, y, z |
+| `+0x18` | Release tick (`_currentTicks`) |
+| `+0x1c` | Impact tick |
+| `+0x20` | Horizontal speed, ft/s (word) |
+| `+0x22` | Vertical speed, ft/s, up positive (word) |
+
+`PROJMakeBombEq(equation, record, position, angle, speed, altitude, passes)`,
+stdcall, record unused:
+
+- Speeds: horizontal = speed x cos(pitch), vertical = speed x sin(pitch), both
+  divided by 32,767 (`_GRSinCos` `0x4d5c98`, sine table `0x515a48`, cosine
+  `0x515ac8`; `0x4c3ec7` to `0x4c3f18`).
+- Ground: an altitude argument of `0x7fffffff` asks `T_Info` (`0x4abab0`) for
+  the ground under the release position (`0x4c3f20` to `0x4c3f43`).
+- Fall time: `(vz + sqrt(vz^2 + 64 h)) / 32` seconds, where h is the release
+  altitude above that ground in feet (`0x4c3f48` to `0x4c3f87`), stored in
+  ticks. This is a fall under **32 ft/s² with no drag**.
+- Impact: the horizontal speed times the fall time, rotated to the release
+  heading (`_Rotate2` `0x4c6654`) and added to the release position
+  (`0x4c3f8a` to `0x4c3fc0`).
+- Refinement: with passes left, it samples the ground under the predicted
+  impact and, when that differs by 5 ft (`0x500`) or more, jumps back to
+  `0x4c3f20` (`0x4c3fd0` to `0x4c4009`). That label reads the ground under the
+  release position again, so the stored ground is always the release point's.
+  The bomb's creation, the CCIP sight and the HAB window ask for 4 passes;
+  the AI release check asks for none.
+
+`PROJBombPos(equation, t, out)` (`0x4c4050`), t in ticks since release:
+
+- x and z move linearly from the release position to the impact point:
+  `p0 + (p1 - p0) * t / (T + 1)`, T the fall time in ticks (`0x4c4064` to
+  `0x4c40c2`). Past T they keep going at the same rate.
+- y is `y0 + vz * t - t^2 / 16` in 1/256 ft, that is `y0 + vz * s - 16 s^2`
+  feet after s seconds (`0x4c40c5` to `0x4c40ef`).
+
+So the path is a vacuum parabola, g = 32 ft/s², with no drag, no terminal
+speed and no retard after release. The real bomb hits whatever terrain or
+object the normal collision step finds; the predicted ground only sets the
+horizontal rate.
+
+Orientation: after each position, `MoveObj` sets pitch to
+`ArcTan(vz - 32 s, vh)` (`_ArcTan` `0x4ccb88`; `0x436fdd` to `0x43703b`),
+clamped to plus or minus `0x3ffc`, in both the motion and attitude words. The
+drawn bomb noses over along its velocity; heading stays at the release heading.
+
+### Release state
+
+The player trigger and the AI both release through `PROJFire` (`0x4c2170`):
+
+- **Position**: `HARDPos` (`0x4532a0`) puts the store at the station's offset
+  rotated with the aircraft (`0x411d40`) when `PROJAccurateHardPos`
+  (`0x4c0820`) says so: a human launcher, one of the two objects at `0x4eb64c`
+  and `0x4eb64e`, or one within 5,000 ft of the point `0x4eb650`. Any other
+  launcher releases from its own centre (`0x4532f0` to `0x453321`). The
+  lateral offset is mirrored when the hardpoint type has flag 0x4 and the
+  station's remaining count divided by `actualRoundsPerGame` is odd (`HARDUnrotatedHardPos` `0x453220` to
+  `0x453291`), so successive releases alternate sides of a paired station.
+  `PROJAdd` raises a launch altitude under 10 ft to 10 ft (`0x4c0b30` to
+  `0x4c0b47`).
+- **Direction**: the aircraft's attitude (`0x50ce9d`, heading and pitch, not
+  its direction of motion at `0x50cea3`) plus the station's slew angles
+  (`0x45335e` to `0x45337d`, or a full composition at `0x453383` for an
+  accurate launcher as above or one banked or pitched past `0x11c6`, 25
+  degrees), pitch clamped to plus or minus `0x3ffc` (`0x453398`). Bombs
+  leave **along the nose, not the flight path**. Every bomb station on the 27
+  imported A2G carriers has zero slew and zero slew limits (PT `:hards`
+  blocks), so the turret aim at `0x4c24b0` (stations with a nonzero
+  `slewLimitH` or `slewLimitP`, `0x4c24e0` to `0x4c24ec`) never applies to them.
+- **Speed**: `PROJSpeed` (`0x4c1120`, called from `PROJAdd` at `0x4c0d76`), a
+  scalar: `max(launcherSpeed * launchRetard / 100, initialSpeed)`, clamped to
+  the record's `_minSpeed` (`+0x67`) and `_maxSpeed` (`+0x6b`). Bomb records:
+  `initialSpeed` 0, clamp 0 to 1,466 ft/s (slick, retarded, packs; Boulder and
+  Moose 1,026), 0 to 2,933 ft/s (cluster).
+- **Scatter**: the creation message adds `Rand(2A) - A` to the heading and to
+  the pitch, with A the words of `adjustBombAngle` (`0x50ce08` = 0x222, 0x222):
+  546 units, **plus or minus 3.0 degrees**, uniform, independently per bomb
+  (`0x4c1fc0` to `0x4c200a`; `Rand` `0x4562f0` returns 0 to n-1).
+  `adjustBombRandom` (`0x50ce10` = 1) has no reader in the listing.
+- No ejection push: bomb records lack flag 0x8 (the 32 ft/s kick at
+  `0x4c0e08` to `0x4c0e27`).
+
+Retard: `launchRetard` (66 on MK82HD, MK82P and MK82AIR; 90 on the five
+cluster records; 100 on slick bombs) only scales the release speed. A Snakeye
+leaves at 66 percent of the aircraft's speed and then falls on the same
+parabola. Flag 0x40 (on the cluster records, with `finalSpeed` 278) makes the
+projectile step write a speed command (`0x4c1494` to `0x4c14ca`), which motion
+type 10 never reads: it does not change a bomb's path.
+
+### Packs and pods
+
+- **Per call**: `PROJFire` makes `gameRoundsInBurst` projectiles when the
+  record is not a gun (flag 0x80), has `projsInPod` 1 and a burst above 1;
+  otherwise one (`0x4c22a7` to `0x4c22c9`). Ammunition is debited once per
+  call, `actualRoundsPerGame` (`+0xf0`) through `HARDUnload` (`0x4527f0`,
+  called at `0x4c224e`). A MK-82 3-, 6- or 7-pack therefore releases all its
+  bombs in the same tick for one round.
+- **Pack layout**: bomb i of a pack (i from 0) is offset from the station
+  cumulatively by `(even i ? +i : -i) * 2 ft` in world x and `-2 i ft` in
+  world y (`0x4c22db` to `0x4c2308`, `0x4c2475`): x 0, -2, +2, -4, +4, -6,
+  +6 ft and y 0, -2, -6, -12, -20, -30, -42 ft. Each bomb gets its own
+  scatter.
+- **Pods**: at mission start `HARDPodHack(1)` (`0x453710`, called at
+  `0x4043c4`) multiplies each loaded station's count by `projsInPod`; mission
+  end divides it back (`0x404752`). Each `PROJFire` then fires one rocket and
+  debits one. Two LAU-61 pods hold 38 rockets.
+- **Player cadence** (`ServicePlayer`, `0x416f17` to `0x417027`): a record with
+  flag 0x800 fires while the trigger is held, one call every `gameBurstT`
+  quarter seconds (`0x416f3b` to `0x416f74`); any other record fires once per
+  new press. LAU-61, B-8M1 and B-13L (0x800, `gameBurstT` 1) fire 4 rockets a
+  second held; LAU-10 (0x20046, no 0x800) one per press. No bomb record has
+  0x800, so `gameBurstT` never spaces a player's bombs.
+- **AI cadence** (`PROJServiceWeapon`, `0x4c4d77` to `0x4c4fcd`): a burst of
+  `gameRoundsInBurst` calls (the larger of it and `gameRoundsInCarpetBurst`
+  when the launcher's type dword `+0xa6` has bit 0x2), `gameBurstT` quarter
+  seconds apart, then `reloadT` quarter seconds, both randomised by record
+  flags 0x80000 and 0x100000.
+
+`gameBurstT` and `reloadT` are quarter seconds in both paths.
+
+### Rocket fall
+
+Rockets carry flag 0x4: the sink grows by `(dt << 13) >> 8` fixed-8 ft/s per
+service with dt from `0x546ba0` (`0x4c14e4` to `0x4c14fc`), which is ticks
+since the object's last service
+([service notes](native-strip.md#load-service-requeue-and-merge)). That
+confirms 32 ft/s² for the sink and its 80 ft/s cap, while unlit or burnt out.
+
+### AI bombs
+
+For an AI launcher (object byte `+0x10` without the human bit 0x80) with a
+target, `PROJFire` replaces each bomb's impact point with the target's position
+plus `Rand(200) - 100` ft in x and in z (`0x4c23c0` to `0x4c2470`, through
+`PROJChangeBombEq` `0x4c4030`). The bomb's horizontal path then runs straight
+to that point while it falls on its own parabola. When the launcher's type
+dword `+0xa6` has bit 0x2 this happens 25 percent of the time (`Percent(75)`
+skips it); among PT records only `~QUE` sets that bit. AI release itself waits
+for `PROJLock`'s bomb check (`0x4c3163` to `0x4c31d9`): an equation from the
+aircraft's own position, attitude and raw speed (no `launchRetard`) against
+the target's altitude, accepted when the predicted impact is within the larger
+of 1,000 ft and an eighth of the target distance.
+
+### Cluster flag 0x800000
+
+The only projectile-record test of 0x800000 is in `GRAPHICAddExp` (`0x443321`
+to `0x443336`). For an explosion caused by such a projectile while the session
+count `0x4eb604` is 1, the effect object is created as type 43
+(`GRAPHICAddInvisible`'s type, `0x4440f0`) with a 1 second life and no debris
+unless the burst's y position in 1/256 ft is a multiple of 11 (`0x4434e6` to
+`0x44350d`, `0x4435d4` to `0x4435e9`). The explosion sound request is made
+either way (`0x44354d` onward). Damage and splash are unaffected.
+
+### Facts for B1 (plan section 7.1)
+
+| Fact | Retail | Status |
+| --- | --- | --- |
+| Release velocity | `PROJSpeed` scalar along the aircraft's attitude plus station slew (zero on every imported bomb station), plus a uniform plus or minus 3.0 degree heading and pitch scatter per bomb; no ejection push | Closed |
+| Gravity | 32 ft/s², closed form, no cap | Closed |
+| Drag | None; `launchRetard` only scales the release speed; flag 0x40 does not affect a bomb | Closed |
+| Orientation | Pitch follows the velocity; heading fixed | Closed |
+| Packs | One press releases the whole pack in one tick, staggered 2 ft steps as above, one round debited | Closed |
+| Pods | `projsInPod` rockets per pod; one rocket per call; held trigger repeats every `gameBurstT` quarter seconds for 0x800 records | Closed |
+| Predictor | The same equation and release state without the scatter, against the ground under the release point (see [Bomb sight](#bomb-sight)) | Closed; the `T_Info` cache detail is unknown below |
+
+### Unknown
+
+| Question | Next step | Fallback |
+| --- | --- | --- |
+| Whether `T_Info`'s per-object cached height (object `+0x27`, `+0x2f`) makes the release-point ground differ from the ground exactly below the station | Trace `0x4abab0`'s cache writers | Ground directly below the release point (fitted) |
+| What object type 43 draws, so what a cluster burst looks like in single player | Trace type 43 in the shape and effect draw code | Decision 13's presentation-only flashes (opinionated, agent) |
+| Meaning of launcher type bit 0x2 (`+0xa6`) | Read the NPC flag consumers | None needed: no imported aircraft sets it |
+| World axis of the pack stagger relative to north | Read the theater axis convention | Use the store's own lateral axis (fitted) |
+| How a guided bomb falls. GBU and JDAM records (GBU10 0x2a543, GBU29 0x2a043) carry neither 0x10 nor 0x4, so they never get the bomb equation; with no target the creation and loss paths call `0x4c1720`, which commands the current heading, pitch and roll (`0x4c1720` to `0x4c1752`), and the 0x40 command heads for `finalSpeed` 278 | Trace motion types 1 and 2 in `MoveObj` (`0x436c70` and peers) for any fall term | The bomb equation from the guided bomb's current state when it has no spot (plan section 5, fitted) |
+
+## Bomb sight
+
+Same build and method as [Bomb motion](#bomb-motion).
+
+### When the sight shows
+
+The HUD mode byte (`0x521694`) is set at `0x406e2a` to `0x406f6c`: a selected
+bomb-flag store gives mode 3 (CCIP) when HUD module byte `+0x239` is set, mode
+6 (HAB) when only `+0x23a` is set, otherwise 5 (ARM). Dispatch at `0x4071a8`
+(table `0x4075b0`) calls the CCIP routine `0x409760` for mode 3; mode 6 draws
+no HUD sight. Rockets lack flag 0x10 and show ARM. The MIG21, MIG17, YAK141,
+F14, F104, SEAHAR and SU33 modules set neither byte (their `CC` or `_C` twins
+set `+0x239`); B2 and BMBROH set only `+0x23a`.
+
+### The prediction
+
+`0x409760`, every HUD frame:
+
+1. Station `0x50cf9c`, its record and `HARDPos` (`0x4097b2`): the same release
+   position and direction as a real release.
+2. `PROJSpeed(record, own speed)` (`0x4097c6`) and `PROJMakeBombEq(..., ground,
+   4)` (`0x4097dc`): the same equation, without the random scatter. The pipper
+   is the mean impact point, over the ground below the release point.
+3. The impact point is projected (`_GRTo2d` `0x4d5cc0`, `0x4097f3`). Behind or
+   off the screen nothing more is drawn except trail dots that land on screen.
+4. The symbol font is selected (`HUDSetSymFont` `0x40ab30`: handle at `_hud +
+   0x5e`, `0x5213be`, the module's `hudsym` font named at `_hud + 0x51`), and
+   restored after (`0x40ab10`).
+
+### Fall line or trail
+
+- Without HUD byte `+0x23a`: a dotted line, `G_PatLine` (`0x498380`) with
+  pattern `0x55555555`, from the HUD reference point (`0x521060`) to the
+  pipper (`0x409858` to `0x409881`).
+- With `+0x23a` (on imported aircraft: F-16C, F-22, F-22N and X-31): instead a
+  dot (`G_Point` `0x4976d0`) at `PROJBombPos` every 64 ticks, a quarter second
+  of fall, from release to impact (`0x409807` to `0x409856`).
+
+The reference point `0x521060` (`0x407026` to `0x40719e`) is the flight path
+marker when HUD byte `+0x23b` is set and own speed is at least the HUD word
+`+0x23e` in ft/s: a point 10,000 ft (`0x271000`) along the velocity, drawn with
+symbol glyph 6. Otherwise it is the boresight point `0x521d94` (10,000 ft along
+the nose, `0x406bb5` to `0x406c58`; symbol glyph 5). Among the retail HUD
+modules only the X-31 family (`F31*.HUD`) lacks `+0x23b`; the minimum speed is
+146 ft/s in the AV8, F4, MIG17, MIG21 and YAK141 modules (and the ASTOVL, F8,
+SEAHAR and novelty ones) and 0 in the others.
+
+### The pipper and its arc
+
+One glyph of the symbol font, printed with `G_Print` flags 5 (centred
+horizontally and vertically, `0x4986cd` to `0x4986f0`) at the impact point
+(`0x4098e2` to `0x4098f3`). The glyph is chosen at `0x409886` to `0x4098dd`:
+
+- d is `_Dist` (`0x4c66cc`: the largest axis difference plus a quarter of each
+  of the other two) from the aircraft's position (`0x50ce91`) to the impact
+  point. R is the record's `zone1.maxRange` (`+0xd7`, feet scaled by 256, so
+  the comparison is in feet).
+- d at most 0.4 R (computed as `(R - R/5) / 2`): glyph `0x2f`.
+- 0.4 R to R: glyph `0x2e + trunc(14 * (0.4 R - d) / (0.6 R))`, so `0x2e` down
+  to `0x21`.
+- d at least R: glyph `0x20`.
+
+The glyphs (HUDSYM11, height 31, advance 29, rendered locally to
+`.local/a2g/renders/ccip-glyphs.png`, local only): `0x20` is a 23-pixel ring with twelve
+clock marks, the four cardinal ones reaching the 29-pixel cell edge, and a
+centre dot at (14, 15), so the centre dot sits on the impact point. `0x21` to
+`0x2f` add an inner 17-pixel arc that starts at 12 o'clock and grows clockwise;
+`0x2f` closes it. The arc winds closed as the range shrinks and the bare
+pipper remains at and beyond R; nothing is blank while the impact is on screen.
+
+R by record: 20,000 ft for MK-82 family and MK-84 (full arc inside 8,000 ft),
+10,000 ft for FAB (4,000 ft), 30,000 ft for cluster (12,000 ft), 20,000 ft for
+Boulder and Moose.
+
+The manual (p. 85) says the arc is a complete circle at 10,000 ft or more and a
+half circle at 5,000 ft, the opposite sense; the code is the evidence for the
+original's behaviour. The routine prints no text.
+
+`ComputeBombPosition` (`0x40ad40`) serves the HAB bombing window: the same
+equation from the aircraft's own position and attitude, returning the camera
+pitch toward the impact; `bombRange` (`0x539d6c`) is its zoom step, 0 to 5
+(`CPBombRange` `0x43e7e0`). No imported aircraft has a HAB-only HUD.
+
+### Unknown
+
+| Question | Next step | Fallback |
+| --- | --- | --- |
+| Pixel rhythm of pattern `0x55555555` | Read the line core `0x4c619c` | One pixel on, one off (fitted) |
+| Which symbol font file serves each display resolution | Trace the HUD font loader's name suffix | `HUDSYM11.FNT`, matching the `HUD11.FNT` text font TORE uses |
 
 ## Manual weapons integration follow-up
 
