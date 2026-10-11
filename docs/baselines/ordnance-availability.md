@@ -53,7 +53,10 @@ here when the supported list, the tanks or the roster change on purpose.
 Slice W2 of the air-to-ground round (2026-10-10) added seven air-to-ground
 missiles (AGM-65A, AGM-84E, AGM-45, AGM-84A, AM-39, AS-16, AS 15): 47 supported
 records and 1,802 weapon placements, measured with `--validate-ordnance` on the
-surface-data import (the tank and recovered-row counts are unchanged).
+surface-data import (the tank and recovered-row counts are unchanged). Slice W1 added the laser bombs, the JDAMs and the
+laser missiles (GBU-10E, GBU-10, GBU-10E Paveway, GBU-27, GBU-28, GBU-29,
+GBU-29/P, GBU-30, AS-14, AS 30L, AT-12): with W2's, 58 supported records and
+2,359 weapon placements, measured the same way (2026-10-11).
 
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is
