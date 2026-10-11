@@ -151,7 +151,7 @@ an advanced targeting option ([the targeting sight](air-to-ground.md#the-targeti
 | Alt+8 / Alt+9 | Approach target low / high | Confirmed |
 | Alt+E | Engage my target; also sets loose formation | Confirmed |
 | Alt+R | Engage my target from formation; also sets at least medium formation | Confirmed |
-| Alt+F | Engage the IR/laser-designated target | Confirmed |
+| Alt+F | Engage the IR/laser contact (the one chosen with `/` and `\` while IR/Laser advanced targeting is on), air or ground; with no hostile contact the wingmen are freed to attack on contact, which is what the manual describes. TORE keeps the engage meaning (John, decision 7, 2026-10-11); taking the contact from TORE's sight track, pin or laser spot is opinionated | Confirmed |
 | Alt+W | Engage every target of my target's class (`Attack bandits`, `Attack SAMs`, ...) | Confirmed |
 | Alt+P | Clear my six | Confirmed |
 | Alt+D | Disengage | Confirmed |
