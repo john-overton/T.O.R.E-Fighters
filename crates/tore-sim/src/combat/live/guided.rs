@@ -438,23 +438,31 @@ pub(super) fn sight<G: Fn(f64, f64) -> f64>(
     });
     let ground_range = aim.map(|point| guided::ground_range(point, launcher.position));
     let slant_range = aim.map(|point| distance(point, launcher.position));
-    let in_reach = aim.is_some_and(|point| {
-        guided::in_release_zone(w, launcher.position, launcher.basis, point, scale)
-            && (!guided::is_glide_bomb(w) || {
-                let motion =
-                    missiles::Motion::launch(w, guided::release_velocity(w, launcher), point[1]);
-                guided::time_to(
-                    w,
-                    motion,
-                    launcher.position,
-                    unit(guided::release_velocity(w, launcher)),
-                    point,
-                    0,
-                )
-                .is_some()
-            })
-            && (kind != Guidance::Command || sight::clear_line(launcher.position, point, cx.ground))
-    });
+    // A laser weapon with no spot to home on is never IN RNG, whatever the
+    // designated object's range.
+    let spotless = matches!(advisory, Some(Advisory::NoLaser | Advisory::Masked));
+    let in_reach = !spotless
+        && aim.is_some_and(|point| {
+            guided::in_release_zone(w, launcher.position, launcher.basis, point, scale)
+                && (!guided::is_glide_bomb(w) || {
+                    let motion = missiles::Motion::launch(
+                        w,
+                        guided::release_velocity(w, launcher),
+                        point[1],
+                    );
+                    guided::time_to(
+                        w,
+                        motion,
+                        launcher.position,
+                        unit(guided::release_velocity(w, launcher)),
+                        point,
+                        0,
+                    )
+                    .is_some()
+                })
+                && (kind != Guidance::Command
+                    || sight::clear_line(launcher.position, point, cx.ground))
+        });
     if advisory.is_none() && aim.is_some() && !in_reach {
         advisory = Some(Advisory::OutOfReach);
     }

@@ -220,28 +220,10 @@ pub fn time_to(
 /// A guided weapon's reach from where it would leave now: the nearest and
 /// farthest ground range ahead at which it can still reach a point on the
 /// ground (docs/spec/air-to-ground.md, "Guided bomb release range
-/// indicator"). The same fields as `delivery::Reach` (slice H1).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Reach {
-    pub minimum_ft: f64,
-    pub maximum_ft: f64,
-}
-impl Reach {
-    /// Whether a target `range_ft` ahead lies inside the reach: IN RNG.
-    pub fn contains(&self, range_ft: f64) -> bool {
-        (self.minimum_ft..=self.maximum_ft).contains(&range_ft)
-    }
-    /// Where `range_ft` sits on the scale: 0 at the minimum, 1 at the
-    /// maximum, clamped.
-    pub fn fraction(&self, range_ft: f64) -> f64 {
-        let span = self.maximum_ft - self.minimum_ft;
-        if span > 0. {
-            ((range_ft - self.minimum_ft) / span).clamp(0., 1.)
-        } else {
-            0.
-        }
-    }
-}
+/// indicator"). Slice H1's type; [`reach`] is the search for guided weapons
+/// (H1's `Reach::search` starts from the unguided throw, which a guided
+/// glide with no fall does not make good).
+pub use super::delivery::Reach;
 
 /// The ground track a release from `launcher` runs along: its velocity's,
 /// else its nose's, as a horizontal unit vector.

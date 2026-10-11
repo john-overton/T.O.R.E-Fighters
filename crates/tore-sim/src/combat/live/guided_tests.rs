@@ -295,10 +295,9 @@ fn a_bomb_released_with_no_spot_locks_once_in_its_nose_cone_and_never_again() {
     s.command(0, Command::ToggleLaser, launcher());
     step(&mut s, false);
     assert_eq!(s.own().laser.state, LaserState::Ready);
-    assert_eq!(
-        s.own().guided_sight.unwrap().advisory,
-        Some(Advisory::NoLaser)
-    );
+    let sight = s.own().guided_sight.unwrap();
+    assert_eq!(sight.advisory, Some(Advisory::NoLaser));
+    assert!(!sight.in_reach, "no spot, no IN RNG");
     // Released anyway: it waits and falls.
     assert_eq!(s.own().release_readiness, Readiness::Ready);
     step(&mut s, true);
