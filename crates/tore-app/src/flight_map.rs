@@ -280,6 +280,7 @@ impl Map {
         Projection {
             center: [anchor[0] + self.offset[0], anchor[1] + self.offset[1]],
             feet_per_pixel: self.width_nmi() * NMI / f64::from(AREA.2),
+            area: AREA,
         }
     }
     fn draw_filters(
@@ -586,8 +587,9 @@ fn draw_ground(
     background: Option<&Sprite>,
     palette: impl Fn(u8) -> [u8; 3],
 ) {
-    for y in AREA.1..AREA.1 + AREA.3 {
-        for x in AREA.0..AREA.0 + AREA.2 {
+    let area = projection.area;
+    for y in area.1..area.1 + area.3 {
+        for x in area.0..area.0 + area.2 {
             let [east, north] = projection.world(x, y);
             let col = (east / f64::from(CELL_FEET)).floor() as i32;
             let row = (north / f64::from(CELL_FEET)).floor() as i32;
@@ -658,309 +660,13 @@ pub struct Plan {
     pub note: Option<String>,
 }
 
-/// The planning map's Close button.
-pub const PLAN_CLOSE: (i32, i32, i32) = (518, 404, 95);
 /// Colour of the objective area's ring and its words.
 const OBJECTIVE: [u8; 4] = [255, 223, 92, 255];
 /// The dark edge that keeps the objective area visible on light ground.
 const OBJECTIVE_EDGE: [u8; 4] = [24, 26, 28, 255];
 
-/// The creator's map view: the plan's own zoom and centre, then the
-/// player's zoom and pan from there, as the in-game map's keys do.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PlanView {
-    center: [f64; 2],
-    fit: i32,
-    zoom: i32,
-    offset: [f64; 2],
-}
-
-impl PlanView {
-    /// A view that holds every start and the objective area, at the
-    /// narrowest of the in-game map's widths (25 to 800 nm) that does.
-    pub fn new(plan: &Plan, world: &Terrain) -> Self {
-        let mut points: Vec<[f64; 2]> = plan
-            .markers
-            .iter()
-            .map(|m| [m.position[0], m.position[2]])
-            .collect();
-        if let Some((center, radius)) = plan.objective {
-            points.push([center[0] - radius, center[1] - radius]);
-            points.push([center[0] + radius, center[1] + radius]);
-        }
-        let (center, fit) = if points.is_empty() {
-            let theater = &world.theater;
-            (
-                [
-                    theater.cols as f64 * f64::from(CELL_FEET) / 2.,
-                    theater.rows as f64 * f64::from(CELL_FEET) / 2.,
-                ],
-                3,
-            )
-        } else {
-            let min = |i: usize| points.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min);
-            let max = |i: usize| {
-                points
-                    .iter()
-                    .map(|p| p[i])
-                    .fold(f64::NEG_INFINITY, f64::max)
-            };
-            let span =
-                (max(0) - min(0)).max((max(1) - min(1)) * f64::from(AREA.2) / f64::from(AREA.3));
-            // A margin of a fifth of the plot for the symbols and labels.
-            let fit = (0..=3)
-                .find(|zoom| 100. * 2f64.powi(*zoom) * NMI * 0.8 >= span)
-                .unwrap_or(3);
-            ([(min(0) + max(0)) / 2., (min(1) + max(1)) / 2.], fit)
-        };
-        Self {
-            center,
-            fit,
-            zoom: fit,
-            offset: [0.; 2],
-        }
-    }
-    fn width_nmi(&self) -> f64 {
-        100. * 2f64.powi(self.zoom)
-    }
-    /// The in-game map's keys: + and - zoom, the arrows pan, Home goes back
-    /// to the plan's own view.
-    pub fn key(&mut self, key: &str) {
-        let step = self.width_nmi() * NMI * 0.25;
-        match key {
-            "+" | "=" => self.zoom = (self.zoom - 1).max(-2),
-            "-" | "_" => self.zoom = (self.zoom + 1).min(3),
-            "ArrowLeft" => self.offset[0] -= step,
-            "ArrowRight" => self.offset[0] += step,
-            "ArrowUp" => self.offset[1] += step,
-            "ArrowDown" => self.offset[1] -= step,
-            "Home" => {
-                self.offset = [0.; 2];
-                self.zoom = self.fit;
-            }
-            _ => {}
-        }
-    }
-    fn projection(&self) -> Projection {
-        Projection {
-            center: [
-                self.center[0] + self.offset[0],
-                self.center[1] + self.offset[1],
-            ],
-            feet_per_pixel: self.width_nmi() * NMI / f64::from(AREA.2),
-        }
-    }
-    /// Draws the plan over `world` in the in-game map's look, with
-    /// `sprites` the creator's (the theater picture, MCICONS.PIC and the
-    /// button pieces). Returns the Close button's rectangle.
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw(
-        &self,
-        pixels: &mut [u8],
-        world: &Terrain,
-        font: &Font,
-        sprites: &std::collections::BTreeMap<String, Sprite>,
-        plan: &Plan,
-        title: &str,
-        close_pressed: bool,
-    ) -> (i32, i32, i32, i32) {
-        Canvas(pixels).rect((0, 0, 640, 480), [72, 72, 72, 255]);
-        let projection = self.projection();
-        let icons = sprites.get("MCICONS.PIC");
-        // Without the theater picture the cells are drawn in a plain land
-        // grey (the creator has no scenery palette).
-        draw_ground(
-            pixels,
-            world,
-            &projection,
-            sprites.get(&world.theater.map),
-            |_| [118, 114, 98],
-        );
-        let mut labels = Vec::new();
-        let mut markers = Vec::new();
-        // The objective area first, under everything else: yellow hatching
-        // edged in dark and a yellow ring between two dark ones, so it shows
-        // on sea, forest and desert alike, and never less than 7 pixels in
-        // radius so it shows at the widest zoom.
-        let mut objective_label = None;
-        if let Some((center, radius)) = plan.objective
-            && let Some(at) = projection.unclipped([center[0], 0., center[1]])
-        {
-            let r = (radius / projection.feet_per_pixel).max(7.);
-            objective_mark(pixels, at, r, AREA);
-            let point = (at.0 as i32, at.1 as i32);
-            if projection.inside(point.0, point.1) {
-                // Nothing is placed on top of a small area.
-                if r < 20. {
-                    markers.push(point);
-                    labels.push((point.0 - 12, point.1 - 10, point.0 + 12, point.1 + 10));
-                }
-                objective_label = Some((point.0, point.1 + r.min(20.) as i32 + 3));
-            }
-        }
-        if let Some(at) = objective_label {
-            label(pixels, font, "OBJECTIVE AREA", at, OBJECTIVE, &mut labels);
-        }
-        // Where each symbol goes: the starts first, then the airfields
-        // around them. The leaders are drawn as they are placed, so every
-        // symbol and label is drawn over them.
-        let mut placed: Vec<((i32, i32), usize, Tile, &str)> = Vec::new();
-        for marker in &plan.markers {
-            let Some(point) = projection.point(marker.position) else {
-                continue;
-            };
-            let at = place_marker(pixels, point, &mut markers, &mut labels);
-            let heading = (marker.heading.rem_euclid(std::f64::consts::TAU)
-                / std::f64::consts::FRAC_PI_4)
-                .round() as usize
-                % 8;
-            let tile = match marker.side {
-                PlanSide::Blue => Tile::Friendly,
-                PlanSide::Red => Tile::Hostile,
-            };
-            placed.push((at, heading, tile, &marker.label));
-        }
-        let scene = &world.airport_scene;
-        for airport in &scene.airports {
-            if airport
-                .runway_objects
-                .iter()
-                .any(|object| plan.start_fields.contains(object))
-            {
-                continue;
-            }
-            let runways: Vec<[f64; 3]> = scene
-                .runways
-                .iter()
-                .filter(|r| r.airport == airport.id)
-                .map(|r| r.surface.center)
-                .collect();
-            if runways.is_empty() {
-                continue;
-            }
-            let center: [f64; 3] = std::array::from_fn(|i| {
-                runways.iter().map(|p| p[i]).sum::<f64>() / runways.len() as f64
-            });
-            let Some(point) = projection.point(center) else {
-                continue;
-            };
-            let at = place_marker(pixels, point, &mut markers, &mut labels);
-            let tile = match airport.allegiance {
-                tore_sim::airport::Allegiance::Friendly => Tile::Friendly,
-                tore_sim::airport::Allegiance::Hostile => Tile::Hostile,
-                _ => Tile::Neutral,
-            };
-            placed.push((at, 15, tile, &airport.name));
-        }
-        for ((x, y), icon, tile, _) in &placed {
-            symbol(pixels, icons, *x, *y, Some(*icon), *tile);
-        }
-        for ((x, y), _, _, words) in &placed {
-            label(pixels, font, words, (*x, y + 12), INK, &mut labels);
-        }
-        self.draw_legend(pixels, font, icons, plan);
-        // The frame, as the in-game map redraws it.
-        let mut c = Canvas(pixels);
-        c.rect((0, 0, 640, 30), [72, 72, 72, 255]);
-        c.rect((0, 438, 640, 42), [72, 72, 72, 255]);
-        let mut p = Paint {
-            pixels,
-            clip: (0, 0, 640, 480),
-            color: INK,
-        };
-        p.line((12., 15.), (12. + AREA.2 as f64 / 4., 15.));
-        for i in 0..=4 {
-            let x = 12. + i as f64 * AREA.2 as f64 / 16.;
-            p.line((x, 12.), (x, 18.));
-        }
-        p.text(
-            font,
-            &format!("{} NAUTICAL MILES", self.width_nmi() / 4.),
-            174,
-            9,
-        );
-        let title = title.to_ascii_uppercase();
-        p.text(font, &title, 628 - advance(font, &title), 9);
-        p.text(font, &plan.summary, 12, 443);
-        p.text(
-            font,
-            "ESC / ENTER: CLOSE   +/-: ZOOM   ARROWS: PAN   HOME: RESET",
-            12,
-            463,
-        );
-        let (x, y, w) = PLAN_CLOSE;
-        if ["ACTION0L.PIC", "ACTION0M.PIC", "ACTION0R.PIC", "QUICKFONT"]
-            .iter()
-            .all(|key| sprites.contains_key(*key))
-        {
-            Canvas(pixels).action_button(sprites, "Close", (x, y, w), false, close_pressed)
-        } else {
-            Canvas(pixels).rect((x, y, w, 24), [66, 70, 73, 255]);
-            Paint {
-                pixels,
-                clip: (x, y, w, 24),
-                color: INK,
-            }
-            .text(font, "CLOSE", x + (w - advance(font, "CLOSE")) / 2, y + 7);
-            (x, y, w, 24)
-        }
-    }
-    /// The side panel: what each mark means, and the plan's note.
-    fn draw_legend(&self, pixels: &mut [u8], font: &Font, icons: Option<&Sprite>, plan: &Plan) {
-        Canvas(pixels).rect((500, 30, 128, 408), [42, 45, 47, 255]);
-        let mut p = Paint {
-            pixels,
-            clip: (500, 30, 128, 408),
-            color: INK,
-        };
-        p.text(font, "MISSION MAP", 507, 45);
-        let rows: [(&str, Option<usize>, Tile); 4] = [
-            ("BLUE START", Some(2), Tile::Friendly),
-            ("RED START", Some(6), Tile::Hostile),
-            ("AIRFIELD", Some(15), Tile::Neutral),
-            ("OBJECTIVE AREA", None, Tile::Neutral),
-        ];
-        for (i, (words, icon, tile)) in rows.into_iter().enumerate() {
-            let y = 82 + i as i32 * 30;
-            match icon {
-                Some(icon) => symbol(pixels, icons, 517, y, Some(icon), tile),
-                None => objective_mark(pixels, (517., f64::from(y)), 8., (500, 30, 128, 408)),
-            }
-            Paint {
-                pixels,
-                clip: (500, 30, 128, 408),
-                color: if icon.is_none() { OBJECTIVE } else { INK },
-            }
-            .text(font, words, 533, y - 4);
-        }
-        let mut p = Paint {
-            pixels,
-            clip: (500, 30, 128, 408),
-            color: INK,
-        };
-        p.text(font, "AIRFIELD TILES:", 507, 206);
-        p.text(font, "BLUE, RED OR GREY", 507, 206 + font.height as i32 + 3);
-        if let Some(note) = &plan.note {
-            let mut y = 250;
-            let mut line = String::new();
-            for word in note.split_whitespace() {
-                let next = if line.is_empty() {
-                    word.to_owned()
-                } else {
-                    format!("{line} {word}")
-                };
-                if advance(font, &next) > 114 && !line.is_empty() {
-                    p.text(font, &line, 507, y);
-                    y += font.height as i32 + 3;
-                    line = word.to_owned();
-                } else {
-                    line = next;
-                }
-            }
-            p.text(font, &line, 507, y);
-        }
-    }
-}
+mod plan_view;
+pub use plan_view::PlanView;
 
 /// The objective area's look: yellow hatching edged in dark inside a yellow
 /// ring between two dark ones, so it shows on sea, forest and desert alike.
@@ -1012,19 +718,24 @@ fn advance(font: &Font, text: &str) -> i32 {
 struct Projection {
     center: [f64; 2],
     feet_per_pixel: f64,
+    /// The plot the projection draws into (the in-game map's, or the
+    /// planning map's smaller one).
+    area: (i32, i32, i32, i32),
 }
 impl Projection {
     fn inside(&self, x: i32, y: i32) -> bool {
-        (AREA.0 + 12..AREA.0 + AREA.2 - 12).contains(&x)
-            && (AREA.1 + 12..AREA.1 + AREA.3 - 12).contains(&y)
+        let area = self.area;
+        (area.0 + 12..area.0 + area.2 - 12).contains(&x)
+            && (area.1 + 12..area.1 + area.3 - 12).contains(&y)
     }
     fn point(&self, position: [f64; 3]) -> Option<(i32, i32)> {
         if !position.iter().all(|p| p.is_finite()) {
             return None;
         }
-        let x =
-            f64::from(AREA.0 + AREA.2 / 2) + (position[0] - self.center[0]) / self.feet_per_pixel;
-        let y = 234. - (position[2] - self.center[1]) / self.feet_per_pixel;
+        let x = f64::from(self.area.0 + self.area.2 / 2)
+            + (position[0] - self.center[0]) / self.feet_per_pixel;
+        let y = f64::from(self.area.1 + self.area.3 / 2)
+            - (position[2] - self.center[1]) / self.feet_per_pixel;
         self.inside(x as i32, y as i32)
             .then_some((x as i32, y as i32))
     }
@@ -1032,16 +743,19 @@ impl Projection {
     fn unclipped(&self, position: [f64; 3]) -> Option<(f64, f64)> {
         position.iter().all(|p| p.is_finite()).then(|| {
             (
-                f64::from(AREA.0 + AREA.2 / 2)
+                f64::from(self.area.0 + self.area.2 / 2)
                     + (position[0] - self.center[0]) / self.feet_per_pixel,
-                234. - (position[2] - self.center[1]) / self.feet_per_pixel,
+                f64::from(self.area.1 + self.area.3 / 2)
+                    - (position[2] - self.center[1]) / self.feet_per_pixel,
             )
         })
     }
     fn world(&self, x: i32, y: i32) -> [f64; 2] {
         [
-            self.center[0] + (x as f64 - f64::from(AREA.0 + AREA.2 / 2)) * self.feet_per_pixel,
-            self.center[1] - (y as f64 - 234.) * self.feet_per_pixel,
+            self.center[0]
+                + (x as f64 - f64::from(self.area.0 + self.area.2 / 2)) * self.feet_per_pixel,
+            self.center[1]
+                - (y as f64 - f64::from(self.area.1 + self.area.3 / 2)) * self.feet_per_pixel,
         ]
     }
 }
@@ -1052,11 +766,20 @@ fn place_marker(
     occupied: &mut Vec<(i32, i32)>,
     labels: &mut Vec<(i32, i32, i32, i32)>,
 ) -> (i32, i32) {
+    place_marker_in(AREA, pixels, point, occupied, labels)
+}
+fn place_marker_in(
+    area: (i32, i32, i32, i32),
+    pixels: &mut [u8],
+    point: (i32, i32),
+    occupied: &mut Vec<(i32, i32)>,
+    labels: &mut Vec<(i32, i32, i32, i32)>,
+) -> (i32, i32) {
     let free = |(x, y): (i32, i32)| {
-        x >= AREA.0 + 12
-            && x < AREA.0 + AREA.2 - 12
-            && y >= AREA.1 + 12
-            && y < AREA.1 + AREA.3 - 24
+        x >= area.0 + 12
+            && x < area.0 + area.2 - 12
+            && y >= area.1 + 12
+            && y < area.1 + area.3 - 24
             && !labels
                 .iter()
                 .any(|&(a, b, c, d)| x - 12 < c && x + 12 > a && y - 10 < d && y + 10 > b)
@@ -1086,7 +809,7 @@ fn place_marker(
     if placed != point {
         let mut p = Paint {
             pixels,
-            clip: AREA,
+            clip: area,
             color: INK,
         };
         p.line(
@@ -1161,6 +884,17 @@ fn label(
     pixels: &mut [u8],
     font: &Font,
     text: &str,
+    at: (i32, i32),
+    color: [u8; 4],
+    occupied: &mut Vec<(i32, i32, i32, i32)>,
+) {
+    label_in(AREA, pixels, font, text, at, color, occupied);
+}
+fn label_in(
+    area: (i32, i32, i32, i32),
+    pixels: &mut [u8],
+    font: &Font,
+    text: &str,
     (x, y): (i32, i32),
     color: [u8; 4],
     occupied: &mut Vec<(i32, i32, i32, i32)>,
@@ -1171,10 +905,10 @@ fn label(
         .map(|c| font.glyphs[c as usize].advance as i32)
         .sum::<i32>();
     let h = font.height as i32;
-    let x = (x - w / 2).clamp(AREA.0 + 2, (AREA.0 + AREA.2 - w - 2).max(AREA.0 + 2));
+    let x = (x - w / 2).clamp(area.0 + 2, (area.0 + area.2 - w - 2).max(area.0 + 2));
     let fits = |y: i32| {
-        y > AREA.1
-            && y + h < AREA.1 + AREA.3
+        y > area.1
+            && y + h < area.1 + area.3
             && !occupied
                 .iter()
                 .any(|&(a, b, c, d)| x - 2 < c && x + w + 2 > a && y - 1 < d && y + h + 1 > b)
@@ -1186,7 +920,7 @@ fn label(
     Canvas(pixels).rect((x - 2, y - 1, w + 4, h + 2), [30, 36, 40, 255]);
     Paint {
         pixels,
-        clip: AREA,
+        clip: area,
         color,
     }
     .text(font, &text, x, y);
@@ -1358,6 +1092,7 @@ mod tests {
         let p = Projection {
             center: [1000., 2000.],
             feet_per_pixel: 100. * NMI / 476.,
+            area: AREA,
         };
         assert_eq!(p.point([1000., 0., 2000.]), Some((250, 234)));
         assert_eq!(p.point([1000. + 25. * NMI, 0., 2000.]), Some((369, 234)));

@@ -11,10 +11,12 @@ use super::QuickMission;
 use crate::flight_map::{Plan, PlanMarker, PlanSide, PlanView};
 use crate::menu::Sprite;
 use std::collections::BTreeMap;
+use std::sync::{Arc, mpsc};
 use tore_formats::font::Font;
 use tore_sim::ai::launch::Side;
 use tore_sim::sensors::FEET_PER_NAUTICAL_MILE as NMI;
 use tore_world::ai_wings::AiFlightModel;
+use tore_world::mission::MissionSpec;
 use tore_world::surface::layout::Variation;
 use tore_world::terrain::Terrain;
 use tore_world::world::{Hooks, Seating, World};
@@ -47,6 +49,7 @@ pub struct Planning {
 
 impl Planning {
     pub fn pointer(&mut self, point: Option<(f64, f64)>) {
+        self.view.pointer(point);
         let (x, y, w, h) = self.close;
         self.hover = point.is_some_and(|(px, py)| {
             px >= f64::from(x)
@@ -56,16 +59,23 @@ impl Planning {
         });
     }
     pub fn down(&mut self) {
-        self.pressed = self.hover;
+        // The scroll bars and the zoom rocker take a press first.
+        self.pressed = !self.view.down() && self.hover;
     }
     /// The Close button was clicked: pressed and released on it.
     pub fn up(&mut self) -> bool {
+        if self.view.up() {
+            self.pressed = false;
+            return false;
+        }
         std::mem::take(&mut self.pressed) && self.hover
     }
     pub fn key(&mut self, key: &str) {
         self.view.key(key);
     }
-    pub fn render(&mut self, pixels: &mut [u8], sprites: &BTreeMap<String, Sprite>) {
+    /// Draws the map; true while the zoom rocker is still tilting.
+    pub fn render(&mut self, pixels: &mut [u8], sprites: &BTreeMap<String, Sprite>) -> bool {
+        let animating = self.view.advance(std::time::Instant::now());
         self.close = self.view.draw(
             pixels,
             &self.terrain,
@@ -75,10 +85,74 @@ impl Planning {
             &self.title,
             self.pressed && self.hover,
         );
+        animating
     }
     /// What the map shows, for tests and the snapshot's log.
     pub fn plan(&self) -> &Plan {
         &self.plan
+    }
+}
+
+/// A map being built on its own thread: the mission it was started for (a
+/// result for any other is stale and ignored), and where the answer arrives.
+pub struct Building {
+    spec: MissionSpec,
+    result: mpsc::Receiver<Result<Planning, String>>,
+}
+
+/// How a build under way stands.
+pub enum Progress {
+    Working,
+    Done(Box<Planning>),
+    Failed(String),
+}
+
+impl Building {
+    /// A build whose answer the caller sends (tests).
+    #[cfg(test)]
+    pub(super) fn from_channel(
+        spec: MissionSpec,
+        result: mpsc::Receiver<Result<Planning, String>>,
+    ) -> Self {
+        Self { spec, result }
+    }
+    /// Starts building the map of `spec` on a thread of its own. The build is
+    /// the whole mission ([`World::build`]), which takes seconds on a large
+    /// theater, so it must not run on the thread that draws the menu.
+    fn start(
+        resources: Arc<BTreeMap<String, Vec<u8>>>,
+        spec: MissionSpec,
+        lobby: bool,
+    ) -> Result<Self, String> {
+        let (send, result) = mpsc::channel();
+        let job = spec.clone();
+        std::thread::Builder::new()
+            .name("tore-map-build".into())
+            .spawn(move || {
+                // A closed creator drops the receiver; the answer is unwanted.
+                let _ = send.send(build(&resources, &job, lobby));
+            })
+            .map_err(|error| format!("The map could not be started: {error}"))?;
+        Ok(Self { spec, result })
+    }
+    /// The answer, if it has arrived.
+    fn poll(&self) -> Progress {
+        match self.result.try_recv() {
+            Ok(Ok(planning)) => Progress::Done(Box::new(planning)),
+            Ok(Err(words)) => Progress::Failed(words),
+            Err(mpsc::TryRecvError::Empty) => Progress::Working,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                Progress::Failed("The map could not be built.".into())
+            }
+        }
+    }
+    /// Waits for the answer (the headless snapshot has nothing else to do).
+    fn wait(&self) -> Progress {
+        match self.result.recv() {
+            Ok(Ok(planning)) => Progress::Done(Box::new(planning)),
+            Ok(Err(words)) => Progress::Failed(words),
+            Err(_) => Progress::Failed("The map could not be built.".into()),
+        }
     }
 }
 
@@ -130,41 +204,39 @@ fn distance_nm(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2]) / NMI
 }
 
+/// What the creator says while the map is being built.
+pub const BUILDING_NOTE: &str = "Building mission map...";
+
 impl QuickMission {
-    /// Opens the map on the mission the draft describes, or says in the
-    /// notice why it cannot.
+    /// Starts building the map of the mission the draft describes, or says in
+    /// the notice why it cannot. The map opens when the build is done
+    /// ([`Self::poll_map`]); until then the creator stays usable and says
+    /// "Building mission map...".
     pub(super) fn open_map(&mut self) {
-        match self.build_map() {
-            Ok(planning) => {
-                self.cancel();
-                self.map = Some(Box::new(planning));
-            }
+        self.map_build = None;
+        match self.start_map() {
+            Ok(building) => self.map_build = Some(building),
             Err(words) => self.notice = Some(words),
         }
     }
 
-    /// Builds the mission the creator would fly and reads the starts and
-    /// the objective from it.
-    fn build_map(&mut self) -> Result<Planning, String> {
-        let resources = self
-            .resources
-            .clone()
-            .ok_or("The map needs the imported game data.")?;
+    /// The mission the map shows for the draft as it stands now, and whether
+    /// it is the lobby's or the read-only view's (where the host draws the
+    /// target's layout when the flight starts, so the map shows its retail
+    /// spot).
+    ///
+    /// Single player draws the flight's seed now, as OK would, and OK keeps
+    /// it, so the flight flies the layout the map shows.
+    pub(super) fn map_mission(&mut self) -> Result<(MissionSpec, bool), String> {
         if let Some(problem) = self.unsupported() {
             return Err(problem);
         }
         let mut spec = self.mission_spec()?;
         spec.ai_flight_model = AiFlightModel::Standard;
-        // The target's layout follows the seed. Single player draws the
-        // flight's seed now, as OK would, and OK keeps it, so the flight
-        // flies the layout the map shows. The lobby's host draws its own
-        // when the flight starts, so the lobby shows the retail spot.
         let lobby = self.lobby || self.view.is_some();
-        let mut variation = None;
         if spec.ground_target.is_some() {
             if lobby {
                 spec.surface_seed = 0;
-                variation = Some(Variation::OFF);
             } else {
                 if !self.seed_pending {
                     self.surface_seed = super::fresh_seed();
@@ -173,35 +245,108 @@ impl QuickMission {
                 spec.surface_seed = self.surface_seed;
             }
         }
-        let built = World::build(
-            &spec,
-            &*resources,
-            Seating::SinglePlayer,
-            &mut Hooks {
-                ground_variation: variation,
-                ..Hooks::default()
-            },
-        )
-        .map_err(|error| format!("The map could not be built: {error}"))?;
-        let world = built.world;
-        let font = resources
-            .get("WIN11.FNT")
-            .and_then(|bytes| Font::parse(bytes).ok())
-            .ok_or("The map needs WIN11.FNT; re-import the game.")?;
-        let plan = plan_of(&world, &spec, lobby);
-        let view = PlanView::new(&plan, &world.terrain);
-        let title = world.terrain.theater.name.clone();
-        Ok(Planning {
-            terrain: world.terrain,
-            plan,
-            view,
-            font,
-            title,
-            close: (0, 0, 0, 0),
-            hover: false,
-            pressed: false,
-        })
+        Ok((spec, lobby))
     }
+
+    fn start_map(&mut self) -> Result<Building, String> {
+        let resources = self
+            .resources
+            .clone()
+            .ok_or("The map needs the imported game data.")?;
+        let (spec, lobby) = self.map_mission()?;
+        Building::start(resources, spec, lobby)
+    }
+
+    /// True while a map is being built.
+    pub fn map_building(&self) -> bool {
+        self.map_build.is_some()
+    }
+
+    /// Takes the finished map, if the build is done: opens it, or says why it
+    /// failed. A build for settings that have changed since is dropped and
+    /// the map is built again for the settings now in force, so the map that
+    /// opens is always the draft's.
+    pub(super) fn poll_map(&mut self) {
+        let Some(building) = &self.map_build else {
+            return;
+        };
+        // The "map-building" snapshot holds the answer back to show the note.
+        if self.map_hold {
+            return;
+        }
+        let progress = building.poll();
+        self.finish_map(progress);
+    }
+
+    /// Waits for the map being built and opens it (the headless snapshot).
+    pub(super) fn wait_for_map(&mut self) {
+        if let Some(building) = &self.map_build {
+            let progress = building.wait();
+            self.finish_map(progress);
+        }
+    }
+
+    fn finish_map(&mut self, progress: Progress) {
+        if matches!(progress, Progress::Working) {
+            return;
+        }
+        let building = self.map_build.take();
+        let current = building.is_some_and(|building| {
+            self.map_mission()
+                .is_ok_and(|(spec, _)| spec == building.spec)
+        });
+        if !current {
+            // The settings changed while it was built: this one is stale.
+            self.open_map();
+            return;
+        }
+        match progress {
+            Progress::Done(planning) => {
+                self.cancel();
+                self.map = Some(planning);
+            }
+            Progress::Failed(words) => self.notice = Some(words),
+            Progress::Working => {}
+        }
+    }
+}
+
+/// Builds the mission of `spec` and reads the starts and the objective from
+/// it: the map's whole content. Deterministic for the same `spec`.
+fn build(
+    resources: &BTreeMap<String, Vec<u8>>,
+    spec: &MissionSpec,
+    lobby: bool,
+) -> Result<Planning, String> {
+    let variation = (spec.ground_target.is_some() && lobby).then_some(Variation::OFF);
+    let built = World::build(
+        spec,
+        resources,
+        Seating::SinglePlayer,
+        &mut Hooks {
+            ground_variation: variation,
+            ..Hooks::default()
+        },
+    )
+    .map_err(|error| format!("The map could not be built: {error}"))?;
+    let world = built.world;
+    let font = resources
+        .get("WIN11.FNT")
+        .and_then(|bytes| Font::parse(bytes).ok())
+        .ok_or("The map needs WIN11.FNT; re-import the game.")?;
+    let plan = plan_of(&world, spec, lobby);
+    let view = PlanView::new(&plan, &world.terrain);
+    let title = world.terrain.theater.name.clone();
+    Ok(Planning {
+        terrain: world.terrain,
+        plan,
+        view,
+        font,
+        title,
+        close: (0, 0, 0, 0),
+        hover: false,
+        pressed: false,
+    })
 }
 
 /// What the map shows of a built mission.

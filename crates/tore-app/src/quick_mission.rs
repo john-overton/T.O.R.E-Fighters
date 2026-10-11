@@ -47,8 +47,14 @@ const OK: usize = 1;
 const CANCEL: usize = 2;
 /// The top bar's Map entry, after Aircraft (slice CL-R).
 const MAP: usize = 62;
-/// Where the Map entry sits in the top bar: after "Aircraft" (103 to 198).
-const MAP_RECT: Rect = (203, 35, 60, 24);
+/// The room after a top-bar label before the next entry's label starts: the
+/// ordnance bar's Weapons entry is 75 wide and starts its label at 103, the
+/// next entry's at 178 (measured, 13 to 14 pixels after the word).
+const BAR_GAP: i32 = 14;
+/// The top bar's entries start at x=103 and sit at y 35 to 59, their labels
+/// at y=38 to 58, centred by the visible glyph bounds of the entry's own
+/// neighbour "Aircraft".
+const BAR_ENTRY: (i32, i32) = (35, 24);
 const POP_OK: usize = 70;
 const POP_CANCEL: usize = 71;
 const UP: usize = 72;
@@ -278,6 +284,10 @@ pub struct QuickMission {
     resources: Option<Arc<BTreeMap<String, Vec<u8>>>>,
     /// The map is open over the creator (slice CL-R).
     map: Option<Box<map::Planning>>,
+    /// The map being built on its own thread (slice CL-R2).
+    map_build: Option<map::Building>,
+    /// The snapshot that shows the build's note keeps the map from opening.
+    map_hold: bool,
 }
 /// What the creator keeps for the lobby's Cancel to put back: the draft and
 /// everything beside it that Accept would send.
@@ -429,6 +439,8 @@ impl QuickMission {
             seed_pending: false,
             resources: None,
             map: None,
+            map_build: None,
+            map_hold: false,
         };
         // The enemy is the first theater's from the start, as a theater
         // change makes it for every other.
@@ -1904,10 +1916,31 @@ impl QuickMission {
             }
             // The Map over the creator (slice CL-R), and over the lobby's
             // editable creator, which shows the target's retail spot.
-            "map" => self.open_map(),
+            "map" => {
+                self.open_map();
+                self.wait_for_map();
+            }
+            // The widest zoom, where the theater just fills the plot, and the
+            // narrowest, to show that no black border appears at either.
+            "map-wide" | "map-close" => {
+                self.open_map();
+                self.wait_for_map();
+                if let Some(map) = &mut self.map {
+                    let key = if name == "map-wide" { "-" } else { "+" };
+                    for _ in 0..8 {
+                        map.key(key);
+                    }
+                }
+            }
+            // The note shown while the map is still being built.
+            "map-building" => {
+                self.map_hold = true;
+                self.open_map();
+            }
             "map-lobby" => {
                 self.enter_lobby();
                 self.open_map();
+                self.wait_for_map();
             }
             "enemy-airports" => {
                 self.apply(ENEMY_START, 1);
@@ -1922,7 +1955,7 @@ impl QuickMission {
                 self.open(OBJECTIVE_BASE + group - 1);
             }
             _ => {
-                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..FIELDS).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, ground-start-auto, ground-target, ground-target-last, airports, enemy-ground-start, enemy-ground-start-auto, enemy-airports, map, map-lobby, objective-1 through objective-6, theaters, help, field-3 through field-36")?;
+                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..FIELDS).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, ground-start-auto, ground-target, ground-target-last, airports, enemy-ground-start, enemy-ground-start-auto, enemy-airports, map, map-building, map-wide, map-close, map-lobby, objective-1 through objective-6, theaters, help, field-3 through field-36")?;
                 self.open(id);
             }
         }
@@ -2120,7 +2153,10 @@ impl QuickMission {
             61 => return Action::Exit,
             // The map changes nothing, so the read-only page has it too.
             MAP => self.open_map(),
-            OK | CANCEL => return Action::Back,
+            OK | CANCEL => {
+                self.map_build = None;
+                return Action::Back;
+            }
             3..=36 | 60 | OBJECTIVE_BASE..=91 => {
                 self.focus = id;
                 self.notice = Some(kind.refusal().into());
@@ -2192,10 +2228,14 @@ impl QuickMission {
                 } else {
                     // A new flight, a new layout of its defenses.
                     self.roll_surface_seed();
+                    self.map_build = None;
                     return Action::Mission;
                 }
             }
-            CANCEL => return Action::Back,
+            CANCEL => {
+                self.map_build = None;
+                return Action::Back;
+            }
             31 | 32 if self.refuse_defense(id) => self.focus = id,
             3..=36 => {
                 if self.hidden_airport(id) {
@@ -2244,9 +2284,14 @@ impl QuickMission {
         self.shift = shift;
         // Enter closes the read-only creator, as Back does.
         if self.view.is_some() && key == "Enter" {
+            self.map_build = None;
             return Action::Back;
         }
         if key == "Escape" {
+            // Escape first gives up the map being built.
+            if self.map_build.take().is_some() {
+                return Action::None;
+            }
             // The lobby's notice is not in the way of Cancel (EF8).
             if self.selector.is_some() || self.help || (self.notice.is_some() && !self.lobby) {
                 self.cancel();
@@ -2316,7 +2361,9 @@ impl QuickMission {
         sprites: &BTreeMap<String, Sprite>,
         _world: &Terrain,
     ) -> bool {
-        let animating = self.rocker.advance(std::time::Instant::now());
+        let mut animating = self.rocker.advance(std::time::Instant::now());
+        // A map built in the background opens the moment it is done.
+        self.poll_map();
         if let Some(d) = &mut self.debrief {
             return d.render(pixels);
         }
@@ -2324,39 +2371,27 @@ impl QuickMission {
             return o.render(pixels);
         }
         if let Some(map) = &mut self.map {
-            map.render(pixels, sprites);
+            animating |= map.render(pixels, sprites);
             return animating;
         }
         pixels.copy_from_slice(&sprites["QUIKMIS3.PIC"].rgba);
         self.controls.clear();
         let mut c = Canvas(pixels);
         let font = &sprites["QUICKFONT"];
-        c.centered_text(
-            &sprites["MENUFONT.PIC"],
-            "Aircraft",
-            (
-                103,
-                38,
-                text_width(&sprites["MENUFONT.PIC"], "Aircraft"),
-                20,
-            ),
-        );
-        // Map, after Aircraft in the top bar, in the same face (slice CL-R).
+        // The top bar: Aircraft, then Map (slice CL-R) in the same face, on
+        // the same baseline and starting a label's gap after it; each hit
+        // box runs from its label to the next one's.
         let face = &sprites["MENUFONT.PIC"];
-        c.centered_text(face, "Map", (MAP_RECT.0, 38, text_width(face, "Map"), 20));
-        self.controls.extend([
-            (0, (84, 35, 18, 24)),
-            (60, (103, 35, 95, 24)),
-            (
-                MAP,
-                (
-                    MAP_RECT.0 - 4,
-                    MAP_RECT.1,
-                    text_width(face, "Map") + 8,
-                    MAP_RECT.3,
-                ),
-            ),
-        ]);
+        let mut entries = Vec::new();
+        let mut x = 103;
+        for (id, label) in [(60, "Aircraft"), (MAP, "Map")] {
+            let width = text_width(face, label);
+            c.centered_text_by(face, label, "Aircraft", (x, 38, width, 20));
+            entries.push((id, (x, BAR_ENTRY.0, width + BAR_GAP, BAR_ENTRY.1)));
+            x += width + BAR_GAP;
+        }
+        self.controls.push((0, (84, 35, 18, 24)));
+        self.controls.extend(entries);
         c.text(font, "FRIENDLY SITUATION", 116, 104, None);
         c.text(font, "ENEMY SITUATION", 429, 104, None);
         self.line(
@@ -2569,7 +2604,10 @@ impl QuickMission {
             );
             self.button(&mut c, sprites, CANCEL, "Cancel", (492, 419, 85, 24));
         }
-        if let Some(message) = &self.notice {
+        // The creator stays live while the map is built: it says so.
+        let building = self.map_building().then_some(map::BUILDING_NOTE.to_owned());
+        animating |= building.is_some();
+        if let Some(message) = self.notice.as_ref().or(building.as_ref()) {
             if self.lobby {
                 lobby_notice(&mut c, &sprites["SMLFONT.PIC"], message);
             } else {
@@ -3787,6 +3825,66 @@ mod tests {
         );
         assert!(asked.iter().all(|(kind, _)| *kind != ItemKind::Weapon));
         assert!(q.gaps.is_empty());
+    }
+    /// CL-R2: the map is built on a thread of its own. A result for settings
+    /// that have since changed is dropped and the map is asked for again; one
+    /// for the settings in force is taken; Escape and Cancel give the build up.
+    #[test]
+    fn a_background_map_build_is_taken_dropped_when_stale_and_given_up_on_leaving() {
+        let mut q = setup();
+        let spec = q.map_mission().unwrap().0;
+        let (send, receive) = std::sync::mpsc::channel();
+        q.map_build = Some(map::Building::from_channel(spec.clone(), receive));
+        assert!(q.map_building());
+        // Nothing has come: the creator carries on, building.
+        q.poll_map();
+        assert!(q.map_building() && q.notice.is_none());
+        // The answer for the settings in force is taken (here a refusal).
+        send.send(Err("The map could not be built: test".into()))
+            .unwrap();
+        q.poll_map();
+        assert!(!q.map_building());
+        assert_eq!(
+            q.notice.as_deref(),
+            Some("The map could not be built: test")
+        );
+        // The settings change while it builds: the answer is stale, so it is
+        // dropped and the build is asked for again (this creator has no game
+        // data, which is what the second try says).
+        q.notice = None;
+        let (send, receive) = std::sync::mpsc::channel();
+        q.map_build = Some(map::Building::from_channel(spec, receive));
+        q.apply(15, 2);
+        send.send(Err("old settings".into())).unwrap();
+        q.poll_map();
+        assert_eq!(
+            q.notice.as_deref(),
+            Some("The map needs the imported game data.")
+        );
+        // Escape gives the build up first, and Cancel leaves it behind.
+        for leave in [0, 1] {
+            let spec = q.map_mission().unwrap().0;
+            let (_send, receive) = std::sync::mpsc::channel();
+            q.map_build = Some(map::Building::from_channel(spec, receive));
+            if leave == 0 {
+                assert_eq!(q.key("Escape", false), Action::None);
+            } else {
+                assert_eq!(q.activate(CANCEL), Action::Back);
+            }
+            assert!(!q.map_building(), "leave {leave}");
+        }
+    }
+    /// A build that dies without answering is reported, not waited on.
+    #[test]
+    fn a_map_build_that_dies_says_so() {
+        let mut q = setup();
+        let spec = q.map_mission().unwrap().0;
+        let (send, receive) = std::sync::mpsc::channel::<Result<map::Planning, String>>();
+        q.map_build = Some(map::Building::from_channel(spec, receive));
+        drop(send);
+        q.poll_map();
+        assert!(!q.map_building());
+        assert_eq!(q.notice.as_deref(), Some("The map could not be built."));
     }
     /// A theater's airports for the creator: `(ordinal, name, short, owner)`.
     fn fields(list: &[(u32, &str, bool, Option<bool>)]) -> Vec<Field> {
