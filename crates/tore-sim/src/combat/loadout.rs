@@ -256,6 +256,10 @@ impl Loadout {
         self.refresh_equipment()
     }
     pub fn capacity(&self, slot: usize, w: &Weapon) -> i32 {
+        // Boulder and Moose load only under Cheat loading.
+        if novelty(&w.source) && !self.cheat {
+            return 0;
+        }
         // The reviewed pod contract is limited to source-installed gun-pod
         // stations. Unrelated rocket launchers keep their existing semantics.
         if w.source == "SUU16.JT"
@@ -384,6 +388,11 @@ impl Loadout {
             .zip(&self.quantities)
             .enumerate()
         {
+            if *n > 0 && novelty(&s.weapon.source) && !self.cheat {
+                return Err(super::invalid(
+                    "This store is available with Cheat loading only.",
+                ));
+            }
             if i32::from(*n) > self.capacity(i, &s.weapon) {
                 return Err(super::invalid("Station quantity exceeds capacity."));
             }
@@ -450,7 +459,7 @@ fn quantity_step(capacity: i32) -> i32 {
 /// Weapons connected to flight, by record name. Shared by launch validation
 /// and the ordnance catalog, including Cheat loading; importing a definition
 /// does not enable it. The ordnance audit requires every one to be imported.
-pub const SUPPORTED_WEAPONS: [&str; 40] = [
+pub const SUPPORTED_WEAPONS: &[&str] = &[
     "AA11.JT",
     "AA11B.JT",
     "AA12.JT",
@@ -491,7 +500,32 @@ pub const SUPPORTED_WEAPONS: [&str; 40] = [
     "SUU16.JT",
     "T12_4.JT",
     "T30_1.JT",
+    // A2G round, X1: free-fall, retarded and pack bombs, cluster bombs and
+    // the LAU-10 pod. The bomb motion, packs and pods are B1's.
+    "MK84.JT",
+    "FAB250.JT",
+    "FAB500.JT",
+    "FAB1000.JT",
+    "MK82P3.JT",
+    "MK82HD.JT",
+    "MK82P.JT",
+    "MK82AIR.JT",
+    "CBU87.JT",
+    "CBU89.JT",
+    "MK20.JT",
+    "RBK250.JT",
+    "RBK500.JT",
+    "LAU10.JT",
 ];
+/// The novelty bombs, Boulder and Moose: they fly as free-fall bombs but load
+/// only with the Load Ordnance page's Cheat loading (A2G decision 16,
+/// opinionated, John 2026-10-10). They are not in [`SUPPORTED_WEAPONS`], so
+/// the ordnance audit and the normal catalog never count them.
+pub const NOVELTY_WEAPONS: &[&str] = &["~BLDR.JT", "~MOOSE.JT"];
+/// Whether `name` is a novelty store that needs Cheat loading.
+pub fn novelty(name: &str) -> bool {
+    NOVELTY_WEAPONS.contains(&name)
+}
 pub fn supported(name: &str) -> bool {
-    SUPPORTED_WEAPONS.contains(&name)
+    SUPPORTED_WEAPONS.contains(&name) || novelty(name)
 }

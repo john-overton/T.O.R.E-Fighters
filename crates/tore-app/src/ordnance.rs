@@ -10,7 +10,7 @@ use std::time::Instant;
 use tore_formats::{Pic, weapons::Weapon};
 use tore_sim::{
     combat::live::OwnshipInput,
-    combat::loadout::{EditableStation, Loadout, supported},
+    combat::loadout::{EditableStation, Loadout, novelty, supported},
     models::FlightModel,
 };
 type Rect = (i32, i32, i32, i32);
@@ -161,7 +161,7 @@ impl Ordnance {
         }
         let mut weapons: Vec<_> = data
             .iter()
-            .filter(|(n, _)| n.ends_with(".JT") && !n.starts_with('~'))
+            .filter(|(n, _)| n.ends_with(".JT") && (!n.starts_with('~') || novelty(n)))
             .filter_map(|(name, b)| Weapon::parse(name, b).ok())
             .collect();
         let display = weapon_label(data, &sprites["QUICKFONT"]);
@@ -268,6 +268,8 @@ impl Ordnance {
             .weapons
             .iter()
             .filter(|w| supported(&w.source))
+            // The novelty bombs show only under Cheat loading (decision 16).
+            .filter(|w| !novelty(&w.source) || load.cheat)
             .filter(|w| w.source != "SUU16.JT" || !load.configuration.gun_pods.is_empty())
             .filter(|w| {
                 load.cheat
@@ -1296,18 +1298,7 @@ fn card(
     if catalog {
         let font = &sprites["WPNBLUE"];
         c.text(font, &format!("{} lbs", w.weight), x, y + 37, None);
-        let guidance = if w.source == "AT2.JT" || w.flags & 1 == 0 {
-            "unguided"
-        } else {
-            match w.seeker.signature {
-                0 => "optical",
-                1 => "laser",
-                2 => "IR",
-                3 if w.flags & 0x200 != 0 => "SARH",
-                3 => "active rdr",
-                _ => "",
-            }
-        };
+        let guidance = guidance(w);
         c.text(
             font,
             guidance,
@@ -1315,6 +1306,24 @@ fn card(
             y + 37,
             None,
         );
+    }
+}
+/// The seeker word on a catalog card, from the retail list ("passive rdr,
+/// active rdr, IR, laser, optical, unguided, SARH"): unguided records carry no
+/// guided flag; a guided record is named for its seeker signature, and
+/// signature 0 is "optical" (the JDAMs and the AT-2).
+fn guidance(w: &Weapon) -> &'static str {
+    if w.flags & 1 == 0 {
+        return "unguided";
+    }
+    match w.seeker.signature {
+        0 => "optical",
+        1 => "laser",
+        2 => "IR",
+        3 if w.flags & 0x200 != 0 => "SARH",
+        3 => "active rdr",
+        4 => "passive rdr",
+        _ => "",
     }
 }
 fn tank_card(
@@ -1849,6 +1858,20 @@ fn source_catalog_drag(
     }
     Ok(())
 }
+/// The record names the Load Ordnance page's weapon catalog offers for
+/// `load`, normal or under Cheat loading, in the page's order. The ordnance
+/// audit checks the lists against the station rules (A2G decision 16).
+pub fn catalog_sources(
+    load: &Loadout,
+    data: &BTreeMap<String, Vec<u8>>,
+    cheat: bool,
+) -> AppResult<Vec<String>> {
+    let mut load = load.clone();
+    load.cheat = cheat;
+    let ui = Ordnance::new(load, data)?;
+    Ok(ui.catalog.iter().map(|w| w.source.clone()).collect())
+}
+
 fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let mut ui = Ordnance::new(load.clone(), data)?;
     let mut pixels = vec![0; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
@@ -3050,5 +3073,87 @@ mod tests {
         ui.pointer(Some((300., 300.)));
         assert_eq!(ui.up(), Action::RockerUp);
         assert_eq!(ui.pages, [0, 0]);
+    }
+    #[test]
+    fn novelty_bombs_load_only_under_cheat_loading() {
+        let mut ui = fixture();
+        let mut bomb = ui.weapons[0].clone();
+        bomb.source = "MK82.JT".into();
+        bomb.flags = 0x22012;
+        bomb.seeker.signature = 0;
+        ui.weapons.push(bomb.clone());
+        for name in ["~BLDR.JT", "~MOOSE.JT"] {
+            let mut novelty = bomb.clone();
+            novelty.source = name.into();
+            ui.weapons.push(novelty);
+        }
+        let names = |ui: &Ordnance| {
+            ui.catalog
+                .iter()
+                .map(|w| w.source.clone())
+                .collect::<Vec<_>>()
+        };
+        // Normal loading: no station gives a novelty bomb capacity, so the
+        // catalog never lists it, a selection is refused and a loadout that
+        // carries one is invalid.
+        ui.rebuild_catalog();
+        assert!(
+            names(&ui).iter().all(|n| !n.starts_with('~')),
+            "{:?}",
+            names(&ui)
+        );
+        let boulder = ui
+            .weapons
+            .iter()
+            .find(|w| w.source == "~BLDR.JT")
+            .unwrap()
+            .clone();
+        assert_eq!(ui.loadout.capacity(0, &boulder), 0);
+        assert!(ui.loadout.clone().select(0, boulder.clone()).is_err());
+        let mut carrying = ui.loadout.clone();
+        carrying.cheat = true;
+        carrying.select(0, boulder.clone()).unwrap();
+        carrying.cheat = false;
+        let error = carrying.validate().unwrap_err().to_string();
+        assert!(error.contains("Cheat loading only"), "{error}");
+        // Cheat loading lists both, with the other supported bombs.
+        ui.activate(13);
+        assert!(ui.loadout.cheat);
+        let listed = names(&ui);
+        assert!(listed.contains(&"~BLDR.JT".to_string()), "{listed:?}");
+        assert!(listed.contains(&"~MOOSE.JT".to_string()), "{listed:?}");
+        assert!(listed.contains(&"MK82.JT".to_string()), "{listed:?}");
+        ui.loadout.select(0, boulder).unwrap();
+        ui.loadout.validate().unwrap();
+        // Switching Cheat off unloads every station and hides them again.
+        ui.activate(13);
+        assert!(!ui.loadout.cheat);
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        ui.loadout.validate().unwrap();
+        assert!(names(&ui).iter().all(|n| !n.starts_with('~')));
+        // A record that is not Boulder or Moose never gets in: the other
+        // novelty records stay out of the page's weapon list.
+        assert!(!ui.weapons.iter().any(|w| w.source == "~VOMIT.JT"));
+    }
+    #[test]
+    fn the_card_names_the_seeker_from_the_retail_list() {
+        let mut w = fixture().weapons[0].clone();
+        let mut word = |flags: u32, signature: u8| {
+            w.flags = flags;
+            w.seeker.signature = signature;
+            guidance(&w)
+        };
+        // No guided flag: every bomb, rocket and gun.
+        assert_eq!(word(0x22012, 0), "unguided");
+        assert_eq!(word(0x82a052, 0), "unguided");
+        assert_eq!(word(0x20846, 0), "unguided");
+        // Guided signature 0 is "optical": the JDAMs (0x2a043) and the AT-2.
+        assert_eq!(word(0x2a043, 0), "optical");
+        assert_eq!(word(0x2216f, 0), "optical");
+        assert_eq!(word(0x2a543, 1), "laser");
+        assert_eq!(word(0x2a06f, 2), "IR");
+        assert_eq!(word(0x2236f, 3), "SARH");
+        assert_eq!(word(0x2a06f, 3), "active rdr");
+        assert_eq!(word(0x2204f, 4), "passive rdr");
     }
 }

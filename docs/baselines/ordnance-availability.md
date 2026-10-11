@@ -45,9 +45,16 @@ internal-fuel validation. This does not assert every full-capacity combination
 can take off.
 
 The audit pins what it must find, so a partial import cannot pass with fewer
-checks (2026-10-08): all 40 supported weapon records and all 4 tank records
-present, 36 aircraft, nine recovered weapon rows, exactly 1,464 weapon
-placements and 146 tank placements. A missing record, or a count that moves,
+checks (2026-10-08): all supported weapon records and all 4 tank records
+present, 36 aircraft, nine recovered weapon rows, and exact weapon and tank
+placement counts. The A2G round (2026-10-10) raised the supported records from
+40 to 54 (14 bomb, pack, cluster and LAU-10 records) and the weapon placements
+from 1,464 to 2,251; tank placements stay 146. It also audits the two novelty
+bombs (Boulder, Moose) apart from the 54: every aircraft gives them no
+capacity and refuses them without Cheat loading, 160 station and record pairs
+take them under Cheat loading, a loadout carrying one fails validation once
+Cheat loading is off, and the normal and Cheat catalogs are checked against the
+station rules on all 36 aircraft (the novelty bombs only in the Cheat catalog). A missing record, or a count that moves,
 fails the run; raise the pins in `crates/tore-app/src/ordnance_audit.rs` and
 here when the supported list, the tanks or the roster change on purpose.
 
@@ -65,7 +72,7 @@ Source and app/extractor binary asset guards passed, as did the documentation
 check. The wrapped Linux GPU smoke test presented its requested screen.
 
 The source audit passed for all 36 retail aircraft: nine recovered weapon rows,
-1,464 compatible supported-weapon placements and 146 tank placements. It also
+1,464 compatible supported-weapon placements (2,251 from the A2G round) and 146 tank placements. It also
 checks explicit rejection of overlapping tank/weapon loads, genuinely older
 loads without tank records, unarmed aircraft and restoring an empty row with
 plus. The F-14 zero/one/two-tank probe passed. All 36 scenarios in the final
