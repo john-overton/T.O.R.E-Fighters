@@ -385,24 +385,52 @@ impl Sensors {
         environment: &Environment<'_>,
         weather: &Weather,
     ) {
-        self.ground.clear();
-        let Some(page) = page else {
-            return;
+        self.ground = match page {
+            Some(page) => self.ground_list(page, observer, objects, environment, weather),
+            None => Vec::new(),
         };
+    }
+
+    /// Whether the pilot's eye sees ground object `object`: inside the visual
+    /// volume and range, with a clear terrain line (the rule behind
+    /// [`GroundContact::visible`]). The AI's ground picture reads it.
+    pub fn sees_ground(
+        &self,
+        observer: &Observer,
+        object: &GroundObject,
+        environment: &Environment<'_>,
+    ) -> bool {
+        self.sees(observer, object, environment)
+    }
+
+    /// The list `page` would hold if it were rebuilt now, by the page's own
+    /// rules, without touching these sensors' pages or selection: nearest
+    /// first, at most [`MAX_GROUND_CONTACTS`]. The ground pages rebuild from
+    /// it; an AI pilot reads its A-G and IR lists from it without switching
+    /// its scope (docs/spec/ai-strike.md, "What the AI knows").
+    pub fn ground_list(
+        &self,
+        page: Mode,
+        observer: &Observer,
+        objects: &[GroundObject],
+        environment: &Environment<'_>,
+        weather: &Weather,
+    ) -> Vec<GroundContact> {
+        let mut list = Vec::new();
         let (volume, cap, channel) = match page {
             Mode::AirGround => match self.profiles.radar.as_ref() {
                 Some(radar) => (radar.search, AG_CAP_FT, Channel::Radar),
-                None => return,
+                None => return list,
             },
             Mode::Infrared => match self.profiles.infrared.as_ref() {
                 Some(infrared) => (infrared.search, PAGE_CAP_FT, Channel::Infrared),
-                None => return,
+                None => return list,
             },
             Mode::Harm => match self.harm_seeker {
                 Some(seeker) => (seeker, HARM_CAP_FT, Channel::Harm),
-                None => return,
+                None => return list,
             },
-            Mode::Rws | Mode::Tws => return,
+            Mode::Rws | Mode::Tws => return list,
         };
         let look_down = self.profiles.radar.as_ref().map_or(0., |r| r.look_down);
         let range_ft = self.controls.range_nmi() * FEET_PER_NAUTICAL_MILE;
@@ -468,11 +496,11 @@ impl Sensors {
         }
         candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         for (distance, _, object, s) in candidates {
-            if self.ground.len() >= MAX_GROUND_CONTACTS {
+            if list.len() >= MAX_GROUND_CONTACTS {
                 break;
             }
             if page == Mode::AirGround
-                && self.ground.iter().any(|listed| {
+                && list.iter().any(|listed: &GroundContact| {
                     listed.aircraft == object.aircraft
                         && length(sub(listed.contact.position, object.position))
                             <= distance / MERGE_DIVISOR
@@ -483,7 +511,7 @@ impl Sensors {
             if (environment.obscured)(observer.position, object.position) {
                 continue;
             }
-            self.ground.push(GroundContact {
+            list.push(GroundContact {
                 contact: Contact {
                     id: object.id,
                     channel,
@@ -500,6 +528,7 @@ impl Sensors {
                 visible: self.sees(observer, object, environment),
             });
         }
+        list
     }
 
     /// Listed contacts follow their objects; one whose object is gone leaves.

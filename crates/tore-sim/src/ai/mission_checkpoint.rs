@@ -241,6 +241,7 @@ impl Checkpoint for AiActor {
             dummy,
             escape_monitor,
             yields,
+            ground,
             trace: _,
             journal_memory: _,
         } = self;
@@ -294,7 +295,10 @@ impl Checkpoint for AiActor {
         escape_monitor.save(s, None)?;
         // The bandits it left alone for a flightmate (slice G4): read by
         // every choice until each lapses.
-        yields.save(s, None)
+        yields.save(s, None)?;
+        // A striker's ground picture (ST-P): the lists, memory, briefing and
+        // threat inputs the next refresh and the strike choice read.
+        ground.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -354,6 +358,7 @@ impl Checkpoint for AiActor {
             dummy: Checkpoint::load(l, None)?,
             escape_monitor: Checkpoint::load(l, None)?,
             yields: Checkpoint::load(l, None)?,
+            ground: Checkpoint::load(l, None)?,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })

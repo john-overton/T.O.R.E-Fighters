@@ -397,6 +397,9 @@ pub struct AiActor {
     /// Bandits this actor leaves alone for a while because a flightmate it
     /// was not sorted with holds them too (slice G4).
     yields: Vec<super::link::Yield>,
+    /// The ground picture of a striker (the Strike role or an ordered ground
+    /// target); `None` for every other actor (docs/spec/ai-strike.md).
+    ground: Option<Box<super::awareness::ground::GroundPicture>>,
     /// Write-only record of the latest mission step. No decision reads it.
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
@@ -466,6 +469,7 @@ impl AiActor {
             alive: true,
             dummy: false,
             yields: Vec::new(),
+            ground: None,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })

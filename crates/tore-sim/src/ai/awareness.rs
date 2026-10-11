@@ -9,6 +9,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod ground;
+
 use super::{Experience, controller::TargetView, experience::ResolvedExperience, targeting::Side};
 
 pub const VISUAL_CONE_HALF_ANGLE_DEG: f64 = 60.0;

@@ -680,6 +680,18 @@ into per-actor assignments. Whole-group survival requirements are stored separat
 The Target window combines player assignments, these requirements and allegiance
 to select a typed Survive/Destroy label, with no label for other contacts. Source missions and
 campaign outcomes remain outside the M1 assignment adapter.
+A striker (the Strike role, `engagement::StrikeRole`, CAP by default, or an
+ordered ground target) also owns a ground picture, `ai::awareness::ground`:
+its briefing, the ground contacts its A-G radar, FLIR and eye perceive by the
+player's list rules (`Sensors::ground_list`), rebuilt every 6 s and followed
+every quarter second, a memory of what it has seen, and the threat inputs
+(known SAM and AAA sites with their reach, hostile fighters within 30 nm,
+retail's threat geometry). `AiMission::observe_ground` refreshes it before the
+step; `ai_wings/ground` briefs strikers on the Quick Mission objective and
+describes the surface rows and their arsenal to it, and does nothing while no
+actor strikes. `targeting::select_strike_target` ranks a striker's ground
+candidates. Air-to-air actors have no picture.
+[Strike behaviour](spec/ai-strike.md#what-the-ai-knows).
 `ai::formation` owns routine repositioning, trailing, breakout, intercept, stabilization and
 capture guidance. Traffic and arrival states are snapshotted before any actor
 advances, so iteration order cannot grant approach priority. Its trace hook is

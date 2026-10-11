@@ -2,10 +2,16 @@
 //! mission, so observation can be prepared independently of ordered decisions.
 use super::{WorldObject, distance};
 use crate::ai::Experience;
+use crate::ai::awareness::ground::{
+    Channels, FIGHTER_THREAT_RANGE_FT, FighterThreat, GroundPicture, GroundScene, GroundTrack,
+    Refresh, Subjects, off_nose_deg,
+};
 use crate::ai::awareness::{self, Memory, Observation, ObservationSource, SourceTimestamps};
 use crate::ai::controller::TargetView;
+use crate::ai::engagement::{StrikeObjective, StrikeRole};
 use crate::ai::targeting::Side;
-use crate::sensors::{self, Observable, Observer, Sensors};
+use crate::attitude::Vector;
+use crate::sensors::{self, GroundObject, Mode, Observable, Observer, Sensors, track};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Context {
@@ -279,3 +285,283 @@ impl Context {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// The ground picture of a striker (docs/spec/ai-strike.md, "What the AI
+// knows"). Air-to-air actors have none and nothing below runs for them.
+
+impl super::AiActor {
+    /// The actor's air-to-ground role: CAP unless a mission or a test set
+    /// Strike.
+    pub fn strike_role(&self) -> StrikeRole {
+        self.ground.as_ref().map_or(StrikeRole::Cap, |g| g.role())
+    }
+    /// Gives the actor a role. Strike starts a ground picture (briefed by the
+    /// host at its next refresh); CAP drops it unless a ground order stands.
+    pub fn set_strike_role(&mut self, role: StrikeRole) {
+        match &mut self.ground {
+            Some(picture) => picture.set_role(role),
+            None if role == StrikeRole::Strike => {
+                self.ground = Some(Box::new(GroundPicture::new(role)));
+            }
+            None => {}
+        }
+        self.tidy_ground();
+    }
+    /// The ordered ground target, if any.
+    pub fn strike_order(&self) -> Option<u32> {
+        self.ground.as_ref().and_then(|g| g.ordered())
+    }
+    /// Orders a ground target (a flight lead's order, a taken-over
+    /// designation), or clears it. An order gives even a CAP actor a ground
+    /// picture while it stands.
+    pub fn set_strike_order(&mut self, target: Option<u32>) {
+        match &mut self.ground {
+            Some(picture) => picture.set_ordered(target),
+            None if target.is_some() => {
+                let mut picture = GroundPicture::new(StrikeRole::Cap);
+                picture.set_ordered(target);
+                self.ground = Some(Box::new(picture));
+            }
+            None => {}
+        }
+        self.tidy_ground();
+    }
+    /// Briefs a striker on its objective. Returns false, changing nothing,
+    /// for an actor without a ground picture.
+    pub fn set_strike_objective(&mut self, objective: StrikeObjective) -> bool {
+        match &mut self.ground {
+            Some(picture) => {
+                picture.set_objective(objective);
+                true
+            }
+            None => false,
+        }
+    }
+    /// A Strike actor the host has not briefed yet.
+    pub fn needs_briefing(&self) -> bool {
+        self.ground
+            .as_ref()
+            .is_some_and(|g| g.role() == StrikeRole::Strike && g.objective().is_none())
+    }
+    /// The striker's ground picture; `None` for an air-to-air actor.
+    pub fn ground_picture(&self) -> Option<&GroundPicture> {
+        self.ground.as_deref()
+    }
+    fn tidy_ground(&mut self) {
+        if self.ground.as_ref().is_some_and(|g| !g.active()) {
+            self.ground = None;
+        }
+    }
+    /// Whether this actor perceives this tick: alive, flying, with its pilot.
+    fn perceives_ground(&self) -> bool {
+        self.alive() && !self.dummy && self.flight.escape.is_none()
+    }
+}
+
+impl super::AiMission {
+    /// Whether any striker's ground picture refreshes at this tick, so the
+    /// host knows to describe the ground objects.
+    pub fn ground_due(&self) -> bool {
+        self.actors.iter().any(|actor| {
+            actor.perceives_ground()
+                && actor
+                    .ground
+                    .as_ref()
+                    .is_some_and(|g| g.due(self.tick).is_some())
+        })
+    }
+
+    /// Refreshes every striker's ground picture that is due at this tick:
+    /// a rebuild every 6 s, a follow every quarter second between
+    /// (docs/spec/ai-strike.md, "What the AI knows"). `ground` is the
+    /// terrain height for sight lines and the radar's look-down.
+    pub fn observe_ground(
+        &mut self,
+        scene: GroundScene<'_>,
+        ground: &(dyn Fn(f64, f64) -> f64 + Sync),
+    ) {
+        let tick = self.tick;
+        let subjects = Subjects::new(scene.subjects);
+        // Neutral scenery never enters a picture (opinionated, agent): the AI
+        // attacks only sided objects, and scenery would fill the 50-entry
+        // lists ahead of them.
+        let objects: Vec<GroundObject> = scene
+            .subjects
+            .iter()
+            .filter(|s| s.side != crate::combat::live::NO_SIDE)
+            .map(|s| s.object.clone())
+            .collect();
+        let obscured = |from: Vector, to: Vector| {
+            crate::combat::live::terrain_hit(from, to, &ground).is_some()
+        };
+        let environment = sensors::Environment {
+            ground,
+            obscured: &obscured,
+        };
+        for actor in &mut self.actors {
+            if !actor.perceives_ground() {
+                continue;
+            }
+            let Some(due) = actor.ground.as_ref().and_then(|g| g.due(tick)) else {
+                continue;
+            };
+            let context = actor.observation_context();
+            let observer = context.observer;
+            let eye = |object: &GroundObject| {
+                actor
+                    .sensors
+                    .as_ref()
+                    .is_some_and(|s| eye_sees(s, &observer, object, &environment))
+            };
+            match due {
+                Refresh::Rebuild => {
+                    let tracks = actor.sensors.as_ref().map_or_else(Vec::new, |s| {
+                        ground_tracks(
+                            s,
+                            &observer,
+                            &objects,
+                            &subjects,
+                            &environment,
+                            scene.weather,
+                        )
+                    });
+                    let fighters = fighters(&actor.awareness, context.side, observer.position);
+                    if let Some(picture) = actor.ground.as_mut() {
+                        picture.rebuild(tick, tracks, &subjects, fighters);
+                    }
+                }
+                Refresh::Follow => {
+                    let visible = |object: &GroundObject| eye(object);
+                    if let Some(picture) = actor.ground.as_mut() {
+                        picture.follow(tick, observer.position, &subjects, &visible);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The eye's rule for a ground object (fitted, from the player's): a
+/// standing, listable object (the type's listing flag, or a ship) on the
+/// ground, inside the visual sensor's volume and range with a clear terrain
+/// line, and no farther than its own visibility distance (`maxVisDist`) when
+/// the type gives one.
+fn eye_sees(
+    sensors: &Sensors,
+    observer: &Observer,
+    object: &GroundObject,
+    environment: &sensors::Environment<'_>,
+) -> bool {
+    if object.destroyed
+        || object.airborne
+        || !(object.listed || object.class & track::class::SHIP != 0)
+    {
+        return false;
+    }
+    let limit = f64::from(object.max_visible) * track::VISIBILITY_UNIT_FT;
+    (object.max_visible == 0 || distance(observer.position, object.position) <= limit)
+        && sensors.sees_ground(observer, object, environment)
+}
+
+/// One rebuild of a striker's lists: the A-G radar list (radar powered and
+/// working), the FLIR list (infrared working) and the eye, by the player's
+/// list rules, merged by object, nearest first (equal ranges by id). The
+/// AI reads all three at once without switching its scope (opinionated,
+/// agent).
+fn ground_tracks(
+    sensors: &Sensors,
+    observer: &Observer,
+    objects: &[GroundObject],
+    subjects: &Subjects<'_>,
+    environment: &sensors::Environment<'_>,
+    weather: &sensors::Weather,
+) -> Vec<GroundTrack> {
+    let mut tracks: std::collections::BTreeMap<u32, GroundTrack> = Default::default();
+    let mut add = |id: u32, distance_ft: f64, channel: sensors::Channel| {
+        let Some(subject) = subjects.get(id) else {
+            return;
+        };
+        let object = &subject.object;
+        let track = tracks.entry(id).or_insert(GroundTrack {
+            id,
+            side: subject.side,
+            class: object.class,
+            position: object.position,
+            velocity: object.velocity,
+            distance_ft,
+            channels: Channels::default(),
+            aircraft: object.aircraft,
+            emitting: object.emitting,
+            destroyed: object.destroyed,
+        });
+        match channel {
+            sensors::Channel::Radar | sensors::Channel::Harm => track.channels.radar = true,
+            sensors::Channel::Infrared => track.channels.infrared = true,
+            sensors::Channel::Visual => track.channels.visual = true,
+        }
+    };
+    let pages = [
+        (
+            observer.radar_powered && !observer.radar_failed,
+            Mode::AirGround,
+        ),
+        (!observer.infrared_failed, Mode::Infrared),
+    ];
+    for (working, page) in pages {
+        if !working {
+            continue;
+        }
+        for listed in sensors.ground_list(page, observer, objects, environment, weather) {
+            add(
+                listed.id(),
+                listed.contact.distance_ft,
+                listed.contact.channel,
+            );
+        }
+    }
+    let mut seen: Vec<(f64, u32)> = objects
+        .iter()
+        .filter(|o| eye_sees(sensors, observer, o, environment))
+        .map(|o| (distance(observer.position, o.position), o.id))
+        .collect();
+    seen.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    for (distance_ft, id) in seen.into_iter().take(track::MAX_GROUND_CONTACTS) {
+        add(id, distance_ft, sensors::Channel::Visual);
+    }
+    let mut tracks: Vec<GroundTrack> = tracks.into_values().collect();
+    tracks.sort_by(|a, b| {
+        a.distance_ft
+            .total_cmp(&b.distance_ft)
+            .then(a.id.cmp(&b.id))
+    });
+    tracks
+}
+
+/// The hostile fighters of the striker's current air picture within 30 nm,
+/// nearest first.
+fn fighters(memory: &Memory, own_side: Side, own: Vector) -> Vec<FighterThreat> {
+    let mut fighters: Vec<FighterThreat> = memory
+        .current_observations()
+        .map(|snapshot| snapshot.target)
+        .filter(|t| t.valid && t.is_aircraft && t.is_fighter && t.side != own_side)
+        .map(|t| FighterThreat {
+            id: t.id,
+            side: t.side,
+            position: t.position,
+            distance_ft: distance(own, t.position),
+            off_nose_deg: off_nose_deg(t.position, t.heading_deg, own),
+        })
+        .filter(|f| f.distance_ft <= FIGHTER_THREAT_RANGE_FT)
+        .collect();
+    fighters.sort_by(|a, b| {
+        a.distance_ft
+            .total_cmp(&b.distance_ft)
+            .then(a.id.cmp(&b.id))
+    });
+    fighters
+}
+
+#[cfg(test)]
+#[path = "mission_ground_tests.rs"]
+mod ground_tests;

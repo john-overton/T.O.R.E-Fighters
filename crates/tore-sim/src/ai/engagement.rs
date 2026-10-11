@@ -29,6 +29,51 @@ pub enum GroupObjective {
     Hold,
 }
 
+/// A wing's air-to-ground role (docs/spec/ai-strike.md, "Who strikes").
+/// **CAP** is every wing's behaviour before the strike round and stays the
+/// default, so nothing changes unless a mission asks for **Strike**. Side
+/// neutral: any side's wing may strike (opinionated, John, 2026-10-11).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StrikeRole {
+    #[default]
+    Cap,
+    Strike,
+}
+
+/// A striker whose briefed targets are gone attacks hostile ground objects it
+/// has seen within this distance of the objective (docs/spec/ai-strike.md,
+/// "What the AI knows": 10 nm, fitted).
+pub const OPPORTUNITY_RADIUS_FT: f64 = 10. * FEET_PER_NAUTICAL_MILE;
+/// The objective's air defences a SEAD striker is briefed on: hostile armed
+/// units and radars within this distance of the objective point (5 nm, the
+/// distance Quick Mission's Red defends its target within; fitted).
+pub const SEAD_BRIEFING_RADIUS_FT: f64 = 5. * FEET_PER_NAUTICAL_MILE;
+
+/// What a strike actor's briefing names: its **Strike objective**
+/// (docs/spec/ai-strike.md, "Who strikes" and "What the AI knows"). Briefed
+/// objects are known from the start, without a sensor: this is the briefing.
+/// Anything else must be seen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StrikeObjective {
+    /// The targets the mission names: Quick Mission's ground objective
+    /// objects (flagged 0x80) on another side, or a mission's own orders.
+    /// Ascending id.
+    pub targets: Vec<u32>,
+    /// The objective's air defences, for a SEAD striker (an anti-radiation
+    /// store aboard); empty otherwise. Ascending id.
+    pub defenses: Vec<u32>,
+    /// Where the objective is: the centre of its targets as briefed, feet.
+    /// `None` with no targets (an order alone).
+    pub point: Option<[f64; 3]>,
+}
+
+impl StrikeObjective {
+    /// Whether `id` is one of the briefed targets or defences.
+    pub fn names(&self, id: u32) -> bool {
+        self.targets.contains(&id) || self.defenses.contains(&id)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     FreeEngagement,
