@@ -83,7 +83,7 @@ fn own(world: &World) -> &live::Ownship {
 
 /// Seat 1 takes plane 0 and flies the laser bomber's run: the A-G page and
 /// the laser bomb, the sight slewed down and pinned on the ground ahead,
-/// Ctrl+M (which leaves a guided bomb on CCIP), the laser off by hand and a
+/// Ctrl+M (which puts the glide bomb on LVL), the laser off by hand and a
 /// bomb released, which locks on the spot as it falls. (The routed theater
 /// has no airport; NAV's airport has its own test.)
 fn bomber_run() -> World {
@@ -190,9 +190,8 @@ fn a_returning_human_finds_its_cockpit_and_its_bomb_still_guiding() {
     assert_eq!(bomb, "GBU10.JT", "{left:?}");
     assert!(left.armed && !left.nav);
     assert!(matches!(left.sight, Some(SightMode::Pinned(_))), "{left:?}");
-    // Ctrl+M switches an unguided bomb's sight only: the GBU-10 keeps
-    // CCIP (the sim's kept-cockpit test covers LVL).
-    assert_eq!(left.delivery, DeliveryMode::Ccip);
+    // Ctrl+M switches a glide bomb's sight too (FX-H): the GBU-10 is on LVL.
+    assert_eq!(left.delivery, DeliveryMode::Level);
     assert!(left.air_ground);
     assert_eq!(left.shots, 1);
     let (id, flight) = world
