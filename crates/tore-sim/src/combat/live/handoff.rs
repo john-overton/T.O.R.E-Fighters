@@ -20,16 +20,31 @@
 //! - **Sensors and missile warnings** move over as they are. The AI's
 //!   equipment failures are the ownship's failure flags; a jammer the row lost
 //!   is `ecm_failed`.
+//!
+//! What the human set in the cockpit (the weapon and its modes, the sight,
+//! the laser, the designation and the A-G page) is not the AI's to fly with:
+//! [`Ownship::kept`] puts it aside as a [`Kept`] when the human gives the
+//! aircraft back, combat holds it while the AI flies ([`super::State::keep`];
+//! the sight and the laser keep working for the weapons the human left
+//! guiding), and [`Ownship::restore`] puts it back when a human takes the
+//! aircraft again (slice FX-J; docs/ARCHITECTURE.md, "What a returning
+//! player keeps").
 
 use super::{
-    AIRCRAFT_RADIUS_FT, Configuration, Launcher, LocalizedDamage, Ownship, SystemFaults, Target,
+    AIRCRAFT_RADIUS_FT, Configuration, Launcher, LocalizedDamage, Ownship, Side, SystemFaults,
+    Target,
 };
 use crate::ai::{
     mission::{EquipmentFaults, StationSpec},
     threat::{DispenserStore, SeekerClass},
     weapon_service::{Rounds, StoreState},
 };
+use crate::combat::{
+    delivery::DeliveryMode, gunship, laser::Laser, missiles::LaunchMode, sight::Sight,
+    sight::SightInput,
+};
 use crate::combat::{missiles::TargetRole, missiles::seeker::Heat, threats::ThreatService};
+use crate::sensors::Picks;
 use crate::sensors::{self, Sensors};
 use tore_formats::Result;
 
@@ -71,6 +86,153 @@ pub struct AiHandback {
     pub warnings: ThreatService,
     /// The configuration the aircraft was built from.
     pub configuration: Configuration,
+}
+
+/// What a human left set in the cockpit of an aircraft it gave back to the
+/// AI, kept by combat while the AI flies it and put back when a human takes
+/// it again ([`Ownship::kept`], [`Ownship::restore`]). Stores, damage and
+/// sensors go to the AI and come back by the conversion above; this is the
+/// rest: the weapon, its modes, the sight, the laser and the pilot's picks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kept {
+    /// The aircraft's side, for the spot its laser keeps while the AI flies.
+    pub side: Side,
+    /// The selected station, and whether a weapon is armed (NAV otherwise).
+    pub selected: usize,
+    pub armed: bool,
+    /// The seeker mode (CUED or BORESIGHT).
+    pub launch_mode: LaunchMode,
+    /// The bomb sight's mode, Ctrl+M's choice included.
+    pub delivery_mode: DeliveryMode,
+    /// The stations that held something this mission: an emptied or
+    /// jettisoned pod keeps or loses its row as the human left it.
+    pub ever_loaded: Vec<bool>,
+    /// The AC-130's gunsight and gun group, as left.
+    pub gunship: Option<gunship::State>,
+    /// The targeting sight: its look, what it tracks or pins, its zoom.
+    /// Stepped while the AI flies, so a track follows its object and a
+    /// laser stays on its point.
+    pub sight: Option<Sight>,
+    /// The laser, the hand setting (Ctrl+L) included. Stepped while the AI
+    /// flies: it lases for the weapons the human left guiding.
+    pub laser: Laser,
+    /// The designation and the A-G flag.
+    pub picks: Picks,
+    /// Easy targeting's HUD memory and the views' sight hold.
+    pub hud_selection: Option<u32>,
+    pub sight_hold: Option<u32>,
+    /// Rounds fired, hits and kills.
+    pub shots: u32,
+    pub hits: u32,
+    pub kills: u32,
+    /// The radar switch, which the AI flies with on (the flight state holds
+    /// it; the host fills it in).
+    pub radar: bool,
+    /// The airport NAV selected (the cockpit's tower service holds it; the
+    /// host fills it in).
+    pub airport: Option<u32>,
+}
+
+impl Ownship {
+    /// What the human set in this cockpit, to keep while the AI flies the
+    /// aircraft. The sight and gunsight let go of the slew controls (nobody
+    /// holds them now) and drop a key press that was waiting. The flight's
+    /// radar switch and NAV airport are the host's to fill in.
+    pub fn kept(&self) -> Kept {
+        let neutral = |input: SightInput| SightInput {
+            deflection: [0; 2],
+            ..input
+        };
+        Kept {
+            side: self.side,
+            selected: self.selected,
+            armed: self.armed,
+            launch_mode: self.launch_mode,
+            delivery_mode: self.delivery_mode,
+            ever_loaded: self.ever_loaded.clone(),
+            gunship: self.gunship.clone().map(|mut group| {
+                group.input = neutral(group.input);
+                group.request = None;
+                group.notice = None;
+                group
+            }),
+            sight: self.sight.map(|mut sight| {
+                sight.input = neutral(sight.input);
+                sight.request = None;
+                sight.notice = None;
+                sight
+            }),
+            laser: self.laser,
+            picks: self.sensors.picks(),
+            hud_selection: self.hud_selection,
+            sight_hold: self.sight_hold,
+            shots: self.shots,
+            hits: self.hits,
+            kills: self.kills,
+            radar: true,
+            airport: None,
+        }
+    }
+
+    /// Puts back what a human left set in this cockpit, on an ownship just
+    /// built from the AI's aircraft ([`Self::from_ai`]). Each part is checked
+    /// against the aircraft as it is now: a selected station that ran dry
+    /// while the AI flew advances as an emptied one does, Guns only moves a
+    /// missile selection to the gun, and a sight or gunsight comes back only
+    /// on the aircraft that has the same one. The radar switch and the NAV
+    /// airport are the host's to put back.
+    pub fn restore(&mut self, kept: &Kept, guns_only: bool, unlimited_ammo: bool) {
+        if kept.ever_loaded.len() == self.ever_loaded.len() {
+            self.ever_loaded.clone_from(&kept.ever_loaded);
+        }
+        self.armed = kept.armed && !self.config.stations.is_empty();
+        if kept.selected < self.config.stations.len() {
+            self.selected = kept.selected;
+        }
+        self.launch_mode = kept.launch_mode;
+        self.delivery_mode = kept.delivery_mode;
+        if let (Some(group), Some(left)) = (&mut self.gunship, &kept.gunship)
+            && group.stations == left.stations
+        {
+            *group = left.clone();
+        }
+        if let (Some(sight), Some(left)) = (&mut self.sight, kept.sight)
+            && sight.sensor == left.sensor
+        {
+            *sight = left;
+        }
+        if self.config.sight_sensor().is_some_and(|s| s.laser) {
+            self.laser = kept.laser;
+        }
+        self.sensors.restore_picks(kept.picks);
+        self.hud_selection = kept.hud_selection;
+        self.sight_hold = kept.sight_hold;
+        self.shots = kept.shots;
+        self.hits = kept.hits;
+        self.kills = kept.kills;
+        self.mounted_key = None;
+        self.enforce_guns_only(guns_only);
+        self.advance_from_empty(guns_only, unlimited_ammo);
+    }
+}
+
+impl super::State {
+    /// Keeps what a human left set in the cockpit of `aircraft`, which the
+    /// AI flies from now on, until a human takes it again. Combat steps its
+    /// sight and laser meanwhile, while the aircraft's row stands.
+    pub fn keep(&mut self, aircraft: u32, kept: Kept) {
+        self.kept.insert(aircraft, kept);
+    }
+    /// What a human left set in the cockpit of `aircraft`, while the AI
+    /// flies it.
+    pub fn kept(&self, aircraft: u32) -> Option<&Kept> {
+        self.kept.get(&aircraft)
+    }
+    /// Takes what a human left set in `aircraft`'s cockpit, for the human
+    /// who takes it now.
+    pub fn take_kept(&mut self, aircraft: u32) -> Option<Kept> {
+        self.kept.remove(&aircraft)
+    }
 }
 
 /// Where the aircraft is, for the row it becomes.

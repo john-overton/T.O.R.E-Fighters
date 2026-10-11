@@ -33,7 +33,7 @@
 //!
 //! A guided bomb that is not guiding (waiting or blind) falls on the bomb
 //! equation from where it is (fitted); a missile flies straight on.
-use super::{Launcher, NO_SIDE, OwnRow, Ownship, Projectile, State, Target};
+use super::{Kept, Launcher, NO_SIDE, OwnRow, Ownship, Projectile, State, Target};
 use crate::attitude::{Vector, dot, unit};
 use crate::combat::ballistics::{BombMotion, ReleaseState};
 use crate::combat::guided::{self, Advisory, GuidedSight, Reach};
@@ -41,6 +41,7 @@ use crate::combat::laser::{self, LaserSpot, LaserState};
 use crate::combat::missiles::{self, Guidance};
 use crate::combat::sight;
 use crate::sensors::Weather;
+use std::collections::BTreeMap;
 use tore_formats::weapons::Weapon;
 
 /// Where a guided weapon's guidance stands.
@@ -83,11 +84,16 @@ impl GuidedFlight {
     }
 }
 
-/// Every laser spot of the ownships this tick.
-pub(super) fn spots(ships: &[Ownship]) -> Vec<LaserSpot> {
+/// Every laser spot this tick: the ownships', then those of the aircraft the
+/// AI flies with a human's laser kept on ([`Kept`]), in aircraft order.
+pub(super) fn spots(ships: &[Ownship], kept: &BTreeMap<u32, Kept>) -> Vec<LaserSpot> {
     ships
         .iter()
         .filter_map(|own| own.laser.spot(own.aircraft, own.side))
+        .chain(
+            kept.iter()
+                .filter_map(|(aircraft, kept)| kept.laser.spot(*aircraft, kept.side)),
+        )
         .collect()
 }
 
@@ -117,11 +123,15 @@ fn choose(
 }
 
 /// The point an aircraft's laser marks now for a weapon that follows it: the
-/// spot while lasing, the laser's point while masked; nothing otherwise.
-fn followed(ships: &[Ownship], owner: u32) -> Option<Vector> {
-    let own = ships.iter().find(|own| own.aircraft == owner)?;
-    match own.laser.state {
-        LaserState::Lasing | LaserState::Masked => own.laser.point,
+/// spot while lasing, the laser's point while masked; nothing otherwise. The
+/// laser is the ownship's, or the one its human left while the AI flies it.
+fn followed(ships: &[Ownship], kept: &BTreeMap<u32, Kept>, owner: u32) -> Option<Vector> {
+    let laser = match ships.iter().find(|own| own.aircraft == owner) {
+        Some(own) => &own.laser,
+        None => &kept.get(&owner)?.laser,
+    };
+    match laser.state {
+        LaserState::Lasing | LaserState::Masked => laser.point,
         LaserState::Off | LaserState::Ready => None,
     }
 }
@@ -244,6 +254,9 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
 /// What one guided step reads besides the projectile.
 pub(super) struct Context<'a, G> {
     pub ships: &'a [Ownship],
+    /// What the humans left set in the aircraft the AI flies now: their
+    /// lasers and their sides.
+    pub kept: &'a BTreeMap<u32, Kept>,
     pub rows: &'a [OwnRow],
     pub targets: &'a [Target],
     pub ground: &'a G,
@@ -269,8 +282,11 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     let nose = guided::nose(heading);
     match flight.mode {
         Mode::Waiting => {
-            let spots = spots(cx.ships);
-            let side = owner.map_or(NO_SIDE, |own| own.side);
+            let spots = spots(cx.ships, cx.kept);
+            let side = owner.map_or_else(
+                || cx.kept.get(&flight.owner).map_or(NO_SIDE, |kept| kept.side),
+                |own| own.side,
+            );
             if let Some(spot) = choose(&spots, flight.owner, side, p.position, |s| {
                 guided::in_cone(w, p.position, nose, s.position)
             }) {
@@ -288,7 +304,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
             let aim = match flight.kind {
                 Guidance::Laser => flight
                     .spot_owner
-                    .and_then(|owner| followed(cx.ships, owner))
+                    .and_then(|owner| followed(cx.ships, cx.kept, owner))
                     .filter(|point| guided::in_cone(w, p.position, nose, *point)),
                 Guidance::Coordinate => flight.point,
                 Guidance::Command => command_aim(flight, p, w, nose, cx),
@@ -349,16 +365,27 @@ fn command_aim<G: Fn(f64, f64) -> f64>(
     nose: crate::attitude::Basis,
     cx: &Context<'_, G>,
 ) -> Option<Vector> {
-    let launcher = cx
-        .rows
-        .iter()
-        .find(|r| r.target.id == flight.owner)
-        .map(|r| r.launcher)
-        .filter(|l| l.alive)?;
-    cx.ships
-        .iter()
-        .find(|own| own.aircraft == flight.owner)
-        .filter(|own| own.hp > 0)?;
+    // The launcher is the ownship's, or the AI-flown row of an aircraft
+    // whose human left it (slice FX-J): the AI flying it keeps the line
+    // only as long as its flying happens to.
+    let launcher = match cx.rows.iter().find(|r| r.target.id == flight.owner) {
+        Some(row) => {
+            cx.ships
+                .iter()
+                .find(|own| own.aircraft == flight.owner)
+                .filter(|own| own.hp > 0)?;
+            row.launcher
+        }
+        None if cx.kept.contains_key(&flight.owner) => cx
+            .targets
+            .iter()
+            .find(|t| t.id == flight.owner)
+            .map(super::sighting::row_launcher)?,
+        None => return None,
+    };
+    if !launcher.alive {
+        return None;
+    }
     let target = row(cx.targets, cx.rows, flight.target?).filter(|t| t.hp > 0)?;
     (guided::in_cone(w, p.position, nose, target.position)
         && guided::in_cone(w, launcher.position, launcher.basis, target.position)

@@ -27,8 +27,8 @@
 use super::super::ballistics::BombMotion;
 use super::{
     ActorSupport, DecoyRoll, DeviceNote, Effect, EffectKind, FriendlyFire, GunCadence, HitRecord,
-    LocalizedDamage, Ownship, Projectile, RangeEstimate, Readiness, State, Strike, SystemFaults,
-    Target,
+    Kept, LocalizedDamage, Ownship, Projectile, RangeEstimate, Readiness, State, Strike,
+    SystemFaults, Target,
 };
 use crate::acoustics::{Emission, Kind as SoundKind};
 use crate::airport::OrientedBox;
@@ -446,6 +446,29 @@ crate::checkpoint_struct!(GunCadence {
     ordinal,
 });
 
+// What a human left set in a cockpit it gave back to the AI (slice FX-J):
+// the sight and the laser step on while the AI flies, so a restore carries
+// them all.
+crate::checkpoint_struct!(Kept {
+    side,
+    selected,
+    armed,
+    launch_mode,
+    delivery_mode,
+    ever_loaded,
+    gunship,
+    sight,
+    laser,
+    picks,
+    hud_selection,
+    sight_hold,
+    shots,
+    hits,
+    kills,
+    radar,
+    airport,
+});
+
 // The configuration is a shared record, and so is the sensors' profile set
 // inside it: both ownship fields that carry the same copy resolve to one
 // coding.
@@ -544,6 +567,7 @@ impl Checkpoint for State {
             bombs,
             guided,
             guided_impacts,
+            kept,
             ground_looks,
             parked,
             ground_listing,
@@ -585,6 +609,7 @@ impl Checkpoint for State {
         bombs.save(s, None)?;
         guided.save(s, None)?;
         guided_impacts.save(s, None)?;
+        kept.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
         ground_listing.save(s, None)?;
@@ -643,6 +668,7 @@ impl Checkpoint for State {
             bombs: Checkpoint::load(l, None)?,
             guided: Checkpoint::load(l, None)?,
             guided_impacts: Checkpoint::load(l, None)?,
+            kept: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
             ground_listing: Checkpoint::load(l, None)?,

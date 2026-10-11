@@ -575,6 +575,16 @@ impl Service {
     pub fn selected(&self) -> Option<u32> {
         self.selected
     }
+    /// Selects `airport` again without a reply, as a player who comes back
+    /// to an aircraft finds NAV where it left it (slice FX-J). An airport
+    /// the tower does not list is not selected. No clearance comes with it.
+    pub fn reselect(&mut self, scene: &Scene, airport: u32) {
+        if scene.airports.iter().any(|a| a.id == airport)
+            && !scene.airport_id_is_short_strip(airport)
+        {
+            self.selected = Some(airport);
+        }
+    }
     /// The scene's objects out of action (no hit points left), in id order:
     /// with the selected airport and the clearance, what a networked client
     /// needs to rebuild this service's guidance ([`Self::presented`]).

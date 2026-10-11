@@ -10,7 +10,7 @@
 //! their exact own-plane coders (`checkpoint_shared.rs`).
 
 use super::{
-    Contact, GroundContact, MapContact, Mode, Plot, Sample, Sensors, Strobe, Trail, Weather,
+    Contact, GroundContact, MapContact, Mode, Picks, Plot, Sample, Sensors, Strobe, Trail, Weather,
     WeatherBand,
 };
 
@@ -20,6 +20,14 @@ crate::checkpoint_enum!(Mode {
     Infrared = 2,
     AirGround = 3,
     Harm = 4,
+});
+
+// A pilot's picks, kept for an aircraft's next human (`combat::live::Kept`).
+crate::checkpoint_struct!(Picks {
+    selected,
+    held,
+    ground_retained,
+    air_ground,
 });
 
 crate::checkpoint_struct!(GroundContact {
