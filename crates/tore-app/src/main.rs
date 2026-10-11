@@ -8601,7 +8601,7 @@ fn locate_shell(
     }
 }
 
-/// `--hud-snapshot PATH [--hud-snapshot-state forward|hover|converting|low]`:
+/// `--hud-snapshot PATH [--hud-snapshot-state forward|hover|converting|low|attitude:PITCH,BANK]`:
 /// the HUD of the selected aircraft over a flat background, headless, as a
 /// PPM. Powered-lift aircraft start in trimmed forward flight (`forward`) or
 /// in a hover (`hover`: a jet with its nozzles vertical, a helicopter trimmed
@@ -8619,6 +8619,10 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
     match state {
         "forward" | "laser-lsr" | "laser-ready" | "laser-mask" | "laser-bud" | "laser-both"
         | "laser-edge" => {
+            flight.start_airborne([0.; 3]);
+        }
+        // A review preview of the pitch ladder: `attitude:PITCH,BANK` in degrees.
+        attitude if attitude.starts_with("attitude:") => {
             flight.start_airborne([0.; 3]);
         }
         "hover" => {
@@ -8647,7 +8651,7 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
         }
         other => {
             return Err(format!(
-                "unknown HUD snapshot state {other}; use forward, hover, converting, low, laser-lsr, laser-ready, laser-mask, laser-bud, laser-both or laser-edge"
+                "unknown HUD snapshot state {other}; use forward, hover, converting, low, attitude:PITCH,BANK, laser-lsr, laser-ready, laser-mask, laser-bud, laser-both or laser-edge"
             )
             .into());
         }
@@ -8657,6 +8661,18 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
         flight.step_surface(&tore_input::PilotInput::default(), |_, _| {
             tore_sim::research::Surface::runway(ground)
         });
+    }
+    if let Some(attitude) = state.strip_prefix("attitude:") {
+        let mut angles = attitude
+            .split(',')
+            .map(|v| v.trim().parse::<f64>().map(f64::to_radians));
+        match (angles.next(), angles.next(), angles.next()) {
+            (Some(Ok(pitch)), Some(Ok(bank)), None) => {
+                flight.pitch = pitch;
+                flight.bank = bank;
+            }
+            _ => return Err("attitude needs PITCH,BANK in degrees, e.g. attitude:20,30".into()),
+        }
     }
     let color = hornet.daylight_palette()[usize::from(hornet.hud.primary_color)];
     let mut pixels = vec![0u8; menu::WIDTH * menu::HEIGHT * 4];
