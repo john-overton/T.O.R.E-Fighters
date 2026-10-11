@@ -47,6 +47,10 @@
 //! - `strafe` ([`strafe`]): the `release` pass with a store selected and Tab,
 //!   the gun key, held `--hold S` (2 by default); the gun fires, the store
 //!   stays on its station.
+//!
+//! `--pilot ai` ([`ai`], AI strike slice ST-D) takes no `--attack`: the AI
+//! flies the aircraft and the driver only watches and prints `ai-strike:`
+//! lines (`--profile`, `--handback S`, `--order KIND`).
 use crate::{AppResult, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -62,6 +66,7 @@ use tore_world::{
     world::{Seating, TickOutput, World},
 };
 
+mod ai;
 mod ccip;
 mod cluster;
 mod guided;
@@ -104,9 +109,11 @@ pub(crate) struct Options {
     pub render: Option<std::path::PathBuf>,
     record: Option<std::path::PathBuf>,
     verify: bool,
+    /// `--pilot ai` and its options ([`ai`]).
+    ai: ai::Config,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level] [--handback S [--mode ccip|lvl] [--trigger]] [--order KIND [--order-at S]] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -137,6 +144,7 @@ fn options() -> AppResult<Options> {
         render: None,
         record: None,
         verify: false,
+        ai: ai::Config::new(),
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -175,6 +183,13 @@ fn options() -> AppResult<Options> {
             "--render" => o.render = Some(next()?.into()),
             "--record" => o.record = Some(next()?.into()),
             "--verify-render" => o.verify = true,
+            "--pilot" => o.ai.pilot(&next()?)?,
+            "--profile" => o.ai.set_profile(&next()?)?,
+            "--handback" => o.ai.handback = Some(next()?.parse()?),
+            "--mode" => o.ai.set_mode(&next()?)?,
+            "--trigger" => o.ai.trigger = true,
+            "--order" => o.ai.set_order(&next()?)?,
+            "--order-at" => o.ai.order_at = next()?.parse()?,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
@@ -182,9 +197,13 @@ fn options() -> AppResult<Options> {
     let [theater, stem] = positional.as_slice() else {
         return Err(USAGE.into());
     };
-    if o.attack.is_empty() {
+    if o.attack.is_empty() && !o.ai.active {
         return Err(USAGE.into());
     }
+    o.ai.check(
+        o.skill,
+        o.record.is_some() || o.verify || o.render.is_some(),
+    )?;
     if o.verify && o.record.is_none() {
         return Err("--verify-render checks a --record run".into());
     }
@@ -215,6 +234,9 @@ pub fn run() -> AppResult<()> {
     let o = options()?;
     let mut resources = crate::reel::load_assets()?.theater_resources;
     surface_dump::with_retail_surface(&mut resources)?;
+    if o.ai.active {
+        return ai::run(&o, &resources);
+    }
     if guided::KINDS.contains(&o.attack.as_str()) {
         return guided::run(&o, &resources);
     }

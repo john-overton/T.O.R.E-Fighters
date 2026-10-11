@@ -78,6 +78,68 @@ rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 | `a2g-antiship` | Over `~QUSFLT`: an F/A-18D's AGM-84A and a Rafale's AM-39 at the Krivak designated on the A-G page | Launched midcourse at the Krivak, the seeker goes active on it and it is hit |
 | `a2g-sarh` | Over `~QUCOL`: a MiG-23's AS-7 on a tank designated on the A-G page, then the same with the A-G page turned off two seconds after launch | On the track it kills its tank, never unguided; with the page off it loses its target for good (status Lost, unguided) and the tank is not hit |
 
+## AI strike driver
+
+`--a2g-run THEATER STEM --pilot ai` (scenario file
+[`tools/battery_scenarios/ai_strike.py`](../../tools/battery_scenarios/ai_strike.py), source
+`crates/tore-app/src/a2g_run/ai.rs`) is the headless driver for the AI strike round (plan
+slice ST-D). The player-side `--attack` kinds above fly the aircraft through the seat's
+controls. This one lets the AI fly it, from the same mission step as the game, and only
+watches. It exists so every behaviour slice of the round can test from the first day: a slice
+that makes the AI strike turns the matching scenario from pending to passing.
+
+The mission is an open one (every plane on the AI), one friendly wing, no enemy. The striker
+starts `--from NM` short of the target at `--altitude` ft and `--speed` kt on `--heading`
+(and `--dive`), loaded as the player-side kinds load it (`--aircraft`, `--load`, `--station`,
+`--count`). The target is the Nth ground target of the stem (`--target N`, or `--unit ID`),
+with `--defenses AAA SAM` and `--surface-seed N` as before.
+
+| Option | What it does |
+| --- | --- |
+| `--skill 0..3` | The striker's wing skill, Novice to Ace (Average by default) |
+| `--profile straight\|popup\|fasthigh\|dive\|level` | **Forces** a pass, for coverage. The real AI chooses its pass from the perceived threat and its energy (John, 2026-10-11), not at random; the flag lets a test fly each pass once |
+| `--handback S` | A human-flown run handed to the AI: a seat flies the striker on the scripted pass, designates the target on the A-G page (or Easy targeting's Ctrl+X for an aircraft with no ground page), selects the store, and gives the aircraft back `S` seconds into the pass. `--mode ccip\|lvl` sets the bomb sight in the human leg, `--trigger` holds the trigger there (pickle and hold) so a bomb leaves before the handoff. For the takeover tests |
+| `--order KIND` | Wing orders: a seat leads a two-ship wing on the pass, designates the target, and gives the wingman (the striker) the order `--order-at S` seconds in (5 by default). Kinds: `engage-my-target`, `engage-from-formation`, `attack-on-contact`, `protect-me`, `disengage`, `bug-out`, `land-selected`, `sort`. The ground attack orders join the table when the game has them |
+
+Every line starts `ai-strike:` and is `key=value` words (the battery reads them with
+`ai_strike.parse_runs`):
+
+| Line | Meaning |
+| --- | --- |
+| `setup` | Aircraft, store, station, target and where it stands, hit points, skill, forced profile, handback, order, mode |
+| `PROFILE name=P requested=R` | The pass the AI reports it flies. `none` until slice ST-T reports one (the first line says `note=no-strike-behaviour`) |
+| `start` | The striker at tick 0: range to the target, height above the ground, speed |
+| `DESIGNATE`, `HANDBACK`, `ORDER`, `ORDER-REPLY` | The human leg: the target designated, what was set when the aircraft was handed back (designation, selected station, bomb sight mode), the order given and the world's reply (given, refused or failed, with its words) |
+| `ACTIVITY name=...` | What the AI says it is doing, each time that changes |
+| `RELEASE` | A store left the striker: time, store, station, height, speed, range to the target |
+| `IMPACT miss_ft=F` | A released round ended; its horizontal distance from the target in feet (the nearest crater or burst within 60 ft of its last place, else that place) |
+| `KILL` | A ground object the striker destroyed, and whether it was the target |
+| `EGRESS` | After a release and once the rounds have landed, the striker is a nautical mile past its closest approach and opening |
+| `LOST` | The striker was destroyed, crashed, ejected or left the AI |
+| `summary` | Counts of the above, the final activity, the target's hit points and the store's rounds left; then `no release` if there was none, and `done` |
+
+Until ST-T the existing AI does nothing with a ground target (its wings are air-to-air, its
+picture holds aircraft only), and the driver says so: `PROFILE name=none`, no `RELEASE`.
+The hooks the strike slices fill are one `hooks` module in `ai.rs`: ST-T hands the AI its
+target and forces the `--profile` pass and reports it, ST-K reads what a takeover kept, ST-O
+adds order kinds.
+
+| Scenario | What it flies | What must hold |
+| --- | --- | --- |
+| `ai-strike-driver` | An A-4E's Mk 82 on `~QUCOL` with the AI flying, at skills 2, 0 and 3, the first two with a forced profile | The report is consistent with itself (the summary counts the lines, a release comes before its impact and its egress), the setup and PROFILE lines echo the request. Passes before and after the strike behaviour |
+| `ai-strike-handback` | A seat designates the column, selects the Mk 82 in LVL and holds the trigger; the bomb falls and is reported; the aircraft is handed to the AI at 30 s. A second run is handed back at 6 s with nothing released | HANDBACK shows LVL and the bomb's station, the human's release comes before the handoff and ends within 1,500 ft, the AI reports an activity after it |
+| `ai-strike-order` | A seat leads a two-ship wing, designates the column, orders Engage my target | One ORDER line with a designation, and the world's reply (today a refusal: no valid hostile target) |
+| `ai-strike-bombs` (pending) | An A-4E's Mk 82 on the TVIET truck park: straight, pop-up, fast-high, dive and level forced once at skill 2, and skills 0, 1 and 3 on the dive | Each run names its pass, releases, ends the bomb within the skill's miss (placeholder limits 600, 450, 350 and 250 ft until ST-S states the 30 percent), shows an EGRESS and is not lost |
+| `ai-strike-rockets`, `ai-strike-maverick`, `ai-strike-jdam`, `ai-sead-harm` (pending) | An A-4E's LAU-61 (straight, pop-up), an A-10's AGM-65G (fast-high), an F-16C's GBU-30 (level), an F-4G's AGM-88 on the `~QVRDRI` radar (fast-high) | The named pass, a release and an impact, the target hurt, the striker not lost |
+| `ai-strike-defended` (pending) | An F/A-18D's Mk 82 on `~QUCOL` with `--defenses 2 2` | Releases, ends the bomb, leaves, and is not lost |
+
+"Pending" scenarios carry `known_failure`: they run, fail for the stated reason and are
+reported as known. When ST-T lands each starts passing, the battery then fails it ("known
+failure now passes") and ST-T removes the marker and tightens the numbers. The scenarios'
+parsing and checks have unit tests in `tools/test_battery_ai_strike.py`, and the battery
+selection family `ai-strike` (`ai-strike-*`, `ai-sead-*`) is chosen by changes to `ai.rs` and
+the scenario file.
+
 ## Powered-lift scenarios (VTOL overhaul)
 
 `flight-powered-*` flies the six powered-lift aircraft (AV-8, Yak-141, V-22, AH-64,

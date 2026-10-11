@@ -162,6 +162,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "air-to-ground: the A-G, IR and HARM pages and designation (--a2g-radar), and the weapons flown through the real trigger by --a2g-run",
         ("a2g-*",),
     ),
+    "ai-strike": (
+        "the AI strike driver (--a2g-run --pilot ai) and the AI's air-to-ground behaviour (slice ST-D onward)",
+        ("ai-strike-*", "ai-sead-*"),
+    ),
     "windowed-menus": ("captured windows: launches, terrain, previews, sizes", ("menus-window-*",)),
     "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*", "flight-target-camera-*")),
     # Replay lane.
@@ -677,6 +681,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
     _r("crates/tore-app/src/blast_preview.rs", ("replay-cli",), "the explosion and cluster burst preview (offscreen renders)"),
     _r("crates/tore-app/src/a2g_radar.rs", ("a2g",), "the ground pages drive"),
+    _r("crates/tore-app/src/a2g_run/ai.rs", ("a2g", "ai-strike"), "the AI strike driver"),
     _r("crates/tore-app/src/a2g_run*", ("a2g",), "the air-to-ground attack driver"),
     _r("crates/tore-app/src/surface_objective.rs", ("surface", "replay-recording"), "the ground target objective drive, which also records the run"),
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
@@ -755,6 +760,8 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_battery_ai.py", (), "AI scenario tests", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/menus.py", LANE_SMOKE["menus"], "menu scenarios", unit_tests=("test_battery_menus",)),
     _r("tools/test_battery_menus.py", (), "menu scenario tests", unit_tests=("test_battery_menus",)),
+    _r("tools/battery_scenarios/ai_strike.py", ("ai-strike",), "AI strike driver scenarios", unit_tests=("test_battery_ai_strike",)),
+    _r("tools/test_battery_ai_strike.py", (), "AI strike scenario tests", unit_tests=("test_battery_ai_strike",)),
     _r("tools/test_battery_a2g.py", (), "air-to-ground scenario tests", unit_tests=("test_battery_a2g",)),
     _r("tools/battery_scenarios/scripts/*", ("replay-input", "flight-takeoff"), "scripts for windowed runs", windowed=True, unit_tests=("test_replay_checks",)),
     _r("tools/battery_scenarios/_replay_*.py", LANE_SMOKE["replay"], "replay scenarios", unit_tests=("test_replay_checks",)),
