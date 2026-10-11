@@ -7,10 +7,13 @@
 //!
 //! The player flies a scripted straight line at the ground target's
 //! defenses, invulnerable, so its SAMs and guns fire at it and the debrief
-//! counts their fire. When it is over the middle of the site, a Mk 82 is
-//! placed on every ground target (the player's, in Blue's mission) every two
-//! seconds until it is gone. The run prints the objectives and the debrief's
-//! tallies before and after, each line starting `surface-objective:`.
+//! counts their fire. When it is over the middle of the site, a Mk 82 is put
+//! in the air for every ground target (the player's, in Blue's mission)
+//! every two seconds until it is gone, as a 45 degree dive at 450 kt would
+//! release it 1,000 ft above the target, aimed by the bomb equation
+//! ([`tore_sim::combat::ballistics`]) to meet it where it will be. The run
+//! prints the objectives and the debrief's tallies before and after, each
+//! line starting `surface-objective:`.
 //!
 //! `--redfor` builds the multiplayer mission instead (open seating) and seats
 //! the human in the first plane of the enemy wing: Redfor defends the target,
@@ -28,8 +31,13 @@
 use crate::{AppResult, replay, snapshot::RenderSnapshot, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
-    attitude::Vector,
-    combat::{FallState, ledger::ShotKind, live::Projectile},
+    attitude::{Vector, unit},
+    combat::{
+        FallState,
+        ballistics::{BombMotion, ReleaseState},
+        ledger::ShotKind,
+        live::Projectile,
+    },
 };
 use tore_world::{
     ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE},
@@ -45,6 +53,27 @@ const PLAYER: u32 = 0;
 const BOMB_ID_BASE: u32 = 0x00F0_0000;
 const FEET_PER_NM: f64 = 6_076.;
 const FPS_PER_KNOT: f64 = 1.687_8;
+/// The pass each bomb is released from: a 45 degree dive at 450 kt, 1,000
+/// ft above the target (fitted for this drive).
+const BOMB_DIVE_DEG: f64 = 45.;
+const BOMB_SPEED_KT: f64 = 450.;
+const BOMB_HEIGHT_FT: f64 = 1_000.;
+
+/// The release that puts a bomb's path on a target at `position` moving at
+/// `velocity`: aimed where the target will be when the bomb gets there.
+pub(crate) fn dive_release(position: Vector, velocity: Vector, heading: f64) -> ReleaseState {
+    let dive = BOMB_DIVE_DEG.to_radians();
+    let direction = [
+        heading.sin() * dive.cos(),
+        -dive.sin(),
+        heading.cos() * dive.cos(),
+    ];
+    let speed = BOMB_SPEED_KT * FPS_PER_KNOT;
+    let still = ReleaseState::onto(position, direction, speed, BOMB_HEIGHT_FT);
+    let fall = BombMotion::new(still).fall_time(position[1]).unwrap_or(0.);
+    let ahead = std::array::from_fn(|i| position[i] + [velocity[0], 0., velocity[2]][i] * fall);
+    ReleaseState::onto(ahead, direction, speed, BOMB_HEIGHT_FT)
+}
 
 struct Options {
     theater: String,
@@ -319,11 +348,9 @@ pub fn run() -> AppResult<()> {
                 else {
                     continue;
                 };
-                // Dropped 150 ft above the aim point, ahead of a moving unit
-                // by the 0.3 s the bomb takes to fall.
-                let from = std::array::from_fn(|i| {
-                    row.position[i] - row.velocity[i] * 0.3 + [0., 150., 0.][i]
-                });
+                // Released from a dive pass, aimed ahead of a moving unit.
+                let release = dive_release(row.position, row.velocity, heading);
+                let from = release.position;
                 let state = &mut world.combat.state;
                 state
                     .ledger
@@ -340,8 +367,8 @@ pub fn run() -> AppResult<()> {
                     station: 0,
                     position: from,
                     previous: from,
-                    direction: [0., -1., 0.],
-                    speed_f8: (500. * 256.) as i32,
+                    direction: unit(release.velocity),
+                    speed_f8: (release.speed() * 256.) as i32,
                     launched_t: (state.tick() / 30) as u16,
                     target: None,
                     fall: FallState::default(),
