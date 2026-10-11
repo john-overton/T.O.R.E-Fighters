@@ -414,6 +414,11 @@ impl super::AiActor {
     /// or a lase order), and the strike they started. The Strike role and its
     /// briefing, which a mission set, are left alone.
     pub fn clear_ground_orders(&mut self) {
+        // A lase duty the order started ends with it (slice ST-L's duty;
+        // a hold on the aircraft's own laser bomb stays).
+        if let Some(strike) = self.strike.as_mut() {
+            strike.stop_lase();
+        }
         self.lase = None;
         if let Some(picture) = &mut self.ground {
             picture.set_ordered(None);

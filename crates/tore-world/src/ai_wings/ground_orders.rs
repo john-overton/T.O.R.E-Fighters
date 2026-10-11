@@ -317,6 +317,12 @@ impl AiWings {
                     unreachable!("an air order is not a ground call")
                 }
             }
+            // The lase order is flown as slice ST-L's duty: the offset orbit
+            // with the spot on the target until it dies, another order or a
+            // threat ends it (ST-INT). `capability` checked `can_lase`.
+            if let Plan::Lase { target } = &plan {
+                self.order_lase(*id, *target, tore_sim::ai::strike::LaseUntil::TargetDies);
+            }
             answers.push(answer(
                 Answered::Receiver(ReceiverOutcome::Applied(AppliedSetting::TargetOrder {
                     deadline: None,

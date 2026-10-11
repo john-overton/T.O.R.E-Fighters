@@ -178,6 +178,10 @@ impl AiWings {
             && let Some(actor) = self.mission.actor_mut(id)
         {
             tasking.apply(actor);
+            // A lase order flies its duty again (slice ST-L).
+            if let Some(target) = tasking.lase {
+                self.order_lase(id, target, tore_sim::ai::strike::LaseUntil::TargetDies);
+            }
         }
     }
     /// The tasking kept for aircraft `id` while a human flies it.

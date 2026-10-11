@@ -655,7 +655,15 @@ ST-L, 2026-10-11) except where a line says otherwise.
   `Impact` (until every weapon guided on its spot has landed, after at least
   one was; two minutes if none ever is), beside `cancel_lase`, `can_lase` and
   `lasing_for`. A duty gives an aircraft with no ground picture the target as
-  an order, cleared with the duty.
+  an order, cleared with the duty. A pod duty climbs until the orbit sees the
+  target at least 20 degrees below (capped at 90% of the ceiling) and flies
+  85% of the speed whose bank just fits the pod's cap, so the circle closes
+  rather than drifting outward; beyond the laser's reach (a duty given far
+  away) the turn toward the orbit is not held to the pod's bank cap. Fitted
+  (agent, ST-INT): at 5,000 ft over the factory an F-16C's duty orbit at the
+  speed that just fits drifted from 18,500 to 28,700 ft in 90 s; with these it
+  holds 19,600 to 21,900 ft lasing throughout. A take and give-back of a lasing
+  wingman keeps the order and starts the duty again.
 - **A designator lases for its wing** (fitted). In a Strike wing, a designator
   aircraft with no ground store to use lets itself be the wing's light: when a
   wing mate with laser rounds and no designator has chosen its target, the
@@ -684,7 +692,7 @@ two to an object, designator carriers lase).
 | Alt+E | Engage my target. An aircraft designation as before; else a ground designation, else the ground object nearest the sight's pin (within 1,000 ft, fitted). The wingman attacks it with its best surface store, answers "Engaging", and the lead's call is "Two, attack tank, bearing 270, 15 miles" | opinionated (John, 2026-10-11) on retail keys |
 | Alt+R | Engage from formation, the same with the ground target; also sets at least medium formation | opinionated (John, 2026-10-11) |
 | Alt+F | Engage the IR/laser target. Retail: the contact you picked with `/` and `\` while IR/Laser advanced targeting is on, air or ground; with no hostile contact the wingmen attack whatever they find. T.O.R.E matches this (decision 7). Taking the target from your sight track, pin or laser spot, as well as the picked contact, is an addition | retail (meaning), opinionated (John, 2026-10-11) on the key, opinionated (agent) for the sight, pin and spot sources |
-| Alt+G | **Lase my target.** New; see [Lasing](#lasing). A wingman with a designator holds the lead's ground target as its lase order (slice ST-L flies the orbit). Taken: "Lasing". No designator aboard: "No designator". No ground target designated or in the sight: refused at the lead with "No target" | opinionated (John, 2026-10-11); key and lines opinionated (agent) |
+| Alt+G | **Lase my target.** New; see [Lasing](#lasing). A wingman with a designator holds the lead's ground target as its lase order and flies it as slice ST-L's lase duty until the target dies, another order or a threat (wired at the integration, ST-INT). Taken: "Lasing". No designator aboard: "No designator". No ground target designated or in the sight: refused at the lead with "No target" | opinionated (John, 2026-10-11); key and lines opinionated (agent) |
 | Alt+W | Engage every target of my target's class, as retail's key does ("Attack SAMs", "Attack tanks"). The class is the designated ground object's (SAM, AAA, ship, tank, vehicle, structure), taken from the designation, else the sight pin; the targets are every hostile standing object of that class within 15 nm of it, the nearest 32, and each wingman takes the nearest with two to an object. Attack SAMs gives a HARM carrier its SEAD order (the radars first). The lead's call is "Attack SAMs". A designated aircraft, or no designation, is "Attack bandits", attack on contact (what the key did until 2026-10-11) | retail (key and meaning), opinionated (John, 2026-10-11) for the ground classes; scan and cap fitted (agent) |
 | (no key) | Attack on contact keeps no key of its own: it is Alt+W with no ground target designated and Alt+F with nothing in the sight, both retail's meanings | opinionated (agent): recommended by this slice, John may want it back on a key |
 | Others | Unchanged. A wingman with no usable surface store (or a laser store with no designator of its own) refuses with the reason shown ("no usable surface store") and says "Winchester" (text only, no recording). Every bombing class takes ground orders since slice ST-F: a helicopter's AT-2 and the gunship's linked guns count as usable stores | spec-derived, line opinionated (agent) |

@@ -186,6 +186,22 @@ impl AiActor {
             self.set_strike_role(super::super::engagement::StrikeRole::Cap);
             return None;
         }
+        // A flight lead's lase order ends with its duty (the target died, a
+        // threat made it defend, the designator is gone): the order onto the
+        // target that the duty gave is cleared, so it does not go on to bomb
+        // it, and a CAP wingman with nothing else rejoins (ST-INT).
+        if let Some(target) = self.lase
+            && strike.lasing() != Some(target)
+        {
+            self.lase = None;
+            if self.strike_order() == Some(target) {
+                self.set_strike_order(None);
+            }
+            if !self.strikes() {
+                self.strike = None;
+                return None;
+            }
+        }
         Some(order)
     }
 

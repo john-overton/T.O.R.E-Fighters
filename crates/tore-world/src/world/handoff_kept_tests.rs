@@ -981,7 +981,12 @@ fn a_take_and_a_give_back_keep_the_planes_class_and_lase_orders() {
                 }
                 _ => {
                     assert_eq!(actor.lase_order(), Some(targets[0]));
-                    assert_eq!(actor.strike_order(), None);
+                    // The order flies its duty again (slice ST-L), whose
+                    // order onto the target stands with it.
+                    let wings = w.ai_wings.as_ref().unwrap();
+                    assert!(wings.can_lase(PLANE.0), "the fixture has a pod");
+                    assert_eq!(wings.lasing_for(PLANE.0), Some(targets[0]));
+                    assert_eq!(actor.strike_order(), Some(targets[0]));
                 }
             }
         }

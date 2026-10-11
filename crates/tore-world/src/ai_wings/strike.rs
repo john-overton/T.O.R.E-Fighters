@@ -390,7 +390,8 @@ pub(super) struct Capability {
     /// strikes since slice ST-F): a refusal "no usable surface store"
     /// otherwise.
     pub strike: bool,
-    /// It carries a laser designator of its own.
+    /// It carries a laser designator of its own and flies the lasing hold
+    /// ([`AiWings::can_lase`]), so it takes "Lase my target".
     pub designator: bool,
 }
 
@@ -410,7 +411,7 @@ impl AiWings {
         }
         Capability {
             strike: strike::has_usable_store(&stores, designator, config.strike_class),
-            designator,
+            designator: self.can_lase(id),
         }
     }
 

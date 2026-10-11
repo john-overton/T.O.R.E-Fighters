@@ -457,7 +457,8 @@ class ScenarioTests(unittest.TestCase):
 
 
 def ground_order_run(kind="strike", result="given", message="Engage my target: 1 applied, 0 rejected, 0 without motion",
-                     state="strike_order=0x50000001 class_order=0 lase_order=none", released=True, designated="0x50000001"):
+                     state="strike_order=0x50000001 class_order=0 lase_order=none", released=True, designated="0x50000001",
+                     extra=()):
     lines = [
         SETUP.format(skill=1, profile="none").replace("order=none", "order=engage-my-target"),
         "ai-strike: PROFILE t=0.000 name=none requested=none note=ordered",
@@ -465,6 +466,7 @@ def ground_order_run(kind="strike", result="given", message="Engage my target: 1
         f"ai-strike: ORDER t=3.017 kind=engage-my-target designated={designated}",
         f'ai-strike: ORDER-REPLY t=3.025 result={result} message="{message}"',
         f"ai-strike: ORDER-STATE t=3.025 {state}",
+        *extra,
     ]
     releases = 1 if released else 0
     if released:
@@ -477,6 +479,29 @@ def ground_order_run(kind="strike", result="given", message="Engage my target: 1
         lines.append("ai-strike: no release")
     lines.append("ai-strike: done")
     return "\n".join(lines)
+
+
+LASE_STATE = "strike_order=0x50000001 class_order=0 lase_order=0x50000001"
+
+
+def lase_flown(phase_at=3.025, lased=True, lost=False, ranges=(21000, 19700, 20500, 21500)):
+    """The lines of a wingman flying Lase my target (slice ST-L's duty, wired at ST-INT)."""
+    lines = []
+    if phase_at is not None:
+        lines.append(f"ai-strike: PHASE t={phase_at:.3f} name=Lase")
+    lines.append("ai-strike: LASER t=0.025 plane=1 state=Off mask=none range_ft=0")
+    if lased:
+        lines.append("ai-strike: LASER t=3.033 plane=1 state=Lasing mask=none range_ft=22920")
+    lines += [f"ai-strike: HOLD t={5 + 5 * i:.3f} range_ft={r} above_ft=6500 speed_kt=200 bank_deg=12"
+              for i, r in enumerate(ranges)]
+    if lost:
+        lines.append("ai-strike: LASER t=40.000 plane=1 state=Masked mask=Gimbal range_ft=21000")
+    return tuple(lines)
+
+
+def lase_run(**kw):
+    released = kw.pop("released", False)
+    return ground_order_run(state=kw.pop("state", LASE_STATE), released=released, extra=lase_flown(**kw))
 
 
 class GroundOrderTests(unittest.TestCase):
@@ -500,10 +525,26 @@ class GroundOrderTests(unittest.TestCase):
         self.assertEqual(self.check(refused, "refused"), [])
         self.assertTrue(any("refusal" in p for p in self.check(ground_order_run(), "refused")))
 
-    def test_the_lase_order_is_held_without_a_strike(self):
+    def test_the_lase_order_is_held_with_at_most_its_own_target_as_a_strike(self):
         held = ground_order_run(state="strike_order=none class_order=0 lase_order=0x50000001", released=False)
         self.assertEqual(self.check(held, "lase"), [])
+        self.assertEqual(self.check(ground_order_run(state=LASE_STATE, released=False), "lase"), [])
+        other = ground_order_run(state="strike_order=0x50000002 class_order=0 lase_order=0x50000001", released=False)
+        self.assertTrue(any("lase order" in p for p in self.check(other, "lase")))
         self.assertTrue(any("lase order" in p for p in self.check(ground_order_run(), "lase")))
+
+    def flown(self, text):
+        return s.ground_order_problems(text, [dict(label="run", kind="lase", flies=True)])
+
+    def test_the_lase_order_is_flown_as_the_lase_hold(self):
+        self.assertEqual(self.flown(lase_run()), [])
+        self.assertTrue(any("never entered" in p for p in self.flown(lase_run(phase_at=None))))
+        self.assertTrue(any("began" in p for p in self.flown(lase_run(phase_at=8.0))))
+        self.assertTrue(any("never came up" in p for p in self.flown(lase_run(lased=False))))
+        self.assertTrue(any("spot was lost" in p for p in self.flown(lase_run(lost=True))))
+        self.assertTrue(any("ft out" in p for p in self.flown(lase_run(ranges=(21000, 70000)))))
+        self.assertTrue(any("HOLD lines" in p for p in self.flown(lase_run(ranges=(21000,)))))
+        self.assertTrue(any("released" in p for p in self.flown(lase_run(released=True))))
 
     def test_attack_on_contact_holds_no_order(self):
         free = ground_order_run(state="strike_order=none class_order=0 lase_order=none", released=False)
@@ -515,8 +556,8 @@ class GroundOrderTests(unittest.TestCase):
         self.assertIn("ai-wing-ground-order", scenarios)
         self.assertIn("ai-wing-lase", scenarios)
         self.assertEqual(len(s.ORDER_RUNS), 1 + len(scenarios["ai-wing-ground-order"].then))
-        lase = ground_order_run(state="strike_order=none class_order=0 lase_order=0x50000001", released=False)
-        self.assertEqual(scenarios["ai-wing-lase"].check(lase), [])
+        self.assertEqual(scenarios["ai-wing-lase"].check(lase_run()), [])
+        self.assertNotEqual(scenarios["ai-wing-lase"].check(lase_run(phase_at=None)), [])
 
 
 def quick_wing_run(role="strike", released=True):
@@ -668,7 +709,7 @@ def buddy_drop(buddy="1", spot="1", lase_first=True, own_lased=False, phase_lase
     return "\n".join(lines)
 
 
-def buddy_none(release=False, attack=False, home=True):
+def buddy_none(release=False, attack=False, home=True, rejoin=False):
     lines = [
         SETUP.format(skill=2, profile="none").replace("A4E", "F14").replace("MK82.JT", "GBU10.JT"),
         "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
@@ -679,6 +720,8 @@ def buddy_none(release=False, attack=False, home=True):
         lines.append("ai-strike: PHASE t=10.000 name=Attack")
     if home:
         lines.append("ai-strike: PHASE t=20.008 name=Home")
+    if rejoin:
+        lines += ["ai-strike: ACTIVITY t=0.008 name=Pursuing", "ai-strike: ACTIVITY t=20.008 name=In formation"]
     if release:
         lines.append("ai-strike: RELEASE t=15.000 n=1 weapon=GBU10.JT station=2 alt_ft=12000 speed_kt=418 range_ft=15771")
     lines.append(
@@ -724,6 +767,8 @@ class LaserBuddyTests(unittest.TestCase):
         self.assertTrue(any("no spot assured" in p for p in self.check(none=buddy_none(release=True))))
         self.assertTrue(any("flew a pass" in p for p in self.check(none=buddy_none(attack=True))))
         self.assertTrue(any("went home" in p for p in self.check(none=buddy_none(home=False))))
+        # Ordered onto the target as a CAP aircraft, it rejoins instead (slice ST-O).
+        self.assertEqual(self.check(none=buddy_none(home=False, rejoin=True)), [])
 
 
 class SelectionTests(unittest.TestCase):

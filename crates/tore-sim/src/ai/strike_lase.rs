@@ -53,6 +53,12 @@ pub const LASE_MAX_TICKS: u64 = 120 * 120;
 /// target leaves the cone (fitted; the same distance as a guided pass's
 /// exit).
 pub const LASE_CONE_EXIT_FT: f64 = GUIDED_EXIT_FT;
+/// A pod duty's hold sees the target at least this far below at the
+/// orbit's radius, degrees (fitted, agent, ST-INT).
+pub const LASE_DUTY_DEPRESSION_DEG: f64 = 20.;
+/// A pod duty's orbit speed, as a share of [`orbit_speed_fps`] (fitted,
+/// agent, ST-INT).
+pub const LASE_DUTY_SPEED_SHARE: f64 = 0.85;
 /// How much the radius error turns the course, degrees per radius of error
 /// (fitted), within -45 and +90 degrees.
 const RADIAL_DEG: f64 = 60.;
@@ -421,9 +427,22 @@ impl Strike {
         let ground = own.position[1] - own.agl_ft;
         let floor = self.floor(cx, self.threat);
         let lase = self.lase.as_mut().expect("a hold has its lase");
+        // A pod duty (a wing order, the wing's light) climbs until the
+        // orbit sees the target at least LASE_DUTY_DEPRESSION_DEG below:
+        // lower, the pod's bank cap is too small to hold the circle and the
+        // orbit drifts outward (fitted, agent, ST-INT). An own bomb's hold
+        // keeps its release height.
+        let duty = !lase.own && sensor.gimbal == Gimbal::Hemisphere;
+        let duty_ft = if duty {
+            let radius = lase_radius_ft(own.speed.0.max(100.), own.g_limit, sensor.reach_ft);
+            (target[1] + radius * LASE_DUTY_DEPRESSION_DEG.to_radians().tan())
+                .min(0.9 * cx.ceiling_ft)
+        } else {
+            f64::MIN
+        };
         let hold = *lase
             .hold_ft
-            .get_or_insert(own.position[1].max(ground + floor));
+            .get_or_insert(own.position[1].max(ground + floor).max(duty_ft));
         let pitch = hold_pitch_deg(own.position[1], hold.max(ground + floor));
         let to_target = bearing_deg(own.position, target);
         let distance = horizontal(own.position, target);
@@ -456,13 +475,28 @@ impl Strike {
         let fade = (2. - distance / radius).clamp(0., 1.);
         let feed = (speed / radius).to_degrees() * fade;
         let theta = angle_difference(own.heading_deg, to_target) * side;
-        let cap = turn_rate_deg(bank_cap_deg(height, distance, theta), speed);
+        // The pod's bank cap keeps the target under the wings while the
+        // laser can reach it; beyond its reach (a duty given far away) the
+        // spot is masked by range anyway and the turn toward the orbit is
+        // free (fitted, agent, ST-INT: capped there, the turn toward a
+        // distant target was nil and the aircraft flew away).
+        let cap = if distance.hypot(height) <= sensor.reach_ft {
+            turn_rate_deg(bank_cap_deg(height, distance, theta), speed)
+        } else {
+            f64::INFINITY
+        };
         let mut turn = (feed + err).clamp(-AWAY_DEG, cap.max(0.));
         if masked {
             turn = turn.min(0.);
         }
         let corner = own.limits.corner.0;
-        let orbit = orbit_speed_fps(height, radius, corner);
+        let mut orbit = orbit_speed_fps(height, radius, corner);
+        // A duty flies a little slower than the speed whose bank just fits
+        // the pod's cap, so the circle has room to close instead of
+        // drifting outward (fitted, agent, ST-INT).
+        if duty {
+            orbit *= LASE_DUTY_SPEED_SHARE;
+        }
         let slow = distance < 2.5 * radius && orbit < corner;
         Steer {
             heading_deg: wrap_deg(own.heading_deg + side * turn),

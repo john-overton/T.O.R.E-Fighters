@@ -362,13 +362,45 @@ def ground_order_problems(output: str, runs_wanted: list[dict]) -> list[str]:
             if classes < 1 or held["strike_order"] != "none":
                 problems.append(f"{label}: want a class order held, got {state}")
         elif kind == "lase":
-            if held["lase_order"] == "none" or held["strike_order"] != "none" or classes:
+            # The lase duty (slice ST-L, wired at ST-INT) orders the wingman onto the target it
+            # lases, so a strike order on that same object may stand beside the lase order.
+            if held["lase_order"] == "none" or held["strike_order"] not in ("none", held["lase_order"]) or classes:
                 problems.append(f"{label}: want the lase order held, got {state}")
+            if want.get("flies", False):
+                problems += lase_flown_problems(run, label, float(order.get("t", "nan")))
         elif kind == "free":
             if held["strike_order"] != "none" or held["lase_order"] != "none" or classes:
                 problems.append(f"{label}: attack on contact holds no ground order, got {state}")
         if kind in ("strike", "class") and want.get("release", True) and not run.of("RELEASE"):
             problems.append(f"{label}: the wingman never released")
+    return problems
+
+
+def lase_flown_problems(run: Run, label: str, ordered_at: float) -> list[str]:
+    """Lase my target flown (ST-INT): the wingman enters the lase hold within 2 s of the order,
+    its laser comes up Lasing and stays so, it flies at least two HOLD lines inside the laser's
+    reach and outside 2 nm (the orbit is 3 nm), and it drops nothing."""
+    problems: list[str] = []
+    plane = (run.first("start") or {}).get("plane")
+    lase_at = [float(p["t"]) for p in run.of("PHASE") if p.get("name") == "Lase" and "t" in p]
+    if not lase_at:
+        problems.append(f"{label}: the wingman never entered the lase hold")
+    elif not lase_at[0] - ordered_at <= 2.0:
+        problems.append(f"{label}: the lase hold began {lase_at[0] - ordered_at:.1f} s after the order, want 2 s")
+    lasers = [x for x in run.of("LASER") if x.get("plane") == plane and number(x.get("t")) >= ordered_at]
+    if not any(x.get("state") == "Lasing" for x in lasers):
+        problems.append(f"{label}: the wingman's laser never came up after the order")
+    elif lasers[-1].get("state") != "Lasing":
+        problems.append(f"{label}: the wingman's spot was lost ({lasers[-1].get('state')} {lasers[-1].get('mask')})")
+    holds = run.of("HOLD")
+    if len(holds) < 2:
+        problems.append(f"{label}: {len(holds)} HOLD lines, want at least two")
+    for h in holds[1:]:
+        r = number(h.get("range_ft"))
+        if not 2 * 6076.0 <= r < LASER_REACH_FT:
+            problems.append(f"{label}: the hold at t={h.get('t')} was {r:.0f} ft out, want 2 nm to the laser's reach")
+    if run.of("RELEASE"):
+        problems.append(f"{label}: the lasing wingman released")
     return problems
 
 
@@ -668,8 +700,12 @@ def laser_buddy_problems(output: str) -> list[str]:
     names = [n for _, n in _phases(none)]
     if "Attack" in names:
         problems.append(f"{label}: flew a pass with a laser bomb and no spot ({names})")
-    if "Home" not in names:
-        problems.append(f"{label}: never gave the bomb up and went home ({names})")
+    # It gives the bomb up: home (a Strike-role striker), or, ordered onto the target as a CAP
+    # aircraft (the driver's assignment), its order ends and it rejoins (slice ST-O's rule).
+    # (The ACTIVITY parser keeps the first word: "In formation" reads "In".)
+    rejoined = any(a.get("name") == "In" for a in none.of("ACTIVITY")[1:])
+    if "Home" not in names and not rejoined:
+        problems.append(f"{label}: never gave the bomb up and went home or rejoined ({names})")
     return problems
 
 
@@ -757,7 +793,7 @@ def scenarios() -> list[Scenario]:
                              "--order-at", "3", "--seconds", "30", "--order", "engage-my-target"),
     }
     lase_args = pilot_run("UKR", "QUFACT", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
-                          "--count", "2", "--order-at", "3", "--seconds", "30", "--order", "lase-my-target")
+                          "--count", "2", "--order-at", "3", "--seconds", "60", "--order", "lase-my-target")
     # The lasing runs: a GBU-10 from 15,000 ft at 480 kt for the pod (an F-16C's Pave Spike), from
     # 8,000 ft at 400 kt for the cone (an Su-25's built-in designator).
     gbu10 = ["--load", "GBU10", "--station", "2", "--count", "2"]
@@ -863,9 +899,11 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="ai-wing-lase", lane="flight",
             args=lase_args, timeout=300,
-            check=lambda out: ground_order_problems(out, [dict(label="lase", kind="lase")]),
+            check=lambda out: ground_order_problems(out, [dict(label="lase", kind="lase", flies=True)]),
             notes="The lead of two F-16Cs designates the factory and orders Lase my target: the wingman "
-                  "has a designator, takes it, and holds the lase order for the lasing slice.",
+                  "has a designator, takes it and holds the lase order, enters the lase hold at once, "
+                  "lases the factory and keeps the spot for the minute, orbiting inside the laser's "
+                  "reach, and drops nothing (ST-INT wires the order to slice ST-L's duty).",
         ),
         Scenario(
             name="ai-strike-bombs", lane="flight",

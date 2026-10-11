@@ -540,6 +540,11 @@ fn lase_my_target_needs_a_designator_and_a_target() {
         .actor(id)
         .unwrap();
     assert_eq!(actor.lase_order(), Some(target));
+    // ... and flies it as slice ST-L's lase duty (ST-INT).
+    assert_eq!(
+        world.ai_wings.as_ref().unwrap().lasing_for(id),
+        Some(target)
+    );
     assert_eq!(
         lines(&world),
         [Chatter::Line {
@@ -547,6 +552,123 @@ fn lase_my_target_needs_a_designator_and_a_target() {
             line: WingLine::Lasing
         }]
     );
+}
+
+fn step_world(world: &mut World, ticks: u32) {
+    let mut out = TickOutput::default();
+    for _ in 0..ticks {
+        let input = crate::seats::SeatInput {
+            tick: world.tick(),
+            ..Default::default()
+        };
+        world.step(&[input], &mut out).unwrap();
+    }
+}
+
+/// Alt+G, wired to slice ST-L (ST-INT): the wingman flies the lasing hold
+/// with its laser on and its sight on the target, and its spot comes up on
+/// the target; a later order ends the duty, and so does the duty's own end
+/// (a threat or the target's death), after which it rejoins rather than
+/// bombing the target it was lasing.
+#[test]
+fn lase_my_target_flies_the_lasing_hold_until_the_order_or_the_duty_ends() {
+    use tore_sim::ai::strike::Phase;
+    // No enemy fighters: one coming inside 5 nm would end the duty (a
+    // threat), as the spec says.
+    let mut spec = spec_with_target(&target("QUCITY", 3, 3, 9));
+    spec.wings[0].count = 2;
+    let mut world = World::new(&spec, &surface_resources(), Seating::SinglePlayer).unwrap();
+    let id = wingman(&world);
+    let target = *hostile(&world, 0x3f00).first().unwrap();
+    bomb_the_wingman(&mut world, true);
+    // A Pave Spike-like pod: 10 nm of reach and the hemisphere below.
+    {
+        let config = world
+            .ai_wings
+            .as_mut()
+            .unwrap()
+            .configs
+            .get_mut(&id)
+            .unwrap();
+        let mut seeker = config.stations[0].weapon.seeker;
+        seeker.signature = 1;
+        seeker.zones[0].maximum_range = 60_760;
+        config.sight = SightSensor::from_record(&seeker, 425);
+    }
+    let report = give(&mut world, O::LaseMyTarget, Some(target));
+    assert_eq!(report.reached, [id]);
+    fn actor(world: &World) -> &tore_sim::ai::mission::AiActor {
+        let id = wingman(world);
+        world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actor(id)
+            .unwrap()
+    }
+    let mut lased = false;
+    for _ in 0..200 {
+        step_world(&mut world, 240);
+        let a = actor(&world);
+        assert_eq!(a.lase_order(), Some(target), "the order stands");
+        assert_eq!(a.strike().map(|s| s.phase()), Some(Phase::Lase));
+        let cockpit = world.combat.state.strike_cockpit(id).unwrap();
+        assert_eq!(cockpit.laser.manual, Some(true), "the laser on by hand");
+        assert_eq!(cockpit.sight.and_then(|s| s.target()), Some(target));
+        if world
+            .combat
+            .state
+            .laser_spots()
+            .iter()
+            .any(|spot| spot.owner == id)
+        {
+            lased = true;
+            break;
+        }
+    }
+    assert!(lased, "the spot came up");
+    assert_eq!(a_release_count(&world, id), 0, "it lases, it does not bomb");
+    // Disengage ends the duty with the order.
+    give(&mut world, O::Disengage, None);
+    let a = actor(&world);
+    assert_eq!(a.lase_order(), None);
+    assert_eq!(a.lasing(), None);
+    assert!(a.ground_picture().is_none());
+    // Ordered again, then the duty ends on its own (the target dies here; a
+    // threat ends it the same way): the order goes with it, and the
+    // wingman, a CAP one, drops the target and rejoins.
+    give(&mut world, O::LaseMyTarget, Some(target));
+    assert_eq!(
+        world.ai_wings.as_ref().unwrap().lasing_for(id),
+        Some(target)
+    );
+    step_world(&mut world, 30);
+    world
+        .combat
+        .state
+        .targets
+        .iter_mut()
+        .find(|t| t.id == target)
+        .unwrap()
+        .hp = 0;
+    step_world(&mut world, 60);
+    let a = actor(&world);
+    assert_eq!(a.lase_order(), None, "the order ends with its duty");
+    assert_eq!(a.strike_order(), None);
+    assert!(a.ground_picture().is_none());
+    assert!(a.alive());
+}
+
+/// Rounds the wingman has released from its stations.
+fn a_release_count(world: &World, id: u32) -> usize {
+    world
+        .combat
+        .state
+        .projectiles
+        .iter()
+        .filter(|p| p.owner == id)
+        .count()
 }
 
 #[test]
