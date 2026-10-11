@@ -204,6 +204,7 @@ impl Strike {
             pitch_deg: hold_pitch_deg(own.position[1], altitude),
             speed: SpeedRequest::Corner,
             afterburner: distance < radius,
+            bank_deg: None,
         })
     }
 
@@ -225,6 +226,7 @@ impl Strike {
             ),
             speed: SpeedRequest::Corner,
             afterburner: false,
+            bank_deg: None,
         })
     }
 

@@ -113,7 +113,7 @@ pub(crate) struct Options {
     ai: ai::Config,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--render OUT.png --render-at S] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -185,6 +185,7 @@ fn options() -> AppResult<Options> {
             "--verify-render" => o.verify = true,
             "--pilot" => o.ai.pilot(&next()?)?,
             "--profile" => o.ai.set_profile(&next()?)?,
+            "--render-at" => o.ai.render_at = Some(next()?.parse()?),
             "--handback" => o.ai.handback = Some(next()?.parse()?),
             "--mode" => o.ai.set_mode(&next()?)?,
             "--trigger" => o.ai.trigger = true,
@@ -203,10 +204,10 @@ fn options() -> AppResult<Options> {
     if o.attack.is_empty() && !o.ai.active {
         return Err(USAGE.into());
     }
-    o.ai.check(
-        o.skill,
-        o.record.is_some() || o.verify || o.render.is_some(),
-    )?;
+    o.ai.check(o.skill, o.record.is_some() || o.verify)?;
+    if o.ai.active && o.render.is_some() != o.ai.render_at.is_some() {
+        return Err("with --pilot ai, --render OUT.png and --render-at S go together".into());
+    }
     if o.verify && o.record.is_none() {
         return Err("--verify-render checks a --record run".into());
     }

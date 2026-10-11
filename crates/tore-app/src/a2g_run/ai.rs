@@ -10,9 +10,10 @@
 //!
 //! ```text
 //! --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N]
-//!     [--station N] [--count N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level]
+//!     [--station N] [--count N] [--skill 0..3]
+//!     [--profile straight|popup|fasthigh|dive|level|orbit|standoff]
 //!     [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]]
-//!     [--order KIND [--order-at S]] [--quick-wing]
+//!     [--order KIND [--order-at S]] [--quick-wing] [--render OUT.png --render-at S]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S]
 //! ```
@@ -63,6 +64,9 @@
 //!   the ground, speed, range to the target, rounds left).
 //! - `IMPACT miss_ft=F`: a released round ended, and how far (horizontal) from
 //!   the target it ended.
+//! - `BURST`: an AC-130 burst began (its gun rounds are not RELEASE lines):
+//!   its number, its walked-in aim offset, and the orbit's radius, height,
+//!   slant range and bank (slice ST-F).
 //! - `KILL`: a ground object the striker destroyed.
 //! - `EGRESS`: after a release the striker is opening from the target (one
 //!   nautical mile past its closest approach).
@@ -117,15 +121,21 @@ pub(crate) enum Profile {
     FastHigh,
     Dive,
     Level,
+    /// The gunship's orbit (slice ST-F).
+    Orbit,
+    /// A helicopter's stand-off attack (slice ST-F).
+    StandOff,
 }
 
 impl Profile {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Straight,
         Self::Popup,
         Self::FastHigh,
         Self::Dive,
         Self::Level,
+        Self::Orbit,
+        Self::StandOff,
     ];
 
     pub(crate) fn label(self) -> &'static str {
@@ -135,6 +145,8 @@ impl Profile {
             Self::FastHigh => "fasthigh",
             Self::Dive => "dive",
             Self::Level => "level",
+            Self::Orbit => "orbit",
+            Self::StandOff => "standoff",
         }
     }
 
@@ -145,6 +157,8 @@ impl Profile {
             Self::FastHigh => StrikePass::FastHigh,
             Self::Dive => StrikePass::Dive,
             Self::Level => StrikePass::Level,
+            Self::Orbit => StrikePass::Orbit,
+            Self::StandOff => StrikePass::StandOff,
         }
     }
 
@@ -155,6 +169,8 @@ impl Profile {
             StrikePass::FastHigh => Self::FastHigh,
             StrikePass::Dive => Self::Dive,
             StrikePass::Level => Self::Level,
+            StrikePass::Orbit => Self::Orbit,
+            StrikePass::StandOff => Self::StandOff,
         }
     }
 
@@ -163,7 +179,9 @@ impl Profile {
             .into_iter()
             .find(|p| p.label() == text.to_ascii_lowercase())
             .ok_or_else(|| {
-                format!("unknown --profile {text}; use straight, popup, fasthigh, dive or level")
+                format!(
+                    "unknown --profile {text}; use straight, popup, fasthigh, dive, level, orbit or standoff"
+                )
                     .into()
             })
     }
@@ -206,6 +224,9 @@ pub(crate) struct Config {
     pub order_at: f64,
     /// `--quick-wing`.
     pub quick_wing: bool,
+    /// `--render-at S` (with `--render OUT.png`): one offscreen picture of
+    /// the striker and its target `S` seconds into the run (slice ST-F).
+    pub render_at: Option<f64>,
 }
 
 impl Config {
@@ -286,7 +307,7 @@ impl Config {
             );
         }
         if records {
-            return Err("--record and --render are not built for --pilot ai (slice ST-RA)".into());
+            return Err("--record is not built for --pilot ai (slice ST-RA)".into());
         }
         if let Some(skill) = skill
             && !(0..=3).contains(&skill)
@@ -376,6 +397,18 @@ mod hooks {
         }
     }
 
+    /// Slice ST-F: the gunship's burst while its trigger is held: the burst
+    /// number at the target, the walked-in aim offset's distance from the
+    /// target, feet, and whether the draw lies inside the circle.
+    pub(super) fn burst(actor: &AiActor, tick: u64) -> Option<(u32, f64, bool)> {
+        let fire = actor.strike()?.gunship_fire(tick)?;
+        Some((
+            fire.burst,
+            fire.aim_ft[0].hypot(fire.aim_ft[1]),
+            fire.inside,
+        ))
+    }
+
     /// Slice ST-O: a wing order is the seat's command, as in the game: the
     /// world reads the ground target from the seat's designation and sight,
     /// and the wingman takes or refuses it.
@@ -462,6 +495,10 @@ struct Watch {
     lost: Option<f64>,
     activity: Option<Activity>,
     profile: Option<Profile>,
+    /// The gunship's gun rounds and the last burst reported (slice ST-F).
+    gun_rounds: usize,
+    burst: Option<u32>,
+    bursts: usize,
 }
 
 impl Watch {
@@ -481,6 +518,9 @@ impl Watch {
             lost: None,
             activity: None,
             profile: None,
+            gun_rounds: 0,
+            burst: None,
+            bursts: 0,
         }
     }
 }
@@ -535,6 +575,46 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     {
         w.profile = Some(profile);
         println!("ai-strike: PROFILE t={t:.3} name={}", profile.label());
+    }
+    // The gunship's gun rounds and bursts (slice ST-F): each burst once,
+    // with the orbit's geometry as it starts.
+    let state = &scene.world.combat.state;
+    let guns: Vec<u32> = state
+        .projectiles
+        .iter()
+        .filter(|p| p.owner == w.plane.0 && !w.seen.contains(&p.id))
+        .filter(|p| p.gun_round.is_some() || p.weapon.as_ref().is_some_and(live::is_gun))
+        .map(|p| p.id)
+        .collect();
+    w.gun_rounds += guns.len();
+    w.seen.extend(guns);
+    let burst = scene
+        .world
+        .ai_wings
+        .as_ref()
+        .and_then(|wings| {
+            wings
+                .mission()
+                .actor(w.plane.0)
+                .map(|a| (wings.mission().tick(), a))
+        })
+        .and_then(|(tick, actor)| hooks::burst(actor, tick).map(|b| (b, actor.flight())));
+    if let Some(((n, aim, inside), flight)) = burst
+        && w.burst != Some(n)
+        && let Some(tp) = target_at
+    {
+        w.burst = Some(n);
+        w.bursts += 1;
+        let radius = horizontal(flight.position, tp);
+        let height = flight.position[1] - tp[1];
+        println!(
+            "ai-strike: BURST t={t:.3} n={n} aim_ft={aim:.0} inside={} radius_ft={radius:.0} height_ft={height:.0} slant_ft={:.0} bank_deg={:.1} speed_kt={:.0} rounds={}",
+            if inside { "yes" } else { "no" },
+            radius.hypot(height),
+            flight.bank.to_degrees(),
+            flight.speed / FPS_PER_KNOT,
+            w.gun_rounds,
+        );
     }
     let state = &scene.world.combat.state;
     // Releases: rounds of the striker not seen before.
@@ -815,11 +895,17 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             .ok_or("no ownship")?;
         let s = &own.configuration().stations[station];
         println!(
-            "ai-strike: setup aircraft={:?} load={} station={station} count={} rounds={} target={target:#010x} target_at={:.0},{:.0},{:.0} hp={hp} skill={} profile={} handback={} order={} mode={}",
+            "ai-strike: setup aircraft={:?} load={} station={station} count={} rounds={} target={target:#010x} name={} target_at={:.0},{:.0},{:.0} hp={hp} skill={} profile={} handback={} order={} mode={}",
             o.aircraft,
             s.weapon.source,
             s.count,
             own.rounds(station),
+            scene
+                .world
+                .combat
+                .ground_name(target)
+                .unwrap_or("unnamed")
+                .replace(' ', "_"),
             target_at[0],
             target_at[1],
             target_at[2],
@@ -1073,6 +1159,12 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         }
         observe(&mut scene, &mut watch);
         let t = scene.seconds();
+        if let (Some(at), Some(path)) = (cfg.render_at, &o.render)
+            && t >= at
+            && t - 1. / 120. < at
+        {
+            render(&scene, resources, striker, path)?;
+        }
         // Done when the striker is gone or the last round has landed and the
         // striker has had time to leave.
         let over = [
@@ -1089,7 +1181,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let t = scene.seconds();
     let hp_end = scene.target_row().map(|r| r.hp);
     println!(
-        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={}",
+        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={} gun_rounds={} bursts={}",
         t - started,
         watch.profile.map_or("none", Profile::label),
         watch.releases,
@@ -1110,11 +1202,112 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                 Rounds::Finite(n) => n.to_string(),
                 Rounds::Unlimited => "unlimited".to_owned(),
             }),
+        watch.gun_rounds,
+        watch.bursts,
     );
     if watch.releases == 0 {
         println!("ai-strike: no release");
     }
     println!("ai-strike: done");
+    Ok(())
+}
+
+/// One offscreen picture (slice ST-F): the striker from just outside it,
+/// looking past it down at its target, with the ground units, the rounds in flight (tracers)
+/// and the effects of this tick. A development aid, as `--surface-scene`.
+fn render(
+    scene: &Scene,
+    resources: &BTreeMap<String, Vec<u8>>,
+    plane: PlaneId,
+    path: &std::path::Path,
+) -> AppResult<()> {
+    let world = &scene.world;
+    let actor = scene
+        .actor(plane)
+        .ok_or("the AI does not fly the striker")?;
+    let state = actor.flight().clone();
+    let target = scene.target_row().map_or(state.position, |r| r.position);
+    let airframe = crate::aircraft::Airframe::load(resources, actor.identity().aircraft)?;
+    let mut scenery = crate::scenery::Scenery::build(resources, &world.terrain)?;
+    let art = crate::render_snapshot::CombatArt::load(resources)?;
+    let mut gpu = pollster::block_on(crate::reel::Gpu::new(&scenery))?;
+    // The camera: on the line from the target out through the striker,
+    // 450 ft beyond it and 150 ft behind it on its track, looking at the
+    // target, so the gunship stands in front of what it shoots at.
+    let (sin, cos) = state.yaw.sin_cos();
+    let out: Vector = std::array::from_fn(|i| state.position[i] - target[i]);
+    let length = out.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.);
+    let mut camera = crate::camera::Camera::new();
+    camera.position = [
+        state.position[0] + out[0] / length * 450. - sin * 150.,
+        state.position[1] + out[1] / length * 450.,
+        state.position[2] + out[2] / length * 450. - cos * 150.,
+    ];
+    let d: Vector = std::array::from_fn(|i| target[i] - camera.position[i]);
+    camera.yaw = d[0].atan2(d[2]) as f32;
+    camera.pitch = d[1].atan2(d[0].hypot(d[2])) as f32;
+    camera.zoom = (30_f64.to_radians().tan() / 22_f64.to_radians().tan()) as f32;
+    camera.near_clip = 2.;
+    scenery.resolve_palette(&world.terrain, camera.position[1]);
+    scenery.set_origin(camera.position);
+    let snapshot = world.combat.render_snapshot().clone();
+    let standing = crate::render_snapshot::standing(&world.combat.state.targets);
+    let geometry = std::sync::Arc::clone(
+        scenery.static_geometry(&world.combat.state.targets, &world.combat.surface),
+    );
+    gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
+    gpu.sim.surface_units(
+        &gpu.device,
+        &gpu.queue,
+        &scenery.surface_vertices(&snapshot, &|id| standing.contains(&id), &camera),
+    );
+    let contrails = tore_sim::combat::smoke::Smoke::default();
+    gpu.sim.smoke(
+        &gpu.device,
+        &gpu.queue,
+        &art.smoke,
+        [&world.combat.state.smoke, &contrails],
+        &world.combat.state.devices,
+    );
+    gpu.sim.effects(
+        &gpu.device,
+        &gpu.queue,
+        &art.effects,
+        &snapshot.effects,
+        &snapshot.marks,
+    );
+    gpu.sim.combat(
+        &gpu.device,
+        &gpu.queue,
+        &crate::render_snapshot::combat_geometry(
+            &snapshot,
+            &art,
+            &airframe,
+            &state,
+            &camera,
+            &world.terrain,
+            &scenery,
+        ),
+    );
+    let vertices = airframe.vertices(&state, &camera, &world.terrain, &scenery);
+    gpu.sim
+        .aircraft(&gpu.device, &gpu.queue, &airframe, &vertices);
+    let pixels = gpu.pixels(&camera, &world.terrain, &scenery)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(
+        path,
+        crate::replay::png::encode_rgba(crate::reel::WIDTH, crate::reel::HEIGHT, &pixels)?,
+    )?;
+    println!(
+        "ai-strike: RENDER t={:.3} path={} range_ft={:.0} height_ft={:.0} bank_deg={:.1}",
+        scene.seconds(),
+        path.display(),
+        horizontal(state.position, target),
+        state.position[1] - target[1],
+        state.bank.to_degrees(),
+    );
     Ok(())
 }
 

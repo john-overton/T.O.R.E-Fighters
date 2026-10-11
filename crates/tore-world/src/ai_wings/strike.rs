@@ -50,7 +50,11 @@ pub(super) fn step(
         let Some(actor) = wings.mission.actor(id) else {
             continue;
         };
-        let stores = describe(config, actor.stations());
+        let mut stores = describe(config, actor.stations());
+        // The gunship's linked guns are its strike stores (slice ST-F).
+        if config.strike_class == tore_sim::models::strike_class::StrikeClass::Gunship {
+            stores.extend(super::gunship::gun_stores(config, actor.stations()));
+        }
         let launcher = crate::combat::launcher(actor.flight());
         let selection = actor.strike().and_then(strike::Strike::selection);
         let side = state
@@ -92,16 +96,23 @@ pub(super) fn step(
             let row = state.targets.iter().find(|t| t.id == sel.target)?;
             let (position, velocity, alive) = (row.position, row.velocity, row.hp > 0);
             let emitting = row.radar_emitting;
-            // A laser weapon of its own in flight counts too (slice ST-K: a
-            // takeover holds its target in the gimbal until impact).
-            let guided_in_flight = state
-                .projectiles
-                .iter()
-                .any(|p| p.owner == id && p.target == Some(sel.target) && p.guidance.is_some())
-                || state
-                    .guided_flights()
-                    .any(|(_, f)| f.owner == id && f.kind == missiles::Guidance::Laser);
-            let (impact, seconds, warning, due) = if sel.kind.seeker() {
+            // A seeker's flight, or a command-guided round (the AT-2, which
+            // flies its own guidance with no projectile target) from the
+            // selected station (slice ST-F), or a laser weapon of its own in
+            // flight (slice ST-K: a takeover holds its target in the gimbal
+            // until impact).
+            let guided_in_flight = state.projectiles.iter().any(|p| {
+                p.owner == id
+                    && ((p.target == Some(sel.target) && p.guidance.is_some())
+                        || (sel.kind == StoreKind::Command && p.station == station))
+            }) || state
+                .guided_flights()
+                .any(|(_, f)| f.owner == id && f.kind == missiles::Guidance::Laser);
+            let (impact, seconds, warning, due) = if sel.kind == StoreKind::Gun {
+                // The gunship's guns are trained and fired by their own
+                // bridge (`super::gunship`).
+                (None, None, false, false)
+            } else if sel.kind.seeker() {
                 let due = seeker_due(
                     sel.kind,
                     w,
@@ -245,8 +256,9 @@ fn seeker_due(
 /// ST-O).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Capability {
-    /// It flies strikes (its bombing class does) and has a store that can
-    /// attack a ground target: a refusal "no usable surface store" otherwise.
+    /// It has a store that can attack a ground target (every bombing class
+    /// strikes since slice ST-F): a refusal "no usable surface store"
+    /// otherwise.
     pub strike: bool,
     /// It carries a laser designator of its own.
     pub designator: bool,
@@ -260,10 +272,14 @@ impl AiWings {
             return Capability::default();
         };
         let designator = config.sight_sensor().is_some_and(|s| s.laser);
-        let stores = describe(config, actor.stations());
+        let mut stores = describe(config, actor.stations());
+        // Every bombing class strikes (slice ST-F); the gunship with its
+        // linked guns.
+        if config.strike_class == tore_sim::models::strike_class::StrikeClass::Gunship {
+            stores.extend(super::gunship::gun_stores(config, actor.stations()));
+        }
         Capability {
-            strike: strike::Strike::flies(config.strike_class)
-                && strike::has_usable_store(&stores, designator),
+            strike: strike::has_usable_store(&stores, designator, config.strike_class),
             designator,
         }
     }

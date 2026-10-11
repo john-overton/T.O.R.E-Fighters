@@ -28,6 +28,7 @@ pub use chatter::{Chatter, Contact, ContactView, FuelLevel, Member};
 mod engagement;
 pub use engagement::Preset;
 mod ground;
+mod gunship;
 mod orders;
 pub(crate) use orders::{GroundAim, GroundFact, OrderReport, order_label};
 pub mod outcome;
@@ -1983,6 +1984,7 @@ impl AiWings {
         let objects = humans.iter().map(|h| Self::human_object(h)).collect();
         ground::step(self, state, world, &ground);
         strike::step(self, state, &ground);
+        gunship::step(self, state, &ground);
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
         let output = self.advance_on_surface(objects, &mut state.targets, &ground, &|x, z| {

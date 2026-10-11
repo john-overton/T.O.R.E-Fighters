@@ -15,8 +15,9 @@ available speed](#perceived-threat-and-available-speed)) is built (ST-P), the
 strike cockpit and shared release (ST-C), and the strike tactics for
 fighters, attack jets and heavies (ST-T: target, store and pass choice, the
 skill circle, release, exit, re-attack, defence and home; [How the AI flies a
-pass](#how-the-ai-flies-a-pass)). Helicopters, the AC-130, AI lasing beyond its
-own designator, orders and takeover are later slices. John asked for AI that attacks the ground and
+pass](#how-the-ai-flies-a-pass)), and the helicopters' and the AC-130's
+families (ST-F: [Helicopters](#helicopters), [AC-130](#ac-130)). AI lasing
+beyond its own designator, orders and takeover are later slices. John asked for AI that attacks the ground and
 authorised the work for this round (answers of 2026-10-11, folded in below). The
 slices that build it are listed in [Source notes](#source-notes).
 
@@ -471,7 +472,7 @@ All fitted (agent, 2026-10-11) unless marked.
 
 | Rule | Value |
 | --- | --- |
-| Who | An AI aircraft with a ground picture (the Strike role or an ordered ground target) of the Fighter, Attack or Heavy class. Helicopters and the gunship keep their existing behaviour until their slice |
+| Who | An AI aircraft with a ground picture (the Strike role or an ordered ground target) of the Fighter, Attack or Heavy class. Helicopters and the gunship fly their own families ([Helicopters](#helicopters), [AC-130](#ac-130)) |
 | Choice point | 10 nm from the target, or at once inside it; again at each turn back |
 | Target | The ordered one; else for an anti-radiation carrier the objective's SAM radars, then AAA radars, then other radars, nearest first, two attackers at most (SEAD); else the selector's (nearest briefed, then seen opportunity targets) |
 | Store | Anti-radiation at a radar first; under threat Missiles stand-off first (seeker, radar AGM, JDAM, laser, bombs, rockets); otherwise bombs, JDAM, laser, seeker, radar AGM, rockets. A laser store only with the aircraft's own designator, its laser on by hand while selected (other spots are the lasing slice's). A heavy carries no rockets into a pass |
@@ -515,6 +516,29 @@ the AT-2 use the player's release and guided rules. Under threat Missiles a
 helicopter stays at the weapon's release range rather than closing to 1,500
 ft (fitted).
 
+Built in slice ST-F (`tore_sim::ai::strike::helicopter`). Every choice is a
+fixed function of the store and the perceived threat; nothing is drawn but the
+rockets' aim offset (the [skill circle](#skill-and-release-precision)).
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| Store | The AT-2 (or any guided or seeker store) first, then rockets; a laser store only with its own designator. Guns are not used against the ground | fitted (agent) |
+| Pass | Under threat Missiles with a guided store: the stand-off attack. Otherwise the pop-up | fitted (agent), spec rule above |
+| Pop-up | Toward a point 1,500 ft above the target until 10,000 ft out, a pull 30 degrees over the line of sight for 6 s, then the nose on the target until 1,500 ft or the target is behind. The pull does not bleed speed: retail's operand slip asks for minimum speed there, T.O.R.E does not copy it | retail shape; no bleed opinionated (John, 2026-10-11, "maintain proper speed for defense and quick exfil") |
+| Speed | Every leg asks for the helicopter's maximum speed. Asked for corner speed, the AI's input-only adapter slows a helicopter until it sinks (a Mi-24 on the pop-up went from 120 to 85 kt and into the ground), and the adapter holds a helicopter at about 85 to 140 kt on maximum | opinionated (John) for keeping speed; the value fitted (agent) to what the adapter can fly |
+| Stand-off attack | Masked: toward the target, down toward 200 ft above the ground, to 60% of the weapon's zone-1 range (about where the guided T bar stands, 40% of the reach in from its far edge; 10,800 ft for the AT-2). Unmask: climb 500 ft, nose on the target, for at most 10 s while the shot comes up. Fire, hold the line, then mask again turning away from the target and run out to the weapon's range plus 6,000 ft before turning back | fitted (agent) |
+| No hover | The unmask is flown at speed, not from a hover: the AI's adapter cannot hold a helicopter in a hover (asked for its slowest speed it noses over into the ground), and a moving helicopter keeps its speed for defence | fitted (agent), a limit of the adapter |
+| The AT-2 | Leaves when the shared release test passes (the target inside the launcher's 45 degree cone with a clear line, inside the reach). The helicopter then holds its nose on the target, level, until the missile has hit or is gone (the [launcher sight rule](air-to-ground.md): command guidance needs the target in the cone every tick), and only then exits | spec-derived |
+| Rockets | The cue is flown onto the pass's drawn aim point: heading at the aim, flight path at the line to the aim plus three times the angle between the aim and the cue, no steeper than 20 degrees down. The first rocket leaves when the cue is within 25% of the circle of the aim (a fighter's gate is 5%: a helicopter's cue moves slowly and its adapter holds it only to about this), then up to eight at the record's cadence while the cue stays inside the circle | fitted (agent); the circle opinionated (John) |
+| Run floor | A pop-up's final ends 500 ft above the ground whatever the cue says (the adapter cannot pull a helicopter out of a steep dive near the ground) | fitted (agent) |
+| Exit | Retail's: 5 degrees up at maximum speed on the exit heading, levelling at the pass's height, to max(20,000 ft, 2R); then turn back and choose again | retail |
+| Defence, safe, home | The fighters' (above) | spec-derived |
+
+Known limit: a defence hands the helicopter to the existing B47 reactions,
+which fly fighter breaks at corner speed; a helicopter flying them sinks into
+the ground (a Mi-24 under the column's SAMs did, in the driver). Helicopter
+defence is open (the retail helicopter break, B20, is not built).
+
 ## AC-130
 
 Retail circles a target on a left pylon turn (`circle 0 4000 2000 35`, at a
@@ -545,7 +569,33 @@ from the guns:
 | Retail orbit, for comparison | 4,000 ft radius, 2,000 ft high, slant 4,472 ft (34% of reach), fixed. T.O.R.E departs on purpose: John asked for the orbit from gun reach, which puts the aircraft farther out and higher | retail, opinionated (John, 2026-10-11) for the departure |
 | Speed | Halfway between corner and maximum | retail |
 | Firing | Gunship sight on the target; guns fire inside their arcs and the 13,000 ft range, as the player's | spec-derived |
-| Threat | With a known SAM covering the target it does not ingress and holds off; under AAA it continues | opinionated (agent); confirm with John |
+| Threat | With a known SAM covering the target it does not ingress and holds off; under AAA it continues | opinionated (agent); confirmed by John (2026-10-11) |
+
+How it is built (slice ST-F, `tore_sim::ai::strike::gunship`, the bridge
+`tore_world::ai_wings::gunship`, the gun train in
+`tore_sim::combat::live::gunship_fire`). All fitted (agent, 2026-10-11) unless
+marked:
+
+| Rule | Value |
+| --- | --- |
+| Planning bank | The orbit is planned at the maximum bank less 5 degrees (25 for the AC-130), leaving the bank law room to correct; the radius grows past `r` when the turn at that bank needs it |
+| Speed cap | The radius grows only until the slant range is 90% of the reach (11,700 ft, a 9,584 ft radius); beyond that the speed comes down from the retail midpoint until the turn fits, never below corner. Retail's midpoint at the AC-130's limits in the driver is about 191 kt, which fits the 8,520 ft radius at about 21 degrees of bank |
+| Flying the orbit | Retail's circle law for the heading (the bearing to the target plus 90 degrees, less 45 degrees per radius of distance error, held to 45 to 135), flown with an explicit bank: the heading error closed in 4 s plus the orbit's own turn rate, blended in by retail's on-orbit score, never past the maximum bank. Height held at the orbit's, at most 10 degrees of climb or dive. The orbit follows a moving target |
+| On the orbit | Within 25% of the radius of it and within 30 degrees of the circle law's heading; firing only there |
+| Bursts | A burst every 2 s on the orbit. The 25 mm fires in the first second of each (30 rounds); the 40 and 105 mm fire every round they are due at their own rates, 100 and 10 a minute |
+| Skill for guns | Each burst aims at the target plus an offset drawn like a bomb pass's ([skill circle](#skill-and-release-precision): the same seeded draw with the burst's number, 90% inside `R`, 10% in the ring to `2R`), which the gunner walks in: the offset is halved for every burst already fired at that target, down to a sixteenth. An Ace's first burst lands within 328 ft and its fifth within 21 ft; a Novice's within 1,066 ft and 67 ft. Opinionated (agent) for applying John's circle to gun bursts and for the walk-in, which stands for a gunner correcting onto his own impacts |
+| Aim | Each gun is trained on the burst's aim with its own ballistics, as the player's gunsight trains it: led by the round's time of flight and raised by its drop; then the train is walked until the gunsight's pipper (the march of the trajectory the simulation flies) sits on the aim, as a gunner puts the pipper on the target (the lead-and-drop solution alone left the rounds 50 to 65 ft off at 10,400 ft). This replaces retail's AI aim, 20 ft above the target with no drop (about 17 ft low at 4,470 ft). A round fired along the train lands within 20 ft of its aim plus the gun's own dispersion cone, the same cone a player's rounds have (unit test, all three guns from a 330 ft/s orbit) |
+| Mount arcs | A gun fires only when its train lies inside its arcs (25 mm 60/60, 40 mm 45/45, 105 mm 25 in heading and 45 in elevation, about abeam left), the aim inside its zone-1 range, its own airframe clear and the terrain line open. The AI trains its guns at once rather than slewing at 30 degrees a second: on the orbit the target moves through the arcs far slower than that |
+| Hold-off | While a known hostile SAM covers the target, it circles the target outside that SAM's reach (the SAM's distance from the target plus its reach plus 2 nm) and comes in once no SAM covers it |
+| Target | The ordered target, else the selector's; when it dies, the next; with none, or with no gun rounds left, home |
+
+Measured in the driver (`ai-strike-ac130`, the moving T-90 of `~QUCOL`, 240 s
+from 3 nm at 6,000 ft): on the orbit 30 s after the start, at about 191 kt,
+5,965 ft over the target, 8,800 to 10,600 ft from it horizontally (the target
+moves), 21 to 24 degrees of bank; the tank (200 hit points) killed at 123 to
+165 s at skills 0, 2 and 3. The 25 mm does little to a tank (3 damage a round);
+the 105 mm's 150 does most of the work.
+
 
 ## Lasing
 
@@ -590,7 +640,7 @@ two to an object, designator carriers lase).
 | Alt+G | **Lase my target.** New; see [Lasing](#lasing). A wingman with a designator holds the lead's ground target as its lase order (slice ST-L flies the orbit). Taken: "Lasing". No designator aboard: "No designator". No ground target designated or in the sight: refused at the lead with "No target" | opinionated (John, 2026-10-11); key and lines opinionated (agent) |
 | Alt+W | Engage every target of my target's class, as retail's key does ("Attack SAMs", "Attack tanks"). The class is the designated ground object's (SAM, AAA, ship, tank, vehicle, structure), taken from the designation, else the sight pin; the targets are every hostile standing object of that class within 15 nm of it, the nearest 32, and each wingman takes the nearest with two to an object. Attack SAMs gives a HARM carrier its SEAD order (the radars first). The lead's call is "Attack SAMs". A designated aircraft, or no designation, is "Attack bandits", attack on contact (what the key did until 2026-10-11) | retail (key and meaning), opinionated (John, 2026-10-11) for the ground classes; scan and cap fitted (agent) |
 | (no key) | Attack on contact keeps no key of its own: it is Alt+W with no ground target designated and Alt+F with nothing in the sight, both retail's meanings | opinionated (agent): recommended by this slice, John may want it back on a key |
-| Others | Unchanged. A wingman with no usable surface store (or a laser store with no designator of its own) refuses with the reason shown ("no usable surface store") and says "Winchester" (text only, no recording). A wingman that can only fly air missions (helicopters and the gunship until slice ST-F) refuses the same way | spec-derived, line opinionated (agent) |
+| Others | Unchanged. A wingman with no usable surface store (or a laser store with no designator of its own) refuses with the reason shown ("no usable surface store") and says "Winchester" (text only, no recording). Every bombing class takes ground orders since slice ST-F: a helicopter's AT-2 and the gunship's linked guns count as usable stores | spec-derived, line opinionated (agent) |
 
 A wingman that took a ground order keeps it until its object (or every object of the class) is gone, then ends it and rejoins the formation; a Strike-role wing goes home instead. A later order that is not a setting (formation, spacing, stacking and wing control keep it) replaces it, and Disengage ends it. Every order is a rebindable action in the controls screen (keyboard, joystick and gamepad); the new ones are `key:Alt-f`, `key:Alt-w` (its action is unchanged, its meaning is retail's) and `key:Alt-g`.
 
@@ -636,7 +686,7 @@ rules above are met, all agent decisions (2026-10-11) unless marked:
 
 | Rule | Value |
 | --- | --- |
-| When it starts | At the give-back, when the cockpit the human left holds a ground target, the aircraft carries a surface store with rounds (not the AT-2), and it is a fighter, attack jet or heavy (helicopters and the gunship wait for their slice) |
+| When it starts | At the give-back, when the cockpit the human left holds a ground target, the aircraft carries a surface store with rounds (not the AT-2), and it is a fighter, attack jet or heavy (a helicopter's or the gunship's attack is not continued: their families do not fly the takeover rules yet; agent decision at the integration) |
 | Target | The designated object when it is a standing ground object of another side; else, with the sight pinned, the standing hostile ground object nearest the pin within 1,000 ft (fitted). The AI gets an order onto it and the Strike role, so a dead target is followed by the mission's next briefed one ([What the AI knows](#what-the-ai-knows)) |
 | Store | The kept station while it has rounds (a laser store only with the aircraft's own designator, decision 9), then the AI's own choice |
 | Pass | Kept LVL: a level run with a bomb, a laser bomb or a JDAM. Kept CCIP, rockets and seekers: the [table](#pass-choice) |
@@ -691,7 +741,10 @@ strike order or a takeover of a striking plane.
 | Striker defends against | an aircraft that fired, locked, or is inside 5 nm facing it | fitted |
 | Safe | no warning in 10 s, no SAM covering the target, no fighter inside 15 nm | fitted |
 | Bombing class | helicopter by lift, gunship by gunsight, Heavy at 150,000 lb or G limit 3 or less, Attack at 700 kt or less, else Fighter | opinionated (John, 2026-10-11) |
-| AC-130 orbit | 10,400 ft slant, 35 degrees, 5,965 ft high, 8,520 ft radius, bank at most the aircraft's `maxBank` (radius grows instead) | fitted; bank cap opinionated (agent) |
+| AC-130 orbit | 10,400 ft slant, 35 degrees, 5,965 ft high, 8,520 ft radius, bank at most the aircraft's `maxBank` (radius grows instead, planned at `maxBank` less 5, up to a 90% slant, then the speed comes down) | fitted; bank cap opinionated (agent) |
+| AC-130 bursts | every 2 s on the orbit; the 25 mm for 1 s of it, the 40 and 105 mm at their rates; aim drawn in the skill circle, halved per burst down to a sixteenth | fitted; circle opinionated (John), its use for guns opinionated (agent) |
+| Helicopter stand-off | masked at 200 ft AGL to 60% of the zone-1 range, unmask 500 ft for up to 10 s | fitted |
+| Helicopter rocket gate | 25% of `R` | fitted |
 | AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |
 | Lase orbit | radius max(3 nm, 1.2 turn radii) | fitted |
 | Ground picture | rebuilt every 6 s, contacts followed every 0.25 s | retail |
@@ -702,7 +755,8 @@ strike order or a takeover of a striking plane.
 
 | Unknown | Fallback | Next step |
 | --- | --- | --- |
-| Whether the AC-130's rounds hit from the orbit (aim 20 ft above the target, no drop; hit test `_PROJHitChance`) | The player's gun ballistics | Test in the AC-130 slice |
+| How retail's AC-130 rounds hit from its orbit (aim 20 ft above the target, no drop; hit test `_PROJHitChance`) | T.O.R.E aims with the player's gun ballistics instead (ST-F): its rounds land on their aim | Only if John wants retail's aim back |
+| A helicopter's defence against SAMs and guns (retail breaks +/-90 degrees, B20) | The fighters' B47 reactions, which a helicopter cannot fly | A helicopter defence slice |
 | How retail's Quick Mission strike wings reach the target area (placement) | Strike wings fly to the objective (Who strikes) | Read the wing placement code if John wants retail parity |
 | The wing message sent when an order deadline passes (20 s) | None | Low priority |
 | Retail's choice of jink side and heading | Seeded channel or a fixed side | None |

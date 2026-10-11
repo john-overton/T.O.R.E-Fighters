@@ -340,6 +340,62 @@ class StrikeTests(unittest.TestCase):
         self.assertTrue(any("1 runs" in p for p in s.strike_problems(self.good(), self.wanted() * 2)))
 
 
+# The aim lies inside every skill's circle (Ace 33 ft, John's tighter precision).
+def gunship_run(skill=2, bursts=8, aim=20.0, inside="yes", slant=10400.0, bank=-22.0, killed=True, lost=None):
+    """One AC-130 run of the driver: an orbit with `bursts` bursts."""
+    out = [
+        "ai-strike: setup aircraft=Ac130 load=C_25.JT station=0 count=3000 rounds=3000 target=0x50000001 "
+        f"name=T-90 target_at=999570,7,789571 hp=200 skill={skill} profile=none handback=none order=none mode=none",
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        "ai-strike: start t=0.000 plane=0 range_ft=18228 alt_ft=6000 speed_kt=220",
+        "ai-strike: PROFILE t=0.008 name=orbit",
+    ]
+    for n in range(1, bursts + 1):
+        out.append(
+            f"ai-strike: BURST t={20 + 2 * n:.3f} n={n} aim_ft={aim:.0f} inside={inside} radius_ft=8520 "
+            f"height_ft=5965 slant_ft={slant:.0f} bank_deg={bank:.1f} speed_kt=191 rounds={32 * n}"
+        )
+    if killed:
+        out.append("ai-strike: KILL t=120.000 victim=0x50000001 category=0x0400 target=yes")
+    if lost is not None:
+        out.append(f"ai-strike: LOST t={lost:.3f} reason=destroyed")
+    out.append(
+        f"ai-strike: summary t=240.000 ran_s=240.0 profile=orbit releases=0 impacts=0 kills={1 if killed else 0} "
+        f"egress=no lost={'yes' if lost is not None else 'no'} activity=Attacking target_hp={'0' if killed else '120'}/200 "
+        f"closest_ft=8834 store_rounds_left=900 gun_rounds={32 * bursts} bursts={bursts}"
+    )
+    out.append("ai-strike: no release")
+    out.append("ai-strike: done")
+    return "\n".join(out)
+
+
+class GunshipTests(unittest.TestCase):
+    want = [dict(label="ac130", skill=2)]
+
+    def test_an_honest_orbit_passes(self):
+        self.assertEqual(s.gunship_problems(gunship_run(), self.want), [])
+
+    def test_an_aim_outside_the_circle_or_the_ring_fails(self):
+        r = s.CIRCLE_FT[2]
+        self.assertNotEqual(s.gunship_problems(gunship_run(aim=r + 50), self.want), [])
+        self.assertEqual(s.gunship_problems(gunship_run(aim=r + 50, inside="no"), self.want), [])
+        self.assertNotEqual(s.gunship_problems(gunship_run(aim=2 * r + 50, inside="no"), self.want), [])
+
+    def test_out_of_reach_or_overbanked_once_settled_fails(self):
+        self.assertNotEqual(s.gunship_problems(gunship_run(slant=14000.0), self.want), [])
+        self.assertNotEqual(s.gunship_problems(gunship_run(bank=-35.0), self.want), [])
+        # The first bursts settle the orbit: only the later ones are held to it.
+        self.assertEqual(s.gunship_problems(gunship_run(bursts=s.ORBIT_SETTLE_BURSTS, slant=14000.0), self.want), [])
+
+    def test_no_kill_a_loss_or_no_burst_fails(self):
+        self.assertNotEqual(s.gunship_problems(gunship_run(killed=False), self.want), [])
+        self.assertNotEqual(s.gunship_problems(gunship_run(lost=100.0), self.want), [])
+        self.assertNotEqual(s.gunship_problems(gunship_run(bursts=0), self.want), [])
+
+    def test_the_run_count_must_match(self):
+        self.assertNotEqual(s.gunship_problems(gunship_run(), self.want * 2), [])
+
+
 class ScenarioTests(unittest.TestCase):
     def setUp(self):
         self.scenarios = {sc.name: sc for sc in s.scenarios()}
@@ -349,7 +405,8 @@ class ScenarioTests(unittest.TestCase):
             self.assertEqual(sc.known_failure, "", name)
 
     def test_the_plan_s_scenarios_exist(self):
-        want = {"ai-strike-bombs", "ai-strike-rockets", "ai-strike-maverick", "ai-strike-jdam", "ai-sead-harm", "ai-strike-defended"}
+        want = {"ai-strike-bombs", "ai-strike-rockets", "ai-strike-maverick", "ai-strike-jdam", "ai-sead-harm",
+                "ai-strike-defended", "ai-strike-heli", "ai-strike-ac130"}
         self.assertTrue(want <= set(self.scenarios))
 
     def test_every_scenario_flies_the_ai(self):
@@ -380,6 +437,14 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(self.scenarios["ai-strike-handback"].check(
             handback_run() + "\n" + handback_run(trigger=False, back=6.0)), [])
         self.assertEqual(self.scenarios["ai-strike-order"].check(order_run()), [])
+
+    def test_the_family_scenarios_fly_the_helicopters_and_the_gunship(self):
+        heli = self.scenarios["ai-strike-heli"]
+        aircraft = [a[a.index("--aircraft") + 1] for a in [heli.args] + [st.args for st in heli.then]]
+        self.assertEqual(sorted(set(aircraft)), ["ah64", "mi24"])
+        gun = self.scenarios["ai-strike-ac130"]
+        self.assertTrue(all(a[a.index("--aircraft") + 1] == "ac130" for a in [gun.args] + [st.args for st in gun.then]))
+        self.assertEqual(gun.check("\n".join(gunship_run(k) for k in (0, 2, 3))), [])
 
     def test_the_pending_checks_fail_on_the_driver_as_it_is_today(self):
         today = "\n".join(run(skill, profile) for skill, profile in s.BOMB_RUNS)

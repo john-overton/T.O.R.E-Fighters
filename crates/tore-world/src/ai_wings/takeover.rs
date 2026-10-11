@@ -16,11 +16,12 @@ use super::AiWings;
 use super::strike::kind;
 use tore_sim::ai::engagement::StrikeRole;
 use tore_sim::ai::mission::AiActor;
-use tore_sim::ai::strike::{StoreKind, Strike, Takeover};
+use tore_sim::ai::strike::{StoreKind, Takeover};
 use tore_sim::ai::weapon_service::{Rounds, StationId};
 use tore_sim::combat::live::{self, StrikeTarget};
 use tore_sim::combat::missiles::TargetRole;
 use tore_sim::combat::sight::SightMode;
+use tore_sim::models::strike_class::StrikeClass;
 
 /// The object under a pinned sight is the human's target when it stands
 /// this close to the pin, horizontally (fitted, agent).
@@ -65,7 +66,8 @@ impl AiWings {
     /// aircraft `id`, just given back (see the module notes). Returns the
     /// target it continues, or `None` (changing nothing) when the cockpit
     /// holds no ground target, the aircraft carries no usable surface
-    /// store, or it is a helicopter or the gunship (slice ST-F).
+    /// store, or it is a helicopter or the gunship (their families, slice
+    /// ST-F, do not fly a takeover).
     pub fn continue_attack(
         &mut self,
         id: u32,
@@ -73,7 +75,13 @@ impl AiWings {
         state: &live::State,
     ) -> Option<u32> {
         let config = self.configs.get(&id)?;
-        if !Strike::flies(config.strike_class) {
+        // The helicopter and gunship families (slice ST-F) do not fly the
+        // takeover rules, so their attacks are not continued (integration
+        // decision, ST-INT).
+        if matches!(
+            config.strike_class,
+            StrikeClass::Helicopter | StrikeClass::Gunship
+        ) {
             return None;
         }
         let target = ground_target(&kept.cockpit, kept.side, state)?;

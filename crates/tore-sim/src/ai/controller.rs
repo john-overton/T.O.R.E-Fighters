@@ -1326,10 +1326,17 @@ impl Controller {
             // whatever maneuver was running is dropped.
             self.active = None;
             self.pursuit = None;
+            // The gunship's orbit flies its own bank (slice ST-F); every
+            // other pass leaves the bank to the adapter.
+            let bank =
+                steer.bank_deg.map_or(
+                    Bank::Unconstrained,
+                    |deg| Bank::Explicit(deg.round() as i32),
+                );
             let request = MotionRequest::new(
                 steer.heading_deg.round() as i32,
                 PitchRequest::Explicit(steer.pitch_deg.round() as i32),
-                Bank::Unconstrained,
+                bank,
                 steer.speed,
                 Duration::Timed(1),
             );
@@ -1341,7 +1348,7 @@ impl Controller {
                 heading_deg: steer.heading_deg,
                 flight_path_pitch_deg: steer.pitch_deg.clamp(-90., 90.),
                 speed: steer.speed.resolve(frame.own.limits)?,
-                bank: Bank::Unconstrained,
+                bank,
                 completion: Completion::Deadline(
                     motion::deadline_for(Duration::Timed(1), clock).expect("timed strike"),
                 ),

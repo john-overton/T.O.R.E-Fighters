@@ -23,7 +23,7 @@ impl AiActor {
     /// The host's inputs for the next step (stores, cockpit solution). The
     /// strike state is made here for a striker that has none yet.
     pub fn set_strike_inputs(&mut self, inputs: Inputs) {
-        if !self.strikes() || !Strike::flies(inputs.class) {
+        if !self.strikes() {
             return;
         }
         self.strike
