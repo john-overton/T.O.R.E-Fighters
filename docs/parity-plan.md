@@ -16,8 +16,10 @@ targets (the A-G radar page, the FLIR, the targeting sight, the HARM page), use
 CCIP and level-release bomb sights with John's "T" guide, fire rocket pods, guided
 bombs, laser missiles, JDAMs and the ground missiles, and see the laser and the
 release-range indicator. Every weapon class was flown headless on two carriers
-([acceptance](baselines/air-to-ground.md), [spec](spec/air-to-ground.md)). Open:
-networked clients see the new displays once protocol 23 merges, an AGM-65A
+([acceptance](baselines/air-to-ground.md), [spec](spec/air-to-ground.md)). Online
+under protocol 23 (slice NA) networked clients see the new displays, the lobby
+carries the Pave pods and `net-a2g-loopback` flies a lasing and a buddy bomber.
+Open: an AGM-65A
 range question, and the not-built items in the spec. The AI strike round (AI
 wings attacking ground targets) is next and needs John's go-ahead.
 
@@ -99,7 +101,7 @@ name, with the numbers a player would notice.
 | --- | --- | --- |
 | [Missiles](spec/missiles.md) | Four guidance types, 63-candidate inventory, pitbull, range, motor and guidance lifetime | Implemented for A2A stores and, since the air-to-ground round, for the surface seekers (Mavericks, SLAM, HARM, Harpoon, Exocet, Kickback, AS-7, AS-15) flown from ground designations; surface units fire 13 radar and 6 infrared SAM and ship missile profiles (2026-10-10); [missile validation](baselines/missiles.md), [air-to-ground acceptance](baselines/air-to-ground.md), [HUD cleanup and tone limits](baselines/hud-cleanup.md) |
 | [Aircraft radar](spec/radar.md) | Twelve-aircraft radar stats, automatic range modes, installed visual and ECM records, and look-down evidence | Implemented as one shared component, with the retail air-to-ground, IR-ground and HARM pages added by the air-to-ground round; [component guide](radar.md), [validation](baselines/radar.md) |
-| [Air-to-ground](spec/air-to-ground.md) | Ground designation, the A-G radar and HARM page, the targeting sight and laser, bomb sights and warnings, guided bombs, rocket pods, cluster bombs and the ground missiles: 40 records in twelve classes plus the Pave pods | Implemented and flown headless on two carriers per record (2026-10-11); not built: a JDAM release-at-the-bar mode, the HUD time-to-impact row, Tab gun fire and a viewer laser overlay; clients see the new displays once protocol 23 merges; [acceptance](baselines/air-to-ground.md) |
+| [Air-to-ground](spec/air-to-ground.md) | Ground designation, the A-G radar and HARM page, the targeting sight and laser, bomb sights and warnings, guided bombs, rocket pods, cluster bombs and the ground missiles: 40 records in twelve classes plus the Pave pods | Implemented and flown headless on two carriers per record (2026-10-11); not built: a JDAM release-at-the-bar mode, the HUD time-to-impact row, Tab gun fire and a viewer laser overlay; clients see the new displays under protocol 23 ([online](MULTIPLAYER.md#air-to-ground-online)); [acceptance](baselines/air-to-ground.md) |
 | [Roster expansion](spec/roster-aircraft.md) | Seven REDFOR/F-22A initial player ports | [Acceptance and limits](baselines/aircraft-roster-expansion.md) |
 | [Additional aircraft](spec/additional-aircraft.md) | F-14D, A-4E and X-31 source flight configuration and fitted presentation | Initial ports implemented; [acceptance](baselines/aircraft-fa-expansion.md) |
 | [AI experience](spec/ai-experience.md) | Experience channels, Quick Mission and mission skill rules, enemy-skill override, tactical thresholds, G exemption, family scope | Specified; implemented as isolated `tore-sim::ai::experience`, Quick Mission hookup is partial |

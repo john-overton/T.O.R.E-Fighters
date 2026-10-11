@@ -158,6 +158,20 @@
 //! A bot also prints the snapshot rate of each flight as it is seated
 //! ("Bot: snapshots: 30 a second", slice R1).
 //!
+//! `--load STORE[,STORE]...` (protocol 23, slice NA) makes every bot hang
+//! each store on its aircraft before it readies, a Cheat loading the host's
+//! `loadouts any` allows: the first station after the others that takes the
+//! store gets up to two. The bot takes its slot, sends the loadout and
+//! readies once the host accepts it. `--a2g lase|buddy` flies the plane by
+//! the air-to-ground script (`tore_session::bot::a2g`): `lase` turns the A-G
+//! radar on, designates the nearest enemy ground object by Ctrl+X (the Easy
+//! targeting cheat) and lases it by hand while circling it; `buddy` drops a
+//! GBU-10 on another plane's spot when its guided sight says IN RNG, then
+//! fires an AGM-88 in BORE at the HARM cue's candidate. Both print what
+//! their screens show, "NAME: a2g: ..." lines. `--players N` on a joined
+//! bot that wears the crown makes its start wait until N players hold
+//! slots, all ready.
+//!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
 //! every bot was seated, got a debrief and then left cleanly, or was told the
@@ -203,7 +217,8 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--capture FILE] [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] [--objectives] \
 [--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
-[--drop-resource NAME]... [--expect-unable]\n       tore-bot --content-report [--data-dir DIR] \
+[--drop-resource NAME]... [--expect-unable] [--load STORE[,STORE]...] [--a2g lase|buddy]\n       \
+tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
 
 /// How long the bot looks for the listing on the master's list.
@@ -291,6 +306,10 @@ struct Options {
     wait_standbys: usize,
     /// `--master` with `--host`: the master the hosted game lists itself on.
     listed_on: Option<String>,
+    /// `--load`: stores hung on the aircraft before readying (slice NA).
+    load: Vec<String>,
+    /// `--a2g`: the air-to-ground script that flies the plane (slice NA).
+    a2g: Option<tore_session::bot::a2g::Role>,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -464,6 +483,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
         players: 1,
         wait_standbys: 0,
         listed_on: None,
+        load: Vec::new(),
+        a2g: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -564,6 +585,23 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     .ok()
                     .filter(|n| (0..=2).contains(n))
                     .ok_or("--wait-standbys is 0 to 2")?;
+            }
+            "--load" => {
+                options.load = value()?
+                    .split(',')
+                    .map(|store| store.trim().to_ascii_uppercase())
+                    .filter(|store| !store.is_empty())
+                    .collect();
+                if options.load.is_empty() {
+                    return Err("--load names one store or more".into());
+                }
+            }
+            "--a2g" => {
+                let word = value()?;
+                options.a2g = Some(
+                    tore_session::bot::a2g::Role::parse(&word)
+                        .ok_or_else(|| format!("--a2g is lase or buddy, not {word:?}"))?,
+                );
             }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
@@ -922,6 +960,12 @@ impl Running {
         for (after, command) in &options.commands {
             bot.send_at(*after, *command);
         }
+        if !options.load.is_empty() {
+            bot.load_stores(options.load.clone());
+        }
+        if let Some(role) = options.a2g {
+            bot.fly_a2g(role);
+        }
         self.bot = Some(bot);
         Ok(())
     }
@@ -1274,7 +1318,9 @@ fn main() -> ExitCode {
             password: options.password.clone(),
             plane: options.slot.map(|slot| slot + i as u32),
             entropy: Entropy::System,
-            auto_ready: options.observe.is_none() && options.side.is_none(),
+            auto_ready: options.observe.is_none()
+                && options.side.is_none()
+                && options.load.is_empty(),
             content: Some(Arc::clone(&content)),
             ..ClientConfig::new(server, &name, build())
         };
@@ -1593,6 +1639,11 @@ fn main() -> ExitCode {
             for line in std::mem::take(&mut bot.objectives_read) {
                 println!("{}: objective: {line}", r.name);
             }
+            if let Some(script) = &mut bot.a2g {
+                for line in std::mem::take(&mut script.lines) {
+                    println!("{}: {line}", r.name);
+                }
+            }
             while let Some(event) = bot.client.poll_event() {
                 match event {
                     ClientEvent::Connected { .. } if r.through.is_some() => println!(
@@ -1638,6 +1689,9 @@ fn main() -> ExitCode {
                             let stand = options.king.as_ref().is_some_and(|values| {
                                 values.iter().all(|v| lobby.settings.contains(v))
                             });
+                            // `--players` (slice NA): that many players
+                            // hold slots first.
+                            let holders = lobby.players.iter().filter(|p| p.slot.is_some()).count();
                             if king != r.crowned {
                                 r.crowned = king;
                                 if king {
@@ -1675,7 +1729,7 @@ fn main() -> ExitCode {
                             // everyone holding a slot is ready (not before,
                             // so a change that clears the ready marks does
                             // not meet a start already on its way).
-                            r.start_ok = r.settings_sent && stand;
+                            r.start_ok = r.settings_sent && stand && holders >= options.players;
                             bot.start_when_ready = r.start_ok;
                         }
                     }

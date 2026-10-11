@@ -98,8 +98,8 @@ dragging the loaded one to another pod station, moves it. The station shows the
 pod card and "1 loaded (max 1)"; a click on it adds nothing, a right-click or a
 drag onto the catalog takes it off, and Unload All and the Cheat toggle take it
 off. A pod hung or taken off plays the weapon cue (opinionated, agent). The
-lobby's page does not offer pods: a multiplayer loadout carries weapons and
-tanks until the multiplayer slice carries pods. The saved loadout names the pod's
+lobby's page offers the pods too since protocol 23 (slice NA): a pod not every
+player has is dimmed and refused with the host's words, as a weapon is. The saved loadout names the pod's
 SEE record on the station's row with none of the station's weapon, so the
 mission the page builds, a saved mission text and the checks of
 the loadout spec all keep it (agent decision). The ordnance audit loads each pod on every

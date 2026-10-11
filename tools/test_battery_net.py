@@ -10,6 +10,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import battery  # noqa: E402
 from battery_scenarios import net  # noqa: E402
+from battery_scenarios import net_a2g  # noqa: E402
 from battery_scenarios import net_accept  # noqa: E402
 from battery_scenarios import net_datalink  # noqa: E402
 from battery_scenarios import net_observe  # noqa: E402
@@ -809,3 +810,56 @@ class SmokeTests(unittest.TestCase):
         texts = self.texts("coop")
         texts["Owl"] += "Owl: seat 0, plane 3, at tick 4\n"
         self.assertTrue(any("plane or a debrief" in p for p in net_accept.smoke_problems(texts, "coop")))
+
+
+class A2gLoopbackTests(unittest.TestCase):
+    """Protocol 23, slice NA: what the lasing bot and the buddy bomber print, from a real run."""
+
+    LASER = (
+        "Laser: seat 0, plane 0, at tick 0\n"
+        "Laser: a2g: tracking 0x58000006, laser on\n"
+        "Laser: a2g: laser Lasing spot owner 0 target 0x58000006 at 712954 13 833156 range 17920\n"
+        "Laser: a2g: saw SA9.JT 33554619 from plane 1342177294 target 0x0\n"
+        "Laser: a2g: saw GBU10.JT 0 from plane 1 target none\n"
+        "Laser: a2g: saw AGM88.JT 1 from plane 1 target 0x50000015\n"
+    )
+    BUDDY = (
+        "Buddy: seat 1, plane 1, at tick 0\n"
+        "Buddy: a2g: buddy spot owner 0 target 0x58000006 at 712954 13 833156 range 7626\n"
+        "Buddy: a2g: release GBU10.JT buddy yes reach 842-18611 range 2449 spot owner 0 target 0x58000006 at "
+        "712954 13 833156 range 3796\n"
+        "Buddy: a2g: weapon 0 Laser guiding yes tti 7.1\n"
+        "Buddy: a2g: weapon 0 Laser guiding yes tti 5.1\n"
+        "Buddy: a2g: bomb ended at tick 6453\n"
+        "Buddy: a2g: harm cue candidate 0x50000015 emitters 8 cued no readiness Ready\n"
+        "Buddy: a2g: fire AGM88.JT at 0x50000015\n"
+    )
+
+    def test_the_real_run_passes(self):
+        self.assertEqual(net_a2g.a2g_problems(self.LASER, self.BUDDY), [])
+
+    def test_a_spot_the_screens_disagree_on_is_named(self):
+        moved = self.BUDDY.replace("at 712954 13 833156 range 7626", "at 713954 13 833156 range 7626")
+        self.assertTrue(any("apart" in p for p in net_a2g.a2g_problems(self.LASER, moved)))
+        other = self.BUDDY.replace("buddy spot owner 0 target 0x58000006", "buddy spot owner 0 target 0x58000007")
+        self.assertTrue(any("not one the Laser bot lased" in p for p in net_a2g.a2g_problems(self.LASER, other)))
+
+    def test_each_missing_step_is_named(self):
+        for line, words in (
+            ("release GBU10", "released no GBU-10"),
+            ("guiding yes", "never guided"),
+            ("bomb ended", "never saw its bomb end"),
+            ("fire AGM88", "fired no HARM"),
+        ):
+            buddy = "".join(l + "\n" for l in self.BUDDY.splitlines() if line not in l)
+            self.assertTrue(any(words in p for p in net_a2g.a2g_problems(self.LASER, buddy)), line)
+        no_bomb = self.LASER.replace("saw GBU10.JT", "saw MK82.JT")
+        self.assertTrue(any("GBU-10" in p for p in net_a2g.a2g_problems(no_bomb, self.BUDDY)))
+        elsewhere = self.LASER.replace("target 0x50000015", "target 0x50000016")
+        self.assertTrue(any("AGM-88 at" in p for p in net_a2g.a2g_problems(elsewhere, self.BUDDY)))
+
+    def test_the_scenario_is_listed_in_the_net_lane(self):
+        (scenario,) = net_a2g.scenarios()
+        self.assertEqual((scenario.name, scenario.lane, scenario.window), ("net-a2g-loopback", "net", False))
+        self.assertIn("F16C.PT", net_a2g.MISSION)
+        self.assertIn("easy-targeting", net_a2g.MISSION)

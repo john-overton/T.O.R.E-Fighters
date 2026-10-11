@@ -1522,6 +1522,16 @@ impl Client {
         self.seat.as_ref().map(|s| (s.seat, PlaneId(s.plane)))
     }
 
+    /// The import the client builds its missions from.
+    pub fn resources(&self) -> &Arc<BTreeMap<String, Vec<u8>>> {
+        &self.resources
+    }
+
+    /// The plane the player's configuration asks for ([`ClientConfig::plane`]).
+    pub fn wanted_plane(&self) -> Option<u32> {
+        self.config.plane
+    }
+
     /// The plane's loadout as the host seated it.
     pub fn loadout(&self) -> Option<&LoadoutSpec> {
         self.seat.as_ref().map(|s| &s.loadout)

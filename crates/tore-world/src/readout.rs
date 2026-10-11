@@ -73,24 +73,24 @@ pub struct CockpitReadout {
     /// The AC-130's gunsight; `None` on every other aircraft.
     pub gunsight: Option<GunsightReadout>,
     /// The targeting sight of an aircraft with a laser designator or a FLIR,
-    /// the AC-130 excepted (its sight is `gunsight`). Host-built; not on the
-    /// wire yet (slice NA carries it at protocol 23).
+    /// the AC-130 excepted (its sight is `gunsight`). Host-built; on the
+    /// wire since protocol 23 (the readout's Sight and Sight sensor groups).
     pub sight: Option<SightReadout>,
     /// The laser and the spot the plane's laser weapons home on: present on
     /// an aircraft with a laser designator, or while a buddy's spot is shown.
-    /// Host-built; not on the wire yet (slice NA).
+    /// Host-built; on the wire since protocol 23.
     pub laser: Option<LaserReadout>,
     /// The selected guided air-to-ground weapon's sight: its aim, range,
     /// reach and advisory (docs/spec/air-to-ground.md, "Guided bomb release
-    /// range indicator"). Host-built; not on the wire yet (slice NA).
+    /// range indicator"). Host-built; on the wire since protocol 23.
     pub guided: Option<GuidedSight>,
     /// The plane's own guided air-to-ground weapons in flight, oldest first,
     /// at most [`MAX_WEAPON_TTI`], with their time to impact. Host-built;
-    /// not on the wire yet (slice NA).
+    /// on the wire since protocol 23.
     pub weapon_tti: Vec<WeaponTti>,
     /// The combat tick the plane's last guided air-to-ground weapon ended
     /// (hit or went away), for the targeting page's impact cue. Host-built;
-    /// not on the wire yet (slice NA).
+    /// on the wire since protocol 23.
     pub guided_impact_tick: Option<u64>,
     /// The mounted seeker and its tone.
     pub seeker: SeekerReadout,
@@ -358,8 +358,8 @@ pub struct Estimates {
     /// Seconds the missile would fly to the observed target.
     pub solution_seconds: Option<f64>,
     /// The HARM boresight cue while an anti-radiation missile is armed.
-    /// Host-built; a networked client has none until the wire carries it
-    /// (protocol 23, slice NA).
+    /// Host-built; a networked client reads it from the readout's HARM cue
+    /// group (protocol 23).
     pub harm: Option<HarmCue>,
 }
 
@@ -430,8 +430,8 @@ impl HarmCue {
 /// What the HUD's bomb or rocket sight shows for the selected station
 /// (docs/spec/air-to-ground.md, "The HUD in air-to-ground modes"): the
 /// delivery solution combat worked out on the last tick
-/// ([`tore_sim::combat::delivery`]). Host-built; a networked client has none
-/// until the wire carries it (protocol 23, slice NA).
+/// ([`tore_sim::combat::delivery`]). Host-built; a networked client reads it
+/// from the readout's Bomb sight group (protocol 23).
 #[derive(Clone, Debug, PartialEq)]
 pub struct BombSight {
     /// CCIP or LVL; always CCIP for rockets.
@@ -547,15 +547,14 @@ pub struct SensorReadout {
     /// The positions the contacts were recorded at, oldest first.
     pub trail_points: Vec<Vector>,
     /// The A-G flag (Ctrl+R): the radar shows the air-to-ground page.
-    /// Host-built; a networked client has none until the wire carries it
-    /// (protocol 23, slice NA).
+    /// Host-built; on the wire since protocol 23 (the Sensors group's end).
     pub air_ground: bool,
     /// An anti-radiation weapon is aboard: the HARM page can be selected.
     /// Host-built, as `air_ground`.
     pub harm: bool,
     /// The ground page's list (A-G, the IR page's ground objects or the HARM
-    /// page's emitters), nearest first, at most [`MAX_GROUND`]. Host-built,
-    /// as `air_ground`.
+    /// page's emitters), nearest first, at most [`MAX_GROUND`]. Host-built;
+    /// on the wire since protocol 23 (the readout's ground contacts list).
     pub ground: Vec<sensors::GroundContact>,
 }
 impl SensorReadout {
@@ -1126,8 +1125,9 @@ impl PlainBits for TargetRow {
 impl CockpitReadout {
     /// The plain bits of each group, in the order of the fields: header,
     /// stores, gunsight, seeker, estimates, targets, sensors, visual, map,
-    /// rwr, damage, countermeasures, airport, target window, music.
-    pub fn group_bits(&self) -> [(&'static str, usize); 15] {
+    /// rwr, damage, countermeasures, airport, target window, music, and the
+    /// air-to-ground round's parts together (protocol 23).
+    pub fn group_bits(&self) -> [(&'static str, usize); 16] {
         let observation = |_: &seeker::Observation| 32 + 2 * VECTOR + 3 * 64;
         // Mode, its point or id, look, returning, aim, three impacts (kind,
         // point, seconds, range), their tick, three readiness codes, the
@@ -1213,6 +1213,57 @@ impl CockpitReadout {
         let music = option(&self.music.designated_enemy, |_| 32 + VECTOR)
             + 32 * self.music.aiming.len()
             + 2;
+        // The targeting sight (mode, its point or id, look, returning, aim,
+        // notice, zoom) and its sensor (laser, reach, gimbal, eye, default
+        // look); the laser (designator, state, mask, setting, ranges) and its
+        // spots (owner, side, point, target, own, range); the bomb sight
+        // (mode, rocket, CCIP, level release, warnings, fall); the guided
+        // sight (kind, aim, buddy, ranges, reach, IN RNG, advisory); the
+        // HARM cue's emitters; the weapons in flight; the ground pages.
+        let spot = |_: &SpotReadout| 32 + 32 + VECTOR + 33 + 1 + 64;
+        let a2g = option(&self.sight, |s| {
+            2 + match s.mode {
+                SightMode::Free => 0,
+                SightMode::Pinned(_) => VECTOR,
+                SightMode::Tracked(_) => 32,
+            } + 2 * 64
+                + 1
+                + option(&s.aim, |_| VECTOR)
+                + option(&s.notice, |_| 2 + 64)
+                + 3
+                + 1
+                + 64
+                + 1
+                + 2 * 64
+                + VECTOR
+                + 2 * 64
+        }) + option(&self.laser, |l| {
+            1 + 2 + 2 + 2 + 2 * 64 + option(&l.spot, spot) + option(&l.buddy, spot)
+        }) + option(&self.bomb_sight, |b| {
+            1 + 1
+                + option(&b.ccip, |_| 3 * VECTOR + 4 * 64 + 4)
+                + option(&b.level, |_| VECTOR + 7 * 64)
+                + 3
+                + option(&b.falling, |_| 64)
+        }) + option(&self.guided, |g| {
+            3 + option(&g.aim, |_| VECTOR)
+                + 1
+                + option(&g.ground_range_ft, |_| 64)
+                + option(&g.slant_range_ft, |_| 64)
+                + option(&g.reach, |_| 128)
+                + 1
+                + 3
+        }) + option(&self.estimates.harm, |h| {
+            option(&h.candidate, |_| 32) + 1 + h.emitters.len() * (32 + VECTOR + 2)
+        }) + option(&self.guided_impact_tick, |_| 64)
+            + self.weapon_tti.len() * (32 + 8 + 3 + 1 + 65 + VECTOR)
+            + 2
+            + self
+                .sensors
+                .ground
+                .iter()
+                .map(|g| g.contact.plain_bits() + 16 + 2)
+                .sum::<usize>();
         [
             ("header", 32 + 64),
             ("stores", stores),
@@ -1229,6 +1280,7 @@ impl CockpitReadout {
             ("airport", airport),
             ("target window", window),
             ("music", music),
+            ("air to ground", a2g),
         ]
     }
 }

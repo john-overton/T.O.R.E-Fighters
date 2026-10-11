@@ -21,8 +21,9 @@ below, and the retail facts they found are labelled **retail data** (see
 [Fold-in record](#fold-in-record)). Where the research found that retail
 differs from the first plan (no 90 kt rule, no buddy lasing, JDAMs are optical,
 bombs scatter, the CCIP arc rule), the sections say so. Online, a client sees
-the ground pages, the sights and the guided-weapon scale once protocol 23
-carries them (slice NA); the weapons and their effects need no change.
+the ground pages, the sights and the guided-weapon scale under protocol 23
+(slice NA, [online](../MULTIPLAYER.md#air-to-ground-online)); the weapons and
+their effects need no change.
 
 ## What the player gets
 
@@ -1236,8 +1237,11 @@ found these promised or specified items unbuilt:
   (`player.laser`, `player.designate`, `weapon.guided`), the viewer draws no spot.
 - `Ctrl+M` on the [keyboard map](../tore-keyboard-map.html) (a browser check and
   a README image recapture are due).
-- Online: a client sees the ground pages, the sights, the guided scale and the
-  Pave pods in the lobby once protocol 23 (slice NA) carries them.
+- Online (protocol 23, slice NA): the cues are the host's, drawn a round trip
+  late; the targeting page's camera follows the host's look (the AC-130's own
+  camera turns ahead on the client); a rejoining player's sight comes back at
+  its default look with the laser off, since the AI flew the plane meanwhile
+  ([online](../MULTIPLAYER.md#air-to-ground-online)).
 
 ## Edge cases
 

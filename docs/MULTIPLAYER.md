@@ -42,6 +42,7 @@ it carries one of these marks:
 - [Flight data link](#flight-data-link)
 - [Sim rules in multiplayer](#sim-rules-in-multiplayer)
   - [Ground targets online](#ground-targets-online): the surface world under protocol 22
+  - [Air-to-ground online](#air-to-ground-online): radar pages, sights, the laser, bombs and guided weapons under protocol 23
 - [Debrief](#debrief)
 - [Architecture](#architecture)
 - [Networking](#networking)
@@ -827,6 +828,45 @@ defenses](spec/surface-defenses.md)). What a player sees:
   tells each player and each late joiner every unit not as built.
 
 The bytes are in [the wire's surface world](formats/net-protocol.md#the-surface-world-protocol-22).
+
+### Air-to-ground online
+
+*Built (slice NA of the air-to-ground round, protocol 23, 2026-10-11).*
+Everything the round added flies online, co-op and PvP, with the host
+working out every solution ([air-to-ground](spec/air-to-ground.md)). What a
+player sees:
+
+- **The same cockpit as in single player.** The A-G radar page, the IR
+  page's ground objects and the HARM page with their contacts and symbols;
+  the targeting sight and its page (LASE, BUDDY, LSR RDY, MASK, the range and
+  time to impact); the HUD's CCIP pipper, the level "T", the rocket pipper,
+  LOW, FRAG and OVERFLY; the laser box and `LSR` or `BUD`; the guided
+  weapons' reach scale and IN RNG; the HARM boresight cue. The keys are the
+  same (Ctrl+R, M, T, Ctrl+X under Easy targeting, Backslash and the sight
+  keys, `/`, Ctrl+L, Ctrl+M).
+- **A round trip late.** The cues are the host's, drawn around the player's
+  own aircraft, so they lag the stick by the round trip, as the AC-130's
+  pipper does. The targeting page's camera follows the host's look (agent
+  decision; the AC-130's own camera turns ahead on the client).
+- **Buddy lasing between players.** A laser bomb homes on another player's
+  spot of the same side (John, 2026-10-10, decision 6), and the targeting
+  page names that player's callsign beside BUDDY.
+- **Bombs and guided weapons on every screen.** Every player sees a bomb fall
+  (a pack's bombs spread as the host released them), rockets leave their pods
+  and a guided weapon steer onto its spot, where the host has them.
+- **Pods in the lobby.** The lobby's Load Ordnance offers the Pave Spike and
+  Pave Knife, as single player does; Cheat loading (the King's `loadouts any`)
+  offers the novelty stores too. A player whose import lacks a pod or a
+  store someone chose, or has it differently, is told before the flight, as
+  for any weapon.
+- **Host migration and rejoin.** A new host takes every sight, laser and
+  guided weapon in flight from the old host's checkpoint. A player who drops
+  and rejoins gets its aircraft back from the AI that flew it meanwhile, with
+  its sight at the default look and the laser off (agent decision: the AI
+  handoff keeps stores, damage and sensors only), and a laser weapon it left
+  guiding on its own spot goes blind when the laser stops.
+
+The bytes are in [the wire's air-to-ground round](formats/net-protocol.md#the-air-to-ground-round-protocol-23).
 
 ## Debrief
 

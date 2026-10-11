@@ -19,7 +19,7 @@ use tore_import::source::{self, Importer, Source};
 use tore_net::Entropy;
 use tore_net::sim::{LinkConfig, SimNetwork, SimSocket};
 use tore_world::mission::{Skill, Start};
-use tore_world::test_support::resources::{THEATER, loadable_missile, resources};
+use tore_world::test_support::resources::{THEATER, laser_pod, loadable_missile, resources};
 
 const MS: Duration = Duration::from_millis(1);
 /// The third weapon some tests add.
@@ -436,6 +436,114 @@ fn a_loadout_with_a_weapon_a_player_lacks_or_has_differently_is_refused() {
         rig.run(Duration::from_millis(300));
         assert_eq!(rig.refused(king, kind::LOADOUT).len(), 1);
     }
+}
+
+/// A laser designator pod the page offers (protocol 23, slice NA).
+const POD: &str = "PAVEKNF.SEE";
+
+/// The F/A-18D's standard load with the pod on its missile station, a
+/// Cheat loading (the synthetic station's flags were not made for pods).
+fn pod_loadout(import: &Resources) -> LoadoutSpec {
+    let kind = tore_world::aircraft_type::AircraftType::load(import, AircraftId::F18).unwrap();
+    let base = tore_sim::combat::loadout::Loadout::new(&kind.profile, |name| {
+        import
+            .get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+    })
+    .unwrap();
+    let mut load = LoadoutSpec::of(&base);
+    load.cheat = true;
+    load.stations[1].weapon = POD.into();
+    load.stations[1].quantity = 0;
+    load
+}
+
+/// Protocol 23, slice NA: a lobby loadout that names a laser designator pod
+/// is refused while a player lacks the pod, with the host's words; once
+/// everyone has it, it flies, and the host's plane and the player's copy of
+/// the flight both hang the pod, whose sight the plane then has.
+#[test]
+fn a_loadout_with_a_designator_pod_flies_and_one_a_player_lacks_is_refused() {
+    use crate::settings::{LoadoutRule, number};
+    let mut import = resources();
+    import.insert(POD.into(), laser_pod(POD));
+    let label = label_of(ItemKind::Weapon, POD, &import).unwrap();
+    let hosted = |config: &mut HostConfig| {
+        config.house = Some("10.0.0.2:40000".parse().unwrap());
+        config.crown = CrownRule::FirstPlayer;
+        config.start = StartMode::King;
+        config
+            .settings
+            .push((number::LOADOUTS, LoadoutRule::Any.value()));
+    };
+    let mut rig = Rig::new(spec(2, 1), import.clone(), hosted);
+    let king = rig.join("Viper", import.clone(), |_| {});
+    let hawk = rig.join("Hawk", without(import.clone(), POD), |_| {});
+    rig.gather(&[king, hawk]);
+    let gaps = rig.gaps(king);
+    assert!(
+        gaps.iter()
+            .any(|g| (g.kind, g.key.as_str()) == (ItemKind::Weapon, POD)),
+        "{gaps:?}"
+    );
+    rig.client(king).take_slot(0);
+    rig.run(Duration::from_millis(300));
+    rig.client(king).send_loadout(Some(pod_loadout(&import)));
+    rig.run(Duration::from_millis(300));
+    assert_eq!(
+        rig.refused(king, kind::LOADOUT),
+        [format!(
+            "Not everyone has the {label}: Hawk's game has no {label}."
+        )]
+    );
+
+    // Everyone has it: the pod flies.
+    let mut rig = Rig::new(spec(2, 1), import.clone(), hosted);
+    let king = rig.join("Viper", import.clone(), |_| {});
+    rig.gather(&[king]);
+    rig.client(king).take_slot(0);
+    rig.run(Duration::from_millis(300));
+    rig.client(king).send_loadout(Some(pod_loadout(&import)));
+    rig.run(Duration::from_millis(300));
+    assert!(rig.refused(king, kind::LOADOUT).is_empty());
+    rig.client(king).set_ready(true);
+    rig.run(Duration::from_millis(200));
+    rig.client(king).start_mission();
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.players[king].client.phase()
+            == ClientPhase::Flying)
+    );
+    let hung = |world: &World| {
+        let own = world.combat.state.ownship(0).expect("plane 0 flies");
+        (
+            own.configuration()
+                .designator_pods
+                .iter()
+                .map(|pod| pod.store.source.clone())
+                .collect::<Vec<_>>(),
+            own.sight.map(|s| s.sensor.laser),
+        )
+    };
+    let host = hung(&rig.host.world);
+    assert_eq!(host, (vec![POD.to_owned()], Some(true)));
+    // The player's own plane, as its game draws it, hangs it too.
+    rig.run(Duration::from_millis(300));
+    let now = rig.net.now();
+    let frame = rig.players[king].client.frame(now).expect("a frame");
+    let pods: Vec<&str> = frame
+        .config
+        .designator_pods
+        .iter()
+        .map(|pod| pod.store.source.as_str())
+        .collect();
+    assert_eq!(pods, [POD]);
+    assert!(
+        frame
+            .readout
+            .and_then(|r| r.sight)
+            .is_some_and(|s| s.sensor.laser)
+    );
 }
 
 #[test]

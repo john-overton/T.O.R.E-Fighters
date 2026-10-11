@@ -322,6 +322,27 @@ impl Host {
         // for the manifest a joiner checks; a flight's world is the
         // standby's.
         let spec = super::state::session_spec(&session, &config).map_err(|e| e.to_string())?;
+        // The mission's own rules (friendly fire and the loadout rule) are
+        // the session's: the new host builds the flight's loadouts under
+        // them, as the old host did, before the session part restores every
+        // setting. Without this a Cheat loading under `loadouts any` was
+        // refused at the takeover (found by slice NA's laser bombers).
+        let mut config = config;
+        {
+            use crate::settings::{LoadoutRule, number};
+            config
+                .settings
+                .retain(|(n, _)| *n != number::FRIENDLY_FIRE && *n != number::LOADOUTS);
+            let loadouts = if spec.cheat_loadouts {
+                LoadoutRule::Any
+            } else {
+                LoadoutRule::Own
+            };
+            config.settings.extend([
+                (number::FRIENDLY_FIRE, u32::from(spec.friendly_fire)),
+                (number::LOADOUTS, loadouts.value()),
+            ]);
+        }
         let start = config.start;
         let mut host = Host::new(
             spec,

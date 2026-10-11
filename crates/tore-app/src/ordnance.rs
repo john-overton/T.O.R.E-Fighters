@@ -249,10 +249,16 @@ impl Ordnance {
     /// it offers; the catalog dims those and loading one says why it cannot
     /// be. Only the lobby's page uses it.
     pub fn set_gaps(&mut self, refusal: impl Fn(&str) -> Option<String>) {
+        // The laser designator pods are weapon items too (protocol 23).
         self.gaps = self
             .weapons
             .iter()
-            .filter_map(|weapon| Some((weapon.source.clone(), refusal(&weapon.source)?)))
+            .map(|weapon| weapon.source.clone())
+            .chain(self.designators.iter().map(|pod| pod.source.clone()))
+            .filter_map(|source| {
+                let words = refusal(&source)?;
+                Some((source, words))
+            })
             .collect();
     }
     /// The host's words for a weapon the lobby's page cannot load, when it
@@ -300,7 +306,8 @@ impl Ordnance {
             .cloned()
             .collect();
         // Laser designator pods go on pod stations (decision 7); Cheat loading
-        // lists both. The lobby's page does not offer them ([`Self::page_entries`]).
+        // lists both. The lobby's page offers them too since protocol 23 (a
+        // loadout row names the pod's SEE record; slice NA).
         self.designator_catalog = self
             .designators
             .iter()
@@ -466,6 +473,9 @@ impl Ordnance {
                     return self.cannot_load();
                 };
                 let pod = self.designator_catalog[index].clone();
+                if self.refuse_gap(&pod.source) {
+                    return Action::None;
+                }
                 self.edit_loadout(|load| load.load_designator(slot, pod))
             }
         }
@@ -501,6 +511,9 @@ impl Ordnance {
                 };
                 self.selected = Some(CatalogEntry::Designator(index));
                 let pod = self.designator_catalog[index].clone();
+                if self.refuse_gap(&pod.source) {
+                    return Action::None;
+                }
                 self.edit_loadout(|load| load.load_designator(slot, pod))
             }
             DragSource::DesignatorStation(index) => {
@@ -580,11 +593,7 @@ impl Ordnance {
         if self.category == 1 {
             (0..self.tank_catalog.len())
                 .map(CatalogEntry::Tank)
-                .chain(
-                    (0..self.designator_catalog.len())
-                        .filter(|_| !self.lobby)
-                        .map(CatalogEntry::Designator),
-                )
+                .chain((0..self.designator_catalog.len()).map(CatalogEntry::Designator))
                 .chain(weapons)
                 .collect()
         } else {
@@ -942,8 +951,14 @@ impl Ordnance {
             }
             100..=107 => {
                 self.select_card(id);
-                if let Some(CatalogEntry::Weapon(index)) = self.selected {
-                    let source = self.catalog[index].source.clone();
+                let source = match self.selected {
+                    Some(CatalogEntry::Weapon(index)) => Some(self.catalog[index].source.clone()),
+                    Some(CatalogEntry::Designator(index)) => {
+                        Some(self.designator_catalog[index].source.clone())
+                    }
+                    _ => None,
+                };
+                if let Some(source) = source {
                     self.refuse_gap(&source);
                 }
             }
@@ -1088,15 +1103,24 @@ impl Ordnance {
                     self.selected == Some(CatalogEntry::Tank(index)),
                     true,
                 ),
-                CatalogEntry::Designator(index) => designator_card(
-                    &mut c,
-                    &self.sprites,
-                    &self.designator_catalog[index],
-                    x,
-                    y,
-                    self.selected == Some(CatalogEntry::Designator(index)),
-                    true,
-                ),
+                CatalogEntry::Designator(index) => {
+                    designator_card(
+                        &mut c,
+                        &self.sprites,
+                        &self.designator_catalog[index],
+                        x,
+                        y,
+                        self.selected == Some(CatalogEntry::Designator(index)),
+                        true,
+                    );
+                    // What not every player has is dimmed on the lobby's page.
+                    if self
+                        .gap_words(&self.designator_catalog[index].source)
+                        .is_some()
+                    {
+                        dim(&mut c, (x - 3, y - 5, 113, 66));
+                    }
+                }
                 CatalogEntry::Weapon(index) => {
                     card(
                         &mut c,
@@ -3462,15 +3486,38 @@ mod tests {
         // Cheat loading lists the pod whatever the aircraft's stations.
         assert_eq!(ui.designator_catalog.len(), 1);
     }
+    /// Protocol 23 (slice NA): the lobby's page offers the pods, a pod in a
+    /// gap is dimmed and refused with the host's words, and the loadout the
+    /// page sends names the pod's SEE record on its station.
     #[test]
-    fn the_lobbys_page_does_not_offer_designator_pods() {
+    fn the_lobbys_page_offers_designator_pods_and_refuses_one_in_a_gap() {
+        const WORDS: &str = "Not everyone has the Pave Spike: Hawk's game has no Pave Spike.";
         let mut ui = with_pod_station();
         ui.lobby = true;
         ui.activate(4);
-        assert!(
-            ui.page_entries()
-                .iter()
-                .all(|entry| !matches!(entry, CatalogEntry::Designator(_)))
-        );
+        assert_eq!(ui.page_entries()[0], CatalogEntry::Designator(0));
+        let asked = std::cell::RefCell::new(Vec::new());
+        ui.set_gaps(|source| {
+            asked.borrow_mut().push(source.to_owned());
+            (source == "PAVESPK.SEE").then(|| WORDS.to_owned())
+        });
+        assert!(asked.borrow().contains(&"PAVESPK.SEE".to_owned()));
+        // Picking it says why; loading it, by a click or a drag, is refused.
+        ui.activate(100);
+        assert_eq!(ui.message.as_deref(), Some(WORDS));
+        ui.activate(201);
+        assert!(ui.loadout.designator(1).is_none());
+        ui.message = None;
+        ui.drop_store(DragSource::DesignatorCatalog(0), 1);
+        assert!(ui.loadout.designator(1).is_none());
+        assert_eq!(ui.message.as_deref(), Some(WORDS));
+        // Everyone has it: it hangs, and the loadout names it.
+        ui.set_gaps(|_| None);
+        ui.message = None;
+        assert_eq!(ui.activate(201), Action::OrdnanceWeapon);
+        assert!(ui.loadout.designator(1).is_some());
+        let spec = tore_world::mission::LoadoutSpec::of(&ui.loadout);
+        assert_eq!(spec.stations[1].weapon, "PAVESPK.SEE");
+        assert_eq!(spec.stations[1].quantity, 0);
     }
 }

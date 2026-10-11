@@ -32,7 +32,9 @@
 //! with its camera on the subject given, and draws the observer's frames
 //! ([`Bot::watched`], [`Bot::watched_aircraft`]).
 
-use crate::client::{Client, ClientFrame, Controls};
+pub mod a2g;
+
+use crate::client::{Client, ClientFrame, ClientPhase, Controls};
 use crate::wire::chat::{ChatSend, QuickMessage, Receiver, Refusal};
 use crate::wire::events::{LinkEvent, WireEvent};
 use crate::wire::messages::{LobbyPhase, RosterPlane, Subject};
@@ -815,6 +817,15 @@ pub struct Bot {
     /// The flightmates' assignments the readout's marks last showed, by
     /// bandit (a mask of member numbers), for their changes.
     link_marked: std::collections::BTreeMap<u32, u16>,
+    /// The air-to-ground script that flies the plane in place of the
+    /// pursuit (`tore-bot --a2g`, slice NA).
+    pub a2g: Option<a2g::Script>,
+    /// Stores hung on the aircraft's stations in a Cheat loading before the
+    /// bot readies (`tore-bot --load`, slice NA): the bot takes its slot,
+    /// sends the loadout and readies once the host accepts it.
+    load: Vec<String>,
+    /// When the lobby requests of the loading were last sent.
+    load_asked: Option<Duration>,
 }
 
 /// A data link change in words, for `tore-bot` to print (slice G7).
@@ -890,6 +901,115 @@ impl Bot {
             designated: None,
             objective_seen: Default::default(),
             objectives_read: Vec::new(),
+            a2g: None,
+            load: Vec::new(),
+            load_asked: None,
+        }
+    }
+
+    /// Flies the plane by the air-to-ground script `role` (slice NA).
+    pub fn fly_a2g(&mut self, role: a2g::Role) {
+        self.a2g = Some(a2g::Script::new(role));
+    }
+
+    /// Hangs `stores` on the aircraft before readying (slice NA): a Cheat
+    /// loading, which the host's `loadouts any` allows. The client's
+    /// automatic ready must be off.
+    pub fn load_stores(&mut self, stores: Vec<String>) {
+        self.load = stores;
+    }
+
+    /// The standard load of the aircraft flying `plane` with each of the
+    /// stores put on the first station after the others that takes it, two
+    /// loaded (or as many as it takes).
+    fn loadout_with_stores(&self, plane: u32) -> Option<tore_world::mission::LoadoutSpec> {
+        let spec = self.client.spec()?;
+        let aircraft = spec
+            .open_planes()
+            .into_iter()
+            .find(|p| p.id == plane)?
+            .aircraft;
+        let world = self.client.mission()?;
+        let kind = world
+            .combat
+            .dummy_types()
+            .iter()
+            .find(|kind| kind.profile.id == aircraft)?;
+        let resources = self.client.resources();
+        let read = |name: &str| {
+            resources
+                .get(name)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+        };
+        let mut load = tore_sim::combat::loadout::Loadout::new(&kind.profile, read).ok()?;
+        load.cheat = true;
+        let mut out = tore_world::mission::LoadoutSpec::of(&load);
+        let mut used = BTreeSet::new();
+        for store in &self.load {
+            let weapon = tore_formats::weapons::Weapon::parse(store, resources.get(store)?).ok()?;
+            let slot = (0..load.configuration.stations.len()).find(|&slot| {
+                !used.contains(&slot)
+                    && !tore_sim::combat::live::is_gun(&load.configuration.stations[slot].weapon)
+                    && load.capacity(slot, &weapon) > 0
+            })?;
+            used.insert(slot);
+            // The station's capacity for the store is its count (the page's
+            // rule, which the host checks); the bot loads two at most.
+            let count = load.capacity(slot, &weapon) as u16;
+            out.stations[slot] = tore_world::mission::StationLoad {
+                weapon: store.clone(),
+                count,
+                quantity: count.min(2),
+            };
+        }
+        Some(out)
+    }
+
+    /// The lobby with stores to hang: the slot, the loadout, then ready,
+    /// each asked for at most once a second.
+    fn ready_with_stores(&mut self, now: Duration) {
+        if self.load.is_empty() || self.client.phase() != ClientPhase::Lobby {
+            return;
+        }
+        if self
+            .load_asked
+            .is_some_and(|at| now.saturating_sub(at) < Duration::from_secs(1))
+        {
+            return;
+        }
+        let Some(lobby) = self.client.lobby() else {
+            return;
+        };
+        if lobby.phase != crate::wire::messages::LobbyPhase::Lobby
+            || self.client.spec().is_none()
+            || self.client.mission().is_none()
+        {
+            return;
+        }
+        let Some(me) = lobby.me() else {
+            return;
+        };
+        let (slot, loaded, ready) = (me.slot, me.loadout, me.ready);
+        self.load_asked = Some(now);
+        match slot {
+            None => match self.client.wanted_plane() {
+                Some(plane) => self.client.take_slot(plane),
+                None => self.client.take_any_slot(),
+            },
+            Some(plane) if !loaded => {
+                let loadout = self.loadout_with_stores(plane);
+                if loadout.is_none() {
+                    self.lines_read.push(format!(
+                        "cannot hang {} on plane {}",
+                        self.load.join(", "),
+                        plane
+                    ));
+                }
+                self.client.send_loadout(loadout);
+            }
+            Some(_) if !ready => self.client.set_ready(true),
+            Some(_) => {}
         }
     }
 
@@ -1218,6 +1338,12 @@ impl Bot {
             }
         }
         let controls = match self.client.prediction() {
+            Some(prediction) if self.a2g.is_some() => {
+                let flight = prediction.plane().flight.clone();
+                let enemies = enemies(&self.client);
+                let script = self.a2g.as_mut().expect("a script");
+                script.controls(now, &flight, drawn.as_ref(), &enemies, &mut self.pilot)
+            }
             Some(prediction) => {
                 let flight = prediction.plane().flight.clone();
                 let picture = self.picture.take();
@@ -1235,6 +1361,7 @@ impl Bot {
         self.scripted_commands(now, &mut controls);
         self.designate_next(now, &mut controls);
         self.away(now);
+        self.ready_with_stores(now);
         self.client.update(now, &controls);
         self.watch_when_flying();
         self.start_if_ready();

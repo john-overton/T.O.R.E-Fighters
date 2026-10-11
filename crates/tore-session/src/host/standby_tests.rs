@@ -100,6 +100,9 @@ struct Player {
     status_at: Option<Duration>,
     notes: Vec<(Duration, Note)>,
     statuses: Vec<(Duration, crate::wire::migration::StandbyStatus)>,
+    /// A laser bomber's run (protocol 23, slice NA): it cruises and flies
+    /// the run's commands and trigger.
+    a2g: Option<crate::wire::readout_a2g_tests::A2gPilot>,
 }
 
 impl Player {
@@ -108,12 +111,16 @@ impl Player {
             return Controls::default();
         };
         let enemies = crate::bot::enemies(&self.client);
-        self.pilot.controls(
+        let mut controls = self.pilot.controls(
             now,
             &prediction.plane().flight,
             self.picture.as_ref(),
             &|id| enemies.contains(&id),
-        )
+        );
+        if let Some(run) = &mut self.a2g {
+            run.drive(now, &mut controls);
+        }
+        controls
     }
 
     /// Every lobby id this player's lobby marks as a standby, with its mark.
@@ -275,6 +282,7 @@ impl Rig {
             status_at: None,
             notes: Vec::new(),
             statuses: Vec::new(),
+            a2g: None,
         });
         // One at a time, so the join order is the order joined.
         assert!(
@@ -284,6 +292,39 @@ impl Rig {
                 .is_some_and(|p| p.client.lobby().is_some())),
             "{callsign} joins"
         );
+    }
+
+    /// A laser bomber's game joins for `plane` (protocol 23, slice NA): it
+    /// takes the slot, sends the synthetic laser bomber's Cheat loading and
+    /// readies once the host takes it, then cruises and flies the run.
+    fn join_bomber(&mut self, callsign: &str, plane: u32, platform: Platform) {
+        self.join(callsign, plane, platform);
+        let index = self.players.len() - 1;
+        let player = &mut self.players[index];
+        player.pilot.passive = true;
+        player.a2g = Some(Default::default());
+        // The automatic ready took the slot with the standard load: send the
+        // bomber's and ready again.
+        assert!(
+            self.run_until(Duration::from_secs(2), |r| r.players[index]
+                .client
+                .lobby()
+                .and_then(|l| l.me())
+                .is_some_and(|me| me.slot.is_some())),
+            "{callsign} holds a slot"
+        );
+        self.players[index]
+            .client
+            .send_loadout(Some(tore_world::test_support::resources::a2g_loadout()));
+        assert!(
+            self.run_until(Duration::from_secs(2), |r| r.players[index]
+                .client
+                .lobby()
+                .and_then(|l| l.me())
+                .is_some_and(|me| me.loadout)),
+            "{callsign}'s loadout is taken"
+        );
+        self.players[index].client.set_ready(true);
     }
 
     /// One millisecond for everyone.
@@ -766,6 +807,72 @@ fn a_warm_and_a_cold_standby_follow_a_moving_ground_target() {
             tank(&replica).is_some(),
             "standby {player} holds the column"
         );
+    }
+}
+
+/// Protocol 23, slice NA: a warm and a cold standby follow three laser
+/// bombers (the synthetic F/A-18D's pod and two GBU-10s): every sight
+/// pinned, every laser set by hand, bombs released and guiding. The warm
+/// one's Checks stay equal, both hold the host's world, and their copies of
+/// the sights, lasers and guided flights are the host's (they are in the
+/// combat checkpoint and stepped from the same commands).
+#[test]
+fn a_warm_and_a_cold_standby_follow_laser_bombers() {
+    use crate::settings::{LoadoutRule, number};
+    use tore_sim::combat::sight::SightMode;
+    let mut spec = crate::wire::readout_a2g_tests::a2g_spec();
+    // An open mission: each player's loadout is the lobby's.
+    spec.loadout = None;
+    spec.wings[0].count = 3;
+    let mut config = config();
+    config
+        .settings
+        .push((number::LOADOUTS, LoadoutRule::Any.value()));
+    let mut resources = tore_world::test_support::surface::routed_resources();
+    tore_world::test_support::resources::add_a2g_stores(&mut resources);
+    let mut rig = Rig::with(spec, resources, config);
+    rig.host.set_standbys_enabled(true);
+    rig.join_bomber("Viper", 0, Platform::current());
+    rig.join_bomber("Cobra", 1, other_platform());
+    rig.join_bomber("Hawk", 2, Platform::current());
+    rig.settle();
+    assert!(
+        rig.run_until(Duration::from_secs(5), |r| r.host.ready_standbys().len()
+            == 2),
+        "ready in the lobby"
+    );
+    rig.fly();
+    rig.fly_for(12);
+    let state = &rig.host.world.combat.state;
+    for plane in 0..3 {
+        let own = state.ownship(plane).unwrap();
+        assert!(
+            matches!(own.sight.map(|s| s.mode), Some(SightMode::Pinned(_))),
+            "plane {plane}'s sight is pinned: {:?}",
+            own.sight.map(|s| s.mode)
+        );
+        assert!(
+            state.guided_impact(plane).is_some()
+                || state.guided_flights().any(|(_, f)| f.owner == plane),
+            "plane {plane} released a guided bomb"
+        );
+    }
+    let warm = rig.figures(0).unwrap();
+    assert_eq!(warm.mismatches, 0);
+    assert!(warm.checks_equal >= 1, "{warm:?}");
+    rig.holds_the_hosts_world(0);
+    rig.holds_the_hosts_world(1);
+    for player in [0, 1] {
+        let replica = rig.players[player].standby.replica().unwrap();
+        if replica.tick() != rig.host.world.tick() {
+            continue;
+        }
+        let (ours, host) = (&replica.combat.state, &rig.host.world.combat.state);
+        for plane in 0..3 {
+            let (a, b) = (ours.ownship(plane).unwrap(), host.ownship(plane).unwrap());
+            assert_eq!((a.sight, a.laser), (b.sight, b.laser), "plane {plane}");
+        }
+        assert!(ours.guided_flights().eq(host.guided_flights()));
     }
 }
 

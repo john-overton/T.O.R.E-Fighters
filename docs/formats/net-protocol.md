@@ -43,6 +43,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Compatibility (stage L)](#compatibility-stage-l) (built under protocol 10)
 - [Host migration and rejoin (stage K)](#host-migration-and-rejoin-stage-k) (built under protocol 13)
 - [The surface world (protocol 22)](#the-surface-world-protocol-22) (built under protocol 22)
+- [The air-to-ground round (protocol 23)](#the-air-to-ground-round-protocol-23) (built under protocol 23)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -1037,7 +1038,7 @@ an escape to a varint; strings are a length byte and UTF-8.
 | Interpolation delay | 6, 0 to 63 |
 | View subject | 1, then kind 3 (2 before protocol 22) and id varint |
 | Mismatch | 32 |
-| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; powered-lift block (below); scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1; gunsight block (protocol 21, below) |
+| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; powered-lift block (below); scope channel 2 (radar, infrared, visual, and since protocol 23 the HARM page, 3), range step 4 (0 to 5, the scope's six ranges), history 1; gunsight block (protocol 21, below) |
 | Each later tick | 1 bit "same as the tick before"; else 9 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope, powered lift, gunsight; 8 before protocol 21), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
 | Command count | 7, 0 to 64 |
 | First command number | 16, when there are commands; the rest follow one by one |
@@ -1065,6 +1066,17 @@ same law. The sight's commands are combat codes 28 (`SightDesignate`,
 Backslash) and 29 (`SightPinGround`, Shift+Backslash), with no fields; L
 stays `ClearDesignation`. A paused game's neutral frames keep the zoom step
 and drop the slew, as they keep the scope.
+
+Protocol 23 (the air-to-ground round) takes in the combat codes its slices
+added: 30 is `ToggleAirGround` (Ctrl+R, the A-G radar page), and 31, the
+last 5-bit code, is an **extended** combat command: a varint follows, 0
+`NearestGround` (Ctrl+X under Easy targeting), 1 `ToggleLaser` (Ctrl+L) and
+2 `SightNext` (`/`), none with fields; a reader refuses any other varint.
+The seat's slew and zoom in the gunsight block steer the targeting sight of
+every aircraft with a laser designator or a FLIR too, and codes 28 and 29
+work it as they do the AC-130's ([the air-to-ground groups](#the-air-to-ground-groups)).
+The delivery mode (CCIP or LVL, Ctrl+M) rides the existing
+`ToggleSeekerMode` (code 5).
 
 Set-axis (code 24) and adjust-axis (code 25) commands carry a two-bit axis
 code plus an optional position or signed step; neutral-vector (code 26) is a
@@ -1205,18 +1217,21 @@ no blade angle is sent.
 The readout's record is the baseline (7 bits since protocol 16, 5 before:
 snapshots back to the readout the client acknowledged, 1 to 127, or 0 for
 none, against the empty readout),
-then 32 parts (31 before protocol 22, 30 before protocol 21, 26 before
-protocol 15), each behind a
+then 40 parts (32 before protocol 23, 31 before protocol 22, 30 before
+protocol 21, 26 before protocol 15), each behind a
 changed bit, in this order, which is also their importance: header (plane and
 tick), link (protocol 15), stores, gunsight (protocol 21,
-[below](#the-gunsight)), countermeasures, damage, seeker, seeker observation, estimates,
+[below](#the-gunsight)), bomb sight, guided sight, laser, targeting sight,
+sight sensor, HARM cue and weapons in flight (protocol 23,
+[below](#the-air-to-ground-groups)), countermeasures, damage, seeker, seeker observation, estimates,
 estimate observation, targets, displayed target, viewed target, airport,
 target window, music, designated enemy, AI locks, painting radars (protocol
 22: the ids of the surface radars painting the plane, a list like the AI
 locks), inbound missiles, threat
 records, emitters, sensor scalars, contacts, link marks, link mates and link
 tracks (protocol 15, [the data link](#data-link-stage-g)), strobes, plots,
-trails, visual contacts, map. The client's `CockpitReadout`
+trails, visual contacts, map; the ground contacts (protocol 23) come right
+after the contacts. The client's `CockpitReadout`
 comes back from them (`QReadout::readout`; `ClientConnection::cockpit_readout`
 gives the newest one around the client's predicted plane, for its flight
 frame's `ReadoutSlot::ready`). The host puts each seated player's readout,
@@ -1254,7 +1269,10 @@ built from the tick's flight, in every snapshot.
   baseline stays so, as the host holds it, but the cockpit shows a scalar
   group that has not arrived since with what it last arrived with for the
   same plane (`ReadoutReceiver::presented`): every group but the AI locks
-  always holds values, so an empty one has not arrived. Before this the
+  and the painting radars always holds values, so an empty one has not
+  arrived (the air-to-ground groups of protocol 23 start with a presence
+  value for this reason: a bomb sight that went away arrives as "none", not
+  as an empty group, which would show the last one). Before this the
   radar page read the sensor flags of such a readout as `NOT INSTALLED`.
   The lists cannot be told apart from an empty list, so they show what came:
   with acknowledgements always over the window late, a busy fight's
@@ -1354,6 +1372,65 @@ readout's plain size is 471 to 13,145 bytes, mean 1,895; its record is 4 to
 emitters 7, threat records 6), with 2.7 changes waiting on average, mostly in
 the first second while the map and scope come across. Keeping no room for
 messages, 61 bytes on average.
+
+#### The air-to-ground groups
+
+*Built in protocol 23 (slice NA); agent decisions unless credited.* The
+air-to-ground round's sights and cues are the host's ([the
+spec](../spec/air-to-ground.md)): the host runs every solution, and the
+owner's readout carries what the HUD, the targeting page and the scopes draw,
+so a client shows the cues the host built. Seven scalar groups (15 to 21),
+each starting with a presence value (0 none, 1 present) so a part that went
+away reads as none:
+
+| Group | Values after the presence value |
+| --- | --- |
+| Targeting sight (15) | 15: the mode (0 free, 1 pinned, 2 tracked) and the tracked id; the pin as an offset from the aim point in 1/8 ft; the look (heading, elevation) in 2^-20 of a turn; travelling home; the aim point (present, then 1/8 ft); the notice (0 none, 1 no ground point, 2 drop to slew, 3 gimbal limit) and its tick before the readout's; the zoom step 1 to 6 |
+| Sight sensor (16) | 10: laser (or FLIR); reach in whole feet; the gimbal (0 the hemisphere, 1 a cone with its search and track half-angles in 2^-20 of a turn); the eye in the aircraft's frame in 1/8 ft; the default look. A group of its own because it changes only with the plane or its pod |
+| Laser (17) | 26: designator; the state (0 off, 1 ready, 2 lasing, 3 masked); the mask (0 none, 1 range, 2 gimbal, 3 terrain); the hand setting (0 the automatic rule, 1 on, 2 off); the range and the reach in whole feet; then the spot and the buddy's spot, 10 values each (present, owner plane, side, position in whole feet, target present and id, own, range) |
+| Bomb sight (18) | 31: the mode (0 CCIP, 1 LVL), rocket; the CCIP (present; the mean impact in 1/8 ft, the release point as an offset from it, the release velocity in 1/64 ft/s, the fall's seconds in 1/64 s, the arc's range, the slant range and the record's zone-1 maximum in whole feet, the arc's steps 0 to 15); the level release (present; the target in 1/8 ft, D and C in whole feet, the seconds to release, the steering in 1/4096 rad, the slant range and the release radius in whole feet, the ground speed in 1/64 ft/s); the warnings as a mask (1 LOW, 2 FRAG, 4 OVERFLY, read back in that order); the last bomb's fall (present, seconds) |
+| Guided sight (19) | 15: the guidance (0 supported, 1 active, 2 infrared, 3 emitter, 4 laser, 5 coordinate, 6 command); the aim (present, whole feet); buddy; the ground and slant ranges (present and range each); the reach (present, minimum, maximum); IN RNG; the advisory (0 none, 1 NO LASER, 2 MASK, 3 OUT OF REACH, 4 NO TARGET) |
+| HARM cue (20) | 3, then 6 an emitter: the candidate (present, id), CUED; each emitter in the cue's order, nearest the bore first (id, position in whole feet, painting, emitting), at most 8 |
+| Weapons in flight (21) | 2, then 9 a weapon: the tick the plane's last guided weapon ended (present, ticks before the readout's); each of its guided weapons in flight, oldest first, at most 4 (projectile, station, guidance, guiding, seconds to impact present and in 1/64 s, position in whole feet). Never empty, so it has no presence value |
+
+The ground pages ride two values at the end of the Sensors group (the A-G
+flag and whether the HARM page is there) and the **ground contacts** list
+(list 16, at most 50): each contact as the scope's (the channel, 0 to 3 with
+the HARM page, position and velocity in whole feet and 1/4 ft/s, eligible and
+destroyed), then its class word and the aircraft and visible flags. Its
+position and velocity go as differences, not predicted, since the host
+refreshes a listed position four times a second and holds it between. The
+client lists them nearest its own plane first, as the host does.
+
+*Agent decisions:* points the HUD draws close to the plane (the sight's aim
+and pin, the bomb sight's impact, release and target) are 1/8 ft, as the
+gunsight's; points drawn far off or only as text (laser spots, the guided
+aim, the HARM cue's emitters, the weapons in flight) are whole feet, as the
+scope's. The readiness codes 25 (`NoEmitter`, NO EMITTER) and 26
+(`TrackLost`, NO TRACK) ride the Estimates group's readiness as any other.
+A reader refuses a group of the wrong length, an unknown mode, state, mask,
+setting, guidance, advisory or notice, a zoom step outside 1 to 6, an arc
+over 15, a warnings mask over 7, and a HARM cue or a weapons list over its
+limit.
+
+**On the client.** The cues are drawn from the host's solution a round trip
+late, as the gunsight's pipper is: the CCIP pipper, the LVL marker, the
+reach scale and the laser box sit where the host put them for the readout's
+tick, around the client's predicted plane. The targeting sight's look is
+the host's (the AC-130's own client-side turn, [above](#the-gunsight), is not
+extended to it: the targeting page's camera smooths the look, agent
+decision). The weapons themselves are projectile entities, as every missile
+is: a falling bomb, a pack's bombs, each rocket of a pod and a guided weapon
+steering on its spot travel as the host steps them (their scatter and
+guidance are the host's), and the client's interpolation draws them; no
+event and no client-side motion was needed (agent decision: unlike the
+surface round's gun bursts, they are few and not repeated a round a tick).
+A guided weapon's `target` stays none.
+
+Measured with `a_laser_bombers_readout_comes_through_a_connection_as_the_host_built_it`
+(the synthetic F/A-18D with a laser pod and two laser bombs, the sight
+pinned and the laser set by hand, a bomb guiding): the readout the client
+reads codes to the host's own numbers on every snapshot.
 
 ### Events as built
 
@@ -2409,6 +2486,47 @@ flowchart LR
   not by the highest number, since surface shots are numbered in a block of
   their own: before this, an aircraft's launch after a SAM's went untold.
 
+## The air-to-ground round (protocol 23)
+
+*Built (slice NA, 2026-10-11); agent decisions unless credited.* The round's
+radar pages, sights, laser, bombs and guided weapons work online with the
+host running every solution
+([guide](../MULTIPLAYER.md#air-to-ground-online), [spec](../spec/air-to-ground.md)).
+What travels:
+
+- **The seat's controls.** Combat codes 30 and 31 with its extended
+  varints, the scope's HARM channel and the sight's slew, zoom and codes 28
+  and 29 on every sight aircraft ([inputs](#inputs-as-built)). The standby
+  stream codes a seat's commands as the Inputs section does, so it carries
+  them too.
+- **The cockpit.** The readout's seven [air-to-ground groups](#the-air-to-ground-groups),
+  the ground pages' flags and their contacts, and readiness codes 25 and 26.
+  Buddy lasing needs nothing more: a buddy's spot is in the readout of every
+  plane that may use it, with its owner, so the targeting page and the HUD
+  name the owner's callsign from the lobby.
+- **The weapons.** Bombs (a pack's included, each with the host's scatter),
+  rocket pod rounds and guided weapons are projectile entities; no event was
+  added. Their ends are the Hit, Ground and Effect events every weapon
+  already had.
+- **Loadouts.** A loadout row's weapon may name a laser designator pod's SEE
+  record (`PAVESPK.SEE`, `PAVEKNF.SEE`; X1 writes the pod there), with its
+  count and a quantity of 0; the Loadout and Flight loadouts messages carry
+  it as any name. The content check counts the pods, and Cheat loading's
+  novelty stores (`~BLDR.JT`, `~MOOSE.JT`), as weapon items, so a loadout
+  that names one a player lacks or has differently is refused as any other
+  weapon is ([stage L](#compatibility-stage-l)). The import's other `~`
+  records are never offered and stay out.
+- **Migration and rejoin.** The sights, lasers, delivery modes and guided
+  flights are in the combat checkpoint, so a standby holds them and a new
+  host takes them from it. A takeover builds the flight's loadouts under the
+  session's own friendly fire and loadout rule before the session part
+  restores every setting (a Cheat loading under `loadouts any` was refused at
+  a takeover before). A player who rejoins takes its plane back from the AI,
+  which flew it meanwhile: the AI handoff carries stores, damage and sensors
+  but not the sight or the laser, so the sight comes back at its default look
+  with the laser off, and a laser weapon the player left guiding on its own
+  spot goes blind when the laser stops at the handoff.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -2425,6 +2543,8 @@ Decoders check every count and length against these before reading on.
 | Ejected pilots | 64 |
 | Moving surface units (protocol 22) | 128 |
 | Hardpoints in a Surface unit event (protocol 22) | 64 |
+| Ground contacts in a readout (protocol 23) | 50 |
+| Emitters of the HARM cue, guided weapons in flight in a readout (protocol 23) | 8, 4 |
 | Name table | 4,096 entries |
 | String | 255 bytes |
 | Input ticks per packet | 24 |
@@ -2532,6 +2652,14 @@ again with an observer; the capture format did not change for it.
   digest in the Seated message and the Resumed flight, the debrief pilot's
   shot-down-by name and the readout's painting radars (32 parts). The ground
   target's text lines travel in the mission text. Protocol 22 is the surface
+  round's one bump. 23 since the air-to-ground round (slice NA,
+  [the round](#the-air-to-ground-round-protocol-23)): the readout's seven
+  [air-to-ground groups](#the-air-to-ground-groups), the Sensors group's
+  ground page flags and the ground contacts list (40 parts), and, taken into
+  23's definition, what the round's slices added under 22: combat code 30,
+  the extended code 31 and its varints, the HARM channel (3) and readiness
+  codes 25 and 26. A loadout row naming a pod and the content items of the
+  pods and the novelty stores change no layout. Protocol 23 is the air-to-ground
   round's one bump.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares

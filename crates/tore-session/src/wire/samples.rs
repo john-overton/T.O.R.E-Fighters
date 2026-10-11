@@ -1273,6 +1273,212 @@ pub fn gunsight() -> tore_world::readout::GunsightReadout {
     }
 }
 
+/// A targeting sight tracking a ground object through a laser pod, every
+/// value on the wire's grid (protocol 23, slice NA).
+pub fn sight() -> tore_world::readout::SightReadout {
+    use std::f64::consts::TAU;
+    use tore_sim::combat::gunship::{Notice, SightNotice};
+    use tore_sim::combat::sight::{Gimbal, SightMode, SightSensor};
+    tore_world::readout::SightReadout {
+        mode: SightMode::Tracked(0x5C00_0003),
+        look: [TAU / 64., -TAU / 32.],
+        returning: false,
+        aim: Some([41_000.125, 210.5, -28_000.75]),
+        notice: Some(SightNotice {
+            notice: Notice::GimbalLimit,
+            tick: 395,
+        }),
+        zoom: 3,
+        sensor: SightSensor {
+            laser: true,
+            range_ft: 60_760.,
+            gimbal: Gimbal::Cone {
+                search: TAU / 8.,
+                track: TAU / 16.,
+            },
+            eye: [0., -4., 0.5],
+            default_look: [0., -TAU / 64.],
+        },
+    }
+}
+
+/// A laser lasing its sight's target, with a buddy's spot beside it, on the
+/// wire's grid (protocol 23).
+pub fn laser() -> tore_world::readout::LaserReadout {
+    use tore_sim::ai::targeting::Side;
+    use tore_sim::combat::laser::{LaserSpot, LaserState};
+    use tore_world::readout::{LaserReadout, SpotReadout};
+    LaserReadout {
+        designator: true,
+        state: LaserState::Lasing,
+        mask: None,
+        manual: Some(true),
+        range_ft: 26_000.,
+        limit_ft: 30_380.,
+        spot: Some(SpotReadout {
+            spot: LaserSpot {
+                owner: 3,
+                side: Side(0),
+                position: [41_000., 210., -28_001.],
+                target: Some(0x5C00_0003),
+            },
+            own: true,
+            range_ft: 26_000.,
+        }),
+        buddy: Some(SpotReadout {
+            spot: LaserSpot {
+                owner: 1,
+                side: Side(0),
+                position: [39_000., 190., -27_000.],
+                target: None,
+            },
+            own: false,
+            range_ft: 27_500.,
+        }),
+    }
+}
+
+/// A CCIP bomb sight with its fall and a level release beside it, on the
+/// wire's grid (protocol 23).
+pub fn bomb_sight() -> tore_world::readout::BombSight {
+    use tore_sim::combat::ballistics::ReleaseState;
+    use tore_sim::combat::delivery::{Ccip, DeliveryMode, LevelRelease, Warning};
+    tore_world::readout::BombSight {
+        mode: DeliveryMode::Level,
+        rocket: false,
+        ccip: Some(Ccip {
+            release: ReleaseState {
+                position: [30_000.5, 5_000.25, -20_000.125],
+                velocity: [800.5, -40.25, 12.015_625],
+            },
+            impact: [36_000.25, 200., -19_800.5],
+            seconds: 7.5,
+            range_ft: 7_500.,
+            slant_ft: 7_700.,
+            maximum_ft: 30_000.,
+            arc: 12,
+        }),
+        level: Some(LevelRelease {
+            target: [37_000.125, 205.5, -19_850.],
+            along_ft: 1_000.,
+            cross_ft: -50.,
+            release_seconds: 1.25,
+            steering_rad: -0.0625,
+            slant_ft: 8_500.,
+            radius_ft: 120.,
+            ground_speed_fps: 800.5,
+        }),
+        warnings: vec![Warning::Low, Warning::Overfly],
+        falling: Some(3.5),
+    }
+}
+
+/// A laser bomb's guided sight on a buddy's spot, inside its reach, on the
+/// wire's grid (protocol 23).
+pub fn guided() -> tore_sim::combat::guided::GuidedSight {
+    use tore_sim::combat::delivery::Reach;
+    use tore_sim::combat::guided::{Advisory, GuidedSight};
+    use tore_sim::combat::missiles::Guidance;
+    GuidedSight {
+        kind: Guidance::Laser,
+        aim: Some([39_000., 190., -27_000.]),
+        buddy: true,
+        ground_range_ft: Some(16_000.),
+        slant_range_ft: Some(20_000.),
+        reach: Some(Reach {
+            minimum_ft: 9_000.,
+            maximum_ft: 21_000.,
+        }),
+        in_reach: true,
+        advisory: Some(Advisory::Masked),
+    }
+}
+
+/// A HARM boresight cue of two emitters, the first the candidate, on the
+/// wire's grid (protocol 23).
+pub fn harm_cue() -> tore_world::readout::HarmCue {
+    use tore_world::readout::{HarmCue, HarmEmitter};
+    HarmCue {
+        emitters: vec![
+            HarmEmitter {
+                id: 0x5C00_0010,
+                position: [60_000., 300., -40_000.],
+                painting: true,
+                emitting: true,
+            },
+            HarmEmitter {
+                id: 0x5C00_0004,
+                position: [58_000., 280., -45_000.],
+                painting: false,
+                emitting: false,
+            },
+        ],
+        candidate: Some(0x5C00_0010),
+        cued: false,
+    }
+}
+
+/// Two guided weapons in flight, on the wire's grid (protocol 23).
+pub fn weapon_tti() -> Vec<tore_world::readout::WeaponTti> {
+    use tore_sim::combat::missiles::Guidance;
+    use tore_world::readout::WeaponTti;
+    vec![
+        WeaponTti {
+            projectile: 4_100,
+            station: 3,
+            kind: Guidance::Laser,
+            guiding: true,
+            seconds: Some(12.25),
+            position: [35_000., 4_000., -24_000.],
+        },
+        WeaponTti {
+            projectile: 4_107,
+            station: 4,
+            kind: Guidance::Coordinate,
+            guiding: false,
+            seconds: None,
+            position: [33_000., 4_800., -23_000.],
+        },
+    ]
+}
+
+/// Ground page contacts: a tank on the A-G page, a SAM site and a parked
+/// aircraft, on the wire's grid (protocol 23).
+pub fn ground_contacts() -> Vec<tore_sim::sensors::GroundContact> {
+    use tore_sim::sensors::{Channel, Contact, GroundContact};
+    let contact = |id: u32, x: f64, velocity: [f64; 3]| Contact {
+        id,
+        channel: Channel::Radar,
+        bearing_rad: 0.,
+        elevation_rad: 0.,
+        distance_ft: 0.,
+        position: [x, 210., -28_000.],
+        velocity,
+        track_eligible: true,
+        destroyed: false,
+    };
+    vec![
+        GroundContact {
+            contact: contact(0x5C00_0003, 41_000., [20.25, 0., -3.5]),
+            class: 0x0101,
+            aircraft: false,
+            visible: true,
+        },
+        GroundContact {
+            contact: contact(0x5C00_0010, 60_000., [0.; 3]),
+            class: 0x0410,
+            aircraft: false,
+            visible: false,
+        },
+        GroundContact {
+            contact: contact(0x5000_0012, 45_000., [0.; 3]),
+            class: 0x0001,
+            aircraft: true,
+            visible: true,
+        },
+    ]
+}
+
 /// A cockpit readout with every group and list filled, built by hand.
 pub fn readout() -> tore_world::readout::CockpitReadout {
     use tore_sim::combat::live::{Readiness, SeekerTone};
@@ -1327,11 +1533,12 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             gun_group: 5,
         },
         gunsight: Some(gunsight()),
-        sight: None,
-        laser: None,
-        guided: None,
-        weapon_tti: Vec::new(),
-        guided_impact_tick: None,
+        // Protocol 23: the air-to-ground round's groups (slice NA).
+        sight: Some(sight()),
+        laser: Some(laser()),
+        guided: Some(guided()),
+        weapon_tti: weapon_tti(),
+        guided_impact_tick: Some(380),
         seeker: SeekerReadout {
             status: seeker::Status::Locked,
             target: Some(7),
@@ -1343,7 +1550,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 locked: true,
             }),
         },
-        bomb_sight: None,
+        bomb_sight: Some(bomb_sight()),
         estimates: Estimates {
             readiness: Readiness::Ready,
             guidance_available: true,
@@ -1357,7 +1564,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             in_range: true,
             hit_percent: 72,
             solution_seconds: Some(11.5),
-            harm: None,
+            harm: Some(harm_cue()),
         },
         targets: Targets {
             designated: Some(7),
@@ -1389,9 +1596,9 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 len: 3,
             }],
             trail_points: vec![[0., 0., 0.], [10., 0., 5.], [20., 1., 10.]],
-            air_ground: false,
-            harm: false,
-            ground: Vec::new(),
+            air_ground: true,
+            harm: true,
+            ground: ground_contacts(),
         },
         visual: vec![contact(12, -40_000.)],
         map: vec![MapRow {
@@ -1548,6 +1755,18 @@ pub fn readout_snapshots() -> (Vec<u8>, Vec<u8>) {
         gunsight.sight = tore_sim::combat::gunship::Sight::Pinned(gunsight.aim.unwrap());
         gunsight.impacts_tick = 404;
     }
+    // Protocol 23: the targeting sight slews, the laser closes, the bomb
+    // falls a little longer and the weapon in flight a little nearer.
+    if let Some(sight) = &mut second.sight {
+        sight.look[0] += std::f64::consts::TAU / 1_024.;
+    }
+    if let Some(laser) = &mut second.laser {
+        laser.range_ft -= 400.;
+    }
+    if let Some(bomb) = &mut second.bomb_sight {
+        bomb.falling = Some(3.5 - 4. / 120.);
+    }
+    second.weapon_tti[0].seconds = Some(12.25 - 4. / 120.);
     // The link: a track moved on its publishing tick, the assignment locked.
     second.link.tracks[0].position[0] += 200.;
     if let Some(assigned) = &mut second.link.assigned {

@@ -1089,8 +1089,8 @@ const SIGHT_DESIGNATE: u64 = 28;
 const SIGHT_PIN_GROUND: u64 = 29;
 const TOGGLE_AIR_GROUND: u64 = 30;
 /// The last 5-bit code: an extended command follows as a varint, so the
-/// air-to-ground round's commands do not run out of codes (slice G1; the
-/// protocol bump is slice NA's).
+/// air-to-ground round's commands do not run out of codes (slice G1; part of
+/// protocol 23).
 const EXTENDED: u64 = 31;
 /// Extended combat commands, by their varint after [`EXTENDED`].
 const NEAREST_GROUND: u64 = 0;

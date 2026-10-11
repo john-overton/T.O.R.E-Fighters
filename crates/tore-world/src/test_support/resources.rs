@@ -485,6 +485,133 @@ pub fn resources() -> BTreeMap<String, Vec<u8>> {
     resources
 }
 
+/// A laser-guided bomb as the GBU-10E record has it (signature 1, flags
+/// 0x2a543: guided, the designator flag 0x400; no motor, retard 90, slowing
+/// 14 ft/s a second toward 278 ft/s; zone 0 50,000 ft, zone 1 30,000 ft),
+/// every number synthetic in shape.
+fn laser_bomb(resource: &str) -> Vec<u8> {
+    let value = |name: &str| match name {
+        "structType" => 0,
+        "weight" => 2_000,
+        "flags" => 0x2a543,
+        "sig" => 1,
+        "_minSpeed" => 0,
+        "_cornerSpeed" | "_maxSpeed" => 2_933,
+        "_acc" => 0,
+        "_dacc" => 14,
+        "initialSpeed" => 0,
+        "finalSpeed" => 278,
+        "launchRetard" => 90,
+        "removeT" => 240,
+        "poweredTurnRate" | "unpoweredTurnRate" => 6_370,
+        "performanceAt0" | "performanceAt20" => 100,
+        "actualRoundsPerGame" | "gameRoundsInBurst" | "gameRoundsInCarpetBurst" => 1,
+        "projsInPod" => 1,
+        "chances[0]" | "chances[1]" | "chances[2]" | "chances[3]" => 100,
+        "zone0.h" | "zone0.p" => 16_380,
+        "zone1.h" | "zone1.p" => 8_190,
+        "zone0.maxRange" => 50_000,
+        "zone1.maxRange" => 30_000,
+        "zone0.minAlt" | "zone1.minAlt" => -2_000_000_000,
+        "zone0.maxAlt" | "zone1.maxAlt" => 2_000_000_000,
+        "damage[0]" | "damage[1]" | "damage[2]" | "damage[3]" | "damage[4]" => 400,
+        "fuzeArmT" => 4,
+        "fuzeRadius" => 100,
+        _ => 0,
+    };
+    let mut text = String::from(HEADER);
+    let object = |name: &str| match name {
+        "structType" => 7,
+        "typeSize" => 315,
+        other => value(other),
+    };
+    let projectile = |name: &str| match name {
+        "structType" => 10,
+        other => value(other),
+    };
+    text += &fields(schema::OBJECT, &[], "_PROJProc", &object);
+    text += &fields(schema::PROJECTILE, &["si_names"], "", &projectile);
+    text += &names("LGB", "Synthetic laser bomb", resource);
+    text.into_bytes()
+}
+
+/// A laser designator pod's record: a laser sensor (signature 1) with
+/// weight, which `DesignatorStore::parse` takes (slice NA's content tests).
+pub fn laser_pod(resource: &str) -> Vec<u8> {
+    sensor(resource, 1)
+}
+
+/// Adds the air-to-ground round's synthetic stores to `resources` (the
+/// synthetic import, or one built on it): the F/A-18D carries a laser
+/// designator pod (`LASERPOD.SEE`, signature 1 with weight: a pod, the
+/// hemisphere below the aircraft), and a laser-guided bomb (`GBU10.JT`)
+/// is in the import for [`a2g_loadout`] to hang on its missile station, for
+/// the multiplayer round's sight, laser and guided weapon tests (slice NA).
+/// No other test sees it.
+pub fn add_a2g_stores(resources: &mut BTreeMap<String, Vec<u8>>) {
+    resources.insert("LASERPOD.SEE".to_owned(), sensor("LASERPOD.SEE", 1));
+    resources.insert("GBU10.JT".to_owned(), laser_bomb("GBU10.JT"));
+    resources.insert(
+        "F18.PT".to_owned(),
+        aircraft(&[
+            Hardpoint {
+                flags: 8,
+                store: "M61.JT",
+                count: 500,
+            },
+            Hardpoint {
+                flags: 8,
+                store: "F18R.SEE",
+                count: 1,
+            },
+            Hardpoint {
+                flags: 8,
+                store: "F18V.SEE",
+                count: 1,
+            },
+            Hardpoint {
+                flags: 8,
+                store: "F18.ECM",
+                count: 1,
+            },
+            Hardpoint {
+                flags: 8,
+                store: "LASERPOD.SEE",
+                count: 1,
+            },
+            Hardpoint {
+                flags: 0x80,
+                store: "AIM9M.JT",
+                count: 2,
+            },
+        ]),
+    );
+}
+
+/// The F/A-18D of [`add_a2g_stores`] with two laser-guided bombs on its
+/// missile station, a Cheat loading (the synthetic station's flags were not
+/// made for bombs).
+pub fn a2g_loadout() -> crate::mission::LoadoutSpec {
+    use crate::mission::{LoadoutSpec, StationLoad};
+    LoadoutSpec {
+        tanks: None,
+        fuel_lbs: 1_000.,
+        cheat: true,
+        stations: vec![
+            StationLoad {
+                weapon: "M61.JT".into(),
+                count: 500,
+                quantity: 500,
+            },
+            StationLoad {
+                weapon: "GBU10.JT".into(),
+                count: 2,
+                quantity: 2,
+            },
+        ],
+    }
+}
+
 /// [`resources`] with an AC-130U (`AC130.PT`) carrying the three
 /// side-firing guns the gunsight drives (`C_25.JT`, `C_40.JT`, `C_105.JT`,
 /// synthetic guns) and the fighter's sensors, for the AC-130 gunsight's

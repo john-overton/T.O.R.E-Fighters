@@ -565,3 +565,23 @@ fn every_lobby_build_round_trips_and_code_three_is_invalid() {
         Err(WireError::Invalid("build"))
     );
 }
+
+/// Protocol 23 (slice NA): the laser designator pods and the novelty stores
+/// are weapon items, so a Content and a Content gaps name them by their
+/// records' names, the SEE pod and the `~` store as any other key.
+#[test]
+fn the_pods_and_the_novelty_stores_go_as_weapon_items() {
+    let mut items = vec![
+        item(ItemKind::Weapon, "PAVEKNF.SEE"),
+        item(ItemKind::Weapon, "PAVESPK.SEE"),
+        item(ItemKind::Weapon, "~BLDR.JT"),
+        item(ItemKind::Weapon, "~MOOSE.JT"),
+        item(ItemKind::Shared, ""),
+    ];
+    items.sort();
+    round_trip(&content(items));
+    round_trip(&gaps(vec![
+        gap(ItemKind::Weapon, "PAVEKNF.SEE", &[2]),
+        gap(ItemKind::Weapon, "~BLDR.JT", &[3]),
+    ]));
+}
