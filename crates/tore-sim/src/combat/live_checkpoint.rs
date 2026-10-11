@@ -170,6 +170,7 @@ crate::checkpoint_struct!(SightInput { deflection, zoom });
 crate::checkpoint_enum!(crate::combat::gunship::SightRequest {
     Designate = 0,
     Pin = 1,
+    Next = 2,
 });
 crate::checkpoint_enum!(crate::combat::gunship::Notice {
     NoGroundPoint = 0,
@@ -462,6 +463,8 @@ crate::checkpoint_struct!(Ownship {
     ever_loaded,
     selected,
     gunship,
+    sight,
+    laser,
     armed,
     sensors,
     hud_selection,
@@ -494,7 +497,8 @@ crate::checkpoint_struct!(Ownship {
     gun_cadence,
     bay_release,
     bay_hold_until,
-} shared { config });
+    delivery_mode,
+} shared { config } skip { delivery = None });
 
 impl Checkpoint for State {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {

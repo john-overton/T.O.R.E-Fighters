@@ -16,6 +16,7 @@ use tore_sim::{
 use tore_world::readout::CockpitReadout;
 
 mod agm;
+mod bombs;
 
 /// Reserve the weapon readout area even for a safe gun, keeping flight text clear.
 pub fn active(frame: &FlightFrame) -> bool {
@@ -25,6 +26,7 @@ pub fn active(frame: &FlightFrame) -> bool {
     let weapon = &station.weapon;
     live::is_gun(weapon)
         || (frame.readout.stores.armed && missiles::Profile::for_weapon(weapon).is_some())
+        || frame.readout.bomb_sight.is_some()
 }
 
 fn debug_point(point: (f64, f64), size: [f64; 2]) -> (f64, f64) {
@@ -113,6 +115,10 @@ pub fn draw(
         return;
     }
     let w = &station.weapon;
+    if let Some(sight) = &ro.bomb_sight {
+        bombs::draw(pixels, frame, font, color, zoom, w, sight);
+        return;
+    }
     let Some(profile) = missiles::Profile::for_weapon(w) else {
         return;
     };

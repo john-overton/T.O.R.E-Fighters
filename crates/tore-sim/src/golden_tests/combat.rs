@@ -637,6 +637,8 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         infrared_hardpoint: None,
         rwr_hardpoint: None,
         sensors: sensor_profiles(),
+        sight: None,
+        designator_pods: vec![],
     }
 }
 

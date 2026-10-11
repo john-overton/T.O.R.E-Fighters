@@ -24,10 +24,13 @@ use tore_sim::{
     airport::Service,
     attitude::Vector,
     combat::{
+        delivery::{Ccip, Delivery, DeliveryMode, LevelRelease, Warning},
         gunship::{self, Sight, SightNotice},
         gunship_impact::Impact,
+        laser::{LaserSpot, LaserState, Mask},
         live::{self, Launcher, Readiness, SeekerTone, Target},
         missiles::{FiringBand, LaunchMode, TargetRole, seeker},
+        sight::{SightMode, SightSensor},
         threats::ThreatRecord,
     },
     sensors::{self, Channel, Contact, Mode, Plot, Strobe, Support, passive},
@@ -65,10 +68,21 @@ pub struct CockpitReadout {
     pub stores: Stores,
     /// The AC-130's gunsight; `None` on every other aircraft.
     pub gunsight: Option<GunsightReadout>,
+    /// The targeting sight of an aircraft with a laser designator or a FLIR,
+    /// the AC-130 excepted (its sight is `gunsight`). Host-built; not on the
+    /// wire yet (slice NA carries it at protocol 23).
+    pub sight: Option<SightReadout>,
+    /// The laser and the spot the plane's laser weapons home on: present on
+    /// an aircraft with a laser designator, or while a buddy's spot is shown.
+    /// Host-built; not on the wire yet (slice NA).
+    pub laser: Option<LaserReadout>,
     /// The mounted seeker and its tone.
     pub seeker: SeekerReadout,
     /// What the weapon page and HUD estimate for the selected station.
     pub estimates: Estimates,
+    /// The bomb or rocket sight, while an unguided bomb or a rocket pod is
+    /// selected and armed.
+    pub bomb_sight: Option<BombSight>,
     /// The designated, displayed and view targets.
     pub targets: Targets,
     /// Radar and infrared contacts, plots, strobes and trails.
@@ -186,6 +200,77 @@ impl GunsightReadout {
     }
 }
 
+/// The targeting sight as the sim holds it (`tore_sim::combat::sight::Sight`,
+/// docs/spec/air-to-ground.md, "The targeting sight"): what the targeting
+/// page and the HUD laser box draw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SightReadout {
+    /// Free slew, a pinned ground point or a tracked object.
+    pub mode: SightMode,
+    /// Body-relative [heading, elevation] of the line of sight, radians.
+    pub look: [f64; 2],
+    /// The sight is travelling back to its default look.
+    pub returning: bool,
+    /// The point the sight marks.
+    pub aim: Option<Vector>,
+    /// The last notice for the activity line and the tick it was raised.
+    pub notice: Option<SightNotice>,
+    /// The zoom step in use, 1 to 6.
+    pub zoom: u8,
+    /// The sensor: laser or FLIR, reach, gimbal, eye and default look.
+    pub sensor: SightSensor,
+}
+impl SightReadout {
+    pub fn of(sight: &tore_sim::combat::sight::Sight) -> Self {
+        Self {
+            mode: sight.mode,
+            look: sight.look,
+            returning: sight.returning,
+            aim: sight.aim,
+            notice: sight.notice,
+            zoom: sight.zoom(),
+            sensor: sight.sensor,
+        }
+    }
+    /// Slewed off the sensor's default look (the targeting page shows then).
+    pub fn slewed(&self) -> bool {
+        self.look != self.sensor.default_look
+    }
+}
+
+/// A laser spot as the plane sees it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpotReadout {
+    pub spot: LaserSpot,
+    /// The plane's own spot (LASE, `LSR`, the box's L) or a buddy's (BUDDY,
+    /// `BUD`, the box's B); the owner's callsign names the buddy.
+    pub own: bool,
+    /// From the plane to the spot, feet.
+    pub range_ft: f64,
+}
+
+/// The plane's laser and the spots it may use (docs/spec/air-to-ground.md,
+/// "The laser" and "Buddy lasing").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LaserReadout {
+    /// The plane carries a laser designator.
+    pub designator: bool,
+    /// Off, ready (LSR RDY), lasing (LASE) or masked (MASK).
+    pub state: LaserState,
+    pub mask: Option<Mask>,
+    /// Ctrl+L: on or off by hand, or the automatic rule.
+    pub manual: Option<bool>,
+    /// From the sight's eye to its point, feet (0 without a point).
+    pub range_ft: f64,
+    /// The laser's reach now, feet (halved through cloud or fog).
+    pub limit_ft: f64,
+    /// The spot the plane's laser weapons home on: its own while lasing,
+    /// else a buddy's.
+    pub spot: Option<SpotReadout>,
+    /// A buddy's spot shown beside the plane's own (the second BUDDY row).
+    pub buddy: Option<SpotReadout>,
+}
+
 /// The mounted seeker.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SeekerReadout {
@@ -284,6 +369,43 @@ impl HarmCue {
             candidate,
             cued,
         })
+    }
+}
+
+/// What the HUD's bomb or rocket sight shows for the selected station
+/// (docs/spec/air-to-ground.md, "The HUD in air-to-ground modes"): the
+/// delivery solution combat worked out on the last tick
+/// ([`tore_sim::combat::delivery`]). Host-built; a networked client has none
+/// until the wire carries it (protocol 23, slice NA).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BombSight {
+    /// CCIP or LVL; always CCIP for rockets.
+    pub mode: DeliveryMode,
+    /// A rocket pod: ARM and the rocket pipper.
+    pub rocket: bool,
+    /// The impact point and its range arc, when the round comes down.
+    pub ccip: Option<Ccip>,
+    /// The level release, in LVL with a ground target.
+    pub level: Option<LevelRelease>,
+    /// LOW, FRAG and OVERFLY, in that order.
+    pub warnings: Vec<Warning>,
+    /// Seconds until the plane's last released bomb lands.
+    pub falling: Option<f64>,
+}
+impl BombSight {
+    pub fn of(delivery: &Delivery) -> Self {
+        Self {
+            mode: delivery.mode,
+            rocket: delivery.rocket,
+            ccip: delivery.ccip,
+            level: delivery.level,
+            warnings: delivery.warnings.clone(),
+            falling: delivery.falling,
+        }
+    }
+    /// The first warning, for the readiness slot.
+    pub fn warning(&self) -> Option<Warning> {
+        self.warnings.first().copied()
     }
 }
 
@@ -815,6 +937,13 @@ pub fn build(
             gun_group: own.gunship.as_ref().map_or(0, |guns| guns.mask()),
         },
         gunsight: own.gunship.as_ref().map(GunsightReadout::of),
+        sight: own.sight.as_ref().map(SightReadout::of),
+        laser: laser_readout(state, own, here),
+        bomb_sight: own
+            .delivery
+            .as_ref()
+            .filter(|d| own.armed && d.station == own.selected)
+            .map(BombSight::of),
         seeker: SeekerReadout {
             status: own.mounted.status,
             target: own.mounted.target,
@@ -869,6 +998,47 @@ pub fn build(
             home: status.as_ref().is_some_and(|status| status.home),
         },
         link: LinkReadout::default(),
+    })
+}
+
+/// The plane's laser readout: its own laser, and a buddy's spot when a laser
+/// weapon is selected and the spot lies inside that weapon's seeker range
+/// (zone 0 maximum, 8.23 nmi for the GBU-10; the display rule is fitted).
+fn laser_readout(state: &live::State, own: &live::Ownship, here: Vector) -> Option<LaserReadout> {
+    let designator = own
+        .configuration()
+        .sight_sensor()
+        .is_some_and(|sensor| sensor.laser);
+    let seeker_range = own
+        .laser_weapon_selected()
+        .then(|| own.configuration().stations.get(own.selected))
+        .flatten()
+        .map(|station| f64::from(station.weapon.seeker.zones[0].maximum_range.max(0)));
+    let shown = |spot: LaserSpot, own: bool| SpotReadout {
+        spot,
+        own,
+        range_ft: away(spot.position, here),
+    };
+    let buddy = seeker_range
+        .and_then(|reach| {
+            state
+                .buddy_spot(own.aircraft, here)
+                .filter(|spot| away(spot.position, here) <= reach)
+        })
+        .map(|spot| shown(spot, false));
+    let spot = own
+        .laser
+        .spot(own.aircraft, own.side)
+        .map(|spot| shown(spot, true));
+    (designator || buddy.is_some()).then_some(LaserReadout {
+        designator,
+        state: own.laser.state,
+        mask: own.laser.mask,
+        manual: own.laser.manual,
+        range_ft: own.laser.range_ft,
+        limit_ft: own.laser.limit_ft,
+        spot: spot.or(buddy),
+        buddy: spot.and(buddy),
     })
 }
 

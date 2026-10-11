@@ -125,6 +125,17 @@ impl Loadout {
         self.configuration.ammunition(&self.quantities)
     }
     pub fn refresh_equipment(&mut self) -> Result<()> {
+        // A designator pod leaves its station when a weapon or a tank takes
+        // the station.
+        let quantities = &self.quantities;
+        let tanks = &self.configuration.tanks;
+        let slots = &self.configuration.hardpoint_slots;
+        self.configuration.designator_pods.retain(|pod| {
+            quantities.get(pod.station).is_some_and(|q| *q == 0)
+                && !tanks
+                    .iter()
+                    .any(|t| t.quantity > 0 && slots.get(t.hardpoint) == Some(&Some(pod.station)))
+        });
         for pod in &mut self.configuration.gun_pods {
             pod.quantity = if self.configuration.stations[pod.station].weapon.source == "SUU16.JT" {
                 self.quantities[pod.station]
@@ -283,6 +294,73 @@ impl Loadout {
             .unwrap_or(0)
             .max(0)
     }
+    /// How many of a designator pod station `slot` takes: one where the
+    /// retail equipment rule allows it (a pod station, flag 0x400, within
+    /// its weight class), else none. Cheat loading follows the cheat rule.
+    pub fn designator_capacity(&self, slot: usize, pod: &super::sight::DesignatorStore) -> i32 {
+        self.hardpoints
+            .get(slot)
+            .and_then(|h| {
+                loading::Station::from_source(h).ok().map(|s| {
+                    let store = loading::Store::sensor(pod.flags, pod.weight_lbs);
+                    let matches_default = h
+                        .store
+                        .as_deref()
+                        .is_some_and(|d| d.eq_ignore_ascii_case(&pod.source));
+                    if self.cheat {
+                        s.cheat_count(store, matches_default, h.store.is_some())
+                    } else {
+                        s.allowed_count(store, matches_default)
+                    }
+                })
+            })
+            .unwrap_or(0)
+            .clamp(0, 1)
+    }
+    /// Load a laser designator pod on station `slot` (decision 7), in place
+    /// of its weapon and of a tank on the same hardpoint. An aircraft
+    /// carries one pod: loading another moves it. Leaves the loadout as it
+    /// was if the station cannot take it.
+    pub fn load_designator(
+        &mut self,
+        slot: usize,
+        pod: super::sight::DesignatorStore,
+    ) -> Result<()> {
+        if self.designator_capacity(slot, &pod) <= 0 {
+            return Err(super::invalid(
+                "This store cannot be loaded at this station.",
+            ));
+        }
+        let mut draft = self.clone();
+        draft.quantities[slot] = 0;
+        for tank in &mut draft.configuration.tanks {
+            if draft.configuration.hardpoint_slots.get(tank.hardpoint) == Some(&Some(slot)) {
+                tank.quantity = 0;
+            }
+        }
+        draft.configuration.designator_pods = vec![super::sight::DesignatorPod {
+            station: slot,
+            store: pod,
+        }];
+        draft.refresh_equipment()?;
+        *self = draft;
+        Ok(())
+    }
+    /// Take the designator pod off station `slot`, if it holds one.
+    pub fn unload_designator(&mut self, slot: usize) -> Result<()> {
+        self.configuration
+            .designator_pods
+            .retain(|pod| pod.station != slot);
+        self.refresh_equipment()
+    }
+    /// The designator pod on station `slot`.
+    pub fn designator(&self, slot: usize) -> Option<&super::sight::DesignatorStore> {
+        self.configuration
+            .designator_pods
+            .iter()
+            .find(|pod| pod.station == slot)
+            .map(|pod| &pod.store)
+    }
     pub fn select(&mut self, slot: usize, w: Weapon) -> Result<()> {
         let capacity = self.capacity(slot, &w);
         if capacity <= 0 || capacity >= 32767 {
@@ -395,6 +473,15 @@ impl Loadout {
         }
         if self.configuration.tanks.len() != self.tank_hardpoints.len() {
             return Err(super::invalid("Invalid tank station state."));
+        }
+        for pod in &self.configuration.designator_pods {
+            if self.designator_capacity(pod.station, &pod.store) <= 0
+                || self.quantities.get(pod.station).is_none_or(|q| *q > 0)
+            {
+                return Err(super::invalid(
+                    "A designator pod cannot be loaded at this station.",
+                ));
+            }
         }
         for (index, tank) in self.configuration.tanks.iter().enumerate() {
             if tank.quantity > 0 {

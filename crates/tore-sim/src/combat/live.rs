@@ -34,6 +34,8 @@ pub use agm::{CueEmitter, MAX_HARM_CUE};
 mod bomb_tests;
 mod broad;
 mod collateral;
+#[cfg(test)]
+mod delivery_tests;
 mod ground_sensing;
 #[cfg(test)]
 mod ground_sensing_tests;
@@ -46,6 +48,9 @@ mod handoff;
 mod observation;
 #[cfg(test)]
 mod observation_reference;
+mod sighting;
+#[cfg(test)]
+mod sighting_tests;
 #[cfg(test)]
 mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
@@ -233,10 +238,17 @@ pub enum Command {
     /// Ctrl+X: the nearest hostile ground object, only with the Easy
     /// targeting cheat on (a retail cheat key).
     NearestGround,
-    /// Backslash on the AC-130: track the object under the gunsight's
-    /// crosshair, else pin the ground there. Nothing on other aircraft.
+    /// Ctrl+L: the laser on or off by hand, on an aircraft with a laser
+    /// designator (docs/spec/air-to-ground.md, "The laser").
+    ToggleLaser,
+    /// `/`: the targeting sight tracks the next visible ground object.
+    SightNext,
+    /// Backslash on an aircraft with a targeting sight (the AC-130's
+    /// gunsight included): track the object under the crosshair, else pin
+    /// the ground there.
     SightDesignate,
-    /// Shift+Backslash on the AC-130: pin the ground under the crosshair.
+    /// Shift+Backslash on an aircraft with a targeting sight: pin the ground
+    /// under the crosshair.
     SightPinGround,
     ToggleArm,
     Jettison,
@@ -415,6 +427,12 @@ pub struct Configuration {
     pub wreck_power: crate::wreck::Power,
     /// Imported sensor capability, resolved by parsed record channel.
     pub sensors: sensors::SensorProfiles,
+    /// The targeting sight of the aircraft's own laser or FLIR record
+    /// ([`super::sight::fixed_sight`]); [`Configuration::sight_sensor`] puts
+    /// a loaded designator pod first.
+    pub sight: Option<super::sight::SightSensor>,
+    /// Laser designator pods loaded on weapon stations (decision 7).
+    pub designator_pods: Vec<super::sight::DesignatorPod>,
 }
 impl Configuration {
     /// Convert installed quantities to logical rounds: a gun pod's rounds,
@@ -460,6 +478,12 @@ impl Configuration {
                 return Err(super::invalid("invalid gun pod configuration"));
             }
             mass += i64::from(pod.quantity) * i64::from(pod.weight_lbs);
+        }
+        for pod in &self.designator_pods {
+            if pod.station >= self.stations.len() || pod.store.weight_lbs < 0 {
+                return Err(super::invalid("invalid designator pod configuration"));
+            }
+            mass += i64::from(pod.store.weight_lbs);
         }
         let mut fuel = [0.; 9];
         let mut used = [false; 9];
@@ -774,6 +798,7 @@ impl Configuration {
         // Sensors resolve by parsed record channel, so a missing device is an
         // explicit state rather than another aircraft's radar.
         let profiles = sensors::SensorProfiles::from_source(a, &mut read)?;
+        let sight = super::sight::fixed_sight(a, &mut read)?;
         let station = |record: Option<&String>| {
             record.and_then(|record| {
                 a.hardpoints.iter().position(|h| {
@@ -879,6 +904,8 @@ impl Configuration {
             rwr_hardpoint,
             ecm_hardpoint,
             sensors: profiles,
+            sight,
+            designator_pods: vec![],
             fixed_external_equipment_lbs,
             tanks,
             gun_pods,
@@ -1298,6 +1325,11 @@ pub struct Ownship {
     pub selected: usize,
     /// AC-130 fixed-tick barrel angles and linked membership.
     pub gunship: Option<super::gunship::State>,
+    /// The targeting sight of an aircraft with a laser designator or a FLIR
+    /// (the AC-130's is its gunsight, in `gunship`).
+    pub sight: Option<super::sight::Sight>,
+    /// The laser designator: off on an aircraft without one.
+    pub laser: super::laser::Laser,
     pub armed: bool,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
@@ -1345,6 +1377,12 @@ pub struct Ownship {
     bay_release: Option<(usize, u64)>,
     /// The bay stays open until this tick after a bay release.
     bay_hold_until: u64,
+    /// The bomb sight's mode (Ctrl+M): CCIP or the level release.
+    pub delivery_mode: super::delivery::DeliveryMode,
+    /// The bomb or rocket sight's solution for the selected station, worked
+    /// out every step from that step's launcher ([`super::delivery::solve`]).
+    /// Derived each step, so a checkpoint does not carry it.
+    pub delivery: Option<super::delivery::Delivery>,
 }
 
 /// Combat: what every aircraft shares, and the [`Ownship`] of each
@@ -1642,6 +1680,10 @@ impl Ownship {
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let sensors = Sensors::new(config.sensors.clone());
         let gunship = super::gunship::State::new(&config);
+        let sight = gunship
+            .is_none()
+            .then(|| config.sight_sensor().map(super::sight::Sight::new))
+            .flatten();
         Ok(Self {
             aircraft,
             side,
@@ -1676,6 +1718,8 @@ impl Ownship {
             ever_loaded,
             selected: 0,
             gunship,
+            sight,
+            laser: Default::default(),
             sensors,
             emitters: vec![],
             missile_threats: super::threats::ThreatService::new(aircraft),
@@ -1689,6 +1733,8 @@ impl Ownship {
             gun_cadence,
             bay_release: None,
             bay_hold_until: 0,
+            delivery_mode: Default::default(),
+            delivery: None,
         })
     }
     pub fn configuration(&self) -> &Configuration {
@@ -2976,12 +3022,37 @@ impl State {
     /// (x right, y up, -127 to 127) and the zoom step (1 to 6, 0 for the
     /// default). Held until set again; nothing without an AC-130 gun group.
     pub fn set_sight_input(&mut self, aircraft: u32, deflection: [i8; 2], zoom: u8) {
-        if let Some(group) = self
-            .ownship_mut(aircraft)
-            .and_then(|own| own.gunship.as_mut())
-        {
-            group.input = super::gunship::SightInput { deflection, zoom };
+        let Some(own) = self.ownship_mut(aircraft) else {
+            return;
+        };
+        let input = super::gunship::SightInput { deflection, zoom };
+        if let Some(group) = own.gunship.as_mut() {
+            group.input = input;
         }
+        if let Some(sight) = own.sight.as_mut() {
+            sight.input = input;
+        }
+    }
+    /// A newly selected unguided bomb starts in LVL when a ground target is
+    /// designated and the flight path is near level, else in CCIP
+    /// ([`super::delivery::DeliveryMode::chosen`]); Ctrl+M overrides it.
+    fn choose_delivery(&self, own: &mut Ownship, launcher: Launcher) {
+        if !own.armed
+            || !own
+                .config
+                .stations
+                .get(own.selected)
+                .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+        {
+            return;
+        }
+        let ground_target = own
+            .designated()
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+            .is_some_and(|t| t.role == TargetRole::Surface && t.hp > 0);
+        let v = launcher.velocity;
+        own.delivery_mode =
+            super::delivery::DeliveryMode::chosen(ground_target, v[1].atan2(v[0].hypot(v[2])));
     }
     /// A manual range or cockpit command for one ownship.
     pub fn command(&mut self, aircraft: u32, command: Command, launcher: Launcher) {
@@ -3114,6 +3185,18 @@ impl State {
             Command::ReleaseChaff => self.release_countermeasure(own, EffectKind::Chaff, launcher),
             Command::ReleaseFlare => self.release_countermeasure(own, EffectKind::Flare, launcher),
             Command::ToggleSeekerMode => {
+                // Ctrl+M with an unguided bomb selected switches its sight
+                // between CCIP and LVL (docs/spec/air-to-ground.md).
+                if own.armed
+                    && own
+                        .config
+                        .stations
+                        .get(own.selected)
+                        .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+                {
+                    own.delivery_mode = own.delivery_mode.toggled();
+                    return;
+                }
                 if self.weapon_rules == Rules::Compatibility || !own.guidance_available(launcher) {
                     return;
                 }
@@ -3162,15 +3245,21 @@ impl State {
                     own.release();
                 }
             }
-            Command::NextWeapon => own.select_next(),
+            Command::NextWeapon => {
+                own.select_next();
+                self.choose_delivery(own, launcher);
+            }
             Command::NextSelection => {
-                own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::PreviousSelection => {
-                own.cycle_selection(false, self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.cycle_selection(false, self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::AdvanceFromEmpty => {
-                own.advance_from_empty(self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.advance_from_empty(self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::SelectNav => {
                 own.release();
@@ -3214,15 +3303,16 @@ impl State {
                 if let Some(group) = &mut own.gunship {
                     group.drop_hold();
                 }
-            }
-            Command::SightDesignate => {
-                if let Some(group) = &mut own.gunship {
-                    group.request = Some(super::gunship::SightRequest::Designate);
+                if let Some(sight) = &mut own.sight {
+                    sight.drop_hold();
                 }
             }
-            Command::SightPinGround => {
-                if let Some(group) = &mut own.gunship {
-                    group.request = Some(super::gunship::SightRequest::Pin);
+            Command::SightDesignate => own.request_sight(super::sight::SightRequest::Designate),
+            Command::SightPinGround => own.request_sight(super::sight::SightRequest::Pin),
+            Command::SightNext => own.request_sight(super::sight::SightRequest::Next),
+            Command::ToggleLaser => {
+                if own.config.sight_sensor().is_some_and(|s| s.laser) {
+                    own.laser.toggle();
                 }
             }
             Command::ToggleArm => {
@@ -3825,6 +3915,49 @@ impl State {
             blast: Some(explosion),
         });
     }
+    /// The bomb or rocket sight's solution for `own`'s selected station this
+    /// step: against its designated ground target, with the time to impact of
+    /// the last bomb it released.
+    fn delivery_for(
+        &self,
+        own: &Ownship,
+        launcher: &Launcher,
+        ground: &impl Fn(f64, f64) -> f64,
+        clock: super::delivery::Clock,
+    ) -> Option<super::delivery::Delivery> {
+        if !own.armed || !launcher.alive {
+            return None;
+        }
+        let station = own.config.stations.get(own.selected)?;
+        let target = own
+            .designated()
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+            .filter(|t| t.role == TargetRole::Surface && t.hp > 0)
+            .map(|t| t.position);
+        let falling = self
+            .projectiles
+            .iter()
+            .filter(|p| p.owner == own.aircraft)
+            .filter_map(|p| self.bombs.get(&p.id).map(|motion| (p, motion)))
+            .max_by_key(|(p, _)| p.id)
+            .and_then(|(p, motion)| {
+                motion
+                    .fall_time(ground(p.position[0], p.position[2]))
+                    .map(|t| (t - p.age as f64 / 120.).max(0.))
+            });
+        super::delivery::solve(
+            super::delivery::Situation {
+                index: own.selected,
+                station,
+                launcher,
+                mode: own.delivery_mode,
+                target,
+                clock,
+                falling,
+            },
+            ground,
+        )
+    }
     fn push_effect(&mut self, effect: Effect) {
         if self.effects.len() == MAX_EFFECTS {
             self.effects.remove(0);
@@ -3960,6 +4093,9 @@ impl State {
             self.ownship_rows
                 .extend(rows.iter().map(|r| r.target.clone()));
         }
+        // The aircraft with one of their own laser weapons in flight: their
+        // lasers stay on (docs/spec/air-to-ground.md, "The laser").
+        let laser_owners = sighting::laser_owners(&ships, &self.projectiles);
         // These observations read fixed rows and change only their ownship.
         // Readiness and every release remain below, in aircraft id order.
         // Fitted: at least two active cockpits amortize a scoped dispatch.
@@ -4000,6 +4136,19 @@ impl State {
                     },
                 );
             }
+            if own.sight.is_some() {
+                sighting::step(
+                    own,
+                    launcher,
+                    &self.targets,
+                    &sighting::Context {
+                        ground: &ground,
+                        weather: &self.sensor_weather,
+                        laser_owners: &laser_owners,
+                        tick: self.tick,
+                    },
+                );
+            }
             if own.config.stations.is_empty() {
                 own.release_readiness = Readiness::Safe;
                 own.release();
@@ -4008,6 +4157,16 @@ impl State {
             if own.gunship.is_some() {
                 step_gunship(own, k, launcher, &self.targets, &rows, &ground, self.tick);
             }
+            own.delivery = self.delivery_for(
+                own,
+                &launcher,
+                &ground,
+                super::delivery::Clock {
+                    tick: self.tick - 1,
+                    service,
+                    remainder: self.service_remainder,
+                },
+            );
             let selected = own.selected;
             let grouped = own
                 .gunship
@@ -4075,6 +4234,21 @@ impl State {
                     w.burst.game_burst_t,
                     now,
                 );
+                // LVL holds a bomb's trigger while the release cue lies ahead:
+                // a held trigger waits for the cue and releases there, once a
+                // pass (docs/spec/air-to-ground.md, "The level release T").
+                let polled = match own.delivery.as_ref().and_then(|d| d.level_trigger(index)) {
+                    Some(due) => {
+                        due && held
+                            && launcher.alive
+                            && !self.projectiles.iter().any(|p| {
+                                p.owner == own.aircraft
+                                    && p.station == index
+                                    && p.age <= super::delivery::RELEASE_GUARD_TICKS
+                            })
+                    }
+                    None => polled,
+                };
                 if polled && bay_waits && own.release_readiness == Readiness::Ready {
                     own.bay_release = Some((index, self.tick));
                     own.release_readiness = Readiness::BayClosed;
@@ -4283,6 +4457,9 @@ impl State {
                             self.rewinds.insert(self.next_shot, ticks);
                         }
                         own.shots += 1;
+                        if super::laser::is_laser_weapon(w) {
+                            own.laser.note_release();
+                        }
                         self.next_shot += 1;
                         fired = true;
                         events.push(Event::Fired {
@@ -6182,6 +6359,8 @@ mod tests {
                 infrared_hardpoint: None,
                 rwr_hardpoint: None,
                 sensors: sensor_profiles(),
+                sight: None,
+                designator_pods: vec![],
             },
             true,
         )

@@ -1742,8 +1742,14 @@ impl QReadout {
             tick: readout_tick,
             stores,
             gunsight,
+            // The targeting sight and the laser are host-built and not on
+            // the wire before protocol 23 (slice NA).
+            sight: None,
+            laser: None,
             seeker,
             estimates,
+            // Host-built until protocol 23 carries it (slice NA).
+            bomb_sight: None,
             targets,
             sensors,
             visual,

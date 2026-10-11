@@ -271,6 +271,27 @@ Air-to-Surface group, as the manual instructs (retail manual p. 120, decision 7)
 In retail a laser weapon needs only that its own launcher carries a working
 signature-1 sensor with a nonzero count, so a loaded pod counts.
 
+Built (T1). Which gimbal a record gets is one rule over the SEE fields (fitted):
+a record with weight (an external store: PAVESPK and PAVEKNF 425 lb, AAS38
+350 lb) or an all-round zone is a pod with the hemisphere below the aircraft;
+any other is built in, with a cone of its zone 0 heading (search, 60 degrees on
+every retail record) and zone 1 heading (track, 45 degrees). The cone is
+measured as the root sum square of the body heading and elevation. A laser
+record wins over a FLIR record on the same aircraft, and a loaded pod wins over
+both. A pod's eye sits 4 ft below the aircraft's centre, a built-in sensor's at
+the centre (fitted). The laser's reach and a FLIR sight's `/` range are the
+record's zone 0 maximum (60,760 ft on every laser, 91,140 ft on AAS38, AV8IR and
+SU37I, 54,684 ft on the MiG-29, Su-27 and AC-130 FLIRs; retail data). The
+AC-130 keeps its gunsight and has no separate targeting sight.
+
+A loaded pod takes a weapon station whose flags carry 0x400, under the retail
+equipment rule (the station's bit 1 needs the record's bit 1; the station's
+weight class over the pod's 425 lb caps it), one pod an aircraft; it replaces
+the station's weapon and any tank on that hardpoint, adds its weight, and comes
+off when a weapon or a tank takes the station. Cheat loading puts it on any
+station. The sim side is built (`Loadout::load_designator`); the Load Ordnance
+page does not offer the pods yet (the catalog card is a follow-up).
+
 ### The sight
 
 The AC-130 sight is generalised for every aircraft with a sight and the
@@ -281,6 +302,25 @@ Shift+;), the same ground march and the same masking rule. A fighter's default
 look is straight ahead, 10 degrees down (fitted). The tracked object becomes the
 designation. Label: opinionated (John, 2026-10-10: the target display shows
 lasing), reusing the AC-130 design.
+
+Built (T1), each an agent choice unless marked:
+
+- The sight of a fighter sees only objects on the ground (units, structures,
+  ships, parked aircraft). It never tracks a flying aircraft, so the air-to-air
+  designation rules are unchanged on every FLIR aircraft.
+- A designated ground object (T or a click on a ground page, Enter, Ctrl+X)
+  becomes the sight's track, and the sight's track designates its object while
+  it holds it. When the track ends (a pin, L, or the object destroyed, which
+  leaves the sight pinned on the ground it looked at) the designation that was
+  the track clears.
+- **`/`** lists the visible ground objects: standing, not friendly, within the
+  sensor's reach, inside its gimbal and with a clear terrain line from the eye.
+  The first press takes the one nearest the line of sight; each further press
+  steps to the next one to the right by body heading, wrapping to the leftmost
+  (the Enter rule of the ground pages). It works on the AC-130's gunsight too.
+- Outside a built-in sensor's search cone the camera stops at the edge with the
+  gimbal notice; a pod stops at the aircraft's horizontal plane as the AC-130's
+  dome does.
 
 ### The laser
 
@@ -354,6 +394,26 @@ Whether "LASER SEEKER DAMAGED" (a retail damage message) switches the designator
 off is an [unknown](#unknowns); the fallback is that the designator works while
 its aircraft lives.
 
+Built (T1), agent choices on the rules above:
+
+- The laser's limit is the record's reach times the retail laser weather
+  selector on the line from the eye to the point (50 percent when the altitudes
+  between them meet a cloud deck or fog, the same test the ground pages use).
+  The checks run in order, reach, gimbal (a built-in sensor's 45 degree track
+  cone, a pod's hemisphere), then terrain, and the first that fails names the
+  mask.
+- Ctrl+L before the sight holds anything is remembered: the laser lases as soon
+  as the sight tracks or pins. A manual on ends when the sight stops holding a
+  point, so the next track starts in Ready; a manual off ends at Ctrl+L or the
+  next laser weapon release.
+- "A laser weapon" is signature 1 with flag 0x400 (retail data). The automatic
+  rule reads the selected station while armed, and any of the aircraft's own
+  laser weapons still in flight.
+- The laser is off while its aircraft is destroyed.
+- Weapons read `State::laser_spot_for` (own first, else a buddy's) and the
+  laser's point while masked (`Laser::point`); the release range halving for a
+  laser weapon is `laser::weather_scale` (slice W1 applies it).
+
 ### Buddy lasing
 
 **Retail has no buddy lasing**: a laser weapon needs its own launcher's
@@ -381,6 +441,12 @@ What the player sees, own spot against buddy spot:
 | HUD weapon text | `LSR 4.3` (nm, flashing while lasing) | `BUD 4.3` (nm from the player's aircraft to the spot, flashing) |
 | Range | laser range from the player's aircraft to the spot | the same, to the buddy's spot |
 | Both exist | the row reads LASE and a second small BUDDY row sits beneath it | |
+
+Built (T1): "nearest" is nearest the aircraft whose weapon asks, then the lower
+aircraft id. Only human-flown aircraft lase this round (no AI strike), so a
+buddy is another player or, in single player, nobody yet. The readout carries
+the spot the plane's weapons home on, whether it is its own, its range and its
+owner, plus a second buddy spot when both exist.
 
 An aircraft with no sight of its own (a MiG-23 with an F-16C overhead) still
 gets the page: with a laser weapon selected and a buddy spot valid, the target
@@ -448,7 +514,11 @@ else HAB (a bomber camera, byte +0x23a), else ARM. Ctrl+M switches CCIP and LVL
 for bombs (and BORE and CUED for missiles, the existing action). CCIP is the
 default. LVL is chosen automatically when a bomb is selected while a ground
 designation exists and the flight path is within 10 degrees of level (fitted),
-and Ctrl+M overrides it.
+and Ctrl+M overrides it. The choice is made at the moment of selection only: a
+dive or a climb afterwards keeps the mode, so the "T" never vanishes mid-run
+(agent). The status word reads CCIP or LVL for an unguided bomb, ARM for a
+rocket pod and every guided store, LCOS or SAFE for a gun and NAV with NAV
+selected.
 
 Retail gives the MiG-21, MiG-17F, Mi-24 and Yak-141 no bomb sight (their bombs
 show ARM). **Every aircraft that can carry bombs gets both modes** (opinionated, John accepted decision 1,
@@ -485,9 +555,13 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
   ft), 10,000 ft for the FABs (4,000 ft), 30,000 ft for the cluster bombs
   (12,000 ft). The manual (p. 85) says the arc is a full circle at 10,000 ft or
   more and half at 5,000 ft, in the opposite sense; **the code wins** (decision 3,
-  accepted, confirmed by the lead after the research). The ring radius in
-  reference pixels follows the LCOS pipper (9, spec-derived,
-  [gunsight](gunsight-targeting.md)) until H1 measures the glyph.
+  accepted, confirmed by the lead after the research). TORE draws the glyph from
+  its measurements rather than from the font: a ring of radius 11 reference
+  pixels, the four cardinal clock marks out to radius 14 and the other eight to
+  13, the inner arc at radius 8 and a one-pixel centre dot (retail data, the
+  HUDSYM11 render). The range d is retail's approximate distance (the largest
+  axis difference plus a quarter of the other two), so the steps fall where the
+  original's do.
 - **Fall line.** A dotted line from the HUD reference point to the pipper. The
   reference point is the flight path marker when the HUD module has the
   flight-path option and the aircraft is above a minimum speed (146 ft/s in the
@@ -496,13 +570,21 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
   alternate pixels (rhythm fitted).
 - **Dot trail.** On the **F-16C, F-22, F-22N and X-31** the line is replaced by a
   trail of dots along the fall path, one every quarter second of fall from now to
-  impact.
+  impact. Dots nearer the eye than 1,000 ft are left out: in the first moments
+  of the fall the station's offset from the eye sweeps them across the HUD
+  (fitted). These options, the flight path reference and its minimum speed are
+  taken from R1's reading of each HUD module, transcribed by module name.
 - **Off the HUD.** Retail draws nothing beyond trail dots that land on screen.
-  TORE draws the fall line to the HUD's lower edge and a small caret there, so a
-  level pass still shows where the bombs would go (fitted).
-- **Text.** CCIP status, count and short name, slant range to the impact point
-  (`R 1.8`), and IN RNG inside the zone-1 maximum (fitted layout; the
-  "IN RNG" string is retail data). The retail routine prints no text.
+  TORE draws the fall line to the HUD's lower edge and a downward caret there,
+  where the line to the impact crosses the edge, so a level pass still shows
+  where the bombs would go (fitted). An impact that cannot be projected (far
+  below the nose) puts the caret under the line's start; an impact above the
+  HUD (a climb) draws nothing.
+- **Text.** CCIP status, count and short name, IN RNG inside the zone-1
+  maximum, the warnings below that, and on the right the slant range to the
+  impact point (`R 1.8`) and, while a released bomb falls, `IMP 0:05`, its time
+  to impact (fitted layout; the "IN RNG" string is retail data). The retail
+  routine prints no text.
 - **Release.** The pilot releases when the pipper is on the target. A pack
   leaves in one instant (see [packs](#release-modes-and-packs)).
 
@@ -528,7 +610,23 @@ designated ground object or a pinned point from any channel, the sight or Enter.
 - **Release.** When the marker meets the crossbar. If the trigger is held
   (pickle and hold), the release happens automatically at 0 s when the
   cross-track miss is inside the record's collateral radius (decision 2,
-  accepted). Otherwise the pilot presses at the cue.
+  accepted), or its fuze radius if that is larger, so a record without splash
+  still releases (fitted). While the cue lies ahead the trigger only arms the
+  release: a press that is let go before the cue drops nothing. The cue counts
+  as reached from the tick the impact point passes the target until three ticks
+  of ground travel past it, so a cue between two ticks is not missed, and one
+  pass releases once: not again while a bomb from that station released in the
+  last second is falling (both fitted). Once the cue has passed, or with the
+  miss outside the radius, the trigger is a plain press again and the pilot
+  releases by hand.
+- **Drawing** (agent). The crossbar is 32 reference pixels wide and stands 12
+  pixels above the flight path marker, clear of its fin. The stem stands at the
+  flight path's track turned by the steering correction and runs from just
+  under the heading readout down to the crossbar; when it lies beyond the
+  HUD's side it stays at the edge with an arrowhead toward the turn. The
+  release marker is a circle of radius 3.
+- **Without a target.** LVL with nothing designated says `NO TARGET` and draws
+  the CCIP pipper, so the bombs can still be aimed (agent).
 - **Overflown** (D below zero): the stem and marker go and the text reads
   OVERFLY. More than 60 s out, the stem is dashed.
 - The same T serves guided bombs in level flight, with the release range
@@ -563,7 +661,11 @@ target caret, and IN RNG when the target lies between them. Above the scale,
 the target enters the maximum reach, so a level pass with a JDAM is "fly the
 stem, release at the bar". This is John's "range indicator for when to drop"
 (opinionated, John, 2026-10-10, decision 4); the reach computation is an
-opinionated (agent) design. Retail gives only "when you're in range and have a
+opinionated (agent) design: starting from the unguided throw, which the bomb
+always makes good, steps that double search outward and inward with the guided
+weapon's own fly-out at a point that far ahead along the release's ground
+track, then bisection closes each edge to 10 ft (slice H1 built the search, W1
+supplies the guided fly-out and draws the scale). Retail gives only "when you're in range and have a
 good hit probability" (retail manual p. 125) and no release range cue.
 
 **Retail JDAMs are "optical", not GPS** ([optical](../formats/missiles.md#optical)):
@@ -580,6 +682,9 @@ retail behaviour; the reach scale serves both.
 - **Rockets** (ARM status, retail): a rocket pipper at the predicted ground
   impact of the next rocket, flown through the rocket's motor, speed command and
   gravity (opinionated, agent, decision 12; without it rockets are unaimable).
+  The prediction takes the very steps combat gives the round, on combat's own
+  quarter-second clock, so a rocket fired on that tick lands on the pipper. The
+  rocket pipper has no fall line.
   Retail rockets carry the gravity flag, so they sink at 32 ft/s squared to an
   80 ft/s cap after burnout (retail data). The range arc follows the record's
   zone-1 maximum, as CCIP.
@@ -672,8 +777,8 @@ the station could not release at all:
 
 | Warning | When |
 | --- | --- |
-| LOW | The predicted fall time is shorter than the record's fuze arm time: the bomb will not explode |
-| FRAG | At the predicted impact time the aircraft (flying its current path) is inside the record's collateral radius of the impact point; splash can hurt the shooter (retail manual p. 126, no number given) |
+| LOW | The predicted fall time is shorter than the record's fuze arm time: the bomb will not explode. In TORE today an unarmed bomb still bursts on the ground with its splash; it cannot strike a target directly |
+| FRAG | At the predicted impact time the aircraft is inside the record's collateral radius of the impact point; splash can hurt the shooter (retail manual p. 126, no number given). The aircraft is taken along its ground track at its ground speed and no lower than it is now: a dive is taken to be pulled out at once, a climb keeps climbing (fitted; flying a dive on would put every dive release inside its own splash). For a slick bomb that lands under the aircraft, FRAG means flying lower than the splash radius |
 | BAY | A bay aircraft with the bay closed, as today (retail BAY; release refused "Can't deploy, Open weapon bay door") |
 | NO TARGET | A guided weapon that needs a designation has none |
 | NO TRACK | A SARH missile's A-G track is lost |
@@ -682,10 +787,12 @@ the station could not release at all:
 | OVERFLY | LVL, passed the target |
 | NO EMITTER | A HARM with no emitter to fire at |
 
-Only a GPS bomb with no designated point and an AT-2 with no target block
-release, apart from the missiles: a missile that needs a target (NO TARGET, NO
-TRACK, NO EMITTER) does not leave without one, as before this round (built,
-W2). Laser bombs can be released without a spot (they fall ballistic and can
+LOW, FRAG and OVERFLY are worked out by the sight (slice H1); the HUD shows
+LOW and FRAG together in the readiness slot, and OVERFLY in place of the
+release time. Only a GPS bomb with no designated point and an AT-2 with no
+target block release, apart from the missiles: a missile that needs a target
+(NO TARGET, NO TRACK, NO EMITTER) does not leave without one, as before this
+round (built, W2). Laser bombs can be released without a spot (they fall ballistic and can
 still pick one up), as retail allows. The text strings are fitted.
 
 ## Weapon classes

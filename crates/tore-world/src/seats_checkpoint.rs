@@ -204,6 +204,8 @@ fn save_live(s: &mut Saver, command: Live) -> Result<(), CheckpointError> {
         Live::SightPinGround => put(s, 29),
         Live::ToggleAirGround => put(s, 30),
         Live::NearestGround => put(s, 31),
+        Live::ToggleLaser => put(s, 32),
+        Live::SightNext => put(s, 33),
     }
     Ok(())
 }
@@ -242,6 +244,8 @@ fn load_live(l: &mut Loader<'_>) -> Result<Live, CheckpointError> {
         29 => Live::SightPinGround,
         30 => Live::ToggleAirGround,
         31 => Live::NearestGround,
+        32 => Live::ToggleLaser,
+        33 => Live::SightNext,
         other => return invalid(format!("a combat command has no variant {other}")),
     })
 }
@@ -615,6 +619,8 @@ mod tests {
             Live::SightPinGround,
             Live::ToggleAirGround,
             Live::NearestGround,
+            Live::ToggleLaser,
+            Live::SightNext,
         ];
         let mut orders = vec![
             PlayerOrder::EngageMyTarget,

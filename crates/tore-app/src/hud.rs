@@ -224,6 +224,26 @@ fn rung_project(
         ladder_project(pitch, bank, bearing, elevation, zoom)
     }
 }
+/// The HUD's weapon status word (docs/spec/air-to-ground.md, "Status word and
+/// mode choice"; retail printer 0x409030): NAV with NAV selected, LCOS or
+/// SAFE for a gun, CCIP or LVL for an unguided bomb as its sight is set, ARM
+/// for a rocket pod and every guided store.
+pub fn status_word(
+    nav: bool,
+    gun: bool,
+    armed: bool,
+    bomb_sight: Option<&tore_world::readout::BombSight>,
+) -> &'static str {
+    if nav {
+        "NAV"
+    } else if gun {
+        if armed { "LCOS" } else { "SAFE" }
+    } else if let Some(sight) = bomb_sight.filter(|sight| !sight.rocket) {
+        sight.mode.label()
+    } else {
+        "ARM"
+    }
+}
 /// `2X`, `4X`, `8X` or `1/2X`: the compression level the HUD shows.
 pub fn time_label(scale: f64) -> String {
     if scale < 1. {
@@ -487,6 +507,28 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_status_word_follows_the_selected_store_and_the_bomb_sight() {
+        use tore_sim::combat::delivery::DeliveryMode;
+        let sight = |mode, rocket| tore_world::readout::BombSight {
+            mode,
+            rocket,
+            ccip: None,
+            level: None,
+            warnings: Vec::new(),
+            falling: None,
+        };
+        assert_eq!(status_word(true, true, true, None), "NAV");
+        assert_eq!(status_word(false, true, true, None), "LCOS");
+        assert_eq!(status_word(false, true, false, None), "SAFE");
+        let ccip = sight(DeliveryMode::Ccip, false);
+        let level = sight(DeliveryMode::Level, false);
+        let rocket = sight(DeliveryMode::Ccip, true);
+        assert_eq!(status_word(false, false, true, Some(&ccip)), "CCIP");
+        assert_eq!(status_word(false, false, true, Some(&level)), "LVL");
+        assert_eq!(status_word(false, false, true, Some(&rocket)), "ARM");
+        assert_eq!(status_word(false, false, true, None), "ARM");
+    }
     #[test]
     fn a_fixed_gear_shows_no_gear_label() {
         use tore_formats::aircraft::AircraftId;

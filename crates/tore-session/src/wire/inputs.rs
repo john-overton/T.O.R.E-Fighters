@@ -1094,6 +1094,10 @@ const TOGGLE_AIR_GROUND: u64 = 30;
 const EXTENDED: u64 = 31;
 /// Extended combat commands, by their varint after [`EXTENDED`].
 const NEAREST_GROUND: u64 = 0;
+/// Ctrl+L, the laser on or off (slice T1).
+const TOGGLE_LASER: u64 = 1;
+/// `/`, the targeting sight's next visible object (slice T1).
+const SIGHT_NEXT: u64 = 2;
 
 /// A combat command's code, exhaustively, so a new command cannot go
 /// uncoded.
@@ -1131,7 +1135,7 @@ fn live_code(command: live::Command) -> u64 {
         C::SightDesignate => SIGHT_DESIGNATE,
         C::SightPinGround => SIGHT_PIN_GROUND,
         C::ToggleAirGround => TOGGLE_AIR_GROUND,
-        C::NearestGround => EXTENDED,
+        C::NearestGround | C::ToggleLaser | C::SightNext => EXTENDED,
     }
 }
 
@@ -1144,6 +1148,8 @@ fn write_live(w: &mut BitWriter, command: live::Command) {
         live::Command::TargetDistance(distance) => w.write_varint(u64::from(distance)),
         live::Command::DesignateTarget(id) => w.write_varint(u64::from(id)),
         live::Command::NearestGround => w.write_varint(NEAREST_GROUND),
+        live::Command::ToggleLaser => w.write_varint(TOGGLE_LASER),
+        live::Command::SightNext => w.write_varint(SIGHT_NEXT),
         _ => {}
     }
 }
@@ -1160,6 +1166,8 @@ fn read_live(r: &mut BitReader<'_>) -> WireResult<live::Command> {
         TOGGLE_AIR_GROUND => live::Command::ToggleAirGround,
         EXTENDED => match r.read_varint()? {
             NEAREST_GROUND => live::Command::NearestGround,
+            TOGGLE_LASER => live::Command::ToggleLaser,
+            SIGHT_NEXT => live::Command::SightNext,
             _ => return Err(WireError::Invalid("extended combat command")),
         },
         code => *LIVE
@@ -1460,7 +1468,12 @@ mod tests {
 
     #[test]
     fn the_air_to_ground_commands_and_the_harm_channel_read_back() {
-        for command in [live::Command::ToggleAirGround, live::Command::NearestGround] {
+        for command in [
+            live::Command::ToggleAirGround,
+            live::Command::NearestGround,
+            live::Command::ToggleLaser,
+            live::Command::SightNext,
+        ] {
             let mut w = BitWriter::new();
             write_live(&mut w, command);
             let bytes = w.finish();
