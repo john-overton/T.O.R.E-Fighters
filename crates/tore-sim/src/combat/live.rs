@@ -26,6 +26,8 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
     (*state % u32::from(bound)) as u16
 }
 
+#[cfg(test)]
+mod bomb_tests;
 mod broad;
 mod collateral;
 mod ground_sensing;
@@ -53,6 +55,15 @@ pub use surface::{
     GroundLook, Refused, SURFACE_PROJECTILE_ID_BASE, SURFACE_PROJECTILE_RESERVE, SurfaceRound,
     SurfaceShot, flak_explosion, is_flak, surface_tracer, ticks_to_range,
 };
+
+/// Rounds one loaded store holds: a rocket pod's rockets, else 1.
+fn pod_rounds(w: &Weapon) -> u32 {
+    if super::ballistics::is_pod(w) {
+        u32::from(w.burst.projectiles_in_pod.unsigned_abs())
+    } else {
+        1
+    }
+}
 
 /// Rounds, missiles and bombs in flight at once. John, 2026-10-09: 5,000,
 /// up from 256, so a crowded gunfight never loses a burst. What a full sky
@@ -394,8 +405,11 @@ pub struct Configuration {
     pub sensors: sensors::SensorProfiles,
 }
 impl Configuration {
-    /// Convert installed gun pod quantities to logical rounds. The high ammo
-    /// bit remains reserved for station failure, so overflow is rejected.
+    /// Convert installed quantities to logical rounds: a gun pod's rounds,
+    /// and a rocket pod's rockets, `projsInPod` a pod (retail multiplies a
+    /// loaded station's count by it at mission start, `HARDPodHack`; two
+    /// LAU-61 pods hold 38 rockets). The high ammo bit remains reserved for
+    /// station failure, so overflow is rejected.
     pub fn ammunition(&self, quantities: &[u16]) -> Result<Vec<u16>> {
         if quantities.len() != self.stations.len() {
             return Err(super::invalid("invalid ammunition station count"));
@@ -409,7 +423,10 @@ impl Configuration {
                     .iter()
                     .find(|pod| pod.station == station)
                     .filter(|_| self.stations[station].weapon.source == "SUU16.JT")
-                    .map_or(1, |pod| u32::from(pod.rounds_per_pod));
+                    .map_or_else(
+                        || pod_rounds(&self.stations[station].weapon),
+                        |pod| u32::from(pod.rounds_per_pod),
+                    );
                 let rounds = u32::from(*quantity) * multiplier;
                 if rounds >= 32767 {
                     return Err(super::invalid(
@@ -1379,6 +1396,10 @@ pub struct State {
     surface_rounds: BTreeMap<u32, SurfaceRound>,
     /// The number of the next surface unit's round.
     next_surface_shot: u32,
+    /// The path of each bomb in flight, by projectile number: bomb records
+    /// fall on the closed-form bomb equation ([`super::ballistics`]), so a
+    /// bomb keeps its release rather than a velocity. Mission state.
+    bombs: BTreeMap<u32, super::ballistics::BombMotion>,
     /// How each ground object that has a unit record explodes when destroyed.
     ground_looks: BTreeMap<u32, GroundLook>,
     /// The parked aircraft among the targets, by id, with their crash sites
@@ -1798,7 +1819,13 @@ impl Ownship {
                 .iter()
                 .zip(&self.ammo)
                 .filter(|(s, _)| !s.internal && s.weapon.source != "SUU16.JT")
-                .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff))
+                .map(|(s, count)| {
+                    // A rocket pod's weight is the full pod's; each rocket
+                    // fired takes its share (fitted: retail's store weight
+                    // for a part-empty pod is not read).
+                    f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff)
+                        / f64::from(pod_rounds(&s.weapon))
+                })
                 .sum::<f64>()
     }
 }
@@ -2563,6 +2590,7 @@ impl State {
             rewinds: BTreeMap::new(),
             surface_rounds: BTreeMap::new(),
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
+            bombs: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
             ground_listing: BTreeMap::new(),
             airfield: Default::default(),
@@ -2761,6 +2789,11 @@ impl State {
 
     /// The rewind, in ticks, that projectile `id` carries: 0 for every round
     /// but a gun round a human fired with a view.
+    /// The path of bomb `id` while it falls: where it was released and how
+    /// fast it was going, scatter included. `None` for any other round.
+    pub fn bomb_motion(&self, id: u32) -> Option<super::ballistics::BombMotion> {
+        self.bombs.get(&id).copied()
+    }
     pub fn rewind_of(&self, id: u32) -> u16 {
         self.rewinds.get(&id).copied().unwrap_or(0)
     }
@@ -4028,8 +4061,10 @@ impl State {
                         (0, 1, None, false)
                     }
                 } else if due && allowed {
+                    // One trigger call: a pod's one rocket, or a record's
+                    // whole burst (a bomb pack in one tick), for one debit.
                     (
-                        usize::from(w.burst.game_rounds_in_burst.max(1)).min(32),
+                        super::ballistics::release_count(w),
                         u16::from(w.burst.actual_rounds_per_game),
                         None,
                         false,
@@ -4039,8 +4074,12 @@ impl State {
                 };
                 let mut fired = false;
                 if count > 0 {
-                    for _ in 0..count {
-                        let loaded = if self.cheats.unlimited_ammo {
+                    for round in 0..count {
+                        // A gun debits each round; any other call debits once,
+                        // for the first of its projectiles (retail PROJFire).
+                        let loaded = if !gun && round > 0 {
+                            true
+                        } else if self.cheats.unlimited_ammo {
                             own.rounds(index) > 0
                         } else {
                             unload(&mut own.ammo[index], debit)
@@ -4063,10 +4102,22 @@ impl State {
                                     + launcher.basis.forward[i] * station.mount[2]
                             })
                         };
-                        let direction =
+                        let mut direction =
                             gun_pose.map_or(launcher.basis.forward, |(_, heading, elevation)| {
                                 super::gunship::direction(launcher, heading, elevation)
                             });
+                        // A bomb leaves its station (staggered in a pack)
+                        // along the nose, then takes its own scatter.
+                        let bomb = super::ballistics::is_bomb(w).then(|| {
+                            let (heading, pitch) =
+                                super::ballistics::scatter(|bound| draw(&mut self.rng, bound));
+                            super::ballistics::ReleaseState::from_station(&launcher, station, round)
+                                .turned(heading, pitch)
+                        });
+                        let position = bomb.map_or(position, |release| release.position);
+                        if let Some(release) = bomb {
+                            direction = super::ballistics::BombMotion::new(release).direction(0.);
+                        }
                         let target = if self.weapon_rules == Rules::Spec
                             && !own.guidance_available(launcher)
                         {
@@ -4133,6 +4184,12 @@ impl State {
                             gun_round,
                             tracer,
                         });
+                        if let Some(release) = bomb {
+                            self.bombs.insert(
+                                self.next_shot,
+                                super::ballistics::BombMotion::new(release),
+                            );
+                        }
                         if let Some(flight) =
                             self.projectiles.last().and_then(|p| p.guidance.as_ref())
                             && flight.profile.guidance == Guidance::Active
@@ -4504,6 +4561,21 @@ impl State {
                     *position += delta;
                 }
                 p.speed_f8 = (missiles::length(motion.velocity) * 256.) as i32;
+            } else if super::ballistics::is_bomb(w) {
+                // A bomb record falls on its closed-form path. One placed in
+                // flight without a release (a driver's or a test's round)
+                // starts its path where it is, at its own speed.
+                let motion = *self.bombs.entry(p.id).or_insert_with(|| {
+                    super::ballistics::BombMotion::new(super::ballistics::ReleaseState::new(
+                        p.position,
+                        p.direction,
+                        f64::from(p.speed_f8) / 256.,
+                    ))
+                });
+                let seconds = (p.age + 1) as f64 / 120.;
+                p.position = motion.position(seconds);
+                p.direction = motion.direction(seconds);
+                p.speed_f8 = (missiles::length(motion.velocity(seconds)) * 256.) as i32;
             } else {
                 if w.flags & 0x40 != 0 {
                     let target =
@@ -5014,12 +5086,14 @@ impl State {
             }
             true
         });
-        // A round that is gone takes its rewind and its surface record with it.
-        if !self.rewinds.is_empty() || !self.surface_rounds.is_empty() {
+        // A round that is gone takes its rewind, its surface record and its
+        // bomb path with it.
+        if !self.rewinds.is_empty() || !self.surface_rounds.is_empty() || !self.bombs.is_empty() {
             let flying: std::collections::BTreeSet<u32> =
                 self.projectiles.iter().map(|p| p.id).collect();
             self.rewinds.retain(|id, _| flying.contains(id));
             self.surface_rounds.retain(|id, _| flying.contains(id));
+            self.bombs.retain(|id, _| flying.contains(id));
         }
         for id in parked_wrecks {
             self.parked_destroyed(id);
@@ -10268,7 +10342,9 @@ mod hit_rule_tests {
         s.targets.push(target(6, [0., 1000., 1500.], 100, 0x80));
         let round = shell(&s, 5, [0., 1000., 300.], [0., 1000., 0.], None, 0);
         s.projectiles.push(round);
-        let round = shell(&s, 5, [0., 1000., 1400.], [0., 1000., 1500.], None, 0);
+        let mut round = shell(&s, 5, [0., 1000., 1400.], [0., 1000., 1500.], None, 0);
+        // Rounds in flight have their own numbers: a bomb's path is kept by it.
+        round.id += 1;
         s.projectiles.push(round);
         let events = run(&mut s, 30);
         assert!(

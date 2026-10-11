@@ -742,8 +742,10 @@ seconds). In LVL a held trigger auto-releases once at 0 s.
 
 ### Bomb motion
 
-Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Today a released
-bomb flies straight along the nose and never falls.
+Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Implemented
+(B1): `tore_sim::combat::ballistics` (`BombMotion`, `ReleaseState`,
+`predict_impact`). Pack offsets are laid along the aircraft's lateral axis
+(fitted), and a pod's weight falls by one rocket's share per rocket (fitted).
 
 | Fact | Retail |
 | --- | --- |
