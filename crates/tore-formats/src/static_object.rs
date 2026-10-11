@@ -16,6 +16,10 @@ pub struct Definition {
     pub category: u16,
     pub radar_signature: i32,
     pub infrared_signature: i32,
+    /// `expType`: the explosion the object shows when destroyed.
+    pub explosion: u8,
+    /// `craterSize`: the crater it leaves on land.
+    pub crater: u8,
 }
 
 impl Definition {
@@ -75,6 +79,10 @@ impl Definition {
         if radar_signature < 0 || infrared_signature < 0 {
             return Err(invalid("negative static object signature"));
         }
+        let byte = |key: &str| -> Result<u8> {
+            u8::try_from(scalar(key)?).map_err(|_| invalid("static object byte field out of range"))
+        };
+        let (explosion, crater) = (byte("expType")?, byte("craterSize")?);
         Ok(Self {
             display_name: names[0].clone(),
             class_name: names[1].clone(),
@@ -85,6 +93,8 @@ impl Definition {
             category,
             radar_signature,
             infrared_signature,
+            explosion,
+            crater,
         })
     }
 }

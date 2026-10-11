@@ -309,7 +309,7 @@ impl InputsSection {
         let _ = w.write_bits(u64::from(self.view_offset), 8);
         let _ = w.write_bits(u64::from(self.interpolation_delay), 6);
         bits::write_option(&mut w, self.view_subject, |w, key| {
-            let _ = w.write_bits(u64::from(key.kind.code()), 2);
+            let _ = w.write_bits(u64::from(key.kind.code()), EntityKind::CODE_BITS);
             w.write_varint(u64::from(key.id));
         });
         let _ = w.write_bits(u64::from(self.mismatch), 32);
@@ -352,7 +352,8 @@ impl InputsSection {
         let view_offset = r.read_bits(8)? as u8;
         let interpolation_delay = r.read_bits(6)? as u8;
         let view_subject = bits::read_option(&mut r, |r| {
-            let kind = EntityKind::from_code(r.read_bits(2)? as u8);
+            let kind = EntityKind::from_code(r.read_bits(EntityKind::CODE_BITS)? as u8)
+                .ok_or(WireError::Invalid("view subject kind"))?;
             Ok(EntityKey {
                 kind,
                 id: read_u32(r)?,

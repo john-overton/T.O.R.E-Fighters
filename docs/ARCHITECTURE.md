@@ -28,7 +28,7 @@ These are baseline-compatible versions, not automatically the latest versions. E
 
 The shell creates its window on the main event loop and uploads a 640 × 480 RGBA menu canvas to a Metal/native GPU texture. The shader draws a scaled, letterboxed image using linear filtering. The same viewport calculation maps physical mouse coordinates back into retail coordinates, including Retina scaling. It handles zero-sized windows and recoverable surface loss. Fatal graphics/startup errors return a failing process status.
 
-`tore-import` (`crates/tore-import`, standard library and `tore-formats` only, so a server can use it without the windowing, graphics and audio libraries) holds the whole import. Its `media_source.rs` decides what a chosen folder is by its contents: an installed game folder with loose archives, or a disc folder holding the Electronic Arts installer container (`SETUP.ESA`), whose stored archives are read in place by offset rather than copied. `tore-formats::executable` maps the executable's hash to one of the two reviewed builds and supplies that build's table addresses, so the disc's 1.0 build and the 1.02F patch decode the same content; an unknown build is refused before any archive is opened. Its `import.rs` selectively decompresses resources into a versioned local pack and verifies the pack from disk before the import completes, reporting progress by archive and resource count; `pack.rs` reads and writes the pack and loads the newest good one. The game's `assets.rs` calls it and adds what only the game needs: it validates and decodes the menu art, buttons, fonts and debrief art from the loaded resources (the library takes that check as a function, so a set the game cannot draw never reaches the cache). `menu.rs` composites original background, button pieces, and font strips and owns UI state. `renderer.rs` owns the surface, texture, and scaling. Every game object is built from imported assets before the window opens and the renderer needs a terrain world, so a first run cannot happen inside the game application: `main.rs` runs a pre-game shell, a second winit application handler holding `locate.rs` and the blit-only presenter in `canvas_present.rs`, on the same event loop through `run_app_on_demand`. Re-import from Pref ends the game application and runs the shell again; the event loop is created once. `audio.rs` mixes bounded local PCM, recorded music, and up to sixteen spatial voices with linear resampling into the device rate. `tore-sim::acoustics` advances sound wavefronts and passing-object detection at 120 Hz. Combat publishes bounded sound emissions with physical positions; the app uses the main camera as listener and the device mixer supplies stereo direction, distance gain and treble fade. An emission released by the player's own aircraft plays centered and without distance while the listener is in that cockpit; every other outside sound is muffled in a cockpit view. Up to ten looping sources (crash fires, other aircraft's engines) and, in external views, the player's own engine are placed with distance, stereo and Doppler pitch. See [audio behavior](audio.md). Explosions, craters and crash-site fires are drawn by `effect_renderer.rs` from the original sheets as textured sprites ([explosions](spec/explosions.md)). Audio initializes independently and can fail without blocking menus. No input device or microphone is opened.
+`tore-import` (`crates/tore-import`, standard library and `tore-formats` only, so a server can use it without the windowing, graphics and audio libraries) holds the whole import. Its `media_source.rs` decides what a chosen folder is by its contents: an installed game folder with loose archives, or a disc folder holding the Electronic Arts installer container (`SETUP.ESA`), whose stored archives are read in place by offset rather than copied. `tore-formats::executable` maps the executable's hash to one of the two reviewed builds and supplies that build's table addresses, so the disc's 1.0 build and the 1.02F patch decode the same content; an unknown build is refused before any archive is opened. Its `import.rs` selectively decompresses resources into a versioned local pack and verifies the pack from disk before the import completes, reporting progress by archive and resource count; `pack.rs` reads and writes the pack and loads the newest good one. The game's `assets.rs` calls it and adds what only the game needs: it validates and decodes the menu art, buttons, fonts and debrief art from the loaded resources (the library takes that check as a function, so a set the game cannot draw never reaches the cache). `menu.rs` composites original background, button pieces, and font strips and owns UI state. `renderer.rs` owns the surface, texture, and scaling. Every game object is built from imported assets before the window opens and the renderer needs a terrain world, so a first run cannot happen inside the game application: `main.rs` runs a pre-game shell, a second winit application handler holding `locate.rs` and the blit-only presenter in `canvas_present.rs`, on the same event loop through `run_app_on_demand`. Re-import from Pref ends the game application and runs the shell again; the event loop is created once. `audio.rs` mixes bounded local PCM, recorded music, and up to sixteen spatial voices with linear resampling into the device rate. `tore-sim::acoustics` advances sound wavefronts and passing-object detection at 120 Hz. Combat publishes bounded sound emissions with physical positions; the app uses the main camera as listener and the device mixer supplies stereo direction, distance gain and treble fade. An emission released by the player's own aircraft plays centered and without distance while the listener is in that cockpit; every other outside sound is muffled in a cockpit view. Up to ten looping sources (crash fires, other aircraft's engines) and, in external views, the player's own engine are placed with distance, stereo and Doppler pitch. See [audio behavior](audio.md). Explosions, craters, crash-site fires and the shockwave rings of large ground explosions are drawn by `effect_renderer.rs` from the original sheets as textured sprites ([explosions](spec/explosions.md)); splash damage is `tore-sim`'s `combat/live/collateral.rs` ([splash](spec/missiles.md#splash-damage)). Audio initializes independently and can fail without blocking menus. No input device or microphone is opened.
 
 The app and general extractor share the same EALIB/DCL readers. `Archive::open` reads a directory and seeks to selected resources; it does not load whole disc archives. The menu retains a 16 MiB resource cap; the general CLI has an explicit configurable cap for larger media. The Python entry point handles portable invocation and SHA-256 report enrichment; it contains no second decompressor.
 
@@ -778,6 +778,64 @@ clipping improves magnified subject depth precision. Target preview requests use
 an independent 24 Hz phase clock; the other camera panels retain their existing
 refresh interval.
 
+## The surface world
+
+Built in the surface-AI round (2026-10-10, John's request of that day; the
+behaviour is in [surface defenses](spec/surface-defenses.md)). The Quick
+Mission's ground target and the theater layouts' own SAM, AAA, ship and vehicle
+units are one `tore_world::surface::Surface`, built once with the terrain and
+the same on every machine that builds the mission.
+
+```mermaid
+flowchart LR
+    Spec[MissionSpec: ground target, defenses, seed] --> Resolve[surface::resolve: rolls, picks, ids, sides]
+    Layout[Theater layout NT placements] --> Resolve
+    Resolve --> Place[surface::layout: jitter, relocation, starts, batteries, trucks]
+    Place --> Surface[Surface and its digest]
+    Surface --> Scene[Terrain scene, combat target rows, parked aircraft]
+    Surface --> Arsenal[surface::fire::Arsenal]
+    Arsenal --> Tick[World::step_surface each tick]
+```
+
+| Where | What it does |
+| --- | --- |
+| `tore-formats` `surface_unit`, `quick_template` (and `tables`), `parked_aircraft`, `carrier`, `surface_set` | Bounded readers for NT unit records, the `~Q*.M` templates and the FA.EXE lists recorded as facts, the OBJECT block of a parked PT, the FA.EXE carrier parts table, and the data-derived list of what the import must keep |
+| `tore-world` `surface::{catalog, resolve, units}` | The catalog of NT, OT and PT entries; template and layout resolution with seeded streams (`Stream`, SplitMix64 keyed by seed, stem, ordinal and purpose); fixed ids (`SURFACE_UNIT_BASE` and the truck and radar ranges); sides; `Surface::digest` |
+| `tore-world` `surface::layout` | Jitter, relocation of unanchored templates, both sides' starts, battery formation and radar adoption, supply truck placement; integer trigonometry so every platform agrees |
+| `tore-world` `surface::{fire, emitters}` | The arsenal (each armed unit's arms, loaded at the end of the airport scene build), the per-tick fire step driving one `tore_sim::ai::surface::Controller` per gun mount or missile record, battery controllers, radar on and off and the lock feed for the RWR |
+| `tore-world` `surface::{movement, supply, parked}` | Routed units (integer `Mover` state), supply truck resupply, parked aircraft poses and deck spots |
+| `tore-sim` `ai::surface` | The engagement controller (Idle, Search, Prepare, Track, Fire, Pause, Reload, Empty, Blind) and the experience table, renderer-free and checkpointed |
+| `tore-sim` `combat::surface_guns`, `combat/live/{surface, collateral, parked}` | The AAA tuning table; `State::fire_surface` and surface rounds (flak time fuze, capacity reserve); splash damage for every weapon; parked aircraft rows |
+| `tore-app` `scenery/surface_art.rs`, `surface_fx.rs` | Wreck swaps, launcher rails, carrier parts and sprites; flak, gunfire and launch effects and wreck smoke |
+
+**One tick.** `World::step` moves routed units (`Combat::step_surface`) right
+before the combat step, so this tick's fire meets units where they are. After
+the AI wings, `World::step_surface` returns at once when the arsenal is empty
+(every mission without surface units, so the single-player guard is unchanged);
+otherwise it lists the airborne aircraft, runs `supply::step` (the "truck in
+reach" flag and timers), `fire::step` (controllers, shots through
+`live::State::fire_surface`, emitters) and `supply::deliver`, then hands the
+surface missiles' support entries to `set_actor_supports` merged with the AI
+wings' in one call.
+
+**State.** What changes lives in `Combat::surface` (`SurfaceState`: per-unit
+stock, controllers, radar state, movers, resupply timers, battery state and an
+RNG), inside the combat checkpoint, so restart, rejoin and host migration carry
+it. A checkpoint made for another surface digest is refused. The per-tick
+`trace`, `locks`, `painting` and `bursts` lists are rebuilt each tick and not
+checkpointed.
+
+**Multiplayer and replays.** The host runs the surface tick; clients build the
+same `Surface` from the mission text, compare digests at Seated and Resumed,
+and draw moving units, bursts and unit states the host sends
+([the client's side](#the-client-session), protocol 22). Recordings use format
+3 ([mission recordings](#mission-recordings)).
+
+**Development tools.** `--surface-dump`, `--surface-sheets`,
+`--surface-preview`, `--surface-trace`, `--surface-drive`, `--surface-parked`,
+`--surface-objective`, `--surface-scene` and `--surface-fx-preview`
+([development](DEVELOPMENT.md#surface-unit-inspection)).
+
 ## Ownship systems state
 
 `tore-sim::aircraft_systems` coordinates separate engine, fluids, fuel, controls,
@@ -867,6 +925,22 @@ writes its exports on background threads the menu's redraw polls, so the
 menu never waits on a file.
 `replay/cli.rs` holds the `--recording-*` commands and the tick-by-tick
 render check. See [mission replays](REPLAYS.md).
+
+A recording is written in the oldest format that holds it (slice RP1,
+2026-10-10). `World::needs_surface_format()` is true when the mission has a
+ground target, an airfield scene other than the retail one, or active surface
+units, routed units or parked aircraft in its terrain; only then is the file
+format 3 (`tore_replay::FORMAT_VERSION`), and every other flight is the format
+2 file it always was, byte for byte, so the single-player guard's recordings
+stay comparable and an older build still opens a plain recording. Format 3 adds
+the ground target to the header (`world.ground_target`, which
+`Terrain::for_recorded` passes back so the viewer resolves the same template,
+defenses, trucks, radars, parked aircraft and starts), per-frame poses of
+moving units, rail and spare-magazine changes, the piece index of a surface
+owner's debris, a registry naming every surface unit, the `surface.*` events
+and a flak effect code. `replay/recorder/surface.rs` registers the units;
+`convert::snapshot` and `Tracks::stock_at` rebuild them for the viewer. The
+layout is in [REPLAYS.md](REPLAYS.md#versions-and-damage).
 
 The mission replay viewer is its own screen, `Screen::Replay`, run by
 `replay/viewer.rs` and wired into the app by `replay/host.rs`, which takes the
@@ -962,7 +1036,8 @@ from its vertex building.
 | `terrain` | `Terrain`, its `Overrides` and the shared `Placements` loader |
 | `combat`, `combat_tape` | `Combat`; the tape's command names and the `Entry` record |
 | `aircraft_type` | `AircraftType`, the simulation's view of one aircraft |
-| `snapshot` | The tick's picture as data (`RenderSnapshot`, poses, `interpolate`) |
+| `snapshot` | The tick's picture as data (`RenderSnapshot`, poses, `interpolate`, the poses of surface units that follow a route) |
+| `surface` | The ground target and the theater's surface units: resolution, layout, the arsenal and fire, movement, resupply, parked aircraft ([the surface world](#the-surface-world)) |
 | `ai_wings` | `AiWings`, its orders, reports, chatter and engagement |
 | `comms`, `radio_calls`, `crew_voice`, `airfield_radio` | The radio channel and every call generator |
 | `situation` | The situation music's selector; the mission result check it reads is `ai_wings::outcome` |
@@ -1425,7 +1500,7 @@ today, because window events always arrive between frames.
 | `CycleWeapon` | The weapon selection steps and NAV mode follows the arming; the weapon page turns to it (`Cue::WeaponCycled { seat }`). |
 | `Airport` | A NAV mode switch or a tower request, as in B0. |
 | `Combat(command)` | Combat takes the command as it is: designation (next, previous, visual, by identity from a scope click) and the seeker mode or the designation release from the weapon display. |
-| `Manual(command)` | A key, button or menu command: arming, seeker mode, clearing the designation, jettison and the range and development commands. It lets go of the trigger, gives combat the command, and puts the payload weight right. Outside `--live-fire` only arming, seeker and designation work, and the pilot gets "Manual range command requires --live-fire". |
+| `Manual(command)` | A key, button or menu command: arming, seeker mode, clearing the designation, the gun-group keys, jettison and the range and development commands. It lets go of the trigger, gives combat the command, and puts the payload weight right. Outside `--live-fire` only arming, seeker, designation, gun-group and jettison work, and the pilot gets "Manual range command requires --live-fire". |
 | `RangeReset` | A new target on the range; "Target reset is available only with --live-fire" otherwise. |
 | `ReleaseChaff`, `ReleaseFlare` | One cartridge or flare, with the retail messages ("Chaff launched, 11 left", "Out of flares"). Refused when the aircraft is destroyed, the pilot has ejected or it has no hit points. |
 | `RadioSilence` | Toggles radio silence and tells the pilot ("Radio silence", "Radio traffic OK"). |
@@ -3442,6 +3517,18 @@ player never runs any of it.
   player's. A burst of a shooter the picture does not hold is not drawn.
   Rounds come in the picture with numbers far above the host's, so a camera or
   the regenerated smoke never takes one for a host's projectile.
+
+*Built (N1, protocol 22, the surface world).* Every game builds the ground
+target from the mission text and the seed the host drew, and refuses a seat or
+resume whose surface digest differs from its own. Moving surface units arrive
+as entities and join the picture's `surface` list (their ground rows move with
+them); the told unit states (`ClientFrame::surface_units`) go into the game's
+never-stepped copy of the mission (`net/play.rs`, `surface_units_to_world`),
+so rails, radars and wrecks draw from it; a surface gun's burst is one event,
+and `net/guns.rs` remakes its rounds, owned by the unit, from the unit's
+hardpoint, turning them with the target it draws through the host's own
+`surface::fire::gun_aim_point`. The details are in
+[the wire's surface world](formats/net-protocol.md#the-surface-world-protocol-22).
 
 *Built (D8b, the game's side that needs no session).* The game's flight
 screen has a session mode (`FlightUi::session`): no Pause, time compression or
@@ -9919,7 +10006,15 @@ were.
 - A new flight starts the wire state afresh (baselines, names, events) but
   keeps the prediction, the clocks and the other aircraft's histories: the
   others hold still through the gap and then jump to the present, as after a
-  [stall](#a-stalled-game-stays-connected-ef-k).
+  [stall](#a-stalled-game-stays-connected-ef-k). The new host sends a player
+  that came back no snapshot until it has answered its Resume, even once it
+  is live: before Resumed the connection has no flight of the new host.
+  *Fixed 2026-10-10 (agent decision):* a game whose Resume came after the
+  new host went live was sent snapshots of a placeholder flight; the client
+  dropped that flight's first Names message (a packet's messages are read
+  before its sections), started the flight at the snapshot, and refused the
+  next Names as out of order, leaving with a protocol error. The client now
+  also starts a later flight at its Names message.
 - A player in the lobby resumes into the lobby, and an observer's watch starts
   again. The mission is built again only when its number or text differs.
 

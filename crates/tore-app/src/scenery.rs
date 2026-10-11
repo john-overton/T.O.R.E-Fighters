@@ -4,6 +4,7 @@
 //! simulation half is [`Terrain`]; code that needs the weather or the airport
 //! scene takes `&Terrain` alongside `&Scenery`.
 mod runway_cutout;
+pub mod surface_art;
 
 use crate::{
     AppResult,
@@ -37,7 +38,8 @@ pub struct StaticGeometry {
 }
 
 struct StandingGeometry {
-    hidden: BTreeSet<u32>,
+    /// Every placement not standing intact, with its look.
+    looks: BTreeMap<u32, surface_art::Look>,
     geometry: Arc<StaticGeometry>,
 }
 
@@ -56,6 +58,8 @@ pub struct Scenery {
     static_vertices: BTreeMap<u32, Vec<f32>>,
     static_lines: BTreeMap<u32, Vec<f32>>,
     standing_geometry: Option<StandingGeometry>,
+    /// The surface units' wrecks, rails, moving units, sprites and pieces.
+    pub surface: surface_art::SurfaceArt,
     pub texture_indices: Vec<u8>,
     pub smooth_weather: bool,
     pub visual_bands: Vec<tore_formats::weather::Layer>,
@@ -135,6 +139,39 @@ fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+/// Each parked aircraft of `terrain` with its shape drawn gear down. A shape
+/// that does not read is left undrawn and logged.
+fn parked_shapes<'a>(
+    resources: &BTreeMap<String, Vec<u8>>,
+    terrain: &'a Terrain,
+) -> Vec<(
+    &'a tore_world::surface::parked::ParkedPose,
+    tore_formats::shape::Shape,
+)> {
+    terrain
+        .surface
+        .parked_scene
+        .iter()
+        .filter_map(|pose| {
+            let state: BTreeMap<usize, i32> =
+                pose.gear_word.map(|word| (word, 1)).into_iter().collect();
+            let shape = resources
+                .get(&pose.shape)
+                .ok_or_else(|| format!("missing {}", pose.shape))
+                .and_then(|bytes| {
+                    tore_formats::shape::Shape::with_state(bytes, &state).map_err(|e| e.to_string())
+                });
+            match shape {
+                Ok(shape) => Some((pose, shape)),
+                Err(error) => {
+                    log::warn!("Parked aircraft {} not drawn: {error}", pose.resource);
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 /// Placements without a standing combat target: destroyed, or never registered.
@@ -274,6 +311,7 @@ impl Scenery {
             static_vertices: BTreeMap::new(),
             static_lines: BTreeMap::new(),
             standing_geometry: None,
+            surface: surface_art::SurfaceArt::default(),
             texture_indices,
             smooth_weather: match std::env::var("TORE_WEATHER_SMOOTH").as_deref() {
                 Err(std::env::VarError::NotPresent) | Ok("1") => true,
@@ -321,16 +359,23 @@ impl Scenery {
         code: &str,
     ) -> AppResult<()> {
         self.standing_geometry = None;
-        let sources = Placements::load(resources, code)?;
+        // The layout's placements and the ground target's, as the terrain
+        // built its scene.
+        let sources = Placements::for_terrain(resources, terrain, code)?;
         for (main_shape, error) in &sources.unreadable {
             log::warn!("Airport scene: {main_shape} retained without visual geometry: {error}");
         }
-        let mut static_layers = BTreeMap::<String, crate::static_art::Image>::new();
         let mut static_float_count = 0usize;
-        for placement in &sources.layout.placements {
-            let id = 0x4000_0000u32
-                .checked_add(placement.key.ordinal)
-                .ok_or("airport object ID overflow")?;
+        // Every drawn shape with its id, type, scale, orientation and origin.
+        let mut drawn: Vec<(
+            u32,
+            Option<&str>,
+            &tore_formats::shape::Shape,
+            surface_art::Stand,
+            f64,
+        )> = Vec::new();
+        for placed in sources.placed() {
+            let (id, placement) = placed?;
             let Some(shape) = sources.shapes.get(&placement.object_type) else {
                 continue;
             };
@@ -341,109 +386,92 @@ impl Scenery {
                 scale,
                 basis,
                 origin,
+                support_origin,
                 ..
             }) = sources.stance(placement, ground)
             else {
                 continue;
             };
-            let mut instance_vertices = Vec::new();
-            for face in &shape.faces {
-                if face.positions.len() < 3 {
-                    continue;
+            // How far the shape stands above its placement point (a land
+            // unit on its lowest point): a moving unit keeps it.
+            let lift = (0..3)
+                .map(|i| (origin[i] - support_origin[i]) * basis.up[i])
+                .sum();
+            drawn.push((
+                id,
+                Some(placement.object_type.as_str()),
+                shape,
+                surface_art::Stand {
+                    scale,
+                    basis,
+                    origin,
+                },
+                lift,
+            ));
+        }
+        // The parked aircraft, gear down at the aircraft convention, where
+        // the terrain placed them (docs/spec/surface-defenses.md, "Parked
+        // aircraft"). Like every placement they hide when destroyed.
+        let parked = parked_shapes(resources, terrain);
+        drawn.extend(parked.iter().map(|(pose, shape)| {
+            (
+                pose.id.0,
+                None,
+                shape,
+                surface_art::Stand {
+                    scale: pose.scale,
+                    basis: pose.basis,
+                    origin: pose.origin,
+                },
+                0.,
+            )
+        }));
+        let mut art = surface_art::SurfaceArt::default();
+        let first_page = self.texture_indices.len();
+        let mut build = surface_art::Build {
+            resources,
+            terrain,
+            definitions: &sources.definitions,
+            first_page,
+            pages: &mut self.sky_indices,
+        };
+        for (id, object_type, shape, stand, lift) in drawn {
+            surface_art::preload(shape, resources, first_page, build.pages, &mut art.layers)?;
+            let mut geometry = surface_art::Drawn::default();
+            surface_art::emit(
+                shape,
+                &stand,
+                &art.layers,
+                &mut geometry,
+                surface_art::BUDGET - static_float_count,
+            )?;
+            match object_type {
+                Some(object_type) => {
+                    // Wrecks, rails, carrier parts and sprites; a unit that
+                    // follows a route is drawn every frame instead.
+                    let (parts, moves) =
+                        art.add(&mut build, id, object_type, shape, &stand, lift)?;
+                    if moves {
+                        continue;
+                    }
+                    geometry.vertices.extend(parts.vertices);
+                    geometry.lines.extend(parts.lines);
                 }
-                let image = if face.texture.is_empty() || face.uv.is_empty() {
-                    None
-                } else {
-                    let name = face.texture.to_ascii_uppercase();
-                    if !static_layers.contains_key(&name) {
-                        let pic = Pic::parse(
-                            resources
-                                .get(&name)
-                                .ok_or_else(|| format!("missing static texture {name}"))?,
-                        )?;
-                        let first = (self.texture_indices.len() + self.sky_indices.len()) / 65536;
-                        let image =
-                            crate::static_art::Image::append(&pic, &mut self.sky_indices, first)?;
-                        static_layers.insert(name.clone(), image);
+                None => {
+                    if let Some((pose, _)) = parked.iter().find(|(pose, _)| pose.id.0 == id) {
+                        art.add_parked(&mut build, id, &pose.shape, pose.scale);
                     }
-                    static_layers.get(&name)
-                };
-                for triangle in 1..face.positions.len() - 1 {
-                    if static_float_count + instance_vertices.len() + 30 > 32 * 1024 * 1024 / 4 {
-                        return Err("static scene exceeds 32 MiB geometry budget".into());
-                    }
-                    let mut points = Vec::with_capacity(3);
-                    for vertex_index in [0, triangle, triangle + 1] {
-                        let point = face.positions[vertex_index];
-                        let right = f64::from(point[0]) * scale;
-                        let up = f64::from(point[2]) * scale;
-                        let forward = f64::from(point[1]) * scale;
-                        let position = std::array::from_fn::<_, 3, _>(|axis| {
-                            origin[axis]
-                                + basis.right[axis] * right
-                                + basis.up[axis] * up
-                                + basis.forward[axis] * forward
-                        });
-                        let uv = face.uv.get(vertex_index).copied().unwrap_or([0.0; 2]);
-                        let uv = image.map_or([0., 0.], |image| {
-                            [uv[0] + 0.5, image.height as f32 - 0.5 - uv[1]]
-                        });
-                        points.push([
-                            position[0] as f32,
-                            position[1] as f32,
-                            position[2] as f32,
-                            uv[0],
-                            uv[1],
-                            -1.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            f32::from(face.colors[vertex_index]) + f32::from(face.fog as u8) * 256.,
-                        ]);
-                    }
-                    if let Some(image) = image {
-                        image.triangle(
-                            points.try_into().expect("three triangle corners"),
-                            &mut instance_vertices,
-                            32 * 1024 * 1024 / 4 - static_float_count,
-                        )?;
-                    } else {
-                        instance_vertices.extend(points.into_iter().flatten());
-                    }
-                }
-            }
-            let mut line_vertices = Vec::new();
-            for line in &shape.lines {
-                for point in line.positions {
-                    let [right, forward, up] = point.map(|v| f64::from(v) * scale);
-                    let position = std::array::from_fn::<_, 3, _>(|axis| {
-                        origin[axis]
-                            + basis.right[axis] * right
-                            + basis.up[axis] * up
-                            + basis.forward[axis] * forward
-                    });
-                    line_vertices.extend([
-                        position[0] as f32,
-                        position[1] as f32,
-                        position[2] as f32,
-                        0.,
-                        0.,
-                        -1.,
-                        0.,
-                        0.,
-                        0.,
-                        f32::from(line.color) + f32::from(line.fog as u8) * 256.,
-                    ]);
                 }
             }
-            static_float_count += line_vertices.len();
-            self.static_lines.insert(id, line_vertices);
-            static_float_count += instance_vertices.len();
-            if static_float_count > 32 * 1024 * 1024 / 4 {
+            static_float_count += geometry.lines.len();
+            self.static_lines.insert(id, geometry.lines);
+            static_float_count += geometry.vertices.len();
+            if static_float_count > surface_art::BUDGET {
                 return Err("static scene exceeds 32 MiB geometry budget".into());
             }
-            self.static_vertices.insert(id, instance_vertices);
+            self.static_vertices.insert(id, geometry.vertices);
         }
+        self.surface = art;
         Ok(())
     }
 
@@ -529,44 +557,132 @@ impl Scenery {
         standing(&self.static_lines, destroyed)
     }
 
-    /// Reuse one current batch while exactly the same placements stand. A
-    /// missing combat target hides its placement, as does one with no HP.
+    /// Reuse one current batch while every placement keeps its look. A
+    /// missing combat target hides its placement; one with no HP shows its
+    /// wreck when it keeps one (docs/spec/surface-defenses.md, "Destroyed
+    /// looks"), else hides; a launcher shows the loads `surface` gives its
+    /// rails.
     pub fn static_geometry(
         &mut self,
         targets: &[tore_sim::combat::live::Target],
+        surface: &tore_world::surface::SurfaceState,
     ) -> &Arc<StaticGeometry> {
-        let alive: BTreeSet<_> = targets
-            .iter()
-            .filter(|target| target.hp > 0)
-            .map(|target| target.id)
+        let hp: BTreeMap<u32, i32> = targets.iter().map(|t| (t.id, t.hp)).collect();
+        let looks = self
+            .placement_ids()
+            .into_iter()
+            .filter_map(|id| {
+                let known = hp.get(&id);
+                let look = self.surface.look(
+                    id,
+                    known.is_some_and(|hp| *hp > 0),
+                    known.is_some(),
+                    Some(surface),
+                )?;
+                Some((id, look))
+            })
             .collect();
-        let hidden = self
-            .static_vertices
-            .keys()
-            .chain(self.static_lines.keys())
-            .filter(|id| !alive.contains(id))
-            .copied()
-            .collect();
-        self.static_geometry_where(&hidden)
+        self.static_geometry_with(looks)
     }
 
     /// Recorded destruction can move backwards when a replay seeks. Keep
     /// only the current set's batch, so destruction history cannot grow it.
+    /// A destroyed placement shows its wreck when it keeps one.
     pub fn static_geometry_where(&mut self, hidden: &BTreeSet<u32>) -> &Arc<StaticGeometry> {
+        let looks = hidden
+            .iter()
+            .filter_map(|id| Some((*id, self.surface.look(*id, false, true, None)?)))
+            .collect();
+        self.static_geometry_with(looks)
+    }
+
+    /// [`Self::static_geometry_where`] for a replay that also recorded the
+    /// launcher loads (format 3): `surface` holds the rails of each unit that
+    /// ever changed them, as the recording left them at this tick.
+    pub fn static_geometry_replay(
+        &mut self,
+        hidden: &BTreeSet<u32>,
+        surface: &tore_world::surface::SurfaceState,
+    ) -> &Arc<StaticGeometry> {
+        let mut looks: BTreeMap<u32, surface_art::Look> = hidden
+            .iter()
+            .filter_map(|id| Some((*id, self.surface.look(*id, false, true, None)?)))
+            .collect();
+        for unit in &surface.units {
+            let id = unit.id.0;
+            if hidden.contains(&id) {
+                continue;
+            }
+            if let Some(look) = self.surface.look(id, true, true, Some(surface)) {
+                looks.insert(id, look);
+            }
+        }
+        self.static_geometry_with(looks)
+    }
+
+    /// Every placement id with standing geometry or lines, ascending.
+    fn placement_ids(&self) -> BTreeSet<u32> {
+        self.static_vertices
+            .keys()
+            .chain(self.static_lines.keys())
+            .copied()
+            .collect()
+    }
+
+    fn static_geometry_with(
+        &mut self,
+        looks: BTreeMap<u32, surface_art::Look>,
+    ) -> &Arc<StaticGeometry> {
         if self
             .standing_geometry
             .as_ref()
-            .is_none_or(|cached| cached.hidden != *hidden)
+            .is_none_or(|cached| cached.looks != looks)
         {
+            let mut vertices = Vec::new();
+            let mut lines = Vec::new();
+            for id in self.placement_ids() {
+                match looks.get(&id) {
+                    None => {
+                        vertices.extend_from_slice(
+                            self.static_vertices.get(&id).map_or(&[][..], Vec::as_slice),
+                        );
+                        lines.extend_from_slice(
+                            self.static_lines.get(&id).map_or(&[][..], Vec::as_slice),
+                        );
+                    }
+                    Some(look) => {
+                        if let Some(drawn) = self.surface.drawn(id, look) {
+                            vertices.extend_from_slice(&drawn.vertices);
+                            lines.extend_from_slice(&drawn.lines);
+                        }
+                    }
+                }
+            }
             self.standing_geometry = Some(StandingGeometry {
-                hidden: hidden.clone(),
-                geometry: Arc::new(StaticGeometry {
-                    vertices: standing(&self.static_vertices, hidden),
-                    lines: standing(&self.static_lines, hidden),
-                }),
+                looks,
+                geometry: Arc::new(StaticGeometry { vertices, lines }),
             });
         }
         &self.standing_geometry.as_ref().unwrap().geometry
+    }
+
+    /// This frame's moving surface geometry, relative to the render origin
+    /// (set it first): routed units, men and deck crew facing `camera`, and
+    /// parked aircraft pieces, for [`crate::sim_renderer::SimRenderer::surface_units`].
+    /// `standing` says whether an object stands.
+    pub fn surface_vertices(
+        &self,
+        picture: &crate::snapshot::RenderSnapshot,
+        standing: &dyn Fn(u32) -> bool,
+        camera: &Camera,
+    ) -> Vec<f32> {
+        self.surface.frame(
+            picture,
+            standing,
+            camera,
+            self.origin,
+            picture.tick as f64 / 120.,
+        )
     }
 
     pub fn glare_enabled(&self) -> bool {
@@ -734,6 +850,7 @@ pub(crate) mod tests {
             static_vertices: BTreeMap::new(),
             static_lines: BTreeMap::new(),
             standing_geometry: None,
+            surface: surface_art::SurfaceArt::default(),
             texture_indices: vec![],
             smooth_weather: true,
             visual_bands: Vec::new(),
@@ -806,6 +923,175 @@ pub(crate) mod tests {
         );
     }
 
+    /// No surface unit state: no launcher shows its loads.
+    fn quiet() -> tore_world::surface::SurfaceState {
+        tore_world::surface::SurfaceState::new(0, Vec::new())
+    }
+
+    #[test]
+    fn a_destroyed_placement_with_a_wreck_shows_it_in_its_place() {
+        let mut scene = scenery();
+        scene.static_vertices = BTreeMap::from([(1, vec![1.; 30]), (2, vec![2.; 30])]);
+        scene.static_lines = BTreeMap::from([(2, vec![-2.; 20])]);
+        scene.surface = surface_art::SurfaceArt::default().with_wreck(
+            2,
+            surface_art::Drawn {
+                vertices: vec![9.; 30],
+                lines: vec![-9.; 20],
+            },
+        );
+        let mut targets = tore_world::test_support::spawned();
+        targets.truncate(2);
+        let standing = Arc::clone(scene.static_geometry(&targets, &quiet()));
+        assert_eq!(standing.vertices, [vec![1.; 30], vec![2.; 30]].concat());
+        targets[1].hp = 0;
+        let wrecked = Arc::clone(scene.static_geometry(&targets, &quiet()));
+        assert_eq!(wrecked.vertices, [vec![1.; 30], vec![9.; 30]].concat());
+        assert_eq!(wrecked.lines, vec![-9.; 20]);
+        // A replay that recorded the loss shows the same wreck; one that
+        // did not shows the placement standing.
+        let destroyed = BTreeSet::from([2]);
+        assert_eq!(
+            scene.static_geometry_where(&destroyed).vertices,
+            wrecked.vertices
+        );
+        assert_eq!(
+            scene.static_geometry_where(&BTreeSet::new()).vertices,
+            standing.vertices
+        );
+        // Placement 1 has no wreck: destroyed, it is gone.
+        targets[0].hp = 0;
+        assert_eq!(
+            scene.static_geometry(&targets, &quiet()).vertices,
+            vec![9.; 30]
+        );
+    }
+
+    /// The lowest vertex of `vertices` (relative to `origin`) against the
+    /// terrain: the smallest height above the ground under any vertex, and
+    /// the lowest vertex's height above the ground at `at`.
+    fn grounding(
+        vertices: &[f32],
+        origin: [f64; 3],
+        terrain: &Terrain,
+        at: [f64; 3],
+    ) -> (f64, f64) {
+        let points: Vec<[f64; 3]> = vertices
+            .chunks_exact(10)
+            .map(|v| std::array::from_fn(|i| f64::from(v[i]) + origin[i]))
+            .collect();
+        assert!(!points.is_empty(), "nothing drawn");
+        let height = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
+        let clearance = points
+            .iter()
+            .map(|p| p[1] - height(p[0], p[2]))
+            .fold(f64::INFINITY, f64::min);
+        let low = points.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        (clearance, low - height(at[0], at[2]))
+    }
+
+    /// Every land unit, standing or moving, intact or wrecked, draws with
+    /// its lowest vertex (track or wheel bottom) on the terrain: a T-72, a
+    /// ZSU-23, a truck and an SA-6 standing, their DEST wrecks, and a moving
+    /// T-80 tilted to the slope, alive and wrecked.
+    #[test]
+    #[ignore = "needs an imported data profile (TORE_DATA_DIR)"]
+    fn land_units_and_their_wrecks_stand_on_the_ground() {
+        use tore_world::{
+            mission::{Defense, MissionSpec},
+            seats::SeatInput,
+            world::{Seating, TickOutput, World},
+        };
+        let resources = crate::reel::load_assets().unwrap().theater_resources;
+        let build = |theater: &str, stem: &str| {
+            let mut spec = MissionSpec::new(theater, tore_formats::aircraft::AircraftId::F18);
+            spec.ground_target = Some(stem.into());
+            spec.surface_seed = 1;
+            (spec.aaa, spec.sam) = (Defense::Heavy, Defense::Heavy);
+            World::new(&spec, &resources, Seating::SinglePlayer).unwrap()
+        };
+        // Standing units and their wrecks.
+        let world = build("PGU", "QPGSAM");
+        let mut scenery = Scenery::build(&resources, &world.terrain).unwrap();
+        for kind in ["T72.NT", "ZSU23.NT", "TRUCK.NT", "SA6.NT"] {
+            let unit = world
+                .terrain
+                .surface
+                .template_units()
+                .find(|u| {
+                    u.resource == kind
+                        && u.in_scene
+                        && !world.terrain.surface.courses.contains_key(&u.id)
+                })
+                .unwrap_or_else(|| panic!("no standing {kind}"));
+            let at = [f64::from(unit.position[0]), 0., f64::from(unit.position[2])];
+            let intact = &scenery.static_vertices[&unit.id.0];
+            let (_, low) = grounding(intact, [0.; 3], &world.terrain, at);
+            assert!(low.abs() <= 1., "{kind} stands {low:.2} ft off the ground");
+            let wreck = scenery
+                .surface
+                .drawn(unit.id.0, &surface_art::Look::Wreck)
+                .unwrap_or_else(|| panic!("{kind} keeps no wreck"))
+                .vertices
+                .clone();
+            let (_, low) = grounding(&wreck, [0.; 3], &world.terrain, at);
+            assert!(
+                low.abs() <= 1.,
+                "{kind}'s wreck lies {low:.2} ft off the ground"
+            );
+            // Its hit box stands where it is drawn.
+            let bounds = world.combat.state.ground_bounds(unit.id.0).unwrap();
+            let bottom = bounds.center[1] - bounds.half[1];
+            let ground = f64::from(world.terrain.height(at[0] as f32, at[2] as f32));
+            assert!(
+                (bottom - ground).abs() <= 1.,
+                "{kind}'s box bottom {bottom} ground {ground}"
+            );
+        }
+        // A moving T-80, tilted to the slope.
+        let mut world = build("UKR", "QUCOL");
+        let mut out = TickOutput::default();
+        for _ in 0..120 * 60 {
+            let input = SeatInput {
+                tick: world.tick(),
+                ..SeatInput::default()
+            };
+            world.step(&[input], &mut out).unwrap();
+        }
+        let mut scenery = Scenery::build(&resources, &world.terrain).unwrap();
+        let picture = world.combat.render_snapshot().clone();
+        let t80 = picture
+            .surface
+            .iter()
+            .find(|pose| world.terrain.surface.unit(pose.id).unwrap().resource == "T80.NT")
+            .unwrap()
+            .clone();
+        let camera = crate::camera::Camera::new();
+        scenery.set_origin(t80.position);
+        let one = crate::snapshot::RenderSnapshot {
+            surface: vec![t80.clone()],
+            ..Default::default()
+        };
+        let drawn = scenery.surface_vertices(&one, &|_| true, &camera);
+        let (clearance, low) = grounding(&drawn, scenery.origin, &world.terrain, t80.position);
+        assert!(
+            low.abs() <= 1. && clearance > -1.,
+            "moving T-80: low {low:.2}, clearance {clearance:.2}"
+        );
+        let mut wrecked = t80;
+        wrecked.wrecked = true;
+        let one = crate::snapshot::RenderSnapshot {
+            surface: vec![wrecked.clone()],
+            ..Default::default()
+        };
+        let drawn = scenery.surface_vertices(&one, &|_| true, &camera);
+        let (_, low) = grounding(&drawn, scenery.origin, &world.terrain, wrecked.position);
+        assert!(
+            low.abs() <= 1.,
+            "moving T-80's wreck lies {low:.2} ft off the ground"
+        );
+    }
+
     #[test]
     fn static_cache_tracks_standing_objects_and_preserves_lines() {
         let mut scene = scenery();
@@ -819,7 +1105,7 @@ pub(crate) mod tests {
         let mut line_only = targets[0].clone();
         line_only.id = 4;
         targets.push(line_only);
-        let full = Arc::clone(scene.static_geometry(&targets));
+        let full = Arc::clone(scene.static_geometry(&targets, &quiet()));
         assert_eq!(full.vertices, scene.visible_static_vertices(&targets));
         assert_eq!(full.lines, scene.visible_static_lines(&targets));
         assert_eq!(full.vertices.len(), 90);
@@ -829,24 +1115,30 @@ pub(crate) mod tests {
         targets[1].hp = 1;
         scene.set_origin([30_000., 1000., -20_000.]);
         scene.palette = [[17; 3]; 256];
-        assert!(Arc::ptr_eq(&full, scene.static_geometry(&targets)));
+        assert!(Arc::ptr_eq(
+            &full,
+            scene.static_geometry(&targets, &quiet())
+        ));
 
         targets[1].hp = 0;
         targets[2].hp = 0;
-        let damaged = Arc::clone(scene.static_geometry(&targets));
+        let damaged = Arc::clone(scene.static_geometry(&targets, &quiet()));
         assert!(!Arc::ptr_eq(&full, &damaged));
         assert_eq!(damaged.vertices, scene.visible_static_vertices(&targets));
         assert_eq!(damaged.lines, scene.visible_static_lines(&targets));
         assert_eq!(damaged.vertices, vec![1.; 30]);
         assert_eq!(damaged.lines, vec![-1.; 20]);
-        assert!(Arc::ptr_eq(&damaged, scene.static_geometry(&targets)));
+        assert!(Arc::ptr_eq(
+            &damaged,
+            scene.static_geometry(&targets, &quiet())
+        ));
 
-        let empty = Arc::clone(scene.static_geometry(&[]));
+        let empty = Arc::clone(scene.static_geometry(&[], &quiet()));
         assert!(empty.vertices.is_empty() && empty.lines.is_empty());
         // Restart revives targets without requiring a new renderer.
         targets[1].hp = 100;
         targets[2].hp = 100;
-        let restored = scene.static_geometry(&targets);
+        let restored = scene.static_geometry(&targets, &quiet());
         assert!(!Arc::ptr_eq(&empty, restored));
         assert_eq!(restored.vertices, full.vertices);
         assert_eq!(restored.lines, full.lines);

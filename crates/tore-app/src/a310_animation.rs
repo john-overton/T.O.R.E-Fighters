@@ -777,6 +777,7 @@ mod tests {
             faces.push(source);
         }
         let shape = Shape {
+            billboards: Vec::new(),
             faces,
             lines: Vec::new(),
             state_words: BTreeSet::new(),

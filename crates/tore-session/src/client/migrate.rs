@@ -787,6 +787,16 @@ impl Client {
         for &object in &resumed.destroyed {
             self.destroyed.insert(object, 0);
         }
+        let mismatch = self
+            .mission
+            .as_ref()
+            .and_then(|mission| super::surface_mismatch(&mission.world, resumed.surface_digest));
+        if let Some(reason) = mismatch {
+            let message = backlog(Vec::new(), Vec::new());
+            self.send(&message);
+            self.refuse_surface(reason);
+            return;
+        }
         let (Some(seat), Some(mission)) = (self.seat.as_mut(), self.mission.as_ref()) else {
             // Not flying here: an empty backlog ends the host's wait.
             let message = backlog(Vec::new(), Vec::new());

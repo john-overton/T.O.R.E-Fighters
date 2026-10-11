@@ -30,7 +30,9 @@ greyed-out **Cancel** and a blue default **OK**. The clipboard shows five pages:
 4. **HIT PERCENTAGES**: Air-to-Air and Air-to-Ground (Launches, Hit, Failed,
    Spoofed, Jammed), Gun (Hit) and Bomb (Hit).
 5. **ENEMY HIT PERCENTAGES**, fire aimed **ON** each pilot: AAM and SAM
-   (Launches, Hit, Failed, Jammed, Spoofed), Gun (Hit) and AAA (Hit).
+   (Launches, Hit, Failed, Jammed, Spoofed), Gun (Hit) and AAA (Hit). Aircraft
+   fire fills AAM and Gun; the fire of a mission's SAM sites, guns and ships
+   fills SAM and AAA ([below](#weapon-classes)).
 
 Every table has a PLAYER and a WINGMAN column. The rocker, Page Up/Down and the
 arrow keys turn pages; Home and End jump to the first and last page. Paging
@@ -45,6 +47,13 @@ reads **MISSION ENDED** and says who ended it, and page 2 reads **MISSION
 OUTCOME : INCOMPLETE**, retail's word for a multiplayer mission cut short
 (`agent decision`, EF-F; [details](../ARCHITECTURE.md#smoke-test-fixes-ef-f)).
 Single player never shows it.
+
+When a SAM site, gun or ship shot the pilot's aircraft down, page 2's pilot
+status table gains a **Shot down by** row with the unit's short name (SA-6,
+ZSU-23-4); the flight shows the same name in a message ("Shot down by SA-6")
+when its aircraft is destroyed. Neither appears for an aircraft's kill or when
+the pilot is flying (`opinionated`, agent decision, 2026-10-10; the networked
+debrief does not carry the name yet).
 
 Closing the debrief returns to the **Quick Mission creator with every setting
 of the mission just flown**, not to the ordnance screen. Requested by John on
@@ -99,7 +108,13 @@ A store counts by its type flags, as retail does: guided (0x1) with the air flag
 Air-to-Ground; otherwise the bomb flag (0x10) is Bomb and the gun flag (0x80)
 is Gun. Unguided rockets fall in none of these and are not listed. Fire from an
 enemy aircraft at a pilot counts as Gun when it carries the gun flag and as AAM
-otherwise. SAM and AAA rows stay empty until surface defences exist.
+otherwise. Fire from an enemy surface unit (a SAM site, an anti-aircraft gun,
+a tank, a ship, a battery launcher) counts the same way with the retail
+names: a gun round is **AAA** and anything else is **SAM**, so a SCUD
+launcher's SA-9 counts as a SAM and a tank's shell as AAA. A friendly or
+neutral unit's fire is not counted. Every round or missile is one launch; a
+battery's missile belongs to the launcher that fired it (`spec-derived`
+from the retail rule, [format](../formats/debrief.md#page-contents)).
 
 Every gun projectile is one round. Whether retail counts rounds or bursts is
 unknown.
@@ -138,7 +153,8 @@ shooter the last attacker.
   while the hit table showed none. A decoyed missile that only touches a wreck,
   explodes on the ground, runs out or is jammed stays Spoofed. A mission
   recording keeps both moments: the spoof when the decoy wins, then the hit,
-  marked as replacing it ([recorded events](../REPLAYS.md#recording)).
+  marked as replacing it, and naming the chaff or flare that fooled the missile
+  by its release number ([recorded events](../REPLAYS.md#recording)).
 - **Same rule everywhere.** Multiplayer scores (kills, damage) and the PvP
   kill limit credit a lost plane by this same record (`Ledger::credit`), so a
   plane's credited kill, its debrief and its score agree. A kill before the
@@ -146,7 +162,21 @@ shooter the last attacker.
   Agent decision, 2026-10-09: the manual does not describe indirect kills,
   decoyed missiles or hits that did no damage.
 
-Airport and scene objects count as not friendly.
+Airport and scene objects count as not friendly. Surface units are objects
+with a side, and their kills fall in the same rows by their class word: a SAM
+launcher in SAM, a gun in AAA, a tank in Tank, a ship in Ship, a supply truck
+and a Straight Flush or HAWK radar element in Vehicle, a GCI radar in
+Structure, a parked aircraft in Fighter or Bomber by its type's class word
+(each counted in the first row of its class bits). A kill by splash or
+collateral damage credits the shooter like any other
+([splash](missiles.md#splash-damage)).
+
+**Friendly ground units.** Destroying a surface unit of the player's own side
+that is not an objective counts as Friendly fire, like an aircraft of its own
+side (retail: a same-side object not flagged as a target). That includes a
+base-layout SAM, radar or supply truck and a battery's added radar or truck,
+which are never targets. A unit with no side (scenery) is not friendly
+(`spec-derived`; John decided that it fails the mission, 2026-10-10).
 
 ### Outcome and objectives
 
@@ -157,8 +187,21 @@ Airport and scene objects count as not friendly.
 | Any friendly objective lost fails it | retail |
 | Otherwise the mission succeeds | retail |
 | Targets are the enemy group the player's flight is assigned to destroy. When the player's flight has no target group (free fire, CAP, protection, self-defence, hold), every enemy aircraft is a target, as in retail Quick Missions | agent decision, 2026-09-23; retail makes every enemy aircraft a target |
-| Friendly objectives are the aircraft the player's flight protects plus every member of a group whose survival is required, including the player when your own group's survival is required | agent decision; retail Quick Missions have none |
+| Friendly objectives are the aircraft the player's flight protects plus every member of a group whose survival is required, including the player when your own group's survival is required; a Redfor player's also include the mission's ground target | agent decision; retail Quick Missions have none |
 | "Destroyed the target." / "Failed to destroy the target." for one target; "Destroyed the N targets." when all are down; otherwise "Destroyed N of M targets." Protected sentences follow the same pattern. A sentence appears only when its list is not empty | retail |
+
+**A mission's ground target** adds its objects to the same lists
+([surface objectives](surface-defenses.md#objectives-scoring-and-debrief)).
+Every object of the template flagged 0x80, parked aircraft included, is a
+target of a friendly (Blue) plane, destroyed when its hit points are gone,
+and joins the air targets in **one combined Destroy line** ("Destroyed 2 of 5
+targets."). In a multiplayer game a plane of the enemy (Redfor) side defends
+the target: the same objects are its **Protect** objective, protected while
+they stand. A surface object the result cannot find is undecided: neither
+destroyed nor lost (an aircraft it cannot find counts as gone, as before).
+Added radars and supply trucks are never targets. Surface ids have no
+lineage. `opinionated` (John, 2026-10-10: one combined line, Redfor defends,
+a friendly ground unit destroyed fails the mission).
 
 Retail also requires a counter to reach 300 before a protect-only mission can
 succeed; what it counts is unknown, so this rule is not applied.
@@ -170,14 +213,15 @@ AI's respawn of its own aircraft. Each aircraft the mission started with is
 the root of a *lineage*, and every aircraft a revival or a respawn adds
 continues one (docs/ARCHITECTURE.md, "Death, revival and lives"). Retail has
 no respawns, so every rule here is an agent decision of the lobby pass's
-follow-up F1, 2026-10-09, **pending John**; he asked only that a respawned
-objective aircraft "should still say objective".
+follow-up F1, 2026-10-09; he asked that a respawned objective aircraft
+"should still say objective" and on 2026-10-10 found the counting rules below
+fine.
 
 | Rule | Provenance |
 | --- | --- |
 | An objective names a lineage. Every aircraft of an objective lineage is an objective wherever the original is: the target window's "Obj: Destroy" or "Obj: Survive", the AI's own target and escort lists (an intercepting AI wingman goes after the respawn too), and the network readout a client is sent | John asked for it, 2026-10-09; the rule is an agent decision |
-| A destroy objective counts each lineage once. It is destroyed the first time any aircraft of it is lost, so the objective can be met although the lineage flies again; shooting the respawn down later is credited as a kill as usual and changes no objective count | agent decision, pending John |
-| A protect objective fails on the first loss of a protected lineage, as it would without respawns; the respawned aircraft still shows "Obj: Survive" | agent decision, pending John |
+| A destroy objective counts each lineage once. It is destroyed the first time any aircraft of it is lost, so the objective can be met although the lineage flies again; shooting the respawn down later is credited as a kill as usual and changes no objective count | agent decision, accepted by John (2026-10-10) |
+| A protect objective fails on the first loss of a protected lineage, as it would without respawns; the respawned aircraft still shows "Obj: Survive" | agent decision, accepted by John (2026-10-10) |
 | A player's revived aircraft is asked what its lineage was asked: the same targets and friendly objectives | agent decision |
 | With no target group, the targets are every aircraft of the other side the mission started with, human-flown ones too, one lineage each. Before this, a networked flight counted only the AI's aircraft | agent decision; the table's retail rule, applied to every enemy aircraft |
 | A networked mission gives every aircraft its objectives when it is built (the group objective of its wing, the groups that must survive), so a player who takes one in flight is asked what the mission asks of that aircraft. Before this a player who took an aircraft by handoff had no objectives: the target window never read "Obj:", and the debrief listed no friendly objective | agent decision (a fault found by follow-up F1) |

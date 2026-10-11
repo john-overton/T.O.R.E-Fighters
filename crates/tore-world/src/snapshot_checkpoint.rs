@@ -14,7 +14,7 @@
 
 use super::{
     AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
-    ProjectilePose, RenderSnapshot,
+    ProjectilePose, RenderSnapshot, SurfacePose,
 };
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 use tore_sim::combat::live::EffectKind;
@@ -29,6 +29,15 @@ tore_sim::checkpoint_struct!(RenderSnapshot {
     debris,
     pilots,
     models,
+    surface,
+});
+
+tore_sim::checkpoint_struct!(SurfacePose {
+    id,
+    position,
+    attitude,
+    shape,
+    wrecked,
 });
 
 // Which airframe draws a pose: nothing, a model's batch or the player's.
@@ -114,6 +123,7 @@ fn effect_kind_number(kind: EffectKind) -> u64 {
         EffectKind::Destroyed => 4,
         EffectKind::Ground => 5,
         EffectKind::DebrisImpact => 6,
+        EffectKind::Flak => 7,
     }
 }
 
@@ -126,6 +136,7 @@ fn effect_kind(number: u64) -> Result<EffectKind, CheckpointError> {
         4 => EffectKind::Destroyed,
         5 => EffectKind::Ground,
         6 => EffectKind::DebrisImpact,
+        7 => EffectKind::Flak,
         other => return invalid(format!("an effect kind has no variant {other}")),
     })
 }
@@ -314,6 +325,15 @@ mod tests {
             })
             .collect(),
             models: vec![AircraftId::F18, AircraftId::Mig29, AircraftId::F22n],
+            surface: (0..2)
+                .map(|n| SurfacePose {
+                    id: crate::surface::UnitId(0x5000_0000 + n),
+                    position: [t + f64::from(n), 256., 2. * t],
+                    attitude: [0.5, 0.01 * f64::from(n), -0.02],
+                    shape: (n == 1).then(|| "T72.SH".to_string()),
+                    wrecked: n == 1,
+                })
+                .collect(),
         }
     }
 
@@ -357,8 +377,8 @@ mod tests {
             records: Vec::new(),
         };
         assert!(from_bytes::<Draw>(&coded, &models).is_err());
-        assert!(effect_kind(7).is_err());
-        for n in 0..7 {
+        assert!(effect_kind(8).is_err());
+        for n in 0..8 {
             assert_eq!(effect_kind_number(effect_kind(n).unwrap()), n);
         }
     }

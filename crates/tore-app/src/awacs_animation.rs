@@ -548,6 +548,7 @@ mod tests {
             ),
         ];
         let shape = Shape {
+            billboards: Vec::new(),
             faces: definitions.into_iter().map(|(a, p)| panel(a, p)).collect(),
             lines: Vec::new(),
             state_words: BTreeSet::new(),

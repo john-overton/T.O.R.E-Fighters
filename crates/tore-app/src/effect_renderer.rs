@@ -1,6 +1,16 @@
 //! Original explosion, fire and crater artwork as textured sprites. The
 //! simulation owns every effect's type, place and life; the sheets, frame
 //! layouts and sizes are in docs/spec/explosions.md.
+//!
+//! Flak bursts draw `FLAKA` (the 85 mm shell's type 27, two seconds) or the
+//! larger `FLAKB` (the 100 mm shell's type 28, one second): the simulation
+//! picks the type from the shell's record. The light and dark puff a burst
+//! leaves are `surface_fx.rs`'s.
+//!
+//! A large ground explosion also throws out a shockwave: a ring of
+//! `SMOKE.PIC` dust (or white spray on water) that races outward from the
+//! blast and fades (docs/spec/explosions.md, "Shockwave"). It is drawn from
+//! the effect alone, so replays and every networked client show it too.
 use crate::camera::Camera;
 use crate::snapshot::{EffectPose, MarkPose};
 use std::collections::BTreeMap;
@@ -59,8 +69,9 @@ impl Layout {
     }
 }
 
-/// EXP.SH's sheets in its own order, then FIRE.SH's and CRATER.SH's.
-const SHEETS: [(&str, Layout); 25] = [
+/// EXP.SH's sheets in its own order, then FIRE.SH's and CRATER.SH's, then
+/// the smoke puffs the shockwave ring is made of.
+const SHEETS: [(&str, Layout); 26] = [
     ("AIRSML.PIC", layout([78, 50, 1, 0, 2, 2, 3, 12])),
     ("AIRMED.PIC", layout([78, 64, 1, 0, 2, 2, 3, 12])),
     ("AIRMED2.PIC", layout([78, 64, 1, 0, 2, 2, 3, 12])),
@@ -86,10 +97,89 @@ const SHEETS: [(&str, Layout); 25] = [
     ("DIRTEXP.PIC", layout([76, 62, 4, 0, 1, 1, 3, 12])),
     ("FIREA.PIC", layout([76, 62, 4, 0, 1, 1, 3, 15])),
     ("CRATERS.PIC", layout([78, 66, 1, 0, 2, 0, 3, 3])),
+    // Dark, grey and white puffs, 44 pixels square (the smoke renderer's
+    // cells).
+    ("SMOKE.PIC", layout([44, 43, 1, 0, 3, 0, 3, 3])),
 ];
 const FIRE_SHEET: usize = 23;
 const CRATER_SHEET: usize = 24;
 const DEBRIS_SHEET: usize = 21;
+const SMOKE_SHEET: usize = 25;
+
+/// The shockwave of a large ground explosion (agent design, X1, 2026-10-10;
+/// the original draws none): `PUFFS` puffs on a ring that grows from the
+/// blast to `REACH` times the explosion's drawn width over `GROW_TICKS`,
+/// easing out as a blast wave slows, then drifts out a further `DRIFT`
+/// while it fades over the rest of the explosion's life. Each puff grows
+/// from `PUFF_START` to `PUFF_END` of the width across.
+mod shockwave {
+    pub const PUFFS: usize = 32;
+    pub const REACH: f64 = 1.6;
+    pub const DRIFT: f64 = 0.15;
+    pub const GROW_TICKS: f64 = 84.;
+    pub const PUFF_START: f64 = 0.12;
+    pub const PUFF_END: f64 = 0.5;
+    pub const OPACITY: f64 = 0.85;
+}
+
+/// The `SMOKE.PIC` puff an explosion type's shockwave is made of: grey dust
+/// for the large land types (21 to 23, 35 to 37), white spray for the large
+/// water type (34); none for any other type.
+fn shockwave_puff(kind: u8) -> Option<u16> {
+    match kind {
+        21..=23 | 35..=37 => Some(1),
+        34 => Some(2),
+        _ => None,
+    }
+}
+
+/// The shockwave ring of one explosion `elapsed` ticks into its `duration`,
+/// `width` feet across, standing on `position`.
+fn shockwave(
+    kind: u8,
+    position: [f64; 3],
+    width: f64,
+    elapsed: u16,
+    duration: u16,
+    out: &mut Vec<Sprite>,
+) {
+    use shockwave::*;
+    let Some(puff) = shockwave_puff(kind) else {
+        return;
+    };
+    let (_, layout) = SHEETS[SMOKE_SHEET];
+    let t = f64::from(elapsed);
+    let life = f64::from(duration.max(1));
+    let grow = (t / GROW_TICKS).min(1.);
+    let drift = ((t - GROW_TICKS).max(0.) / (life - GROW_TICKS).max(1.)).min(1.);
+    let radius = width * (REACH * (1. - (1. - grow).powi(2)) + DRIFT * drift);
+    let half = width * (PUFF_START + (PUFF_END - PUFF_START) * grow.sqrt()) / 2.;
+    let opacity = OPACITY * (1. - t / life).clamp(0., 1.).powf(1.5);
+    if opacity <= 0. || radius <= 0. {
+        return;
+    }
+    // Each blast's ring is turned by its own repeatable amount.
+    let turn = f64::from(blast::pick(position, 4, 360)).to_radians();
+    for n in 0..PUFFS {
+        let angle = turn + std::f64::consts::TAU * n as f64 / PUFFS as f64;
+        out.push(Sprite {
+            position: [
+                position[0] + radius * angle.cos(),
+                position[1],
+                position[2] + radius * angle.sin(),
+            ],
+            extent: [
+                half,
+                half * 2. * f64::from(layout.height) / f64::from(layout.width),
+            ],
+            mode: Mode::Standing,
+            cell: layout.cell(puff),
+            layer: SMOKE_SHEET,
+            opacity: opacity as f32,
+            emissive: false,
+        });
+    }
+}
 
 /// The sheet EXP.SH draws for each explosion type, 15 to 38.
 const EXPLOSION_SHEETS: [usize; 24] = [
@@ -180,6 +270,7 @@ fn legacy(kind: EffectKind) -> Option<(u8, u16)> {
         EffectKind::Hit => Some((18, 45)),
         EffectKind::Ground => Some((15, 45)),
         EffectKind::Destroyed => Some((blast::AIRCRAFT, 240)),
+        EffectKind::Flak => Some((27, 240)),
         _ => None,
     }
 }
@@ -251,6 +342,16 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
         if !art.present[sheet] || width <= 0. {
             continue;
         }
+        if art.present[SMOKE_SHEET] && effect.kind != EffectKind::DebrisImpact {
+            shockwave(
+                kind,
+                effect.position,
+                width,
+                duration.saturating_sub(effect.ticks),
+                duration,
+                &mut out,
+            );
+        }
         let (_, layout) = SHEETS[sheet];
         let elapsed = duration.saturating_sub(effect.ticks);
         let frame = u32::from(elapsed) * u32::from(layout.frames) / u32::from(duration.max(1));
@@ -283,7 +384,37 @@ pub struct EffectRenderer {
     bind: Option<wgpu::BindGroup>,
     buffer: wgpu::Buffer,
     sprites: Vec<Sprite>,
+    /// The fires that fit their unit: where each burns and how wide it is
+    /// drawn, in feet.
+    fires: Vec<([f64; 3], f64)>,
     count: u32,
+}
+
+/// A fire this near a fitted fire's spot (feet, level) is that fire.
+const FIRE_FIT_FT: f64 = 2.;
+
+/// `sprites` with every fire sprite that stands on one of `fires` drawn at
+/// that fire's width (the fire's sheet is as wide as it is tall by the
+/// layout's aspect).
+fn fit_fires(sprites: &[Sprite], fires: &[([f64; 3], f64)]) -> Vec<Sprite> {
+    let (_, layout) = SHEETS[FIRE_SHEET];
+    sprites
+        .iter()
+        .map(|sprite| {
+            let mut sprite = *sprite;
+            if sprite.layer == FIRE_SHEET
+                && let Some((_, width)) = fires.iter().find(|(at, _)| {
+                    (at[0] - sprite.position[0]).hypot(at[2] - sprite.position[2]) <= FIRE_FIT_FT
+                })
+            {
+                sprite.extent = [
+                    width / 2.,
+                    width * f64::from(layout.height) / f64::from(layout.width),
+                ];
+            }
+            sprite
+        })
+        .collect()
 }
 impl EffectRenderer {
     pub fn new(
@@ -302,8 +433,14 @@ impl EffectRenderer {
                 mapped_at_creation: false,
             }),
             sprites: Vec::new(),
+            fires: Vec::new(),
             count: 0,
         }
+    }
+    /// The fires of destroyed units and the width each is drawn at, for the
+    /// next `update`.
+    pub fn fit_fires(&mut self, fires: &[([f64; 3], f64)]) {
+        self.fires = fires.to_vec();
     }
     /// Rebuild for a new anti-aliasing sample count; the next `prepare`
     /// recreates the bindings.
@@ -449,8 +586,8 @@ impl EffectRenderer {
     /// far to near.
     pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
         let eye = camera.position;
-        let mut visible: Vec<_> = self
-            .sprites
+        let fitted = fit_fires(&self.sprites, &self.fires);
+        let mut visible: Vec<_> = fitted
             .iter()
             .filter_map(|s| {
                 let offset: [f64; 3] = std::array::from_fn(|i| s.position[i] - eye[i]);
@@ -536,6 +673,32 @@ mod tests {
     }
 
     #[test]
+    fn flak_bursts_draw_the_small_sheet_for_85_mm_and_the_large_one_for_100_mm() {
+        let art = Art::synthetic();
+        let burst = |kind: u8, ticks: u16| {
+            sprites(&art, &[effect(EffectKind::Flak, Some(kind), ticks)], &[])
+        };
+        // Type 27: FLAKA, 28 frames over two seconds, floating where it bursts.
+        let small = burst(27, 120);
+        assert_eq!(small.len(), 1, "no shockwave, no second sprite");
+        assert_eq!(small[0].layer, 12);
+        assert_eq!(SHEETS[small[0].layer].0, "FLAKA.PIC");
+        assert_eq!(small[0].mode, Mode::Billboard);
+        assert_eq!(small[0].cell, SHEETS[12].1.cell(14));
+        assert!(small[0].emissive);
+        // Type 28: FLAKB, 12 frames over one second, drawn larger.
+        let large = burst(28, 60);
+        assert_eq!(SHEETS[large[0].layer].0, "FLAKB.PIC");
+        assert_eq!(large[0].cell, SHEETS[13].1.cell(6));
+        let width = |kind: u8| f64::from(blast::rolled_size(kind, [100., 0., 200.]));
+        assert!(width(28) > width(27));
+        assert_eq!(large[0].extent[0], width(28) / 2.);
+        // An old recording's flak (no type) draws as the small one.
+        let legacy = sprites(&art, &[effect(EffectKind::Flak, None, 240)], &[]);
+        assert_eq!(SHEETS[legacy[0].layer].0, "FLAKA.PIC");
+    }
+
+    #[test]
     fn explosions_animate_over_their_life_and_sit_or_float_by_type() {
         let art = Art::synthetic();
         // Type 30: one second, twelve frames, floating in the air.
@@ -548,8 +711,9 @@ mod tests {
         assert_eq!(start[0].extent[0], width / 2.);
         // Type 35 stands on the ground for two seconds.
         let ground = sprites(&art, &[effect(EffectKind::Ground, Some(35), 120)], &[]);
-        assert_eq!(ground[0].mode, Mode::Standing);
-        assert_eq!(ground[0].cell, SHEETS[8].1.cell(7));
+        let blast = ground.iter().find(|s| s.layer == 8).unwrap();
+        assert_eq!(blast.mode, Mode::Standing);
+        assert_eq!(blast.cell, SHEETS[8].1.cell(7));
         // Recordings without types draw their family; launches draw nothing.
         let old = sprites(
             &art,
@@ -563,6 +727,87 @@ mod tests {
         assert_eq!(old[0].layer, 4);
         let debris = sprites(&art, &[effect(EffectKind::DebrisImpact, None, 45)], &[]);
         assert_eq!((debris[0].layer, debris[0].extent[0]), (DEBRIS_SHEET, 7.5));
+    }
+
+    #[test]
+    fn large_ground_explosions_throw_out_a_fading_shockwave_ring() {
+        let art = Art::synthetic();
+        let ring = |kind: u8, ticks: u16| -> Vec<Sprite> {
+            sprites(&art, &[effect(EffectKind::Ground, Some(kind), ticks)], &[])
+                .into_iter()
+                .filter(|s| s.layer == SMOKE_SHEET)
+                .collect()
+        };
+        let center = [100., 0., 200.];
+        let width = f64::from(blast::rolled_size(35, center));
+        let reach = |puffs: &[Sprite]| {
+            let p = puffs[0].position;
+            ((p[0] - center[0]).powi(2) + (p[2] - center[2]).powi(2)).sqrt()
+        };
+        // Just after the blast: a tight, dense ring of dust on the ground.
+        let early = ring(35, 239);
+        assert_eq!(early.len(), shockwave::PUFFS);
+        assert!(early.iter().all(|s| s.mode == Mode::Standing
+            && s.position[1] == 0.
+            && s.cell == SHEETS[SMOKE_SHEET].1.cell(1)
+            && !s.emissive));
+        assert!(reach(&early) < 0.1 * width);
+        // Grown to its reach as the blast wave slows, then drifting on.
+        let grown = ring(35, 240 - shockwave::GROW_TICKS as u16);
+        assert!((reach(&grown) - shockwave::REACH * width).abs() < 1e-6);
+        let late = ring(35, 10);
+        assert!(reach(&late) > reach(&grown));
+        assert!(late[0].extent[0] > early[0].extent[0]);
+        // And fading out over the explosion's life.
+        assert!(early[0].opacity > grown[0].opacity && grown[0].opacity > late[0].opacity);
+        assert!(late[0].opacity < 0.01);
+        // Every large land type has one; on water it is white spray.
+        for kind in [21, 22, 23, 36, 37] {
+            assert_eq!(ring(kind, 200).len(), shockwave::PUFFS, "{kind}");
+        }
+        assert!(
+            ring(34, 200)
+                .iter()
+                .all(|s| s.cell == SHEETS[SMOKE_SHEET].1.cell(2))
+        );
+        // Gun puffs, air bursts, flak and debris landing have none.
+        for kind in [15, 16, 17, 18, 27, 30, 38] {
+            assert!(ring(kind, 40).is_empty(), "{kind}");
+        }
+        let debris = sprites(&art, &[effect(EffectKind::DebrisImpact, Some(35), 40)], &[]);
+        assert!(debris.iter().all(|s| s.layer != SMOKE_SHEET));
+        // Without SMOKE.PIC the explosion still draws, alone.
+        let mut missing = Art::synthetic();
+        missing.present[SMOKE_SHEET] = false;
+        assert_eq!(
+            sprites(&missing, &[effect(EffectKind::Ground, Some(35), 200)], &[]).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_fire_that_fits_its_unit_is_drawn_at_the_units_width() {
+        let art = Art::synthetic();
+        let fire = |x| MarkPose {
+            kind: MarkKind::Fire,
+            position: [x, 10., 0.],
+            age: 0,
+            strength: 1.,
+        };
+        let drawn = sprites(&art, &[], &[fire(0.), fire(500.)]);
+        // Both are the crash site's 100 feet until one is fitted.
+        assert!(drawn.iter().all(|s| s.extent[0] == 50.));
+        let (_, layout) = SHEETS[FIRE_SHEET];
+        let fitted = fit_fires(&drawn, &[([0., 10., 0.], 30.)]);
+        assert_eq!(fitted[0].extent[0], 15.);
+        assert_eq!(
+            fitted[0].extent[1],
+            30. * f64::from(layout.height) / f64::from(layout.width)
+        );
+        assert_eq!(
+            fitted[1].extent, drawn[1].extent,
+            "the other keeps its size"
+        );
     }
 
     #[test]

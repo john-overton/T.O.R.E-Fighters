@@ -79,7 +79,13 @@ def semantic_log_problems(text: str) -> list[str]:
                 text_ = d.get("text", "")
                 if not text_.strip() or (k != "comms.hud" and not f.get("speaker")):
                     problems.append(f"empty delivered line at {d['t']}s: {f}")
-                key = (f.get("speaker"), text_)
+                # The same line twice in 0.2 s is a stutter only when one
+                # trigger made it. Two different triggers are two real events:
+                # an "I'm hit" call is made for every guided hit (docs/spec/
+                # radio-chatter.md), so two missiles striking one aircraft a
+                # few ticks apart, or a splash and a direct hit, call twice and
+                # the variant roll can pick the same line (1 in 5).
+                key = (f.get("speaker"), text_, f.get("trigger"))
                 last = delivered.get(key)
                 if last is not None and d["t"] - last < 0.2 and k != "comms.hud":
                     problems.append(f"{f.get('speaker')} said '{text_}' twice within 0.2 s at {d['t']}s")
@@ -107,6 +113,38 @@ def outcome_problems(shot: int, results: list[dict]) -> list[str]:
         return []
     return [f"shot {shot} has {len(kinds)} outcomes: " + ", ".join(
         k if r is None else f"{k} replacing {r}" for k, r in kinds)]
+
+
+def decoy_problems(events: list[dict]) -> list[str]:
+    """A decoyed missile names the chaff or flare that fooled it by the release
+    number its `combat.countermeasure` entry carries. Recordings without numbers
+    stay valid: only a number that is there is checked, and it must belong to a
+    device of that kind released by then (by the aircraft the entry names, for
+    `weapon.decoyed`). A tick lists its weapon events before the devices
+    released on it, so a device counts from the tick it left."""
+    problems: list[str] = []
+    released: dict[tuple, int] = {}
+    for e in events:
+        f = e.get("fields", {})
+        if e["kind"] == "combat.countermeasure" and f.get("number") is not None:
+            released.setdefault((f["number"], e.get("subject"), f.get("decoy")), e["tick"])
+    for e in events:
+        f = e.get("fields", {})
+        if e["kind"] == "weapon.decoyed" and f.get("number") is not None:
+            left = released.get((f["number"], e.get("object"), f.get("decoy")))
+            if left is None or left > e["tick"]:
+                problems.append(
+                    f"shot {f.get('projectile')} was decoyed by {f.get('decoy')} #{f['number']} "
+                    f"of aircraft {e.get('object')}, which was never released")
+        elif e["kind"] == "weapon.outcome" and f.get("replaces") is not None:
+            m = re.search(r"decoyed by (chaff|flare) #(\d+) from ", f.get("reason", ""))
+            if m and not any(
+                n == int(m.group(2)) and d == m.group(1) and tick <= e["tick"]
+                for (n, _, d), tick in released.items()
+            ):
+                problems.append(
+                    f"shot {f.get('projectile')} late hit names {m.group(1)} #{m.group(2)}, which was never released")
+    return problems
 
 
 def invariant_problems(text: str) -> list[str]:
@@ -149,6 +187,7 @@ def invariant_problems(text: str) -> list[str]:
             if f["left"] < 0 or f["left"] > left.get(key, 10**9):
                 problems.append(f"aircraft {key[0]} {key[1]} count went to {f['left']} at {e['t']}s")
             left[key] = f["left"]
+    problems += decoy_problems(events)
     for shot, results in outcomes.items():
         problems += outcome_problems(shot, results)
         if shot not in launched:
@@ -329,8 +368,9 @@ def scenarios() -> list[Scenario]:
     for fault in (0, 4, 7, 11, 12, 29, 30, 34, 44):
         out.append(record_scenario(f"replay-rec-fault-{fault}", ["--ai-probe-ticks", "1800", "--separation", "1", "--probe-fault", f"100:{fault}"], same_run=False))
 
-    # Ground starts, takeoffs, wings, orders.
-    for airport in (1, 2, 5):
+    # Ground starts, takeoffs, wings, orders, at Blue fields (slice AL1):
+    # Simferopol, Odesa and Kherson.
+    for airport in (2, 9, 11):
         for wing in (1, 3, 5):
             out.append(
                 record_scenario(
@@ -344,7 +384,7 @@ def scenarios() -> list[Scenario]:
         out.append(
             record_scenario(
                 f"replay-rec-order-{order}",
-                ["--ai-probe-ticks", "9000", "--ground-start", "1", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-order", f"3000:{order}"],
+                ["--ai-probe-ticks", "9000", "--ground-start", "2", "--maneuver", "takeoff", "--probe-wing-size", "3", "--probe-wing-order", f"3000:{order}"],
                 same_run=False,
                 timeout=400,
             )

@@ -383,6 +383,65 @@ impl GroundLayout {
 /// must be on the airport's paving, on a landable surface and clear of
 /// buildings. If the staggered layout cannot fit, its spacing tightens, and
 /// if none works the start is rejected with a message for the creator.
+/// The runway a `start ground auto` mission parks Blue's wing on: with a
+/// ground target, the Blue-side airfield nearest the target at least 15 nm
+/// from it (docs/spec/surface-defenses.md, "Start placement"; default,
+/// pending John) that is no short strip or vertical pad and holds a ground
+/// layout for `count` aircraft. Without a target, or when no such airfield
+/// exists, the earlier rule (`fitted`, agent decision 2026-10-10, slice Q1):
+/// the first runway, by object id, of an airport of the side that qualifies,
+/// else of a neutral one. Never an enemy field (slice AL1): with none of the
+/// side's own or neutral the start is refused, and the creator offers
+/// Airborne only.
+pub fn auto_runway(world: &Terrain, count: usize) -> crate::WorldResult<u32> {
+    auto_runway_for(world, count, false)
+}
+
+/// [`auto_runway`] for either side: `red` ranks the Red-side airfields, for
+/// a Redfor human's ground start in PvP.
+pub fn auto_runway_for(world: &Terrain, count: usize, red: bool) -> crate::WorldResult<u32> {
+    use tore_sim::airport::Allegiance;
+    let scene = &world.airport_scene;
+    // The airport of each runway, as the side sees it.
+    let allegiance = |id: u32| {
+        scene
+            .runway(id)
+            .and_then(|r| scene.airports.iter().find(|a| a.id == r.airport))
+            .filter(|a| a.serves(red))
+            .map(|a| a.allegiance_for(red))
+    };
+    let qualifies = |id: u32| {
+        allegiance(id).is_some()
+            && !scene.vertical_pad(id)
+            && !scene.short_strip(id)
+            && ground_layout(world, id, count).is_ok()
+    };
+    if let Some(starts) = &world.surface.starts {
+        let ranked = if red {
+            &starts.red_airfields
+        } else {
+            &starts.blue_airfields
+        };
+        if let Some(id) = ranked.iter().copied().find(|id| qualifies(*id)) {
+            return Ok(id);
+        }
+    }
+    let usable = |own_only: bool| {
+        let mut ids: Vec<u32> = scene
+            .runways
+            .iter()
+            .map(|r| r.object)
+            .filter(|id| !own_only || allegiance(*id) == Some(Allegiance::Friendly))
+            .collect();
+        ids.sort_unstable();
+        ids.into_iter().find(|id| qualifies(*id))
+    };
+    usable(true).or_else(|| usable(false)).ok_or_else(|| {
+        "No runway of your side in this theater holds your wing for a ground start. Choose Airborne."
+            .into()
+    })
+}
+
 pub fn ground_layout(
     world: &Terrain,
     object: u32,
@@ -513,6 +572,10 @@ pub struct MissionLayout {
     pub player_turn: f64,
     /// Where the enemy group sits relative to the player.
     pub enemy: EnemyAim,
+    /// Airborne with a ground target: the player's heading points at the
+    /// target and is kept, and the enemy group alone turns toward Red's
+    /// start, as on a ground start (agent decision, 2026-10-10).
+    pub held_heading: bool,
 }
 
 impl MissionLayout {
@@ -531,11 +594,32 @@ impl MissionLayout {
             Some(g) => ([g.slots[0][0], g.slots[0][2]], g.heading),
             None => ([start.position[0], start.position[2]], start.yaw),
         };
-        let enemy = aim_into_map(reference, heading, separation_ft, group, map_bounds(world));
+        // With a ground target Red starts where the surface layout put it,
+        // by the target (John, 2026-10-10): the group is aimed at that point
+        // from wherever the player starts, in the air or on a runway.
+        let enemy = match &world.surface.starts {
+            Some(starts) => {
+                let red = starts.red.map(f64::from);
+                let to = [red[0] - reference[0], red[1] - reference[1]];
+                let distance_ft = to[0].hypot(to[1]);
+                EnemyAim {
+                    turn: (to[0].atan2(to[1]) - heading).rem_euclid(std::f64::consts::TAU),
+                    distance_ft,
+                    requested_ft: distance_ft,
+                }
+            }
+            None => aim_into_map(reference, heading, separation_ft, group, map_bounds(world)),
+        };
+        let held_heading = ground.is_none() && world.surface.starts.is_some();
         Self {
-            player_turn: if ground.is_some() { 0. } else { enemy.turn },
+            player_turn: if ground.is_some() || held_heading {
+                0.
+            } else {
+                enemy.turn
+            },
             ground,
             enemy,
+            held_heading,
         }
     }
 
@@ -544,7 +628,7 @@ impl MissionLayout {
             separation_ft: self.enemy.distance_ft,
             // An airborne scene turns with the player; parked aircraft cannot,
             // so only the enemy bearing changes.
-            enemy_turn: if self.ground.is_some() {
+            enemy_turn: if self.ground.is_some() || self.held_heading {
                 self.enemy.turn
             } else {
                 0.
@@ -801,6 +885,7 @@ mod placement_tests {
             ground: None,
             player_turn: aim.turn,
             enemy: aim,
+            held_heading: false,
         };
         let plan = airborne.spawn_plan();
         assert_eq!(plan.enemy_turn, 0.);
@@ -814,6 +899,7 @@ mod placement_tests {
             ground: Some(ground.clone()),
             player_turn: 0.,
             enemy: EnemyAim::straight(5. * FEET_PER_NM),
+            held_heading: false,
         };
         assert!(parked.notice().is_none());
         let parked = MissionLayout {

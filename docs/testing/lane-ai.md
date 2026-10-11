@@ -63,6 +63,7 @@ minutes cost about 4 minutes.
 | Creator objectives | `ai-objective-*` | ten group setups (`--probe-group GROUP:CHOICE[:survive]`: free, CAP, targets, protection, self-defense, hold, required survival on either side) at four fight sizes; the debrief's targets, protected aircraft and SUCCESS or FAILURE must match the aircraft left alive ([debrief rules](../spec/debrief.md)) |
 | Order drills | `ai-orders-cycle-*` | the four player wing orders cycled twelve times through a fight, in the air and after a ground start; every order must be answered |
 | Damaged aircraft | `ai-damaged-*` | twelve recovery faults, each with hits or gunfire and a second fault, for 20 minutes under weapons hold |
+| Surface units | `surface-*` | `surface-resolve-all` runs `--surface-dump --all`: all 124 offered ground target templates at every defense level with three seeds, each base layout and each template in its scene at heavy defenses. Template objects, `<sam>` and `<aaa>` slots, targets at heavy and at none, and base-layout SAM and AAA by side must equal the retail survey; light and moderate must man 25 and 60 percent of the slots within 3 points; a second run must repeat every digest ([surface defenses](../spec/surface-defenses.md)). Until the import keeps the templates, the dump reads them from the retail media (`TORE_GAME_DIR`, the remembered source or the `gameassets` link). `surface-relocate-sweep` runs `--surface-dump --sweep`: every offered template placed at heavy defenses with seeds 1 to 20; every placement passes the site rules, the anchored templates are exactly the expected 34 and never move, at least 60 percent of the others relocate, batteries keep their caps and every manned slot and template battery has a truck 200 to 400 ft away, each base layout forms its expected SA-2, SA-3, SA-6 and HAWK batteries, and a second run repeats the digests. `surface-start-placement` runs `--surface-dump --starts`: per theater with a 50 nm enemy distance, Red starts within 5 nm of the target, Blue 50 nm from Red toward its side and heading at the target, both on the map. `surface-ucol-moving` and `surface-cargo-sailing` run `--surface-drive THEATER STEM [--at SECONDS,...] [--kill ORDINAL@SECONDS] [--surface-only]`, which builds the mission and steps the world (or just the surface movement) and prints where each routed unit is: the nine `~QUCOL` tanks within 450 ft of their route at 60 and 600 s at 50 ft/s, standing exactly on the last point by 1,300 s, one tank destroyed at 100 s stopped where it died; the three `~QTCARGO` cargo ships at 16 ft/s heading 225 degrees on the water, all on the common end point by 6,500 s ([movement](../spec/surface-defenses.md#movement)) `surface-parked-aircraft` runs `--surface-parked THEATER STEM [--strike ORDINAL:bomb\|maverick\|gun]`, which lists every parked aircraft and puts the player's rounds on chosen ones: on `~QLFFAIR` the nine aircraft stand gear down as surface-role targets on the ground, the five Super Etendards are the targets, a Maverick's seeker locks one, and a Mk 82, a Maverick and a gun burst each destroy one with damage by section, an aircraft explosion, a crater, a fire, a fragment and a Fighter-row kill, none of them inside another object's weapon contact (the airfield meets weapons at its pavement); on `~QUSTRIP` the parked MiG-29 does the same unsheltered and a MiG-25 takes left-wing damage; the eight `~QFFLT` aircraft stand on the Clemenceau's deck at 89 ft and the four `~QBFLT` Yak-141s stay out ([parked aircraft](../spec/surface-defenses.md#parked-aircraft)). `surface-objective-destroy` and `surface-objective-protect` run `--surface-objective THEATER STEM [--redfor] [--kill-friendly]`: a scripted pass at the target's defenses with the player invulnerable, then Mk 82s on every target. On `~QUCOL` the three flagged tanks read "Destroyed 0 of 3 targets" and then "Destroyed the 3 targets" (SUCCESS), the debrief's SAM and AAA rows count the column's fire and the Tank row the three kills; on `~QLFFAIR` the five parked Super Etendards are targets and count in the Fighter row; on `~QIRRETR` one friendly unit that is not a target is destroyed too, so every target is down yet the mission fails with one friendly-fire kill; the protect run seats the human in the first enemy plane of a multiplayer mission, where the same tanks are "Protected the 3 friendly objectives" (not shot at) and fall to "Protected 0 of 3" when a Blue plane destroys them ([objectives](../spec/surface-defenses.md#objectives-scoring-and-debrief)) |
 
 ## What is checked
 
@@ -257,6 +258,10 @@ low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s while the enemy is still alive (item 5 below).
+- `ai-theater-vla-takeoff-a6` (Spassk Dalniy, near the north edge; the first
+  Blue field in Vladivostok since slice AL1, when the Redfor airports 1 to 5
+  left the Blue ground starts): the same, the airborne friendly wing 2 leaves
+  the map after 156 s (item 5 below).
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -393,6 +398,38 @@ leave the in-flight airport list ([rule](../spec/airports.md#short-strips), item
   unmarked; 113 passed before and still does.
 - A unit test (`tools/test_battery_ai.py`, `ShortStripTests`) checks that no AI
   scenario and none of the 400 fuzz seeds starts on a short strip.
+
+### Enemy fields (airport allegiance, 2026-10-10)
+
+Since slice AL1 every airport takes its runway's layout side and the player's
+Blue wing starts only at a Blue or neutral field
+([rule](../spec/airports.md#allegiance)); the creator's `--ground-start N`
+refuses an enemy field as it refuses a short strip. What changed in the lanes:
+
+- `_strips.py` also lists each base theater's Redfor fields (the
+  `allegiance=Some(Hostile)` rows of `TORE_AIRPORT_PROBE=1`), and
+  `ground_airport` skips them too; it returns nothing for the Falklands and
+  North Vietnam, which have no Blue field, so their theater takeoff and land
+  scenarios and their wing-of-five climb-out are gone, and a fuzz seed that
+  drew a ground start there flies airborne.
+- Creator-path starts at UKR airport 1 (Zaporizhzhya, Redfor) moved to airport
+  2 (Simferopol, the lane's `GROUND_AIRPORT`); the replay recording and live
+  ground starts use Simferopol, Odesa (9) and Kherson (11), and the restart
+  setups also L'viv (8) and Ivano Frankivs'k (12).
+- `ai-takeoff-{ukr-a1,fra-a3,nsk-a5}-*` are now `-ukr-a9`, `-fra-a4` and
+  `-nsk-a9` (Odesa, Florennes, Kimpo); `ai-lost-lead-route-ukr-a6` is
+  `-ukr-a9`; `ai-known-f22-leader-wingman-ukr3` is `-ukr12`;
+  `flight-climbout-*` leaves Kherson instead of Krasnodar.
+- The ILS-terrain land orders keep the two Blue fields (UKR 8 and 12). Amiens,
+  Burevestnik, Hyon Ni, Donets'k and Kharkiv are Redfor fields where the Blue
+  wing neither starts nor is sent, so those five are gone; a Redfor wing would
+  land there, but the probe has no Redfor wing to order. No Blue field can
+  stand in: `--validate-ils` at 51b2d613 lists only those seven runway ends
+  whose 3 degree path meets terrain in the last 5 nm, and UKR 8 and 12 are the
+  only Blue ones (checked in slice A1). Restoring the five needs a probe option
+  that seats the wing on Redfor.
+- `ShortStripTests` also checks that no AI scenario or fuzz seed starts at an
+  enemy field.
 
 Run of the lane's theater, takeoff, ground, ILS-terrain, long-ground, record,
 determinism and all 400 fuzz scenarios (`TORE_AI_FUZZ=all`, `--jobs 6

@@ -843,6 +843,12 @@ pub struct Seated {
     pub roster: Roster,
     /// The ground objects destroyed so far; every other one stands.
     pub destroyed: Vec<u32>,
+    /// The host's `tore_world::surface::Surface::digest` (protocol 22):
+    /// the ground target's units, their places, batteries, supply trucks,
+    /// parked and deck aircraft and both sides' starts, which every client
+    /// builds from the mission's text and seed. A client whose own differs
+    /// refuses the seat.
+    pub surface_digest: u64,
 }
 
 impl Seated {
@@ -905,6 +911,9 @@ pub struct DebriefPilot {
     pub enemy_sam: Tally,
     pub enemy_gun: Tally,
     pub enemy_aaa: Tally,
+    /// The surface unit that destroyed the airframe, by name ("SA-6"),
+    /// when one did (protocol 22).
+    pub shot_down_by: Option<String>,
 }
 
 /// The seat's debrief report as the single-player debrief shows it (host to
@@ -1120,6 +1129,7 @@ fn write_pilot(w: &mut BitWriter, p: &DebriefPilot) {
         enemy_sam,
         enemy_gun,
         enemy_aaa,
+        shot_down_by,
     } = p;
     let status = match status {
         PilotStatus::Alive => 0,
@@ -1146,6 +1156,7 @@ fn write_pilot(w: &mut BitWriter, p: &DebriefPilot) {
     ] {
         write_tally(w, t);
     }
+    bits::write_option(w, shot_down_by.as_deref(), write_str);
 }
 
 fn read_pilot(r: &mut BitReader<'_>) -> WireResult<DebriefPilot> {
@@ -1177,6 +1188,7 @@ fn read_pilot(r: &mut BitReader<'_>) -> WireResult<DebriefPilot> {
         enemy_sam: read_tally(r)?,
         enemy_gun: read_tally(r)?,
         enemy_aaa: read_tally(r)?,
+        shot_down_by: bits::read_option(r, read_str)?,
     })
 }
 
@@ -2486,6 +2498,7 @@ impl Message {
                 for id in &s.destroyed {
                     w.write_varint(u64::from(*id));
                 }
+                let _ = w.write_bits(s.surface_digest, 64);
             }
             Self::Roster(roster) => write_roster(&mut w, roster)?,
             Self::Names(names) => {
@@ -2681,6 +2694,7 @@ impl Message {
                     return Err(tore_codec::CodecError::UnexpectedEnd.into());
                 }
                 let destroyed = (0..count).map(|_| read_u32(r)).collect::<WireResult<_>>()?;
+                let surface_digest = r.read_bits(64)?;
                 Self::Seated(Box::new(Seated {
                     flight,
                     seat,
@@ -2690,6 +2704,7 @@ impl Message {
                     loadout,
                     roster,
                     destroyed,
+                    surface_digest,
                 }))
             }
             kind::ROSTER => Self::Roster(read_roster(r)?),

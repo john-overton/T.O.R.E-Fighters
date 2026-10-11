@@ -293,6 +293,7 @@ fn the_callers_hooks_supply_the_types_and_the_weapon_labels() {
             player: Some(std::sync::Arc::clone(&player)),
             load: Some(&mut load),
             weapon_label: Some(&label),
+            ground_variation: None,
         },
     )
     .unwrap();
@@ -343,4 +344,101 @@ fn an_airborne_start_takes_the_variety_speed_at_the_mission_altitude() {
         .sum::<f64>()
         .sqrt();
     assert!((ground - at_mission).abs() < 1e-6, "{ground} {at_mission}");
+}
+
+#[test]
+fn a_ground_target_missing_from_the_import_flies_without_it_and_says_why() {
+    use crate::mission::Defense;
+    let map = resources();
+    let plain = World::new(&spec(), &map, Seating::SinglePlayer).unwrap();
+    assert!(plain.terrain.surface.unresolved.is_none());
+    let mut with = spec();
+    with.ground_target = Some("QUCOL".into());
+    with.aaa = Defense::Heavy;
+    with.sam = Defense::Moderate;
+    with.surface_seed = 77;
+    // The synthetic import keeps no templates, as imports made before the
+    // surface round do not: nothing stands at the target.
+    let world = World::new(&with, &map, Seating::SinglePlayer).unwrap();
+    let why = world.terrain.surface.unresolved.as_deref().unwrap();
+    assert!(why.contains("~QUCOL.M"), "{why}");
+    assert!(world.terrain.surface.template.is_none());
+    assert_eq!(
+        world.combat.state.targets.len(),
+        plain.combat.state.targets.len()
+    );
+}
+
+#[test]
+fn an_airport_takes_its_runways_layout_side() {
+    use crate::test_support::resources::owned_airport_resources;
+    use tore_sim::airport::Allegiance;
+    // Bit 0x80 of the owner is Redfor; no owner field is neutral, and a
+    // neutral field grants both sides permission (slice AL1).
+    for (owner, allegiance) in [
+        (Some(12), Allegiance::Friendly),
+        (Some(137), Allegiance::Hostile),
+        (None, Allegiance::Neutral),
+    ] {
+        let world = World::new(
+            &spec(),
+            &owned_airport_resources(owner),
+            Seating::SinglePlayer,
+        )
+        .unwrap();
+        let airport = &world.terrain.airport_scene.airports[0];
+        assert_eq!(airport.allegiance, allegiance, "{owner:?}");
+        assert!(airport.neutral_permission);
+    }
+}
+
+#[test]
+fn a_theater_with_no_field_of_the_side_has_no_ground_start_or_home_for_it() {
+    use crate::test_support::resources::{AIRPORT_RUNWAY, owned_airport_resources};
+    use tore_sim::ai::launch::Side;
+    // The one runway is Redfor's.
+    let map = owned_airport_resources(Some(137));
+    let mut auto = spec();
+    auto.start = Start::GroundAuto {
+        altitude_ft: 10_000,
+    };
+    assert!(error_of(&auto, &map).contains("No runway of your side"));
+    let world = World::new(&spec(), &map, Seating::SinglePlayer).unwrap();
+    assert_eq!(
+        crate::mission_layout::auto_runway_for(&world.terrain, 1, true).unwrap(),
+        AIRPORT_RUNWAY
+    );
+    // Blue's AI keeps its start point as home; Redfor's goes to the field.
+    let fields = crate::ai_wings::Airfields::from_world(&world.terrain, None);
+    assert_eq!(fields.home([0.; 3], Side::Friendly), None);
+    assert_eq!(
+        fields.home([0.; 3], Side::Enemy).map(|r| r.object),
+        Some(AIRPORT_RUNWAY)
+    );
+}
+
+#[test]
+fn a_ground_start_on_auto_takes_a_runway_the_world_picks() {
+    use crate::test_support::resources::{AIRPORT_RUNWAY, airport_resources};
+    let map = airport_resources();
+    let mut auto = spec();
+    auto.start = Start::GroundAuto {
+        altitude_ft: 10_000,
+    };
+    let mut named = spec();
+    named.start = Start::Ground {
+        runway: AIRPORT_RUNWAY,
+        altitude_ft: 10_000,
+    };
+    let auto = World::new(&auto, &map, Seating::SinglePlayer).unwrap();
+    let named = World::new(&named, &map, Seating::SinglePlayer).unwrap();
+    // The synthetic theater has one runway: both park on it.
+    assert_eq!(
+        auto.cockpits[0].flight.position,
+        named.cockpits[0].flight.position
+    );
+    // No runway at all is a plain refusal, not a panic.
+    let mut none = spec();
+    none.start = Start::GroundAuto { altitude_ft: 5_000 };
+    assert!(error_of(&none, &resources()).contains("No runway"));
 }

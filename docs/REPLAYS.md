@@ -158,13 +158,14 @@ player's ownship, and the first aircraft is the one watched.
 
 | Family | Events |
 | --- | --- |
-| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`; `weapon.track_lost` once per shot, with the range and why (decoyed, the seeker lost it, the target is gone, or it could not hold the target); `weapon.decoyed` for each missile that followed chaff or a flare, an AI aircraft's or the player's own, with the roll, its threshold, and the missile's susceptibility and the device's effectiveness behind it (a roll that failed shows in the missile's guidance tree); `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes, with why (the decoy and its roll, the jammer, or a track lost earlier) and, for a guided miss, how close it came; one per shot, except that a missile recorded as spoofed which flies on and damages an aircraft gets a second outcome, a hit with `replaces` spoofed, and the later one stands, as it does in the debrief |
+| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`; `weapon.track_lost` once per shot, with the range and why (decoyed, the seeker lost it, the target is gone, or it could not hold the target); `weapon.decoyed` for each missile that followed chaff or a flare, an AI aircraft's or the player's own, with the roll, its threshold, and the missile's susceptibility and the device's effectiveness behind it, and the `number` of the chaff cartridge or flare that fooled it, the same number as its `combat.countermeasure` entry (a roll that failed shows in the missile's guidance tree; recordings made before 2026-10-10 have no number); `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes, with why (the decoy and its roll, the jammer, or a track lost earlier) and, for a guided miss, how close it came; one per shot, except that a missile recorded as spoofed which flies on and damages an aircraft gets a second outcome, a hit with `replaces` spoofed, and the later one stands, as it does in the debrief; that hit's reason names the device, as in `it was decoyed by chaff #7 from Enemy 2-1 at 0:13.5 but flew on and struck anyway` (`#7` is the device's number; a recording without numbers says `chaff` alone) |
 | Combat | `combat.hit` from each aircraft's hit points, with the attacker, damage, hit points after and the region hit (plus damaged systems for the player); `combat.destroyed` with the killer; `combat.ground_impact`; `combat.countermeasure` for every chaff cartridge and flare that leaves an aircraft, the player's and the AI's, with how many of that kind it has left and the aircraft's exact position, velocity and attitude as it left, which the viewer flies the device again from ([below](#chaff-and-flares)); `combat.countermeasures_cleared` when a range reset removes them all |
 | Aircraft | `aircraft.crashed` (flying into the ground or a structure, or a destroyed aircraft's wreck coming down or exploding), `aircraft.ejected` with the hazard an AI pilot left for or your own ejection, `aircraft.pilot_killed`, `aircraft.took_off`, `aircraft.landed`, `aircraft.flameout`, `aircraft.fuel_out` |
 | Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off; `flight.effect` when a flight-model effect starts or stops, with what it applied and why ([below](#flight-model-effects)); `flight.g_limit` when the stick reaches its stop, with the G the envelope offers, the limit applied, the G delivered and what set the limit; `flight.structural_failure` with the section, the G and why |
 | AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
 | Data link | `datalink.member`, `datalink.lock`, `datalink.unlock`, `datalink.assign`, `datalink.clear`, `datalink.acknowledge` and `datalink.sort_warning`: what changed in each flight's shared picture, from the data link's journal ([below](#data-link-events)) |
+| Surface units (format 3) | The surface world of a [ground target mission](spec/surface-defenses.md): `surface.burst` for each gun burst or missile salvo of a unit, `surface.phase` for the engagement it is in, `surface.rearm` and `surface.refill` when a supply truck rearms a launcher or gives a gun a magazine (with what it holds after), `surface.radar` when a radar comes on, goes off or is shut down by an anti-radiation missile, and `surface.wreck` with the unit's fire (its width, sized by its hit points). The rounds and missiles are ordinary `weapon.launch` and `weapon.outcome` events owned by the unit's id, and an aircraft's loss to one says `it was shot down by an SA-6` |
 | Audio | `audio.effect` (impacts, explosions, and each chaff cartridge's and flare's release sound, marked `own` when the player's own aircraft released it), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
 | Player and system | `player.command` (combat commands and trigger releases), `player.view_target` (the target your target views follow, from the first frame and again whenever it changes, including when the sensors drop it and the views hold it by sight within visual range, and when it goes to none), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
 | Display trees | `ai.thought` for every AI aircraft, `flight.telemetry` for every aircraft that flies, `weapon.guidance` for every guided missile ([below](#display-trees)) |
@@ -485,7 +486,7 @@ finishing renames it to its final name. All integers are little endian.
 
 | Part | Contents |
 | --- | --- |
-| Prelude, 12 bytes | `TOREREPL`, the format version (currently 2), two reserved bytes |
+| Prelude, 12 bytes | `TOREREPL`, the format version (2 or 3, see [Versions and damage](#versions-and-damage)), two reserved bytes |
 | Header chunk | The text header: `key=value` lines in UTF-8 |
 | Data chunks | One to two seconds of frames each (120 by default) |
 | Footer chunk | End tick, the writer's totals and the mission result |
@@ -504,8 +505,8 @@ length and the bytes, so a reader skips sections it does not know:
 | Section | Contents |
 | --- | --- |
 | Strings | Strings first used in this chunk |
-| Entities | Aircraft and weapons registered in this chunk |
-| Frames | Aircraft, projectiles, debris, ejected pilots and surface damage, tick by tick |
+| Entities | Aircraft and weapons registered in this chunk, and from format 3 the surface units |
+| Frames | Aircraft, projectiles, debris, ejected pilots and surface damage, tick by tick; from format 3 also the surface units' poses, launcher and magazine changes and debris pieces |
 | Spawns | Effects and smoke or contrail puffs released, tick by tick |
 | Events | Everything that happened, tick by tick |
 | Trees | Display tree samples (AI thinking, telemetry, missile guidance) |
@@ -559,6 +560,7 @@ is positive right wing down.
 | Debris and ejected pilots | Position and attitude or heading |
 | Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect |
 | Surface objects | Hit points, when they change |
+| Surface units (format 3) | Each unit that follows a route: position and attitude every tick, and whether it is a wreck. A launcher's rails (every rail of the unit, when any changes) and a gun's spare magazines, when they change. The piece a parked aircraft's debris is. Standing units are in the rebuilt scenery and cost nothing |
 | Events and display trees | See [the vocabulary](../crates/tore-replay/src/vocab.rs) |
 | Checksum | Once per second: a hash of every aircraft's exact state |
 
@@ -619,6 +621,8 @@ beyond them.
 | New effects per frame | 64 |
 | New puffs per frame | 4,096 |
 | Surface changes per frame | 4,096 |
+| Surface unit poses per frame, launcher and magazine changes per frame (format 3) | 4,096 each |
+| Registered surface units (format 3) | 8,192 |
 | Events per frame, fields per event | 1,024, 64 |
 | Ids in one value | 1,024 |
 | Display trees per frame | 256 |
@@ -634,6 +638,58 @@ beyond them.
 
 ### Versions and damage
 
+- **A recording is written in the oldest format that holds it** (agent
+  decision, 2026-10-10). A world with a ground target, a redrawn airfield
+  scene or active surface units is a **format 3** file; every other
+  recording is the format 2 file it always was, byte for byte, so a build
+  from before format 3 still opens it. A reader opens both. The header says
+  which: `world.surface=1` marks a world with surface units, and
+  `world.ground_target` or `world.airfield_scene` (below) a ground target or
+  a redrawn scene.
+- Format 3 adds, for the surface-defenses round (slice RP1):
+  - **The ground target** in the header, `world.ground_target=` followed by
+    `stem,aaa,sam,seed,nationality,night_stealth,jitter,relocate,separation_nm`
+    (for example `QUCOL,3,3,1,10,0,1,1,5`; the flags are 0 or 1). It is
+    everything the world needs to resolve the same surface again: template,
+    defense levels, seed, the enemy's nationality, the night rule, whether
+    positions jitter and the template relocates, and the enemy distance that
+    sets the starts. The viewer rebuilds the terrain with it, so the
+    template, its defenses, the added trucks and radars, the parked aircraft
+    and the starts are the flight's.
+  - **The airfield scene**, `world.airfield_scene=N`, written only when N is
+    not 0. 0 is the retail airfields, which every recording before the field
+    has. A build that redraws the airports will give its scene a number of
+    its own, so a replay builds the airfields the flight had; until then a
+    build opens a recording of another scene with the retail airfields and
+    says so in the session log. Reserved here; no build writes anything but 0
+    yet.
+  - **Surface poses**: every unit that follows a route (columns, convoys,
+    ships under way) as a list in each frame, keyed by its fixed id, with
+    position and attitude predicted like an aircraft's, so a unit driving
+    straight costs a zero residual and a unit that stands costs nothing. The
+    wrecked flag flips when its hit points run out. These are the poses
+    `RenderSnapshot.surface` holds; the viewer draws them with the unit's
+    shape and wreck look.
+  - **Launcher and magazine changes**: whenever a rail changes (a launch, a
+    truck's rearm) every rail of that unit is recorded with the missiles it
+    holds, and a gun's spare magazines whenever they change. A unit not
+    listed has its full load. The viewer draws the rails from them.
+  - **Debris pieces**: for each debris piece owned by a surface object, such
+    as a parked aircraft's fragment, its piece index (`_B` or `_D`), as
+    `DebrisPose.variant` holds it.
+  - **Flak**: its own effect code, `32` plus the explosion type less 15, so
+    the KS-12's type 27 and the KS-19's type 28 are recorded as flak and not
+    as an ordinary hit. A format 2 recording stores a burst as a hit, and the
+    viewer lights and puffs a type 27 hit as flak; it has no way to tell a
+    type 28 one.
+  - **Surface unit registry**: a unit's id, short name (`SA-6`), label
+    (`SA-6 #18`), side, hit points and position, in the entities section.
+    The logs and exports name a surface shooter or victim by it, and a
+    wreck's fire is sized by its hit points.
+  - **Events**: `surface.burst`, `surface.phase`, `surface.rearm`,
+    `surface.refill`, `surface.radar` and `surface.wreck` (see
+    [the vocabulary](../crates/tore-replay/src/vocab.rs)). Unknown event kinds
+    were always allowed, so an older reader would skip them too.
 - Format 2 adds four powered-lift actuator positions, six signed gun mount
   coordinates and discrete linked gun membership to each aircraft record. Nozzle pitch, nacelle conversion and collective use the existing
   0-to-1 device precision; nozzle yaw uses the signed precision. Playback
@@ -1135,8 +1191,13 @@ are agent choices (2026-09-28).
   These replay choices were requested by John on 2026-10-01.
 - <a id="object-view"></a>**Object view.** A camera from any object to any
   other, at any range: aircraft, ground objects of the recorded world
-  (buildings, runways and the like, until they are destroyed) and weapons in
-  flight (missiles, bombs and rockets, not gun rounds). Requested by John on
+  (buildings, runways, and a ground target's units, until they are destroyed)
+  and weapons in flight (missiles, bombs and rockets, not gun rounds). A
+  surface unit that follows a route is where the recording had it on the tick
+  and faces the way it faces, so the view can ride with a tank in a column or
+  look at a ship under way; the recording's registry names it (`T-80 #7`),
+  and a unit it names by id only is "Ground object" and its number (slice
+  RP1, agent decision). Requested by John on
   2026-09-28; the keys, menu items, order and fallback below are agent
   decisions. It starts from the selected aircraft, or from a ground object or
   weapon chosen with **View from here** on the right-click menu; **Look at
@@ -1187,7 +1248,14 @@ under the playhead:
   either way reads each second once.
 - Ejected pilots, with the imported ejection art.
 - Buildings and airport objects, minus those the recording shows destroyed
-  by that tick.
+  by that tick. A wreck shows its destroyed look. A ground target's template,
+  trucks, radars and parked aircraft are rebuilt from the header
+  ([format 3](#versions-and-damage)); its launchers show the rails the
+  recording left them, its columns and ships drive their recorded poses, and
+  the wreck smoke, gun flashes, launch flashes and flak light and puffs
+  rebuild from the recorded rounds, flak and hit points as flight draws them.
+  A wreck's smoke starts on the tick the unit died, wherever the playhead was
+  put.
 - Smoke and contrails rebuilt from their release ticks with the
   simulation's lifetimes, rise and caps; effects from their start ticks.
   Craters and crash-site fires, which can last the whole mission, are read
@@ -1408,10 +1476,25 @@ about 1,200 ticks a frame, frames take about 2 ms more.
   recordings; a recording of a flight flown by hand has not been watched
   yet.
 - Gun rounds have no trails.
-- The object view's ground objects are the recorded world's fixed objects
-  (Ukraine has 257), so after the aircraft and weapons O steps through all
-  of them before it wraps round. It has no look-around, as flight's
-  relation views have none.
+- The object view's ground objects are the recorded world's objects
+  (Ukraine has 257 before a ground target adds its own), so after the
+  aircraft and weapons O steps through all of them before it wraps round. It
+  has no look-around, as flight's relation views have none.
+- The game keeps the newest 64 explosions and drops the oldest when a 65th
+  starts, even if it is still playing; a replay keeps every explosion that is
+  still playing and shows the newest 64. A burst of more than 64 at once (a
+  Mk 82 splashing a whole airfield) therefore leaves a replay one older
+  explosion on screen than the game had for the next few seconds, and
+  `--verify-render` of such a flight reports it as `effects live, recorded`.
+- Seeking to a moment shows no muzzle flash or launch flash for a shot fired
+  on that very tick (a flash needs the tick before to compare), and a flak
+  burst or wreck column that began before the playhead is rebuilt as flight
+  had it.
+- A ground target's wreck fires and their smoke come back from the recorded
+  craters, fires, hit points and the registry's hit points. A unit the
+  recording never named (one that never fired and was not destroyed) is not
+  in the registry, and a recording of a world from before format 3 has none
+  of this: its columns stay where the scenery put them.
 
 ## Debug panels
 
@@ -1820,6 +1903,7 @@ them again.
 | `--recording-diff A B` | Prints how two recordings differ: header, identities, the first second their checksums differ, the first tick any aircraft's state differs, and event counts by family |
 | `--convert-capture CAPTURE [--out REPLAY]` | Turns a networked flight's capture into a replay, beside the capture (or at REPLAY, which must not exist), one for each flight in it; needs the import the capture was made with. See [Network flights](#network-flights) |
 | `--watch-replay FILE` | Opens the [viewer](#viewer) on a recording (this one needs the game media and a display); with `--capture-replay OUT.ppm --replay-tick N` it writes one frame and exits, see [captures](#captures-and-timing) |
+| `--surface-objective THEATER STEM --record PATH [--verify-render] [--run-on] [--vulnerable]` | The ground target objective run ([development](DEVELOPMENT.md)) recorded as a format 3 file, with the same `--verify-render` check: its last line reads `surface-objective: verify-render: PASS ticks=... missing=0 differing=0`. `--run-on` keeps it running to `--seconds` after every target is down (trucks rearm), `--vulnerable` lets the defenses shoot the player down. The `replay-surface` battery scenario runs it |
 | `--ai-probe-ticks N --record-mission PATH [--verify-render]` | Records a headless AI probe to PATH (never overwritten) without changing its output. `--verify-render` then rebuilds every tick from the file, compares it with the picture the probe drew, and prints one line: `AI probe verify-render: PASS ticks=... missing=0 differing=0 device_ticks=...`, or the first difference; `device_ticks` counts the ticks with chaff or flares in the air, each checked against the devices the probe flew |
 
 For example, after John says "look at the replay from 3:40 pm" (15:40 UTC
@@ -1836,8 +1920,11 @@ headless workflow.
 ## For developers
 
 - Write with `tore_replay::Writer` (`create`, `register_aircraft`,
-  `register_weapon`, `push`, `finish`); a writer dropped without `finish`
-  keeps its `.partial` file and flushes what it holds.
+  `register_weapon`, `register_surface_unit`, `push`, `finish`); a writer
+  dropped without `finish` keeps its `.partial` file and flushes what it
+  holds. `Writer::version` says which format the header's world chose
+  (`World::needs_surface_format`); a format 2 writer refuses surface tracks,
+  flak and the registry with a plain message.
 - Read with `tore_replay::Recording` (`open`, `frame`, `frames`,
   `decode_chunk`, `tree`, `spawns`, `live_puffs`, `live_effects`, `events`).
   `Recording::peek` reads only the header, seek index and footer, for
@@ -1849,6 +1936,17 @@ headless workflow.
   and `replay/cli.rs` the command line, whose `log` and `acmi` the screen's
   export buttons call on a background thread. `Tick::journal` hands `begin`
   the AI message journal the host drained for the tick.
+- `replay/recorder/surface.rs` records the surface world of a format 3
+  recording from state the tick already computed: the routed units' poses
+  (`RenderSnapshot.surface`), launcher and magazine changes
+  (`SurfaceState.units[..].mounts`), the debris pieces, the registry (names
+  from `Surface::unit` and `Combat::ground_name`, hit points and positions
+  from the combat rows), and the events from the controllers' trace
+  (`Trace::Shot`, `Phase`, `Rearm`, `Refill`, `Radar`, `Shutdown`) and from
+  the surface rows whose hit points ran out. The aircraft's loss to a unit
+  reads `it was shot down by an SA-6` from `outcome::shot_down_by`.
+  `replay/tracks.rs` collects the launcher changes and the tick each unit died
+  for the viewer (`stock_at`, `deaths`).
 - `replay/recorder/why.rs` turns the AI's and the flight model's records
   into reason events and display trees, with its rates, triggers and
   debouncing; `replay/recorder/journal.rs` turns the two journals into
@@ -1876,10 +1974,11 @@ headless workflow.
   draw rules that hold for a whole flight (which models are loaded, which
   aircraft draw with them) are header extras, read with
   `Presentation::from_header`. Ground objects are not aircraft: only their
-  hit points are recorded.
+  hit points are recorded, except the units that follow a route (poses), the
+  launchers (rails) and a parked aircraft's debris piece (format 3).
 - `replay::identity::terrain` rebuilds the recorded world from the header's
-  resolved settings (layout, weather choice and layer, start time, wind and
-  cloud deck) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
+  resolved settings (layout, weather choice and layer, start time, wind,
+  cloud deck and, in format 3, the ground target) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
   `TORE_CLOUD_ALTITUDE`; `replay::identity::of` captures them from a live
   terrain. The viewer then builds its `Scenery` from that terrain.
 - The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:

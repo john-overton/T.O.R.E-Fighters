@@ -150,16 +150,20 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "airports": (
         "airports in the creator, the tower lists and ILS surveys",
         (
-            "menus-validate-creator", "menus-validate-ils*", "menus-snap-quick-airports",
+            "menus-validate-creator", "menus-validate-ils*", "menus-snap-quick-airports", "airport-allegiance",
             "menus-snap-quick-ground-start", "menus-snap-quick-field-*", "ai-ils-*",
         ),
+    ),
+    "surface": (
+        "surface units: ground target templates resolved, base-layout air defenses and their sides",
+        ("surface-*",),
     ),
     "windowed-menus": ("captured windows: launches, terrain, previews, sizes", ("menus-window-*",)),
     "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*", "flight-target-camera-*")),
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",
-        ("replay-rec-*", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
+        ("replay-rec-*", "replay-surface", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
     ),
     "replay-cli": (
         "command-line errors, speeds, ticks, small tools",
@@ -241,6 +245,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
     ),
+    "net-surface": (
+        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP",
+        ("net-surface-*",),
+    ),
 }
 
 def family_matches(family: str, name: str) -> bool:
@@ -286,7 +294,7 @@ MAIN_FAMILIES = (
     "replay-cli", "menus-creator", "flight-maneuvers", "flight-takeoff", "flight-landing", "ai-fights",
     "ai-airfield", "ai-lead", "ai-orders", "ai-regression", "flight-powered",
 )
-NET_FAMILIES = ("net-fly", "net-window", "net-convert")
+NET_FAMILIES = ("net-fly", "net-window", "net-convert", "net-surface")
 # What a change to host migration reaches besides the rest of the net lane (slice K9).
 NET_MIGRATE = NET_FAMILIES + ("net-migrate", "net-migrate-relay")
 RENDER_FAMILIES = ("windowed-menus", "flight-views", "instruments")
@@ -338,12 +346,14 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/telemetry.rs", ("flight-maneuvers", "instruments"), "telemetry"),
     _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers", "flight-powered"), "cheats; Easy flight physics"),
     # tore-sim: AI.
+    _r("crates/tore-sim/src/ai/surface*", ("surface",), "the surface engagement controller"),
     _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio",), "AI"),
     # tore-sim: the flight data link's radar table.
     _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link radar table"),
     _r("crates/tore-sim/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights"), "data link sort"),
     # tore-sim: combat, systems, sensors.
     _r("crates/tore-sim/src/combat.rs", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
+    _r("crates/tore-sim/src/combat/live/parked*", ("surface", "flight-combat"), "parked aircraft targets"),
     _r("crates/tore-sim/src/combat/*", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
     _r("crates/tore-sim/src/aircraft_systems/*", ("flight-damage", "flight-combat", "ai-damage", "instruments"), "aircraft systems"),
     _r("crates/tore-sim/src/ejection.rs", ("flight-damage",), "ejection"),
@@ -361,6 +371,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/*", FLIGHT_CORE + ("ai-airfield", "flight-combat"), "tore-sim, unmapped file"),
     # tore-world.
     _r("crates/tore-world/src/ai_wings.rs", AI_CORE + ("radio",), "wing AI"),
+    _r("crates/tore-world/src/ai_wings/outcome.rs", AI_CORE + ("radio", "surface"), "the mission result rule: the surface objectives join it"),
     _r("crates/tore-world/src/ai_wings/*", AI_CORE + ("radio",), "wing AI"),
     _r("crates/tore-world/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link picture"),
     _r("crates/tore-world/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights", "link-cues"), "data link picture"),
@@ -370,10 +381,11 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/radio_calls.rs", ("radio", "replay-recording", "ai-fights"), "radio calls"),
     _r("crates/tore-world/src/crew_voice.rs", ("radio", "replay-live"), "crew voice"),
     _r("crates/tore-world/src/situation.rs", ("radio", "replay-live"), "situation audio"),
-    _r("crates/tore-world/src/combat.rs", ("flight-combat", "ai-fights", "ai-damage", "combat-tapes"), "combat in the world"),
+    _r("crates/tore-world/src/combat.rs", ("flight-combat", "ai-fights", "ai-damage", "combat-tapes", "surface"), "combat in the world"),
     _r("crates/tore-world/src/combat_tape.rs", ("combat-tapes", "flight-combat"), "combat tapes"),
-    _r("crates/tore-world/src/terrain.rs", ("airports", "flight-environment", "ai-airfield", "menus-creator"), "terrain and airport lists"),
-    _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights") + NET_FAMILIES, "debrief evaluator; the multiplayer results rows"),
+    _r("crates/tore-world/src/terrain.rs", ("airports", "flight-environment", "ai-airfield", "menus-creator", "surface"), "terrain and airport lists"),
+    _r("crates/tore-world/src/surface/*", ("surface", "airports", "flight-combat", "ai-fights", "net-surface"), "surface units: resolution, ids and sides; what the network sends of them"),
+    _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights", "surface") + NET_FAMILIES, "debrief evaluator; the multiplayer results rows; the surface tallies"),
     _r("crates/tore-world/src/debrief/*", ("menus-screens", "ai-fights") + NET_FAMILIES, "the multiplayer results rows' tests"),
     _r("crates/tore-world/src/seats.rs", ("ai-lead", "ai-fights"), "seats"),
     _r("crates/tore-world/src/frame.rs", ("flight-views", "instruments", "replay-recording", "link-cues"), "the flight frame"),
@@ -420,6 +432,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-formats/src/pic.rs", MENU_FAMILIES, "pictures", windowed=True),
     _r("crates/tore-formats/src/hud.rs", ("instruments", "menus-screens"), "HUD data", windowed=True),
     _r("crates/tore-formats/src/shape.rs", RENDER_FAMILIES, "shapes", windowed=True),
+    _r("crates/tore-formats/src/parked_aircraft.rs", ("surface",), "parked aircraft records and gear"),
+    _r("crates/tore-formats/src/carrier.rs", ("surface",), "carrier parts and decks"),
     _r("crates/tore-formats/src/static_object.rs", RENDER_FAMILIES, "static objects", windowed=True),
     _r("crates/tore-formats/src/music.rs", ("replay-live",), "music"),
     _r("crates/tore-formats/src/pcm.rs", ("replay-live",), "sound samples"),
@@ -427,6 +441,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-formats/src/executable.rs", ("menus-validate", "replay-settings"), "importer data"),
     _r("crates/tore-formats/src/module.rs", ("menus-validate", "replay-settings"), "importer data"),
     _r("crates/tore-formats/src/dcl.rs", ("menus-validate", "replay-settings"), "importer decompression"),
+    _r("crates/tore-formats/src/surface_set.rs", ("menus-validate", "replay-settings", "net-builds"), "what the import keeps for ground targets"),
+    _r("crates/tore-formats/src/surface_set/*", ("menus-validate", "replay-settings", "net-builds"), "what the import keeps for ground targets"),
     _r("crates/tore-formats/src/lib.rs", ("menus-validate", "flight-maneuvers", "ai-fights"), "tore-formats public surface"),
     _r("crates/tore-formats/*", ("menus-validate", "menus-creator", "flight-maneuvers", "ai-fights"), "tore-formats, unmapped file"),
     # tore-input and friends.
@@ -441,6 +457,18 @@ RULES: tuple[Rule, ...] = (
     _r(
         "crates/tore-import/src/source.rs", ("menus-validate", "replay-settings", "net-builds"),
         "the import's source entry (build and importer); nothing in single player reads it",
+    ),
+    _r(
+        "crates/tore-import/src/import.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "what the import selects and writes (net-content-builds imports the 1.0 disc)",
+    ),
+    _r(
+        "crates/tore-import/src/surface.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "the ground target data marker and lookups",
+    ),
+    _r(
+        "crates/tore-import/src/pack.rs", ("menus-validate", "replay-settings", "net-builds"),
+        "the pack markers every start checks",
     ),
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
@@ -624,6 +652,11 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/tape_file.rs", ("combat-tapes", "flight-combat", "replay-cli"), "tape files"),
     _r("crates/tore-app/src/navigation.rs", ("flight-landing", "airports", "ai-airfield", "menus-creator"), "navigation and airport lists"),
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
+    _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
+    _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
+    _r("crates/tore-app/src/surface_drive.rs", ("surface",), "the surface movement drive"),
+    _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
+    _r("crates/tore-app/src/surface_objective.rs", ("surface", "replay-recording"), "the ground target objective drive, which also records the run"),
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
     _r("crates/tore-app/src/replay/net_convert.rs", ("net-convert",), "converting a capture into a replay"),
@@ -682,6 +715,10 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_battery_flight.py", (), "flight scenario tests", unit_tests=("test_battery_flight",)),
     _r("tools/battery_scenarios/render.py", ("flight-views",), "render capture scenarios", windowed=True, unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/ai.py", LANE_SMOKE["ai"], "AI scenarios", unit_tests=("test_battery_ai",)),
+    _r("tools/battery_scenarios/surface.py", ("surface",), "surface unit scenarios", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/surface_move.py", ("surface",), "surface movement scenarios", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/surface_parked.py", ("surface",), "parked aircraft scenarios", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/surface_objective.py", ("surface",), "ground target objective scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/_ai_fuzz.py", LANE_SMOKE["ai"], "AI fuzz scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/_ai_fuzz_cmd.py", LANE_SMOKE["ai"], "AI fuzz command", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/_debrief.py", LANE_SMOKE["ai"] + LANE_SMOKE["flight"], "the debrief kill and hit check shared by the AI and flight lanes", unit_tests=("test_battery_ai", "test_battery_flight")),
@@ -698,6 +735,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/net_observe.py", ("net-window",), "the observer screen scenario", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_datalink.py", ("net-window", "link-cues"), "the data link's cues in a multiplayer flight (stage G, slice G10)", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_accept.py", ("net-window",), "stage F phase 2's acceptance scenarios: the away menu's Spawn in Aircraft and a host's Leave Game (slice F2-X)", windowed=True, unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/net_surface.py", ("net-surface",), "a ground target online (protocol 22, slice N1)", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_screens.py", ("net-window",), "the game's rejoin and its HUD through a host migration (stage K, slice K7b)", windowed=True),
     _r("tools/test_battery_net.py", (), "net scenario tests", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),

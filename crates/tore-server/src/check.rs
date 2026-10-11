@@ -4,7 +4,41 @@
 
 use crate::prepare::Prepared;
 use tore_session::host::content::{GameContent, report_lines};
-use tore_world::mission::{MissionSpec, RUNWAY_OBJECT_BASE, Start};
+use tore_world::{
+    mission::{MissionSpec, RUNWAY_OBJECT_BASE, Start},
+    terrain::Terrain,
+};
+
+/// Why a mission's explicit ground start cannot be flown: `start ground N`
+/// parks the friendly wing (Blue) on runway N, and an airport takes its
+/// runway's layout side (slice AL1), so a Redfor field is refused. A neutral
+/// field serves both sides. `None` for any other start, or a runway this
+/// import does not have (the build reports that).
+pub fn ground_start_problem(spec: &MissionSpec, terrain: &Terrain) -> Option<String> {
+    let scene = &terrain.airport_scene;
+    let runway = spec.ground_runway()?;
+    let id = scene.runway(runway)?.airport;
+    let airport = scene.airports.iter().find(|a| a.id == id)?;
+    (!airport.serves(false)).then(|| {
+        format!(
+            "starts the friendly wing on runway {} at {}, an enemy airfield: a ground start needs a friendly or neutral runway (--check lists the runways and their sides)",
+            runway.saturating_sub(RUNWAY_OBJECT_BASE),
+            airport.name
+        )
+    })
+}
+
+/// How the runway list names an airport's side, from the friendly wing's
+/// point of view, and whether a ground start may use it: a field that serves
+/// both sides is neutral, one that serves only Redfor the enemy's.
+fn side_words(blue: bool, red: bool) -> &'static str {
+    match (blue, red) {
+        (true, true) => "neutral",
+        (true, false) => "friendly",
+        (false, true) => "enemy: no ground start",
+        (false, false) => "no ground start",
+    }
+}
 
 /// A one-line summary of the mission, for the start lines.
 pub fn mission_summary(spec: &MissionSpec, aircraft: usize) -> String {
@@ -14,6 +48,7 @@ pub fn mission_summary(spec: &MissionSpec, aircraft: usize) -> String {
             "ground start on runway {}",
             runway.saturating_sub(RUNWAY_OBJECT_BASE)
         ),
+        Start::GroundAuto { .. } => "ground start on a runway the world picks".to_owned(),
     };
     let side = |range: std::ops::Range<usize>| -> String {
         let counts: Vec<String> = spec.wings[range]
@@ -75,18 +110,21 @@ pub fn report(prepared: &Prepared) -> Vec<String> {
         lines.push("  none".into());
     }
     for runway in runways {
-        let airport = scene
+        let found = scene
             .airports
             .iter()
-            .find(|airport| airport.id == runway.airport)
-            .map_or(runway.name.as_str(), |airport| airport.name.as_str());
+            .find(|airport| airport.id == runway.airport);
+        let airport = found.map_or(runway.name.as_str(), |airport| airport.name.as_str());
+        let side = found.map_or("no ground start", |a| {
+            side_words(a.serves(false), a.serves(true))
+        });
         let short = if runway.short_strip() {
             ", a short strip: no ground start"
         } else {
             ""
         };
         lines.push(format!(
-            "  {:>3}  {airport} ({:.0} ft{short})",
+            "  {:>3}  {airport} ({:.0} ft, {side}{short})",
             runway.object.saturating_sub(RUNWAY_OBJECT_BASE),
             runway.length_ft
         ));
@@ -113,10 +151,46 @@ mod tests {
         options::Options,
         prepare::{
             prepare,
-            tests::{MISSION, data_folder},
+            tests::{MISSION, data_folder, data_folder_with},
         },
     };
     use std::fs;
+    use tore_world::test_support::resources::owned_airport_resources;
+
+    /// A ground start on the synthetic field, owned by `nationality2`.
+    fn ground_start_at(name: &str, nationality2: Option<u8>) -> Result<Prepared, String> {
+        let dir = data_folder_with(name, true, owned_airport_resources(nationality2));
+        fs::write(
+            dir.join("mission.txt"),
+            MISSION.replace("start airborne 10000", "start ground 0 10000"),
+        )
+        .unwrap();
+        let prepared = prepare(&Options::default(), &dir);
+        let _ = fs::remove_dir_all(dir);
+        prepared
+    }
+
+    #[test]
+    fn an_explicit_ground_start_at_an_enemy_field_is_refused() {
+        // Bit 0x80 is Redfor: the friendly wing may not park there.
+        let error = ground_start_at("check-enemy-field", Some(137))
+            .err()
+            .unwrap();
+        assert!(
+            error.contains("runway 0 at Synthetic Field, an enemy airfield"),
+            "{error}"
+        );
+        assert!(error.contains("friendly or neutral runway"), "{error}");
+        // A Blue field and an unowned (neutral) one are flown.
+        let blue = ground_start_at("check-blue-field", Some(12)).unwrap();
+        let text = report(&blue).join("\n");
+        assert!(
+            text.contains("    0  Synthetic Field (8000 ft, friendly)"),
+            "{text}"
+        );
+        let neutral = ground_start_at("check-neutral-field", None).unwrap();
+        assert!(report(&neutral).join("\n").contains("ft, neutral)"));
+    }
 
     #[test]
     fn the_report_lists_planes_runways_and_the_digest() {

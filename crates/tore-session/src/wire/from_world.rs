@@ -9,10 +9,10 @@ use super::WireResult;
 use super::bits::{steps, turn16};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKind, EntityState,
-    Motion, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, ROTOR_SPEED_MAX,
+    Motion, MoverState, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, ROTOR_SPEED_MAX,
     ROTOR_SPEED_STEP, ROTOR_TILT_STEP, RotorState, SPEED_STEP, Status,
 };
-use super::events::{LinkEvent, Rumble, WireEvent};
+use super::events::{LinkEvent, MountView, Rumble, SurfaceUnitView, WireEvent};
 use super::names::NameTable;
 use super::priority::Relevance;
 use tore_formats::aircraft::AircraftId;
@@ -25,6 +25,7 @@ use tore_world::snapshot::{
     AircraftPose, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose, ProjectilePose,
     RenderSnapshot,
 };
+use tore_world::surface::SurfacePose;
 use tore_world::world::{Cue, OrderReply, Release, World};
 
 fn level(value: f64) -> u8 {
@@ -316,18 +317,19 @@ fn targets_picture(world: &World) -> RenderSnapshot {
                 crew,
             })
             .collect(),
+        surface: combat.surface_poses(),
         ..RenderSnapshot::default()
     }
 }
 
 /// Every entity of `current` a client flying `player` draws: every aircraft
 /// but its own (plane 0 included when another seat flies it), every missile,
-/// bomb and rocket (gun rounds are burst events), every debris piece, and
-/// every ejected pilot but its own (its escape is part of its plane's exact
-/// state). `current` is the seat's picture ([`seat_picture`]); a picture
+/// bomb and rocket (gun rounds are burst events), every debris piece, every
+/// ejected pilot but its own (its escape is part of its plane's exact
+/// state), and every surface unit that follows a route (protocol 22). `current` is the seat's picture ([`seat_picture`]); a picture
 /// built for another plane serves too, since its player pose is taken as an
-/// aircraft like any other. Debris and pilots take their velocity from
-/// `previous`, the seat's picture a tick or more before. The entities come
+/// aircraft like any other. Debris, pilots and surface units take their
+/// velocity from `previous`, the seat's picture a tick or more before. The entities come
 /// in key order.
 pub fn entities(
     current: &RenderSnapshot,
@@ -416,7 +418,20 @@ pub fn entities(
             )),
         });
     }
+    for pose in &current.surface {
+        let then = previous
+            .and_then(|p| p.surface.iter().find(|q| q.id == pose.id))
+            .map(|q| q.position);
+        out.push(Entity {
+            id: pose.id.0,
+            state: EntityState::Surface(mover_state(
+                pose,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
     out.sort_by_key(Entity::key);
+    out.dedup_by_key(|e| e.key());
     Ok(out)
 }
 
@@ -442,6 +457,113 @@ pub fn pilot_state(pose: &PilotPose, velocity: [f64; 3]) -> PilotState {
         motion: Motion::of(pose.position, velocity),
         heading: turn16(pose.heading),
         phase: pose.phase,
+    }
+}
+
+/// A moving surface unit, quantized (protocol 22).
+pub fn mover_state(pose: &SurfacePose, velocity: [f64; 3]) -> MoverState {
+    MoverState {
+        motion: Motion::of(pose.position, velocity),
+        attitude: attitude(pose.attitude),
+        wrecked: pose.wrecked,
+    }
+}
+
+/// A unit's hardpoints as a client draws and shows them: a missile rail's
+/// loaded rounds and a gun's spare magazines, each from the unit's state, or
+/// from its full loads while the state has none yet (`stock` is `None` for a
+/// unit as the mission built it).
+fn mount_views(
+    arms: &tore_world::surface::fire::Arms,
+    stock: Option<&[tore_world::surface::MountStock]>,
+) -> Vec<MountView> {
+    use tore_world::surface::fire::Kind;
+    let missile = |index: usize| {
+        arms.weapons
+            .iter()
+            .any(|w| w.kind == Kind::Missile && w.mounts.iter().any(|m| m.index == index))
+    };
+    let gun = |index: usize| {
+        arms.weapons
+            .iter()
+            .any(|w| w.kind != Kind::Missile && w.mounts.iter().any(|m| m.index == index))
+    };
+    let small = |n: u32| n.min(u32::from(u16::MAX)) as u16;
+    arms.loads
+        .iter()
+        .enumerate()
+        .map(|(index, load)| {
+            let now = stock.and_then(|s| s.get(index)).unwrap_or(load);
+            MountView {
+                rails: missile(index).then(|| small(now.loaded)),
+                spares: if gun(index) {
+                    now.reserve.map(small)
+                } else {
+                    None
+                },
+            }
+        })
+        .collect()
+}
+
+/// Every surface unit's and placed parked aircraft's state as a client
+/// draws and shows it (protocol 22): units with a combat row, ascending id.
+pub fn surface_views(world: &World) -> Vec<SurfaceUnitView> {
+    let surface = &world.terrain.surface;
+    let combat = &world.combat;
+    let rows: std::collections::BTreeMap<u32, (i32, bool)> = combat
+        .state
+        .targets
+        .iter()
+        .filter(|t| t.role == tore_sim::combat::missiles::TargetRole::Surface)
+        .map(|t| (t.id, (t.hp, t.radar_emitting)))
+        .collect();
+    let units = surface.units.iter().map(|u| u.id.0);
+    let parked = surface.parked.iter().map(|p| p.id.0);
+    let mut ids: Vec<u32> = units
+        .chain(parked)
+        .filter(|id| rows.contains_key(id))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .map(|id| {
+            let (hp, radar) = rows[&id];
+            let unit = tore_world::surface::UnitId(id);
+            let mounts = surface.arsenal.arms(unit).map_or_else(Vec::new, |arms| {
+                let stock = combat
+                    .surface
+                    .unit(unit)
+                    .map(|s| s.mounts.as_slice())
+                    .filter(|m| !m.is_empty());
+                mount_views(arms, stock)
+            });
+            SurfaceUnitView {
+                unit: id,
+                hp,
+                radar,
+                mounts,
+            }
+        })
+        .collect()
+}
+
+/// A surface unit's state as the mission built it, which a client assumes
+/// for every unit the host has not told it of: full hit points
+/// (`initial_hp`), radar off, full rails and spares.
+pub fn built_view(
+    surface: &tore_world::surface::Surface,
+    unit: u32,
+    initial_hp: i32,
+) -> SurfaceUnitView {
+    SurfaceUnitView {
+        unit,
+        hp: initial_hp,
+        radar: false,
+        mounts: surface
+            .arsenal
+            .arms(tore_world::surface::UnitId(unit))
+            .map_or_else(Vec::new, |arms| mount_views(arms, None)),
     }
 }
 

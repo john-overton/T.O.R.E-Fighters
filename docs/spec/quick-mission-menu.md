@@ -29,9 +29,8 @@ inline option selects its previous available value, wrapping to the last value.
 This also works for aircraft/theater/airport fields without opening their list;
 their existing left-click behavior is unchanged. The player's wing count wraps
 from one to its maximum, never through zero. Empty lists do nothing. Existing
-field dependencies continue to apply to editable settings. The ground-target
-section is unavailable as described below. Require a matching right
-press/release on the same field.
+field dependencies continue to apply to editable settings. Require a matching
+right press/release on the same field.
 Right-click cannot activate OK, Cancel, Exit, popup rows or controls behind a
 selector/help menu. Focus loss cancels a pending press. In the ordnance view,
 right-click retains its existing station-quantity decrement.
@@ -78,23 +77,65 @@ unknown. Further research would inspect the original dialog drawing data.
 The Aircraft menu label is vertically centered by visible glyph bounds within
 y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
 
-## Unavailable ground-target controls
+## Ground target and defenses
 
-**Opinionated**, requested by John on 2026-09-23. The ground-target, AAA and
-SAM fields remain visible but cannot be edited. Clicking anywhere in that
-sentence block, including its three value boxes, opens a small modal notice:
-"Ground targets, AAA and SAMs are not implemented yet." Left-click,
-right-click, Shift activation and keyboard activation all leave the draft
-unchanged and never open a choice list. The other creator settings remain
-available after dismissing the notice.
+The sentence block "Friendly ground target is [target] [AAA strength] defended
+by AAA and [SAM strength] defended by SAMs." is live in all sixteen theaters
+(requested by John on 2026-10-10; before that, from 2026-09-23, it showed a
+notice and changed nothing). Its words are retail data: each theater's target
+list and the four strengths "not", "lightly", "moderately" and "heavily" come
+from the executable's creator strings, and the text form of a mission file
+writes the strengths `none`, `light`, `moderate` and `heavy`
+([mission file](../DEDICATED-SERVER.md#the-mission-file)).
 
-The popup reuses the menu font and original blue OK button. OK, Enter, Space
-or Escape dismiss it; inputs cannot change settings or launch a mission through
-it. Focus loss cancels it with the other temporary menus. Agent-selected layout
-on the 640 by 480 canvas: the sentence hit region is (334,294), 278 by 49;
-the centered popup is (166,202), 308 by 88, with its two text lines at y=214
-and y=231 and its OK button at (285,255). This disables host setup controls;
-it does not implement ground targets or defense behavior.
+- **Target list.** Each theater offers its own list, whose first entry is the
+  "nothing" template (no ground target) and whose other entries are the
+  theater's template missions, in menu order
+  ([the list per theater](../formats/quick-templates.md#recorded-facts-from-faexe-102f)).
+  Clicking the field steps through the list; Shift opens it.
+- **Strengths.** Each strength steps through its four words. With the target
+  at "none" both strengths read "not" and cannot be changed: touching one says
+  "Choose a ground target first: the defenses are the target's." Setting the
+  target to none, or changing the theater, puts both back to "not" at once
+  (retail clears them when the target is none; the theater case it leaves to
+  the next change, which is not copied).
+- **Enemy nationality.** Field 20 is part of the mission. It picks the
+  equipment group the target's units are drawn from, so the mission file
+  carries it (`enemy-nationality`), and the lobby's read-only creator shows it
+  instead of "as the King's". Changing the theater resets it to the
+  theater's own enemy.
+- **Start.** With a target chosen, the Airport list of a ground start gains a
+  first row, "Automatic (near the target)", which is the default: the mission
+  says `start ground auto` and the world picks the runway from the target.
+  Naming an airport keeps that airport. Choosing no target (or a target when
+  none was set) starts the list over. "Automatic" takes the Blue airfield
+  nearest the target at least 15 nm from it
+  ([start placement](surface-defenses.md)); when none qualifies, the first
+  Blue airport whose runway holds the wing, then the first neutral one
+  (fitted), and never an enemy field (slice AL1): with none the start is
+  refused.
+- **Seed.** Pressing OK on a mission with a target draws a new number that
+  the target's layout is rolled from, so each flight can differ and a restart
+  of the same flight repeats it. The lobby sends none; the host draws it when
+  the flight starts.
+- **Lobby.** The King edits the fields like any other; everyone else sees the
+  King's choice read-only, with the same dimming rule as the other fields.
+  A multiplayer start stays airborne, so `start ground auto` does not reach
+  a lobby.
+- **What the flight gets.** The target's template, its SAMs, guns, ships,
+  supply trucks and parked aircraft are built from these fields and the seed,
+  defend the target and make it the mission's objective
+  ([surface defenses](surface-defenses.md)). A template the import does not
+  hold leaves the mission without it, and the log says so.
+
+The old notice popup (sentence hit region (334,294), 278 by 49; popup (166,202),
+308 by 88) is gone, and so is the launch refusal "Ground targets and defenses
+are not available yet." The sentence keeps its layout and word-wrapping; the
+fields are ordinary inline boxes. Snapshot states: `ground-target` (the
+theater's first target, AAA moderately, SAMs heavily), `ground-target-last`
+(its last, lightly and moderately), `ground-start-auto` (the first with a
+ground start) and `lobby-creator-view-target` (the read-only creator on a
+mission with a target); `field-30` to `field-32` open the lists.
 
 ## Mission end
 
@@ -184,15 +225,18 @@ Kurile theaters 200 miles fits only toward a corner.
 Every AI aircraft has a home runway for returning to base. The player's
 wingmen in a ground start call the departure runway home. Every other aircraft
 takes the nearest runway, measured from where it starts, that its side may
-use: a friendly field or a neutral one that grants permission, the same test
-the player's tower service applies. Allegiance is recorded from the player's
+use: a field of its own side or a neutral one that grants permission, the same
+test the player's tower service applies. Allegiance is recorded from Blue's
 side, so an enemy aircraft's own fields are the ones marked hostile, and the
 single neutral-permission flag serves both sides. Ties go to the lower runway
 number. An aircraft with no usable runway keeps its start point as home. A short
 strip (a runway under 2,000 ft, [see above](airports.md#short-strips)) is nobody's
-home. Every imported airport is currently neutral with permission, so in practice
-each aircraft takes its nearest runway. This choice is **fitted** (agent decision,
-2026-09-23).
+home. Since slice AL1 (John, 2026-10-10) every imported airport takes its
+runway's layout side ([allegiance](airports.md#allegiance)), so Blue aircraft
+go home to Blue fields and Redfor aircraft to Red ones; in North Vietnam and
+the Falklands, which have no Blue field, a Blue AI aircraft keeps its start
+point. Before AL1 every airport was neutral and each aircraft took its nearest
+runway. The nearest-runway choice is **fitted** (agent decision, 2026-09-23).
 
 ### Radar and aircraft on the ground
 
@@ -261,6 +305,23 @@ The accepted start is retained through ordnance setup and mission restart.
 
 Ground start parks the player's whole wing, friendly wing 1, at the selected
 airport. The other wings, friendly and enemy, keep the airborne launch.
+
+**Only the player's side's airports (John, 2026-10-10, slice AL1).** Each
+airport takes its runway's layout side ([allegiance](airports.md#allegiance)).
+The picker lists the player's side's airports and the neutral ones, in layout
+order, and its default is the first of them, so a Blue player no longer starts
+at Polotsk in the Baltics (an enemy field ringed by ZSU-23s) but at Siauliai,
+and in South Korea at Kimpo instead of Koksan. A Redfor pilot's picker would
+list the Red fields; the multiplayer creator stays airborne. In a theater with
+no field for the player's side (for Blue, the Falklands and North Vietnam)
+Ground is not offered: the Start field is greyed with the note "(no friendly
+airfield)", the Ground row of its list is dimmed, and choosing it, or changing
+to such a theater with Ground set, leaves the start airborne with the notice
+"No airfield of your side in this theater, so you start airborne. Ground start
+needs a friendly or neutral airfield." The `--ground-start N` option refuses an
+enemy field with "is an enemy airfield: no ground start there. Choose one of
+your side's airfields or Airborne." A dedicated server refuses a mission whose
+`start ground N` names an enemy field, before it opens its port.
 
 **No ground start on a short strip (opinionated, John 2026-09-30).** The 22
 airstrips with a runway under 2,000 ft (about 1,074 ft, in Cuba, the Falklands,

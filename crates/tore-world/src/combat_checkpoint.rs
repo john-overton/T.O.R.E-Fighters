@@ -6,14 +6,16 @@
 //! host's contrail clock and smoke, each human's trigger, the engine outlets
 //! and last pose of every other human-flown aircraft, the AI-pose switch and
 //! the render history (the last two snapshots, coded because the picture and
-//! the devices of an aircraft whose AI stopped read them back).
+//! the devices of an aircraft whose AI stopped read them back), and the
+//! surface units' state (refused when it belongs to another surface).
 //!
 //! Skipped, each with its class:
 //!
 //! - setup, fixed when the mission is built and the same in the fresh world:
 //!   `contrail_offsets`, `range`, `clean_recording`, `open`, `initial_ammo`,
 //!   `dummies`, `mission_spawns`, `mission_layout`, `dummy_types`,
-//!   `dummy_configs`, `airport_objects`;
+//!   `dummy_configs`, `airport_objects`, `ground_sides`, `ground_looks`,
+//!   `surface_targets`;
 //! - local, one machine's: `tape` (the recorder's list, which the app owns),
 //!   `last_launcher` (read only to write the tape) and `notes` (the mission
 //!   recorder's command notes, which nothing in flight reads);
@@ -115,6 +117,14 @@ impl Combat {
             dummy_types: _,
             dummy_configs: _,
             airport_objects: _,
+            ground_sides: _,
+            ground_looks: _,
+            // Setup: rebuilt from the surface with the scene.
+            parked: _,
+            surface_targets: _,
+            // Setup: rebuilt with the scene.
+            weapon_boxes: _,
+            surface,
             // Local: the recorder's list, owned by the app.
             tape: _,
             // Local: read only to write the tape.
@@ -128,7 +138,8 @@ impl Combat {
         ownship_contrails.save(s, None)?;
         poses.save(s, None)?;
         ai_poses.save(s, None)?;
-        render.save(s, None)
+        render.save(s, None)?;
+        surface.save(s, None)
     }
 
     /// Reads what [`Self::save_wrapper`] wrote over this combat's fields.
@@ -142,6 +153,8 @@ impl Combat {
         let poses = Checkpoint::load(l, None)?;
         let ai_poses = Checkpoint::load(l, None)?;
         let render = Checkpoint::load(l, None)?;
+        let surface: crate::surface::SurfaceState = Checkpoint::load(l, None)?;
+        surface.check_against(&self.surface)?;
         let Combat {
             // The state is the caller's.
             state: _,
@@ -165,6 +178,12 @@ impl Combat {
             dummy_types: _,
             dummy_configs: _,
             airport_objects: _,
+            ground_sides: _,
+            ground_looks: _,
+            parked: _,
+            surface_targets: _,
+            weapon_boxes: _,
+            surface: surface_slot,
             tape: _,
             last_launcher: _,
             notes: _,
@@ -176,6 +195,7 @@ impl Combat {
         *poses_slot = poses;
         *ai_poses_slot = ai_poses;
         *render_slot = render;
+        *surface_slot = surface;
         Ok(())
     }
 }

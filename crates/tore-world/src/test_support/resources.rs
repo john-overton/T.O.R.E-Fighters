@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 #[path = "../../../tore-formats/src/aircraft_schema.rs"]
 #[allow(dead_code)]
-mod schema;
+pub(crate) mod schema;
 
 /// The theater the synthetic import holds.
 pub const THEATER: &str = "UKR";
@@ -564,11 +564,19 @@ pub const AIRPORT_RUNWAY: u32 = crate::mission::RUNWAY_OBJECT_BASE;
 /// the ground. [`resources`] itself is unchanged, so no other test sees the
 /// airport.
 pub fn airport_resources() -> BTreeMap<String, Vec<u8>> {
+    owned_airport_resources(None)
+}
+
+/// [`airport_resources`] with the runway's layout owner: `Some(n)` writes
+/// `nationality2 n` (bit 0x80 set is Redfor, clear is Blue; slice AL1), and
+/// `None` leaves the field unowned, so the airport is neutral.
+pub fn owned_airport_resources(nationality2: Option<u8>) -> BTreeMap<String, Vec<u8>> {
     let mut resources = resources();
     let middle = AIRPORT_AT as i64;
+    let owner = nationality2.map_or(String::new(), |n| format!("\tnationality2 {n}\n"));
     let layout = format!(
         "textFormat\nmap UKR.T2\nlayer CLEAR.LAY 0\ntime 12 0\n;--- Synthetic Field\nobj\n\
-         \ttype STRIP.OT\n\tpos {middle} 0 {middle}\n\tangle 0 0 0\n\tname \u{1}Synthetic Field\u{1}\n\t.\n"
+         \ttype STRIP.OT\n\tpos {middle} 0 {middle}\n\tangle 0 0 0\n{owner}\tname \u{1}Synthetic Field\u{1}\n\t.\n"
     );
     resources.insert("UKR.MM".to_owned(), layout.into_bytes());
     resources.insert("STRIP.OT".to_owned(), airport_definition());

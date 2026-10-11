@@ -100,6 +100,17 @@ impl<'a> Names<'a> {
         match self.recording.aircraft_info(id) {
             Some(info) if !info.label.is_empty() => info.label.clone(),
             Some(info) if !info.name.is_empty() => format!("{} {id}", info.name),
+            // A surface unit the recording (format 3) names.
+            _ if self
+                .recording
+                .surface_info(id)
+                .is_some_and(|u| !u.label.is_empty()) =>
+            {
+                self.recording
+                    .surface_info(id)
+                    .map(|u| u.label.clone())
+                    .unwrap_or_default()
+            }
             _ if id >= SURFACE_IDS => format!("surface object {id:#x}"),
             _ => format!("aircraft {id}"),
         }
@@ -259,6 +270,18 @@ pub(crate) fn comms_text(event: &Event, names: &Names) -> String {
     comms(event, names, false)
 }
 
+/// The chaff or flare a missile followed. The release's number, when the
+/// recording has it, says which one: `chaff #7`. Older recordings carry no
+/// number and say `chaff` or `a flare`.
+fn decoy_text(kind: Option<String>, number: Option<f64>) -> String {
+    match (kind, number) {
+        (Some(d), Some(n)) => format!("{d} #{}", num(n, 0)),
+        (Some(d), None) if d == "chaff" => d,
+        (Some(d), None) => format!("a {d}"),
+        (None, _) => "a decoy".into(),
+    }
+}
+
 /// A one-line plain-English description of any event.
 pub(crate) fn describe(event: &Event, names: &Names) -> String {
     let s = event
@@ -311,11 +334,7 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             format!("{shot} from {s} lost track{}{}", to("of"), because(event))
         }
         kind::WEAPON_DECOYED => {
-            let decoy = match opt(event, field::DECOY) {
-                Some(d) if d == "chaff" => d,
-                Some(d) => format!("a {d}"),
-                None => "a decoy".into(),
-            };
+            let decoy = decoy_text(opt(event, field::DECOY), event.num(field::NUMBER));
             let roll = match (event.num(field::ROLL), event.num(field::THRESHOLD)) {
                 (Some(r), Some(t)) => format!(" (roll {} < {})", num(r, 0), num(t, 0)),
                 _ => String::new(),
@@ -358,7 +377,15 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             if let Some(weapon) = weapon {
                 line.push_str(&format!(" ({weapon})"));
             }
-            line + &because(event)
+            // "it was shot down by an SA-6" repeats a killer the line names;
+            // it is kept when the line could only say "surface object 0x...".
+            let named = event
+                .object
+                .is_some_and(|id| !names.who(id).starts_with("surface object"));
+            match event.string(field::REASON) {
+                Some(reason) if named && reason.starts_with("it was shot down by ") => line,
+                _ => line + &because(event),
+            }
         }
         kind::COMBAT_AIRBURST => format!("{shot} from {s} burst{}", to("near")),
         kind::COMBAT_GROUND_IMPACT => format!("{shot} from {s} hit the ground"),
@@ -488,6 +515,60 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
                 .map_or_else(|| "a flightmate".into(), |id| names.who(id)),
             object()
         ),
+        kind::SURFACE_BURST => {
+            let rounds = opt(event, field::ROUNDS).unwrap_or_else(|| "?".into());
+            let flak = if event.flag(field::FLAK) == Some(true) {
+                " of flak"
+            } else {
+                ""
+            };
+            let opening = if event.flag(field::OPENING) == Some(true) {
+                " (opening barrage)"
+            } else {
+                ""
+            };
+            let record = opt(event, field::WEAPON)
+                .map(|w| format!(" from {w}"))
+                .unwrap_or_default();
+            format!(
+                "{s} fired {rounds} rounds{flak}{record}{}{opening}",
+                to("at")
+            )
+        }
+        kind::SURFACE_PHASE => format!(
+            "{s} engagement {}{}",
+            opt(event, field::TO).unwrap_or_else(|| "changed".into()),
+            to("on")
+        ),
+        kind::SURFACE_REARM => {
+            let loaded = opt(event, field::LOADED)
+                .map(|n| format!(", {n} on the rails"))
+                .unwrap_or_default();
+            format!("{s} was rearmed by a supply truck{loaded}")
+        }
+        kind::SURFACE_REFILL => {
+            let reserve = opt(event, field::RESERVE)
+                .map(|n| format!(", {n} spare magazines"))
+                .unwrap_or_default();
+            format!("{s} was given a magazine by a supply truck{reserve}")
+        }
+        kind::SURFACE_RADAR => format!(
+            "{s} radar {}{}",
+            if event.flag(field::ON) == Some(false) {
+                "off"
+            } else {
+                "on"
+            },
+            because(event)
+        ),
+        kind::SURFACE_WRECK => {
+            let fire = match (event.flag(field::BURNING), event.num(field::FIRE_FT)) {
+                (Some(true), Some(width)) => format!(", burning with a {} ft fire", num(width, 0)),
+                (Some(true), None) => ", burning".into(),
+                _ => String::new(),
+            };
+            format!("{s} was destroyed{}{fire}", to("by"))
+        }
         kind::PLAYER_COMMAND => format!(
             "{s} command {}{}",
             opt(event, field::COMMAND).unwrap_or_default(),
@@ -552,6 +633,17 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_followed_decoy_names_its_number_when_the_recording_has_one() {
+        let kind = |k: &str| Some(k.to_owned());
+        assert_eq!(decoy_text(kind("chaff"), Some(7.)), "chaff #7");
+        assert_eq!(decoy_text(kind("flare"), Some(12.)), "flare #12");
+        // Recordings made before the number was kept read as they did.
+        assert_eq!(decoy_text(kind("chaff"), None), "chaff");
+        assert_eq!(decoy_text(kind("flare"), None), "a flare");
+        assert_eq!(decoy_text(None, None), "a decoy");
+    }
 
     #[test]
     fn clocks_and_numbers_read_naturally() {

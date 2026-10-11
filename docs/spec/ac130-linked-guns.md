@@ -438,8 +438,33 @@ the air: blown out along the barrel, slowed at once, then left where the air
 took it, so it drifts aft of the gunship as it flies on, swelling and fading.
 
 **The 105 mm tracer** is drawn half as bright again as any other gun's tracer
-(John, 2026-10-09). The rule keys on the round's weapon record (C_105.JT), so it
-applies to every 105 round the simulation marks as a tracer.
+(John, 2026-10-09) and 1.75 times as wide (John asked for 1.5 to 2 times on
+2026-10-10; 1.75 is an agent choice, opinionated: the ordinary ribbon is 2.4 feet
+across, the 105's 4.2). Its length is the round's one tick of flight, as for
+every tracer. The rules key on the round's weapon record (C_105.JT), so they
+apply to every 105 round the simulation marks as a tracer. At gunship ranges
+(thousands of feet) any of the three tracers is under a pixel wide on the
+138 x 114 target camera page; the extra width shows in the outside views and
+the nearer sight ranges, and does not make a thin tracer at 6,000 feet more
+than a faint dot.
+
+**The 25 mm flickers.** It never holds a steady glow (John, 2026-10-10): its
+size and brightness change every tick while the trigger is held, as the table
+says.
+
+**The target camera blooms on a 105 mm shot.** When the player's own 105 fires,
+the sensor picture on the TARGET CAM page whites out and recovers (John asked
+for a brief bloom or whiteout pulse, 2026-10-10; the numbers are agent choices,
+opinionated). The picture is lifted toward white by 90 percent at its middle and
+54 percent at its corners, held for 4 ticks (a thirtieth of a second), then
+eased away to nothing at 40 ticks (a third of a second): about 70 percent at 8
+ticks, 28 percent at 20 ticks and under 7 percent at 30 ticks. The page's text,
+pipper, range arc and gun boxes are drawn over it and stay readable throughout.
+Only the player's own 105 shots do it, in single player and in a multiplayer
+flight, and the other two calibres do not. A second shot restarts it.
+`gun_flash::BLOOM` holds every number. `--target-cam-preview bloomN` draws the
+page N ticks after a shot and `--gun-flash-preview` saves page-sized stills of
+the same pulse through the real sight camera.
 
 No graphics option turns this off, as none turns flare light off.
 

@@ -41,13 +41,14 @@ NORMAL_STATES = [
 QUICK_STATES = [
     "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
     "ordnance-message", "ordnance-message-long", "debrief", "debrief-2", "debrief-3", "debrief-4",
-    "debrief-5", "debrief-success", "objectives", "ground-start", "airports", "ground-targets-unavailable",
+    "debrief-5", "debrief-success", "objectives", "ground-start", "airports",
+    "ground-start-auto", "ground-target", "ground-target-last",
     "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
     # Stage L (slice L4): the lobby's creator and Load Ordnance with items not every player has dimmed.
     "lobby-creator-gaps", "lobby-creator-gap-notice", "lobby-creator-gap-theaters", "lobby-ordnance-gaps",
     # Lobby pass (slice L4): the mission page read-only, for a player who is not the King.
     "lobby-creator-view", "lobby-creator-view-gaps", "lobby-creator-view-click", "lobby-creator-view-changed",
-    "lobby-creator-view-flying", "lobby-creator-view-locked",
+    "lobby-creator-view-flying", "lobby-creator-view-locked", "lobby-creator-view-target",
 ]
 THEATERS = ["BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU", "NSK", "WTA", "UKR", "VLA"]
 VARIANT_THEATERS = [f"~{code}{n}" for code in ("UKR", "VLA") for n in range(1, 9)] + ["~UKRF", "~VLAF", "~WTAF"]
@@ -207,6 +208,28 @@ def flown_inventory(choice: str):
     return check
 
 
+AIRPORT_LINE = re.compile(r"^airport-allegiance: (\S+) (blue|red) (offered (\d+) default|none:)", re.M)
+BASE_THEATERS = ("APA", "BAL", "CUB", "EGY", "FRA", "GRE", "IRA", "KURILE", "LFA", "NSK", "PGU", "SPA",
+                 "TVIET", "UKR", "VLA", "WTA")
+
+
+def airport_allegiance_problems(output: str) -> list[str]:
+    """Every base theater has a line for each side, and only the Falklands
+    and North Vietnam have no Blue field (slice AL1)."""
+    found = {(m.group(1), m.group(2)): m.group(3) for m in AIRPORT_LINE.finditer(output)}
+    problems = []
+    for theater in BASE_THEATERS:
+        for side in ("blue", "red"):
+            line = found.get((theater, side))
+            if line is None:
+                problems.append(f"no {side} line for {theater}")
+                continue
+            none = line == "none:"
+            if none != (side == "blue" and theater in ("LFA", "TVIET")):
+                problems.append(f"{theater} {side}: {line}")
+    return problems
+
+
 def no_ordnance_leak(output: str) -> list[str]:
     """The creator probe must report every removed-store case and no problems."""
     problems = []
@@ -301,6 +324,21 @@ def scenarios() -> list[Scenario]:
                 forbid=[r"PROBLEM"],
             )
         )
+    # Airport allegiance (slice AL1): every base theater for Blue and for
+    # Redfor, the ground-start fields offered and checked against the world.
+    out.append(
+        Scenario(
+            name="airport-allegiance",
+            lane="menus",
+            args=["--airport-allegiance", "--no-audio"],
+            timeout=600,
+            expect=[r"airport-allegiance: 16 theaters, blue none: LFA TVIET, red none: -, 0 problems"],
+            forbid=[r"PROBLEM"],
+            check=airport_allegiance_problems,
+            notes="Each theater's ground-start fields for Blue and for Redfor: none of the other side's, the default "
+                  "one of them, auto and AI homes the same; the Falklands and North Vietnam have none for Blue.",
+        )
+    )
     out.append(Scenario(name="menus-validate-maps", lane="menus", args=["--validate-maps", "--no-audio"], timeout=600, expect=[r"Validated 75 retail map layouts"]))
     out.append(Scenario(name="menus-validate-weather", lane="menus", args=["--validate-weather", "--no-audio"], timeout=900, expect=[r"Weather sources validated"]))
     # `--combat-smoke` fails for the other thirteen aircraft (a stale radar-off
@@ -331,13 +369,14 @@ def scenarios() -> list[Scenario]:
             )
         )
     # Every creator popup (fields 3 to 34), with a ground start chosen so the
-    # airport row exists.
+    # airport row exists (Simferopol: airport 1, Zaporizhzhya, is a Redfor
+    # field since slice AL1 and no Blue ground start).
     for field in range(3, 35):
         out.append(
             Scenario(
                 name=f"menus-snap-quick-field-{field}",
                 lane="menus",
-                args=["--quick-mission", "--ground-start", "1", "--snapshot", "{work}/shot.ppm", "--snapshot-state", f"field-{field}", "--no-audio"],
+                args=["--quick-mission", "--ground-start", "2", "--snapshot", "{work}/shot.ppm", "--snapshot-state", f"field-{field}", "--no-audio"],
                 timeout=120,
                 expect=[r"Menu preview:"],
                 check=menu_picture(),
@@ -483,7 +522,7 @@ def scenarios() -> list[Scenario]:
                 name=f"menus-window-launch-ground-{a}",
                 lane="menus",
                 window=True,
-                args=["--aircraft", a, "--launch-quick-mission", "--ground-start", "1", "--probe-wing-size", "3", "--smoke-test", "--no-audio"],
+                args=["--aircraft", a, "--launch-quick-mission", "--ground-start", "2", "--probe-wing-size", "3", "--smoke-test", "--no-audio"],
                 timeout=180,
                 expect=[r"Quick Mission restart: PASS", r"Quick Mission launch: ground=Some\(\d+\).*supported=true.*parked_targets=2"],
             )
@@ -503,7 +542,7 @@ def scenarios() -> list[Scenario]:
             name="menus-window-launch-legacy-adapter-ground-refused",
             lane="menus",
             window=True,
-            args=["--legacy-flight", "--launch-quick-mission", "--ground-start", "1", "--smoke-test", "--no-audio"],
+            args=["--legacy-flight", "--launch-quick-mission", "--ground-start", "2", "--smoke-test", "--no-audio"],
             timeout=180,
             expect_exit=1,
             expect=[r"Ground start requires the researched flight model; choose Airborne for this adapter"],

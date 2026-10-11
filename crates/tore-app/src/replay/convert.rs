@@ -9,7 +9,8 @@
 //!
 //! The draw rules a snapshot carries per aircraft are the same for a whole
 //! recording, so they live in the header as a [`Presentation`]. Ground
-//! objects are not aircraft: a recording keeps only their hit points.
+//! objects are not aircraft: a recording keeps only their hit points, except
+//! the surface units that follow a route, whose poses it keeps (format 3).
 // The recorder uses the recording half and the replay viewer the rest.
 #![allow(dead_code)]
 use crate::snapshot::{
@@ -26,6 +27,7 @@ use tore_sim::{
     },
     ejection, wreck,
 };
+use tore_world::surface::{SurfacePose, UnitId};
 
 /// The exact identity a recording stores for an aircraft type: its PT
 /// resource, or for the F/A-XX runtime variant its own key, so a variant is
@@ -383,6 +385,59 @@ pub fn debris_states(debris: &[DebrisPose]) -> Vec<replay::DebrisState> {
         .collect()
 }
 
+/// The piece of each of a surface owner's debris pieces, as recorded:
+/// `(owner, index, piece)` with `index` counted as [`debris_states`] counts.
+/// Aircraft debris takes its variant from the owner's structural section
+/// instead, so it is left out. Parked aircraft throw pieces (`_B`, `_D`), and
+/// `DebrisPose::variant` is the piece for them.
+pub fn debris_pieces(debris: &[DebrisPose]) -> Vec<(u32, u32, u8)> {
+    let mut counts: BTreeMap<u32, u32> = BTreeMap::new();
+    debris
+        .iter()
+        .filter_map(|piece| {
+            let index = counts.entry(piece.owner).or_default();
+            let at = *index;
+            *index += 1;
+            let variant = piece.variant.filter(|_| is_surface_id(piece.owner))?;
+            Some((piece.owner, at, u8::try_from(variant).unwrap_or(u8::MAX)))
+        })
+        .collect()
+}
+
+/// Whether `id` is in the surface objects' id range (`0x4000_0000` up to
+/// the shots surface units fire).
+pub fn is_surface_id(id: u32) -> bool {
+    (tore_world::surface::LAYOUT_OBJECT_BASE..tore_world::surface::SURFACE_UNIT_END).contains(&id)
+}
+
+/// The routed surface units as a frame records them.
+pub fn surface_states(poses: &[SurfacePose]) -> Vec<replay::SurfaceState> {
+    poses
+        .iter()
+        .map(|pose| replay::SurfaceState {
+            id: pose.id.0,
+            position: pose.position,
+            attitude: pose.attitude,
+            wrecked: pose.wrecked,
+        })
+        .collect()
+}
+
+/// The recorded surface units as the picture draws them; the shape is left
+/// to the drawing, which knows each unit's look.
+pub fn surface_poses(states: &[replay::SurfaceState]) -> Vec<SurfacePose> {
+    states
+        .iter()
+        .map(|state| SurfacePose {
+            id: UnitId(state.id),
+            position: state.position,
+            attitude: state.attitude,
+            shape: None,
+            wrecked: state.wrecked,
+        })
+        .collect()
+}
+
 /// A recorded debris piece as drawn. `variant` is the owner's structural
 /// section on that tick.
 pub fn debris_pose(state: &replay::DebrisState, draw: Draw, variant: Option<usize>) -> DebrisPose {
@@ -445,8 +500,15 @@ pub fn pilot_pose(state: &replay::EscapeeState) -> PilotPose {
 /// A live effect as a recording keeps it: a hit, kill or ground strike
 /// with a reviewed explosion type keeps that type.
 pub fn effect_kind(kind: live::EffectKind, blast: Option<u8>) -> replay::EffectKind {
+    // A flak burst has its own code (format 3) with the explosion type it
+    // showed, 27 or 28, so a replay lights and puffs it as flight does.
+    if kind == live::EffectKind::Flak
+        && let Some(explosion) = blast.filter(|b| tore_sim::combat::blast::explosion(*b).is_some())
+    {
+        return replay::EffectKind::Flak { explosion };
+    }
     let on = match kind {
-        live::EffectKind::Hit => Some(replay::Strike::Hit),
+        live::EffectKind::Hit | live::EffectKind::Flak => Some(replay::Strike::Hit),
         live::EffectKind::Destroyed => Some(replay::Strike::Destroyed),
         live::EffectKind::Ground => Some(replay::Strike::Ground),
         _ => None,
@@ -461,7 +523,7 @@ pub fn effect_kind(kind: live::EffectKind, blast: Option<u8>) -> replay::EffectK
         live::EffectKind::Flare => replay::EffectKind::Flare,
         live::EffectKind::Chaff => replay::EffectKind::Chaff,
         live::EffectKind::Launch => replay::EffectKind::Launch,
-        live::EffectKind::Hit => replay::EffectKind::Hit,
+        live::EffectKind::Hit | live::EffectKind::Flak => replay::EffectKind::Hit,
         live::EffectKind::Destroyed => replay::EffectKind::Destroyed,
         live::EffectKind::Ground => replay::EffectKind::Ground,
         live::EffectKind::DebrisImpact => replay::EffectKind::DebrisImpact,
@@ -487,6 +549,7 @@ fn live_effect_kind(kind: replay::EffectKind) -> Option<(live::EffectKind, Optio
             },
             Some(explosion),
         ),
+        replay::EffectKind::Flak { explosion } => (live::EffectKind::Flak, Some(explosion)),
         replay::EffectKind::Crater(_) | replay::EffectKind::Fire | replay::EffectKind::Other(_) => {
             return None;
         }
@@ -718,6 +781,8 @@ impl EffectWatch {
 pub struct Identities {
     pub aircraft: BTreeMap<u32, AircraftId>,
     pub weapons: BTreeMap<u32, replay::WeaponInfo>,
+    /// The surface units the recording names (format 3).
+    pub surface: BTreeMap<u32, replay::SurfaceInfo>,
 }
 
 impl Identities {
@@ -729,6 +794,10 @@ impl Identities {
                 .collect(),
             weapons: recording
                 .weapons()
+                .map(|info| (info.id, info.clone()))
+                .collect(),
+            surface: recording
+                .surface_units()
                 .map(|info| (info.id, info.clone()))
                 .collect(),
         }
@@ -797,15 +866,24 @@ pub fn snapshot(
             .debris
             .iter()
             .map(|piece| {
+                // A surface owner's piece is recorded; an aircraft's variant
+                // follows its structural section.
+                let variant = frame
+                    .debris_pieces
+                    .iter()
+                    .find(|(owner, index, _)| (*owner, *index) == (piece.owner, piece.index))
+                    .map(|(_, _, piece)| usize::from(*piece))
+                    .or_else(|| structural(piece.owner));
                 debris_pose(
                     piece,
                     presentation.draw(piece.owner, kind(piece.owner)),
-                    structural(piece.owner),
+                    variant,
                 )
             })
             .collect(),
         pilots: frame.escapees.iter().map(pilot_pose).collect(),
         models: presentation.models.clone(),
+        surface: surface_poses(&frame.surface),
     }
 }
 
@@ -948,7 +1026,8 @@ fn aircraft_difference(live: &AircraftPose, replayed: &AircraftPose) -> Option<S
 /// The first difference between a live snapshot and the one a recording
 /// rebuilt, beyond the format's documented precision, in plain words.
 /// `None` means both draw the same picture. Ground objects are left out:
-/// a recording keeps only their hit points, and they are never drawn.
+/// a recording keeps only their hit points, and they are never drawn. The
+/// routed surface units' poses are compared.
 pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<String> {
     if live.tick != replayed.tick {
         return Some(format!(
@@ -1069,6 +1148,21 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
             live.models, replayed.models
         ));
     }
+    if live.surface.len() != replayed.surface.len() {
+        return Some(format!(
+            "{} routed surface units live, {} recorded",
+            live.surface.len(),
+            replayed.surface.len()
+        ));
+    }
+    for (a, b) in live.surface.iter().zip(&replayed.surface) {
+        if (a.id, a.wrecked) != (b.id, b.wrecked)
+            || far(a.position, b.position, tolerance::POSITION)
+            || (0..3).any(|i| angle_far(a.attitude[i], b.attitude[i]))
+        {
+            return Some(format!("surface unit differs: live {a:?}, recorded {b:?}"));
+        }
+    }
     None
 }
 
@@ -1175,6 +1269,95 @@ mod tests {
         );
         let single = snapshot(&frame, &[], &single, &Identities::default());
         assert_eq!(single.player.id, 0);
+    }
+
+    #[test]
+    fn surface_units_debris_pieces_and_flak_rebuild_the_picture_they_were_recorded_from() {
+        let parked = 0x5000_0007;
+        let live = RenderSnapshot {
+            tick: 500,
+            models: vec![AircraftId::Mig29],
+            surface: vec![
+                SurfacePose {
+                    id: UnitId(0x5000_0001),
+                    position: [10_000.25, 12., 20_000.5],
+                    attitude: [1.5, 0.02, -0.01],
+                    shape: None,
+                    wrecked: false,
+                },
+                SurfacePose {
+                    id: UnitId(0x5000_0002),
+                    position: [10_100., 11., 20_050.],
+                    attitude: [0.5, 0., 0.],
+                    shape: None,
+                    wrecked: true,
+                },
+            ],
+            // An aircraft's piece follows its section; a parked aircraft's
+            // is the piece it threw.
+            debris: vec![
+                DebrisPose {
+                    owner: parked,
+                    draw: Draw::Hidden,
+                    position: [5., 6., 7.],
+                    attitude: [0.1, 0.2, 0.3],
+                    variant: Some(1),
+                },
+                DebrisPose {
+                    owner: parked,
+                    draw: Draw::Hidden,
+                    position: [8., 9., 10.],
+                    attitude: [0.; 3],
+                    variant: Some(0),
+                },
+            ],
+            ..RenderSnapshot::default()
+        };
+        let frame = replay::Frame {
+            tick: 500,
+            surface: surface_states(&live.surface),
+            debris: debris_states(&live.debris),
+            debris_pieces: debris_pieces(&live.debris),
+            ..Default::default()
+        };
+        assert_eq!(
+            frame.debris_pieces,
+            [(parked, 0, 1), (parked, 1, 0)],
+            "each piece by its place among its owner's"
+        );
+        let rules = Presentation {
+            models: vec![AircraftId::Mig29],
+            slots: 4,
+            player: 0,
+        };
+        let rebuilt = snapshot(&frame, &[], &rules, &Identities::default());
+        assert_eq!(rebuilt.surface, live.surface);
+        assert_eq!(difference(&live, &rebuilt), None);
+        // A pose that is not where it was recorded is a difference.
+        let mut moved = rebuilt.clone();
+        moved.surface[0].position[0] += 1.;
+        assert!(
+            difference(&live, &moved)
+                .unwrap()
+                .starts_with("surface unit differs")
+        );
+        let mut hidden = rebuilt;
+        hidden.surface.pop();
+        assert!(difference(&live, &hidden).unwrap().contains("routed"));
+        // The flak keeps its explosion type, the KS-19's 28 included.
+        for explosion in [27, 28] {
+            let kind = effect_kind(live::EffectKind::Flak, Some(explosion));
+            assert_eq!(kind, replay::EffectKind::Flak { explosion });
+            assert_eq!(
+                live_effect_kind(kind),
+                Some((live::EffectKind::Flak, Some(explosion)))
+            );
+        }
+        // A flak burst with no type a recording can name is an ordinary hit.
+        assert_eq!(
+            effect_kind(live::EffectKind::Flak, None),
+            replay::EffectKind::Hit
+        );
     }
 
     fn effect(kind: live::EffectKind, x: f64, ticks: u16) -> EffectPose {

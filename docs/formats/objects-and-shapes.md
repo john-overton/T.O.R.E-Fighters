@@ -66,7 +66,8 @@ The runtime importer follows base and variant layout placements through their OB
 prefix to explicit SH and projected PIC references. Static geometry uses the SH
 CODE header exponent for rendering and contact. All main shapes placed by the 75 reviewed layouts project with the scenery
 reader. It also preserves bounded line records, shown as one-pixel strokes, and
-selects a fitted loaded pose for the reviewed CHAP/SA2 load-count envelopes.
+selects a fitted loaded pose for the reviewed CHAP/SA2/SA3/SCD load-count envelopes
+and a rest pose for the KRIV/SOVR turret envelopes ([surface unit shapes](#surface-unit-shapes-envelopes-and-sprites-2026-10-10)).
 No callback runs. Unreviewed shape opcodes still receive diagnostics while
 placement identity remains available. [Scenery coverage and limits](../spec/terrain-detail.md).
 
@@ -350,6 +351,480 @@ extra shape slots, different selectors/classes and unsupported layouts fail.
 This is metadata inspection, not object placement or full resource resolution.
 [Definition-reader evidence](../baselines/native-strip-definition.md).
 
+## Placed object scale (2026-10-10)
+
+Implementation, slice SC1 of the surface objectives round. John's direction
+(2026-10-10): "Ideally runways and buildings and aircraft are all the same
+realistic scale." The rule lives in one function,
+`tore_world::terrain::placed_shape_scale`, with its parts in
+`terrain::PlacedSize`. Every placed object's drawn mesh, contact box,
+collision box and hit box comes from it through `Placements::stance`, and so
+does a runway's length (`strip_length_ft`).
+
+**The rule.** Feet per shape unit of a placed object are the SH header scale
+`2^(e-8)` times a factor:
+
+| Placed object | Factor | Why |
+| --- | --- | --- |
+| Runways and strips: any definition naming `_STRIPProc` | 1 | A runway's length is a real map length. At a third, the 4,060 ft theater runways would be 1,350 ft and the 1,074 ft short strips 358 ft. |
+| Bridges and roads: `MAP_TIED_TYPES` (BRDEND, BRDMID, BR1/2/3 END and MID, BRD1 to BRD4, ROAD, ROAD2, ROAD4, ROADC) | 1 | They span real terrain. A bridge's ends and middle overlap only at the shape scale (see below). |
+| Everything else: buildings, theater objects, city blocks, surface units | 1/3 (`REAL_SIZE_FACTOR`) | Real size, the aircraft renderer's factor. |
+
+Runways are told apart by their definition. Bridges and roads are not: their
+OBJECT records are `_OBJProc` objects like any building, and no flag or class
+word separates them (a bridge end has flags `$901`, a crane the `$20921` of a
+bridge middle, a road the `$0` of a tree, all FA_2.LIB), so the twelve bridge
+and four road types are listed by name in `MAP_TIED_TYPES`, the one list.
+
+Lengths that a record gives in retail feet at the shape scale follow the same
+factor, through `PlacedSize::feet`: an NT mount position
+(`surface::mount_position_ft`, a Krivak's mount at z -225 lies 75 ft aft) and
+a surface unit shape's F2 ground offset (`surface::ground_offset_ft`). No
+code read either before this slice; the surface controller and presentation
+slices use these helpers.
+
+Provenance: `opinionated` (John, realistic scale, 2026-10-10), with the factor
+`fitted`. It is not retail parity: retail draws every shape about three times
+real size.
+
+**Evidence that retail is 3x and the map is real.** The full investigation is
+in the surface round's scale finding; its native results:
+
+- Both camera-relative shape draw entries in FA.EXE (`0x4d057c`, `0x4d0cf7`)
+  shift by the header exponent word alone, on fixed8 feet world coordinates,
+  with no separate factor for aircraft. OpenFA reads shapes the same way.
+- PT, NT and STRIP data in feet match the meshes only at `2^(e-8)`: AC-130 PT
+  gun positions, KRIVAK.NT mounts (z -225, -310 and +300 inside a hull box of
+  -492 to 720), RUNWAY.SH STRIP anchors at scale 4, and the F2 contact offset.
+- Map positions are real feet: FRA.MM Paris to Brussels is 860,000 ft (262 km,
+  real 264 km).
+- At a third, shapes come out at their real size:
+
+| Shape | e | Retail scale (ft) | Drawn here (ft) | Real |
+| --- | --- | --- | --- | --- |
+| F18 (F/A-18D, aircraft renderer) | 8 | 109 x 168 | 36 x 56 | 40 span, 56 long |
+| NIMZ (Nimitz) | 10 | 3,276 long | 1,092 | 1,092 |
+| KRIV (Krivak) | 10 | 1,216 long | 405 | 405 |
+| T72 / ZSU23 | 8 | 90 / 63 | 30 / 21 | 31 / 21 |
+| HANGR hangar | 10 | 472 x 900 x 196 | 157 x 300 x 65 | large hangar |
+| BNK2 hardened shelter | 9 | 324 x 420 x 164 | 108 x 140 x 55 | about 80 x 120 x 30 |
+| CTWR1 control tower | 11 | 192 x 192 x 544 | 64 x 64 x 181 | 100 to 200 tall |
+| RUNWAY.SH (kept) | 10 | 6,000 long, pavement 368 wide | unchanged | 150 to 200 wide |
+
+Heights include the part of a building's mesh below its origin.
+
+**Bridges.** In ~FRA0.MM a BRDEND, a BRDMID and a BRDEND stand at z 800,293,
+803,221 and 806,101. At the shape scale (e 11) the middle spans plus or minus
+2,448 ft and each end overlaps it by 24 and 72 ft: one bridge over a river on
+the terrain. At a third there would be gaps of about 1,950 ft.
+
+**City blocks shrink.** CTYBKA to G (1,840 x 1,976 ft at the retail scale),
+TWNBKA to F (3,600 to 4,500 ft) and CITY1 to 3 (9,000 ft) are buildings and
+take the third. Checked against the city areas of the terrain texture
+in overhead and oblique captures of Ukraine and Greece: the blocks stand on the city patch, not on any
+particular texture feature, so a block shrinks in place and stays on its
+patch. In Greece the texture's street grid is near real scale (blocks about
+280 ft), and the shrunk buildings (about 100 to 400 ft) fit it where the
+retail-scale ones (up to 1,100 ft) covered several streets. Two costs remain.
+A whole cluster shrinks about its origin, so a CITY2 that covered 9,000 ft of
+a city patch covers 3,000 ft and the patch around it is texture only; shrinking
+each building about its own base would keep the footprint and is a possible
+follow-up. And in Ukraine the city texture itself is drawn coarse (its houses
+come out at about 150 to 200 ft), so real-size towers look small against it.
+Spacing does not decide it: UKR blocks stand on a checkerboard of about 2,000 ft
+cells, and CITY2 clusters about 9,500 to 12,000 ft apart.
+
+**What a player notices.** Buildings and units are a third the size in every
+axis, so their contact and hit boxes are too: bombs and guns need closer hits
+than in retail, and gaps between buildings are wider. Buildings stand where
+they were authored, so airports look sparser and a building that retail placed
+against an apron edge (FRA Chateaudun's shelters, for example) now stands a
+few hundred feet off it. The runway pavement keeps its retail width, about
+twice real: John deferred narrowing it on 2026-10-10. Narrowing it later
+touches the strip mesh width, the runway's landable contact surface, the taxi
+paths, ground-start slot spacing, the AI landing's lateral tolerance and the
+ILS localizer width ([roadmap](../ROADMAP.md#real-scale-airfields-and-runway-width);
+the redrawn real-scale airport experiment is the other route). Composite runway shapes such as RNWY1 carry their
+own small structures, which stay at the shape scale with the runway.
+
+**What does not change.** Runway geometry, STRIP anchors, the ILS, AI taxi,
+landing and parking points, short-strip lengths, and ground-start slots all
+come from map-tied runways and stay as they were (validated: `--validate-ils`
+and ground-start, landing and parking probes give identical output before and
+after). Positions of every placed object are unchanged.
+
+## Surface unit shapes: envelopes and sprites (2026-10-10)
+
+Research and implementation, slice S1 of the surface objectives round. Shapes
+from the catalog's FA_2.LIB build; `shape_inspect FILE.SH [--scenery]` prints
+the counts below. The reader still interprets only bounded data records and
+the reviewed byte patterns named here; no imported code runs.
+
+### What the bounded reader accepts
+
+| Record | Bytes | Reader meaning |
+| --- | --- | --- |
+| `82` | count, slot, signed word triples | vertices into eight-byte slots |
+| `7a` | three signed words, slot | one vertex into the same slots (also the weather grammar's vertex) |
+| `fc` | face, see [geometry](#3-geometry-materials-and-shading) | polygon |
+| `e2` / `e0` | 14-byte name / slot | named texture / runtime decal slot |
+| `e4` | count 4, four `u, v` word pairs | texture corners for the next sprite |
+| `ea` | centre slot, width, height | sprite facing the viewer (`Shape::billboards`) |
+| `12`, `c4`, `38`, `1e`, `00` | relative links | call, transformed call, scope, scope end, return |
+| `48` | relative link | jump, followed by the export and scenery paths only |
+| `bc`, `ca`, `f6`, `42`, `40`, `44`, `ff ff` | | lines, fog, vertex colour, source name, skipped tables |
+| `f0` | x86 envelope | only the reviewed forms below; otherwise the first trampoline is the resume |
+
+Texture coordinates count PIC rows up from the bottom row: a face's `v` of 0
+is the last row of the PIC. Reading them top-down puts the Krivak's deck on
+the wrong strip of `_KRIV.PIC` and leaves holes; bottom-up covers every deck
+face. Sprite corners follow the same rule, in the order bottom left, top
+left, top right, bottom right. The game renderer's static path already flips
+`v` this way.
+
+### Reviewed f0 envelopes
+
+```mermaid
+flowchart LR
+    F0[f0 record] --> L{HARDNumLoaded prelude?}
+    L -- state path --> C[count from loaded_count_word]
+    L -- scenery path --> E[eb 05 b8 1 envelope, full load]
+    C --> E2[eb 05 b8 1 envelope, that count]
+    F0 --> H{HardpointAngle envelope?}
+    H --> R[resume at its c4, turned to the mount rest]
+    F0 --> G[guard chains and single trampoline, as before]
+```
+
+- **Loaded count** (CHAP, SA2, SA3, SCD): `mov ecx,[objId]; mov edx,hardpoint;
+  or ecx,ecx; jz +13`, a trampoline to `@HARDNumLoaded@8` that returns into
+  `eb 05 b8 01 00 00 00`, then `cmp eax,N; jb +17` (draw rail N while at least N
+  rounds remain) or `or eax,eax; jz +17` (draw while any remain). The drawing
+  arm resumes at an SH call to the missile; the skipping arm lands on the next
+  f0 record's own trampoline. The scenery path draws the full load, as it did
+  for CHAP and SA2 before. The state path reads the count from the synthetic
+  state key `shape::loaded_count_word(hardpoint)` (`0xffff0000` plus the
+  index, far above any module address); absent means none loaded. SA3 draws
+  one missile per round on hardpoint 0 (two rails), SCD one, CHAP three rails
+  at counts 1 to 3, SA2 one per hardpoint 0 to 5.
+- **Hardpoint angle** (KRIV, SOVR and their copies): `call $+5; pop ebx;
+  add ebx,N; mov ecx,hardpoint`, a trampoline to `@HardpointAngle@4` that
+  returns straight back, an optional `add ax,imm16`, `mov [ebx+6],ax`, and the
+  trampoline that resumes SH. The write lands on the first rotation word of
+  the c4 record the program resumes at (the reader checks this), so the
+  turret under it turns. The reader used to take the first trampoline, which
+  returns into x86, and failed on bytes it read as opcodes `15` (KRIV) and
+  `ec` (SOVR). The added constant equals the hardpoint heading in the NT:
+  32760 for the aft mounts of KRIVAK.NT (hardpoints 0, 1) and SOVR.NT
+  (hardpoint 1), absent for SOVR's forward mount (heading 0). The static pose
+  takes HardpointAngle as zero, the mount at rest, and turns the turret by
+  that constant about the up axis. This rest reading is an inference from
+  that match (fitted); live traverse belongs to the surface AI.
+- **Rotating radar** (`a1 _currentTicks; shl ax,6; mov [ebx+6],ax`) needs no
+  change: its single trampoline already resumes at the c4, drawn unturned.
+
+### Results
+
+| Shape | Scenery path | State path | Before |
+| --- | --- | --- | --- |
+| KRIV.SH (Krivak) | 62 faces | 62 faces | fails, "opcode 15" |
+| KRIV_A.SH | 72 faces, 4 lines | 72 faces | 72 faces, unchanged |
+| SOVR.SH (Sovremennyy) | 74 faces | 74 faces | fails, "opcode ec" |
+| SOVR_A.SH | 84 faces | 84 faces | 84 faces, unchanged |
+| SA3.SH (SA-3 Goa) | 128 faces, 64 lines | 28 / 78 / 128 faces at 0 / 1 / 2 loaded | scenery only, unchanged |
+| SCD.SH (SCUD) | 114 faces | 94 / 114 faces at 0 / 1 loaded | scenery only, unchanged |
+| CHAP.SH, SA2.SH | 49, 146 faces | 37 to 49, 62 to 146 by count | scenery only, unchanged |
+| SOLDIER.SH | 1 sprite | 1 sprite | fails, no geometry |
+| RUNNER.SH | 2 faces | 12 faces | unchanged |
+| CATGUY.SH | 1 sprite | 1 sprite | fails (taught in S2, [below](#carriers-islands-and-deck-crew-2026-10-10)) |
+
+Every retail shape in FA_1, FA_2, FA_4B, FA_4D and swpatch that projected
+before keeps a byte-identical result on every path, including each state
+word at -1 and 1: `crates/tore-formats/tests/shape_projection.rs` compares a
+recorded digest per shape and skips without the install.
+
+CATGUY.SH, the carrier deck crew, is a sprite whose texture corners are
+written by `_CATGUYDraw@4` from a frame table each frame; its file corners
+are zero. Slice S2 reads that envelope; see
+[carriers, islands and deck crew](#carriers-islands-and-deck-crew-2026-10-10).
+
+SOLDIER.SH is one 7 by 12 unit sprite centred 6 units up, cut from rows 150
+to 199 of SOLDIER.PIC. `Billboard::face` turns it to a viewer; the static
+scenery build does not draw sprites yet.
+
+### Size of surface units
+
+At the retail shape scale (source units times 2^(exponent - 8), taken as
+feet) the Krivak is 1,216 ft long and the Ticonderoga 1,696 ft. At a third
+they are 405 and 565 ft, their real lengths; the ZSU-23-4 (21 ft), M1 (32 ft)
+and T-72 (30 ft) agree too. Since slice SC1 placed units are drawn at the
+third: see [placed object scale](#placed-object-scale-2026-10-10).
+
+### Preview sheets
+
+`tore-app --surface-preview OUT_DIR` (first argument, no window) reads the
+retail archives directly and writes a sheet per shape with its `_A` shape
+from four sides, close views, a launcher sheet by loaded count, and every
+texture with holes in magenta. Faces the shape-file guide calls opaque
+(switch 12, or the `ee`/`fe` combinations) show their own colour through
+index-255 texels; transparent faces are cut out there.
+
+## Carriers, islands and deck crew (2026-10-10)
+
+Research and implementation, slice S2 of the surface objectives round. Same
+build and tools as the section above; FA.EXE is the 1.02F build the quick
+template tables were read from.
+
+### Low-memory envelope
+
+Every carrier hull, `_A` hull and island opens with the same f0 record:
+`cmp byte [_lowMemory],0; jz` over a trampoline and a short SH arm, then a
+second trampoline. Both trampolines enter `do_start_interp` and resume on the
+byte after themselves, so both are resume points, not native calls. The arm
+is a `48` jump to a reduced model at the end of the shape (CATGUY's arm is
+`00 00`: draw nothing). A machine with the memory the game asks for skips the
+arm and resumes after the second trampoline, at the full model. The import
+names come from each shape's `.idata`; only these 12 shapes and CATGUY test
+`_lowMemory`.
+
+The reader used to take the first trampoline. The scenery and export paths
+then followed the `48` jump and drew the reduced model (NIMZ: 28 faces and 16
+lines), and the state path, which does not follow `48` jumps, ran into the
+second trampoline's bytes and ended with no geometry. The reader now
+recognises the envelope (the `jz` length must land on the second trampoline,
+both trampolines must resume on themselves and share one thunk) and takes the
+full model on every path. Records after it are the detail selectors `c8`
+(jump to level of detail), `a6` (jump to detail level) and `ac` (jump to
+damage), skipped as before, so the nearest detail draws.
+
+### Damaged islands
+
+The hulls carry their damage in separate `_A` shapes. The islands carry it
+inside: an `ac` record at the top of each island jumps to a damaged copy
+textured with `_NIMZT_A`, `_KITTTD`, `_CLEMT_A` or `_WASPT_A`. The state and
+export paths follow `ac` while the synthetic state key
+`shape::DAMAGED_WORD` (`0xfffe0000`) is nonzero; absent or zero draws the
+intact island, and the scenery path is always intact. The key is not listed
+in `state_words`, so no recorded digest changed; every other shape with an
+`ac` record behaves as before unless a caller sets the key, and only the four
+islands were reviewed with it.
+
+### Results
+
+| Shape | Before: scenery / state | Now, every path | Damage key |
+| --- | --- | --- | --- |
+| NIMZ.SH (Eisenhower) | 28 faces, 16 lines (reduced) / fails | 98 faces | 98 |
+| NIMZ_A.SH | 41 faces, 16 lines / fails | 98 faces | 98 |
+| KITT.SH (Kitty Hawk) | 23 faces / fails | 232 faces | 232 |
+| KITT_A.SH | 45 faces / fails | 233 faces | 233 |
+| CLEM.SH (Clemenceau) | 18 faces / fails | 96 faces (10 lines on the export path) | 96 |
+| CLEM_A.SH | 27 faces / fails | 98 faces (10 lines on the export path) | 98 |
+| WASP.SH (Wasp) | 65 faces / fails | 139 faces | 139 |
+| WASP_A.SH | 65 faces / fails | 140 faces | 140 |
+| NIMZT.SH (island) | 14 faces / fails | 48 faces | 48, damaged |
+| KITTT.SH | 28 faces / fails | 77 faces | 64, damaged |
+| CLEMT.SH | 36 faces / fails | 66 faces | 66, damaged |
+| WASPT.SH | 58 faces / fails | 85 faces | 83, damaged |
+| CATGUY.SH (deck crew) | fails / fails | 1 sprite | 1 sprite |
+
+Every face record of each full model is reached; the only records left
+unread are the lower levels of detail (the low-memory jump lands on one of
+them) and, for the islands, the damaged copy. The twelve carrier entries of the digest manifest
+(`tests/data/shape-projection-digests.txt`) were refreshed on purpose; no
+other entry changed. All 13 shapes pass `tools/check_shape_roundtrip.py`.
+
+`XNIMZ.SH`, `XKITT.SH`, `XCLEM.SH` and `XWASP.SH` are not used in flight:
+FA.EXE names them beside the reference room's `.INF` and picture strings.
+They read cleanly and stay in the manifest unchanged.
+
+### Parts spawned with a carrier
+
+FA.EXE spawns each carrier's island and deck parts from a table: names at
+`0x50cbd0` (Eisenhower), `0x50cc18` (Wasp), `0x50cc38` (Kitty Hawk) and
+`0x50cc80` (Clemenceau), each followed by signed word triples (right, up,
+forward, in world units) and headings in binary angle units. The spawning
+loop (`0x4bdd34` for the Eisenhower) turns each offset by the carrier's
+attitude and adds it to the carrier's position (`0x411d10`).
+
+| Carrier | Catapult officer (CATGUY.NT) | Tractors (MULE_A, MULE_B, MULE_C) | Island |
+| --- | --- | --- | --- |
+| Eisenhower | -15, 0, 1011; heading 32760 | (292, 0, -408), (205, 0, -158), (-387, 0, -729) | `~NIMZT.OT` at 360, 0, -195 |
+| Kitty Hawk | -15, 0, 1011; 32760 | (252, 0, -408), (205, 0, -158), (-347, 0, -729) | `~KITTT.OT` at 300, 0, -190 |
+| Clemenceau | 70, 20, 1420; 32760 | (330, 0, -700), (466, 0, 700), (-410, 0, -729) | `~CLEMT.OT` at 380, 0, 230 |
+| Wasp | none | MULE_A only, (80, 0, 320) | `~WASPT.OT` at 0, 0, 0 |
+
+Tractor headings are -20384, 4004 and -3276 (Wasp: -25116); islands 0. The
+loop is skipped in two game modes (word `0x520a50` equal to 3 or 12), not
+traced further. The table is recorded as facts in `tore_formats::carrier`
+(`CARRIERS`, `for_hull`), where the game reads it.
+
+Every height is 0 (the Clemenceau's officer 20), yet the island shapes reach
+down to their ground offset (F2 word +8, which FA 0x42e0c0 reads to stand an
+object on the ground): NIMZT -236 and CLEMT -224 world units, KITTT and WASPT
+0, the tractors 0, CATGUY -6 (its sprite is centred on its origin), and the
+parked Rafale and Super Etendard -18 and -16. Something lifts the parts onto
+the deck; the rule is not traced. The preview stands each part on the hull's
+deck by its ground offset (fitted). That puts the deck crew's feet, the
+tractors' wheels, the aircraft's wheels and every island's base on the deck,
+and the hull numbers on the Eisenhower and Kitty Hawk islands above it.
+Against it: the Eisenhower then stands 832 ft (277 ft at a third) above the
+waterline, where its real mast top is about 207 ft; with the island's origin
+on the deck instead it stands 596 ft (199 ft), and the lower third of the
+island, with its hull number, hangs below the deck. The lead kept the
+ground-offset rule (2026-10-10), and the game places the parts that way:
+the offset is in world feet at the scenery scale (CLEMT's -224 matches its
+lowest point, -57 units at 4 ft a unit; a T-80's -16 matches its lowest point
+at 1 ft a unit), so in game it takes the hull's real-size factor, a third,
+like the table offsets and the deck. Ships and the bunkers record offsets
+well below their geometry (Krivak -100 against a lowest point of -26 units,
+BNK5 -176 against -88), so land units alone stand on their lowest point in
+game ([drawing](../spec/surface-defenses.md#drawing)).
+
+### Flight decks
+
+The flat deck is the height shared by the largest area of level faces
+(`tore_formats::carrier::flight_deck`, fitted). The
+outline is the convex hull of those faces (right, forward), in source units;
+times 4 for feet at the scenery scale, which is what the carriers' own
+placement offsets and the template positions use.
+
+| Hull | Deck height | Level deck area | Outline (right, forward), source units |
+| --- | --- | --- | --- |
+| NIMZ | 63 units: 252 ft scenery, 84 ft at a third | 159,865 sq units | (-136,123) (-128,-210) (-75,-307) (-27,-307) (54,-295) (127,-198) (127,214) (30,512) (-43,512) (-136,200) |
+| KITT | 58: 232 ft, 77 ft | 128,172 | (-112,140) (-99,-239) (-76,-312) (-40,-394) (1,-386) (69,-372) (81,-325) (101,-242) (101,174) (48,409) (-33,409) |
+| CLEM | 67: 268 ft, 89 ft | 182,008 | (-126,97) (-118,-323) (83,-323) (131,-94) (131,496) (-65,496) (-126,172) |
+| WASP | 58: 232 ft, 77 ft | 65,950 | (-67,-288) (-58,-298) (-39,-317) (39,-317) (100,-259) (100,-207) (67,200) (58,295) (-58,295) (-67,286) |
+
+The Wasp's level faces at 58 cover only about half its deck rectangle (more
+level faces lie at 49 and 33 units, and some deck faces are not level), so
+its outline is partial. Kitty Hawk also has smaller level areas at 50 and 22
+units. The areas sum level faces and count overlaps twice. The Clemenceau
+template `~QFFLT` parks its eight aircraft inside the CLEM outline.
+
+The Kiev (KIEV.SH, not in the FA.EXE carrier table) has level faces only at
+-22 units, below its origin, about 57,300 square units: no deck the rule
+finds. The game takes a deck only above the hull's origin (the waterline), so
+the four `~QBFLT` Yak-141s stand nowhere
+([parked aircraft](../spec/surface-defenses.md#parked-aircraft)).
+`parked_inspect FA_2.LIB FA_1.LIB --deck HULL.SH` lists a hull's levels.
+
+### Parked aircraft gear
+
+An aircraft shape draws its devices as branches its instance state words
+switch on: afterburner flame, airbrake, landing gear, hook, flaps. With
+every word 0 the gear is up. `tore_formats::parked_aircraft::gear` finds the
+gear word from the shape alone: the word whose branch, switched on by
+itself, adds the faces that reach lowest, at least as low as the rest of the
+shape (a tie goes to the branch that adds more faces, then the lower word).
+No word adds faces on the helicopters AH1 (COB.SH) and MI17 (HIP.SH): their
+skids and wheels are always drawn. Every one of the 39 aircraft types the
+Quick Mission templates park reads in the state path, gear up and down.
+Across them the gear-down lowest point equals the shape's ground offset (F2
+word +8, scenery feet) within two shape units; an ignored retail test
+(`parked_aircraft::import_tests`) pins the table. `parked_inspect FA_2.LIB
+FA_1.LIB [PT ...]` prints each type's words and what each adds.
+
+| PT | Shape | Gear word | Gear faces | Wheels (units below origin) | Ground offset |
+| --- | --- | --- | ---: | ---: | ---: |
+| A37 | A37 | 6380 | 12 | 9 | -9 |
+| AH1 | COB | none | 0 | 22 | -21 |
+| C130 | C130 (exponent 9) | 3a30 | 6 | 21 | -40 |
+| F16E | F16E | 8d8c | 25 | 21 | -21 |
+| F4E | F4E | 5dfc | 6 | 21 | -21 |
+| F5EE | F5EE | 639c | 6 | 18 | -18 |
+| F5EV | F5EV | 614c | 6 | 18 | -18 |
+| J7E | J7E | 4ce6 | 6 | 15 | -14 |
+| KA50 | HOKUM | 7350 | 6 | 14 | -14 |
+| M2000 | M20 | 589c | 6 | 12 | -13 |
+| M2000E | M20E | 592c | 6 | 13 | -13 |
+| M25 | MIG25 | 760c | 12 | 28 | -27 |
+| M5 | MR5 | 67cc | 12 | 16 | -17 |
+| MF1 | MF1 | 5adc | 6 | 17 | -17 |
+| MI17 | HIP | none | 0 | 25 | -24 |
+| MI24 | HIND | 7196 | 6 | 30 | -29 |
+| MIG17F | M17 | 605c | 22 | 14 | -14 |
+| MIG21 | MIG21 | 4a56 | 6 | 18 | -18 |
+| MIG21F | M21F | 5d0c | 26 | 19 | -19 |
+| MIG23 | MIG23 (exponent 9) | 6ae6 | 18 | 10 | -20 |
+| MIG27 | MIG27 | 390c | 6 | 20 | -19 |
+| MIG29 | MIG29 | 824c | 16 | 20 | -19 |
+| MIG29M | MIG2M | 7f1c | 16 | 20 | -19 |
+| MIG29V | MIG2V | 38b6 | 6 | 24 | -23 |
+| MIG31 | MIG31 | 612c | 12 | 30 | -30 |
+| MR3 | MR3 | 604c | 6 | 13 | -13 |
+| MR3E | MR3E | 593c | 6 | 13 | -13 |
+| Q5 | Q5 | 63fc | 6 | 15 | -14 |
+| RAFALE | RAF | 5b62 | 20 | 18 | -18 |
+| RAFALEF | RAFF | 6092 | 20 | 18 | -18 |
+| SFR | SFR (exponent 9) | 5e50 | 6 | 10 | -20 |
+| SPE | SPE | 68cc | 6 | 17 | -16 |
+| SU24 | SU24 (exponent 9) | 765c | 24 | 13 | -24 |
+| SU25 | SU25 | 8396 | 18 | 23 | -22 |
+| SU27V | SU27V | 41dc | 8 | 23 | -22 |
+| SU34 | SU34 | 67cc | 8 | 26 | -26 |
+| SU35 | SU35 | 79cc | 18 | 22 | -22 |
+| SU7 | SU7 | 629c | 10 | 19 | -19 |
+| YAK141 | Y141 | 6270 | 4 | 21 | -21 |
+
+Words are hexadecimal. Most jets number their words flame, brake, gear,
+flaps from one base (gear at base + 0xc); the MiG-21, J-7E and MiG-29V
+(no brake word) have gear at base + 6, the A-37 at its first word, and the
+Yak-141's branch adds only its main gear (its nose gear is always drawn).
+The Rafale M (RAFF) word 609e also reaches 18 units with four faces (likely
+its hook); the Super Etendard's 68d8 reaches 16. The helicopters' and the
+C-130's rotor and propeller discs are drawn as in flight: no state word
+stops them.
+
+### Extents at both scales
+
+The hulls' source units, at the scenery scale (times 4, as feet) and at a
+third of that (the aircraft convention):
+
+| Hull | Length | Beam | Real length |
+| --- | --- | --- | --- |
+| NIMZ | 819 units: 3,276 ft, 1,092 ft | 263: 1,052 ft, 351 ft | 1,092 ft |
+| KITT | 819: 3,276 ft, 1,092 ft | 213: 852 ft, 284 ft | 1,069 ft |
+| CLEM | 819: 3,276 ft, 1,092 ft | 257: 1,028 ft, 343 ft | 869 ft |
+| WASP | 633: 2,532 ft, 844 ft | 200: 800 ft, 267 ft | 844 ft |
+
+At a third, the Eisenhower, Kitty Hawk and Wasp lengths match the real ships;
+the Clemenceau is modelled at the Eisenhower's length. The scale is
+unchanged here.
+
+### Deck crew sprite
+
+CATGUY.SH draws one sprite. Its f0 envelope calls `_CATGUYDraw@4` with the
+object id, which returns the frame in the high word and the row in the low
+word, then rewrites the next `ea` sprite's width and its four `e4` corners
+from three eleven-entry tables in the shape: width 8 units (12 for frame 9),
+columns `left + 1` to `left + width - 1` of the 640 by 480 PIC, rows
+`row * 79 + 10` to `row * 79 + 68` counted down and stored counted up
+(`479 - y`). The reader recognises the 217-byte envelope by a recorded
+FNV-1a digest with its five address words zeroed (no bytes are recorded),
+checks that both trampolines resume where expected and that the resume lands
+on the `7a`, `e4`, `ea` sprite records, and applies the same tables. The
+synthetic state key `shape::SPRITE_FRAME_WORD` (`0xfffd0000`) carries the
+value the native call returns; absent, and always on the scenery path, it is
+frame 0, row 0 (fitted: the frame choice is not traced). Frames past 10 or
+rows past 5 are errors.
+
+The sprite's centre is its origin, 8 by 12 units at scale 1, so it needs its
+ground offset (-6) to stand on the deck. A `68` record before the texture
+switches between `CATF.PIC` (front) and `CATB.PIC` (back), most likely by the
+viewer's side; it is not decoded. The scenery path draws the front; the state
+path draws the back, because it does not follow the `48` jump over the
+second texture (the reader's existing rule for that path).
+
+### Preview
+
+`--surface-preview` adds sheets for the four hulls with their `_A` shapes,
+the four islands with their damage branch, a sheet per carrier with its
+island and deck parts placed from the table above (intact and damaged, four
+sides, plus close views), and the `~QFFLT` fleet: the Clemenceau with its
+parked aircraft, and the whole fleet from above and from a quarter with each
+ship ringed. Escort placeholders take the first unit of the theater's default
+enemy group list; the surface round's resolution picks among them. The
+preview prints each deck's height and outline.
+
 ## Whitecap shape boundary
 
 WAVE1.SH/WAVE2.SH contain embedded frame-selection code, outside the static SH
@@ -530,3 +1005,27 @@ write and selects inert geometry without executing module code. The app packs
 its four runtime textures into an indexed atlas and draws seat, free-fall,
 inflating and open-parachute poses. Native shadow placement, camera-dependent
 detail selection and animation timing remain unverified.
+
+## NT surface-unit layout
+
+An NT is the "active object" counterpart of a static `*.OT`: the PT's OBJECT
+and NPC blocks with no PLANE block, then its hardpoint rows (weapons and
+sensors with their arcs). An OT is the OBJECT block alone, which is why
+`static_object::Definition` can stand base-layout NT placements as scenery.
+The byte and field contract of all 84 retail NTs, their census, hardpoints,
+movement words and what is not established is in
+[NT surface units](surface-units.md); what a player sees is in
+[surface objectives and air defenses](../spec/surface-defenses.md).
+
+Shapes: every NT main and `_A` shape now projects on every path. The envelopes
+the reader learned for them (the loaded-count `eb` envelope of SA3, SCD, CHAP
+and SA2, the hardpoint-angle `f0` envelope of KRIV and SOVR, the sprites of
+SOLDIER, RUNNER and CATGUY, and the carriers' low-memory envelope) are in
+[surface unit shapes](#surface-unit-shapes-envelopes-and-sprites-2026-10-10) and
+[carriers, islands and deck crew](#carriers-islands-and-deck-crew-2026-10-10);
+their drawn size is in [placed object scale](#placed-object-scale-2026-10-10).
+Every ship has a `_A` damaged shape; no ground vehicle or SAM has one, and
+`DEST.OT` ("Destroyed Vehicle", hp 0, `DEST.SH`) is the wreck object. Damaged
+bunker variants `~BNK5`, `~BNK6`, `~BNK8` use `DBK*.SH`. The reader stays a
+bounded data grammar; each new opcode or envelope is reviewed and documented in
+this guide before it is accepted.

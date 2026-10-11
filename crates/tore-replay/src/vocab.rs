@@ -30,7 +30,9 @@ pub mod kind {
     /// aircraft that released the decoy. Fields: `projectile`, `decoy`
     /// (Text: chaff or flare), `roll` and `threshold` (Int: the decoy roll
     /// passed when roll < threshold), `susceptibility` and `effectiveness`
-    /// (Int, percent), `reason`.
+    /// (Int, percent), `number` (Int: the chaff cartridge or flare that fooled
+    /// it, the `number` of its `combat.countermeasure`; absent in recordings
+    /// made before it was kept), `reason`.
     pub const WEAPON_DECOYED: &str = "weapon.decoyed";
     /// How a shot ended. Subject: shooter. Object: intended target. Fields:
     /// `projectile`, `result` (Text from [`super::outcome`]: hit, missed,
@@ -38,7 +40,11 @@ pub mod kind {
     /// `miss_ft` (Num: the closest the shot came to its target), `replaces`
     /// (Text from [`super::outcome`]). One per shot, except that a missile
     /// recorded as spoofed which flies on and damages an aircraft gets a
-    /// second, `hit`, with `replaces` spoofed: the later one stands.
+    /// second, `hit`, with `replaces` spoofed: the later one stands. That
+    /// hit's `reason` names the chaff or flare that fooled the missile, as in
+    /// `it was decoyed by chaff #7 from Enemy 2-1 at 0:13.5 but flew on and
+    /// struck anyway`; `#7` is the `number` of that device's
+    /// `combat.countermeasure` entry.
     pub const WEAPON_OUTCOME: &str = "weapon.outcome";
     /// Damage landed. Subject: attacker. Object: the aircraft or surface
     /// object hit. Fields: `projectile`, `weapon`, `damage` (Int), `hp_after`
@@ -271,6 +277,31 @@ pub mod kind {
     /// Fields: `other` (Id: the flightmate).
     pub const DATALINK_SORT_WARNING: &str = "datalink.sort_warning";
 
+    /// A surface unit's gun fired a burst, or its launcher a salvo (format
+    /// 3; the rounds themselves are also `weapon.launch`). Subject: the
+    /// unit. Object: its target. Fields: `weapon` (Text: the record),
+    /// `mount` (Int: the hardpoint), `rounds` (Int), `refused` (Int: rounds
+    /// the world could not place), `opening` (Bool: a flak battery's opening
+    /// barrage), `flak` (Bool).
+    pub const SURFACE_BURST: &str = "surface.burst";
+    /// A surface unit's engagement changed phase (search, track, fire,
+    /// reload and so on). Subject: the unit. Object: its target. Fields:
+    /// `station` (Int: which of its weapons), `to` (Text).
+    pub const SURFACE_PHASE: &str = "surface.phase";
+    /// A supply truck rearmed every empty rail of a launcher. Subject: the
+    /// unit. Fields: `loaded` (Int: missiles on its rails after).
+    pub const SURFACE_REARM: &str = "surface.rearm";
+    /// A supply truck added a spare magazine to a gun. Subject: the unit.
+    /// Fields: `mount` (Int), `reserve` (Int: spare magazines after).
+    pub const SURFACE_REFILL: &str = "surface.refill";
+    /// A surface radar came on or went off. Subject: the unit. Fields: `on`
+    /// (Bool), `reason` (Text).
+    pub const SURFACE_RADAR: &str = "surface.radar";
+    /// A surface unit was destroyed and lies as a wreck. Subject: the unit.
+    /// Object: what destroyed it. Fields: `burning` (Bool), `fire_ft` (Num:
+    /// the wreck fire's width when it burns), `hp_before` (Int).
+    pub const SURFACE_WRECK: &str = "surface.wreck";
+
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
         WEAPON_LAUNCH,
@@ -341,6 +372,12 @@ pub mod kind {
         DATALINK_CLEAR,
         DATALINK_ACKNOWLEDGE,
         DATALINK_SORT_WARNING,
+        SURFACE_BURST,
+        SURFACE_PHASE,
+        SURFACE_REARM,
+        SURFACE_REFILL,
+        SURFACE_RADAR,
+        SURFACE_WRECK,
     ];
 }
 
@@ -445,6 +482,26 @@ pub mod field {
     pub const TARGET: &str = "target";
     /// The other member of a pair, such as the flightmate in a sort warning.
     pub const OTHER: &str = "other";
+    /// A surface unit's hardpoint.
+    pub const MOUNT: &str = "mount";
+    /// Rounds in a surface burst.
+    pub const ROUNDS: &str = "rounds";
+    /// Rounds the world refused.
+    pub const REFUSED: &str = "refused";
+    /// A flak battery's opening barrage.
+    pub const OPENING: &str = "opening";
+    /// A flak shell.
+    pub const FLAK: &str = "flak";
+    /// Missiles on a launcher's rails.
+    pub const LOADED: &str = "loaded";
+    /// Spare magazines a gun keeps.
+    pub const RESERVE: &str = "reserve";
+    /// A wreck still burns.
+    pub const BURNING: &str = "burning";
+    /// A wreck fire's width, feet.
+    pub const FIRE_FT: &str = "fire_ft";
+    /// Hit points before a change.
+    pub const HP_BEFORE: &str = "hp_before";
     /// A position in feet, world axes.
     pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
     /// A velocity in feet per second, world axes.

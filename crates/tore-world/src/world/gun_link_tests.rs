@@ -179,3 +179,39 @@ fn range_only_commands_are_still_refused_outside_the_range() {
     );
     assert!(refused(&out));
 }
+
+#[test]
+fn jettison_works_without_the_range_and_leaves_the_gunships_guns_alone() {
+    // Shift+K is a gameplay command now (John, 2026-10-10). Every AC-130 gun
+    // is a fixed, internal station, so jettisoning with a gun selected
+    // changes nothing: no refusal, no ammunition lost, no unlinked gun.
+    let mut world = gunship();
+    step(
+        &mut world,
+        false,
+        vec![
+            SeatCommand::Manual(Live::NextGunGroup),
+            SeatCommand::Manual(Live::ToggleGunGroup),
+        ],
+    );
+    let own = world.combat.state.own();
+    assert!(
+        own.configuration().stations.iter().all(|s| s.internal),
+        "the AC-130 carries nothing external"
+    );
+    let (ammo, mask_before, payload) = (own.ammo.clone(), mask(&world), own.payload_lbs());
+    for selected in 0..3 {
+        world.combat.state.own_mut().selected = selected;
+        let out = step(&mut world, false, vec![SeatCommand::Manual(Live::Jettison)]);
+        assert!(!refused(&out), "Shift+K is not a range command");
+    }
+    let own = world.combat.state.own();
+    assert_eq!(own.ammo, ammo, "no gun lost a round");
+    assert_eq!(own.payload_lbs(), payload);
+    assert_eq!(mask(&world), mask_before, "the link is as it was");
+    // It still fires.
+    for _ in 0..120 {
+        step(&mut world, true, Vec::new());
+    }
+    assert!(world.combat.state.own().ammo != ammo, "the guns still fire");
+}

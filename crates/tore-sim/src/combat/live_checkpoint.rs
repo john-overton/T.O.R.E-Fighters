@@ -186,6 +186,26 @@ crate::checkpoint_enum!(EffectKind {
     Destroyed = 4,
     Ground = 5,
     DebrisImpact = 6,
+    Flak = 7,
+});
+
+// A surface unit's round in flight: its end tick (a flak shell's time fuze)
+// and whether it is flak; and how a ground object with a unit record
+// explodes. Both are read by later ticks.
+type SurfaceRound = super::SurfaceRound;
+crate::checkpoint_struct!(SurfaceRound { end_tick, flak });
+type GroundLook = super::GroundLook;
+crate::checkpoint_struct!(GroundLook {
+    explosion,
+    crater,
+    burns
+});
+
+type ParkedSite = super::ParkedSite;
+crate::checkpoint_struct!(ParkedSite {
+    ground,
+    water,
+    aircraft
 });
 
 crate::checkpoint_struct!(HitRecord {
@@ -498,6 +518,10 @@ impl Checkpoint for State {
             friendly_fire,
             volumes,
             rewinds,
+            surface_rounds,
+            next_surface_shot,
+            ground_looks,
+            parked,
         } = self;
         weapon_rules.save(s, None)?;
         ownships.save(s, None)?;
@@ -529,6 +553,10 @@ impl Checkpoint for State {
         friendly_fire.save(s, None)?;
         volumes.save(s, None)?;
         rewinds.save(s, None)?;
+        surface_rounds.save(s, None)?;
+        next_surface_shot.save(s, None)?;
+        ground_looks.save(s, None)?;
+        parked.save(s, None)?;
         Ok(())
     }
 
@@ -576,6 +604,10 @@ impl Checkpoint for State {
             friendly_fire: Checkpoint::load(l, None)?,
             volumes: Checkpoint::load(l, None)?,
             rewinds: Checkpoint::load(l, None)?,
+            surface_rounds: Checkpoint::load(l, None)?,
+            next_surface_shot: Checkpoint::load(l, None)?,
+            ground_looks: Checkpoint::load(l, None)?,
+            parked: Checkpoint::load(l, None)?,
         })
     }
 }

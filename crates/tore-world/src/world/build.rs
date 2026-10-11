@@ -9,7 +9,7 @@ use crate::{
     aircraft_type::{AircraftType, load_type},
     combat::Combat,
     comms, crew_voice,
-    mission::MissionSpec,
+    mission::{MissionSpec, Start},
     mission_layout,
     resources::ResourceSource,
     seats::{PlaneId, Roster},
@@ -46,6 +46,9 @@ pub struct Hooks<'a> {
     /// Tidies a weapon's display name as the game's loadout screen does, for
     /// every weapon of the player's load.
     pub weapon_label: Option<&'a dyn Fn(&mut Weapon)>,
+    /// Jitter and relocation of the ground target, both on in a mission
+    /// (`None`); development tools turn relocation off to fly the retail spot.
+    pub ground_variation: Option<crate::surface::layout::Variation>,
 }
 
 /// A mission just built: the world, and what starting it reported.
@@ -90,11 +93,17 @@ impl World {
                     .into(),
             );
         }
-        let terrain = crate::terrain::Terrain::for_mission(
+        // The ground target's template joins the theater's own surface units.
+        let mut target = crate::surface::resolve::GroundTarget::from_spec(spec);
+        if let (Some(target), Some(variation)) = (target.as_mut(), hooks.ground_variation) {
+            target.variation = variation;
+        }
+        let terrain = crate::terrain::Terrain::for_mission_with(
             resources,
             &spec.theater,
             Some(spec.condition.index()),
             &spec.weather,
+            target.as_ref(),
         )?;
         let player = match hooks.player.clone() {
             Some(player) => player,
@@ -136,7 +145,17 @@ impl World {
         }
 
         let altitude = f64::from(spec.start.altitude_ft());
-        let selected_ground = spec.ground_runway();
+        let selected_ground = match spec.start {
+            Start::GroundAuto { .. } => Some(mission_layout::auto_runway(
+                &terrain,
+                if spec.fixture_wings {
+                    1
+                } else {
+                    spec.player_wing_size()
+                },
+            )?),
+            _ => spec.ground_runway(),
+        };
         if selected_ground.is_some() && !spec.researched_flight {
             return Err("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
         }
@@ -198,7 +217,7 @@ impl World {
         } else {
             Combat::with_loadout(&player, &load)?
         };
-        combat.add_airport_targets(&terrain.airport_scene)?;
+        combat.add_scene_targets(&terrain)?;
         // The King's friendly fire (stage F phase 2): kept across every
         // restart of combat.
         if !spec.friendly_fire {

@@ -264,6 +264,52 @@ fn arming_seeker_mode_and_jettison_match_the_old_path() {
 }
 
 #[test]
+fn jettison_empties_the_selected_external_store_outside_live_fire() {
+    // Shift+K works in the ordinary game, not only on the range (John,
+    // 2026-10-10).
+    let mut world = mission();
+    assert!(!world.combat.range);
+    // The synthetic fighter carries nothing external: hang its first loaded
+    // station outside, as a wing pylon.
+    let mut config = world.combat.state.own().configuration().clone();
+    let station = config
+        .stations
+        .iter()
+        .position(|s| s.count > 0)
+        .expect("the fixture carries a store");
+    config.stations[station].internal = false;
+    let old = std::mem::replace(
+        &mut world.combat.state,
+        tore_sim::combat::live::State::new(config, true).unwrap(),
+    );
+    world.combat.state.targets = old.targets.clone();
+    world.combat.apply_startup_weapons();
+    let own = world.combat.state.own();
+    assert!(own.ammo[station] > 0);
+    let (payload, others) = (own.payload_lbs(), own.ammo.clone());
+    world.combat.state.own_mut().selected = station;
+    let commanded = input(&world, vec![SeatCommand::Manual(Live::Jettison)]);
+    let mut out = TickOutput::default();
+    world.step(&[commanded], &mut out).unwrap();
+    assert!(
+        !out.cues.iter().any(|cue| matches!(
+            cue,
+            Cue::Message { text, .. } if text.contains("requires --live-fire")
+        )),
+        "not refused: {:?}",
+        out.cues
+    );
+    let own = world.combat.state.own();
+    assert_eq!(own.ammo[station], 0, "the store is gone");
+    assert!(own.payload_lbs() < payload, "and so is its weight");
+    for (i, rounds) in others.iter().enumerate().filter(|(i, _)| *i != station) {
+        assert_eq!(own.ammo[i], *rounds, "station {i} is untouched");
+    }
+    // The aircraft's weight follows the payload, as it does on the range.
+    assert!(world.cockpits[0].flight.systems.used_external_lbs() <= own.payload_lbs());
+}
+
+#[test]
 fn a_range_command_outside_live_fire_is_refused_with_a_message() {
     let (_, after, out) = same_as_old(vec![SeatCommand::Manual(Live::CycleClass)], |_| {});
     assert!(!after.combat.range);
@@ -736,6 +782,7 @@ fn land_at_selected_reports_a_refused_site_to_the_pilot_and_the_journal() {
         &world.terrain.airport_scene,
         &world.terrain.airfield_anchors,
         &world.cockpits[0].airport_service,
+        false,
     );
     let commanded = input(
         &world,

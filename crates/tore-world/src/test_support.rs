@@ -3,6 +3,7 @@
 //! launch rows and spawned targets. No retail data. Compiled for this crate's
 //! own tests and, through the `test-support` feature, for the app's.
 pub mod resources;
+pub mod surface;
 use crate::terrain::Terrain;
 use std::collections::BTreeMap;
 use tore_formats::{
@@ -176,6 +177,7 @@ pub fn terrain() -> Terrain {
         airfield_anchors: BTreeMap::new(),
         static_manifest: Vec::new(),
         catalog: vec![],
+        surface: Default::default(),
         layout: "TEST.MM".into(),
         condition: None,
         weather: tore_sim::environment::Environment::new(

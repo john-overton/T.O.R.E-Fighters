@@ -289,9 +289,12 @@ fn replay_reader(
             for object in &scene.objects {
                 state.add_ground_target(
                     object.id,
-                    object.bounds,
+                    // Runways meet weapons at their pavement, as in flight.
+                    tore_world::combat::weapon_contact(object, scene).unwrap_or(object.bounds),
                     object.hit_points,
                     object.category,
+                    // Combat tapes predate surface sides: neutral, as recorded.
+                    tore_sim::combat::live::NO_SIDE,
                 )?;
                 if let Some(target) = state
                     .targets
@@ -421,6 +424,7 @@ fn replay_reader(
                         alive: launcher.alive,
                         speed_fps: launcher.speed_fps,
                         ground_clearance_ft: 0.,
+                        redfor: false,
                     };
                     service.step(scene, aircraft);
                     let _ = service.guidance(scene, aircraft);
@@ -454,6 +458,7 @@ fn replay_reader(
                         alive: launcher.alive,
                         speed_fps: launcher.speed_fps,
                         ground_clearance_ft: 0.,
+                        redfor: false,
                     },
                     airport_command(action).unwrap(),
                 );
@@ -473,6 +478,7 @@ fn replay_reader(
             alive: launcher.alive,
             speed_fps: launcher.speed_fps,
             ground_clearance_ft: 0.,
+            redfor: false,
         });
     }
     Err("combat tape record bound".into())

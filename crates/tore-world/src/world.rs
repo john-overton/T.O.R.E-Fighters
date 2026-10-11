@@ -443,7 +443,12 @@ impl World {
             if let Some(airport) = ground_airport {
                 cockpit.airport_service.command(
                     &self.terrain.airport_scene,
-                    airport_aircraft(&self.terrain, &lead, cockpit.airport_nav_mode),
+                    airport_aircraft(
+                        &self.terrain,
+                        &lead,
+                        cockpit.airport_nav_mode,
+                        self.roster.redfor(cockpit.plane),
+                    ),
                     tore_sim::airport::Command::SelectAirport(airport),
                 );
             }
@@ -761,12 +766,22 @@ impl World {
                 &mut cockpit.flight,
                 &input.pilot,
                 &self.terrain,
+                // A unit that follows a route leaves the scene's box at its
+                // start behind: it is not solid there, and (agent decision)
+                // not solid where it drives, so planes fly through it.
                 &mut self
                     .combat
                     .state
                     .targets
                     .iter()
                     .filter(|target| target.hp > 0)
+                    .filter(|target| {
+                        !self
+                            .terrain
+                            .surface
+                            .courses
+                            .contains_key(&crate::surface::UnitId(target.id))
+                    })
                     .map(|target| target.id),
             );
             if let Some(error) = cockpit.flight.native_fault() {
@@ -813,7 +828,12 @@ impl World {
         if self.combat.recording_tape()
             && let Some(own) = self.cockpits.first()
         {
-            let airport = airport_aircraft(&self.terrain, &own.flight, own.airport_nav_mode);
+            let airport = airport_aircraft(
+                &self.terrain,
+                &own.flight,
+                own.airport_nav_mode,
+                self.roster.redfor(own.plane),
+            );
             self.combat.record_tape(
                 format!(
                     "airport-state:{}:{}:{}",
@@ -834,6 +854,9 @@ impl World {
             .map(|(cockpit, input)| (cockpit.plane.0, combat::gun_rewind(input.tick, input.view)))
             .filter(|(_, ticks)| *ticks > 0)
             .collect();
+        // The units that follow a route move first, so this tick's fire and
+        // hits meet them where they are now.
+        self.combat.step_surface(&self.terrain);
         let mut flights: Vec<(u32, &mut flight::State)> = self
             .cockpits
             .iter_mut()
@@ -849,6 +872,7 @@ impl World {
         out.cues.push(Cue::CombatStepped);
         for index in 0..self.cockpits.len() {
             let seat = self.seat_of_cockpit(index);
+            let redfor = self.roster.redfor(self.cockpits[index].plane);
             let cockpit = &mut self.cockpits[index];
             for airport_event in cockpit.airport_service.synchronize_health(
                 self.combat
@@ -878,7 +902,12 @@ impl World {
             }
             for event in cockpit.airport_service.step(
                 &self.terrain.airport_scene,
-                airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode),
+                airport_aircraft(
+                    &self.terrain,
+                    &cockpit.flight,
+                    cockpit.airport_nav_mode,
+                    redfor,
+                ),
             ) {
                 if matches!(event, tore_sim::airport::Event::LandingComplete { .. }) {
                     out.cues.push(Cue::Message {
@@ -901,6 +930,7 @@ impl World {
                     &cockpit.airport_service,
                     &cockpit.flight,
                     self.terrain.surface(x, z).height,
+                    self.roster.redfor(cockpit.plane),
                 );
             }
         }
@@ -954,6 +984,21 @@ impl World {
                         .find(|cockpit| cockpit.plane.0 == *aircraft)
                     {
                         plane::take_event(&mut cockpit.flight, cockpit.plane.0, event);
+                    }
+                    // A SAM site, gun or ship that scored the kill is named
+                    // ("Shot down by SA-6"); aircraft kills stay unnamed, as
+                    // before. Agent decision, 2026-10-10.
+                    if let Some(&(_, seat)) = flown.iter().find(|(plane, _)| plane == aircraft)
+                        && let Some(name) = ai_wings::outcome::shot_down_by(
+                            &self.terrain.surface,
+                            &self.combat.state.ledger,
+                            *aircraft,
+                        )
+                    {
+                        out.cues.push(Cue::Message {
+                            seat,
+                            text: format!("Shot down by {name}"),
+                        });
                     }
                 }
                 Event::Fired {
@@ -1079,6 +1124,10 @@ impl World {
                 }
             }
         }
+        // The surface units' tick, after the AI's and before the next combat
+        // step: their shots join the projectiles and their fire-control
+        // answers join the AI's (docs/spec/surface-defenses.md, "Surface AI").
+        self.step_surface();
         // Two flightmates have both locked one aircraft: the humans among
         // them hear a beep and read a line (the data link's sort warning).
         let edge = self.datalink.sort_edge(&self.roster);
@@ -1111,6 +1160,92 @@ impl World {
         out.emissions = self.combat.state.take_sound_events();
         out.events = events;
         Ok(())
+    }
+
+    /// The surface's tick ([`crate::surface::fire::step`]) against every
+    /// aircraft in the air: the AI's and the humans'. Nothing happens in a
+    /// mission without armed surface units.
+    fn step_surface(&mut self) {
+        use crate::surface::{
+            fire::{self, Aircraft},
+            movement, supply,
+        };
+        if self.terrain.surface.arsenal.is_empty() {
+            return;
+        }
+        let state = &self.combat.state;
+        let mut aircraft: Vec<Aircraft> = state
+            .targets
+            .iter()
+            .filter(|t| t.role == tore_sim::combat::missiles::TargetRole::Aircraft && t.hp > 0)
+            .map(|t| Aircraft {
+                id: t.id,
+                side: t.side,
+                position: t.position,
+                velocity: t.velocity,
+                category: t.category,
+                airborne: t.airborne && !t.on_ground && t.wreck.is_none(),
+                jammer: t.jammer_active && t.jammer.as_ref().is_some_and(|j| j.radio_frequency),
+            })
+            .collect();
+        for cockpit in &self.cockpits {
+            let Some(own) = state.ownship(cockpit.plane.0) else {
+                continue;
+            };
+            let flight = &cockpit.flight;
+            let [x, _, z] = flight.position;
+            if own.hp <= 0 || flight.crashed || aircraft.iter().any(|a| a.id == own.aircraft) {
+                continue;
+            }
+            aircraft.push(Aircraft {
+                id: own.aircraft,
+                side: own.side,
+                position: flight.position,
+                velocity: flight.velocity,
+                category: own.configuration().target_category,
+                airborne: !flight.supported_at(self.terrain.surface(x, z).height),
+                jammer: combat::launcher(flight).jammer,
+            });
+        }
+        aircraft.sort_by_key(|a| a.id);
+        let terrain = &self.terrain;
+        let ground = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
+        // Night and fog hide a target from a blind battery's optical sight.
+        let daylight = !matches!(terrain.condition, Some(2 | 5));
+        let scene = fire::Scene {
+            tick: self.combat.state.tick(),
+            aircraft: &aircraft,
+            ground: &ground,
+            daylight,
+        };
+        // A live friendly supply truck within 0.1 mile sets each unit's
+        // `supply` flag before the controllers read it, and its timers
+        // deliver after them (docs/spec/surface-defenses.md, "Resupply").
+        // A truck on a route is measured where it is now.
+        let delivery = supply::step(
+            &terrain.surface,
+            &mut self.combat.surface,
+            &self.combat.state,
+            &|unit, state| {
+                let at = movement::unit_pose(unit, state, terrain).position;
+                [at[0], at[2]]
+            },
+        );
+        let stepped = fire::step(
+            &terrain.surface,
+            &mut self.combat.surface,
+            &mut self.combat.state,
+            &scene,
+        );
+        supply::deliver(&terrain.surface, &mut self.combat.surface, delivery);
+        let ai: Vec<_> = self
+            .ai_wings
+            .as_ref()
+            .map(|wings| wings.actor_supports().collect())
+            .unwrap_or_default();
+        self.combat
+            .state
+            .set_actor_supports(ai.into_iter().chain(stepped.supports));
     }
 
     /// The seat that flies the plane of `cockpit`: a cockpit exists while a
@@ -1188,6 +1323,7 @@ impl World {
                 &self.terrain,
                 &cockpit.airport_service,
                 self.ai_wings.as_ref(),
+                self.roster.redfor(cockpit.plane),
             );
         }
         let listening: Vec<u8> = listeners
@@ -1317,6 +1453,7 @@ impl World {
             let state = &self.combat.state;
             let wings = self.ai_wings.as_ref();
             let (roster, revival) = (&self.roster, &self.revival);
+            let surface = &self.terrain.surface;
             let succeeded = || {
                 let side = roster
                     .plane(PlaneId(plane))
@@ -1330,7 +1467,16 @@ impl World {
                     })
                     .collect();
                 let lineages = revival.objective_lineages(roster);
-                ai_wings::outcome::succeeded(state, wings, plane, alive, side, &humans, &lineages)
+                ai_wings::outcome::succeeded(
+                    state,
+                    wings,
+                    plane,
+                    alive,
+                    side,
+                    &humans,
+                    &lineages,
+                    Some(surface),
+                )
             };
             let results =
                 cockpit
@@ -1366,6 +1512,7 @@ impl World {
     /// applied at the start of the tick in the order it was given.
     fn airport_command(&mut self, cockpit: usize, command: AirportInput, out: &mut TickOutput) {
         let seat = self.seat_of_cockpit(cockpit);
+        let redfor = self.roster.redfor(self.cockpits[cockpit].plane);
         let cockpit = &mut self.cockpits[cockpit];
         match command {
             AirportInput::NavMode => {
@@ -1408,8 +1555,12 @@ impl World {
                         combat::launcher(&cockpit.flight),
                     );
                 }
-                let aircraft =
-                    airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode);
+                let aircraft = airport_aircraft(
+                    &self.terrain,
+                    &cockpit.flight,
+                    cockpit.airport_nav_mode,
+                    redfor,
+                );
                 for event in
                     cockpit
                         .airport_service
@@ -1491,6 +1642,7 @@ pub fn airport_aircraft(
     world: &terrain::Terrain,
     flight: &flight::State,
     nav_mode: bool,
+    redfor: bool,
 ) -> tore_sim::airport::Aircraft {
     let supported = world
         .airport_scene
@@ -1505,6 +1657,7 @@ pub fn airport_aircraft(
         alive: !flight.crashed,
         speed_fps: flight.speed,
         ground_clearance_ft: flight.model().configuration().equipment.ground_clearance_ft,
+        redfor,
     }
 }
 

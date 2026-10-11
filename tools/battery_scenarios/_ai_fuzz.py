@@ -52,10 +52,12 @@ def config(seed: int) -> tuple[list[str], int, dict]:
             "--probe-friendly-aircraft", wing, "--probe-enemy-aircraft", foe,
             "--probe-enemy-skill", r.choice(SKILLS), "--ai-mission", r.choice(MISSIONS),
             "--probe-geometry", r.choice(["head", "side", "rear"])]
+    # The draw is unchanged; a short strip (no ground start there, John
+    # 2026-09-30) or a Redfor field (slice AL1) moves to the next airport that
+    # is one, and a theater with none for Blue flies an airborne start.
+    airport = ground_airport(theater, r.randint(1, 3)) if ground else None
+    ground = airport is not None
     if ground:
-        # The draw is unchanged; a short strip (no ground start there, John
-        # 2026-09-30) moves to the next airport that is one.
-        airport = ground_airport(theater, r.randint(1, 3))
         args += ["--ground-start", str(airport), "--maneuver", "takeoff", "--separation", r.choice(["20", "50", "100"])]
     else:
         args += ["--separation", r.choice(["1", "2", "5", "10", "20", "50"]),

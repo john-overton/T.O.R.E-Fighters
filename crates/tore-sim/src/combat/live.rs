@@ -27,6 +27,7 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 }
 
 mod broad;
+mod collateral;
 #[cfg(test)]
 mod gunship_impact_tests;
 #[cfg(test)]
@@ -38,7 +39,16 @@ mod observation_reference;
 #[cfg(test)]
 mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
+mod parked;
+#[cfg(test)]
+mod parked_tests;
 pub mod rewind;
+pub use parked::{ParkedAircraft, ParkedSite};
+mod surface;
+pub use surface::{
+    GroundLook, Refused, SURFACE_PROJECTILE_ID_BASE, SURFACE_PROJECTILE_RESERVE, SurfaceRound,
+    SurfaceShot, flak_explosion, is_flak, surface_tracer, ticks_to_range,
+};
 
 /// Rounds, missiles and bombs in flight at once. John, 2026-10-09: 5,000,
 /// up from 256, so a crowded gunfight never loses a burst. What a full sky
@@ -277,6 +287,9 @@ pub struct DecoyRoll {
     pub projectile: u32,
     /// [`EffectKind::Chaff`] or [`EffectKind::Flare`].
     pub kind: EffectKind,
+    /// The number of the chaff cartridge or flare the missile rolled
+    /// against: [`DeviceRelease::number`] of its release.
+    pub device: u64,
     /// The missile's decoy susceptibility, percent.
     pub susceptibility: u8,
     /// The dispenser's effectiveness, percent.
@@ -1131,6 +1144,9 @@ pub enum EffectKind {
     Destroyed,
     Ground,
     DebrisImpact,
+    /// A flak shell's burst in the air: its record's explosion, no tracer
+    /// before it, a flash of light (docs/spec/surface-defenses.md, "Flak").
+    Flak,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
@@ -1298,7 +1314,9 @@ pub struct State {
     /// The targets the other ownships make of their aircraft, as the last step
     /// left them; empty with fewer than two ownships.
     ownship_rows: Vec<Target>,
-    actor_support: BTreeMap<u32, ActorSupport>,
+    /// Fire-control answers by owner and the target each observes: an owner
+    /// may guide missiles at several targets (a ship's two SAM systems).
+    actor_support: BTreeMap<(u32, u32), ActorSupport>,
     /// Ground contact volumes keyed by stable target ID. Aircraft remain spheres.
     ground_bounds: BTreeMap<u32, crate::airport::OrientedBox>,
     pub effects: Vec<Effect>,
@@ -1345,6 +1363,16 @@ pub struct State {
     /// projectile number: gun rounds a human fired with a view. Mission state
     /// like the rounds themselves.
     rewinds: BTreeMap<u32, u16>,
+    /// What each surface unit's round in flight carries beyond an aircraft's
+    /// round, by projectile number ([`State::fire_surface`]).
+    surface_rounds: BTreeMap<u32, SurfaceRound>,
+    /// The number of the next surface unit's round.
+    next_surface_shot: u32,
+    /// How each ground object that has a unit record explodes when destroyed.
+    ground_looks: BTreeMap<u32, GroundLook>,
+    /// The parked aircraft among the targets, by id, with their crash sites
+    /// ([`State::add_parked_aircraft`]).
+    parked: BTreeMap<u32, ParkedSite>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -2511,6 +2539,10 @@ impl State {
             friendly_fire: FriendlyFire::default(),
             volumes: rewind::History::default(),
             rewinds: BTreeMap::new(),
+            surface_rounds: BTreeMap::new(),
+            next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
+            ground_looks: BTreeMap::new(),
+            parked: BTreeMap::new(),
         }
     }
     /// A state with no ownship whose aircraft rows count from 0: an open
@@ -2682,10 +2714,24 @@ impl State {
     /// Replace all fire-control snapshots of aircraft that are not ownships for
     /// the next missile step. An ownship's support is sourced from its own
     /// sensor component.
+    ///
+    /// An entry answers for the target its observation names: an owner may
+    /// give one per target it guides missiles at, and an entry without an
+    /// observation supports nothing, so it is dropped. A battery launcher's
+    /// entry names the launcher as owner and its radar's position as
+    /// `radar_position` (docs/spec/surface-defenses.md, "SAM batteries").
     pub fn set_actor_supports(&mut self, supports: impl IntoIterator<Item = ActorSupport>) {
         self.actor_support.clear();
         self.actor_support
-            .extend(supports.into_iter().map(|support| (support.owner, support)));
+            .extend(supports.into_iter().filter_map(|support| {
+                support
+                    .observation
+                    .map(|observation| ((support.owner, observation.id), support))
+            }));
+    }
+    /// The fire-control answer `owner` gives for `target`.
+    fn support_for(&self, owner: u32, target: Option<u32>) -> Option<ActorSupport> {
+        target.and_then(|target| self.actor_support.get(&(owner, target)).copied())
     }
 
     /// The rewind, in ticks, that projectile `id` carries: 0 for every round
@@ -2752,7 +2798,7 @@ impl State {
                             radar_emitting: launcher.radar && launcher.alive,
                         })
                     } else {
-                        self.actor_support.get(&projectile.owner).copied()
+                        self.support_for(projectile.owner, target)
                     };
                 let supported = profile.guidance == Guidance::Supported
                     && support.is_some_and(|answer| {
@@ -2835,8 +2881,9 @@ impl State {
     fn command_of(&mut self, own: &mut Ownship, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
-                self.targets
-                    .retain(|t| self.ground_bounds.contains_key(&t.id));
+                self.targets.retain(|t| {
+                    self.ground_bounds.contains_key(&t.id) || self.parked.contains_key(&t.id)
+                });
                 own.sensors.clear_selection();
                 own.hud_selection = None;
                 own.sight_hold = None;
@@ -2845,11 +2892,9 @@ impl State {
             }
             Command::TargetDistance(distance) => {
                 if (1..=1_000_000).contains(&distance) {
-                    for target in self
-                        .targets
-                        .iter_mut()
-                        .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                    {
+                    for target in self.targets.iter_mut().filter(|t| {
+                        !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                    }) {
                         target.position = std::array::from_fn(|i| {
                             launcher.position[i] + launcher.basis.forward[i] * f64::from(distance)
                         });
@@ -2863,11 +2908,9 @@ impl State {
                 own.mounted = Seeker::default();
             }
             Command::TargetHeat(value) => {
-                for t in self
-                    .targets
-                    .iter_mut()
-                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                {
+                for t in self.targets.iter_mut().filter(|t| {
+                    !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                }) {
                     t.heat = match value {
                         0 => Heat::Unknown,
                         1 => Heat::Engine {
@@ -2894,11 +2937,9 @@ impl State {
                 }
             }
             Command::ToggleTargetRadar => {
-                for t in self
-                    .targets
-                    .iter_mut()
-                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                {
+                for t in self.targets.iter_mut().filter(|t| {
+                    !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                }) {
                     t.radar_emitting = !t.radar_emitting;
                 }
             }
@@ -2942,11 +2983,9 @@ impl State {
             Command::DamagePlayer => own.pending_damage = true,
             Command::ToggleTargetJammer => {
                 self.target_jammer = !self.target_jammer;
-                for t in self
-                    .targets
-                    .iter_mut()
-                    .filter(|t| !self.ground_bounds.contains_key(&t.id))
-                {
+                for t in self.targets.iter_mut().filter(|t| {
+                    !self.ground_bounds.contains_key(&t.id) && !self.parked.contains_key(&t.id)
+                }) {
                     t.jammer_active = self.target_jammer;
                 }
             }
@@ -3116,6 +3155,8 @@ impl State {
             own.aircraft,
             Some(left),
         );
+        // The device this release made, which every roll below is against.
+        let device = self.devices.released();
         for projectile in &mut self.projectiles {
             // Lazy: an AI missile carries its own weapon and its station
             // indexes the AI's loadout, which can be longer than this
@@ -3152,6 +3193,7 @@ impl State {
                 aircraft: own.aircraft,
                 projectile: projectile.id,
                 kind,
+                device,
                 susceptibility,
                 effectiveness,
                 threshold,
@@ -3377,15 +3419,16 @@ impl State {
             side,
         });
     }
-    /// Replace imported scene objects without changing aircraft or fixture IDs.
+    /// Replace imported scene objects, parked aircraft included, without
+    /// changing aircraft or fixture IDs.
     pub fn remove_ground_targets(&mut self) {
-        self.projectiles.retain(|p| {
-            !p.target
-                .is_some_and(|id| self.ground_bounds.contains_key(&id))
-        });
-        self.targets
-            .retain(|t| !self.ground_bounds.contains_key(&t.id));
+        let (bounds, parked) = (&self.ground_bounds, &self.parked);
+        let scene = |id: u32| bounds.contains_key(&id) || parked.contains_key(&id);
+        self.projectiles.retain(|p| !p.target.is_some_and(&scene));
+        self.targets.retain(|t| !scene(t.id));
         self.ground_bounds.clear();
+        self.ground_looks.clear();
+        self.parked.clear();
         for own in &mut self.ownships {
             own.sensors.clear_selection();
             own.hud_selection = None;
@@ -3394,12 +3437,15 @@ impl State {
     }
     /// Register one imported, stationary surface object without consuming an
     /// aircraft roster index. The caller owns the explicit disjoint ID range.
+    /// `side` is the side the object fights for, [`NO_SIDE`] for neutral
+    /// scenery.
     pub fn add_ground_target(
         &mut self,
         id: u32,
         bounds: crate::airport::OrientedBox,
         hit_points: i32,
         category: u16,
+        side: Side,
     ) -> Result<()> {
         if id == 0
             || !bounds.valid()
@@ -3438,7 +3484,7 @@ impl State {
             localized_damage: LocalizedDamage::default(),
             faults: Default::default(),
             category,
-            side: NO_SIDE,
+            side,
         });
         self.ground_bounds.insert(id, bounds);
         Ok(())
@@ -3466,7 +3512,7 @@ impl State {
         self.note_devices(DeviceNote::Cleared(self.tick));
         self.debris.clear();
         self.targets
-            .retain(|t| self.ground_bounds.contains_key(&t.id));
+            .retain(|t| self.ground_bounds.contains_key(&t.id) || self.parked.contains_key(&t.id));
         let id = self.next_target_id;
         self.next_target_id = self
             .next_target_id
@@ -4177,6 +4223,8 @@ impl State {
         let mut sources = Vec::new();
         // Score changes, owner and whether it is a kill, applied after the loop.
         let mut scored: Vec<(u32, bool)> = Vec::new();
+        // Parked aircraft destroyed this tick, for their crash sites.
+        let mut parked_wrecks: Vec<u32> = Vec::new();
         // Jammer deception on target hits takes the first ownship's ECM record.
         let fixture_ecm = ships.first().map(|own| own.config.ecm);
         let friendly_fire_off = self.friendly_fire == FriendlyFire::Off;
@@ -4209,14 +4257,16 @@ impl State {
             })
             .collect();
         // Each aircraft's side, the first row of an id answering, for the
-        // friendly fire rule.
+        // friendly fire rule and for whom a surface round counts as hostile.
         let mut target_sides: BTreeMap<u32, Side> = BTreeMap::new();
-        if friendly_fire_off {
+        if friendly_fire_off || !self.surface_rounds.is_empty() {
             for t in &self.targets {
                 target_sides.entry(t.id).or_insert(t.side);
             }
         }
         let mut candidates: Vec<usize> = Vec::new();
+        // Every round's collateral bursts, applied after the search.
+        let mut bursts: Vec<collateral::Burst> = Vec::new();
         self.projectiles.retain_mut(|p| {
             let owned = p.weapon.clone();
             let w = owned.as_ref().unwrap_or_else(|| {
@@ -4226,6 +4276,30 @@ impl State {
             let easy = self.cheats.easy_aiming && by_ownship && p.incoming.is_none();
             let eased = (easy && !is_gun(w)).then(|| eased_weapon(w));
             let w = eased.as_ref().unwrap_or(w);
+            // A surface unit's round, and its shooter's side: who is hostile
+            // to its flak fuze, and whom friendly fire spares from any
+            // round's hits and bursts.
+            let surface = self.surface_rounds.get(&p.id).copied();
+            let owner_side = if surface.is_some() || friendly_fire_off {
+                ships
+                    .iter()
+                    .find(|o| o.aircraft == p.owner)
+                    .map(|o| o.side)
+                    .or_else(|| target_sides.get(&p.owner).copied())
+                    .unwrap_or(NO_SIDE)
+            } else {
+                NO_SIDE
+            };
+            let surface_gun = surface.is_some() && is_gun(w);
+            let shooter = collateral::Shooter {
+                side: if friendly_fire_off {
+                    owner_side
+                } else {
+                    NO_SIDE
+                },
+                surface: surface.is_some(),
+                ownship: by_ownship,
+            };
             let hitbox = if easy {
                 crate::cheats::EASY_AIMING_HITBOX
             } else {
@@ -4252,7 +4326,21 @@ impl State {
             } else {
                 removal_due(m, now, p.launched_t, (p.position[1] * 256.) as i32)
             } {
-                self.ledger.resolve(p.id, Resolution::Missed);
+                if surface.is_some_and(|round| round.flak) {
+                    // A flak shell that reaches the end of its life bursts there.
+                    impacts.push((p.position, EffectKind::Flak, flak_explosion(w), 0));
+                    bursts.push(collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        p.position,
+                        collateral::Detonation::Air,
+                        None,
+                        true,
+                    ));
+                } else {
+                    self.ledger.resolve(p.id, Resolution::Missed);
+                }
                 return false;
             }
             p.previous = p.position;
@@ -4295,7 +4383,10 @@ impl State {
                             radar_emitting: row.launcher.radar && row.launcher.alive,
                         })
                 } else {
-                    self.actor_support.get(&p.owner).copied()
+                    p.guidance
+                        .as_ref()
+                        .and_then(|flight| flight.seeker.target)
+                        .and_then(|id| self.actor_support.get(&(p.owner, id)).copied())
                 };
                 let owner = p.owner;
                 guide_owned(
@@ -4404,16 +4495,7 @@ impl State {
             let mut first: Option<(f64, Option<Hit>)> = None;
             // With friendly fire off, no round damages an aircraft of its
             // shooter's own side, the shooter included.
-            let shooter_side = if friendly_fire_off {
-                ships
-                    .iter()
-                    .find(|o| o.aircraft == p.owner)
-                    .map(|o| o.side)
-                    .or_else(|| target_sides.get(&p.owner).copied())
-                    .unwrap_or(NO_SIDE)
-            } else {
-                NO_SIDE
-            };
+            let shooter_side = shooter.side;
             let spares =
                 |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
             // The round's swept segment widened by its fuze, for the first
@@ -4472,6 +4554,11 @@ impl State {
                 target_broad.candidates(reach, &mut candidates);
                 for &i in &candidates {
                     let t = &self.targets[i];
+                    // A surface round strikes aircraft only: no ground object
+                    // or ship, its own launcher included.
+                    if surface.is_some() && t.role != TargetRole::Aircraft {
+                        continue;
+                    }
                     if !(t.body_present()
                         && (!is_gun(w) || t.id != p.owner)
                         && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side)))
@@ -4487,7 +4574,10 @@ impl State {
                         // radius remains a separate damage rule and does not turn
                         // a long runway into a giant interception sphere.
                         bounds.segment_fraction(p.previous, p.position)
-                    } else if is_gun(w) && t.role == TargetRole::Aircraft {
+                    } else if is_gun(w)
+                        && (t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id))
+                    {
+                        // A parked aircraft has the same aircraft volume.
                         if let Some(v) = past(t.id) {
                             rewound_contact(p, v, hitbox)
                         } else {
@@ -4497,7 +4587,15 @@ impl State {
                             LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
                         }
                     } else {
-                        let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
+                        // A parked aircraft is met at its aircraft sphere: a bomb or
+                        // missile's fuze radius does not reach it (fitted; nothing
+                        // bursts beside a ground target).
+                        let fuze = if self.parked.contains_key(&t.id) {
+                            0
+                        } else {
+                            w.damage.fuze_radius.max(0)
+                        };
+                        let radius = t.radius * hitbox + f64::from(fuze);
                         let start = sub(p.previous, old_targets[i]);
                         // A round leaving its own launcher's volume is not a hit.
                         if p.owner == t.id && dot(start, start) <= radius * radius {
@@ -4520,6 +4618,83 @@ impl State {
             {
                 first = Some((at, None));
             }
+            if let Some(round) = surface {
+                // A flak shell bursts as it comes within its fuze radius of a
+                // hostile aircraft in flight, unless it struck something first.
+                if round.flak && armed {
+                    let fuze = f64::from(w.damage.fuze_radius.max(0));
+                    let hostile = |t: &Target| {
+                        t.hp > 0
+                            && t.airborne
+                            && !t.on_ground
+                            && t.body_present()
+                            && t.id != p.owner
+                            && (owner_side == NO_SIDE || t.side != owner_side)
+                    };
+                    let mut near: Option<f64> = None;
+                    let mut closer = |at: Option<f64>| {
+                        if let Some(at) = at
+                            && near.is_none_or(|n| at < n)
+                        {
+                            near = Some(at);
+                        }
+                    };
+                    for r in rows.iter().filter(|r| hostile(&r.target)) {
+                        closer(segment_sphere(
+                            sub(p.previous, r.previous),
+                            sub(p.position, r.target.position),
+                            r.target.radius + fuze,
+                        ));
+                    }
+                    for &i in &candidates {
+                        let t = &self.targets[i];
+                        if t.role == TargetRole::Aircraft && hostile(t) {
+                            closer(segment_sphere(
+                                sub(p.previous, old_targets[i]),
+                                sub(p.position, t.position),
+                                t.radius + fuze,
+                            ));
+                        }
+                    }
+                    if let Some(at) = near
+                        && first.is_none_or(|f| at < f.0)
+                    {
+                        let position = std::array::from_fn(|i| {
+                            p.previous[i] + (p.position[i] - p.previous[i]) * at
+                        });
+                        impacts.push((position, EffectKind::Flak, flak_explosion(w), 0));
+                        bursts.push(collateral::Burst::new(
+                            p,
+                            w,
+                            shooter,
+                            position,
+                            collateral::Detonation::Air,
+                            None,
+                            true,
+                        ));
+                        return false;
+                    }
+                }
+                // The round's end tick: a flak shell's time fuze bursts it;
+                // any other round has gone past its target and goes away.
+                if first.is_none() && round.end_tick.is_some_and(|end| p.age >= end) {
+                    if round.flak {
+                        impacts.push((p.position, EffectKind::Flak, flak_explosion(w), 0));
+                        bursts.push(collateral::Burst::new(
+                            p,
+                            w,
+                            shooter,
+                            p.position,
+                            collateral::Detonation::Air,
+                            None,
+                            true,
+                        ));
+                    } else {
+                        self.ledger.resolve(p.id, Resolution::Missed);
+                    }
+                    return false;
+                }
+            }
             if let Some((at, target)) = first {
                 let position =
                     std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * at);
@@ -4538,6 +4713,22 @@ impl State {
                     if by_ownship {
                         scored.push((p.owner, false));
                     }
+                    let burst = collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        position,
+                        if wreck.role == TargetRole::Aircraft {
+                            collateral::Detonation::Air
+                        } else {
+                            collateral::Detonation::Ground
+                        },
+                        Some(wreck.id),
+                        false,
+                    );
+                    if burst.collateral() {
+                        bursts.push(burst);
+                    }
                     return false;
                 }
                 if let Some(Hit::Ownship(n)) = target {
@@ -4548,7 +4739,9 @@ impl State {
                         w.seeker.signature,
                         r.launcher.jammer && !own.ecm_failed,
                     );
+                    // A jammer defeats missiles, never a surface gun's rounds.
                     if deception != 0
+                        && !surface_gun
                         && i32::from(draw(&mut self.rng, 100))
                             >= super::systems::hit_chance(100, deception)
                     {
@@ -4574,7 +4767,14 @@ impl State {
                                 LocalizedDamage::section_segment(previous, p.position, &r.target);
                             (section, position)
                         };
-                        ownship_hits.push((n, amount, section, is_gun(w), p.owner, w.flags));
+                        ownship_hits.push((
+                            n,
+                            amount,
+                            section,
+                            is_aircraft_gun(w),
+                            p.owner,
+                            w.flags,
+                        ));
                         impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
                         if !is_gun(w) {
                             events.push(Event::Jolt(Jolt {
@@ -4585,6 +4785,18 @@ impl State {
                                 ) / 100.,
                             }));
                         }
+                        let burst = collateral::Burst::new(
+                            p,
+                            w,
+                            shooter,
+                            position,
+                            collateral::Detonation::Air,
+                            Some(r.target.id),
+                            false,
+                        );
+                        if burst.collateral() {
+                            bursts.push(burst);
+                        }
                     }
                     return false;
                 }
@@ -4594,10 +4806,14 @@ impl State {
                         super::systems::deception_chance(
                             ecm,
                             w.seeker.signature,
-                            self.target_jammer && !self.ground_bounds.contains_key(&t.id),
+                            self.target_jammer
+                                && !self.ground_bounds.contains_key(&t.id)
+                                && !self.parked.contains_key(&t.id),
                         )
                     });
+                    // A jammer defeats missiles, never a surface gun's rounds.
                     if deception != 0
+                        && !surface_gun
                         && i32::from(draw(&mut self.rng, 100))
                             >= super::systems::hit_chance(100, deception)
                     {
@@ -4630,12 +4846,14 @@ impl State {
                     let critical = critical_hit(t, w, section, scaled);
                     let applied = if critical { t.hp } else { scaled.min(t.hp) };
                     t.hp -= applied;
-                    if t.role == TargetRole::Aircraft {
+                    // A parked aircraft takes damage by section like any
+                    // aircraft (no system faults: nothing is running).
+                    if t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id) {
                         t.localized_damage.record(section, scaled, t.initial_hp);
-                        if t.hp > 0 {
-                            t.faults
-                                .hit(scaled, t.initial_hp, |n| draw(&mut self.rng, n));
-                        }
+                    }
+                    if t.role == TargetRole::Aircraft && t.hp > 0 {
+                        t.faults
+                            .hit(scaled, t.initial_hp, |n| draw(&mut self.rng, n));
                     }
                     if self.history.len() == MAX_HIT_RECORDS {
                         self.history.remove(0);
@@ -4686,19 +4904,60 @@ impl State {
                     }
                     impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
                     if t.hp == 0 {
-                        impacts.push((
-                            position,
-                            EffectKind::Destroyed,
-                            if t.role == TargetRole::Aircraft {
-                                super::blast::AIRCRAFT
-                            } else {
-                                super::blast::GROUND_OBJECT
-                            },
-                            0,
-                        ));
+                        // A ground object explodes as its unit record says,
+                        // leaving its crater on land.
+                        let parked = self.parked.contains_key(&t.id);
+                        if parked {
+                            parked_wrecks.push(t.id);
+                        }
+                        let (explosion, crater) = if t.role == TargetRole::Aircraft || parked {
+                            (super::blast::AIRCRAFT, 0)
+                        } else if let Some(look) = self.ground_looks.get(&t.id) {
+                            (
+                                super::blast::ground_object(Some(look.explosion)),
+                                if water(position[0], position[2]) {
+                                    0
+                                } else {
+                                    look.crater
+                                },
+                            )
+                        } else {
+                            (super::blast::GROUND_OBJECT, 0)
+                        };
+                        impacts.push((position, EffectKind::Destroyed, explosion, crater));
+                    }
+                    // A round on an aircraft bursts in the air; on a ground
+                    // object or ship, at ground level.
+                    let burst = collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        position,
+                        if t.role == TargetRole::Aircraft {
+                            collateral::Detonation::Air
+                        } else {
+                            collateral::Detonation::Ground
+                        },
+                        Some(t.id),
+                        false,
+                    );
+                    if burst.collateral() {
+                        bursts.push(burst);
                     }
                 } else {
                     self.ledger.resolve(p.id, Resolution::Missed);
+                    let burst = collateral::Burst::new(
+                        p,
+                        w,
+                        shooter,
+                        position,
+                        collateral::Detonation::Ground,
+                        None,
+                        false,
+                    );
+                    if burst.collateral() {
+                        bursts.push(burst);
+                    }
                     events.push(Event::Ground);
                     if water(position[0], position[2]) {
                         impacts.push((position, EffectKind::Ground, w.effects.water_explosion, 0));
@@ -4715,11 +4974,30 @@ impl State {
             }
             true
         });
-        // A round that is gone takes its rewind with it.
-        if !self.rewinds.is_empty() {
+        // A round that is gone takes its rewind and its surface record with it.
+        if !self.rewinds.is_empty() || !self.surface_rounds.is_empty() {
             let flying: std::collections::BTreeSet<u32> =
                 self.projectiles.iter().map(|p| p.id).collect();
             self.rewinds.retain(|id, _| flying.contains(id));
+            self.surface_rounds.retain(|id, _| flying.contains(id));
+        }
+        for id in parked_wrecks {
+            self.parked_destroyed(id);
+        }
+        for burst in &bursts {
+            self.apply_burst(
+                burst,
+                &rows,
+                friendly_fire_off,
+                &water,
+                collateral::Outputs {
+                    events: &mut events,
+                    strikes: &mut strikes,
+                    ownship_hits: &mut ownship_hits,
+                    impacts: &mut impacts,
+                    scored: &mut scored,
+                },
+            );
         }
         for strike in strikes {
             self.strike(strike);
@@ -4790,12 +5068,15 @@ impl State {
             self.blast(p, kind, explosion);
             self.crater(p, crater, super::blast::FOREVER);
         }
+        self.burn_wrecks();
         use super::smoke::Kind;
-        for t in self
-            .targets
-            .iter()
-            .filter(|t| t.airborne && t.damage_fraction() >= 0.5)
-        {
+        // A damaged parked aircraft smokes like a damaged aircraft in the air
+        // (docs/spec/surface-defenses.md, "Parked aircraft"); a destroyed one
+        // burns at its crash site instead.
+        for t in self.targets.iter().filter(|t| {
+            (t.airborne || (t.hp > 0 && self.parked.contains_key(&t.id)))
+                && t.damage_fraction() >= 0.5
+        }) {
             sources.push((
                 std::array::from_fn(|i| t.position[i] - t.basis.forward[i] * 15.),
                 Kind::Aircraft,
@@ -5054,9 +5335,16 @@ fn rewound_section(
     let impact = std::array::from_fn(|i| impact[i] + target.position[i] - v.position[i]);
     (section, impact)
 }
+/// John's one-third rule for the aircraft guns (2026-09-20). Surface guns
+/// keep their record's damage: the AAA tuning table already matches retail
+/// damage per second.
 fn scaled_weapon_damage(w: &Weapon, damage: i32) -> i32 {
     let damage = damage.max(0);
-    if is_gun(w) { damage / 3 } else { damage }
+    if is_aircraft_gun(w) {
+        damage / 3
+    } else {
+        damage
+    }
 }
 
 fn projectile_damage(p: &Projectile, w: &Weapon, damage: i32) -> i32 {
@@ -5070,12 +5358,20 @@ fn projectile_damage(p: &Projectile, w: &Weapon, damage: i32) -> i32 {
 
 fn critical_hit(target: &Target, weapon: &Weapon, section: DamageSection, damage: i32) -> bool {
     target.role == TargetRole::Aircraft
-        && is_gun(weapon)
+        && is_aircraft_gun(weapon)
         && (section == DamageSection::Cockpit
             || (section == DamageSection::Core && damage >= target.initial_hp / 2))
 }
 
+/// Whether `w` is a gun: an aircraft's gun record or a surface gun of the AAA
+/// tuning table. Gun rounds are hit-tested against the aircraft volume, spread
+/// by the gun dispersion and never home.
 pub fn is_gun(w: &Weapon) -> bool {
+    is_aircraft_gun(w) || super::surface_guns::is_surface_gun(&w.source)
+}
+/// An aircraft's gun record, which the one-third damage rule and the critical
+/// (pilot and central) gun kills apply to.
+pub fn is_aircraft_gun(w: &Weapon) -> bool {
     AircraftId::ALL
         .into_iter()
         .chain([AircraftId::Faxx])
@@ -7376,6 +7672,9 @@ mod tests {
         );
         assert_eq!(roll.decoyed, decoyed);
         assert_eq!(roll.decoyed, roll.roll < 50);
+        // The roll names the chaff cartridge it was against: the number of
+        // the player's chaff release among the notes above.
+        assert_eq!(roll.device, 1);
         assert!(s.take_device_notes().is_empty() && s.take_decoy_rolls().is_empty());
         // A range reset clears the devices, and says so.
         s.range_target(0, launcher());
@@ -7553,7 +7852,8 @@ mod tests {
             pitch: 0.,
             bank: 0.,
         };
-        s.add_ground_target(0x40000000, bounds, 17, 0x100).unwrap();
+        s.add_ground_target(0x40000000, bounds, 17, 0x100, NO_SIDE)
+            .unwrap();
         let mut destroyed = 0;
         for _ in 0..300 {
             destroyed += s
@@ -7587,7 +7887,8 @@ mod tests {
             pitch: 0.,
             bank: 0.,
         };
-        s.add_ground_target(0x40000000, bounds, 750, 0x100).unwrap();
+        s.add_ground_target(0x40000000, bounds, 750, 0x100, NO_SIDE)
+            .unwrap();
         s.targets
             .iter_mut()
             .find(|t| t.id == 0x40000000)

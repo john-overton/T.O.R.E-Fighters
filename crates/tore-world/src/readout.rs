@@ -378,6 +378,11 @@ pub struct RwrReadout {
     pub inbound: Vec<InboundMissile>,
     /// The seeker classes of the missile locks the AI holds on the plane.
     pub locks: Vec<u8>,
+    /// The surface emitters (radars) whose controllers track or fire at the
+    /// plane, by emitter id: the RWR draws their squares bright. Host-built
+    /// (`Combat::cockpit_readout`); a networked client has none until the
+    /// wire carries it (protocol 22).
+    pub painting: Vec<u32>,
 }
 
 /// Damage, faults and failures.
@@ -736,6 +741,7 @@ pub fn build(
             missiles,
             inbound,
             locks,
+            painting: Vec::new(),
         },
         damage: DamageReadout {
             hp: own.hp,

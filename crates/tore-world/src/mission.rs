@@ -117,16 +117,98 @@ pub enum Start {
     /// altitude setting, which a ground start keeps: airborne aircraft of
     /// the mission need it to clear the ground.
     Ground { runway: u32, altitude_ft: u32 },
+    /// Parked on a runway the world picks from the ground target (text form
+    /// `start ground auto`; surface-defenses spec, "Start placement"). Until
+    /// the world places starts from the target it takes the first friendly
+    /// runway that fits the wing. `altitude_ft` is as for [`Self::Ground`].
+    GroundAuto { altitude_ft: u32 },
 }
 
 impl Start {
     /// The creator's altitude setting.
     pub fn altitude_ft(self) -> u32 {
         match self {
-            Self::Airborne { altitude_ft } | Self::Ground { altitude_ft, .. } => altitude_ft,
+            Self::Airborne { altitude_ft }
+            | Self::Ground { altitude_ft, .. }
+            | Self::GroundAuto { altitude_ft } => altitude_ft,
         }
     }
+
+    /// The start is on the ground, on a chosen runway or one the world picks.
+    pub fn on_ground(self) -> bool {
+        !matches!(self, Self::Airborne { .. })
+    }
 }
+
+/// How heavily a ground target's anti-aircraft guns or SAM sites are manned:
+/// the creator's fields 31 and 32 (retail words "not", "lightly",
+/// "moderately" and "heavily"; the text form writes the plain ones). The level
+/// is the chance in percent that each slot of the target's template is manned
+/// (0, 25, 60 and 100, `quick_template::tables::DEFENSE_PERCENT`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Defense {
+    #[default]
+    None,
+    Light,
+    Moderate,
+    Heavy,
+}
+
+impl Defense {
+    pub const ALL: [Defense; 4] = [Self::None, Self::Light, Self::Moderate, Self::Heavy];
+
+    /// The text form's word.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Light => "light",
+            Self::Moderate => "moderate",
+            Self::Heavy => "heavy",
+        }
+    }
+
+    pub fn parse(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|level| level.name() == word)
+    }
+
+    /// The creator's list index: 0 for none up to 3 for heavy.
+    pub fn level(self) -> usize {
+        self as usize
+    }
+
+    pub fn from_level(level: usize) -> Option<Self> {
+        Self::ALL.get(level).copied()
+    }
+
+    /// The chance in percent that a slot is manned.
+    pub fn percent(self) -> u32 {
+        tore_formats::quick_template::tables::DEFENSE_PERCENT[self.level()]
+    }
+}
+
+/// The template stems the creator offers as ground targets in a theater, in
+/// menu order after the leading "nothing" entry, or none for an unknown
+/// theater. A `~` layout variant offers its base theater's.
+pub fn ground_targets(theater: &str) -> &'static [&'static str] {
+    use tore_formats::quick_template::tables::TEMPLATES;
+    tore_formats::theater::base_theater(theater)
+        .and_then(|base| THEATERS.iter().position(|code| *code == base))
+        .and_then(|index| TEMPLATES[index].get(1..))
+        .unwrap_or(&[])
+}
+
+/// The nationality (creator list index) the creator gives the enemy in a
+/// theater, the default of [`MissionSpec::enemy_nationality`]. A theater the
+/// creator does not offer gets Ukraine's.
+pub fn default_enemy_nationality(theater: &str) -> u8 {
+    use tore_formats::quick_template::tables::ENEMY_NATIONALITY;
+    tore_formats::theater::base_theater(theater)
+        .and_then(|base| THEATERS.iter().position(|code| *code == base))
+        .map_or(ENEMY_NATIONALITY[14], |index| ENEMY_NATIONALITY[index]) as u8
+}
+
+/// How many nationalities the creator lists.
+pub const NATIONALITIES: u8 = 60;
 
 /// How good a wing's pilots are. `Dummy` is the creator's training setting:
 /// a constant-heading 400-knot target.
@@ -493,6 +575,27 @@ pub struct MissionSpec {
     /// `own` when absent; a networked mission's setting, which single
     /// player's build refuses.
     pub cheat_loadouts: bool,
+    /// The creator's friendly ground target (field 30) as the stem of its
+    /// template mission, for example `QUCOL`: one of [`ground_targets`] for
+    /// the theater. `None` is the creator's "no ground target". Text form
+    /// `ground-target QUCOL`, absent when `None`.
+    pub ground_target: Option<String>,
+    /// How heavily the target's AAA guns (field 31) and SAM sites (field 32)
+    /// are manned. Only with a ground target. Text form `defenses aaa heavy
+    /// sam moderate`, written only with a target and a level above none.
+    pub aaa: Defense,
+    pub sam: Defense,
+    /// The seed of everything the surface layout rolls (which slots are
+    /// manned, which units, where they stand). The creator rolls one when
+    /// the flight starts; a restart reuses it. 0 is "none drawn yet": the
+    /// host draws one when the flight starts. Text form `surface-seed N`,
+    /// written when not 0.
+    pub surface_seed: u32,
+    /// The enemy's nationality (field 20, an index into the creator's list of
+    /// 60), which decides the equipment group the target's units are drawn
+    /// from. The default is the theater's ([`default_enemy_nationality`]); the
+    /// text form writes `enemy-nationality N` only when it differs.
+    pub enemy_nationality: u8,
 }
 
 impl MissionSpec {
@@ -534,6 +637,11 @@ impl MissionSpec {
             plane_loadouts: BTreeMap::new(),
             friendly_fire: true,
             cheat_loadouts: false,
+            ground_target: None,
+            aaa: Defense::None,
+            sam: Defense::None,
+            surface_seed: 0,
+            enemy_nationality: default_enemy_nationality(theater),
         }
     }
 
@@ -567,8 +675,14 @@ impl MissionSpec {
     pub fn ground_runway(&self) -> Option<u32> {
         match self.start {
             Start::Ground { runway, .. } => Some(runway),
-            Start::Airborne { .. } => None,
+            Start::Airborne { .. } | Start::GroundAuto { .. } => None,
         }
+    }
+
+    /// The start is on the ground and the world picks the runway
+    /// (`start ground auto`).
+    pub fn ground_auto(&self) -> bool {
+        matches!(self.start, Start::GroundAuto { .. })
     }
 
     /// The enemy's distance in feet.
@@ -659,7 +773,7 @@ impl MissionSpec {
         };
         let start = match self.start {
             Start::Airborne { altitude_ft } => format!("airborne at {altitude_ft} ft"),
-            Start::Ground { .. } => "ground start".to_owned(),
+            Start::Ground { .. } | Start::GroundAuto { .. } => "ground start".to_owned(),
         };
         format!(
             "{}, {}, {start}: {} against {}",
@@ -692,6 +806,29 @@ impl MissionSpec {
             && runway < RUNWAY_OBJECT_BASE
         {
             return refuse(format!("{runway} is not a runway object"));
+        }
+        if let Some(target) = &self.ground_target {
+            let offered = ground_targets(&self.theater);
+            if !offered.contains(&target.as_str()) {
+                return refuse(if offered.is_empty() {
+                    format!("{} has no ground targets", self.theater)
+                } else {
+                    format!(
+                        "`{target}` is not a ground target of {}; the choices are {}",
+                        self.theater,
+                        offered.join(", ")
+                    )
+                });
+            }
+        } else if self.aaa != Defense::None || self.sam != Defense::None {
+            return refuse("the AAA and SAM defenses need a `ground-target`".into());
+        }
+        if self.enemy_nationality >= NATIONALITIES {
+            return refuse(format!(
+                "the enemy nationality is 0 to {}, not {}",
+                NATIONALITIES - 1,
+                self.enemy_nationality
+            ));
         }
         if !SEPARATION_NM.contains(&f64::from(self.separation_nm)) {
             return refuse(format!(
@@ -829,6 +966,13 @@ impl MissionSpec {
                     line(format!("start ground {ordinal} {altitude_ft}"));
                 }
             }
+            Start::GroundAuto { altitude_ft } => {
+                if altitude_ft == DEFAULT_ALTITUDE_FT {
+                    line("start ground auto".to_owned());
+                } else {
+                    line(format!("start ground auto {altitude_ft}"));
+                }
+            }
         }
         line(format!("separation-nm {}", self.separation_nm));
         line(format!("preset {}", self.preset.name()));
@@ -860,6 +1004,24 @@ impl MissionSpec {
             if *survive {
                 line(format!("survive {} yes", wing_words(Self::wing_id(index))));
             }
+        }
+        // The surface layout's settings, written only when set so a mission
+        // without a ground target reads as it always did.
+        if let Some(target) = &self.ground_target {
+            line(format!("ground-target {target}"));
+            if self.aaa != Defense::None || self.sam != Defense::None {
+                line(format!(
+                    "defenses aaa {} sam {}",
+                    self.aaa.name(),
+                    self.sam.name()
+                ));
+            }
+        }
+        if self.surface_seed != 0 {
+            line(format!("surface-seed {}", self.surface_seed));
+        }
+        if self.enemy_nationality != default_enemy_nationality(&self.theater) {
+            line(format!("enemy-nationality {}", self.enemy_nationality));
         }
         line(format!("cheats {}", cheats_words(&self.cheats)));
         // A networked mission's settings, written only when they differ
@@ -1196,6 +1358,10 @@ struct Parser {
     plane_loads: BTreeMap<u32, LoadParts>,
     friendly_fire: Option<bool>,
     cheat_loadouts: Option<bool>,
+    ground_target: Option<String>,
+    defenses: Option<(Defense, Defense)>,
+    surface_seed: Option<u32>,
+    enemy_nationality: Option<u8>,
 }
 
 /// One loadout's lines as the parser has read them.
@@ -1528,6 +1694,65 @@ impl Parser {
                 };
                 once(&mut self.cheat_loadouts, "`loadouts`", any)
             }
+            "ground-target" => {
+                let [stem] = arguments(words, 1, "ground-target TEMPLATE")? else {
+                    unreachable!("one argument")
+                };
+                if !resource_name(stem) {
+                    return refuse(format!("`{stem}` is not a ground target name"));
+                }
+                once(
+                    &mut self.ground_target,
+                    "`ground-target`",
+                    (*stem).to_owned(),
+                )
+            }
+            "defenses" => {
+                let usage = "defenses aaa LEVEL sam LEVEL";
+                let (Some(&"aaa"), Some(&"sam")) = (words.get(1), words.get(3)) else {
+                    return refuse(format!("expected `{usage}`"));
+                };
+                let [_, _, aaa, _, sam] = words else {
+                    return refuse(format!("expected `{usage}`"));
+                };
+                let level = |word: &str| {
+                    Defense::parse(word).ok_or_else(|| {
+                        MissionError(format!(
+                            "`{word}` is not a defense level; the choices are {}",
+                            join(Defense::ALL.map(Defense::name))
+                        ))
+                    })
+                };
+                once(&mut self.defenses, "`defenses`", (level(aaa)?, level(sam)?))
+            }
+            "surface-seed" => {
+                let [seed] = arguments(words, 1, "surface-seed N")? else {
+                    unreachable!("one argument")
+                };
+                let seed = seed.parse::<u32>().or_else(|_| {
+                    refuse(format!("the surface seed is a whole number, not `{seed}`"))
+                })?;
+                once(&mut self.surface_seed, "`surface-seed`", seed)
+            }
+            "enemy-nationality" => {
+                let [index] = arguments(words, 1, "enemy-nationality N")? else {
+                    unreachable!("one argument")
+                };
+                let index = index
+                    .parse::<u8>()
+                    .ok()
+                    .filter(|index| *index < NATIONALITIES)
+                    .map_or_else(
+                        || {
+                            refuse(format!(
+                                "the enemy nationality is 0 to {}, not `{index}`",
+                                NATIONALITIES - 1
+                            ))
+                        },
+                        Ok,
+                    )?;
+                once(&mut self.enemy_nationality, "`enemy-nationality`", index)
+            }
             _ => refuse(format!("unknown setting `{key}`")),
         }
     }
@@ -1551,7 +1776,12 @@ impl Parser {
                 if words.len() != 3 && words.len() != 4 {
                     return refuse("expected `start ground RUNWAY [FEET]`".into());
                 }
-                let ordinal = whole(words[2], "the runway number")?;
+                let auto = words[2] == "auto";
+                let ordinal = if auto {
+                    0
+                } else {
+                    whole(words[2], "the runway number")?
+                };
                 if ordinal >= RUNWAY_OBJECT_BASE {
                     return refuse(format!("{ordinal} is not a runway number"));
                 }
@@ -1565,12 +1795,18 @@ impl Parser {
                         join(ALTITUDES_FT)
                     ));
                 }
-                Start::Ground {
-                    runway: RUNWAY_OBJECT_BASE + ordinal,
-                    altitude_ft,
+                if auto {
+                    Start::GroundAuto { altitude_ft }
+                } else {
+                    Start::Ground {
+                        runway: RUNWAY_OBJECT_BASE + ordinal,
+                        altitude_ft,
+                    }
                 }
             }
-            _ => return refuse("expected `start airborne FEET` or `start ground RUNWAY`".into()),
+            _ => {
+                return refuse("expected `start airborne FEET` or `start ground RUNWAY`".into());
+            }
         };
         once(&mut self.start, "`start`", start)
     }
@@ -1806,6 +2042,15 @@ impl Parser {
         spec.fixture_wings = self.fixture_wings.unwrap_or(false);
         spec.friendly_fire = self.friendly_fire.unwrap_or(true);
         spec.cheat_loadouts = self.cheat_loadouts.unwrap_or(false);
+        spec.ground_target = self.ground_target;
+        if let Some((aaa, sam)) = self.defenses {
+            spec.aaa = aaa;
+            spec.sam = sam;
+        }
+        spec.surface_seed = self.surface_seed.unwrap_or(0);
+        if let Some(nationality) = self.enemy_nationality {
+            spec.enemy_nationality = nationality;
+        }
         if !self.load.is_empty() {
             spec.loadout = Some(self.load.finish("loadout")?);
         }
@@ -2379,6 +2624,138 @@ mod tests {
         let high = MissionSpec::from_text(&format!("{BASE}start ground 12 20000\n")).unwrap();
         assert_eq!(high.start.altitude_ft(), 20_000);
         assert!(high.to_text().contains("start ground 12 20000\n"));
+    }
+
+    /// The text of a plain mission, written before the surface settings
+    /// existed: it must not change (the mission hash is the text's).
+    #[test]
+    fn a_mission_without_a_ground_target_writes_the_text_it_always_did() {
+        let spec = MissionSpec::new("EGY", AircraftId::F18);
+        assert_eq!(
+            spec.to_text(),
+            "tore-mission 1\ntheater EGY\ncondition clear\nstart airborne 5000\n\
+             separation-nm 5\npreset free\nguns-only no\nwing friendly 1 F18.PT 1 average\n\
+             cheats none\nflight-model human hybrid\nflight-model ai hybrid\n"
+        );
+        let text = MissionSpec::from_text(&guide_example()).unwrap().to_text();
+        for key in [
+            "ground-target",
+            "defenses",
+            "surface-seed",
+            "enemy-nationality",
+            "ground auto",
+        ] {
+            assert!(!text.contains(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_ground_target_its_defenses_seed_and_enemy_round_trip() {
+        let mut spec = MissionSpec::new("KURILE", AircraftId::F18);
+        spec.ground_target = Some("QKSILO".into());
+        spec.aaa = Defense::Heavy;
+        spec.sam = Defense::Light;
+        spec.surface_seed = 1_234_567;
+        spec.enemy_nationality = 33;
+        spec.validate().unwrap();
+        let text = spec.to_text();
+        assert!(text.contains("\nground-target QKSILO\n"), "{text}");
+        assert!(text.contains("\ndefenses aaa heavy sam light\n"), "{text}");
+        assert!(text.contains("\nsurface-seed 1234567\n"), "{text}");
+        assert!(text.contains("\nenemy-nationality 33\n"), "{text}");
+        assert_eq!(MissionSpec::from_text(&text).unwrap(), spec);
+        // Every defense pair, and a target with no defenses, which writes no
+        // `defenses` line and reads back as none.
+        for aaa in Defense::ALL {
+            for sam in Defense::ALL {
+                spec.aaa = aaa;
+                spec.sam = sam;
+                let text = spec.to_text();
+                let has_line = text.contains("defenses");
+                assert_eq!(has_line, aaa != Defense::None || sam != Defense::None);
+                assert_eq!(MissionSpec::from_text(&text).unwrap(), spec, "{text}");
+            }
+        }
+        // The theater's own enemy is the default and is not written.
+        spec.enemy_nationality = default_enemy_nationality("KURILE");
+        assert!(!spec.to_text().contains("enemy-nationality"));
+        assert_eq!(MissionSpec::from_text(&spec.to_text()).unwrap(), spec);
+    }
+
+    #[test]
+    fn every_theaters_targets_and_enemy_come_from_the_retail_tables() {
+        use tore_formats::quick_template::tables::{ENEMY_NATIONALITY, TEMPLATES};
+        for (index, theater) in THEATERS.into_iter().enumerate() {
+            let offered = ground_targets(theater);
+            assert_eq!(offered.len() + 1, TEMPLATES[index].len(), "{theater}");
+            assert!(!offered.is_empty() && !offered.iter().any(|s| s.ends_with("NOTH")));
+            assert_eq!(
+                usize::from(default_enemy_nationality(theater)),
+                ENEMY_NATIONALITY[index]
+            );
+            for stem in offered {
+                let mut spec = MissionSpec::new(theater, AircraftId::F18);
+                spec.ground_target = Some((*stem).into());
+                spec.aaa = Defense::Moderate;
+                spec.validate()
+                    .unwrap_or_else(|e| panic!("{theater} {stem}: {e}"));
+                assert_eq!(MissionSpec::from_text(&spec.to_text()).unwrap(), spec);
+            }
+        }
+        // A layout variant offers its base theater's targets.
+        assert_eq!(ground_targets("~UKR1"), ground_targets("UKR"));
+        assert!(ground_targets("NOWHERE").is_empty());
+    }
+
+    #[test]
+    fn a_ground_target_is_refused_for_the_wrong_theater_or_the_nothing_entry() {
+        let target = |text: &str| refused(&format!("{BASE}{text}"));
+        assert!(target("ground-target QCSCUD\n").contains("not a ground target of UKR"));
+        assert!(target("ground-target QUNOTH\n").contains("not a ground target"));
+        assert!(target("ground-target\n").contains("expected `ground-target TEMPLATE`"));
+        assert!(
+            target("defenses aaa heavy sam none\n").contains("need a `ground-target`"),
+            "defenses need a target"
+        );
+        let with = |text: &str| refused(&format!("{BASE}ground-target QUCOL\n{text}"));
+        assert!(with("defenses aaa heavily sam none\n").contains("not a defense level"));
+        assert!(with("defenses sam heavy aaa none\n").contains("expected `defenses aaa"));
+        assert!(with("defenses aaa heavy\n").contains("expected `defenses aaa"));
+        assert!(with("defenses aaa none sam none\ndefenses aaa none sam none\n").contains("twice"));
+        assert!(with("surface-seed -1\n").contains("whole number"));
+        assert!(with("surface-seed 4294967296\n").contains("whole number"));
+        assert!(with("enemy-nationality 60\n").contains("0 to 59"));
+        assert!(with("enemy-nationality x\n").contains("0 to 59"));
+        assert!(with("ground-target QUCOL\n").contains("twice"));
+        // Built in code, the same rules hold.
+        let mut spec = MissionSpec::new("UKR", AircraftId::F18);
+        spec.sam = Defense::Light;
+        assert!(spec.validate().is_err());
+        spec.sam = Defense::None;
+        spec.enemy_nationality = 60;
+        assert!(spec.validate().is_err());
+    }
+
+    #[test]
+    fn a_ground_start_may_leave_its_runway_to_the_world() {
+        let spec = MissionSpec::from_text(&format!("{BASE}start ground auto\n")).unwrap();
+        assert!(spec.ground_auto() && spec.start.on_ground());
+        assert_eq!(spec.ground_runway(), None);
+        assert_eq!(spec.start.altitude_ft(), DEFAULT_ALTITUDE_FT);
+        assert!(spec.to_text().contains("start ground auto\n"));
+        let high = MissionSpec::from_text(&format!("{BASE}start ground auto 20000\n")).unwrap();
+        assert_eq!(
+            high.start,
+            Start::GroundAuto {
+                altitude_ft: 20_000
+            }
+        );
+        assert!(high.to_text().contains("start ground auto 20000\n"));
+        assert_eq!(MissionSpec::from_text(&high.to_text()).unwrap(), high);
+        assert!(high.summary().contains("ground start"));
+        assert!(refused(&format!("{BASE}start ground auto 123\n")).contains("altitude"));
+        assert!(refused(&format!("{BASE}start ground automatic\n")).contains("runway number"));
+        assert!(refused(&format!("{BASE}start ground\n")).contains("RUNWAY [FEET]"));
     }
 
     #[test]

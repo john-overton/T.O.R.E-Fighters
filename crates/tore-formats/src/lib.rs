@@ -1,6 +1,7 @@
 //! Bounded readers for user-owned Fighters Anthology menu and theater resources.
 //! No executable resource is ever executed. See docs/formats/menu.md and theater.md.
 pub mod aircraft;
+pub mod carrier;
 pub mod chat;
 mod dcl;
 pub mod esa;
@@ -11,12 +12,16 @@ pub mod mission;
 pub mod mission_text;
 pub mod module;
 pub mod music;
+pub mod parked_aircraft;
 pub mod pcm;
 mod pic;
+pub mod quick_template;
 pub mod radio;
 pub mod shape;
 pub mod static_object;
 pub mod strip;
+pub mod surface_set;
+pub mod surface_unit;
 pub mod text;
 pub mod theater;
 pub mod ui;

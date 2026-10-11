@@ -188,6 +188,12 @@ pub fn build(
         })?;
         (world, reads.manifest())
     };
+    if let Some(problem) = crate::check::ground_start_problem(&spec, &world.terrain) {
+        return Err(format!(
+            "The mission in {} {problem}.",
+            config.mission.display()
+        ));
+    }
     if let OpenPlanes::List(planes) = &config.open_planes {
         let count = world.roster.planes().len() as u32;
         if let Some(plane) = planes.iter().find(|plane| **plane >= count) {
@@ -216,14 +222,26 @@ pub mod tests {
 
     /// A data folder holding a synthetic import with the markers.
     pub fn data_folder(name: &str, markers: bool) -> PathBuf {
+        data_folder_with(name, markers, resources())
+    }
+
+    /// [`data_folder`] holding the synthetic import `map`.
+    pub fn data_folder_with(
+        name: &str,
+        markers: bool,
+        mut map: std::collections::BTreeMap<String, Vec<u8>>,
+    ) -> PathBuf {
         let dir = scratch(name);
         fs::create_dir_all(&dir).unwrap();
-        let mut map = resources();
         if markers {
             map.insert("TORE_MUSIC_V1".into(), b"PCM1".to_vec());
             map.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
             map.insert("TORE_AIRPORTS_V1".into(), b"SCENE1".to_vec());
             map.insert("TORE_SPEECH_V1".into(), b"ALL1".to_vec());
+            map.insert(
+                tore_import::surface::MARKER.into(),
+                tore_import::surface::MARKER_VALUE.to_vec(),
+            );
         }
         write_pack(&dir.join("menu-1.pack"), &map).unwrap();
         dir

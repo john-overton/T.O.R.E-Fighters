@@ -76,6 +76,11 @@ not that all guidance behavior has passed acceptance. **Catalog** means inventor
 only, hidden from Load Ordnance until flight support is connected under the
 [catalog availability rule](ordnance-presentation.md#catalog-availability).
 Missile presence does not authorize SAM, ship, ground-target or AI work.
+John authorized surface air defenses on 2026-10-10: the SAM and ship records
+that surface units fire have reviewed profiles, supported radar or infrared, as
+listed in [surface defenses](surface-defenses.md#sam-missiles) (the S and I
+rows above; ASROC and the anti-ship SS-N-9 stay without one). They stay
+Catalog: no aircraft carries them.
 
 Ranges are the source launch envelope converted using **6,076 feet per nmi**,
 rounded to two decimals. They are not a guaranteed intercept range. Times use
@@ -138,13 +143,13 @@ separate proposed profile setting, never inferred from these motor numbers.
 | SA14.JT (SA-14) | I* | Catalog | 0.08 to 2.47 | 0 | 22 | 20 | 3.29 | wide*/90 | N/A | 5/5 |
 | SA15.JT (SA-15) | S* | Catalog | 0.16 to 5.92 | 1 | 9 | 20 | 13.17 | wide*/90 | N/A | N/A |
 | SA16.JT (SA-16) | I* | Catalog | 0.08 to 1.32 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
-| SA19.JT (SA-19) | Hold: radar role | Catalog | 0.08 to 3.95 | 0 | 5 | 20 | 9.87 | wide*/90 | TBD | TBD |
+| SA19.JT (SA-19) | S (surface, default pending John) | Catalog | 0.08 to 3.95 | 0 | 5 | 20 | 9.87 | wide*/90 | TBD | TBD |
 | SA2A.JT (SA-2A) | S* | Catalog | 1.23 to 15.64 | 2 | 21 | 40 | 24.69 | wide*/90 | N/A | N/A |
 | SA3.JT (SA-3) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | SA6.JT (SA-6) | S* | Catalog | 1.48 to 12.34 | 2 | 21 | 20 | 13.17 | wide*/90 | N/A | N/A |
 | SA7.JT (SA-7) | I* | Catalog | 0.08 to 1.48 | 0 | 5 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
 | SA9.JT (SA-9) | I* | Catalog | 0.41 to 2.96 | 0 | 10 | 20 | 3.29 | wide*/90 | N/A | 5/5 |
-| SAN11.JT (SA-N-11) | Hold: radar role | Catalog | 0.25 to 3.95 | 2 | 8 | 40 | 16.46 | wide*/90 | TBD | TBD |
+| SAN11.JT (SA-N-11) | S (surface, default pending John) | Catalog | 0.25 to 3.95 | 2 | 8 | 40 | 16.46 | wide*/90 | TBD | TBD |
 | SAN3.JT (SA-N-3) | S* | Catalog | 0.82 to 16.46 | 2 | 8 | 180 | 16.46 | wide*/90 | N/A | N/A |
 | SAN4.JT (SA-N-4) | S* | Catalog | 0.66 to 5.76 | 2 | 8 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | SAN5.JT (SA-N-5) | I* | Catalog | 0.08 to 1.48 | 2 | 3 | 20 | 2.47 | wide*/90 | N/A | 5/5 |
@@ -549,7 +554,8 @@ Requested by John on 2026-10-02: guns and missiles can hit a destroyed aircraft
 while its falling body is still present. Radar/visual selection and mounted
 seekers can retain that body. Impact consumes the projectile and produces its
 normal hit effect, including with friendly fire disabled, but applies no further
-damage, pilot injury, system fault or kill credit. Once impact or airburst removes
+damage, pilot injury, system fault or kill credit to the wreck. Its
+[splash](#splash-damage) still reaches anything else nearby. Once impact or airburst removes
 the wreck, its old position is not a collision body. The simulation owns both
 presence and collision; the renderer does not decide what is hittable.
 
@@ -592,6 +598,108 @@ range. Report hits, misses and expiry, not a fabricated universal effective rang
 For SA14 and SA6, imported removal precedes motor cutoff. Preserve that
 compatibility behavior and report it; do not silently fix the source data.
 The long burn values in the table are likewise the current game's timing choice.
+
+## Splash damage
+
+Decided by John on 2026-10-10: every weapon whose record carries a collateral
+radius and percent does splash damage, whatever fired it. That is every
+air-to-air and air-to-ground missile, every bomb and rocket, the SAMs and the
+flak. No gun record carries one, so guns (the AC-130's 105 mm included) do
+none.
+
+What a player sees:
+
+- A missile that bursts on or beside an aircraft also hurts every other
+  aircraft within its radius, so a wingman in close formation with the target
+  can be damaged or killed by the shot meant for his leader, and a missile
+  bursting near the player's own aircraft hurts it.
+- A bomb or missile that hits the ground hurts every ground object, ship,
+  vehicle and parked aircraft within its radius, and any aircraft low enough
+  to be inside it. A near miss on a target is no longer harmless.
+- The damage falls off in a straight line with distance, from the record's
+  percent of its damage at the burst to nothing at the radius edge. Distance
+  is measured to the target's surface: its box for a ground object, its body
+  sphere for an aircraft, so a large building is reached as soon as its near
+  wall is.
+- A burst in the air or on an aircraft passes the share on whole. A burst on
+  the ground (the terrain, the sea, a ground object or a ship) passes on 70
+  percent of it for a weapon whose percent is 100 (every bomb) and half for
+  any other.
+- The aircraft or object a round struck directly takes only that direct hit.
+- The shooter can be caught in its own blast, as the manual warns (p. 126:
+  "Firing a missile within its minimum range, or launching a bomb at too low
+  an altitude, can put you within this radius"). That damage credits no one,
+  like a crash: no kill, no strike, no friendly-fire count.
+- With friendly fire off, splash spares everything of the shooter's side,
+  the shooter included: aircraft, ground objects and parked aircraft. With
+  it on (single player), it spares no one.
+- A splash kill is credited to the shooter in the debrief, the replay and the
+  multiplayer score, exactly as a direct kill is, and an ownship's splash
+  kills count on its kill tally. Strikes, radio hit calls and jolts follow.
+- A surface unit's splash reaches aircraft only (surface units do not fight
+  each other this round, [surface defenses](surface-defenses.md#sam-missiles)).
+
+Retail radii and percents (FA 1.02F records):
+
+| Weapons | Radius | Percent |
+| --- | ---: | ---: |
+| Most air-to-air missiles (AIM-7, AIM-9, AIM-120, AA-2 to AA-12, MICA, R-530, R-550, PL-7, PL-10), the anti-radar missiles, most air-to-ground missiles, AM-39, most SAMs | 750 ft | 35 |
+| AIM-54, AAM-L, AS-14, AS-16 | 1,000 ft | 35 |
+| AGM-65A | 650 ft | 30 |
+| AT-12 | 200 ft | 35 |
+| Harpoon (AGM-84A, AGM-84E) | 1,000 ft | 100 |
+| SA-2 | 1,200 ft | 35 |
+| Rockets: LAU-10, LAU-61, B-8; B-13 | 250 ft; 350 ft | 35 |
+| Mk 82 and Mk 82 HD; Mk 82 P3; Mk 82 HDP6; Mk 82 AIR | 500; 800; 1,000; 1,100 ft | 100 |
+| FAB-250, FAB-500, FAB-1000 | 600, 900, 1,200 ft | 100 |
+| Mk 84, GBU-10, GBU-27, GBU-30 | 1,000 ft | 100 |
+| GBU-29 | 300 ft | 100 |
+| GBU-28, GBU-29/P | 100 ft | 35 |
+| Cluster bombs: Mk 20, RBK-250, CBU-87, CBU-97 (CBU89), RBK-500 | 1,600, 1,500, 2,200, 2,500, 2,500 ft | 100 |
+| KS-12, KS-19 flak | 750 ft | 35 |
+
+Worked examples: an AIM-7M (170 damage to aircraft) bursting at its 100 ft
+fuze beside its target does 35 percent, 59 points, to an aircraft whose skin
+is at the burst, 21 percent (35 points) to one 300 ft beside the target, and
+nothing past 750 ft. A Mk 84 (400 damage) landing 200 ft from a vehicle
+(near side 185 ft away) does (100 - 18) x 70 / 100 = 57 percent, 228 points.
+
+Edge cases:
+
+- A record with a radius of 0 or a percent of 0 (guns, the AEMP-1, which has
+  a radius but no damage, and the cheat weapons) does no splash.
+- A round defeated by a jammer, a round that runs out of life in the air and a
+  surface gun round that passes its target do no splash. A flak shell bursts
+  at its fuze, its time fuze or the end of its life, with splash.
+- Collateral damage never harms a weapon or decoy in flight.
+
+Spec-derived from the original's collateral routine
+([format notes](../formats/weapons.md#collateral-damage)): who is reached,
+the straight-line falloff to the target's surface, the struck target
+excluded, and the ground share. Spec-derived from the manual (p. 126): the
+shooter can be caught in its own blast. Fitted by the agent: which
+direct hits count as ground bursts (TORE: a hit on a ground object or ship;
+the original's split between its two direct-hit calls was not traced); the
+splash applied at once (the original delays each target's share by about
+2 ticks plus one per 500 feet, which no player can see at these ranges); an
+ownship's splash damage taking the usual damage roll, as a direct hit does.
+Opinionated (John, 2026-10-10): splash for every weapon and friendly fire
+deciding whom it spares. Agent decision: self-inflicted splash credits no
+one. The original's routine spares the shooter, and the shooter's side
+except one unidentified object type, unless the shooter carries an
+unidentified flag; see [unknowns](#splash-unknowns).
+
+### Splash unknowns
+
+- The original's collateral routine skips the shooter, and objects of the
+  shooter's side unless the target is of object type 4, except when the
+  shooter carries a flag (object byte 0x10, bit 0x80); neither is
+  identified. The manual says a player can be caught in his own blast, so
+  the flag may mark the player's aircraft. TORE follows the friendly fire
+  setting instead, per John's decision, and lets the shooter be hurt, per the
+  manual. Next step: name object type 4 and the flag from the object creator.
+- Which of the original's two direct-hit collateral calls (full share, or
+  the ground share) serves which kind of target.
 
 ## Drop launch, sag and cruise profile
 

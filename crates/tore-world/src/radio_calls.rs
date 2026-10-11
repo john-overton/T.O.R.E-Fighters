@@ -14,7 +14,8 @@ use tore_sim::combat::{
     missiles::{self, TargetRole},
 };
 
-use crate::ai_wings::{AiWings, Chatter, Contact, FuelLevel, Member};
+use crate::ai_wings::outcome::is_surface;
+use crate::ai_wings::{AiWings, Chatter, Contact, ENEMY_SIDE, FRIENDLY_SIDE, FuelLevel, Member};
 use crate::comms::journal::{
     self, Cause, Entry, Origin, Outcome, REPEAT_S, Reason, Roll, Source, Store, Test, WingReply,
 };
@@ -306,9 +307,26 @@ impl Scene<'_> {
     fn enemy(&self, id: u32) -> bool {
         if let Some(member) = self.member(id) {
             member.enemy
+        } else if let Some(side) = self.surface_side(id) {
+            side == ENEMY_SIDE
         } else {
             !self.friendlies.contains(&id) && self.human(id).is_none()
         }
+    }
+    /// The side of surface object `id` when it has one: a ground unit, a
+    /// parked aircraft or a layout object the surface gave a side
+    /// (docs/spec/surface-defenses.md, "Ownership and sides"). `None` for
+    /// anything else, which keeps the plain rule of [`Self::enemy`].
+    fn surface_side(&self, id: u32) -> Option<live::Side> {
+        is_surface(id)
+            .then(|| self.target(id).map(|t| t.side))
+            .flatten()
+            .filter(|side| *side == FRIENDLY_SIDE || *side == ENEMY_SIDE)
+    }
+    /// Whether `id` is a surface unit or parked aircraft: it has no radio, so
+    /// it makes no hit or kill call.
+    fn surface(&self, id: u32) -> bool {
+        is_surface(id) && self.member(id).is_none() && self.human(id).is_none()
     }
     fn aircraft(&self, id: u32) -> bool {
         self.member(id).is_some()
@@ -779,14 +797,19 @@ impl Radio {
         let shooter = strike.owner;
         let victim = strike.victim;
         let same_side = scene.enemy(shooter) == scene.enemy(victim);
+        // A SAM site or a gun has no radio, so no hit or kill call is made
+        // as if a wingman had scored; "I'm hit" below is the victim's own.
+        let speaks = !scene.surface(shooter);
         if strike.destroyed {
-            if !same_side {
+            if !same_side && speaks {
                 self.kill(comms, scene, shooter, victim, strike);
             }
             return;
         }
         if !same_side {
-            self.hit(comms, scene, shooter, strike);
+            if speaks {
+                self.hit(comms, scene, shooter, strike);
+            }
             if scene.aircraft(victim) {
                 self.damaged(comms, scene, victim, shooter, strike);
             }
@@ -1710,6 +1733,68 @@ mod tests {
         let hit: Vec<_> = calls.iter().filter(|l| l.starts_with("YOU")).collect();
         assert_eq!(hit.len(), 2, "{calls:?}");
         assert_eq!(w.scene(0.).attacker(3), Attacker::Aircraft);
+    }
+
+    /// A surface unit's row: a SAM or gun site of `side`, in the surface ids.
+    fn site(id: u32, side: live::Side, category: u16) -> live::Target {
+        let mut t = target(id, [2000., 0., 0.]);
+        t.role = TargetRole::Surface;
+        t.aircraft = None;
+        t.airborne = false;
+        t.category = category;
+        t.side = side;
+        t
+    }
+
+    #[test]
+    fn a_surface_unit_has_a_side_and_makes_no_hit_or_kill_call() {
+        use crate::surface::SURFACE_UNIT_BASE;
+        let (red_sam, blue_gun) = (SURFACE_UNIT_BASE + 1, SURFACE_UNIT_BASE + 2);
+        let mut w = World::new();
+        w.targets.push(site(red_sam, ENEMY_SIDE, 0x1000));
+        w.targets.push(site(blue_gun, FRIENDLY_SIDE, 0x800));
+        let scene = w.scene(0.);
+        // Sided surface rows read their own side, not the AI friend list.
+        assert!(scene.enemy(red_sam) && !scene.enemy(blue_gun));
+        assert!(scene.surface(red_sam) && !scene.surface(PLAYER_ID) && !scene.surface(3));
+        assert_eq!(scene.attacker(red_sam), Attacker::Other);
+        assert_eq!(scene.attacker(blue_gun), Attacker::Aaa);
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        // The enemy SAM damages and then destroys the player: only the
+        // player's own "I'm hit" is a call; the SAM makes no hit or kill call
+        // and nothing is journaled under a made-up aircraft name.
+        radio.strike(
+            &mut comms,
+            &w.scene(0.),
+            &strike(red_sam, PLAYER_ID, 1, false),
+        );
+        radio.strike(
+            &mut comms,
+            &w.scene(1.),
+            &strike(red_sam, PLAYER_ID, 1, true),
+        );
+        assert_eq!(radio.made, 1, "the player's \"I'm hit\"");
+        let said = lines(&mut comms, 5.);
+        assert!(said.iter().all(|line| line.starts_with("YOU")), "{said:?}");
+        assert!(
+            comms
+                .take_journal()
+                .iter()
+                .all(|entry| !format!("{entry:?}").contains(&format!("Aircraft {red_sam}"))),
+        );
+        // A friendly gun site shoots down an enemy aircraft and hits the
+        // player's flight: no call from the site either way.
+        radio.strike(&mut comms, &w.scene(10.), &strike(blue_gun, 3, 0x80, true));
+        radio.strike(&mut comms, &w.scene(11.), &strike(blue_gun, 1, 0x80, false));
+        assert_eq!(radio.made, 1);
+        // The player's own kill of the enemy SAM is still a kill call.
+        radio.strike(
+            &mut comms,
+            &w.scene(20.),
+            &strike(PLAYER_ID, red_sam, 0x10, true),
+        );
+        assert_eq!(radio.made, 2);
     }
 
     #[test]

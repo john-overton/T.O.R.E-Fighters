@@ -93,22 +93,29 @@ class ProbeCheckTests(unittest.TestCase):
         self.assertGreater(len(names), 300)
 
 class ShortStripTests(unittest.TestCase):
-    """John, 2026-09-30: no ground start on a short strip, so no AI scenario or fuzz seed uses one."""
+    """John, 2026-09-30: no ground start on a short strip, and since slice AL1 none at a Redfor
+    field, so no AI scenario or fuzz seed uses one."""
 
-    def test_a_short_strip_moves_to_the_next_airport_that_is_not(self):
-        from battery_scenarios._strips import SHORT_STRIPS, ground_airport, is_short_strip
+    def test_a_short_strip_or_enemy_field_moves_to_the_next_airport_that_is_not(self):
+        from battery_scenarios._strips import SHORT_STRIPS, ground_airport, is_enemy_field, is_short_strip
 
         self.assertEqual(sum(len(v) for v in SHORT_STRIPS.values()), 22)
         self.assertEqual(ground_airport("APA", 1), 1)
         self.assertEqual(ground_airport("APA", 3), 7)
-        self.assertEqual(ground_airport("LFA", 2), 4)
-        self.assertEqual(ground_airport("UKR", 3), 3)
+        self.assertEqual(ground_airport("UKR", 1), 2)
+        self.assertEqual(ground_airport("UKR", 3), 8)
+        self.assertEqual(ground_airport("NSK", 1), 9)
+        # No Blue field: the Falklands' one is a short strip, North Vietnam has none.
+        self.assertIsNone(ground_airport("LFA", 1))
+        self.assertIsNone(ground_airport("TVIET", 1))
+        self.assertIsNone(ground_airport("CUB", 3))
         self.assertEqual(ground_airport("~APAF", 2), 2)
         self.assertTrue(is_short_strip("CUB", 13) and not is_short_strip("CUB", 1))
+        self.assertTrue(is_enemy_field("UKR", 1) and not is_enemy_field("UKR", 2))
 
-    def test_no_scenario_and_no_fuzz_seed_starts_on_a_short_strip(self):
+    def test_no_scenario_and_no_fuzz_seed_starts_on_a_short_strip_or_enemy_field(self):
         from battery_scenarios import _ai_fuzz
-        from battery_scenarios._strips import is_short_strip
+        from battery_scenarios._strips import is_ground_start
 
         def theater_and_airport(args):
             if "--ground-start" not in args:
@@ -119,12 +126,12 @@ class ShortStripTests(unittest.TestCase):
         for s in ai.scenarios():
             found = theater_and_airport(s.args)
             if found:
-                self.assertFalse(is_short_strip(*found), f"{s.name} starts on a short strip")
+                self.assertTrue(is_ground_start(*found), f"{s.name} starts on a short strip or enemy field")
         for seed in _ai_fuzz.SEEDS:
             args, _, _ = _ai_fuzz.config(seed)
             found = theater_and_airport(args)
             if found:
-                self.assertFalse(is_short_strip(*found), f"fuzz seed {seed} starts on a short strip")
+                self.assertTrue(is_ground_start(*found), f"fuzz seed {seed} starts on a short strip or enemy field")
 
 
 class PlayerFliesTests(unittest.TestCase):

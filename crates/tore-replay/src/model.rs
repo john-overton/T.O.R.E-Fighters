@@ -7,7 +7,7 @@
 //! positive right wing down. The forward vector is
 //! `[sin yaw cos pitch, sin pitch, cos yaw cos pitch]`.
 
-use crate::FORMAT_VERSION;
+use crate::BASE_FORMAT_VERSION;
 
 /// Simulation ticks per second.
 pub const TICKS_PER_SECOND: u64 = 120;
@@ -16,8 +16,10 @@ pub const TICKS_PER_SECOND: u64 = 120;
 /// never depends on environment variables or settings at playback time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header {
-    /// The file's format version. The writer ignores this field and always
-    /// writes [`FORMAT_VERSION`]; the reader reports what the file holds.
+    /// The file's format version. The writer ignores this field and writes
+    /// the oldest version that holds the recording ([`World::needs_surface_format`]):
+    /// 2, or [`FORMAT_VERSION`] for a world with surface tracks. The reader
+    /// reports what the file holds.
     pub format_version: u16,
     /// Game version, for example `0.1.0`.
     pub game_version: String,
@@ -37,7 +39,7 @@ pub struct Header {
 impl Default for Header {
     fn default() -> Self {
         Self {
-            format_version: FORMAT_VERSION,
+            format_version: BASE_FORMAT_VERSION,
             game_version: String::new(),
             game_commit: String::new(),
             recorded_at: String::new(),
@@ -139,6 +141,53 @@ pub struct World {
     /// Map size east and north in feet, from the origin corner. Exports use it
     /// to centre Tacview's map; without it they use the known theater size.
     pub extent_ft: Option<[f64; 2]>,
+    /// The Quick Mission ground target the flight had (format 3), so a replay
+    /// rebuilds the same surface: template, defenses, seed, nationality and
+    /// separation (and so the starts). `None` for a flight with no ground
+    /// target, and for every recording before format 3.
+    pub ground_target: Option<GroundTarget>,
+    /// Which airfield scene the flight was flown on (format 3). 0 is the
+    /// retail airfields, and is what every recording before this field has.
+    /// A build that redraws the airports gives the redrawn scene a number
+    /// of its own, so a replay builds the airfields the flight had. Written
+    /// only when it is not 0.
+    pub airfield_scene: u32,
+    /// The world holds active surface units (format 3): the recording may
+    /// carry surface poses, launcher loads, names and the rest of the
+    /// surface tracks. A recording of a world without any is a format 2 file.
+    pub surface: bool,
+}
+
+/// The Quick Mission ground target of a flight, as the world needs it to
+/// rebuild the same surface. Mirrors the game's resolution inputs; this crate
+/// knows no simulation types, so the app converts.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct GroundTarget {
+    /// Template stem, for example `QUCOL`.
+    pub stem: String,
+    /// AAA and SAM defense levels, 0 (none) to 3 (heavy).
+    pub aaa: u8,
+    pub sam: u8,
+    /// The mission's surface seed.
+    pub seed: u32,
+    /// The enemy nationality's index in the creator's list.
+    pub enemy_nationality: u8,
+    /// The night rule with a stealth aircraft in a friendly wing.
+    pub night_stealth: bool,
+    /// Whether positions jitter and templates relocate (both on in a
+    /// mission; the preview tools turn them off).
+    pub jitter: bool,
+    pub relocate: bool,
+    /// The creator's enemy distance in nautical miles.
+    pub separation_nm: u32,
+}
+
+impl World {
+    /// Whether the recording needs format 3 to be written: it carries the
+    /// ground target, a redrawn airfield scene or surface tracks.
+    pub fn needs_surface_format(&self) -> bool {
+        self.ground_target.is_some() || self.airfield_scene != 0 || self.surface
+    }
 }
 
 /// Cloud settings for the recording's weather.
@@ -281,6 +330,14 @@ pub struct Frame {
     pub new_puffs: Vec<PuffSpawn>,
     /// Surface objects whose hit points changed this tick: `(id, hp)`.
     pub surface_hp: Vec<(u32, i32)>,
+    /// Every surface unit that follows a route, where it is (format 3).
+    pub surface: Vec<SurfaceState>,
+    /// Launcher rails and gun reserves that changed this tick (format 3).
+    pub surface_stock: Vec<SurfaceStock>,
+    /// The piece of a surface owner's debris pieces: `(owner, index, piece)`
+    /// for each entry of `debris` whose owner is a surface object, such as a
+    /// parked aircraft (format 3). `index` is [`DebrisState::index`].
+    pub debris_pieces: Vec<(u32, u32, u8)>,
     pub events: Vec<Event>,
     pub trees: Vec<TreeSample>,
     /// State checksum, set by the app once per second. See
@@ -573,6 +630,49 @@ pub struct DebrisState {
     pub attitude: [f64; 3],
 }
 
+/// One surface unit's pose in one tick (format 3): the units that follow a
+/// route, so a replay can draw a column that no longer sits in the static
+/// scenery.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct SurfaceState {
+    /// The unit's fixed id (`0x4000_0000` and up).
+    pub id: u32,
+    pub position: [f64; 3],
+    /// `[yaw, pitch, bank]` in radians.
+    pub attitude: [f64; 3],
+    /// No hit points left: the wreck lies where it died.
+    pub wrecked: bool,
+}
+
+/// A launcher's rails or a gun's reserve after a change (format 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SurfaceStock {
+    pub unit: u32,
+    /// The hardpoint index.
+    pub mount: u16,
+    /// Rounds or missiles in the gun or on the rail.
+    pub loaded: u32,
+    /// Spare magazines, for a gun that keeps some.
+    pub reserve: Option<u32>,
+}
+
+/// A surface unit's identity, registered once and referenced by id (format
+/// 3): names for the log and the text exports, the hit points its wreck's
+/// fire is sized by, and where a unit that does not move stands.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct SurfaceInfo {
+    pub id: u32,
+    /// Short type name, for example `SA-6`.
+    pub name: String,
+    /// Label for people, for example `SA-6 #18`.
+    pub label: String,
+    pub side: Side,
+    /// Hit points when new.
+    pub hit_points: i32,
+    /// Where it stood when registered, feet.
+    pub position: [f64; 3],
+}
+
 /// One ejected pilot in one tick.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct EscapeeState {
@@ -606,6 +706,12 @@ pub enum EffectKind {
     Crater(u8),
     /// A crash-site fire.
     Fire,
+    /// A flak shell's burst in the air and the original explosion type (15
+    /// to 38) it showed: 27 for a small flak gun, 28 for a KS-19. Format 3;
+    /// older recordings store a burst as an ordinary [`Self::Blast`] hit.
+    Flak {
+        explosion: u8,
+    },
     /// A kind this build does not know: any code [`Self::from_code`] does
     /// not name.
     Other(u8),
@@ -625,6 +731,8 @@ impl EffectKind {
     /// craters take 160 plus their size.
     const BLAST: u8 = 64;
     const CRATER: u8 = 160;
+    /// Flak bursts take 32 plus their type less 15.
+    const FLAK: u8 = 32;
 
     pub fn code(self) -> u8 {
         match self {
@@ -640,6 +748,7 @@ impl EffectKind {
                 Self::BLAST + 32 * on as u8 + explosion.clamp(15, 38) - 15
             }
             Self::Crater(size) => Self::CRATER + size.min(63),
+            Self::Flak { explosion } => Self::FLAK + explosion.clamp(15, 38) - 15,
             Self::Other(code) => code,
         }
     }
@@ -670,6 +779,9 @@ impl EffectKind {
                 }
             }
             Self::CRATER..=223 => Self::Crater(code - Self::CRATER),
+            Self::FLAK..=55 => Self::Flak {
+                explosion: code - Self::FLAK + 15,
+            },
             other => Self::Other(other),
         }
     }
@@ -695,6 +807,7 @@ impl EffectKind {
             Self::DebrisImpact => "debris_impact",
             Self::Crater(_) => "crater",
             Self::Fire => "fire",
+            Self::Flak { .. } => "flak",
             Self::Other(_) => "other",
         }
     }
@@ -702,7 +815,7 @@ impl EffectKind {
     /// The explosion type, for a kind that has one.
     pub fn explosion(self) -> Option<u8> {
         match self {
-            Self::Blast { explosion, .. } => Some(explosion),
+            Self::Blast { explosion, .. } | Self::Flak { explosion } => Some(explosion),
             _ => None,
         }
     }

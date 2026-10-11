@@ -275,7 +275,9 @@ mod scalar {
     pub const SENSORS: usize = 11;
     pub const LINK: usize = 12;
     pub const GUNSIGHT: usize = 13;
-    pub const COUNT: usize = 14;
+    /// The surface radars painting the plane (protocol 22).
+    pub const PAINTING: usize = 14;
+    pub const COUNT: usize = 15;
 }
 
 /// The lists.
@@ -313,7 +315,7 @@ pub enum Part {
 }
 
 /// How many parts a record has.
-pub const PART_COUNT: usize = 31;
+pub const PART_COUNT: usize = 32;
 
 /// The parts in the order they are written, which is their importance:
 /// what is left out for room is what comes last.
@@ -336,6 +338,7 @@ pub const PARTS: [Part; PART_COUNT] = [
     Part::Scalar(scalar::MUSIC),
     Part::List(list::ENEMY),
     Part::Scalar(scalar::LOCKS),
+    Part::Scalar(scalar::PAINTING),
     Part::List(list::INBOUND),
     Part::List(list::THREATS),
     Part::List(list::EMITTERS),
@@ -412,6 +415,7 @@ pub fn part_name(part: Part) -> &'static str {
             "sensors",
             "link",
             "gunsight",
+            "painting",
         ][index],
         Part::List(index) => [
             "seeker observation",
@@ -1039,6 +1043,12 @@ impl QReadout {
             .chain(music.aiming.iter().map(|id| i64::from(*id)))
             .collect();
         s[scalar::LOCKS] = readout.rwr.locks.iter().map(|l| i64::from(*l)).collect();
+        s[scalar::PAINTING] = readout
+            .rwr
+            .painting
+            .iter()
+            .map(|id| i64::from(*id))
+            .collect();
         let se = &readout.sensors;
         s[scalar::SENSORS] = [se.tick as i64 - readout.tick as i64]
             .into_iter()
@@ -1217,7 +1227,7 @@ impl QReadout {
         self.scalars
             .iter()
             .enumerate()
-            .all(|(index, group)| index == scalar::LOCKS || !group.is_empty())
+            .all(|(index, group)| !always_holds_values(index) || !group.is_empty())
     }
 
     /// The plane this readout is for, once its header has arrived.
@@ -1561,6 +1571,10 @@ impl QReadout {
             .iter()
             .map(|l| u8::try_from(*l).map_err(|_| bad("lock")))
             .collect::<WireResult<Vec<u8>>>()?;
+        let painting = get(scalar::PAINTING)
+            .iter()
+            .map(|id| u32::try_from(*id).map_err(|_| bad("painting emitter")))
+            .collect::<WireResult<Vec<u32>>>()?;
 
         let ap = get(scalar::AIRPORT);
         let service = match scene {
@@ -1722,6 +1736,7 @@ impl QReadout {
                 missiles,
                 inbound,
                 locks,
+                painting,
             },
             damage,
             countermeasures,
@@ -2241,10 +2256,11 @@ impl ReadoutSender {
 }
 
 /// Whether a scalar group always holds values once it has arrived: all but
-/// the AI locks, which are a list of ids and empty when nothing locks the
-/// plane. An empty one of these has not arrived yet.
+/// the AI locks and the painting surface radars (protocol 22), which are
+/// lists and empty when nothing locks or paints the plane. An empty one of
+/// these has not arrived yet.
 fn always_holds_values(group: usize) -> bool {
-    group != scalar::LOCKS
+    group != scalar::LOCKS && group != scalar::PAINTING
 }
 
 /// The client's readouts by snapshot tick, kept as baselines.

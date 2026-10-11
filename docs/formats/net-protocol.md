@@ -42,6 +42,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Phase 2: the King's settings, revival, scores and observers](#phase-2-the-kings-settings-revival-scores-and-observers) (designed)
 - [Compatibility (stage L)](#compatibility-stage-l) (built under protocol 10)
 - [Host migration and rejoin (stage K)](#host-migration-and-rejoin-stage-k) (built under protocol 13)
+- [The surface world (protocol 22)](#the-surface-world-protocol-22) (built under protocol 22)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -149,7 +150,7 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (21), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Connect request | protocol version (22), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
 | Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 2 by default since slice D12, 4 before; the rate in force on the day of the join, see below), host tick now (32); 31 bytes |
@@ -684,7 +685,7 @@ carried it is lost.
 | Tick count | 5 | How many ticks follow, 1 to 24, oldest first, ending at the newest |
 | View offset | 8 | The host tick the player's screen showed when the newest tick was sampled, as ticks before the newest; used for [lag compensation](../ARCHITECTURE.md#hits-and-lag-compensation) |
 | Interpolation delay | 6 | The client's interpolation delay in ticks, which bounds the rewind's cap |
-| View subject | 1, then 2 and a varint | Whether the player's view follows another entity (target, wing, external or fly-by view), then its kind and id; the host sends that entity at the full rate. *Built (D6):* the id is a varint, since projectile numbers pass 65,535 in a long mission |
+| View subject | 1, then 3 (2 before protocol 22) and a varint | Whether the player's view follows another entity (target, wing, external or fly-by view), then its kind and id; the host sends that entity at the full rate. *Built (D6):* the id is a varint, since projectile numbers pass 65,535 in a long mission |
 | Mismatch | 32 | The newest snapshot tick whose own-state hash differed from the client's own, or 0 |
 | Per tick | | The first tick in full, each later one as a "same as the tick before" bit or its changed fields ([settled](#inputs-as-built)) |
 | Commands | | The unacknowledged commands, below ([settled](#inputs-as-built)) |
@@ -800,15 +801,17 @@ id. Contact positions are world positions, in whole feet
 
 Everything the client draws that moves: aircraft (every plane except the
 player's own, human-flown or not), missiles, bombs and rockets in flight,
-debris pieces and ejected pilots. Gun rounds are not entities; they arrive as
-burst [events](#events). Ground objects do not move; their destruction is an
-event.
+debris pieces, ejected pilots and, since protocol 22, the surface units that
+follow a route (a ground target's column, its cargo ships). Gun rounds are not
+entities; they arrive as burst [events](#events). Ground objects that stand
+still are built from the mission on every client; their destruction and their
+changed states are events ([the surface world](#the-surface-world-protocol-22)).
 
 Each entity record:
 
 | Field | Meaning |
 | --- | --- |
-| Kind | Aircraft, projectile, debris or pilot. *Built (D6):* records come kind by kind, each kind's count first, so a record carries no kind bits |
+| Kind | Aircraft, projectile, debris, pilot or (protocol 22) surface unit. *Built (D6):* records come kind by kind, each kind's count first, so a record carries no kind bits |
 | Id | The plane id, projectile number, or the aircraft a debris piece or pilot came from; coded as the difference from the previous record's id of the same kind |
 | Removed | 1 bit: the entity is gone; nothing follows |
 | Baseline | Snapshots back to the acknowledged state this record is coded against (7 bits since protocol 16, 5 before); 0 is a full record |
@@ -842,6 +845,7 @@ each.
 | Projectile | On first sight: owner, weapon and shape (name table), target, whether it is aimed at this player's plane; then position, velocity, direction. *Built (D6):* velocity replaces speed, so that the prediction needs no trigonometry and both ends agree to the step; the speed is its length |
 | Debris | On first sight: owner, drawn model and damage variant; then position, velocity, attitude (*built (D6):* with a velocity, from the picture a tick before, for the prediction) |
 | Pilot | On first sight: the aircraft it left; then position, velocity, heading, escape phase |
+| Surface unit (protocol 22) | Its unit id is its identity; position, ground-relative velocity, heading, pitch and bank, and whether it is a wreck |
 
 **Priority and relevance.** Each entity has a priority that grows every
 snapshot by its relevance weight and resets when it is sent. An entity is due
@@ -889,6 +893,9 @@ snapshot's tick.
 | Gun burst | everyone | Shooter, gun station, first tick, last tick (0 while still firing). *Built (D7a):* sent when the burst starts, and again from its first tick with its length once the station has fired no round for its weapon's round interval plus 2 ticks. *Read by the client (D8c):* it makes the burst's rounds again from the first tick at the weapon's cadence ([the client session](../ARCHITECTURE.md#the-client-session)) |
 | Sound | everyone | Emission kind, position, the aircraft it came from |
 | Link | the seat, about members of its flight | A data link change: a member joined, a lock taken or dropped, an assignment given, cleared or acknowledged, a sort warning (protocol 15, [the data link](#data-link-stage-g)) |
+| Surface burst | everyone | A surface unit's gun burst (protocol 22): unit, hardpoint, target, the first round's direction, the burst's rounds and ticks ([the surface world](#the-surface-world-protocol-22)) |
+| Surface burst end | everyone | That burst stopped after this many rounds, short of its schedule (protocol 22) |
+| Surface unit | everyone | A surface unit's hit points, radar, launcher rails and spare magazines, when they change and at a seat (protocol 22) |
 
 Recording stems, weapon and sound names are sent by their index in the
 connection's name table (the Names message), which the host fills before the
@@ -1028,7 +1035,7 @@ an escape to a varint; strings are a length byte and UTF-8.
 | Tick count | 5, 1 to 24 |
 | View offset | 8 |
 | Interpolation delay | 6, 0 to 63 |
-| View subject | 1, then kind 2 and id varint |
+| View subject | 1, then kind 3 (2 before protocol 22) and id varint |
 | Mismatch | 32 |
 | First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; powered-lift block (below); scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1; gunsight block (protocol 21, below) |
 | Each later tick | 1 bit "same as the tick before"; else 9 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope, powered lift, gunsight; 8 before protocol 21), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
@@ -1107,16 +1114,16 @@ the [architecture](../ARCHITECTURE.md#the-host-session).
 
 The section is the header (161 bits), one bit for the cockpit readout and,
 when it is set, the readout's record ([below](#the-cockpit-readout-as-built)),
-then the four kinds in turn
-(aircraft, projectiles, debris, pilots): each kind's count as a varint and
-its records in id order.
+then the five kinds in turn
+(aircraft, projectiles, debris, pilots and, since protocol 22, surface units):
+each kind's count as a varint and its records in id order.
 
 | Record field | Bits |
 | --- | --- |
 | Id | The first record of a kind: its id; later ones: the id less the previous one less 1. Bucketed unsigned: 2 bits of index, then 0, 4 or 10 bits, or a varint |
 | Removed | 1 |
 | Baseline | 7: snapshots back, 1 to 127; 0 is a full record (5 bits, 1 to 31, before protocol 16) |
-| Full body | The identity fields; position and velocity as six signed varints; the angles, 16 bits each (aircraft and debris 3, projectiles 2, pilots 1); an aircraft's speed as a signed varint; every slow field |
+| Full body | The identity fields; position and velocity as six signed varints; the angles, 16 bits each (aircraft, debris and surface units 3, projectiles 2, pilots 1); an aircraft's speed as a signed varint; every slow field |
 | Body against a baseline | 1 bit "moved"; if set, the position residuals after the prediction, the velocity, angle and speed differences, each bucketed (position and velocity 3, 6, 10, 14 or 20 bits; angles 3, 6, 9, 12 or 17; speed 3, 6, 10 or 16); then for each group of slow fields a changed bit, and in a changed group a bit per field and each new value |
 
 The identity fields (full records only): an aircraft's type as 1 bit and its
@@ -1139,7 +1146,8 @@ thousandths up to 2,000; four disk tilts at 1/256 rad in 8 signed bits each,
 the front or main rotor's longitudinal and lateral, then the CH-47's rear
 rotor's or the V-22's right proprotor's; an aircraft without rotors sends only
 the present bit, and an aircraft whose rotor speed is zero counts as one
-without); a pilot's is its escape phase (3 bits). The client draws a remote
+without); a pilot's is its escape phase (3 bits); a surface unit's is its
+wreck flag (1 bit; it has no identity fields). The client draws a remote
 rotorcraft's blades by integrating the received rotor speed (the [rotor
 presentation](../spec/rotor-presentation.md#rotor-speed-and-blade-angle)), so
 no blade angle is sent.
@@ -1197,12 +1205,15 @@ no blade angle is sent.
 The readout's record is the baseline (7 bits since protocol 16, 5 before:
 snapshots back to the readout the client acknowledged, 1 to 127, or 0 for
 none, against the empty readout),
-then 31 parts (30 before protocol 21, 26 before protocol 15), each behind a
+then 32 parts (31 before protocol 22, 30 before protocol 21, 26 before
+protocol 15), each behind a
 changed bit, in this order, which is also their importance: header (plane and
 tick), link (protocol 15), stores, gunsight (protocol 21,
 [below](#the-gunsight)), countermeasures, damage, seeker, seeker observation, estimates,
 estimate observation, targets, displayed target, viewed target, airport,
-target window, music, designated enemy, AI locks, inbound missiles, threat
+target window, music, designated enemy, AI locks, painting radars (protocol
+22: the ids of the surface radars painting the plane, a list like the AI
+locks), inbound missiles, threat
 records, emitters, sensor scalars, contacts, link marks, link mates and link
 tracks (protocol 15, [the data link](#data-link-stage-g)), strobes, plots,
 trails, visual contacts, map. The client's `CockpitReadout`
@@ -1528,8 +1539,10 @@ and readout baselines, the event queue and its numbers, the name table, the
 own-state baselines) starts afresh, the Seated message names the flight,
 and every Snapshot and Own state section, every Names message and every
 Inputs section carries it. A client starts its own afresh at the Seated
-message or at the first section of a later flight, whichever comes first,
-and drops a section of an earlier flight that arrives late (an Own state
+message, at the first section of a later flight or at a Names message of a
+later flight, whichever comes first (a packet's messages are read before its
+sections, so a Names message the client dropped would leave the flight's
+table short), and drops a section of an earlier flight that arrives late (an Own state
 section of the client's flight must still name a baseline it has; one of a
 later flight must name none). The host drops Inputs of another flight.
 Reliable delivery keeps a Names message of the earlier flight before the
@@ -2309,6 +2322,93 @@ choice below is an agent decision.
   warm one that fails two checks gets a fresh Appoint, cold. A Standby
   status from a game that is not a standby is ignored, not refused.
 
+## The surface world (protocol 22)
+
+*Built (slice N1 of the surface round, 2026-10-10); every choice is an agent
+decision unless credited.* What a ground target and the theater layouts' air
+defenses ([surface defenses](../spec/surface-defenses.md)) put on the wire.
+The host runs every surface unit; each player's game builds the same surface
+from the mission text and its seed and never steps it.
+
+```mermaid
+flowchart LR
+    text["Mission text with the seed<br/>the host drew"] --> build["Every game builds<br/>units, batteries, trucks,<br/>parked aircraft, starts"]
+    build --> digest{"Seated or Resumed:<br/>the host's digest<br/>equals ours?"}
+    digest -->|"no"| refuse["Content refused,<br/>back to the lobby"]
+    digest -->|"yes"| fly["Fly: moving units as entities,<br/>bursts, ends and unit states<br/>as events"]
+```
+
+- **The seed.** A mission with a ground target whose `surface-seed` is 0 (the
+  Quick Mission creator's lobby mission, a server's file, a bot's) gets one
+  from the host before its text is sent: drawn from the session id, the
+  mission's number and an FNV-1a 64 of its text, never 0. A restart of the
+  same mission keeps it, so its layout stays (the creator's rule).
+- **The digest.** The Seated message and the Resumed flight end with the
+  host's `Surface::digest()` (64 bits): the template and its settings, the
+  relocation, every unit with its place, the parked and deck aircraft, the
+  supply trucks, the batteries and both sides' starts. A client compares it
+  with its own copy's once the mission has loaded; a difference sends Content
+  refused with the reason ("Your game places this mission's ground target
+  differently from the host's (surface ..., host ...)"), and the player stays
+  in the lobby, marked unable, as for a content difference. A resume whose
+  digest differs ends the new host's wait with an empty Backlog first.
+- **Moving units** are the fifth entity kind: a unit that follows a route
+  (`Surface.courses`), sent as long as it is in the mission, moving, arrived
+  or wrecked, with the host's Mover's position, velocity (from the picture a
+  snapshot before, as for debris), heading, pitch and bank, and a wreck bit.
+  The route's leg and the follower's speed command are not sent: a client
+  never steps a unit (lead ruling after M1), and a new host takes them from
+  the checkpoint. The client draws them in its picture's `surface` list and
+  moves the unit's ground row with them, so the views and the target window
+  follow the unit. A unit that stands is never sent.
+- **Surface burst** (event 18): unit (varint), hardpoint (8), target (1 and a
+  varint), the first round's direction (azimuth from +z towards +x, then
+  elevation, 16 bits each), the burst's rounds and its span in ticks
+  (varints). Round *k* leaves at the first tick at or after *k* × span /
+  rounds after the event's tick, the host controller's own schedule. One
+  event per burst, sent when its first round flies, never one per round. A
+  client remakes the rounds, owned by the unit, from its hardpoint (a moving
+  unit's where the picture draws it) with the simulation's round rules;
+  later rounds turn from the first by as much as the lead on the target the
+  picture draws turns (the host's gunsight solution, a radar gun observing
+  every tick and a visual one every half second), and each ends a little past
+  the target's range as the host's do. Flak shells are never sent: each burst
+  in the air is an Effect of kind Flak with its explosion type, 27 for the
+  KS-12 and 28 for the KS-19.
+- **Surface burst end** (event 19): unit, hardpoint and the rounds fired, at
+  the burst's first tick, when its controller stopped before its schedule's
+  end (the target left the gun's gates, the magazine ran dry, the unit
+  died). The client takes back the rounds it made past them.
+- **Surface unit** (event 20): unit (varint), hit points (signed varint),
+  radar emitting (1), a count of hardpoints (at most 64) and for each a
+  launcher's loaded rails (1 and a varint) and a gun's spare magazines (1 and
+  a varint; a ship's guns have unlimited spares and send none). A gun's
+  loaded rounds are not sent: they change with every round. The host sends a
+  unit's state when any of these changes, and at every seat, resume and
+  observer start for each unit not as the mission built it (full hit points,
+  radar off, full rails and spares). Units and placed parked aircraft with a
+  combat row are told; the client takes the newest state at or before its
+  drawn tick, and a unit it was never told of is as built. A unit's death
+  stays the Ground destroyed event's. The game puts the states in its copy of
+  the mission, so a launcher's rails empty and refill, a radar's row emits
+  and a damaged parked aircraft smokes.
+- **Owners.** Surface units own their shots: a SAM is a projectile entity
+  whose owner is the unit (`speed_f8` comes from its velocity, so its launch
+  look starts when its motor lights), and its launch is a Launch event with
+  the unit as the shooter. A client's remade surface rounds keep the unit as
+  their owner. The flight views take a moving unit as a subject.
+- **Parked aircraft** are built on every client. Their destruction is the
+  Ground destroyed event, their crash crater and fire are Mark events and
+  their fragment is a debris entity whose damage variant is the piece, as the
+  host's combat makes them, so a client calls no kill path of its own.
+- **Debrief and readout.** The debrief pilot ends with the name of the
+  surface unit that shot it down (1 and a string). The readout's painting
+  radars are its scalar group 14. The debrief's objectives already carried the
+  ground target's combined Destroy or Protect line.
+- **New projectiles** are found by the set alive at the last tick sorted,
+  not by the highest number, since surface shots are numbered in a block of
+  their own: before this, an aircraft's launch after a SAM's went untold.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -2323,6 +2423,8 @@ Decoders check every count and length against these before reading on.
 | Aircraft per snapshot | 64 |
 | Projectiles, debris pieces | 256 each |
 | Ejected pilots | 64 |
+| Moving surface units (protocol 22) | 128 |
+| Hardpoints in a Surface unit event (protocol 22) | 64 |
 | Name table | 4,096 entries |
 | String | 255 bytes |
 | Input ticks per packet | 24 |
@@ -2352,7 +2454,7 @@ number changes on its own.
 
 The file starts with 12 bytes: the 8-byte magic `TORE-CAP`
 (`tore_session::capture::MAGIC`, which a game's pruner checks so that it only
-ever deletes captures), the capture format's version (16 bits, 3 since powered-lift controls, 4 since the gunsight's slew and zoom) and the
+ever deletes captures), the capture format's version (16 bits, 3 since powered-lift controls, 4 since the gunsight's slew and zoom, 5 since protocol 22's 3-bit entity kind in the view subject) and the
 protocol version (16 bits); a reader refuses another of either. Records follow, each a kind (8 bits), a body length (32 bits) and the
 body; a capture cut short ends at its last whole record. Numbers are least
 significant byte first, times are nanoseconds of the client's clock (64 bits),
@@ -2362,7 +2464,7 @@ and strings are a 16-bit length and UTF-8.
 | --- | --- | --- |
 | 1 | Start | The time the join started, the seed of its randomness (64 bits: the nonce comes from it), the server's address, the callsign, the game version and commit, a release-build byte, the plane asked for (a byte, then 32 bits when 1), and whether the client readies by itself (a byte, format 2). Never the password |
 | 2 | Receive | The time, the sender's address, then the datagram as it arrived |
-| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the powered-lift block in Inputs coding, the gunsight's slew (two signed bytes) and zoom step (3 bits, format 4), the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
+| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the powered-lift block in Inputs coding, the gunsight's slew (two signed bytes) and zoom step (3 bits, format 4), the view subject (1, then its kind in 3 bits since format 5, 2 before, and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
 | 4 | Frame | The time a frame was drawn |
 | 5 | Leave | The time the player ended the mission |
 | 6 | Disconnect | The time the player quit |
@@ -2424,7 +2526,13 @@ again with an observer; the capture format did not change for it.
   (31 parts), the standby stream's seat inputs, which carry the sight
   with the rest of the controls, and the six gun-mount angles at 1/32,767 in
   the entity's devices and the readout's stores (slice G5). Protocol 21 is
-  the gunsight project's one bump.
+  the gunsight project's one bump. 22 since the surface round (slice N1,
+  [the surface world](#the-surface-world-protocol-22)): the fifth entity kind
+  and the 3-bit kind code in the view subject, events 18 to 20, the surface
+  digest in the Seated message and the Resumed flight, the debrief pilot's
+  shot-down-by name and the readout's painting radars (32 parts). The ground
+  target's text lines travel in the mission text. Protocol 22 is the surface
+  round's one bump.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

@@ -808,17 +808,17 @@ pub struct Airfields {
 impl Airfields {
     /// `fitted`, agent decision 2026-09-23: which airfields each side may
     /// return to. It mirrors the player's tower service and airport list: a
-    /// friendly field, or a neutral one that grants permission. Allegiance is
-    /// recorded from the player's point of view, so for the enemy side a
-    /// hostile field is its own. The single neutral-permission flag is used for
-    /// both sides because no per-side permission is recorded.
+    /// field of the side, or a neutral one that grants permission
+    /// ([`Airport::serves`](tore_sim::airport::Airport::serves)). Allegiance is
+    /// recorded from Blue's point of view and taken from the runway's layout
+    /// side (slice AL1), so for the enemy side a hostile field is its own. The
+    /// single neutral-permission flag is used for both sides because no
+    /// per-side permission is recorded.
     pub fn from_scene(scene: &tore_sim::airport::Scene, departure: Option<Departure>) -> Self {
-        use tore_sim::airport::Allegiance;
         let mut runways = Vec::new();
         for airport in &scene.airports {
-            let neutral = airport.allegiance == Allegiance::Neutral && airport.neutral_permission;
-            let friendly = neutral || airport.allegiance == Allegiance::Friendly;
-            let enemy = neutral || airport.allegiance == Allegiance::Hostile;
+            let friendly = airport.serves(false);
+            let enemy = airport.serves(true);
             if !friendly && !enemy {
                 continue;
             }
@@ -2092,46 +2092,7 @@ impl AiWings {
         for event in &output.devices {
             self.realise_device(event, state)?;
         }
-        state.set_actor_supports(
-            self.mission
-                .actors()
-                .iter()
-                .filter(|a| a.alive())
-                .map(|actor| {
-                    let observation = actor
-                        .controller()
-                        .target()
-                        .and_then(|id| {
-                            actor
-                                .awareness()
-                                .current_observations()
-                                .find(|record| record.target.id == id)
-                        })
-                        .map(|record| {
-                            let delta =
-                                missiles::sub(record.target.position, actor.flight().position);
-                            seeker::Observation {
-                                id: record.target.id,
-                                position: record.target.position,
-                                velocity: record.velocity,
-                                quality: 1.0,
-                                off_axis: 0.0,
-                                range: missiles::length(delta),
-                            }
-                        });
-                    live::ActorSupport {
-                        owner: actor.id(),
-                        supported: observation
-                            .is_some_and(|o| actor.sensors().is_some_and(|s| s.supports(o.id))),
-                        observation,
-                        radar_position: actor.flight().position,
-                        radar_emitting: actor.flight().radar
-                            && actor.sensors().is_some_and(|s| {
-                                matches!(s.mode(), Some(sensors::Mode::Rws | sensors::Mode::Tws))
-                            }),
-                    }
-                }),
-        );
+        state.set_actor_supports(self.actor_supports());
         if state.weapon_rules == Rules::Compatibility {
             // Each round's seeker comes from the weapon it carries: its own
             // record, or a station of its owner's ownship.
@@ -2161,6 +2122,51 @@ impl AiWings {
         self.report_perceived_attacks(state, &humans, &ground);
         self.last_output = output;
         Ok(())
+    }
+
+    /// The AI aircraft's fire-control answers for the missile step: each live
+    /// actor's observation of its target, its sensors' support and its radar.
+    /// The step hands them to combat; the surface tick merges its own with
+    /// these in one `set_actor_supports` call
+    /// (docs/spec/surface-defenses.md, "SAM missiles").
+    pub fn actor_supports(&self) -> impl Iterator<Item = live::ActorSupport> + '_ {
+        self.mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive())
+            .map(|actor| {
+                let observation = actor
+                    .controller()
+                    .target()
+                    .and_then(|id| {
+                        actor
+                            .awareness()
+                            .current_observations()
+                            .find(|record| record.target.id == id)
+                    })
+                    .map(|record| {
+                        let delta = missiles::sub(record.target.position, actor.flight().position);
+                        seeker::Observation {
+                            id: record.target.id,
+                            position: record.target.position,
+                            velocity: record.velocity,
+                            quality: 1.0,
+                            off_axis: 0.0,
+                            range: missiles::length(delta),
+                        }
+                    });
+                live::ActorSupport {
+                    owner: actor.id(),
+                    supported: observation
+                        .is_some_and(|o| actor.sensors().is_some_and(|s| s.supports(o.id))),
+                    observation,
+                    radar_position: actor.flight().position,
+                    radar_emitting: actor.flight().radar
+                        && actor.sensors().is_some_and(|s| {
+                            matches!(s.mode(), Some(sensors::Mode::Rws | sensors::Mode::Tws))
+                        }),
+                }
+            })
     }
 
     /// Report observable attacks, never an opponent's private target choice.
@@ -2978,6 +2984,9 @@ impl AiWings {
                 },
                 event.actor,
             );
+            // The number this device was given, which each roll below is
+            // against.
+            let device = state.devices.released();
             // The seeker and decoy chance of each round, from the weapon it
             // carries, so no particular ownship is needed.
             let seekers: Vec<(u8, u8)> = state
@@ -3019,6 +3028,7 @@ impl AiWings {
                         projectile: projectile.id,
                         releaser: event.actor,
                         class: event.class,
+                        device,
                         susceptibility: missile.decoy_susceptibility_percent,
                         effectiveness,
                         draw: self.device_random.log().draws().last().copied(),
@@ -5969,6 +5979,10 @@ mod tests {
             combat.projectiles[0].target, None,
             "decoyed by the flare, as plane 50's own missile"
         );
+        // The roll names the flare it was against: the device just released.
+        let rolls = wings.decoy_rolls();
+        assert_eq!(rolls.len(), 1);
+        assert!(rolls[0].device > 0 && rolls[0].device == combat.devices.released());
     }
 
     #[test]

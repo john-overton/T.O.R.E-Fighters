@@ -10,9 +10,10 @@
 //! the calls and the debrief agree. This file keeps the 4 second check,
 //! the rule that a result already decided at flight start disables SUCC and
 //! HOME, and the home check.
-use crate::ai_wings::AiWings;
+use crate::ai_wings::{AiWings, ENEMY_SIDE, FRIENDLY_SIDE};
 use crate::comms::journal::{Audience, Cause, Origin, Source};
 use crate::comms::{Call, Kind, Phrase, Phrases};
+use crate::surface::{LAYOUT_OBJECT_BASE, SURFACE_UNIT_END, Surface};
 use crate::terrain::Terrain;
 use tore_sim::ai::launch::Side;
 use tore_sim::combat::ledger::{Kill, Ledger};
@@ -142,6 +143,109 @@ pub struct Aircraft {
     pub alive: bool,
 }
 
+/// How a surface object stands to the plane whose result this is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stance {
+    /// On the plane's own side.
+    Friendly,
+    /// On the other side.
+    Hostile,
+    /// Scenery with no owner.
+    Neutral,
+}
+impl Stance {
+    /// The stance of an object on combat side `object` to a plane that flies
+    /// for `side`.
+    pub fn of(object: live::Side, side: Side) -> Self {
+        let own = if side.is_enemy() {
+            ENEMY_SIDE
+        } else {
+            FRIENDLY_SIDE
+        };
+        if object == own {
+            Self::Friendly
+        } else if object == FRIENDLY_SIDE || object == ENEMY_SIDE {
+            Self::Hostile
+        } else {
+            Self::Neutral
+        }
+    }
+}
+
+/// One surface object as the mission result sees it: a unit of the theater
+/// layout or of the ground target, a battery's added radar, a supply truck or
+/// a parked aircraft (docs/spec/surface-defenses.md, "Objectives, scoring and
+/// debrief"). Ids are in the surface ranges ([`crate::surface::UnitId`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ground<'a> {
+    pub id: u32,
+    pub stance: Stance,
+    /// Its combat row still has hit points.
+    pub alive: bool,
+    /// Its type's short display name, for "shot down by" lines.
+    pub name: &'a str,
+}
+
+/// Whether `id` is a surface object's id (any of the reserved ranges).
+pub fn is_surface(id: u32) -> bool {
+    (LAYOUT_OBJECT_BASE..SURFACE_UNIT_END).contains(&id)
+}
+
+/// Every surface object of `surface` that has a combat row, as the plane
+/// that flies for `side` sees it. An object with no row (its shape was one
+/// the reader cannot draw) is left out: it can be neither hit nor destroyed.
+pub fn ground<'a>(surface: &'a Surface, state: &live::State, side: Side) -> Vec<Ground<'a>> {
+    let rows: std::collections::BTreeMap<u32, i32> = state
+        .targets
+        .iter()
+        .filter(|t| is_surface(t.id))
+        .map(|t| (t.id, t.hp))
+        .collect();
+    let object = |id: u32, name: &'a str| {
+        rows.get(&id).map(|hp| Ground {
+            id,
+            stance: Stance::of(surface.side_of(id), side),
+            alive: *hp > 0,
+            name,
+        })
+    };
+    surface
+        .units
+        .iter()
+        .filter_map(|unit| object(unit.id.0, &unit.name))
+        .chain(
+            surface
+                .parked_scene
+                .iter()
+                .filter_map(|pose| object(pose.id.0, &pose.name)),
+        )
+        .collect()
+}
+
+/// The short name of the surface unit the ledger credits with the loss of
+/// aircraft `plane` ("SA-6", "ZSU-23-4"): its recorded kill, else the last
+/// shooter to hit it. `None` when an aircraft, or nobody, is credited.
+pub fn shot_down_by<'a>(surface: &'a Surface, ledger: &Ledger, plane: u32) -> Option<&'a str> {
+    let owner = ledger.credit(plane)?.owner;
+    is_surface(owner)
+        .then(|| surface.unit(crate::surface::UnitId(owner)))
+        .flatten()
+        .map(|unit| unit.name.as_str())
+}
+
+/// The destroy targets the mission's ground target has in the world: the
+/// template objects and parked aircraft flagged 0x80 that have a combat row,
+/// ascending id. Empty without a ground target.
+pub fn ground_targets(surface: &Surface, state: &live::State) -> Vec<u32> {
+    let mut targets: Vec<u32> = surface
+        .targets()
+        .map(|id| id.0)
+        .filter(|id| state.targets.iter().any(|t| t.id == *id))
+        .collect();
+    targets.sort_unstable();
+    targets
+}
+
 /// What the mission result knows of lineages (the lobby pass's follow-up
 /// F1): the root of every plane a respawn or a revival added (the plane the
 /// mission started with that it continues), and the side of every plane the
@@ -233,6 +337,27 @@ impl Requirements {
             protect: lineages.fold(&protect),
         }
     }
+
+    /// The same requirements with the mission's ground `targets` added
+    /// (docs/spec/surface-defenses.md, "Objectives, scoring and debrief"): a
+    /// plane of the friendly side must destroy them, joining the air
+    /// requirement in one combined Destroy objective, and a plane of the
+    /// enemy side (a Redfor player in a multiplayer game) must keep them
+    /// alive. Surface ids have no lineage. Agent decision, 2026-10-10;
+    /// requested by John.
+    pub fn with_ground(mut self, side: Side, targets: &[u32]) -> Self {
+        let list = if side.is_enemy() {
+            &mut self.protect
+        } else {
+            &mut self.destroy
+        };
+        for id in targets {
+            if !list.contains(id) {
+                list.push(*id);
+            }
+        }
+        self
+    }
 }
 
 /// The AI's aircraft as they stand, each friendly when it is on `side`, for
@@ -255,16 +380,20 @@ pub fn ai_aircraft(wings: &AiWings, side: Side) -> Vec<Aircraft> {
 
 /// How the mission stands for one plane, from the combat ledger, every
 /// aircraft's fate and the plane's requirements. The one place the mission
-/// result rule lives: the plane shot down no friendly aircraft, every
-/// aircraft it must destroy is gone and every one it must protect still
-/// flies.
+/// result rule lives: the plane shot down no friendly aircraft and destroyed
+/// no friendly ground object that was not a target, every object it must
+/// destroy is gone and every one it must protect still stands.
 pub struct Standing<'a> {
     pub ledger: &'a Ledger,
     /// The plane whose result this is; it must be in `aircraft`.
     pub plane: u32,
-    /// Every aircraft the plane knows of, the plane included. An id that is
-    /// not listed counts as gone.
+    /// Every aircraft the plane knows of, the plane included. An aircraft
+    /// that is not listed counts as gone.
     pub aircraft: &'a [Aircraft],
+    /// Every surface object the plane knows of ([`ground`]); empty without a
+    /// ground target. A surface id that is not listed is undecided: it is
+    /// neither destroyed nor lost.
+    pub ground: &'a [Ground<'a>],
     pub requirements: &'a Requirements,
 }
 
@@ -272,8 +401,23 @@ impl Standing<'_> {
     fn aircraft(&self, id: u32) -> Option<&Aircraft> {
         self.aircraft.iter().find(|a| a.id == id)
     }
+    /// The surface object `id`, when the standing lists it.
+    pub fn ground(&self, id: u32) -> Option<&Ground<'_>> {
+        self.ground.iter().find(|g| g.id == id)
+    }
+    /// An aircraft on the plane's side, or a surface object on its side that
+    /// the mission does not name as an objective (retail: a same-side object
+    /// "not flagged as a target"; the plane's own protected objectives are
+    /// not friendly fire, they fail the mission another way).
     pub fn friendly(&self, id: u32) -> bool {
-        self.aircraft(id).is_some_and(|a| a.friendly)
+        match self.ground(id) {
+            Some(ground) => {
+                ground.stance == Stance::Friendly
+                    && !self.requirements.destroy.contains(&id)
+                    && !self.requirements.protect.contains(&id)
+            }
+            None => self.aircraft(id).is_some_and(|a| a.friendly),
+        }
     }
     /// Recorded kills, plus lost aircraft credited to their last attacker. The
     /// plane's own loss credits nobody.
@@ -292,26 +436,40 @@ impl Standing<'_> {
         }
         kills
     }
-    /// The plane shot down an aircraft of its own side.
+    /// The plane shot down an aircraft of its own side, or destroyed a
+    /// surface object of its own side that was not an objective.
     pub fn friendly_fire(&self) -> bool {
         self.kills()
             .iter()
             .any(|k| k.owner == self.plane && self.friendly(k.victim))
     }
-    /// How many of the aircraft to destroy are gone.
+    /// How many of the objects to destroy are gone. A surface object counts
+    /// once its combat row has no hit points; one the standing does not list
+    /// is undecided, not destroyed (before the ground fates existed an
+    /// unknown id counted as destroyed at once). An aircraft the standing
+    /// does not list is gone.
     pub fn destroyed(&self) -> u32 {
         self.requirements
             .destroy
             .iter()
-            .filter(|id| self.aircraft(**id).is_none_or(|a| !a.alive))
+            .filter(|id| match self.ground(**id) {
+                Some(ground) => !ground.alive,
+                None if is_surface(**id) => false,
+                None => self.aircraft(**id).is_none_or(|a| !a.alive),
+            })
             .count() as u32
     }
-    /// How many of the aircraft to protect still fly.
+    /// How many of the objects to protect still stand. A surface object the
+    /// standing does not list is undecided and still protected.
     pub fn protected(&self) -> u32 {
         self.requirements
             .protect
             .iter()
-            .filter(|id| self.aircraft(**id).is_some_and(|a| a.alive))
+            .filter(|id| match self.ground(**id) {
+                Some(ground) => ground.alive,
+                None if is_surface(**id) => true,
+                None => self.aircraft(**id).is_some_and(|a| a.alive),
+            })
             .count() as u32
     }
     pub fn succeeded(&self) -> bool {
@@ -327,7 +485,10 @@ impl Standing<'_> {
 /// planes as they stand (a multiplayer game's; the lobby pass's follow-up F1),
 /// each friendly when on `side`: without them they count as neither friendly
 /// nor alive here (B3). `lineages` folds respawns and revivals into the
-/// objectives they continue.
+/// objectives they continue. `surface` is the mission's resolved surface:
+/// its ground targets join the requirements and its objects' fates decide
+/// them.
+#[allow(clippy::too_many_arguments)]
 pub fn succeeded(
     state: &live::State,
     wings: Option<&AiWings>,
@@ -336,6 +497,7 @@ pub fn succeeded(
     side: Side,
     humans: &[Aircraft],
     lineages: &Lineages,
+    surface: Option<&Surface>,
 ) -> bool {
     let mut aircraft = vec![Aircraft {
         id: plane,
@@ -348,10 +510,15 @@ pub fn succeeded(
         aircraft.extend(ai_aircraft(wings, side));
         requirements = Requirements::of(wings, plane, side, lineages);
     }
+    let fates = surface.map_or_else(Vec::new, |surface| ground(surface, state, side));
+    if let Some(surface) = surface {
+        requirements = requirements.with_ground(side, &ground_targets(surface, state));
+    }
     Standing {
         ledger: &state.ledger,
         plane,
         aircraft: &aircraft,
+        ground: &fates,
         requirements: &requirements,
     }
     .succeeded()
@@ -513,7 +680,8 @@ mod tests {
             true,
             Side::Friendly,
             &[],
-            &Lineages::default()
+            &Lineages::default(),
+            None
         ));
         assert!(
             succeeded(
@@ -523,7 +691,8 @@ mod tests {
                 false,
                 Side::Friendly,
                 &[],
-                &Lineages::default()
+                &Lineages::default(),
+                None
             ),
             "the plane's own death is not a failure"
         );
@@ -576,6 +745,7 @@ mod tests {
             ledger: &ledger,
             plane,
             aircraft: &fates,
+            ground: &[],
             requirements: &requirements,
         };
         assert_eq!(standing(0).kills().len(), 3);
@@ -647,7 +817,8 @@ mod tests {
             true,
             Side::Friendly,
             &[],
-            &Lineages::default()
+            &Lineages::default(),
+            None
         ));
         // A friendly group that must survive still is the plane's objective.
         wings.apply_group_survival(&[true, false, false, false, false, false]);
@@ -670,7 +841,8 @@ mod tests {
             true,
             Side::Friendly,
             &[],
-            &Lineages::default()
+            &Lineages::default(),
+            None
         ));
     }
 }
