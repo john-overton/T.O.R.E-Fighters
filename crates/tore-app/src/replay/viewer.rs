@@ -20,6 +20,7 @@ use crate::replay::context_menu::{
 use crate::replay::convert;
 use crate::replay::devices::DeviceTrack;
 use crate::replay::drone::{Drone, Mode};
+use crate::replay::ground_marks;
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
 use crate::replay::panels::{self, Data, Kind, Panels, RecordedTrees};
 use crate::replay::pause;
@@ -73,16 +74,20 @@ pub struct Ui {
     pub trails: bool,
     /// Index into [`trails::LENGTHS`].
     pub trail_length: usize,
+    /// Laser spots, designations and guided weapons drawn in the 3D view
+    /// (B, FX-R); on at first, and only for a recording that has any.
+    pub marks: bool,
 }
 
 impl Ui {
     /// The interface parts named in a comma-separated list (labels, timer,
-    /// trails, comms, subtitles), all others off; `none` for none.
+    /// trails, marks, comms, subtitles), all others off; `none` for none.
     pub fn parse(list: &str) -> Result<Self, String> {
         let mut ui = Self {
             labels: false,
             timer: false,
             subtitles: false,
+            marks: false,
             ..Self::default()
         };
         for part in list.split(',').map(str::trim) {
@@ -90,12 +95,13 @@ impl Ui {
                 "labels" => ui.labels = true,
                 "timer" => ui.timer = true,
                 "trails" => ui.trails = true,
+                "marks" => ui.marks = true,
                 "comms" => ui.comms = true,
                 "subtitles" => ui.subtitles = true,
                 "none" | "" => {}
                 other => {
                     return Err(format!(
-                        "unknown replay interface part {other:?}: use labels, timer, trails, comms or subtitles"
+                        "unknown replay interface part {other:?}: use labels, timer, trails, marks, comms or subtitles"
                     ));
                 }
             }
@@ -114,6 +120,7 @@ impl Default for Ui {
             subtitles: true,
             trails: false,
             trail_length: trails::DEFAULT_LENGTH,
+            marks: true,
         }
     }
 }
@@ -722,6 +729,8 @@ pub struct Viewer {
     weather: WeatherTrack,
     /// Released chaff and flares, flown again from their releases.
     devices: DeviceTrack,
+    /// The recording's laser spots, designations and guided weapons.
+    marks: ground_marks::Marks,
     /// Where each airframe's engine outlets sit, for the afterburner
     /// lights: the player's airframe's, then each model's.
     outlets: (Vec<[f64; 3]>, Vec<Vec<[f64; 3]>>),
@@ -983,6 +992,7 @@ impl Viewer {
             targets: BTreeMap::new(),
             missiles: BTreeMap::new(),
             devices: DeviceTrack::new(&[]),
+            marks: ground_marks::Marks::default(),
             outlets: (
                 ownship.contrail_offsets.clone(),
                 models
@@ -1079,6 +1089,7 @@ impl Viewer {
         self.targets = targets(events, self.player);
         self.missiles = missiles(&self.recording);
         self.devices = DeviceTrack::new(events);
+        self.marks = ground_marks::Marks::from_events(events);
         if let Some(growth) = &mut self.growth {
             growth.events = events.len();
         }
@@ -1679,6 +1690,7 @@ impl Viewer {
                     Part::Labels => self.ui.labels = !self.ui.labels,
                     Part::Timer => self.ui.timer = !self.ui.timer,
                     Part::Trails => self.ui.trails = !self.ui.trails,
+                    Part::Marks => self.ui.marks = !self.ui.marks,
                     Part::Comms => {
                         self.panels.toggle_comms();
                         self.ui.comms = self.panels.comms_open();
@@ -1796,6 +1808,15 @@ impl Viewer {
                 } else {
                     "Trails off"
                 });
+            }
+            "b" => {
+                self.ui.marks = !self.ui.marks;
+                let words = match (self.ui.marks, self.marks.any()) {
+                    (false, _) => "Laser and bomb marks off",
+                    (true, true) => "Laser and bomb marks on",
+                    (true, false) => "Laser and bomb marks on (this recording has none)",
+                };
+                self.toast(words);
             }
             "p" => return Command::Screenshot,
             "Escape" => self.open_pause(),
@@ -2719,6 +2740,92 @@ impl Viewer {
         )
     }
 
+    /// Whether the laser and bomb marks are drawn: switched on, and the
+    /// recording has any.
+    fn marks_shown(&self) -> bool {
+        self.ui.marks && self.marks.any()
+    }
+
+    /// What the marks draw at `tick` in `picture`: laser spots, designations,
+    /// guided weapons and landings, placed where the picture has their
+    /// aircraft, weapons and ground objects.
+    fn mark_prims(&self, picture: &RenderSnapshot, tick: u64) -> Vec<ground_marks::Prim> {
+        let scene = self.marks.scene(tick);
+        if scene == ground_marks::Scene::default() {
+            return Vec::new();
+        }
+        let wants_objects =
+            !scene.designations.is_empty() || scene.weapons.iter().any(|w| w.target.is_some());
+        let objects: BTreeMap<u32, [f64; 3]> = if wants_objects {
+            self.ground_objects(tick, picture).into_iter().collect()
+        } else {
+            BTreeMap::new()
+        };
+        let aircraft = |id: u32| everyone(picture).find(|p| p.id == id).map(|p| p.position);
+        let projectile = |id: u32| {
+            picture
+                .projectiles
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.position)
+        };
+        let object = |id: u32| objects.get(&id).copied();
+        let side = |id: u32| self.side(id);
+        let name = |id: u32| crate::replay::panels::ascii(&self.label(id));
+        ground_marks::draw(
+            &scene,
+            &ground_marks::Positions {
+                aircraft: &aircraft,
+                projectile: &projectile,
+                object: &object,
+            },
+            &ground_marks::Who {
+                player: self.player,
+                side: &side,
+                name: &name,
+            },
+        )
+    }
+
+    /// The words beside the marks, placed for a view of `size` and kept
+    /// clear of `others`, the name labels already there. They have no
+    /// aircraft behind them, so a right-click does not pick them.
+    fn mark_labels(
+        &self,
+        picture: &RenderSnapshot,
+        tick: u64,
+        camera: &Camera,
+        size: [u32; 2],
+        others: &[Label],
+    ) -> Vec<Label> {
+        if !self.marks_shown() {
+            return Vec::new();
+        }
+        let scale = Placement::new(size).scale();
+        let font = &self.ownship.font;
+        let mut all = others.to_vec();
+        for prim in self.mark_prims(picture, tick) {
+            let ground_marks::Prim::Text { at, text, color } = prim else {
+                continue;
+            };
+            let Some([x, y]) = camera.project(size, at) else {
+                continue;
+            };
+            let text = crate::replay::panels::ascii(&text);
+            let width = FlightCanvas::text_width(font, &text, scale);
+            all.push(Label {
+                id: u32::MAX,
+                // Clear of the shape drawn at the point.
+                at: [x - width / 2., y - (font.height as f64 + 26.) * scale],
+                size: [width, (font.height as f64 + 1.) * scale],
+                text,
+                color,
+            });
+        }
+        separate_labels(&mut all, scale);
+        all.split_off(others.len())
+    }
+
     /// The cockpit messages on screen at `tick`, oldest first.
     fn messages(&self, tick: u64) -> Vec<String> {
         let life = (crate::flight_ui::MESSAGE_LIFETIME.as_secs_f64()
@@ -2989,6 +3096,16 @@ impl Viewer {
                 &mut combat.vertices,
             );
         }
+        if self.marks_shown() {
+            let prims = self.mark_prims(&picture, tick);
+            ground_marks::geometry(
+                &prims,
+                &camera,
+                self.scenery.origin,
+                f64::from(size[1]),
+                &mut combat.vertices,
+            );
+        }
         renderer.combat(&combat);
         renderer.aircraft(
             &self.ownship,
@@ -3041,6 +3158,14 @@ impl Viewer {
         };
         self.size = size;
         self.pickables = Self::pickables_for(picture, &labels, &self.ground_objects(tick, picture));
+        // The words beside laser spots and guided weapons are drawn with the
+        // name labels, with the labels switch, but are not picked.
+        let drawn: Vec<Label> = if self.ui.hidden {
+            Vec::new()
+        } else {
+            let marks = self.mark_labels(picture, tick, camera, size, &labels);
+            labels.iter().cloned().chain(marks).collect()
+        };
         if !self.requests.is_empty() {
             self.open_requests(camera);
         }
@@ -3092,7 +3217,7 @@ impl Viewer {
             &Interface {
                 hidden: self.ui.hidden,
                 bar: !self.pause.is_open(),
-                labels: &labels,
+                labels: &drawn,
                 model: &model,
                 panels: PanelLayer {
                     pixels: &self.panel_layer,
@@ -3537,6 +3662,12 @@ mod tests {
         v.key("r", true, false, true);
         assert!(v.ui.trails);
         assert_eq!(trails::LENGTHS[v.ui.trail_length], 60);
+        // B switches the laser and bomb marks, on at first.
+        assert!(before.marks);
+        press(&mut v, "b");
+        assert!(!v.ui.marks);
+        press(&mut v, "b");
+        assert!(v.ui.marks);
         assert_eq!(press(&mut v, "p"), Command::Screenshot);
         // H hides everything. Esc opens the menu over the hidden
         // interface, with the pointer; closing it leaves the interface
@@ -3652,7 +3783,7 @@ mod tests {
         // Back up to the Pref rows, then the ? tab.
         press(&mut v, "Escape");
         press(&mut v, "Escape");
-        assert_eq!(v.pause.widget.rows(&v.pause.tree).len(), 7);
+        assert_eq!(v.pause.widget.rows(&v.pause.tree).len(), 8);
         click(&mut v, QUESTION_TAB);
         assert_eq!(
             v.pause.widget.rows(&v.pause.tree)[0].label,
@@ -3669,13 +3800,20 @@ mod tests {
         let before = v.ui;
         let state = |v: &Viewer, label| pause::state(&v.ui, label);
         assert_eq!(state(&v, pause::COMMS), Some("Off"));
-        for row in 3..7 {
+        for row in 3..8 {
             assert_eq!(click(&mut v, menu_row(row)), Command::Click);
         }
         assert_eq!(
-            (v.ui.labels, v.ui.timer, v.ui.trails, v.ui.comms),
-            (!before.labels, !before.timer, !before.trails, !before.comms)
+            (v.ui.labels, v.ui.timer, v.ui.trails, v.ui.marks, v.ui.comms),
+            (
+                !before.labels,
+                !before.timer,
+                !before.trails,
+                !before.marks,
+                !before.comms
+            )
         );
+        assert_eq!(state(&v, pause::MARKS), Some("Off"));
         assert!(v.panels.comms_open());
         assert_eq!(state(&v, pause::COMMS), Some("On"));
         assert_eq!(state(&v, "Graphics..."), None);
@@ -4656,6 +4794,10 @@ mod tests {
         assert_eq!(v.panels.find(Kind::Telemetry, 2), Some(panels::Side::Right));
         assert_eq!(v.menu.as_ref().unwrap().target, Target::Aircraft(2));
         assert!(Request::parse("thought,sparkles").is_err());
+        // The marks are on unless the list leaves them out.
+        assert!(!v.ui.marks);
+        assert!(Ui::parse("marks").unwrap().marks);
+        assert!(Ui::default().marks);
         assert_eq!(Request::parse("").unwrap(), []);
         assert_eq!(v.clock.position(), 300.);
         assert_eq!(

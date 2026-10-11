@@ -32,6 +32,9 @@ pub const NAME_LABELS: &str = "Name labels?";
 pub const MISSION_TIMER: &str = "Mission timer?";
 pub const TRAILS: &str = "Flight path trails?";
 pub const COMMS: &str = "Comms panel?";
+/// The laser spots, designations and guided weapons of an air-to-ground pass,
+/// drawn in the 3D view: the same switch as the B key (slice FX-R).
+pub const MARKS: &str = "Laser and bomb marks?";
 /// The retail tab that opens the controls screen, as it does in flight.
 pub const CONTROL: &str = "Control";
 /// The retail Pref rows a replay keeps, in retail order.
@@ -86,6 +89,7 @@ fn help_lines(_: &[MenuNode]) -> Vec<String> {
         "M: right-click menu on the selected aircraft | X: close every panel",
         "Right-click: the menu on the object under the pointer",
         "R: trails on or off | Shift-R: next trail length",
+        "B: laser spots, designations and guided bombs on or off",
         "H: hide or show the interface | P: save the view as a PNG",
         "Esc: this menu; Esc again resumes | Alt-F4: exit to the desktop",
         "The keys are built in; docs/REPLAYS.md lists them all",
@@ -137,7 +141,7 @@ pub fn tree(imported: &[MenuNode]) -> Vec<MenuNode> {
     if let Some(node) = prefs.iter_mut().find(|n| n.label == "Time") {
         node.children = kept(time, &TIME_ROWS);
     }
-    prefs.extend([NAME_LABELS, MISSION_TIMER, TRAILS, COMMS].map(|label| row(label, "")));
+    prefs.extend([NAME_LABELS, MISSION_TIMER, TRAILS, MARKS, COMMS].map(|label| row(label, "")));
     vec![
         MenuNode {
             label: question.map_or("?", |n| &n.label).into(),
@@ -163,6 +167,7 @@ pub fn state(ui: &Ui, label: &str) -> Option<&'static str> {
         NAME_LABELS => ui.labels,
         MISSION_TIMER => ui.timer,
         TRAILS => ui.trails,
+        MARKS => ui.marks,
         COMMS => ui.comms,
         _ => return None,
     };
@@ -212,6 +217,7 @@ pub enum Part {
     Labels,
     Timer,
     Trails,
+    Marks,
     Comms,
 }
 
@@ -585,6 +591,7 @@ impl Menu {
             NAME_LABELS => Choice::Toggle(Part::Labels),
             MISSION_TIMER => Choice::Toggle(Part::Timer),
             TRAILS => Choice::Toggle(Part::Trails),
+            MARKS => Choice::Toggle(Part::Marks),
             COMMS => Choice::Toggle(Part::Comms),
             _ => Choice::None,
         }
@@ -670,6 +677,7 @@ mod tests {
                 "Name labels?|",
                 "Mission timer?|",
                 "Flight path trails?|",
+                "Laser and bomb marks?|",
                 "Comms panel?|"
             ]
             .map(String::from)

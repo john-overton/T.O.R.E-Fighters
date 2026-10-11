@@ -75,7 +75,7 @@ impl Camera {
             (self.position[1] + f64::from(h * speed)).clamp(f64::from(ground + 100.0), 400_000.0);
     }
     /// The camera's right, up and forward unit vectors.
-    fn axes(&self) -> ([f64; 3], [f64; 3], [f64; 3]) {
+    pub fn axes(&self) -> ([f64; 3], [f64; 3], [f64; 3]) {
         let (sy, cy) = f64::from(self.yaw).sin_cos();
         let (sp, cp) = f64::from(self.pitch).sin_cos();
         let (sr, cr) = f64::from(self.roll).sin_cos();
