@@ -33,17 +33,24 @@ from battery_scenarios.a2g_missiles import STRAIGHT_FLUSH
 LINE = re.compile(r"^ai-strike: (\S+)(?: (.*))?$", re.M)
 FIELD = re.compile(r'(\w+)=("[^"]*"|\S+)')
 
-# John's release circle (2026-10-11, docs/spec/ai-strike.md#skill-and-release-precision), in
-# feet, by skill 0 (Novice), 1 (Average), 2 (Experienced), 3 (Ace): 325, 250, 175 and 100 m.
-CIRCLE_FT = {0: 1066.0, 1: 820.0, 2: 574.0, 3: 328.0}
-# The bomb's own scatter, on top of the aim offset: the worst of the specced cases is the level
-# Mk 82 (about 770 ft across the track); the dive is about 310 ft.
-SCATTER_FT = 800.0
+# John's release circle (2026-10-11, docs/spec/ai-strike.md#skill-and-release-precision), by skill
+# 0 (Novice), 1 (Average), 2 (Experienced), 3 (Ace): 85, 60, 35 and 10 m, in feet (279, 197, 115
+# and 33).
+CIRCLE_M = {0: 85.0, 1: 60.0, 2: 35.0, 3: 10.0}
+CIRCLE_FT = {skill: metres / 0.3048 for skill, metres in CIRCLE_M.items()}
+# The release gate (`strike.rs` GATE_SHARE and GATE_FLOOR_FT): the cue may be this far from the aim
+# point at the release, so the bomb's mean impact may sit this far outside the drawn aim.
+GATE_FT = {skill: max(0.1 * r, 10.0) for skill, r in CIRCLE_FT.items()}
+# The bomb's own scatter, on top of the aim offset: half what it was at 3 degrees (800 ft), as John
+# halved the scatter to 1.5 degrees. The worst of the specced cases is the level Mk 82 (about 385
+# ft across the track); the dive is about 155 ft.
+SCATTER_FT = 400.0
 # Horizontal miss, in feet, a bomb pass may end within. The seeded aim offset is inside the circle
 # 90% of passes and inside the ring R to 2R on the other 10%: a run whose RELEASE lines all say
-# `inside=yes` is held to the circle plus the scatter, any other to the ring's outer edge plus it.
-MISS_FT_MAX = {skill: 2 * r + SCATTER_FT for skill, r in CIRCLE_FT.items()}
-MISS_FT_INSIDE = {skill: r + SCATTER_FT for skill, r in CIRCLE_FT.items()}
+# `inside=yes` is held to the circle plus the gate plus the scatter, any other to the ring's outer
+# edge plus them.
+MISS_FT_MAX = {skill: 2 * r + GATE_FT[skill] + SCATTER_FT for skill, r in CIRCLE_FT.items()}
+MISS_FT_INSIDE = {skill: r + GATE_FT[skill] + SCATTER_FT for skill, r in CIRCLE_FT.items()}
 # The driver rounds the aim offset to whole feet.
 AIM_SLACK_FT = 1.0
 # A rocket or a guided weapon is judged by the target, not a miss distance.
@@ -381,7 +388,7 @@ def scenarios() -> list[Scenario]:
             notes="An A-4E's Mk 82 on the Ukraine armored column: each pass (straight, pop-up, fast-high, "
                   "dive, level) forced once at skill 2 and skills 0, 1 and 3 on the dive. Each run names its "
                   "pass, releases with its drawn aim inside the release circle (or the ring R to 2R when the "
-                  "draw says so), ends the bomb within the circle plus 800 ft of scatter (the ring's edge plus "
+                  "draw says so), ends the bomb within the circle plus the gate plus 400 ft of scatter (the ring's edge plus "
                   "it for a ring draw), leaves and is not lost.",
         ),
         Scenario(
@@ -391,7 +398,7 @@ def scenarios() -> list[Scenario]:
             check=lambda out: strike_problems(out, _runs(rocket_runs, hit=False)),
             notes="An A-4E's LAU-61 pods on the column, straight runs at skills 2 and 3: a burst at the "
                   "record's cadence with the drawn aim inside the circle, each rocket within the circle "
-                  "plus 800 ft, and the striker leaves.",
+                  "plus the gate plus 400 ft, and the striker leaves.",
         ),
         Scenario(
             name="ai-strike-maverick", lane="flight",
