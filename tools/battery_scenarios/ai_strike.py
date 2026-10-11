@@ -397,7 +397,7 @@ ORDER_RUNS = [
     dict(label="Alt+E", kind="strike"),
     dict(label="Alt+R", kind="strike"),
     dict(label="Alt+F", kind="strike"),
-    dict(label="Alt+W", kind="class"),
+    dict(label="Alt+W", kind="class", release=False),
     dict(label="refused", kind="refused"),
 ]
 
@@ -432,10 +432,10 @@ def scenarios() -> list[Scenario]:
         "engage-ir-laser": pilot_run("UKR", "QUFACT", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
                                      "--count", "2", "--order-at", "3", "--seconds", "90",
                                      "--order", "engage-ir-laser"),
-        "engage-class": pilot_run("VLA", "QVRDRI", "--surface-seed", "4", "--defenses", "3", "3", "--unit",
-                                  STRAIGHT_FLUSH, "--aircraft", "f4g", "--load", "AGM88", "--from", "12",
-                                  "--altitude", "15000", "--order-at", "3", "--seconds", "120",
-                                  "--order", "engage-class"),
+        # The heavily defended column: the lead designates a SAM (the nearest one its radar lists), and the
+        # wingman is given every one of its class. The defences may bring the wingman down.
+        "engage-class": pilot_run("UKR", "QUCOL", "--defenses", "3", "3", "--aircraft", "a4e", "--load", "MK82",
+                                  "--order-at", "3", "--seconds", "60", "--order", "engage-class"),
         "refused": pilot_run("UKR", "QUCOL", "--aircraft", "f14", "--station", "0", "--load", "AIM9M",
                              "--order-at", "3", "--seconds", "30", "--order", "engage-my-target"),
     }
@@ -479,19 +479,19 @@ def scenarios() -> list[Scenario]:
             check=lambda out: ground_order_problems(out, ORDER_RUNS),
             notes="A seat leads a two-ship wing and orders the wingman onto the ground: Alt+E and Alt+R "
                   "on the Ukraine armored column (an A-4E's Mk 82), Alt+F on the factory with the "
-                  "lead's Pave Spike on it (an F-16C's JDAM), Alt+W on a SAM (an F-4G's HARM takes the "
-                  "site's SAMs as a class order), and Alt+E refused by a wingman with only air-to-air "
+                  "lead's Pave Spike on it (an F-16C's JDAM), Alt+W on a SAM of the defended column (the "
+                  "wingman takes the site's SAMs as a class order), and Alt+E refused by a wingman with only air-to-air "
                   "stores. Each reports the reply and what the wingman holds; the takers release.",
         ),
         Scenario(
             name="qmc-strike-wing", lane="flight",
-            args=pilot_run("UKR", "QUCOL", "--aircraft", "a4e", "--load", "MK82", "--quick-wing",
-                           "--seconds", "420"),
+            args=pilot_run("UKR", "QUFACT", "--aircraft", "a4e", "--load", "MK82", "--quick-wing",
+                           "--seconds", "300"),
             timeout=900,
-            then=[Step(pilot_run("UKR", "QUCOL", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
+            then=[Step(pilot_run("UKR", "QUFACT", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
                                  "--quick-wing", "--seconds", "60"), timeout=300)],
             check=quick_wing_problems,
-            notes="A Quick Mission with the Ukraine column as the ground target and a second friendly wing "
+            notes="A Quick Mission with the Ukraine factory as the ground target and a second friendly wing "
                   "of two: A-4E bombers get the Strike role from the mission's default (retail's "
                   "bomber-class rule) and attack the column on their own; F-16C fighters keep CAP and "
                   "release nothing.",

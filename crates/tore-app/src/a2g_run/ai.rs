@@ -646,7 +646,12 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
 /// nearest contact to the target on the page, else after a few seconds the
 /// Easy targeting cheat's Ctrl+X (an aircraft with no ground radar). Returns
 /// the designated id, if any.
-fn designate(scene: &mut Scene, pass: &Pass, plane: PlaneId) -> AppResult<Option<u32>> {
+fn designate(
+    scene: &mut Scene,
+    pass: &Pass,
+    plane: PlaneId,
+    prefer: Option<u16>,
+) -> AppResult<Option<u32>> {
     scene.queue(SeatCommand::Combat(Command::ToggleAirGround));
     let easy = scene.world.combat.state.cheats.easy_targeting;
     let mut found = None;
@@ -659,18 +664,29 @@ fn designate(scene: &mut Scene, pass: &Pass, plane: PlaneId) -> AppResult<Option
             .ownship(plane.0)
             .ok_or("no ownship")?;
         if let Some(id) = own.designated() {
-            found = Some(id);
-            break;
+            let class = scene
+                .world
+                .combat
+                .state
+                .targets
+                .iter()
+                .find(|t| t.id == id)
+                .map_or(0, |t| t.category);
+            if prefer.is_none_or(|wanted| class & wanted != 0) {
+                found = Some(id);
+                break;
+            }
         }
         let aim = pass.aim;
+        let d = |p: [f64; 3]| (p[0] - aim[0]).hypot(p[2] - aim[2]);
+        // The contact nearest the target, of the preferred class if one is
+        // listed (a class order is given on a SAM).
         let nearest = own
             .sensors
             .ground()
             .iter()
-            .min_by(|a, b| {
-                let d = |p: [f64; 3]| (p[0] - aim[0]).hypot(p[2] - aim[2]);
-                d(a.contact.position).total_cmp(&d(b.contact.position))
-            })
+            .filter(|g| prefer.is_none_or(|class| g.class & class != 0))
+            .min_by(|a, b| d(a.contact.position).total_cmp(&d(b.contact.position)))
             .map(|g| g.contact.id);
         if let Some(id) = nearest {
             scene.queue(SeatCommand::Combat(Command::DesignateTarget(id)));
@@ -775,8 +791,17 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         scene.station = 0;
         human = true;
     } else if quick {
-        // The wing stays where the mission put it.
+        // The wing stays where the mission put it. Taking a plane to fit its
+        // store rebuilt its AI actor without the role the mission gave it
+        // (a takeover does not keep it yet, slice ST-K), so the mission's
+        // role rule runs again.
         scene.world.give_back_plane(SEAT)?;
+        if let Some(wings) = scene.world.ai_wings.as_mut() {
+            wings.apply_strike_roles(
+                &[tore_sim::ai::engagement::GroupObjective::Inherit; 6],
+                true,
+            );
+        }
     } else if cfg.handback.is_some() {
         place(&mut scene.world, striker, &pass, 0., 0.);
         human = true;
@@ -823,7 +848,10 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let mut leg_t = 0.;
     if human {
         let flier = if ordering { lead } else { striker };
-        let designated = designate(&mut scene, &pass, flier)?;
+        // A class order is given on a SAM (Attack SAMs).
+        let prefer = (cfg.order.map(|(_, order)| order) == Some(PlayerOrder::EngageClass))
+            .then_some(tore_sim::sensors::track::class::SAM);
+        let designated = designate(&mut scene, &pass, flier, prefer)?;
         match designated {
             Some(id) => {
                 scene.target = id;
