@@ -611,9 +611,15 @@ fn channel_code(c: Channel) -> i64 {
         Channel::Radar => 0,
         Channel::Infrared => 1,
         Channel::Visual => 2,
+        Channel::Harm => 3,
     }
 }
-const CHANNELS: [Channel; 3] = [Channel::Radar, Channel::Infrared, Channel::Visual];
+const CHANNELS: [Channel; 4] = [
+    Channel::Radar,
+    Channel::Infrared,
+    Channel::Visual,
+    Channel::Harm,
+];
 
 fn source_code(s: TrackSource) -> i64 {
     match s {
@@ -1498,6 +1504,11 @@ impl QReadout {
             strobes,
             trails,
             trail_points,
+            // The ground pages are not on the wire before protocol 23
+            // (slice NA): a client draws none.
+            air_ground: false,
+            harm: false,
+            ground: Vec::new(),
         };
         let visual = self.lists[list::VISUAL]
             .iter()

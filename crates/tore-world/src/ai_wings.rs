@@ -2762,6 +2762,18 @@ impl AiWings {
         objects
     }
 
+    /// Each AI aircraft and whether it is in an airfield's takeoff or landing
+    /// sequence (the A-G page lists aircraft only then).
+    pub fn airfield_attachment(&self) -> Vec<(u32, bool)> {
+        self.slots
+            .iter()
+            .filter_map(|slot| {
+                let actor = self.mission.actor(slot.id)?;
+                Some((slot.id, actor.alive() && actor.airfield().is_some()))
+            })
+            .collect()
+    }
+
     /// The AI pose becomes the target pose, so the renderer, the player's
     /// sensors, the missile collision sweep and the damage model all see one
     /// world with one authority per aircraft.

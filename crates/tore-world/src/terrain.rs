@@ -1066,6 +1066,8 @@ impl Terrain {
                 category: definition.category,
                 radar_signature: f64::from(definition.radar_signature),
                 infrared_signature: f64::from(definition.infrared_signature),
+                type_flags: definition.flags,
+                max_visible: definition.max_visible,
             });
             if runway {
                 let airport_id = u32::try_from(airports.len() + 1)?;
@@ -1500,6 +1502,8 @@ mod tests {
             infrared_signature: 0,
             explosion: 0,
             crater: 0,
+            flags: 0,
+            max_visible: 0,
         }
     }
 
@@ -1719,6 +1723,8 @@ mod tests {
                 category: 0x2000,
                 radar_signature: 1.0,
                 infrared_signature: 0.0,
+                type_flags: 0,
+                max_visible: 0,
             });
         assert_eq!(
             world

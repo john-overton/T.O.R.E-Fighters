@@ -1382,6 +1382,9 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 len: 3,
             }],
             trail_points: vec![[0., 0., 0.], [10., 0., 5.], [20., 1., 10.]],
+            air_ground: false,
+            harm: false,
+            ground: Vec::new(),
         },
         visual: vec![contact(12, -40_000.)],
         map: vec![MapRow {

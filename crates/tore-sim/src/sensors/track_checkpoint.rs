@@ -9,13 +9,33 @@
 //! carries the same copy. The `Controls` and `Channel` types are coded by
 //! their exact own-plane coders (`checkpoint_shared.rs`).
 
-use super::{Contact, MapContact, Mode, Plot, Sample, Sensors, Strobe, Trail};
+use super::{
+    Contact, GroundContact, MapContact, Mode, Plot, Sample, Sensors, Strobe, Trail, Weather,
+    WeatherBand,
+};
 
 crate::checkpoint_enum!(Mode {
     Rws = 0,
     Tws = 1,
     Infrared = 2,
+    AirGround = 3,
+    Harm = 4,
 });
+
+crate::checkpoint_struct!(GroundContact {
+    contact,
+    class,
+    aircraft,
+    visible,
+});
+
+crate::checkpoint_struct!(WeatherBand {
+    low_ft,
+    high_ft,
+    effects,
+});
+
+crate::checkpoint_struct!(Weather { bands });
 
 crate::checkpoint_struct!(Contact {
     id,
@@ -85,6 +105,13 @@ crate::checkpoint_struct!(Sensors {
     history,
     tick,
     keep_selection,
+    air_ground,
+    harm_seeker,
+    ground,
+    ground_page,
+    ground_built,
+    held,
+    ground_retained,
 } shared { profiles });
 
 #[cfg(test)]

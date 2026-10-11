@@ -28,6 +28,10 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 
 mod broad;
 mod collateral;
+mod ground_sensing;
+#[cfg(test)]
+mod ground_sensing_tests;
+pub use ground_sensing::GroundListing;
 #[cfg(test)]
 mod gunship_impact_tests;
 #[cfg(test)]
@@ -199,6 +203,13 @@ pub enum Command {
     /// Persistent selection of one current contact by its stable identity.
     DesignateTarget(u32),
     ClearDesignation,
+    /// Ctrl+R or Shift+R: the radar's air-to-ground page on or off. It turns
+    /// the air radar off and never touches the designated target
+    /// (docs/spec/air-to-ground.md, "The air-to-ground radar").
+    ToggleAirGround,
+    /// Ctrl+X: the nearest hostile ground object, only with the Easy
+    /// targeting cheat on (a retail cheat key).
+    NearestGround,
     /// Backslash on the AC-130: track the object under the gunsight's
     /// crosshair, else pin the ground there. Nothing on other aircraft.
     SightDesignate,
@@ -1373,6 +1384,13 @@ pub struct State {
     /// The parked aircraft among the targets, by id, with their crash sites
     /// ([`State::add_parked_aircraft`]).
     parked: BTreeMap<u32, ParkedSite>,
+    /// The type facts the ground pages read, by ground object
+    /// ([`State::set_ground_listing`]).
+    ground_listing: BTreeMap<u32, GroundListing>,
+    /// The aircraft in an airfield sequence ([`State::set_airfield_attached`]).
+    airfield: std::collections::BTreeSet<u32>,
+    /// The weather's sensor effects ([`State::set_sensor_weather`]).
+    sensor_weather: sensors::Weather,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -1490,9 +1508,12 @@ fn step_gunship(
     );
     let after = group.target();
     if after != before {
+        // The sight's track designates its object, whatever the channels see,
+        // for as long as it holds it (docs/spec/air-to-ground.md, "Visual and
+        // sight designation").
         match after {
-            Some(id) if own.sensors.designate(id) => {}
-            _ => own.sensors.clear_selection(),
+            Some(id) => own.sensors.hold(id),
+            None => own.sensors.clear_selection(),
         }
         own.hud_selection = own.designated();
     }
@@ -1528,7 +1549,8 @@ fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
         aircraft: Some(own.config.aircraft),
         role: TargetRole::Aircraft,
         heat: Heat::Unknown,
-        radar_emitting: launcher.radar,
+        // The A-G page does not emit for anti-radiation seekers (retail).
+        radar_emitting: launcher.radar && !own.sensors.air_ground(),
         id: own.aircraft,
         position: launcher.position,
         velocity: launcher.velocity,
@@ -2542,6 +2564,9 @@ impl State {
             surface_rounds: BTreeMap::new(),
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
             ground_looks: BTreeMap::new(),
+            ground_listing: BTreeMap::new(),
+            airfield: Default::default(),
+            sensor_weather: Default::default(),
             parked: BTreeMap::new(),
         }
     }
@@ -3068,6 +3093,17 @@ impl State {
                 }
                 own.sight_follows_designation();
             }
+            Command::ToggleAirGround => {
+                own.sensors.toggle_air_ground();
+            }
+            Command::NearestGround => {
+                if own.easy_targeting(self.cheats.easy_targeting)
+                    && let Some(id) = self.nearest_ground(own, launcher.position)
+                {
+                    own.sensors.select_ground(id);
+                    own.selection_changed();
+                }
+            }
             Command::ClearDesignation => {
                 own.sensors.clear_selection();
                 own.hud_selection = None;
@@ -3428,6 +3464,7 @@ impl State {
         self.targets.retain(|t| !scene(t.id));
         self.ground_bounds.clear();
         self.ground_looks.clear();
+        self.ground_listing.clear();
         self.parked.clear();
         for own in &mut self.ownships {
             own.sensors.clear_selection();
@@ -3829,7 +3866,9 @@ impl State {
         // Fitted: at least two active cockpits amortize a scoped dispatch.
         let observations_prepared = executor.should_dispatch(active.len(), 2);
         if observations_prepared {
+            let facts = self.ground_facts();
             let context = observation::Context {
+                facts: &facts,
                 targets: &self.targets,
                 rows: &rows,
                 weapon_rules: self.weapon_rules,
@@ -3852,6 +3891,7 @@ impl State {
                     k,
                     launcher,
                     &observation::Context {
+                        facts: &self.ground_facts(),
                         targets: &self.targets,
                         rows: &rows,
                         weapon_rules: self.weapon_rules,

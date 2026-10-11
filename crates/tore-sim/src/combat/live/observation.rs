@@ -3,6 +3,9 @@
 use super::*;
 
 pub(super) struct Context<'a, G> {
+    /// The state's read-only facts for the ground pages: type facts, airfield
+    /// sequences and weather. Never its projectiles or random stream.
+    pub facts: &'a super::ground_sensing::GroundFacts<'a>,
     pub targets: &'a [Target],
     pub rows: &'a [OwnRow],
     pub weapon_rules: Rules,
@@ -43,7 +46,28 @@ pub(super) fn observe_ownship(
     let easy_targeting = own.easy_targeting(context.easy_targeting);
     own.sensors.keep_selection = easy_targeting;
     let in_view = own.designated().or(own.sight_hold);
+    own.sensors
+        .set_harm_seeker(super::ground_sensing::harm_seeker(own));
     own.sensors.step(&observer, &observables, &environment);
+    // The ground pages, and a ground selection's keeping, read the rows only
+    // when a page lists ground objects or the selection is not an air contact.
+    let ground_selection = own
+        .sensors
+        .selected()
+        .is_some_and(|id| own.sensors.contact(id).is_none());
+    let objects: Vec<sensors::GroundObject> =
+        if own.sensors.ground_page().is_some() || ground_selection {
+            context
+                .targets
+                .iter()
+                .chain(peers(context.rows, own_index))
+                .map(|t| context.facts.ground_object(t))
+                .collect()
+        } else {
+            Vec::new()
+        };
+    own.sensors
+        .step_ground(&observer, &objects, &environment, context.facts.weather);
     if let Some(id) = own.designated() {
         own.hud_selection = Some(id);
     } else if !easy_targeting {

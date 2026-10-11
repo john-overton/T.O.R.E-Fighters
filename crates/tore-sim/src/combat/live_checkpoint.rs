@@ -201,6 +201,10 @@ crate::checkpoint_struct!(GroundLook {
     burns
 });
 
+// The type facts the ground pages read of a ground object.
+type GroundListing = super::GroundListing;
+crate::checkpoint_struct!(GroundListing { flags, max_visible });
+
 type ParkedSite = super::ParkedSite;
 crate::checkpoint_struct!(ParkedSite {
     ground,
@@ -522,6 +526,9 @@ impl Checkpoint for State {
             next_surface_shot,
             ground_looks,
             parked,
+            ground_listing,
+            airfield,
+            sensor_weather,
         } = self;
         weapon_rules.save(s, None)?;
         ownships.save(s, None)?;
@@ -557,6 +564,9 @@ impl Checkpoint for State {
         next_surface_shot.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
+        ground_listing.save(s, None)?;
+        airfield.save(s, None)?;
+        sensor_weather.save(s, None)?;
         Ok(())
     }
 
@@ -608,6 +618,9 @@ impl Checkpoint for State {
             next_surface_shot: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
+            ground_listing: Checkpoint::load(l, None)?,
+            airfield: Checkpoint::load(l, None)?,
+            sensor_weather: Checkpoint::load(l, None)?,
         })
     }
 }

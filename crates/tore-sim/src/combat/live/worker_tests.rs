@@ -213,6 +213,7 @@ fn ownship_observation_extraction_matches_pre_extraction_reference() {
                 row.index,
                 row.launcher,
                 &observation::Context {
+                    facts: &state.ground_facts(),
                     targets: &state.targets,
                     rows: &rows,
                     weapon_rules: state.weapon_rules,

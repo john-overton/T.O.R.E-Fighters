@@ -453,6 +453,7 @@ fn write_sensors(w: &mut BitWriter, sensors: &Controls) -> WireResult<()> {
         Channel::Radar => 0,
         Channel::Infrared => 1,
         Channel::Visual => 2,
+        Channel::Harm => 3,
     };
     if sensors.range_index >= RANGE_LADDER_NMI.len() {
         return Err(WireError::Invalid("scope range step"));
@@ -468,6 +469,7 @@ fn read_sensors(r: &mut BitReader<'_>) -> WireResult<Controls> {
         0 => Channel::Radar,
         1 => Channel::Infrared,
         2 => Channel::Visual,
+        3 => Channel::Harm,
         _ => return Err(WireError::Invalid("scope channel")),
     };
     let range_index = r.read_bits(4)? as usize;
@@ -1085,6 +1087,13 @@ const NEXT_GUN_GROUP: u64 = 26;
 const TOGGLE_GUN_GROUP: u64 = 27;
 const SIGHT_DESIGNATE: u64 = 28;
 const SIGHT_PIN_GROUND: u64 = 29;
+const TOGGLE_AIR_GROUND: u64 = 30;
+/// The last 5-bit code: an extended command follows as a varint, so the
+/// air-to-ground round's commands do not run out of codes (slice G1; the
+/// protocol bump is slice NA's).
+const EXTENDED: u64 = 31;
+/// Extended combat commands, by their varint after [`EXTENDED`].
+const NEAREST_GROUND: u64 = 0;
 
 /// A combat command's code, exhaustively, so a new command cannot go
 /// uncoded.
@@ -1121,6 +1130,8 @@ fn live_code(command: live::Command) -> u64 {
         C::ToggleGunGroup => TOGGLE_GUN_GROUP,
         C::SightDesignate => SIGHT_DESIGNATE,
         C::SightPinGround => SIGHT_PIN_GROUND,
+        C::ToggleAirGround => TOGGLE_AIR_GROUND,
+        C::NearestGround => EXTENDED,
     }
 }
 
@@ -1132,6 +1143,7 @@ fn write_live(w: &mut BitWriter, command: live::Command) {
         }
         live::Command::TargetDistance(distance) => w.write_varint(u64::from(distance)),
         live::Command::DesignateTarget(id) => w.write_varint(u64::from(id)),
+        live::Command::NearestGround => w.write_varint(NEAREST_GROUND),
         _ => {}
     }
 }
@@ -1145,6 +1157,11 @@ fn read_live(r: &mut BitReader<'_>) -> WireResult<live::Command> {
         TOGGLE_GUN_GROUP => live::Command::ToggleGunGroup,
         SIGHT_DESIGNATE => live::Command::SightDesignate,
         SIGHT_PIN_GROUND => live::Command::SightPinGround,
+        TOGGLE_AIR_GROUND => live::Command::ToggleAirGround,
+        EXTENDED => match r.read_varint()? {
+            NEAREST_GROUND => live::Command::NearestGround,
+            _ => return Err(WireError::Invalid("extended combat command")),
+        },
         code => *LIVE
             .get(code as usize)
             .ok_or(WireError::Invalid("combat command"))?,
@@ -1289,6 +1306,10 @@ mod tests {
             DESIGNATE_TARGET,
             NEXT_GUN_GROUP,
             TOGGLE_GUN_GROUP,
+            SIGHT_DESIGNATE,
+            SIGHT_PIN_GROUND,
+            TOGGLE_AIR_GROUND,
+            EXTENDED,
         ];
         assert_eq!(TARGET_HEAT, LIVE.len() as u64);
         let unique: std::collections::BTreeSet<u64> = live.iter().copied().collect();
@@ -1435,6 +1456,30 @@ mod tests {
         let bytes = w.finish();
         assert_eq!(bytes, [23], "five bits, no fields");
         assert_eq!(read_command(&mut BitReader::new(&bytes)).unwrap(), command);
+    }
+
+    #[test]
+    fn the_air_to_ground_commands_and_the_harm_channel_read_back() {
+        for command in [live::Command::ToggleAirGround, live::Command::NearestGround] {
+            let mut w = BitWriter::new();
+            write_live(&mut w, command);
+            let bytes = w.finish();
+            assert_eq!(read_live(&mut BitReader::new(&bytes)).unwrap(), command);
+        }
+        // An extended code the reader does not know is refused.
+        let mut w = BitWriter::new();
+        let _ = w.write_bits(EXTENDED, 5);
+        w.write_varint(9);
+        let bytes = w.finish();
+        assert!(read_live(&mut BitReader::new(&bytes)).is_err());
+        let controls = Controls {
+            channel: Channel::Harm,
+            ..Controls::default()
+        };
+        let mut w = BitWriter::new();
+        write_sensors(&mut w, &controls).unwrap();
+        let bytes = w.finish();
+        assert_eq!(read_sensors(&mut BitReader::new(&bytes)).unwrap(), controls);
     }
 
     #[test]

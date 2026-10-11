@@ -653,6 +653,9 @@ fn a_ground_object_is_tracked_at_30_nmi_trains_the_guns_geometrically_and_its_de
     tick(&mut s, false);
     assert_eq!(group(&s).sight, Sight::Tracked(77));
     assert_eq!(s.own_view().display_target().map(|t| t.id), Some(77));
+    // The track designates the ground object, which no radar sees (slice G1).
+    assert_eq!(s.own().designated(), Some(77));
+    assert_eq!(s.own().sensors.held(), Some(77));
     // Far beyond any solution: MAX RANGE, yet the guns still come round
     // toward it, here level and abeam.
     group_mut(&mut s).headings = [-1.2; 3];

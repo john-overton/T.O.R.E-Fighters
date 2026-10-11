@@ -103,6 +103,7 @@ impl Sensors {
                     (&visual.track, visual.track.maximum_ft),
                 )
             }
+            Channel::Harm => return None,
         };
         let admits = |(volume, effective): (&crate::sensors::profile::Volume, f64)| {
             volume.admits_geometry(

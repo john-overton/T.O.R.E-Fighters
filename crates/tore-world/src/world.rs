@@ -793,6 +793,10 @@ impl World {
         // it, with no elapsed-time catch-up.
         self.terrain.weather.step();
         let weather = plane::WeatherReading::of(&self.terrain.weather);
+        // The ground pages scale their ranges by the weather's sensor effects.
+        self.combat
+            .state
+            .set_sensor_weather(self.terrain.weather.sensor_weather());
         for index in 0..self.cockpits.len() {
             let seat = self.seat_of_cockpit(index);
             let cockpit = &mut self.cockpits[index];
@@ -1092,6 +1096,10 @@ impl World {
             // what the humans attack, read after combat and before the step.
             bridge.set_link(&self.datalink);
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
+            // The A-G page lists aircraft only in an airfield sequence.
+            for (id, attached) in bridge.airfield_attachment() {
+                self.combat.state.set_airfield_attached(id, attached);
+            }
             self.combat.ai_crashes(&bridge, &self.terrain);
             for (id, message, friendly) in bridge.ejection_events.drain(..) {
                 out.cues.push(Cue::WingEjection {

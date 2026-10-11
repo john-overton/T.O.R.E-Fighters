@@ -20,6 +20,12 @@ pub struct Definition {
     pub explosion: u8,
     /// `craterSize`: the crater it leaves on land.
     pub crater: u8,
+    /// The OBJECT block's type `flags`: bit 0x20 lets a scope page list the
+    /// object (docs/formats/radar.md, "A-G page").
+    pub flags: u32,
+    /// `maxVisDist`, raw, in units of 256 ft: the A-G page lists a ground
+    /// object only from 75 up, within three times this distance.
+    pub max_visible: i32,
 }
 
 impl Definition {
@@ -83,6 +89,8 @@ impl Definition {
             u8::try_from(scalar(key)?).map_err(|_| invalid("static object byte field out of range"))
         };
         let (explosion, crater) = (byte("expType")?, byte("craterSize")?);
+        let flags = scalar("flags")? as u32;
+        let max_visible = scalar("maxVisDist")?;
         Ok(Self {
             display_name: names[0].clone(),
             class_name: names[1].clone(),
@@ -95,6 +103,8 @@ impl Definition {
             infrared_signature,
             explosion,
             crater,
+            flags,
+            max_visible,
         })
     }
 }

@@ -37,7 +37,28 @@ pub(super) fn observe(
     };
     own.sensors.keep_selection = state.cheats.easy_targeting;
     let in_view = own.designated().or(own.sight_hold);
+    // Added with the ground pages (slice G1), after the copy was taken.
+    own.sensors
+        .set_harm_seeker(super::ground_sensing::harm_seeker(own));
     own.sensors.step(&observer, &observables, &environment);
+    let ground_selection = own
+        .sensors
+        .selected()
+        .is_some_and(|id| own.sensors.contact(id).is_none());
+    let facts = state.ground_facts();
+    let objects: Vec<sensors::GroundObject> =
+        if own.sensors.ground_page().is_some() || ground_selection {
+            state
+                .targets
+                .iter()
+                .chain(peers(rows, k))
+                .map(|t| facts.ground_object(t))
+                .collect()
+        } else {
+            Vec::new()
+        };
+    own.sensors
+        .step_ground(&observer, &objects, &environment, facts.weather);
     if let Some(id) = own.designated() {
         own.hud_selection = Some(id);
     } else if !state.cheats.easy_targeting {

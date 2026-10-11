@@ -131,6 +131,8 @@ mod tests {
             category: 0x100,
             radar_signature: 100.,
             infrared_signature: 100.,
+            type_flags: 0,
+            max_visible: 0,
             runway,
         }
     }

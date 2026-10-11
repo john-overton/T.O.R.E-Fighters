@@ -37,6 +37,8 @@ use tore_sim::{
 pub const MAX_CONTACTS: usize = 128;
 /// Visual contacts kept.
 pub const MAX_VISUAL: usize = 64;
+/// Ground page contacts kept: the page's own list limit.
+pub const MAX_GROUND: usize = sensors::track::MAX_GROUND_CONTACTS;
 /// Stale plots kept.
 pub const MAX_PLOTS: usize = 64;
 /// Received noise strobes kept.
@@ -100,6 +102,7 @@ impl CockpitReadout {
         self.sensors
             .contact(id)
             .or_else(|| self.visual.iter().find(|contact| contact.id == id))
+            .or_else(|| self.sensors.ground_contact(id).map(|g| &g.contact))
     }
 }
 
@@ -298,30 +301,49 @@ pub struct SensorReadout {
     pub trails: Vec<Trail>,
     /// The positions the contacts were recorded at, oldest first.
     pub trail_points: Vec<Vector>,
+    /// The A-G flag (Ctrl+R): the radar shows the air-to-ground page.
+    /// Host-built; a networked client has none until the wire carries it
+    /// (protocol 23, slice NA).
+    pub air_ground: bool,
+    /// An anti-radiation weapon is aboard: the HARM page can be selected.
+    /// Host-built, as `air_ground`.
+    pub harm: bool,
+    /// The ground page's list (A-G, the IR page's ground objects or the HARM
+    /// page's emitters), nearest first, at most [`MAX_GROUND`]. Host-built,
+    /// as `air_ground`.
+    pub ground: Vec<sensors::GroundContact>,
 }
 impl SensorReadout {
-    const fn slot(channel: Channel) -> usize {
+    const fn slot(channel: Channel) -> Option<usize> {
         match channel {
-            Channel::Radar => 0,
-            Channel::Infrared => 1,
-            Channel::Visual => 2,
+            Channel::Radar => Some(0),
+            Channel::Infrared => Some(1),
+            Channel::Visual => Some(2),
+            Channel::Harm => None,
         }
     }
     /// Whether the channel is installed.
     pub fn available(&self, channel: Channel) -> bool {
-        self.available[Self::slot(channel)]
+        Self::slot(channel).map_or(self.harm, |slot| self.available[slot])
     }
     /// Whether the channel is installed, powered and undamaged.
     pub fn operating(&self, channel: Channel) -> bool {
-        self.operating[Self::slot(channel)]
+        Self::slot(channel).map_or(self.harm, |slot| self.operating[slot])
+    }
+    /// A ground page contact by identity.
+    pub fn ground_contact(&self, id: u32) -> Option<&sensors::GroundContact> {
+        self.ground.iter().find(|g| g.contact.id == id)
     }
     /// The mode a channel would report for `controls`; the label follows the
     /// player's own control, never a step behind it.
     pub fn mode_for(&self, channel: Channel, controls: &sensors::Controls) -> Option<Mode> {
         match channel {
             Channel::Infrared | Channel::Visual => Some(Mode::Infrared),
+            Channel::Harm => Some(Mode::Harm),
             Channel::Radar => self.radar_track_nmi.map(|track| {
-                if controls.range_nmi() <= track {
+                if self.air_ground {
+                    Mode::AirGround
+                } else if controls.range_nmi() <= track {
                     Mode::Tws
                 } else {
                     Mode::Rws
@@ -660,6 +682,9 @@ pub fn build(
         strobes,
         trails,
         trail_points,
+        air_ground: sensors.air_ground(),
+        harm: sensors.available(Channel::Harm),
+        ground: sensors.ground().iter().take(MAX_GROUND).copied().collect(),
     };
 
     let mut emitters = own.emitters.clone();

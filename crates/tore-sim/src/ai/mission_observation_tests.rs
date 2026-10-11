@@ -859,7 +859,11 @@ impl AiActor {
                         target: self.observed_target(object, contact.position),
                         velocity: contact.velocity,
                         source: match contact.channel {
-                            sensors::Channel::Radar => ObservationSource::Radar,
+                            // AI sensors never select the HARM page; its emitters would be
+                            // radar returns.
+                            sensors::Channel::Radar | sensors::Channel::Harm => {
+                                ObservationSource::Radar
+                            }
                             sensors::Channel::Infrared => ObservationSource::Infrared,
                             sensors::Channel::Visual => ObservationSource::Visual,
                         },

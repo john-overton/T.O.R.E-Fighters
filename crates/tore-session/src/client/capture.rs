@@ -222,6 +222,7 @@ fn channel_code(channel: Channel) -> u64 {
         Channel::Radar => 0,
         Channel::Infrared => 1,
         Channel::Visual => 2,
+        Channel::Harm => 3,
     }
 }
 
@@ -279,6 +280,7 @@ pub fn decode_sampled(bytes: &[u8]) -> Result<Sampled, CaptureError> {
         0 => Channel::Radar,
         1 => Channel::Infrared,
         2 => Channel::Visual,
+        3 => Channel::Harm,
         _ => return Err(CaptureError::Damaged("scope channel")),
     };
     let range_index = r.read_bits(4).map_err(bad)? as usize;

@@ -516,6 +516,8 @@ pub fn shapeless_targets(surface: &Surface) -> Vec<tore_sim::airport::StaticObje
                     category: unit.class,
                     radar_signature: 0.,
                     infrared_signature: 0.,
+                    type_flags: 0,
+                    max_visible: 0,
                     runway: false,
                 })
         })

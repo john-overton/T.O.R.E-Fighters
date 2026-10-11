@@ -4273,6 +4273,8 @@ mod tests {
             category: 0,
             radar_signature: 1.,
             infrared_signature: 1.,
+            type_flags: 0,
+            max_visible: 0,
             runway: false,
         }
     }
