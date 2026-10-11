@@ -2786,8 +2786,14 @@ mod tests {
         assert_eq!(air.enemy_start, EnemyStart::Airborne);
         assert!(!air.to_text().contains("enemy-start"));
         for (text, words) in [
-            (format!("{BASE}enemy-start ground auto\n"), "enemy wing 1, which has no aircraft"),
-            (format!("{red}enemy-start ground\n"), "expected `enemy-start airborne`"),
+            (
+                format!("{BASE}enemy-start ground auto\n"),
+                "enemy wing 1, which has no aircraft",
+            ),
+            (
+                format!("{red}enemy-start ground\n"),
+                "expected `enemy-start airborne`",
+            ),
             (format!("{red}enemy-start ground x\n"), "the runway number"),
             (
                 format!("{red}start ground 7\nenemy-start ground 7\n"),

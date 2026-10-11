@@ -495,7 +495,16 @@ fn an_enemy_ground_start_parks_enemy_wing_one_at_a_redfor_field() {
     world.take_plane(SeatId(0), lead).unwrap();
     let cockpit = &world.cockpits[0];
     assert_eq!(cockpit.plane, lead);
-    assert!(cockpit.flight.research.as_ref().is_some_and(|r| r.on_ground));
+    assert!(
+        cockpit
+            .flight
+            .research
+            .as_ref()
+            .is_some_and(|r| r.on_ground)
+    );
     assert!(cockpit.result.home_base().is_some());
     assert!(world.roster.redfor(lead) && lead != PlaneId(0));
+    // As a single-player ground start begins: on NAV, the field selected.
+    assert!(cockpit.airport_nav_mode);
+    assert!(cockpit.airport_service.selected().is_some());
 }
