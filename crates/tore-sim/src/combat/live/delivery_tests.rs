@@ -413,7 +413,7 @@ fn drop_on_target(altitude: f64) -> (i32, usize, Vec<Option<u8>>) {
 
 #[test]
 fn a_bomb_that_lands_before_its_fuze_arms_is_a_dud() {
-    // From 50 ft it falls 1.8 s (3.4 s at most with the scatter lofting it),
+    // From 50 ft it falls 1.8 s (2.5 s at most with the scatter lofting it),
     // short of the 5 s arm time: LOW, and on the ground a puff of dirt with
     // no burst, splash or crater.
     let low = solve_low(50.);
@@ -425,7 +425,7 @@ fn a_bomb_that_lands_before_its_fuze_arms_is_a_dud() {
     // The bullet-on-land dust burst, after its variety roll (types 15, 16).
     let puff = |b: &Option<u8>| matches!(b, Some(15 | 16));
     assert!(blasts.iter().all(puff), "{blasts:?}");
-    // From 800 ft (7 s, 5.9 s at least) it is armed: the burst, its splash
+    // From 800 ft (7 s, 6.5 s at least) it is armed: the burst, its splash
     // and a crater.
     assert!(!solve_low(800.));
     let (hp, craters, blasts) = drop_on_target(800.);

@@ -582,8 +582,8 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
   released now, from the same release position and direction as a real release
   (the aircraft's **nose**, not its flight path) and the same motion (see
   [bomb motion](#bomb-motion)), over the ground below the release point. It is
-  the **mean** impact: each real bomb is scattered up to 3 degrees in heading and
-  in pitch, so the pipper is where the bombs land on average.
+  the **mean** impact: each real bomb is scattered up to 1.5 degrees (retail: 3) in
+  heading and in pitch, so the pipper is where the bombs land on average.
 - **Pipper.** One glyph centred on the impact point: a 23-pixel ring with twelve
   clock marks and a centre dot. Let R be the record's zone-1 maximum range and d
   the distance from the aircraft to the impact point. Inside 0.4 R the glyph
@@ -1103,13 +1103,13 @@ Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Implemented
 | Release position and direction | The station position with the aircraft's attitude: the bomb leaves along the **nose** (heading and pitch), not along the flight path, plus the station slew (zero on every imported bomb station). Successive releases alternate sides of a paired station |
 | Release speed | The aircraft's speed times `launchRetard` / 100, at least the record's initial speed (0), clamped to 0 to 1,466 ft/s for slick, retarded and pack bombs and 0 to 2,933 ft/s for cluster. `launchRetard`: 100 slick, 66 Snakeye, 6-pack and 7-pack, 90 cluster and guided. No ejection push |
 | Path | A vacuum parabola: gravity **32 ft/s squared**, no drag, no terminal speed, no retard after release. The bomb noses over along its velocity; heading stays fixed |
-| Scatter | Each bomb adds a uniform random plus or minus **3.0 degrees** to its heading and to its pitch. **The player's bombs scatter too; this stays the default while John decides** ([decisions pending](#decisions-pending)) |
+| Scatter | Retail: each bomb adds a uniform random plus or minus **3.0 degrees** (546 units) to its heading and to its pitch, the player's too. **TORE: plus or minus 1.5 degrees (273 units), opinionated (John, 2026-10-11)**, for every bomb, player and AI. The earlier "keep the player's retail 3 degrees" note (2026-10-10) is superseded |
 | Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply, and a bomb that reaches the ground unarmed is a dud ([warnings](#warnings)) |
 | Pods | As [Rockets](#rockets) |
 
 The sight is the same calculation without the scatter. A test checks the mean
 path (scatter off, flat ground, within a foot of the pipper) and the scatter
-bounds (3 degrees) separately.
+bounds (1.5 degrees) separately.
 
 **A guided bomb with no target** (laser bomb after losing its lock, JDAM released
 with none) has neither the bomb flag nor gravity: it holds its heading and pitch
@@ -1130,8 +1130,8 @@ strike](ai-strike.md). What it means here:
 - **The AI uses the player's systems.** It flies the pass through control
   inputs and releases through the same release function, CCIP and LVL
   solutions, guided reach and lock flow, with the same bomb scatter. There is no
-  retail-style re-aim. For unguided weapons skill sets a release circle round the target, 100 m for an Ace up to
-  325 m for a Novice, with a seeded aim offset inside it ([definition and worked
+  retail-style re-aim. For unguided weapons skill sets a release circle round the target, 10 m for an Ace up to
+  85 m for a Novice, with a seeded aim offset inside it ([definition and worked
   numbers](ai-strike.md#skill-and-release-precision)).
 - **AI lasing.** An AI with a designator lases like a player, its spot is an
   ordinary spot (a [buddy spot](#buddy-lasing) for others), an AI laser-bomb
@@ -1314,7 +1314,7 @@ records (ranges, weights, counts) are in the inventory above.
 | Automatic LVL choice | flight path within 10 degrees of level | fitted |
 | Bomb release | along the nose; speed times `launchRetard` / 100; clamp 1,466 ft/s (2,933 cluster) | retail data |
 | Bomb gravity, drag | 32 ft/s squared; none | retail data |
-| Bomb scatter | uniform plus or minus 3.0 degrees (546 units) in heading and pitch, per bomb, player included | retail data; the player default pending John |
+| Bomb scatter | uniform plus or minus 1.5 degrees (273 units) in heading and pitch, per bomb, player included; retail's value is 3.0 degrees (546 units) | opinionated, John 2026-10-11 (retail data: 3.0) |
 | Pack offsets | x 0, -2, +2, -4, +4, -6, +6 ft; y 0, -2, -6, -12, -20, -30, -42 ft | retail data |
 | Pod rockets and cadence | 19, 19, 5, 4 per pod; one per call; 4 a second held (LAU-10 one per press) | retail data |
 | Rocket sink | 32 ft/s squared to an 80 ft/s cap | retail data |
@@ -1374,7 +1374,7 @@ found these promised or specified items unbuilt:
 - A bomb released below its arm time: LOW before the release, and the bomb lands
   a dud (a puff of dirt, no burst or splash).
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.
-- A bomb falls on its parabola with up to 3 degrees of scatter: the pipper marks
+- A bomb falls on its parabola with up to 1.5 degrees of scatter: the pipper marks
   the mean, so a single bomb can land beside it.
 - Online, the host runs every solution and sends the results; clients draw
   them. Buddy lasing works across players by side.
@@ -1430,8 +1430,8 @@ recommendations, with the notes below. This table lists what is still open.
 | Decision 7, Pave pods as stores | Accepted; the retail lock needs only a working signature-1 sensor aboard | Pods on any 0x400 station |
 | Buddy-spot display range and the buddy page for aircraft with no sight | Agent follow-ups to John's 2026-10-10 note | As written above |
 
-Closed since: player bomb scatter stays on (retail's plus or minus 3 degrees, the
-player's bombs included; John, 2026-10-10), and the novelty bombs are Cheat only.
+Closed since: player bomb scatter stays on (John, 2026-10-10; halved from retail's
+plus or minus 3 degrees to 1.5 for every bomb, John, 2026-10-11), and the novelty bombs are Cheat only.
 
 Recorded decisions (all accepted, 2026-10-10): 1 both sights on every bomb
 carrier; 2 the level T with auto-release; 3 the code's CCIP arc rule; 4 JDAMs

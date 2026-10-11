@@ -2702,17 +2702,19 @@ impl Viewer {
         height: f64,
         out: &mut Vec<f32>,
     ) {
+        let origin = self.scenery.origin;
         let seconds = trails::LENGTHS[self.ui.trail_length];
         for pose in everyone(picture) {
             let Some(samples) = self.tracks.aircraft.get(&pose.id) else {
                 continue;
             };
             let points = trails::path(samples, tick, seconds, pose.position);
-            trails::ribbon(
+            trails::ribbon_world(
                 out,
                 &points,
                 trails::side_color(self.side(pose.id)),
                 camera,
+                origin,
                 height,
             );
         }
@@ -2722,7 +2724,7 @@ impl Viewer {
             };
             let points = trails::path(&path.samples, tick, seconds, projectile.position);
             let color = trails::weapon_color(self.side(path.owner));
-            trails::ribbon(out, &points, color, camera, height);
+            trails::ribbon_world(out, &points, color, camera, origin, height);
         }
     }
 

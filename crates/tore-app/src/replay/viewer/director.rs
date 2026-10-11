@@ -45,6 +45,9 @@ impl Viewer {
         // The promo reel never shows the air-to-ground marks, which are for
         // troubleshooting; `TORE_REPLAY_MARKS=1` draws them for a check.
         self.ui.marks = std::env::var_os("TORE_REPLAY_MARKS").is_some_and(|v| v == "1");
+        // The same for the flight path trails (R), for checking where they
+        // are drawn.
+        self.ui.trails = std::env::var_os("TORE_REPLAY_TRAILS").is_some_and(|v| v == "1");
         self.clock.seek(frame.tick);
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
@@ -316,6 +319,15 @@ impl Viewer {
             &self.world,
             &self.scenery,
         );
+        if self.ui.trails {
+            self.trails(
+                &picture,
+                tick,
+                &camera,
+                f64::from(crate::reel::HEIGHT),
+                &mut combat.vertices,
+            );
+        }
         if self.marks_shown() {
             let prims = self.mark_prims(&picture, tick);
             ground_marks::geometry(

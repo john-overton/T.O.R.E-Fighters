@@ -230,16 +230,16 @@ class StrikeTests(unittest.TestCase):
 
     def test_a_miss_beyond_the_skills_limit_fails(self):
         too_far = s.MISS_FT_MAX[3] + 1
-        ring = dict(aim=(400.0, "no"))
+        ring = dict(aim=(50.0, "no"))
         self.assertTrue(any("from the target" in p for p in s.strike_problems(self.good(3, miss=too_far, **ring), self.wanted(3))))
-        self.assertEqual(s.strike_problems(self.good(0, miss=s.MISS_FT_MAX[3] + 1, aim=(1200.0, "no")), self.wanted(0)), [])
+        self.assertEqual(s.strike_problems(self.good(0, miss=s.MISS_FT_MAX[3] + 1, aim=(400.0, "no")), self.wanted(0)), [])
 
-    def test_an_inside_draw_is_held_to_the_circle_plus_scatter(self):
+    def test_an_inside_draw_is_held_to_the_circle_plus_gate_plus_scatter(self):
         inside = s.MISS_FT_INSIDE[2]
         self.assertEqual(s.strike_problems(self.good(2, miss=inside - 1), self.wanted(2)), [])
         problems = s.strike_problems(self.good(2, miss=inside + 1), self.wanted(2))
         self.assertTrue(any("from the target" in p for p in problems), problems)
-        ring = s.strike_problems(self.good(2, miss=inside + 1, aim=(700.0, "no")), self.wanted(2))
+        ring = s.strike_problems(self.good(2, miss=inside + 1, aim=(200.0, "no")), self.wanted(2))
         self.assertEqual(ring, [])
 
     def test_the_aim_must_lie_where_the_draw_says(self):
@@ -261,8 +261,9 @@ class StrikeTests(unittest.TestCase):
         self.assertTrue(any("never defended" in p for p in s.strike_problems(self.good(), self.wanted(defends=True))))
 
     def test_the_limits_are_the_ring_edge_plus_scatter_and_grow_as_skill_falls(self):
-        self.assertEqual([round(s.MISS_FT_MAX[k]) for k in (0, 1, 2, 3)], [2932, 2440, 1948, 1456])
-        self.assertEqual([round(s.CIRCLE_FT[k] / 3.28084) for k in (3, 2, 1, 0)], [100, 175, 250, 325])
+        self.assertEqual([round(s.MISS_FT_MAX[k]) for k in (0, 1, 2, 3)], [986, 813, 641, 476])
+        self.assertEqual([round(s.CIRCLE_FT[k] / 3.28084) for k in (3, 2, 1, 0)], [10, 35, 60, 85])
+        self.assertEqual([round(s.CIRCLE_FT[k]) for k in (3, 2, 1, 0)], [33, 115, 197, 279])
         self.assertTrue(s.MISS_FT_MAX[0] > s.MISS_FT_MAX[1] > s.MISS_FT_MAX[2] > s.MISS_FT_MAX[3])
 
     def test_a_lost_striker_or_no_egress_fails(self):
