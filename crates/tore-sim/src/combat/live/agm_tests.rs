@@ -165,7 +165,7 @@ fn the_reviewed_air_to_ground_records_have_surface_profiles() {
 }
 
 #[test]
-fn surface_missile_launches_hold_their_path_but_air_missiles_do_not() {
+fn every_sagging_missile_and_surface_guidance_holds_its_path() {
     let s = fixture(true);
     let mut w = s.own().config.stations[0].weapon.clone();
     for (source, holds_path) in [
@@ -177,15 +177,21 @@ fn surface_missile_launches_hold_their_path_but_air_missiles_do_not() {
         ("AIM120.JT", false),
         ("AIM9M.JT", false),
         ("SA6.JT", false),
+        ("SEA_SPAR.JT", false),
         ("SYNTHETIC.JT", false),
     ] {
         w.source = source.into();
-        assert_eq!(
-            missiles::Motion::launch(&w, launcher().velocity, launcher().position[1]).holds_path,
-            holds_path,
-            "{source}"
-        );
+        for sags in [false, true] {
+            w.flags = (w.flags & !missiles::SAG_FLAG) | if sags { missiles::SAG_FLAG } else { 0 };
+            assert_eq!(
+                missiles::Motion::launch(&w, launcher().velocity, launcher().position[1])
+                    .holds_path,
+                holds_path || sags,
+                "{source}, sags={sags}"
+            );
+        }
     }
+
     // Record-based guidance has no named surface profile but holds its path too.
     w.source = "SYNTHETIC.JT".into();
     w.seeker.signature = 1;

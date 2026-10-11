@@ -729,18 +729,18 @@ addresses are in [the missile format notes](../formats/missiles.md#release-sag-a
   directly. Distances and altitudes are 256-foot steps. The height is above the
   target (or its predicted intercept), not above the ground or the launch point.
 
-**Fitted, agent decision (FX-M, 2026-10-11):** surface-target missile profiles
-and laser, coordinate and command air-to-ground weapons steer using their
-actual path, including the downward sink, rather than their velocity alone.
-This lets a coasting Maverick reach a ground target without sag carrying it
-under the sight line and into the ground early. The correction subtracts the
-current sink from vertical velocity for steering in live flight and prediction;
-it does not change the motor, the 32 ft/s² sag, its 80 ft/s cap or the cruise
-heights. Air-to-air missiles and SAMs retain their existing steering. This
-correction is not a recovered original steering rule. The
+**Fitted, requested by John (2026-10-11):** every missile with the sag
+flag holds its actual path, including the downward sink, onto the intercept
+point. This includes air-to-air missiles and SAMs. Surface-target profiles and
+laser, coordinate and command air-to-ground guidance keep the same correction
+introduced in FX-M (fitted, agent decision). Steering subtracts the current sink
+from vertical velocity in both live flight and fly-out prediction. The motor,
+32 ft/s² sag, 80 ft/s cap, locked fins before ignition and cruise heights are
+unchanged. This correction is not a recovered original steering rule. The
 [air-to-ground baseline](../baselines/air-to-ground.md#class-8-infrared-air-to-ground-missiles)
-records the measured reach. The HUD fly-out still ignores terrain along the
-future path, so its estimate is not a promise of a hit.
+records the Maverick reach; the [air missile sag baseline](../baselines/missile-sag.md)
+records air-to-air and SAM validation. The HUD fly-out still ignores terrain
+along the future path, so its estimate is not a promise of a hit.
 
 What a player sees, from the retail records:
 

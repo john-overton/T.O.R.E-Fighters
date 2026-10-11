@@ -2248,8 +2248,8 @@ fn reference_ticks() -> u64 {
 }
 
 /// `missiles::intercept` as it was before a coasting fly-out stopped once the
-/// target was out of reach: a verbatim copy, kept here as the independent
-/// reference, that always flies to a hit or the end.
+/// target was out of reach: an independent full-flight reference that always
+/// flies to a hit or the end, using the current path-holding motion.
 #[allow(clippy::too_many_arguments)]
 fn reference_intercept(
     m: &tore_formats::weapons::Movement,
@@ -2272,7 +2272,7 @@ fn reference_intercept(
         let previous = sub(target, position);
         let desired = commanded_heading(
             forward,
-            motion.velocity,
+            motion.path(),
             crate::attitude::unit(sub(motion.aim(position, aim), position)),
         );
         let next = steer(m, tick, forward, desired);
@@ -2676,4 +2676,118 @@ fn a_range_estimate_flies_a_bounded_number_of_ticks() {
     // maths, and sits well under what flying every sample out would cost.
     assert!(flown <= 1_500_000, "{flown} ticks flown, over the bound");
     assert!(flown * 10 <= whole * 7, "{flown} of {whole} ticks flown");
+}
+
+/// Synthetic coasting shots isolate sag from record tuning and seeker noise.
+/// The same known stationary target is supplied to live guidance and prediction.
+fn sagging_air_shot(name: &str, height: f64, holds_path: bool) -> (f64, bool) {
+    let mut w = weapon(name);
+    w.flags = missiles::SAG_FLAG;
+    w.movement.ignite_t = 0;
+    w.movement.fuel_t = 8;
+    w.movement.remove_t = 400;
+    w.movement.initial_speed = 600;
+    w.movement.maximum_speed = 600;
+    w.movement.final_speed = 600;
+    w.movement.deceleration = 0;
+    w.movement.powered_turn_rate = 1000;
+    w.movement.unpowered_turn_rate = 1000;
+    for zone in &mut w.seeker.zones {
+        zone.minimum_range = 0;
+        zone.maximum_range = 100_000;
+        zone.heading = 16_380;
+        zone.pitch = 16_380;
+    }
+    let start = [
+        0.,
+        if matches!(name, "SA6.JT" | "SEA_SPAR.JT") {
+            20.
+        } else {
+            height
+        },
+        0.,
+    ];
+    let point = [0., height, 4. * 6076.];
+    let mut t = target(7, point, 100, 0x80);
+    t.velocity = [0.; 3];
+    let mut p = shot(&w, LaunchMode::Cued, Some(t.id));
+    p.position = start;
+    p.previous = start;
+    p.direction = crate::attitude::unit(missiles::sub(point, start));
+    let mut motion = Motion::launch(&w, p.direction.map(|v| v * 600.), start[1]);
+    motion.holds_path = holds_path;
+    p.motion = Some(motion);
+    let profile = Profile::for_weapon(&w).unwrap();
+    p.guidance = Some(Flight::new(profile, LaunchMode::Cued, Some(t.id), start));
+    p.guidance.as_mut().unwrap().last_intercept = Some(point);
+    let prediction = missiles::intercept(
+        &w.movement,
+        motion,
+        start,
+        p.direction,
+        point,
+        [0.; 3],
+        0,
+        profile.guidance_ticks,
+    )
+    .is_some();
+    let support = ActorSupport {
+        owner: p.owner,
+        supported: true,
+        observation: Some(seeker::Observation {
+            id: t.id,
+            position: point,
+            velocity: [0.; 3],
+            quality: 1.,
+            off_axis: 0.,
+            range: missiles::length(missiles::sub(point, start)),
+        }),
+        radar_position: start,
+        radar_emitting: true,
+    };
+    let mut miss = f64::INFINITY;
+    for age in 0..profile.guidance_ticks {
+        p.age = age;
+        let old = p.direction;
+        guide_owned(
+            &mut p,
+            &w,
+            std::slice::from_ref(&t),
+            std::iter::empty(),
+            Some(&support),
+            &|_, _| false,
+            &|_, _| 0.,
+        );
+        let motion = p.motion.as_mut().unwrap();
+        motion.turn(old, p.direction);
+        let delta = motion.step(&w.movement, age, p.direction);
+        let relative = missiles::sub(point, p.position);
+        let u = (dot(relative, delta) / dot(delta, delta).max(1e-12)).clamp(0., 1.);
+        miss = miss.min(missiles::length(std::array::from_fn(|i| {
+            relative[i] - delta[i] * u
+        })));
+        p.position = std::array::from_fn(|i| p.position[i] + delta[i]);
+        if p.position[1] <= 0. || dot(missiles::sub(point, p.position), delta) <= 0. {
+            break;
+        }
+    }
+    (miss, prediction)
+}
+
+#[test]
+fn sagging_air_missiles_and_sams_hold_the_live_and_predicted_intercept() {
+    for name in ["AIM7.JT", "AIM9M.JT", "AIM120.JT", "SA6.JT", "SEA_SPAR.JT"] {
+        for height in [300., 10_000.] {
+            let before = sagging_air_shot(name, height, false);
+            let after = sagging_air_shot(name, height, true);
+            eprintln!("sag synthetic {name} {height} ft 4 nm: {before:?} -> {after:?}");
+            assert!(before.0 > 25. && !before.1, "{name} {height}: {before:?}");
+            assert!(after.0 < 1., "{name} {height}: {after:?}");
+            assert!(after.1, "{name} {height}: prediction must reach");
+            assert!(
+                after.0 < before.0,
+                "{name} {height}: path holding must reduce miss"
+            );
+        }
+    }
 }

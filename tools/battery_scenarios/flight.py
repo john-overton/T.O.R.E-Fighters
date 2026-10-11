@@ -748,10 +748,39 @@ def check_combat_evidence(output: str) -> list[str]:
     return problems
 
 
+def check_missile_sag(output: str) -> list[str]:
+    rows = [line.split(",") for line in output.splitlines() if line.startswith("sag,") and ".JT," in line]
+    problems = []
+    if len(rows) != 128:
+        problems.append(f"expected 128 sag measurements, got {len(rows)}")
+    ranges = {"AIM7.JT": 40, "AIM9M.JT": 12, "AIM120.JT": 50, "SEA_SPAR.JT": 12}
+    checked = set()
+    for row in rows:
+        if len(row) != 8:
+            problems.append(f"short sag row: {row}")
+            continue
+        try:
+            _, weapon, height, distance, miss, end, predicted, ticks = row
+            if float(distance) != ranges.get(weapon):
+                continue
+            checked.add((weapon, float(height)))
+            if float(miss) >= 1 or end != "passed" or predicted != "true" or int(ticks) <= 0:
+                problems.append(f"coasting intercept failed: {','.join(row)}")
+        except ValueError:
+            problems.append(f"unreadable sag row: {row}")
+    expected = {(weapon, height) for weapon in ranges for height in (300, 10000)}
+    if checked != expected:
+        problems.append(f"missing sag cases: {sorted(expected - checked)}")
+    return problems
+
+
 def combat_scenarios() -> list[Scenario]:
     out = [Scenario(name="flight-wreckcontact-f18", lane="flight",
                     args=["--combat-smoke", "--aircraft", "f18", "--no-audio"],
                     check=check_wreck_contacts, timeout=300)]
+    out.append(Scenario(name="flight-missile-sag", lane="flight",
+                        args=["--missile-sag", "--no-audio"],
+                        check=check_missile_sag, timeout=120))
     for ac in AIRCRAFT:
         out.append(Scenario(name=f"flight-combatsmoke-{ac}", lane="flight", args=["--combat-smoke", "--aircraft", ac, "--no-audio"], check=check_combat_smoke, timeout=300))
         # The F-14 and Su-35 carry very long range missiles: their acceptance

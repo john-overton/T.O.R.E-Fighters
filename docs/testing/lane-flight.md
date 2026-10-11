@@ -494,6 +494,17 @@ None of these is defined in the specs, the manual text or the feature matrix, so
 
 ## The slow set and the missile acceptance tables
 
+`--missile-sag` is a headless motion regression using imported AIM-7, AIM-9M,
+AIM-120 and Sea Sparrow records, a continuously known stationary target, and
+flat ground.
+It reports the swept closest approach before the first pass, ground contact or
+expiry, alongside the terrain-free fly-out prediction and coasting sag ticks.
+Target heights are 300 and 10,000 ft AGL. Aircraft launches inherit 600 ft/s at
+target height; the SAM starts stationary on a 20 ft rail aimed at the target.
+This isolates motion, not seeker acquisition, launch permission or damage odds.
+The `flight-missile-sag` battery scenario checks the coasting long-range rows.
+See the [sag validation](../baselines/missile-sag.md) for before/after measurements.
+
 `--missile-acceptance` prints one row per weapon, mode, launch motion, target motion and range
 (hit, expiry or an inhibited shot). Every aircraft was run to completion in an optimized build
 (`cargo build --release -p tore-app`, each run a few minutes; the F-14's long-range AIM-54 rows

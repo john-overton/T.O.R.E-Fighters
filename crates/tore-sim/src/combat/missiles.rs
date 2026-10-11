@@ -430,8 +430,8 @@ pub struct Motion {
     pub cruise: Option<Cruise>,
     /// Fitted: steering lays the missile's actual path, its velocity with
     /// the sag, on the aim point instead of its velocity alone, so the sag
-    /// cannot carry it under the aim point (the air-to-ground missiles, whose
-    /// aim point is on the ground). See [`Motion::path`].
+    /// cannot carry it under the aim point. Every sagging missile opts in,
+    /// as does surface guidance. See [`Motion::path`].
     pub holds_path: bool,
 }
 impl Motion {
@@ -462,7 +462,8 @@ impl Motion {
             },
             sags: w.flags & SAG_FLAG != 0,
             cruise: Cruise::for_weapon(w),
-            holds_path: Profile::for_weapon(w).is_some_and(|p| p.role == TargetRole::Surface)
+            holds_path: w.flags & SAG_FLAG != 0
+                || Profile::for_weapon(w).is_some_and(|p| p.role == TargetRole::Surface)
                 || Guidance::air_to_ground(w).is_some(),
             ..Self::new(&w.movement, velocity, altitude)
         }
@@ -470,8 +471,8 @@ impl Motion {
     /// The way the missile is travelling, for steering. Its velocity, and
     /// for a missile that holds its path the sag as well: the sag moves it
     /// straight down apart from its velocity, so a missile that only pointed
-    /// its velocity at a ground target would sink under its line of sight and
-    /// meet the ground short of the target (docs/spec/missiles.md,
+    /// its velocity at a target would sink under its line of sight and can
+    /// meet the ground short of a low target (docs/spec/missiles.md,
     /// "Drop launch, sag and cruise profile").
     pub fn path(&self) -> Vector {
         if self.holds_path {

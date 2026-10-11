@@ -1258,6 +1258,10 @@ bounded to 1..1,000,000 feet. Version-4 tapes record these commands, full world
 velocity and bay permission. Use fresh tape paths because recording never
 overwrites an existing file. [Missile acceptance](baselines/missiles.md).
 
+`--missile-sag --no-audio` measures coasting A2A and SAM motion without a window.
+Use a private profile copy. [Probe and battery contract](testing/lane-flight.md),
+[before/after measurements](baselines/missile-sag.md).
+
 For a rendered formation check, use `--dummy-aircraft f18,5 --dummy-aircraft rafale,5`
 with `--capture-flight .local/formation.ppm`. This repeatable diagnostic uses the
 same dummy creation/rendering as the creator, one mile ahead. It accepts a count

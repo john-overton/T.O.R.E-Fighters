@@ -264,8 +264,9 @@ number the player sees is the same, bit for bit:
 | `intercept` checks every 16 ticks while the missile coasts whether the gap is more than missile and target can still close, and stops with the answer it would have reached, no hit | out of fuel the missile only slows (a turn costs speed, the coast slowdown takes it), its sag is capped, and the target keeps its speed (`coasting_reach`) |
 
 Each bound carries a small rounding margin (`unreachable`). The tests in
-`missile_tests.rs` hold every shortcut to the old code: whole copies of the
-old `maximum_range`, `firing_band` and `intercept` run beside the new ones on
+`missile_tests.rs` hold every shortcut to full-flight references: copies of
+`maximum_range`, `firing_band` and `intercept` retain the full loops with current
+path-holding steering and run beside the optimized versions on
 random missiles, speeds, distances, motions, ages, sag, ejection and cruise
 profiles, and must agree to the last bit. The cases include late hits the
 bounds must not cut off, and a built case where only the fall of a coasting

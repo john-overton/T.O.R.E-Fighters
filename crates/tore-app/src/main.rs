@@ -87,6 +87,7 @@ mod mig23_animation;
 mod mig29_animation;
 mod mirrors;
 mod missile_acceptance;
+mod missile_sag;
 mod navigation;
 mod net;
 mod ocean;
@@ -8993,6 +8994,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut gunsight_probe: Option<String> = None;
     let mut gunsight_dump: Option<PathBuf> = None;
     let mut missile_acceptance = false;
+    let mut missile_sag = false;
     let mut record_combat = None;
     let mut replay_combat = None;
     let mut combat_probe = None;
@@ -9500,6 +9502,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--guns" => recording_guns = true,
             "--missile-acceptance" => missile_acceptance = true,
+            "--missile-sag" => { missile_acceptance = true; missile_sag = true; }
             "--compatibility-weapons" => combat_commands.push(tore_sim::combat::live::Command::CompatibilityWeapons),
             "--combat-smoke" => {
                 combat_smoke = true;
@@ -10731,6 +10734,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 Err(error) => println!("{id:?}: unavailable, {error}"),
             }
         }
+        return Ok(Outcome::Done);
+    }
+    if missile_sag {
+        missile_sag::run(&assets.theater_resources)?;
         return Ok(Outcome::Done);
     }
     if missile_acceptance {
