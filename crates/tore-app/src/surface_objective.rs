@@ -268,7 +268,15 @@ pub fn run() -> AppResult<()> {
     let mut record = o
         .record
         .as_ref()
-        .map(|path| Record::start(&world, path, o.verify))
+        .map(|path| {
+            Record::start(
+                &world,
+                path,
+                o.verify,
+                "F/A-18D",
+                "the surface objective run",
+            )
+        })
         .transpose()?;
 
     // The line the human flies: at the middle of the targets, `--from` nm out.
@@ -454,8 +462,9 @@ pub fn run() -> AppResult<()> {
 }
 
 /// The run as a mission recording, the way the AI probe records: the picture
-/// is taken as live flight takes it and nothing it reads feeds back.
-struct Record {
+/// is taken as live flight takes it and nothing it reads feeds back. The
+/// air-to-ground driver (`--a2g-run --record`) records through it too.
+pub(crate) struct Record {
     recorder: replay::recorder::Recorder,
     /// Every tick's picture, when the run checks the recording against them.
     pictures: Option<Vec<RenderSnapshot>>,
@@ -463,15 +472,20 @@ struct Record {
 }
 
 impl Record {
-    fn start(world: &World, path: &std::path::Path, verify: bool) -> AppResult<Self> {
+    pub(crate) fn start(
+        world: &World,
+        path: &std::path::Path,
+        verify: bool,
+        plane: &str,
+        run: &str,
+    ) -> AppResult<Self> {
         use replay::{convert, recorder};
         let combat = &world.combat;
         let flight = &world.cockpits[0].flight;
         let snapshot = combat.render_snapshot();
         let extra = vec![(
             "probe".to_owned(),
-            "the surface objective run on the full mission tick: no audio, music, HUD or rumble"
-                .to_owned(),
+            format!("{run} on the full mission tick: no audio, music, HUD or rumble"),
         )];
         let header = recorder::header(
             tore_replay::MissionKind::Probe,
@@ -480,11 +494,11 @@ impl Record {
             extra,
             std::time::SystemTime::now(),
         );
-        let player = recorder::Human::single_player("F/A-18D", true);
+        let (player, others) = crate::recorded_humans(world, SEAT, plane);
         let roster = recorder::roster(
             snapshot,
             &player,
-            &[],
+            &others,
             world.ai_wings.as_ref(),
             combat.dummy_types(),
         );
@@ -512,20 +526,23 @@ impl Record {
         })
     }
 
-    fn before(&mut self, world: &mut World) {
+    pub(crate) fn before(&mut self, world: &mut World) {
         self.recorder.start_tick(None, &mut world.combat);
     }
 
-    fn after(&mut self, world: &mut World, out: &TickOutput) {
+    pub(crate) fn after(&mut self, world: &mut World, out: &TickOutput) {
         let idle = tore_sim::flight::PilotInput::default();
         let cockpit = &world.cockpits[0];
+        // The other human-flown planes (a buddy's seat) are recorded as the
+        // game records them.
+        let crews = crate::other_crews(&world.cockpits, cockpit.plane, &idle);
         self.recorder.begin(replay::recorder::Tick {
             snapshot: world.combat.render_snapshot(),
             combat: &world.combat,
             flight: &cockpit.flight,
             previous: &cockpit.previous_flight,
             pilot: &idle,
-            others: &[],
+            others: &crews,
             wings: world.ai_wings.as_ref(),
             world: &world.terrain,
             events: &out.events,
@@ -543,7 +560,11 @@ impl Record {
     }
 
     /// Finishes the file and, when asked, replays it against the run.
-    fn finish(mut self, world: &World, report: &debrief::Report) -> AppResult<Vec<String>> {
+    pub(crate) fn finish(
+        mut self,
+        world: &World,
+        report: &debrief::Report,
+    ) -> AppResult<Vec<String>> {
         self.recorder.note(
             tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
                 .with(tore_replay::vocab::field::REASON, "the run finished"),

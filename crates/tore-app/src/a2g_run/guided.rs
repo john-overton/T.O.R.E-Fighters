@@ -159,7 +159,9 @@ pub(super) fn scene(
         station,
         target,
         owner,
+        record: None,
     };
+    let scene = scene.recording(o)?;
     let row = scene.target_row().ok_or("the target has no row")?;
     let own = scene
         .world
@@ -248,8 +250,7 @@ impl Scene {
                 ..SeatInput::default()
             });
         }
-        self.world.step(&inputs, &mut self.out)?;
-        Ok(())
+        self.recorded(|world, out| world.step(&inputs, out))
     }
 
     fn sight(&self) -> Option<GuidedSight> {
@@ -547,7 +548,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         if released.is_some() { "yes" } else { "no" },
         scene.rounds()
     );
-    scene.finish();
+    scene.finish()?;
     println!("a2g-run: done");
     Ok(())
 }
