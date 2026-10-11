@@ -24,6 +24,7 @@
 //! Weapon records, configurations and signature profiles are shared records
 //! (equal copies cost one coding), as the records slice settled.
 
+use super::super::ballistics::BombMotion;
 use super::{
     ActorSupport, DecoyRoll, DeviceNote, Effect, EffectKind, FriendlyFire, GunCadence, HitRecord,
     LocalizedDamage, Ownship, Projectile, RangeEstimate, Readiness, State, Strike, SystemFaults,
@@ -194,6 +195,12 @@ crate::checkpoint_enum!(EffectKind {
 // explodes. Both are read by later ticks.
 type SurfaceRound = super::SurfaceRound;
 crate::checkpoint_struct!(SurfaceRound { end_tick, flak });
+
+crate::checkpoint_struct!(BombMotion {
+    origin,
+    horizontal,
+    vertical,
+});
 type GroundLook = super::GroundLook;
 crate::checkpoint_struct!(GroundLook {
     explosion,
@@ -520,6 +527,7 @@ impl Checkpoint for State {
             rewinds,
             surface_rounds,
             next_surface_shot,
+            bombs,
             ground_looks,
             parked,
         } = self;
@@ -555,6 +563,7 @@ impl Checkpoint for State {
         rewinds.save(s, None)?;
         surface_rounds.save(s, None)?;
         next_surface_shot.save(s, None)?;
+        bombs.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
         Ok(())
@@ -606,6 +615,7 @@ impl Checkpoint for State {
             rewinds: Checkpoint::load(l, None)?,
             surface_rounds: Checkpoint::load(l, None)?,
             next_surface_shot: Checkpoint::load(l, None)?,
+            bombs: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
         })

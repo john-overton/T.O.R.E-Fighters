@@ -543,10 +543,10 @@ this round.
 | --- | --- | --- | --- | --- | --- |
 | 1 | Free-fall bombs | MK82, MK84, FAB250, FAB500, FAB1000, MK82P3 (3-pack) | 18 to 26 | Retail bomb motion; CCIP and LVL; fuze, splash and craters exist | MK82 partly; rest missing |
 | 2 | Retarded bombs | MK82HD, MK82P (6-pack), MK82AIR (7-pack) | 17 to 26 | As 1, with the record's launch retard 66 and pack spacing | missing |
-| 3 | Cluster bombs | CBU87, CBU89, MK20, RBK250, RBK500 | 26 each | As 1, with the slowdown to 278 ft/s; retail wide splash; presentation-only bomblet flashes | missing |
+| 3 | Cluster bombs | CBU87, CBU89, MK20, RBK250, RBK500 | 26 each | As 1, released at 90 percent of the aircraft's speed (up to 2,933 ft/s); retail wide splash; presentation-only bomblet flashes | missing |
 | 4 | Laser-guided bombs | GBU10, GBU10A, PAVEWAY, PAVEWA3, GBU28 | 24 (GBU28: 5) | Ballistic until a valid spot is in the seeker cone (zone 0, 90 degrees); then steer within the record's turn limits while gliding to final speed; spot lost: ballistic | missing |
 | 5 | GPS bombs (JDAM) | GBU29, GBU29P, GBU30 | 25 to 26 | Fly to the ground point designated at release (fixed coordinates; a moving target is missed), all weather, no designator after release | missing |
-| 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press, or held repeat, fires the record burst (2, LAU-10 1); rocket pipper | LAU61, B8, B13 partly |
+| 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); one rocket a press, four a second held (LAU-10 once a press); rocket pipper | LAU61, B8, B13 partly |
 | 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Command guidance to the designated ground object while it stays inside the launcher's zone-1 cone with line of sight; else ballistic | partly |
 | 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | AGM65G partly |
 | 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; memory to the last position | AGM88 partly; AGM45 hidden |
@@ -588,22 +588,29 @@ flowchart TD
 ### Rockets
 
 A pod holds `projsInPod` rockets, the real count: LAU-61 19, B-8M1 19, B-13L 5,
-LAU-10 4 (retail data). Each press, or each repeat while the trigger is held
-(rockets carry the held-repeat flag 0x800), fires the record's burst (2 rockets,
-LAU-10 1) with the record's burst spacing, and the pod empties in order. An empty
-pod stays on the station. Launch envelope 1.48 to 2.47 nmi; motor 10 s; the
-manual gives a 1 nmi line of sight (retail manual, weapon notes). Opinionated
-(John accepted decision 12): the real counts and burst, with the rocket pipper.
-Which JT field counts pod rockets (`projsInPod` against `actualRoundsPerGame`) is
-an R1 fold.
+LAU-10 4 (retail data). At mission start a station's count is multiplied by it,
+so two LAU-61 pods show and hold 38 rockets (retail, `HARDPodHack`). Each
+trigger call fires **one** rocket and uses one round, not the record's burst:
+the LAU-61, B-8M1 and B-13L carry the held-repeat flag 0x800 with a burst time
+of one quarter second, so a held trigger fires four a second on the game's
+quarter-second clock; the LAU-10 lacks it and fires once a press (retail,
+`PROJFire` and `ServicePlayer`; [weapons formats](../formats/weapons.md),
+"Packs and pods"). The burst (2) is the AI's count of calls. An empty pod stays
+on the station; the pods' weight falls by a rocket's share with each one fired
+(fitted: retail's weight for a part-empty pod is not read). Launch envelope
+1.48 to 2.47 nmi; motor 10 s; the manual gives a 1 nmi line of sight (retail
+manual, weapon notes). Opinionated (John accepted decision 12): the real counts,
+with the rocket pipper.
 
 ### Cluster bombs
 
 CBU-87, CBU-97 (record CBU89), Mk 20 Rockeye II, RBK-250 and RBK-500 are the
 five cluster records (flags 0x82a052; 0x800000 is set on exactly these five,
 meaning unknown). The data has **no submunition count or dispersion field**.
-They slow to a final speed of 278 ft/s (deceleration 14 with the speed
-command), explode as type 18 with a fuze radius of 100 ft and no crater, and
+Their records carry a speed command toward a final speed of 278 ft/s, which
+the bomb path never reads (retail: they fall on the same parabola as any bomb,
+released at 90 percent of the aircraft's speed and clamped at 2,933 ft/s), and
+they explode as type 18 with a fuze radius of 100 ft and no crater, and
 their splash is wide: 2,200, 2,500, 1,600, 1,500 and 2,500 ft at 100 percent
 damage for CBU-87, CBU-97, Mk 20, RBK-250 and RBK-500 (retail data; compare
 [explosions](explosions.md)). The remake keeps the retail wide splash and
@@ -615,35 +622,55 @@ no damage and the damage is the same as the original's.
 
 Data packs only (opinionated, John accepted decision 14, matching retail, which
 has no ripple, salvo, interval or quantity control): one press releases one
-record burst, that is a single bomb or the 3, 6 or 7 of a pack at its spacing
-(gameRoundsInBurst 3, 6, 7 on MK82P3, MK82P, MK82AIR; gameBurstT 4; retail data,
-unit R1 fold). Holding the trigger repeats releases at the record's reload time
-for held-repeat records (rockets) and in LVL auto-release.
+record burst, that is a single bomb or the whole 3, 6 or 7 of a pack (game
+rounds in burst 3, 6, 7 on MK82P3, MK82P, MK82AIR; retail data), **all in the
+same tick for one round** (retail `PROJFire`). Bomb i of a pack (from 0) leaves
+its station offset x 0, -2, +2, -4, +4, -6, +6 ft and y 0, -2, -6, -12, -20,
+-30, -42 ft, each with its own scatter (retail). Retail adds the sideways step
+on world x, whose direction is unknown; the remake lays it along the
+aircraft's lateral axis (fitted). No bomb record has the held-repeat flag, so
+holding the trigger does not release a second pack; a new press does. Holding
+repeats rockets (above) and, in LVL, the auto-release.
 
 ### Bomb motion
 
-Retail bomb motion is the routine at 0x4c4050 (`PROJBombPos`), not yet read.
-Until R1 folds it, the fitted fallback below ships. Today a released bomb flies
-straight along the nose and never falls (the 0x4 gravity flag is absent from
-every bomb record).
+Retail, from the bomb routine (`PROJMakeBombEq` 0x4c3eb0 and `PROJBombPos`
+0x4c4050; facts and addresses in [weapons formats](../formats/weapons.md),
+"Bomb motion"). Spec-derived in `tore_sim::combat::ballistics`.
 
-| Fact | R1 fold; fitted fallback |
-| --- | --- |
-| Release velocity | The aircraft's velocity vector times `launchRetard` / 100 plus a 10 ft/s downward ejection. `launchRetard`: 100 slick, 66 retarded (MK82HD Snakeye, MK82AIR, MK82P), 90 cluster and guided (retail data) |
-| Gravity | 32.2 ft/s squared, no terminal cap for bombs |
-| Drag | None for slick bombs (retail records carry no drag fields); retarded bombs lose horizontal speed by the cluster record's deceleration rule only if R1 shows one |
-| Orientation | The drawn bomb points along its velocity (pitch-over) |
-| Packs | `gameRoundsInBurst` bombs per press, one every `gameBurstT` service units, from alternating sides of the station mount |
-| Pods | As [Rockets](#rockets); empty pods stay on the station |
+- **The bomb flag selects the path.** A record with type flag 0x10 falls on a
+  closed-form vacuum parabola; it never needs the gravity flag 0x4 (no bomb
+  record has it). Height after s seconds is `y0 + vz s - 16 s²`: gravity
+  32 ft/s², no drag, no terminal speed. Horizontal motion is linear at the
+  release's horizontal speed, with no cap.
+- **Release.** The bomb leaves its station along the aircraft's **attitude**
+  (the nose, not the flight path) at `max(launcher speed x launchRetard / 100,
+  initialSpeed)`, clamped by the record: 0 to 1,466 ft/s for slick, retarded
+  and packed bombs, 0 to 2,933 ft/s for cluster bombs. There is no ejection
+  push. A Snakeye (retard 66) leaves at 66 percent of the aircraft's speed and
+  then falls on the same parabola: the same fall, a shorter throw.
+- **Scatter.** Every bomb, the player's included, takes a uniform random error
+  of up to plus or minus 3.0 degrees in heading and, separately, in pitch
+  (retail `adjustBombAngle`, 546 of 65,536 units a turn). John confirmed it
+  for the player's bombs on 2026-10-10 (opinionated, John, matching retail); it
+  is one constant (`BOMB_SCATTER_DEGREES`). It is drawn from combat's own random stream, so a
+  replay and every machine of a network game agree. At 5,000 ft and 450 kt
+  level it moves the burst up to about 1,000 ft along track and 700 ft across.
+- **Orientation.** The drawn bomb pitches along its velocity; its heading
+  stays the release heading.
+- **Guided bombs** (GBU and JDAM records) have neither 0x10 nor 0x4 and keep
+  their own path (slice W1).
 
-> **R1 fold, bomb motion.** Waiting for the bomb routine (0x4c4050), the impact
-> predictor (0x4c3eb0), `PROJSpeed` for bomb records (nose or velocity, retard),
-> the 0x40 speed command on bombs and cluster records, the `gameBurstT` units,
-> which field counts pod rockets, and the 0x800000 bit. Destination:
-> [weapons formats](../formats/weapons.md).
+Worked example (retail data): a Mk 82 released level at 5,000 ft and 450 kt
+(759 ft/s) falls for `sqrt(5,000 / 16)` = 17.7 s and travels 13,417 ft before
+it bursts, its mean point; a Snakeye from the same pass travels 8,839 ft.
 
-The sight and the motion are one calculation: a test requires the real bomb to
-land on the predicted point to within a foot.
+The bomb sight's prediction (`ballistics::predict_impact`) is the same
+equation from the same release state without the scatter, against the ground
+under the release point (retail keeps that height; its refinement loop never
+takes effect). Over flat ground a bomb without scatter lands on the predicted
+point to within a foot (unit test); a real bomb lands within the scatter's reach
+of it.
 
 ## Keys
 
@@ -814,11 +841,15 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
 | Release range scale | x=390, the missile scale | spec-derived |
 | HUD laser box | 12 by 8 reference pixels | fitted |
-| Cluster final speed | 278 ft/s, deceleration 14 | retail data |
+| Cluster final speed | 278 ft/s, deceleration 14, unread by the bomb path | retail data |
 | Cluster splash | 2,200, 2,500, 1,600, 1,500, 2,500 ft at 100 percent | retail data |
 | Fuze radius | 300 ft slick, 100 ft cluster and guided | retail data |
-| Release velocity, gravity, ejection | see [Bomb motion](#bomb-motion) | R1 fold; fitted fallback |
-| Rockets per pod and burst | 19, 19, 5, 4; burst 2 (LAU-10 1) | retail data |
+| Release speed | `max(launcher speed x launchRetard / 100, initialSpeed)`, clamped 0 to 1,466 ft/s (0 to 2,933 cluster), along the nose; no ejection | retail data (`PROJSpeed`) |
+| Bomb gravity and drag | 32 ft/s², no drag, no terminal speed | retail data (`PROJBombPos`) |
+| Bomb scatter | plus or minus 3.0 degrees in heading and in pitch, uniform, every bomb | retail data; for the player's bombs too (John, 2026-10-10) |
+| Pack stagger | x 0, -2, +2, -4, +4, -6, +6 ft; y 0, -2, -6, -12, -20, -30, -42 ft | retail data; lateral axis fitted |
+| Rocket repeat | one rocket a call, every quarter second held (0x800 pods) | retail data |
+| Rockets per pod | 19, 19, 5, 4, multiplied into the station's count at mission start | retail data |
 | Pack sizes | 3, 6, 7 bombs | retail data |
 | AI release tolerance (for the future AI round) | impact within max(1,000 ft, range/8) | spec-derived ([AI](ai.md)) |
 | Release altitude advice | 3,000 ft lightly defended, 5,000 ft or more defended; about 1 nmi of range per 1,000 ft of drop altitude | retail manual (advice, not enforced) |
@@ -852,8 +883,8 @@ filled in with something plausible. Rows that a research slice may close say so.
 | HARM page look; modes beyond designated target (boresight, self-protect, pre-briefed) | Fitted page; the boresight cue is opinionated | R2: handler 0x4154c7 |
 | Laser: the designator gate (own aircraft only or any), reacquisition after a target switch, spot behaviour, laser weather | Buddy rule and reacquisition (fitted) | R2: `PROJLock`, `HARDBestSeeker` |
 | What a guided signature-0 record (JDAM, AT-2) does in the retail projectile code | GPS point and command guidance (opinionated, agent) | R2 |
-| Bomb motion: release direction (nose or velocity), drag, pitch-over | Fitted fallback table | R1: 0x4c4050, 0x4c3eb0 |
-| `gameBurstT` units for packs and pods; which field counts pod rockets | `gameBurstT` service units, `projsInPod` | R1 |
+| World axis of the pack's sideways stagger | The aircraft's lateral axis (fitted) | Read the theater axis convention |
+| Whether the predictor's cached ground height differs from the ground under the station | Ground directly below the release point (fitted) | Trace `T_Info` 0x4abab0's cache writers |
 | CCIP pipper glyph shapes, the threshold units (record range against the manual's feet), the dotted line size, the HUD reference point | The 0.4 and 1.0 rule over zone-1 range | R1 (renders glyphs 0x20 to 0x2f) |
 | Meaning of flags 0x2, 0x8, 0x8000 and 0x800000 on air-to-ground records | Ignored | R1, R2 where touched |
 | The "optical" label mapping | Signature 0 guided = optical | R2 |
@@ -902,7 +933,7 @@ format documents; this spec then replaces its fallbacks.
 | HARM page | The HARM handler and selector | R2 | [radar formats](../formats/radar.md) "HARM page" | `R2 fold, HARM page` |
 | Laser and designator | `PROJLock`, `HARDBestSeeker`, signature-0 guided records, laser weather | R2 | [missile formats](../formats/missiles.md) "Laser and designator", "Optical" | `R2 fold, laser` |
 | Bomb sight | The CCIP draw, reference point, glyph rule and units | R1 | [weapons formats](../formats/weapons.md) "Bomb sight" | `R1 fold, bomb sight` |
-| Bomb motion | The bomb routine, predictor, retard, 0x40 command, pack and pod fields, 0x800000 | R1 | [weapons formats](../formats/weapons.md) "Bomb motion" | `R1 fold` |
+| Bomb motion | Folded by B1 (2026-10-10): [Bomb motion](#bomb-motion), [Rockets](#rockets), [Release modes and packs](#release-modes-and-packs) | R1 | [weapons formats](../formats/weapons.md) "Bomb motion" | done |
 
 ## Source notes
 
