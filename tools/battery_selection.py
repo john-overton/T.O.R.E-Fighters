@@ -253,6 +253,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP",
         ("net-surface-*",),
     ),
+    "net-a2g": (
+        "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site",
+        ("net-a2g-*",),
+    ),
 }
 
 def family_matches(family: str, name: str) -> bool:
@@ -298,7 +302,7 @@ MAIN_FAMILIES = (
     "replay-cli", "menus-creator", "flight-maneuvers", "flight-takeoff", "flight-landing", "ai-fights",
     "ai-airfield", "ai-lead", "ai-orders", "ai-regression", "flight-powered",
 )
-NET_FAMILIES = ("net-fly", "net-window", "net-convert", "net-surface")
+NET_FAMILIES = ("net-fly", "net-window", "net-convert", "net-surface", "net-a2g")
 # What a change to host migration reaches besides the rest of the net lane (slice K9).
 NET_MIGRATE = NET_FAMILIES + ("net-migrate", "net-migrate-relay")
 RENDER_FAMILIES = ("windowed-menus", "flight-views", "instruments")
@@ -758,6 +762,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/net_datalink.py", ("net-window", "link-cues"), "the data link's cues in a multiplayer flight (stage G, slice G10)", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_accept.py", ("net-window",), "stage F phase 2's acceptance scenarios: the away menu's Spawn in Aircraft and a host's Leave Game (slice F2-X)", windowed=True, unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_surface.py", ("net-surface",), "a ground target online (protocol 22, slice N1)", unit_tests=("test_battery_net",)),
+    _r("tools/battery_scenarios/net_a2g.py", ("net-a2g",), "the air-to-ground round online (protocol 23, slice NA)", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/net_screens.py", ("net-window",), "the game's rejoin and its HUD through a host migration (stage K, slice K7b)", windowed=True),
     _r("tools/test_battery_net.py", (), "net scenario tests", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),
