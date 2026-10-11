@@ -859,7 +859,40 @@ class A2gLoopbackTests(unittest.TestCase):
         self.assertTrue(any("AGM-88 at" in p for p in net_a2g.a2g_problems(elsewhere, self.BUDDY)))
 
     def test_the_scenario_is_listed_in_the_net_lane(self):
-        (scenario,) = net_a2g.scenarios()
+        (scenario,) = [s for s in net_a2g.scenarios() if s.name == "net-a2g-loopback"]
         self.assertEqual((scenario.name, scenario.lane, scenario.window), ("net-a2g-loopback", "net", False))
         self.assertIn("F16C.PT", net_a2g.MISSION)
         self.assertIn("easy-targeting", net_a2g.MISSION)
+
+
+class StrikeHandbackTests(unittest.TestCase):
+    """`net-ai-strike-handback` (slice ST-K): the pass set up, the AI's release seen, the cockpit found."""
+
+    STRIKE = "Strike: a2g: strike set target 0x50000008 station 1 mode LVL laser auto rounds 2\n"
+    WATCH = "Stay: a2g: saw MK82.JT 16777216 from plane 0 target none\n"
+    BACK = "Strike: a2g: cockpit designated 0x50000008 station 1 mode LVL laser auto rounds 1\n"
+
+    def test_a_finished_pass_and_the_cockpit_as_left_pass(self):
+        self.assertEqual(net_a2g.handback_problems(self.STRIKE, self.WATCH, self.BACK), [])
+        dead = self.BACK.replace("designated 0x50000008", "designated none")
+        self.assertEqual(net_a2g.handback_problems(self.STRIKE, self.WATCH, dead), [])
+
+    def test_each_failure_is_named(self):
+        problems = net_a2g.handback_problems
+        self.assertTrue(any("never set up" in p for p in problems("", self.WATCH, self.BACK)))
+        self.assertTrue(any("did not continue" in p for p in problems(self.STRIKE, "", self.BACK)))
+        self.assertTrue(any("never read its cockpit" in p for p in problems(self.STRIKE, self.WATCH, "")))
+        for old, new, words in (
+            ("station 1", "station 0", "station 0"),
+            ("mode LVL", "mode CCIP", "in CCIP"),
+            ("rounds 1", "rounds 2", "as many as"),
+            ("designated 0x50000008", "designated 0x50000009", "designates 0x50000009"),
+        ):
+            back = self.BACK.replace(old, new)
+            self.assertTrue(any(words in p for p in problems(self.STRIKE, self.WATCH, back)), new)
+
+    def test_the_scenario_is_listed_in_the_net_lane(self):
+        (scenario,) = [s for s in net_a2g.scenarios() if s.name == "net-ai-strike-handback"]
+        self.assertEqual((scenario.lane, scenario.window), ("net", False))
+        self.assertNotIn("wing enemy", net_a2g.STRIKE_MISSION)
+        self.assertIn("easy-targeting", net_a2g.STRIKE_MISSION)

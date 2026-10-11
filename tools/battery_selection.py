@@ -258,8 +258,9 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-surface-*",),
     ),
     "net-a2g": (
-        "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site",
-        ("net-a2g-*",),
+        "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site; "
+        "a bomber dropped mid-pass whose attack the AI finishes (slice ST-K)",
+        ("net-a2g-*", "net-ai-strike-*"),
     ),
 }
 
@@ -427,6 +428,11 @@ RULES: tuple[Rule, ...] = (
     # Stage F phase 2's shared types (F2-0); single player never uses them.
     _r("crates/tore-world/src/score.rs", NET_FAMILIES, "score facts (networked games)"),
     _r("crates/tore-world/src/world/revive.rs", NET_FAMILIES + ("ai-lead",), "revival (networked games)"),
+    _r(
+        "crates/tore-world/src/world/handoff.rs",
+        AI_CORE + ("replay-recording", "ai-strike", "net-a2g"),
+        "the handoff between the AI and a human: the takeover of a ground attack (slice ST-K)",
+    ),
     _r("crates/tore-world/src/world/replies.rs", NET_FAMILIES + ("radio",), "wingmen's replies"),
     _r("crates/tore-world/src/world.rs", AI_CORE + ("replay-recording",), "mission world"),
     _r("crates/tore-world/src/world/*", AI_CORE + ("replay-recording",), "mission world"),

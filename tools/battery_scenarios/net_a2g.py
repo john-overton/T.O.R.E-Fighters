@@ -15,14 +15,31 @@ King who waits for two players holding slots. Two bots fly it:
 Both screens must agree: the spot the Buddy reads as the buddy's is the Laser bot's own (owner plane 0, the
 same target, the same point); the Buddy releases on it and the bomb guides (its time to impact counts down)
 and ends; the Laser bot draws the Buddy's GBU-10 and its AGM-88, the missile flying at the candidate the
-Buddy's HARM cue chose. See docs/testing/lane-net.md.
+Buddy's HARM cue chose.
+
+`net-ai-strike-handback` (slice ST-K, docs/spec/ai-strike.md "Takeover and handback"): a `tore-server` flies the
+Ukraine column `~QUCOL` (no added defenses, Easy targeting) with two F-16Cs and no enemy aircraft (a hostile
+fighter within 15 nm makes the takeover unsafe, so the AI would stand off instead). `Strike` (plane 0, Mk 82s in a
+Cheat loading, a token file) sets up a level pass (`tore-bot --a2g strike`: A-G page, Ctrl+X, the Mk 82s, LVL)
+and is killed in flight before it releases; the server keeps plane 0 for it and the AI flies it. `Stay` (plane
+1, `--a2g watch`) keeps the mission going and sees the Mk 82s leave plane 0: the AI continued the pass. Strike's
+game then joins again with its token (`--a2g watch`) and finds its cockpit as it left it: the same station, LVL,
+fewer bombs, and the designation on the same target while it stands. See docs/testing/lane-net.md.
 """
 from __future__ import annotations
 
 import re
 
 from battery import Drive, DriveError, Scenario
-from battery_scenarios.net import NET_BAD, server_log, start_bots, start_server
+from battery_scenarios.net import (
+    LOCALHOST,
+    NET_BAD,
+    log_must,
+    rejoin_problems,
+    server_log,
+    start_bots,
+    start_server,
+)
 
 MISSION = """tore-mission 1
 theater VLA
@@ -146,10 +163,120 @@ def drive_loopback(d: Drive) -> None:
         d.problem("the server log does not show both bots joining")
 
 
+STRIKE_MISSION = """tore-mission 1
+theater UKR
+condition clear
+start airborne 5000
+separation-nm 5
+preset free
+guns-only no
+wing friendly 1 F16C.PT 2 average
+ground-target QUCOL
+surface-seed 7
+cheats easy-targeting
+"""
+
+STRIKE_SET = re.compile(
+    r"^Strike: a2g: strike set target (?P<target>0x[0-9a-f]+) station (?P<station>\d+) mode LVL "
+    r"laser \S+ rounds (?P<rounds>\d+)$",
+    re.M,
+)
+COCKPIT = re.compile(
+    r"^Strike: a2g: cockpit designated (?P<designated>\S+) station (?P<station>\d+) mode (?P<mode>\S+) "
+    r"laser \S+ rounds (?P<rounds>\d+)$",
+    re.M,
+)
+
+
+def handback_problems(strike: str, watch: str, back: str) -> list[str]:
+    """What the three bots printed against `net-ai-strike-handback`'s rules: the pass set up, the AI's release
+    seen from plane 1, and the rejoined cockpit as left with fewer bombs."""
+    problems: list[str] = []
+    set_up = STRIKE_SET.search(strike)
+    if set_up is None:
+        return ["the Strike bot never set up its pass (no `strike set` line)"]
+    if re.search(r"^Stay: a2g: saw MK82\.JT \d+ from plane 0 ", watch, re.M) is None:
+        problems.append("Stay never saw a Mk 82 leave plane 0: the AI did not continue the pass")
+    found = [m.groupdict() for m in COCKPIT.finditer(back)]
+    if not found:
+        return problems + ["the rejoined game never read its cockpit (no `cockpit` line)"]
+    first = found[0]
+    if first["station"] != set_up["station"]:
+        problems.append(f"the rejoined cockpit has station {first['station']}, the human left {set_up['station']}")
+    if first["mode"] != "LVL":
+        problems.append(f"the rejoined cockpit is in {first['mode']}, the human left LVL")
+    if not int(first["rounds"]) < int(set_up["rounds"]):
+        problems.append(f"the rejoined cockpit has {first['rounds']} bombs, as many as the human left")
+    if first["designated"] not in (set_up["target"], "none"):
+        problems.append(
+            f"the rejoined cockpit designates {first['designated']}, the AI attacked {set_up['target']}"
+        )
+    return problems
+
+
+def drive_strike_handback(d: Drive) -> None:
+    """A bomber's game dropped mid-pass: the AI finishes the pass, the game rejoins and finds its cockpit."""
+    port = d.port()
+    server = start_server(d, port, STRIKE_MISSION, king="first-player", loadouts="any")
+    token_file = d.work / "strike.token"
+    # Strike wears the crown and its start waits for both players, so its Cheat loading goes with its ready.
+    strike = start_bots(
+        d, port, "strike", 120, "--callsign", "Strike", "--slot", "0", "--a2g", "strike", "--load", "MK82.JT",
+        "--token-file", str(token_file), "--king", "loadouts=any", "--players", "2",
+    )
+    if not server.wait_for(r"Strike wears the crown", 60):
+        raise DriveError("the Strike bot never wore the crown")
+    stay = start_bots(d, port, "stay", 330, "--callsign", "Stay", "--slot", "1", "--a2g", "watch")
+    if not strike.wait_for(r"^Strike: a2g: strike set target", 90):
+        raise DriveError("the Strike bot never set up its pass")
+    # On a straight line at the target before the drop.
+    d.sleep(8)
+    if re.search(r"^Stay: a2g: saw MK82\.JT \d+ from plane 0 ", stay.text(), re.M):
+        d.problem("a Mk 82 left plane 0 before the drop")
+    d.log("killing Strike (SIGKILL)")
+    strike.stopped = True
+    strike.popen.kill()
+    strike.wait(10)
+    if not server.wait_for(r"Strike dropped out: the AI flies plane 0, kept for it$", 40):
+        d.problem("the server did not keep plane 0 for the dropped Strike")
+    # The pass the human set up, or the re-attack after it (the level run's cue does not always come
+    # inside the gate on the first pass from the human's line).
+    if not stay.wait_for(r"^Stay: a2g: saw MK82\.JT \d+ from plane 0 ", 240):
+        d.problem("the AI never released on the human's target")
+    d.sleep(15)
+    back = d.start(
+        "strike2",
+        [d.bot, "--connect", f"{LOCALHOST}:{port}", "--seconds", "15", "--callsign", "Strike", "--slot", "0",
+         "--token-file", str(token_file), "--a2g", "watch"],
+    )
+    back.finish(90, 0)
+    for problem in rejoin_problems(back.text(), "Strike", 0):
+        d.problem(problem)
+    back.expect(r"^Strike: The connection ended: the player left\.$", "a clean leave")
+    stay.finish(330, 0)
+    server.send("end")
+    server.finish(40, 0)
+    for bot in (stay, back):
+        bot.forbid(NET_BAD, "a network problem")
+    for problem in handback_problems(strike.text(), stay.text(), back.text()):
+        d.problem(problem)
+    log_must(
+        d,
+        server_log(d),
+        r"Strike dropped out: the AI flies plane 0, kept for it$",
+        r"Strike rejoined with its token: plane 0 is waiting$",
+        forbid=r"protocol error|bad packets|\bfault\b",
+    )
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
             name="net-a2g-loopback", lane="net", args=[], driver=drive_loopback, uses=("server", "bot"),
             timeout=360,
+        ),
+        Scenario(
+            name="net-ai-strike-handback", lane="net", args=[], driver=drive_strike_handback,
+            uses=("server", "bot"), timeout=600,
         ),
     ]
