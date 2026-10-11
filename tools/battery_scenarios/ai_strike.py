@@ -9,7 +9,8 @@ what the simulation reports. Two kinds of scenario use it:
   lands: they check that the driver runs, that its report is consistent with
   itself (the summary counts the lines, a release comes before its impact),
   that a human-flown run is handed to the AI, and that a wing order goes out.
-  `ai-strike-driver`, `ai-strike-handback`, `ai-strike-order`.
+  `ai-strike-driver`, `ai-strike-handback`, `ai-strike-order`; the order scenarios `ai-wing-ground-order`
+  and `ai-wing-lase` (slice ST-O).
 * Behaviour scenarios, one per weapon class (slice ST-T, the strike tactics):
   `ai-strike-bombs`, `ai-strike-rockets`, `ai-strike-maverick`,
   `ai-strike-jdam`, `ai-sead-harm`, `ai-strike-defended`. Each run names the
@@ -242,6 +243,78 @@ def order_problems(output: str) -> list[str]:
     return problems
 
 
+def ground_order_problems(output: str, runs_wanted: list[dict]) -> list[str]:
+    """The wing orders onto the ground (slice ST-O). Each wanted run has a `label` and a `kind`:
+    `strike` (Alt+E, Alt+R, Alt+F: the wingman holds the object as its order and releases),
+    `class` (Alt+W: it holds a class order and releases), `lase` (it holds the lase order),
+    `refused` (no usable surface store: the order is refused, nothing is held, nothing released)
+    or `free` (attack on contact: taken, nothing held)."""
+    runs = parse_runs(output)
+    if len(runs) != len(runs_wanted):
+        return [f"{len(runs)} runs finished, want {len(runs_wanted)}"]
+    problems: list[str] = []
+    for run, want in zip(runs, runs_wanted):
+        label, kind = want["label"], want["kind"]
+        problems += consistency_problems(run, label)
+        order, reply, state = run.first("ORDER"), run.first("ORDER-REPLY"), run.first("ORDER-STATE")
+        if order is None or reply is None or state is None:
+            problems.append(f"{label}: missing ORDER, ORDER-REPLY or ORDER-STATE line")
+            continue
+        if order.get("designated") in (None, "none"):
+            problems.append(f"{label}: the order went out with nothing designated")
+        message = reply.get("message", "")
+        held = {k: state.get(k, "none") for k in ("strike_order", "lase_order")}
+        classes = int(state.get("class_order", "0"))
+        if kind == "refused":
+            if "no usable surface store" not in message:
+                problems.append(f"{label}: reply {message!r}, want the no usable surface store refusal")
+            if held["strike_order"] != "none" or held["lase_order"] != "none" or classes:
+                problems.append(f"{label}: a refused order left an order standing: {state}")
+            if run.of("RELEASE"):
+                problems.append(f"{label}: the refusing wingman released")
+            continue
+        if reply.get("result") != "given" or "1 applied" not in message:
+            problems.append(f"{label}: reply {reply.get('result')} {message!r}, want 1 applied")
+        if kind == "strike":
+            if held["strike_order"] == "none" or classes or held["lase_order"] != "none":
+                problems.append(f"{label}: want one strike order held, got {state}")
+        elif kind == "class":
+            if classes < 1 or held["strike_order"] != "none":
+                problems.append(f"{label}: want a class order held, got {state}")
+        elif kind == "lase":
+            if held["lase_order"] == "none" or held["strike_order"] != "none" or classes:
+                problems.append(f"{label}: want the lase order held, got {state}")
+        elif kind == "free":
+            if held["strike_order"] != "none" or held["lase_order"] != "none" or classes:
+                problems.append(f"{label}: attack on contact holds no ground order, got {state}")
+        if kind in ("strike", "class") and want.get("release", True) and not run.of("RELEASE"):
+            problems.append(f"{label}: the wingman never released")
+    return problems
+
+
+def quick_wing_problems(output: str) -> list[str]:
+    """`qmc-strike-wing`: a Quick Mission's friendly wing 2 with a ground target set. Run 1 is
+    bombers (an A-4E, bomber class): the mission gives them the Strike role and they release.
+    Run 2 is fighters (an F-16C): they keep CAP and release nothing."""
+    runs = parse_runs(output)
+    if len(runs) != 2:
+        return [f"{len(runs)} runs finished, want 2"]
+    problems: list[str] = []
+    for run, role, label in zip(runs, ("strike", "cap"), ("bombers", "fighters")):
+        problems += consistency_problems(run, label)
+        found = run.first("ROLE")
+        if found is None:
+            problems.append(f"{label}: no ROLE line")
+        elif found.get("role") != role:
+            problems.append(f"{label}: the wing was given role {found.get('role')}, want {role}")
+        released = bool(run.of("RELEASE"))
+        if role == "strike" and not released:
+            problems.append(f"{label}: the Strike wing never released")
+        if role == "cap" and released:
+            problems.append(f"{label}: the CAP wing released on the ground")
+    return problems
+
+
 def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
     """The behaviour scenarios: for each run (a dict with `label`, `profile`, `skill`, and
     optional `miss` (bomb miss limit) or `weapon_hit`), the AI named the pass it flew, released,
@@ -319,6 +392,16 @@ def _runs(skills_and_profiles, miss=True, **extra) -> list[dict]:
 BOMB_RUNS = [(2, p) for p in ("straight", "popup", "fasthigh", "dive", "level")] + [(s, "dive") for s in (0, 1, 3)]
 
 
+# The runs of `ai-wing-ground-order`, in the order they are given.
+ORDER_RUNS = [
+    dict(label="Alt+E", kind="strike"),
+    dict(label="Alt+R", kind="strike"),
+    dict(label="Alt+F", kind="strike"),
+    dict(label="Alt+W", kind="class"),
+    dict(label="refused", kind="refused"),
+]
+
+
 def pilot_run(theater: str, stem: str, *rest: str) -> list[str]:
     return ["--a2g-run", theater, stem, "--pilot", "ai", *rest]
 
@@ -342,6 +425,22 @@ def scenarios() -> list[Scenario]:
     rockets = ["--aircraft", "a4e", "--load", "LAU61", "--seconds", "120"]
     maverick = ["--aircraft", "a10", "--load", "AGM65G", "--seconds", "120"]
     jdam = ["--aircraft", "f16c", "--load", "GBU30", "--station", "2", "--count", "2", "--seconds", "120"]
+    column = ["--aircraft", "a4e", "--load", "MK82", "--order-at", "3", "--seconds", "90"]
+    order_args = {
+        "engage-my-target": pilot_run("UKR", "QUCOL", *column, "--order", "engage-my-target"),
+        "engage-from-formation": pilot_run("UKR", "QUCOL", *column, "--order", "engage-from-formation"),
+        "engage-ir-laser": pilot_run("UKR", "QUFACT", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
+                                     "--count", "2", "--order-at", "3", "--seconds", "90",
+                                     "--order", "engage-ir-laser"),
+        "engage-class": pilot_run("VLA", "QVRDRI", "--surface-seed", "4", "--defenses", "3", "3", "--unit",
+                                  STRAIGHT_FLUSH, "--aircraft", "f4g", "--load", "AGM88", "--from", "12",
+                                  "--altitude", "15000", "--order-at", "3", "--seconds", "120",
+                                  "--order", "engage-class"),
+        "refused": pilot_run("UKR", "QUCOL", "--aircraft", "f14", "--station", "0", "--load", "AIM9M",
+                             "--order-at", "3", "--seconds", "30", "--order", "engage-my-target"),
+    }
+    lase_args = pilot_run("UKR", "QUFACT", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
+                          "--count", "2", "--order-at", "3", "--seconds", "30", "--order", "lase-my-target")
     return [
         Scenario(
             name="ai-strike-driver", lane="flight",
@@ -371,7 +470,38 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             check=order_problems,
             notes="A seat leads a two-ship wing, designates the column and gives the wingman Engage my "
-                  "target; the driver reports the order and the world's reply.",
+                  "target; the driver reports the order and the world's reply (taken since slice ST-O).",
+        ),
+        Scenario(
+            name="ai-wing-ground-order", lane="flight",
+            args=order_args["engage-my-target"], timeout=600,
+            then=[Step(a, timeout=600) for k, a in order_args.items() if k != "engage-my-target"],
+            check=lambda out: ground_order_problems(out, ORDER_RUNS),
+            notes="A seat leads a two-ship wing and orders the wingman onto the ground: Alt+E and Alt+R "
+                  "on the Ukraine armored column (an A-4E's Mk 82), Alt+F on the factory with the "
+                  "lead's Pave Spike on it (an F-16C's JDAM), Alt+W on a SAM (an F-4G's HARM takes the "
+                  "site's SAMs as a class order), and Alt+E refused by a wingman with only air-to-air "
+                  "stores. Each reports the reply and what the wingman holds; the takers release.",
+        ),
+        Scenario(
+            name="qmc-strike-wing", lane="flight",
+            args=pilot_run("UKR", "QUCOL", "--aircraft", "a4e", "--load", "MK82", "--quick-wing",
+                           "--seconds", "420"),
+            timeout=900,
+            then=[Step(pilot_run("UKR", "QUCOL", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
+                                 "--quick-wing", "--seconds", "60"), timeout=300)],
+            check=quick_wing_problems,
+            notes="A Quick Mission with the Ukraine column as the ground target and a second friendly wing "
+                  "of two: A-4E bombers get the Strike role from the mission's default (retail's "
+                  "bomber-class rule) and attack the column on their own; F-16C fighters keep CAP and "
+                  "release nothing.",
+        ),
+        Scenario(
+            name="ai-wing-lase", lane="flight",
+            args=lase_args, timeout=300,
+            check=lambda out: ground_order_problems(out, [dict(label="lase", kind="lase")]),
+            notes="The lead of two F-16Cs designates the factory and orders Lase my target: the wingman "
+                  "has a designator, takes it, and holds the lase order for the lasing slice.",
         ),
         Scenario(
             name="ai-strike-bombs", lane="flight",

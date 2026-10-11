@@ -113,7 +113,7 @@ pub(crate) struct Options {
     ai: ai::Config,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level] [--handback S [--mode ccip|lvl] [--trigger]] [--order KIND [--order-at S]] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level] [--handback S [--mode ccip|lvl] [--trigger]] [--order KIND [--order-at S]] [--quick-wing] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -190,6 +190,7 @@ fn options() -> AppResult<Options> {
             "--trigger" => o.ai.trigger = true,
             "--order" => o.ai.set_order(&next()?)?,
             "--order-at" => o.ai.order_at = next()?.parse()?,
+            "--quick-wing" => o.ai.quick_wing = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
