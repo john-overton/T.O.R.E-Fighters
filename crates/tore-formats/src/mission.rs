@@ -70,7 +70,7 @@ impl Placement {
         }
     }
     /// True when the owner is Redfor: the nationality byte's side bit 0x80
-    /// (docs/formats/quick-templates.md#ownership). `None` without an owner.
+    /// (docs/formats/quick-templates.md#owners-and-nationality3). `None` without an owner.
     pub fn redfor(&self) -> Option<bool> {
         self.nationality.map(|value| value & 0x80 != 0)
     }

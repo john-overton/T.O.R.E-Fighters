@@ -16,7 +16,7 @@ and fact contract for `tore_formats::quick_template`
 `quick_template/tables.rs`) and for `nationality3` in
 `tore_formats::mission`. How the creator rolls and places the contents is in
 [quick-mission.md](quick-mission.md); player
-behaviour will live in [the surface defenses spec](../spec/surface-defenses.md).
+behaviour is in [the surface defenses spec](../spec/surface-defenses.md).
 Evidence: `FA.EXE` 1.02F, SHA-256
 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`, read as
 data and disassembly, never executed.
@@ -48,6 +48,14 @@ placeholders: `<sam>` 891, `<aaa>` 879, `<tank>` 298, `<afv>` 244,
 in no shipped template.
 
 Largest template: 127 objects. Aliases are unique inside every template.
+
+Other fields: skill 1 (average) on 3,752 objects, 2 on 136, 3 on 143, 0 on 3.
+`react` is mostly `$c000 $0 $0` (attack fighters and bombers) or `$c000 $3fff
+$0` (also defend against every other class). `searchDist` is 0 (3,985), 1 (37)
+or 25 (12). 159 objects carry `startTime` (values 60 to 5,400, seconds assumed):
+98 aircraft, 40 NTs and 21 tank or AFV placeholders; the field's meaning is not
+traced. Placeholder tokens are matched case-insensitively (templates write
+`<SAM>`, `<sam>`, `<CARGO>`).
 
 ## Routes
 
@@ -130,33 +138,26 @@ argument order of the helper at `0x432850`), so only the group index matters:
 | `<carrier>` | NIMZ, WASP | CLEM | KIEV | KIEV | NIMZ |
 | `<cargo>` | CARGO, SACRAM | CARGO | CARGO, OLEKMA | CARGO | CARGO |
 
+Equipment group by enemy nationality (word table `0x4f1e58`, indexed by the
+creator's field 20):
+
+| Group | Nationalities (creator index) |
+| --- | --- |
+| 0 | American (0), British (1), German (4), Belgian (5), Japanese (8), South Korean (11), Lithuanian (17), Polish (18), Columbian (35), Pakistani (36), Italian (42), Swedish (43), Norwegian (45), Spanish (46), Portuguese (47), Austrian (48), Danish (49), Dutch (50), Canadian (51), Australian (55), Philippine (56) |
+| 1 | French (3), Sudanese (32) |
+| 2 | Chinese (2), North Korean (9), Russian (10), Estonian (15), Latvian (16), Belorussian (19), North Vietnamese (20), Ukrainian (22), Iraqi (23), Iranian (24), Cuban (33), Panamanian (34), Indian (37), Afghani (38), Finnish (44), Bulgarian (52), Hungarian (53), Romanian (54) |
+| 3 | Syrian (12), Islamic Egyptian (14), Libyan (31), Argentinean (57), Serbian (59) |
+| 4 | Jordanian (6), Israeli (7), Arab Egyptian (13), South Vietnamese (21), Kuwaiti (25), Saudi Arabian (26), Omani (27), UAE (28), Qatari (29), Bahraini (30), Taiwanese (39), Greek (40), Turkish (41), Bosnian (58) |
+
 The night and stealth rule: conditions index 6 (night) with `F117.PT` or
 `B2.PT` in a friendly wing replaces every manned `<aaa>` pick with ZSU23 and
 writes skill 0 (novice). Neither aircraft is imported, so the rule is dormant.
 
-Template names per theater (source order of creator field 13):
-
-| Theater | Templates |
-| --- | --- |
-| BAL | QBNOTH QBFLT QBAIR QBBRD QBXING QBACOL QBFAIR QBSPPY QBSHAR |
-| CUB | QCNOTH QCFAIR QCSCUD QCSUB QCLST QCCARG QCCMHQ |
-| EGY | QENOTH QESFLT QESAIR QELAIR QECMHQ QERDRI QEARMOR QECDEF |
-| LFA | QLFNOTH QLFCARG QLFPATR QLFSAM QLFFAIR QLFSTOR QLFCMHQ |
-| FRA | QFNOTH QFFLT QFSAIR QFLAIR QFSUP QFRDRI QFCMHQ QFFACT |
-| GRE | QGRNOTH QGRSAIR QGRPATR QGRRDR QGRCARG QGRSTOR |
-| IRA | QIRNOTH QIRRDR QIRFAIR QIRPOW QIRCCC QIRARM QIRSCUD QIRCWP QIRRETR |
-| KURILE | QKNOTH QKSFLT QKLFLT QKSCFT QKSUB QKPLNGR QKSILO QKARMOR |
-| TVIET | QTNOTH QTBARG QTCARGO QTBRDG QTBUNK QTCOMM QTSTRG QTTRUCK QTAAA QTSAM |
-| SPA | QSPNOTH QSPFAIR QSPSAM QSPASA QSPFRU QSPSUP QSPCMHQ |
-| APA | QAPNOTH QAPFAIR QAPBLK QAPPATR QAPHELO QAPSAM QAPCMHQ |
-| PGU | QPGNOTH QPGPATR QPGFAIR QPGSAM QPGSRUN QPGRDR QPGWSHP |
-| NSK | QNSNOTH QNSFAIR QNSARM QNSFOA QNSBORD QNSCOL QNSSUP |
-| WTA | QWTNOTH QWTFAIR QWTPATR QWTHYDO QWTWARS QWTCARG QWTLAND |
-| UKR | QUNOTH QUSFLT QULFLT QUCITY QUFACT QUSTRIP QUCOL QUNUKE QUBRI |
-| VLA | QVNOTH QVSFLT QVSAIR QVLAIR QVCMHQ QVARMOR QVRDRI QVSUP |
-
-The resource is `~<name>.M`. The creator's own target-label counts per theater
-equal these list lengths.
+The template names per theater, in creator menu order with their retail labels,
+targets and slot counts, are in
+[the creator tables](quick-mission.md#template-list-and-target-names-per-theater)
+(`tables::TEMPLATES` holds the same order). The resource is `~<name>.M`. The
+creator's own target-label counts per theater equal these list lengths.
 
 ## Reader bounds
 

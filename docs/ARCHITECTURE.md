@@ -778,6 +778,64 @@ clipping improves magnified subject depth precision. Target preview requests use
 an independent 24 Hz phase clock; the other camera panels retain their existing
 refresh interval.
 
+## The surface world
+
+Built in the surface-AI round (2026-10-10, John's request of that day; the
+behaviour is in [surface defenses](spec/surface-defenses.md)). The Quick
+Mission's ground target and the theater layouts' own SAM, AAA, ship and vehicle
+units are one `tore_world::surface::Surface`, built once with the terrain and
+the same on every machine that builds the mission.
+
+```mermaid
+flowchart LR
+    Spec[MissionSpec: ground target, defenses, seed] --> Resolve[surface::resolve: rolls, picks, ids, sides]
+    Layout[Theater layout NT placements] --> Resolve
+    Resolve --> Place[surface::layout: jitter, relocation, starts, batteries, trucks]
+    Place --> Surface[Surface and its digest]
+    Surface --> Scene[Terrain scene, combat target rows, parked aircraft]
+    Surface --> Arsenal[surface::fire::Arsenal]
+    Arsenal --> Tick[World::step_surface each tick]
+```
+
+| Where | What it does |
+| --- | --- |
+| `tore-formats` `surface_unit`, `quick_template` (and `tables`), `parked_aircraft`, `carrier`, `surface_set` | Bounded readers for NT unit records, the `~Q*.M` templates and the FA.EXE lists recorded as facts, the OBJECT block of a parked PT, the FA.EXE carrier parts table, and the data-derived list of what the import must keep |
+| `tore-world` `surface::{catalog, resolve, units}` | The catalog of NT, OT and PT entries; template and layout resolution with seeded streams (`Stream`, SplitMix64 keyed by seed, stem, ordinal and purpose); fixed ids (`SURFACE_UNIT_BASE` and the truck and radar ranges); sides; `Surface::digest` |
+| `tore-world` `surface::layout` | Jitter, relocation of unanchored templates, both sides' starts, battery formation and radar adoption, supply truck placement; integer trigonometry so every platform agrees |
+| `tore-world` `surface::{fire, emitters}` | The arsenal (each armed unit's arms, loaded at the end of the airport scene build), the per-tick fire step driving one `tore_sim::ai::surface::Controller` per gun mount or missile record, battery controllers, radar on and off and the lock feed for the RWR |
+| `tore-world` `surface::{movement, supply, parked}` | Routed units (integer `Mover` state), supply truck resupply, parked aircraft poses and deck spots |
+| `tore-sim` `ai::surface` | The engagement controller (Idle, Search, Prepare, Track, Fire, Pause, Reload, Empty, Blind) and the experience table, renderer-free and checkpointed |
+| `tore-sim` `combat::surface_guns`, `combat/live/{surface, collateral, parked}` | The AAA tuning table; `State::fire_surface` and surface rounds (flak time fuze, capacity reserve); splash damage for every weapon; parked aircraft rows |
+| `tore-app` `scenery/surface_art.rs`, `surface_fx.rs` | Wreck swaps, launcher rails, carrier parts and sprites; flak, gunfire and launch effects and wreck smoke |
+
+**One tick.** `World::step` moves routed units (`Combat::step_surface`) right
+before the combat step, so this tick's fire meets units where they are. After
+the AI wings, `World::step_surface` returns at once when the arsenal is empty
+(every mission without surface units, so the single-player guard is unchanged);
+otherwise it lists the airborne aircraft, runs `supply::step` (the "truck in
+reach" flag and timers), `fire::step` (controllers, shots through
+`live::State::fire_surface`, emitters) and `supply::deliver`, then hands the
+surface missiles' support entries to `set_actor_supports` merged with the AI
+wings' in one call.
+
+**State.** What changes lives in `Combat::surface` (`SurfaceState`: per-unit
+stock, controllers, radar state, movers, resupply timers, battery state and an
+RNG), inside the combat checkpoint, so restart, rejoin and host migration carry
+it. A checkpoint made for another surface digest is refused. The per-tick
+`trace`, `locks`, `painting` and `bursts` lists are rebuilt each tick and not
+checkpointed.
+
+**Multiplayer and replays.** The host runs the surface tick; clients build the
+same `Surface` from the mission text, compare digests at Seated and Resumed,
+and draw moving units, bursts and unit states the host sends
+([the client's side](#the-client-session), protocol 22). Recordings use format
+3 ([mission recordings](#mission-recordings)).
+
+**Development tools.** `--surface-dump`, `--surface-sheets`,
+`--surface-preview`, `--surface-trace`, `--surface-drive`, `--surface-parked`,
+`--surface-objective`, `--surface-scene` and `--surface-fx-preview`
+([development](DEVELOPMENT.md#surface-unit-inspection)).
+
 ## Ownship systems state
 
 `tore-sim::aircraft_systems` coordinates separate engine, fluids, fuel, controls,
@@ -867,6 +925,22 @@ writes its exports on background threads the menu's redraw polls, so the
 menu never waits on a file.
 `replay/cli.rs` holds the `--recording-*` commands and the tick-by-tick
 render check. See [mission replays](REPLAYS.md).
+
+A recording is written in the oldest format that holds it (slice RP1,
+2026-10-10). `World::needs_surface_format()` is true when the mission has a
+ground target, an airfield scene other than the retail one, or active surface
+units, routed units or parked aircraft in its terrain; only then is the file
+format 3 (`tore_replay::FORMAT_VERSION`), and every other flight is the format
+2 file it always was, byte for byte, so the single-player guard's recordings
+stay comparable and an older build still opens a plain recording. Format 3 adds
+the ground target to the header (`world.ground_target`, which
+`Terrain::for_recorded` passes back so the viewer resolves the same template,
+defenses, trucks, radars, parked aircraft and starts), per-frame poses of
+moving units, rail and spare-magazine changes, the piece index of a surface
+owner's debris, a registry naming every surface unit, the `surface.*` events
+and a flak effect code. `replay/recorder/surface.rs` registers the units;
+`convert::snapshot` and `Tracks::stock_at` rebuild them for the viewer. The
+layout is in [REPLAYS.md](REPLAYS.md#versions-and-damage).
 
 The mission replay viewer is its own screen, `Screen::Replay`, run by
 `replay/viewer.rs` and wired into the app by `replay/host.rs`, which takes the
@@ -963,6 +1037,7 @@ from its vertex building.
 | `combat`, `combat_tape` | `Combat`; the tape's command names and the `Entry` record |
 | `aircraft_type` | `AircraftType`, the simulation's view of one aircraft |
 | `snapshot` | The tick's picture as data (`RenderSnapshot`, poses, `interpolate`, the poses of surface units that follow a route) |
+| `surface` | The ground target and the theater's surface units: resolution, layout, the arsenal and fire, movement, resupply, parked aircraft ([the surface world](#the-surface-world)) |
 | `ai_wings` | `AiWings`, its orders, reports, chatter and engagement |
 | `comms`, `radio_calls`, `crew_voice`, `airfield_radio` | The radio channel and every call generator |
 | `situation` | The situation music's selector; the mission result check it reads is `ai_wings::outcome` |

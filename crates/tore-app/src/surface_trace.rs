@@ -8,7 +8,7 @@
 //!     [--enemy-nationality N] [--aircraft ID] [--over TYPE [--index N] | --unit ID]
 //!     [--altitude FT] [--speed KT] [--pass FT] [--from NM] [--seconds S]
 //!     [--condition NAME] [--chaff S] [--flares S] [--harm-at NM] [--kill-at S]
-//!     [--player-side red] [--invulnerable] [--quiet-shots]
+//!     [--player-side red] [--invulnerable] [--quiet-shots] [--no-relocate]
 //!     [--drain] [--drain-reserve] [--kill-truck-at S]
 //! ```
 //!
@@ -91,6 +91,7 @@ struct Options {
     red: bool,
     invulnerable: bool,
     quiet_shots: bool,
+    no_relocate: bool,
     all_units: bool,
     near: f64,
     skill: Option<i32>,
@@ -126,6 +127,7 @@ fn options() -> AppResult<Options> {
         red: false,
         invulnerable: false,
         quiet_shots: false,
+        no_relocate: false,
         all_units: false,
         near: 0.,
         skill: None,
@@ -176,6 +178,7 @@ fn options() -> AppResult<Options> {
             "--player-side" => o.red = next()?.eq_ignore_ascii_case("red"),
             "--invulnerable" => o.invulnerable = true,
             "--quiet-shots" => o.quiet_shots = true,
+            "--no-relocate" => o.no_relocate = true,
             "--all-units" => o.all_units = true,
             "--near" => o.near = next()?.parse()?,
             "--skill" => o.skill = Some(next()?.parse()?),
@@ -400,7 +403,19 @@ pub fn run() -> AppResult<()> {
     let o = options()?;
     let resources = resources()?;
     let spec = spec(&o)?;
-    let mut world = World::new(&spec, &resources, Seating::SinglePlayer)?;
+    let mut world = World::build(
+        &spec,
+        &resources,
+        Seating::SinglePlayer,
+        &mut tore_world::world::Hooks {
+            ground_variation: Some(tore_world::surface::layout::Variation {
+                jitter: true,
+                relocate: !o.no_relocate,
+            }),
+            ..Default::default()
+        },
+    )?
+    .world;
     if let Some(why) = &world.terrain.surface.unresolved {
         return Err(why.clone().into());
     }

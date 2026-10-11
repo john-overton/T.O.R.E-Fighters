@@ -293,6 +293,7 @@ fn the_callers_hooks_supply_the_types_and_the_weapon_labels() {
             player: Some(std::sync::Arc::clone(&player)),
             load: Some(&mut load),
             weapon_label: Some(&label),
+            ground_variation: None,
         },
     )
     .unwrap();

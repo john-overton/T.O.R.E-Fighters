@@ -204,6 +204,7 @@ fn build_mission(spec: &MissionSpec, resources: &BTreeMap<String, Vec<u8>>) -> W
             player: None,
             load: Some(&mut load),
             weapon_label: None,
+            ground_variation: None,
         },
     )?;
     Ok(Built {
