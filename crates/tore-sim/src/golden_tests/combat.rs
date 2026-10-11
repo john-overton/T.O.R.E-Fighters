@@ -616,6 +616,7 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         visual_hardpoint: slots + 2,
         ecm_hardpoint: Some(slots + 1),
         aircraft: AircraftId::F18,
+        strike_class: crate::models::strike_class::StrikeClass::Fighter,
         stations: stations
             .into_iter()
             .map(|(weapon, count, internal)| Station {

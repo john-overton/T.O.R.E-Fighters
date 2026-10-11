@@ -6,6 +6,7 @@ use super::tests::fixture;
 use super::*;
 use crate::combat::ballistics::{ReleaseState, predict_impact};
 use crate::combat::delivery::{DeliveryMode, RELEASE_WINDOW_TICKS, Warning};
+use crate::models::strike_class::StrikeClass;
 
 const KNOT: f64 = 1.687_8;
 const TARGET: u32 = 0x4000_0000;
@@ -54,7 +55,13 @@ fn lau61() -> Weapon {
 
 /// A gun on station 0 and `weapon` on station 1.
 fn carrying(weapon: Weapon, count: u16) -> State {
+    carrying_as(weapon, count, StrikeClass::Fighter)
+}
+
+/// [`carrying`] for an aircraft of the given bombing class.
+fn carrying_as(weapon: Weapon, count: u16, class: StrikeClass) -> State {
     let mut config = fixture(false).own().configuration().clone();
+    config.strike_class = class;
     let gun = config.stations[0].clone();
     config.stations = vec![
         gun,
@@ -179,6 +186,49 @@ fn ctrl_m_switches_a_bombs_sight_and_a_new_bomb_picks_its_mode() {
     s.command(0, Command::NextSelection, level);
     s.command(0, Command::NextSelection, level);
     assert_eq!(s.own().delivery_mode, DeliveryMode::Ccip);
+}
+
+/// A Heavy's bombs default to LVL whatever the attitude, with or without a
+/// target (retail heavies have no CCIP); the other classes keep the H1
+/// rule; Ctrl+M still switches a Heavy to CCIP (docs/spec/ai-strike.md,
+/// "Bombing class").
+#[test]
+fn a_heavy_selects_lvl_whatever_its_attitude_and_every_class_keeps_both_modes() {
+    let level = pass(5_000., 0., 450., 0.);
+    let dive = pass(5_000., 0., 450., -30.);
+    let select = |s: &mut State, launcher: Launcher| {
+        s.command(0, Command::SelectNav, launcher);
+        s.command(0, Command::NextSelection, launcher);
+        s.command(0, Command::NextSelection, launcher);
+        assert_eq!(s.own().selected, 1);
+        s.own().delivery_mode
+    };
+    // A Heavy starts in LVL, with no ground target and in a dive.
+    let mut heavy = carrying_as(mk82(), 4, StrikeClass::Heavy);
+    assert_eq!(heavy.own().delivery_mode, DeliveryMode::Level);
+    assert_eq!(select(&mut heavy, dive), DeliveryMode::Level);
+    assert_eq!(select(&mut heavy, level), DeliveryMode::Level);
+    designate_ground(&mut heavy, 0., 20_000.);
+    assert_eq!(select(&mut heavy, dive), DeliveryMode::Level);
+    // Both modes stay: Ctrl+M takes it to CCIP and back.
+    heavy.command(0, Command::ToggleSeekerMode, level);
+    assert_eq!(heavy.own().delivery_mode, DeliveryMode::Ccip);
+    heavy.command(0, Command::ToggleSeekerMode, level);
+    assert_eq!(heavy.own().delivery_mode, DeliveryMode::Level);
+    // Every other class keeps the situational rule.
+    for class in [
+        StrikeClass::Fighter,
+        StrikeClass::Attack,
+        StrikeClass::Helicopter,
+        StrikeClass::Gunship,
+    ] {
+        let mut s = carrying_as(mk82(), 4, class);
+        assert_eq!(s.own().delivery_mode, DeliveryMode::Ccip, "{class:?}");
+        assert_eq!(select(&mut s, level), DeliveryMode::Ccip, "{class:?}");
+        designate_ground(&mut s, 0., 20_000.);
+        assert_eq!(select(&mut s, level), DeliveryMode::Level, "{class:?}");
+        assert_eq!(select(&mut s, dive), DeliveryMode::Ccip, "{class:?}");
+    }
 }
 
 /// Flies the level pass with the trigger as `held` says for each second of

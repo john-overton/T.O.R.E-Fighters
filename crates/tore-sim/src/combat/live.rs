@@ -11,6 +11,7 @@ use super::{
     launch_speed, removal_due, unload,
 };
 use crate::attitude::{Basis, Vector, cross, dot, unit};
+use crate::models::strike_class::StrikeClass;
 use crate::sensors::{self, Observable, Observer, Sensors, Support, passive};
 use std::collections::BTreeMap;
 use tore_formats::{
@@ -434,6 +435,9 @@ pub struct Configuration {
     pub rwr_hardpoint: Option<usize>,
     pub ecm_hardpoint: Option<usize>,
     pub aircraft: AircraftId,
+    /// How the aircraft bombs, read from its imported record
+    /// ([`crate::models::strike_class`]).
+    pub strike_class: StrikeClass,
     pub stations: Vec<Station>,
     pub hit_points: i32,
     pub target_category: u16,
@@ -934,6 +938,7 @@ impl Configuration {
             wreck_power,
             engines,
             aircraft: a.id,
+            strike_class: StrikeClass::of_aircraft(a),
             stations,
             hit_points,
             target_category: a
@@ -1731,6 +1736,9 @@ impl Ownship {
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let sensors = Sensors::new(config.sensors.clone());
         let gunship = super::gunship::State::new(&config);
+        // A Heavy starts in LVL (no CCIP in retail); everything else in CCIP.
+        let delivery_mode =
+            crate::models::strike_class::default_delivery(config.strike_class, false, 0.);
         let sight = gunship
             .is_none()
             .then(|| config.sight_sensor().map(super::sight::Sight::new))
@@ -1786,7 +1794,7 @@ impl Ownship {
             gun_key: false,
             bay_release: None,
             bay_hold_until: 0,
-            delivery_mode: Default::default(),
+            delivery_mode,
             delivery: None,
         })
     }
@@ -3152,8 +3160,11 @@ impl State {
             };
         }
         let v = launcher.velocity;
-        own.delivery_mode =
-            super::delivery::DeliveryMode::chosen(ground_target, v[1].atan2(v[0].hypot(v[2])));
+        own.delivery_mode = crate::models::strike_class::default_delivery(
+            own.config.strike_class,
+            ground_target,
+            v[1].atan2(v[0].hypot(v[2])),
+        );
     }
     /// A manual range or cockpit command for one ownship.
     pub fn command(&mut self, aircraft: u32, command: Command, launcher: Launcher) {
@@ -6624,6 +6635,7 @@ mod tests {
                 visual_hardpoint: 3,
                 ecm_hardpoint: Some(2),
                 aircraft: AircraftId::F18,
+                strike_class: StrikeClass::Fighter,
                 stations: vec![Station {
                     weapon: w,
                     mount: [0.; 3],
