@@ -100,7 +100,7 @@ pub fn run() -> AppResult<()> {
     let mut spec = MissionSpec::new(theater, AircraftId::F18);
     spec.ground_target = Some(stem.trim_start_matches('~').to_ascii_uppercase());
     spec.surface_seed = seed;
-    // Experiment AP1: the redrawn airports when TORE_REDRAWN_AIRPORTS=1.
+    // The redrawn airports unless TORE_REDRAWN_AIRPORTS=0.
     spec.weather.redrawn_airports = crate::scenery::redrawn_airports()?;
     let mut world = World::new(&spec, &resources, Seating::SinglePlayer)?;
     let surface = world.terrain.surface.clone();

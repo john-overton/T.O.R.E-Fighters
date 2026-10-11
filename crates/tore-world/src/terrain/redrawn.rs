@@ -1,8 +1,9 @@
-//! Redrawn airports: an experiment (AP1, 2026-10-10) that replaces the
-//! retail airfield shapes with airports drawn at real-world size from small
-//! data files we own, textured with retail airport art. Off by default; the
-//! app turns it on with `TORE_REDRAWN_AIRPORTS=1` through
-//! [`super::Overrides::redrawn_airports`]. See docs/formats/redrawn-airports.md.
+//! Redrawn airports (AP1, 2026-10-10; the default since 2026-10-11): they
+//! replace the retail airfield shapes with airports drawn at real-world size
+//! from small data files we own, textured with retail airport art. On unless
+//! [`super::Overrides::redrawn_airports`] is off (single player's developer
+//! escape hatch `TORE_REDRAWN_AIRPORTS=0`, or a replay of a recording from
+//! before the redraw). See docs/formats/redrawn-airports.md.
 //!
 //! One plan per runway shape type (`crates/tore-world/airports/*.toml`)
 //! gives its runways, taxiways, aprons, building lines and the AI's points
@@ -169,6 +170,41 @@ pub struct Built {
     added: Vec<Placement>,
     /// Parked template aircraft moved off the grass onto the aprons.
     pub snapped: usize,
+    /// For a second tile (paired or alone): its runway object's approach
+    /// line, moved onto the tile's main paved runway. A tile's STRIP anchors
+    /// are copies of its base's, so its retail line lies beside its
+    /// pavement; `None` keeps the retail line (every base and pad).
+    pub runway_line: Option<RunwayLine>,
+}
+
+/// A runway object's approach line in the world: its centre on the runway
+/// plane, its heading (radians, the scene's convention) and its length.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunwayLine {
+    pub center: [f64; 3],
+    pub heading: f64,
+    pub length: f64,
+}
+
+impl RunwayLine {
+    /// The longest runway of a second tile's plan (the first of equals), in
+    /// the tile's own frame, whose heading is `heading`.
+    fn main(plan: &Plan, frame: &Frame, heading: f64) -> Option<Self> {
+        let runway = plan
+            .runways
+            .iter()
+            .reduce(|best, r| if r.length > best.length { r } else { best })?;
+        let d = geometry::direction(runway.heading);
+        let middle = [
+            runway.from[0] + d[0] * runway.length * 0.5,
+            runway.from[1] + d[1] * runway.length * 0.5,
+        ];
+        Some(Self {
+            center: frame.world(middle),
+            heading: (heading + runway.heading.to_radians()).rem_euclid(std::f64::consts::TAU),
+            length: runway.length,
+        })
+    }
 }
 
 impl Built {
@@ -288,30 +324,33 @@ pub(super) fn apply(
         if paired.contains(&b) {
             continue;
         }
-        let tile = tile_of.get(&b).map(|t| &strips[*t]);
-        let Some(base_plan) = plans.single(&base.object_type) else {
+        // A plan applies only to the runway it was drawn for: a shape whose
+        // runway length differs from the plan's by more than a foot (an
+        // import that is not the one the plans were drawn from, or a
+        // synthetic test map) keeps its retail airfield, and so does its
+        // second tile. Being the default, the redraw never refuses a
+        // mission; every game of a session has the same import (the content
+        // check), so they all fall back alike.
+        let fits = |plan: &Plan, strip: &StripPlacement| {
+            plan.runway_length_ft
+                .is_none_or(|expected| (strip.length - expected).abs() <= 1.)
+        };
+        let Some(base_plan) = plans.single(&base.object_type).filter(|p| fits(p, base)) else {
             continue;
         };
-        let check = |plan: &Plan, strip: &StripPlacement| -> WorldResult<()> {
-            match plan.runway_length_ft {
-                Some(expected) if (strip.length - expected).abs() > 1. => Err(format!(
-                    "redrawn airport: {} runway is {:.0} ft, the plan expects {expected:.0}",
-                    strip.object_type, strip.length
-                )
-                .into()),
-                _ => Ok(()),
-            }
+        let tile = tile_of.get(&b).map(|t| &strips[*t]);
+        let tile_plan = match tile {
+            Some(tile) => match plans.single(&tile.object_type).filter(|p| fits(p, tile)) {
+                Some(plan) => Some(plan),
+                None => continue,
+            },
+            None => None,
         };
-        check(base_plan, base)?;
         let frame = base.frame;
         let mut parts = vec![(base_plan, [0., 0.])];
         let mut links = None;
         let mut name = base.object_type.clone();
-        if let Some(tile) = tile {
-            let tile_plan = plans
-                .single(&tile.object_type)
-                .ok_or_else(|| format!("redrawn airport: no plan for {}", tile.object_type))?;
-            check(tile_plan, tile)?;
+        if let (Some(tile), Some(tile_plan)) = (tile, tile_plan) {
             parts.push((tile_plan, frame.local(tile.frame.origin)));
             links = plans.pair(&base.object_type);
             name = format!("{}+{}", base.object_type, tile.object_type);
@@ -347,6 +386,11 @@ pub(super) fn apply(
             pitch: base.stance.pitch,
             bank: base.stance.bank,
         };
+        // A tile alone (no base beside it) flies from its own main runway
+        // and has no taxi points: the AI's runway fallback, as retail's.
+        let runway_line = (!base_plan.ils_runway)
+            .then(|| RunwayLine::main(base_plan, &frame, base.stance.heading))
+            .flatten();
         let anchors = a.map(|a| AirfieldAnchors {
             taxi_out: a.taxi_out.map(|p| frame.world(p)),
             takeoff_spot: frame.world(a.takeoff),
@@ -425,9 +469,15 @@ pub(super) fn apply(
             moved: relaid.moved,
             added: relaid.added,
             snapped,
+            runway_line,
         };
         apply_edits(std::slice::from_ref(&built), sources);
-        if let Some(tile_id) = tile_id {
+        if let (Some(tile_id), Some(tile), Some(tile_plan)) = (tile_id, tile, tile_plan) {
+            // The tile's runway object lands and departs on the tile's own
+            // main runway inside the pair's box. Its taxi points would be
+            // the base's, 9,000 ft away, so it has none: the AI's runway
+            // fallback, as at retail's tiles, whose points lay off their
+            // pavement.
             out.push(Built {
                 plan: name,
                 strip_id: tile_id,
@@ -435,11 +485,12 @@ pub(super) fn apply(
                 materials: Vec::new(),
                 patches: Vec::new(),
                 surface,
-                anchors,
+                anchors: None,
                 lights: Vec::new(),
                 moved: Vec::new(),
                 added: Vec::new(),
                 snapped: 0,
+                runway_line: RunwayLine::main(tile_plan, &tile.frame, tile.stance.heading),
             });
         }
         out.push(built);

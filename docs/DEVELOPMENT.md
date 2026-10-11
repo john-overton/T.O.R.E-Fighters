@@ -1101,14 +1101,19 @@ commands, explicit weather poses and result codes for the continuation captures.
 Weather sky/ocean, moon and cloud textures now use source point-index samples;
 float GPU projection remains qualified against native coverage/behavior.
 
-`TORE_REDRAWN_AIRPORTS=0|1` (default 0) turns on experiment AP1: every airport
-is drawn and flown from its runway type's real-size redrawn plan instead of
-the retail airfield shape, in flights and in replays
-([redrawn airports](formats/redrawn-airports.md)). Single player only.
+Every airport is drawn and flown from its runway type's real-size redrawn
+plan ([redrawn airports](formats/redrawn-airports.md)), the default since
+protocol 24. `TORE_REDRAWN_AIRPORTS=0` is a developer escape hatch: single
+player launches and the offline tools (`--surface-dump`, `--surface-parked`,
+the previews, `--validate-maps`, `--validate-ils`, `--airport-allegiance`)
+build the retail airfield shapes instead; unset or `1` keeps the redraw.
+Online sessions, the dedicated server and the bot never read it (every game of
+a session flies the redraw), and a replay builds the airfields its recording
+names, whatever the switch says.
 `--airfield-sheets OUTPUT_DIRECTORY [--all] [THEATER ...]` renders one redrawn
 airport of each plan (`--all`: every one) overhead, oblique, from short final,
 along the parking row, toward the runway's far end and over a taxiway junction;
-with the switch unset it renders the same views of
+with `TORE_REDRAWN_AIRPORTS=0` it renders the same views of
 the retail airfields. Redrawn airports carry runway, approach, PAPI and taxiway
 lights; `TORE_AIRFIELD_LIGHTS=0` hides them.
 

@@ -28,9 +28,10 @@ use tore_replay::{
 };
 use tore_sim::combat::{
     delivery::DeliveryMode,
-    laser::{LaserState, Mask},
+    laser::{Laser, LaserState, Mask},
     live::{self, GuidedFlight, GuidedMode},
     missiles::Guidance,
+    sight::Sight,
 };
 use tore_sim::sensors::track::Mode;
 
@@ -189,6 +190,66 @@ fn aloud(name: &str) -> String {
     format!("{} {name}", super::surface::article(name))
 }
 
+/// One aircraft's cockpit as the pilot events read it: an ownship, or the
+/// cockpit a human left in an aircraft the AI flies now (slice FX-K). The
+/// kept laser and sight step every tick and a laser weapon in flight keeps
+/// guiding on the kept spot, so the recording follows them like a flown
+/// cockpit's.
+struct Cockpit<'a> {
+    aircraft: u32,
+    laser: &'a Laser,
+    sight: Option<&'a Sight>,
+    /// The designated object.
+    designated: Option<u32>,
+    /// The ownship, when a human flies; none for a kept cockpit.
+    own: Option<&'a live::Ownship>,
+}
+
+impl Cockpit<'_> {
+    /// The AI flies the aircraft and this is what its human left.
+    fn kept(&self) -> bool {
+        self.own.is_none()
+    }
+}
+
+/// Every cockpit of the tick in aircraft order: the ownships, and the
+/// cockpits kept in aircraft the AI flies.
+fn cockpits(state: &live::State) -> Vec<Cockpit<'_>> {
+    let mut all: Vec<Cockpit<'_>> = state
+        .ownships()
+        .iter()
+        .map(|own| Cockpit {
+            aircraft: own.aircraft,
+            laser: &own.laser,
+            sight: own.sight.as_ref(),
+            designated: own.designated(),
+            own: Some(own),
+        })
+        .collect();
+    all.extend(
+        state
+            .kept_cockpits()
+            .filter(|(aircraft, _)| state.ownship(*aircraft).is_none())
+            .map(|(aircraft, kept)| Cockpit {
+                aircraft,
+                laser: &kept.laser,
+                sight: kept.sight.as_ref(),
+                designated: kept.picks.selected,
+                own: None,
+            }),
+    );
+    all.sort_by_key(|cockpit| cockpit.aircraft);
+    all
+}
+
+/// The laser of an aircraft a human flies or left its cockpit in.
+fn laser_of(state: &live::State, aircraft: u32) -> Option<&Laser> {
+    state
+        .ownship(aircraft)
+        .map(|own| &own.laser)
+        .or_else(|| state.kept(aircraft).map(|kept| &kept.laser))
+}
+
 impl Watch {
     /// How a guided weapon was guided at the end of its flight, from what
     /// the last tick knew of it: a clause for its outcome ("it was guided on
@@ -257,6 +318,50 @@ impl Watch {
         self.lasers(cx, events);
         self.laser_spots(cx, events);
         self.designations(cx, events);
+        self.gone(cx, events);
+    }
+
+    /// An aircraft that has no cockpit any more, a human's or a kept one (it
+    /// was destroyed or left the mission while its laser was on or its target
+    /// designated), ends its laser and designation in the recording, as its
+    /// weapons lose the spot (slice FX-K).
+    fn gone(&mut self, cx: &Context<'_>, events: &mut Vec<Event>) {
+        let present: BTreeSet<u32> = cockpits(&cx.tick.combat.state)
+            .iter()
+            .map(|cockpit| cockpit.aircraft)
+            .collect();
+        let gone: BTreeSet<u32> = self
+            .lasers
+            .keys()
+            .chain(self.designations.keys())
+            .chain(self.spots.keys())
+            .copied()
+            .filter(|aircraft| !present.contains(aircraft))
+            .collect();
+        for aircraft in gone {
+            self.spots.remove(&aircraft);
+            if let Some(note) = self.lasers.remove(&aircraft)
+                && note.state != LaserState::Off
+            {
+                events.push(
+                    Event::new(kind::PLAYER_LASER)
+                        .with_subject(aircraft)
+                        .with(field::STATE, laser::OFF)
+                        .with(field::ON, false)
+                        .with(field::HOW, "automatic")
+                        .with(field::REASON, "its aircraft is gone"),
+                );
+            }
+            if let Some(before) = self.designations.remove(&aircraft) {
+                let mut event = Event::new(kind::PLAYER_DESIGNATE)
+                    .with_subject(aircraft)
+                    .with(field::CHANNEL, designate::CLEARED);
+                if let Some(from) = before.object {
+                    event = event.with(field::FROM, replay::Value::Id(from));
+                }
+                events.push(event.with(field::REASON, "its aircraft is gone"));
+            }
+        }
     }
 
     /// One `weapon.release` for each trigger call that let go of bombs or
@@ -430,12 +535,13 @@ impl Watch {
         for (name, value) in field::POSITION.into_iter().zip(at) {
             event = event.with(name, value);
         }
-        let target = cx
-            .tick
-            .combat
-            .state
+        // The shooter's designation, or the one its human left when the AI
+        // flies the aircraft now.
+        let state = &cx.tick.combat.state;
+        let target = state
             .ownship(shot.owner)
             .and_then(|own| own.designated())
+            .or_else(|| state.kept(shot.owner).and_then(|kept| kept.picks.selected))
             .and_then(|target| cx.ground_row(target));
         let target_ft = target.map(|row| super::trees::round(super::distance(at, row.position), 1));
         if let Some(row) = target {
@@ -656,7 +762,7 @@ impl Watch {
     /// `player.laser`: each aircraft's laser designator when its state, mask
     /// or manual setting changes.
     fn lasers(&mut self, cx: &Context<'_>, events: &mut Vec<Event>) {
-        for own in cx.tick.combat.state.ownships() {
+        for own in cockpits(&cx.tick.combat.state) {
             let now = LaserNote {
                 state: own.laser.state,
                 mask: own.laser.mask,
@@ -703,6 +809,9 @@ impl Watch {
                 }
                 self.spots.insert(own.aircraft, (cx.frame.tick, point));
             }
+            if own.kept() {
+                event = event.with(field::KEPT, true);
+            }
             events.push(event);
         }
     }
@@ -713,7 +822,7 @@ impl Watch {
     /// between them.
     fn laser_spots(&mut self, cx: &Context<'_>, events: &mut Vec<Event>) {
         let tick = cx.frame.tick;
-        for own in cx.tick.combat.state.ownships() {
+        for own in cockpits(&cx.tick.combat.state) {
             let spot = own
                 .laser
                 .point
@@ -733,6 +842,9 @@ impl Watch {
             for (name, value) in field::POSITION.into_iter().zip(point) {
                 event = event.with(name, value);
             }
+            if own.kept() {
+                event = event.with(field::KEPT, true);
+            }
             events.push(event);
         }
     }
@@ -740,26 +852,33 @@ impl Watch {
     /// `player.designate`: an aircraft's ground designation or pin, when it
     /// changes. An air target never makes an entry.
     fn designations(&mut self, cx: &Context<'_>, events: &mut Vec<Event>) {
-        for own in cx.tick.combat.state.ownships() {
-            let tracked = own.sight.as_ref().and_then(|sight| sight.target());
+        for own in cockpits(&cx.tick.combat.state) {
+            let tracked = own.sight.and_then(|sight| sight.target());
             let object = own
-                .designated()
+                .designated
                 .filter(|id| cx.ground_row(*id).is_some())
                 .or(tracked.filter(|id| cx.ground_row(*id).is_some()));
-            let pin = own
-                .sight
-                .as_ref()
-                .and_then(|sight| sight.held_point())
-                .filter(|_| object.is_none() && tracked.is_none());
+            let held = own.sight.and_then(|sight| sight.held_point());
+            let pin = held.filter(|_| object.is_none() && tracked.is_none());
+            let before = self.designations.get(&own.aircraft).copied();
             let now = match (object, pin) {
                 (Some(id), _) => Some(Designation {
                     object: Some(id),
-                    channel: match own.sensors.ground_page() {
-                        Some(Mode::AirGround) if own.ground_track(id) => designate::RADAR,
-                        Some(Mode::Infrared) => designate::INFRARED,
-                        Some(Mode::Harm) => designate::HARM,
-                        _ if tracked == Some(id) => designate::SIGHT,
-                        _ => designate::VISUAL,
+                    channel: match own.own {
+                        Some(ship) => match ship.sensors.ground_page() {
+                            Some(Mode::AirGround) if ship.ground_track(id) => designate::RADAR,
+                            Some(Mode::Infrared) => designate::INFRARED,
+                            Some(Mode::Harm) => designate::HARM,
+                            _ if tracked == Some(id) => designate::SIGHT,
+                            _ => designate::VISUAL,
+                        },
+                        // The AI has no pages to say how: the designation
+                        // the human made stays as it was written.
+                        None => match before {
+                            Some(was) if was.object == Some(id) => was.channel,
+                            _ if tracked == Some(id) => designate::SIGHT,
+                            _ => designate::VISUAL,
+                        },
                     },
                 }),
                 (None, Some(_)) => Some(Designation {
@@ -768,7 +887,6 @@ impl Watch {
                 }),
                 (None, None) => None,
             };
-            let before = self.designations.get(&own.aircraft).copied();
             // A pin is news when it appears or moves a long way; its point
             // drifts a little as the sight follows it.
             if now == before {
@@ -790,12 +908,13 @@ impl Watch {
             if let Some(from) = before.and_then(|d| d.object) {
                 event = event.with(field::FROM, replay::Value::Id(from));
             }
-            if let (Some(Designation { object: None, .. }), Some(point)) =
-                (now, own.sight.as_ref().and_then(|sight| sight.held_point()))
-            {
+            if let (Some(Designation { object: None, .. }), Some(point)) = (now, held) {
                 for (name, value) in field::POSITION.into_iter().zip(point) {
                     event = event.with(name, value);
                 }
+            }
+            if own.kept() {
+                event = event.with(field::KEPT, true);
             }
             events.push(event);
         }
@@ -853,8 +972,8 @@ fn why_blind(state: &live::State, flight: &GuidedFlight, before: Option<GuidedNo
             let owner = note.spot_owner.or(flight.spot_owner);
             match owner {
                 Some(owner)
-                    if state.ownship(owner).is_none_or(|own| {
-                        !matches!(own.laser.state, LaserState::Lasing | LaserState::Masked)
+                    if laser_of(state, owner).is_none_or(|laser| {
+                        !matches!(laser.state, LaserState::Lasing | LaserState::Masked)
                     }) =>
                 {
                     Blind::LaserStopped(owner)
@@ -1025,5 +1144,47 @@ mod tests {
         assert_eq!(aloud("AGM-88"), "an AGM-88");
         assert_eq!(possessive("You"), "your");
         assert_eq!(possessive("Enemy 1-2"), "Enemy 1-2's");
+    }
+
+    /// A laser weapon whose shooter was given back to the AI goes blind
+    /// because of the kept laser, not because "the laser went off" when the
+    /// ownship left (slice FX-K).
+    #[test]
+    fn a_weapon_of_a_given_back_aircraft_reads_the_kept_laser_for_why_it_went_blind() {
+        use crate::combat_view::render_hash_tests as fixture;
+        use tore_sim::combat::live::{DEFAULT_OWNSHIP_SIDE, Ownship};
+        let combat = fixture::combat(fixture::models(), Vec::new());
+        let config = combat.state.own().configuration().clone();
+        let mut state = live::State::without_ownships();
+        let mut ship = Ownship::new(7, DEFAULT_OWNSHIP_SIDE, config, false).unwrap();
+        ship.laser.state = LaserState::Lasing;
+        ship.laser.point = Some([0., 0., 0.]);
+        state.keep(7, ship.kept());
+        let flight = GuidedFlight {
+            kind: Guidance::Laser,
+            mode: GuidedMode::Blind,
+            owner: 7,
+            station: 0,
+            spot_owner: Some(7),
+            point: None,
+            target: None,
+            fall: None,
+            seconds: None,
+        };
+        let before = Some(GuidedNote {
+            kind: Guidance::Laser,
+            mode: GuidedMode::Guiding,
+            owner: 7,
+            spot_owner: Some(7),
+            blind: None,
+            point: None,
+            written: None,
+        });
+        assert_eq!(why_blind(&state, &flight, before), Blind::Cone);
+        let mut kept = state.take_kept(7).unwrap();
+        kept.laser.state = LaserState::Off;
+        state.keep(7, kept);
+        assert_eq!(why_blind(&state, &flight, before), Blind::LaserStopped(7));
+        assert!(laser_of(&state, 7).is_some() && laser_of(&state, 8).is_none());
     }
 }

@@ -21,31 +21,40 @@ The five-degree pitch ladder retains its positive/negative line styles and
 bank orientation. Its visible window spans reference y=182..348 and x=250..390. This trims
 the expanded 208-pixel height to 166 pixels, about 20% less area, while
 retaining its width and upper edge. Other HUD elements keep their positions.
-At John's further request, compress spacing between ladder marks to 75% of its
-previous value. His 2026-09-21 correction requires the displayed pitch to match
-actual aircraft orientation throughout a climb, dive and vertical transition.
-For numbered, nonzero rungs, use the angular difference between rung elevation and aircraft pitch,
-then apply the same 0.75 factor to its bank-normal screen displacement about
-the aircraft's forward point (320,240). This scales spacing and motion together:
-the 70-degree rung crosses that point at 70 degrees, not earlier. At bank zero
-and unit zoom, a rung five degrees above pitch is about 27.28 pixels above it.
 
-Agent geometry decision: project rung bearing in a local zero-pitch frame using
-the relative elevation. This retains level-flight rung widths at steep attitudes,
-rather than shrinking them to zero at the poles. Rotate the complete scale by
-bank. Draw marks from -90 through +90 inclusive in five-degree steps, preserving
-negative dashes and applying the same transform to labels. There is no special
-vertical fallback or discontinuous change in compression. The +/-90 rung passes
-through the forward point at vertical climb/dive, including through a full loop.
+The ladder is a literal degree scale (opinionated, requested by John on
+2026-10-11, superseding his 2026-09-21 request to compress ladder spacing to
+75%). John reported that the angles felt compressed and accelerated when
+pitching up and down. Every rung, the zero bar included, sits at an offset from
+the forward point (320,240) along the bank normal that is linear in degrees:
+the rung's elevation minus the aircraft's pitch, times one fixed scale. The
+scale is the HUD's true scale at the centre for the current zoom, 240 * sqrt(3)
+* zoom pixels per radian: about 7.26 pixels per degree at unit zoom, so rungs
+are 36.3 pixels apart. Spacing is equal everywhere, a rung five degrees above
+the nose is exactly five degrees of scale above the forward point, and rung
+motion is exactly proportional to the change in pitch. There is no compression
+factor and no perspective growth away from the centre. The 70-degree rung
+crosses the forward point at 70 degrees of pitch.
 
-The zero-degree bar is a separate world-projected horizon reference, requested
-by John on 2026-09-21 after reviewing level flight. Draw it with the same
-uncompressed world projection as the flight-path marker. A level velocity vector
-therefore lies on this bar even when positive angle of attack puts the nose
-above the horizon. Bank, zoom and head-look apply consistently. Do not draw a
-second compact zero bar. The gap between the true horizon bar and nearby compact
-numbered marks is consequently not uniformly compressed, an agent implementation
-choice that preserves both horizon alignment and accurate numbered pitch readings.
+Agent geometry decision: a mark's offset across the rung (its bearing) uses the
+local zero-pitch perspective width, which is the same at every rung. This
+retains level-flight rung widths at steep attitudes, rather than shrinking them
+to zero at the poles. Rotate the complete scale by bank. Draw marks from -90
+through +90 inclusive in five-degree steps, preserving negative dashes and
+applying the same transform to labels. Marks more than 90 degrees from the nose
+are not drawn (they are far outside the window). There is no special vertical
+fallback. The +/-90 rung passes through the forward point at vertical
+climb/dive, including through a full loop.
+
+The zero-degree bar is the ladder's own zero rung, on the same linear scale as
+the numbered marks, so the horizon and the rungs always agree. At the
+centre it matches the true horizon: the flight-path marker and weapon cues keep
+the true perspective projection, which differs from the linear scale by under
+three pixels anywhere inside the ladder window (about eleven degrees from the
+nose, where the true projection runs about one percent longer). A level
+velocity vector therefore lies on the bar to within that difference, even when
+positive angle of attack puts the nose above the horizon. Bank, zoom and
+head-look apply consistently. Do not draw a second zero bar.
 
 Do not anchor the numbered scale to the horizon: that previously produced false
 pitch readings and a steep-flight gap. Keep its corrected calibration and +/-90

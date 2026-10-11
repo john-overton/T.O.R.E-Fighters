@@ -107,13 +107,15 @@ fn theater_index(code: &str) -> AppResult<usize> {
 /// `--separation` says otherwise (the creator's 20 nm entry).
 const DUMP_SEPARATION_NM: u32 = 20;
 
-fn overrides() -> Overrides {
-    Overrides {
+/// Noon, no wind, no cloud; the redrawn airports unless
+/// `TORE_REDRAWN_AIRPORTS=0`.
+fn overrides() -> AppResult<Overrides> {
+    Ok(Overrides {
         time: Some([12, 0]),
         wind: None,
         cloud_altitude: Some(0),
-        redrawn_airports: false,
-    }
+        redrawn_airports: crate::scenery::redrawn_airports()?,
+    })
 }
 
 pub fn run() -> AppResult<()> {
@@ -181,7 +183,7 @@ pub fn run() -> AppResult<()> {
         _ => return Err("--surface-dump takes one template".into()),
     };
     let terrain =
-        Terrain::for_mission_with(&resources, theater, Some(0), &overrides(), target.as_ref())?;
+        Terrain::for_mission_with(&resources, theater, Some(0), &overrides()?, target.as_ref())?;
     print_surface(theater, &terrain.surface);
     Ok(())
 }
@@ -407,7 +409,7 @@ fn resolve_all(resources: &BTreeMap<String, Vec<u8>>, seeds: u32) -> AppResult<(
     let mut templates = 0usize;
     for (index, theater) in tables::THEATERS.iter().enumerate() {
         // The base layout's air defenses, by side.
-        let base = Terrain::for_mission(resources, theater, Some(0), &overrides())?;
+        let base = Terrain::for_mission(resources, theater, Some(0), &overrides()?)?;
         let defenses = |side_id: u32| {
             base.surface
                 .units
@@ -515,7 +517,7 @@ fn resolve_all(resources: &BTreeMap<String, Vec<u8>>, seeds: u32) -> AppResult<(
                 resources,
                 theater,
                 Some(0),
-                &overrides(),
+                &overrides()?,
                 Some(&target),
             ) {
                 Ok(built) => {
@@ -595,7 +597,7 @@ fn relocate_sweep(
     let (mut placements, mut relocated, mut problems, mut errors) =
         (0usize, 0usize, 0usize, 0usize);
     for (index, theater, stems) in jobs(wanted)? {
-        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides())?;
+        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides()?)?;
         let base = &terrain.surface;
         let count = |system| base.batteries.iter().filter(|b| b.system == system).count();
         use tore_world::surface::BatterySystem as S;
@@ -745,7 +747,7 @@ fn start_placement(resources: &BTreeMap<String, Vec<u8>>, wanted: &[String]) -> 
     };
     let mut checked = 0;
     for (index, theater, stems) in jobs(wanted)? {
-        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides())?;
+        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides()?)?;
         let site = tore_world::terrain::SurfaceSite::load(resources, theater)?;
         let stem = stems
             .iter()
@@ -910,7 +912,7 @@ pub fn sheets() -> AppResult<()> {
                 &resources,
                 &theater,
                 Some(0),
-                &overrides(),
+                &overrides()?,
                 Some(&target),
             )?;
             let mut scenery = Scenery::build(&resources, &world)?;
