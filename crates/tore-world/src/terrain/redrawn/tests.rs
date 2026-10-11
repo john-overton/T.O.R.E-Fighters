@@ -552,7 +552,7 @@ fn a_second_tiles_runway_line_lies_on_its_main_runway() {
         let plan = single(&plans, tile);
         assert!(!plan.ils_runway, "{tile}");
         let (_, patches) = compose(&[(&plan, [0., 0.])], None, 0.);
-        let line = RunwayLine::main(&plan, &frame, 0.).unwrap();
+        let line = RunwayLine::main(&plan, &frame, 0., [0., 0.]).unwrap();
         let longest = plan.runways.iter().map(|r| r.length).fold(0., f64::max);
         assert_eq!(line.length, longest, "{tile}");
         let d = [line.heading.sin(), line.heading.cos()];
@@ -566,4 +566,276 @@ fn a_second_tiles_runway_line_lies_on_its_main_runway() {
     }
     // A base keeps the retail line.
     assert!(single(&plans, "STRIP.OT").ils_runway);
+}
+
+/// The measured offsets of each tile's frame in its base's (16 base
+/// layouts), as `pairs_join_without_overlaps` uses them.
+const PAIR_OFFSETS: [(&str, &str, Point); 4] = [
+    ("STRIP3.OT", "STRIP3A.OT", [-896., 9670.]),
+    ("STRIP5.OT", "STRIP5A.OT", [-8896., -628.]),
+    ("STRIP6.OT", "STRIP6A.OT", [-8907., 693.]),
+    ("STRIP7.OT", "STRIP7A.OT", [3452., 8899.]),
+];
+
+/// A redrawn airport assembled from plans as `apply` assembles it, in an
+/// identity frame at heading 0, with the runway objects it flies: the base
+/// (or a lone tile) first, then a pair's tile.
+fn assembled(
+    base: &Plan,
+    tile: Option<(&Plan, Point)>,
+    links: Option<&Plan>,
+) -> (
+    Built,
+    Vec<(tore_sim::airport::Runway, Option<AirfieldAnchors>)>,
+) {
+    let frame = Frame {
+        origin: [0.; 3],
+        right: [1., 0., 0.],
+        forward: [0., 0., 1.],
+    };
+    let alone = (!base.ils_runway && tile.is_none()).then(|| marked_alone(base));
+    let mut parts = vec![(alone.as_ref().unwrap_or(base), [0., 0.])];
+    if let Some((tile, offset)) = tile {
+        let names = links.and_then(|l| l.pair.as_ref()?.continues.as_ref());
+        let offset = names.map_or(offset, |names| align(offset, base, tile, names));
+        parts.push((tile, offset));
+    }
+    let (materials, patches) = compose(&parts, links, 0.);
+    let runways = parts
+        .iter()
+        .enumerate()
+        .flat_map(|(k, (plan, offset))| {
+            plan.runways.iter().map(move |r| DrawnRunway {
+                name: if k == 0 {
+                    r.name.clone()
+                } else {
+                    format!("{} {}", plan.applies_to, r.name)
+                },
+                from: super::geometry::add(r.from, *offset),
+                heading: r.heading,
+                length: r.length,
+                width: r.width,
+                pad: r.pad,
+            })
+        })
+        .collect();
+    let (min, max) = super::geometry::bounds(patches.iter().map(|p| &p.poly)).unwrap();
+    let surface = OrientedBox {
+        center: [(min[0] + max[0]) * 0.5, 0., (min[1] + max[1]) * 0.5],
+        half: [
+            (max[0] - min[0]) * 0.5 + 200.,
+            1.,
+            (max[1] - min[1]) * 0.5 + 200.,
+        ],
+        heading: 0.,
+        pitch: 0.,
+        bank: 0.,
+    };
+    let runway = |object: u32, line: RunwayLine| tore_sim::airport::Runway {
+        object,
+        airport: object,
+        name: format!("Runway {object}"),
+        surface,
+        approach_center: line.center,
+        elevation_ft: 0.,
+        heading: line.heading,
+        length_ft: line.length,
+    };
+    let base_line = if base.ils_runway {
+        let length = base.runways[0].length;
+        RunwayLine {
+            center: [0., 0., length * 0.5],
+            heading: 0.,
+            length,
+        }
+    } else {
+        RunwayLine::main(base, &frame, 0., [0., 0.]).unwrap()
+    };
+    let mut objects = vec![(
+        runway(1, base_line),
+        plan_anchors(base, [0., 0.], &frame, 0.),
+    )];
+    if let Some((tile, _)) = tile {
+        let offset = parts[1].1;
+        let pair = links.and_then(|l| l.pair.as_ref());
+        let line = match pair.and_then(|p| p.joined.then_some(p.continues.as_ref()).flatten()) {
+            Some(names) => RunwayLine::joined(base, tile, names, &frame, 0., offset),
+            None => RunwayLine::main(tile, &frame, 0., offset),
+        }
+        .unwrap();
+        objects.push((runway(2, line), plan_anchors(tile, offset, &frame, 0.)));
+    }
+    let built = Built {
+        plan: base.applies_to.clone(),
+        strip_id: 1,
+        frame,
+        materials,
+        patches,
+        surface,
+        anchors: None,
+        lights: Vec::new(),
+        runways,
+        moved: Vec::new(),
+        added: Vec::new(),
+        snapped: 0,
+        runway_line: None,
+    };
+    (built, objects)
+}
+
+/// Slice CL-AP (John, 2026-10-11: "ensure AI actually taxi on taxiways
+/// instead of grass"): at every plan, alone and in its pair, every runway
+/// object has AI points, every AI route from every parking slot out to the
+/// takeoff spot and in from the landing aim point stays on the pavement
+/// (with the wheel track and the run-out past each stop), every drawn
+/// runway end is reachable over pavement from parking, and the runway
+/// object's line lies on a drawn runway. `--airfield-audit` runs the same
+/// audit over every layout of an import.
+#[test]
+fn every_plan_and_pair_passes_the_ai_route_audit() {
+    let plans = builtin();
+    let mut cases: Vec<(String, Built, Vec<_>)> = Vec::new();
+    for plan in plans
+        .iter()
+        .filter(|p| p.pair.is_none() && p.applies_to != "DTSTRP.OT")
+    {
+        let (built, objects) = assembled(plan, None, None);
+        cases.push((plan.applies_to.clone(), built, objects));
+    }
+    for (base, tile, offset) in PAIR_OFFSETS {
+        let links = plans
+            .iter()
+            .find(|p| p.pair.as_ref().is_some_and(|pair| pair.base == base))
+            .unwrap();
+        let (base_plan, tile_plan) = (single(&plans, base), single(&plans, tile));
+        // The tile at its measured offset and 60 ft either side of it.
+        for shift in [-60., 0., 60.] {
+            let at = [offset[0] + shift, offset[1] - shift];
+            let (built, objects) = assembled(&base_plan, Some((&tile_plan, at)), Some(links));
+            cases.push((format!("{base}+{tile} {shift}"), built, objects));
+        }
+    }
+    for (name, built, objects) in &cases {
+        let all = std::slice::from_ref(built);
+        let components = audit::components(built);
+        for (runway, anchors) in objects {
+            let anchors =
+                anchors.unwrap_or_else(|| panic!("{name}: {} has no AI points", runway.name));
+            for route in audit::routes(&anchors, runway) {
+                let off = audit::walk(all, &route);
+                assert!(
+                    off.is_empty(),
+                    "{name} {}: {} leaves the pavement at {:?}",
+                    runway.name,
+                    route.name,
+                    off.first()
+                );
+            }
+            let parking = [anchors.parking[0][0], anchors.parking[0][2]];
+            let from = audit::component_at(built, &components, parking);
+            assert!(from.is_some(), "{name}: parking off the pavement");
+            for drawn in &built.runways {
+                for end in audit::runway_ends(drawn, 5.) {
+                    assert_eq!(
+                        audit::component_at(built, &components, end),
+                        from,
+                        "{name} {}: {} end {end:?} not reachable from parking",
+                        runway.name,
+                        drawn.name
+                    );
+                }
+            }
+            audit::line_runway(built, runway)
+                .unwrap_or_else(|why| panic!("{name} {}: {why}", runway.name));
+        }
+    }
+    assert_eq!(cases.len(), 12 + 4 * 3);
+}
+
+/// A pair's tile is moved across the base runway its main runway continues
+/// so the two are one line; with `joined` (STRIP5A and STRIP6A, whose main
+/// runway runs on into the base's crossing runway) the tile's runway object
+/// flies the two as one, so both ILS thresholds stand at the real, marked
+/// runway ends rather than one in the middle of the pavement.
+#[test]
+fn a_pair_tile_lines_up_with_the_runway_it_continues() {
+    let plans = builtin();
+    for (base, tile, offset) in PAIR_OFFSETS {
+        let links = plans
+            .iter()
+            .find(|p| p.pair.as_ref().is_some_and(|pair| pair.base == base))
+            .unwrap();
+        let pair = links.pair.as_ref().unwrap();
+        let names = pair
+            .continues
+            .as_ref()
+            .expect("every pair continues a runway");
+        let (base_plan, tile_plan) = (single(&plans, base), single(&plans, tile));
+        let (built, objects) = assembled(&base_plan, Some((&tile_plan, offset)), Some(links));
+        let b = built.runways.iter().find(|r| r.name == names[0]).unwrap();
+        let t = built
+            .runways
+            .iter()
+            .find(|r| r.name == format!("{tile} {}", names[1]))
+            .unwrap();
+        let side = super::geometry::right_of(super::geometry::direction(b.heading));
+        let across = dot(super::geometry::sub(t.from, b.from), side);
+        assert!(
+            across.abs() < 1e-6,
+            "{tile}: {across} ft off the base runway's line"
+        );
+        let line = &objects[1].0;
+        let expected = if pair.joined {
+            t.length + b.length
+        } else {
+            t.length
+        };
+        assert!(
+            if pair.joined {
+                line.length_ft > expected * 0.9
+            } else {
+                (line.length_ft - expected).abs() < 1e-6
+            },
+            "{tile}: line {} ft",
+            line.length_ft
+        );
+        assert_eq!(
+            pair.joined,
+            ["STRIP5A.OT", "STRIP6A.OT"].contains(&tile),
+            "{tile}"
+        );
+    }
+}
+
+/// A lone tile marks both ends of its runways (no base runs on from it);
+/// a dirt strip has no lights (John, 2026-10-11: lone grass or dirt fields
+/// are fine unlit).
+#[test]
+fn a_lone_tile_is_marked_at_both_ends_and_a_dirt_strip_is_unlit() {
+    let plans = builtin();
+    for tile in ["STRIP3A.OT", "STRIP5A.OT", "STRIP6A.OT", "STRIP7A.OT"] {
+        let plan = single(&plans, tile);
+        assert!(
+            plan.runways.iter().any(|r| r.marked != [true, true]),
+            "{tile}"
+        );
+        assert!(
+            marked_alone(&plan)
+                .runways
+                .iter()
+                .all(|r| r.marked == [true, true]),
+            "{tile}"
+        );
+    }
+    let dirt = single(&plans, "DTSTRP.OT");
+    assert!(!dirt.lights);
+    let frame = Frame {
+        origin: [0.; 3],
+        right: [1., 0., 0.],
+        forward: [0., 0., 1.],
+    };
+    let parts = [(&dirt, [0., 0.])];
+    let (materials, patches) = compose(&parts, None, 0.);
+    assert!(lights::lights(&parts, None, &patches, &materials, &frame, &|_, _| 0.).is_empty());
+    assert!(single(&plans, "STRIP7A.OT").lights);
 }

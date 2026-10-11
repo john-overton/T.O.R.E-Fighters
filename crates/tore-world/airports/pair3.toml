@@ -14,6 +14,7 @@
 base = "STRIP3.OT"
 tile = "STRIP3A.OT"
 unmark = ["R1:far"]
+continues = ["R0", "R0"]
 
 [[taxiway]]
 name = "east link"
