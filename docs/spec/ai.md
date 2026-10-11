@@ -206,8 +206,10 @@ that maneuver. Actual firing eligibility belongs to weapon services.
 Egress uses a jinking phase while within 10000 horizontal feet, then a climbing
 departure until at least `max(30000 feet, twice turn radius)` away, before
 turning back. This is horizontal separation, not a 30000-foot altitude goal.
-B15 establishes the shared target-offset frame. Dive-bomb rollout, jink path
-and complete attack trajectories remain open.
+B15 establishes the shared target-offset frame. The dive-bomb rollout, the
+jink path and the pop-up and orbit maneuvers are recorded in [Strike
+maneuvers, steering frame and orbit](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)
+(static read, ST-R); only the interruption rules and the hit test remain open.
 
 **T.O.R.E strike AI (opinionated, John, 2026-10-11).** Retail chooses these
 passes by dice and moves each released AI bomb to within 100 ft of its target.
@@ -266,10 +268,10 @@ Family binding and catalog counts remain in the experience spec.
 
 | Family | Behavior present | Inputs and missing contract |
 | --- | --- | --- |
-| F-117 | Shares fighter air combat; ground pass requests a 5000 vertical offset and speed operand 300 while target remains ahead/valid | Target pose, maximum/minimum speed and attack path; offset axes and release timing remain open |
+| F-117 | Shares fighter air combat; ground pass requests a 5000 vertical offset and speed operand 300 while target remains ahead/valid | Target pose, maximum/minimum speed and attack path; offset axes are the [steering frame](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit); release timing is the weapon service's gates ([weapons](../formats/weapons.md#ai-release-against-ground-targets)) |
 | Helicopter | Shares IR/radar response entry, distinct pursuit and pop-up attack; missile response turns toward a target with off-beam below 90 degrees, otherwise chooses a +/-90-degree break | Helicopter motion limits and target geometry; do not reuse fighter aerobatic trajectories |
 | Bomber | Aircraft attack handler exits; ground attack uses a high pass; IR/radar reactions choose a +/-90-degree break | Target type, altitude, available stores, wing state and evasion limits; exit does not prove that defensive weapons cannot fire |
-| AC-130 | Ground attack repeatedly requests a circle with speed halfway between corner and maximum | Target pose and orbit parameters; six circle-argument meanings and weapon firing sector remain unresolved |
+| AC-130 | Ground attack repeatedly requests a circle with speed halfway between corner and maximum | Target pose and orbit parameters; the six circle arguments (left, 4,000 ft radius, 2,000 ft up, 35 degrees of bank capped by `maxBank`, speed, 5 s) and the gun arcs are in [Strike maneuvers, steering frame and orbit](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit); the hit test is open |
 | Large/airliner | Handles hit and evade; hit requests a downward pitch from 0 through -24 degrees and speed operand 2000 | Damage event and aircraft limits; positive speed clamp prevents assuming literal 2000-unit achieved flight |
 | MOTH | Fighter-derived air behavior with distinct ground attack and shorter egress operands | Exact special-aircraft configuration and maneuver consumers; no ordinary aircraft alias |
 

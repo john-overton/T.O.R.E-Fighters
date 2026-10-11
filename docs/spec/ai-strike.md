@@ -47,8 +47,9 @@ Retail FA's AI does strike, simply. A script picks one of four passes by dice
 (straight run, pop-up, fast-high, dive bomb), the weapon service releases
 whenever its check passes, and each AI bomb is re-aimed to land within 100 ft
 of its target ([B14](ai.md#b14-surface-attack-and-egress), [B42](ai.md),
-[bomb notes](../formats/weapons.md)). It has no buddy lasing, no AI lasing for
-players and no Quick Mission strike wings.
+[bomb notes](../formats/weapons.md)). It has no buddy lasing and no AI lasing for
+players. Its Quick Mission already sends friendly bomber-class wings at ground
+targets ([Who strikes](#who-strikes)).
 
 John's answers change the shape of it. All of these are opinionated (John,
 2026-10-11):
@@ -74,6 +75,7 @@ seeded draws for hit rolls and countermeasures.
 | Every AI family can strike: fighters, attack jets, heavies, helicopters and the AC-130 | opinionated (John, 2026-10-11) |
 | The behaviour is side neutral. Any side's wing with the Strike role strikes | opinionated (John, 2026-10-11) |
 | Quick Mission gives each wing a role, **CAP** (today's behaviour, the default) or **Strike** (offered only when a ground target is set). A Strike wing flies to the objective, strikes, goes home. Its loadout is the loadout page; a Strike wing with no surface stores is told so | opinionated (John, 2026-10-11) |
+| **Retail's rule, recorded beside it** ([ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)). Retail Quick Mission has no role setting. When a ground target is set, every *friendly* bomber-class wing (A-4E, A-6, F-117, B-52, AC-130U, AH-64, Mi-24, Su-24, Tornado) is given ground classes (ship, tank, vehicle, structure) to attack and defend and fighters to evade, and attacks what it sees within about 26,400 ft. Fighter-class wings (A-10, A-7, AV-8B, Su-25 included) stay air only. No wing is ever given SAMs or AAA, so retail has no SEAD. Enemy wings never strike. How the wings reach the area is open. T.O.R.E's per-wing CAP or Strike role is a departure from this, and the default is CAP for every wing; see [Confirm with John](#confirm-with-john) item 9 | retail (rule), opinionated (John, 2026-10-11) for the departure |
 | Redfor can strike but Quick Mission gives Redfor no air-to-ground objectives, so no Redfor wing is tasked in Quick Mission. Imported missions can task any side later | opinionated (John, 2026-10-11) |
 | PvP: a Blue Strike wing goes after Redfor's protected objects ([objectives](surface-defenses.md#objectives-scoring-and-debrief)); Redfor wings stay CAP and defend | opinionated (agent) |
 | The player's own wingmen follow the player and strike on orders only. They never wander off to bomb on their own, even on loose control | opinionated (John, 2026-10-11) |
@@ -148,6 +150,8 @@ condition with the dice removed: altitude AGL and horizontal distance to the
 target both at least max(10,000 ft, twice the turn radius) ([B14](ai.md#b14-surface-attack-and-egress),
 retail).
 
+**Retail's threat geometry**, the only one it has ([ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit); it reads no threat rings or weapon ranges): a ship threat is ignored beyond 40,000 ft and any other beyond 30 statute miles; between 20,000 ft and 30 miles it is ignored unless the aircraft is within 100 degrees of the threat's nose; inside 20,000 ft it is always evaded (if its class is in the evade set). Speed enters retail's pass choice only through turn radius. These bands (20,000 ft, 30 miles, 100 degrees) are the inputs the levels above are built from, not the levels themselves: the levels stay opinionated (agent), and the Air level's 30 nm is close to retail's 30 statute miles (26 nm).
+
 The picture is rebuilt at the 6 s cadence. Inputs are read when a pass is
 chosen and again before each re-attack, never in the middle of a pass, so the
 choice cannot flicker.
@@ -161,9 +165,9 @@ each re-attack. The four retail passes keep their retail shapes
 | Pass | Shape | Label |
 | --- | --- | --- |
 | Straight run | Fly at the target until 2,000 ft horizontal, then exit | retail |
-| Pop-up | Approach 500 ft above the target until within 10,000 ft, pull up 25 degrees, then point at the target until 1,500 ft or it is no longer ahead | retail |
+| Pop-up | Approach 500 ft above the target until within 10,000 ft, pull up 25 degrees, then point at the target until 1,500 ft or it is no longer ahead. Aim is the target's own position (0 to 359 ft right of it in retail, see below) | retail |
 | Fast-high | Approach 5,000 ft above, straight on at maximum speed after 2,000 ft | retail |
-| Dive bomb | Level at max(twice the turn radius, altitude) until 1.5 turn radii, roll inverted, pull to 90 degrees nose down, roll out at max(twice the turn radius, 2,000 ft) altitude, climb 25 degrees | retail script; the rollout numbers are the script's, the steering frame is [unknown](#unknowns) |
+| Dive bomb | Entry only at the dive gate. Approach at a point H = max(2R, AGL at entry) above the target at corner speed until horizontal distance is under 1.5R. Roll-in: hold the bearing to the target at that moment, level, bank 180 (inverted), corner speed, until under R. Pull to 90 degrees nose down (flown at the aircraft's `maxDive`, -80 on every fighter and attack jet) and hold until AGL is under max(2R, 2,000 ft). Roll out on the roll-in heading plus 180 at corner speed, a split-S pull-through to level. Then climb 25 degrees for 10 s, then the exit run. R is the turn radius, V squared over 43.6 G ft | retail ([ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)) |
 | Level run | Straight and level at or above the release floor, with the LVL cue, for bombs dropped from altitude | opinionated (agent); the heavies' retail high pass is the model |
 | Orbit | Left-hand pylon turn around the target | retail for the family, numbers [fitted](#ac-130) |
 
@@ -181,12 +185,16 @@ applies:
 
 | Case | Pass |
 | --- | --- |
-| Seeker missiles and HARM (stand-off) | Fast-high when energy is Good, else straight run; the approach ends at the store's release range |
+| Seeker missiles and HARM (stand-off) | Fast-high when energy is Good, else straight run; the approach ends at the store's release range. Retail's guided release rule is the model: a guided round only inside 10,000 ft or half the weapon's maximum range, one guided round in flight at a time (retail, [weapons](../formats/weapons.md#ai-release-against-ground-targets)) |
 | Rockets | Straight run with a shallow dive; pop-up under threat Missiles |
 | Guns (strafing) | Straight run; attack jets strafe after their bombs and rockets are gone |
 | Laser bombs, JDAMs | Level run (or a shallow run) to the weapon's reach |
 | Taken over with LVL kept | Level run whatever the table says |
 | Taken over with CCIP kept | The table's pass, flown as CCIP |
+
+**Retail quirks the pass copies and does not copy.** Retail's pop-up pull (`homeAngle 0 25 0 corner 4`, helicopter 30 degrees for 6 s) is written with the speed in an ignored slot, so it requests *minimum* speed during the pull and bleeds speed for 4 s (6 s). The final pop-up leg aims 0 to 359 ft right of the target because a bearing was used as feet. **Recommendation, opinionated (agent): do not copy either.** The pull holds corner speed, or the speed the pass choice needs, and the final leg aims at the target, because John asked that tactics follow perceived threat and available speed (decision 3), and a pass that throws away its own speed under threat Missiles contradicts that. The pass shape (offsets, angles, durations) is retail's. Say so to John if he would rather have the retail bleed (item 10).
+
+**The steering frame** (retail, same source): a pass offset is added to the target's position (in feet, x to the target's right, z ahead, rotated by the *target's* heading; y straight up from the target's height) and the aircraft flies straight at that point. A "low approach" is therefore a straight line to the point, level only because pitch requests within 3 degrees snap to level while the point is 3,000 ft or more away. Pitch is clamped to the aircraft's climb and dive limits. The AI takes this frame for the offset passes; its pilot flies the line through control inputs ([Skill](#skill-and-release-precision)).
 
 Release floor, a minimum altitude AGL for dive and level releases, taken from
 the retail manual's advice (3,000 ft lightly defended, 5,000 ft or more
@@ -322,10 +330,14 @@ spec adds none (spec-derived).
 After release the aircraft exits and decides again. All fitted from the retail
 exit unless marked.
 
-- **Exit** (retail). Inside 10,000 ft horizontal, jink. Then climb 10 degrees at
-  maximum speed until max(30,000 ft, twice the turn radius) away, turn back.
-  The jink path is [unknown](#unknowns); a fitted weave is used until it is
-  known.
+- **Exit** (retail, [ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)).
+  Inside 10,000 ft horizontal, jink: four legs of 3 s at maximum speed, heading
+  the current heading plus or minus 10 degrees, climbing 10 to 14 degrees, a
+  weave of 10 degrees to one side, repeated while still inside 10,000 ft.
+  Beyond 10,000 ft: hold heading, climb 10 degrees at maximum speed. At
+  max(30,000 ft, twice the turn radius) away, turn back level at corner speed
+  and choose again. Retail draws the weave's side and heading by random; T.O.R.E
+  uses the existing seeded channel or a fixed side (John, decision 13).
 - **Re-attack.** At the exit distance the aircraft runs the choice again with
   fresh threat and energy. Target alive and a usable store: attack. Target
   dead: the next target. No target left, or no usable store: home (the existing
@@ -387,9 +399,17 @@ ft (fitted).
 
 ## AC-130
 
-Retail circles a target on a left pylon turn ("circle ... until target
-destroyed", at a speed halfway between corner and maximum; [B20](ai.md#b20-other-aircraft-families),
-retail), with the argument meanings open ([unknowns](#unknowns)). John asked
+Retail circles a target on a left pylon turn (`circle 0 4000 2000 35`, at a
+speed halfway between corner and maximum, re-issued every 5 s; [B20](ai.md#b20-other-aircraft-families),
+[formats](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)). Its
+numbers are script constants, not derived from the guns: radius **4,000 ft**
+horizontal about the moving target, **2,000 ft** above it, heading to the
+centre plus 90 degrees (45 to 135 as it converges), and a requested bank of 35
+degrees that the AC-130's `maxBank` of **30 degrees** caps (it banks 20 to 30).
+On that orbit the target is 4,472 ft slant, 26.6 degrees down and abeam left,
+about a third of the 13,000 ft gun zone, inside every mount arc (retail). The arcs ST-R
+confirmed, as half-widths about the left-facing neutral: C_25 60/60, C_40 45/45,
+C_105 25 in heading and 45 in pitch. John asked
 that the gunship "know range and circle targets appropriately based on where
 guns can hit" (opinionated, John, 2026-10-11). The orbit is therefore chosen
 from the guns:
@@ -400,8 +420,11 @@ from the guns:
 | Slant range to the target | 80% of the reach: **10,400 ft** | fitted |
 | Depression angle | **35 degrees**, inside the 105 mm's elevation limit of 45 degrees and the 25 and 40 mm's | fitted on the shipped arcs |
 | Orbit height and radius | `h = slant x sin 35 = 5,965 ft` above the target, `r = slant x cos 35 = 8,520 ft` | fitted |
-| Minimum radius | If the aircraft's turn radius at the orbit speed (about 6,200 ft at 200 kt and 30 degrees of bank) exceeds `r`, raise `r` to it and `h` with it, keeping 35 degrees | fitted |
+| Minimum radius | If the aircraft's turn radius at the orbit speed and at most `maxBank` (about 6,200 ft at 200 kt and 30 degrees of bank) exceeds `r`, raise `r` to it and `h` with it, keeping 35 degrees | fitted |
 | Direction | Left-hand, guns toward the target (the guns' arcs are left side only) | retail direction, spec-derived arcs |
+| Bank limit | The orbit never asks for more bank than the aircraft's `maxBank` (30 degrees for the AC-130). When the radius for the planned speed and bank is larger than `r`, the radius grows (and the height with it, keeping 35 degrees); the bank does not. This replaces the 35 degree bank of the earlier draft | opinionated (agent); retail also caps bank at `maxBank` |
+| Mount limits | The target stays inside the arcs above (C_25 60/60, C_40 45/45, C_105 25 heading, 45 pitch); 35 degrees of depression is inside every pitch limit | retail (arcs), fitted (orbit) |
+| Retail orbit, for comparison | 4,000 ft radius, 2,000 ft high, slant 4,472 ft (34% of reach), fixed. T.O.R.E departs on purpose: John asked for the orbit from gun reach, which puts the aircraft farther out and higher | retail, opinionated (John, 2026-10-11) for the departure |
 | Speed | Halfway between corner and maximum | retail |
 | Firing | Gunship sight on the target; guns fire inside their arcs and the 13,000 ft range, as the player's | spec-derived |
 | Threat | With a known SAM covering the target it does not ingress and holds off; under AAA it continues | opinionated (agent); confirm with John |
@@ -445,17 +468,19 @@ two to an object, designator carriers lase).
 | --- | --- | --- |
 | Alt+E | Engage my target. Accepts a ground designation, else the sight pin. The wingman attacks with its best surface store and answers "Engaging" | opinionated (John, 2026-10-11) on retail keys |
 | Alt+R | Engage from formation, the same with the ground target | opinionated (John, 2026-10-11) |
-| Alt+F | Engage the IR/laser-designated target: whatever your sight track, pin or laser spot is on | opinionated (John, 2026-10-11) on the retail key table |
+| Alt+F | Engage the IR/laser target. Retail: the contact you picked with `/` and `\` while IR/Laser advanced targeting is on, air or ground; with no hostile contact the wingmen attack whatever they find. T.O.R.E matches this (decision 7). Taking the target from your sight track, pin or laser spot, as well as the picked contact, is an addition | retail (meaning), opinionated (John, 2026-10-11) on the key, opinionated (agent) for the sight, pin and spot sources |
 | Lase my target | New; see [Lasing](#lasing) | opinionated (John, 2026-10-11) |
-| Alt+W | Unchanged: attack on contact. No target-class orders now | opinionated (John, 2026-10-11) |
+| Alt+W | Unchanged: attack on contact. No target-class orders now. Retail's Alt+W is the class order ("Attack SAMs", attack all of the target's class); keeping attack on contact here is a departure | opinionated (John, 2026-10-11); the departure from retail is opinionated (agent) |
 | Others | Unchanged. A wingman with no usable surface store refuses with the reason shown ("no usable surface store") | spec-derived |
 
 Alt+F: the retail manual calls Alt+F "attack on contact" and the executable's
 key table calls it "engage the IR/laser target" ([keyboard](keyboard.md)).
-T.O.R.E follows the key table for Alt+F and keeps attack on contact on Alt+W.
-The retail meaning is being checked separately (research slice ST-R); if it
-settles the other way this section and the keys follow it. See
-[Unknowns](#unknowns).
+Research (ST-R) settled it: both are true. Alt+F sends the IR/laser contact you
+picked, and when there is no hostile contact it sends the free order, which is
+attack on contact. T.O.R.E follows it. A ground target is accepted by retail's
+receiver (Alt+E, Alt+R and Alt+F alike), so ordering wingmen onto the ground
+needs no new order, only the target source above. Retail Alt+W is the class
+order; T.O.R.E keeps attack on contact there for now (item 11 below).
 
 ## Takeover and handback
 
@@ -514,11 +539,13 @@ strike order or a takeover of a striking plane.
 | Release floor | 3,000 ft (Clear, Air), 5,000 ft (Guns, Missiles) | retail manual advice, opinionated (agent) |
 | Heavy minimum release altitude | max(5,000 ft AGL, mission airborne height), +0 / +5,000 / +10,000 ft by threat, at most 90% of ceiling | opinionated (John, 2026-10-11); raises fitted |
 | Heavy exit | toward 50,000 ft | retail |
-| Exit | jink inside 10,000 ft, climb 10 degrees to max(30,000 ft, 2 turn radii) | retail |
+| Exit | jink inside 10,000 ft (4 legs of 3 s, 10 to 14 degrees up, 10 degree weave), then climb 10 degrees to max(30,000 ft, 2 turn radii) | retail |
+| Guided release | inside 10,000 ft or half the weapon's maximum range | retail |
 | Striker defends against | an aircraft that fired, locked, or is inside 5 nm facing it | fitted |
 | Safe | no warning in 10 s, no SAM covering the target, no fighter inside 15 nm | fitted |
 | Bombing class | helicopter by lift, gunship by gunsight, Heavy at 150,000 lb or G limit 3 or less, Attack at 700 kt or less, else Fighter | opinionated (John, 2026-10-11) |
-| AC-130 orbit | 10,400 ft slant, 35 degrees, 5,965 ft high, 8,520 ft radius | fitted |
+| AC-130 orbit | 10,400 ft slant, 35 degrees, 5,965 ft high, 8,520 ft radius, bank at most the aircraft's `maxBank` (radius grows instead) | fitted; bank cap opinionated (agent) |
+| AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |
 | Lase orbit | radius max(3 nm, 1.2 turn radii) | fitted |
 | Ground picture | rebuilt every 6 s | retail |
 | Attackers per object | two | spec-derived |
@@ -527,14 +554,16 @@ strike order or a takeover of a striking plane.
 
 | Unknown | Fallback | Next step |
 | --- | --- | --- |
-| Steering frame of the pass offsets (`homePos`), the dive rollout in flight, and the jink path | The script numbers above with a fitted weave | Research slice ST-R reads the steering code |
-| AC-130 circle arguments and firing sector | The fitted orbit above | ST-R reads the circle handler |
-| Whether Alt+F is "attack on contact" (manual) or "engage the IR/laser target" (key table) in the retail build | The key table, as above | ST-R |
-| How retail gives the AI a ground target (reactions, mission masks) and whether orders E, W, F accept one | Opinionated orders above | ST-R |
-| HARM eligibility and missile release against ground targets for the AI | Existing HARM and seeker rules | ST-R |
-| Whether skill changes retail strike behaviour | None; skill acts only as the release precision above | ST-R (the `chance` handler) |
-| What an AI guided bomb does with no designator | The player's fallback ([motion](air-to-ground.md#bomb-motion)) | A2G open item |
-| Quick Mission enemy strike wings in retail | None built | ST-R |
+| Whether the AC-130's rounds hit from the orbit (aim 20 ft above the target, no drop; hit test `_PROJHitChance`) | The player's gun ballistics | Test in the AC-130 slice |
+| How retail's Quick Mission strike wings reach the target area (placement) | Strike wings fly to the objective (Who strikes) | Read the wing placement code if John wants retail parity |
+| The wing message sent when an order deadline passes (20 s) | None | Low priority |
+| Retail's choice of jink side and heading | Seeded channel or a fixed side | None |
+
+Closed by ST-R, no longer unknown: the steering frame, dive rollout, jink path,
+AC-130 circle and mount arcs, how retail gives the AI a ground target, Alt+F,
+Alt+E, Alt+R and Alt+W receiver behaviour, HARM and missile release gates, skill
+(retail strikes ignore it), AI guided bombs with no designator (they glide at
+-20 degrees below 293 ft/s) and retail's Quick Mission strike wings.
 | Whether heavy burst spacing from the record gives a sensible stick on the first imported heavy | The record's spacing | Test when a heavy with bombs is imported |
 
 ## Confirm with John
@@ -556,11 +585,27 @@ and is open to change.
    Mission altitude setting, as AGL, plus the threat raise of +5,000 and +10,000
    ft.
 5. **AC-130 under a SAM** holds off instead of attacking, and the 35 degree,
-   80%-of-reach orbit.
-6. **Alt+F** follows the key table; attack on contact stays on Alt+W.
+   80%-of-reach orbit (with the bank held to `maxBank`, the radius growing
+   instead).
+6. **Alt+F** matches retail (the IR/laser contact, else attack on contact);
+   the sight, pin and spot as extra sources, and attack on contact on Alt+W
+   rather than retail's class order, are departures (see item 11).
 7. **Safe** for takeover: no warning in 10 s, no covering SAM, no fighter
    inside 15 nm.
 8. **Lase my target** orbit and key.
+9. **Default role for bomber-class wings.** Retail Quick Mission sends a
+   friendly bomber-class wing (A-4E, A-6, F-117, B-52, AC-130U, AH-64, Mi-24,
+   Su-24, Tornado) at the ground target automatically when one is set, with
+   fighter-class wings (A-10 and A-7 included) air only. Should a bomber-class
+   wing default to Strike when a ground target is set, as retail does, instead
+   of CAP? Default here: CAP for everyone, as John answered, with the player
+   free to set Strike.
+10. **Pop-up speed quirk.** Retail's pop-up pull requests minimum speed by an
+    operand-order mistake. The spec recommends not copying it (tactics follow
+    threat and speed). Say if the retail bleed is wanted.
+11. **Alt+W.** Retail's Alt+W is "attack all of the target's class" (Attack
+    SAMs, bandits, tanks). The spec keeps attack on contact there. Say if the
+    class order should return, which would also give wingmen a SEAD command.
 
 ## Source notes
 
