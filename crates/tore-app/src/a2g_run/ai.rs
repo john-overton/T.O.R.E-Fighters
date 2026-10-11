@@ -91,6 +91,14 @@ const BURST_WITHIN_FT: f64 = 60.;
 /// The striker is egressing once it is this far past its closest approach
 /// after a release.
 const EGRESS_OPENING_FT: f64 = FEET_PER_NM;
+/// `--render-scene` draws its frame this long after the first release.
+const RENDER_AFTER_SECONDS: f64 = 0.4;
+/// `--render-scene`'s companion lead starts this far behind the striker
+/// and to its right, feet, well clear of the pass.
+const COMPANION_BEHIND_FT: f64 = 15_000.;
+const COMPANION_RIGHT_FT: f64 = 12_000.;
+/// The companion's plane: friendly wing 2's only aircraft.
+const COMPANION: PlaneId = PlaneId(1);
 
 /// The passes `--profile` can force (docs/spec/ai.md, the retail script's
 /// four passes, and the level run the heavy bombers fly).
@@ -101,15 +109,19 @@ pub(crate) enum Profile {
     FastHigh,
     Dive,
     Level,
+    Laydown,
+    Strafe,
 }
 
 impl Profile {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Straight,
         Self::Popup,
         Self::FastHigh,
         Self::Dive,
         Self::Level,
+        Self::Laydown,
+        Self::Strafe,
     ];
 
     pub(crate) fn label(self) -> &'static str {
@@ -119,6 +131,8 @@ impl Profile {
             Self::FastHigh => "fasthigh",
             Self::Dive => "dive",
             Self::Level => "level",
+            Self::Laydown => "laydown",
+            Self::Strafe => "strafe",
         }
     }
 
@@ -129,6 +143,8 @@ impl Profile {
             Self::FastHigh => StrikePass::FastHigh,
             Self::Dive => StrikePass::Dive,
             Self::Level => StrikePass::Level,
+            Self::Laydown => StrikePass::Laydown,
+            Self::Strafe => StrikePass::Strafe,
         }
     }
 
@@ -139,6 +155,8 @@ impl Profile {
             StrikePass::FastHigh => Self::FastHigh,
             StrikePass::Dive => Self::Dive,
             StrikePass::Level => Self::Level,
+            StrikePass::Laydown => Self::Laydown,
+            StrikePass::Strafe => Self::Strafe,
         }
     }
 
@@ -147,7 +165,9 @@ impl Profile {
             .into_iter()
             .find(|p| p.label() == text.to_ascii_lowercase())
             .ok_or_else(|| {
-                format!("unknown --profile {text}; use straight, popup, fasthigh, dive or level")
+                format!(
+                    "unknown --profile {text}; use straight, popup, fasthigh, dive, level, laydown or strafe"
+                )
                     .into()
             })
     }
@@ -180,6 +200,16 @@ pub(crate) struct Config {
     pub trigger: bool,
     pub order: Option<(&'static str, PlayerOrder)>,
     pub order_at: f64,
+    /// `--mission-altitude FT`: the Quick Mission altitude setting (5,000,
+    /// 10,000, 20,000 or 40,000 ft), the mission's airborne height a heavy
+    /// bombs from (slice ST-T2).
+    pub mission_altitude: Option<u32>,
+    /// `--render-scene DIR`: draws the world offscreen, looking at the
+    /// striker, at its first release (slice ST-T2).
+    pub render_scene: Option<std::path::PathBuf>,
+    /// `--offset FT`: the striker starts this far right of the pass line
+    /// (negative: left), for the first-pass convergence tests.
+    pub offset_ft: f64,
 }
 
 impl Config {
@@ -288,8 +318,25 @@ mod hooks {
     /// The aim of the striker's current pass: the drawn offset's distance
     /// from the target, feet, whether it lies inside the circle, and the
     /// pass number. A smart weapon aims at the target itself (0 ft).
+    /// The striker's flight path below the horizon, degrees (a dive's
+    /// angle; negative climbing).
+    pub(super) fn dive_deg(velocity: Vector) -> f64 {
+        -velocity[1]
+            .atan2(velocity[0].hypot(velocity[2]))
+            .to_degrees()
+    }
+
+    /// The lead the striker lays on a moving target, feet (0 on a
+    /// standing one).
+    pub(super) fn lead(actor: &AiActor) -> f64 {
+        actor
+            .strike()
+            .map_or(0., |s| s.lead()[0].hypot(s.lead()[1]))
+    }
+
     pub(super) fn aim(actor: &AiActor) -> Option<(f64, bool, u32)> {
         let s = actor.strike()?;
+        // A gun run's aim is its current burst's (slice ST-T2).
         let (offset, inside) = s.aim();
         let unguided = s.selection().is_none_or(|sel| sel.kind.unguided());
         let distance = if unguided {
@@ -298,6 +345,12 @@ mod hooks {
             0.
         };
         Some((distance, inside || !unguided, s.pass_number()))
+    }
+
+    /// A gun run's current (pass, burst) (slice ST-T2).
+    pub(super) fn burst(actor: &AiActor) -> Option<(u32, u32)> {
+        let s = actor.strike()?;
+        (s.burst() > 0).then(|| (s.pass_number(), s.burst()))
     }
 
     /// Slice ST-O: give a wing order that carries a ground target. Today the
@@ -361,12 +414,28 @@ fn place(world: &mut World, plane: PlaneId, pass: &Pass, along: f64, right: f64)
     flight.pitch_rate = 0.;
 }
 
-/// One mission step. `human` is whether the main seat flies a plane.
-fn step(scene: &mut Scene, human: bool, trigger: bool) -> AppResult<()> {
+/// One mission step. `human` is whether the main seat flies a plane;
+/// `companion` whether the render companion sits on the second seat (it
+/// gets an empty input: nobody flies it).
+fn step(scene: &mut Scene, human: bool, trigger: bool, companion: bool) -> AppResult<()> {
     if human {
         return scene.step(trigger);
     }
-    scene.recorded(|world, out| world.step(&[], out))
+    scene.recorded(|world, out| {
+        let idle = tore_world::seats::SeatInput {
+            seat: WINGMAN_SEAT,
+            tick: world.tick(),
+            ..tore_world::seats::SeatInput::default()
+        };
+        world.step(
+            if companion {
+                std::slice::from_ref(&idle)
+            } else {
+                &[]
+            },
+            out,
+        )
+    })
 }
 
 /// Everything the watcher reports about the striker.
@@ -386,7 +455,28 @@ struct Watch {
     lost: Option<f64>,
     activity: Option<Activity>,
     profile: Option<Profile>,
+    /// Gun rounds in flight: id to (burst key, last place).
+    gun_rounds: BTreeMap<u32, ((u32, u32), Vector)>,
+    /// A gun run's bursts by (pass, burst): each is one release.
+    bursts: BTreeMap<(u32, u32), Burst>,
 }
+
+/// One gun burst of a strafing run: its release number, the rounds fired,
+/// where those that reached the ground ended, the last round's time, and
+/// whether its impact line is out.
+struct Burst {
+    n: usize,
+    fired: usize,
+    ends: Vec<Vector>,
+    last_fired: f64,
+    reported: bool,
+}
+
+/// A burst's impact line goes out once its rounds have all ended and none
+/// has been fired for this long (the AI's bursts are 0.5 s).
+const BURST_DONE_SECONDS: f64 = 0.75;
+/// A gun round that ends this close above the ground there reached it.
+const ROUND_GROUND_FT: f64 = 100.;
 
 impl Watch {
     fn new(plane: PlaneId, target: u32) -> Self {
@@ -405,7 +495,14 @@ impl Watch {
             lost: None,
             activity: None,
             profile: None,
+            gun_rounds: BTreeMap::new(),
+            bursts: BTreeMap::new(),
         }
+    }
+
+    /// Rounds still flying, or a burst whose impact is not out yet.
+    fn busy(&self) -> bool {
+        !self.flying.is_empty() || self.bursts.values().any(|b| !b.reported)
     }
 }
 
@@ -417,6 +514,18 @@ impl Scene {
     /// The striker as the AI holds it, while the AI flies it.
     fn actor(&self, plane: PlaneId) -> Option<&AiActor> {
         self.world.ai_wings.as_ref()?.mission().actor(plane.0)
+    }
+
+    /// The striker's velocity, from the AI's flight or the seat's cockpit.
+    fn striker_velocity(&self, plane: PlaneId) -> Vector {
+        if let Some(actor) = self.actor(plane) {
+            return actor.flight().velocity;
+        }
+        self.world
+            .cockpits
+            .iter()
+            .find(|c| c.plane == plane)
+            .map_or([0.; 3], |c| c.flight.velocity)
     }
 
     /// The striker's position, from the AI's flight or the seat's cockpit.
@@ -500,8 +609,10 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
                 )
             },
         );
+        let lead = scene.actor(w.plane).map_or(0., hooks::lead);
+        let dive = hooks::dive_deg(scene.striker_velocity(w.plane));
         println!(
-            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim}",
+            "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim} lead_ft={lead:.0} dive_deg={dive:.0}",
             w.releases,
             if name.is_empty() { "unknown" } else { &name },
         );
@@ -556,6 +667,9 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             *last = p.position;
         }
     }
+    observe_guns(scene, w, t, target_at);
+    trace(scene, w, tick, target_at);
+    let state = &scene.world.combat.state;
     // Kills credited to the striker.
     let kills = state
         .ledger
@@ -588,7 +702,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
         if let (Some(_), false) = (w.last_release, w.egress)
             && let Some((closest, _)) = w.closest
             && range > closest + EGRESS_OPENING_FT
-            && w.flying.is_empty()
+            && !w.busy()
         {
             w.egress = true;
             println!(
@@ -614,6 +728,184 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
                 }
             });
         println!("ai-strike: LOST t={t:.3} reason={reason}");
+    }
+}
+
+/// `TORE_AI_STRIKE_TRACE=1`: a `trace` line every half second with the
+/// striker's flight and strike state, for tuning a pass by eye.
+fn trace(scene: &Scene, w: &Watch, tick: u64, target_at: Option<Vector>) {
+    if !tick.is_multiple_of(60) || std::env::var_os("TORE_AI_STRIKE_TRACE").is_none() {
+        return;
+    }
+    let (Some(actor), Some(tp)) = (scene.actor(w.plane), target_at) else {
+        return;
+    };
+    let f = actor.flight();
+    let v = f.velocity;
+    let fpp = v[1].atan2(v[0].hypot(v[2])).to_degrees();
+    let (phase, segment) = actor
+        .strike()
+        .map_or(("none".to_owned(), "none".to_owned()), |s| {
+            (format!("{:?}", s.phase()), format!("{:?}", s.segment()))
+        });
+    println!(
+        "ai-strike: trace t={:.1} range_ft={:.0} agl_ft={:.0} speed_fps={:.0} fpp={fpp:.1} bank={:.0} heading={:.0} track={:.0} bearing={:.0} pitch={:.0} phase={phase} segment={segment}",
+        tick as f64 / 120.,
+        horizontal(f.position, tp),
+        f.position[1] - scene.ground(f.position[0], f.position[2]),
+        f.speed,
+        f.bank.to_degrees(),
+        f.yaw.to_degrees().rem_euclid(360.),
+        v[0].atan2(v[2]).to_degrees().rem_euclid(360.),
+        (tp[0] - f.position[0])
+            .atan2(tp[2] - f.position[2])
+            .to_degrees()
+            .rem_euclid(360.),
+        f.pitch.to_degrees(),
+    );
+}
+
+/// A gun run's bursts (slice ST-T2): each burst is one `RELEASE` (its first
+/// round, with the burst's own aim draw and `burst=B rounds_left=N`) and one
+/// `IMPACT` once its rounds have ended: `miss_ft` from the target to the
+/// middle of the rounds that reached the ground, `rounds`, `ground` (how
+/// many reached it) and `near` (how many ended within 50 ft of the target).
+fn observe_guns(scene: &Scene, w: &mut Watch, t: f64, target_at: Option<Vector>) {
+    let state = &scene.world.combat.state;
+    let key = scene.actor(w.plane).and_then(hooks::burst);
+    let fresh: Vec<(u32, Vector, usize, Option<String>)> = state
+        .projectiles
+        .iter()
+        .filter(|p| p.owner == w.plane.0 && !w.seen.contains(&p.id))
+        .filter(|p| p.gun_round.is_some() || p.weapon.as_ref().is_some_and(live::is_gun))
+        .map(|p| {
+            (
+                p.id,
+                p.position,
+                p.station,
+                p.weapon.as_ref().map(|wp| wp.source.clone()),
+            )
+        })
+        .collect();
+    for (id, position, station, name) in fresh {
+        w.seen.insert(id);
+        let Some(key) = key else {
+            continue;
+        };
+        if !w.bursts.contains_key(&key) {
+            w.releases += 1;
+            w.last_release = Some(t);
+            let (alt, speed, range) = match (scene.striker_at(w.plane), target_at) {
+                (Some((p, s)), Some(tp)) => (
+                    p[1] - scene.ground(p[0], p[2]),
+                    s / FPS_PER_KNOT,
+                    horizontal(p, tp),
+                ),
+                _ => (f64::NAN, f64::NAN, f64::NAN),
+            };
+            let aim = scene.actor(w.plane).and_then(hooks::aim).map_or(
+                String::new(),
+                |(offset, inside, pass)| {
+                    format!(
+                        " pass={pass} aim_ft={offset:.0} inside={}",
+                        if inside { "yes" } else { "no" }
+                    )
+                },
+            );
+            let left = scene
+                .actor(w.plane)
+                .and_then(|a| {
+                    a.stations()
+                        .iter()
+                        .find(|s| usize::from(s.station.0) == station)
+                })
+                .map_or("unknown".to_owned(), |s| match s.store.rounds {
+                    Rounds::Finite(n) => n.to_string(),
+                    Rounds::Unlimited => "unlimited".to_owned(),
+                });
+            let lead = scene.actor(w.plane).map_or(0., hooks::lead);
+            let dive = hooks::dive_deg(scene.striker_velocity(w.plane));
+            println!(
+                "ai-strike: RELEASE t={t:.3} n={} weapon={} station={station} alt_ft={alt:.0} speed_kt={speed:.0} range_ft={range:.0}{aim} lead_ft={lead:.0} dive_deg={dive:.0} burst={} rounds_left={left}",
+                w.releases,
+                name.as_deref().unwrap_or("gun"),
+                key.1,
+            );
+            w.bursts.insert(
+                key,
+                Burst {
+                    n: w.releases,
+                    fired: 0,
+                    ends: Vec::new(),
+                    last_fired: t,
+                    reported: false,
+                },
+            );
+        }
+        let burst = w.bursts.get_mut(&key).expect("inserted");
+        burst.fired += 1;
+        burst.last_fired = t;
+        w.gun_rounds.insert(id, (key, position));
+    }
+    // Rounds that ended this tick.
+    let gone: Vec<u32> = w
+        .gun_rounds
+        .keys()
+        .copied()
+        .filter(|id| !state.projectiles.iter().any(|p| p.id == *id))
+        .collect();
+    for id in gone {
+        let (key, last) = w.gun_rounds.remove(&id).expect("tracked");
+        if last[1] - scene.ground(last[0], last[2]) <= ROUND_GROUND_FT
+            && let Some(burst) = w.bursts.get_mut(&key)
+        {
+            burst.ends.push(last);
+        }
+    }
+    for (id, (_, last)) in w.gun_rounds.iter_mut() {
+        if let Some(p) = state.projectiles.iter().find(|p| p.id == *id) {
+            *last = p.position;
+        }
+    }
+    // Bursts whose rounds have all ended.
+    let flying: std::collections::BTreeSet<(u32, u32)> =
+        w.gun_rounds.values().map(|(key, _)| *key).collect();
+    for (key, burst) in w.bursts.iter_mut() {
+        if burst.reported || flying.contains(key) || t - burst.last_fired < BURST_DONE_SECONDS {
+            continue;
+        }
+        burst.reported = true;
+        w.impacts += 1;
+        w.last_impact = Some(t);
+        let middle = (!burst.ends.is_empty()).then(|| {
+            let k = burst.ends.len() as f64;
+            std::array::from_fn::<f64, 3, _>(|i| burst.ends.iter().map(|e| e[i]).sum::<f64>() / k)
+        });
+        let near = target_at.map_or(0, |tp| {
+            burst
+                .ends
+                .iter()
+                .filter(|e| horizontal(**e, tp) <= 50.)
+                .count()
+        });
+        match (middle, target_at) {
+            (Some(m), Some(tp)) => println!(
+                "ai-strike: IMPACT t={t:.3} n={} miss_ft={:.1} at={:.0},{:.0},{:.0} rounds={} ground={} near={near}",
+                burst.n,
+                horizontal(m, tp),
+                m[0],
+                m[1],
+                m[2],
+                burst.fired,
+                burst.ends.len(),
+            ),
+            _ => println!(
+                "ai-strike: IMPACT t={t:.3} n={} miss_ft=nan rounds={} ground={} near={near}",
+                burst.n,
+                burst.fired,
+                burst.ends.len()
+            ),
+        }
     }
 }
 
@@ -669,7 +961,18 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     spec.sam = Defense::from_level(o.defenses.1).ok_or("defense levels are 0 to 3")?;
     spec.surface_seed = o.seed;
     spec.wings[0].skill = skill;
+    // `--render-scene` needs a seat's plane to present the picture from: a
+    // companion lead the seat takes, flying well clear of the striker.
+    let companion = cfg.render_scene.is_some() && !ordering && cfg.handback.is_none();
     spec.wings[0].count = if ordering { 2 } else { 1 };
+    if companion {
+        // Friendly wing 2, one aircraft, the seat's.
+        spec.wings[1].aircraft = o.aircraft;
+        spec.wings[1].count = 1;
+    }
+    if let Some(altitude_ft) = cfg.mission_altitude {
+        spec.start = tore_world::mission::Start::Airborne { altitude_ft };
+    }
     spec.validate()?;
     let mut world = World::new(&spec, resources, Seating::Open)?;
     if let Some(why) = &world.terrain.surface.unresolved {
@@ -743,8 +1046,20 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         place(&mut scene.world, striker, &pass, 0., 0.);
         human = true;
     } else {
-        place(&mut scene.world, striker, &pass, 0., 0.);
+        place(&mut scene.world, striker, &pass, 0., cfg.offset_ft);
         scene.world.give_back_plane(SEAT)?;
+        if companion {
+            // The companion (friendly wing 2) on the second seat, well clear
+            // of the pass; nobody flies it.
+            scene.world.take_plane(WINGMAN_SEAT, COMPANION)?;
+            place(
+                &mut scene.world,
+                COMPANION,
+                &pass,
+                -COMPANION_BEHIND_FT,
+                COMPANION_RIGHT_FT,
+            );
+        }
     }
     let mut watch = Watch::new(striker, target);
     let note = hooks::assign(&mut scene.world, striker, target, station, cfg.profile);
@@ -782,6 +1097,8 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         }
     }
     let mut ordered = false;
+    let mut rendered = false;
+    let mut first_release: Option<f64> = None;
     let mut handed = !human || ordering;
     let started = scene.seconds();
     for tick in 0..(o.seconds * 120.) as u64 {
@@ -846,7 +1163,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             );
         }
         let trigger = human && cfg.trigger && scene.selected();
-        step(&mut scene, human, trigger)?;
+        step(&mut scene, human, trigger, companion)?;
         for reply in &scene.out.orders {
             let (result, message) = match &reply.outcome {
                 OrderOutcome::Given { message } => ("given", message),
@@ -860,15 +1177,28 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         }
         observe(&mut scene, &mut watch);
         let t = scene.seconds();
+        // `--render-scene`: one frame a moment after the first release.
+        if let (Some(dir), Some(at)) = (&cfg.render_scene, first_release.or(watch.last_release))
+            && !rendered
+            && t >= at + RENDER_AFTER_SECONDS
+        {
+            first_release = Some(at);
+            rendered = true;
+            let name = format!(
+                "{}-{}-{}.png",
+                o.stem.to_ascii_lowercase(),
+                cfg.profile.map_or("free", Profile::label),
+                o.skill.unwrap_or(1)
+            );
+            let target_at = scene.target_row().map_or(target_at, |r| r.position);
+            super::ai_render::render(&mut scene, COMPANION, striker, target_at, &dir.join(name))?;
+        }
         // Done when the striker is gone or the last round has landed and the
         // striker has had time to leave.
-        let over = [
-            watch.lost,
-            watch.last_impact.filter(|_| watch.flying.is_empty()),
-        ]
-        .into_iter()
-        .flatten()
-        .fold(None, |a: Option<f64>, b| Some(a.map_or(b, |a| a.max(b))));
+        let over = [watch.lost, watch.last_impact.filter(|_| !watch.busy())]
+            .into_iter()
+            .flatten()
+            .fold(None, |a: Option<f64>, b| Some(a.map_or(b, |a| a.max(b))));
         if over.is_some_and(|at| t > at + SETTLE_SECONDS) {
             break;
         }
