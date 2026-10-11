@@ -537,7 +537,7 @@ fn quantity_step(capacity: i32) -> i32 {
 /// Weapons connected to flight, by record name. Shared by launch validation
 /// and the ordnance catalog, including Cheat loading; importing a definition
 /// does not enable it. The ordnance audit requires every one to be imported.
-pub const SUPPORTED_WEAPONS: [&str; 40] = [
+pub const SUPPORTED_WEAPONS: [&str; 47] = [
     "AA11.JT",
     "AA11B.JT",
     "AA12.JT",
@@ -578,6 +578,17 @@ pub const SUPPORTED_WEAPONS: [&str; 40] = [
     "SUU16.JT",
     "T12_4.JT",
     "T30_1.JT",
+    // Air-to-ground missiles, slice W2 (docs/spec/air-to-ground.md, "Weapon
+    // classes" 8 to 11): the second Maverick and the SLAM (infrared), the
+    // Shrike (anti-radiation), Harpoon, Exocet and Kickback (active radar on
+    // the A-G track) and the AS 15 (supported by the A-G track).
+    "AGM65A.JT",
+    "AGM84E.JT",
+    "AGM45.JT",
+    "AGM84A.JT",
+    "AM39.JT",
+    "AS16.JT",
+    "AS15.JT",
 ];
 pub fn supported(name: &str) -> bool {
     SUPPORTED_WEAPONS.contains(&name)

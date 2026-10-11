@@ -9,7 +9,8 @@
 > <!-- tore-header v2 -->
 
 Status: **specification written before implementation** (2026-10-10, the A2G
-round). Nothing in this file is built yet. Each section says what the player
+round). Sections marked "Built" name the slice that built them; the rest is
+not built yet. Each section says what the player
 will see and do, with the numbers, and labels where every number comes from.
 The slices that build it are listed in [Source notes](#source-notes). The two
 research slices have reported: R2 (A-G page, HARM page, laser, optical) and R1
@@ -717,6 +718,47 @@ retail behaviour; the reach scale serves both.
   (`NO TRACK` when the A-G track is lost for a SARH missile).
 - **Laser AGMs.** The laser box and laser range (below), range scale.
 
+Built (W2), with these rules (opinionated, agent, where not labelled):
+
+- **BORE waits for the lock.** A Maverick or a HARM in BORE fires only once its
+  seeker holds the BORE candidate (a quarter second, the seekers' existing
+  dwell): `ACQUIRING` until then, `NO TARGET` (Maverick) or `NO EMITTER` (HARM)
+  with nothing in the cone, so an air-to-ground missile never leaves without a
+  target. Retail releases a HARM only at an emitting target and a Maverick only
+  at a designated one; air-to-air BORE keeps its old rule. The Maverick's bore
+  circle is the air-to-air 5 degrees; the HARM's is its whole seeker cone, and
+  its candidate must also lie inside the launch zone's angles.
+- **CUED.** A designation turns a Maverick or a HARM to CUED, as it does an
+  air-to-air infrared missile, and the seeker mode key cannot take it back to
+  BORE while the designation stands.
+- **The HARM cue.** Up to 8 emitters, nearest the bore first, are drawn as the
+  RWR's 7 pixel ground square; a radar painting the plane carries a centre dot
+  (the bright square; painting is the surface fire control's Track or Fire on
+  the plane, as the RWR shows it); the designated or held radar after it stops
+  emitting shows only its corners (dim). The weapon diamond marks the
+  candidate, blinking in BORE, and the word BORE or CUED sits above the bore
+  ring. The candidate is the painting radar first, then the one nearest the
+  bore, then the nearest.
+- **The A-G track.** A surface radar weapon is released only while the A-G page
+  is up and lists its designated target (`NO TRACK` otherwise, retail data); it
+  leaves for the point the page gives and the page refreshes its midcourse
+  point. The AS-7 and AS-15 need the page and the target inside their zone 1
+  from the launcher for the whole flight; once that fails the missile loses its
+  target for good and flies on unguided (retail data: the lock clears the
+  target and nothing gives it a new one).
+- **Target switch.** A new designation sends the player's AS-7 and AS-15 in
+  flight to the new target when it is inside their zone-1 cone about the nose
+  and on the A-G track, and blinds them otherwise; clearing the designation
+  leaves them guiding (retail data). The air-to-air supported missiles, which
+  retail retargets too, keep today's rule; the laser weapons are slice W1's.
+- **HARM after shutdown.** A launched HARM keeps homing on its radar after the
+  radar stops, on angles only, while it stays inside the missile's zone-1 cone
+  (retail data). So a SAM radar's HARM shutdown no longer saves it from a HARM
+  already locked on it.
+- **Surface seekers.** The active surface seekers (AGM-84A, AM-39, AS-16) see a
+  ground object or ship by range and radar signature alone, without the air
+  radar's clutter notch (fitted).
+
 ### Laser on the HUD
 
 - The laser point is marked with the retail IR/laser **rectangular TD box**
@@ -756,7 +798,9 @@ the station could not release at all:
 LOW, FRAG and OVERFLY are worked out by the sight (slice H1); the HUD shows
 LOW and FRAG together in the readiness slot, and OVERFLY in place of the
 release time. Only a GPS bomb with no designated point and an AT-2 with no
-target block release. Laser bombs can be released without a spot (they fall ballistic and can
+target block release, apart from the missiles: a missile that needs a target
+(NO TARGET, NO TRACK, NO EMITTER) does not leave without one, as before this
+round (built, W2). Laser bombs can be released without a spot (they fall ballistic and can
 still pick one up), as retail allows. The text strings are fitted.
 
 ## Weapon classes
@@ -773,10 +817,10 @@ this round.
 | 5 | JDAM | GBU29, GBU29P, GBU30 | 25 to 26 | Retail "optical": home on the object designated at release, follow it, fire and forget, release range cut by visibility. TORE (opinionated, John): GPS, fly to the point designated at release, any weather, a moving target is missed | missing |
 | 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press fires one rocket and a held trigger repeats four a second (LAU-10 one per press); rocket pipper | LAU61, B8, B13 partly |
 | 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Retail: steers at the designated object until impact (cruise profile), needs its launcher alive, zone 1 500 to 18,000 ft and 45 degrees; a switch does not retarget it. Without a target it flies unguided | partly |
-| 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | AGM65G partly |
-| 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; keeps homing on the object after its radar stops | AGM88 partly; AGM45 hidden |
-| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G on at release (retail); surface seekers see surface rows without the air notch | profiled, hidden |
-| 11 | SARH AGMs | AS7, AS15 | 21 | Needs A-G on at release and for the whole flight, target inside zone 1 (45 degrees) from the launcher; lost: unguided | AS7 partly; AS15 missing |
+| 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | Built (W2) |
+| 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; keeps homing on the object after its radar stops | Built (W2) |
+| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G on at release (retail); surface seekers see surface rows without the air notch | Built (W2) |
+| 11 | SARH AGMs | AS7, AS15 | 21 | Needs A-G on at release and for the whole flight, target inside zone 1 (45 degrees) from the launcher; lost: unguided | Built (W2) |
 | 12 | Laser AGMs | AS14, AS30, AT12 | 24 to 25 | Class 4's lock rule on a powered, cruising missile | missing |
 
 Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work. Novelty
@@ -1077,7 +1121,8 @@ records (ranges, weights, counts) are in the inventory above.
 
 - A SAM or AAA site turns its radar off: its HARM square dims and leaves the
   HARM page at the next rebuild; a HARM already flying keeps homing on the object
-  while it stays inside the missile's 45 degree cone.
+  while it stays inside the missile's 45 degree cone, so the shutdown roll of
+  [surface defenses](surface-defenses.md) no longer saves the radar from it.
 - Terrain blocks the laser at release: MASK on the page and the HUD; a laser
   weapon released then falls ballistic. A weapon already guiding is not broken by
   MASK (retail checks angles only).

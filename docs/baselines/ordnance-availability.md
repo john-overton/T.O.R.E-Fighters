@@ -50,6 +50,10 @@ present, 36 aircraft, nine recovered weapon rows, exactly 1,464 weapon
 placements and 146 tank placements. A missing record, or a count that moves,
 fails the run; raise the pins in `crates/tore-app/src/ordnance_audit.rs` and
 here when the supported list, the tanks or the roster change on purpose.
+Slice W2 of the air-to-ground round (2026-10-10) added seven air-to-ground
+missiles (AGM-65A, AGM-84E, AGM-45, AGM-84A, AM-39, AS-16, AS 15): 47 supported
+records and 1,802 weapon placements, measured with `--validate-ordnance` on the
+surface-data import (the tank and recovered-row counts are unchanged).
 
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is

@@ -26,6 +26,10 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
     (*state % u32::from(bound)) as u16
 }
 
+mod agm;
+#[cfg(test)]
+mod agm_tests;
+pub use agm::{CueEmitter, MAX_HARM_CUE};
 #[cfg(test)]
 mod bomb_tests;
 mod broad;
@@ -146,6 +150,12 @@ pub enum Readiness {
     GunObscured,
     /// Terrain lies between a gun's muzzle and its aim point (AC-130).
     TerrainMask,
+    /// An anti-radiation missile in BORE has no emitter in its cone to fire
+    /// at: retail releases a HARM only at an emitting target.
+    NoEmitter,
+    /// A surface radar weapon (AGM-84A, AM-39, AS-16, AS-7, AS-15) has no
+    /// A-G track on its target: the A-G page is off or does not list it.
+    TrackLost,
 }
 impl Readiness {
     /// Whether an AC-130 gun with this readiness releases rounds. Only the
@@ -192,6 +202,8 @@ impl Readiness {
             Self::GroupEmpty => "GROUP EMPTY",
             Self::GunObscured => "NO LINE OF FIRE",
             Self::TerrainMask => "TERRAIN MASK",
+            Self::NoEmitter => "NO EMITTER",
+            Self::TrackLost => "NO TRACK",
         }
     }
 }
@@ -1331,6 +1343,12 @@ pub struct Ownship {
     sight_hold: Option<u32>,
     /// Friendly aircraft identities, which T and Enter skip. Set by the host.
     pub friendlies: std::collections::BTreeSet<u32>,
+    /// The radars painting this aircraft (the RWR's bright squares), set by
+    /// the host every tick: the HARM boresight candidate prefers them.
+    painted_by: std::collections::BTreeSet<u32>,
+    /// The HARM boresight cue's emitters, worked out with the observations
+    /// each step; for the HUD only, never a designation or a lock.
+    harm_cue: Vec<CueEmitter>,
     /// Passive emitters received this step, for the exposure instrument.
     pub emitters: Vec<passive::Emitter>,
     pub missile_threats: super::threats::ThreatService,
@@ -1680,6 +1698,8 @@ impl Ownship {
             hud_selection: None,
             sight_hold: None,
             friendlies: Default::default(),
+            painted_by: Default::default(),
+            harm_cue: Vec::new(),
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
             hp: config.damage_capacity,
@@ -2234,11 +2254,29 @@ impl<'a> LauncherView<'a> {
         if profile.is_some_and(|p| p.supports_boresight())
             && self.view.own.launch_mode == LaunchMode::Boresight
         {
-            if self.view.own.bore_observation.is_some_and(|o| {
+            // An air-to-ground missile in BORE fires only at the candidate its
+            // seeker holds (agent): retail releases a HARM only at an emitting
+            // target and a Maverick only at a designated one.
+            let surface = profile.is_some_and(|p| p.role == TargetRole::Surface);
+            let bore = self.view.own.bore_observation;
+            if surface && bore.is_none() {
+                return if profile.is_some_and(|p| p.holds_on_angles()) {
+                    Readiness::NoEmitter
+                } else {
+                    Readiness::NoTarget
+                };
+            }
+            if bore.is_some_and(|o| {
                 missiles::length(sub(o.position, launcher.position))
                     < f64::from(w.seeker.zones[1].minimum_range.max(0))
             }) {
                 return Readiness::MinimumRange;
+            }
+            if surface
+                && (self.view.own.mounted.target != bore.map(|o| o.id)
+                    || self.view.own.mounted.status != Status::Locked)
+            {
+                return Readiness::RadarAcquiring;
             }
             return Readiness::Ready;
         }
@@ -2251,7 +2289,15 @@ impl<'a> LauncherView<'a> {
         if !t.body_present() {
             return Readiness::TargetDestroyed;
         }
-        if w.seeker.signature == 3 {
+        if w.seeker.signature == 3 && profile.is_some_and(|p| p.needs_air_ground()) {
+            // A surface radar weapon is released on the A-G track (retail).
+            if self.view.own.radar_failed {
+                return Readiness::RadarFailed;
+            }
+            if !self.view.own.ground_track(t.id) {
+                return Readiness::TrackLost;
+            }
+        } else if w.seeker.signature == 3 {
             // Equipment state answers immediately, before the shared support
             // result, so a failure reported between steps is not stale.
             if self.view.own.radar_failed {
@@ -2886,6 +2932,14 @@ impl State {
                             .find(|(aircraft, _)| *aircraft == own.aircraft)
                             .map(|(_, launcher)| launcher);
                         target.zip(launcher).map(|(id, launcher)| ActorSupport {
+                            supported: agm::ownship_supports(
+                                own,
+                                Some(profile),
+                                weapon,
+                                launcher,
+                                id,
+                                self.targets.iter().find(|t| t.id == id),
+                            ),
                             owner: own.aircraft,
                             observation: own.sensors.observation(id).map(|contact| {
                                 let delta = sub(contact.position, projectile.position);
@@ -2900,7 +2954,6 @@ impl State {
                                     range: missiles::length(delta),
                                 }
                             }),
-                            supported: own.sensors.supports(id),
                             radar_position: launcher.position,
                             radar_emitting: launcher.radar && launcher.alive,
                         })
@@ -3011,6 +3064,17 @@ impl State {
         });
     }
     fn command_of(&mut self, own: &mut Ownship, command: Command, launcher: Launcher) {
+        let before = own.designated();
+        self.apply_command(own, command, launcher);
+        // A new designation retargets or blinds the player's supported
+        // surface missiles in flight (retail `PROJRetargetMissiles`).
+        if let Some(id) = own.designated()
+            && before != Some(id)
+        {
+            agm::retarget(self, own, id, &launcher);
+        }
+    }
+    fn apply_command(&mut self, own: &mut Ownship, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
                 self.targets.retain(|t| {
@@ -3144,9 +3208,11 @@ impl State {
                 {
                     return;
                 }
+                // A designation holds an infrared missile, and an
+                // anti-radiation surface missile, in CUED.
                 if own.designated().is_some()
                     && missiles::Profile::for_weapon(&own.config.stations[own.selected].weapon)
-                        .is_some_and(|p| p.guidance == Guidance::Infrared)
+                        .is_some_and(|p| p.guidance == Guidance::Infrared || p.holds_on_angles())
                 {
                     return;
                 }
@@ -4327,6 +4393,14 @@ impl State {
                                 {
                                     flight.seeker = own.mounted.clone();
                                 }
+                                // A surface radar weapon leaves for the point
+                                // the A-G track gives; the track refreshes it.
+                                if profile.needs_air_ground()
+                                    && let Some(contact) =
+                                        target.and_then(|id| own.sensors.observation(id))
+                                {
+                                    flight.last_intercept = Some(contact.position);
+                                }
                                 if !profile.guidance_available(launcher.radar_power) {
                                     flight.unguided = true;
                                     flight.enabled = false;
@@ -4644,7 +4718,14 @@ impl State {
                         .and_then(|flight| flight.seeker.target)
                         .map(|id| ActorSupport {
                             owner: p.owner,
-                            supported: own.sensors.supports(id),
+                            supported: agm::ownship_supports(
+                                own,
+                                p.guidance.as_ref().map(|flight| flight.profile),
+                                w,
+                                &row.launcher,
+                                id,
+                                self.targets.iter().find(|t| t.id == id),
+                            ),
                             observation: own.sensors.observation(id).map(|contact| {
                                 let delta = sub(contact.position, p.position);
                                 seeker::Observation {
@@ -5791,7 +5872,7 @@ pub fn segment_sphere(a: Vector, b: Vector, radius: f64) -> Option<f64> {
     let t = (-bb - disc.sqrt()) / aa;
     (0. ..=1.).contains(&t).then_some(t)
 }
-pub(crate) fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
+pub fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
     let below = |t: f64| {
         let p: Vector = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
         p[1] <= ground(p[0], p[2])
@@ -9843,6 +9924,20 @@ fn guide_owned<'a>(
                 .and_then(|answer| answer.observation)
                 .filter(|o| o.id == id)
         });
+    // A supported surface missile (AS-7, AS-15) whose A-G track drops loses
+    // its target for good and flies on unguided (retail data).
+    if profile.rides_air_ground() && supported.is_none() {
+        agm::blind(p);
+        return;
+    }
+    let flight = p.guidance.as_mut().unwrap();
+    // An anti-radiation surface missile keeps homing on its acquired object
+    // after the radar stops, on angles only, while the object stays inside
+    // its zone-1 cone (retail data).
+    let held = flight
+        .seeker
+        .target
+        .filter(|_| profile.holds_on_angles() && flight.seeker.acquired);
     // Only shared supported observations may update an initially silent shot.
     if !flight.seeker.acquired
         && let Some(contact) = supported
@@ -9884,7 +9979,21 @@ fn guide_owned<'a>(
                 profile.guidance != Guidance::Supported || supported.is_some_and(|o| o.id == t.id)
             })
             .filter_map(|t| {
-                let observed = seeker::observe(w, profile, &view, t)?;
+                let observed = seeker::observe(w, profile, &view, t).or_else(|| {
+                    (held == Some(t.id)
+                        && agm::inside_angles(&w.seeker.zones[1], view.position, basis, t.position))
+                    .then(|| {
+                        let delta = sub(t.position, view.position);
+                        seeker::Observation {
+                            id: t.id,
+                            position: t.position,
+                            velocity: t.velocity,
+                            quality: 1.,
+                            off_axis: dot(unit(delta), basis.forward).clamp(-1., 1.).acos(),
+                            range: missiles::length(delta),
+                        }
+                    })
+                })?;
                 if profile.guidance == Guidance::Supported {
                     supported
                 } else if profile.guidance == Guidance::Active

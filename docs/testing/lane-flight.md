@@ -36,12 +36,16 @@ about 1 G well below the top speed.
 ## Air-to-ground weapons
 
 `a2g-*` (scenario files
-[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py) and
-[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py)) runs
+[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py),
+[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py) and
+[`a2g_missiles.py`](../../tools/battery_scenarios/a2g_missiles.py)) runs
 `--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND`, which flies a scripted
 straight pass at a ground target of a Quick Mission, invulnerable, and attacks through the
 real player path: the weapon keys select the station and the trigger releases. A store the
-aircraft does not carry is fitted to a bomb or pod station for the run (`--count N`). Each
+aircraft does not carry is fitted to a bomb, pod or air-to-ground missile station for the run
+(`--count N`). The missile kinds also select the page and designate through the player's keys
+(`--designate ag|ir|harm|visual|none`, `--unit ID`), and `--render OUT.png` draws the HUD at
+the release. Each
 weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run/`.
 
 | Scenario | What it flies | What must hold |
@@ -52,6 +56,11 @@ weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run
 | `a2g-rocket-ccip` | `--attack rocket`: an A-4E's LAU-61s in a 10 degree dive on a truck, fired once the rocket pipper says IN RNG, held a second | Rockets hit and destroy the truck; a rocket that bursts on the ground does so within a foot of the pipper of the tick it was fired on ([rockets](../spec/air-to-ground.md#rockets-and-guns)) |
 | `a2g-warnings` | `--attack ccip` with an A-4E's Mk 82 from a 30 degree dive at 300 ft, a level pass at 400 ft and one at 1,500 ft | LOW and FRAG, FRAG only, and neither; the LOW bomb lands a dud (a puff, nothing destroyed), the others burst ([warnings](../spec/air-to-ground.md#warnings)) |
 | `a2g-rocket-pod` | An A-4E's two LAU-61 pods tapped three times, held for a second and held until empty; two LAU-10 pods held for two seconds | 38 rockets in the pods, one a press; four or five in a second held, a quarter second apart on the game's quarter-second clock; all 38 when held on; the LAU-10 pods hold 8 and fire one however long the trigger is held ([rockets](../spec/air-to-ground.md#rockets)) |
+| `a2g-maverick` | Over `~QUCOL`: an A-10's AGM-65G on a tank designated on the A-G page (Ctrl+R, T), the same with nothing designated (BORE), an AV-8B's AGM-65G on a tank designated on its FLIR (M, T), and an A-10's AGM-65A on the tank Enter picks | CUED with the seeker locked on the designated tank, launched at it and killed; in BORE the candidate and the missile's target are the strongest return in the 5 degree bore circle, locked at release, killed; the FLIR run kills, the AGM-65A hits ([missiles](../spec/air-to-ground.md#missiles-and-the-harm-boresight-cue)) |
+| `a2g-harm-bore` | Over `~QVRDRI` (seed 4, heavy defenses): an F-4G's AGM-88 with nothing designated, at an SA-6 battery's Straight Flush at ace and at novice experience | The HUD cue lists several emitters with the radar as the BORE candidate; the HARM leaves in BORE at it; the ace radar shuts down within 10 nm and the HARM keeps homing, locked, and kills it; the novice radar stays on and dies |
+| `a2g-harm-page` | The same F-4G on the HARM page (M), T to the Straight Flush | The designation turns the cue to CUED; the HARM leaves in CUED at the radar and kills it |
+| `a2g-antiship` | Over `~QUSFLT`: an F/A-18D's AGM-84A and a Rafale's AM-39 at the Krivak designated on the A-G page | Launched midcourse at the Krivak, the seeker goes active on it and it is hit |
+| `a2g-sarh` | Over `~QUCOL`: a MiG-23's AS-7 on a tank designated on the A-G page, then the same with the A-G page turned off two seconds after launch | On the track it kills its tank, never unguided; with the page off it loses its target for good (status Lost, unguided) and the tank is not hit |
 
 ## Powered-lift scenarios (VTOL overhaul)
 
