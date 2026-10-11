@@ -166,7 +166,11 @@ and a gamepad's View+stick defaults avoid the problem.
 | Previous radar target | Shift+T | - | - |
 | Select visual target | Enter or Apostrophe | - | - |
 | Clear designation | Semicolon or L | - | View + B |
-| Seeker mode (bore/cued) | - | - | - |
+| Delivery mode (CCIP/LVL, bore/cued) | Ctrl+M | - | - |
+| Sight: next visible object | / | - | - |
+| Laser on or off | Ctrl+L | - | - |
+| Fire the gun whatever is selected | Tab | - | - |
+| Nearest ground target (Easy targeting) | Ctrl+X | - | - |
 | Release chaff | Insert | - | View + D-pad left |
 | Release flare | Delete | - | View + D-pad right |
 | Jettison selected stores | Shift+K | - | View + Right stick press |
@@ -183,6 +187,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
 | --- | --- | --- | --- |
 | Radar power / radar channel | R | - | View + Left stick press |
+| Air-to-ground radar on or off | Ctrl+R or Shift+R | - | - |
 | Jammer (ECM) | J | - | View + Y |
 | Cycle sensor channel | M | - | - |
 | Infrared channel | I | - | - |

@@ -6,8 +6,9 @@
 //! it is on a carrier deck, and every fleet aircraft left out.
 //!
 //! `--strike` puts the player's own round on a parked aircraft (by its
-//! template ordinal) one second in: `bomb` (a Mk 82 dropped on it from 300
-//! ft), `maverick` (an AGM-65G flown into it from 3,000 ft out, after
+//! template ordinal) one second in: `bomb` (a Mk 82 released onto it from a
+//! 45 degree dive at 450 kt, 1,000 ft above it, on the bomb equation),
+//! `maverick` (an AGM-65G flown into it from 3,000 ft out, after
 //! checking its seeker sees the aircraft) or `gun` (a burst of 12 M61 rounds
 //! through its left wing). The whole world then steps (the live game's tick,
 //! no window, no audio) and the outcome is printed: hit points and damage by
@@ -223,8 +224,13 @@ pub fn run() -> AppResult<()> {
                 let mut shots: Vec<(Weapon, [f64; 3], [f64; 3], f64)> = Vec::new();
                 match kind {
                     Strike::Bomb => {
-                        let from = [center[0], center[1] + 300., center[2]];
-                        shots.push((weapon("MK82.JT")?, from, [0., -1., 0.], 500.));
+                        let release = crate::surface_objective::dive_release(center, [0.; 3], 0.);
+                        shots.push((
+                            weapon("MK82.JT")?,
+                            release.position,
+                            release.velocity,
+                            release.speed(),
+                        ));
                     }
                     Strike::Maverick => {
                         let w = weapon("AGM65G.JT")?;
@@ -284,7 +290,7 @@ pub fn run() -> AppResult<()> {
                         station: 0,
                         position: from,
                         previous: from,
-                        direction,
+                        direction: tore_sim::attitude::unit(direction),
                         speed_f8: (speed * 256.) as i32,
                         launched_t: 0,
                         target: None,

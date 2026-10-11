@@ -275,7 +275,8 @@ Missing retail facts: exact mouse hit rules, history cadence, lock/loss timers,
 maintained support after changing display mode or designation, active-seeker
 activation, and supplemental radar. Each one has an authored replacement in the
 [component guide](../radar.md), labelled there; none of them is recovered
-behaviour. Detailed ground-target filtering is deferred with A2G;
+behaviour. Ground-target filtering is specified in
+[air-to-ground](air-to-ground.md#the-air-to-ground-radar) (specified, not yet built);
 IFF remains the existing gamified target view. Next research should
 inspect only the handlers needed for the next player interaction, then add its
 observable rules here. Do not hold basic radar profiles or shared contact state
@@ -317,6 +318,21 @@ This establishes the documented presentation, not an executed-retail comparison.
 of selection or acquisition. Stale contacts retain their dim cross. Direction
 lines follow the TWS rule above. IR direction-line behavior is not established
 by this passage and is left disabled as an agent decision.
-Surface-symbol implementation remains deferred with A2G. The inspected passage
-specifies large surface targets only; other ground-symbol distinctions remain
-unknown and require inspecting the ground-radar examples before implementation.
+Surface symbols are drawn on the A-G, IR and HARM pages with the retail
+characters (a 2 by 2 dot, a 5 by 5 X for SAM and AAA, a 5 by 5 square for
+aircraft): see [air-to-ground](air-to-ground.md#the-air-to-ground-radar).
+
+## Air-to-ground mode and the HARM page
+
+Specified in [air-to-ground](air-to-ground.md) and built (slice G1). Ctrl+R (or
+Shift+R) puts the radar in the retail **A-G** mode, which turns the air radar
+off: ground units, structures and ships appear as 2 by 2 dots and SAM and AAA
+sites as a 5 by 5 X (retail data; the manual's 90 kt split is not in the page
+code), ground contacts can be designated with T (nearest first), Shift+T
+(farthest first) and a scope click. The same range ladder applies. M adds a
+**HARM** page that lists the ground emitters a loaded anti-radiation missile
+can see. The FLIR (I) adds hot ground contacts. The manual says air-mode radar
+ignores anything slower than 90 kt; the page code has no such test. See
+[A-G radar](air-to-ground.md#the-air-to-ground-radar),
+[FLIR](air-to-ground.md#flir-ground-contacts) and
+[the HARM page](air-to-ground.md#the-harm-scope-page).

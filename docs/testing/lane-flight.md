@@ -33,6 +33,49 @@ into overspeed. Before the fast-side hold
 ([flight model](../FLIGHT-MODEL.md#envelope-limits-and-loading)) it fell to
 about 1 G well below the top speed.
 
+## Air-to-ground weapons
+
+`a2g-*` (scenario files
+[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py),
+[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py),
+[`a2g_guided.py`](../../tools/battery_scenarios/a2g_guided.py) and
+[`a2g_missiles.py`](../../tools/battery_scenarios/a2g_missiles.py)) runs
+`--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND`, which flies a scripted
+straight pass at a ground target of a Quick Mission, invulnerable, and attacks through the
+real player path: the weapon keys select the station and the trigger releases. A store the
+aircraft does not carry is fitted to a bomb, pod or air-to-ground missile station for the run
+(`--count N`). The missile kinds also select the page and designate through the player's keys
+(`--designate ag|ir|harm|visual|none`, `--unit ID`), and `--render OUT.png` draws the HUD at
+the release. Each
+weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run/`.
+
+| Scenario | What it flies | What must hold |
+| --- | --- | --- |
+| `a2g-bomb-motion` | Over `~QUCOL`: an A-4E Mk 82 from a level pass at 5,000 ft and 450 kt, an F-4B Mk 82 from a 30 degree dive released 3,000 ft above the target, an A-4E Mk 82 AIR 7-pack and an A-4E Snakeye, each released when the bomb sight's mean impact reaches the target | The solution obeys the bomb equation (fall and throw within 0.01 s and 2 ft); every bomb bursts within 2 ft of its own path and within the 3 degree scatter's reach of the mean point, its scatter within 3 degrees; the 7-pack is seven bombs in one tick for one round at the retail stagger and 66 percent of the speed; the Snakeye falls as long as the slick bomb and throws 66 percent as far ([bomb motion](../spec/air-to-ground.md#bomb-motion)) |
+| `a2g-ccip-dive` | `--attack ccip` over the TVIET truck park: an F/A-18D's Mk 82 in a 30 degree dive from 2,000 ft, released when the HUD's CCIP pipper covers the truck; then a longer, shallower pass from 3 nmi | The truck is destroyed; every logged sight follows the retail arc rule (full inside 0.4 of the 20,000 ft range, one step fewer each fourteenth of the rest, the bare ring from the maximum, on retail's approximate distance), its glyph is 0x20 plus the arc, IN RNG inside the range, and the arc never shrinks as the range closes ([CCIP](../spec/air-to-ground.md#ccip-the-dive-pipper)) |
+| `a2g-level-t` | `--attack level` over `~QUCOL`: an F-4B designates the column from the A-G page, selects its Mk 82 (LVL on selection) and holds the trigger through a level pass at 5,000 ft and 450 kt | Exactly one bomb, released within three ticks of ground travel past the cue with the cross-track miss inside the radius; the release time falls and the marker rides down before it; OVERFLY after; the burst inside the record's splash radius of the target ([the level T](../spec/air-to-ground.md#the-level-release-t-lvl)) |
+| `a2g-rocket-ccip` | `--attack rocket`: an A-4E's LAU-61s in a 10 degree dive on a truck, fired once the rocket pipper says IN RNG, held a second | Rockets hit and destroy the truck; a rocket that bursts on the ground does so within a foot of the pipper of the tick it was fired on ([rockets](../spec/air-to-ground.md#rockets-and-guns)) |
+| `a2g-warnings` | `--attack ccip` with an A-4E's Mk 82 from a 30 degree dive at 300 ft, a level pass at 400 ft and one at 1,500 ft | LOW and FRAG, FRAG only, and neither; the LOW bomb lands a dud (a puff, nothing destroyed), the others burst ([warnings](../spec/air-to-ground.md#warnings)) |
+| `a2g-rocket-pod` | An A-4E's two LAU-61 pods tapped three times, held for a second and held until empty; two LAU-10 pods held for two seconds | 38 rockets in the pods, one a press; four or five in a second held, a quarter second apart on the game's quarter-second clock; all 38 when held on; the LAU-10 pods hold 8 and fire one however long the trigger is held ([rockets](../spec/air-to-ground.md#rockets)) |
+| `a2g-cluster` | Over `~QUCOL` (scenario file [`a2g_cluster.py`](../../tools/battery_scenarios/a2g_cluster.py), attack kind `cluster`): an A-4E CBU-87 and Mk 20 from a level pass and an F-4B RBK-500 from a 30 degree dive | The burst is the type 18 family with no crater; a vehicle inside the record's splash (2,200, 1,600 and 2,500 ft) loses the record's damage times 70 percent, falling in a line to nothing at the edge, and one outside loses none; the 28 bomblet flashes the renderer derives are the same on every derivation, inside 1,200 ft of the burst and start within its first half second ([cluster flashes](../spec/ordnance-presentation.md#cluster-bomb-flashes)) |
+
+`a2g-catalog` (menus lane, [`a2g_catalog.py`](../../tools/battery_scenarios/a2g_catalog.py))
+runs `--validate-ordnance`, whose audit covers the air-to-ground records on the Load
+Ordnance page and the Cheat-only novelty bombs: the normal and Cheat catalogs are checked
+against the station rules on all 36 aircraft, and Boulder and Moose must have no capacity,
+be refused and fail validation without Cheat loading ([novelty
+rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
+| `a2g-laser-self` | `--attack laser` over `~QUCOL`: an F-16C designates a T-80 from the A-G page (T), its Pave Spike lases automatically with the GBU-10 selected, and the bomb is released from 15,000 ft at 480 kt on the HUD's IN RNG cue; again with Ctrl+L turning the laser off 20 s after the release | The bomb leaves at 90 percent of the speed, guiding on aircraft 0's spot from inside its reach, its time to impact counts down, and it destroys the tank; with the laser off it goes from guiding to blind, falls and misses, and the tank is unhurt ([the laser](../spec/air-to-ground.md#the-laser)) |
+| `a2g-laser-buddy` | Two seats (Open seating): an Su-25 two miles behind designates with Ctrl+X (Easy targeting) and lases by hand; an F/A-18D, which has no designator, drops a GBU-10 from 12,000 ft | The release guides on the Su-25's spot (buddy yes, own laser off), lands within 40 ft of the tank and destroys it ([buddy lasing](../spec/air-to-ground.md#buddy-lasing)) |
+| `a2g-jdam-cloud` | `--attack jdam --condition cloudy`: an F-16C's GBU-30 from 12,000 ft at a standing object of the TVIET truck park, then at a `~QUCOL` tank that drives on at 50 ft/s | The first lands on the stored point and destroys the object; the second lands within 40 ft of the stored point and at least 500 ft from the tank, which is unhurt ([guided bomb release range indicator](../spec/air-to-ground.md#guided-bomb-release-range-indicator)) |
+| `a2g-laser-missile` | `--attack laser`: an Su-25's AS-14 from 3,000 ft, on its built-in designator's spot | Released guiding on its own spot; ends guiding within 60 ft and destroys the tank ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
+| `a2g-at2` | `--attack at2`: a Mi-24 300 ft up, 2 nmi out at 60 kt, launches an AT-2 at a `~QUCOL` tank (Easy targeting's Ctrl+X: it has no ground page); again turning 90 degrees away 2 s after the launch | The AT-2 is command guided and hits (the T-80 takes 120 of its 200 hit points); turning away makes it blind for good, it never guides again and misses ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
+| `a2g-maverick` | Over `~QUCOL`: an A-10's AGM-65G on a tank designated on the A-G page (Ctrl+R, T), the same with nothing designated (BORE), an AV-8B's AGM-65G on a tank designated on its FLIR (M, T), and an A-10's AGM-65A on the tank Enter picks | CUED with the seeker locked on the designated tank, launched at it and killed; in BORE the candidate and the missile's target are the strongest return in the 5 degree bore circle, locked at release, killed; the FLIR run kills, the AGM-65A hits ([missiles](../spec/air-to-ground.md#missiles-and-the-harm-boresight-cue)) |
+| `a2g-harm-bore` | Over `~QVRDRI` (seed 4, heavy defenses): an F-4G's AGM-88 with nothing designated, at an SA-6 battery's Straight Flush at ace and at novice experience | The HUD cue lists several emitters with the radar as the BORE candidate; the HARM leaves in BORE at it; the ace radar shuts down within 10 nm and the HARM keeps homing, locked, and kills it; the novice radar stays on and dies |
+| `a2g-harm-page` | The same F-4G on the HARM page (M), T to the Straight Flush | The designation turns the cue to CUED; the HARM leaves in CUED at the radar and kills it |
+| `a2g-antiship` | Over `~QUSFLT`: an F/A-18D's AGM-84A and a Rafale's AM-39 at the Krivak designated on the A-G page | Launched midcourse at the Krivak, the seeker goes active on it and it is hit |
+| `a2g-sarh` | Over `~QUCOL`: a MiG-23's AS-7 on a tank designated on the A-G page, then the same with the A-G page turned off two seconds after launch | On the track it kills its tank, never unguided; with the page off it loses its target for good (status Lost, unguided) and the tank is not hit |
+
 ## Powered-lift scenarios (VTOL overhaul)
 
 `flight-powered-*` flies the six powered-lift aircraft (AV-8, Yak-141, V-22, AH-64,

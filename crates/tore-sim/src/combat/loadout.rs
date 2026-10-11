@@ -125,6 +125,17 @@ impl Loadout {
         self.configuration.ammunition(&self.quantities)
     }
     pub fn refresh_equipment(&mut self) -> Result<()> {
+        // A designator pod leaves its station when a weapon or a tank takes
+        // the station.
+        let quantities = &self.quantities;
+        let tanks = &self.configuration.tanks;
+        let slots = &self.configuration.hardpoint_slots;
+        self.configuration.designator_pods.retain(|pod| {
+            quantities.get(pod.station).is_some_and(|q| *q == 0)
+                && !tanks
+                    .iter()
+                    .any(|t| t.quantity > 0 && slots.get(t.hardpoint) == Some(&Some(pod.station)))
+        });
         for pod in &mut self.configuration.gun_pods {
             pod.quantity = if self.configuration.stations[pod.station].weapon.source == "SUU16.JT" {
                 self.quantities[pod.station]
@@ -256,6 +267,10 @@ impl Loadout {
         self.refresh_equipment()
     }
     pub fn capacity(&self, slot: usize, w: &Weapon) -> i32 {
+        // Boulder and Moose load only under Cheat loading.
+        if novelty(&w.source) && !self.cheat {
+            return 0;
+        }
         // The reviewed pod contract is limited to source-installed gun-pod
         // stations. Unrelated rocket launchers keep their existing semantics.
         if w.source == "SUU16.JT"
@@ -282,6 +297,73 @@ impl Loadout {
             })
             .unwrap_or(0)
             .max(0)
+    }
+    /// How many of a designator pod station `slot` takes: one where the
+    /// retail equipment rule allows it (a pod station, flag 0x400, within
+    /// its weight class), else none. Cheat loading follows the cheat rule.
+    pub fn designator_capacity(&self, slot: usize, pod: &super::sight::DesignatorStore) -> i32 {
+        self.hardpoints
+            .get(slot)
+            .and_then(|h| {
+                loading::Station::from_source(h).ok().map(|s| {
+                    let store = loading::Store::sensor(pod.flags, pod.weight_lbs);
+                    let matches_default = h
+                        .store
+                        .as_deref()
+                        .is_some_and(|d| d.eq_ignore_ascii_case(&pod.source));
+                    if self.cheat {
+                        s.cheat_count(store, matches_default, h.store.is_some())
+                    } else {
+                        s.allowed_count(store, matches_default)
+                    }
+                })
+            })
+            .unwrap_or(0)
+            .clamp(0, 1)
+    }
+    /// Load a laser designator pod on station `slot` (decision 7), in place
+    /// of its weapon and of a tank on the same hardpoint. An aircraft
+    /// carries one pod: loading another moves it. Leaves the loadout as it
+    /// was if the station cannot take it.
+    pub fn load_designator(
+        &mut self,
+        slot: usize,
+        pod: super::sight::DesignatorStore,
+    ) -> Result<()> {
+        if self.designator_capacity(slot, &pod) <= 0 {
+            return Err(super::invalid(
+                "This store cannot be loaded at this station.",
+            ));
+        }
+        let mut draft = self.clone();
+        draft.quantities[slot] = 0;
+        for tank in &mut draft.configuration.tanks {
+            if draft.configuration.hardpoint_slots.get(tank.hardpoint) == Some(&Some(slot)) {
+                tank.quantity = 0;
+            }
+        }
+        draft.configuration.designator_pods = vec![super::sight::DesignatorPod {
+            station: slot,
+            store: pod,
+        }];
+        draft.refresh_equipment()?;
+        *self = draft;
+        Ok(())
+    }
+    /// Take the designator pod off station `slot`, if it holds one.
+    pub fn unload_designator(&mut self, slot: usize) -> Result<()> {
+        self.configuration
+            .designator_pods
+            .retain(|pod| pod.station != slot);
+        self.refresh_equipment()
+    }
+    /// The designator pod on station `slot`.
+    pub fn designator(&self, slot: usize) -> Option<&super::sight::DesignatorStore> {
+        self.configuration
+            .designator_pods
+            .iter()
+            .find(|pod| pod.station == slot)
+            .map(|pod| &pod.store)
     }
     pub fn select(&mut self, slot: usize, w: Weapon) -> Result<()> {
         let capacity = self.capacity(slot, &w);
@@ -384,6 +466,11 @@ impl Loadout {
             .zip(&self.quantities)
             .enumerate()
         {
+            if *n > 0 && novelty(&s.weapon.source) && !self.cheat {
+                return Err(super::invalid(
+                    "This store is available with Cheat loading only.",
+                ));
+            }
             if i32::from(*n) > self.capacity(i, &s.weapon) {
                 return Err(super::invalid("Station quantity exceeds capacity."));
             }
@@ -395,6 +482,15 @@ impl Loadout {
         }
         if self.configuration.tanks.len() != self.tank_hardpoints.len() {
             return Err(super::invalid("Invalid tank station state."));
+        }
+        for pod in &self.configuration.designator_pods {
+            if self.designator_capacity(pod.station, &pod.store) <= 0
+                || self.quantities.get(pod.station).is_none_or(|q| *q > 0)
+            {
+                return Err(super::invalid(
+                    "A designator pod cannot be loaded at this station.",
+                ));
+            }
         }
         for (index, tank) in self.configuration.tanks.iter().enumerate() {
             if tank.quantity > 0 {
@@ -450,7 +546,7 @@ fn quantity_step(capacity: i32) -> i32 {
 /// Weapons connected to flight, by record name. Shared by launch validation
 /// and the ordnance catalog, including Cheat loading; importing a definition
 /// does not enable it. The ordnance audit requires every one to be imported.
-pub const SUPPORTED_WEAPONS: [&str; 40] = [
+pub const SUPPORTED_WEAPONS: &[&str] = &[
     "AA11.JT",
     "AA11B.JT",
     "AA12.JT",
@@ -491,7 +587,57 @@ pub const SUPPORTED_WEAPONS: [&str; 40] = [
     "SUU16.JT",
     "T12_4.JT",
     "T30_1.JT",
+    // A2G round, X1: free-fall, retarded and pack bombs, cluster bombs and
+    // the LAU-10 pod. The bomb motion, packs and pods are B1's.
+    "MK84.JT",
+    "FAB250.JT",
+    "FAB500.JT",
+    "FAB1000.JT",
+    "MK82P3.JT",
+    "MK82HD.JT",
+    "MK82P.JT",
+    "MK82AIR.JT",
+    "CBU87.JT",
+    "CBU89.JT",
+    "MK20.JT",
+    "RBK250.JT",
+    "RBK500.JT",
+    "LAU10.JT",
+    // Guided air-to-ground weapons, slice W1 (docs/spec/air-to-ground.md,
+    // "Weapon classes" 4, 5 and 12): the laser bombs, the JDAMs and the
+    // laser missiles. The AT-2 above now flies command guidance.
+    "GBU10.JT",
+    "GBU10A.JT",
+    "PAVEWAY.JT",
+    "PAVEWA3.JT",
+    "GBU28.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "AS14.JT",
+    "AS30.JT",
+    "AT12.JT",
+    // Air-to-ground missiles, slice W2 (docs/spec/air-to-ground.md, "Weapon
+    // classes" 8 to 11): the second Maverick and the SLAM (infrared), the
+    // Shrike (anti-radiation), Harpoon, Exocet and Kickback (active radar on
+    // the A-G track) and the AS 15 (supported by the A-G track).
+    "AGM65A.JT",
+    "AGM84E.JT",
+    "AGM45.JT",
+    "AGM84A.JT",
+    "AM39.JT",
+    "AS16.JT",
+    "AS15.JT",
 ];
+/// The novelty bombs, Boulder and Moose: they fly as free-fall bombs but load
+/// only with the Load Ordnance page's Cheat loading (A2G decision 16,
+/// opinionated, John 2026-10-10). They are not in [`SUPPORTED_WEAPONS`], so
+/// the ordnance audit and the normal catalog never count them.
+pub const NOVELTY_WEAPONS: &[&str] = &["~BLDR.JT", "~MOOSE.JT"];
+/// Whether `name` is a novelty store that needs Cheat loading.
+pub fn novelty(name: &str) -> bool {
+    NOVELTY_WEAPONS.contains(&name)
+}
 pub fn supported(name: &str) -> bool {
-    SUPPORTED_WEAPONS.contains(&name)
+    SUPPORTED_WEAPONS.contains(&name) || novelty(name)
 }

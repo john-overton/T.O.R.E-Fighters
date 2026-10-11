@@ -5,7 +5,7 @@
 use crate::flight;
 use tore_sim::{
     attitude::{Basis, Vector, dot},
-    sensors::{self, passive},
+    sensors::{self, GroundSymbol, passive},
 };
 use tore_world::{
     datalink::TrackSource,
@@ -29,6 +29,13 @@ pub struct Contact {
     /// Past observations reprojected through the current scope transform,
     /// oldest first. Never connected across a missing sample.
     pub trail: Vec<(f64, f64)>,
+    /// How it is drawn: an air return is the filled square; a ground page's
+    /// contact a dot, an X for SAM and AAA, or a square for an aircraft
+    /// (docs/spec/air-to-ground.md, "Symbols").
+    pub symbol: GroundSymbol,
+    /// The designation bars stand 14 pixels apart (aircraft, SAM, AAA)
+    /// rather than 10.
+    pub wide_bars: bool,
 }
 
 /// Received interference in one direction. Passive noise supplies no range.
@@ -239,6 +246,8 @@ pub fn scope(readout: &CockpitReadout, s: &flight::State, controls: sensors::Con
         acquired: !stale && acquired == Some(c.id),
         stale,
         trail,
+        symbol: GroundSymbol::Square,
+        wide_bars: true,
     };
     let mut contacts: Vec<Contact> = sensors
         .contacts
@@ -271,8 +280,19 @@ pub fn scope(readout: &CockpitReadout, s: &flight::State, controls: sensors::Con
                 acquired: false,
                 stale: true,
                 trail: vec![],
+                symbol: GroundSymbol::Square,
+                wide_bars: true,
             }),
     );
+    // The ground page's list: the A-G page, the IR page's ground objects or
+    // the HARM page's emitters.
+    contacts.extend(sensors.ground.iter().map(|g| Contact {
+        symbol: g.symbol(),
+        wide_bars: g.wide_bars(),
+        heading_rad: None,
+        ..plot(&g.contact, false, Vec::new())
+    }));
+    let ground_selected = selected.is_some_and(|id| sensors.ground_contact(id).is_some());
     let (marks, remote) = link_cues(readout, s, &basis);
     Scope {
         tick: sensors.tick,
@@ -283,6 +303,8 @@ pub fn scope(readout: &CockpitReadout, s: &flight::State, controls: sensors::Con
         operating: sensors.operating(channel),
         unavailable: if sensors.available(channel) {
             None
+        } else if channel == sensors::Channel::Harm {
+            Some("NO HARM SEEKER")
         } else {
             Some("NOT INSTALLED")
         },
@@ -299,7 +321,11 @@ pub fn scope(readout: &CockpitReadout, s: &flight::State, controls: sensors::Con
             })
             .collect(),
         selected,
-        status: sensors.selected_support.map(|support| support.label()),
+        // A ground page has no air radar track status to give.
+        status: sensors
+            .selected_support
+            .filter(|_| !ground_selected)
+            .map(|support| support.label()),
         marks,
         remote,
     }
@@ -436,6 +462,8 @@ mod tests {
             acquired: false,
             stale,
             trail: vec![],
+            symbol: tore_sim::sensors::GroundSymbol::Square,
+            wide_bars: true,
         }
     }
     #[test]

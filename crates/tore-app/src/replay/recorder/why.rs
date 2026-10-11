@@ -774,6 +774,9 @@ impl Recorder {
                 Kind::Active => "active radar",
                 Kind::Infrared => "infrared",
                 Kind::Emitter => "anti-radiation",
+                Kind::Laser => "laser",
+                Kind::Coordinate => "coordinate",
+                Kind::Command => "command",
             };
             let decoy = guide.roll.map(|roll| {
                 format!(

@@ -3,6 +3,8 @@
 // CLI/probe output stays on stdout; startup diagnostics also go to session logs.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod a10_animation;
+mod a2g_radar;
+mod a2g_run;
 mod a310_animation;
 mod a4e_animation;
 mod a7_animation;
@@ -1194,11 +1196,10 @@ impl App {
                     {
                         self.flight_ui.message("Hook unavailable for this aircraft");
                     } else if command == tore_input::PilotCommand::Toggle(tore_input::Switch::Radar)
-                        && self.instruments.channel != 0
+                        && self.radar_key_returns()
                     {
-                        // The same rule as the keyboard: returning to the radar
-                        // channel comes before spending the power switch.
-                        self.instruments.channel = 0;
+                        // The same rule as the keyboard: returning to the air
+                        // radar comes before spending the power switch.
                     } else {
                         self.input.queue(command);
                         self.announce_stability(command);
@@ -1335,6 +1336,21 @@ impl App {
             "range-target" => Command::RangeReset,
             "sight-designate" => Command::SightDesignate,
             "sight-pin" => Command::SightPinGround,
+            // The air-to-ground radar page and the Easy targeting cheat's
+            // nearest ground target (slice G1).
+            "a-g-radar" => return self.air_ground_key(),
+            "nearest-ground" => return self.nearest_ground_key(),
+            // The laser and the targeting sight's next object (slice T1).
+            "laze" => return self.laze_key(),
+            "sight-next" => return self.sight_next_key(),
+            // A2G keys (K1): bound and listed, not wired to the sim yet.
+            "fire-gun" => {
+                let label = "Fire the gun";
+                println!("{name}: not implemented yet");
+                self.flight_ui
+                    .message(format!("{label}: not implemented yet"));
+                Command::None
+            }
             "sight-zoom-in" => Command::SightZoom(1),
             "sight-zoom-out" => Command::SightZoom(-1),
             "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
@@ -1727,21 +1743,21 @@ impl App {
                 self.queue(seats::SeatCommand::RangeReset);
                 Action::None
             }
-            // Retail's Backslash designates the IR/laser target, which only
-            // the AC-130's gunsight has here; the other aircraft say so like
-            // the other retail keys whose feature is missing. The pin key
-            // and the zoom keys are the same on every aircraft but act on
-            // the gunsight alone.
-            Command::SightDesignate | Command::SightPinGround if !self.input.gunsight() => {
+            // Retail's Backslash designates the IR/laser target: the
+            // AC-130's gunsight and the targeting sight of every aircraft
+            // with a laser designator or a FLIR (slice T1). The others say
+            // they have none. The pin key and the zoom keys act on the sight
+            // alone.
+            Command::SightDesignate | Command::SightPinGround if !self.has_sight() => {
                 self.flight_ui
                     .message(if command == Command::SightDesignate {
-                        "IR/laser designate: not implemented yet"
+                        "IR/laser designate: no targeting sight"
                     } else {
-                        "Pin ground point: AC-130 gunsight only"
+                        "Pin ground point: no targeting sight"
                     });
                 Action::Click
             }
-            Command::SightZoom(_) if !self.input.gunsight() => {
+            Command::SightZoom(_) if !self.has_sight() => {
                 self.flight_ui
                     .message("Bomb camera zoom: not implemented yet");
                 Action::Click
@@ -1804,10 +1820,9 @@ impl App {
                     self.flight_ui.message("Hook unavailable for this aircraft");
                     return Action::None;
                 }
-                // Returning to the active radar channel comes first, so the
-                // radar power switch is not spent leaving the passive page.
-                if switch == tore_input::Switch::Radar && self.instruments.channel != 0 {
-                    self.instruments.channel = 0;
+                // Returning to the air radar comes first, so the radar power
+                // switch is not spent leaving the passive page or A-G.
+                if switch == tore_input::Switch::Radar && self.radar_key_returns() {
                     return Action::Click;
                 }
                 self.input.queue(tore_input::PilotCommand::Toggle(switch));
@@ -1968,15 +1983,23 @@ impl App {
                 Action::Click
             }
             Command::Mode => {
-                // Cycles the available sensor channels. Radar search and track
-                // modes follow the selected display range automatically.
-                self.instruments.cycle_channel();
-                if !net::play::current_frame(&self.world, &self.net_flight, &self.net)
+                // Cycles the available sensor channels: radar, infrared and,
+                // with an anti-radiation weapon aboard, the HARM page. Radar
+                // search and track modes follow the selected display range.
+                let sensors = net::play::current_frame(&self.world, &self.net_flight, &self.net)
                     .readout
                     .sensors
-                    .available(self.instruments.controls().channel)
-                {
+                    .clone();
+                let mut skipped_infrared = false;
+                for _ in 0..instruments::CHANNELS {
                     self.instruments.cycle_channel();
+                    let channel = self.instruments.controls().channel;
+                    if sensors.available(channel) {
+                        break;
+                    }
+                    skipped_infrared |= channel == tore_sim::sensors::Channel::Infrared;
+                }
+                if skipped_infrared {
                     self.flight_ui.message("No infrared sensor is installed.");
                 }
                 Action::Click
@@ -1998,6 +2021,122 @@ impl App {
                 Action::Click
             }
         }
+    }
+    /// R while the scope is off the air radar (the IR or HARM page, or A-G):
+    /// back to the air radar, without spending the power switch. Retail R
+    /// turns the air radar on and A-G off.
+    fn radar_key_returns(&mut self) -> bool {
+        let air_ground = net::play::current_frame(&self.world, &self.net_flight, &self.net)
+            .readout
+            .sensors
+            .air_ground;
+        if air_ground {
+            self.instruments.channel = 0;
+            self.queue(seats::SeatCommand::Combat(
+                tore_sim::combat::live::Command::ToggleAirGround,
+            ));
+            self.flight_ui.message("Air-Air Radar on");
+            return true;
+        }
+        if self.instruments.channel != 0 {
+            self.instruments.channel = 0;
+            return true;
+        }
+        false
+    }
+    /// Ctrl+R or Shift+R: the radar's air-to-ground page on or off
+    /// (docs/spec/air-to-ground.md, "The air-to-ground radar").
+    fn air_ground_key(&mut self) -> Action {
+        let (working, on) = {
+            let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+            (
+                frame
+                    .readout
+                    .sensors
+                    .available(tore_sim::sensors::Channel::Radar)
+                    && !frame.readout.damage.radar_failed,
+                !frame.readout.sensors.air_ground,
+            )
+        };
+        if !working && on {
+            self.flight_ui.message("No working radar found");
+            return Action::Click;
+        }
+        if on {
+            // The page is the radar's: the scope returns to it, and a radar
+            // switched off comes on (retail's ground radar has no switch).
+            self.instruments.channel = 0;
+            if self.net_flight.is_none() && !self.world.cockpits[OWN].flight.radar {
+                self.input
+                    .queue(tore_input::PilotCommand::Toggle(tore_input::Switch::Radar));
+            }
+        }
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::ToggleAirGround,
+        ));
+        self.flight_ui.message(if on {
+            "Air-Ground Radar on"
+        } else {
+            "Air-Ground Radar off"
+        });
+        Action::Click
+    }
+    /// Ctrl+X: the nearest hostile ground object, with the Easy targeting
+    /// cheat (or the AC-130's sight) only.
+    /// The aircraft in flight has a sight the sight keys act on: the
+    /// AC-130's gunsight, or a targeting sight (a laser designator or a
+    /// FLIR).
+    fn has_sight(&self) -> bool {
+        self.input.gunsight()
+            || net::play::current_frame(&self.world, &self.net_flight, &self.net)
+                .readout
+                .sight
+                .is_some()
+    }
+    /// Ctrl+L: the laser on or off by hand (docs/spec/air-to-ground.md, "The
+    /// laser"). Says so on an aircraft without a designator.
+    fn laze_key(&mut self) -> Action {
+        let laser = net::play::current_frame(&self.world, &self.net_flight, &self.net)
+            .readout
+            .laser;
+        let Some(laser) = laser.filter(|laser| laser.designator) else {
+            self.flight_ui.message("Laser: no laser designator");
+            return Action::Click;
+        };
+        use tore_sim::combat::laser::LaserState;
+        let on = laser.manual.unwrap_or(matches!(
+            laser.state,
+            LaserState::Lasing | LaserState::Masked
+        ));
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::ToggleLaser,
+        ));
+        self.flight_ui
+            .message(if on { "Laser off" } else { "Laser on" });
+        Action::None
+    }
+    /// `/`: the sight tracks the next visible ground object.
+    fn sight_next_key(&mut self) -> Action {
+        if !self.has_sight() {
+            self.flight_ui
+                .message("Sight: next visible object: no targeting sight");
+            return Action::Click;
+        }
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::SightNext,
+        ));
+        Action::None
+    }
+    fn nearest_ground_key(&mut self) -> Action {
+        if !self.flight_ui.cheats.easy_targeting && !self.input.gunsight() {
+            self.flight_ui
+                .message("Nearest ground target: Easy targeting cheat only");
+            return Action::Click;
+        }
+        self.queue(seats::SeatCommand::Combat(
+            tore_sim::combat::live::Command::NearestGround,
+        ));
+        Action::None
     }
     fn open_controls(&mut self, context: &'static str) {
         let mut editor = controls_editor::Editor::new(
@@ -4083,6 +4222,52 @@ impl ApplicationHandler for App {
                                 tracked,
                             )
                         });
+                        // The targeting page's camera: the sight's own, from its
+                        // sensor, or an aircraft with no sight looking at a buddy's
+                        // laser spot. The look is carried between ticks even while
+                        // the page is not showing, so it never snaps in.
+                        let targeting_form =
+                            instruments::targeting::form(&frame.readout, frame.config);
+                        let targeting_shot = if let Some(sight) = frame.readout.sight.as_ref() {
+                            let tracked = sight.mode.tracked().and_then(|_| {
+                                self.combat_view
+                                    .display_position(&self.world.combat, &frame.readout)
+                            });
+                            let alpha = if self.flight_ui.frozen() {
+                                1.
+                            } else {
+                                self.flight_clock.remainder / flight::DT
+                            };
+                            let shot = self.sight.sensor_frame(
+                                sight.sensor.eye,
+                                sight.look,
+                                frame.flight.ticks,
+                                alpha,
+                                &combat::launcher(presented),
+                                self.input.sight().1,
+                                tracked,
+                            );
+                            (targeting_form == Some(instruments::targeting::Form::Sight)).then_some(
+                                gunsight_view::TargetingShot::Sight {
+                                    frame: shot,
+                                    mount: sight.sensor.eye,
+                                    tracked: tracked.is_some(),
+                                },
+                            )
+                        } else if targeting_form == Some(instruments::targeting::Form::Buddy) {
+                            frame
+                                .readout
+                                .laser
+                                .and_then(|laser| laser.spot)
+                                .map(|spot| gunsight_view::TargetingShot::Buddy {
+                                    view: gunsight_view::buddy_view(
+                                        &combat::launcher(presented),
+                                        spot.spot.position,
+                                    ),
+                                })
+                        } else {
+                            None
+                        };
                         if self.performance.measuring() {
                             if let Some(client) = net_frame {
                                 self.performance.network_tick(client.tick);
@@ -4286,6 +4471,49 @@ impl ApplicationHandler for App {
                                                 camera
                                             }
                                             None => gunsight_view::camera(&sight_frame.view),
+                                        }
+                                    } else if page == 4
+                                        && let Some(shot) = &targeting_shot
+                                    {
+                                        match shot {
+                                            gunsight_view::TargetingShot::Sight {
+                                                frame: sight_frame,
+                                                mount,
+                                                tracked,
+                                            } => {
+                                                // As the AC-130's gunsight: a tracked
+                                                // object keeps the automatic framing,
+                                                // from the sensor's eye.
+                                                let mut from_eye = presented.clone();
+                                                from_eye.position = gunsight_view::sensor_eye(
+                                                    &combat::launcher(presented),
+                                                    *mount,
+                                                );
+                                                let framed = tracked
+                                                    .then(|| {
+                                                        self.combat_view.framed_target_camera(
+                                                            &self.world.combat,
+                                                            &frame.readout,
+                                                            &from_eye,
+                                                            &self.hornet,
+                                                            &self.world.terrain,
+                                                            &self.scenery,
+                                                        )
+                                                    })
+                                                    .flatten();
+                                                match framed {
+                                                    Some(camera) => {
+                                                        self.sight.fitted_zoom = camera.zoom;
+                                                        camera
+                                                    }
+                                                    None => {
+                                                        gunsight_view::camera(&sight_frame.view)
+                                                    }
+                                                }
+                                            }
+                                            gunsight_view::TargetingShot::Buddy { view } => {
+                                                gunsight_view::camera(view)
+                                            }
                                         }
                                     } else if page == 4 {
                                         let Some(camera) = self.combat_view.framed_target_camera(
@@ -4516,6 +4744,58 @@ impl ApplicationHandler for App {
                                             .display_position(&self.world.combat, &frame.readout)
                                     }),
                             );
+                        }
+                        if let (Some(page), Some(shot)) = (
+                            self.instruments
+                                .combat
+                                .as_mut()
+                                .and_then(|c| c.targeting.as_mut()),
+                            &targeting_shot,
+                        ) {
+                            // The lasing pilot's callsign names a buddy's spot, in a
+                            // networked game.
+                            let owner = frame
+                                .readout
+                                .laser
+                                .and_then(|laser| laser.spot.filter(|s| !s.own).or(laser.buddy))
+                                .and_then(|spot| {
+                                    self.net_flight
+                                        .as_ref()
+                                        .and(self.net.as_ref())
+                                        .and_then(|net| net.client.lobby())
+                                        .and_then(|lobby| {
+                                            lobby
+                                                .players
+                                                .iter()
+                                                .find(|player| player.slot == Some(spot.spot.owner))
+                                                .map(|player| {
+                                                    crate::replay::panels::ascii(&player.callsign)
+                                                })
+                                        })
+                                });
+                            match shot {
+                                gunsight_view::TargetingShot::Sight {
+                                    frame: sight_frame,
+                                    tracked,
+                                    ..
+                                } => page.present(
+                                    sight_frame.look,
+                                    self.input.sight().1,
+                                    sight_frame.view,
+                                    tracked
+                                        .then(|| {
+                                            self.combat_view.display_position(
+                                                &self.world.combat,
+                                                &frame.readout,
+                                            )
+                                        })
+                                        .flatten(),
+                                    owner,
+                                ),
+                                gunsight_view::TargetingShot::Buddy { view } => {
+                                    page.present([0.; 2], 3, *view, None, owner)
+                                }
+                            }
                         }
                         if let (Some(readout), Some(wings)) = (
                             self.instruments.combat.as_mut(),
@@ -8337,7 +8617,8 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
     flight.yaw = 0.;
     let mut ground = 0.;
     match state {
-        "forward" => {
+        "forward" | "laser-lsr" | "laser-ready" | "laser-mask" | "laser-bud" | "laser-both"
+        | "laser-edge" => {
             flight.start_airborne([0.; 3]);
         }
         "hover" => {
@@ -8366,7 +8647,7 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
         }
         other => {
             return Err(format!(
-                "unknown HUD snapshot state {other}; use forward, hover, converting or low"
+                "unknown HUD snapshot state {other}; use forward, hover, converting, low, laser-lsr, laser-ready, laser-mask, laser-bud, laser-both or laser-edge"
             )
             .into());
         }
@@ -8393,6 +8674,18 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
         None,
         (flight.bank, 1.),
     );
+    // The laser's box and text over the HUD (docs/spec/air-to-ground.md).
+    if let Some(laser) = weapon_hud::laser::preview(state, &flight) {
+        weapon_hud::laser::draw(
+            &mut pixels,
+            &flight,
+            Some(&laser),
+            0,
+            &hornet.hud_font,
+            color,
+            1.,
+        );
+    }
     // Over a plain sky and ground split at the horizon of the camera.
     let horizon = hud::project(flight.pitch, flight.bank, 0., 0., 1.)
         .map_or(240., |(_, y)| y)
@@ -8585,8 +8878,24 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         airfield_sheets::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--a2g-run") {
+        a2g_run::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--hud-a2g-preview") {
+        a2g_run::preview::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--hud-guided-preview") {
+        a2g_run::guided_preview::run()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--surface-objective") {
         surface_objective::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--a2g-radar") {
+        a2g_radar::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-parked") {
@@ -9478,10 +9787,13 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--target-cam-preview" => {
                 let mode = args.next().ok_or("--target-cam-preview needs a mode")?;
-                if instruments::gunsight::preview(&mode).is_none() {
+                if instruments::gunsight::preview(&mode).is_none()
+                    && instruments::targeting::preview(&mode).is_none()
+                {
                     return Err(format!(
-                        "--target-cam-preview modes: {}",
-                        instruments::gunsight::PREVIEW_MODES
+                        "--target-cam-preview modes: {}. Targeting page: {}",
+                        instruments::gunsight::PREVIEW_MODES,
+                        instruments::targeting::PREVIEW_MODES
                     )
                     .into());
                 }
@@ -9697,7 +10009,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --gun-flash-preview OUT_DIR (first argument) renders the AC-130 muzzle flashes, gun light, blast smoke and 105 mm tracer offscreen by day, dusk and night, outside and through the gunsight camera (TORE_PREVIEW_THEATER picks the theater). --blast-preview OUT_DIR (first argument) renders a large ground explosion's shockwave ring through its two seconds, and a water explosion's, offscreen. --surface-preview OUT_DIR (first argument) writes contact sheets of the surface-unit shapes (ships, launchers, soldiers) and their damaged shapes from four sides, read from the retail archives without opening a window (add destroyed for each class beside its destroyed look). --surface-scene OUT_DIR THEATER STEM renders a ground target in game offscreen after --seconds, with --kill, --rails and --focus (docs/DEVELOPMENT.md). --sight-preview heading,elevation,ticks holds the AC-130 sight at a body-relative look and runs the sim that many ticks first, so --capture-flight shows the aim-point box and diamond (add --combat-command sight-pin for a pinned point). --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display; --validate-ordnance checks source station coverage, weapon/tank availability and saved loads for every reviewed aircraft.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --gunsight-probe pin-orbit|fire-no-target|track-out-of-arc (with --aircraft ac130) runs a scripted AC-130 gunsight check on flat ground and prints PASS or FAIL lines, and --gunsight-dump PATH writes the orbit's gun train as CSV; --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target|sort orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member (with its radar flag) and each lock taken or dropped in the flight data link's picture; --probe-blind-wing takes the sensors from the player's wingmen, so only the data link can show them an enemy; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|75|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --gun-flash-preview OUT_DIR (first argument) renders the AC-130 muzzle flashes, gun light, blast smoke and 105 mm tracer offscreen by day, dusk and night, outside and through the gunsight camera (TORE_PREVIEW_THEATER picks the theater). --blast-preview OUT_DIR (first argument) renders a large ground explosion's shockwave ring through its two seconds, and a water explosion's, offscreen. --surface-preview OUT_DIR (first argument) writes contact sheets of the surface-unit shapes (ships, launchers, soldiers) and their damaged shapes from four sides, read from the retail archives without opening a window (add destroyed for each class beside its destroyed look). --surface-scene OUT_DIR THEATER STEM renders a ground target in game offscreen after --seconds, with --kill, --rails and --focus (docs/DEVELOPMENT.md). --hud-a2g-preview OUT_DIR (first argument) writes review frames and sheets of the HUD's bomb and rocket sights (CCIP, the level T, the rocket pipper, LOW and FRAG) without a window. --hud-guided-preview OUT_DIR (first argument) writes review frames of the guided weapons' release range scale (JDAM, laser bomb and laser missile) without a window. --sight-preview heading,elevation,ticks holds the AC-130 sight at a body-relative look and runs the sim that many ticks first, so --capture-flight shows the aim-point box and diamond (add --combat-command sight-pin for a pinned point). --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display; --validate-ordnance checks source station coverage, weapon/tank availability and saved loads for every reviewed aircraft.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --gunsight-probe pin-orbit|fire-no-target|track-out-of-arc (with --aircraft ac130) runs a scripted AC-130 gunsight check on flat ground and prints PASS or FAIL lines, and --gunsight-dump PATH writes the orbit's gun train as CSV; --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target|sort orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member (with its radar flag) and each lock taken or dropped in the flight data link's picture; --probe-blind-wing takes the sensors from the player's wingmen, so only the data link can show them an enemy; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|75|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own. --list also lists the hosted game on the Internet Lobby, on the master --master HOST[:PORT] names (default the public one). --find-games SECONDS [--port N] looks for games on the local network for that long, prints each one found (address, build, name, mission, players, phase, King, password, full) and exits. --browse SECONDS [--master HOST[:PORT]] lists the games on the Internet Lobby for that long, with each one's mission and players, and exits. A hosting game asks the router to forward its port (UPnP, NAT-PMP or PCP) while Options > Forward the game port on my router is on, and removes it when hosting stops; --map-port SECONDS [--port N] does the same by itself for that long and exits, to check that the router answers."
@@ -9713,7 +10025,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission (which refuses a short strip or an enemy airfield). The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport. --airport-allegiance lists every base theater's ground-start airports for Blue and for Redfor and checks that none is the other side's.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it. --target-cam-preview MODE (with --panel-snapshot, default page 4) draws the AC-130 gunsight page from a synthetic readout on a synthetic scene: free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal, gimbal-text, gimbal-bitmap, zoom1..zoom6.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, ground-start-auto, airports, ground-target, ground-target-last, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it. --target-cam-preview MODE (with --panel-snapshot, default page 4) draws the AC-130 gunsight page from a synthetic readout on a synthetic scene: free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal, gimbal-text, gimbal-bitmap, zoom1..zoom6; the targeting page of a laser or FLIR aircraft (lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked). --hud-snapshot PATH with --hud-snapshot-state laser-lsr, laser-bud, laser-both, laser-ready, laser-mask or laser-edge draws the HUD laser box and text.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, ground-start-auto, airports, ground-target, ground-target-last, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -11134,18 +11446,31 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if let Some(mode) = &target_cam_preview {
             // The AC-130 gunsight page from a synthetic readout on a synthetic
             // scene, drawn by the same CPU raster as the flight screen.
-            let preview =
-                instruments::gunsight::preview(mode).ok_or("unknown --target-cam-preview mode")?;
-            panels.camera_target = preview.target.as_ref().map(|(target, _)| target.id);
-            panels.cameras.insert(4, preview.scene);
-            panels.sight_bloom = preview.bloom;
-            let (target, link) = preview.target.unzip();
-            panels.combat = Some(instruments::CombatReadout {
-                gunsight: Some(preview.page),
-                target,
-                target_link: link.unwrap_or_default(),
-                ..Default::default()
-            });
+            if let Some(preview) = instruments::targeting::preview(mode) {
+                // The targeting page of a laser or FLIR aircraft, or its buddy form.
+                panels.camera_target = preview.target.as_ref().map(|(target, _)| target.id);
+                panels.cameras.insert(4, preview.scene);
+                let (target, link) = preview.target.unzip();
+                panels.combat = Some(instruments::CombatReadout {
+                    targeting: Some(preview.page),
+                    target,
+                    target_link: link.unwrap_or_default(),
+                    ..Default::default()
+                });
+            } else {
+                let preview = instruments::gunsight::preview(mode)
+                    .ok_or("unknown --target-cam-preview mode")?;
+                panels.camera_target = preview.target.as_ref().map(|(target, _)| target.id);
+                panels.cameras.insert(4, preview.scene);
+                panels.sight_bloom = preview.bloom;
+                let (target, link) = preview.target.unzip();
+                panels.combat = Some(instruments::CombatReadout {
+                    gunsight: Some(preview.page),
+                    target,
+                    target_link: link.unwrap_or_default(),
+                    ..Default::default()
+                });
+            }
         }
         let r = panels.page(
             instrument_page.unwrap_or(if target_cam_preview.is_some() { 4 } else { 7 }),

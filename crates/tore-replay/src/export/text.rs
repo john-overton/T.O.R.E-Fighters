@@ -154,6 +154,15 @@ pub(crate) fn fields_text(event: &Event) -> String {
         .join(", ")
 }
 
+/// "Enemy 1-2's", and "your" for the player's `You`.
+fn possessive(name: &str) -> String {
+    if name == "You" {
+        "your".to_owned()
+    } else {
+        format!("{name}'s")
+    }
+}
+
 fn opt(event: &Event, name: &str) -> Option<String> {
     event.get(name).map(value_text).filter(|t| !t.is_empty())
 }
@@ -387,6 +396,85 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
                 _ => line + &because(event),
             }
         }
+        kind::WEAPON_RELEASE => {
+            let count = event.num(field::COUNT).unwrap_or(1.);
+            let rounds = if count > 1. {
+                format!("{} x ", num(count, 0))
+            } else {
+                String::new()
+            };
+            let mut line = format!(
+                "{s} released {rounds}{}",
+                weapon.unwrap_or_else(|| "a weapon".into())
+            );
+            if let Some(station) = opt(event, field::STATION) {
+                line.push_str(&format!(" from station {station}"));
+            }
+            line.push_str(&to("at"));
+            if let Some(range) = event.num(field::RANGE_FT) {
+                line.push_str(&format!(" at {} nm", nm(range)));
+            }
+            if let Some(how) = opt(event, field::DELIVERY) {
+                line.push_str(&format!(" ({how}"));
+                if let Some(salvo) = event.num(field::SALVO) {
+                    line.push_str(&format!(", rocket {} of the salvo", num(salvo, 0)));
+                }
+                line.push(')');
+            }
+            if let Some(left) = opt(event, field::LEFT) {
+                line.push_str(&format!(", {left} left"));
+            }
+            line
+        }
+        kind::WEAPON_DUD => format!("{shot} from {s} was a dud{}", because(event)),
+        kind::WEAPON_CLUSTER => format!("{shot} from {s} burst and scattered its submunitions"),
+        kind::WEAPON_GUIDED => {
+            let mode = opt(event, field::MODE).unwrap_or_else(|| "?".into());
+            let follows = event
+                .id(field::SPOT_OWNER)
+                .map(|id| {
+                    if event.flag(field::OWN) == Some(true) {
+                        " on the shooter's own laser".to_owned()
+                    } else {
+                        format!(" on {} laser", possessive(&names.who(id)))
+                    }
+                })
+                .unwrap_or_default();
+            if event.flag(field::RELEASED) == Some(true) {
+                format!("{shot} from {s} left {mode}{follows}{}", because(event))
+            } else {
+                format!(
+                    "{shot} from {s} guidance {} -> {mode}{because}",
+                    opt(event, field::FROM).unwrap_or_else(|| "?".into()),
+                    because = because(event)
+                )
+            }
+        }
+        kind::PLAYER_LASER => {
+            let state = opt(event, field::STATE).unwrap_or_else(|| "?".into());
+            let mask = opt(event, field::MASK)
+                .map(|m| format!(" ({m})"))
+                .unwrap_or_default();
+            let on = event
+                .object
+                .map(|id| format!(" on {}", names.who(id)))
+                .unwrap_or_default();
+            format!("{s} laser {state}{mask}{on}")
+        }
+        kind::PLAYER_DESIGNATE => {
+            let channel = opt(event, field::CHANNEL).unwrap_or_else(|| "?".into());
+            match (event.object, channel.as_str()) {
+                (_, "cleared") => format!(
+                    "{s} gave up its ground designation{}",
+                    event
+                        .id(field::FROM)
+                        .map(|id| format!(" of {}", names.who(id)))
+                        .unwrap_or_default()
+                ),
+                (Some(id), _) => format!("{s} designated {} ({channel})", names.who(id)),
+                (None, _) => format!("{s} pinned a ground point"),
+            }
+        }
         kind::COMBAT_AIRBURST => format!("{shot} from {s} burst{}", to("near")),
         kind::COMBAT_GROUND_IMPACT => format!("{shot} from {s} hit the ground"),
         kind::COMBAT_COUNTERMEASURE => {
@@ -567,7 +655,7 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
                 (Some(true), None) => ", burning".into(),
                 _ => String::new(),
             };
-            format!("{s} was destroyed{}{fire}", to("by"))
+            format!("{s} was destroyed{}{fire}{}", to("by"), because(event))
         }
         kind::PLAYER_COMMAND => format!(
             "{s} command {}{}",

@@ -158,6 +158,11 @@ pub struct StaticObject {
     pub category: u16,
     pub radar_signature: f64,
     pub infrared_signature: f64,
+    /// The type's OBJECT `flags` (0 when unknown): bit 0x20 lets a scope page
+    /// list it (docs/formats/radar.md, "A-G page").
+    pub type_flags: u32,
+    /// The type's `maxVisDist`, raw (256 ft units; 0 when unknown).
+    pub max_visible: i32,
     pub runway: bool,
 }
 
@@ -960,6 +965,8 @@ mod tests {
                 category: 0x100,
                 radar_signature: 100.,
                 infrared_signature: 100.,
+                type_flags: 0,
+                max_visible: 0,
                 runway: true,
             }],
             runways: vec![Runway {

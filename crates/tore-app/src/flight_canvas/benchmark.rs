@@ -171,6 +171,8 @@ pub(super) fn fixture(masked_corners: bool) -> (Airframe, State, Instruments) {
                             )
                         })
                         .collect(),
+                    symbol: tore_sim::sensors::GroundSymbol::Square,
+                    wide_bars: true,
                 })
                 .collect(),
             strobes: vec![scope::Strobe {

@@ -158,13 +158,14 @@ player's ownship, and the first aircraft is the one watched.
 
 | Family | Events |
 | --- | --- |
-| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one); `weapon.seeker_active`, `weapon.pitbull`; `weapon.track_lost` once per shot, with the range and why (decoyed, the seeker lost it, the target is gone, or it could not hold the target); `weapon.decoyed` for each missile that followed chaff or a flare, an AI aircraft's or the player's own, with the roll, its threshold, and the missile's susceptibility and the device's effectiveness behind it, and the `number` of the chaff cartridge or flare that fooled it, the same number as its `combat.countermeasure` entry (a roll that failed shows in the missile's guidance tree; recordings made before 2026-10-10 have no number); `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes, with why (the decoy and its roll, the jammer, or a track lost earlier) and, for a guided miss, how close it came; one per shot, except that a missile recorded as spoofed which flies on and damages an aircraft gets a second outcome, a hit with `replaces` spoofed, and the later one stands, as it does in the debrief; that hit's reason names the device, as in `it was decoyed by chaff #7 from Enemy 2-1 at 0:13.5 but flew on and struck anyway` (`#7` is the device's number; a recording without numbers says `chaff` alone) |
+| Weapons | `weapon.launch` with range, aspect, off-boresight angle, closure, heights and speeds at release (a gun round or rocket, which has no target of its own, is aimed at the shooter's current target: the AI's, or the player's designated one; a bomb, rocket or air-to-ground missile also says `surface` and, for a ground target, the range to it, and a HARM or Maverick says `boresight` or `cued` in `mode`); `weapon.seeker_active`, `weapon.pitbull`; `weapon.track_lost` once per shot, with the range and why (decoyed, the seeker lost it, the target is gone, or it could not hold the target); `weapon.decoyed` for each missile that followed chaff or a flare, an AI aircraft's or the player's own, with the roll, its threshold, and the missile's susceptibility and the device's effectiveness behind it, and the `number` of the chaff cartridge or flare that fooled it, the same number as its `combat.countermeasure` entry (a roll that failed shows in the missile's guidance tree; recordings made before 2026-10-10 have no number); `weapon.outcome` (hit, missed, spoofed, jammed) for every shot the debrief ledger closes, with why (the decoy and its roll, the jammer, or a track lost earlier) and, for a guided miss, how close it came; one per shot, except that a missile recorded as spoofed which flies on and damages an aircraft gets a second outcome, a hit with `replaces` spoofed, and the later one stands, as it does in the debrief; that hit's reason names the device, as in `it was decoyed by chaff #7 from Enemy 2-1 at 0:13.5 but flew on and struck anyway` (`#7` is the device's number; a recording without numbers says `chaff` alone) |
 | Combat | `combat.hit` from each aircraft's hit points, with the attacker, damage, hit points after and the region hit (plus damaged systems for the player); `combat.destroyed` with the killer; `combat.ground_impact`; `combat.countermeasure` for every chaff cartridge and flare that leaves an aircraft, the player's and the AI's, with how many of that kind it has left and the aircraft's exact position, velocity and attitude as it left, which the viewer flies the device again from ([below](#chaff-and-flares)); `combat.countermeasures_cleared` when a range reset removes them all |
 | Aircraft | `aircraft.crashed` (flying into the ground or a structure, or a destroyed aircraft's wreck coming down or exploding), `aircraft.ejected` with the hazard an AI pilot left for or your own ejection, `aircraft.pilot_killed`, `aircraft.took_off`, `aircraft.landed`, `aircraft.flameout`, `aircraft.fuel_out` |
 | Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off; `flight.effect` when a flight-model effect starts or stops, with what it applied and why ([below](#flight-model-effects)); `flight.g_limit` when the stick reaches its stop, with the G the envelope offers, the limit applied, the G delivered and what set the limit; `flight.structural_failure` with the section, the G and why |
 | AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
 | Data link | `datalink.member`, `datalink.lock`, `datalink.unlock`, `datalink.assign`, `datalink.clear`, `datalink.acknowledge` and `datalink.sort_warning`: what changed in each flight's shared picture, from the data link's journal ([below](#data-link-events)) |
+| Air to ground | The bombs, rockets and guided weapons of the [air-to-ground round](spec/air-to-ground.md), in [their own section](#air-to-ground-events): `weapon.release` for each trigger call that lets go of bombs or rockets (a pack is one entry listing its rounds in order), `weapon.dud`, `weapon.cluster`, `weapon.guided` for a laser or GPS weapon's release and each change of guidance, `player.laser` and `player.designate`. A bomb's fall is the projectile's ordinary track, one pose a tick |
 | Surface units (format 3) | The surface world of a [ground target mission](spec/surface-defenses.md): `surface.burst` for each gun burst or missile salvo of a unit, `surface.phase` for the engagement it is in, `surface.rearm` and `surface.refill` when a supply truck rearms a launcher or gives a gun a magazine (with what it holds after), `surface.radar` when a radar comes on, goes off or is shut down by an anti-radiation missile, and `surface.wreck` with the unit's fire (its width, sized by its hit points). The rounds and missiles are ordinary `weapon.launch` and `weapon.outcome` events owned by the unit's id, and an aircraft's loss to one says `it was shot down by an SA-6` |
 | Audio | `audio.effect` (impacts, explosions, and each chaff cartridge's and flare's release sound, marked `own` when the player's own aircraft released it), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
 | Player and system | `player.command` (combat commands and trigger releases), `player.view_target` (the target your target views follow, from the first frame and again whenever it changes, including when the sensors drop it and the views hold it by sight within visual range, and when it goes to none), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
@@ -388,6 +389,61 @@ every one in words; the summary has a **Data link** section (below); the
 Comms panel lists them under the **Link** chip, except `datalink.member`, which
 only the exports count; and `--recording-diff` compares them as a category.
 A recording from before them has none and reads as it always did.
+
+### Air-to-ground events
+
+The air-to-ground round (slice RA, 2026-10-11) adds events and one weapon
+class; the format stays 3 for a recording with surface content and 2 for one
+without (decision 19 of the plan: a replay draws no HUD, so no new per-tick
+track is needed). Everything is derived from state the tick already computed
+and draws no random number, so recording changes nothing the mission does. The
+names are in `tore_replay::vocab`; the layout is an agent decision.
+
+| Event | Who | What |
+| --- | --- | --- |
+| `weapon.release` | the aircraft, then the ground target it had designated | One entry for each trigger call that lets go of bombs or rockets: `class` (bomb or rocket), `weapon`, `station`, `count` (the rounds of this call), `projectile` (the first) and `projectiles` (all of them in pack order, so a round's place in the list is its pack index), `delivery` (`ccip` or `level` for a bomb, by the sight in use; `rocket`; `guided` for a laser or GPS bomb; `unguided` for an aircraft with no bomb sight), `left` (rounds the station holds after, for a flown aircraft), `range_ft` to the designated target and, for a rocket, `salvo`: its number in the run of rockets fired from that station with gaps under a second. Each round is also an ordinary `weapon.launch`. |
+| `weapon.dud` | the shooter | A bomb that landed before its fuze armed (the [dud rule](spec/air-to-ground.md#warnings)): `projectile`, `weapon`, where it landed, `arm_s`, `flown_s` and `reason`. Its `weapon.outcome` says missed and why. |
+| `weapon.cluster` | the shooter | A cluster bomb burst on the ground: `projectile`, `weapon`, where, and the burst's `explosion` type. The submunition flashes are drawn from that burst's explosion, so a replay shows what the flight showed. |
+| `weapon.guided` | the shooter, then the object an AT-2 or JDAM follows | A laser weapon, JDAM or AT-2 at its release (`released` true) and at each change of mode: `mode` is `waiting` (a laser weapon released with no spot, which may lock one), `guiding` or `blind` (guidance lost for good, or never had), with `from`, `guidance` (`laser`, `coordinate` or `command`), `spot_owner` and `own` (a laser weapon on its own aircraft's spot or a buddy's), the JDAM's stored point as `x_ft`, `y_ft`, `z_ft` with `stored` true, and a `reason` in words. Event kinds of the same family as the `weapon.guidance` display tree, but a separate log of what changed. |
+| `player.laser` | the lasing aircraft, then the object under the spot | An aircraft's laser designator changed state or mask: `state` (`ready`, `lasing`, `masked`, `off`), `how` (automatic or by hand), `mask` (range, gimbal or terrain), `range_ft`, and the spot's position while it lases. |
+| `player.designate` | the aircraft, then the ground object | A flown aircraft designated a ground object or pinned a ground point, or gave one up: `channel` (`a-g radar`, `infrared`, `harm page`, `sight`, `visual`, `pin` or `cleared`), `from` (the object before) and, for a pin, its position. An air target never makes an entry. |
+
+```mermaid
+stateDiagram-v2
+    [*] --> guiding: released with a usable spot or point
+    [*] --> waiting: laser weapon released with no spot
+    [*] --> blind: every spot out of reach, or no point in the release zone
+    waiting --> guiding: locks a spot inside its nose cone
+    guiding --> blind: the spot owner's laser stops, the spot leaves the cone, or the launcher or target is lost
+    blind --> [*]
+    guiding --> [*]: impact
+```
+
+The words follow the weapon to its end. A guided weapon's `weapon.outcome`
+says what it was following (`it was guided on Enemy 1-2's laser`, `it flew to
+the point stored at its release`, `it went blind when your laser went off`),
+and the loss it caused names the weapon and its guidance, in both
+`surface.wreck` and `combat.destroyed`: `T-80 #2 was destroyed by You because it
+was hit by a GBU-10 guided on Enemy 1-2's laser`. When the killing round was
+an unguided bomb, a rocket or an air-to-ground missile, the loss still gets
+its `weapon`, `projectile` and `reason` (`it was hit by an AGM-88`). Names come
+from the roster, so a buddy's spot reads as the buddy's label and the player's
+own as `your laser`.
+
+Weapon classes are `bomb`, `rocket`, `missile`, `gun` and `other`. Since this
+slice an unguided rocket pod (several rockets, no seeker) is a **rocket**,
+where recordings from before were `other`; a guided glide bomb (the laser
+bombs and the JDAMs) is a **bomb**, where it was a missile. The Tacview file
+types them `Weapon+Rocket` and `Weapon+Bomb`, and a replay of an older
+recording reads them as it recorded them.
+
+What reads them: the debug log carries every event; the summary lists the
+releases, duds, cluster bursts and guided modes among its key events; Tacview
+shows all of them as `Debug` events; `--recording-diff` compares them as part
+of the event categories. The battery scenario `replay-a2g` records a bomb
+pack, a dud, a rocket salvo, a cluster bomb, a laser bomb on its own spot, one
+that loses its laser, a JDAM and two HARM launches, replays each tick for
+tick against the picture the run drew, and checks the events.
 
 ## Network flights
 
@@ -690,6 +746,10 @@ beyond them.
     `surface.refill`, `surface.radar` and `surface.wreck` (see
     [the vocabulary](../crates/tore-replay/src/vocab.rs)). Unknown event kinds
     were always allowed, so an older reader would skip them too.
+- The air-to-ground round (slice RA) adds events and a weapon class and **no
+  format change**: a recording is still format 3 with surface content and
+  format 2 without, and both versions open unchanged. See
+  [Air-to-ground events](#air-to-ground-events).
 - Format 2 adds four powered-lift actuator positions, six signed gun mount
   coordinates and discrete linked gun membership to each aircraft record. Nozzle pitch, nacelle conversion and collective use the existing
   0-to-1 device precision; nozzle yaw uses the signed precision. Playback
@@ -1904,6 +1964,7 @@ them again.
 | `--convert-capture CAPTURE [--out REPLAY]` | Turns a networked flight's capture into a replay, beside the capture (or at REPLAY, which must not exist), one for each flight in it; needs the import the capture was made with. See [Network flights](#network-flights) |
 | `--watch-replay FILE` | Opens the [viewer](#viewer) on a recording (this one needs the game media and a display); with `--capture-replay OUT.ppm --replay-tick N` it writes one frame and exits, see [captures](#captures-and-timing) |
 | `--surface-objective THEATER STEM --record PATH [--verify-render] [--run-on] [--vulnerable]` | The ground target objective run ([development](DEVELOPMENT.md)) recorded as a format 3 file, with the same `--verify-render` check: its last line reads `surface-objective: verify-render: PASS ticks=... missing=0 differing=0`. `--run-on` keeps it running to `--seconds` after every target is down (trucks rearm), `--vulnerable` lets the defenses shoot the player down. The `replay-surface` battery scenario runs it |
+| `--a2g-run ... --record PATH [--verify-render]` | The air-to-ground driver ([development](DEVELOPMENT.md)) recorded the same way, with the same check: its last line reads `a2g-run: verify-render: PASS ticks=... missing=0 differing=0`. The `replay-a2g` battery scenario runs it |
 | `--ai-probe-ticks N --record-mission PATH [--verify-render]` | Records a headless AI probe to PATH (never overwritten) without changing its output. `--verify-render` then rebuilds every tick from the file, compares it with the picture the probe drew, and prints one line: `AI probe verify-render: PASS ticks=... missing=0 differing=0 device_ticks=...`, or the first difference; `device_ticks` counts the ticks with chaff or flares in the air, each checked against the devices the probe flew |
 
 For example, after John says "look at the replay from 3:40 pm" (15:40 UTC

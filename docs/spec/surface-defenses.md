@@ -847,7 +847,10 @@ emitter-homing missile (AGM-88, AGM-45) is launched at an emitter and is within
 10 nm, the emitter rolls its skill's shutdown chance once; on success the radar
 goes off for 30 s (supported missiles it guides lose support; a battery goes
 Blind for that time). Manual p. 120: "A threat's only defense ... is to turn off
-the radar."
+the radar." A HARM that has already locked the radar keeps homing on it after
+the shutdown, on angles only (retail data; slice W2,
+[air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)), so the
+shutdown blinds the battery but does not save its radar from that missile.
 
 **What the player sees and hears:**
 

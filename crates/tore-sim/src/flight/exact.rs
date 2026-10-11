@@ -302,6 +302,7 @@ exact_enum!(Channel {
     Radar = 0,
     Infrared = 1,
     Visual = 2,
+    Harm = 3,
 });
 exact_struct!(Controls {
     channel,

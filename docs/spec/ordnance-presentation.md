@@ -56,6 +56,137 @@ rocker keeps its 500 lb step. Unload All and toggling Cheat clear both kinds of
 equipment. Rules, persistence and geometry limits live in the
 [tank specification](external-fuel-tanks.md).
 
+## Air-to-ground stores
+
+The air-to-ground round (plan decisions 13 and 16) put the free-fall, retarded,
+pack and cluster bombs and the LAU-10 rocket pod on the Load Ordnance page.
+The flight behaviour of each is in [air-to-ground](air-to-ground.md#bomb-motion):
+bombs fall on the retail bomb equation with its plus or minus 3 degree scatter,
+a pack releases all its bombs in one press, a rocket pod holds its real rocket
+count. Provenance: the records are retail data; listing them is spec-derived
+from the catalog rule above (a record is listed once its flight behaviour
+works), and the Cheat-only rule and the bomblet flashes below are opinionated.
+
+| Added to the supported list | Records |
+| --- | --- |
+| Free-fall bombs | MK84, FAB250, FAB500, FAB1000, MK82P3 (3-pack) |
+| Retarded bombs and packs | MK82HD (Snakeye), MK82P (6-pack), MK82AIR (7-pack) |
+| Cluster bombs | CBU87, CBU89 (labelled CBU-97), MK20 (Rockeye II), RBK250, RBK500 |
+| Rocket pod | LAU10 |
+
+With the 40 records supported before, the list holds 54. MK82 itself was
+already listed. Rows carry no change to any aircraft's default stations: each
+aircraft's flyable defaults are still its reviewed set, so these stores load
+only through the page, a saved loadout or Cheat. The other air-to-ground
+records (guided bombs, JDAMs and the remaining missiles) join
+the list in the slices that make them work.
+
+### Laser designator pods
+
+The Pave Spike (`PAVESPK`) and Pave Knife (`PAVEKNF`) laser pods load on any
+pod station, the retail equipment rule T1 implemented (decision 7;
+[air-to-ground](air-to-ground.md)). The page lists them in the air-to-surface
+catalog after the tanks and before the weapons, each as a card with the
+original `$PAVESPK` or `$PAVEKNF` thumbnail, the pod's name, its weight and
+"laser" in the seeker corner. Normal loading lists a pod when some station of the
+aircraft can hang it; Cheat loading lists both.
+
+A pod takes the station's place: loading one leaves the station's weapon
+unloaded (and a tank on the same mount off), and a weapon or tank taking the
+station back removes the pod. An aircraft carries one pod: loading a second, or
+dragging the loaded one to another pod station, moves it. The station shows the
+pod card and "1 loaded (max 1)"; a click on it adds nothing, a right-click or a
+drag onto the catalog takes it off, and Unload All and the Cheat toggle take it
+off. A pod hung or taken off plays the weapon cue (opinionated, agent). The
+lobby's page does not offer pods: a multiplayer loadout carries weapons and
+tanks until the multiplayer slice carries pods. The saved loadout names the pod's
+SEE record on the station's row with none of the station's weapon, so the
+mission the page builds, a saved mission text and the checks of
+the loadout spec all keep it (agent decision). The ordnance audit loads each pod on every
+station that takes it and restores it through the saved mission.
+
+### Novelty bombs are Cheat only
+
+Boulder (`~BLDR`) and Moose (`~MOOSE`) load on the same stations as ordinary
+bombs and fly as free-fall bombs. John decided on 2026-10-10 that they are
+Cheat loading only (decision 16, confirmed; opinionated). The two other
+novelty records, Moth Balls (`~MOTHB`) and Vomit (`~VOMIT`), stay hidden:
+nothing loads them.
+
+```mermaid
+flowchart TD
+    R[Weapon record] --> N{Boulder or Moose?}
+    N -->|no| S{In the supported list?}
+    S -->|no| H[Hidden in both modes]
+    S -->|yes| W{Cheat loading on?}
+    W -->|no| F[Listed if a station of the aircraft takes it]
+    W -->|yes| A[Listed whatever the aircraft]
+    N -->|yes| C{Cheat loading on?}
+    C -->|no| X[Hidden; no station gives it capacity; a loadout carrying it is refused]
+    C -->|yes| A
+```
+
+The rule lives in the loadout, not only on the page: without Cheat loading no
+station has capacity for either record, selecting one is refused, and a loadout
+that carries one (a saved mission, a lobby loadout) fails validation with
+"This store is available with Cheat loading only." Turning Cheat loading off
+unloads every station as it already does, so a novelty bomb cannot survive it.
+The page's catalog lists the two records only in the Cheat catalog, on every
+aircraft, with the other supported records. Novelty records are not in the
+supported list the ordnance audit counts; the audit checks them separately
+(`--validate-ordnance`: every aircraft refuses them without Cheat loading and
+the Cheat catalog lists them).
+
+### Card seeker label
+
+A catalog card's second line shows the weapon's weight and a seeker word. The
+word follows the retail label list: "unguided" for a record without the guided
+flag (every free-fall, retarded, pack and cluster bomb and the rocket pods);
+otherwise the seeker signature, 0 "optical", 1 "laser", 2 "IR", 3 "SARH" with
+the semi-active flag or "active rdr", 4 "passive rdr" (retail data,
+[missile formats](../formats/missiles.md)). Signature 0 guided records are the
+JDAMs and the AT-2, so all of them read "optical". The AT-2 read "unguided" while
+it flew unguided; it reads "optical" from this round on, and the card
+describes the record, not today's flight model.
+
+### Cluster bomb flashes
+
+A cluster bomb does its retail damage: a wide splash, 2,200, 2,500, 1,600,
+1,500 and 2,500 ft for CBU-87, CBU-97, Mk 20, RBK-250 and RBK-500, falling in a
+straight line from the record's damage at the burst to nothing at the edge
+(70 percent of it for a ground burst), no crater. The retail game draws the
+burst as one small flash, and in a one-machine session about ten bursts in
+eleven as nothing at all (the 0x800000 flag; [weapon formats](../formats/weapons.md#cluster-flag-0x800000)).
+The remake adds a presentation-only scatter of bomblet flashes so a cluster
+bomb looks like one (opinionated, agent, decision 13). The flashes do no
+damage, add nothing to the simulation, a checkpoint, the wire or a replay, and
+every client draws the same pattern, because it is derived from the burst's
+explosion effect alone.
+
+- **What counts as a cluster burst.** A ground impact whose explosion type is in
+  the type 18 family (18, 19, 20, 24, 25, 26, 28, 29, which is type 18 and the
+  variants the original rolls for it). The five cluster records are the only
+  weapons whose land and water explosion is type 18 (guns name 15, bombs and
+  missiles 21 and 35), so the burst identifies itself. A cluster bomb that
+  strikes an object directly makes a plain hit effect, which a gun burst on an
+  aircraft also makes, so it draws the single retail flash and no scatter.
+- **The pattern (fitted).** 28 flashes, scattered evenly over a disc of 1,200 ft
+  around the burst (inside the smallest cluster splash, 1,500 ft), each at a
+  place, start and size taken from where the burst is, so the same burst always
+  draws the same pattern. Each flash starts at a random tick within the first
+  half second and plays half a second, so the last ends with the burst's one
+  second. A flash draws type 18, 19 or 20 (`AIRSML`, `AIRSMLA`, `AIRSMLB2`)
+  standing on the burst's ground level, 1.5 times that type's rolled width
+  (38 to 120 ft). Ground height is the burst's, so on a steep slope a flash can
+  sit a little above or below the true ground.
+- **Not shown.** Over water the flashes are the same orange flashes, not
+  splashes. A missing sheet skips its flashes only.
+
+The scenario `a2g-cluster` flies a CBU-87, a Mk 20 and an RBK-500 onto an armored
+column and checks the splash rule and the flash pattern; `a2g-catalog` runs the
+ordnance audit in both catalog modes. `--blast-preview OUT_DIR` renders the
+burst from three heights and close up through its second (`cluster-*` files).
+
 ## Source stations and availability
 
 John requested an aircraft-wide ordnance and weapon-availability pass on

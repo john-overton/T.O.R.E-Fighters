@@ -19,8 +19,10 @@
 //! the RWR's ground squares, lock and tone as they change; decoy rolls and
 //! hits; and a closing summary line. `--chaff S` and `--flares S` release one
 //! every S seconds while a missile is in flight at the aircraft;
-//! `--harm-at NM` puts an AGM-88 in flight at the unit's radar from the
-//! aircraft when it is that close; `--kill-at S` destroys the radar (the
+//! `--harm-at NM` fits an AGM-88 to the aircraft, selects it, and fires it in
+//! BORE through the trigger (the HARM boresight cue, slice W2) once the
+//! aircraft is that close and the cue's candidate is the unit's radar; the
+//! radar's destruction prints as `destroyed`. `--kill-at S` destroys the radar (the
 //! battery's, or the unit itself) at S seconds. A battery launcher fights in
 //! the battery the layout formed; the trace follows its radar and launchers.
 //! The resupply checks (docs/spec/surface-defenses.md, "Resupply"): `--drain`
@@ -37,12 +39,8 @@ use crate::{AppResult, rwr_tone};
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{aircraft::AircraftId, quick_template::tables, weapons::Weapon};
 use tore_sim::{
-    attitude::{self, Vector},
-    combat::{
-        FallState,
-        live::{self, EffectKind, Event, Projectile},
-        missiles::{self, Flight, LaunchMode, Motion},
-    },
+    attitude::Vector,
+    combat::live::{self, EffectKind, Event, Ownship, Readiness},
     sensors::passive::Symbol,
 };
 use tore_world::{
@@ -60,7 +58,6 @@ const SEAT: SeatId = SeatId(0);
 const PLAYER: u32 = 0;
 /// Id of the trace's injected AGM-88: below the surface shots' range and far
 /// above any the player's own count reaches in a trace.
-const HARM_ID: u32 = 0x01F0_0000;
 const FEET_PER_NM: f64 = 6_076.;
 const FPS_PER_KNOT: f64 = 1.687_8;
 
@@ -620,10 +617,12 @@ pub fn run() -> AppResult<()> {
     let mut trucks_killed = false;
     let mut out = TickOutput::default();
     let mut bursts: BTreeMap<(UnitId, usize), OpenBurst> = BTreeMap::new();
-    let harm = resources
-        .get("AGM88.JT")
-        .map(|bytes| Weapon::parse("AGM88.JT", bytes))
-        .transpose()?;
+    let harm = match o.harm_at_nm {
+        Some(_) => fit_harm(&mut world, &resources)?,
+        None => None,
+    };
+    let mut harm_pressed: Option<u64> = None;
+    let mut radar_destroyed = false;
     for tick in 0..ticks {
         let t = tick as f64 / 120.;
         // The scripted line: position, attitude and velocity every tick.
@@ -665,22 +664,37 @@ pub fn run() -> AppResult<()> {
             commands.push(SeatCommand::ReleaseFlare);
             last_flare = t;
         }
-        if let (Some(at), Some(record)) = (o.harm_at_nm, &harm)
+        // The HARM: selected, then fired through the trigger once the cue's
+        // BORE candidate is the radar and the weapon reads READY.
+        let mut trigger = false;
+        if let (Some(at), Some(station)) = (o.harm_at_nm, harm)
             && !harm_fired
         {
+            let own = world.combat.state.own();
+            if !(own.armed && own.selected == station) {
+                commands.push(SeatCommand::CycleWeapon { forward: true });
+            }
             let target = world
                 .terrain
                 .surface
                 .arsenal
                 .arms(radar)
                 .map(|a| world.combat.surface.place(a).eye);
-            if let Some(target) = target
+            let launcher = tore_world::combat::launcher(&world.cockpits[0].flight);
+            let ready = world
+                .combat
+                .state
+                .view(PLAYER)
+                .is_some_and(|view| view.readiness(launcher) == Readiness::Ready);
+            if harm_pressed.is_none()
+                && let Some(target) = target
                 && distance(target, position) <= at * FEET_PER_NM
+                && own.bore_observation.map(|o| o.id) == Some(radar.0)
+                && ready
             {
-                fire_harm(&mut world, record, position, target, radar, tick);
-                line(t, format_args!("harm launched at {:#x}", radar.0));
-                harm_fired = true;
+                harm_pressed = Some(tick);
             }
+            trigger = harm_pressed.is_some_and(|at| tick < at + 12);
         }
         if let Some(at) = o.kill_at
             && !killed
@@ -719,10 +733,42 @@ pub fn run() -> AppResult<()> {
         let input = SeatInput {
             seat: SEAT,
             tick: world.tick(),
+            trigger,
             commands,
             ..Default::default()
         };
         world.step(std::slice::from_ref(&input), &mut out)?;
+        if let Some(station) = harm
+            && !harm_fired
+            && let Some(p) = world
+                .combat
+                .state
+                .projectiles
+                .iter()
+                .find(|p| p.owner == PLAYER && p.station == station)
+        {
+            line(
+                t,
+                format_args!(
+                    "harm launched at {:#x} mode BORE",
+                    p.target.unwrap_or_default()
+                ),
+            );
+            harm_fired = true;
+        }
+        // A HARM keeps homing after the shutdown (retail): the radar's death.
+        if !radar_destroyed
+            && !killed
+            && world
+                .combat
+                .state
+                .targets
+                .iter()
+                .any(|target| target.id == radar.0 && target.hp <= 0)
+        {
+            line(t, format_args!("destroyed {:#x}", radar.0));
+            radar_destroyed = true;
+        }
         // The surface's own trace.
         for trace in &world.combat.surface.trace {
             let followed = match trace {
@@ -1003,46 +1049,30 @@ fn surface_mount(world: &World, unit: UnitId, weapon: usize) -> usize {
         .map_or(0, |m| m.index)
 }
 
-/// An AGM-88 from the aircraft at `target`, homing on emitter `radar`: the
-/// player's launch path needs a designation the trace does not make, so the
-/// missile is put in flight directly.
-fn fire_harm(
-    world: &mut World,
-    record: &Weapon,
-    from: Vector,
-    target: Vector,
-    radar: UnitId,
-    tick: u64,
-) {
-    let Some(profile) = missiles::Profile::for_weapon(record) else {
-        return;
+/// Fits an AGM-88 pair to the aircraft's first missile station (a Cheat
+/// loading would carry it there), for `--harm-at`. Returns the station.
+fn fit_harm(world: &mut World, resources: &BTreeMap<String, Vec<u8>>) -> AppResult<Option<usize>> {
+    let Some(bytes) = resources.get("AGM88.JT") else {
+        return Ok(None);
     };
-    let velocity = world.cockpits[0].flight.velocity;
-    let direction = attitude::unit(std::array::from_fn(|i| target[i] - from[i]));
-    let launch = from;
-    world.combat.state.projectiles.push(Projectile {
-        id: HARM_ID,
-        owner: PLAYER,
-        weapon: Some(record.clone()),
-        guidance: Some(Flight::new(
-            profile,
-            LaunchMode::Cued,
-            Some(radar.0),
-            launch,
-        )),
-        motion: Some(Motion::launch(record, velocity, launch[1])),
-        guidance_ticks: Some(profile.guidance_ticks),
-        age: 0,
-        incoming: None,
-        station: 0,
-        position: launch,
-        previous: launch,
-        direction,
-        speed_f8: (attitude::dot(velocity, velocity).sqrt() * 256.) as i32,
-        launched_t: (tick / 30) as u16,
-        target: Some(radar.0),
-        fall: FallState::default(),
-        gun_round: None,
-        tracer: false,
-    });
+    let record = Weapon::parse("AGM88.JT", bytes)?;
+    let state = &mut world.combat.state;
+    let own = state.ownship(PLAYER).ok_or("no ownship")?;
+    let mut config = own.configuration().clone();
+    let Some(station) = config
+        .stations
+        .iter()
+        .position(|s| s.weapon.seeker.signature != 0)
+    else {
+        return Ok(None);
+    };
+    config.stations[station].weapon = record;
+    config.stations[station].count = 2;
+    let (side, friendlies) = (own.side, own.friendlies.clone());
+    state.remove_ownship(PLAYER);
+    let mut own = Ownship::new(PLAYER, side, config, true)?;
+    own.friendlies = friendlies;
+    state.add_ownship(own)?;
+    println!("surface-trace: harm station {station}");
+    Ok(Some(station))
 }

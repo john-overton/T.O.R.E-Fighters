@@ -24,6 +24,7 @@
 //! Weapon records, configurations and signature profiles are shared records
 //! (equal copies cost one coding), as the records slice settled.
 
+use super::super::ballistics::BombMotion;
 use super::{
     ActorSupport, DecoyRoll, DeviceNote, Effect, EffectKind, FriendlyFire, GunCadence, HitRecord,
     LocalizedDamage, Ownship, Projectile, RangeEstimate, Readiness, State, Strike, SystemFaults,
@@ -61,6 +62,8 @@ crate::checkpoint_enum!(Readiness {
     GroupEmpty = 22,
     GunObscured = 23,
     TerrainMask = 24,
+    NoEmitter = 25,
+    TrackLost = 26,
 });
 
 // The AC-130's player-directed gun mounts and gunsight: the actual slewed
@@ -167,6 +170,7 @@ crate::checkpoint_struct!(SightInput { deflection, zoom });
 crate::checkpoint_enum!(crate::combat::gunship::SightRequest {
     Designate = 0,
     Pin = 1,
+    Next = 2,
 });
 crate::checkpoint_enum!(crate::combat::gunship::Notice {
     NoGroundPoint = 0,
@@ -194,12 +198,22 @@ crate::checkpoint_enum!(EffectKind {
 // explodes. Both are read by later ticks.
 type SurfaceRound = super::SurfaceRound;
 crate::checkpoint_struct!(SurfaceRound { end_tick, flak });
+
+crate::checkpoint_struct!(BombMotion {
+    origin,
+    horizontal,
+    vertical,
+});
 type GroundLook = super::GroundLook;
 crate::checkpoint_struct!(GroundLook {
     explosion,
     crater,
     burns
 });
+
+// The type facts the ground pages read of a ground object.
+type GroundListing = super::GroundListing;
+crate::checkpoint_struct!(GroundListing { flags, max_visible });
 
 type ParkedSite = super::ParkedSite;
 crate::checkpoint_struct!(ParkedSite {
@@ -449,11 +463,15 @@ crate::checkpoint_struct!(Ownship {
     ever_loaded,
     selected,
     gunship,
+    sight,
+    laser,
     armed,
     sensors,
     hud_selection,
     sight_hold,
     friendlies,
+    painted_by,
+    harm_cue,
     emitters,
     missile_threats,
     hp,
@@ -479,7 +497,8 @@ crate::checkpoint_struct!(Ownship {
     gun_cadence,
     bay_release,
     bay_hold_until,
-} shared { config });
+    delivery_mode,
+} shared { config } skip { delivery = None, guided_sight = None });
 
 impl Checkpoint for State {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
@@ -522,8 +541,14 @@ impl Checkpoint for State {
             rewinds,
             surface_rounds,
             next_surface_shot,
+            bombs,
+            guided,
+            guided_impacts,
             ground_looks,
             parked,
+            ground_listing,
+            airfield,
+            sensor_weather,
         } = self;
         weapon_rules.save(s, None)?;
         ownships.save(s, None)?;
@@ -557,8 +582,14 @@ impl Checkpoint for State {
         rewinds.save(s, None)?;
         surface_rounds.save(s, None)?;
         next_surface_shot.save(s, None)?;
+        bombs.save(s, None)?;
+        guided.save(s, None)?;
+        guided_impacts.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
+        ground_listing.save(s, None)?;
+        airfield.save(s, None)?;
+        sensor_weather.save(s, None)?;
         Ok(())
     }
 
@@ -609,8 +640,14 @@ impl Checkpoint for State {
             rewinds: Checkpoint::load(l, None)?,
             surface_rounds: Checkpoint::load(l, None)?,
             next_surface_shot: Checkpoint::load(l, None)?,
+            bombs: Checkpoint::load(l, None)?,
+            guided: Checkpoint::load(l, None)?,
+            guided_impacts: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
+            ground_listing: Checkpoint::load(l, None)?,
+            airfield: Checkpoint::load(l, None)?,
+            sensor_weather: Checkpoint::load(l, None)?,
         })
     }
 }

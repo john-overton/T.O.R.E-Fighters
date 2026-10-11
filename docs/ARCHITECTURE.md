@@ -390,6 +390,79 @@ decides which statuses hold the trigger. Presentation reads the owner's
 prediction (`tore_session::client::sight`). Wire: protocol 21
 ([the gunsight](formats/net-protocol.md#the-gunsight)).
 
+The sight itself is `combat::sight` (air-to-ground slice T1;
+[spec](spec/air-to-ground.md#the-targeting-sight)): `Sight` holds the mode,
+look, aim point, seat controls, pending key and notice, and `Sight::step` is the
+one law for every sight. Its `SightSensor` names the laser flag, the reach, the
+`Gimbal` (the hemisphere below the aircraft, or a cone about the nose) and the
+eye; `fixed_sight` reads it from the aircraft's own laser or FLIR record and a
+loaded `DesignatorPod` comes first (`Configuration::sight_sensor`). The gunship
+keeps its flat fields and steps through `Sight::step` with its dome sensor
+(`gunship::sensor`), and `gunship` re-exports the sight's names. Every other
+aircraft with a sensor of that kind carries `Ownship::sight`, stepped in
+`live/sighting.rs` before the release loop: the sight sees only ground objects,
+follows a designated ground object, and its track designates through
+`Sensors::hold`. `combat::laser` holds each aircraft's `Laser` (Off, Ready,
+Lasing, Masked, the Ctrl+L override and the limits), stepped right after the
+sight; `State::laser_spots`, `laser_spot_for` and `buddy_spot` give the spots by
+owner and side for the weapons (buddy lasing). Both are in the checkpoint. The
+readout's `SightReadout` and `LaserReadout` are host-built and not on the wire
+before protocol 23.
+
+#### Air-to-ground weapons
+
+The air-to-ground round (2026-10-10 and 11; [spec](spec/air-to-ground.md),
+[evidence](baselines/air-to-ground.md)) added no new service. It added modules
+to the ones above, and each keeps its state in the combat checkpoint, so single
+player, the host and a standby run one law:
+
+```mermaid
+flowchart LR
+    subgraph sensing[Sensors and designation]
+        G[sensors::track::ground<br/>A-G, IR and HARM pages] --> H[Sensors::hold<br/>designation]
+        S[combat::sight<br/>targeting sight] --> H
+    end
+    subgraph delivery[Delivery]
+        B[combat::ballistics<br/>bomb equation, packs, pods]
+        D[combat::delivery<br/>CCIP, LVL, warnings, reach]
+        L[combat::laser<br/>laser state and spots]
+        U[combat::guided<br/>laser, GPS and command flight]
+    end
+    H --> D
+    H --> U
+    L --> U
+    B --> D
+    B --> U
+    D --> F[live fire loop<br/>release, packs, pods]
+    U --> F
+    A[live::agm<br/>HARM cue, surface seekers] --> F
+    F --> R[CockpitReadout<br/>bomb_sight, guided, laser, sight, harm]
+    R --> P[weapon_hud and instruments::targeting]
+```
+
+- `sensors::track::ground` keeps one ground list for the A-G page, the IR
+  page's ground objects and the HARM page, rebuilt on the retail timers. The
+  fire loop and the HUD read it through the sensors, never the world.
+- `combat::ballistics` is the retail bomb equation (32 ft/s squared, no drag,
+  released along the nose with a random error of 3 degrees), the pack and pod
+  rules and the impact predictor. Bomb paths live in `live::State::bombs`, not
+  on `Projectile`.
+- `combat::delivery` rebuilds the CCIP, level-release and rocket solutions every
+  step from that step's launcher (skipped in the checkpoint, so nothing depends
+  on history) and owns `Reach`. `combat::guided` flies the laser bombs, JDAMs,
+  laser missiles and the AT-2 (`live::guided` holds each flight) and gives the
+  same `Reach` from its fly-out. `live::agm` holds the HARM cue, surface-seeker
+  support, retargeting and blinding.
+- Only a human seat's ownship uses these paths. The AI keeps its stores, does
+  not attack the ground and does not lase (the AI strike round comes later).
+- The host builds `bomb_sight`, `guided`, `weapon_tti`, the HARM cue and the
+  ground pages into the readout; `weapon_hud/{bombs,guided,agm,laser}.rs` and
+  `instruments/targeting.rs` draw them. These fields are host-built and not on
+  the wire before protocol 23, so a client shows none of them until then.
+- `a2g_run.rs` and `a2g_run/` (`--a2g-run`) drive every path through the real
+  player command path for the `a2g-*` battery scenarios and the replay check.
+  They never place a projectile by hand.
+
 `ai::gunnery` uses the same trajectory solver with explicitly permitted visual
 or sensor observations. The controller chooses gun tracking through ordinary
 flight inputs and authorizes individual rounds. `ai_wings` rechecks barrel
@@ -534,6 +607,10 @@ motion. Explicit target role is separate from damage category. Launch-origin
 minimum-range qualification persists through terminal closure, as specified in
 [engagement rules](spec/missiles.md#minimum-engagement-and-target-role). Combat tape version 4 includes world velocity and bay permission, while versions 2 and 3
 select compatibility rules. [Missile specification](spec/missiles.md).
+
+Combat tape version 8 has version 7's records; it marks tapes recorded since
+bombs fall on the bomb equation and rocket pods hold their rockets, so an older
+tape that dropped bombs or fired pods can replay to a different outcome.
 
 Combat tape version 5 records radar power separately from transmission, preserving
 passive-channel behavior and radar-off unguided releases. Versions before 5 imply

@@ -793,8 +793,12 @@ against each other. See the
 [delivery table](radar.md#delivery-and-acceptance) for what each stage delivered.
 
 Mode scope is TWS/RWS and installed infrared air-to-air, with single-target
-tracking only. Gamified IFF stays in the target view. A2G/HARM awaits ground weapons
-and object systems; no realistic IFF, multi-track or AI work is authorized.
+tracking only. Gamified IFF stays in the target view. The air-to-ground (A-G)
+page, the IR page's ground objects and the HARM page arrived with the
+air-to-ground round (2026-10-10, [spec](spec/air-to-ground.md#the-air-to-ground-radar),
+[evidence](baselines/air-to-ground.md)): the retail ground lists and symbols,
+no ground map and no moving-target picture. No realistic IFF, multi-track or AI
+work is authorized.
 Unresolved retail details use documented fitted rules; complete source-code
 closure is not a prerequisite.
 
@@ -809,8 +813,9 @@ Requested by John on 2026-09-23: Load Ordnance hides weapons without connected
 flight behaviour. Normal loading shows supported weapons that fit the selected
 aircraft; Cheat shows all imported supported weapons. The
 [catalog specification](spec/ordnance-presentation.md#catalog-availability)
-defines visibility. The current flight support list contains 25 weapons;
-importing the wider [JT inventory](formats/fa-weapons.csv) does not enable them.
+defines visibility. The current flight support list contains 72 weapons (2026-10-11,
+after the air-to-ground round) and the Cheat-only Boulder and Moose;
+importing the wider [JT inventory](formats/fa-weapons.csv) does not enable the rest.
 
 The agent-selected passes below plan the remaining weapons. Each starts with a
 player-facing behaviour spec and records unknowns with a next research step.
@@ -821,11 +826,11 @@ enabled by the catalog fix.
 
 | Pass | Remaining scope and examples | Acceptance before catalog exposure |
 | --- | --- | --- |
-| W1: Conventional guns, rockets and bombs | Remaining aircraft cannon and pods such as ADEN, BK27 and GAU8; LAU10 rockets; MK84 and FAB-series bombs | Specify ammunition/pod counts, release cadence, trajectories, impact/fuze behaviour and damage. Exercise manual release, depletion, mass, compatible stations and accepted-load restart. |
+| W1: Conventional guns, rockets and bombs | **Bombs and rockets delivered 2026-10-11 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** MK84, FAB-250, FAB-500, FAB-1000, the Mk 82 pack and retarded variants and the LAU-10 are loadable; bombs fall on the retail equation, packs release together and pods hold their real rockets. **Remaining:** the aircraft cannon pods ADEN, BK27, GAU-13 and GSh-6-23 (GAU8 is supported already), which nothing loads. Original scope: remaining aircraft cannon and pods such as ADEN, BK27 and GAU8; LAU10 rockets; MK84 and FAB-series bombs | Specify ammunition/pod counts, release cadence, trajectories, impact/fuze behaviour and damage. Exercise manual release, depletion, mass, compatible stations and accepted-load restart. |
 | W2: Remaining air-to-air missiles | AIM7/AIM7E, AIM9B, AA10/AA6/AA9, PL7/PL10 | Resolve each guidance profile, launch limits, support loss, seeker acquisition, motor/lifetime and HUD/audio feedback. Validate against spec numbers and deterministic manual target fixtures. |
-| W3: Surface and anti-ship missiles | AGM65A, AGM84A/AGM84E, AM39, AS15/AS16; AGM45/AGM88 passive-emitter weapons | Connect the required ground/ship targets, designation and emission state first. Validate valid and invalid targets, lost emissions/support, flight, impact and damage without granting hidden target knowledge. Since 2026-10-10 the ground and ship targets, radar emission state and HARM shutdown exist (surface round); player designation of ground targets is the [A2G workstream](#next-rounds-after-the-surface-round). |
-| W4: Designator and unresolved guidance | GBU10/GBU10A, GBU28, PAVEWAY/PAVEWA3; AS14, AS30, AT12 and AT2 | Specify the actual guidance and designation requirements before selecting a model. Connect acquisition, release, loss of designation and terminal impact; do not substitute a radar or heat seeker for an unresolved contract. |
-| W5: Special payloads and delivery variants | CBU87/CBU89, MK20, RBK250/RBK500, MK82 variants, GBU29/GBU29P/GBU30 and AEMP1 | Resolve each record's payload and release behaviour. Implement the applicable submunition, retarding, penetration or special damage effect with numerical tests; keep unresolved and internal novelty records hidden. |
+| W3: Surface and anti-ship missiles | **Delivered 2026-10-11 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** AGM65A, AGM84A/AGM84E, AM39, AS15/AS16 and AGM45/AGM88 fly from the ground designations, the A-G track, the HARM boresight cue and the HARM page; remaining: a lobby and network view of the ground pages until protocol 23 merges. Original scope: AGM65A, AGM84A/AGM84E, AM39, AS15/AS16; AGM45/AGM88 passive-emitter weapons | Connect the required ground/ship targets, designation and emission state first. Validate valid and invalid targets, lost emissions/support, flight, impact and damage without granting hidden target knowledge. |
+| W4: Designator and unresolved guidance | **Delivered 2026-10-11 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** the laser bombs and laser missiles home on the aircraft's own laser spot or a same-side buddy's (John's addition) and go blind when the spot ends; the AT-2 is command guided. Remaining: a JDAM "release at the bar" mode on the level T and a viewer overlay for laser spots. Original scope: GBU10/GBU10A, GBU28, PAVEWAY/PAVEWA3; AS14, AS30, AT12 and AT2 | Specify the actual guidance and designation requirements before selecting a model. Connect acquisition, release, loss of designation and terminal impact; do not substitute a radar or heat seeker for an unresolved contract. |
+| W5: Special payloads and delivery variants | **Delivered 2026-10-11 except AEMP1 (air-to-ground round, [evidence](baselines/air-to-ground.md)):** the cluster bombs (retail wide splash and presentation-only flashes), the Mk 82 variants and the JDAMs (John's choice: fly to the point designated at release, where retail homes on the object). **Remaining:** AEMP1, an air-to-air EM pulse that nothing loads. Original scope: CBU87/CBU89, MK20, RBK250/RBK500, MK82 variants, GBU29/GBU29P/GBU30 and AEMP1 | Resolve each record's payload and release behaviour. Implement the applicable submunition, retarding, penetration or special damage effect with numerical tests; keep unresolved and internal novelty records hidden. |
 | W6: Ground and naval weapons | Remaining surface gun rounds, SAM/ship missiles, ASROC and other held surface roles in the inventory | Built for air defense on 2026-10-10 with John's authorization: the surface gun rounds with the AAA tuning table, flak, the 13 radar and 6 infrared SAM and ship missile profiles, fired by surface units only ([surface defenses](spec/surface-defenses.md)). Held: ASROC and the SS-N-9 anti-ship missile (surface against surface is out of scope). |
 
 Every pass updates the shared flight support list only for weapons that have

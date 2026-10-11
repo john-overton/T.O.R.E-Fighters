@@ -696,6 +696,8 @@ mod tests {
                 category: 0x100,
                 radar_signature: 0.,
                 infrared_signature: 0.,
+                type_flags: 0,
+                max_visible: 0,
                 runway: true,
             }],
             runways: vec![Runway {

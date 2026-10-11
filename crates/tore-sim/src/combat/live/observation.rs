@@ -3,6 +3,9 @@
 use super::*;
 
 pub(super) struct Context<'a, G> {
+    /// The state's read-only facts for the ground pages: type facts, airfield
+    /// sequences and weather. Never its projectiles or random stream.
+    pub facts: &'a super::ground_sensing::GroundFacts<'a>,
     pub targets: &'a [Target],
     pub rows: &'a [OwnRow],
     pub weapon_rules: Rules,
@@ -43,7 +46,28 @@ pub(super) fn observe_ownship(
     let easy_targeting = own.easy_targeting(context.easy_targeting);
     own.sensors.keep_selection = easy_targeting;
     let in_view = own.designated().or(own.sight_hold);
+    own.sensors
+        .set_harm_seeker(super::ground_sensing::harm_seeker(own));
     own.sensors.step(&observer, &observables, &environment);
+    // The ground pages, and a ground selection's keeping, read the rows only
+    // when a page lists ground objects or the selection is not an air contact.
+    let ground_selection = own
+        .sensors
+        .selected()
+        .is_some_and(|id| own.sensors.contact(id).is_none());
+    let objects: Vec<sensors::GroundObject> =
+        if own.sensors.ground_page().is_some() || ground_selection {
+            context
+                .targets
+                .iter()
+                .chain(peers(context.rows, own_index))
+                .map(|t| context.facts.ground_object(t))
+                .collect()
+        } else {
+            Vec::new()
+        };
+    own.sensors
+        .step_ground(&observer, &objects, &environment, context.facts.weather);
     if let Some(id) = own.designated() {
         own.hud_selection = Some(id);
     } else if !easy_targeting {
@@ -77,6 +101,12 @@ pub(super) fn observe_ownship(
         &environment,
     );
     own.bore_observation = None;
+    own.harm_cue = super::agm::harm_emitters(
+        own,
+        &launcher,
+        context.targets.iter().chain(peers(context.rows, own_index)),
+        &obscured,
+    );
     let index = own.selected;
     let Some(station) = own.config.stations.get(index) else {
         own.mounted = Seeker::default();
@@ -97,7 +127,11 @@ pub(super) fn observe_ownship(
         {
             own.launch_mode = LaunchMode::Boresight;
         }
-        if profile.guidance == Guidance::Infrared && own.designated().is_some() {
+        // A designation turns an infrared missile, and an anti-radiation
+        // surface missile (the HARM cue's CUED), to CUED.
+        if (profile.guidance == Guidance::Infrared || profile.holds_on_angles())
+            && own.designated().is_some()
+        {
             own.launch_mode = LaunchMode::Cued;
         }
         let assigned = if own.launch_mode == LaunchMode::Cued {
@@ -127,7 +161,7 @@ pub(super) fn observe_ownship(
             let bore = own.launch_mode == LaunchMode::Boresight;
             let cap = bore.then(|| profile.search_cap());
             // Mounted IR may choose a stronger return. Released missiles keep identity.
-            if bore && profile.guidance == Guidance::Infrared {
+            if bore && (profile.guidance == Guidance::Infrared || profile.holds_on_angles()) {
                 own.mounted.target = None;
                 own.mounted.acquired = false;
                 own.mounted.missing = 0;
@@ -155,10 +189,16 @@ pub(super) fn observe_ownship(
                 })
                 .collect();
             if bore {
-                own.bore_observation = observations
-                    .iter()
-                    .min_by(|a, b| seeker::compare_returns(a, b, profile))
-                    .copied();
+                own.bore_observation = if profile.holds_on_angles() {
+                    // The HARM cue's candidate: painting first, then nearest
+                    // the bore, inside the launch cone.
+                    super::agm::harm_candidate(&observations, &own.painted_by, w, &launcher)
+                } else {
+                    observations
+                        .iter()
+                        .min_by(|a, b| seeker::compare_returns(a, b, profile))
+                        .copied()
+                };
             }
             if bore && profile.guidance == Guidance::Active {
                 // The HUD estimate never pre-locks or assigns an active-radar shot.
@@ -168,7 +208,16 @@ pub(super) fn observe_ownship(
             {
                 let supported: Vec<_> = observations
                     .into_iter()
-                    .filter(|o| own.sensors.supports(o.id))
+                    .filter(|o| {
+                        super::agm::ownship_supports(
+                            own,
+                            Some(profile),
+                            w,
+                            &launcher,
+                            o.id,
+                            context.targets.iter().find(|t| t.id == o.id),
+                        )
+                    })
                     .collect();
                 own.mounted.step(
                     missiles::Profile {
@@ -177,6 +226,10 @@ pub(super) fn observe_ownship(
                     },
                     &supported,
                 );
+            } else if bore && profile.holds_on_angles() {
+                // The mounted HARM seeker settles on the cue's candidate.
+                let candidate: Vec<_> = own.bore_observation.into_iter().collect();
+                own.mounted.step(profile, &candidate);
             } else {
                 own.mounted.step(profile, &observations);
             }

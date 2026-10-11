@@ -338,6 +338,8 @@ pub fn combat_fixture(guided: bool) -> live::State {
                 jammer: None,
                 signature: sensors::SignatureProfile::default(),
             },
+            sight: None,
+            designator_pods: vec![],
         },
         true,
     )

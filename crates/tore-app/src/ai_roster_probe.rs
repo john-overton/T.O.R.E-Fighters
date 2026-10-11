@@ -74,13 +74,16 @@ pub fn roster_probe(
                         .zip(&config.stations)
                         .enumerate()
                         .any(|(index, (station, imported))| {
-                            // A gun pod's count is pods; the AI counts rounds.
+                            // A gun or rocket pod's count is pods; the AI counts rounds.
                             let pod_rounds = config
                                 .gun_pods
                                 .iter()
                                 .find(|pod| pod.station == index)
                                 .filter(|_| imported.weapon.source == "SUU16.JT")
-                                .map_or(1, |pod| u32::from(pod.rounds_per_pod));
+                                .map_or_else(
+                                    || live::pod_rounds(&imported.weapon),
+                                    |pod| u32::from(pod.rounds_per_pod),
+                                );
                             station.employment_zone != Some(imported.weapon.seeker.zones[1])
                                 || station.rounds()
                                     != tore_sim::ai::weapon_service::Rounds::Finite(

@@ -8,10 +8,13 @@
 //!
 //! The player flies a scripted straight line at the ground target's
 //! defenses, invulnerable, so its SAMs and guns fire at it and the debrief
-//! counts their fire. When it is over the middle of the site, a Mk 82 is
-//! placed on every ground target (the player's, in Blue's mission) every two
-//! seconds until it is gone. The run prints the objectives and the debrief's
-//! tallies before and after, each line starting `surface-objective:`.
+//! counts their fire. When it is over the middle of the site, a Mk 82 is put
+//! in the air for every ground target (the player's, in Blue's mission)
+//! every two seconds until it is gone, as a 45 degree dive at 450 kt would
+//! release it 1,000 ft above the target, aimed by the bomb equation
+//! ([`tore_sim::combat::ballistics`]) to meet it where it will be. The run
+//! prints the objectives and the debrief's tallies before and after, each
+//! line starting `surface-objective:`.
 //!
 //! `--redfor` builds the multiplayer mission instead (open seating) and seats
 //! the human in the first plane of the enemy wing: Redfor defends the target,
@@ -42,8 +45,13 @@
 use crate::{AppResult, replay, snapshot::RenderSnapshot, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
-    attitude::Vector,
-    combat::{FallState, ledger::ShotKind, live::Projectile},
+    attitude::{Vector, unit},
+    combat::{
+        FallState,
+        ballistics::{BombMotion, ReleaseState},
+        ledger::ShotKind,
+        live::Projectile,
+    },
 };
 use tore_world::{
     ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE},
@@ -60,6 +68,27 @@ const PLAYER: u32 = 0;
 const BOMB_ID_BASE: u32 = 0x00F0_0000;
 const FEET_PER_NM: f64 = 6_076.;
 const FPS_PER_KNOT: f64 = 1.687_8;
+/// The pass each bomb is released from: a 45 degree dive at 450 kt, 1,000
+/// ft above the target (fitted for this drive).
+const BOMB_DIVE_DEG: f64 = 45.;
+const BOMB_SPEED_KT: f64 = 450.;
+const BOMB_HEIGHT_FT: f64 = 1_000.;
+
+/// The release that puts a bomb's path on a target at `position` moving at
+/// `velocity`: aimed where the target will be when the bomb gets there.
+pub(crate) fn dive_release(position: Vector, velocity: Vector, heading: f64) -> ReleaseState {
+    let dive = BOMB_DIVE_DEG.to_radians();
+    let direction = [
+        heading.sin() * dive.cos(),
+        -dive.sin(),
+        heading.cos() * dive.cos(),
+    ];
+    let speed = BOMB_SPEED_KT * FPS_PER_KNOT;
+    let still = ReleaseState::onto(position, direction, speed, BOMB_HEIGHT_FT);
+    let fall = BombMotion::new(still).fall_time(position[1]).unwrap_or(0.);
+    let ahead = std::array::from_fn(|i| position[i] + [velocity[0], 0., velocity[2]][i] * fall);
+    ReleaseState::onto(ahead, direction, speed, BOMB_HEIGHT_FT)
+}
 
 struct Options {
     theater: String,
@@ -281,7 +310,15 @@ pub fn run() -> AppResult<()> {
     let mut record = o
         .record
         .as_ref()
-        .map(|path| Record::start(&world, path, o.verify))
+        .map(|path| {
+            Record::start(
+                &world,
+                path,
+                o.verify,
+                "F/A-18D",
+                "the surface objective run",
+            )
+        })
         .transpose()?;
 
     // The line the human flies: at the middle of the targets, `--from` nm out.
@@ -378,11 +415,9 @@ pub fn run() -> AppResult<()> {
                 else {
                     continue;
                 };
-                // Dropped 150 ft above the aim point, ahead of a moving unit
-                // by the 0.3 s the bomb takes to fall.
-                let from = std::array::from_fn(|i| {
-                    row.position[i] - row.velocity[i] * 0.3 + [0., 150., 0.][i]
-                });
+                // Released from a dive pass, aimed ahead of a moving unit.
+                let release = dive_release(row.position, row.velocity, heading);
+                let from = release.position;
                 let state = &mut world.combat.state;
                 state
                     .ledger
@@ -399,8 +434,8 @@ pub fn run() -> AppResult<()> {
                     station: 0,
                     position: from,
                     previous: from,
-                    direction: [0., -1., 0.],
-                    speed_f8: (500. * 256.) as i32,
+                    direction: unit(release.velocity),
+                    speed_f8: (release.speed() * 256.) as i32,
                     launched_t: (state.tick() / 30) as u16,
                     target: None,
                     fall: FallState::default(),
@@ -490,8 +525,9 @@ pub fn run() -> AppResult<()> {
 }
 
 /// The run as a mission recording, the way the AI probe records: the picture
-/// is taken as live flight takes it and nothing it reads feeds back.
-struct Record {
+/// is taken as live flight takes it and nothing it reads feeds back. The
+/// air-to-ground driver (`--a2g-run --record`) records through it too.
+pub(crate) struct Record {
     recorder: replay::recorder::Recorder,
     /// Every tick's picture, when the run checks the recording against them.
     pictures: Option<Vec<RenderSnapshot>>,
@@ -499,15 +535,20 @@ struct Record {
 }
 
 impl Record {
-    fn start(world: &World, path: &std::path::Path, verify: bool) -> AppResult<Self> {
+    pub(crate) fn start(
+        world: &World,
+        path: &std::path::Path,
+        verify: bool,
+        plane: &str,
+        run: &str,
+    ) -> AppResult<Self> {
         use replay::{convert, recorder};
         let combat = &world.combat;
         let flight = &world.cockpits[0].flight;
         let snapshot = combat.render_snapshot();
         let extra = vec![(
             "probe".to_owned(),
-            "the surface objective run on the full mission tick: no audio, music, HUD or rumble"
-                .to_owned(),
+            format!("{run} on the full mission tick: no audio, music, HUD or rumble"),
         )];
         let header = recorder::header(
             tore_replay::MissionKind::Probe,
@@ -516,11 +557,11 @@ impl Record {
             extra,
             std::time::SystemTime::now(),
         );
-        let player = recorder::Human::single_player("F/A-18D", true);
+        let (player, others) = crate::recorded_humans(world, SEAT, plane);
         let roster = recorder::roster(
             snapshot,
             &player,
-            &[],
+            &others,
             world.ai_wings.as_ref(),
             combat.dummy_types(),
         );
@@ -548,20 +589,23 @@ impl Record {
         })
     }
 
-    fn before(&mut self, world: &mut World) {
+    pub(crate) fn before(&mut self, world: &mut World) {
         self.recorder.start_tick(None, &mut world.combat);
     }
 
-    fn after(&mut self, world: &mut World, out: &TickOutput) {
+    pub(crate) fn after(&mut self, world: &mut World, out: &TickOutput) {
         let idle = tore_sim::flight::PilotInput::default();
         let cockpit = &world.cockpits[0];
+        // The other human-flown planes (a buddy's seat) are recorded as the
+        // game records them.
+        let crews = crate::other_crews(&world.cockpits, cockpit.plane, &idle);
         self.recorder.begin(replay::recorder::Tick {
             snapshot: world.combat.render_snapshot(),
             combat: &world.combat,
             flight: &cockpit.flight,
             previous: &cockpit.previous_flight,
             pilot: &idle,
-            others: &[],
+            others: &crews,
             wings: world.ai_wings.as_ref(),
             world: &world.terrain,
             events: &out.events,
@@ -579,7 +623,11 @@ impl Record {
     }
 
     /// Finishes the file and, when asked, replays it against the run.
-    fn finish(mut self, world: &World, report: &debrief::Report) -> AppResult<Vec<String>> {
+    pub(crate) fn finish(
+        mut self,
+        world: &World,
+        report: &debrief::Report,
+    ) -> AppResult<Vec<String>> {
         self.recorder.note(
             tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
                 .with(tore_replay::vocab::field::REASON, "the run finished"),

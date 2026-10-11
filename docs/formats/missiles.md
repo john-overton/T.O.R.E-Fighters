@@ -103,6 +103,118 @@ time unit behind 32 ft/s²; the random launch-distance percentage that flags
 0x1000 and 0x2000 set at 0x4c0e48..0x4c0eb5; any launch position offset. Next
 step: trace 0x463a20's mode-2 consumer in projectile movement.
 
+## Laser and designator
+
+Research mode, 2026-10-10, slice R2 of the air-to-ground round; same build,
+listing and units as the [A-G page](radar.md#a-g-page). Nothing was executed.
+While a projectile is the current object, `_curThing` gives its launcher +0xe2
+at 0x50cf62, its target +0xe4 at 0x50cf64 and its state +0xde at 0x50cf5e; its
+JT is copied to `_curThingType` 0x50d268, so flags read at 0x50d30e (JT +0xa6),
+the seeker starts at JT +0xac and the seeker signature reads at 0x50d31c. JT
+values below come from `tore_formats::weapons::Weapon` over the retail records.
+
+### Records
+
+| Records | Data |
+| --- | --- |
+| GBU10, GBU10A, PAVEWAY, PAVEWA3, GBU28 | Signature 1, flags 0x2a543: guided 0x1, 0x100, designator 0x400, speed command 0x40; no gravity 0x4 and no bomb flag 0x10. Final speed 278 ft/s, deceleration 14, no motor, `launchRetard` 90, turn rate 6370 powered and unpowered. Zone 0 90 degrees (16380) to 50,000 ft; zone 1 45 degrees (8190), 0 ft (GBU10, GBU10A) or 50 ft to 30,000 ft |
+| AS14, AS30, AT12 | Signature 1, flags 0x2a56f: the same guidance bits on a powered, cruising missile |
+| PAVESPK, PAVEKNF (pods) | Signature 1, zone 0 all round (32767 by 32767) to 60,760 ft |
+| SU24L, SU37L, KA50L, AV8L (built in) | Signature 1, zone 0 60 degrees (10920) to 60,760 ft |
+
+### The lock rule
+
+`PROJLock` 0x4c2f20 takes the JT, the launcher, the target, the hardpoint and a
+launch flag. For these records it requires, in order:
+
+| Step | Evidence | Rule |
+| --- | --- | --- |
+| 1 | 0x4c3014..0x4c3024 | The target is active |
+| 2 | 0x4c3027..0x4c3054 | Any of 0x100, 0x200, 0x400: the launcher is active (alive) |
+| 3 | 0x4c30e7..0x4c3113 | 0x400: with the launcher made current, `HARDBestSeeker` 0x452e60 with signature 1 and weapons excluded must find a sensor whose count is nonzero (0x452df0). That is, the weapon's own launching aircraft carries a working laser designator |
+| 4 | 0x4c3121..0x4c3155 | `PROJInFOV` 0x4c2860 with the weapon's own seeker, zone 1, about the mount direction at launch or the weapon's nose in flight: heading and pitch each within 45 degrees (0x4c2ad1..0x4c2aeb). At launch also the zone-1 range and altitude, with the range scaled by the laser signature; in flight angles only |
+
+The designator is never checked for range, field of view or line of sight: the
+only signature-1 queries in the executable are step 3 and a generic search
+(`PROJSelectTarget` 0x4c41a7, signature 0xff), and nothing reads a designator's
+zones. There is no laser spot object and no laser on or off state. A laser
+weapon homes on its target object and needs its own launcher, alive, to carry
+a designator. Another aircraft's designator never helps: **retail has no buddy
+lasing** (plan decision 6). Buddy lasing, and a display that shows a spot is
+someone else's, are therefore opinionated additions (John, 2026-10-10).
+
+### Release, flight and loss
+
+| Evidence | Finding |
+| --- | --- |
+| Release, `PROJFire` 0x4c21f4..0x4c2213 | Runs the lock with launch = 1; on failure the weapon leaves with no target. A laser weapon released by an aircraft without a designator, at a target outside its 45 degree zone-1 cone, or beyond its scaled range, flies unguided |
+| Flight, 0x4c12ce..0x4c135c | While it has a target the projectile reruns the lock (launcher, target, no launch checks) every 2 quarter seconds, 0.5 s |
+| Loss, 0x4c1469..0x4c1470 and 0x4c1720 | On failure `PROJSetTarget` 0x4c0870 clears the target and `CreateMove` 0x463a20 holds the current heading, pitch and bank. Neither the flight loop nor the retarget routine (which skips a weapon without a target, 0x4c3e2e) gives it a new one, so the loss is permanent: the launcher dies, loses its designator, the target dies, or the target leaves the 45 degree cone |
+| Damage message | "LASER SEEKER DAMAGED" (0x4ec53c) sits in the damage message table at 0x4ecb5c beside "IR SEEKER DAMAGED" and "RADAR DAMAGED" |
+
+### Target switch
+
+`PROJRetargetMissiles` 0x4c3dd0 is called from `NPCSetStateTarget` 0x4736d6
+only for the player (`_curId` equals `_playerId`), only when the new target is
+nonzero and differs from the old one (0x4736b7..0x4736d2). It walks every live
+projectile owned by this computer (0x4c3de8..0x4c3e9f) and acts on one that is
+guided (0x4c3e1c), launched by the player (0x4c3e25), has a target other than
+the new one (0x4c3e2e..0x4c3e3f), has not begun its terminal hit roll (state
+bits 0x18 clear, 0x4c3e41; bit 0x8 is set when the roll starts, 0x4c3277), and
+has signature 1, or signature 3 with 0x200 (0x4c3e4a..0x4c3e5f). It reruns the
+lock on the new target: success retargets the weapon (0x4c3e7c..0x4c3e7e),
+failure clears its target and flies it straight (0x4c3e85..0x4c3e8c).
+
+So switching designation sends the player's laser weapons in flight to the new
+target if it lies inside their 45 degree cone, and blinds them otherwise.
+Clearing the designation (;) does not call the routine, so the weapons keep
+guiding on the old target. AI launchers never retarget. The manual's "switch
+targets and the bomb will fall blindly" (M:7988 to 7992) matches only the
+failing case.
+
+### Weather and night
+
+| Evidence | Finding |
+| --- | --- |
+| Signature, `COSig` 0x478249..0x47824c | A laser seeker uses the target's `sigs[1]` (type +0x41; 100 on retail ground units) |
+| Weather, 0x478390..0x4783a7 and `WRWeatherEffects` 0x4b4720..0x4b4784 | The signature is scaled by the minimum, over the weather layers spanning the launcher's and the target's altitudes, of the layer byte at +0x14e + signature. The selector is the seeker signature: 0 visual, 1 laser, 2 IR, 3 radar, 4 anti-radiation. Retail selector-1 values are 50 in `CLOUD1` inside the deck and in `FOG1` low, 100 elsewhere ([weather selectors](weather.md#effect-selectors)) |
+| Effect | Range is compared after scaling by 100 / signature, so a GBU-10's 30,000 ft release limit becomes 15,000 ft when the line from launcher to target spans cloud or fog. The test runs at release only; in flight the lock skips range and signature, so weather never breaks a lock already made |
+| Night, 0x47840d..0x478480 | For visual and laser seekers, a target whose type flags carry 0x1000000 has its signature divided by 1 within 1,500 ft rising to 5 at 4,500 ft and beyond, before 07:00 (0x6270 s) or after 19:05 (0x10c5c s). No retail NT record carries the flag |
+
+### Unknowns
+
+| Unknown | Next step | Fallback |
+| --- | --- | --- |
+| Whether "LASER SEEKER DAMAGED" zeroes the count step 3 tests | Trace the damage writer that indexes the table at 0x4ecb34 | The designator works while its aircraft lives |
+| How a guided bomb moves after losing its target | 0x4c1720 holds attitude; whether movement then adds a fall to a record without 0x4 or 0x10 is R1's bomb motion (`PROJMoveProc` 0x4c11b0) | R1's fitted bomb fallback, so the bomb falls ballistically |
+| Which objects carry type flag 0x1000000 | Scan the OT and PT records' type flags | No night rule |
+
+## Optical
+
+Same build and listing. "Optical" is the retail label for every guided
+signature-0 record.
+
+| Evidence | Finding |
+| --- | --- |
+| Label, 0x41a5b4..0x41a62a, table `sigName` 0x4ee800 | Load Ordnance shows "unguided" without flag 0x1, "SARH" for signature 3 with 0x200, otherwise `sigName[signature]`: 0 "optical", 1 "laser", 2 "IR", 3 "active rdr", 4 "passive rdr". GBU29, GBU29P, GBU30 and AT2 are the guided signature-0 records, so all four read "optical" |
+| JDAM records | GBU29, GBU29P, GBU30 flags 0x2a043: the laser bombs' 0x2a543 without 0x100 and 0x400. Same movement and zones as the laser bombs (zone 1 50 to 30,000 ft, 45 degrees) |
+| AT2 | Flags 0x2216f: guided, 0x100, cruise 0x20 with bytes [29, 4, 29, 4], gravity 0x4, ejection 0x8, speed command 0x40. Zone 1 500 to 18,000 ft, 45 degrees |
+| Lock | The [lock rule](#the-lock-rule) without step 3. A JDAM carries none of 0x100, 0x200, 0x400, so only target alive and the zone-1 test apply: fire and forget. AT-2 also needs its launcher alive (0x100) for the whole flight |
+| Steering, 0x4c147f..0x4c148f, 0x4c1630, 0x4c1660 | The projectile steers at its target object, not a stored point: 0x4c1630 issues a `CreateMove` toward the target id every service; AT-2's flag 0x20 selects the cruise profile 0x4c1660 instead. A moving target is followed |
+| Visibility, `COSig` 0x478249..0x4783f8 | Signature 0 is the target's visual `sigs[0]` with weather selector 0 (visibility: `DAY2` night 25, dawn and dusk 75, below cloud 75, inside cloud 10, low fog 10). Below 75 the percent is raised toward 75 near the target: 75 within 200 ft, blending back over 200 to 1,500 ft (0x4783ad..0x4783f8). At release only, so a JDAM's 30,000 ft limit becomes 7,500 ft at night and 3,000 ft in cloud or fog |
+| Target switch | Signature 0 is not retargeted (0x4c3e4a..0x4c3e5f): a JDAM or AT-2 keeps its release target |
+| No target | Released without a target the weapon has no guidance. JDAMs lack the bomb flag 0x10, so the unguided-bomb release check (`PROJMakeBombEq` 0x4c3eb0 impact within max(range / 8, 1,000 ft) of the target, 0x4c3163..0x4c31cb, see R1's bomb sight) does not apply to them |
+
+Retail answer to plan decision 4: there is no GPS or coordinate guidance. The
+JDAM records are optical, fire-and-forget bombs that home on the object
+designated at release, follow it if it moves, need no designator, and have
+their release range cut by darkness, cloud and fog. A bomb that flies to a
+stored ground point in all weather is an opinionated design.
+
+| Unknown | Next step | Fallback |
+| --- | --- | --- |
+| What a player sees when firing an optical weapon with no target (refused or released unguided) | Trace the player's fire path ahead of `PROJFire` and the HUD readiness for signature 0 | Released unguided, as `PROJFire` allows |
+
 ## Exceptions that must survive classification
 
 - AA10 labels itself AA-10T but has signature 3 and flag 0x200. AA9 also has

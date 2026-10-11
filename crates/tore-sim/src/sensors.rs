@@ -18,8 +18,8 @@ pub use profile::{
 };
 pub use signature::{Configuration, SignatureProfile};
 pub use track::{
-    Channel, Contact, Controls, Environment, Event, Mode, Observable, Observer, Plot, Sample,
-    Sensors, Strobe, Support,
+    Channel, Contact, Controls, Environment, Event, GroundContact, GroundObject, GroundSymbol,
+    Mode, Observable, Observer, Plot, Sample, Sensors, Strobe, Support, Weather, WeatherBand,
 };
 
 fn invalid(message: &str) -> std::io::Error {

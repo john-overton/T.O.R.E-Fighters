@@ -26,8 +26,26 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
     (*state % u32::from(bound)) as u16
 }
 
+mod agm;
+#[cfg(test)]
+mod agm_tests;
+pub use agm::{CueEmitter, MAX_HARM_CUE};
+#[cfg(test)]
+mod bomb_tests;
 mod broad;
+#[cfg(test)]
+mod cluster_tests;
 mod collateral;
+#[cfg(test)]
+mod delivery_tests;
+mod ground_sensing;
+#[cfg(test)]
+mod ground_sensing_tests;
+pub use ground_sensing::GroundListing;
+mod guided;
+#[cfg(test)]
+pub(crate) mod guided_tests;
+pub use guided::{GuidedFlight, Mode as GuidedMode};
 #[cfg(test)]
 mod gunship_impact_tests;
 #[cfg(test)]
@@ -36,6 +54,9 @@ mod handoff;
 mod observation;
 #[cfg(test)]
 mod observation_reference;
+mod sighting;
+#[cfg(test)]
+mod sighting_tests;
 #[cfg(test)]
 mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
@@ -49,6 +70,17 @@ pub use surface::{
     GroundLook, Refused, SURFACE_PROJECTILE_ID_BASE, SURFACE_PROJECTILE_RESERVE, SurfaceRound,
     SurfaceShot, flak_explosion, is_flak, surface_tracer, ticks_to_range,
 };
+
+/// Rounds one loaded store holds: a rocket pod's rockets, else 1 (retail's
+/// `HARDPodHack` multiplies a loaded station's count by it, for the player,
+/// the AI and every wing member alike).
+pub fn pod_rounds(w: &Weapon) -> u32 {
+    if super::ballistics::is_pod(w) {
+        u32::from(w.burst.projectiles_in_pod.unsigned_abs())
+    } else {
+        1
+    }
+}
 
 /// Rounds, missiles and bombs in flight at once. John, 2026-10-09: 5,000,
 /// up from 256, so a crowded gunfight never loses a burst. What a full sky
@@ -78,6 +110,9 @@ pub enum FriendlyFire {
 pub const INCOMING_OWNER: u32 = u32::MAX;
 pub const MAX_EFFECTS: usize = 64;
 pub const MAX_HIT_RECORDS: usize = 128;
+/// The puff a dud bomb raises: the original's bullet-on-land explosion, its
+/// smallest dust burst (explosion type 15; docs/spec/explosions.md).
+const DUD_PUFF: u8 = 15;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
 const BAY_RELEASE_TICKS: u64 = 360;
 /// Fitted: the bay stays open 1 second after a release so the weapon clears.
@@ -123,6 +158,12 @@ pub enum Readiness {
     GunObscured,
     /// Terrain lies between a gun's muzzle and its aim point (AC-130).
     TerrainMask,
+    /// An anti-radiation missile in BORE has no emitter in its cone to fire
+    /// at: retail releases a HARM only at an emitting target.
+    NoEmitter,
+    /// A surface radar weapon (AGM-84A, AM-39, AS-16, AS-7, AS-15) has no
+    /// A-G track on its target: the A-G page is off or does not list it.
+    TrackLost,
 }
 impl Readiness {
     /// Whether an AC-130 gun with this readiness releases rounds. Only the
@@ -169,6 +210,8 @@ impl Readiness {
             Self::GroupEmpty => "GROUP EMPTY",
             Self::GunObscured => "NO LINE OF FIRE",
             Self::TerrainMask => "TERRAIN MASK",
+            Self::NoEmitter => "NO EMITTER",
+            Self::TrackLost => "NO TRACK",
         }
     }
 }
@@ -199,10 +242,24 @@ pub enum Command {
     /// Persistent selection of one current contact by its stable identity.
     DesignateTarget(u32),
     ClearDesignation,
-    /// Backslash on the AC-130: track the object under the gunsight's
-    /// crosshair, else pin the ground there. Nothing on other aircraft.
+    /// Ctrl+R or Shift+R: the radar's air-to-ground page on or off. It turns
+    /// the air radar off and never touches the designated target
+    /// (docs/spec/air-to-ground.md, "The air-to-ground radar").
+    ToggleAirGround,
+    /// Ctrl+X: the nearest hostile ground object, only with the Easy
+    /// targeting cheat on (a retail cheat key).
+    NearestGround,
+    /// Ctrl+L: the laser on or off by hand, on an aircraft with a laser
+    /// designator (docs/spec/air-to-ground.md, "The laser").
+    ToggleLaser,
+    /// `/`: the targeting sight tracks the next visible ground object.
+    SightNext,
+    /// Backslash on an aircraft with a targeting sight (the AC-130's
+    /// gunsight included): track the object under the crosshair, else pin
+    /// the ground there.
     SightDesignate,
-    /// Shift+Backslash on the AC-130: pin the ground under the crosshair.
+    /// Shift+Backslash on an aircraft with a targeting sight: pin the ground
+    /// under the crosshair.
     SightPinGround,
     ToggleArm,
     Jettison,
@@ -381,10 +438,19 @@ pub struct Configuration {
     pub wreck_power: crate::wreck::Power,
     /// Imported sensor capability, resolved by parsed record channel.
     pub sensors: sensors::SensorProfiles,
+    /// The targeting sight of the aircraft's own laser or FLIR record
+    /// ([`super::sight::fixed_sight`]); [`Configuration::sight_sensor`] puts
+    /// a loaded designator pod first.
+    pub sight: Option<super::sight::SightSensor>,
+    /// Laser designator pods loaded on weapon stations (decision 7).
+    pub designator_pods: Vec<super::sight::DesignatorPod>,
 }
 impl Configuration {
-    /// Convert installed gun pod quantities to logical rounds. The high ammo
-    /// bit remains reserved for station failure, so overflow is rejected.
+    /// Convert installed quantities to logical rounds: a gun pod's rounds,
+    /// and a rocket pod's rockets, `projsInPod` a pod (retail multiplies a
+    /// loaded station's count by it at mission start, `HARDPodHack`; two
+    /// LAU-61 pods hold 38 rockets). The high ammo bit remains reserved for
+    /// station failure, so overflow is rejected.
     pub fn ammunition(&self, quantities: &[u16]) -> Result<Vec<u16>> {
         if quantities.len() != self.stations.len() {
             return Err(super::invalid("invalid ammunition station count"));
@@ -398,7 +464,10 @@ impl Configuration {
                     .iter()
                     .find(|pod| pod.station == station)
                     .filter(|_| self.stations[station].weapon.source == "SUU16.JT")
-                    .map_or(1, |pod| u32::from(pod.rounds_per_pod));
+                    .map_or_else(
+                        || pod_rounds(&self.stations[station].weapon),
+                        |pod| u32::from(pod.rounds_per_pod),
+                    );
                 let rounds = u32::from(*quantity) * multiplier;
                 if rounds >= 32767 {
                     return Err(super::invalid(
@@ -420,6 +489,12 @@ impl Configuration {
                 return Err(super::invalid("invalid gun pod configuration"));
             }
             mass += i64::from(pod.quantity) * i64::from(pod.weight_lbs);
+        }
+        for pod in &self.designator_pods {
+            if pod.station >= self.stations.len() || pod.store.weight_lbs < 0 {
+                return Err(super::invalid("invalid designator pod configuration"));
+            }
+            mass += i64::from(pod.store.weight_lbs);
         }
         let mut fuel = [0.; 9];
         let mut used = [false; 9];
@@ -734,6 +809,7 @@ impl Configuration {
         // Sensors resolve by parsed record channel, so a missing device is an
         // explicit state rather than another aircraft's radar.
         let profiles = sensors::SensorProfiles::from_source(a, &mut read)?;
+        let sight = super::sight::fixed_sight(a, &mut read)?;
         let station = |record: Option<&String>| {
             record.and_then(|record| {
                 a.hardpoints.iter().position(|h| {
@@ -839,6 +915,8 @@ impl Configuration {
             rwr_hardpoint,
             ecm_hardpoint,
             sensors: profiles,
+            sight,
+            designator_pods: vec![],
             fixed_external_equipment_lbs,
             tanks,
             gun_pods,
@@ -1267,6 +1345,15 @@ pub struct Ownship {
     pub selected: usize,
     /// AC-130 fixed-tick barrel angles and linked membership.
     pub gunship: Option<super::gunship::State>,
+    /// The targeting sight of an aircraft with a laser designator or a FLIR
+    /// (the AC-130's is its gunsight, in `gunship`).
+    pub sight: Option<super::sight::Sight>,
+    /// The laser designator: off on an aircraft without one.
+    pub laser: super::laser::Laser,
+    /// The selected guided air-to-ground weapon's sight (aim, reach and
+    /// advisory), worked out every step for the cockpit; never read back by
+    /// combat, so a checkpoint does not carry it.
+    pub guided_sight: Option<super::guided::GuidedSight>,
     pub armed: bool,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
@@ -1277,6 +1364,12 @@ pub struct Ownship {
     sight_hold: Option<u32>,
     /// Friendly aircraft identities, which T and Enter skip. Set by the host.
     pub friendlies: std::collections::BTreeSet<u32>,
+    /// The radars painting this aircraft (the RWR's bright squares), set by
+    /// the host every tick: the HARM boresight candidate prefers them.
+    painted_by: std::collections::BTreeSet<u32>,
+    /// The HARM boresight cue's emitters, worked out with the observations
+    /// each step; for the HUD only, never a designation or a lock.
+    harm_cue: Vec<CueEmitter>,
     /// Passive emitters received this step, for the exposure instrument.
     pub emitters: Vec<passive::Emitter>,
     pub missile_threats: super::threats::ThreatService,
@@ -1308,6 +1401,12 @@ pub struct Ownship {
     bay_release: Option<(usize, u64)>,
     /// The bay stays open until this tick after a bay release.
     bay_hold_until: u64,
+    /// The bomb sight's mode (Ctrl+M): CCIP or the level release.
+    pub delivery_mode: super::delivery::DeliveryMode,
+    /// The bomb or rocket sight's solution for the selected station, worked
+    /// out every step from that step's launcher ([`super::delivery::solve`]).
+    /// Derived each step, so a checkpoint does not carry it.
+    pub delivery: Option<super::delivery::Delivery>,
 }
 
 /// Combat: what every aircraft shares, and the [`Ownship`] of each
@@ -1381,11 +1480,28 @@ pub struct State {
     surface_rounds: BTreeMap<u32, SurfaceRound>,
     /// The number of the next surface unit's round.
     next_surface_shot: u32,
+    /// The path of each bomb in flight, by projectile number: bomb records
+    /// fall on the closed-form bomb equation ([`super::ballistics`]), so a
+    /// bomb keeps its release rather than a velocity. Mission state.
+    bombs: BTreeMap<u32, super::ballistics::BombMotion>,
+    /// The guidance of each guided air-to-ground weapon an ownship released
+    /// and is in flight, by projectile number ([`guided`]). Mission state.
+    guided: BTreeMap<u32, guided::GuidedFlight>,
+    /// The tick each aircraft's last guided air-to-ground weapon ended (hit
+    /// or went away), for the targeting page's impact cue.
+    guided_impacts: BTreeMap<u32, u64>,
     /// How each ground object that has a unit record explodes when destroyed.
     ground_looks: BTreeMap<u32, GroundLook>,
     /// The parked aircraft among the targets, by id, with their crash sites
     /// ([`State::add_parked_aircraft`]).
     parked: BTreeMap<u32, ParkedSite>,
+    /// The type facts the ground pages read, by ground object
+    /// ([`State::set_ground_listing`]).
+    ground_listing: BTreeMap<u32, GroundListing>,
+    /// The aircraft in an airfield sequence ([`State::set_airfield_attached`]).
+    airfield: std::collections::BTreeSet<u32>,
+    /// The weather's sensor effects ([`State::set_sensor_weather`]).
+    sensor_weather: sensors::Weather,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -1503,9 +1619,12 @@ fn step_gunship(
     );
     let after = group.target();
     if after != before {
+        // The sight's track designates its object, whatever the channels see,
+        // for as long as it holds it (docs/spec/air-to-ground.md, "Visual and
+        // sight designation").
         match after {
-            Some(id) if own.sensors.designate(id) => {}
-            _ => own.sensors.clear_selection(),
+            Some(id) => own.sensors.hold(id),
+            None => own.sensors.clear_selection(),
         }
         own.hud_selection = own.designated();
     }
@@ -1541,7 +1660,8 @@ fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
         aircraft: Some(own.config.aircraft),
         role: TargetRole::Aircraft,
         heat: Heat::Unknown,
-        radar_emitting: launcher.radar,
+        // The A-G page does not emit for anti-radiation seekers (retail).
+        radar_emitting: launcher.radar && !own.sensors.air_ground(),
         id: own.aircraft,
         position: launcher.position,
         velocity: launcher.velocity,
@@ -1594,6 +1714,10 @@ impl Ownship {
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let sensors = Sensors::new(config.sensors.clone());
         let gunship = super::gunship::State::new(&config);
+        let sight = gunship
+            .is_none()
+            .then(|| config.sight_sensor().map(super::sight::Sight::new))
+            .flatten();
         Ok(Self {
             aircraft,
             side,
@@ -1605,6 +1729,8 @@ impl Ownship {
             hud_selection: None,
             sight_hold: None,
             friendlies: Default::default(),
+            painted_by: Default::default(),
+            harm_cue: Vec::new(),
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
             hp: config.damage_capacity,
@@ -1626,6 +1752,9 @@ impl Ownship {
             ever_loaded,
             selected: 0,
             gunship,
+            sight,
+            laser: Default::default(),
+            guided_sight: None,
             sensors,
             emitters: vec![],
             missile_threats: super::threats::ThreatService::new(aircraft),
@@ -1639,6 +1768,8 @@ impl Ownship {
             gun_cadence,
             bay_release: None,
             bay_hold_until: 0,
+            delivery_mode: Default::default(),
+            delivery: None,
         })
     }
     pub fn configuration(&self) -> &Configuration {
@@ -1789,7 +1920,13 @@ impl Ownship {
                 .iter()
                 .zip(&self.ammo)
                 .filter(|(s, _)| !s.internal && s.weapon.source != "SUU16.JT")
-                .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff))
+                .map(|(s, count)| {
+                    // A rocket pod's weight is the full pod's; each rocket
+                    // fired takes its share (fitted: retail's store weight
+                    // for a part-empty pod is not read).
+                    f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff)
+                        / f64::from(pod_rounds(&s.weapon))
+                })
                 .sum::<f64>()
     }
 }
@@ -2137,6 +2274,38 @@ impl<'a> LauncherView<'a> {
         }
         let launcher = self.launcher;
         let w = &self.view.own.config.stations[self.view.own.selected].weapon;
+        // The guided air-to-ground weapons (docs/spec/air-to-ground.md,
+        // "Warnings"): only a JDAM with nothing to fly to and an AT-2 with no
+        // target are held back. A laser weapon goes with or without a spot
+        // (it falls blind, and may find one); NO LASER, MASK and OUT OF
+        // REACH are advisories in `Ownship::guided_sight`.
+        if self.view.state.weapon_rules == Rules::Spec
+            && let Some(kind) = super::guided::kind(w)
+        {
+            let designated = self
+                .view
+                .designated()
+                .and_then(|id| self.view.contact(id))
+                .filter(|t| !t.airborne);
+            return match kind {
+                Guidance::Coordinate
+                    if designated.is_none_or(|t| t.hp <= 0)
+                        && self
+                            .view
+                            .own
+                            .sight
+                            .is_none_or(|sight| sight.held_point().is_none()) =>
+                {
+                    Readiness::NoTarget
+                }
+                Guidance::Command => match designated {
+                    None => Readiness::NoTarget,
+                    Some(t) if t.hp <= 0 => Readiness::TargetDestroyed,
+                    Some(_) => Readiness::Ready,
+                },
+                _ => Readiness::Ready,
+            };
+        }
         if w.seeker.signature == 0 {
             return Readiness::Ready;
         }
@@ -2149,11 +2318,29 @@ impl<'a> LauncherView<'a> {
         if profile.is_some_and(|p| p.supports_boresight())
             && self.view.own.launch_mode == LaunchMode::Boresight
         {
-            if self.view.own.bore_observation.is_some_and(|o| {
+            // An air-to-ground missile in BORE fires only at the candidate its
+            // seeker holds (agent): retail releases a HARM only at an emitting
+            // target and a Maverick only at a designated one.
+            let surface = profile.is_some_and(|p| p.role == TargetRole::Surface);
+            let bore = self.view.own.bore_observation;
+            if surface && bore.is_none() {
+                return if profile.is_some_and(|p| p.holds_on_angles()) {
+                    Readiness::NoEmitter
+                } else {
+                    Readiness::NoTarget
+                };
+            }
+            if bore.is_some_and(|o| {
                 missiles::length(sub(o.position, launcher.position))
                     < f64::from(w.seeker.zones[1].minimum_range.max(0))
             }) {
                 return Readiness::MinimumRange;
+            }
+            if surface
+                && (self.view.own.mounted.target != bore.map(|o| o.id)
+                    || self.view.own.mounted.status != Status::Locked)
+            {
+                return Readiness::RadarAcquiring;
             }
             return Readiness::Ready;
         }
@@ -2166,7 +2353,15 @@ impl<'a> LauncherView<'a> {
         if !t.body_present() {
             return Readiness::TargetDestroyed;
         }
-        if w.seeker.signature == 3 {
+        if w.seeker.signature == 3 && profile.is_some_and(|p| p.needs_air_ground()) {
+            // A surface radar weapon is released on the A-G track (retail).
+            if self.view.own.radar_failed {
+                return Readiness::RadarFailed;
+            }
+            if !self.view.own.ground_track(t.id) {
+                return Readiness::TrackLost;
+            }
+        } else if w.seeker.signature == 3 {
             // Equipment state answers immediately, before the shared support
             // result, so a failure reported between steps is not stale.
             if self.view.own.radar_failed {
@@ -2555,7 +2750,13 @@ impl State {
             rewinds: BTreeMap::new(),
             surface_rounds: BTreeMap::new(),
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
+            bombs: BTreeMap::new(),
+            guided: BTreeMap::new(),
+            guided_impacts: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
+            ground_listing: BTreeMap::new(),
+            airfield: Default::default(),
+            sensor_weather: Default::default(),
             parked: BTreeMap::new(),
         }
     }
@@ -2750,6 +2951,11 @@ impl State {
 
     /// The rewind, in ticks, that projectile `id` carries: 0 for every round
     /// but a gun round a human fired with a view.
+    /// The path of bomb `id` while it falls: where it was released and how
+    /// fast it was going, scatter included. `None` for any other round.
+    pub fn bomb_motion(&self, id: u32) -> Option<super::ballistics::BombMotion> {
+        self.bombs.get(&id).copied()
+    }
     pub fn rewind_of(&self, id: u32) -> u16 {
         self.rewinds.get(&id).copied().unwrap_or(0)
     }
@@ -2793,6 +2999,14 @@ impl State {
                             .find(|(aircraft, _)| *aircraft == own.aircraft)
                             .map(|(_, launcher)| launcher);
                         target.zip(launcher).map(|(id, launcher)| ActorSupport {
+                            supported: agm::ownship_supports(
+                                own,
+                                Some(profile),
+                                weapon,
+                                launcher,
+                                id,
+                                self.targets.iter().find(|t| t.id == id),
+                            ),
                             owner: own.aircraft,
                             observation: own.sensors.observation(id).map(|contact| {
                                 let delta = sub(contact.position, projectile.position);
@@ -2807,7 +3021,6 @@ impl State {
                                     range: missiles::length(delta),
                                 }
                             }),
-                            supported: own.sensors.supports(id),
                             radar_position: launcher.position,
                             radar_emitting: launcher.radar && launcher.alive,
                         })
@@ -2879,12 +3092,37 @@ impl State {
     /// (x right, y up, -127 to 127) and the zoom step (1 to 6, 0 for the
     /// default). Held until set again; nothing without an AC-130 gun group.
     pub fn set_sight_input(&mut self, aircraft: u32, deflection: [i8; 2], zoom: u8) {
-        if let Some(group) = self
-            .ownship_mut(aircraft)
-            .and_then(|own| own.gunship.as_mut())
-        {
-            group.input = super::gunship::SightInput { deflection, zoom };
+        let Some(own) = self.ownship_mut(aircraft) else {
+            return;
+        };
+        let input = super::gunship::SightInput { deflection, zoom };
+        if let Some(group) = own.gunship.as_mut() {
+            group.input = input;
         }
+        if let Some(sight) = own.sight.as_mut() {
+            sight.input = input;
+        }
+    }
+    /// A newly selected unguided bomb starts in LVL when a ground target is
+    /// designated and the flight path is near level, else in CCIP
+    /// ([`super::delivery::DeliveryMode::chosen`]); Ctrl+M overrides it.
+    fn choose_delivery(&self, own: &mut Ownship, launcher: Launcher) {
+        if !own.armed
+            || !own
+                .config
+                .stations
+                .get(own.selected)
+                .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+        {
+            return;
+        }
+        let ground_target = own
+            .designated()
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+            .is_some_and(|t| t.role == TargetRole::Surface && t.hp > 0);
+        let v = launcher.velocity;
+        own.delivery_mode =
+            super::delivery::DeliveryMode::chosen(ground_target, v[1].atan2(v[0].hypot(v[2])));
     }
     /// A manual range or cockpit command for one ownship.
     pub fn command(&mut self, aircraft: u32, command: Command, launcher: Launcher) {
@@ -2893,6 +3131,17 @@ impl State {
         });
     }
     fn command_of(&mut self, own: &mut Ownship, command: Command, launcher: Launcher) {
+        let before = own.designated();
+        self.apply_command(own, command, launcher);
+        // A new designation retargets or blinds the player's supported
+        // surface missiles in flight (retail `PROJRetargetMissiles`).
+        if let Some(id) = own.designated()
+            && before != Some(id)
+        {
+            agm::retarget(self, own, id, &launcher);
+        }
+    }
+    fn apply_command(&mut self, own: &mut Ownship, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
                 self.targets.retain(|t| {
@@ -3006,6 +3255,18 @@ impl State {
             Command::ReleaseChaff => self.release_countermeasure(own, EffectKind::Chaff, launcher),
             Command::ReleaseFlare => self.release_countermeasure(own, EffectKind::Flare, launcher),
             Command::ToggleSeekerMode => {
+                // Ctrl+M with an unguided bomb selected switches its sight
+                // between CCIP and LVL (docs/spec/air-to-ground.md).
+                if own.armed
+                    && own
+                        .config
+                        .stations
+                        .get(own.selected)
+                        .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+                {
+                    own.delivery_mode = own.delivery_mode.toggled();
+                    return;
+                }
                 if self.weapon_rules == Rules::Compatibility || !own.guidance_available(launcher) {
                     return;
                 }
@@ -3014,9 +3275,11 @@ impl State {
                 {
                     return;
                 }
+                // A designation holds an infrared missile, and an
+                // anti-radiation surface missile, in CUED.
                 if own.designated().is_some()
                     && missiles::Profile::for_weapon(&own.config.stations[own.selected].weapon)
-                        .is_some_and(|p| p.guidance == Guidance::Infrared)
+                        .is_some_and(|p| p.guidance == Guidance::Infrared || p.holds_on_angles())
                 {
                     return;
                 }
@@ -3052,15 +3315,21 @@ impl State {
                     own.release();
                 }
             }
-            Command::NextWeapon => own.select_next(),
+            Command::NextWeapon => {
+                own.select_next();
+                self.choose_delivery(own, launcher);
+            }
             Command::NextSelection => {
-                own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::PreviousSelection => {
-                own.cycle_selection(false, self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.cycle_selection(false, self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::AdvanceFromEmpty => {
-                own.advance_from_empty(self.cheats.guns_only, self.cheats.unlimited_ammo)
+                own.advance_from_empty(self.cheats.guns_only, self.cheats.unlimited_ammo);
+                self.choose_delivery(own, launcher);
             }
             Command::SelectNav => {
                 own.release();
@@ -3082,6 +3351,17 @@ impl State {
                 }
                 own.sight_follows_designation();
             }
+            Command::ToggleAirGround => {
+                own.sensors.toggle_air_ground();
+            }
+            Command::NearestGround => {
+                if own.easy_targeting(self.cheats.easy_targeting)
+                    && let Some(id) = self.nearest_ground(own, launcher.position)
+                {
+                    own.sensors.select_ground(id);
+                    own.selection_changed();
+                }
+            }
             Command::ClearDesignation => {
                 own.sensors.clear_selection();
                 own.hud_selection = None;
@@ -3093,15 +3373,16 @@ impl State {
                 if let Some(group) = &mut own.gunship {
                     group.drop_hold();
                 }
-            }
-            Command::SightDesignate => {
-                if let Some(group) = &mut own.gunship {
-                    group.request = Some(super::gunship::SightRequest::Designate);
+                if let Some(sight) = &mut own.sight {
+                    sight.drop_hold();
                 }
             }
-            Command::SightPinGround => {
-                if let Some(group) = &mut own.gunship {
-                    group.request = Some(super::gunship::SightRequest::Pin);
+            Command::SightDesignate => own.request_sight(super::sight::SightRequest::Designate),
+            Command::SightPinGround => own.request_sight(super::sight::SightRequest::Pin),
+            Command::SightNext => own.request_sight(super::sight::SightRequest::Next),
+            Command::ToggleLaser => {
+                if own.config.sight_sensor().is_some_and(|s| s.laser) {
+                    own.laser.toggle();
                 }
             }
             Command::ToggleArm => {
@@ -3442,6 +3723,7 @@ impl State {
         self.targets.retain(|t| !scene(t.id));
         self.ground_bounds.clear();
         self.ground_looks.clear();
+        self.ground_listing.clear();
         self.parked.clear();
         for own in &mut self.ownships {
             own.sensors.clear_selection();
@@ -3703,6 +3985,49 @@ impl State {
             blast: Some(explosion),
         });
     }
+    /// The bomb or rocket sight's solution for `own`'s selected station this
+    /// step: against its designated ground target, with the time to impact of
+    /// the last bomb it released.
+    fn delivery_for(
+        &self,
+        own: &Ownship,
+        launcher: &Launcher,
+        ground: &impl Fn(f64, f64) -> f64,
+        clock: super::delivery::Clock,
+    ) -> Option<super::delivery::Delivery> {
+        if !own.armed || !launcher.alive {
+            return None;
+        }
+        let station = own.config.stations.get(own.selected)?;
+        let target = own
+            .designated()
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+            .filter(|t| t.role == TargetRole::Surface && t.hp > 0)
+            .map(|t| t.position);
+        let falling = self
+            .projectiles
+            .iter()
+            .filter(|p| p.owner == own.aircraft)
+            .filter_map(|p| self.bombs.get(&p.id).map(|motion| (p, motion)))
+            .max_by_key(|(p, _)| p.id)
+            .and_then(|(p, motion)| {
+                motion
+                    .fall_time(ground(p.position[0], p.position[2]))
+                    .map(|t| (t - p.age as f64 / 120.).max(0.))
+            });
+        super::delivery::solve(
+            super::delivery::Situation {
+                index: own.selected,
+                station,
+                launcher,
+                mode: own.delivery_mode,
+                target,
+                clock,
+                falling,
+            },
+            ground,
+        )
+    }
     fn push_effect(&mut self, effect: Effect) {
         if self.effects.len() == MAX_EFFECTS {
             self.effects.remove(0);
@@ -3838,12 +4163,21 @@ impl State {
             self.ownship_rows
                 .extend(rows.iter().map(|r| r.target.clone()));
         }
+        // The aircraft with one of their own laser weapons in flight: their
+        // lasers stay on (docs/spec/air-to-ground.md, "The laser").
+        let laser_owners = sighting::laser_owners(&ships, &self.projectiles);
+        // Every laser spot as the last step left it: a guided release and
+        // the guided sight read the other ownships' spots here, and their
+        // own aircraft's fresh one.
+        let spots_before = guided::spots(&ships);
         // These observations read fixed rows and change only their ownship.
         // Readiness and every release remain below, in aircraft id order.
         // Fitted: at least two active cockpits amortize a scoped dispatch.
         let observations_prepared = executor.should_dispatch(active.len(), 2);
         if observations_prepared {
+            let facts = self.ground_facts();
             let context = observation::Context {
+                facts: &facts,
                 targets: &self.targets,
                 rows: &rows,
                 weapon_rules: self.weapon_rules,
@@ -3866,6 +4200,7 @@ impl State {
                     k,
                     launcher,
                     &observation::Context {
+                        facts: &self.ground_facts(),
                         targets: &self.targets,
                         rows: &rows,
                         weapon_rules: self.weapon_rules,
@@ -3875,6 +4210,29 @@ impl State {
                     },
                 );
             }
+            if own.sight.is_some() {
+                sighting::step(
+                    own,
+                    launcher,
+                    &self.targets,
+                    &sighting::Context {
+                        ground: &ground,
+                        weather: &self.sensor_weather,
+                        laser_owners: &laser_owners,
+                        tick: self.tick,
+                    },
+                );
+            }
+            own.guided_sight = guided::sight(
+                own,
+                &launcher,
+                &guided::SightContext {
+                    spots: &spots_before,
+                    targets: &self.targets,
+                    weather: &self.sensor_weather,
+                    ground: &ground,
+                },
+            );
             if own.config.stations.is_empty() {
                 own.release_readiness = Readiness::Safe;
                 own.release();
@@ -3883,6 +4241,16 @@ impl State {
             if own.gunship.is_some() {
                 step_gunship(own, k, launcher, &self.targets, &rows, &ground, self.tick);
             }
+            own.delivery = self.delivery_for(
+                own,
+                &launcher,
+                &ground,
+                super::delivery::Clock {
+                    tick: self.tick - 1,
+                    service,
+                    remainder: self.service_remainder,
+                },
+            );
             let selected = own.selected;
             let grouped = own
                 .gunship
@@ -3950,6 +4318,21 @@ impl State {
                     w.burst.game_burst_t,
                     now,
                 );
+                // LVL holds a bomb's trigger while the release cue lies ahead:
+                // a held trigger waits for the cue and releases there, once a
+                // pass (docs/spec/air-to-ground.md, "The level release T").
+                let polled = match own.delivery.as_ref().and_then(|d| d.level_trigger(index)) {
+                    Some(due) => {
+                        due && held
+                            && launcher.alive
+                            && !self.projectiles.iter().any(|p| {
+                                p.owner == own.aircraft
+                                    && p.station == index
+                                    && p.age <= super::delivery::RELEASE_GUARD_TICKS
+                            })
+                    }
+                    None => polled,
+                };
                 if polled && bay_waits && own.release_readiness == Readiness::Ready {
                     own.bay_release = Some((index, self.tick));
                     own.release_readiness = Readiness::BayClosed;
@@ -4002,8 +4385,10 @@ impl State {
                         (0, 1, None, false)
                     }
                 } else if due && allowed {
+                    // One trigger call: a pod's one rocket, or a record's
+                    // whole burst (a bomb pack in one tick), for one debit.
                     (
-                        usize::from(w.burst.game_rounds_in_burst.max(1)).min(32),
+                        super::ballistics::release_count(w),
                         u16::from(w.burst.actual_rounds_per_game),
                         None,
                         false,
@@ -4013,8 +4398,12 @@ impl State {
                 };
                 let mut fired = false;
                 if count > 0 {
-                    for _ in 0..count {
-                        let loaded = if self.cheats.unlimited_ammo {
+                    for round in 0..count {
+                        // A gun debits each round; any other call debits once,
+                        // for the first of its projectiles (retail PROJFire).
+                        let loaded = if !gun && round > 0 {
+                            true
+                        } else if self.cheats.unlimited_ammo {
                             own.rounds(index) > 0
                         } else {
                             unload(&mut own.ammo[index], debit)
@@ -4037,10 +4426,22 @@ impl State {
                                     + launcher.basis.forward[i] * station.mount[2]
                             })
                         };
-                        let direction =
+                        let mut direction =
                             gun_pose.map_or(launcher.basis.forward, |(_, heading, elevation)| {
                                 super::gunship::direction(launcher, heading, elevation)
                             });
+                        // A bomb leaves its station (staggered in a pack)
+                        // along the nose, then takes its own scatter.
+                        let bomb = super::ballistics::is_bomb(w).then(|| {
+                            let (heading, pitch) =
+                                super::ballistics::scatter(|bound| draw(&mut self.rng, bound));
+                            super::ballistics::ReleaseState::from_station(&launcher, station, round)
+                                .turned(heading, pitch)
+                        });
+                        let position = bomb.map_or(position, |release| release.position);
+                        if let Some(release) = bomb {
+                            direction = super::ballistics::BombMotion::new(release).direction(0.);
+                        }
                         let target = if self.weapon_rules == Rules::Spec
                             && !own.guidance_available(launcher)
                         {
@@ -4073,6 +4474,14 @@ impl State {
                                 {
                                     flight.seeker = own.mounted.clone();
                                 }
+                                // A surface radar weapon leaves for the point
+                                // the A-G track gives; the track refreshes it.
+                                if profile.needs_air_ground()
+                                    && let Some(contact) =
+                                        target.and_then(|id| own.sensors.observation(id))
+                                {
+                                    flight.last_intercept = Some(contact.position);
+                                }
                                 if !profile.guidance_available(launcher.radar_power) {
                                     flight.unguided = true;
                                     flight.enabled = false;
@@ -4081,6 +4490,14 @@ impl State {
                                 }
                                 flight
                             });
+                        // A guided air-to-ground weapon flies its own
+                        // guidance ([`guided`]) on a motion, never the
+                        // legacy pursuit: its projectile target stays empty.
+                        let guided_kind = (self.weapon_rules == Rules::Spec)
+                            .then(|| super::guided::kind(w))
+                            .flatten();
+                        let guided_velocity =
+                            guided_kind.map(|_| super::guided::release_velocity(w, &launcher));
                         self.projectiles.push(Projectile {
                             id: self.next_shot,
                             owner: own.aircraft,
@@ -4089,9 +4506,13 @@ impl State {
                             guidance_ticks: (self.weapon_rules == Rules::Spec)
                                 .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
                                 .flatten(),
-                            motion: (self.weapon_rules == Rules::Spec
-                                && missiles::Profile::for_weapon(w).is_some())
-                            .then(|| Motion::launch(w, launcher.velocity, position[1])),
+                            motion: if let Some(velocity) = guided_velocity {
+                                Some(Motion::launch(w, velocity, position[1]))
+                            } else {
+                                (self.weapon_rules == Rules::Spec
+                                    && missiles::Profile::for_weapon(w).is_some())
+                                .then(|| Motion::launch(w, launcher.velocity, position[1]))
+                            },
                             age: 0,
                             incoming: None,
                             station: index,
@@ -4102,11 +4523,37 @@ impl State {
                                 .expect("validated speed limits")
                                 * 256,
                             launched_t: now,
-                            target: if guided { target } else { None },
+                            target: if guided && guided_kind.is_none() {
+                                target
+                            } else {
+                                None
+                            },
                             fall: FallState::default(),
                             gun_round,
                             tracer,
                         });
+                        if let Some(release) = bomb {
+                            self.bombs.insert(
+                                self.next_shot,
+                                super::ballistics::BombMotion::new(release),
+                            );
+                        }
+                        if let (Some(kind), Some(velocity)) = (guided_kind, guided_velocity) {
+                            let flight = guided::release(
+                                w,
+                                kind,
+                                own,
+                                index,
+                                &launcher,
+                                position,
+                                velocity,
+                                &spots_before,
+                                &self.targets,
+                                &self.sensor_weather,
+                                &ground,
+                            );
+                            self.guided.insert(self.next_shot, flight);
+                        }
                         if let Some(flight) =
                             self.projectiles.last().and_then(|p| p.guidance.as_ref())
                             && flight.profile.guidance == Guidance::Active
@@ -4126,6 +4573,9 @@ impl State {
                             self.rewinds.insert(self.next_shot, ticks);
                         }
                         own.shots += 1;
+                        if super::laser::is_laser_weapon(w) {
+                            own.laser.note_release();
+                        }
                         self.next_shot += 1;
                         fired = true;
                         events.push(Event::Fired {
@@ -4381,7 +4831,14 @@ impl State {
                         .and_then(|flight| flight.seeker.target)
                         .map(|id| ActorSupport {
                             owner: p.owner,
-                            supported: own.sensors.supports(id),
+                            supported: agm::ownship_supports(
+                                own,
+                                p.guidance.as_ref().map(|flight| flight.profile),
+                                w,
+                                &row.launcher,
+                                id,
+                                self.targets.iter().find(|t| t.id == id),
+                            ),
                             observation: own.sensors.observation(id).map(|contact| {
                                 let delta = sub(contact.position, p.position);
                                 seeker::Observation {
@@ -4471,13 +4928,50 @@ impl State {
                     events.push(Event::TrackLost(id));
                 }
             }
-            if let Some(motion) = &mut p.motion {
-                motion.turn(old_direction, p.direction);
+            // A guided air-to-ground weapon steers itself (turning its
+            // motion with it); one that is not guiding may fall instead.
+            let guided_fall = self.guided.get_mut(&p.id).map(|flight| {
+                guided::steer(
+                    flight,
+                    p,
+                    w,
+                    &guided::Context {
+                        ships: &ships,
+                        rows: &rows,
+                        targets: &self.targets,
+                        ground: &ground,
+                    },
+                )
+            });
+            if let Some(Some((fall, start))) = guided_fall {
+                let seconds = (p.age + 1 - start) as f64 / 120.;
+                p.position = fall.position(seconds);
+                p.direction = fall.direction(seconds);
+                p.speed_f8 = (missiles::length(fall.velocity(seconds)) * 256.) as i32;
+            } else if let Some(motion) = &mut p.motion {
+                if guided_fall.is_none() {
+                    motion.turn(old_direction, p.direction);
+                }
                 let delta = motion.step(m, p.age, p.direction);
                 for (position, delta) in p.position.iter_mut().zip(delta) {
                     *position += delta;
                 }
                 p.speed_f8 = (missiles::length(motion.velocity) * 256.) as i32;
+            } else if super::ballistics::is_bomb(w) {
+                // A bomb record falls on its closed-form path. One placed in
+                // flight without a release (a driver's or a test's round)
+                // starts its path where it is, at its own speed.
+                let motion = *self.bombs.entry(p.id).or_insert_with(|| {
+                    super::ballistics::BombMotion::new(super::ballistics::ReleaseState::new(
+                        p.position,
+                        p.direction,
+                        f64::from(p.speed_f8) / 256.,
+                    ))
+                });
+                let seconds = (p.age + 1) as f64 / 120.;
+                p.position = motion.position(seconds);
+                p.direction = motion.direction(seconds);
+                p.speed_f8 = (missiles::length(motion.velocity(seconds)) * 256.) as i32;
             } else {
                 if w.flags & 0x40 != 0 {
                     let target =
@@ -4958,6 +5452,16 @@ impl State {
                     if burst.collateral() {
                         bursts.push(burst);
                     }
+                } else if super::ballistics::is_bomb(w) && !armed {
+                    // A bomb that reaches the ground before its fuze arms is a
+                    // dud: no burst, no splash, no crater, only a puff of dirt
+                    // where it lands (opinionated, lead, 2026-10-10;
+                    // docs/spec/air-to-ground.md, "Warnings").
+                    self.ledger.resolve(p.id, Resolution::Missed);
+                    events.push(Event::Ground);
+                    if !water(position[0], position[2]) {
+                        impacts.push((position, EffectKind::Ground, DUD_PUFF, 0));
+                    }
                 } else {
                     self.ledger.resolve(p.id, Resolution::Missed);
                     let burst = collateral::Burst::new(
@@ -4988,12 +5492,27 @@ impl State {
             }
             true
         });
-        // A round that is gone takes its rewind and its surface record with it.
-        if !self.rewinds.is_empty() || !self.surface_rounds.is_empty() {
+        // A round that is gone takes its rewind, its surface record and its
+        // bomb path with it.
+        if !self.rewinds.is_empty()
+            || !self.surface_rounds.is_empty()
+            || !self.bombs.is_empty()
+            || !self.guided.is_empty()
+        {
             let flying: std::collections::BTreeSet<u32> =
                 self.projectiles.iter().map(|p| p.id).collect();
             self.rewinds.retain(|id, _| flying.contains(id));
             self.surface_rounds.retain(|id, _| flying.contains(id));
+            self.bombs.retain(|id, _| flying.contains(id));
+            // A guided weapon that is gone marks its aircraft's last impact.
+            let (tick, impacts) = (self.tick, &mut self.guided_impacts);
+            self.guided.retain(|id, flight| {
+                let keep = flying.contains(id);
+                if !keep {
+                    impacts.insert(flight.owner, tick);
+                }
+                keep
+            });
         }
         for id in parked_wrecks {
             self.parked_destroyed(id);
@@ -5511,7 +6030,7 @@ pub fn segment_sphere(a: Vector, b: Vector, radius: f64) -> Option<f64> {
     let t = (-bb - disc.sqrt()) / aa;
     (0. ..=1.).contains(&t).then_some(t)
 }
-pub(crate) fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
+pub fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
     let below = |t: f64| {
         let p: Vector = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
         p[1] <= ground(p[0], p[2])
@@ -6011,6 +6530,8 @@ mod tests {
                 infrared_hardpoint: None,
                 rwr_hardpoint: None,
                 sensors: sensor_profiles(),
+                sight: None,
+                designator_pods: vec![],
             },
             true,
         )
@@ -9561,6 +10082,20 @@ fn guide_owned<'a>(
                 .and_then(|answer| answer.observation)
                 .filter(|o| o.id == id)
         });
+    // A supported surface missile (AS-7, AS-15) whose A-G track drops loses
+    // its target for good and flies on unguided (retail data).
+    if profile.rides_air_ground() && supported.is_none() {
+        agm::blind(p);
+        return;
+    }
+    let flight = p.guidance.as_mut().unwrap();
+    // An anti-radiation surface missile keeps homing on its acquired object
+    // after the radar stops, on angles only, while the object stays inside
+    // its zone-1 cone (retail data).
+    let held = flight
+        .seeker
+        .target
+        .filter(|_| profile.holds_on_angles() && flight.seeker.acquired);
     // Only shared supported observations may update an initially silent shot.
     if !flight.seeker.acquired
         && let Some(contact) = supported
@@ -9602,7 +10137,21 @@ fn guide_owned<'a>(
                 profile.guidance != Guidance::Supported || supported.is_some_and(|o| o.id == t.id)
             })
             .filter_map(|t| {
-                let observed = seeker::observe(w, profile, &view, t)?;
+                let observed = seeker::observe(w, profile, &view, t).or_else(|| {
+                    (held == Some(t.id)
+                        && agm::inside_angles(&w.seeker.zones[1], view.position, basis, t.position))
+                    .then(|| {
+                        let delta = sub(t.position, view.position);
+                        seeker::Observation {
+                            id: t.id,
+                            position: t.position,
+                            velocity: t.velocity,
+                            quality: 1.,
+                            off_axis: dot(unit(delta), basis.forward).clamp(-1., 1.).acos(),
+                            range: missiles::length(delta),
+                        }
+                    })
+                })?;
                 if profile.guidance == Guidance::Supported {
                     supported
                 } else if profile.guidance == Guidance::Active
@@ -10252,7 +10801,9 @@ mod hit_rule_tests {
         s.targets.push(target(6, [0., 1000., 1500.], 100, 0x80));
         let round = shell(&s, 5, [0., 1000., 300.], [0., 1000., 0.], None, 0);
         s.projectiles.push(round);
-        let round = shell(&s, 5, [0., 1000., 1400.], [0., 1000., 1500.], None, 0);
+        let mut round = shell(&s, 5, [0., 1000., 1400.], [0., 1000., 1500.], None, 0);
+        // Rounds in flight have their own numbers: a bomb's path is kept by it.
+        round.id += 1;
         s.projectiles.push(round);
         let events = run(&mut s, 30);
         assert!(

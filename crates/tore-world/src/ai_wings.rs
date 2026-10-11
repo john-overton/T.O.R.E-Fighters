@@ -521,13 +521,16 @@ pub(crate) fn station_specs_loaded(
         let units = u32::from(quantities.get(index).copied().unwrap_or(station.count));
         // Source bookkeeping must use the same ammo units for a human taking
         // this depot's aircraft. This changes no targeting or steering rules.
+        // A rocket pod's rockets are counted the same way, `projsInPod` a pod
+        // (retail's `HARDPodHack` multiplies every station's count at mission
+        // start, the AI's and a wing member's included).
         let carried = units
             * config
                 .gun_pods
                 .iter()
                 .find(|pod| pod.station == index)
                 .filter(|_| w.source == "SUU16.JT")
-                .map_or(1, |pod| u32::from(pod.rounds_per_pod));
+                .map_or_else(|| live::pod_rounds(w), |pod| u32::from(pod.rounds_per_pod));
         // An empty station is the same record with no rounds.
         let mut spec = if gun {
             simple_stations(0, carried.max(1), AI_STORE_SPEED).remove(0)
@@ -546,10 +549,11 @@ pub(crate) fn station_specs_loaded(
         };
         // The reviewed default inventory owns the record used at release.
         spec.debit = u32::from(w.burst.actual_rounds_per_game).max(1);
+        // A rocket pod's weight is the full pod's: each rocket takes its share.
         spec.external_round_lbs = if station.internal || w.source == "SUU16.JT" {
             0.0
         } else {
-            f64::from(w.weight.max(0))
+            f64::from(w.weight.max(0)) / f64::from(live::pod_rounds(w))
         };
         // Fitted: one representative projectile per release, as in
         // the player live adapter. The source ammunition debit remains separate.
@@ -2760,6 +2764,18 @@ impl AiWings {
             });
         }
         objects
+    }
+
+    /// Each AI aircraft and whether it is in an airfield's takeoff or landing
+    /// sequence (the A-G page lists aircraft only then).
+    pub fn airfield_attachment(&self) -> Vec<(u32, bool)> {
+        self.slots
+            .iter()
+            .filter_map(|slot| {
+                let actor = self.mission.actor(slot.id)?;
+                Some((slot.id, actor.alive() && actor.airfield().is_some()))
+            })
+            .collect()
     }
 
     /// The AI pose becomes the target pose, so the renderer, the player's

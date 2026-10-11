@@ -1327,6 +1327,11 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             gun_group: 5,
         },
         gunsight: Some(gunsight()),
+        sight: None,
+        laser: None,
+        guided: None,
+        weapon_tti: Vec::new(),
+        guided_impact_tick: None,
         seeker: SeekerReadout {
             status: seeker::Status::Locked,
             target: Some(7),
@@ -1338,6 +1343,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 locked: true,
             }),
         },
+        bomb_sight: None,
         estimates: Estimates {
             readiness: Readiness::Ready,
             guidance_available: true,
@@ -1351,6 +1357,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             in_range: true,
             hit_percent: 72,
             solution_seconds: Some(11.5),
+            harm: None,
         },
         targets: Targets {
             designated: Some(7),
@@ -1382,6 +1389,9 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
                 len: 3,
             }],
             trail_points: vec![[0., 0., 0.], [10., 0., 5.], [20., 1., 10.]],
+            air_ground: false,
+            harm: false,
+            ground: Vec::new(),
         },
         visual: vec![contact(12, -40_000.)],
         map: vec![MapRow {

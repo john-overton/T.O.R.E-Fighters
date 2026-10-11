@@ -300,9 +300,12 @@ object. Whatever the mode, the guns train on the aim point inside their own arcs
 ### Keys
 
 All opinionated (John, 2026-10-09, accepted from the plan's recommendations).
-Every key works on the AC-130 only; elsewhere Backslash and Shift+' / Shift+;
-report "not implemented yet" (retail's IR/laser designate and bomb camera zoom)
-and the rest do nothing.
+The gunsight is the AC-130's case of the targeting sight that every aircraft
+with a laser designator or a FLIR has since the air-to-ground round
+([the targeting sight](air-to-ground.md#the-targeting-sight)): the same keys
+drive it there, and the code is shared (`tore_sim::combat::sight`), with the
+AC-130's behaviour unchanged. An aircraft with no sight says "no targeting sight"
+for Backslash, Shift+Backslash and the zoom keys.
 
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |

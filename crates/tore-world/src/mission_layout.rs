@@ -692,6 +692,8 @@ mod placement_tests {
             category: 0,
             radar_signature: 1.,
             infrared_signature: 0.,
+            type_flags: 0,
+            max_visible: 0,
             runway: true,
         });
         scene.runways.push(tore_sim::airport::Runway {
@@ -742,6 +744,8 @@ mod placement_tests {
                 category: 0x2000,
                 radar_signature: 1.,
                 infrared_signature: 0.,
+                type_flags: 0,
+                max_visible: 0,
                 runway: false,
             });
     }

@@ -37,6 +37,7 @@
 //! and the shots, resupply, radar and wreck events of surface units.
 mod datalink;
 mod devices;
+mod ground;
 mod journal;
 mod surface;
 mod why;
@@ -166,7 +167,7 @@ struct Watch {
 }
 
 /// What the recorder remembers about one projectile between ticks.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 struct Shot {
     owner: u32,
     weapon: u32,
@@ -177,6 +178,46 @@ struct Shot {
     lost: bool,
     /// When it lost track, for the reason its outcome gives.
     lost_at: Option<u64>,
+    /// The station it left, and the clock and age its fuze counts from, as
+    /// the simulation held them (a bomb that lands before its fuze arms is a
+    /// dud, [`ground::is_dud`]).
+    station: usize,
+    launched_t: u16,
+    age: u64,
+    /// The round flies on a motion of its own (a guided weapon), so its fuze
+    /// counts ticks of age.
+    motion: bool,
+}
+
+/// What the recorder knows of a weapon type for its events and words.
+#[derive(Clone, Debug)]
+struct WeaponNote {
+    name: String,
+    class: replay::WeaponClass,
+    /// The fuze's arming time, quarter seconds.
+    arm_quarters: u16,
+    /// A cluster bomb (its ground burst scatters submunitions).
+    cluster: bool,
+    /// A bomb, rocket or air-to-ground missile: a weapon whose kills the
+    /// ground events name.
+    air_to_ground: bool,
+}
+
+impl WeaponNote {
+    fn of(weapon: &tore_formats::weapons::Weapon, class: replay::WeaponClass) -> Self {
+        use tore_sim::combat::{guided, missiles};
+        Self {
+            name: weapon.hud_name.clone(),
+            class,
+            arm_quarters: weapon.damage.fuze_arm_t,
+            cluster: weapon.effects.land_explosion == 18,
+            air_to_ground: matches!(
+                class,
+                replay::WeaponClass::Bomb | replay::WeaponClass::Rocket
+            ) || guided::kind(weapon).is_some()
+                || missiles::SURFACE_ROLE.contains(&weapon.source.as_str()),
+        }
+    }
 }
 
 /// The seeker tone the player hears, without its loudness.
@@ -285,6 +326,8 @@ pub struct Recorder {
     early: Vec<Event>,
     registered: BTreeSet<u32>,
     weapons: BTreeMap<String, u32>,
+    /// What each registered weapon type is, by id.
+    weapon_notes: BTreeMap<u32, WeaponNote>,
     effects: EffectWatch,
     /// Serial of the next crater or fire to record.
     marks: u64,
@@ -325,6 +368,10 @@ pub struct Recorder {
     /// The AI aircraft's chaff and flares left as the last tick was
     /// recorded, for the releases its end collects.
     dispensers: devices::Dispensers,
+    /// The air-to-ground round: guided weapons, lasers, designations.
+    ground: ground::Watch,
+    /// The quarter-second clock of the step that has just run, for fuzes.
+    state_clock: Option<u16>,
 }
 
 /// Comms and audio entries kept for live flight between its looks.
@@ -376,6 +423,7 @@ impl Recorder {
             early: Vec::new(),
             registered: BTreeSet::new(),
             weapons: BTreeMap::new(),
+            weapon_notes: BTreeMap::new(),
             effects: EffectWatch::default(),
             marks: 0,
             surface: BTreeMap::new(),
@@ -400,6 +448,8 @@ impl Recorder {
             why: why::Why::default(),
             surface_watch: surface::Watch::default(),
             dispensers: devices::Dispensers::new(),
+            ground: ground::Watch::default(),
+            state_clock: None,
         };
         for info in roster {
             recorder.register(info.clone());
@@ -781,7 +831,10 @@ impl Recorder {
         }
         let id = self.weapons.len() as u32;
         self.weapons.insert(weapon.source.clone(), id);
-        self.send(Message::Weapon(Box::new(convert::weapon_info(id, weapon))));
+        let info = convert::weapon_info(id, weapon);
+        self.weapon_notes
+            .insert(id, WeaponNote::of(weapon, info.class));
+        self.send(Message::Weapon(Box::new(info)));
         id
     }
 
@@ -801,6 +854,7 @@ impl Recorder {
             return;
         }
         self.last_tick = Some(number);
+        self.state_clock = Some(ground::impact_clock(&tick.combat.state));
         let mut frame = Frame {
             tick: number,
             events: std::mem::take(&mut self.early),
@@ -880,6 +934,10 @@ impl Recorder {
                     position: pose.position,
                     lost: self.shots.get(&pose.id).is_some_and(|shot| shot.lost),
                     lost_at: self.shots.get(&pose.id).and_then(|shot| shot.lost_at),
+                    station: simulated.map_or(0, |p| p.station),
+                    launched_t: simulated.map_or(0, |p| p.launched_t),
+                    age: simulated.map_or(0, |p| p.age),
+                    motion: simulated.is_some_and(|p| p.motion.is_some()),
                 },
             );
         }
@@ -902,6 +960,17 @@ impl Recorder {
         self.surface_watch.events(&tick, &lost, &mut events);
         self.aircraft_events(&tick, &frame, &mut events);
         self.cue_events(&tick, player_ground, &mut events);
+        self.ground.events(
+            &ground::Context {
+                tick: &tick,
+                frame: &frame,
+                old: &self.shots,
+                new: &shots,
+                notes: &self.weapon_notes,
+                infos: &self.infos,
+            },
+            &mut events,
+        );
         self.shots = shots;
         // The reasons behind the tick and its display trees.
         self.explain(&tick, &mut frame, &mut events);
@@ -1027,6 +1096,25 @@ impl Recorder {
                     event = event
                         .with(field::SHOOTER_ALT_FT, shooter.position[1])
                         .with(field::SHOOTER_SPEED_KT, speed(shooter) * KT_PER_FPS);
+                }
+                // An air-to-ground weapon says it aims at the surface, and
+                // how far the ground target was (a bomb or rocket aims at
+                // nothing the picture holds: its release says which).
+                if self
+                    .weapon_notes
+                    .get(&shot.weapon)
+                    .is_some_and(|note| note.air_to_ground)
+                {
+                    event = event.with(field::SURFACE, true);
+                    if event.get(field::RANGE_FT).is_none()
+                        && let Some(row) = aim.and_then(|id| {
+                            tick.combat.state.targets.iter().find(|row| {
+                                row.id == id && !row.airborne && convert::is_surface_id(id)
+                            })
+                        })
+                    {
+                        event = event.with(field::RANGE_FT, distance(shot.position, row.position));
+                    }
                 }
                 events.push(event);
                 continue;
@@ -1199,6 +1287,10 @@ impl Recorder {
                 format!("{decoy}{when} but flew on and struck anyway")
             }),
         };
+        // An air-to-ground round says how it ended when nothing above did:
+        // a bomb that landed before its fuze armed, or a guided weapon and
+        // what it was following.
+        let reason = reason.or_else(|| self.ground_reason(resolved, shot));
         if let Some(replaced) = resolved.replaces {
             event = event.with(field::REPLACES, result_name(replaced));
         }
@@ -1206,6 +1298,27 @@ impl Recorder {
             event = event.with(field::REASON, reason);
         }
         event
+    }
+
+    /// The words for a bomb or guided weapon's outcome, if it has any: a
+    /// dud says so, a guided weapon names what it followed.
+    fn ground_reason(&self, resolved: &ledger::Outcome, shot: Option<&Shot>) -> Option<String> {
+        let guided = self
+            .ground
+            .how_guided(resolved.projectile, |id| self.who(id));
+        let dud = shot.zip(self.state_clock).is_some_and(|(shot, clock)| {
+            resolved.resolution == ledger::Resolution::Missed
+                && self
+                    .weapon_notes
+                    .get(&shot.weapon)
+                    .is_some_and(|note| ground::is_dud(shot, note, clock))
+        });
+        match (dud, guided) {
+            (true, Some(how)) => Some(format!("it landed before its fuze armed; {}", how.outcome)),
+            (true, None) => Some("it landed before its fuze armed".to_owned()),
+            (false, Some(how)) => Some(how.outcome),
+            (false, None) => None,
+        }
     }
 
     fn aircraft_events(&mut self, tick: &Tick<'_>, frame: &Frame, events: &mut Vec<Event>) {
@@ -2219,6 +2332,7 @@ mod tests {
                 position: [0.; 3],
                 lost: true,
                 lost_at: Some(1_621),
+                ..Shot::default()
             },
         );
         let named = recorder.outcome_event(&ledger::Outcome {
@@ -3058,6 +3172,75 @@ mod tests {
             frames[1].new_effects[1].duration_ticks,
             u32::from(current.effects[1].ticks)
         );
+    }
+
+    #[test]
+    fn laser_and_ground_designation_changes_are_recorded_once() {
+        use tore_sim::combat::laser::{LaserState, Mask};
+        let (mut recorder, receiver) = Recorder::detached(64, &[]);
+        let mut combat = fixture::combat(
+            fixture::models(),
+            (0..7).map(|i| (i % 3, [0.; 3])).collect(),
+        );
+        let player = fixture::player();
+        let scene = fixture::scene(combat.state.own().configuration());
+        let snapshot = fixture::snapshots(&mut combat, &scene, true, &player)[1].clone();
+        let mut ui = flight_ui::FlightUi::default();
+        // A ground object of the mission's surface world.
+        let ground = 0x5000_0001;
+        combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| !t.airborne)
+            .expect("the fixture has ground objects")
+            .id = ground;
+        tick(&mut recorder, &mut combat, &snapshot, 0, &mut ui);
+        // Designate a ground object, then let the laser go ready, lase,
+        // mask and stop; ticks that change nothing add nothing.
+        combat.state.own_mut().sensors.hold(ground);
+        let steps: [(LaserState, Option<Mask>); 6] = [
+            (LaserState::Off, None),
+            (LaserState::Ready, None),
+            (LaserState::Lasing, None),
+            (LaserState::Lasing, None),
+            (LaserState::Masked, Some(Mask::Range)),
+            (LaserState::Off, None),
+        ];
+        for (n, (state, mask)) in steps.into_iter().enumerate() {
+            let own = combat.state.own_mut();
+            own.laser.state = state;
+            own.laser.mask = mask;
+            own.laser.point = (state == LaserState::Lasing).then_some([10., 20., 30.]);
+            tick(&mut recorder, &mut combat, &snapshot, 1 + n as u64, &mut ui);
+        }
+        // The last frame stays open to notes until the next tick.
+        tick(&mut recorder, &mut combat, &snapshot, 7, &mut ui);
+        let frames = frames(&receiver);
+        let events = |kind: &str| -> Vec<(u64, Event)> {
+            frames
+                .iter()
+                .flat_map(|f| f.events.iter().map(move |e| (f.tick, e.clone())))
+                .filter(|(_, e)| e.kind == kind)
+                .collect()
+        };
+        let lasers = events(kind::PLAYER_LASER);
+        let states: Vec<(u64, &str)> = lasers
+            .iter()
+            .map(|(tick, e)| (*tick, e.string(field::STATE).unwrap()))
+            .collect();
+        assert_eq!(
+            states,
+            [(2, "ready"), (3, "lasing"), (5, "masked"), (6, "off")]
+        );
+        let lasing = &lasers[1].1;
+        assert_eq!(lasing.flag(field::ON), Some(true));
+        assert_eq!(lasing.num(field::Y_FT), Some(20.));
+        assert_eq!(lasers[2].1.string(field::MASK), Some("range"));
+        let designations = events(kind::PLAYER_DESIGNATE);
+        assert_eq!(designations.len(), 1, "the object is designated once");
+        assert_eq!(designations[0].1.object, Some(ground));
+        assert_eq!(designations[0].1.string(field::CHANNEL), Some("visual"));
     }
 
     /// Records the fixture's two snapshots for the seat that flies `plane` and

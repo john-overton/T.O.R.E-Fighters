@@ -126,8 +126,10 @@ lower edge of the vertical bars is the same scale on every aircraft; the
 manual's "stall rather than sink" mark for the jets is fitted to it rather
 than computed. The cluster is a list of marks, a pure function of the flight
 state, so each row is tested by what it puts where; `--hud-snapshot PATH
-[--hud-snapshot-state forward|hover|converting|low]` draws the HUD of
-`--aircraft` headless. Radar height and the stability label are conditional
+[--hud-snapshot-state forward|hover|converting|low|laser-lsr|laser-bud|laser-both|
+laser-ready|laser-mask|laser-edge]` draws the HUD of
+`--aircraft` headless (the `laser-*` states add the [laser box and
+text](air-to-ground.md#laser-on-the-hud) over a forward flight). Radar height and the stability label are conditional
 rows, so the trimmed `forward` and `hover` states at 3,000 ft and Damper show
 neither; `low` hovers 45 ft over the ground at stability Off and shows both.
 
@@ -187,3 +189,16 @@ armed. These exceptions are developer facilities, not alternate player defaults.
 [Validation and visual evidence](../baselines/hud-cleanup.md#expanded-hud-and-startup-review).
 
 [Horizon reference validation](../baselines/horizon-creator.md).
+
+## Air-to-ground status words
+
+Specified in [air-to-ground](air-to-ground.md#the-hud-in-air-to-ground-modes),
+not yet built. The status word at (207,259) gains two bomb modes beside NAV,
+LCOS and ARM: **CCIP** (the dive pipper with a dotted fall line, ring radius 9
+reference pixels) and **LVL** (the level-flight "T" release guide, with a time
+to release in the weapon text). Ctrl+M switches between them. Guided bombs show
+a release range indicator on the weapon range scale at x=390. A laser point is
+marked with a 12 by 8 reference pixel box, and laser range, buddy-spot and time
+to impact text join the weapon rows. The warnings LOW and FRAG appear in the
+readiness slot. All positions follow this page's weapon rows; the air-to-ground
+spec holds the behaviour and numbers.

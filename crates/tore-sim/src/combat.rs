@@ -2,17 +2,22 @@
 //! Diagnostic until complete dispatch/contact/guidance contracts are accepted.
 //! No renderer, resource lookup, native execution, wall clock or hidden randomness.
 use std::io::{Error, ErrorKind};
+pub mod ballistics;
 pub mod blast;
 pub mod countermeasures;
 pub mod debris;
+pub mod delivery;
+pub mod guided;
 pub mod gun_round;
 pub mod gunship;
 pub mod gunship_impact;
 pub mod gunsight;
+pub mod laser;
 pub mod ledger;
 pub mod loading;
 pub mod loadout;
 pub mod missiles;
+pub mod sight;
 pub mod smoke;
 pub mod surface_guns;
 pub mod systems;

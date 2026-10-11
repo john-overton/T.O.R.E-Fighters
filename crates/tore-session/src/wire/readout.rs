@@ -479,9 +479,11 @@ fn readiness_code(r: Readiness) -> i64 {
         R::GroupEmpty => 22,
         R::GunObscured => 23,
         R::TerrainMask => 24,
+        R::NoEmitter => 25,
+        R::TrackLost => 26,
     }
 }
-const READINESS: [Readiness; 25] = [
+const READINESS: [Readiness; 27] = [
     Readiness::Ready,
     Readiness::Safe,
     Readiness::BayClosed,
@@ -507,6 +509,8 @@ const READINESS: [Readiness; 25] = [
     Readiness::GroupEmpty,
     Readiness::GunObscured,
     Readiness::TerrainMask,
+    Readiness::NoEmitter,
+    Readiness::TrackLost,
 ];
 
 fn status_code(s: seeker::Status) -> i64 {
@@ -611,9 +615,15 @@ fn channel_code(c: Channel) -> i64 {
         Channel::Radar => 0,
         Channel::Infrared => 1,
         Channel::Visual => 2,
+        Channel::Harm => 3,
     }
 }
-const CHANNELS: [Channel; 3] = [Channel::Radar, Channel::Infrared, Channel::Visual];
+const CHANNELS: [Channel; 4] = [
+    Channel::Radar,
+    Channel::Infrared,
+    Channel::Visual,
+    Channel::Harm,
+];
 
 fn source_code(s: TrackSource) -> i64 {
     match s {
@@ -1368,6 +1378,8 @@ impl QReadout {
             in_range: pick(es, 8) != 0,
             hit_percent: u8::try_from(pick(es, 9)).map_err(|_| bad("hit percentage"))?,
             solution_seconds: opt(es, 10).map(|t| v(t, SECONDS)),
+            // Host-built: not on the wire before protocol 23 (slice NA).
+            harm: None,
         };
 
         let row = |list: usize| -> WireResult<Option<TargetRow>> {
@@ -1498,6 +1510,11 @@ impl QReadout {
             strobes,
             trails,
             trail_points,
+            // The ground pages are not on the wire before protocol 23
+            // (slice NA): a client draws none.
+            air_ground: false,
+            harm: false,
+            ground: Vec::new(),
         };
         let visual = self.lists[list::VISUAL]
             .iter()
@@ -1725,8 +1742,19 @@ impl QReadout {
             tick: readout_tick,
             stores,
             gunsight,
+            // The targeting sight and the laser are host-built and not on
+            // the wire before protocol 23 (slice NA).
+            sight: None,
+            laser: None,
+            // The guided weapon sight and the weapons in flight are
+            // host-built too (slice NA).
+            guided: None,
+            weapon_tti: Vec::new(),
+            guided_impact_tick: None,
             seeker,
             estimates,
+            // Host-built until protocol 23 carries it (slice NA).
+            bomb_sight: None,
             targets,
             sensors,
             visual,

@@ -6,7 +6,7 @@
 use crate::{camera::Camera, instruments::gunsight::SightView, target_preview};
 use tore_sim::{
     attitude::Vector,
-    combat::{gunship, live::Launcher},
+    combat::{gunship, live::Launcher, sight},
 };
 
 /// The camera's world position for a launcher pose: sensor dome D, the round
@@ -46,6 +46,58 @@ pub fn tracked_view(eye: Vector, target: Vector, zoom: f32) -> SightView {
         pitch: camera.pitch,
         zoom,
     }
+}
+
+/// The camera's world position for a targeting sight (laser or FLIR) on
+/// any other aircraft: the sensor's eye in the aircraft's frame, from
+/// the sim's own mount maths (`sight::world_mount`).
+pub fn sensor_eye(launcher: &Launcher, mount: Vector) -> Vector {
+    sight::world_mount(*launcher, mount)
+}
+
+/// The view along a targeting sight's look from its sensor's eye: body-relative
+/// heading and elevation, so it follows the aircraft's bank and turn. The same
+/// maths as [`free_view`] with the sensor's own mount.
+pub fn sensor_view(launcher: &Launcher, mount: Vector, look: [f64; 2], step: u8) -> SightView {
+    let line = sight::direction(*launcher, look[0], look[1]);
+    SightView {
+        position: sensor_eye(launcher, mount),
+        yaw: line[0].atan2(line[2]) as f32,
+        pitch: line[1].atan2(line[0].hypot(line[2])) as f32,
+        zoom: zoom_factor(step),
+    }
+}
+
+/// The buddy form's view: from the aircraft at the buddy's laser spot, on the
+/// target window's camera line (at most a nautical mile behind the spot) at the
+/// ladder step that frames the spot's surroundings
+/// ([`crate::instruments::targeting::buddy_zoom_step`]).
+pub fn buddy_view(launcher: &Launcher, spot: Vector) -> SightView {
+    let camera = target_preview::camera(launcher.position, spot);
+    let distance = (0..3)
+        .map(|i| (spot[i] - camera.position[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    SightView {
+        position: camera.position,
+        yaw: camera.yaw,
+        pitch: camera.pitch,
+        zoom: zoom_factor(crate::instruments::targeting::buddy_zoom_step(distance)),
+    }
+}
+
+/// The targeting page's camera for a frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TargetingShot {
+    /// The aircraft's own sight, from its sensor at `mount`; `tracked` says
+    /// the sight follows an object, so the camera frames it.
+    Sight {
+        frame: Frame,
+        mount: Vector,
+        tracked: bool,
+    },
+    /// An aircraft with no sight, looking at a buddy's spot.
+    Buddy { view: SightView },
 }
 
 /// The renderer's camera for a view.
@@ -152,6 +204,29 @@ impl Sight {
         };
         Frame { look, view }
     }
+
+    /// The same for a targeting sight on any other aircraft: the look from
+    /// the sight's sensor, the view from the sensor's eye `mount` (the sim's
+    /// own mount maths).
+    #[allow(clippy::too_many_arguments)]
+    pub fn sensor_frame(
+        &mut self,
+        mount: Vector,
+        sight_look: [f64; 2],
+        ticks: u64,
+        alpha: f64,
+        launcher: &Launcher,
+        zoom: u8,
+        tracked: Option<Vector>,
+    ) -> Frame {
+        self.look.update(ticks, sight_look);
+        let look = self.look.presented(alpha);
+        let view = match tracked {
+            Some(position) => tracked_view(sensor_eye(launcher, mount), position, self.fitted_zoom),
+            None => sensor_view(launcher, mount, look, zoom),
+        };
+        Frame { look, view }
+    }
 }
 
 #[cfg(test)]
@@ -223,6 +298,51 @@ mod tests {
         });
         let (_, top) = view.project(up).expect("in front");
         assert!(top.abs() < 0.01, "{top}");
+    }
+
+    #[test]
+    fn a_pod_view_looks_from_under_the_aircraft_along_the_sights_line() {
+        let still = launcher(0.7, 0.05, 0.3);
+        let mount = [0., -4., 0.];
+        let view = sensor_view(&still, mount, [0., -0.17], 3);
+        // The eye is the pod's mount, four feet below the aircraft's centre in
+        // its own frame.
+        let drop: Vector = std::array::from_fn(|i| view.position[i] - still.position[i]);
+        let below = drop
+            .iter()
+            .zip(still.basis.up)
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        assert!((below + 4.).abs() < 1e-9, "{below}");
+        // A point on the line of sight lands on the centre of the picture.
+        let line = sight::direction(still, 0., -0.17);
+        let point = std::array::from_fn(|i| view.position[i] + line[i] * 9_000.);
+        let (x, y) = view.project(point).expect("in front");
+        assert!((x - 69.).abs() < 1e-3 && (y - 57.).abs() < 1e-3, "{x} {y}");
+        // The AC-130's own view, from its dome, is unchanged by the new maths.
+        let dome = free_view(&still, [0., -0.17], 3);
+        assert_ne!(dome.position, view.position);
+    }
+
+    #[test]
+    fn a_buddy_view_looks_at_the_spot_and_frames_it_by_distance() {
+        let still = launcher(0., 0., 0.);
+        let near = [1_000., 5_000. - 300., 4_000.];
+        let far = [1_000., 5_000. - 3_000., 60_000.];
+        for spot in [near, far] {
+            let view = buddy_view(&still, spot);
+            let (x, y) = view.project(spot).expect("in front");
+            assert!((x - 69.).abs() < 1e-3 && (y - 57.).abs() < 1e-3, "{x} {y}");
+        }
+        // A nearer spot is framed with a wider field than a far one.
+        assert!(buddy_view(&still, near).zoom < buddy_view(&still, far).zoom);
+        // The camera never sits more than a nautical mile behind the spot.
+        let view = buddy_view(&still, far);
+        let behind = (0..3)
+            .map(|i| (far[i] - view.position[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(behind <= tore_sim::sensors::FEET_PER_NAUTICAL_MILE + 1.);
     }
 
     #[test]

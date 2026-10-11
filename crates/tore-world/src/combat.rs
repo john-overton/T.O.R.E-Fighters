@@ -508,6 +508,14 @@ impl Combat {
             target.signature.radar = object.radar_signature;
             target.signature.infrared = object.infrared_signature;
         }
+        // What the ground pages read of its type (docs/formats/radar.md).
+        state.set_ground_listing(
+            object.id,
+            live::GroundListing {
+                flags: object.type_flags,
+                max_visible: object.max_visible.clamp(0, i32::from(u16::MAX)) as u16,
+            },
+        );
         Ok(())
     }
     pub fn ground_name(&self, id: u32) -> Option<&str> {
