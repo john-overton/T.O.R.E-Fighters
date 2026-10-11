@@ -32,8 +32,9 @@
 //!   is safe (the spec's safe test), else egresses and goes home unless it
 //!   is safe by the exit distance.
 //!
-//! Helicopters and the gunship keep their existing behaviour (slice ST-F):
-//! [`Strike::flies`] says no for them.
+//! Helicopters and the gunship fly their own families (slice ST-F): the
+//! helicopter's pop-up and stand-off attack ([`helicopter`]) and the
+//! gunship's orbit with its linked guns ([`gunship`]).
 use super::Experience;
 use super::awareness::ground::{BriefedKind, GroundPicture, RecentWarnings, ThreatLevel};
 use super::controller::{Activity, OwnState};
@@ -180,15 +181,22 @@ pub enum Pass {
     FastHigh,
     Dive,
     Level,
+    /// The gunship's left-hand orbit about the target (slice ST-F).
+    Orbit,
+    /// A helicopter's stand-off attack: low to the weapon's range, unmask,
+    /// fire, mask (slice ST-F).
+    StandOff,
 }
 
 impl Pass {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::Straight,
         Self::PopUp,
         Self::FastHigh,
         Self::Dive,
         Self::Level,
+        Self::Orbit,
+        Self::StandOff,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -197,6 +205,8 @@ impl Pass {
             Self::FastHigh => "fasthigh",
             Self::Dive => "dive",
             Self::Level => "level",
+            Self::Orbit => "orbit",
+            Self::StandOff => "standoff",
         }
     }
 }
@@ -220,6 +230,8 @@ pub enum StoreKind {
     RadarAgm,
     /// HARM and the other anti-radiation missiles.
     AntiRadiation,
+    /// One of the gunship's linked guns (slice ST-F), never chosen here.
+    Gun,
 }
 
 impl StoreKind {
@@ -305,6 +317,10 @@ pub struct Steer {
     pub pitch_deg: f64,
     pub speed: SpeedRequest,
     pub afterburner: bool,
+    /// A bank to hold, degrees (right positive), instead of the bank the
+    /// adapter picks for the heading: the gunship's orbit flies its bank
+    /// (slice ST-F). `None` everywhere else.
+    pub bank_deg: Option<f64>,
 }
 
 /// A store to release now, at the striker's target.
@@ -391,6 +407,9 @@ pub enum Segment {
     Final,
     /// The dive's pull-out climb.
     Climb,
+    /// A helicopter holds the line to its command-guided round until it
+    /// has hit or is gone (slice ST-F).
+    Guide,
 }
 
 /// One striker's strike state (see the module notes).
@@ -474,12 +493,6 @@ impl Strike {
             withdrawn: false,
             inputs: None,
         }
-    }
-
-    /// Whether the strike flies an aircraft of this class: helicopters and
-    /// the gunship keep their existing behaviour until slice ST-F.
-    pub fn flies(class: StrikeClass) -> bool {
-        !matches!(class, StrikeClass::Helicopter | StrikeClass::Gunship)
     }
 
     pub fn phase(&self) -> Phase {
@@ -584,6 +597,12 @@ impl Strike {
         if self.phase == Phase::Home {
             return order;
         }
+        // Helicopters and the gunship fly their own families (slice ST-F).
+        match cx.inputs.class {
+            StrikeClass::Helicopter => return helicopter::step(self, cx),
+            StrikeClass::Gunship => return gunship::step(self, cx),
+            _ => {}
+        }
         // Defend: the existing reactions fly; resume at ingress once the
         // threat has gone (no warning in 10 s, no fighter threatening).
         if cx.defending || self.threatened(cx) {
@@ -681,6 +700,7 @@ impl Strike {
                     pitch_deg: 0.,
                     speed: SpeedRequest::Maximum,
                     afterburner: true,
+                    bank_deg: None,
                 });
                 order.activity = Some(Activity::Pursuing);
                 order
@@ -843,7 +863,8 @@ impl Strike {
             Pass::FastHigh => target_at[1] + FAST_HIGH_OFFSET_FT.max(floor),
             Pass::Dive => target_at[1] + agl.max(2. * radius).max(DIVE_GATE_MIN_FT),
             Pass::PopUp => target_at[1] + POPUP_OFFSET_FT,
-            Pass::Straight => target_at[1],
+            // The families' own passes are never a fighter's.
+            Pass::Straight | Pass::Orbit | Pass::StandOff => target_at[1],
         });
         // A target behind is not attacked from where it stands: the exit
         // opens the distance and turns back (fitted).
@@ -866,7 +887,7 @@ impl Strike {
         let other = stores.iter().any(|s| {
             s.rounds > 0
                 && s.kind != StoreKind::AntiRadiation
-                && s.kind != StoreKind::Command
+                && (s.kind != StoreKind::Command || cx.inputs.class == StrikeClass::Helicopter)
                 && (s.kind != StoreKind::Laser || cx.inputs.designator)
         });
         let attackers = |id: u32| cx.mates.iter().filter(|m| **m == id).count() as u32;
@@ -935,6 +956,7 @@ impl Strike {
             pitch_deg: hold_pitch_deg(own.position[1], altitude),
             speed,
             afterburner: false,
+            bank_deg: None,
         }
     }
 
@@ -960,6 +982,7 @@ impl Strike {
                 pitch_deg: if climbing { JINK_CLIMB_DEG } else { 0. },
                 speed: SpeedRequest::Maximum,
                 afterburner: true,
+                bank_deg: None,
             }
         } else {
             Steer {
@@ -971,6 +994,7 @@ impl Strike {
                 },
                 speed: SpeedRequest::Maximum,
                 afterburner: true,
+                bank_deg: None,
             }
         }
     }
@@ -1057,6 +1081,7 @@ impl Strike {
                 pitch_deg: DIVE_CLIMB_DEG,
                 speed: SpeedRequest::Corner,
                 afterburner: false,
+                bank_deg: None,
             });
             return order;
         }
@@ -1068,7 +1093,7 @@ impl Strike {
                     || (self.segment == Segment::Approach && !ahead)
             }
             Pass::PopUp => self.segment == Segment::Final && (distance < POPUP_EXIT_FT || !ahead),
-            Pass::Straight => distance < STRAIGHT_EXIT_FT,
+            Pass::Straight | Pass::Orbit | Pass::StandOff => distance < STRAIGHT_EXIT_FT,
             Pass::FastHigh => distance < FAST_HIGH_EXIT_FT && !level_like,
             Pass::Level => false,
         } || (level_like && self.overflown(cx, target, aim, solution))
@@ -1082,6 +1107,7 @@ impl Strike {
                     pitch_deg: DIVE_CLIMB_DEG,
                     speed: SpeedRequest::Corner,
                     afterburner: false,
+                    bank_deg: None,
                 });
                 return order;
             }
@@ -1129,6 +1155,7 @@ impl Strike {
                     pitch_deg: pitch,
                     speed,
                     afterburner,
+                    bank_deg: None,
                 }
             }
             Segment::Pull => Steer {
@@ -1137,6 +1164,7 @@ impl Strike {
                     .min(MAX_DIVE_DEG),
                 speed: SpeedRequest::Corner,
                 afterburner: false,
+                bank_deg: None,
             },
             Segment::Final if level_like || kind.seeker() => {
                 let heading = solution
@@ -1159,6 +1187,7 @@ impl Strike {
                     pitch_deg: pitch,
                     speed,
                     afterburner,
+                    bank_deg: None,
                 }
             }
             Segment::Final => {
@@ -1184,9 +1213,10 @@ impl Strike {
                     pitch_deg: pitch.max(-MAX_DIVE_DEG),
                     speed: SpeedRequest::Corner,
                     afterburner: false,
+                    bank_deg: None,
                 }
             }
-            Segment::Climb => unreachable!("handled above"),
+            Segment::Climb | Segment::Guide => unreachable!("handled above"),
         };
         order.steer = Some(steer);
 
@@ -1433,7 +1463,7 @@ pub fn choose_store(
             K::AntiRadiation => target.radar || target.emitting,
             K::Laser => designator,
             K::Rocket => class != StrikeClass::Heavy,
-            K::Command => false,
+            K::Command | K::Gun => false,
             _ => true,
         };
         allowed
@@ -1734,6 +1764,11 @@ fn target_facts(picture: &GroundPicture, id: u32) -> TargetFacts {
 
 #[path = "strike_checkpoint.rs"]
 mod checkpoint;
+
+#[path = "family_gunship.rs"]
+pub mod gunship;
+#[path = "family_helicopter.rs"]
+pub mod helicopter;
 
 #[cfg(test)]
 #[path = "strike_tests.rs"]

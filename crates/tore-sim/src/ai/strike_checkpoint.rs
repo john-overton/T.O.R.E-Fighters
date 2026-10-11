@@ -18,6 +18,8 @@ crate::checkpoint_enum!(Pass {
     FastHigh = 2,
     Dive = 3,
     Level = 4,
+    Orbit = 5,
+    StandOff = 6,
 });
 
 crate::checkpoint_enum!(StoreKind {
@@ -29,6 +31,7 @@ crate::checkpoint_enum!(StoreKind {
     Seeker = 5,
     RadarAgm = 6,
     AntiRadiation = 7,
+    Gun = 8,
 });
 
 crate::checkpoint_enum!(Phase {
@@ -47,6 +50,7 @@ crate::checkpoint_enum!(Segment {
     Pull = 1,
     Final = 2,
     Climb = 3,
+    Guide = 4,
 });
 
 crate::checkpoint_enum!(ThreatLevel {

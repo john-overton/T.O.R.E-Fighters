@@ -12,10 +12,10 @@ use crate::ai::engagement::{StrikeObjective, StrikeRole};
 use crate::checkpoint::{Models, from_bytes, to_bytes};
 use crate::sensors::GroundObject;
 
-const TARGET: u32 = 0x5000_0001;
-const OWN: u32 = 1;
+pub(super) const TARGET: u32 = 0x5000_0001;
+pub(super) const OWN: u32 = 1;
 
-fn own(position: Vector, speed: f64) -> OwnState {
+pub(super) fn own(position: Vector, speed: f64) -> OwnState {
     OwnState {
         position,
         heading_deg: 0.,
@@ -46,7 +46,12 @@ fn own(position: Vector, speed: f64) -> OwnState {
     }
 }
 
-fn ground(id: u32, position: Vector, class: u16, defense: Option<DefenseFacts>) -> GroundSubject {
+pub(super) fn ground(
+    id: u32,
+    position: Vector,
+    class: u16,
+    defense: Option<DefenseFacts>,
+) -> GroundSubject {
     GroundSubject {
         object: GroundObject {
             id,
@@ -68,7 +73,7 @@ fn ground(id: u32, position: Vector, class: u16, defense: Option<DefenseFacts>) 
     }
 }
 
-fn site(missile_ft: f64, gun_ft: f64, radar: bool) -> Option<DefenseFacts> {
+pub(super) fn site(missile_ft: f64, gun_ft: f64, radar: bool) -> Option<DefenseFacts> {
     Some(DefenseFacts {
         missile_reach_ft: missile_ft,
         gun_reach_ft: gun_ft,
@@ -81,7 +86,7 @@ fn site(missile_ft: f64, gun_ft: f64, radar: bool) -> Option<DefenseFacts> {
 
 /// A picture ordered onto `TARGET`, built from `subjects` (which hold it),
 /// briefed on `defenses` too.
-fn picture(subjects: &[GroundSubject], defenses: Vec<u32>) -> GroundPicture {
+pub(super) fn picture(subjects: &[GroundSubject], defenses: Vec<u32>) -> GroundPicture {
     let mut picture = GroundPicture::new(StrikeRole::Strike);
     picture.set_ordered(Some(TARGET));
     picture.set_objective(StrikeObjective {
@@ -93,7 +98,7 @@ fn picture(subjects: &[GroundSubject], defenses: Vec<u32>) -> GroundPicture {
     picture
 }
 
-fn bomb(rounds: u32) -> Store {
+pub(super) fn bomb(rounds: u32) -> Store {
     Store {
         station: StationId(1),
         kind: StoreKind::Bomb,
@@ -106,7 +111,7 @@ fn bomb(rounds: u32) -> Store {
     }
 }
 
-fn store(station: u8, kind: StoreKind) -> Store {
+pub(super) fn store(station: u8, kind: StoreKind) -> Store {
     Store {
         station: StationId(station),
         kind,
@@ -114,7 +119,7 @@ fn store(station: u8, kind: StoreKind) -> Store {
     }
 }
 
-fn inputs(stores: Vec<Store>, solution: Option<Solution>) -> Inputs {
+pub(super) fn inputs(stores: Vec<Store>, solution: Option<Solution>) -> Inputs {
     Inputs {
         class: StrikeClass::Attack,
         stores,
@@ -124,7 +129,7 @@ fn inputs(stores: Vec<Store>, solution: Option<Solution>) -> Inputs {
     }
 }
 
-fn solution(target: Vector, impact: Vector, due: bool) -> Solution {
+pub(super) fn solution(target: Vector, impact: Vector, due: bool) -> Solution {
     Solution {
         station: StationId(1),
         target: TARGET,
@@ -139,14 +144,14 @@ fn solution(target: Vector, impact: Vector, due: bool) -> Solution {
     }
 }
 
-struct World {
-    own: OwnState,
-    picture: GroundPicture,
-    inputs: Inputs,
+pub(super) struct World {
+    pub(super) own: OwnState,
+    pub(super) picture: GroundPicture,
+    pub(super) inputs: Inputs,
 }
 
 impl World {
-    fn context(&self, tick: u64) -> Context<'_> {
+    pub(super) fn context(&self, tick: u64) -> Context<'_> {
         Context {
             tick,
             aircraft: OWN,
@@ -165,10 +170,10 @@ impl World {
     }
 }
 
-const TARGET_AT: Vector = [0., 0., 24_000.];
+pub(super) const TARGET_AT: Vector = [0., 0., 24_000.];
 
 /// An A-4E-like striker at 5,000 ft, 4 nm south of a truck, nothing around.
-fn quiet_world() -> World {
+pub(super) fn quiet_world() -> World {
     World {
         own: own([0., 5_000., 0.], 700.),
         picture: picture(&[ground(TARGET, TARGET_AT, 0x200, None)], Vec::new()),
@@ -626,19 +631,6 @@ fn a_defence_hands_over_and_the_striker_resumes_only_when_safe() {
     world.own.position = [0., 6_000., -10_000.];
     strike.step(&world.context(6_000));
     assert_eq!(strike.phase(), Phase::Home);
-}
-
-#[test]
-fn helicopters_and_the_gunship_keep_their_own_behaviour() {
-    assert!(!Strike::flies(StrikeClass::Helicopter));
-    assert!(!Strike::flies(StrikeClass::Gunship));
-    for class in [
-        StrikeClass::Heavy,
-        StrikeClass::Attack,
-        StrikeClass::Fighter,
-    ] {
-        assert!(Strike::flies(class));
-    }
 }
 
 #[test]

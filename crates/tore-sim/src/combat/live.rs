@@ -56,10 +56,12 @@ pub(crate) mod guided_tests;
 pub use guided::{GuidedFlight, Mode as GuidedMode};
 #[cfg(test)]
 mod gun_key_tests;
+mod gunship_fire;
 #[cfg(test)]
 mod gunship_impact_tests;
 #[cfg(test)]
 mod gunship_tests;
+pub use gunship_fire::{AiGunRound, GunTrain, NoShot, ai_gun_due, ai_gun_slow, ai_gun_train};
 mod handoff;
 #[cfg(test)]
 mod kept_tests;

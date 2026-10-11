@@ -272,7 +272,9 @@ def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
             if not miss <= limit:
                 problems.append(f"{label}: impact {impact.get('miss_ft')} ft from the target, want at most {limit:.0f}")
         lost_allowed = run.of("LOST") and want.get("may_lose")
-        if limit is not None and run.of("RELEASE") and not run.of("EGRESS") and not lost_allowed:
+        # A helicopter leaves too slowly for the driver's one-mile EGRESS inside its settle time.
+        egress_wanted = want.get("egress", True)
+        if limit is not None and egress_wanted and run.of("RELEASE") and not run.of("EGRESS") and not lost_allowed:
             problems.append(f"{label}: no EGRESS after the release")
         if run.of("LOST") and not want.get("may_lose"):
             problems.append(f"{label}: the striker was lost ({run.first('LOST')})")
@@ -280,6 +282,56 @@ def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
             problems.append(f"{label}: never defended against the defences")
         if want.get("hit") and not _target_hurt(run):
             problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
+    return problems
+
+
+# The AC-130's orbit from its guns' reach (docs/spec/ai-strike.md#ac-130): the slant range is planned
+# at 80% of the 13,000 ft reach (90% at most when the bank cap grows the radius); a moving target
+# stretches it a little either way. The bank never passes the AC-130's 30 degrees.
+GUN_REACH_FT = 13000.0
+ORBIT_SLANT_FT = (8000.0, GUN_REACH_FT)
+ORBIT_BANK_MAX_DEG = 30.5
+# Bursts the orbit takes to settle before its geometry is held to the limits.
+ORBIT_SETTLE_BURSTS = 5
+
+
+def gunship_problems(output: str, runs_wanted: list[dict]) -> list[str]:
+    """`ai-strike-ac130`: for each run (a dict with `label` and `skill`), the AC-130 flew its orbit,
+    fired its guns in bursts whose walked-in aim lies inside the skill circle (the ring R to 2R for a
+    ring draw), kept the target inside its guns' reach and its bank under 30 degrees once settled,
+    killed the target, and was not lost."""
+    runs = parse_runs(output)
+    if len(runs) != len(runs_wanted):
+        return [f"{len(runs)} runs finished, want {len(runs_wanted)}"]
+    problems: list[str] = []
+    for run, want in zip(runs, runs_wanted):
+        label = want["label"]
+        problems += consistency_problems(run, label)
+        named = (run.of("PROFILE") or [{}])[-1]
+        if named.get("name") != "orbit":
+            problems.append(f"{label}: flew PROFILE {named.get('name')}, want orbit")
+        bursts = run.of("BURST")
+        if not bursts:
+            problems.append(f"{label}: no BURST")
+            continue
+        r = CIRCLE_FT[want["skill"]]
+        for burst in bursts:
+            aim = number(burst.get("aim_ft"))
+            edge = r if burst.get("inside") == "yes" else 2 * r
+            if not aim <= edge + AIM_SLACK_FT:
+                problems.append(f"{label}: burst {burst.get('n')} aimed {burst.get('aim_ft')} ft out, beyond {edge:.0f}")
+        for burst in bursts[ORBIT_SETTLE_BURSTS:]:
+            slant = number(burst.get("slant_ft"))
+            if not ORBIT_SLANT_FT[0] <= slant <= ORBIT_SLANT_FT[1]:
+                problems.append(f"{label}: burst {burst.get('n')} from {burst.get('slant_ft')} ft slant, outside the guns' reach")
+            if not abs(number(burst.get("bank_deg"))) <= ORBIT_BANK_MAX_DEG:
+                problems.append(f"{label}: burst {burst.get('n')} at {burst.get('bank_deg')} degrees of bank")
+        if not number(run.summary.get("gun_rounds")) > 0:
+            problems.append(f"{label}: no gun rounds")
+        if not any(k.get("target") == "yes" for k in run.of("KILL")):
+            problems.append(f"{label}: the target was not killed ({run.summary.get('target_hp')})")
+        if run.of("LOST"):
+            problems.append(f"{label}: the gunship was lost ({run.first('LOST')})")
     return problems
 
 
@@ -341,6 +393,28 @@ def scenarios() -> list[Scenario]:
     rocket_runs = [(2, "straight"), (3, "straight")]
     rockets = ["--aircraft", "a4e", "--load", "LAU61", "--seconds", "120"]
     maverick = ["--aircraft", "a10", "--load", "AGM65G", "--seconds", "120"]
+    # Helicopters (slice ST-F) start 4 nm out at 1,500 ft and 120 kt. The AT-2 is judged by the
+    # target; the rockets by their miss, like a fighter's. The stand-off attack (flown under SAMs) is
+    # forced on a quiet column: the column's SAMs bring a helicopter down before it can show it.
+    heli = ["--altitude", "1500", "--speed", "120", "--seconds", "150"]
+    at2 = ["--aircraft", "mi24", "--load", "AT2", *heli]
+    heli_rockets = ["--aircraft", "ah64", "--load", "LAU61", *heli]
+    heli_runs = [
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2"),
+         dict(label="mi24 at2 popup", profile="popup", skill=2, miss=None, hit=True)),
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", "--profile", "standoff"),
+         dict(label="mi24 at2 standoff", profile="standoff", skill=2, miss=None, hit=True)),
+        (pilot_run("UKR", "QUCOL", *heli_rockets, "--skill", "2"),
+         dict(label="ah64 rockets skill 2", profile="popup", skill=2, miss=MISS_FT_MAX[2], egress=False)),
+        (pilot_run("UKR", "QUCOL", *heli_rockets, "--skill", "3"),
+         dict(label="ah64 rockets skill 3", profile="popup", skill=3, miss=MISS_FT_MAX[3], egress=False)),
+    ]
+    # The AC-130 (slice ST-F) on the moving armoured column: the TVIET truck park's radar-laid guns
+    # (26,200 and 44,250 ft reach) shoot it down on its way in, so the quiet column it is.
+    gunship_skills = (0, 2, 3)
+    gunship = ["--aircraft", "ac130", "--load", "C_25.JT", "--altitude", "6000", "--speed", "220",
+               "--from", "3", "--seconds", "240"]
+    gunship_args = [pilot_run("UKR", "QUCOL", *gunship, "--skill", str(k)) for k in gunship_skills]
     jdam = ["--aircraft", "f16c", "--load", "GBU30", "--station", "2", "--count", "2", "--seconds", "120"]
     return [
         Scenario(
@@ -419,6 +493,28 @@ def scenarios() -> list[Scenario]:
             check=lambda out: strike_problems(out, _runs([(2, "fasthigh")], miss=False, hit=True)),
             notes="An F-4G's HARM on the heavily defended site's radar, fast-high: fired inside the AI's "
                   "100,000 ft HARM range while the radar emits, and the radar is hurt.",
+        ),
+        Scenario(
+            name="ai-strike-heli", lane="flight",
+            args=heli_runs[0][0], timeout=600,
+            then=[Step(a, timeout=300) for a, _ in heli_runs[1:]],
+            check=lambda out: strike_problems(out, [w for _, w in heli_runs]),
+            notes="Helicopters strike the Ukraine armored column: a Mi-24's AT-2 from the pop-up and "
+                  "from the stand-off attack (masked to the weapon's range, unmask, fire, hold the line "
+                  "until impact), each hurting the tank; an AH-64's rocket burst from the pop-up at "
+                  "skills 2 and 3, the drawn aim inside the circle and every rocket within the circle "
+                  "plus 800 ft. None is lost.",
+        ),
+        Scenario(
+            name="ai-strike-ac130", lane="flight",
+            args=gunship_args[0], timeout=600,
+            then=[Step(a, timeout=300) for a in gunship_args[1:]],
+            check=lambda out: gunship_problems(
+                out, [dict(label=f"ac130 skill {k}", skill=k) for k in gunship_skills]),
+            notes="An AC-130 circles the Ukraine armored column on its left-hand orbit from the guns' "
+                  "reach and fires its linked guns in bursts (skills 0, 2 and 3): each burst's walked-in "
+                  "aim inside the skill circle, the target inside the guns' 13,000 ft and the bank "
+                  "under 30 degrees once settled, the tank killed, the gunship not lost.",
         ),
         Scenario(
             name="ai-strike-defended", lane="flight",
