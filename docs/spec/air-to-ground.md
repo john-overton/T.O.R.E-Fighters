@@ -1233,8 +1233,6 @@ found these promised or specified items unbuilt:
   row is drawn).
 - Tab, "fire the gun whatever is selected" (decision 21): the key is bound and
   answers "not implemented yet".
-- A viewer overlay for laser spots and designations: replays carry the events
-  (`player.laser`, `player.designate`, `weapon.guided`), the viewer draws no spot.
 - `Ctrl+M` on the [keyboard map](../tore-keyboard-map.html) (a browser check and
   a README image recapture are due).
 - Online (protocol 23, slice NA): the cues are the host's, drawn a round trip

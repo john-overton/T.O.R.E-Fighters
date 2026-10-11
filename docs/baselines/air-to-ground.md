@@ -419,9 +419,9 @@ Not built:
   unguided bombs; the reach scale covers the JDAM).
 - The HUD's `TTI m:ss` row for a laser or GPS weapon in flight. The targeting
   page's TTI row is drawn; the HUD row is not.
-- A viewer overlay for laser spots and designations: replays and recordings carry
-  the events (`player.laser`, `player.designate`, `weapon.guided`), the viewer
-  draws no laser spot.
+- A viewer overlay for laser spots and designations: not built in this pass;
+  built afterwards (FX-R, 2026-10-11, B in the replay viewer, see
+  [laser and bomb marks](../REPLAYS.md#laser-and-bomb-marks)).
 - Tab (fire the gun whatever is selected), above.
 - `Ctrl+M` on [the keyboard map](../tore-keyboard-map.html): the map's rules call
   for a browser check of all five sheets at two sizes and a README image
