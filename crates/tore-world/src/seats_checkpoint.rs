@@ -325,6 +325,9 @@ fn save_order(s: &mut Saver, order: PlayerOrder) -> Result<(), CheckpointError> 
         PlayerOrder::BugOut => put(s, 11),
         PlayerOrder::LandAtSelected => put(s, 12),
         PlayerOrder::Sort => put(s, 13),
+        PlayerOrder::EngageIrLaser => put(s, 14),
+        PlayerOrder::EngageClass => put(s, 15),
+        PlayerOrder::LaseMyTarget => put(s, 16),
     }
     Ok(())
 }
@@ -345,6 +348,9 @@ fn load_order(l: &mut Loader<'_>) -> Result<PlayerOrder, CheckpointError> {
         11 => PlayerOrder::BugOut,
         12 => PlayerOrder::LandAtSelected,
         13 => PlayerOrder::Sort,
+        14 => PlayerOrder::EngageIrLaser,
+        15 => PlayerOrder::EngageClass,
+        16 => PlayerOrder::LaseMyTarget,
         other => return invalid(format!("a wing order has no variant {other}")),
     })
 }
@@ -640,6 +646,9 @@ mod tests {
             PlayerOrder::BugOut,
             PlayerOrder::LandAtSelected,
             PlayerOrder::Sort,
+            PlayerOrder::EngageIrLaser,
+            PlayerOrder::EngageClass,
+            PlayerOrder::LaseMyTarget,
         ];
         orders.extend(PlayerBreak::ALL.map(PlayerOrder::Break));
         orders.extend(PlayerApproach::ALL.map(PlayerOrder::Approach));

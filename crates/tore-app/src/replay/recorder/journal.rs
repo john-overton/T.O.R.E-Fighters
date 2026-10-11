@@ -617,6 +617,8 @@ impl Recorder {
                 Answered::AlreadyLanded => "already landed".into(),
                 Answered::OnAirfield => "taking off, landing or on the ground".into(),
                 Answered::NoBase => "no base to return to".into(),
+                Answered::NoSurfaceStore => "no usable surface store".into(),
+                Answered::NoDesignator => "no designator aboard".into(),
             };
             for (what, side) in &answer.side {
                 let (result, why) = receiver(*side);

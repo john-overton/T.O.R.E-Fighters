@@ -193,6 +193,9 @@ pub struct AiSetup {
     pub flight_model: ai_wings::AiFlightModel,
     pub group_objectives: [tore_sim::ai::engagement::GroupObjective; 6],
     pub group_must_survive: [bool; 6],
+    /// The mission names a ground target, which decides which wings strike
+    /// ([`ai_wings::AiWings::apply_strike_roles`]).
+    pub ground_target: bool,
     /// The loadouts the players chose for planes of an open mission, by
     /// plane, checked ([`crate::mission::LoadoutSpec::check_for_plane`]);
     /// every other AI aircraft carries its standard load.
@@ -491,6 +494,7 @@ impl World {
             bridge.set_flight_model(ai.flight_model)?;
             bridge.apply_mission_preset(ai.preset, lead.position);
             bridge.apply_group_objectives(&ai.group_objectives, lead.position);
+            bridge.apply_strike_roles(&ai.group_objectives, ai.ground_target);
             bridge.apply_group_survival(&ai.group_must_survive);
             if open {
                 // Every plane carries its objectives for whoever flies it

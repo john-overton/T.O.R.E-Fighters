@@ -135,6 +135,9 @@ fn save_order(s: &mut Saver, order: &PlayerOrder) -> Result<(), CheckpointError>
         PlayerOrder::BugOut => (11, 0),
         PlayerOrder::LandAtSelected => (12, 0),
         PlayerOrder::Sort => (13, 0),
+        PlayerOrder::EngageIrLaser => (14, 0),
+        PlayerOrder::EngageClass => (15, 0),
+        PlayerOrder::LaseMyTarget => (16, 0),
     };
     s.writer().write_varint(number);
     if matches!(number, 5 | 6) {
@@ -173,6 +176,9 @@ fn load_order(l: &mut Loader<'_>) -> Result<PlayerOrder, CheckpointError> {
         11 => PlayerOrder::BugOut,
         12 => PlayerOrder::LandAtSelected,
         13 => PlayerOrder::Sort,
+        14 => PlayerOrder::EngageIrLaser,
+        15 => PlayerOrder::EngageClass,
+        16 => PlayerOrder::LaseMyTarget,
         other => return invalid(format!("a player order has no number {other}")),
     })
 }
@@ -433,6 +439,9 @@ mod tests {
             PlayerOrder::BugOut,
             PlayerOrder::LandAtSelected,
             PlayerOrder::Sort,
+            PlayerOrder::EngageIrLaser,
+            PlayerOrder::EngageClass,
+            PlayerOrder::LaseMyTarget,
         ]
         .into_iter()
         .chain(PlayerBreak::ALL.map(PlayerOrder::Break))
@@ -456,7 +465,7 @@ mod tests {
     fn a_number_that_is_no_order_side_or_wing_is_refused() {
         let models = Models::default();
         let mut s = Saver::new();
-        s.writer().write_varint(14);
+        s.writer().write_varint(17);
         let body = s.finish_section();
         let coded = tore_sim::checkpoint::Coded {
             body,

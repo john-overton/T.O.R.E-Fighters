@@ -29,7 +29,7 @@ mod engagement;
 pub use engagement::Preset;
 mod ground;
 mod orders;
-pub(crate) use orders::{OrderReport, order_label};
+pub(crate) use orders::{GroundAim, GroundFact, OrderReport, order_label};
 pub mod outcome;
 mod record;
 pub use record::DecoyRoll;

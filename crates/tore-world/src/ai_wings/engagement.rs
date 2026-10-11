@@ -143,7 +143,9 @@ impl AiWings {
         player_position: [f64; 3],
     ) {
         for (index, objective) in objectives.iter().copied().enumerate() {
-            if objective == GroupObjective::Inherit {
+            // Strike leaves the air orders to the mission, as Inherit does
+            // (its role is set by `apply_strike_roles`).
+            if matches!(objective, GroupObjective::Inherit | GroupObjective::Strike) {
                 continue;
             }
             let side = if index < 3 {
@@ -153,7 +155,7 @@ impl AiWings {
             };
             let wing = index as u8 % 3;
             let mut assignment = match objective {
-                GroupObjective::Inherit => unreachable!(),
+                GroupObjective::Inherit | GroupObjective::Strike => unreachable!(),
                 GroupObjective::Free => Assignment::default(),
                 GroupObjective::Cap => cap(player_position),
                 GroupObjective::SelfDefense => self_defense(),

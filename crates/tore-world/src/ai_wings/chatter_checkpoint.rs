@@ -20,6 +20,7 @@
 
 use super::{Chatter, Contact, ContactView, FuelLevel, Watch};
 use crate::comms::Elevation;
+use crate::comms::journal::WingLine;
 use crate::radio_calls::Release;
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, InPlace, Loader, Saver, invalid};
 
@@ -109,6 +110,15 @@ impl Checkpoint for Chatter {
                 speaker.save(s, None)?;
                 level.save(s, None)?;
             }
+            Chatter::Line { speaker, line } => {
+                s.writer().write_varint(8);
+                speaker.save(s, None)?;
+                let code = WingLine::ALL
+                    .iter()
+                    .position(|candidate| candidate == line)
+                    .expect("every wing line is listed") as u64;
+                s.writer().write_varint(code);
+            }
             Chatter::Leadership {
                 speaker,
                 side,
@@ -164,6 +174,14 @@ impl Checkpoint for Chatter {
                 leader: Checkpoint::load(l, None)?,
                 previous_pilot_alive: Checkpoint::load(l, None)?,
             },
+            8 => {
+                let speaker = Checkpoint::load(l, None)?;
+                let code = l.reader().read_varint()?;
+                let Some(line) = WingLine::ALL.get(code as usize).copied() else {
+                    return invalid(format!("a wing line has no code {code}"));
+                };
+                Chatter::Line { speaker, line }
+            }
             other => return invalid(format!("Chatter has no variant {other}")),
         })
     }
@@ -269,6 +287,14 @@ mod tests {
                 aircraft: false,
             },
             Chatter::Showtime { speaker: 8 },
+            Chatter::Line {
+                speaker: 2,
+                line: WingLine::Winchester,
+            },
+            Chatter::Line {
+                speaker: 2,
+                line: WingLine::Lasing,
+            },
             Chatter::Contact {
                 speaker: 2,
                 target: 17,

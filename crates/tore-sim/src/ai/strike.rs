@@ -863,14 +863,9 @@ impl Strike {
         let anti_radiation = stores
             .iter()
             .any(|s| s.kind == StoreKind::AntiRadiation && s.rounds > 0);
-        let other = stores.iter().any(|s| {
-            s.rounds > 0
-                && s.kind != StoreKind::AntiRadiation
-                && s.kind != StoreKind::Command
-                && (s.kind != StoreKind::Laser || cx.inputs.designator)
-        });
+        let usable_store = has_usable_store(stores, cx.inputs.designator);
         let attackers = |id: u32| cx.mates.iter().filter(|m| **m == id).count() as u32;
-        let usable = |_: u16| anti_radiation || other;
+        let usable = |_: u16| usable_store;
         let candidates = cx
             .picture
             .strike_candidates(own, cx.side, &attackers, &usable);
@@ -1479,6 +1474,17 @@ pub fn sead_order(
         .collect();
     ranked.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
     ranked.into_iter().map(|(_, _, id)| id).collect()
+}
+
+/// Whether any of the stores can attack a ground target now: a store with
+/// rounds that is not the helicopters' command-guided AT-2 and, when it is
+/// a laser weapon, only for an aircraft with a designator of its own. The
+/// target choice and a flight lead's order (which a wingman refuses without
+/// one) both ask it.
+pub fn has_usable_store(stores: &[Store], designator: bool) -> bool {
+    stores.iter().any(|s| {
+        s.rounds > 0 && s.kind != StoreKind::Command && (s.kind != StoreKind::Laser || designator)
+    })
 }
 
 /// The radius of John's release circle by skill (2026-10-11): Ace 100 m,

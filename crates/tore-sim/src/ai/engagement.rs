@@ -27,6 +27,11 @@ pub enum GroupObjective {
     Escort(super::launch::WingId),
     SelfDefense,
     Hold,
+    /// Strike the mission's ground target (slice ST-O): the wing's air
+    /// orders are the mission's own (as for `Inherit`) and its aircraft take
+    /// the [`StrikeRole::Strike`] role. Offered for a friendly wing with a
+    /// ground target set.
+    Strike,
 }
 
 /// A wing's air-to-ground role (docs/spec/ai-strike.md, "Who strikes").

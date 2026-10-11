@@ -327,6 +327,85 @@ impl super::AiActor {
         }
         self.tidy_ground();
     }
+    /// Why this actor takes no flight lead's order onto the ground now: the
+    /// receiver's own gates (a training target, a wingman that bugged out,
+    /// damage recovery, a plane parked or in an airfield sequence) and an
+    /// ordered landing, which would send a striker straight home.
+    pub fn ground_order_refusal(&self) -> Option<crate::ai::wing::RejectReason> {
+        use crate::ai::wing::RejectReason;
+        if self.dummy {
+            Some(RejectReason::Dummy)
+        } else if self.bugged_out {
+            Some(RejectReason::BuggedOut)
+        } else if self.damage_return.is_some() {
+            Some(RejectReason::DamageRecovery)
+        } else if self.airfield_phase() == Some(crate::ai::airfield::Phase::Parked) {
+            Some(RejectReason::Landed)
+        } else if self.airfield_phase().is_some() || self.landing_order.is_some() {
+            Some(RejectReason::OnAirfield)
+        } else {
+            None
+        }
+    }
+    /// A flight lead's order onto one ground object ("Engage my target",
+    /// Alt+F, slice ST-O): the object alone, replacing any class or lase
+    /// order, with a fresh strike behind it (a finished strike is not
+    /// resumed).
+    pub fn order_strike(&mut self, target: u32) {
+        self.lase = None;
+        self.strike = None;
+        if let Some(picture) = &mut self.ground {
+            picture.set_class_order(Vec::new());
+        }
+        self.set_strike_order(Some(target));
+    }
+    /// A flight lead's order onto every object of a class (Alt+W, slice
+    /// ST-O): the objects are the targets, nearest first, two to an object.
+    /// Replaces any other ground order. With no targets it only clears.
+    pub fn order_strike_class(&mut self, targets: Vec<u32>) {
+        self.lase = None;
+        self.strike = None;
+        self.set_strike_order(None);
+        if targets.is_empty() {
+            self.tidy_ground();
+            return;
+        }
+        let picture = self
+            .ground
+            .get_or_insert_with(|| Box::new(GroundPicture::new(StrikeRole::Cap)));
+        picture.set_class_order(targets);
+    }
+    /// A flight lead's "Lase my target" (slice ST-O): the object the wingman
+    /// lases. Replaces any strike order. Slice ST-L reads it to fly the
+    /// lasing orbit.
+    pub fn order_lase(&mut self, target: u32) {
+        self.clear_ground_orders();
+        self.lase = Some(target);
+    }
+    /// The object this wingman was ordered to lase, while the order stands.
+    pub fn lase_order(&self) -> Option<u32> {
+        self.lase
+    }
+    /// Ends every order a flight lead gave onto the ground (a strike, a class
+    /// or a lase order), and the strike they started. The Strike role and its
+    /// briefing, which a mission set, are left alone.
+    pub fn clear_ground_orders(&mut self) {
+        self.lase = None;
+        if let Some(picture) = &mut self.ground {
+            picture.set_ordered(None);
+            picture.set_class_order(Vec::new());
+        }
+        self.tidy_ground();
+    }
+    /// Whether a flight lead's ground order stands (a strike, a class or a
+    /// lase order).
+    pub fn has_ground_order(&self) -> bool {
+        self.lase.is_some()
+            || self
+                .ground
+                .as_ref()
+                .is_some_and(|g| g.ordered().is_some() || !g.class_order().is_empty())
+    }
     /// Briefs a striker on its objective. Returns false, changing nothing,
     /// for an actor without a ground picture.
     pub fn set_strike_objective(&mut self, objective: StrikeObjective) -> bool {

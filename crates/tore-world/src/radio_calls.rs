@@ -1173,6 +1173,18 @@ impl Radio {
                 2.,
                 Origin::of(Source::Reply, Cause::Reply(WingReply::Showtime)),
             ),
+            // A refusal of a ground order, or "Lasing": text only, as no
+            // retail recording says it (slice ST-O).
+            Chatter::Line { speaker, line } => self.say(
+                comms,
+                scene,
+                *speaker,
+                Audience::Leader,
+                Phrase::default().raw(line.text(), None),
+                Kind::Important,
+                2.,
+                Origin::of(Source::Reply, Cause::Reply(WingReply::Line(*line))),
+            ),
             Chatter::Contact {
                 speaker,
                 target,
