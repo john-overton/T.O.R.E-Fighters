@@ -9,6 +9,7 @@ use super::tests::{Rig, level_script, spec};
 use super::*;
 use std::sync::{Arc, Mutex};
 use tore_net::sim::LinkConfig;
+use tore_world::seats::SeatCommand;
 
 const MS: Duration = Duration::from_millis(1);
 
@@ -123,14 +124,14 @@ fn a_game_that_joined_without_its_token_sends_a_rejoin() {
     );
 }
 
-/// Protocol 23, slice NA: a game whose plane pinned its targeting sight and
-/// set its laser by hand, then stalled for good, joins again with its token.
-/// While it was gone the AI flew the plane (the handoff carries stores,
-/// damage and sensors, not the sight, agent decision), so it comes back to
-/// the sensor's default look, nothing held and the laser off, and its
-/// readout says so, the designator pod included.
+/// Protocol 23, slice NA; slice FX-J: a game whose plane pinned its
+/// targeting sight, put the A-G page up and set its laser by hand, then
+/// stalled for good, joins again with its token. While it was gone the AI
+/// flew the plane and the host kept the cockpit (the handoff's kept
+/// cockpit), so it comes back to the same pin, the laser on by hand and the
+/// A-G page, and its readout says so, the designator pod included.
 #[test]
-fn a_game_that_rejoins_reads_its_planes_sight_and_laser_afresh() {
+fn a_game_that_rejoins_reads_its_planes_sight_and_laser_as_it_left_them() {
     use tore_sim::combat::laser::LaserState;
     use tore_sim::combat::sight::SightMode;
     let mut spec = crate::wire::readout_a2g_tests::a2g_spec();
@@ -199,17 +200,208 @@ fn a_game_that_rejoins_reads_its_planes_sight_and_laser_afresh() {
     }
     let readout = read.expect("the rejoined game reads a sight and a laser");
     let host = rig.host.world().combat.state.ownship(plane).unwrap();
-    let (shown, laser) = (readout.sight.unwrap(), readout.laser.unwrap());
-    assert_eq!(shown.mode, SightMode::Free);
-    assert_eq!(Some(shown.mode), host.sight.map(|s| s.mode));
-    // The pod's sensor, its default look within the wire's step.
+    let (shown, shown_laser) = (readout.sight.unwrap(), readout.laser.unwrap());
+    assert_eq!(
+        host.sight.map(|s| s.mode),
+        Some(sight.mode),
+        "the host's pin"
+    );
+    // The same pin on the client, within the wire's step.
+    let (SightMode::Pinned(got), SightMode::Pinned(left)) = (shown.mode, sight.mode) else {
+        panic!("the sight comes back pinned: {:?}", shown.mode);
+    };
+    assert!(
+        (0..3).all(|i| (got[i] - left[i]).abs() <= 1.),
+        "{got:?} {left:?}"
+    );
+    // The pod's sensor.
     let (got, sent) = (shown.sensor, sight.sensor);
     assert_eq!(
         (got.laser, got.range_ft, got.gimbal, got.eye),
         (sent.laser, sent.range_ft, sent.gimbal, sent.eye)
     );
-    assert!((0..2).all(|i| (got.default_look[i] - sent.default_look[i]).abs() < 1e-5));
-    assert!(!shown.slewed(), "at the default look");
-    assert!(laser.designator);
-    assert_eq!((laser.state, laser.manual), (LaserState::Off, None));
+    assert!(shown_laser.designator);
+    assert_eq!(shown_laser.manual, Some(true), "on by hand, as left");
+    assert_eq!(host.laser.manual, Some(true));
+    assert_ne!(shown_laser.state, LaserState::Off);
+    assert!(readout.sensors.air_ground, "the A-G page, as left");
+    assert!(host.sensors.air_ground());
+    let _ = laser;
+}
+
+/// Slice FX-J: a laser bomber (the synthetic F/A-18D's pod and two GBU-10s,
+/// a Cheat loading) releases on its pin and its game stalls for good while
+/// the bomb falls. The host drops it and the AI flies the plane, the laser
+/// the player left keeps the spot, and the bomb guides on; the game joins
+/// again with its token, finds its laser and pin, and the bomb ends on the
+/// spot, guiding the whole way.
+#[test]
+fn a_laser_bomb_guides_on_across_a_drop_and_a_rejoin() {
+    use crate::settings::{LoadoutRule, number};
+    use tore_sim::combat::live::GuidedMode;
+    use tore_sim::combat::sight::SightMode;
+    let mut spec = crate::wire::readout_a2g_tests::a2g_spec();
+    spec.loadout = None;
+    spec.wings[0].count = 2;
+    let mut import = tore_world::test_support::surface::routed_resources();
+    tore_world::test_support::resources::add_a2g_stores(&mut import);
+    let mut rig = Rig::with_import(spec, LinkConfig::one_way(10 * MS), 21, import, |config| {
+        config
+            .settings
+            .push((number::LOADOUTS, LoadoutRule::Any.value()));
+    });
+    // The run: the A-G page and the laser bomb at once, the sight slewed
+    // down for 3.5 s (onto the ground some 18,000 ft ahead, inside the pod's
+    // reach in this weather) and pinned with the laser off by hand (the spot
+    // is beyond the bomb's release zone, which would leave it blind; with
+    // no spot it waits, the release puts the laser back on and it locks as
+    // it falls), the trigger at 4.5 s.
+    let script = |run: bool| -> super::tests::Script {
+        use tore_sim::combat::live::Command as Combat;
+        let mut level = level_script();
+        let mut since = None;
+        let mut given = 0;
+        Box::new(move |now, client, picture| {
+            let mut controls = level(now, client, picture);
+            if !run || client.prediction().is_none() {
+                return controls;
+            }
+            let at = now.saturating_sub(*since.get_or_insert(now));
+            if given == 0 {
+                controls.commands.extend([
+                    SeatCommand::Combat(Combat::ToggleAirGround),
+                    SeatCommand::CycleWeapon { forward: true },
+                ]);
+                given = 1;
+            }
+            if at < Duration::from_millis(3_500) {
+                controls.sight = [0, -127];
+            } else if given == 1 {
+                controls.commands.extend([
+                    SeatCommand::Combat(Combat::SightPinGround),
+                    SeatCommand::Combat(Combat::ToggleLaser),
+                ]);
+                given = 2;
+            }
+            controls.trigger =
+                (Duration::from_millis(4_500)..Duration::from_millis(4_750)).contains(&at);
+            controls
+        })
+    };
+    let viper = rig.join(
+        |c| {
+            c.callsign = "Viper".into();
+            c.auto_ready = false;
+        },
+        script(true),
+    );
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.players[viper].client.lobby().is_some()
+    }));
+    rig.players[viper].client.take_any_slot();
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.players[viper]
+            .client
+            .lobby()
+            .and_then(|l| l.me())
+            .is_some_and(|me| me.slot.is_some())
+    }));
+    rig.players[viper]
+        .client
+        .send_loadout(Some(tore_world::test_support::resources::a2g_loadout()));
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.players[viper]
+            .client
+            .lobby()
+            .and_then(|l| l.me())
+            .is_some_and(|me| me.loadout)
+    }));
+    rig.players[viper].client.set_ready(true);
+    assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(viper)));
+    let plane = rig.players[viper].client.seat().map(|(_, p)| p.0).unwrap();
+    // The bomb leaves four seconds after the game flies, and locks.
+    let guiding = |r: &Rig| {
+        r.host
+            .world()
+            .combat
+            .state
+            .guided_flights()
+            .find(|(_, f)| f.owner == plane)
+            .filter(|(_, f)| f.mode == GuidedMode::Guiding)
+            .map(|(id, _)| id)
+    };
+    assert!(
+        rig.run_until(Duration::from_secs(8), |r| guiding(r).is_some()),
+        "the bomb guides"
+    );
+    let bomb = guiding(&rig).unwrap();
+    let pin = rig
+        .host
+        .world()
+        .combat
+        .state
+        .ownship(plane)
+        .unwrap()
+        .sight
+        .unwrap()
+        .mode;
+    assert!(matches!(pin, SightMode::Pinned(_)), "{pin:?}");
+    let token = rig.players[viper].client.token().unwrap().token;
+    rig.players[viper].stalled = true;
+    // Every tick from here the bomb guides, until it ends.
+    let mut modes = Vec::new();
+    let mut gap = false;
+    let watch = |r: &Rig, modes: &mut Vec<GuidedMode>, gap: &mut bool| {
+        let state = &r.host.world().combat.state;
+        if let Some(flight) = state.guided_flight(bomb) {
+            modes.push(flight.mode);
+        }
+        if state.ownship(plane).is_none() && state.kept(plane).is_some() {
+            *gap = true;
+        }
+    };
+    assert!(rig.run_until(Duration::from_secs(8), |r| {
+        watch(r, &mut modes, &mut gap);
+        r.host.peers_for_test() == 0
+    }));
+    assert!(
+        rig.run_until(Duration::from_secs(1), |r| {
+            watch(r, &mut modes, &mut gap);
+            gap
+        }),
+        "the AI flies the plane with the cockpit kept"
+    );
+    rig.run(Duration::from_millis(200));
+    let back = rig.join(
+        move |c| {
+            c.callsign = "Viper".into();
+            c.token = Some(token);
+        },
+        script(false),
+    );
+    assert!(rig.run_until(Duration::from_secs(4), |r| {
+        watch(r, &mut modes, &mut gap);
+        r.seated(back)
+    }));
+    assert_eq!(
+        rig.players[back].client.seat().map(|(_, p)| p.0),
+        Some(plane)
+    );
+    let own = rig.host.world().combat.state.ownship(plane).unwrap();
+    assert_eq!(own.sight.map(|s| s.mode), Some(pin), "the same pin");
+    assert!(own.laser.lasing() || own.laser.point.is_some());
+    assert!(
+        rig.host.world().combat.state.guided_flight(bomb).is_some(),
+        "the bomb is still in the air at the rejoin"
+    );
+    assert!(rig.run_until(Duration::from_secs(60), |r| {
+        watch(r, &mut modes, &mut gap);
+        r.host.world().combat.state.guided_flight(bomb).is_none()
+    }));
+    assert!(
+        modes.iter().all(|m| *m == GuidedMode::Guiding),
+        "the bomb guided the whole way: {:?}",
+        modes.iter().filter(|m| **m != GuidedMode::Guiding).count()
+    );
+    assert!(rig.host.world().combat.state.guided_impact(plane).is_some());
 }
