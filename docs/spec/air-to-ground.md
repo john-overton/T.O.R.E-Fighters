@@ -552,7 +552,9 @@ else HAB (a bomber camera, byte +0x23a), else ARM. Ctrl+M switches CCIP and LVL
 for bombs (and BORE and CUED for missiles, the existing action). CCIP is the
 default. LVL is chosen automatically when a bomb is selected while a ground
 designation exists and the flight path is within 10 degrees of level (fitted),
-and Ctrl+M overrides it. The choice is made at the moment of selection only: a
+and Ctrl+M overrides it. A heavy bomber ([bombing class](ai-strike.md#bombing-class))
+is the exception: it selects LVL whatever its attitude or target and starts in
+LVL (opinionated, John, 2026-10-11). The choice is made at the moment of selection only: a
 dive or a climb afterwards keeps the mode, so the "T" never vanishes mid-run
 (agent). The status word reads CCIP or LVL for an unguided bomb, ARM for a
 rocket pod and every guided store, LCOS or SAFE for a gun and NAV with NAV

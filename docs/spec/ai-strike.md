@@ -234,15 +234,32 @@ this order. Fields are in [the aircraft table](../formats/fa-aircraft.csv).
   stores today). Attack: A-4E, Su-25, AV-8B, A-7, A-10, MiG-17F. Fighter: every
   other imported aircraft, the F/A-18D included. The F-22 uses its bay as in
   [weapons](air-to-ground.md#weapon-classes).
-- **Override.** An optional per-aircraft override in the aircraft's T.O.R.E
-  metadata, empty for every current aircraft, for the day the rule is wrong for
-  one (the F-117, which retail flies at 5,000 ft level, is the likely first).
-  Opinionated (agent).
+- **Override.** An optional per-aircraft override, a data table keyed by PT
+  resource name (`OVERRIDES`, empty for every current aircraft), for the day
+  the rule is wrong for one (the F-117, which retail flies at 5,000 ft level,
+  is the likely first). A new import adds nothing to it; only a wrong class
+  does. Opinionated (agent).
 - **The player's default.** The class sets only the **default** bomb mode: a
   Heavy selects LVL whatever its attitude (retail heavies have no CCIP); every
   other class keeps the [H1 rule](air-to-ground.md#status-word-and-mode-choice).
   Both modes stay available to the player on every aircraft. Opinionated (John,
-  2026-10-11); no imported aircraft is a Heavy with bombs today.
+  2026-10-11); no imported aircraft is a Heavy with bombs today. How the two
+  combine:
+
+  | Class | Bomb mode when a bomb is selected |
+  | --- | --- |
+  | Heavy | LVL always: with or without a designated ground target, level or diving. A Heavy also starts the mission in LVL |
+  | Helicopter, Gunship, Attack, Fighter | The H1 rule: LVL if a ground target is designated and the flight path is within 10 degrees of level, else CCIP |
+
+  Ctrl+M switches CCIP and LVL for every class after the choice, and nothing
+  re-chooses until the next selection.
+- **Where it lives.** `crates/tore-sim/src/models/strike_class.rs`
+  (`StrikeClass`, `Record`, `OVERRIDES`, `default_delivery`). The class is read
+  once from the imported record into the combat configuration
+  (`combat::live::Configuration::strike_class`), so the player's selection rule
+  and the AI strike controller read the same field. Tests pin the imported
+  roster above, the 145-record census (the `ai_script` column of the [aircraft
+  table](../formats/fa-aircraft.csv)) and the Heavy LVL default.
 
 ## Skill and release precision
 
