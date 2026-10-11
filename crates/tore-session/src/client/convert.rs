@@ -1025,10 +1025,25 @@ fn weapon_registry(
     (ids, infos)
 }
 
-/// The weapon class the single-player recorder gives a weapon.
-fn weapon_class(weapon: &tore_formats::weapons::Weapon) -> replay::WeaponClass {
-    if tore_sim::combat::live::is_gun(weapon) {
+/// The weapon class the single-player recorder gives a weapon (the game's
+/// `replay::convert::weapon_class`, whose tests compare this with it): the
+/// debrief's store-flag rule, with the air-to-ground round's two
+/// refinements (slice RA): a guided glide bomb (the laser bombs and the
+/// JDAMs) is a bomb, and an unguided rocket of a pod is a rocket.
+pub fn weapon_class(weapon: &tore_formats::weapons::Weapon) -> replay::WeaponClass {
+    use tore_sim::combat::{ballistics, guided, live};
+    if live::is_gun(weapon) {
         return replay::WeaponClass::Gun;
+    }
+    if guided::is_glide_bomb(weapon) {
+        return replay::WeaponClass::Bomb;
+    }
+    let rocket = !ballistics::is_bomb(weapon)
+        && weapon.flags & 1 == 0
+        && ballistics::is_pod(weapon)
+        && weapon.seeker.signature == 0;
+    if rocket {
+        return replay::WeaponClass::Rocket;
     }
     match ShotKind::of(weapon) {
         ShotKind::AirToAir | ShotKind::AirToGround => replay::WeaponClass::Missile,

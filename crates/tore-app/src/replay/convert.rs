@@ -1258,6 +1258,29 @@ mod tests {
         let mut as30 = record("AS30.JT", 0x20401, 1, 1);
         as30.movement.fuel_t = 40;
         assert_eq!(weapon_class(&as30), Missile);
+        // A network capture's conversion classes them the same (slice NA).
+        let rockets =
+            ["LAU61.JT", "B8.JT", "B13.JT", "LAU10.JT"].map(|s| record(s, 0x20846, 19, 0));
+        for w in [
+            record("MK82.JT", 0x22012, 1, 0),
+            record("ONE.JT", 0x20846, 1, 0),
+            record("AGM65G.JT", 0x20001, 1, 2),
+            record("AA.JT", 0x10001, 1, 2),
+            record("M61.JT", 0x80, 1, 0),
+            gbu,
+            jdam,
+            as30,
+        ]
+        .iter()
+        .chain(&rockets)
+        {
+            assert_eq!(
+                tore_session::client::convert::weapon_class(w),
+                weapon_class(w),
+                "{}",
+                w.source
+            );
+        }
     }
 
     #[test]
