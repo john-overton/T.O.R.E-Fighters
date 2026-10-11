@@ -50,11 +50,14 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   Flight keys the viewer does not read stay dim. Ctrl+B, the flight's "Mark
   replay moment" default, is on this sheet because its purpose is replays;
   the sheet says it works in flight.
-- The AC-130 gunsight keys (John, 2026-10-09) are on Fly & Fight: Backslash
-  and Shift+Backslash (designate, pin ground), Alt with the arrows (slew),
-  Shift+' and Shift+; (zoom), and L and ; (drop). They carry an AC- label, and
-  a small AC-130 legend box in the keyboard plate's free top-right corner
-  lists them with the gamepad gestures. Keep those labels in step with
+- The sight keys are on Fly & Fight: Backslash and Shift+Backslash
+  (designate, pin ground), `/` (next visible ground object), Alt with the
+  arrows (slew), Shift+' and Shift+; (zoom), L and ; (drop) and Ctrl+L (the
+  laser). They were the AC-130 gunsight's keys (John, 2026-10-09) and serve
+  every aircraft with a laser designator or a FLIR since air-to-ground slice T1,
+  so they no longer carry an AC- label. A small legend box in the keyboard
+  plate's free top-right corner lists them with the AC-130's gamepad gestures.
+  Keep those labels in step with
   [the input guide](INPUT.md#ac-130-gunsight-controls).
 - The keypad works as the navigation keys. Highlight a keypad key on the sheet
   for its command, with the same label as the key it stands for: keypad 0 and

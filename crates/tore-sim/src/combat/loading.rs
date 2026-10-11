@@ -44,6 +44,14 @@ impl Store {
             weight: i32::from(t.empty_weight).wrapping_add(t.fuel_weight),
         }
     }
+    /// A sensor carried as a store (a laser designator pod): equipment, as
+    /// retail loads a SEE record on a hardpoint.
+    pub fn sensor(flags: u8, weight: i32) -> Self {
+        Self {
+            kind: StoreKind::Equipment { flags },
+            weight,
+        }
+    }
     pub fn countermeasures(c: Countermeasures) -> Self {
         Self {
             kind: StoreKind::Equipment { flags: c.flags },

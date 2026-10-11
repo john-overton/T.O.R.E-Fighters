@@ -199,12 +199,17 @@ key assignments or original linked fire behaviour.
 
 The gunsight is the AC-130's target camera. These keys were chosen by John on
 2026-10-09; the behaviour behind them is the AC-130 gunsight project's, and the
-[controls list](CONTROLS.md) has every default. On any other aircraft they do
-nothing, and the two that mean something in retail say so.
+[controls list](CONTROLS.md) has every default. Since the air-to-ground slice T1
+the same keys drive the targeting sight of every aircraft with a laser
+designator or a FLIR ([air-to-ground](spec/air-to-ground.md#the-targeting-sight));
+on an aircraft without one, Backslash, Shift+Backslash and the zoom keys say "no
+targeting sight". The gamepad gestures stay the AC-130's.
 
 | Action | Keyboard | Gamepad | Notes |
 | --- | --- | --- | --- |
-| Designate what is under the crosshair | Backslash | Select + A, tapped | An object if one is there, else the ground. Retail's Backslash is "designate the IR/laser target", so the other aircraft report it as not implemented yet |
+| Designate what is under the crosshair | Backslash | Select + A, tapped | An object if one is there, else the ground. Retail's Backslash is "designate the IR/laser target": every aircraft with a sight |
+| Next visible ground object | / | None | The first press takes the one nearest the line of sight, then each press steps right, wrapping to the leftmost |
+| Laser on or off by hand | Ctrl+L | None | Aircraft with a laser designator; the laser also comes on by itself with a laser weapon selected |
 | Pin the ground under the crosshair | Shift+Backslash | Select + A, held half a second | |
 | Drop the target or pin; again, back to the default view | L or ; | Select + B | The existing clear-designation keys |
 | Slew the sight | Alt + arrows (or Alt + keypad 4, 6, 8, 2) | Select + right stick | Actions `sight-left`, `sight-right`, `sight-up`, `sight-down` for keys and buttons; `sight-x` and `sight-y` for sticks and HOTAS axes (right and up positive) |
@@ -480,14 +485,14 @@ Deliberate differences from FA:
 | L | Clear designation, alongside ; | Unused | Earlier T.O.R.E key, kept |
 | Shift+/ | Center view, alongside keypad 5 | Unused | Laptops lack a keypad |
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
-| Backslash | On the AC-130, designate what is under the gunsight's crosshair; elsewhere "not implemented yet" | IR/laser designation, only with advanced targeting on | The AC-130 gunsight is that targeting, John 2026-10-09. The live-fire range reset moved to Ctrl+Shift+Backslash (kept its key, gained Ctrl+Shift) |
-| Shift+Backslash | Pin the AC-130 gunsight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
-| Shift+' / Shift+; | Zoom the AC-130 gunsight in / out; elsewhere "not implemented yet" | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
-| Alt + arrows | Slew the AC-130 gunsight | Unused | T.O.R.E addition, John 2026-10-09 |
+| Backslash | Designate what is under the sight's crosshair (the AC-130's gunsight, or the targeting sight of an aircraft with a laser designator or a FLIR); elsewhere "no targeting sight" | IR/laser designation, only with advanced targeting on | The AC-130 gunsight is that targeting, John 2026-10-09; every sight aircraft since A2G slice T1. The live-fire range reset moved to Ctrl+Shift+Backslash (kept its key, gained Ctrl+Shift) |
+| Shift+Backslash | Pin the sight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
+| Shift+' / Shift+; | Zoom the sight in / out; elsewhere a message | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
+| Alt + arrows | Slew the sight | Unused | T.O.R.E addition, John 2026-10-09 |
 | Tab | Fire the gun whatever is selected (`fire-gun`); says "not implemented yet" until the air-to-ground weapons land | Fire the gun | Retail key, bound by A2G slice K1 |
 | Shift+R / Ctrl+R | Air-to-ground radar page on or off (`a-g-radar`): turns the air radar off, never clears the designation; R returns to the air radar | The same | Retail keys, bound by K1, built by G1. Ctrl+Shift+R is still the tower repeat |
-| / | Sight: next visible object (`sight-next`); "not implemented yet" for now | Designate the next visible object as the IR/laser target | Retail key, bound by K1; the sight keys serve every aircraft with a sight in the A2G design |
-| Ctrl+L | Laser on or off (`laze`); "not implemented yet" for now | Unused | T.O.R.E addition, John (A2G decision 5) |
+| / | Sight: next visible object (`sight-next`): the sight tracks the next visible ground object to the right; "no targeting sight" without one | Designate the next visible object as the IR/laser target | Retail key, bound by K1, built by T1 |
+| Ctrl+L | Laser on or off by hand (`laze`); "no laser designator" without one | Unused | T.O.R.E addition, John (A2G decision 5), built by T1 |
 | Ctrl+M | Delivery mode: CCIP / LVL for bombs, BORE / CUED for missiles (`weapon-seeker-mode`) | Unused | T.O.R.E addition, A2G design 2.7; the action existed without a key |
 | Ctrl+X | Nearest hostile ground target, under Easy targeting or on the AC-130 (`nearest-ground`); otherwise a message says it needs the cheat | Nearest ground target cheat when the Multi menu allows it | John, A2G decision 21; built by G1 |
 | V | Save the view to Other View and open it | The same, then return the main view to the front | The main view stays |
