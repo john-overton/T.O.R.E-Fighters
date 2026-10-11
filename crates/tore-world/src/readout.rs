@@ -24,11 +24,12 @@ use tore_sim::{
     airport::Service,
     attitude::Vector,
     combat::{
+        guided::GuidedSight,
         gunship::{self, Sight, SightNotice},
         gunship_impact::Impact,
         laser::{LaserSpot, LaserState, Mask},
         live::{self, Launcher, Readiness, SeekerTone, Target},
-        missiles::{FiringBand, LaunchMode, TargetRole, seeker},
+        missiles::{FiringBand, Guidance, LaunchMode, TargetRole, seeker},
         sight::{SightMode, SightSensor},
         threats::ThreatRecord,
     },
@@ -55,6 +56,9 @@ pub const MAX_THREATS: usize = 16;
 pub const MAX_INBOUND: usize = 16;
 /// AI aircraft listed as holding a lock or aiming a missile.
 pub const MAX_AI_THREATS: usize = 16;
+/// The plane's own guided air-to-ground weapons in flight listed with their
+/// time to impact (plan section 9: at most 4).
+pub const MAX_WEAPON_TTI: usize = 4;
 
 /// The readout of one seat's plane at one instant.
 #[derive(Clone, Debug, PartialEq)]
@@ -75,6 +79,18 @@ pub struct CockpitReadout {
     /// an aircraft with a laser designator, or while a buddy's spot is shown.
     /// Host-built; not on the wire yet (slice NA).
     pub laser: Option<LaserReadout>,
+    /// The selected guided air-to-ground weapon's sight: its aim, range,
+    /// reach and advisory (docs/spec/air-to-ground.md, "Guided bomb release
+    /// range indicator"). Host-built; not on the wire yet (slice NA).
+    pub guided: Option<GuidedSight>,
+    /// The plane's own guided air-to-ground weapons in flight, oldest first,
+    /// at most [`MAX_WEAPON_TTI`], with their time to impact. Host-built;
+    /// not on the wire yet (slice NA).
+    pub weapon_tti: Vec<WeaponTti>,
+    /// The combat tick the plane's last guided air-to-ground weapon ended
+    /// (hit or went away), for the targeting page's impact cue. Host-built;
+    /// not on the wire yet (slice NA).
+    pub guided_impact_tick: Option<u64>,
     /// The mounted seeker and its tone.
     pub seeker: SeekerReadout,
     /// What the weapon page and HUD estimate for the selected station.
@@ -265,6 +281,45 @@ pub struct LaserReadout {
     pub spot: Option<SpotReadout>,
     /// A buddy's spot shown beside the plane's own (the second BUDDY row).
     pub buddy: Option<SpotReadout>,
+}
+
+/// One of the plane's guided air-to-ground weapons in flight
+/// (docs/spec/air-to-ground.md, "Laser on the HUD": `TTI 0:12`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WeaponTti {
+    /// Its projectile number.
+    pub projectile: u32,
+    /// The station it left.
+    pub station: u8,
+    /// Laser, coordinate (JDAM) or command (AT-2).
+    pub kind: Guidance,
+    /// It is homing now (a blind or waiting one falls or flies straight).
+    pub guiding: bool,
+    /// Seconds to impact, when they can be worked out.
+    pub seconds: Option<f64>,
+    /// Where it is.
+    pub position: Vector,
+}
+
+/// The plane's own guided weapons in flight, oldest first, at most
+/// [`MAX_WEAPON_TTI`].
+fn weapon_tti(state: &live::State, plane: u32) -> Vec<WeaponTti> {
+    state
+        .guided_flights()
+        .filter(|(_, flight)| flight.owner == plane)
+        .filter_map(|(id, flight)| {
+            let p = state.projectiles.iter().find(|p| p.id == id)?;
+            Some(WeaponTti {
+                projectile: id,
+                station: u8::try_from(flight.station).unwrap_or(u8::MAX),
+                kind: flight.kind,
+                guiding: flight.guiding(),
+                seconds: flight.seconds,
+                position: p.position,
+            })
+        })
+        .take(MAX_WEAPON_TTI)
+        .collect()
 }
 
 /// The mounted seeker.
@@ -829,6 +884,9 @@ pub fn build(
         gunsight: own.gunship.as_ref().map(GunsightReadout::of),
         sight: own.sight.as_ref().map(SightReadout::of),
         laser: laser_readout(state, own, here),
+        guided: own.guided_sight,
+        weapon_tti: weapon_tti(state, plane),
+        guided_impact_tick: state.guided_impact(plane),
         seeker: SeekerReadout {
             status: own.mounted.status,
             target: own.mounted.target,

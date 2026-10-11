@@ -1740,6 +1740,11 @@ impl QReadout {
             // the wire before protocol 23 (slice NA).
             sight: None,
             laser: None,
+            // The guided weapon sight and the weapons in flight are
+            // host-built too (slice NA).
+            guided: None,
+            weapon_tti: Vec::new(),
+            guided_impact_tick: None,
             seeker,
             estimates,
             targets,
