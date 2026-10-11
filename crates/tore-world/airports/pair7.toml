@@ -4,7 +4,7 @@
 # airport textures; one plan per runway shape type; larger airports keep
 # their strips, with parking and taxiways on both sides). Sizes and positions
 # are agent choices at real-world scale (fitted); runway centrelines follow
-# the retail ones. Only applies with TORE_REDRAWN_AIRPORTS=1.
+# the retail ones. The default; TORE_REDRAWN_AIRPORTS=0 turns it off.
 # Feet in the runway frame: x right of the retail runway centreline, z along
 # it from its near threshold (STRIP anchor 0x11). Keys:
 # docs/formats/redrawn-airports.md.

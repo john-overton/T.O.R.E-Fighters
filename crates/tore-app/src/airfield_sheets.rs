@@ -5,8 +5,8 @@
 //! row, down the runway to its far end and over the first taxiway
 //! junction, at noon with no clouds. The airports
 //! and cameras are chosen from the redrawn scene; the scene drawn follows
-//! `TORE_REDRAWN_AIRPORTS`, so a run with it unset renders the same views of
-//! the retail airfields for a before and after pair.
+//! `TORE_REDRAWN_AIRPORTS`, so a run with it set to 0 renders the same views
+//! of the retail airfields for a before and after pair.
 use crate::{
     AppResult,
     camera::Camera,

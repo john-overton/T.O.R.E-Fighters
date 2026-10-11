@@ -153,8 +153,12 @@ pub fn path_words(path: Path) -> &'static str {
 /// (`ToggleAirGround`), the HARM channel (code 3) and readiness codes 25
 /// (`NoEmitter`) and 26 (`TrackLost`), which the round's slices added under
 /// 22, are part of 23's definition; a loadout row may name a laser
-/// designator pod's SEE record.
-pub const PROTOCOL_VERSION: u16 = 23;
+/// designator pod's SEE record. 24 since the mp-fixes round (slice FX-A):
+/// every game builds the redrawn airports (docs/formats/redrawn-airports.md),
+/// so the airfields' buildings, their added hangars and vehicles (new target
+/// ids), the parked aircraft and the AI's airfield points differ from a 23
+/// game's; no byte layout changed for it.
+pub const PROTOCOL_VERSION: u16 = 24;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
