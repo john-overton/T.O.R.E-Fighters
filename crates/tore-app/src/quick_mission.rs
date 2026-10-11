@@ -68,6 +68,9 @@ pub struct Field {
     pub id: u32,
     pub name: String,
     pub short: bool,
+    /// A STOL runway (`tore_sim::stol`): labelled so in the picker, and
+    /// listed after the longer fields.
+    pub stol: bool,
     pub redfor: Option<bool>,
 }
 impl Field {
@@ -75,11 +78,16 @@ impl Field {
     pub fn enemy_of(&self, redfor: bool) -> bool {
         self.redfor == Some(!redfor)
     }
-    /// A ground start for a pilot of this side: no short strip (John,
-    /// 2026-09-30) and no field of the other side (slice AL1, John
-    /// 2026-10-10). A neutral field is offered to both sides.
+    /// A ground start for a pilot of this side: no field of the other side
+    /// (slice AL1, John 2026-10-10). A neutral field is offered to both
+    /// sides. A short strip is offered too, labelled STOL (John,
+    /// 2026-10-11, replacing his 2026-09-30 rule that left them out).
     pub fn offered_to(&self, redfor: bool) -> bool {
-        !self.short && !self.enemy_of(redfor)
+        !self.enemy_of(redfor)
+    }
+    /// The name the picker shows: with `(STOL)` after a STOL field's.
+    pub fn label(&self) -> String {
+        tore_sim::stol::label(&self.name, self.stol)
     }
 }
 /// The tint of a list row the lobby's creator dims: what not everyone has.
@@ -265,12 +273,15 @@ pub fn condition(value: usize) -> Option<usize> {
 }
 
 /// The ground-start choices among a theater's `fields` for a pilot of one
-/// side: names and runway objects, in layout order.
+/// side: names (STOL fields labelled) and runway objects, in layout order
+/// with the STOL fields after the others, so the default start is a field
+/// any aircraft can take off from whenever the side has one.
 fn offered(fields: &[Field], redfor: bool) -> (Vec<String>, Vec<u32>) {
-    fields
-        .iter()
-        .filter(|field| field.offered_to(redfor))
-        .map(|field| (field.name.clone(), field.id))
+    let side = || fields.iter().filter(|field| field.offered_to(redfor));
+    side()
+        .filter(|field| !field.stol)
+        .chain(side().filter(|field| field.stol))
+        .map(|field| (field.label(), field.id))
         .unzip()
 }
 
@@ -422,6 +433,7 @@ impl QuickMission {
                         name: p.name.unwrap_or(p.object_type),
                         // A strip whose shape cannot be measured stays listed.
                         short: length.is_some_and(tore_sim::airport::short_strip_length),
+                        stol: length.is_some_and(tore_sim::stol::length),
                         redfor,
                     });
                 }
@@ -527,8 +539,8 @@ impl QuickMission {
             out.push(("creator aircraft".into(), text.clone()));
         }
         for (theater, fields) in self.theater_codes.iter().zip(&self.fields) {
-            for field in fields.iter().filter(|field| !field.short) {
-                out.push((format!("airport in {theater}"), field.name.clone()));
+            for field in fields {
+                out.push((format!("airport in {theater}"), field.label()));
             }
         }
         for (id, list) in self.options.targets.iter().enumerate() {
@@ -941,11 +953,6 @@ impl QuickMission {
             .and_then(|list| list.iter().find(|field| field.id == object))
         {
             let name = &field.name;
-            if field.short {
-                return Err(format!(
-                    "{name} is a short strip: no ground start there. Choose a longer runway or Airborne."
-                ));
-            }
             if field.enemy_of(self.player_redfor) {
                 return Err(format!(
                     "{name} is an enemy airfield: no ground start there. Choose one of your side's airfields or Airborne."
@@ -3370,6 +3377,7 @@ mod tests {
                 id: 0x4000_0000 + ordinal,
                 name: (*name).into(),
                 short: *short,
+                stol: *short,
                 redfor: *redfor,
             })
             .collect()
@@ -3387,8 +3395,12 @@ mod tests {
         q.set_player_redfor(false);
         q.apply(33, 1);
         // Blue: its own and the neutral field, never the enemy's, and the
-        // default is its first, not the layout's first (an enemy field).
-        assert_eq!(&q.values(34)[..], ["Blue Field", "Open Field"]);
+        // default is its first, not the layout's first (an enemy field). Its
+        // STOL strip comes last, labelled (John, 2026-10-11).
+        assert_eq!(
+            &q.values(34)[..],
+            ["Blue Field", "Open Field", "Blue Strip (STOL)"]
+        );
         assert_eq!(q.ground_runway(), Some(0x4000_0001));
         let error = q.choose_ground_runway(0x4000_0000).unwrap_err();
         assert!(error.contains("Red Field is an enemy airfield"), "{error}");
@@ -3408,7 +3420,9 @@ mod tests {
         let mut q = setup();
         q.fields[0] = fields(&[
             (0, "Red Field", false, Some(true)),
-            (1, "Blue Strip", true, Some(false)),
+            // A STOL strip is a ground start (John, 2026-10-11), so only
+            // the other side's fields leave Blue without one.
+            (1, "Red Strip", true, Some(true)),
         ]);
         q.set_player_redfor(false);
         assert!(q.ground_unavailable());
@@ -3444,25 +3458,29 @@ mod tests {
         assert_eq!(q.ground_runway(), Some(0x4000_0000));
     }
 
+    /// John, 2026-10-11: a short runway is labelled STOL and is a ground
+    /// start like any other; it is listed after the longer fields, so the
+    /// default stays a field any aircraft can take off from.
     #[test]
-    fn a_short_strip_is_no_ground_start() {
+    fn a_stol_strip_is_labelled_and_offered_last() {
         let mut q = setup();
         q.fields[0] = fields(&[
-            (0, "Long Field", false, None),
             (3, "Goose Green", true, None),
+            (0, "Long Field", false, None),
         ]);
         q.set_player_redfor(false);
-        // The short strip is not in the list the creator offers.
-        assert_eq!(q.values(34).len(), 1);
-        let error = q.choose_ground_runway(0x4000_0003).unwrap_err();
-        assert!(
-            error.contains("Goose Green") && error.contains("short strip"),
-            "{error}"
-        );
-        assert!(!q.ground_start());
-        q.choose_ground_runway(0x4000_0000).unwrap();
+        assert_eq!(&q.values(34)[..], ["Long Field", "Goose Green (STOL)"]);
+        q.apply(33, 1);
         assert_eq!(q.ground_runway(), Some(0x4000_0000));
-        // Something that is neither keeps the old message.
+        q.choose_ground_runway(0x4000_0003).unwrap();
+        assert!(q.ground_start());
+        assert_eq!(q.ground_runway(), Some(0x4000_0003));
+        // A theater whose only field of the side is a STOL strip still
+        // offers Ground there.
+        q.fields[0] = fields(&[(3, "San Carlos", true, Some(false))]);
+        q.set_player_redfor(false);
+        assert_eq!(&q.values(34)[..], ["San Carlos (STOL)"]);
+        // Something that is no runway keeps the old message.
         let error = q.choose_ground_runway(0x4000_0999).unwrap_err();
         assert!(error.contains("No imported runway matches"), "{error}");
     }

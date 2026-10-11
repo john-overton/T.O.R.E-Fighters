@@ -425,7 +425,9 @@ impl Map {
                     .iter()
                     .find(|a| a.id == runway.airport)
                     .map_or(runway.name.as_str(), |a| a.name.as_str());
-                label(pixels, font, name, (x, y + 12), INK, &mut labels);
+                // A STOL runway says so (slice CL-AP, John 2026-10-11).
+                let name = tore_sim::stol::label(name, tore_sim::stol::runway(runway));
+                label(pixels, font, &name, (x, y + 12), INK, &mut labels);
             }
         }
         let contacts = &readout.map;
