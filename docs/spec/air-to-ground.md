@@ -809,7 +809,7 @@ flowchart TD
 
 A pod holds `projsInPod` rockets, the real count: LAU-61 19, B-8M1 19, B-13L 5,
 LAU-10 4 (retail data); two pods hold twice that. The pod count is set at
-mission start (the station's count times `projsInPod`). **Each trigger call fires
+mission start (the station's count times `projsInPod`). AI and wing aircraft count their pods the same way (retail's `HARDPodHack` multiplies every station), so a plane a human takes carries the loadout's rockets. **Each trigger call fires
 one rocket** (retail data, the earlier "burst of 2" reading was wrong for the
 player). LAU-61, B-8M1 and B-13L (held-repeat flag 0x800) **repeat every quarter
 second, 4 rockets a second, while the trigger is held**; the LAU-10 fires one per
