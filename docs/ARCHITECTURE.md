@@ -535,6 +535,10 @@ minimum-range qualification persists through terminal closure, as specified in
 [engagement rules](spec/missiles.md#minimum-engagement-and-target-role). Combat tape version 4 includes world velocity and bay permission, while versions 2 and 3
 select compatibility rules. [Missile specification](spec/missiles.md).
 
+Combat tape version 8 has version 7's records; it marks tapes recorded since
+bombs fall on the bomb equation and rocket pods hold their rockets, so an older
+tape that dropped bombs or fired pods can replay to a different outcome.
+
 Combat tape version 5 records radar power separately from transmission, preserving
 passive-channel behavior and radar-off unguided releases. Versions before 5 imply
 power on for the new guidance gate. Version 4 remains the missile rule-version boundary. Seeker mode and

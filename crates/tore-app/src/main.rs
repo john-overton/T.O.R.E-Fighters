@@ -3,6 +3,7 @@
 // CLI/probe output stays on stdout; startup diagnostics also go to session logs.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod a10_animation;
+mod a2g_run;
 mod a310_animation;
 mod a4e_animation;
 mod a7_animation;
@@ -8571,6 +8572,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-drive") {
         surface_drive::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--a2g-run") {
+        a2g_run::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-objective") {

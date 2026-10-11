@@ -21,7 +21,11 @@ use tore_sim::{
 /// permission. Mode, heat and emitter changes are explicit commands. Versions
 /// 2/3 retain compatibility rules and their original control defaults.
 /// Version 7 distinguishes a present falling wreck from a removed body.
-const VERSION: u32 = 7;
+/// Version 8 marks tapes recorded since bombs fall on the bomb equation and
+/// rocket pods hold their rockets (docs/formats/weapons.md, "Bomb motion"):
+/// its records are version 7's, and an older tape that dropped bombs or fired
+/// pods replays with the new motion, so its outcome can differ.
+const VERSION: u32 = 8;
 
 pub struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
