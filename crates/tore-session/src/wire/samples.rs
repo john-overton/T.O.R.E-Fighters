@@ -1357,6 +1357,7 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             in_range: true,
             hit_percent: 72,
             solution_seconds: Some(11.5),
+            harm: None,
         },
         targets: Targets {
             designated: Some(7),

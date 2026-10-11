@@ -357,6 +357,74 @@ pub struct Estimates {
     pub hit_percent: u8,
     /// Seconds the missile would fly to the observed target.
     pub solution_seconds: Option<f64>,
+    /// The HARM boresight cue while an anti-radiation missile is armed.
+    /// Host-built; a networked client has none until the wire carries it
+    /// (protocol 23, slice NA).
+    pub harm: Option<HarmCue>,
+}
+
+/// Emitters the HARM boresight cue lists at most.
+pub const MAX_HARM_CUE: usize = live::MAX_HARM_CUE;
+
+/// The HARM boresight cue (opinionated, John, 2026-10-10: "act kind of like
+/// boresite on a2a weapons where it shows a radiation source you can shoot
+/// at"): every emitter the armed anti-radiation missile's seeker receives
+/// inside its cone, nearest the bore first, and the one the trigger fires at.
+/// docs/spec/air-to-ground.md, "Missiles and the HARM boresight cue".
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HarmCue {
+    /// At most [`MAX_HARM_CUE`], nearest the bore first.
+    pub emitters: Vec<HarmEmitter>,
+    /// The emitter the trigger fires at: the BORE candidate (painting first,
+    /// then nearest the bore, inside the launch cone), or the designated one
+    /// in CUED.
+    pub candidate: Option<u32>,
+    /// A designation holds the missile in CUED.
+    pub cued: bool,
+}
+
+/// One emitter of the HARM cue, drawn as the RWR's ground square.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HarmEmitter {
+    pub id: u32,
+    pub position: Vector,
+    /// Its radar paints the plane: drawn bright.
+    pub painting: bool,
+    /// It emits now; a cued target whose radar went off is drawn dim.
+    pub emitting: bool,
+}
+
+impl HarmCue {
+    /// The cue of an ownship, `None` unless an anti-radiation missile is
+    /// armed.
+    pub fn of(own: &live::Ownship, readiness: Readiness) -> Option<Self> {
+        let w = &own.configuration().stations.get(own.selected)?.weapon;
+        tore_sim::combat::missiles::Profile::for_weapon(w).filter(|p| p.holds_on_angles())?;
+        if !own.armed || matches!(readiness, Readiness::Safe | Readiness::LauncherLost) {
+            return None;
+        }
+        let cued = own.launch_mode == LaunchMode::Cued;
+        let candidate = if cued {
+            own.designated()
+        } else {
+            own.bore_observation.map(|o| o.id)
+        };
+        Some(Self {
+            emitters: own
+                .harm_cue()
+                .iter()
+                .take(MAX_HARM_CUE)
+                .map(|e| HarmEmitter {
+                    id: e.observation.id,
+                    position: e.observation.position,
+                    painting: e.painting,
+                    emitting: e.emitting,
+                })
+                .collect(),
+            candidate,
+            cued,
+        })
+    }
 }
 
 /// What the HUD's bomb or rocket sight shows for the selected station
@@ -801,6 +869,7 @@ pub fn build(
         in_range: at.in_estimated_range(),
         hit_percent: at.estimated_hit_percent(),
         solution_seconds: at.mounted_solution().map(|s| s.seconds),
+        harm: HarmCue::of(own, at.readiness()),
     };
 
     let sensors = &own.sensors;

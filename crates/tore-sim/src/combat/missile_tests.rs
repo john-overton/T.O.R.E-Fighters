@@ -1190,7 +1190,12 @@ fn surface_weapons_reject_aircraft_and_maverick_uses_surface_contrast() {
     ] {
         let w = weapon(name);
         let profile = Profile::for_weapon(&w).unwrap();
-        assert!(!profile.supports_boresight());
+        // The Maverick and the HARMs fire in BORE (slice W2, plan decisions 9
+        // and 10); the radar surface weapons do not.
+        assert_eq!(
+            profile.supports_boresight(),
+            matches!(profile.guidance, Guidance::Infrared | Guidance::Emitter)
+        );
         let mut t = target(7, [0., 1000., 1000.], 200, 0x200);
         t.radar_emitting = true;
         assert!(seeker::observe(&w, profile, &view, &t).is_none());

@@ -19,7 +19,7 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 const AIRCRAFT: usize = 36;
 const RECOVERED_STATIONS: usize = 9;
 const TANK_RECORDS: usize = 4;
-const WEAPON_PLACEMENTS: usize = 2021;
+const WEAPON_PLACEMENTS: usize = 2359;
 const TANK_PLACEMENTS: usize = 146;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
@@ -320,6 +320,6 @@ mod tests {
     #[test]
     fn the_pinned_counts_match_the_reviewed_roster() {
         assert_eq!(AircraftId::ALL.len(), AIRCRAFT);
-        assert_eq!(SUPPORTED_WEAPONS.len(), 51);
+        assert_eq!(SUPPORTED_WEAPONS.len(), 58);
     }
 }

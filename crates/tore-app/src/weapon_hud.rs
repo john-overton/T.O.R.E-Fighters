@@ -15,6 +15,7 @@ use tore_sim::{
 };
 use tore_world::readout::CockpitReadout;
 
+mod agm;
 mod bombs;
 mod guided;
 pub mod laser;
@@ -143,13 +144,15 @@ pub fn draw(
         color: [color[0], color[1], color[2], 255],
     };
     let bore = ro.estimates.guidance_available && ro.stores.launch_mode == LaunchMode::Boresight;
+    // The HARM cue shows its emitters in place of the bore circle.
+    let harm = agm::is_harm(profile);
     let cap = if bore {
         profile.search_cap()
     } else {
         std::f64::consts::PI
     };
     let zone = &w.seeker.zones[0];
-    let cone = if !ro.estimates.guidance_available {
+    let cone = if !ro.estimates.guidance_available || harm {
         Vec::new()
     } else if bore {
         let angle = cap
@@ -176,8 +179,9 @@ pub fn draw(
             paint.line(a, b);
         }
     }
-    if let Some((x, y)) = projected(l.basis.forward, s, zoom) {
-        if bore {
+    let ring = projected(l.basis.forward, s, zoom);
+    if let Some((x, y)) = ring {
+        if bore && !harm {
             let radius = 240. * 3f64.sqrt() * cap.tan() * zoom;
             paint.text(font, "BORE", x as i32 - 12, (y - radius + 5.) as i32);
         }
@@ -189,6 +193,9 @@ pub fn draw(
                 (x + 9. * b.cos(), y + 9. * b.sin()),
             );
         }
+    }
+    if harm {
+        agm::draw_harm(&mut paint, frame, font, zoom, ring);
     }
     let observed = ro.estimates.observation;
     let in_range = ro.estimates.in_range;

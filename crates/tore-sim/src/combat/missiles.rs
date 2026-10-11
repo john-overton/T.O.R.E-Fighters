@@ -107,6 +107,23 @@ pub const SURFACE_SUPPORTED: [&str; 13] = [
 pub const SURFACE_INFRARED: [&str; 6] = [
     "FIM92.JT", "SA7.JT", "SA9.JT", "SA13.JT", "SA14.JT", "SA16.JT",
 ];
+/// The reviewed air-to-ground missiles: target role surface. Infrared
+/// (AGM-65G, AGM-65A, the AGM-84E SLAM by its data signature 2),
+/// anti-radiation (AGM-45, AGM-88), active radar (AGM-84A, AM-39, AS-16) and
+/// supported radar (AS-7, AS-15 by its data signature 3 with 0x200; the manual
+/// calls it laser). docs/spec/air-to-ground.md, "Weapon classes" 8 to 11.
+pub const SURFACE_ROLE: [&str; 10] = [
+    "AGM65G.JT",
+    "AGM65A.JT",
+    "AGM84E.JT",
+    "AGM45.JT",
+    "AGM88.JT",
+    "AGM84A.JT",
+    "AM39.JT",
+    "AS16.JT",
+    "AS7.JT",
+    "AS15.JT",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Profile {
@@ -148,11 +165,11 @@ impl Profile {
             "AIM54C.JT" => (Guidance::Active, Some(10.)),
             "AEMP1.JT" => (Guidance::Active, Some(3.)),
             "AS16.JT" => (Guidance::Active, Some(2.)),
-            "R530.JT" | "AS7.JT" | "AA10.JT" | "AIM7.JT" | "AIM7E.JT" => {
+            "R530.JT" | "AS7.JT" | "AS15.JT" | "AA10.JT" | "AIM7.JT" | "AIM7E.JT" => {
                 (Guidance::Supported, None)
             }
             "AA11.JT" | "AA11B.JT" | "AA2.JT" | "AA8.JT" | "AIM9M.JT" | "AIM9X.JT" | "R550.JT"
-            | "AGM65G.JT" | "AIM9B.JT" => (Guidance::Infrared, None),
+            | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" | "AIM9B.JT" => (Guidance::Infrared, None),
             "AGM45.JT" | "AGM88.JT" => (Guidance::Emitter, None),
             _ => return None,
         })
@@ -168,10 +185,10 @@ impl Profile {
     /// Explicit reviewed identities only. This does not expand store allowlists.
     pub fn for_weapon(w: &Weapon) -> Option<Self> {
         let (guidance, active) = Self::reviewed_guidance(&w.source)?;
-        let role = match w.source.as_str() {
-            "AGM65G.JT" | "AGM45.JT" | "AGM88.JT" | "AGM84A.JT" | "AM39.JT" | "AS16.JT"
-            | "AS7.JT" => TargetRole::Surface,
-            _ => TargetRole::Aircraft,
+        let role = if SURFACE_ROLE.contains(&w.source.as_str()) {
+            TargetRole::Surface
+        } else {
+            TargetRole::Aircraft
         };
         Some(Self {
             role,
@@ -190,14 +207,53 @@ impl Profile {
     pub fn guidance_available(self, radar_power: bool) -> bool {
         radar_power || self.guidance == Guidance::Infrared
     }
+    /// Air-to-air independent missiles fire in BORE; of the air-to-ground
+    /// ones the infrared missiles (the Maverick boresight, John accepted plan
+    /// decision 10) and the anti-radiation missiles (the HARM boresight cue,
+    /// John, 2026-10-10) do. docs/spec/air-to-ground.md, "Missiles and the
+    /// HARM boresight cue".
     pub fn supports_boresight(self) -> bool {
-        self.role == TargetRole::Aircraft && self.independent()
+        match self.role {
+            TargetRole::Aircraft => self.independent(),
+            TargetRole::Surface => matches!(self.guidance, Guidance::Infrared | Guidance::Emitter),
+        }
+    }
+    /// A surface-target radar weapon (AGM-84A, AM-39, AS-16, AS-7, AS-15):
+    /// retail releases it only with the A-G page on, and it takes its target
+    /// from the A-G track (retail data, docs/formats/radar.md, "A-G page").
+    pub fn needs_air_ground(self) -> bool {
+        self.role == TargetRole::Surface
+            && matches!(self.guidance, Guidance::Active | Guidance::Supported)
+    }
+    /// A surface-target supported radar weapon (AS-7, AS-15, flag 0x200): the
+    /// launcher's A-G track must hold it, with the target inside the weapon's
+    /// zone 1 from the launcher, for the whole flight; once lost it flies
+    /// unguided (retail data). The player's new designation retargets it in
+    /// flight when the new target is inside its zone-1 cone, and blinds it
+    /// otherwise (`PROJRetargetMissiles`, docs/formats/missiles.md, "Target
+    /// switch"). The air-to-air supported missiles keep today's rules.
+    pub fn rides_air_ground(self) -> bool {
+        self.role == TargetRole::Surface && self.guidance == Guidance::Supported
+    }
+    /// An anti-radiation surface missile in flight keeps homing on its
+    /// acquired object after its radar stops, on angles only, while the object
+    /// stays inside the weapon's zone-1 cone (retail data, docs/formats/radar.md,
+    /// "HARM page").
+    pub fn holds_on_angles(self) -> bool {
+        self.role == TargetRole::Surface && self.guidance == Guidance::Emitter
     }
     pub fn accepts(self, target: &super::live::Target) -> bool {
         self.role == target.role && (self.role == TargetRole::Surface || target.airborne)
     }
+    /// The bore circle: 5 degrees, except that an anti-radiation surface
+    /// missile's BORE looks through its whole seeker cone (zone 0, 45 degrees
+    /// on the AGM-88 and AGM-45), as its HUD cue shows every emitter there.
     pub fn search_cap(self) -> f64 {
-        5f64.to_radians()
+        if self.holds_on_angles() {
+            std::f64::consts::PI
+        } else {
+            5f64.to_radians()
+        }
     }
 }
 
@@ -261,6 +317,20 @@ pub fn active_radar_visible(
     target_height_agl_ft: f64,
 ) -> bool {
     let nominal = f64::from(w.seeker.zones[0].maximum_range);
+    // A surface-target seeker looks for ground objects and ships: the air
+    // radar's clutter notch does not apply (fitted, docs/spec/air-to-ground.md,
+    // "Weapon classes" 10).
+    if Profile::for_weapon(w).is_some_and(|p| p.role == TargetRole::Surface) {
+        let sighting = crate::sensors::detection::Sighting::new(position, &basis, target.position);
+        let signature = target.signature.effective_radar(
+            &target.basis,
+            sub(position, target.position),
+            target.configuration,
+        );
+        let range =
+            crate::sensors::detection::effective_range_ft(nominal, signature / 100., 1., 1., 1.);
+        return signature > 0. && sighting.distance_ft <= range;
+    }
     let sighting = crate::sensors::detection::Sighting::new(position, &basis, target.position);
     let signature = target.signature.effective_radar(
         &target.basis,

@@ -247,7 +247,7 @@ def scenarios() -> list[Scenario]:
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 9 recovered weapon stations, 1464 weapon placements, 146 tank placements, 40 weapon and 4 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 9 recovered weapon stations, 1802 weapon placements, 146 tank placements, 47 weapon and 4 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

@@ -122,6 +122,11 @@ fn options(shot: &Shot) -> Options {
         gap: 0.5,
         defenses: (0, 0),
         seed: 1,
+        unit: None,
+        designate: None,
+        break_at: None,
+        skill: None,
+        render: None,
     }
 }
 
