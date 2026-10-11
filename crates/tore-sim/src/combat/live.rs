@@ -29,6 +29,8 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 #[cfg(test)]
 mod bomb_tests;
 mod broad;
+#[cfg(test)]
+mod cluster_tests;
 mod collateral;
 mod ground_sensing;
 #[cfg(test)]

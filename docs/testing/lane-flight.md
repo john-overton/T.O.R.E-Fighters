@@ -47,6 +47,14 @@ weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run
 | --- | --- | --- |
 | `a2g-bomb-motion` | Over `~QUCOL`: an A-4E Mk 82 from a level pass at 5,000 ft and 450 kt, an F-4B Mk 82 from a 30 degree dive released 3,000 ft above the target, an A-4E Mk 82 AIR 7-pack and an A-4E Snakeye, each released when the bomb sight's mean impact reaches the target | The solution obeys the bomb equation (fall and throw within 0.01 s and 2 ft); every bomb bursts within 2 ft of its own path and within the 3 degree scatter's reach of the mean point, its scatter within 3 degrees; the 7-pack is seven bombs in one tick for one round at the retail stagger and 66 percent of the speed; the Snakeye falls as long as the slick bomb and throws 66 percent as far ([bomb motion](../spec/air-to-ground.md#bomb-motion)) |
 | `a2g-rocket-pod` | An A-4E's two LAU-61 pods tapped three times, held for a second and held until empty; two LAU-10 pods held for two seconds | 38 rockets in the pods, one a press; four or five in a second held, a quarter second apart on the game's quarter-second clock; all 38 when held on; the LAU-10 pods hold 8 and fire one however long the trigger is held ([rockets](../spec/air-to-ground.md#rockets)) |
+| `a2g-cluster` | Over `~QUCOL` (scenario file [`a2g_cluster.py`](../../tools/battery_scenarios/a2g_cluster.py), attack kind `cluster`): an A-4E CBU-87 and Mk 20 from a level pass and an F-4B RBK-500 from a 30 degree dive | The burst is the type 18 family with no crater; a vehicle inside the record's splash (2,200, 1,600 and 2,500 ft) loses the record's damage times 70 percent, falling in a line to nothing at the edge, and one outside loses none; the 28 bomblet flashes the renderer derives are the same on every derivation, inside 1,200 ft of the burst and start within its first half second ([cluster flashes](../spec/ordnance-presentation.md#cluster-bomb-flashes)) |
+
+`a2g-catalog` (menus lane, [`a2g_catalog.py`](../../tools/battery_scenarios/a2g_catalog.py))
+runs `--validate-ordnance`, whose audit covers the air-to-ground records on the Load
+Ordnance page and the Cheat-only novelty bombs: the normal and Cheat catalogs are checked
+against the station rules on all 36 aircraft, and Boulder and Moose must have no capacity,
+be refused and fail validation without Cheat loading ([novelty
+rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 
 ## Powered-lift scenarios (VTOL overhaul)
 

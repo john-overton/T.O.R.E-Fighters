@@ -1,7 +1,9 @@
 //! `--blast-preview OUT_DIR`: offscreen renders of a large ground
 //! explosion and its shockwave ring through the explosion's two seconds,
 //! from a strike aircraft's height and from low beside it, by day and at
-//! dusk; and the white spray ring of a large water explosion. A development
+//! dusk; the white spray ring of a large water explosion; and, by day, a
+//! cluster bomb's burst (type 18 on the ground) with its bomblet flashes
+//! through the burst's second (`cluster-*` files). A development
 //! aid for docs/spec/explosions.md#shockwave: no window opens, nothing is
 //! simulated, the effects are placed by hand.
 use crate::{
@@ -19,6 +21,8 @@ use tore_sim::combat::{blast::MarkKind, live::EffectKind};
 
 /// The explosions' life: types 21 to 23 and 34 to 37 last two seconds.
 const LIFE: u16 = 240;
+/// A cluster burst (type 18) lasts one second.
+const CLUSTER_LIFE: u16 = 120;
 
 /// One picture: the explosion type, seconds after the blast, and the
 /// camera's place relative to the blast (east, up, north, in feet).
@@ -81,6 +85,25 @@ pub fn run() -> AppResult<()> {
             crater: false,
         });
     }
+    // A cluster bomb's burst: the flashes begin within half a second, so
+    // the frames are 0.1 to 1 s in; the pattern is 2,400 ft across.
+    for (view, eye, fov) in [
+        ("cluster-high", [-5_000., 3_000., -7_500.], 24.),
+        ("cluster-low", [-2_400., 250., -3_200.], 50.),
+        ("cluster-overhead", [0., 4_500., -400.], 36.),
+        ("cluster-close", [0., 1_400., -300.], 40.),
+    ] {
+        for seconds in [0.1, 0.3, 0.5, 0.8] {
+            shots.push(Shot {
+                name: view,
+                kind: 18,
+                seconds,
+                eye,
+                fov,
+                crater: false,
+            });
+        }
+    }
     for (light, condition, time) in [("day", None, Some([13, 0])), ("dusk", Some(4), None)] {
         let overrides = Overrides {
             time,
@@ -123,6 +146,7 @@ pub fn run() -> AppResult<()> {
             if light == "dusk" && shot.name != "low" {
                 continue;
             }
+            let life = if shot.kind == 18 { CLUSTER_LIFE } else { LIFE };
             let mut point = if shot.kind == 34 {
                 let Some(sea) = sea else {
                     println!("Blast preview: no open sea near the {theater} start");
@@ -135,13 +159,13 @@ pub fn run() -> AppResult<()> {
             point[1] = f64::from(world.height(point[0] as f32, point[2] as f32)).max(0.);
             let elapsed = (shot.seconds * 120.) as u16;
             let effects = [EffectPose {
-                kind: if shot.kind == 34 {
+                kind: if matches!(shot.kind, 18 | 34) {
                     EffectKind::Ground
                 } else {
                     EffectKind::Destroyed
                 },
                 position: point,
-                ticks: LIFE - elapsed.min(LIFE - 1),
+                ticks: life - elapsed.min(life - 1),
                 blast: Some(shot.kind),
             }];
             let marks: Vec<MarkPose> = if shot.crater {

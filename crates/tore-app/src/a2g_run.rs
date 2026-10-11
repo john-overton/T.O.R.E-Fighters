@@ -22,6 +22,8 @@
 //!   `--dive DEG`, released when the bomb sight's mean impact reaches the
 //!   target (bombs), or one second in (rockets). `--hold S` keeps the trigger
 //!   down that long, `--repeat N` presses N times `--gap S` apart.
+//! - `cluster` ([`cluster`]): the `release` pass with a cluster bomb, then
+//!   the splash on every surface target and the bomblet flashes.
 use crate::{AppResult, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -37,6 +39,7 @@ use tore_world::{
     world::{Seating, TickOutput, World},
 };
 
+mod cluster;
 mod release;
 
 const SEAT: SeatId = SeatId(0);
@@ -148,7 +151,8 @@ pub fn run() -> AppResult<()> {
     let mut scene = Scene::new(&o, &resources)?;
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
-        other => return Err(format!("unknown --attack {other}; kinds: release").into()),
+        "cluster" => cluster::run(&mut scene, &o)?,
+        other => return Err(format!("unknown --attack {other}; kinds: release, cluster").into()),
     }
     scene.finish();
     println!("a2g-run: done");
