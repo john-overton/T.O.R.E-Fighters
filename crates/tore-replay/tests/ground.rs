@@ -141,7 +141,10 @@ fn events() -> Vec<(u64, Event)> {
         .with(field::GUIDED, true)
         .with(field::MODE, guide::BLIND)
         .with(field::MISS_FT, 940.5)
-        .with(field::REASON, "it landed 940 ft from the point it was steering for");
+        .with(
+            field::REASON,
+            "it landed 940 ft from the point it was steering for",
+        );
     vec![
         (10, designated),
         (11, lasing),
