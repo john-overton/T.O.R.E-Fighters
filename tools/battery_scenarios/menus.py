@@ -49,6 +49,8 @@ QUICK_STATES = [
     # Lobby pass (slice L4): the mission page read-only, for a player who is not the King.
     "lobby-creator-view", "lobby-creator-view-gaps", "lobby-creator-view-click", "lobby-creator-view-changed",
     "lobby-creator-view-flying", "lobby-creator-view-locked", "lobby-creator-view-target",
+    # Slice CL-R: the enemy's ground start rows and list, and the creator's Map (airborne, no target).
+    "enemy-ground-start", "enemy-ground-start-auto", "enemy-airports", "map", "map-lobby",
 ]
 THEATERS = ["BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU", "NSK", "WTA", "UKR", "VLA"]
 VARIANT_THEATERS = [f"~{code}{n}" for code in ("UKR", "VLA") for n in range(1, 9)] + ["~UKRF", "~VLAF", "~WTAF"]
@@ -368,17 +370,39 @@ def scenarios() -> list[Scenario]:
                 check=menu_picture(),
             )
         )
-    # Every creator popup (fields 3 to 34), with a ground start chosen so the
+    # Every creator popup (fields 3 to 36), with a ground start chosen so the
     # airport row exists (Simferopol: airport 1, Zaporizhzhya, is a Redfor
-    # field since slice AL1 and no Blue ground start).
-    for field in range(3, 35):
+    # field since slice AL1 and no Blue ground start). The enemy's Start and
+    # Airport (35 and 36, slice CL-R) are opened with Enemy Wing 1 parked at
+    # Donets'k (airport 5), so the Enemy airport row exists too.
+    for field in range(3, 37):
+        enemy = ["--enemy-ground-start", "5"] if field >= 35 else []
         out.append(
             Scenario(
                 name=f"menus-snap-quick-field-{field}",
                 lane="menus",
-                args=["--quick-mission", "--ground-start", "2", "--snapshot", "{work}/shot.ppm", "--snapshot-state", f"field-{field}", "--no-audio"],
+                args=["--quick-mission", "--ground-start", "2", *enemy, "--snapshot", "{work}/shot.ppm", "--snapshot-state", f"field-{field}", "--no-audio"],
                 timeout=120,
                 expect=[r"Menu preview:"],
+                check=menu_picture(),
+            )
+        )
+    # The creator's Map (slice CL-R) on the Ukraine with a ground target, a
+    # Blue ground start at L'viv (airport 9) and Enemy Wing 1 parked at
+    # Donets'k (airport 5): both starts are named and the objective is an
+    # area, built from the mission the creator would fly.
+    for state in ("map", "map-lobby"):
+        out.append(
+            Scenario(
+                name=f"menus-snap-quick-{state}-ukr-target-ground",
+                lane="menus",
+                args=["--theater", "UKR", "--quick-mission", "--ground-start", "9", "--enemy-ground-start", "5",
+                      "--ground-target", "QUCITY", "--defenses", "2", "2", "--surface-seed", "12345",
+                      "--snapshot", "{work}/shot.ppm", "--snapshot-state", state, "--no-audio"],
+                timeout=180,
+                expect=[r"creator map: BLUE START: L'VIV at", r"creator map: RED START: DONETS'K at",
+                        r"creator map: objective area x=\d+ z=\d+ radius=30380", r"Menu preview:"],
+                forbid=[r"the map did not open"],
                 check=menu_picture(),
             )
         )
