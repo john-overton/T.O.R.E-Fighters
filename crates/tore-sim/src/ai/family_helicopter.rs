@@ -70,6 +70,11 @@ pub const CUE_TURN_GAIN: f64 = 3.;
 /// its skill circle of the drawn aim (fitted, agent; a fighter's is 5%): its
 /// slow sweep and its adapter hold the cue to about this.
 pub const GATE_SHARE: f64 = 0.25;
+/// The least a helicopter's rocket gate may be, feet (fitted, agent,
+/// ST-INT): with John's tighter circles (Ace 33 ft) a quarter of the circle
+/// is 8 to 29 ft at skills 3 and 2, and the AH-64's cue never came that
+/// close in a 150 s pass; 30 ft released at both skills.
+pub const GATE_FLOOR_FT: f64 = 40.;
 /// Stand-off attack (fitted, agent): the share of the weapon's zone-1
 /// range it unmasks at (the guided T bar stands 40% of the reach in from
 /// its far edge, docs/spec/air-to-ground.md), the masked run's height above the ground, the
@@ -328,7 +333,7 @@ fn choose(s: &mut Strike, cx: &Context<'_>) {
     s.aim_ft = draw.offset_ft;
     s.inside = draw.inside;
     s.jink_side = draw.side;
-    s.gate_ft = GATE_SHARE * radius_ft;
+    s.gate_ft = (GATE_SHARE * radius_ft).max(GATE_FLOOR_FT);
     s.holding = None;
     s.released = 0;
     s.next_release = 0;
