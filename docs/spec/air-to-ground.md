@@ -651,12 +651,12 @@ this round.
 
 | # | Class | Records | Carriers | How it works | Today |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Free-fall bombs | MK82, MK84, FAB250, FAB500, FAB1000, MK82P3 (3-pack) | 18 to 26 | Retail bomb motion; CCIP and LVL; fuze, splash and craters exist | MK82 partly; rest missing |
-| 2 | Retarded bombs | MK82HD, MK82P (6-pack), MK82AIR (7-pack) | 17 to 26 | As 1; the launch retard 66 only lowers the release speed to 66 percent of the aircraft's, then the same parabola; packs leave in one instant with stepped offsets | missing |
-| 3 | Cluster bombs | CBU87, CBU89, MK20, RBK250, RBK500 | 26 each | As 1 (the 278 ft/s speed command does not change a bomb's path); retail wide splash; presentation-only bomblet flashes | missing |
+| 1 | Free-fall bombs | MK82, MK84, FAB250, FAB500, FAB1000, MK82P3 (3-pack) | 18 to 26 | Retail bomb motion; CCIP and LVL; fuze, splash and craters exist | Fly and load (the page lists them); no sight yet |
+| 2 | Retarded bombs | MK82HD, MK82P (6-pack), MK82AIR (7-pack) | 17 to 26 | As 1; the launch retard 66 only lowers the release speed to 66 percent of the aircraft's, then the same parabola; packs leave in one instant with stepped offsets | Fly and load (the page lists them); no sight yet |
+| 3 | Cluster bombs | CBU87, CBU89, MK20, RBK250, RBK500 | 26 each | As 1 (the 278 ft/s speed command does not change a bomb's path); retail wide splash; presentation-only bomblet flashes | Fly and load, with the flashes ([ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes)); no sight yet |
 | 4 | Laser-guided bombs | GBU10, GBU10A, PAVEWAY, PAVEWA3, GBU28 | 24 (GBU28: 5) | Retail: homes on the release target while its own launcher's designator works and the target stays inside 45 degrees; never reacquires. TORE: homes on the spot (own, or a buddy's, opinionated). Loss: holds heading and pitch and slows to 278 ft/s (retail), with a fitted ballistic fall | missing |
 | 5 | JDAM | GBU29, GBU29P, GBU30 | 25 to 26 | Retail "optical": home on the object designated at release, follow it, fire and forget, release range cut by visibility. TORE (opinionated, John): GPS, fly to the point designated at release, any weather, a moving target is missed | missing |
-| 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press fires one rocket and a held trigger repeats four a second (LAU-10 one per press); rocket pipper | LAU61, B8, B13 partly |
+| 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press fires one rocket and a held trigger repeats four a second (LAU-10 one per press); rocket pipper | Fly and load, the LAU-10 too; no pipper yet |
 | 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Retail: steers at the designated object until impact (cruise profile), needs its launcher alive, zone 1 500 to 18,000 ft and 45 degrees; a switch does not retarget it. Without a target it flies unguided | partly |
 | 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | AGM65G partly |
 | 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; keeps homing on the object after its radar stops | AGM88 partly; AGM45 hidden |
@@ -665,7 +665,8 @@ this round.
 | 12 | Laser AGMs | AS14, AS30, AT12 | 24 to 25 | Class 4's lock rule on a powered, cruising missile | missing |
 
 Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work. Novelty
-Boulder and Moose are Cheat catalog only ([decisions pending](#decisions-pending)).
+Boulder and Moose are Cheat catalog only (John, 2026-10-10, decision 16; see
+[ordnance presentation](ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 Pave Spike and Pave Knife are loadable pods (decision 7). Carrier counts and
 status are survey results (static reading of the PT stations with the real
 loading rules); they are re-checked at acceptance.
@@ -725,7 +726,9 @@ damage for CBU-87, CBU-97, Mk 20, RBK-250 and RBK-500 (retail data; compare
 [explosions](explosions.md)). The remake keeps the retail wide splash and
 adds a **presentation-only scatter of small flashes** over the radius, so a
 cluster bomb looks like one (opinionated, agent, decision 13): the flashes do
-no damage and the damage is the same as the original's.
+no damage and the damage is the same as the original's. The pattern, its
+constants and the scenario that checks them are in
+[ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes).
 
 ### Release modes and packs
 
@@ -883,7 +886,7 @@ pounds.
 | AS14 | AS-14 Kedge | 12 | 1495 | 0.08 to 6.58 | 8.23 | Laser; manual 0 to 6.5 |
 | AS30 | AS 30L | 12 | 1146 | 0.08 to 9.87 | 9.87 | Laser; manual "active radar, laser", 2 to 6.5 |
 | AT12 | AT-12 Swinger | 12 | 132 | 0.16 to 4.28 | 4.28 | Laser; manual 0 to 4.2 |
-| ~BLDR | Boulder | novelty | 300 | 0.01 to 3.29 | 3.29 | Loads on our aircraft; Cheat only by default |
+| ~BLDR | Boulder | novelty | 300 | 0.01 to 3.29 | 3.29 | Loads on our aircraft; Cheat only (John, decision 16) |
 | ~MOOSE | Moose | novelty | 300 | 0.01 to 3.29 | 3.29 | As Boulder |
 
 Guided-bomb envelope (retail data): seeker cone zone 0, 90 degree half-angle,
@@ -1024,7 +1027,6 @@ recommendations, with the notes below. This table lists what is still open.
 
 | Item | State | Default if John does not choose |
 | --- | --- | --- |
-| Novelty bombs (decision 16): Boulder (~BLDR) and Moose (~MOOSE) load on our aircraft; ~MOTHB and ~VOMIT are in the data but nothing loads them | John's pick is pending | Cheat catalog only, hidden from the Load Ordnance list |
 | Player bomb scatter: retail scatters every bomb up to 3 degrees, the player's included | Asked of John | Scatter on for the player (retail), pipper at the mean |
 | The manual's 90 kt rule on the A-G page (a hovering helicopter shows) | The retail page has no speed test, so a hovering Mi-24 does not show. Whether to add the manual's rule as an opinionated addition is open | Retail class and airport rules only |
 | Decision 4 (JDAM as GPS bombs) | Accepted; R2 found retail JDAMs are optical (follow the target, release range cut by visibility). The GPS treatment with a reach scale is John's opinionated addition | GPS as specified |
