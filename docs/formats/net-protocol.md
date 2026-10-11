@@ -2705,6 +2705,10 @@ again with an observer; the capture format did not change for it.
   [inputs as built](#inputs-as-built)) and the readout's Guided sight group
   (19) growing from 15 to 18 values with the level T (present, steering,
   ground speed; FX-H, [the air-to-ground groups](#the-air-to-ground-groups)).
+  The combat checkpoint, which the standby stream and a takeover carry,
+  also changes under 24 with no message layout change: a missile's
+  `Motion.holds_path` (FX-M) and the `kept` map after `guided_impacts`
+  (FX-J, rejoin).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
