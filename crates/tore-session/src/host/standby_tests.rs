@@ -876,6 +876,77 @@ fn a_warm_and_a_cold_standby_follow_laser_bombers() {
     }
 }
 
+/// Slice FX-J: three laser bombers fly the run, and Hawk leaves its game
+/// after its release, its laser on and its sight pinned. The host gives the
+/// plane to the AI and keeps Hawk's cockpit, whose sight and laser step on
+/// while the AI flies. A warm and a cold standby hold the same kept cockpit
+/// (it is in the combat checkpoint, and the give-back is a journal
+/// command), and their worlds are the host's.
+#[test]
+fn a_warm_and_a_cold_standby_carry_a_dropped_bombers_kept_cockpit() {
+    use crate::settings::{LoadoutRule, number};
+    use tore_sim::combat::sight::SightMode;
+    let mut spec = crate::wire::readout_a2g_tests::a2g_spec();
+    spec.loadout = None;
+    spec.wings[0].count = 3;
+    let mut config = config();
+    config
+        .settings
+        .push((number::LOADOUTS, LoadoutRule::Any.value()));
+    let mut resources = tore_world::test_support::surface::routed_resources();
+    tore_world::test_support::resources::add_a2g_stores(&mut resources);
+    let mut rig = Rig::with(spec, resources, config);
+    rig.host.set_standbys_enabled(true);
+    rig.join_bomber("Viper", 0, Platform::current());
+    rig.join_bomber("Cobra", 1, other_platform());
+    rig.join_bomber("Hawk", 2, Platform::current());
+    rig.settle();
+    assert!(
+        rig.run_until(Duration::from_secs(5), |r| r.host.ready_standbys().len()
+            == 2),
+        "ready in the lobby"
+    );
+    rig.fly();
+    rig.run(Duration::from_secs(6));
+    let left = rig.host.world.combat.state.ownship(2).unwrap().clone();
+    assert!(matches!(
+        left.sight.map(|s| s.mode),
+        Some(SightMode::Pinned(_))
+    ));
+    let now = rig.net.now();
+    rig.players[2].client.leave_game(now);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r
+            .host
+            .world
+            .combat
+            .state
+            .kept(2)
+            .is_some()),
+        "the host keeps Hawk's cockpit"
+    );
+    rig.fly_for(6);
+    let kept = rig.host.world.combat.state.kept(2).unwrap().clone();
+    assert_eq!(kept.sight.map(|s| s.mode), left.sight.map(|s| s.mode));
+    assert_eq!(kept.selected, left.selected);
+    let warm = rig.figures(0).unwrap();
+    assert_eq!(warm.mismatches, 0);
+    rig.holds_the_hosts_world(0);
+    rig.holds_the_hosts_world(1);
+    for player in [0, 1] {
+        let replica = rig.players[player].standby.replica().unwrap();
+        if replica.tick() == rig.host.world.tick() {
+            assert_eq!(
+                replica.combat.state.kept(2),
+                Some(&kept),
+                "standby {player}"
+            );
+        } else {
+            assert!(replica.combat.state.kept(2).is_some(), "standby {player}");
+        }
+    }
+}
+
 #[test]
 fn a_forced_mismatch_resyncs_the_warm_standby() {
     let mut rig = Rig::new();

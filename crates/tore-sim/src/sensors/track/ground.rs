@@ -20,6 +20,19 @@ use super::{Basis, Channel, Contact, Environment, Event, Mode, Observer, Sensors
 use crate::sensors::detection::Sighting;
 use crate::sensors::profile::{FEET_PER_NAUTICAL_MILE, Volume};
 
+/// What a pilot picked on its sensors ([`Sensors::picks`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Picks {
+    /// The designated target.
+    pub selected: Option<u32>,
+    /// The targeting sight's track holds the designation.
+    pub held: Option<u32>,
+    /// The ground rules kept the designation at the last step.
+    pub ground_retained: Option<u32>,
+    /// The A-G flag (Ctrl+R).
+    pub air_ground: bool,
+}
+
 /// Object class words (docs/formats/debrief.md, "Outcome").
 pub mod class {
     pub const AIRCRAFT: u16 = 0xc000;
@@ -224,6 +237,43 @@ impl Sensors {
     /// The selection the sight's track holds.
     pub fn held(&self) -> Option<u32> {
         self.held
+    }
+    /// What the pilot picked on these sensors: the designation, how the
+    /// ground rules hold it and the A-G flag. A handoff keeps it for the
+    /// aircraft's next human (`combat::live::Kept`).
+    pub fn picks(&self) -> Picks {
+        Picks {
+            selected: self.selected,
+            held: self.held,
+            ground_retained: self.ground_retained,
+            air_ground: self.air_ground,
+        }
+    }
+    /// Puts back what a pilot picked. A selection that differs from the
+    /// current one acquires afresh, and the next step keeps it only by the
+    /// usual rules (an air contact the scope still holds; a ground object the
+    /// sight's track, the page or the pilot's eye holds). The A-G flag needs
+    /// a working radar, as Ctrl+R does.
+    pub fn restore_picks(&mut self, picks: Picks) {
+        if self.selected != picks.selected {
+            self.selected = picks.selected;
+            self.acquired = None;
+            self.acquisition = 0;
+        }
+        self.held = picks.held.filter(|id| picks.selected == Some(*id));
+        self.ground_retained = picks
+            .ground_retained
+            .filter(|id| picks.selected == Some(*id));
+        self.air_ground = picks.air_ground && self.profiles.radar.is_some() && !self.radar_failed;
+    }
+    /// The pages as an AI pilot starts with them: the default scope controls
+    /// (radar, default range, no history), the A-G page off and no sight
+    /// hold. The designation stays, for the next step's rules.
+    pub fn reset_pages(&mut self) {
+        self.controls = super::Controls::default();
+        self.air_ground = false;
+        self.held = None;
+        self.ground_retained = None;
     }
     /// Ctrl+X under Easy targeting: designate `id` directly. Easy targeting
     /// keeps it while the object stands.

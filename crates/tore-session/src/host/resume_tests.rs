@@ -1836,3 +1836,101 @@ fn a_takeover_carries_the_laser_bombers_sights_lasers_and_bombs() {
         );
     }
 }
+
+/// Slice FX-J: three laser bombers release; the one whose game is not a
+/// standby leaves, and the host keeps its cockpit while the AI flies its
+/// plane (the sight and the laser stepping on). The host is then cut off.
+/// The standby's world at T codes to the old host's, the kept cockpit is in
+/// it, the new host carries it on, and a human who takes that plane on the
+/// new host's world finds the cockpit as it was left.
+#[test]
+fn a_takeover_carries_a_dropped_bombers_kept_cockpit() {
+    use crate::settings::{LoadoutRule, number};
+    use tore_sim::combat::sight::SightMode;
+    let mut spec = crate::wire::readout_a2g_tests::a2g_spec();
+    spec.loadout = None;
+    spec.wings[0].count = 4;
+    let mut resources = tore_world::test_support::surface::routed_resources();
+    tore_world::test_support::resources::add_a2g_stores(&mut resources);
+    let mut rig = Rig::with_settings(
+        spec,
+        Arc::new(resources),
+        &[(number::LOADOUTS, LoadoutRule::Any.value())],
+    );
+    let mut games = Vec::new();
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        games.push((rig.join_bomber(callsign, plane), plane));
+    }
+    rig.fly();
+    let (first, second) = rig.standbys();
+    rig.run(Duration::from_secs(5));
+    let (leaver, plane) = games
+        .iter()
+        .copied()
+        .find(|(g, _)| *g != first && *g != second)
+        .expect("a bomber that stands by for nobody");
+    let left = rig
+        .host()
+        .world
+        .combat
+        .state
+        .ownship(plane)
+        .unwrap()
+        .clone();
+    assert!(matches!(
+        left.sight.map(|s| s.mode),
+        Some(SightMode::Pinned(_))
+    ));
+    let now = rig.net.now();
+    rig.games[leaver].client.leave_game(now);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r
+            .host()
+            .world
+            .combat
+            .state
+            .kept(plane)
+            .is_some()),
+        "the host keeps the leaver's cockpit"
+    );
+    // Its game has left: nothing of it runs from here.
+    rig.games[leaver].gone = true;
+    rig.run(Duration::from_secs(1));
+    rig.record_from = Some(rig.host().world.tick());
+    rig.run(Duration::from_millis(500));
+    rig.cut(0);
+    assert!(rig.run_until(Duration::from_secs(3), |r| !r.takeovers.is_empty()));
+    rig.record_from = None;
+    let (game, _, tick, coded) = rig.takeovers[0].clone();
+    assert_eq!(game, first);
+    assert!(
+        rig.checkpoints.get(&tick) == Some(&coded),
+        "the standby's world at T differs from the old host's"
+    );
+    let mut at_t = rig.world_of(&coded);
+    let kept = at_t.combat.state.kept(plane).cloned().expect("kept at T");
+    assert_eq!(kept.sight.map(|s| s.mode), left.sight.map(|s| s.mode));
+    assert_eq!((kept.selected, kept.armed), (left.selected, left.armed));
+    rig.back_after_cut(Duration::from_secs(5));
+    assert!(
+        rig.host_of(first)
+            .world()
+            .combat
+            .state
+            .kept(plane)
+            .is_some(),
+        "the new host carries the kept cockpit"
+    );
+    // A human takes the plane on the world at T: the cockpit as left.
+    at_t.take_plane(
+        tore_world::seats::SeatId(9),
+        tore_world::seats::PlaneId(plane),
+    )
+    .unwrap();
+    let own = at_t.combat.state.ownship(plane).unwrap();
+    assert_eq!(own.sight.map(|s| s.mode), left.sight.map(|s| s.mode));
+    assert_eq!((own.selected, own.armed), (left.selected, left.armed));
+    assert_eq!(own.laser.manual, kept.laser.manual);
+    assert_eq!(own.sensors.air_ground(), left.sensors.air_ground());
+    assert!(at_t.combat.state.kept(plane).is_none());
+}

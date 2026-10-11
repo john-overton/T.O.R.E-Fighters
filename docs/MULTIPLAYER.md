@@ -575,8 +575,13 @@ time, since revival can be minutes and 150 nm away.
 follows the flight; a lead follows the flight plan. The aircraft stays reserved
 for that player as long as it is alive, and other joiners cannot take it unless
 the King releases it. The player rejoins with their saved token and gets the
-aircraft back. If the aircraft is destroyed, or the mission ends before they
-return, they rejoin as an observer until the round ends.
+aircraft back, with the weapon, sight, laser, designation, A-G page, radar
+switch and NAV airport as they left them; a laser bomb they left guiding
+keeps following their laser while the AI flies (slice FX-J, 2026-10-11;
+[what is kept](ARCHITECTURE.md#what-a-returning-player-keeps)). The radar
+scope's channel, range and history are the player's own game settings and
+come back with the game. If the aircraft is destroyed, or the mission ends
+before they return, they rejoin as an observer until the round ends.
 
 **Observers** use the replay viewer's camera and playback controls on the live
 session. This covers players whose aircraft was destroyed, players who join with
@@ -861,10 +866,12 @@ player sees:
   for any weapon.
 - **Host migration and rejoin.** A new host takes every sight, laser and
   guided weapon in flight from the old host's checkpoint. A player who drops
-  and rejoins gets its aircraft back from the AI that flew it meanwhile, with
-  its sight at the default look and the laser off (agent decision: the AI
-  handoff keeps stores, damage and sensors only), and a laser weapon it left
-  guiding on its own spot goes blind when the laser stops.
+  and rejoins gets its aircraft back from the AI that flew it meanwhile with
+  its cockpit as it left it: the weapon, the sight's track or pin, the
+  laser (a hand setting too), the designation and the A-G page. While the
+  AI flies, the sight and the laser keep working, so a laser bomb the player
+  left guiding keeps following the spot (slice FX-J, agent decision;
+  [what is kept](ARCHITECTURE.md#what-a-returning-player-keeps)).
 
 The bytes are in [the wire's air-to-ground round](formats/net-protocol.md#the-air-to-ground-round-protocol-23).
 

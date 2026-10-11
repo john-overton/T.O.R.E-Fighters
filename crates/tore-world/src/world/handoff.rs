@@ -183,13 +183,21 @@ impl World {
                 return Err(error.into());
             }
         };
-        // The start-up rule of a flight start: the gun if it carries
-        // something, else the first loaded station Guns only allows, else NAV.
-        combat::apply_startup_weapon_state(
-            &mut ownship,
-            self.combat.state.cheats.guns_only,
-            self.combat.state.cheats.unlimited_ammo,
-        );
+        // What a human left set in this cockpit when it gave the aircraft
+        // back (slice FX-J): the weapon, its modes, the sight, the laser, the
+        // designation and the pages. Else the start-up rule of a flight
+        // start: the gun if it carries something, else the first loaded
+        // station Guns only allows, else NAV.
+        let cheats = self.combat.state.cheats;
+        let kept = self.combat.state.kept(id).cloned();
+        match &kept {
+            Some(kept) => ownship.restore(kept, cheats.guns_only, cheats.unlimited_ammo),
+            None => combat::apply_startup_weapon_state(
+                &mut ownship,
+                cheats.guns_only,
+                cheats.unlimited_ammo,
+            ),
+        }
         let airport_nav_mode = !ownship.armed;
         let row = self.combat.state.targets.remove(index);
         if let Err(error) = self
@@ -204,6 +212,14 @@ impl World {
         let mut flight = removed.parts.flight;
         flight.autopilot.disengage();
         flight.cheats = self.combat.state.cheats;
+        let mut airport_service = service;
+        if let Some(kept) = &kept {
+            self.combat.state.take_kept(id);
+            flight.radar = kept.radar;
+            if let Some(airport) = kept.airport {
+                airport_service.reselect(&self.terrain.airport_scene, airport);
+            }
+        }
         let crew = comms::crew(&kind.profile);
         self.roster
             .take_plane(seat, plane, crew)
@@ -217,7 +233,7 @@ impl World {
             flight,
             turbulence: Default::default(),
             turbulence_rng,
-            airport_service: service,
+            airport_service,
             airport_nav_mode,
             airfield_radio: AirfieldRadio::for_seat(seat, id),
             crew_voice: CrewVoice::new(&kind.profile).for_seat(seat, id),
@@ -228,9 +244,10 @@ impl World {
         let at = self.cockpits.partition_point(|c| c.plane < plane);
         self.cockpits.insert(at, cockpit);
         self.refresh_friendlies();
-        if let Some(target) = target {
+        if let Some(target) = target.filter(|_| kept.is_none()) {
             // Held only if the aircraft's sensors hold the contact. Not a
-            // command of the seat's, so no tape or note records it.
+            // command of the seat's, so no tape or note records it. A
+            // cockpit a human left keeps that human's designation instead.
             self.combat
                 .state
                 .command(id, live::Command::DesignateTarget(target), launcher);
@@ -306,10 +323,19 @@ impl World {
             .ok_or_else(|| format!("plane {id} has no ownship"))?
             .clone();
         let flight = &self.cockpits[index].flight;
-        let handback = ownship.into_ai(AiPose {
+        // What the human set in the cockpit stays for the next human to take
+        // the aircraft (slice FX-J), the radar switch and NAV's airport with
+        // it.
+        let mut kept = ownship.kept();
+        kept.radar = flight.radar;
+        kept.airport = self.cockpits[index].airport_service.selected();
+        let mut handback = ownship.into_ai(AiPose {
             launcher: combat::launcher(flight),
             on_ground: flight.research.as_ref().is_some_and(|r| r.on_ground),
         });
+        // The AI flies with its own pages and its radar on, as at mission
+        // start (a failed radar stays off).
+        handback.sensors.reset_pages();
         let mut stations = ai_wings::station_specs(&handback.configuration, false);
         for (spec, store) in stations.iter_mut().zip(&handback.stations) {
             spec.store = *store;
@@ -317,6 +343,7 @@ impl World {
         let mut ai_flight = flight.clone();
         // Cheats are the human's settings; an AI aircraft carries none.
         ai_flight.cheats = Default::default();
+        ai_flight.radar = true;
         // The one step that can fail comes before any change.
         wings.insert_actor(ActorInsert {
             id,
@@ -336,6 +363,7 @@ impl World {
         // From here nothing fails.
         self.cockpits.remove(index);
         self.combat.remove_ownship(id);
+        self.combat.state.keep(id, kept);
         let row = handback.row;
         let at = self
             .combat

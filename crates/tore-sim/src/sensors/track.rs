@@ -17,7 +17,7 @@ mod ground;
 pub use ground::{
     AG_CAP_FT, GROUND_REBUILD_STEPS, GROUND_REFRESH_STEPS, GroundContact, GroundObject,
     GroundSymbol, HARM_CAP_FT, HARM_REBUILD_STEPS, LISTED_FLAG, MAX_GROUND_CONTACTS,
-    MIN_VISIBILITY, PAGE_CAP_FT, Weather, WeatherBand, class, selector,
+    MIN_VISIBILITY, PAGE_CAP_FT, Picks, Weather, WeatherBand, class, selector,
 };
 
 /// Weapon-track acquisition, 0.5 seconds of consecutive valid steps.

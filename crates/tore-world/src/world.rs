@@ -66,6 +66,8 @@ mod fight_tests;
 mod frame_tests;
 mod handoff;
 #[cfg(test)]
+mod handoff_kept_tests;
+#[cfg(test)]
 mod handoff_tests;
 #[cfg(test)]
 mod lagcomp_tests;

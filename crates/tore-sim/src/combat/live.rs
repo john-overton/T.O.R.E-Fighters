@@ -53,6 +53,8 @@ mod gunship_impact_tests;
 #[cfg(test)]
 mod gunship_tests;
 mod handoff;
+#[cfg(test)]
+mod kept_tests;
 mod observation;
 #[cfg(test)]
 mod observation_reference;
@@ -61,7 +63,7 @@ mod sighting;
 mod sighting_tests;
 #[cfg(test)]
 mod worker_tests;
-pub use handoff::{AiHandback, AiPose, AiStores};
+pub use handoff::{AiHandback, AiPose, AiStores, Kept};
 mod parked;
 #[cfg(test)]
 mod parked_tests;
@@ -1500,6 +1502,11 @@ pub struct State {
     /// The tick each aircraft's last guided air-to-ground weapon ended (hit
     /// or went away), for the targeting page's impact cue.
     guided_impacts: BTreeMap<u32, u64>,
+    /// What each human left set in the cockpit of an aircraft it gave back
+    /// to the AI, by aircraft, until a human takes it again
+    /// ([`State::keep`]). The sight and the laser step on while the AI flies
+    /// it, for the weapons the human left guiding. Mission state.
+    kept: BTreeMap<u32, Kept>,
     /// How each ground object that has a unit record explodes when destroyed.
     ground_looks: BTreeMap<u32, GroundLook>,
     /// The parked aircraft among the targets, by id, with their crash sites
@@ -2764,6 +2771,7 @@ impl State {
             bombs: BTreeMap::new(),
             guided: BTreeMap::new(),
             guided_impacts: BTreeMap::new(),
+            kept: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
             ground_listing: BTreeMap::new(),
             airfield: Default::default(),
@@ -4189,11 +4197,37 @@ impl State {
         }
         // The aircraft with one of their own laser weapons in flight: their
         // lasers stay on (docs/spec/air-to-ground.md, "The laser").
-        let laser_owners = sighting::laser_owners(&ships, &self.projectiles);
+        let laser_owners = sighting::laser_owners(&ships, &self.kept, &self.projectiles);
+        // The sights and lasers humans left in the aircraft the AI flies now
+        // step first (slice FX-J): their spots are this tick's for every
+        // ownship. An entry whose aircraft is gone or destroyed goes, as no
+        // human can take that aircraft again.
+        let targets = &self.targets;
+        self.kept
+            .retain(|aircraft, _| targets.iter().any(|t| t.id == *aircraft && t.hp > 0));
+        for (aircraft, kept) in &mut self.kept {
+            let row = self
+                .targets
+                .iter()
+                .find(|t| t.id == *aircraft)
+                .expect("a kept aircraft's row");
+            sighting::step_kept(
+                kept,
+                *aircraft,
+                row,
+                &self.targets,
+                &sighting::Context {
+                    ground: &ground,
+                    weather: &self.sensor_weather,
+                    laser_owners: &laser_owners,
+                    tick: self.tick,
+                },
+            );
+        }
         // Every laser spot as the last step left it: a guided release and
         // the guided sight read the other ownships' spots here, and their
         // own aircraft's fresh one.
-        let spots_before = guided::spots(&ships);
+        let spots_before = guided::spots(&ships, &self.kept);
         // These observations read fixed rows and change only their ownship.
         // Readiness and every release remain below, in aircraft id order.
         // Fitted: at least two active cockpits amortize a scoped dispatch.
@@ -5001,6 +5035,7 @@ impl State {
                     w,
                     &guided::Context {
                         ships: &ships,
+                        kept: &self.kept,
                         rows: &rows,
                         targets: &self.targets,
                         ground: &ground,
