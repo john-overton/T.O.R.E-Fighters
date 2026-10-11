@@ -485,11 +485,11 @@ Deliberate differences from FA:
 | Shift+' / Shift+; | Zoom the AC-130 gunsight in / out; elsewhere "not implemented yet" | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
 | Alt + arrows | Slew the AC-130 gunsight | Unused | T.O.R.E addition, John 2026-10-09 |
 | Tab | Fire the gun whatever is selected (`fire-gun`); says "not implemented yet" until the air-to-ground weapons land | Fire the gun | Retail key, bound by A2G slice K1 |
-| Shift+R / Ctrl+R | Air-to-ground radar on or off (`a-g-radar`); "not implemented yet" for now | The same | Retail keys, bound by K1. Ctrl+Shift+R is still the tower repeat |
+| Shift+R / Ctrl+R | Air-to-ground radar page on or off (`a-g-radar`): turns the air radar off, never clears the designation; R returns to the air radar | The same | Retail keys, bound by K1, built by G1. Ctrl+Shift+R is still the tower repeat |
 | / | Sight: next visible object (`sight-next`); "not implemented yet" for now | Designate the next visible object as the IR/laser target | Retail key, bound by K1; the sight keys serve every aircraft with a sight in the A2G design |
 | Ctrl+L | Laser on or off (`laze`); "not implemented yet" for now | Unused | T.O.R.E addition, John (A2G decision 5) |
 | Ctrl+M | Delivery mode: CCIP / LVL for bombs, BORE / CUED for missiles (`weapon-seeker-mode`) | Unused | T.O.R.E addition, A2G design 2.7; the action existed without a key |
-| Ctrl+X | Nearest ground target, under Easy targeting (`nearest-ground`); "not implemented yet" for now | Nearest ground target cheat when the Multi menu allows it | John, A2G decision 21 |
+| Ctrl+X | Nearest hostile ground target, under Easy targeting or on the AC-130 (`nearest-ground`); otherwise a message says it needs the cheat | Nearest ground target cheat when the Multi menu allows it | John, A2G decision 21; built by G1 |
 | V | Save the view to Other View and open it | The same, then return the main view to the front | The main view stays |
 
 ## Profiles and calibration

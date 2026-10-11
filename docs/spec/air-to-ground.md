@@ -164,6 +164,13 @@ a contact (the click rule is an [unknown](#unknowns)). Whether a ground
 designation survives the contact leaving the list is also unknown; the fallback
 is that a designated ground contact drops when every channel loses it, except
 that the targeting sight's track keeps it (as the AC-130 pod track does).
+Built (G1): it stays while the page lists it, while the pilot sees it (inside
+the visual sensor's range and view with a clear terrain line), while the sight's
+track holds it, or under Easy targeting while it stands; otherwise it drops at
+the next step (opinionated, agent). Selecting the IR or HARM page turns A-G
+off; turning A-G on switches a radar that was off on (retail's ground radar
+has no switch); the HARM page also lists emitting aircraft as squares, as the
+retail page does by the air rules.
 
 **Support (retail data).** AGM-84A, AM-39, AS-16, AS-7 and AS-15 are
 surface-target radar weapons: **A-G must be on at release**. AS-7 and AS-15 (flag
@@ -227,6 +234,10 @@ preference) IR off. "HARM" appears in the upper left.
 - **Enter** cycles visible ground objects left to right (retail) that are also
   current ground contacts on some channel (John's air rule kept for the ground);
   **'** picks the one nearest the centre. Aircraft keep today's Enter rule.
+  Built (G1) with one action for both keys, as today: with no aircraft to pick,
+  the first press takes the visible ground contact nearest the centre and each
+  further press steps to the next one to the right, wrapping to the leftmost
+  (opinionated, agent).
 - **`/`** (retail "IR/laser target", next visible object) cycles the targeting
   sight through visible ground objects on aircraft with a sight. Backslash
   stays "nearest the centre" (retail and the AC-130).

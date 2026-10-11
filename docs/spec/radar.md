@@ -318,15 +318,13 @@ This establishes the documented presentation, not an executed-retail comparison.
 of selection or acquisition. Stale contacts retain their dim cross. Direction
 lines follow the TWS rule above. IR direction-line behavior is not established
 by this passage and is left disabled as an agent decision.
-Surface-symbol implementation is not built yet. The inspected passage
-specifies large surface targets only; the planned ground symbols (dots, ships
-and identified SAM and AAA as an X) are fitted in
-[air-to-ground](air-to-ground.md#the-air-to-ground-radar), and other
-ground-symbol distinctions remain unknown pending the research recorded there.
+Surface symbols are drawn on the A-G, IR and HARM pages with the retail
+characters (a 2 by 2 dot, a 5 by 5 X for SAM and AAA, a 5 by 5 square for
+aircraft): see [air-to-ground](air-to-ground.md#the-air-to-ground-radar).
 
 ## Air-to-ground mode and the HARM page
 
-Specified in [air-to-ground](air-to-ground.md), not yet built. Ctrl+R (or
+Specified in [air-to-ground](air-to-ground.md) and built (slice G1). Ctrl+R (or
 Shift+R) puts the radar in the retail **A-G** mode, which turns the air radar
 off: ground units, structures and ships appear as 2 by 2 dots and SAM and AAA
 sites as a 5 by 5 X (retail data; the manual's 90 kt split is not in the page

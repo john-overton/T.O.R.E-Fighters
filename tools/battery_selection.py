@@ -158,6 +158,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "surface units: ground target templates resolved, base-layout air defenses and their sides",
         ("surface-*",),
     ),
+    "a2g": (
+        "air-to-ground: the A-G, IR and HARM pages, designation and the ground weapons",
+        ("a2g-*",),
+    ),
     "windowed-menus": ("captured windows: launches, terrain, previews, sizes", ("menus-window-*",)),
     "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*", "flight-target-camera-*")),
     # Replay lane.
@@ -354,11 +358,13 @@ RULES: tuple[Rule, ...] = (
     # tore-sim: combat, systems, sensors.
     _r("crates/tore-sim/src/combat.rs", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
     _r("crates/tore-sim/src/combat/live/parked*", ("surface", "flight-combat"), "parked aircraft targets"),
+    _r("crates/tore-sim/src/combat/live/ground_sensing*", ("a2g", "flight-combat"), "what the ground pages read of the targets"),
     _r("crates/tore-sim/src/combat/*", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
     _r("crates/tore-sim/src/aircraft_systems/*", ("flight-damage", "flight-combat", "ai-damage", "instruments"), "aircraft systems"),
     _r("crates/tore-sim/src/ejection.rs", ("flight-damage",), "ejection"),
-    _r("crates/tore-sim/src/sensors.rs", ("instruments", "flight-combat", "ai-fights"), "sensors"),
-    _r("crates/tore-sim/src/sensors/*", ("instruments", "flight-combat", "ai-fights"), "sensors"),
+    _r("crates/tore-sim/src/sensors.rs", ("instruments", "flight-combat", "ai-fights", "a2g"), "sensors"),
+    _r("crates/tore-sim/src/sensors/track/ground*", ("a2g", "instruments"), "the ground pages and their tests"),
+    _r("crates/tore-sim/src/sensors/*", ("instruments", "flight-combat", "ai-fights", "a2g"), "sensors"),
     _r("crates/tore-sim/src/wreck.rs", ("flight-damage", "flight-environment"), "wrecks"),
     # tore-sim: world.
     _r("crates/tore-sim/src/airport.rs", ("airports", "flight-takeoff", "flight-landing", "ai-airfield", "menus-creator"), "airports"),
@@ -656,6 +662,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
     _r("crates/tore-app/src/surface_drive.rs", ("surface",), "the surface movement drive"),
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
+    _r("crates/tore-app/src/a2g_radar.rs", ("a2g",), "the ground pages drive"),
     _r("crates/tore-app/src/surface_objective.rs", ("surface", "replay-recording"), "the ground target objective drive, which also records the run"),
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
@@ -718,6 +725,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/surface.py", ("surface",), "surface unit scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_move.py", ("surface",), "surface movement scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_parked.py", ("surface",), "parked aircraft scenarios", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/a2g_radar.py", ("a2g",), "ground page scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_objective.py", ("surface",), "ground target objective scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/_ai_fuzz.py", LANE_SMOKE["ai"], "AI fuzz scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/_ai_fuzz_cmd.py", LANE_SMOKE["ai"], "AI fuzz command", unit_tests=("test_battery_ai",)),
