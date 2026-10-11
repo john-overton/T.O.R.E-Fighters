@@ -3243,6 +3243,49 @@ mod tests {
         assert_eq!(designations[0].1.string(field::CHANNEL), Some("visual"));
     }
 
+    #[test]
+    fn a_moving_laser_spot_is_written_at_most_ten_times_a_second() {
+        use tore_sim::combat::laser::LaserState;
+        let (mut recorder, receiver) = Recorder::detached(64, &[]);
+        let mut combat = fixture::combat(
+            fixture::models(),
+            (0..7).map(|i| (i % 3, [0.; 3])).collect(),
+        );
+        let player = fixture::player();
+        let scene = fixture::scene(combat.state.own().configuration());
+        let snapshot = fixture::snapshots(&mut combat, &scene, true, &player)[1].clone();
+        let mut ui = flight_ui::FlightUi::default();
+        // The spot runs 100 feet a tick for 40 ticks, then holds still for 30.
+        for n in 0..70u64 {
+            let own = combat.state.own_mut();
+            own.laser.state = LaserState::Lasing;
+            own.laser.point = Some([100. * n.min(40) as f64, 0., 50.]);
+            tick(&mut recorder, &mut combat, &snapshot, n, &mut ui);
+        }
+        // Switching off ends the entries, and the next lasing starts afresh.
+        combat.state.own_mut().laser.state = LaserState::Off;
+        tick(&mut recorder, &mut combat, &snapshot, 70, &mut ui);
+        combat.state.own_mut().laser.state = LaserState::Lasing;
+        combat.state.own_mut().laser.point = Some([9., 9., 9.]);
+        tick(&mut recorder, &mut combat, &snapshot, 71, &mut ui);
+        tick(&mut recorder, &mut combat, &snapshot, 72, &mut ui);
+        let frames = frames(&receiver);
+        let spots: Vec<(u64, f64)> = frames
+            .iter()
+            .flat_map(|f| f.events.iter().map(move |e| (f.tick, e)))
+            .filter(|(_, e)| e.kind == kind::PLAYER_LASER_SPOT)
+            .map(|(tick, e)| (tick, e.num(field::X_FT).unwrap()))
+            .collect();
+        // The state event writes the first spot (not an entry of this kind);
+        // then one every 12 ticks while it moves (the last catches it where
+        // it stopped), none once it holds still, and none again for the new
+        // lasing, whose state event wrote it.
+        assert_eq!(
+            spots,
+            [(12, 1_200.), (24, 2_400.), (36, 3_600.), (48, 4_000.)]
+        );
+    }
+
     /// Records the fixture's two snapshots for the seat that flies `plane` and
     /// returns the frames and the roster the recording registered.
     fn record_for(
