@@ -33,6 +33,7 @@ pub(crate) use orders::{OrderReport, order_label};
 pub mod outcome;
 mod record;
 pub use record::DecoyRoll;
+mod release;
 mod reports;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -2028,15 +2029,7 @@ impl AiWings {
                         pending.groups.push_back((event.target, accepted as u16));
                     }
                 } else {
-                    let emitted = self.realise(
-                        event,
-                        &mut state.projectiles,
-                        &weapon,
-                        usize::from(event.station.0),
-                        &positions,
-                        None,
-                    );
-                    aim_latest(state, emitted, event.target);
+                    self.release(event, state, &weapon, &positions, &ground);
                 }
             } else {
                 self.dropped_launches += event.projectiles;

@@ -33,7 +33,8 @@
 //!
 //! A guided bomb that is not guiding (waiting or blind) falls on the bomb
 //! equation from where it is (fitted); a missile flies straight on.
-use super::{Kept, Launcher, NO_SIDE, OwnRow, Ownship, Projectile, State, Target};
+use super::cockpit::{Cockpits, StrikeCockpit};
+use super::{Configuration, Launcher, NO_SIDE, OwnRow, Ownship, Projectile, State, Target};
 use crate::attitude::{Vector, dot, unit};
 use crate::combat::ballistics::{BombMotion, ReleaseState};
 use crate::combat::delivery::DeliveryMode;
@@ -42,7 +43,6 @@ use crate::combat::laser::{self, LaserSpot, LaserState};
 use crate::combat::missiles::{self, Guidance};
 use crate::combat::sight;
 use crate::sensors::Weather;
-use std::collections::BTreeMap;
 use tore_formats::weapons::Weapon;
 
 /// Where a guided weapon's guidance stands.
@@ -86,15 +86,12 @@ impl GuidedFlight {
 }
 
 /// Every laser spot this tick: the ownships', then those of the aircraft the
-/// AI flies with a human's laser kept on ([`Kept`]), in aircraft order.
-pub(super) fn spots(ships: &[Ownship], kept: &BTreeMap<u32, Kept>) -> Vec<LaserSpot> {
-    ships
+/// AI flies with a human's laser kept on ([`super::Kept`]), then the AI
+/// strikers', each in aircraft order ([`Cockpits`]).
+pub(super) fn spots(cockpits: Cockpits<'_>) -> Vec<LaserSpot> {
+    cockpits
         .iter()
-        .filter_map(|own| own.laser.spot(own.aircraft, own.side))
-        .chain(
-            kept.iter()
-                .filter_map(|(aircraft, kept)| kept.laser.spot(*aircraft, kept.side)),
-        )
+        .filter_map(|(aircraft, side, cockpit)| cockpit.laser.spot(aircraft, side))
         .collect()
 }
 
@@ -125,12 +122,10 @@ fn choose(
 
 /// The point an aircraft's laser marks now for a weapon that follows it: the
 /// spot while lasing, the laser's point while masked; nothing otherwise. The
-/// laser is the ownship's, or the one its human left while the AI flies it.
-fn followed(ships: &[Ownship], kept: &BTreeMap<u32, Kept>, owner: u32) -> Option<Vector> {
-    let laser = match ships.iter().find(|own| own.aircraft == owner) {
-        Some(own) => &own.laser,
-        None => &kept.get(&owner)?.laser,
-    };
+/// laser is its strike cockpit's: the ownship's, the one its human left while
+/// the AI flies it, or the AI striker's.
+fn followed(cockpits: Cockpits<'_>, owner: u32) -> Option<Vector> {
+    let laser = &cockpits.get(owner)?.1.laser;
     match laser.state {
         LaserState::Lasing | LaserState::Masked => laser.point,
         LaserState::Off | LaserState::Ready => None,
@@ -145,28 +140,28 @@ fn row<'a>(targets: &'a [Target], rows: &'a [OwnRow], id: u32) -> Option<&'a Tar
         .or_else(|| rows.iter().map(|r| &r.target).find(|t| t.id == id))
 }
 
-/// The point a JDAM would store or an AT-2 would steer at: the designated
-/// object (on the ground and standing), else for a JDAM the sight's held
-/// point.
+/// The point a JDAM would store or an AT-2 would steer at, for a human's
+/// cockpit between steps: the designated object (on the ground and
+/// standing), else for a JDAM the sight's held point
+/// ([`StrikeCockpit::aim_point`] with the sensors' designation).
 pub(super) fn designated_point(
     own: &Ownship,
     kind: Guidance,
     targets: &[Target],
 ) -> Option<(Vector, u32)> {
-    let object = own
-        .designated()
-        .and_then(|id| targets.iter().find(|t| t.id == id))
-        .filter(|t| t.hp > 0 && !t.airborne)
-        .map(|t| (t.position, t.id));
-    match kind {
-        Guidance::Coordinate => object.or_else(|| {
-            own.sight
-                .as_ref()
-                .and_then(|sight| sight.held_point())
-                .map(|point| (point, u32::MAX))
-        }),
-        _ => object,
-    }
+    super::cockpit::aim_point(
+        own.designated().map(super::cockpit::StrikeTarget::Object),
+        own.sight.as_ref(),
+        kind,
+        targets,
+    )
+}
+
+/// Who releases a guided weapon: the aircraft, its side and its cockpit.
+pub(super) struct Releaser<'a> {
+    pub aircraft: u32,
+    pub side: super::Side,
+    pub cockpit: &'a StrikeCockpit,
 }
 
 /// The laser weather share on the line from `from` to `to` (retail selector
@@ -181,7 +176,7 @@ fn laser_scale(weather: &Weather, from: Vector, to: Vector) -> f64 {
 pub(super) fn release<G: Fn(f64, f64) -> f64>(
     w: &Weapon,
     kind: Guidance,
-    own: &Ownship,
+    own: Releaser<'_>,
     station: usize,
     launcher: &Launcher,
     position: Vector,
@@ -214,7 +209,7 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
                 .filter(|s| s.owner != own.aircraft)
                 .copied()
                 .collect();
-            all.extend(own.laser.spot(own.aircraft, own.side));
+            all.extend(own.cockpit.laser.spot(own.aircraft, own.side));
             let usable = choose(&all, own.aircraft, own.side, launcher.position, |s| {
                 zone(
                     s.position,
@@ -230,7 +225,7 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
             }
         }
         Guidance::Coordinate => {
-            if let Some((point, id)) = designated_point(own, kind, targets)
+            if let Some((point, id)) = own.cockpit.aim_point(kind, targets)
                 && zone(point, 1.)
             {
                 flight.mode = Mode::Guiding;
@@ -239,7 +234,7 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
             }
         }
         Guidance::Command => {
-            if let Some((point, id)) = designated_point(own, kind, targets)
+            if let Some((point, id)) = own.cockpit.aim_point(kind, targets)
                 && zone(point, 1.)
                 && sight::clear_line(launcher.position, point, ground)
             {
@@ -259,9 +254,8 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
 /// What one guided step reads besides the projectile.
 pub(super) struct Context<'a, G> {
     pub ships: &'a [Ownship],
-    /// What the humans left set in the aircraft the AI flies now: their
-    /// lasers and their sides.
-    pub kept: &'a BTreeMap<u32, Kept>,
+    /// Every strike cockpit: the lasers weapons follow and their sides.
+    pub cockpits: Cockpits<'a>,
     pub rows: &'a [OwnRow],
     pub targets: &'a [Target],
     pub ground: &'a G,
@@ -278,7 +272,6 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     cx: &Context<'_, G>,
 ) -> Option<(BombMotion, u64)> {
     let glide = guided::is_glide_bomb(w);
-    let owner = cx.ships.iter().find(|own| own.aircraft == flight.owner);
     // Which way the weapon points now: a falling bomb along its fall.
     let heading = match flight.fall {
         Some((fall, start)) => fall.direction((p.age - start) as f64 / 120.),
@@ -287,11 +280,11 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     let nose = guided::nose(heading);
     match flight.mode {
         Mode::Waiting => {
-            let spots = spots(cx.ships, cx.kept);
-            let side = owner.map_or_else(
-                || cx.kept.get(&flight.owner).map_or(NO_SIDE, |kept| kept.side),
-                |own| own.side,
-            );
+            let spots = spots(cx.cockpits);
+            let side = cx
+                .cockpits
+                .get(flight.owner)
+                .map_or(NO_SIDE, |(side, _)| side);
             if let Some(spot) = choose(&spots, flight.owner, side, p.position, |s| {
                 guided::in_cone(w, p.position, nose, s.position)
             }) {
@@ -309,7 +302,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
             let aim = match flight.kind {
                 Guidance::Laser => flight
                     .spot_owner
-                    .and_then(|owner| followed(cx.ships, cx.kept, owner))
+                    .and_then(|owner| followed(cx.cockpits, owner))
                     .filter(|point| guided::in_cone(w, p.position, nose, *point)),
                 Guidance::Coordinate => flight.point,
                 Guidance::Command => command_aim(flight, p, w, nose, cx),
@@ -371,8 +364,8 @@ fn command_aim<G: Fn(f64, f64) -> f64>(
     cx: &Context<'_, G>,
 ) -> Option<Vector> {
     // The launcher is the ownship's, or the AI-flown row of an aircraft
-    // whose human left it (slice FX-J): the AI flying it keeps the line
-    // only as long as its flying happens to.
+    // whose human left it (slice FX-J) or of an AI striker: the AI flying
+    // it keeps the line only as long as its flying does.
     let launcher = match cx.rows.iter().find(|r| r.target.id == flight.owner) {
         Some(row) => {
             cx.ships
@@ -381,7 +374,7 @@ fn command_aim<G: Fn(f64, f64) -> f64>(
                 .filter(|own| own.hp > 0)?;
             row.launcher
         }
-        None if cx.kept.contains_key(&flight.owner) => cx
+        None if cx.cockpits.flown_by_ai(flight.owner) => cx
             .targets
             .iter()
             .find(|t| t.id == flight.owner)
@@ -398,7 +391,7 @@ fn command_aim<G: Fn(f64, f64) -> f64>(
     .then_some(target.position)
 }
 
-/// What the cockpit sight reads besides the ownship.
+/// What the cockpit sight reads besides the cockpit.
 pub(super) struct SightContext<'a, G> {
     /// Every spot (the other ownships' from the snapshot before they
     /// stepped).
@@ -410,37 +403,38 @@ pub(super) struct SightContext<'a, G> {
 
 /// The selected guided weapon's sight, when one is selected and armed: its
 /// aim, range, reach and advisory (docs/spec/air-to-ground.md, "Guided bomb
-/// release range indicator" and "Warnings").
+/// release range indicator" and "Warnings"). The same for a human's cockpit
+/// and an AI striker's.
 pub(super) fn sight<G: Fn(f64, f64) -> f64>(
-    own: &Ownship,
+    aircraft: u32,
+    side: super::Side,
+    own: &StrikeCockpit,
+    config: &Configuration,
     launcher: &Launcher,
     cx: &SightContext<'_, G>,
 ) -> Option<GuidedSight> {
-    if !own.armed {
-        return None;
-    }
-    let w = &own.config.stations.get(own.selected)?.weapon;
+    let w = own.armed_weapon(config)?;
     let kind = guided::kind(w)?;
     let (aim, buddy, mut advisory) = match kind {
         Guidance::Laser => {
             let mut all: Vec<LaserSpot> = cx
                 .spots
                 .iter()
-                .filter(|s| s.owner != own.aircraft)
+                .filter(|s| s.owner != aircraft)
                 .copied()
                 .collect();
-            all.extend(own.laser.spot(own.aircraft, own.side));
-            if let Some(spot) = choose(&all, own.aircraft, own.side, launcher.position, |_| true) {
-                (Some(spot.position), spot.owner != own.aircraft, None)
+            all.extend(own.laser.spot(aircraft, side));
+            if let Some(spot) = choose(&all, aircraft, side, launcher.position, |_| true) {
+                (Some(spot.position), spot.owner != aircraft, None)
             } else if own.laser.state == LaserState::Masked {
                 (own.laser.point, false, Some(Advisory::Masked))
             } else {
-                let object = designated_point(own, Guidance::Command, cx.targets);
+                let object = own.aim_point(Guidance::Command, cx.targets);
                 (object.map(|(p, _)| p), false, Some(Advisory::NoLaser))
             }
         }
         Guidance::Coordinate | Guidance::Command => {
-            let aim = designated_point(own, kind, cx.targets).map(|(p, _)| p);
+            let aim = own.aim_point(kind, cx.targets).map(|(p, _)| p);
             (aim, false, aim.is_none().then_some(Advisory::NoTarget))
         }
         Guidance::Supported | Guidance::Active | Guidance::Infrared | Guidance::Emitter => {

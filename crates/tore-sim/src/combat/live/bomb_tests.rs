@@ -11,7 +11,7 @@ const KNOT: f64 = 1.687_8;
 
 /// A Mk 82 as the record has it: bomb flag, no gravity flag, 0 to 1,466 ft/s,
 /// full launch retard, one round a call.
-fn mk82() -> Weapon {
+pub(super) fn mk82() -> Weapon {
     let mut w = fixture(false).own().configuration().stations[0]
         .weapon
         .clone();
@@ -34,7 +34,7 @@ fn mk82() -> Weapon {
 
 /// A LAU-61 as the record has it: 19 rockets a pod, a burst of 2, repeat
 /// flag 0x800 with a quarter-second burst time, gravity flag 0x4.
-fn lau61() -> Weapon {
+pub(super) fn lau61() -> Weapon {
     let mut w = fixture(false).own().configuration().stations[0]
         .weapon
         .clone();

@@ -116,6 +116,11 @@ single home of the state.
 All opinionated (John, 2026-10-11: "one cockpit, two pilots" and
 [takeover](#takeover-and-handback)); the record layout is an agent design.
 
+Built (slice ST-C): the record, the shared release and the AI's entry to it
+are described in [architecture](../ARCHITECTURE.md#the-strike-cockpit). The AI
+releases on the shared solution with no re-aim; when it releases, and its
+skill's aim for unguided weapons, are the strike tactics' (not yet built).
+
 ## What the AI knows
 
 | Rule | Label |
