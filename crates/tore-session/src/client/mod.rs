@@ -52,6 +52,8 @@ pub mod convert;
 #[cfg(test)]
 mod convert_tests;
 pub mod diagnostics;
+#[cfg(test)]
+mod gun_key_tests;
 pub mod interpolation;
 #[cfg(test)]
 mod lobby_tests;
