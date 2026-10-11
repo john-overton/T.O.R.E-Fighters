@@ -546,3 +546,77 @@ fn a_coasting_maverick_holds_its_path_against_the_sag_and_reaches_a_tank_at_six_
     let (hp, last) = slow_maverick_at_six_miles(true);
     assert!(hp < 100, "the tank is hit, ended at {last:?}");
 }
+
+#[test]
+fn surface_lock_and_launch_require_a_clear_terrain_line_for_every_profile() {
+    let ridge = |_: f64, z: f64| {
+        if (8000. ..=12000.).contains(&z) {
+            4000.
+        } else {
+            0.
+        }
+    };
+    for (name, signature) in [
+        ("AGM65A.JT", 2),
+        ("AGM65G.JT", 2),
+        ("AGM84E.JT", 2),
+        ("AGM88.JT", 4),
+        ("AGM45.JT", 4),
+        ("AGM84A.JT", 3),
+        ("AM39.JT", 3),
+        ("AS16.JT", 3),
+        ("AS7.JT", 3),
+        ("AS15.JT", 3),
+    ] {
+        let mut s = armed(name, signature);
+        ground(&mut s, 0x5000_0001, 0., 20000., 0x400);
+        s.targets[0].radar_emitting = true;
+        s.command(0, Command::ToggleAirGround, launcher());
+        step(&mut s, launcher(), false);
+        s.command(0, Command::Designate, launcher());
+        assert_eq!(
+            until_ready(&mut s, launcher(), 120),
+            Readiness::Ready,
+            "{name}"
+        );
+        let at = s.own_view().at(launcher());
+        let range = at.estimated_max_range();
+        let in_range = at.in_estimated_range();
+        let masked = at.with_terrain(&ridge);
+        assert_eq!(masked.readiness(), Readiness::TerrainMask, "{name}");
+        assert!(!masked.can_lock(), "{name}");
+        assert_eq!(
+            masked.estimated_max_range(),
+            range,
+            "terrain is not range: {name}"
+        );
+        assert_eq!(
+            masked.in_estimated_range(),
+            in_range,
+            "terrain is not IN RNG: {name}"
+        );
+        for _ in 0..60 {
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: launcher(),
+                }],
+                ridge,
+            );
+            assert!(s.projectiles.is_empty(), "masked launch: {name}");
+            assert!(
+                !matches!(s.own().mounted.status, Status::Locked | Status::Pitbull),
+                "masked lock: {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_terrain_masked_harm_is_not_drawn_as_a_shutdown_emitter() {
+    let mut s = harm_scene();
+    assert_eq!(until_ready(&mut s, launcher(), 120), Readiness::Ready);
+    let ridge = |_: Vector, _: Vector| true;
+    assert!(agm::harm_emitters(s.own(), &launcher(), s.targets.iter(), &ridge).is_empty());
+}

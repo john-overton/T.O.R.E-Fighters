@@ -282,7 +282,8 @@ pub fn draw(
             .map(|c| font.glyphs[c as usize].advance)
             .sum();
         paint.text(font, "IN RNG", 211 + width as i32, 283);
-    } else if !matches!(
+    }
+    if !matches!(
         ready,
         live::Readiness::Ready | live::Readiness::TargetDestroyed
     ) {

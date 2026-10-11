@@ -4,6 +4,9 @@ use super::{EnginePhase, altitude_performance};
 use crate::attitude::{Basis, Vector, dot, unit};
 use tore_formats::weapons::{Movement, Weapon, Zone};
 
+mod terrain;
+pub use terrain::launch_line_clear;
+
 pub const HZ: u64 = 120;
 pub const DT: f64 = 1. / HZ as f64;
 pub const NMI: f64 = 6076.;
@@ -650,6 +653,24 @@ const COAST_CHECK_TICKS: u64 = 16;
 #[allow(clippy::too_many_arguments)]
 pub fn intercept(
     m: &Movement,
+    motion: Motion,
+    position: Vector,
+    forward: Vector,
+    target: Vector,
+    velocity: Vector,
+    age: u64,
+    lifetime: u64,
+) -> Option<Solution> {
+    intercept_with_terrain(
+        m, motion, position, forward, target, velocity, age, lifetime, None,
+    )
+}
+
+/// The same fly-out with cruise terrain clearance. The energy-only launch
+/// envelope calls `intercept`; time-to-impact uses the actual terrain.
+#[allow(clippy::too_many_arguments)]
+pub fn intercept_with_terrain(
+    m: &Movement,
     mut motion: Motion,
     mut position: Vector,
     mut forward: Vector,
@@ -657,6 +678,7 @@ pub fn intercept(
     velocity: Vector,
     age: u64,
     lifetime: u64,
+    ground: Option<&dyn Fn(f64, f64) -> f64>,
 ) -> Option<Solution> {
     let end = lifetime.min(u64::from(m.remove_t) * 30);
     let mut aim = target;
@@ -683,7 +705,13 @@ pub fn intercept(
         let desired = commanded_heading(
             forward,
             motion.path(),
-            unit(sub(motion.aim(position, aim), position)),
+            unit(sub(
+                ground.map_or_else(
+                    || motion.aim(position, aim),
+                    |g| motion.aim_over_terrain(position, aim, g),
+                ),
+                position,
+            )),
         );
         let next = steer(m, tick, forward, desired);
         motion.turn(forward, next);

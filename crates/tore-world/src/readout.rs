@@ -850,6 +850,19 @@ pub fn build(
     wings: Option<&AiWings>,
     cockpit: Option<&Cockpit>,
 ) -> Option<CockpitReadout> {
+    build_with_terrain(state, plane, launcher, wings, cockpit, None)
+}
+
+/// Build the same readout with fresh launch visibility and terrain-aware
+/// cruise fly-out time. The launch range scale stays energy-only.
+pub fn build_with_terrain(
+    state: &live::State,
+    plane: u32,
+    launcher: Launcher,
+    wings: Option<&AiWings>,
+    cockpit: Option<&Cockpit>,
+    ground: Option<&dyn Fn(f64, f64) -> f64>,
+) -> Option<CockpitReadout> {
     let view = state.view(plane)?;
     let own = view.ownship();
     let display = view.display_target();
@@ -857,7 +870,10 @@ pub fn build(
 
     // One view of the launcher, which works out the observation and the
     // firing solution once for all of these.
-    let at = view.at(launcher);
+    let mut at = view.at(launcher);
+    if let Some(ground) = ground {
+        at = at.with_terrain(ground);
+    }
     let estimates = Estimates {
         readiness: at.readiness(),
         guidance_available: view.guidance_available(launcher),
@@ -867,7 +883,7 @@ pub fn build(
         band: at.favorable_firing_band(),
         in_range: at.in_estimated_range(),
         hit_percent: at.estimated_hit_percent(),
-        solution_seconds: at.mounted_solution().map(|s| s.seconds),
+        solution_seconds: at.terrain_solution().map(|s| s.seconds),
         harm: HarmCue::of(own, at.readiness()),
     };
 

@@ -9,7 +9,8 @@
 //! the bottom, in nautical miles, with a caret at the aim's ground range and
 //! `R 6.2` above it. IN RNG blinks at 2 Hz while the aim lies inside the
 //! reach; otherwise the advisory (NO LASER, MASK, OUT OF REACH, NO TARGET)
-//! takes the line. Layout fitted; the cue is opinionated (John,
+//! takes the line. When the aim is in range but masked, MASK stays visible on
+//! the readiness row below IN RNG. Layout fitted; the cue is opinionated (John,
 //! 2026-10-10, decision 4: "a range indicator for when to drop").
 //!
 //! A guided bomb in LVL also gets the level release T (slice FX-H; spec
@@ -20,7 +21,11 @@
 use super::bombs::{self, Tee};
 use crate::{frame::FlightFrame, hud::Paint};
 use tore_formats::{font::Font, text::GlyphCodes, weapons::Weapon};
-use tore_sim::combat::{guided::GuidedSight, live, missiles::NMI};
+use tore_sim::combat::{
+    guided::{Advisory, GuidedSight},
+    live,
+    missiles::NMI,
+};
 
 /// The scale's x and its top and bottom, reference pixels.
 const SCALE_X: i32 = 390;
@@ -113,11 +118,54 @@ pub(super) fn draw(
         bombs::draw_level(paint, s, zoom, Some(fpm), &tee);
     }
     let ready = ro.estimates.readiness;
+    if let Some(warning) = additional_warning(ready, sight.in_reach, sight.advisory) {
+        paint.text(font, warning, 207, 295);
+    }
+}
+
+/// A range cue and a visibility warning are independent. Keep release
+/// failures first and avoid repeating an advisory already drawn above.
+fn additional_warning(
+    ready: live::Readiness,
+    in_reach: bool,
+    advisory: Option<Advisory>,
+) -> Option<&'static str> {
     if !matches!(
         ready,
         live::Readiness::Ready | live::Readiness::TargetDestroyed
-    ) && sight.advisory.is_none_or(|a| a.label() != ready.label())
+    ) && (in_reach || advisory.is_none_or(|a| a.label() != ready.label()))
     {
-        paint.text(font, ready.label(), 207, 295);
+        Some(ready.label())
+    } else if in_reach {
+        advisory.map(Advisory::label)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_remains_visible_beside_an_energy_only_in_range_cue() {
+        assert_eq!(
+            additional_warning(live::Readiness::Ready, true, Some(Advisory::Masked)),
+            Some("MASK")
+        );
+        assert_eq!(
+            additional_warning(live::Readiness::Ready, false, Some(Advisory::Masked)),
+            None,
+            "the main row already shows MASK"
+        );
+        assert_eq!(
+            additional_warning(live::Readiness::BayClosed, true, Some(Advisory::Masked)),
+            Some("OPENING BAY")
+        );
+        assert_eq!(
+            additional_warning(live::Readiness::NoTarget, false, Some(Advisory::NoTarget)),
+            None,
+            "do not repeat NO TARGET on both rows"
+        );
     }
 }

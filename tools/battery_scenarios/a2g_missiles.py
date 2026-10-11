@@ -247,6 +247,18 @@ def sarh_problems(output: str) -> list[str]:
     return problems
 
 
+def terrain_cruise_problems(output: str) -> list[str]:
+    problems: list[str] = []
+    _cued_kill(output, "Maverick ridge clearance", problems)
+    heights = [int(h) for h in re.findall(r"^a2g-run: flight .* altitude (\d+) ", output, re.M)]
+    if max(heights, default=0) < 1900:
+        problems.append("the cruise missile did not climb above 1,900 ft over the ridge")
+    end = END.search(output)
+    if end and float(end.group(2)) > 40:
+        problems.append(f"ridge shot ended {end.group(2)} ft from the target, want at most 40")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run"]
     col = run + ["UKR", "QUCOL", "--speed", "350", "--seconds", "60"]
@@ -256,6 +268,25 @@ def scenarios() -> list[Scenario]:
     fleet = run + ["UKR", "QUSFLT", "--unit", KRIVAK, "--attack", "antiship", "--from", "15", "--altitude", "5000",
                    "--speed", "450", "--seconds", "90"]
     return [
+        Scenario(
+            name="a2g-terrain-cruise", lane="flight",
+            args=run + ["VLA", "QVARMOR", "--aircraft", "f18", "--load", "AGM65A", "--attack", "maverick",
+                        "--from", "6", "--altitude", "1100", "--heading", "60", "--speed", "350",
+                        "--unit", "0x50000000", "--seconds", "90"],
+            timeout=300,
+            check=terrain_cruise_problems,
+            notes="The Maverick climbs above 1,900 ft over the ridge, then resumes its profile and kills the tank.",
+        ),
+        Scenario(
+            name="a2g-terrain-mask", lane="flight",
+            args=run + ["VLA", "QVSUP", "--aircraft", "f18", "--load", "AGM65G", "--attack", "maverick",
+                        "--from", "6", "--altitude", "300", "--heading", "180", "--speed", "350",
+                        "--unit", "0x50000000", "--seconds", "10"],
+            timeout=300,
+            expect=[r"a2g-run: terrain setup .* mask [1-9][0-9]*$", r"a2g-run: no launch readiness TERRAIN MASK$"],
+            forbid=[r"a2g-run: launch "],
+            notes="A ridge near the target, skipped by the old eight-probe line, denies Maverick lock and launch.",
+        ),
         Scenario(
             name="a2g-maverick", lane="flight",
             args=col + ["--aircraft", "a10", "--load", "AGM65G", "--attack", "maverick", "--from", "6",

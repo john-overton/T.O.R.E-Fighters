@@ -173,11 +173,25 @@ fn straight_seconds(
 /// the same physics).
 pub fn time_to(
     w: &Weapon,
+    motion: Motion,
+    position: Vector,
+    forward: Vector,
+    point: Vector,
+    age: u64,
+) -> Option<f64> {
+    time_to_with_terrain(w, motion, position, forward, point, age, None)
+}
+
+/// Fly-out time with the live cruise clearance rule. Bomb reach and the
+/// launch envelope stay energy-only; an in-flight cruise uses real terrain.
+pub fn time_to_with_terrain(
+    w: &Weapon,
     mut motion: Motion,
     mut position: Vector,
     mut forward: Vector,
     point: Vector,
     age: u64,
+    ground: Option<&dyn Fn(f64, f64) -> f64>,
 ) -> Option<f64> {
     let m = &w.movement;
     let end = life_ticks(m);
@@ -187,12 +201,18 @@ pub fn time_to(
         if distance <= HIT_FT {
             return Some((tick - age) as f64 * DT);
         }
-        let aim = motion.aim(position, point);
+        let aim = ground.map_or_else(
+            || motion.aim(position, point),
+            |g| motion.aim_over_terrain(position, point, g),
+        );
         let desired =
             missiles::commanded_heading(forward, motion.path(), unit(missiles::sub(aim, position)));
         let error = dot(forward, desired).clamp(-1., 1.).acos();
         let pointing = dot(forward, unit(gap)).clamp(-1., 1.).acos();
-        if error < STRAIGHT_RAD && pointing < STRAIGHT_RAD {
+        if error < STRAIGHT_RAD
+            && pointing < STRAIGHT_RAD
+            && !(ground.is_some() && motion.cruise.is_some())
+        {
             return straight_seconds(
                 m,
                 missiles::length(motion.velocity),

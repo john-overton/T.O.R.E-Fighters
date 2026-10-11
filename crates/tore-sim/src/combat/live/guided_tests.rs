@@ -658,3 +658,151 @@ fn a_laser_bomb_has_the_t_only_with_a_spot_to_home_on() {
     step_as(&mut s, false, at_z(0.));
     assert!(s.own().guided_sight.unwrap().level.is_some());
 }
+
+#[test]
+fn a_buddy_spot_must_be_visible_from_the_shooter_at_lock_and_release() {
+    let ridge = |_: f64, z: f64| {
+        if (5000. ..=7000.).contains(&z) {
+            7000.
+        } else {
+            0.
+        }
+    };
+    for w in [gbu10(), {
+        let mut w = at2();
+        w.source = "AS30.JT".into();
+        w.seeker.signature = 1;
+        w.flags |= 0x400;
+        w
+    }] {
+        let s = scene(w.clone(), false, AHEAD);
+        let spots = [crate::combat::laser::LaserSpot {
+            owner: 1,
+            side: s.own().side,
+            position: tank(&s).position,
+            target: Some(TANK),
+        }];
+        let weather = Weather::default();
+        let release = |ground: &dyn Fn(f64, f64) -> f64| {
+            guided::release(
+                &w,
+                Guidance::Laser,
+                s.own(),
+                0,
+                &launcher(),
+                launcher().position,
+                launcher().velocity,
+                &spots,
+                &s.targets,
+                &weather,
+                &ground,
+            )
+        };
+        assert_eq!(release(&|_, _| 0.).mode, GuidedMode::Guiding);
+        assert_eq!(release(&ridge).mode, GuidedMode::Blind, "{}", w.source);
+        let sight = guided::sight(
+            s.own(),
+            &launcher(),
+            &guided::SightContext {
+                spots: &spots,
+                targets: &s.targets,
+                weather: &weather,
+                ground: &ridge,
+            },
+        )
+        .unwrap();
+        assert_eq!(sight.advisory, Some(Advisory::Masked));
+        assert!(sight.in_reach, "MASK does not alter the energy envelope");
+    }
+}
+
+#[test]
+fn a_command_weapon_has_mask_advisory_and_no_guidance_through_a_ridge() {
+    let mut s = scene(at2(), true, AHEAD);
+    designate(&mut s);
+    let ridge = |_: f64, z: f64| {
+        if (5000. ..=7000.).contains(&z) {
+            7000.
+        } else {
+            0.
+        }
+    };
+    let w = &s.own().config.stations[0].weapon;
+    let weather = Weather::default();
+    let flight = guided::release(
+        w,
+        Guidance::Command,
+        s.own(),
+        0,
+        &launcher(),
+        launcher().position,
+        launcher().velocity,
+        &[],
+        &s.targets,
+        &weather,
+        &ridge,
+    );
+    assert_eq!(flight.mode, GuidedMode::Blind);
+    let sight = guided::sight(
+        s.own(),
+        &launcher(),
+        &guided::SightContext {
+            spots: &[],
+            targets: &s.targets,
+            weather: &weather,
+            ground: &ridge,
+        },
+    )
+    .unwrap();
+    assert_eq!(sight.advisory, Some(Advisory::Masked));
+    assert!(sight.in_reach);
+}
+
+#[test]
+fn a_late_first_laser_lock_checks_terrain_but_an_existing_lock_keeps_its_rules() {
+    let mut s = scene(gbu10(), true, AHEAD);
+    designate(&mut s);
+    s.command(0, Command::ToggleLaser, launcher());
+    step(&mut s, false);
+    step(&mut s, true);
+    let mut flight = flight(&s);
+    assert_eq!(flight.mode, GuidedMode::Waiting);
+    let mut p = s.projectiles[0].clone();
+    let point = tank(&s).position;
+    s.own_mut().laser.state = LaserState::Lasing;
+    s.own_mut().laser.point = Some(point);
+    let w = gbu10();
+    let kept = std::collections::BTreeMap::new();
+    let ridge = |_: f64, z: f64| {
+        if (5000. ..=7000.).contains(&z) {
+            7000.
+        } else {
+            0.
+        }
+    };
+    let steer =
+        |flight: &mut GuidedFlight, p: &mut Projectile, ground: &dyn Fn(f64, f64) -> f64| {
+            guided::steer(
+                flight,
+                p,
+                &w,
+                &guided::Context {
+                    ships: s.ownships(),
+                    kept: &kept,
+                    rows: &[],
+                    targets: &s.targets,
+                    ground: &ground,
+                },
+            );
+        };
+    steer(&mut flight, &mut p, &ridge);
+    assert_eq!(flight.mode, GuidedMode::Waiting);
+    steer(&mut flight, &mut p, &|_, _| 0.);
+    assert_eq!(flight.mode, GuidedMode::Guiding);
+    steer(&mut flight, &mut p, &ridge);
+    assert_eq!(
+        flight.mode,
+        GuidedMode::Guiding,
+        "terrain does not break an established laser lock"
+    );
+}
