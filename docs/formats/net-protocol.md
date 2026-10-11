@@ -1072,6 +1072,11 @@ added: 30 is `ToggleAirGround` (Ctrl+R, the A-G radar page), and 31, the
 last 5-bit code, is an **extended** combat command: a varint follows, 0
 `NearestGround` (Ctrl+X under Easy targeting), 1 `ToggleLaser` (Ctrl+L) and
 2 `SightNext` (`/`), none with fields; a reader refuses any other varint.
+The mp-fixes round (protocol 24) adds 3 `GunKeyDown` and 4 `GunKeyUp` (Tab, held:
+the gun fires whatever store is selected; [the gun
+key](../spec/air-to-ground.md#the-gun-key)), also with no fields. The host
+keeps the key's state per aircraft; a trigger release (`ReleaseTrigger`) and a
+resume start it up.
 The seat's slew and zoom in the gunsight block steer the targeting sight of
 every aircraft with a laser designator or a FLIR too, and codes 28 and 29
 work it as they do the AC-130's ([the air-to-ground groups](#the-air-to-ground-groups)).

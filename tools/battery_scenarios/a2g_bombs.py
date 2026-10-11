@@ -170,6 +170,39 @@ def pod_problems(output: str) -> list[str]:
     return problems
 
 
+STRAFE = re.compile(
+    r"^a2g-run: strafe gun (\d+)->(\d+) fired (\d+) tracers (\d+) store (\d+)->(\d+) selected (\d+) "
+    r"\(key down on (\d+)\) bombs-or-store-rounds-fired (\d+)$",
+    re.M,
+)
+
+
+def strafe_problems(output: str) -> list[str]:
+    """Tab fires the gun with a bomb selected: rounds leave and the ammunition falls, the
+    selection does not move, the bomb stays on its pylon, and the trigger was never pressed."""
+    parts = runs(output)
+    if len(parts) != 1:
+        return [f"{len(parts)} runs finished, want 1"]
+    m = STRAFE.search(parts[0])
+    if m is None:
+        return ["no strafe summary (Tab never went down?)"]
+    start, end, fired, tracers, store_start, store_end, selected, down_on, store_fired = map(int, m.groups())
+    problems: list[str] = []
+    if fired < 20:
+        problems.append(f"Tab fired {fired} gun rounds in two seconds, want a burst")
+    if start - end != fired:
+        problems.append(f"gun ammunition fell {start - end} for {fired} rounds")
+    if not fired // 4 <= tracers <= fired // 2 + 1:
+        problems.append(f"{tracers} tracers in {fired} rounds, want about one in three")
+    if selected != down_on:
+        problems.append(f"selection moved from {down_on} to {selected}")
+    if store_start != store_end or store_fired:
+        problems.append(f"the selected store was used: rounds {store_start}->{store_end}, {store_fired} in the air")
+    if "a2g-run: no key" in parts[0]:
+        problems.append("the store was never selected")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1"]
     return [
@@ -203,5 +236,14 @@ def scenarios() -> list[Scenario]:
             ],
             check=pod_problems,
             notes="Two LAU-61 pods tapped, held a second and held empty; two LAU-10 pods held.",
+        ),
+        Scenario(
+            name="a2g-gun-key", lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "strafe", "--from", "1", "--aircraft", "a4e",
+                  "--load", "MK82", "--altitude", "2000", "--dive", "10", "--speed", "400",
+                  "--seconds", "20", "--hold", "2"],
+            timeout=300,
+            check=strafe_problems,
+            notes="Tab held two seconds with an Mk 82 selected: the gun fires, the bomb does not (FX-T).",
         ),
     ]
