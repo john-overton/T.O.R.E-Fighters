@@ -13,7 +13,7 @@ use super::{
 use crate::attitude::{Basis, Vector, cross, dot, unit};
 use crate::models::strike_class::StrikeClass;
 use crate::sensors::{self, Observable, Observer, Sensors, Support, passive};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{
     Result,
     aircraft::{Aircraft, AircraftId},
@@ -1521,6 +1521,11 @@ pub struct State {
     /// with. Their sights and lasers step as the kept ones do. Mission
     /// state.
     ai_cockpits: BTreeMap<u32, AiCockpit>,
+    /// The AI-flown aircraft (a kept cockpit, an AI striker's own) with a
+    /// laser weapon selected and armed, as the host last said
+    /// ([`State::set_ai_laser_armed`]): their lasers run the automatic rule
+    /// for it, so the spot is up before the release. Mission state.
+    ai_laser_armed: BTreeSet<u32>,
     /// How each ground object that has a unit record explodes when destroyed.
     ground_looks: BTreeMap<u32, GroundLook>,
     /// The parked aircraft among the targets, by id, with their crash sites
@@ -2779,6 +2784,7 @@ impl State {
             guided_impacts: BTreeMap::new(),
             kept: BTreeMap::new(),
             ai_cockpits: BTreeMap::new(),
+            ai_laser_armed: BTreeSet::new(),
             ground_looks: BTreeMap::new(),
             ground_listing: BTreeMap::new(),
             airfield: Default::default(),
@@ -4216,6 +4222,7 @@ impl State {
                     ground: &ground,
                     weather: &self.sensor_weather,
                     laser_owners: &laser_owners,
+                    armed: &self.ai_laser_armed,
                     tick: self.tick,
                 },
             );
@@ -4277,6 +4284,7 @@ impl State {
                         ground: &ground,
                         weather: &self.sensor_weather,
                         laser_owners: &laser_owners,
+                        armed: &self.ai_laser_armed,
                         tick: self.tick,
                     },
                 );

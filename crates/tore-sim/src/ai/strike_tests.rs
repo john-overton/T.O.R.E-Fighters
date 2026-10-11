@@ -823,10 +823,6 @@ fn fly(
             .asin()
             .to_degrees();
         log.push((elevation, range, bank));
-        let cx = Context {
-            ..world.context(tick)
-        };
-        let _ = cx;
     }
     log
 }

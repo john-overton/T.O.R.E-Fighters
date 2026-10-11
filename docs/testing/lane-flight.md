@@ -100,6 +100,8 @@ with `--defenses AAA SAM` and `--surface-seed N` as before.
 | `--skill 0..3` | The striker's wing skill, Novice to Ace (Average by default) |
 | `--profile straight\|popup\|fasthigh\|dive\|level` | **Forces** a pass, for coverage. The real AI chooses its pass from the perceived threat and its energy (John, 2026-10-11), not at random; the flag lets a test fly each pass once |
 | `--handback S` | A human-flown run handed to the AI: a seat flies the striker on the scripted pass, designates the target on the A-G page (or Easy targeting's Ctrl+X for an aircraft with no ground page), selects the store, and gives the aircraft back `S` seconds into the pass. `--mode ccip\|lvl` sets the bomb sight in the human leg, `--trigger` holds the trigger there (pickle and hold) so a bomb leaves before the handoff. For the takeover tests |
+| `--choose-store` | The AI chooses its own store instead of the fitted one (slice ST-L): a laser store only with a spot assured |
+| `--buddy ID` | A second seat flies aircraft ID as a buddy (slice ST-L): a scripted pass 1 nm ahead of the striker, 3,000 ft right and 1,000 ft higher, which designates the nearest ground object with Ctrl+X and lases it by hand (Ctrl+L); the striker is ordered onto what it designated and chooses its own store. A striker with no designator drops on the buddy's spot (`spot_owner` on the RELEASE line). `--buddy` with `--buddy-ai` on the player-side `--attack laser` run is the other way round: the AI flies the buddy, is given the wing order's call and lases for the seat's bomb |
 | `--order KIND` | Wing orders: a seat leads a two-ship wing on the pass, designates the target, and gives the wingman (the striker) the order `--order-at S` seconds in (5 by default). Kinds: `engage-my-target`, `engage-from-formation`, `attack-on-contact`, `protect-me`, `disengage`, `bug-out`, `land-selected`, `sort`. The ground attack orders join the table when the game has them |
 
 Every line starts `ai-strike:` and is `key=value` words (the battery reads them with
@@ -112,12 +114,15 @@ Every line starts `ai-strike:` and is `key=value` words (the battery reads them 
 | `start` | The striker at tick 0: range to the target, height above the ground, speed |
 | `DESIGNATE`, `HANDBACK`, `ORDER`, `ORDER-REPLY` | The human leg: the target designated, what was set when the aircraft was handed back (designation, selected station, bomb sight mode), the order given and the world's reply (given, refused or failed, with its words) |
 | `ACTIVITY name=...` | What the AI says it is doing, each time that changes |
-| `RELEASE` | A store left the striker: time, store, station, height, speed, range to the target, and the pass's number, its drawn aim offset from the target (`aim_ft`) and whether the draw lies inside the release circle (`inside=yes`) or in the ring R to 2R (`inside=no`) |
+| `PHASE name=...` | The striker's strike phase (Ingress, Attack, Lase, Exit, TurnBack, Wait, Defend, Home), each time it changes |
+| `HOLD` | Every 5 s of a lase hold: range from the target, height above it, speed, bank |
+| `LASER plane=P state=S mask=M` | The laser of the striker (and of the buddy), each time its state or mask changes (Off, Ready, Lasing, Masked: Range, Gimbal or Terrain) |
+| `RELEASE` | A store left the striker: time, store, station, height, speed, range to the target, and the pass's number, its drawn aim offset from the target (`aim_ft`) and whether the draw lies inside the release circle (`inside=yes`) or in the ring R to 2R (`inside=no`); for a guided weapon, its mode and the owner of the spot it follows (`guided`, `spot_owner`) |
 | `IMPACT miss_ft=F` | A released round ended; its horizontal distance from the target in feet (the nearest crater or burst within 60 ft of its last place, else that place) |
 | `KILL` | A ground object the striker destroyed, and whether it was the target |
 | `EGRESS` | After a release and once the rounds have landed, the striker is a nautical mile past its closest approach and opening |
 | `LOST` | The striker was destroyed, crashed, ejected or left the AI |
-| `summary` | Counts of the above, the final activity, the target's hit points and the store's rounds left; then `no release` if there was none, and `done` |
+| `summary` | Counts of the above, the final activity, the target's hit points, the store's rounds left, and the seconds a laser weapon of the run flew guiding (`fall_s`) and how many of them the spot it followed was not lasing (`blind_s`); then `no release` if there was none, and `done` |
 
 The run ends 20 s after the striker is lost or its last round has landed. The hooks the strike
 slices fill are one `hooks` module in `ai.rs`: ST-T hands the AI its target (and the driver's
@@ -132,11 +137,14 @@ adds order kinds.
 | `ai-strike-bombs` | An A-4E's Mk 82 on the Ukraine column `~QUCOL`: straight, pop-up, fast-high, dive and level forced once at skill 2, and skills 0, 1 and 3 on the dive | Each run names its pass and releases with its drawn aim inside the skill's release circle (or in the ring R to 2R when the draw says so), ends the bomb within the circle plus 800 ft of scatter (1,866, 1,620, 1,374 and 1,128 ft for skills 0 to 3; the ring's edge plus 800 ft for a ring draw, see [AI strike](../spec/ai-strike.md#skill-and-release-precision)), shows an EGRESS and is not lost. Not the TVIET truck park: its radar-laid guns (26,200 and 44,250 ft reach) shoot an A-4E down at 5,000 ft within 25 s whatever pass it flies |
 | `ai-strike-rockets` | An A-4E's LAU-61 on `~QUCOL`, straight runs at skills 2 and 3 | A rocket burst with the aim inside the circle, each rocket within the circle plus 800 ft, an EGRESS, not lost |
 | `ai-strike-maverick`, `ai-strike-jdam`, `ai-sead-harm` | An A-10's AGM-65G on `~QUCOL` (fast-high), an F-16C's GBU-30 on the factory `~QUFACT` (level; a JDAM flies to the point stored at release, so a moving column would be missed), an F-4G's AGM-88 on the `~QVRDRI` radar (fast-high) | The named pass, a release and an impact, the target hurt, the striker not lost |
+| `ai-strike-laser-self` | An F-16C's Pave Spike and a GBU-10 on `~QUCOL` from 15,000 ft at 480 kt, and an Su-25's built-in designator and a GBU-10 from 8,000 ft at 400 kt, the AI flying both (slice ST-L) | The F-16C goes from the pass to the hold at the release (a PHASE Lase line within a second of it), flies an offset turn (a bank over 10 degrees) inside the laser's 10 nm reach, holds the spot on the tank for the whole 50 s fall (no LASER line leaves Lasing, `blind_s` at most 1) and exits only after the bomb has landed, within 150 ft of the tank, which is destroyed; the laser is let go afterwards. The Su-25's cone holds its nose on the tank and may leave inside 2,000 ft, the bomb following the spot's last point; it also destroys the tank |
+| `ai-strike-laser-buddy` | Three runs (slice ST-L). A player's F/A-18D drops a GBU-10 with an AI F-16C as the buddy, given the wing order's call; an AI F-14 with a GBU-10 and no designator, with a player's F-16C lasing as the buddy and the store left to the AI; the same F-14 with nobody lasing | The AI lases, the sight at the release says IN RNG on a buddy's spot with no laser of its own, the bomb guides on aircraft 1's spot and destroys the tank, and the target page would name the lasing pilot `Friendly 2-1`. The F-14 waits at the choice, chooses the bomb once the player's spot is up, never lases or holds, drops on that spot and destroys the tank, the spot never lost. With nobody lasing it never flies a pass with the bomb and goes home |
 | `ai-strike-defended` | An F/A-18D's Mk 82 on `~QUCOL` with `--defenses 2 2`, its pass chosen by threat (a pop-up, SAMs cover the column) | Releases inside its circle and defends (an ACTIVITY Defending line). The column's guns can bring it down at the pop-up's low altitude, so a loss is allowed |
 
 The scenarios' parsing and checks have unit tests in `tools/test_battery_ai_strike.py`, and the
 battery selection family `ai-strike` (`ai-strike-*`, `ai-sead-*`) is chosen by changes to
-`ai.rs`, the scenario file and the AI sources (`tore-sim/src/ai`, `tore-world/src/ai_wings`).
+`ai.rs`, `guided.rs`, the scenario file, the AI sources (`tore-sim/src/ai`, `tore-world/src/ai_wings`)
+and the laser and sight step (`combat/laser.rs`, `combat/live/sighting.rs`).
 
 ## Powered-lift scenarios (VTOL overhaul)
 

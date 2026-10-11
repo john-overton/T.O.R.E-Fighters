@@ -154,6 +154,16 @@ pub(super) fn step(
             actor.set_laser_set(laser_set);
         }
     }
+    // Every AI-flown cockpit with a laser weapon selected and armed runs the
+    // laser's automatic rule as a player's does, striker or not (a kept
+    // cockpit, an AI striker's own): the spot is up before the release.
+    for (id, config) in &wings.configs {
+        let armed = state.ownship(*id).is_none()
+            && state
+                .strike_cockpit(*id)
+                .is_some_and(|c| c.laser_weapon_armed(config));
+        state.set_ai_laser_armed(*id, armed);
+    }
 }
 
 /// A guided bomb or missile whose reach the cockpit's guided sight works out.

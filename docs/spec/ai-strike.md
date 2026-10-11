@@ -15,8 +15,10 @@ available speed](#perceived-threat-and-available-speed)) is built (ST-P), the
 strike cockpit and shared release (ST-C), and the strike tactics for
 fighters, attack jets and heavies (ST-T: target, store and pass choice, the
 skill circle, release, exit, re-attack, defence and home; [How the AI flies a
-pass](#how-the-ai-flies-a-pass)). Helicopters, the AC-130, AI lasing beyond its
-own designator, orders and takeover are later slices. John asked for AI that attacks the ground and
+pass](#how-the-ai-flies-a-pass)), and AI lasing and buddy lasing (ST-L: the
+hold on its own bomb, the lase duty a wing order calls, a designator lasing for
+its wing, dropping on a buddy's spot; [Lasing](#lasing)). Helicopters, the
+AC-130, orders and takeover are later slices. John asked for AI that attacks the ground and
 authorised the work for this round (answers of 2026-10-11, folded in below). The
 slices that build it are listed in [Source notes](#source-notes).
 
@@ -229,7 +231,7 @@ applies:
 | Seeker missiles and HARM (stand-off) | Fast-high when energy is Good, else straight run; the approach ends at the store's release range. Retail's guided release rule is the model: a guided round only inside 10,000 ft or half the weapon's maximum range, one guided round in flight at a time (retail, [weapons](../formats/weapons.md#ai-release-against-ground-targets)) |
 | Rockets | Straight run with a shallow dive. The pop-up under threat Missiles is not flown with rockets (fitted, agent, ST-T): a rocket flies along the nose, and after a low pop the dive that points the nose at the target is steeper than the AI's terrain floor allows, so the run would end with no rocket fired |
 | Guns (strafing) | Straight run; attack jets strafe after their bombs and rockets are gone |
-| Laser bombs, JDAMs | Level run (or a shallow run) to the weapon's reach |
+| Laser bombs, JDAMs | Level run (or a shallow run) to the weapon's reach. A glide bomb the sight says cannot reach from the aircraft's height or speed (its life runs out first) is approached in a descent of 400 ft/s, never below the release floor (fitted, agent, ST-L) |
 | Taken over with LVL kept | Level run whatever the table says |
 | Taken over with CCIP kept | The table's pass, flown as CCIP |
 
@@ -545,28 +547,69 @@ from the guns:
 Retail has no buddy lasing and its AI lasing is implicit
 ([lasers](../formats/missiles.md)). The buddy rules come from
 [air-to-ground](air-to-ground.md#buddy-lasing) (opinionated, John,
-2026-10-10); the AI follows them (opinionated, John, 2026-10-11).
+2026-10-10); the AI follows them (opinionated, John, 2026-10-11). Built (slice
+ST-L, 2026-10-11) except where a line says otherwise.
 
 - **AI lases its own target.** An AI with a designator (built in, or a Pave
-  pod) lases while its laser weapon is selected or in flight: the player's
-  automatic rule, through the same laser, with the same gimbal (60 degrees
-  search and 45 degrees track built in; hemisphere for a pod).
+  pod) turns its laser on by hand for the pass of a laser store, with its sight
+  tracking the target, so the spot is up when the bomb leaves. It is the
+  player's laser, with the same gimbal (60 degrees search and 45 degrees track
+  built in; hemisphere for a pod) and the same reach (10 nm).
+- **It holds the spot through the fall.** A laser bomb or missile released on
+  its own spot sends the aircraft from the pass into **the hold** instead of
+  the exit: an offset turn about the target, the spot kept on it, until the
+  weapon has landed (or the target is dead, or two minutes have passed), then
+  the exit. The turn is an orbit of radius max(3 nm, 1.2 turn radii), kept
+  inside 80% of the laser's reach, above the release floor, turning toward the
+  side the target lies on at the release. For a **pod** the gimbal is the
+  hemisphere under the wing plane, so the target must stay below the wings:
+  banked toward the target by `phi`, a target `delta` below the horizon at
+  azimuth `theta` from the nose is under the wings while `tan(phi) <= tan(delta) /
+  sin(theta)`. The hold limits its bank to that, less 5 degrees, and flies the
+  speed at which the orbit needs no more bank than the target's depression
+  gives (`v^2 = g r tan(delta - 5 degrees)`, at most corner speed). A
+  masked-by-gimbal laser levels the wings. For a **built-in cone** the hold
+  keeps the nose on the target and ends inside 2,000 ft of it (the target
+  leaves the cone), as an own-bomb hold; the bomb keeps following the spot's
+  last point, as a masked laser does. Fitted (agent); the radius is the
+  spec's.
 - **Its spot is an ordinary spot.** Players' laser weapons can home on it, and
-  the target page shows BUDDY with the AI's callsign.
+  the target page shows BUDDY with the AI's callsign: the wing and member the
+  messages use ("Friendly 2-1"; a player's callsign in a networked game).
 - **AI drops on a buddy spot.** An AI laser-bomb carrier with no designator
   chooses a laser store only when a same-side spot is on its target: a player
-  lasing it, or a wingmate.
+  lasing it, another AI's, or (below) a designator in its wing. With only laser
+  stores it looks for such a spot while it closes on the target, and gives up
+  at 1.5 times the store's fire range, going home with the bomb. With a
+  non-laser store as well it takes that instead. It releases when the sight's
+  range cue says so, on the nearest same-side spot, as a player does.
 - **"Lase my target"** is a new wingman order (a free Alt key, chosen by the
   slice and listed in [controls](../CONTROLS.md)). A wingman with a designator
-  flies an offset orbit of radius max(3 nm, 1.2 turn radii) above the release
-  floor and lases the target you designated, until it dies, the order changes or
-  the wingman is threatened (threat Missiles). Opinionated (John, 2026-10-11);
-  orbit numbers fitted.
-- **A designator lases for its wing.** A Strike wing with one designator
-  aircraft and laser-bomb carriers lets the designator lase the lead's target.
-  Fitted.
+  flies the orbit above the release floor and lases the target you
+  designated, until it dies, the order changes or the wingman is threatened
+  (threat Missiles). Opinionated (John, 2026-10-11); orbit numbers fitted.
+  **Built here as a call** (ST-L): `AiWings::order_lase(id, target,
+  LaseUntil)` with `LaseUntil::Seconds(n)`, `Impact` (until every weapon guided
+  on its spot has landed, after at least one was; two minutes if none ever is)
+  or `TargetDies`, `cancel_lase`, `can_lase` and `lasing_for`. The key and the
+  reply belong to the orders slice (ST-O). A threat that makes the wingman
+  defend ends the duty. A duty gives an aircraft with no ground picture the
+  target as an order, cleared with the duty.
+- **A designator lases for its wing** (fitted). In a Strike wing, a designator
+  aircraft with no ground store to use lets itself be the wing's light: when a
+  wing mate with laser rounds and no designator has chosen its target, the
+  designator flies the hold on that target until the carriers have no more
+  need of a spot and no weapon is guiding on its own. Until a carrier has chosen
+  it waits at the choice rather than going home. A designator with stores of
+  its own strikes with them (its spot serves the carriers if the timing fits).
 - **Order changes.** If the lasing wingman leaves, a laser weapon guiding on its
-  spot goes blind, as for a player who stops lasing.
+  spot goes blind, as for a player who stops lasing. The AI turns the laser on
+  by hand and off again itself; in a cockpit a human left it turns off only
+  what it turned on, and leaves a human's own setting alone (off stays off).
+  In any AI-flown cockpit (one a human left, an AI striker's own) with a laser
+  weapon selected and armed, the laser's automatic rule is on as a player's is,
+  so the spot is up before the release and not only after it (the player's rule
+  is unchanged).
 
 ## Orders from the flight lead
 
@@ -658,7 +701,11 @@ strike order or a takeover of a striking plane.
 | Bombing class | helicopter by lift, gunship by gunsight, Heavy at 150,000 lb or G limit 3 or less, Attack at 700 kt or less, else Fighter | opinionated (John, 2026-10-11) |
 | AC-130 orbit | 10,400 ft slant, 35 degrees, 5,965 ft high, 8,520 ft radius, bank at most the aircraft's `maxBank` (radius grows instead) | fitted; bank cap opinionated (agent) |
 | AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |
-| Lase orbit | radius max(3 nm, 1.2 turn radii) | fitted |
+| Lase orbit | radius max(3 nm, 1.2 turn radii), at most 80% of the laser's reach | fitted |
+| Lase bank limit | the target's depression below the horizon less 5 degrees, divided by the sine of its azimuth (pod hemisphere) | fitted (agent) |
+| Lase hold ends | the weapon landed (not before 2 s), the target dead, or 2 minutes | fitted (agent) |
+| Glide descent | 400 ft/s toward the release floor while the glide bomb cannot reach | fitted (agent) |
+| Spot wait | a laser carrier with no spot closes on the target to 1.5 fire ranges, then gives up | fitted (agent) |
 | Ground picture | rebuilt every 6 s, contacts followed every 0.25 s | retail |
 | SEAD briefing | hostile armed units and radars within 5 nm of the objective point | fitted |
 | Attackers per object | two | spec-derived |
@@ -720,6 +767,13 @@ and is open to change.
     SAMs, bandits, tanks). The spec keeps attack on contact there. Say if the
     class order should return, which would also give wingmen a SEAD command.
 
+12. **Lasing details (ST-L).** A pod's hold limits its bank and slows the
+    orbit so the target stays under the wings, a cone cannot hold a target it
+    flies over, a designator with nothing to drop lases for its wing's laser
+    carriers, and a carrier with only a laser bomb waits for a buddy's spot
+    while it closes (to 1.5 fire ranges) and then goes home. Say if a carrier
+    should drop on no spot at all, or hold off at a distance and wait.
+
 ## Source notes
 
 - Retail evidence: the AI scripts and records summarised in [AI
@@ -734,6 +788,11 @@ and is open to change.
   [surface defenses](surface-defenses.md), [AI experience](ai-experience.md),
   [AI guns](ai-gun-employment.md), [AC-130 guns](ac130-linked-guns.md),
   [keyboard](keyboard.md).
+- Built in ST-L: `ai/strike_lase.rs` (the hold, the duty, the wing's lase),
+  `ai_wings/strike.rs` (the cockpit's sight and laser, the order calls),
+  `live/sighting.rs` (`release_ai_lasers`). Evidence: the scenarios
+  `ai-strike-laser-self` and `ai-strike-laser-buddy`
+  ([driver](../testing/lane-flight.md#ai-strike-driver)).
 - Slices that build it: ST-R research, ST-D driver, ST-Y bombing class, ST-P
   ground picture, ST-C strike cockpit, ST-T tactics, ST-L lasing, ST-O orders
   and roles, ST-K takeover, ST-F helicopters and AC-130, ST-N multiplayer,

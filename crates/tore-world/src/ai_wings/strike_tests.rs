@@ -161,3 +161,55 @@ fn a_lase_order_ends_when_the_target_is_destroyed() {
     let wings = world.ai_wings.as_ref().unwrap();
     assert_eq!(wings.lasing_for(wingman), None);
 }
+
+#[test]
+fn an_ai_flown_cockpit_with_a_laser_weapon_armed_lases_before_the_release() {
+    let mut world = world();
+    let wingman = friendly(&world)[0];
+    let target =
+        super::super::outcome::ground_targets(&world.terrain.surface, &world.combat.state)[0];
+    let wings = world.ai_wings.as_mut().unwrap();
+    let mut config = wings.configs.get(&wingman).unwrap().clone();
+    config.sight = Some(pod());
+    // A laser weapon on station 0: signature 1 with the designator flag.
+    config.stations[0].weapon.seeker.signature = 1;
+    config.stations[0].weapon.flags |= 0x400;
+    wings.configs.insert(wingman, config.clone());
+    // The AI flies a cockpit with that weapon selected and armed and its
+    // sight on the target, the laser on its hand setting automatic (the
+    // takeover's case).
+    let side = world
+        .combat
+        .state
+        .targets
+        .iter()
+        .find(|t| t.id == wingman)
+        .unwrap()
+        .side;
+    {
+        let cockpit = world
+            .combat
+            .state
+            .ai_cockpit_mut(wingman, side, &config)
+            .unwrap();
+        cockpit.selected = 0;
+        cockpit.armed = true;
+        cockpit.target = Some(StrikeTarget::Object(target));
+        cockpit.sight.as_mut().unwrap().track(target);
+    }
+    step(&mut world, 2);
+    let cockpit = world.combat.state.strike_cockpit(wingman).unwrap();
+    assert_eq!(cockpit.laser.manual, None);
+    assert!(cockpit.laser.automatic, "armed: the automatic rule is on");
+    assert!(cockpit.laser.wanted());
+    // Disarmed, it is off again.
+    world
+        .combat
+        .state
+        .ai_cockpit_mut(wingman, side, &config)
+        .unwrap()
+        .armed = false;
+    step(&mut world, 2);
+    let cockpit = world.combat.state.strike_cockpit(wingman).unwrap();
+    assert!(!cockpit.laser.automatic);
+}

@@ -454,7 +454,7 @@ flowchart LR
   same `Reach` from its fly-out. `live::agm` holds the HARM cue, surface-seeker
   support, retargeting and blinding.
 - Only a human seat's ownship uses these paths. The AI keeps its stores, does
-  not attack the ground and does not lase (the AI strike round comes later).
+  not attack the ground and does not lase (the AI strike round, built since, uses the strike cockpit instead).
 - The host builds `bomb_sight`, `guided`, `weapon_tti`, the HARM cue and the
   ground pages into the readout; `weapon_hud/{bombs,guided,agm,laser}.rs` and
   `instruments/targeting.rs` draw them. These fields are host-built and not on
@@ -2039,6 +2039,15 @@ shared solution. Skill enters only for unguided weapons, through a
 `ReleaseAim` (the pass's aim offset from the target and the release gate
 radius, John's precision rule); smart weapons use the targeting systems at
 every skill.
+
+**When the AI lases** is the strike tactics' too (ST-L): the bridge
+(`ai_wings/strike.rs`) points the cockpit's sight and laser at the object the
+tactics name (`Strike::laser_target`), tells them the designator, the laser's
+mask, the aircraft's laser weapons in flight, the weapons on its spot and the
+objects other same-side spots lie on (`LaseInputs`), and lets the laser go
+again when they stop wanting it (`State::release_ai_lasers` for the aircraft
+that no longer step). A spot is an ordinary spot: `State::laser_spots` reads
+every cockpit.
 
 The AI cockpits are mission state in the combat checkpoint, after `kept`; the
 `Ownship` and `Kept` coders carry the cockpit as one record. An entry goes
