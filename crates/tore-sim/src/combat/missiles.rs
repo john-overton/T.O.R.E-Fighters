@@ -428,6 +428,11 @@ pub struct Motion {
     pub sink: f64,
     pub sags: bool,
     pub cruise: Option<Cruise>,
+    /// Fitted: steering lays the missile's actual path, its velocity with
+    /// the sag, on the aim point instead of its velocity alone, so the sag
+    /// cannot carry it under the aim point (the air-to-ground missiles, whose
+    /// aim point is on the ground). See [`Motion::path`].
+    pub holds_path: bool,
 }
 impl Motion {
     pub fn new(m: &Movement, velocity: Vector, altitude: f64) -> Self {
@@ -444,6 +449,7 @@ impl Motion {
             sink: 0.,
             sags: false,
             cruise: None,
+            holds_path: false,
         }
     }
     /// A release of `w`: the record's ejection, sag and cruise profile.
@@ -456,7 +462,26 @@ impl Motion {
             },
             sags: w.flags & SAG_FLAG != 0,
             cruise: Cruise::for_weapon(w),
+            holds_path: Profile::for_weapon(w).is_some_and(|p| p.role == TargetRole::Surface)
+                || Guidance::air_to_ground(w).is_some(),
             ..Self::new(&w.movement, velocity, altitude)
+        }
+    }
+    /// The way the missile is travelling, for steering. Its velocity, and
+    /// for a missile that holds its path the sag as well: the sag moves it
+    /// straight down apart from its velocity, so a missile that only pointed
+    /// its velocity at a ground target would sink under its line of sight and
+    /// meet the ground short of the target (docs/spec/missiles.md,
+    /// "Drop launch, sag and cruise profile").
+    pub fn path(&self) -> Vector {
+        if self.holds_path {
+            [
+                self.velocity[0],
+                self.velocity[1] - self.sink,
+                self.velocity[2],
+            ]
+        } else {
+            self.velocity
         }
     }
     /// Where the missile steers for `intercept`.
@@ -656,7 +681,7 @@ pub fn intercept(
         }
         let desired = commanded_heading(
             forward,
-            motion.velocity,
+            motion.path(),
             unit(sub(motion.aim(position, aim), position)),
         );
         let next = steer(m, tick, forward, desired);
@@ -1058,6 +1083,72 @@ mod tests {
         coast.step(&m, 564 * 30, forward);
         assert!((coast.sink - SAG_FPS2 * DT).abs() < 1e-12);
     }
+    #[test]
+    fn path_accounts_for_sink_only_when_holding_the_path() {
+        let mut motion = Motion {
+            sink: 80.,
+            ..Motion::new(&movement(), [40., -60., 953.], 1024.)
+        };
+        assert_eq!(motion.path(), [40., -60., 953.]);
+        motion.holds_path = true;
+        assert_eq!(motion.path(), [40., -140., 953.]);
+        motion.sink = 0.;
+        assert_eq!(motion.path(), motion.velocity);
+    }
+
+    /// Coast along a commanded dive line from cruise height with full sag.
+    /// Return the closest approach and the lowest altitude before arrival.
+    fn sag_dive(holds_path: bool) -> (f64, f64) {
+        let m = Movement {
+            ignite_t: 0,
+            fuel_t: 0,
+            final_speed: 953,
+            unpowered_turn_rate: 8190,
+            ..movement()
+        };
+        let mut position = [0., 1024., 0.];
+        let target = [0., 0., 7424.];
+        let desired_path = unit(sub(target, position));
+        let mut forward = desired_path;
+        let mut motion = Motion {
+            sink: 80.,
+            sags: true,
+            holds_path,
+            ..Motion::new(&m, forward.map(|v| v * 953.), position[1])
+        };
+        let mut closest = length(sub(target, position));
+        let mut lowest = position[1];
+        for age in 0..12 * HZ {
+            // Keep the commanded line fixed to isolate path correction from
+            // pursuit. The live Maverick test covers a changing sight line.
+            let desired = commanded_heading(forward, motion.path(), desired_path);
+            let next = steer(&m, age, forward, desired);
+            motion.turn(forward, next);
+            forward = next;
+            let delta = motion.step(&m, age, forward);
+            position = std::array::from_fn(|i| position[i] + delta[i]);
+            closest = closest.min(length(sub(target, position)));
+            lowest = lowest.min(position[1]);
+            if closest <= 25. || position[2] >= target[2] {
+                break;
+            }
+        }
+        (closest, lowest)
+    }
+
+    #[test]
+    fn a_coasting_dive_holds_its_path_against_the_sag() {
+        let (miss, low) = sag_dive(false);
+        assert!(
+            low < -100.,
+            "velocity-only steering dips underground: {low}"
+        );
+        assert!(miss > 25., "velocity-only steering misses: {miss}");
+        let (miss, low) = sag_dive(true);
+        assert!(miss <= 25., "path holding reaches the ground point: {miss}");
+        assert!(low >= -25., "path holding stays above the ground: {low}");
+    }
+
     #[test]
     fn cruise_stages_hold_altitude_above_the_target_then_home_direct() {
         let harpoon = Cruise {

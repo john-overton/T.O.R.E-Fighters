@@ -729,6 +729,19 @@ addresses are in [the missile format notes](../formats/missiles.md#release-sag-a
   directly. Distances and altitudes are 256-foot steps. The height is above the
   target (or its predicted intercept), not above the ground or the launch point.
 
+**Fitted, agent decision (FX-M, 2026-10-11):** surface-target missile profiles
+and laser, coordinate and command air-to-ground weapons steer using their
+actual path, including the downward sink, rather than their velocity alone.
+This lets a coasting Maverick reach a ground target without sag carrying it
+under the sight line and into the ground early. The correction subtracts the
+current sink from vertical velocity for steering in live flight and prediction;
+it does not change the motor, the 32 ft/s² sag, its 80 ft/s cap or the cruise
+heights. Air-to-air missiles and SAMs retain their existing steering. This
+correction is not a recovered original steering rule. The
+[air-to-ground baseline](../baselines/air-to-ground.md#class-8-infrared-air-to-ground-missiles)
+records the measured reach. The HUD fly-out still ignores terrain along the
+future path, so its estimate is not a promise of a hit.
+
 What a player sees, from the retail records:
 
 | Missile | Motor lights | Drop before it lights | Cruise profile |

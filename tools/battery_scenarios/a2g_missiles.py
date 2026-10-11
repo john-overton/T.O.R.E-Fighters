@@ -8,6 +8,8 @@ is in BORE, its seeker settles on the strongest return near the bore (the hottes
 and the missile leaves locked on that one (John accepted plan decision 10); an AV-8B designates
 with its FLIR (the IR page, M) and an A-10 with Enter (the visible ground contact nearest the
 centre) for an AGM-65A, each with a kill (the AGM-65A's with a hit). The imported A-10 has no infrared sensor, so the FLIR run is the AV-8B's.
+An A-10's AGM-65A also hits from 6 nmi on the A-G page after coasting into its dive,
+checking that steering compensates for the downward sag (FX-M).
 
 `a2g-harm-bore` over the Vladivostok radar site `~QVRDRI` (seed 4, heavy defenses): an F-4G with
 AGM-88s and nothing designated sees the SA-6 battery's Straight Flush on the HARM cue (John,
@@ -107,8 +109,8 @@ def _cued_kill(run: str, label: str, problems: list[str], kill: bool = True) -> 
 
 def maverick_problems(output: str) -> list[str]:
     parts = runs(output)
-    if len(parts) != 4:
-        return [f"{len(parts)} runs finished, want 4"]
+    if len(parts) != 5:
+        return [f"{len(parts)} runs finished, want 5"]
     problems: list[str] = []
     _cued_kill(parts[0], "A-10 AGM-65G on A-G", problems)
     ready = READY.search(parts[0])
@@ -137,6 +139,11 @@ def maverick_problems(output: str) -> list[str]:
     _cued_kill(parts[2], "AV-8B AGM-65G on the FLIR", problems)
     # The AGM-65A's warhead leaves a T-80 with a tenth of its hit points.
     _cued_kill(parts[3], "A-10 AGM-65A by Enter", problems, kill=False)
+    label = "A-10 AGM-65A at 6 nmi on A-G"
+    _cued_kill(parts[4], label, problems, kill=False)
+    end = END.search(parts[4])
+    if end and not 0 <= float(end.group(2)) <= 40:
+        problems.append(f"{label}: ended {end.group(2)} ft from the target, want at most 40")
     return problems
 
 
@@ -261,9 +268,11 @@ def scenarios() -> list[Scenario]:
                             "--from", "4", "--altitude", "2000"], timeout=300),
                 Step(col + ["--aircraft", "a10", "--load", "AGM65A", "--attack", "maverick", "--designate",
                             "visual", "--from", "3", "--altitude", "2000"], timeout=300),
+                Step(col + ["--aircraft", "a10", "--load", "AGM65A", "--attack", "maverick",
+                            "--from", "6", "--altitude", "3000"], timeout=300),
             ],
             check=maverick_problems,
-            notes="Maverick CUED on the A-G page, in BORE, on the AV-8B's FLIR and by Enter.",
+            notes="Maverick CUED on the A-G page, in BORE, on the AV-8B's FLIR, by Enter, and AGM-65A at 6 nmi.",
         ),
         Scenario(
             name="a2g-harm-bore", lane="flight",

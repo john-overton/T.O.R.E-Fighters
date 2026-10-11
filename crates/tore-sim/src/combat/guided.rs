@@ -188,11 +188,8 @@ pub fn time_to(
             return Some((tick - age) as f64 * DT);
         }
         let aim = motion.aim(position, point);
-        let desired = missiles::commanded_heading(
-            forward,
-            motion.velocity,
-            unit(missiles::sub(aim, position)),
-        );
+        let desired =
+            missiles::commanded_heading(forward, motion.path(), unit(missiles::sub(aim, position)));
         let error = dot(forward, desired).clamp(-1., 1.).acos();
         let pointing = dot(forward, unit(gap)).clamp(-1., 1.).acos();
         if error < STRAIGHT_RAD && pointing < STRAIGHT_RAD {

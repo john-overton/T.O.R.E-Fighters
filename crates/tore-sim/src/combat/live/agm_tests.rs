@@ -165,6 +165,35 @@ fn the_reviewed_air_to_ground_records_have_surface_profiles() {
 }
 
 #[test]
+fn surface_missile_launches_hold_their_path_but_air_missiles_do_not() {
+    let s = fixture(true);
+    let mut w = s.own().config.stations[0].weapon.clone();
+    for (source, holds_path) in [
+        ("AGM65A.JT", true),
+        ("AGM65G.JT", true),
+        ("AGM88.JT", true),
+        ("AGM84A.JT", true),
+        ("AIM7.JT", false),
+        ("AIM120.JT", false),
+        ("AIM9M.JT", false),
+        ("SA6.JT", false),
+        ("SYNTHETIC.JT", false),
+    ] {
+        w.source = source.into();
+        assert_eq!(
+            missiles::Motion::launch(&w, launcher().velocity, launcher().position[1]).holds_path,
+            holds_path,
+            "{source}"
+        );
+    }
+    // Record-based guidance has no named surface profile but holds its path too.
+    w.source = "SYNTHETIC.JT".into();
+    w.seeker.signature = 1;
+    w.flags = 0x401;
+    assert!(missiles::Motion::launch(&w, launcher().velocity, 3000.).holds_path);
+}
+
+#[test]
 fn a_maverick_locks_a_designated_ground_target_and_in_bore_the_strongest_return() {
     // CUED: the A-G page and T give the target; the seeker locks it.
     let mut s = armed("AGM65G.JT", 2);
@@ -443,4 +472,71 @@ fn the_painting_list_and_the_harm_cue_survive_a_checkpoint() {
     assert_eq!(own.painted_by(), s.own().painted_by());
     assert_eq!(own.harm_cue(), s.own().harm_cue());
     assert!(!own.harm_cue().is_empty());
+}
+
+/// An AGM-65A-like record (synthetic numbers of the same shape): a 9 second
+/// burn to about 1,900 ft/s, then a coast toward 953 ft/s with the record's
+/// sag (flag 0x4) and the 1,024 ft cruise height until 7,424 ft out, 40 s of
+/// life and 50,000 ft of seeker range.
+fn slow_maverick() -> State {
+    let mut s = armed("AGM65A.JT", 2);
+    let w = &mut s.own_mut().config.stations[0].weapon;
+    w.flags = 0x2a06f;
+    let m = &mut w.movement;
+    (m.maximum_speed, m.corner_speed, m.initial_speed) = (1906, 1906, 0);
+    (m.acceleration, m.deceleration, m.final_speed) = (733, 146, 953);
+    (m.ignite_t, m.fuel_t, m.remove_t) = (4, 40, 160);
+    (m.powered_turn_rate, m.unpowered_turn_rate) = (10920, 8190);
+    (m.performance_at_0, m.performance_at_20) = (70, 100);
+    m.cruise = [29, 4, 29, 4];
+    for zone in &mut w.seeker.zones {
+        zone.maximum_range = 50_000;
+    }
+    s
+}
+
+/// Fires the slow Maverick CUED from 3,000 ft at a tank 6 nmi ahead, with
+/// path holding as `holds_path` says, and flies it to its end. Returns the
+/// tank's hit points left and where the missile last was.
+fn slow_maverick_at_six_miles(holds_path: bool) -> (i32, Vector) {
+    let mut s = slow_maverick();
+    ground(&mut s, 0x5000_0001, 0., 6. * 6_076., 0x400);
+    s.command(0, Command::ToggleAirGround, launcher());
+    step(&mut s, launcher(), false);
+    s.command(0, Command::Designate, launcher());
+    assert_eq!(until_ready(&mut s, launcher(), 120), Readiness::Ready);
+    let id = fire(&mut s, launcher()).id;
+    let p = s.projectiles.iter_mut().find(|p| p.id == id).unwrap();
+    let motion = p.motion.as_mut().unwrap();
+    assert!(
+        motion.holds_path && motion.sags,
+        "a surface missile holds its path"
+    );
+    motion.holds_path = holds_path;
+    let mut last = p.position;
+    for _ in 0..40 * 120 {
+        step(&mut s, launcher(), false);
+        match s.projectiles.iter().find(|p| p.id == id) {
+            Some(p) => last = p.position,
+            None => break,
+        }
+    }
+    let tank = s.targets.iter().find(|t| t.id == 0x5000_0001).unwrap();
+    (tank.hp, last)
+}
+
+#[test]
+fn a_coasting_maverick_holds_its_path_against_the_sag_and_reaches_a_tank_at_six_miles() {
+    // The fault John saw (2026-10-11): steering pointed only the velocity at
+    // the tank, the 80 ft/s sag carried the coasting missile under its line
+    // of sight, and it met the ground about 1,000 ft short.
+    let (hp, last) = slow_maverick_at_six_miles(false);
+    assert_eq!(hp, 100, "without path holding the tank is untouched");
+    assert!(
+        6. * 6_076. - last[2] > 500.,
+        "it ends short of the tank: {last:?}"
+    );
+    // Holding the path, the same shot hits.
+    let (hp, last) = slow_maverick_at_six_miles(true);
+    assert!(hp < 100, "the tank is hit, ended at {last:?}");
 }
