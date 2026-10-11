@@ -111,6 +111,9 @@ pub fn observe(
             }
             1.
         }
+        // The air-to-ground kinds have no profile: their guidance is
+        // `live::guided`'s, never this seeker's.
+        Guidance::Laser | Guidance::Coordinate | Guidance::Command => return None,
     };
     (quality > 0.).then_some(Observation {
         id: target.id,
