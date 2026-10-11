@@ -2522,10 +2522,15 @@ What travels:
   session's own friendly fire and loadout rule before the session part
   restores every setting (a Cheat loading under `loadouts any` was refused at
   a takeover before). A player who rejoins takes its plane back from the AI,
-  which flew it meanwhile: the AI handoff carries stores, damage and sensors
-  but not the sight or the laser, so the sight comes back at its default look
-  with the laser off, and a laser weapon the player left guiding on its own
-  spot goes blind when the laser stops at the handoff.
+  which flew it meanwhile, and finds the cockpit as it left it (slice FX-J):
+  the host's combat keeps what the player set (the weapon and NAV, the seeker
+  and bomb sight modes, the sight, the laser, the designation, the A-G page,
+  the radar switch and NAV's airport) while the AI flies, and steps the sight
+  and the laser on, so a laser weapon the player left guiding keeps its spot.
+  The kept cockpit is in the combat checkpoint (`live::State`'s `kept`, after
+  `guided_impacts`), so a standby and a new host carry it; no message
+  changes. The rejoining game's readout shows it as any readout does
+  ([the architecture's list](../ARCHITECTURE.md#what-a-returning-player-keeps)).
 
 ## Limits
 

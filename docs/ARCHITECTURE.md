@@ -1804,6 +1804,8 @@ aircraft whose pilot is still aboard can change hands.
    else the first loaded station Guns only allows, else NAV, the bug bash's
    rule), and the AI's current
    target is designated if the aircraft's sensors hold it (*agent proposal*).
+   An aircraft a human gave back instead gets that human's cockpit back
+   ([what a returning player keeps](#what-a-returning-player-keeps), FX-J).
    The autopilot is off, and the human's controls apply from this tick.
 5. If the aircraft leads its wing, the human becomes the wing's leader and the
    AI wingmen follow. The AI's orders and assignments are dropped.
@@ -1815,7 +1817,8 @@ aircraft whose pilot is still aboard can change hands.
 1. The ownship becomes a combat target row with the same fractions, the reverse
    of the above. Its stores, dispensers, sensors and warnings go to a new AI
    actor, built as at mission start: same slot, the same seed rule, fresh
-   awareness, neutral. It joins the actor list in id order.
+   awareness, neutral. It joins the actor list in id order. The human's
+   cockpit settings stay with combat for the next human (FX-J).
 2. A wingman rejoins its leader, and a leader follows the flight plan (the
    guide's rule for a dropped player).
 3. The flight model stays as it is.
@@ -1845,7 +1848,8 @@ The two conversions are in `tore-sim` combat (`live::Ownship::from_ai` and
 | Chaff and flares | From the AI's radar and infrared dispensers | Back into the two dispensers |
 | Sensors and missile warnings | Moved over as they are | Moved back |
 | Avionics failures | The AI's radar, infrared, visual and RWR failures are the ownship's flags; a jammer the row lost is `ecm_failed` | The reverse |
-| Flight state | Moves to the cockpit unchanged (autopilot off, mission cheats applied) | Moves to the actor unchanged (cheats cleared: an AI aircraft carries none) |
+| Flight state | Moves to the cockpit unchanged (autopilot off, mission cheats applied) | Moves to the actor unchanged (cheats cleared: an AI aircraft carries none; the radar switch on, slice FX-J) |
+| The human's cockpit settings | Put back from the kept cockpit if a human left one ([what a returning player keeps](#what-a-returning-player-keeps)) | Kept by combat while the AI flies |
 
 A living aircraft never rounds to zero hit points, so a handoff cannot kill it.
 The round trip keeps rounds, chaff and flares exactly and hit points to within
@@ -1884,6 +1888,97 @@ one point.
   fly) is hidden in the tick's picture until the app supplies a model for it.
   Combat's snapshot looks a row's model up by its place among the mission's
   other aircraft. In an open mission plane 0 is one of them, so it is drawn.
+
+#### What a returning player keeps
+
+*Built (slice FX-J, 2026-10-11; John: "Rejoining should keep all weapon
+states and settings for a user").* A human who gives an aircraft back
+(leaving, dropping, going away or being kicked) leaves its cockpit set as it
+was. Combat keeps that part of the ownship as a `live::Kept`, by aircraft
+(`State::keep`, `kept`, `take_kept`; `Ownship::kept` and `Ownship::restore`
+in `tore-sim` `combat/live/handoff.rs`), while the AI flies the aircraft. The
+next human to take it (the same player rejoining, coming back from away, or
+anyone once the reservation is released) finds the cockpit as it was left.
+A first take of an AI aircraft keeps the start-up rule and the AI's target.
+
+The kept cockpit is mission state in the combat checkpoint, after
+`guided_impacts`, and the give-back that makes it is a journal command, so a
+warm or cold standby and a new host hold the same one (tests:
+`a_warm_and_a_cold_standby_carry_a_dropped_bombers_kept_cockpit`,
+`a_takeover_carries_a_dropped_bombers_kept_cockpit`). An entry goes when a
+human takes the aircraft, or when the aircraft is destroyed or gone.
+
+**While the AI flies** (agent decision): the kept targeting sight and laser
+step on every tick from the AI aircraft's row. Nobody slews the sight or
+presses its keys, so a track follows its object, a pin stays on its ground
+and a free sight looks where it was left. The laser keeps its own rules: on
+by hand while the sight holds a point, off by hand, or on by the automatic
+rule while one of the aircraft's own laser weapons is in flight (no weapon is
+selected and armed while the AI flies). Its spot is a laser spot like any
+other: the aircraft's own laser weapons follow it, and so may a buddy's of the
+same side. So a laser bomb the human left guiding keeps guiding, masked or
+lost only by the AI's flying (out of the gimbal or the reach), and the human
+who comes back finds the laser on it. An AT-2 the human left steered is
+steered on while the AI-flown aircraft keeps the target in its cone with a
+clear line. The kept sight designates nothing: the AI's sensors are its own.
+
+**The AI flies with its own pages** (agent decision): the AI actor's sensors
+go back to the default scope controls with the A-G page off and no sight
+hold, and its radar switch on (a failed radar stays off), as at mission
+start. Before FX-J the AI flew with whatever pages the human left, so a human
+on the HARM page left the AI without an air picture.
+
+What each part of a human's aircraft does across a give-back and a take:
+
+| State | Before FX-J | Now |
+| --- | --- | --- |
+| Hit points, damage, faults, hit sections, stores and failed stations, chaff and flares, avionics failures, missile warnings | Carried by the conversion | Unchanged |
+| Flight state (position, fuel, gear, flaps, jammer switch, bay, damage, flight-model internals) | Moves with the aircraft | Unchanged, except the radar switch below |
+| Radar switch | Moved with the flight state; the AI flew with it | Kept; the AI flies with its radar on; restored at the take |
+| Sensors' contacts, plots, trails | Moved to the AI and back | Unchanged (the AI's are the fresher) |
+| Designation (air or ground), the sight's hold, ground retention | The AI's sensors kept or replaced it; the take designated the AI's target | Kept; restored, then kept or dropped by the next step's usual rules; a TWS track re-acquires (half a second) |
+| A-G page flag (Ctrl+R) | The AI flew with it | Kept; the AI flies without it; restored if the radar works |
+| Selected station and NAV (armed) | Start-up rule (gun first) | Kept; a station emptied meanwhile advances as an emptied one does; Guns only applies; NAV mode follows |
+| Seeker mode (CUED or BORESIGHT) | CUED | Kept |
+| Bomb sight mode (CCIP or LVL, Ctrl+M's choice) | CCIP | Kept |
+| Stations loaded this mission (an emptied or jettisoned pod's row) | Rebuilt from the stores | Kept |
+| Targeting sight: track, pin or free look, travel home, zoom | Default look, nothing held | Kept and stepped while the AI flies; slew let go, a waiting key press dropped |
+| Laser: state, hand setting (Ctrl+L on or off), automatic rule, point | Off, automatic | Kept and stepped while the AI flies |
+| AC-130 gunsight and gun group: candidate, linked guns, barrel train, look, track or pin, zoom | Default | Kept (not stepped: the guns do not fire for the AI) |
+| Easy targeting's HUD memory, the views' sight hold | None | Kept |
+| Rounds fired, hits, kills (the ownship's counters) | Zero | Kept |
+| NAV's selected airport | None | Kept; no clearance comes with it |
+| Guided weapons in flight | Laser weapons went blind when the laser went; AT-2 lost | Laser weapons follow the kept laser; AT-2 steered while the AI-flown launcher holds it; JDAMs unchanged |
+| Radar and infrared missiles in flight | Supported by the AI's fire control for that aircraft | Unchanged |
+
+Not carried, each for a reason:
+
+- **Derived every step:** release readiness, the mounted seeker, the
+  boresight return, the range estimate, the guided sight, the bomb sight's
+  solution and the HARM cue (its emitters, candidate and CUED follow the kept
+  designation and seeker mode on the first step), the emitters received and
+  the radars painting the aircraft (the host sets them).
+- **Trigger and bay state:** the trigger is not held after a gap, so it
+  starts released; the gun cadence and a pending bay release go with it.
+- **Held by the player's game:** the scope's channel (radar, the IR page or
+  the HARM page), its range and contact history, and the sight's zoom step
+  are sent with every input from the game's own settings (saved with its
+  preferences), so they come back with the game, not the handoff.
+- **The autopilot** stays off at every take (the B6 rule: the aircraft's
+  attitude and speed changed under the AI).
+- **The tower's clearance**, the crew voice, the airfield radio, the result
+  tracker's calls and the turbulence are rebuilt as at any take.
+- **Single player** never hands off; none of this runs there.
+
+Tests: `tore-sim` `combat/live/kept_tests.rs` (every part comes back; each is
+checked against the aircraft as it is; a laser bomb follows the kept laser
+and hits, and goes blind without it; a laser left off by hand stays off; the
+checkpoint), `tore-world` `world/handoff_kept_tests.rs` (a bomber's run, the
+drop, the gap and the take from another seat, the bomb guiding every tick;
+the radar switch and NAV's airport; a checkpoint taken in the gap steps on
+identically), and in `tore-session` a rejoin through a real host
+(`a_game_that_rejoins_reads_its_planes_sight_and_laser_as_it_left_them`,
+`a_laser_bomb_guides_on_across_a_drop_and_a_rejoin`).
 
 #### The AI with several humans
 
