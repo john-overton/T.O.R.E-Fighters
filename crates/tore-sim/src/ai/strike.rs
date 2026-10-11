@@ -146,8 +146,13 @@ pub const HEAVY_CEILING_SHARE: f64 = 0.9;
 /// John's release circle (2026-10-11): 90% of passes inside it.
 pub const IN_CIRCLE_SHARE: f64 = 0.9;
 /// The AI releases once the cue is within this share of its circle of the
-/// drawn aim point (spec, fitted).
-pub const GATE_SHARE: f64 = 0.05;
+/// drawn aim point, but never within less than [`GATE_FLOOR_FT`] (spec,
+/// fitted). 0.05 of R suited the 100 m Ace; 10 m circles need the floor.
+pub const GATE_SHARE: f64 = 0.1;
+/// The least the release gate may be, feet: the cue creeps up to 7 ft a tick
+/// across the aim, so a narrower gate steps over it (fitted, agent
+/// 2026-10-11, with the tighter circles).
+pub const GATE_FLOOR_FT: f64 = 10.;
 /// Warnings count this long (spec: 10 s).
 pub const WARNING_TICKS: u64 = 10 * 120;
 /// The defend test: an aircraft inside 5 nm facing the striker (spec,
@@ -833,7 +838,7 @@ impl Strike {
         self.aim_ft = draw.offset_ft;
         self.inside = draw.inside;
         self.jink_side = draw.side;
-        self.gate_ft = GATE_SHARE * radius_ft;
+        self.gate_ft = (GATE_SHARE * radius_ft).max(GATE_FLOOR_FT);
         self.holding = None;
         self.released = 0;
         self.next_release = 0;
@@ -1481,14 +1486,14 @@ pub fn sead_order(
     ranked.into_iter().map(|(_, _, id)| id).collect()
 }
 
-/// The radius of John's release circle by skill (2026-10-11): Ace 100 m,
-/// 75 m more for each level down.
+/// The radius of John's release circle by skill (2026-10-11): Ace 10 m,
+/// 25 m more for each level down.
 pub fn release_circle_ft(level: Experience) -> f64 {
     let metres = match level {
-        Experience::Ace => 100.,
-        Experience::Experienced => 175.,
-        Experience::Average => 250.,
-        Experience::Novice => 325.,
+        Experience::Ace => 10.,
+        Experience::Experienced => 35.,
+        Experience::Average => 60.,
+        Experience::Novice => 85.,
     };
     metres * FEET_PER_METRE
 }

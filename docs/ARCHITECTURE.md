@@ -444,7 +444,7 @@ flowchart LR
   page's ground objects and the HARM page, rebuilt on the retail timers. The
   fire loop and the HUD read it through the sensors, never the world.
 - `combat::ballistics` is the retail bomb equation (32 ft/s squared, no drag,
-  released along the nose with a random error of 3 degrees), the pack and pod
+  released along the nose with a random error of 1.5 degrees, retail's 3 halved), the pack and pod
   rules and the impact predictor. Bomb paths live in `live::State::bombs`, not
   on `Projectile`.
 - `combat::delivery` rebuilds the CCIP, level-release and rocket solutions every

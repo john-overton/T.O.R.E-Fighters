@@ -19,18 +19,18 @@ fn the_pack_stagger_steps_out_two_feet_a_bomb() {
 }
 
 #[test]
-fn the_scatter_is_546_units_either_way_from_the_sim_stream() {
-    // 3 degrees of 65,536 units a turn.
-    assert_eq!(scatter_units(), 546);
+fn the_scatter_is_273_units_either_way_from_the_sim_stream() {
+    // 1.5 degrees of 65,536 units a turn (retail's 3 degrees was 546).
+    assert_eq!(scatter_units(), 273);
     let unit_angle = std::f64::consts::TAU / 65_536.;
     let mut asked = Vec::new();
     let (heading, pitch) = scatter(|bound| {
         asked.push(bound);
         if asked.len() == 1 { 0 } else { bound - 1 }
     });
-    assert_eq!(asked, [1093, 1093]);
-    assert!((heading + 546. * unit_angle).abs() < 1e-12);
-    assert!((pitch - 546. * unit_angle).abs() < 1e-12);
+    assert_eq!(asked, [547, 547]);
+    assert!((heading + 273. * unit_angle).abs() < 1e-12);
+    assert!((pitch - 273. * unit_angle).abs() < 1e-12);
     assert!(heading.abs() <= BOMB_SCATTER_DEGREES.to_radians());
 }
 

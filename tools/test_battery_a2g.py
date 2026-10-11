@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from battery_scenarios import a2g_catalog, a2g_cluster  # noqa: E402
+from battery_scenarios import a2g_catalog, a2g_cluster, a2g_sights  # noqa: E402
 
 
 def cluster_run(source="CBU87.JT", radius=2200, damage=200, flashes=28, lost_outside=0, farthest=1182, lost_scale=1.0):
@@ -77,6 +77,15 @@ def catalog_output(cheat=55, normal=38, empty_normal=0, records=54):
         f"{records} weapon and 4 tank records; passed"
     )
     return "\n".join(rows)
+
+
+class ScatterReachTests(unittest.TestCase):
+    def test_the_level_reach_at_one_and_a_half_degrees_is_half_of_retails(self):
+        speed = 450 * a2g_sights.KNOT
+        now = a2g_sights.scatter_reach_ft(5000.0, speed)
+        retail = a2g_sights.scatter_reach_ft(5000.0, speed, 3.0)
+        self.assertAlmostEqual(now, 595, delta=2)
+        self.assertAlmostEqual(retail / now, 2.0, delta=0.05)
 
 
 class CatalogTests(unittest.TestCase):

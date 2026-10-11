@@ -254,7 +254,7 @@ fn the_mean_path_lands_on_the_predicted_point_within_a_foot() {
 }
 
 #[test]
-fn every_bomb_scatters_within_three_degrees_and_lands_inside_the_predicted_spread() {
+fn every_bomb_scatters_within_one_and_a_half_degrees_and_lands_inside_the_predicted_spread() {
     let mut s = carrying(mk82(), 200, [0.; 3]);
     let launcher = pass(5_000., 450., -20.);
     let station = s.own().configuration().stations[0].clone();

@@ -16,7 +16,8 @@ the Ukraine column. The A-G page designates the target, the bomb starts in LVL
 on selection, and the trigger is held from then on: exactly one bomb leaves,
 on the tick the impact point reaches the target (within three ticks of
 ground travel past it) with the cross-track miss inside the record's radius,
-it bursts within the splash radius of the target, and OVERFLY shows after.
+it bursts within the splash radius of the target plus the scatter's reach (about 600 ft at 1.5
+degrees; the bomb is one random draw), and OVERFLY shows after.
 
 `a2g-rocket-ccip`: an A-4E's LAU-61 rockets in a 10 degree dive on a truck,
 fired once the rocket pipper says IN RNG: they hit and destroy it, and a
@@ -44,6 +45,23 @@ LEVEL_RELEASE = re.compile(
 )
 LEVEL = re.compile(r"^a2g-run: level t=\S+ along (\S+) cross \S+ rel (\S+) steer \S+ marker (\S+) far (\w+)", re.M)
 KNOT = 1.6878
+# The bomb scatter (crates/tore-sim/src/combat/ballistics.rs BOMB_SCATTER_DEGREES): 1.5 degrees in
+# heading and pitch since John's 2026-10-11 change (retail 3).
+SCATTER_DEGREES = 1.5
+
+
+def scatter_reach_ft(height_ft: float, speed_fps: float, degrees: float = SCATTER_DEGREES) -> float:
+    """The farthest a level release's bomb can land from the mean impact with the heading and pitch
+    errors at their limits (the bomb equation: gravity 32 ft/s squared, no drag), over flat ground."""
+    def land(heading: float, pitch: float) -> tuple[float, float]:
+        vz = speed_fps * math.sin(pitch)
+        vh = speed_fps * math.cos(pitch)
+        fall = (vz + math.sqrt(vz * vz + 64 * height_ft)) / 32
+        return vh * math.cos(heading) * fall, vh * math.sin(heading) * fall
+    limit = math.radians(degrees)
+    mean = land(0.0, 0.0)
+    corners = [land(h * limit, p * limit) for h in (-1, -0.5, 0, 0.5, 1) for p in (-1, -0.5, 0, 0.5, 1)]
+    return max(math.hypot(a - mean[0], b - mean[1]) for a, b in corners)
 
 
 def runs(output: str) -> list[str]:
@@ -156,8 +174,15 @@ def level_problems(output: str) -> list[str]:
     splash = float(m.group(1)) if m else 0
     if len(impacts) != 1:
         problems.append(f"{len(impacts)} bursts seen, want 1")
-    elif float(impacts[0][2]) > splash:
-        problems.append(f"burst {impacts[0][2]} ft from the target, outside the {splash:.0f} ft splash")
+    else:
+        # The bomb is one random draw inside its scatter: it may land the scatter's reach beyond the
+        # splash radius of the mean impact (about 600 ft at 1.5 degrees from 5,000 ft at 450 kt).
+        reach = scatter_reach_ft(5000.0, 450 * KNOT)
+        if float(impacts[0][2]) > splash + reach:
+            problems.append(
+                f"burst {impacts[0][2]} ft from the target, outside the {splash:.0f} ft splash plus "
+                f"the {reach:.0f} ft the scatter can carry it"
+            )
     return problems
 
 

@@ -265,12 +265,21 @@ fn the_pass_is_a_fixed_function_of_class_store_threat_and_speed() {
 }
 
 #[test]
+fn the_release_gate_is_a_tenth_of_the_circle_but_never_under_ten_feet() {
+    let gate = |l| (GATE_SHARE * release_circle_ft(l)).max(GATE_FLOOR_FT);
+    // Ace 33 ft: the floor. Experienced 115 ft: the floor's 11.5 ft is above it.
+    assert_eq!(gate(Experience::Ace), GATE_FLOOR_FT);
+    assert!((gate(Experience::Experienced) - 11.48).abs() < 0.01);
+    assert!((gate(Experience::Novice) - 27.89).abs() < 0.01);
+}
+
+#[test]
 fn the_release_circle_is_john_s_and_the_draw_is_deterministic() {
     let metres: Vec<f64> = Experience::ALL
         .iter()
         .map(|l| (release_circle_ft(*l) * 0.3048).round())
         .collect();
-    assert_eq!(metres, vec![325., 250., 175., 100.]);
+    assert_eq!(metres, vec![85., 60., 35., 10.]);
     let a = aim_draw(77, 3, 1, 1_000.);
     assert_eq!(
         a,
@@ -492,7 +501,7 @@ fn a_pass_releases_on_the_gate_exits_turns_back_and_attacks_again() {
     let draw = aim_draw(9, OWN, 1, circle);
     assert_eq!((aim, inside), (draw.offset_ft, draw.inside));
     assert_eq!(selection.aim_ft, aim, "a still target: no lead");
-    assert!((selection.gate_ft - GATE_SHARE * circle).abs() < 1e-9);
+    assert!((selection.gate_ft - (GATE_SHARE * circle).max(GATE_FLOOR_FT)).abs() < 1e-9);
 
     // The cue far short: no release while the host says not due.
     world.own.position = [0., 3_000., 18_000.];

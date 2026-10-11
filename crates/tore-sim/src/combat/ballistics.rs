@@ -33,11 +33,11 @@ pub const BOMB_FLAG: u32 = 0x10;
 /// The bomb equation's gravity, ft/s² (retail, not 32.2).
 pub const GRAVITY_FPS2: f64 = 32.;
 /// The largest random error a released bomb takes in heading and, separately,
-/// in pitch: retail `adjustBombAngle`, 546 of 65,536 units a turn
-/// (FA.EXE 1.02F `0x50ce08`, applied at `0x4c1fc0`). Retail applies it to
-/// every bomb, and John confirmed it for the player's bombs too on
-/// 2026-10-10. One constant, so it can change.
-pub const BOMB_SCATTER_DEGREES: f64 = 3.;
+/// in pitch. Retail's `adjustBombAngle` is 546 of 65,536 units a turn, 3
+/// degrees (FA.EXE 1.02F `0x50ce08`, applied at `0x4c1fc0`); John halved it
+/// to 1.5 degrees (273 units) on 2026-10-11, for every bomb, the player's
+/// and the AI's (opinionated, John). One constant, so it can change.
+pub const BOMB_SCATTER_DEGREES: f64 = 1.5;
 /// Binary angle units a turn, the unit the scatter is rolled in.
 const UNITS_PER_TURN: f64 = 65_536.;
 /// The steepest release pitch, retail's `0x3ffc` clamp.
@@ -80,7 +80,7 @@ pub fn pack_offset(index: usize) -> [f64; 2] {
     [x as f64, y as f64]
 }
 
-/// Half the scatter's span in binary angle units (546 for 3 degrees).
+/// Half the scatter's span in binary angle units (273 for 1.5 degrees, retail's 546 for 3).
 fn scatter_units() -> u16 {
     (BOMB_SCATTER_DEGREES / 360. * UNITS_PER_TURN).round() as u16
 }

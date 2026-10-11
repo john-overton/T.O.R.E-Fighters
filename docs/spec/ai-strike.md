@@ -71,8 +71,8 @@ John's answers change the shape of it. All of these are opinionated (John,
 
 Randomness is kept as low as it can be (John, decision 13). Every choice below
 is a function of the situation. The only dice left in a strike are the ones the
-player's weapons already have: a bomb's up to 3 degree scatter in heading and
-pitch ([bomb motion](air-to-ground.md#bomb-motion), retail), and the existing
+player's weapons already have: a bomb's up to 1.5 degree scatter in heading and
+pitch ([bomb motion](air-to-ground.md#bomb-motion), half of retail's 3, John 2026-10-11), and the existing
 seeded draws for hit rolls and countermeasures.
 
 ## Who strikes
@@ -310,21 +310,23 @@ puts the weapon closer to the target. John's rule is a circle around the target
 that grows as skill goes down.
 
 **The release circle (opinionated, John, 2026-10-11).** The radius `R` comes
-from the aircraft's experience level ([AI experience](ai-experience.md)), 75 m
-more for each level down:
+from the aircraft's experience level ([AI experience](ai-experience.md)), 25 m
+more for each level down. John tightened the circles on 2026-10-11 (they were
+100, 175, 250 and 325 m): "keep the Ace accuracy within 10 m and increase by 25
+m for each band".
 
 | Level | `R` (m) | `R` (ft) |
 | --- | ---: | ---: |
-| Ace | 100 | 328 |
-| Experienced | 175 | 574 |
-| Average | 250 | 820 |
-| Novice | 325 | 1,066 |
+| Ace | 10 | 33 |
+| Experienced | 35 | 115 |
+| Average | 60 | 197 |
+| Novice | 85 | 279 |
 
 - **The AI releases only when the aim cue puts the predicted impact inside its
   circle**: the pipper in CCIP, the T in LVL, the rocket impact for rockets. It
   flies the cue to the aim point drawn below with its stick and rudder and
-  drops when it arrives. An Ace therefore holds the pipper within 100 m of the target; a
-  Novice lets it be 325 m off. (Opinionated, John, 2026-10-11.)
+  drops when it arrives. An Ace therefore holds the pipper within 10 m of the target; a
+  Novice lets it be 85 m off. (Opinionated, John, 2026-10-11.)
 - **A seeded draw picks the aim offset for each pass.** The draw is a
   deterministic function of the mission seed, the aircraft id and the pass
   number (the first pass at a target is 1, each re-attack adds one), so every
@@ -336,13 +338,15 @@ more for each level down:
   two thirds of `R`. The 90% and the circle are John's; the ring's extent and
   the seed inputs are an agent choice (opinionated, agent; see
   [Confirm with John](#confirm-with-john)). The AI flies the cue to the
-  drawn point and releases when the cue is within 5% of `R` (fitted) of it, so
+  drawn point and releases when the cue is within the gate of it, 10% of `R` but at least 10 ft (fitted, agent; it was 5% of `R` for the 100 m Ace, and a 33 ft Ace would step over a 1.6 ft gate), so
   a ring draw releases outside the circle: that is the 10% John asked for.
   (Opinionated, agent.)
-- **The weapon's scatter is on top**, as for the player: up to 3 degrees in
-  heading and pitch for bombs (the retail 0.0524 of the range), the rocket and
-  gun spreads of their records. The scatter is the retail dice and stays as it
-  is.
+- **The weapon's scatter is on top**, as for the player: up to 1.5 degrees in
+  heading and pitch for bombs (0.0262 of the range; retail's is 3 degrees,
+  0.0524, and John halved it for every bomb, player and AI, on 2026-10-11,
+  opinionated), the rocket and gun spreads of their records. The bomb scatter
+  is the retail dice at half the angle ([bomb
+  motion](air-to-ground.md#bomb-motion)).
 - **Unguided weapons only.** The circle applies to unguided bombs, packs and
   rockets. Smart weapons use the targeting and laser systems as the player
   does, which are hard to get wrong at any skill (opinionated, John,
@@ -355,21 +359,23 @@ more for each level down:
   where the pilot aims.
 
 **Worked numbers** (arithmetic of this spec, not a measurement; the draws shown
-are chosen to illustrate; the scatter is the retail 3 degrees, 0.0524 of the
-range):
+are chosen to illustrate; the scatter is TORE's 1.5 degrees, 0.0262 of the
+range, half of retail's 3):
 
-| Case | Ace (328 ft) | Experienced (574 ft) | Average (820 ft) | Novice (1,066 ft) |
+| Case | Ace (33 ft) | Experienced (115 ft) | Average (197 ft) | Novice (279 ft) |
 | --- | --- | --- | --- | --- |
-| Mk 82 dive: 30 degrees, 6,000 ft slant. Scatter alone about 310 ft across the track | Aim 164 ft out for a draw `u` = 0.25; bombs land about 164 ft plus up to 310 ft scatter from the target | Aim 287 ft out; the slick's 300 ft fuze radius is hit by the lucky bombs | Aim 410 ft out | Aim 533 ft out, bombs spread beyond a fuze radius |
-| Mk 82 level: 6,000 ft AGL, 450 kt, 19.4 s fall, 15,900 ft slant. Scatter alone about 770 ft across the track | Aim 164 ft out; scatter dominates | Aim 287 ft out | Aim 410 ft out | Aim 533 ft out; scatter and aim are of the same order |
-| The same pass with a ring draw (10%), `u` = 0.25 | `R x sqrt(1.75)` = 434 ft | 759 ft | 1,085 ft | 1,410 ft |
+| Mk 82 dive: 30 degrees, 6,000 ft slant. Scatter alone about 155 ft across the track | Aim 16 ft out for a draw `u` = 0.25; bombs land about 16 ft plus up to 155 ft scatter from the target, inside the slick's 300 ft fuze radius | Aim 57 ft out; inside the fuze radius | Aim 98 ft out; inside the fuze radius | Aim 139 ft out; still inside it, though a bad scatter on a 279 ft edge draw reaches 434 ft |
+| Mk 82 level: 6,000 ft AGL, 450 kt, 19.4 s fall, 15,900 ft slant. Scatter alone about 385 ft across the track | Aim 16 ft out; scatter dominates | Aim 57 ft out; scatter dominates | Aim 98 ft out | Aim 139 ft out; scatter is still the larger part |
+| The same pass with a ring draw (10%), `u` = 0.25 | `R x sqrt(1.75)` = 43 ft | 152 ft | 260 ft | 369 ft |
 
 Every distance in the first two rows is `R x sqrt(0.25)`, half of `R`; a draw
-of `u` = 1 would put the aim on the circle's edge (R). Reading: an Ace's
-unguided bombs land within a few hundred feet and the scatter is most of the
-miss; a Novice's aim alone can lose the fuze radius of a Mk 82 (300 ft) on most
-passes. Guided weapons are not in the table: they aim at the target at every
-skill.
+of `u` = 1 would put the aim on the circle's edge (R). Reading: with the
+tighter circles and scatter the bomb's own scatter is most of the miss at every
+skill, and most of a Mk 82 dive's bombs land inside its 300 ft fuze radius even
+for a Novice; a level release spreads over about 385 ft whatever the skill, so
+the skill shows mostly in how often the 10% ring draw pushes the aim beyond the
+fuze radius. Guided weapons are not in the table: they aim at the target at
+every skill.
 
 ## Weapons and releases
 
@@ -471,7 +477,7 @@ All fitted (agent, 2026-10-11) unless marked.
 | Aim | The pass's seeded draw (mission seed: the aircraft's roster seed; aircraft id; pass number), unguided only. A moving target is also led by its ground speed times the cue's time of fall |
 | Approach | Flown at the aim point. A pop-up comes down to 500 ft over the target by its pull point, 10,000 ft out (16,000 ft for rockets), then pulls 25 degrees over the line of sight at corner speed for at least 4 s and until the target is 15 degrees down. A dive approaches its roll-in point (the dive's height, at least max(10,000 ft, 2R), where the aim is 30 degrees down) and starts the dive there, since the adapter noses over wings level instead of retail's inverted pull |
 | Flying the cue | Across the track the heading turns by the angle between the aim and the line the cue sweeps along. In a straight run, pop-up or dive the flight path is turned by three times the angle between the cue and a point 600 ft short of the aim (no more than 8 degrees over the line to the target) until the cue is within 600 to 900 ft short, then held, so the cue creeps across the aim; a cue that overshoots by the circle is flown again. While the cue is more than 3,000 ft short the pass flies its own line. A push that would ask the adapter for less than 0.3 G is flown wings level (a banked push turns the wrong way). Level runs, fast-high bomb runs and guided weapons hold their height and steer the cue (or the aim) across |
-| Release | When the host's shared release test passes (the cue within 5% of R of the aim, or a guided weapon's reach), in the pass's final or a pop-up's pull, with the cue inside the store's zone 1 range, above the floor for a dive or level release, and not while the sight warns LOW or FRAG. One trigger call a pass (a pack leaves whole); rockets fire one at the record's cadence while the cue stays inside the circle, at most 8. Seeker missiles fire on the lock (inside zone 1 from the mount, within 10,000 ft or half the zone-1 maximum, an emitting target for a HARM, one guided round at a time) through the AI's own missile release, observed on the ground target |
+| Release | When the host's shared release test passes (the cue within the gate of the aim, 10% of R and at least 10 ft, or a guided weapon's reach), in the pass's final or a pop-up's pull, with the cue inside the store's zone 1 range, above the floor for a dive or level release, and not while the sight warns LOW or FRAG. One trigger call a pass (a pack leaves whole); rockets fire one at the record's cadence while the cue stays inside the circle, at most 8. Seeker missiles fire on the lock (inside zone 1 from the mount, within 10,000 ft or half the zone-1 maximum, an emitting target for a HARM, one guided round at a time) through the AI's own missile release, observed on the ground target |
 | Exit | Retail's: a jink of four 3 s legs at maximum speed (12 degrees up, 10 degrees to the side the draw picks) inside 10,000 ft, then 10 degrees up at maximum speed, levelling 2,000 ft over the altitude the strike began at (a dive's exit climbs back to the dive's height), turning back at max(30,000 ft, 2R) (a heavy at 50,000 ft) |
 | Defend | A B47 defence (missile or gunfire) or a fighter inside 5 nm within 45 degrees of its nose hands the flying back. Once no warning has sounded for 10 s it resumes at ingress if [safe](#egress-re-attack-and-going-home) (the safe test as written, confirmed by John on 2026-10-11); if not, it egresses to the exit distance and resumes only if safe by then, else goes home |
 | Home | No target or no usable store left: the mission's own return (a landing order with a runway, else the leader flies home) |
@@ -638,12 +644,12 @@ strike order or a takeover of a striking plane.
 
 | Figure | Value | Label |
 | --- | --- | --- |
-| Release circle radius (Ace, Experienced, Average, Novice) | 100 m (328 ft), 175 m (574 ft), 250 m (820 ft), 325 m (1,066 ft) | opinionated (John, 2026-10-11) |
+| Release circle radius (Ace, Experienced, Average, Novice) | 10 m (33 ft), 35 m (115 ft), 60 m (197 ft), 85 m (279 ft) | opinionated (John, 2026-10-11; replaces 100, 175, 250 and 325 m) |
 | Aim offset draw | 90% inside the circle, uniform by area; 10% in the ring R to 2R | 90/10 opinionated (John, 2026-10-11); ring extent opinionated (agent) |
 | Draw seed | mission seed, aircraft id, pass number | opinionated (agent) |
 | Guided weapons | no offset: the JDAM stores the target's point, the laser spot sits on the target, seekers lock on it | opinionated (John, 2026-10-11) |
-| Release on the aim point within | 5% of `R` | fitted |
-| Scatter | up to 3 degrees in heading and pitch, as the player | retail |
+| Release on the aim point within | 10% of `R`, at least 10 ft | fitted (agent, 2026-10-11, with the tighter circles) |
+| Scatter | up to 1.5 degrees in heading and pitch (273 units), as the player; retail's is 3 degrees (546 units) | opinionated (John, 2026-10-11) |
 | Threat levels | Clear, Air (fighter within 30 nm), Guns, Missiles | opinionated (agent) |
 | Energy | Good at or above corner speed | opinionated (agent) |
 | Dive gate | altitude and distance both at least max(10,000 ft, 2 turn radii) | retail |
