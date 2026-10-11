@@ -82,6 +82,7 @@ crate::checkpoint_struct!(Strike {
     warned,
     threat,
     withdrawn,
+    takeover,
 } skip {
     inputs = None,
 });

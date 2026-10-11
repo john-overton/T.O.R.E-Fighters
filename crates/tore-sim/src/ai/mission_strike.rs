@@ -8,7 +8,7 @@
 //! air-to-air behaviour is unchanged.
 use super::super::awareness::ground::RecentWarnings;
 use super::super::controller::OwnState;
-use super::super::strike::{self, Context, Inputs, Order, Strike};
+use super::super::strike::{self, Context, Inputs, Order, Strike, Takeover};
 use super::super::weapon_service::StationId;
 use super::{AiActor, AiMission};
 use crate::ai::engagement::StrikeRole;
@@ -39,6 +39,18 @@ impl AiActor {
         self.strike
             .get_or_insert_with(|| Box::new(Strike::new(self.seed)))
             .force(pass, station);
+    }
+
+    /// Continues the attack a human left on this aircraft (slice ST-K): the
+    /// strike starts as a takeover of `takeover`. The host gives the actor
+    /// its ground order first; returns false, changing nothing, for an actor
+    /// that does not strike.
+    pub fn take_over_strike(&mut self, takeover: Takeover) -> bool {
+        if !self.strikes() {
+            return false;
+        }
+        self.strike = Some(Box::new(Strike::taken_over(self.seed, takeover)));
+        true
     }
 
     /// The actor has a ground picture with work to do (the Strike role or a
@@ -112,7 +124,16 @@ impl AiActor {
             ceiling_ft: self.ceiling_ft(),
         };
         let strike = self.strike.as_mut()?;
-        Some(strike.step(&context))
+        let order = strike.step(&context);
+        // A takeover with nothing left to attack hands the aircraft back to
+        // its ordinary role rather than sending it home (slice ST-K).
+        if strike.takeover_done() && !recovering {
+            self.strike = None;
+            self.set_strike_order(None);
+            self.set_strike_role(super::super::engagement::StrikeRole::Cap);
+            return None;
+        }
+        Some(order)
     }
 
     /// The warnings of the last 10 s from the actor's own missile warnings:

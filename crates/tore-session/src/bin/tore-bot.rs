@@ -163,13 +163,15 @@
 //! each store on its aircraft before it readies, a Cheat loading the host's
 //! `loadouts any` allows: the first station after the others that takes the
 //! store gets up to two. The bot takes its slot, sends the loadout and
-//! readies once the host accepts it. `--a2g lase|buddy` flies the plane by
+//! readies once the host accepts it. `--a2g lase|buddy|strike|watch` flies the plane by
 //! the air-to-ground script (`tore_session::bot::a2g`): `lase` turns the A-G
 //! radar on, designates the nearest enemy ground object by Ctrl+X (the Easy
 //! targeting cheat) and lases it by hand while circling it; `buddy` drops a
 //! GBU-10 on another plane's spot when its guided sight says IN RNG, then
-//! fires an AGM-88 in BORE at the HARM cue's candidate. Both print what
-//! their screens show, "NAME: a2g: ..." lines. `--players N` on a joined
+//! fires an AGM-88 in BORE at the HARM cue's candidate; `strike` (slice
+//! ST-K) sets up a Mk 82 pass in LVL at the nearest enemy ground object and
+//! flies it without releasing; `watch` presses nothing and reports its
+//! cockpit. All print what their screens show, "NAME: a2g: ..." lines. `--players N` on a joined
 //! bot that wears the crown makes its start wait until N players hold
 //! slots, all ready.
 //!
@@ -218,7 +220,7 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--capture FILE] [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] [--objectives] \
 [--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
-[--drop-resource NAME]... [--expect-unable] [--load STORE[,STORE]...] [--a2g lase|buddy]\n       \
+[--drop-resource NAME]... [--expect-unable] [--load STORE[,STORE]...] [--a2g lase|buddy|strike|watch]\n       \
 tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
 
@@ -603,10 +605,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--a2g" => {
                 let word = value()?;
-                options.a2g = Some(
-                    tore_session::bot::a2g::Role::parse(&word)
-                        .ok_or_else(|| format!("--a2g is lase or buddy, not {word:?}"))?,
-                );
+                options.a2g =
+                    Some(tore_session::bot::a2g::Role::parse(&word).ok_or_else(|| {
+                        format!("--a2g is lase, buddy, strike or watch, not {word:?}")
+                    })?);
             }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),

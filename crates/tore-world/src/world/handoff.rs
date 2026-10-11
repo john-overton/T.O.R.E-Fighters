@@ -19,7 +19,9 @@ use crate::{
     seats::{Pilot, PlaneId, SeatId},
 };
 use std::sync::Arc;
-use tore_sim::combat::live::{self, AiPose, AiStores, Ownship};
+use tore_sim::ai::strike::Strike;
+use tore_sim::combat::live::{self, AiPose, AiStores, Kept, Ownship, StrikeCockpit};
+use tore_sim::sensors::Picks;
 
 /// What building a human-flown aircraft needs that the AI's records do not
 /// hold: the aircraft's type and its combat configuration.
@@ -148,10 +150,13 @@ impl World {
             ),
         };
         let wings = self.ai_wings.as_mut().ok_or("no AI flies this mission")?;
-        let target = wings
-            .mission()
-            .actor(id)
-            .and_then(tore_sim::ai::mission::AiActor::current_target);
+        let actor = wings.mission().actor(id);
+        let target = actor.and_then(tore_sim::ai::mission::AiActor::current_target);
+        // An AI striker's ground target, while it strikes (slice ST-K).
+        let striking = actor
+            .and_then(|a| a.strike())
+            .and_then(Strike::selection)
+            .map(|s| s.target);
         let removed = wings
             .remove_actor(id)
             .ok_or_else(|| format!("the AI does not fly plane {id}"))?;
@@ -188,9 +193,25 @@ impl World {
         // designation and the pages. Else the start-up rule of a flight
         // start: the gun if it carries something, else the first loaded
         // station Guns only allows, else NAV.
+        //
+        // Slice ST-K: the designation follows the target the AI attacked from
+        // that cockpit meanwhile; and a first take of an AI striker inherits
+        // its attack (its target designated, its store, mode and laser).
         let cheats = self.combat.state.cheats;
-        let kept = self.combat.state.kept(id).cloned();
-        match &kept {
+        let kept = self.combat.state.kept(id).cloned().map(|mut kept| {
+            follow_strike_target(&mut kept, &self.combat.state);
+            kept
+        });
+        let inherited = match (&kept, striking) {
+            (None, Some(target)) => self
+                .combat
+                .state
+                .ai_cockpits()
+                .find(|(aircraft, _)| *aircraft == id)
+                .map(|(_, ai)| inherit(&ownship, &ai.cockpit, target)),
+            _ => None,
+        };
+        match kept.as_ref().or(inherited.as_ref()) {
             Some(kept) => ownship.restore(kept, cheats.guns_only, cheats.unlimited_ammo),
             None => combat::apply_startup_weapon_state(
                 &mut ownship,
@@ -213,6 +234,8 @@ impl World {
         flight.autopilot.disengage();
         flight.cheats = self.combat.state.cheats;
         let mut airport_service = service;
+        // An AI striker's own cockpit is the human's now (or was never made).
+        self.combat.state.take_ai_cockpit(id);
         if let Some(kept) = &kept {
             self.combat.state.take_kept(id);
             flight.radar = kept.radar;
@@ -244,7 +267,7 @@ impl World {
         let at = self.cockpits.partition_point(|c| c.plane < plane);
         self.cockpits.insert(at, cockpit);
         self.refresh_friendlies();
-        if let Some(target) = target.filter(|_| kept.is_none()) {
+        if let Some(target) = target.filter(|_| kept.is_none() && inherited.is_none()) {
             // Held only if the aircraft's sensors hold the contact. Not a
             // command of the seat's, so no tape or note records it. A
             // cockpit a human left keeps that human's designation instead.
@@ -371,8 +394,54 @@ impl World {
             .targets
             .partition_point(|target| target.id < row.id);
         self.combat.state.targets.insert(at, row);
+        // The AI continues the human's ground attack, when it has one and a
+        // store to do it with (slice ST-K).
+        if let (Some(wings), Some(kept)) = (self.ai_wings.as_mut(), self.combat.state.kept(id)) {
+            wings.continue_attack(id, kept, &self.combat.state);
+        }
         self.roster.release_plane(seat);
         self.refresh_friendlies();
         Ok(())
     }
+}
+
+/// What the sensors pick to designate ground object `target` from
+/// `cockpit`: the target, held by the sight's track when it tracks it,
+/// kept by the ground rules, with the A-G flag `air_ground`.
+fn designating(target: u32, cockpit: &StrikeCockpit, air_ground: bool) -> Picks {
+    Picks {
+        selected: Some(target),
+        held: (cockpit.sight.and_then(|s| s.target()) == Some(target)).then_some(target),
+        ground_retained: Some(target),
+        air_ground,
+    }
+}
+
+/// Slice ST-K: a kept cockpit the AI attacked a ground target from (its
+/// strike target, which the strike bridge keeps in the cockpit) comes back
+/// with that target designated, when it stands and differs from what the
+/// human designated: a dead target is replaced by the next the AI took.
+/// Everything else stays as the human left it.
+fn follow_strike_target(kept: &mut Kept, state: &live::State) {
+    let Some(target) = kept.cockpit.target_object() else {
+        return;
+    };
+    let standing = state
+        .targets
+        .iter()
+        .any(|t| t.id == target && t.hp > 0 && !t.airborne);
+    if standing && kept.picks.selected != Some(target) {
+        kept.picks = designating(target, &kept.cockpit, kept.picks.air_ground);
+    }
+}
+
+/// Slice ST-K: what a human taking an AI striker for the first time finds:
+/// the striker's cockpit (its store, armed, bomb sight and seeker modes, its
+/// sight and laser), its ground target designated on the A-G page, and the
+/// rest as a fresh cockpit of `ownship`'s.
+fn inherit(ownship: &Ownship, cockpit: &StrikeCockpit, target: u32) -> Kept {
+    let mut kept = ownship.kept();
+    kept.cockpit = cockpit.clone();
+    kept.picks = designating(target, cockpit, true);
+    kept
 }

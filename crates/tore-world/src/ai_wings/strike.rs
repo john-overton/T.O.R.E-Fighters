@@ -23,6 +23,7 @@ use tore_sim::attitude::Vector;
 use tore_sim::combat::delivery::Warning;
 use tore_sim::combat::live::{self, ReleaseAim, StrikeTarget};
 use tore_sim::combat::missiles::{self, Flight, LaunchMode, Motion, seeker};
+use tore_sim::combat::sight::SightMode;
 use tore_sim::combat::{FallState, ballistics, guided, launch_speed};
 
 /// The anti-radiation and radar seeker signatures (docs/formats/radar.md).
@@ -63,6 +64,7 @@ pub(super) fn step(
         let solution = selection.and_then(|sel| {
             let station = usize::from(sel.station.0);
             let w = &config.stations.get(station)?.weapon;
+            let target_standing = state.targets.iter().any(|t| t.id == sel.target && t.hp > 0);
             let cockpit = state.ai_cockpit_mut(id, side, config)?;
             cockpit.target = Some(StrikeTarget::Object(sel.target));
             cockpit.selected = station;
@@ -71,16 +73,34 @@ pub(super) fn step(
             if !kept {
                 cockpit.delivery_mode = sel.mode;
             }
-            if sel.laser && designator {
+            // Nor its laser hand setting (slice ST-K); the AI's own laser goes
+            // on by hand for a laser store.
+            if sel.laser && designator && !kept {
                 cockpit.laser.manual = Some(true);
+            }
+            // A kept sight that is not pinned takes the AI's target as its
+            // track, as an AI striker's own sight does; a human's pin stays
+            // where it was put (slice ST-K).
+            if kept
+                && target_standing
+                && let Some(sight) = cockpit.sight.as_mut()
+                && !matches!(sight.mode, SightMode::Pinned(_))
+                && sight.target() != Some(sel.target)
+            {
+                sight.track(sel.target);
             }
             let row = state.targets.iter().find(|t| t.id == sel.target)?;
             let (position, velocity, alive) = (row.position, row.velocity, row.hp > 0);
             let emitting = row.radar_emitting;
+            // A laser weapon of its own in flight counts too (slice ST-K: a
+            // takeover holds its target in the gimbal until impact).
             let guided_in_flight = state
                 .projectiles
                 .iter()
-                .any(|p| p.owner == id && p.target == Some(sel.target) && p.guidance.is_some());
+                .any(|p| p.owner == id && p.target == Some(sel.target) && p.guidance.is_some())
+                || state
+                    .guided_flights()
+                    .any(|(_, f)| f.owner == id && f.kind == missiles::Guidance::Laser);
             let (impact, seconds, warning, due) = if sel.kind.seeker() {
                 let due = seeker_due(
                     sel.kind,

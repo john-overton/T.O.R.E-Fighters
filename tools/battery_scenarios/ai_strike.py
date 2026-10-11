@@ -11,6 +11,8 @@ what the simulation reports. Two kinds of scenario use it:
   that a human-flown run is handed to the AI, and that a wing order goes out.
   `ai-strike-driver`, `ai-strike-handback`, `ai-strike-order`; the order scenarios `ai-wing-ground-order`
   and `ai-wing-lase` (slice ST-O).
+* Takeover (slice ST-K): `ai-strike-takeover`, a human's laser bomb pass in LVL continued by the AI
+  after a handback and taken back afterwards.
 * Behaviour scenarios, one per weapon class (slice ST-T, the strike tactics):
   `ai-strike-bombs`, `ai-strike-rockets`, `ai-strike-maverick`,
   `ai-strike-jdam`, `ai-sead-harm`, `ai-strike-defended`. Each run names the
@@ -223,6 +225,69 @@ def handback_problems(output: str) -> list[str]:
             problems.append(f"run 1: the human's bomb ended {impact.get('miss_ft')} ft from the target")
     if runs[1].of("RELEASE") and runs[1].times("RELEASE")[0] < float(runs[1].first("HANDBACK")["t"]):
         problems.append("run 2: the human released, but the trigger was never pressed")
+    return problems
+
+
+# A laser bomb the AI guides on the human's laser ends this close to the target, feet.
+TAKEOVER_MISS_FT = 500.0
+
+
+def takeover_problems(output: str) -> list[str]:
+    """`ai-strike-takeover` (slice ST-K, docs/spec/ai-strike.md "Takeover and handback"): a human sets
+    up a laser bomb pass in LVL with the laser on by hand and gives the aircraft back mid-pass; the AI
+    continues the same pass on the same target with the same store, in LVL with the laser on, and the
+    bomb guides home; the human takes the aircraft back and finds its cockpit as left, one bomb fewer."""
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"{len(runs)} runs finished, want 1"]
+    run = runs[0]
+    problems = consistency_problems(run, "run 1")
+    back = run.first("HANDBACK")
+    over = run.first("TAKEOVER")
+    if back is None or over is None:
+        return problems + ["no HANDBACK or TAKEOVER line"]
+    t_back = number(back.get("t"))
+    if back.get("mode") != "LVL" or back.get("laser") != "hand-on":
+        problems.append(f"handed back in {back.get('mode')} with the laser {back.get('laser')}, asked LVL hand-on")
+    if back.get("designated") in (None, "none"):
+        problems.append("the human designated nothing")
+    if (over.get("target"), over.get("station"), over.get("mode")) != (
+        back.get("designated"), back.get("selected"), "LVL"
+    ):
+        problems.append(
+            f"the AI took over target={over.get('target')} station={over.get('station')} mode={over.get('mode')}, "
+            f"the human left {back.get('designated')} station {back.get('selected')} LVL"
+        )
+    passes = [f.get("name") for f in run.of("PROFILE") if number(f.get("t")) >= t_back]
+    if passes[:1] != ["level"]:
+        problems.append(f"the AI flew {passes[:1] or 'nothing'}, want a level run")
+    releases = [t for t in run.times("RELEASE") if t >= t_back]
+    if not releases:
+        problems.append("the AI released nothing after the handback")
+    impacts = run.of("IMPACT")
+    first_impact = number(impacts[0].get("t")) if impacts else math.inf
+    if not impacts:
+        problems.append("the bomb never ended")
+    elif not number(impacts[0].get("miss_ft")) <= TAKEOVER_MISS_FT:
+        problems.append(f"the laser bomb ended {impacts[0].get('miss_ft')} ft from the target")
+    kept = run.of("KEPT")
+    if not kept:
+        problems.append("no KEPT line: the AI flew without the human's cockpit")
+    for line in kept:
+        if line.get("mode") != "LVL" or line.get("laser") != "hand-on" or line.get("selected") != back.get("selected"):
+            problems.append(f"the AI changed the human's cockpit: {line}")
+            break
+        if line.get("lasing") != "yes" and number(line.get("t")) < first_impact:
+            problems.append(f"the laser stopped at t={line.get('t')}, before the bomb ended")
+            break
+    take = run.first("TAKEBACK")
+    if take is None:
+        return problems + ["no TAKEBACK line"]
+    if (take.get("mode"), take.get("laser"), take.get("selected")) != ("LVL", "hand-on", back.get("selected")):
+        problems.append(f"the human found mode={take.get('mode')} laser={take.get('laser')} station={take.get('selected')}")
+    want = number(run.setup.get("rounds")) - len(run.of("RELEASE"))
+    if number(take.get("rounds")) != want:
+        problems.append(f"the human found {take.get('rounds')} rounds, want {want:.0f}")
     return problems
 
 
@@ -469,6 +534,18 @@ def scenarios() -> list[Scenario]:
             notes="A seat designates the column, selects the Mk 82 in LVL and holds the trigger (a bomb is "
                   "released and reported), then gives the aircraft to the AI; and a second run handed back "
                   "before the release. Both report the handoff and what the AI does after it.",
+        ),
+        Scenario(
+            name="ai-strike-takeover", lane="flight",
+            args=pilot_run("UKR", "QUCOL", "--aircraft", "f16c", "--load", "GBU10", "--handback", "3", "--mode",
+                           "lvl", "--laser", "--take-back", "60", "--altitude", "8000", "--from", "6",
+                           "--seconds", "120"),
+            timeout=300,
+            check=takeover_problems,
+            notes="A seat flies an F-16C's GBU-10 pass at the column in LVL with the laser on by hand and gives the "
+                  "aircraft back 3 s in; the AI flies the same level pass at the same target with the same store, "
+                  "the laser holds the target until the bomb ends, and the seat takes the aircraft back to find "
+                  "its cockpit as left, one bomb fewer (slice ST-K).",
         ),
         Scenario(
             name="ai-strike-order", lane="flight",

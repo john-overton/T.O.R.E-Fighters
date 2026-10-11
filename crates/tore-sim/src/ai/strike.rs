@@ -445,6 +445,8 @@ pub struct Strike {
     /// It left after a defence because it was not safe: at the exit
     /// distance it resumes only if safe, else goes home.
     withdrawn: bool,
+    /// The human's attack this strike continues (slice ST-K), if any.
+    takeover: Option<Takeover>,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -477,6 +479,7 @@ impl Strike {
             warned: None,
             threat: ThreatLevel::Clear,
             withdrawn: false,
+            takeover: None,
             inputs: None,
         }
     }
@@ -611,6 +614,8 @@ impl Strike {
                 self.exit(cx);
             }
         }
+        // A takeover goes on only while safe (slice ST-K).
+        self.recheck_safe(cx);
         let solution = self.solution(cx);
         let target_at = solution
             .map(|s| s.target_position)
@@ -658,8 +663,10 @@ impl Strike {
                             self.enter(Phase::TurnBack, cx.tick);
                         } else if self.safe(cx) {
                             self.withdrawn = false;
+                            self.end_stand_off();
                             self.enter(Phase::TurnBack, cx.tick);
-                        } else {
+                        } else if !self.begin_stand_off(cx, point) {
+                            // A takeover stands off instead (slice ST-K).
                             self.enter(Phase::Home, cx.tick);
                         }
                     }
@@ -696,7 +703,12 @@ impl Strike {
                 order
             }
             Phase::Exit => {
-                order.steer = Some(self.exit_steer(cx, target_at));
+                // A takeover's stand-off and guiding hold (slice ST-K).
+                let steer = self
+                    .stand_off_steer(cx, target_at)
+                    .or_else(|| self.guide_steer(cx))
+                    .unwrap_or_else(|| self.exit_steer(cx, target_at));
+                order.steer = Some(steer);
                 order.activity = Some(Activity::Attacking);
                 order
             }
@@ -760,6 +772,10 @@ impl Strike {
 
     /// The choice: target, store, pass and aim; or wait, or home.
     fn choose(&mut self, cx: &Context<'_>) {
+        // A takeover attacks only when safe (slice ST-K).
+        if self.holds_off(cx) {
+            return;
+        }
         let inputs = cx.inputs;
         let own = cx.own;
         let Some(target) = self.pick_target(cx) else {
@@ -791,13 +807,15 @@ impl Strike {
                 .iter()
                 .find(|s| s.station == station && s.rounds > 0)
                 .copied(),
-            None => choose_store(
-                &inputs.stores,
-                inputs.class,
-                threat,
-                facts,
-                inputs.designator,
-            ),
+            None => self.kept_store(inputs).or_else(|| {
+                choose_store(
+                    &inputs.stores,
+                    inputs.class,
+                    threat,
+                    facts,
+                    inputs.designator,
+                )
+            }),
         };
         let Some(store) = store else {
             self.enter(Phase::Home, cx.tick);
@@ -814,7 +832,7 @@ impl Strike {
         let distance = horizontal(own.position, target_at);
         let agl = own.agl_ft;
         let radius = turn_radius_ft(own.speed.0, own.g_limit);
-        let choice = match self.forced {
+        let choice = match self.forced.or_else(|| self.kept_pass(store.kind)) {
             Some(pass) => PassChoice::Pass(pass),
             None => choose_pass(PassInputs {
                 class: inputs.class,
@@ -1221,6 +1239,11 @@ impl Strike {
                                 }))
                     }
                     k if k.seeker() => first && s.due && !s.guided_in_flight,
+                    // A takeover drops no second laser weapon while one
+                    // guides (slice ST-K).
+                    StoreKind::Laser if self.takeover.is_some() => {
+                        first && s.due && !s.guided_in_flight
+                    }
                     _ => first && s.due,
                 };
             if fire && floor_ok && !s.warning && self.rounds_left(cx) > 0 {
@@ -1745,6 +1768,10 @@ fn target_facts(picture: &GroundPicture, id: u32) -> TargetFacts {
 
 #[path = "strike_checkpoint.rs"]
 mod checkpoint;
+
+#[path = "strike_takeover.rs"]
+mod takeover;
+pub use takeover::{STAND_OFF_MARGIN_FT, Takeover};
 
 #[cfg(test)]
 #[path = "strike_tests.rs"]

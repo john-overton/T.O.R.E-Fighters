@@ -1995,6 +1995,46 @@ identically), and in `tore-session` a rejoin through a real host
 (`a_game_that_rejoins_reads_its_planes_sight_and_laser_as_it_left_them`,
 `a_laser_bomb_guides_on_across_a_drop_and_a_rejoin`).
 
+#### A ground attack the AI takes over
+
+*Built (slice ST-K, 2026-10-11; John's decisions 10 to 12 in
+[AI strike](spec/ai-strike.md#takeover-and-handback)).* When a human gives
+back an aircraft whose kept cockpit holds a ground target and it carries a
+usable surface store, `World::give_back_plane` hands the kept cockpit to
+`AiWings::continue_attack` (`tore-world` `ai_wings/takeover.rs`): the new
+actor gets the Strike role, an order onto the target and a strike that starts
+as a `Takeover` (`tore-sim` `ai/strike_takeover.rs`, a child of the strike
+state): the kept station first, LVL as a level run, attacking only while safe
+and standing off otherwise, a level line while its laser weapon guides, and
+back to its ordinary role when nothing is left. The strike bridge
+(`ai_wings/strike.rs`) leaves a kept cockpit's bomb sight mode and laser hand
+setting alone and makes a kept sight that is not pinned track the target.
+
+At a take, `World::take_plane` moves a kept designation onto the target the
+AI attacked from that cockpit (the bridge keeps it in the cockpit's target)
+when it stands, and a first take of an AI striker restores the striker's own
+cockpit (`AiCockpit`) as if a human had left it, with its target designated.
+The takeover rides the AI checkpoint inside the strike state; nothing new is
+on the wire.
+
+A take and a give-back rebuild the AI actor, so the bridge also keeps the
+actor's air-to-ground tasking while a human flies it (`AiWings::handed_tasking`,
+coded after the handed-over skills): its role (CAP or Strike) and its ordered
+ground target, taken in `remove_actor` and put back in `insert_actor` (a
+give-back, or a take that failed), before the takeover above. A human who takes
+a Strike wing's plane and gives it back returns it to its strike; a wingman
+keeps its ground order. A revived aircraft takes none. ST-O's class and lase
+orders belong in the same record once that slice merges.
+
+Tests: `tore-sim` `ai/strike_takeover_tests.rs` (kept store and LVL pass,
+an emptied kept station, stand-off and resume, the guiding hold, the
+checkpoint), `tore-world` `world/handoff_kept_tests.rs` (a laser bomb pass in
+LVL handed back mid-run, finished by the AI with the laser on and taken back
+with the cockpit as left; the first take of an AI striker; an unsafe give-back
+that stands off and resumes; a checkpoint mid-takeover), `tore-session`
+`a_laser_pass_dropped_mid_run_is_finished_by_the_ai_and_found_on_the_rejoin`,
+and the battery's `ai-strike-takeover` and `net-ai-strike-handback`.
+
 #### The strike cockpit
 
 *Built (slice ST-C, 2026-10-11; [AI strike](spec/ai-strike.md#one-cockpit-two-pilots),

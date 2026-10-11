@@ -181,6 +181,62 @@ class HandbackTests(unittest.TestCase):
         self.assertTrue(any("designated nothing" in p for p in s.handback_problems(text)))
 
 
+def takeover_run(mode="LVL", target="0x50000000", laser="hand-on", lasing_stops=70.0, miss=8.0, rounds=3,
+                 pass_name="level", release=22.8):
+    lines = [
+        SETUP.format(skill=1, profile="none").replace("A4E load=MK82.JT", "F16C load=GBU10.JT"),
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=not-ai-flown",
+        "ai-strike: start t=0.000 plane=0 range_ft=36456 alt_ft=8000 speed_kt=450",
+        "ai-strike: DESIGNATE t=0.017 target=0x50000000 T-80",
+        "ai-strike: HANDBACK t=3.017 designated=0x50000000 selected=1 mode=LVL laser=hand-on",
+        f"ai-strike: TAKEOVER t=3.017 target={target} station=1 mode={mode}",
+        f"ai-strike: KEPT t=3.017 mode=LVL laser={laser} lasing=yes selected=1",
+        f"ai-strike: PROFILE t=3.025 name={pass_name}",
+    ]
+    releases = []
+    if release is not None:
+        lines += [
+            f"ai-strike: RELEASE t={release} n=1 weapon=GBU10.JT station=1 alt_ft=8021 speed_kt=471 range_ft=17246 "
+            "pass=1 aim_ft=0 inside=yes",
+            f"ai-strike: IMPACT t=61.775 n=1 miss_ft={miss} at=1,2,3",
+            "ai-strike: KILL t=61.775 victim=0x50000000 category=0x0400 target=yes",
+            "ai-strike: EGRESS t=61.775 range_ft=15759 alt_ft=8060",
+        ]
+        releases = [release]
+    lines += [
+        f"ai-strike: KEPT t={lasing_stops} mode=LVL laser={laser} lasing=no selected=1",
+        f"ai-strike: TAKEBACK t=72.0 designated=0x50000000 selected=1 mode=LVL laser=hand-on rounds={rounds}",
+        f"ai-strike: summary t=72.0 ran_s=72.0 profile={pass_name} releases={len(releases)} impacts={len(releases)} "
+        f"kills={len(releases)} egress={'yes' if releases else 'no'} lost=no activity=Attacking target_hp=0/200 "
+        "closest_ft=191 store_rounds_left=human",
+    ]
+    if not releases:
+        lines.append("ai-strike: no release")
+    lines.append("ai-strike: done")
+    return "\n".join(lines)
+
+
+class TakeoverTests(unittest.TestCase):
+    def test_the_ai_finishing_the_humans_pass_passes(self):
+        self.assertEqual(s.takeover_problems(takeover_run()), [])
+
+    def test_another_target_mode_or_pass_fails(self):
+        self.assertTrue(any("took over" in p for p in s.takeover_problems(takeover_run(target="0x50000001"))))
+        self.assertTrue(any("took over" in p for p in s.takeover_problems(takeover_run(mode="CCIP"))))
+        self.assertTrue(any("level run" in p for p in s.takeover_problems(takeover_run(pass_name="dive"))))
+
+    def test_no_release_or_a_far_bomb_fails(self):
+        self.assertTrue(any("released nothing" in p for p in s.takeover_problems(takeover_run(release=None, rounds=4))))
+        self.assertTrue(any("ft from the target" in p for p in s.takeover_problems(takeover_run(miss=900))))
+
+    def test_a_changed_cockpit_or_a_dropped_laser_fails(self):
+        self.assertTrue(any("changed the human" in p for p in s.takeover_problems(takeover_run(laser="auto"))))
+        self.assertTrue(any("laser stopped" in p for p in s.takeover_problems(takeover_run(lasing_stops=40.0))))
+
+    def test_the_rounds_found_must_be_one_fewer(self):
+        self.assertTrue(any("rounds" in p for p in s.takeover_problems(takeover_run(rounds=4))))
+
+
 def order_run(result="refused", designated="0x50000000", extra=True):
     lines = [
         SETUP.format(skill=1, profile="none").replace("order=none", "order=engage-my-target"),
