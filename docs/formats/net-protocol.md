@@ -44,6 +44,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Host migration and rejoin (stage K)](#host-migration-and-rejoin-stage-k) (built under protocol 13)
 - [The surface world (protocol 22)](#the-surface-world-protocol-22) (built under protocol 22)
 - [The air-to-ground round (protocol 23)](#the-air-to-ground-round-protocol-23) (built under protocol 23)
+- [The redrawn airports (protocol 24)](#the-redrawn-airports-protocol-24) (built under protocol 24)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -2527,6 +2528,35 @@ What travels:
   with the laser off, and a laser weapon the player left guiding on its own
   spot goes blind when the laser stops at the handoff.
 
+## The redrawn airports (protocol 24)
+
+*Built (slice FX-A of the mp-fixes round, 2026-10-11); agent decisions unless
+credited.* John asked for the [redrawn airports](redrawn-airports.md) on for
+everyone online once the protocol bumps (2026-10-10) and as the default
+(2026-10-11). The airport scene is not on the wire: every game of a session
+and the server rebuild it from their own import and build.
+
+- **Fixed on online.** The mission text has no airfield line and always
+  means the redraw (`MissionSpec::from_text`), so the King's game, every
+  player's, the dedicated server and the bot build the same airfields.
+  `TORE_REDRAWN_AIRPORTS=0` applies only to single-player launches and the
+  offline tools; nothing online reads it. Carrying the setting in the mission
+  text was the alternative; it would let a session fly the retail airfields
+  but add a text line, a lobby control and a server setting for a developer
+  aid, so it was left out.
+- **Why a bump.** A 23 game builds the retail airfields: other buildings
+  stand elsewhere, the redraw's added hangars and vehicles are targets with
+  ids a 23 game lacks (`0x40F0_0000` up), parked aircraft move onto the
+  aprons and the AI's airfield points and ground-start slots differ. The
+  version check keeps such games apart. No message changes its bytes; the
+  wire golden changes only in the version line and the transport packets
+  sealed with it.
+- **Checks that still apply.** The Seated message's surface digest covers the
+  parked aircraft and starts, so a game whose airfields differed would still
+  be refused with Content refused. The theater content item covers the files
+  the terrain reads, now including the building and vehicle types the plans
+  add.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -2660,7 +2690,11 @@ again with an observer; the capture format did not change for it.
   the extended code 31 and its varints, the HARM channel (3) and readiness
   codes 25 and 26. A loadout row naming a pod and the content items of the
   pods and the novelty stores change no layout. Protocol 23 is the air-to-ground
-  round's one bump.
+  round's one bump. 24 since the mp-fixes round (slice FX-A,
+  [the redrawn airports](#the-redrawn-airports-protocol-24)): every game builds
+  the redrawn airports, so the airfields' buildings, their added targets, the
+  parked aircraft and the AI's airfield points differ from a 23 game's; the
+  round's other slices fold their wire changes under 24.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
