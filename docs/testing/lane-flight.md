@@ -98,7 +98,7 @@ with `--defenses AAA SAM` and `--surface-seed N` as before.
 | Option | What it does |
 | --- | --- |
 | `--skill 0..3` | The striker's wing skill, Novice to Ace (Average by default) |
-| `--profile straight\|popup\|fasthigh\|dive\|level` | **Forces** a pass, for coverage. The real AI chooses its pass from the perceived threat and its energy (John, 2026-10-11), not at random; the flag lets a test fly each pass once |
+| `--profile straight\|popup\|fasthigh\|dive\|level\|orbit\|standoff` | **Forces** a pass, for coverage (`orbit` is the AC-130's, `standoff` a helicopter's stand-off attack). The real AI chooses its pass from the perceived threat and its energy (John, 2026-10-11), not at random; the flag lets a test fly each pass once |
 | `--handback S` | A human-flown run handed to the AI: a seat flies the striker on the scripted pass, designates the target on the A-G page (or Easy targeting's Ctrl+X for an aircraft with no ground page), selects the store, and gives the aircraft back `S` seconds into the pass. `--mode ccip\|lvl` sets the bomb sight in the human leg, `--trigger` holds the trigger there (pickle and hold) so a bomb leaves before the handoff. For the takeover tests |
 | `--order KIND` | Wing orders: a seat leads a two-ship wing on the pass, designates the target, and gives the wingman (the striker) the order `--order-at S` seconds in (5 by default). Kinds: `engage-my-target`, `engage-from-formation`, `attack-on-contact`, `protect-me`, `disengage`, `bug-out`, `land-selected`, `sort`. The ground attack orders join the table when the game has them |
 
@@ -107,17 +107,18 @@ Every line starts `ai-strike:` and is `key=value` words (the battery reads them 
 
 | Line | Meaning |
 | --- | --- |
-| `setup` | Aircraft, store, station, target and where it stands, hit points, skill, forced profile, handback, order, mode |
+| `setup` | Aircraft, store, station, target (its id and `name`) and where it stands, hit points, skill, forced profile, handback, order, mode |
 | `PROFILE name=P requested=R` | The first line echoes the request (`note=forced` or `note=chosen`); a later line names each pass the AI flies |
 | `start` | The striker at tick 0: range to the target, height above the ground, speed |
 | `DESIGNATE`, `HANDBACK`, `ORDER`, `ORDER-REPLY` | The human leg: the target designated, what was set when the aircraft was handed back (designation, selected station, bomb sight mode), the order given and the world's reply (given, refused or failed, with its words) |
 | `ACTIVITY name=...` | What the AI says it is doing, each time that changes |
 | `RELEASE` | A store left the striker: time, store, station, height, speed, range to the target, and the pass's number, its drawn aim offset from the target (`aim_ft`) and whether the draw lies inside the release circle (`inside=yes`) or in the ring R to 2R (`inside=no`) |
 | `IMPACT miss_ft=F` | A released round ended; its horizontal distance from the target in feet (the nearest crater or burst within 60 ft of its last place, else that place) |
+| `BURST` | An AC-130 burst began (slice ST-F; gun rounds are not RELEASE lines): its number at the target, its walked-in aim offset (`aim_ft`) and whether the draw lies inside the circle, the orbit's horizontal radius, height above the target, slant range and bank, the speed and the gun rounds fired so far |
 | `KILL` | A ground object the striker destroyed, and whether it was the target |
 | `EGRESS` | After a release and once the rounds have landed, the striker is a nautical mile past its closest approach and opening |
 | `LOST` | The striker was destroyed, crashed, ejected or left the AI |
-| `summary` | Counts of the above, the final activity, the target's hit points and the store's rounds left; then `no release` if there was none, and `done` |
+| `summary` | Counts of the above, the final activity, the target's hit points, the store's rounds left, and the gun rounds and bursts (`gun_rounds`, `bursts`); then `no release` if there was none, and `done` |
 
 The run ends 20 s after the striker is lost or its last round has landed. The hooks the strike
 slices fill are one `hooks` module in `ai.rs`: ST-T hands the AI its target (and the driver's
@@ -132,6 +133,8 @@ adds order kinds.
 | `ai-strike-bombs` | An A-4E's Mk 82 on the Ukraine column `~QUCOL`: straight, pop-up, fast-high, dive and level forced once at skill 2, and skills 0, 1 and 3 on the dive | Each run names its pass and releases with its drawn aim inside the skill's release circle (or in the ring R to 2R when the draw says so), ends the bomb within the circle plus 800 ft of scatter (1,866, 1,620, 1,374 and 1,128 ft for skills 0 to 3; the ring's edge plus 800 ft for a ring draw, see [AI strike](../spec/ai-strike.md#skill-and-release-precision)), shows an EGRESS and is not lost. Not the TVIET truck park: its radar-laid guns (26,200 and 44,250 ft reach) shoot an A-4E down at 5,000 ft within 25 s whatever pass it flies |
 | `ai-strike-rockets` | An A-4E's LAU-61 on `~QUCOL`, straight runs at skills 2 and 3 | A rocket burst with the aim inside the circle, each rocket within the circle plus 800 ft, an EGRESS, not lost |
 | `ai-strike-maverick`, `ai-strike-jdam`, `ai-sead-harm` | An A-10's AGM-65G on `~QUCOL` (fast-high), an F-16C's GBU-30 on the factory `~QUFACT` (level; a JDAM flies to the point stored at release, so a moving column would be missed), an F-4G's AGM-88 on the `~QVRDRI` radar (fast-high) | The named pass, a release and an impact, the target hurt, the striker not lost |
+| `ai-strike-heli` | On `~QUCOL` from 4 nm at 1,500 ft and 120 kt: a Mi-24's AT-2 (its own choice, the pop-up), a Mi-24's AT-2 with the stand-off attack forced, an AH-64's LAU-61 at skills 2 and 3 | The named pass, a release and an impact; the AT-2 hurts the tank; the rockets' drawn aim lies in the circle (or the ring) and each rocket ends within the circle plus 800 ft; not lost. No EGRESS is asked of a helicopter: at its speed the mile does not open inside the 20 s settle. The stand-off attack, which the AI flies under SAMs, is forced on a quiet column: the column's SAMs bring a helicopter down first |
+| `ai-strike-ac130` | An AC-130 from 3 nm at 6,000 ft on `~QUCOL` for 240 s at skills 0, 2 and 3 (the TVIET truck park's radar-laid guns shoot it down on the way in) | PROFILE orbit; BURST lines whose walked-in aim lies inside the circle (the ring for a ring draw); after five bursts the slant range inside 8,000 to 13,000 ft and the bank at most 30 degrees; gun rounds fired; the tank killed; not lost |
 | `ai-strike-defended` | An F/A-18D's Mk 82 on `~QUCOL` with `--defenses 2 2`, its pass chosen by threat (a pop-up, SAMs cover the column) | Releases inside its circle and defends (an ACTIVITY Defending line). The column's guns can bring it down at the pop-up's low altitude, so a loss is allowed |
 
 The scenarios' parsing and checks have unit tests in `tools/test_battery_ai_strike.py`, and the
