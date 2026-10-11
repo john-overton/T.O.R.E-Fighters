@@ -1,7 +1,8 @@
 //! `--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM]
 //! [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S]
 //! [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S]
-//! [--defenses AAA SAM] [--surface-seed N]`: a development aid and the
+//! [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate HOW]
+//! [--break-at S] [--skill N] [--render OUT.png]`: a development aid and the
 //! battery's driver for air-to-ground weapons (plan section 11.2). No window
 //! opens; the whole mission tick runs as in the game.
 //!
@@ -22,6 +23,12 @@
 //!   `--dive DEG`, released when the bomb sight's mean impact reaches the
 //!   target (bombs), or one second in (rockets). `--hold S` keeps the trigger
 //!   down that long, `--repeat N` presses N times `--gap S` apart.
+//! - `maverick`, `harm`, `antiship` and `sarh` ([`missile`], slice W2): the
+//!   air-to-ground missiles. `--designate HOW` picks the target through the
+//!   player's controls (`ag`, `ir`, `harm`, `visual` or `none` for BORE),
+//!   `--unit ID` names the target, `--break-at S` turns the A-G page off S
+//!   seconds after launch, `--skill N` sets the target's (and its battery's)
+//!   experience, and `--render OUT.png` draws the HUD at the release.
 use crate::{AppResult, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -37,6 +44,7 @@ use tore_world::{
     world::{Seating, TickOutput, World},
 };
 
+mod missile;
 mod release;
 
 const SEAT: SeatId = SeatId(0);
@@ -63,9 +71,14 @@ pub(crate) struct Options {
     pub gap: f64,
     defenses: (usize, usize),
     seed: u32,
+    unit: Option<u32>,
+    pub designate: Option<String>,
+    pub break_at: Option<f64>,
+    pub skill: Option<i32>,
+    pub render: Option<std::path::PathBuf>,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -89,6 +102,11 @@ fn options() -> AppResult<Options> {
         gap: 0.5,
         defenses: (0, 0),
         seed: 1,
+        unit: None,
+        designate: None,
+        break_at: None,
+        skill: None,
+        render: None,
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -116,6 +134,11 @@ fn options() -> AppResult<Options> {
             "--gap" => o.gap = next()?.parse()?,
             "--defenses" => o.defenses = (next()?.parse()?, next()?.parse()?),
             "--surface-seed" => o.seed = next()?.parse()?,
+            "--unit" => o.unit = Some(parse_id(&next()?)?),
+            "--designate" => o.designate = Some(next()?.to_ascii_lowercase()),
+            "--break-at" => o.break_at = Some(next()?.parse()?),
+            "--skill" => o.skill = Some(next()?.parse()?),
+            "--render" => o.render = Some(next()?.into()),
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
@@ -129,6 +152,14 @@ fn options() -> AppResult<Options> {
     o.theater = theater.to_ascii_uppercase();
     o.stem = stem.trim_start_matches('~').to_ascii_uppercase();
     Ok(o)
+}
+
+/// A unit id, decimal or `0x` hexadecimal.
+fn parse_id(text: &str) -> AppResult<u32> {
+    Ok(match text.strip_prefix("0x") {
+        Some(hex) => u32::from_str_radix(hex, 16)?,
+        None => text.parse()?,
+    })
 }
 
 /// `mk82` or `MK82.JT` as the record's resource name.
@@ -148,7 +179,15 @@ pub fn run() -> AppResult<()> {
     let mut scene = Scene::new(&o, &resources)?;
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
-        other => return Err(format!("unknown --attack {other}; kinds: release").into()),
+        kind @ ("maverick" | "harm" | "antiship" | "sarh") => {
+            missile::run(&mut scene, &o, kind, &resources)?
+        }
+        other => {
+            return Err(format!(
+                "unknown --attack {other}; kinds: release, maverick, harm, antiship, sarh"
+            )
+            .into());
+        }
     }
     scene.finish();
     println!("a2g-run: done");
@@ -186,9 +225,12 @@ impl Scene {
             &world.terrain.surface,
             &world.combat.state,
         );
-        let target = *targets
-            .get(o.target)
-            .ok_or_else(|| format!("{} has {} ground targets", o.stem, targets.len()))?;
+        let target = match o.unit {
+            Some(id) => id,
+            None => *targets
+                .get(o.target)
+                .ok_or_else(|| format!("{} has {} ground targets", o.stem, targets.len()))?,
+        };
         let station = fit_store(&mut world, owner, o, resources)?;
         let scene = Self {
             world,
@@ -340,8 +382,12 @@ fn fit_store(
         (None, None) => config
             .stations
             .iter()
-            .position(|s| ballistics::is_bomb(&s.weapon) || ballistics::is_pod(&s.weapon))
-            .ok_or("the aircraft has no bomb or rocket station; give --station N")?,
+            .position(|s| {
+                ballistics::is_bomb(&s.weapon)
+                    || ballistics::is_pod(&s.weapon)
+                    || missile::air_to_ground(&s.weapon)
+            })
+            .ok_or("the aircraft has no air-to-ground station; give --station N")?,
     };
     if station >= config.stations.len() {
         return Err(format!("the aircraft has {} stations", config.stations.len()).into());

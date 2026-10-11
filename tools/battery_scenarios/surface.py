@@ -246,13 +246,18 @@ def chaff_flare_problems(output: str) -> list[str]:
 
 
 def harm_problems(output: str) -> list[str]:
-    """An AGM-88 at an SA-6 battery's Straight Flush: an ace radar shuts down,
-    the battery goes Blind for 30 s and comes back; a killed radar blinds it
-    for good."""
+    """An AGM-88 fired from the jet in BORE (the HARM boresight cue, no
+    designation) at an SA-6 battery's Straight Flush: an ace radar shuts down
+    and the battery goes Blind, but the HARM keeps homing on the radar after it
+    stops emitting (retail data, docs/formats/radar.md "HARM page") and
+    destroys it, so the battery stays Blind; a killed radar blinds it for good."""
     problems: list[str] = []
     harm, killed = (runs(output) + ["", ""])[:2]
     m = RADAR.search(harm)
     radar = m.group(1) if m else "?"
+    launched = first(harm, rf"^harm launched at {radar} mode BORE$")
+    if launched is None:
+        problems.append("the HARM was not fired in BORE at the radar")
     shut = first(harm, rf"^harm-roll {radar} .* shutdown$")
     if shut is None:
         problems.append("no HARM shutdown roll succeeded")
@@ -261,9 +266,15 @@ def harm_problems(output: str) -> list[str]:
             problems.append("the radar did not go off with the shutdown")
         if not near(first(harm, r"^battery \d+ Blind"), shut):
             problems.append("the battery did not go Blind with the shutdown")
+        dead = first(harm, rf"^destroyed {radar}$")
+        if dead is None or dead <= shut:
+            problems.append(f"the HARM did not keep homing and destroy the radar after the shutdown ({dead})")
         back = [t for t, text in events(harm) if text == f"radar {radar} on" and t > shut]
-        if not back or not near(back[0], shut + 30.0):
-            problems.append(f"the radar came back at {back[:1]}, expected 30 s after {shut}")
+        if back:
+            problems.append(f"the radar came back at {back[0]} after its shutdown")
+        after = [text for t, text in events(harm) if dead is not None and t > dead and text.startswith("battery ")]
+        if after:
+            problems.append(f"the battery left Blind after its radar died: {after[:2]}")
     kill = first(killed, r"^killed ")
     blind = first(killed, r"^battery \d+ Blind")
     if kill is None or not near(blind, kill):
@@ -624,8 +635,9 @@ def scenarios() -> list[Scenario]:
                              "--skill", "3", "--aircraft", "f16c", "--altitude", "20000", "--from", "25",
                              "--kill-at", "140", "--seconds", "220", "--invulnerable"), timeout=300)],
             check=harm_problems,
-            notes=TRACE_NOTES + " The AGM-88 is put in flight from the jet directly (no designation of ground "
-                  "emitters yet).",
+            notes=TRACE_NOTES + " The jet carries an AGM-88 and fires it in BORE through the trigger when the "
+                  "HARM cue's candidate is the radar (slice W2). The radar's return 30 s after a shutdown that no "
+                  "HARM follows is checked by the tore-world unit test.",
         ),
         Scenario(
             name="surface-battery-sa2", lane="ai", timeout=400,
