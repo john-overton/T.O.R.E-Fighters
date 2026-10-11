@@ -287,26 +287,55 @@ pub fn wreck_phase(code: u8) -> Option<wreck::Phase> {
 
 /// A weapon type's registered identity. `id` is its number in this recording.
 pub fn weapon_info(id: u32, weapon: &tore_formats::weapons::Weapon) -> replay::WeaponInfo {
-    use tore_sim::combat::ledger::ShotKind;
-    let class = if live::is_gun(weapon) {
-        replay::WeaponClass::Gun
-    } else {
-        match ShotKind::of(weapon) {
-            ShotKind::AirToAir | ShotKind::AirToGround => replay::WeaponClass::Missile,
-            ShotKind::Bomb => replay::WeaponClass::Bomb,
-            ShotKind::Gun => replay::WeaponClass::Gun,
-            // Guided but neither air nor surface, rockets and other stores.
-            ShotKind::Other if weapon.flags & 1 != 0 => replay::WeaponClass::Missile,
-            ShotKind::Other => replay::WeaponClass::Other,
-        }
-    };
     replay::WeaponInfo {
         id,
         source: weapon.source.clone(),
         shape: weapon.shape.clone(),
         name: weapon.hud_name.clone(),
-        class,
+        class: weapon_class(weapon),
     }
+}
+
+/// What a weapon record is, for the viewer and the exports. The debrief's
+/// store-flag rule (`ShotKind`) decides guns, missiles and bombs; the air to
+/// ground round adds two refinements (docs/REPLAYS.md, "Weapons"):
+///
+/// - a guided glide bomb (the laser bombs and the JDAMs, which the debrief
+///   counts with the missiles) is a bomb, so a replay draws and names it as
+///   one;
+/// - an unguided rocket (a pod of several rockets, no seeker) is a rocket,
+///   where it used to be recorded as other.
+pub fn weapon_class(weapon: &tore_formats::weapons::Weapon) -> replay::WeaponClass {
+    use tore_sim::combat::{guided, ledger::ShotKind};
+    if live::is_gun(weapon) {
+        return replay::WeaponClass::Gun;
+    }
+    if guided::is_glide_bomb(weapon) {
+        return replay::WeaponClass::Bomb;
+    }
+    if is_rocket(weapon) {
+        return replay::WeaponClass::Rocket;
+    }
+    match ShotKind::of(weapon) {
+        ShotKind::AirToAir | ShotKind::AirToGround => replay::WeaponClass::Missile,
+        ShotKind::Bomb => replay::WeaponClass::Bomb,
+        ShotKind::Gun => replay::WeaponClass::Gun,
+        // Guided but neither air nor surface, and other stores.
+        ShotKind::Other if weapon.flags & 1 != 0 => replay::WeaponClass::Missile,
+        ShotKind::Other => replay::WeaponClass::Other,
+    }
+}
+
+/// An unguided rocket: a pod of several rounds with no seeker and no bomb
+/// or gun flags (the LAU-61, B-8M1, B-13L and LAU-10 pods; the same test
+/// the HUD's rocket pipper uses).
+pub fn is_rocket(weapon: &tore_formats::weapons::Weapon) -> bool {
+    use tore_sim::combat::ballistics;
+    !live::is_gun(weapon)
+        && !ballistics::is_bomb(weapon)
+        && weapon.flags & 1 == 0
+        && ballistics::is_pod(weapon)
+        && weapon.seeker.signature == 0
 }
 
 /// A guided projectile's seeker, as recorded.
@@ -1176,6 +1205,60 @@ mod tests {
         snapshot::{interpolate, pose_state},
     };
     use std::path::Path;
+
+    /// A weapon record shaped like the fixture's first station, as the
+    /// retail record it stands for would be flagged.
+    fn record(source: &str, flags: u32, pod: i16, signature: u8) -> tore_formats::weapons::Weapon {
+        let mut w = fixture::combat(Vec::new(), Vec::new())
+            .state
+            .own()
+            .configuration()
+            .stations[0]
+            .weapon
+            .clone();
+        w.source = source.into();
+        w.flags = flags;
+        w.burst.projectiles_in_pod = pod;
+        w.seeker.signature = signature;
+        w.movement.ignite_t = 0;
+        w.movement.fuel_t = 10;
+        w
+    }
+
+    #[test]
+    fn weapons_are_classed_with_bombs_and_rockets_apart_from_missiles() {
+        use replay::WeaponClass::{Bomb, Gun, Missile, Other, Rocket};
+        // The Mk 82, the LAU-61 and LAU-10 pods and the B-13L: bombs and
+        // rockets, where rockets were recorded as other before.
+        assert_eq!(weapon_class(&record("MK82.JT", 0x22012, 1, 0)), Bomb);
+        for (source, rockets) in [
+            ("LAU61.JT", 19),
+            ("B8.JT", 19),
+            ("B13.JT", 5),
+            ("LAU10.JT", 4),
+        ] {
+            let w = record(source, 0x20846, rockets, 0);
+            assert!(is_rocket(&w), "{source}");
+            assert_eq!(weapon_class(&w), Rocket, "{source}");
+        }
+        // One rocket alone, a guided store and a gun are not rockets.
+        assert_eq!(weapon_class(&record("ONE.JT", 0x20846, 1, 0)), Other);
+        assert_eq!(weapon_class(&record("AGM65G.JT", 0x20001, 1, 2)), Missile);
+        assert_eq!(weapon_class(&record("AA.JT", 0x10001, 1, 2)), Missile);
+        assert_eq!(weapon_class(&record("M61.JT", 0x80, 1, 0)), Gun);
+        // A guided glide bomb (no motor): the laser bombs and the JDAMs are
+        // bombs, though the debrief counts them with the missiles; a laser
+        // missile with a motor stays a missile.
+        let mut gbu = record("GBU10.JT", 0x20401, 1, 1);
+        gbu.movement.fuel_t = 0;
+        assert_eq!(weapon_class(&gbu), Bomb);
+        let mut jdam = record("GBU30.JT", 0x20001, 1, 0);
+        jdam.movement.fuel_t = 0;
+        assert_eq!(weapon_class(&jdam), Bomb);
+        let mut as30 = record("AS30.JT", 0x20401, 1, 1);
+        as30.movement.fuel_t = 40;
+        assert_eq!(weapon_class(&as30), Missile);
+    }
 
     #[test]
     fn identities_round_trip_without_aliasing_a_variant() {
