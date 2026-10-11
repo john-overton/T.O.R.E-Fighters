@@ -23,9 +23,10 @@ fired once the rocket pipper says IN RNG: they hit and destroy it, and a
 rocket that bursts on the ground does so on its pipper.
 
 `a2g-warnings`: an A-4E's Mk 82 released from a 30 degree dive at 300 ft
-(LOW: it falls in under the fuze's one second; FRAG), from a level pass at
-400 ft (FRAG only: the aircraft holding its height is inside the 500 ft
-splash) and at 1,500 ft (neither).
+(LOW: it falls in under the fuze's one second, so it lands a dud, a puff of
+dirt that destroys nothing; FRAG), from a level pass at 400 ft (FRAG only:
+the aircraft holding its height is inside the 500 ft splash; the bomb bursts)
+and at 1,500 ft (neither).
 """
 import math
 import re
@@ -198,6 +199,15 @@ def warning_problems(output: str) -> list[str]:
             problems.append(f"{label}: released with {release['warnings'] or 'none'}, want {want or 'none'}")
         if release and "LOW" in want and release["fall"] >= 1:
             problems.append(f"{label}: LOW with a {release['fall']} s fall, the fuze arms in 1 s")
+        # LOW means a dud: the bomb lands before its fuze arms and does not go
+        # off; an armed bomb bursts.
+        kinds = [i[1] for i in IMPACT.findall(part)]
+        if len(kinds) != 1:
+            problems.append(f"{label}: {len(kinds)} bursts seen, want 1")
+        elif ("LOW" in want) != (kinds[0] == "dud"):
+            problems.append(f"{label}: the bomb landed as '{kinds[0]}' with warnings {want or 'none'}")
+        if "LOW" in want and (_killed(part) or re.search(r"^a2g-run: kill ", part, re.M)):
+            problems.append(f"{label}: a dud destroyed something")
     return problems
 
 

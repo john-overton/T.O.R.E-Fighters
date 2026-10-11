@@ -735,7 +735,7 @@ the station could not release at all:
 
 | Warning | When |
 | --- | --- |
-| LOW | The predicted fall time is shorter than the record's fuze arm time: the bomb will not explode. In TORE today an unarmed bomb still bursts on the ground with its splash; it cannot strike a target directly |
+| LOW | The predicted fall time is shorter than the record's fuze arm time: the bomb will not explode. A bomb that reaches the ground before its fuze arms is a dud: no burst, no splash and no crater, only a small puff of dirt (the bullet-on-land dust burst) where it lands, and nothing on water. Opinionated (lead, 2026-10-10): the retail ground-impact path (`0x4c1dbc`) has not been read for an arm test, so whether the original duds such a bomb is unknown (next step: trace the arm check before `0x4c1dbc`). The fuze already kept an unarmed bomb from striking a target directly |
 | FRAG | At the predicted impact time the aircraft is inside the record's collateral radius of the impact point; splash can hurt the shooter (retail manual p. 126, no number given). The aircraft is taken along its ground track at its ground speed and no lower than it is now: a dive is taken to be pulled out at once, a climb keeps climbing (fitted; flying a dive on would put every dive release inside its own splash). For a slick bomb that lands under the aircraft, FRAG means flying lower than the splash radius |
 | BAY | A bay aircraft with the bay closed, as today (retail BAY; release refused "Can't deploy, Open weapon bay door") |
 | NO TARGET | A guided weapon that needs a designation has none |
@@ -860,7 +860,7 @@ Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Implemented
 | Release speed | The aircraft's speed times `launchRetard` / 100, at least the record's initial speed (0), clamped to 0 to 1,466 ft/s for slick, retarded and pack bombs and 0 to 2,933 ft/s for cluster. `launchRetard`: 100 slick, 66 Snakeye, 6-pack and 7-pack, 90 cluster and guided. No ejection push |
 | Path | A vacuum parabola: gravity **32 ft/s squared**, no drag, no terminal speed, no retard after release. The bomb noses over along its velocity; heading stays fixed |
 | Scatter | Each bomb adds a uniform random plus or minus **3.0 degrees** to its heading and to its pitch. **The player's bombs scatter too; this stays the default while John decides** ([decisions pending](#decisions-pending)) |
-| Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply |
+| Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply, and a bomb that reaches the ground unarmed is a dud ([warnings](#warnings)) |
 | Pods | As [Rockets](#rockets) |
 
 The sight is the same calculation without the scatter. A test checks the mean
@@ -1080,8 +1080,8 @@ records (ranges, weights, counts) are in the inventory above.
   AS-7 and AS-15 need A-G on at release (retail); with the radar off the missile
   reads READY and flies unguided (existing rule,
   [missiles](missiles.md#radar-off-unguided-release)).
-- A bomb released below its arm time: LOW before the release, and the bomb does
-  not explode.
+- A bomb released below its arm time: LOW before the release, and the bomb lands
+  a dud (a puff of dirt, no burst or splash).
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.
 - A bomb falls on its parabola with up to 3 degrees of scatter: the pipper marks
   the mean, so a single bomb can land beside it.
@@ -1095,6 +1095,7 @@ filled in with something plausible.
 
 | Unknown | Fallback shipped | Next step |
 | --- | --- | --- |
+| Whether the original duds a bomb that reaches the ground before its fuze arms | A dud: no burst, splash or crater, a puff of dirt (opinionated, lead, 2026-10-10) | Read the ground-impact path at `0x4c1dbc` and its caller for an arm-time test |
 | The manual's 90 kt split: no speed comparison exists on the A-G path | Retail class and airport rules; the 90 kt rule is a [decision pending](#decisions-pending) | Search the remaining scope writers and the RWR for a speed test |
 | Whether a parked aircraft shows on A-G (the code lists aircraft in airport states 1 to 0x1e; the manual says parked aircraft return no radar) | Parked aircraft do not show (manual) | Trace the parked state value |
 | Mouse designation on the page | The plan's click rule | Trace the scope click handler |
