@@ -36,6 +36,45 @@ pub enum Guidance {
     Active,
     Infrared,
     Emitter,
+    /// Homes on a laser spot: the GBU-10 family, GBU-27, GBU-28, AS-14,
+    /// AS-30 and AT-12 (signature 1 with the designator flag 0x400; retail
+    /// data). The spot is the aircraft's own, else a buddy's (decision 6).
+    Laser,
+    /// Flies to the ground point designated at release: the GBU-29, GBU-29/P
+    /// and GBU-30 JDAMs. Retail calls them "optical" and homes them on the
+    /// release target; GPS coordinates are opinionated (John, 2026-10-10,
+    /// decision 4).
+    Coordinate,
+    /// Steered at the designated object while the launcher sees it: the AT-2
+    /// Swatter (guided signature 0 with the launcher flag 0x100).
+    Command,
+}
+impl Guidance {
+    /// The air-to-ground guidance of a weapon record, from its seeker
+    /// signature and type flags (docs/formats/missiles.md, "Laser and
+    /// designator" and "Optical"): laser weapons, the guided signature-0
+    /// bombs (no bomb flag 0x10, no launcher, support or designator flag) and
+    /// the guided signature-0 weapons the launcher steers (0x100). These
+    /// weapons have no [`Profile`]: their flight is `live`'s guided flight.
+    pub fn air_to_ground(w: &Weapon) -> Option<Self> {
+        const GUIDED: u32 = 0x1;
+        const LAUNCHER: u32 = 0x100;
+        const SUPPORT: u32 = 0x200;
+        const DESIGNATOR: u32 = 0x400;
+        if super::laser::is_laser_weapon(w) {
+            return Some(Self::Laser);
+        }
+        if w.seeker.signature != 0 || w.flags & GUIDED == 0 || w.flags & 0x10 != 0 {
+            return None;
+        }
+        if w.flags & (SUPPORT | DESIGNATOR) != 0 {
+            None
+        } else if w.flags & LAUNCHER != 0 {
+            Some(Self::Command)
+        } else {
+            Some(Self::Coordinate)
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetRole {

@@ -42,6 +42,10 @@ mod ground_sensing;
 #[cfg(test)]
 mod ground_sensing_tests;
 pub use ground_sensing::GroundListing;
+mod guided;
+#[cfg(test)]
+pub(crate) mod guided_tests;
+pub use guided::{GuidedFlight, Mode as GuidedMode};
 #[cfg(test)]
 mod gunship_impact_tests;
 #[cfg(test)]
@@ -1337,6 +1341,10 @@ pub struct Ownship {
     pub sight: Option<super::sight::Sight>,
     /// The laser designator: off on an aircraft without one.
     pub laser: super::laser::Laser,
+    /// The selected guided air-to-ground weapon's sight (aim, reach and
+    /// advisory), worked out every step for the cockpit; never read back by
+    /// combat, so a checkpoint does not carry it.
+    pub guided_sight: Option<super::guided::GuidedSight>,
     pub armed: bool,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
@@ -1463,6 +1471,12 @@ pub struct State {
     /// fall on the closed-form bomb equation ([`super::ballistics`]), so a
     /// bomb keeps its release rather than a velocity. Mission state.
     bombs: BTreeMap<u32, super::ballistics::BombMotion>,
+    /// The guidance of each guided air-to-ground weapon an ownship released
+    /// and is in flight, by projectile number ([`guided`]). Mission state.
+    guided: BTreeMap<u32, guided::GuidedFlight>,
+    /// The tick each aircraft's last guided air-to-ground weapon ended (hit
+    /// or went away), for the targeting page's impact cue.
+    guided_impacts: BTreeMap<u32, u64>,
     /// How each ground object that has a unit record explodes when destroyed.
     ground_looks: BTreeMap<u32, GroundLook>,
     /// The parked aircraft among the targets, by id, with their crash sites
@@ -1727,6 +1741,7 @@ impl Ownship {
             gunship,
             sight,
             laser: Default::default(),
+            guided_sight: None,
             sensors,
             emitters: vec![],
             missile_threats: super::threats::ThreatService::new(aircraft),
@@ -2246,6 +2261,38 @@ impl<'a> LauncherView<'a> {
         }
         let launcher = self.launcher;
         let w = &self.view.own.config.stations[self.view.own.selected].weapon;
+        // The guided air-to-ground weapons (docs/spec/air-to-ground.md,
+        // "Warnings"): only a JDAM with nothing to fly to and an AT-2 with no
+        // target are held back. A laser weapon goes with or without a spot
+        // (it falls blind, and may find one); NO LASER, MASK and OUT OF
+        // REACH are advisories in `Ownship::guided_sight`.
+        if self.view.state.weapon_rules == Rules::Spec
+            && let Some(kind) = super::guided::kind(w)
+        {
+            let designated = self
+                .view
+                .designated()
+                .and_then(|id| self.view.contact(id))
+                .filter(|t| !t.airborne);
+            return match kind {
+                Guidance::Coordinate
+                    if designated.is_none_or(|t| t.hp <= 0)
+                        && self
+                            .view
+                            .own
+                            .sight
+                            .is_none_or(|sight| sight.held_point().is_none()) =>
+                {
+                    Readiness::NoTarget
+                }
+                Guidance::Command => match designated {
+                    None => Readiness::NoTarget,
+                    Some(t) if t.hp <= 0 => Readiness::TargetDestroyed,
+                    Some(_) => Readiness::Ready,
+                },
+                _ => Readiness::Ready,
+            };
+        }
         if w.seeker.signature == 0 {
             return Readiness::Ready;
         }
@@ -2690,6 +2737,8 @@ impl State {
             surface_rounds: BTreeMap::new(),
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
             bombs: BTreeMap::new(),
+            guided: BTreeMap::new(),
+            guided_impacts: BTreeMap::new(),
             ground_looks: BTreeMap::new(),
             ground_listing: BTreeMap::new(),
             airfield: Default::default(),
@@ -4103,6 +4152,10 @@ impl State {
         // The aircraft with one of their own laser weapons in flight: their
         // lasers stay on (docs/spec/air-to-ground.md, "The laser").
         let laser_owners = sighting::laser_owners(&ships, &self.projectiles);
+        // Every laser spot as the last step left it: a guided release and
+        // the guided sight read the other ownships' spots here, and their
+        // own aircraft's fresh one.
+        let spots_before = guided::spots(&ships);
         // These observations read fixed rows and change only their ownship.
         // Readiness and every release remain below, in aircraft id order.
         // Fitted: at least two active cockpits amortize a scoped dispatch.
@@ -4156,6 +4209,16 @@ impl State {
                     },
                 );
             }
+            own.guided_sight = guided::sight(
+                own,
+                &launcher,
+                &guided::SightContext {
+                    spots: &spots_before,
+                    targets: &self.targets,
+                    weather: &self.sensor_weather,
+                    ground: &ground,
+                },
+            );
             if own.config.stations.is_empty() {
                 own.release_readiness = Readiness::Safe;
                 own.release();
@@ -4413,6 +4476,14 @@ impl State {
                                 }
                                 flight
                             });
+                        // A guided air-to-ground weapon flies its own
+                        // guidance ([`guided`]) on a motion, never the
+                        // legacy pursuit: its projectile target stays empty.
+                        let guided_kind = (self.weapon_rules == Rules::Spec)
+                            .then(|| super::guided::kind(w))
+                            .flatten();
+                        let guided_velocity =
+                            guided_kind.map(|_| super::guided::release_velocity(w, &launcher));
                         self.projectiles.push(Projectile {
                             id: self.next_shot,
                             owner: own.aircraft,
@@ -4421,9 +4492,13 @@ impl State {
                             guidance_ticks: (self.weapon_rules == Rules::Spec)
                                 .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
                                 .flatten(),
-                            motion: (self.weapon_rules == Rules::Spec
-                                && missiles::Profile::for_weapon(w).is_some())
-                            .then(|| Motion::launch(w, launcher.velocity, position[1])),
+                            motion: if let Some(velocity) = guided_velocity {
+                                Some(Motion::launch(w, velocity, position[1]))
+                            } else {
+                                (self.weapon_rules == Rules::Spec
+                                    && missiles::Profile::for_weapon(w).is_some())
+                                .then(|| Motion::launch(w, launcher.velocity, position[1]))
+                            },
                             age: 0,
                             incoming: None,
                             station: index,
@@ -4434,7 +4509,11 @@ impl State {
                                 .expect("validated speed limits")
                                 * 256,
                             launched_t: now,
-                            target: if guided { target } else { None },
+                            target: if guided && guided_kind.is_none() {
+                                target
+                            } else {
+                                None
+                            },
                             fall: FallState::default(),
                             gun_round,
                             tracer,
@@ -4444,6 +4523,22 @@ impl State {
                                 self.next_shot,
                                 super::ballistics::BombMotion::new(release),
                             );
+                        }
+                        if let (Some(kind), Some(velocity)) = (guided_kind, guided_velocity) {
+                            let flight = guided::release(
+                                w,
+                                kind,
+                                own,
+                                index,
+                                &launcher,
+                                position,
+                                velocity,
+                                &spots_before,
+                                &self.targets,
+                                &self.sensor_weather,
+                                &ground,
+                            );
+                            self.guided.insert(self.next_shot, flight);
                         }
                         if let Some(flight) =
                             self.projectiles.last().and_then(|p| p.guidance.as_ref())
@@ -4819,8 +4914,30 @@ impl State {
                     events.push(Event::TrackLost(id));
                 }
             }
-            if let Some(motion) = &mut p.motion {
-                motion.turn(old_direction, p.direction);
+            // A guided air-to-ground weapon steers itself (turning its
+            // motion with it); one that is not guiding may fall instead.
+            let guided_fall = self.guided.get_mut(&p.id).map(|flight| {
+                guided::steer(
+                    flight,
+                    p,
+                    w,
+                    &guided::Context {
+                        ships: &ships,
+                        rows: &rows,
+                        targets: &self.targets,
+                        ground: &ground,
+                    },
+                )
+            });
+            if let Some(Some((fall, start))) = guided_fall {
+                let seconds = (p.age + 1 - start) as f64 / 120.;
+                p.position = fall.position(seconds);
+                p.direction = fall.direction(seconds);
+                p.speed_f8 = (missiles::length(fall.velocity(seconds)) * 256.) as i32;
+            } else if let Some(motion) = &mut p.motion {
+                if guided_fall.is_none() {
+                    motion.turn(old_direction, p.direction);
+                }
                 let delta = motion.step(m, p.age, p.direction);
                 for (position, delta) in p.position.iter_mut().zip(delta) {
                     *position += delta;
@@ -5363,12 +5480,25 @@ impl State {
         });
         // A round that is gone takes its rewind, its surface record and its
         // bomb path with it.
-        if !self.rewinds.is_empty() || !self.surface_rounds.is_empty() || !self.bombs.is_empty() {
+        if !self.rewinds.is_empty()
+            || !self.surface_rounds.is_empty()
+            || !self.bombs.is_empty()
+            || !self.guided.is_empty()
+        {
             let flying: std::collections::BTreeSet<u32> =
                 self.projectiles.iter().map(|p| p.id).collect();
             self.rewinds.retain(|id, _| flying.contains(id));
             self.surface_rounds.retain(|id, _| flying.contains(id));
             self.bombs.retain(|id, _| flying.contains(id));
+            // A guided weapon that is gone marks its aircraft's last impact.
+            let (tick, impacts) = (self.tick, &mut self.guided_impacts);
+            self.guided.retain(|id, flight| {
+                let keep = flying.contains(id);
+                if !keep {
+                    impacts.insert(flight.owner, tick);
+                }
+                keep
+            });
         }
         for id in parked_wrecks {
             self.parked_destroyed(id);

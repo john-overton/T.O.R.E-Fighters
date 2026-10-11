@@ -18,6 +18,9 @@ crate::checkpoint_enum!(Guidance {
     Active = 1,
     Infrared = 2,
     Emitter = 3,
+    Laser = 4,
+    Coordinate = 5,
+    Command = 6,
 });
 
 crate::checkpoint_enum!(TargetRole {

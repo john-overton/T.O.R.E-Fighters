@@ -427,6 +427,9 @@ fn guidance_class(guidance: Guidance) -> GuidanceClass {
         Guidance::Supported | Guidance::Active => GuidanceClass::Radar,
         Guidance::Infrared => GuidanceClass::Infrared,
         Guidance::Emitter => GuidanceClass::Passive,
+        // Air-to-ground weapons never threaten an aircraft; the optical and
+        // laser kinds read as the visual class nearest them.
+        Guidance::Laser | Guidance::Coordinate | Guidance::Command => GuidanceClass::Infrared,
     }
 }
 
@@ -445,7 +448,13 @@ fn electronic_evidence(
             missile.radar_acquired && missile.target == Some(receiver_id),
             Some(missile.position),
         )),
-        Guidance::Supported | Guidance::Active | Guidance::Infrared | Guidance::Emitter => None,
+        Guidance::Supported
+        | Guidance::Active
+        | Guidance::Infrared
+        | Guidance::Emitter
+        | Guidance::Laser
+        | Guidance::Coordinate
+        | Guidance::Command => None,
     }
 }
 

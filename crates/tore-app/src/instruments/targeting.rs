@@ -139,13 +139,31 @@ impl Cue {
 }
 
 /// The time to impact slot: the oldest laser or GPS weapon of the aircraft in
-/// flight. Filled by the weapon slice (W1's `WeaponTti`); empty until then.
+/// flight, from the weapon slice's `WeaponTti` (W1).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tti {
     /// Seconds to go.
     pub seconds: f64,
     /// The weapon has hit: IMPACT shows for a second.
     pub impact: bool,
+}
+
+/// The slot from the readout (slice W1): the oldest of the aircraft's guided
+/// weapons in flight whose time can be worked out, else IMPACT for a second
+/// after the last one ended.
+fn tti_of(ro: &CockpitReadout) -> Option<Tti> {
+    if let Some(seconds) = ro.weapon_tti.iter().find_map(|w| w.seconds) {
+        return Some(Tti {
+            seconds,
+            impact: false,
+        });
+    }
+    ro.guided_impact_tick
+        .filter(|tick| ro.tick.saturating_sub(*tick) < 120)
+        .map(|_| Tti {
+            seconds: 0.,
+            impact: true,
+        })
 }
 
 /// `TTI m:ss` or `IMPACT`.
@@ -271,7 +289,7 @@ impl Page {
             cue,
             second_buddy,
             range_ft,
-            tti: None,
+            tti: tti_of(ro),
             notice,
             gimbal_limit: limit_notice || at_limit(gimbal, look),
             limit_notice,
@@ -1042,5 +1060,29 @@ mod tests {
         assert!(at_limit(Some(cone), [1.047, 0.]));
         assert!(!at_limit(Some(cone), [0.2, -0.2]));
         assert!(!at_limit(None, [0., 0.]));
+    }
+
+    #[test]
+    fn the_tti_slot_reads_the_oldest_guided_weapon_then_impact_for_a_second() {
+        let (mut ro, _, _) = world();
+        assert_eq!(tti_of(&ro), None);
+        let weapon = |seconds| tore_world::readout::WeaponTti {
+            projectile: 1,
+            station: 0,
+            kind: tore_sim::combat::missiles::Guidance::Laser,
+            guiding: true,
+            seconds,
+            position: [0.; 3],
+        };
+        ro.weapon_tti = vec![weapon(None), weapon(Some(12.4)), weapon(Some(3.))];
+        let tti = tti_of(&ro).unwrap();
+        assert_eq!((tti.seconds, tti.impact), (12.4, false));
+        assert_eq!(tti_text(tti), "TTI 0:13");
+        ro.weapon_tti.clear();
+        ro.tick = 1_000;
+        ro.guided_impact_tick = Some(950);
+        assert!(tti_of(&ro).unwrap().impact);
+        ro.guided_impact_tick = Some(800);
+        assert_eq!(tti_of(&ro), None);
     }
 }

@@ -498,7 +498,7 @@ crate::checkpoint_struct!(Ownship {
     bay_release,
     bay_hold_until,
     delivery_mode,
-} shared { config } skip { delivery = None });
+} shared { config } skip { delivery = None, guided_sight = None });
 
 impl Checkpoint for State {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
@@ -540,6 +540,8 @@ impl Checkpoint for State {
             surface_rounds,
             next_surface_shot,
             bombs,
+            guided,
+            guided_impacts,
             ground_looks,
             parked,
             ground_listing,
@@ -579,6 +581,8 @@ impl Checkpoint for State {
         surface_rounds.save(s, None)?;
         next_surface_shot.save(s, None)?;
         bombs.save(s, None)?;
+        guided.save(s, None)?;
+        guided_impacts.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
         ground_listing.save(s, None)?;
@@ -634,6 +638,8 @@ impl Checkpoint for State {
             surface_rounds: Checkpoint::load(l, None)?,
             next_surface_shot: Checkpoint::load(l, None)?,
             bombs: Checkpoint::load(l, None)?,
+            guided: Checkpoint::load(l, None)?,
+            guided_impacts: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
             ground_listing: Checkpoint::load(l, None)?,

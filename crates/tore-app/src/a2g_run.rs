@@ -25,6 +25,9 @@
 //!   down that long, `--repeat N` presses N times `--gap S` apart.
 //! - `cluster` ([`cluster`]): the `release` pass with a cluster bomb, then
 //!   the splash on every surface target and the bomblet flashes.
+//! - `laser`, `jdam`, `at2` ([`guided`]): the guided weapons, released on
+//!   the HUD's release range cue, with `--laser-off S`, `--buddy ID`,
+//!   `--turn-away S` and `--condition C` of their own.
 //! - `maverick`, `harm`, `antiship` and `sarh` ([`missile`], slice W2): the
 //!   air-to-ground missiles. `--designate HOW` picks the target through the
 //!   player's controls (`ag`, `ir`, `harm`, `visual` or `none` for BORE),
@@ -55,6 +58,8 @@ use tore_world::{
 
 mod ccip;
 mod cluster;
+mod guided;
+pub mod guided_preview;
 mod level;
 mod missile;
 pub mod preview;
@@ -92,7 +97,7 @@ pub(crate) struct Options {
     pub render: Option<std::path::PathBuf>,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -148,6 +153,10 @@ fn options() -> AppResult<Options> {
             "--gap" => o.gap = next()?.parse()?,
             "--defenses" => o.defenses = (next()?.parse()?, next()?.parse()?),
             "--surface-seed" => o.seed = next()?.parse()?,
+            // The guided kinds' own options, read by `guided`.
+            other if guided::OPTIONS.contains(&other) => {
+                next()?;
+            }
             "--unit" => o.unit = Some(parse_id(&next()?)?),
             "--designate" => o.designate = Some(next()?.to_ascii_lowercase()),
             "--break-at" => o.break_at = Some(next()?.parse()?),
@@ -190,6 +199,9 @@ pub fn run() -> AppResult<()> {
     let o = options()?;
     let mut resources = crate::reel::load_assets()?.theater_resources;
     surface_dump::with_retail_surface(&mut resources)?;
+    if guided::KINDS.contains(&o.attack.as_str()) {
+        return guided::run(&o, &resources);
+    }
     let mut scene = Scene::new(&o, &resources)?;
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
@@ -207,7 +219,7 @@ pub fn run() -> AppResult<()> {
         }
         other => {
             return Err(format!(
-                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, maverick, harm, antiship, sarh"
+                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, maverick, harm, antiship, sarh, laser, jdam, at2"
             )
             .into());
         }

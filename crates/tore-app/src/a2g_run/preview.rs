@@ -410,7 +410,7 @@ fn frame(mut scene: Scene, shot: &Shot, font: &Font) -> AppResult<Vec<u8>> {
 }
 
 /// Sky over ground split at the horizon, and the target as a tan mark.
-fn backdrop(s: &crate::flight::State, target: Vector) -> Vec<u8> {
+pub(super) fn backdrop(s: &crate::flight::State, target: Vector) -> Vec<u8> {
     let mut rgba = vec![0u8; W * H * 4];
     let focal = 240. * 3f64.sqrt();
     let horizon = |x: f64| {
@@ -455,7 +455,7 @@ fn aircraft_name(id: AircraftId) -> &'static str {
     }
 }
 
-fn doubled(rgba: &[u8]) -> Vec<u8> {
+pub(super) fn doubled(rgba: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(rgba.len() * 4);
     for y in 0..2 * H {
         for x in 0..2 * W {

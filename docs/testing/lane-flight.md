@@ -37,7 +37,8 @@ about 1 G well below the top speed.
 
 `a2g-*` (scenario files
 [`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py),
-[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py) and
+[`a2g_sights.py`](../../tools/battery_scenarios/a2g_sights.py),
+[`a2g_guided.py`](../../tools/battery_scenarios/a2g_guided.py) and
 [`a2g_missiles.py`](../../tools/battery_scenarios/a2g_missiles.py)) runs
 `--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND`, which flies a scripted
 straight pass at a ground target of a Quick Mission, invulnerable, and attacks through the
@@ -64,6 +65,11 @@ Ordnance page and the Cheat-only novelty bombs: the normal and Cheat catalogs ar
 against the station rules on all 36 aircraft, and Boulder and Moose must have no capacity,
 be refused and fail validation without Cheat loading ([novelty
 rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
+| `a2g-laser-self` | `--attack laser` over `~QUCOL`: an F-16C designates a T-80 from the A-G page (T), its Pave Spike lases automatically with the GBU-10 selected, and the bomb is released from 15,000 ft at 480 kt on the HUD's IN RNG cue; again with Ctrl+L turning the laser off 20 s after the release | The bomb leaves at 90 percent of the speed, guiding on aircraft 0's spot from inside its reach, its time to impact counts down, and it destroys the tank; with the laser off it goes from guiding to blind, falls and misses, and the tank is unhurt ([the laser](../spec/air-to-ground.md#the-laser)) |
+| `a2g-laser-buddy` | Two seats (Open seating): an Su-25 two miles behind designates with Ctrl+X (Easy targeting) and lases by hand; an F/A-18D, which has no designator, drops a GBU-10 from 12,000 ft | The release guides on the Su-25's spot (buddy yes, own laser off), lands within 40 ft of the tank and destroys it ([buddy lasing](../spec/air-to-ground.md#buddy-lasing)) |
+| `a2g-jdam-cloud` | `--attack jdam --condition cloudy`: an F-16C's GBU-30 from 12,000 ft at a standing object of the TVIET truck park, then at a `~QUCOL` tank that drives on at 50 ft/s | The first lands on the stored point and destroys the object; the second lands within 40 ft of the stored point and at least 500 ft from the tank, which is unhurt ([guided bomb release range indicator](../spec/air-to-ground.md#guided-bomb-release-range-indicator)) |
+| `a2g-laser-missile` | `--attack laser`: an Su-25's AS-14 from 3,000 ft, on its built-in designator's spot | Released guiding on its own spot; ends guiding within 60 ft and destroys the tank ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
+| `a2g-at2` | `--attack at2`: a Mi-24 300 ft up, 2 nmi out at 60 kt, launches an AT-2 at a `~QUCOL` tank (Easy targeting's Ctrl+X: it has no ground page); again turning 90 degrees away 2 s after the launch | The AT-2 is command guided and hits (the T-80 takes 120 of its 200 hit points); turning away makes it blind for good, it never guides again and misses ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
 | `a2g-maverick` | Over `~QUCOL`: an A-10's AGM-65G on a tank designated on the A-G page (Ctrl+R, T), the same with nothing designated (BORE), an AV-8B's AGM-65G on a tank designated on its FLIR (M, T), and an A-10's AGM-65A on the tank Enter picks | CUED with the seeker locked on the designated tank, launched at it and killed; in BORE the candidate and the missile's target are the strongest return in the 5 degree bore circle, locked at release, killed; the FLIR run kills, the AGM-65A hits ([missiles](../spec/air-to-ground.md#missiles-and-the-harm-boresight-cue)) |
 | `a2g-harm-bore` | Over `~QVRDRI` (seed 4, heavy defenses): an F-4G's AGM-88 with nothing designated, at an SA-6 battery's Straight Flush at ace and at novice experience | The HUD cue lists several emitters with the radar as the BORE candidate; the HARM leaves in BORE at it; the ace radar shuts down within 10 nm and the HARM keeps homing, locked, and kills it; the novice radar stays on and dies |
 | `a2g-harm-page` | The same F-4G on the HARM page (M), T to the Straight Flush | The designation turns the cue to CUED; the HARM leaves in CUED at the radar and kills it |

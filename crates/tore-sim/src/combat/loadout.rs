@@ -603,6 +603,20 @@ pub const SUPPORTED_WEAPONS: &[&str] = &[
     "RBK250.JT",
     "RBK500.JT",
     "LAU10.JT",
+    // Guided air-to-ground weapons, slice W1 (docs/spec/air-to-ground.md,
+    // "Weapon classes" 4, 5 and 12): the laser bombs, the JDAMs and the
+    // laser missiles. The AT-2 above now flies command guidance.
+    "GBU10.JT",
+    "GBU10A.JT",
+    "PAVEWAY.JT",
+    "PAVEWA3.JT",
+    "GBU28.JT",
+    "GBU29.JT",
+    "GBU29P.JT",
+    "GBU30.JT",
+    "AS14.JT",
+    "AS30.JT",
+    "AT12.JT",
     // Air-to-ground missiles, slice W2 (docs/spec/air-to-ground.md, "Weapon
     // classes" 8 to 11): the second Maverick and the SLAM (infrared), the
     // Shrike (anti-radiation), Harpoon, Exocet and Kickback (active radar on

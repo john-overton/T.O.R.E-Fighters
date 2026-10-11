@@ -1329,6 +1329,9 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
         gunsight: Some(gunsight()),
         sight: None,
         laser: None,
+        guided: None,
+        weapon_tti: Vec::new(),
+        guided_impact_tick: None,
         seeker: SeekerReadout {
             status: seeker::Status::Locked,
             target: Some(7),

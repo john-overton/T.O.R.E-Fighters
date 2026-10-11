@@ -3024,7 +3024,7 @@ mod tests {
         bomb.seeker.signature = 0;
         ui.weapons.push(bomb.clone());
         let mut unsupported = bomb.clone();
-        unsupported.source = "GBU10.JT".into();
+        unsupported.source = "MOTHB.JT".into();
         ui.weapons.push(unsupported.clone());
         let mut gun = bomb.clone();
         gun.source = "DEFA.JT".into();
