@@ -1587,7 +1587,7 @@ neighbours too. For resupply, `--drain` empties the followed units' rails and
 magazines at the start, `--drain-reserve` their spare magazines too, and
 `--kill-truck-at S` destroys the supply trucks within 0.1 mile of the unit; the
 trace prints `rearm` and `refill` lines and the final stock of every followed
-unit. A launcher in a SAM battery is traced with its battery's radar
+unit. `--no-relocate` traces the template at its retail spot. A launcher in a SAM battery is traced with its battery's radar
 and launchers. It reads the same retail records, weapons and sensors too.
 The `surface-*` engagement battery scenarios run it.
 
@@ -1657,9 +1657,22 @@ target is down, so supply trucks rearm the emptied launchers, and
 `--vulnerable` takes the player's invulnerability away, so the defenses can
 shoot it down. The `replay-surface` scenario uses all four.
 
+The per-theater acceptance run ([baseline](baselines/surface-defenses.md)) adds
+`--shuttle` (fly the line back and forth across the site for the whole run, so
+the defenses keep firing and the trucks rearm them), `--follow-terrain` (hold
+`--altitude` above the ground under the aircraft, so a line over hills does not
+fly into them) and `--no-relocate` (`--no-jitter`) for the retail spot. The run
+then ends with a `surface-objective: layout` line (the template's units, SAM,
+AAA and ship counts, batteries, supply trucks, parked aircraft, anchor and how
+far it moved) and a `surface-objective: summary` line (missiles, gun rounds and
+flak shells fired by the template's units and by the base layout's, refused
+rounds, magazine swaps, rearms, refills, kills, the first shot, the first
+missile, the last target's fall, a crash, and rounds by weapon record).
+
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --redfor
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective TVIET QTAAA --shuttle --run-on --follow-terrain --seconds 900 --no-relocate
 ```
 
 ## Flight view inspection

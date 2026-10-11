@@ -2193,6 +2193,7 @@ impl App {
                 player: Some(Arc::clone(&self.hornet.kind)),
                 load: Some(&mut load),
                 weapon_label: Some(&label),
+                ground_variation: None,
             },
         )
         .map_err(|error| error.to_string())?;
