@@ -76,6 +76,11 @@ impl State {
             .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
             .map(|(_, id)| id)
     }
+    /// What a ground page reads of target row `t`, for a reader outside the
+    /// player's pages (the AI's ground picture, docs/spec/ai-strike.md).
+    pub fn ground_object(&self, t: &Target) -> GroundObject {
+        self.ground_facts().ground_object(t)
+    }
     /// The facts the ground pages read, borrowed for one observation pass.
     pub(super) fn ground_facts(&self) -> GroundFacts<'_> {
         GroundFacts {

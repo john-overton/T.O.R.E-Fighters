@@ -7,7 +7,21 @@
 //! is held between ticks (the one journal-only `Selection` lives in the
 //! why-record `JournalMemory`).
 
-use super::{Assignment, HostileEscort, PatrolRegion, Policy, Role, Stance, ThreatReport};
+use super::{
+    Assignment, HostileEscort, PatrolRegion, Policy, Role, Stance, StrikeObjective, StrikeRole,
+    ThreatReport,
+};
+
+crate::checkpoint_enum!(StrikeRole {
+    Cap = 0,
+    Strike = 1,
+});
+
+crate::checkpoint_struct!(StrikeObjective {
+    targets,
+    defenses,
+    point,
+});
 
 crate::checkpoint_enum!(Role {
     FreeEngagement = 0,
