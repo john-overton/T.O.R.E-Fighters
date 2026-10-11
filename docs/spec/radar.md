@@ -327,12 +327,14 @@ ground-symbol distinctions remain unknown pending the research recorded there.
 ## Air-to-ground mode and the HARM page
 
 Specified in [air-to-ground](air-to-ground.md), not yet built. Ctrl+R (or
-Shift+R) puts the radar in the retail **A-G** mode: ground objects slower than
-90 kt appear as dots, ground contacts can be designated with T, Shift+T and a
-scope click, and an identified SAM or AAA site is an X. The same range ladder
-applies. M adds a **HARM** page that lists the ground emitters a loaded
-anti-radiation missile can see. The FLIR (I) adds hot ground contacts. Air-mode
-radar ignores anything slower than 90 kt. See
+Shift+R) puts the radar in the retail **A-G** mode, which turns the air radar
+off: ground units, structures and ships appear as 2 by 2 dots and SAM and AAA
+sites as a 5 by 5 X (retail data; the manual's 90 kt split is not in the page
+code), ground contacts can be designated with T (nearest first), Shift+T
+(farthest first) and a scope click. The same range ladder applies. M adds a
+**HARM** page that lists the ground emitters a loaded anti-radiation missile
+can see. The FLIR (I) adds hot ground contacts. The manual says air-mode radar
+ignores anything slower than 90 kt; the page code has no such test. See
 [A-G radar](air-to-ground.md#the-air-to-ground-radar),
 [FLIR](air-to-ground.md#flir-ground-contacts) and
 [the HARM page](air-to-ground.md#the-harm-scope-page).

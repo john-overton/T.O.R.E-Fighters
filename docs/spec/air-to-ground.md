@@ -11,9 +11,12 @@
 Status: **specification written before implementation** (2026-10-10, the A2G
 round). Nothing in this file is built yet. Each section says what the player
 will see and do, with the numbers, and labels where every number comes from.
-The slices that build it are listed in [Source notes](#source-notes). Two
-research slices are still running and will fold their facts in at the spots
-marked **R1 fold** and **R2 fold** (see [Fold-in spots](#fold-in-spots-for-the-research-slices)).
+The slices that build it are listed in [Source notes](#source-notes). The two
+research slices have reported: R2 (A-G page, HARM page, laser, optical) and R1
+(bomb motion, bomb sight) are folded in below, and the retail facts they found
+are labelled **retail data** (see [Fold-in record](#fold-in-record)). Where the
+research found that retail differs from the first plan (no 90 kt rule, no buddy
+lasing, JDAMs are optical, bombs scatter, the CCIP arc rule), the sections say so.
 
 ## What the player gets
 
@@ -25,7 +28,7 @@ air-to-ground store the 36 imported aircraft can carry work: 40 real weapon
 records in twelve weapon classes, plus the Pave Spike and Pave Knife pods.
 
 - **Ground targeting.** Ctrl+R puts the radar in the retail air-to-ground mode
-  (objects slower than 90 kt, drawn as dots). The FLIR (I) sees hot ground
+  (ground objects by class, drawn as dots). The FLIR (I) sees hot ground
   targets. T, Shift+T, a scope click, Enter and ' designate them, and the
   target window shows them as it shows aircraft.
 - **Two bomb sights** for unguided bombs, as John asked: a dive pipper (the
@@ -40,8 +43,9 @@ records in twelve weapon classes, plus the Pave Spike and Pave Knife pods.
   laser range readout. When the spot is a wingman's or another player's, both
   displays say so (BUDDY).
 - **Guided bombs.** Laser bombs home on the spot and fall blindly without it.
-  The JDAMs are GPS bombs that fly to the point designated at release. Both get
-  a release range indicator on the HUD range scale.
+  The JDAMs are GPS bombs that fly to the point designated at release (retail
+  JDAMs are "optical"; the GPS treatment is John's). Both get a release range
+  indicator on the HUD range scale.
 - **HARM like boresight.** With a HARM selected the HUD shows every radar
   emitter the missile can see. The one nearest the bore blinks as the
   candidate and the trigger fires at it without designation, exactly as an
@@ -50,8 +54,9 @@ records in twelve weapon classes, plus the Pave Spike and Pave Knife pods.
   near the bore. Harpoon and Exocet go after ships. AS-7 and AS-15 ride the
   radar track. The laser missiles ride the spot.
 - **Bomb motion that matches the game**, read from the original's own bomb
-  routine; multi-bomb packs released at their retail spacing; pods holding
-  their real rocket count; cluster bombs with their retail wide burst.
+  routine (a plain parabola with a small random scatter); multi-bomb packs
+  released in one instant with their retail offsets; pods holding their real
+  rocket count; cluster bombs with their retail wide burst.
 
 Out of scope this round: AI wings attacking ground targets (John, 2026-10-10:
 the player's systems come first; the AI wings stay air-to-air), ground map or
@@ -74,7 +79,6 @@ Every number or rule below carries one of these labels, as
 | **opinionated (John, date)** | A design John asked for |
 | **opinionated (agent)** | A design choice an agent made; never attributed to John |
 | **unknown** | Insufficient evidence; see [Unknowns](#unknowns) |
-| **R1 fold** and **R2 fold** | A spot waiting for a research slice. The text beside it is the fitted fallback that ships if the research cannot close the fact |
 
 Manual and data disagree in places. John accepted (decision 17) that the
 records' seekers and ranges win and the manual is quoted next to them.
@@ -82,107 +86,146 @@ records' seekers and ranges win and the manual is quoted next to them.
 ## Ground contacts and channels
 
 A ground contact is a surface row (a unit, a building with a combat row, a
-ship, a parked aircraft) or an aircraft slower than 90 kt. Five channels can
-show one.
+ship) seen by one of five channels. The retail rules below were read from the
+executable ([A-G page](../formats/radar.md#a-g-page)); the manual's own wording
+differs in places and is quoted as a conflict.
 
 | Channel | What it sees | Label |
 | --- | --- | --- |
-| A-G radar | Objects slower than 90 kt with a radar return, inside the radar's range and azimuth, with terrain line of sight. Parked aircraft return no radar | retail manual pp. 96, 99, 109 (90 kt split), p. 208 (parked aircraft); detection reuses the radar observation with the object's radar signature, fitted |
-| FLIR (I) | Hot ground objects by infrared signature inside the IR sensor's range, terrain line of sight, 10 percent of range in cloud and fog | retail manual pp. 25, 100, 111; the contrast model is spec-derived ([missiles](missiles.md#minimum-engagement-and-target-role)) |
+| A-G radar | Ground units, ships and structures inside the radar's range with a clear terrain line, by class and visibility distance (below). Aircraft show only while airport-attached | retail data |
+| FLIR (I) | Hot ground objects by infrared signature inside the IR sensor's range (the IR page lists ground objects out to 4.97 nmi), terrain line of sight, 10 percent of range in cloud and fog | retail data (page cap), retail manual pp. 25, 100, 111; contrast model spec-derived ([missiles](missiles.md#minimum-engagement-and-target-role)) |
 | Targeting sight | The object under the sight's line (see [the sight](#the-targeting-sight)) | opinionated (John, 2026-10-10), AC-130 rules |
-| HARM page | Ground emitters the HARM seeker receives | retail manual p. 112 |
+| HARM page | Ground emitters the HARM seeker receives | retail data |
 | Visual | Ground objects in view; only a filter on the channels above (Enter, ') | retail manual p. 112, John's air rule ([radar](radar.md#target-selection-keys)) |
-
-Fitted limits: at most 64 ground contacts per channel, nearest first (the
-city-scale scenery would flood the list otherwise). Buildings count only when
-they have a combat row (the scene's targets), never city-fill blocks.
 
 ## The air-to-ground radar
 
-**Ctrl+R** (and Shift+R, both retail keys) toggles the A-G mode on the
-aircraft's own radar. Any aircraft with a signature-3 radar has it (retail
-data: the page reads the aircraft's own radar record). The scope label is
-**A-G** (the binary's string; the manual's "G-R" is noted as a conflict). R
-returns to air mode. Turning A-G on clears the current air target, the IR
-channel and the HARM page, and shows the message "Air-Ground Radar on" (retail
-data). The range ladder is unchanged: 5, 10, 25, 50, 100 and 150 nmi, reset 10
-(spec-derived, [radar](radar.md#scope-range-and-targeting-modes)). A ground
-specific range is unknown.
+**Ctrl+R** toggles the A-G mode on the aircraft's own radar (retail manual
+p. 99; the executable binds the handler to Shift+R and scan code 0x1302, whose
+modifier is undecoded, so both Ctrl+R and Shift+R work). Any aircraft with a
+signature-3 radar has it; without one the message is "No working radar found"
+(retail data). The scope label is **A-G** (the binary's string; the manual's
+"G-R" is a conflict). Turning A-G on shows "Air-Ground Radar on", **turns the
+air radar off**, clears the IR channel (unless the IR/Laser advanced targeting
+preference is on) and the HARM page, and **does not touch the designated target**
+(retail data; the earlier survey reading "A-G clears the air target" was wrong).
+Turning A-G off leaves the air radar off; R turns the air radar on and A-G off,
+so the two are exclusive. The range ladder is unchanged: 5, 10, 25, 50, 100 and
+150 nmi, reset 10 (retail data, spec-derived [radar](radar.md#scope-range-and-targeting-modes)).
 
-Air mode ignores anything slower than 90 kt and ground mode ignores anything
-faster (retail manual pp. 96, 99, 109). A hovering Mi-24 at 60 kt therefore
-shows on A-G and not on air radar, and a 300 kt fighter shows on air radar and
-not on A-G.
+In A-G with the jammer off the player's radar does not emit for enemy
+anti-radiation seekers (retail data: the seeker's signature reads only the air
+radar's emission time and the jammer). Whether the RWR reads the same fields is
+not traced.
 
-**Symbols** (fitted on the manual's "single-pixel dots", p. 97):
+**What the page lists** (retail data, eligibility routine 0x43df70):
+
+| Contact | Rule |
+| --- | --- |
+| Ground units, SAM and AAA sites, tanks, vehicles, structures | Only when the type's visibility distance (`maxVisDist`) is 75 or more, and within three times that distance (unit 256 ft). Retail ground units are 78 (9.9 nmi), the GCI radar 195 (24.6 nmi), the SA-2 391 (49.4 nmi). Men and the officer never show |
+| Ships | Always, inside the page's range; no visibility test |
+| Aircraft | Only while attached to an airport: the takeoff sequence (states 1 to 0x12) or the landing sequence (0x13 to 0x1e), within the visibility distance. An aircraft in free flight never shows on A-G, whatever its speed |
+| Everything | Terrain line of sight; detection range scaled by 100 / effective signature, the signature being the object's radar signature times the weather layers' radar percent, less a look-down penalty (a vehicle on the ground loses the radar's full look-down value: 0 for F-18, F-22, MiG-29, Su-27; 30 for A-10, AV-8B, F-14, F-15; 50 for F-4, F-104). Ships take a third of the penalty |
+
+Range and refresh (retail data): contacts are drawn out to the least of twice
+the selected range, the radar's search range (zone 0) and **45 nmi**. The list is
+rebuilt every 6 seconds and holds 50 entries (when full, the farthest is replaced
+by a nearer one); positions refresh from the live objects every quarter second.
+Ground objects closer together than 5 percent of their range merge into one dot.
+
+**The 90 kt rule is not in the code.** The manual says air mode ignores anything
+slower than 90 kt and ground mode anything faster (retail manual pp. 96, 99,
+109). The page code compares no speed: the class and airport rules above decide.
+So the retail A-G page does not show a hovering helicopter, whatever the manual
+says. See [decisions pending](#decisions-pending) for whether to add the manual's
+rule as an opinionated addition.
+
+**Symbols** (retail data; one character of the window font, centred; colour 0x2c):
 
 | Contact | Symbol |
 | --- | --- |
-| Ground vehicle, building, parked aircraft | 2 by 2 pixel dot |
-| Ship | 3 by 3 pixel dot |
-| SAM or AAA unit the pilot has identified (seen, or received as an emitter) | 5 by 5 pixel X (the manual's remote-targeting X, p. 113) |
-| Selected contact | the existing captain's bars ([radar](radar.md#selected-contact-bars-and-movement-line)) |
-| Moving vehicle | the TWS direction line, as for an air contact |
+| Ground unit, structure, ship | 2 by 2 pixel dot (the manual's "single-pixel dots", p. 97) |
+| SAM or AAA unit | 5 by 5 pixel X, drawn on every page and for every such unit in the list (not only with remote targeting, as the manual implies) |
+| Aircraft (when listed) | 5 by 5 filled square |
+| Designated contact | Two vertical bars: 14 pixels apart for an aircraft or SAM, AAA site; 10 pixels apart for everything else |
 
-**Selection.** T and Shift+T cycle ground contacts nearest first, the air rule
-([radar](radar.md#target-selection-keys)); a scope click picks one. Friendly
-units are skipped by T (the air rule) but can be clicked, so a friendly target
-window still works. A designated ground contact drops when every channel loses
-it, except that the targeting sight's track keeps it (as the AC-130 pod track
-does). Cycle order beyond "nearest first" is unknown in the original. Label:
-opinionated (agent) over the spec-derived air rule.
+(The window font at the lower pixel size draws a 1-pixel dot, a 3 by 3 square and
+X, and narrower bars.) The page draws no TWS direction lines, jammer strobes or
+chaff circles.
 
-**Support.** An A-G track on the designated object supports SARH missiles (AS-7,
-AS-15) and gives active radar missiles their launch target. The gun's LCOS
-solves against a designated ground object as it does for an aircraft, so
-strafing a designated tank shows the pipper on it. Tab fires the gun whatever is
-selected (retail key).
+**Selection** (retail data, with TORE's air rule over it). T picks the nearest
+listed contact beyond the current target, wrapping to the nearest. **Shift+T picks
+the farthest contact nearer than the current one**, wrapping to the farthest
+(farthest first, not "previous"). The retail routine has no side test, so it
+cycles friendly objects too; TORE keeps its air rule of skipping friendlies,
+which a scope click bypasses, so a friendly target window still works (opinionated,
+agent). The cycle acts only while the radar window is open. A scope click picks
+a contact (the click rule is an [unknown](#unknowns)). Whether a ground
+designation survives the contact leaving the list is also unknown; the fallback
+is that a designated ground contact drops when every channel loses it, except
+that the targeting sight's track keeps it (as the AC-130 pod track does).
 
-> **R2 fold, A-G page.** Waiting for the A-G handler (0x414faf), the scope
-> update (0x43fb1e) and the selector (0x440d00): the 90 kt filter, what mode 4
-> draws, ground-specific range, cycle order and the symbols. Fallback: the
-> fitted values above. Destination: [radar formats](../formats/radar.md).
+**Support (retail data).** AGM-84A, AM-39, AS-16, AS-7 and AS-15 are
+surface-target radar weapons: **A-G must be on at release**. AS-7 and AS-15 (flag
+0x200) need A-G on for the whole flight and the target inside their zone 1 (45
+degrees, range included) as seen from the launcher. The gun's LCOS solves against
+a designated ground object as it does for an aircraft, so strafing a designated
+tank shows the pipper on it. Tab fires the gun whatever is selected (retail key).
+
+**Remote ground targeting.** A friendly aircraft with the J-STARS plane flag above
+1,000 ft feeds the A-G and HARM pages (retail data). None is imported; out of
+scope this round.
 
 ### FLIR ground contacts
 
 The IR channel (I) adds ground contacts by infrared signature beside its air
-contacts, labelled "IR" (retail manual p. 100). T cycles them when the IR
+contacts, labelled "IR" (retail manual p. 100). On the page ground objects and
+ships are listed out to 4.97 nmi (retail data). T cycles them when the IR
 channel is the scope channel. Today T selects nothing on IR; the ground list
 changes that for ground contacts only, and air IR contacts stay Enter-only as
 John's air rule says. This is how aircraft without an air-to-ground radar (the
 A-10, the AH-64) designate for a Maverick. Sensor ranges are retail data (AAS-38
 15 nmi, AV8IR 15, SU27I 9 or 10). Weather: radar 100 percent except cloud 75,
 IR 10 percent in cloud and fog, laser 50 percent in cloud and fog (retail
-manual p. 111).
+manual p. 111; the executable's weather selector equals the seeker signature, 0
+visual, 1 laser, 2 IR, 3 radar, 4 anti-radiation).
 
 ### The HARM scope page
 
 **M** cycles the scope channels Radar, IR and, when an anti-radiation missile is
 aboard, HARM (retail: M is the HARM seeker; TORE's cycle keeps both meanings).
-"HARM" appears in the upper left. Without a HARM aboard the message is "No HARM
-seeker found" (retail data, handler 0x4154c7). Selecting HARM turns the radar
-and IR channels off (retail manual p. 122).
+Without a HARM aboard the message is "No HARM seeker found"; on, "HARM seeker
+on" (retail data). Selecting HARM turns the air radar, A-G and (unless the
+preference) IR off. "HARM" appears in the upper left.
 
-- The page shows every ground emitter the selected HARM type's seeker receives
-  (passive reception, the record's zone 0 range) as the RWR ground square at
-  its bearing and true range (range fitted: the seeker is passive; the retail
-  page draws them on the range ladder). Painting emitters are bright, tracking
-  emitters flash (retail manual p. 95, [RWR](rwr.md)).
-- T, Shift+T and a scope click designate an emitter. The designation drops when
-  the emitter goes off and stays off past the seeker's memory (opinionated,
-  agent).
-- After launch the HARM is fire and forget. If the emitter turns off, the
-  missile flies to its last known position and detonates (retail manual
-  p. 120). Turning the radar off is the threat's only defence.
-
-> **R2 fold, HARM page.** Waiting for the HARM handler (0x4154c7) and the
-> selector (0x440d00): what the page draws and what the target switch does.
-> Destination: [radar formats](../formats/radar.md).
+- **What it lists** (retail data): **emitters only**. A ground unit or aircraft
+  shows only while its radar is on (or its jammer is), because the anti-radiation
+  seeker's signature is zero for anything else. Ships never show. Aircraft follow
+  the air rules (altitude 189 ft or more, not landing). Ground objects need a
+  clear terrain line and the seeker's range, to a cap of **30 nmi**. The seeker
+  looks **45 degrees** in heading and pitch about the nose, the same for the
+  AGM-45 and AGM-88. The list rebuilds every second.
+- **Which seeker**: of the anti-radiation types aboard, the one with the smaller
+  range sets the page. With both an AGM-45 (60,000 ft) and an AGM-88 (200,000 ft)
+  the page uses the AGM-45 (retail data).
+- **Symbols**: as the A-G page (X for SAM and AAA, dot for other ground
+  emitters, square for aircraft). The page makes no painting or tracking
+  distinction; that is the RWR's ([RWR](rwr.md)).
+- T, Shift+T and a scope click designate an emitter, as on the A-G page. The
+  designation drops when the emitter leaves the list at the next rebuild and
+  stays off past the seeker's memory (the drop rule is an unknown; fallback
+  opinionated, agent).
+- **After launch** the HARM is fire and forget. At release its target must be
+  emitting. In flight the lock reruns every half second on angles only, so the
+  missile **keeps homing on the object after its radar stops**, while the object
+  stays inside the missile's 45 degree cone (retail data). The manual says it
+  flies to the last known location and detonates (retail manual p. 120); the
+  data is what ships.
 
 ### Visual and sight designation
 
 - **Enter** cycles visible ground objects left to right (retail) that are also
-  current ground contacts on some channel (John's air rule kept for the ground).
+  current ground contacts on some channel (John's air rule kept for the ground);
   **'** picks the one nearest the centre. Aircraft keep today's Enter rule.
 - **`/`** (retail "IR/laser target", next visible object) cycles the targeting
   sight through visible ground objects on aircraft with a sight. Backslash
@@ -213,6 +256,8 @@ and cannot laze, but they can still drop laser bombs on a buddy's spot (see
 [buddy lasing](#buddy-lasing)). Pave Knife is on no imported aircraft by
 default; Pave Spike and Pave Knife load on any pod station from the
 Air-to-Surface group, as the manual instructs (retail manual p. 120, decision 7).
+In retail a laser weapon needs only that its own launcher carries a working
+signature-1 sensor with a nonzero count, so a loaded pod counts.
 
 ### The sight
 
@@ -227,24 +272,54 @@ lasing), reusing the AC-130 design.
 
 ### The laser
 
-A laser spot exists while the laser is on and the sight holds a tracked object
-or a pin. It sits on the tracked object, moving with it, or on the pin.
+**What retail does** (retail data, [laser and designator](../formats/missiles.md#laser-and-designator)).
+There is no laser spot, no laze key and no laser on or off state. A laser weapon
+(signature 1 with flag 0x400: GBU-10 family, GBU-27, GBU-28, AS-14, AS-30, AT-12)
+homes on its **target object**, the object the player designated at release, and
+needs only that its **own launcher is alive and carries a working signature-1
+sensor** (a Pave pod or a built-in designator). The designator's range, field of
+view and line of sight are never checked. At release the target must be inside the
+weapon's zone 1 (45 degrees in heading and pitch about the mount, and the 50 ft
+or 0 to 30,000 ft range) or the weapon leaves unguided. In flight the lock reruns
+every half second on angles only; loss is permanent (the launcher dies or loses
+its designator, the target dies, or the target leaves the 45 degree cone) and the
+weapon then holds its heading and pitch. **Retail never reacquires.**
 
-- **On.** Automatically while a laser weapon (signature 1 with flag 0x400) is
-  selected and armed and the sight holds a point (retail manual, "automatically
-  activated"), and also while one of the aircraft's own laser
-  weapons is in flight. **Ctrl+L** turns it on or off by hand at any time
-  (opinionated, John, 2026-10-10: the laze button). A manual off overrides the
-  automatic rule until Ctrl+L again or a new laser weapon release.
-- **Limits.** Range from the sensor record (10 nmi, retail data), halved in fog
-  or when the line passes through the cloud layer (retail 50 percent, manual
-  p. 111; the line rule is fitted); terrain line of sight (the AC-130's 25 ft
-  rule, spec-derived); the sensor's gimbal. Outside them the laser is MASKED and
-  the spot goes away until the line clears.
-- **Laser weapons and a lost spot.** The weapon falls or flies blindly
-  (ballistic or straight), as the manual says "will fall blindly"
-  (retail manual pp. 120, 123, 125). It reacquires if a valid spot enters its
-  seeker cone again (fitted).
+**Retargeting** (retail data): when the player designates a new target, every
+laser (and SARH) weapon of the player's in flight retargets to it if the new
+target lies inside the weapon's 45 degree cone, and is blinded otherwise.
+Clearing the designation (;) leaves them guiding on the old target. A weapon
+already in its terminal hit roll is not retargeted. AI launchers never retarget.
+The manual's "switch targets and the bomb will fall blindly" (retail manual
+pp. 120, 123, 125) describes only the failing case.
+
+**Weather** (retail data): at release only, the weapon's range is divided by the
+laser signature, 100 percent normally and 50 percent in cloud or fog, so a
+GBU-10's 30,000 ft release range becomes 15,000 ft when the line from launcher to
+target spans cloud or fog. In flight weather never breaks a lock. No night rule
+applies to laser weapons in the retail data.
+
+**What TORE adds (opinionated, John, 2026-10-10: the laze button and the lasing
+displays).** A laser spot exists while the laser is on and the sight holds a
+tracked object or a pin. It sits on the tracked object, moving with it, or on
+the pin.
+
+- **On.** Automatically while a laser weapon is selected and armed and the sight
+  holds a point (retail manual, "automatically activated"), and also while one of
+  the aircraft's own laser weapons is in flight. **Ctrl+L** turns it on or off by
+  hand at any time. A manual off overrides the automatic rule until Ctrl+L again
+  or a new laser weapon release.
+- **Limits at release** (agent design on the retail records): range from the
+  sensor record (10 nmi; retail has the figure but never reads it), halved in fog
+  or when the line passes through cloud (the retail 50 percent, release only);
+  terrain line of sight (the AC-130's 25 ft rule, spec-derived); the sensor's
+  gimbal. Outside them the laser is MASKED, the spot goes away and a laser weapon
+  released then falls ballistic.
+- **In flight.** As retail, a weapon already guiding is not broken by weather or
+  by MASK; it follows the spot, and loses guidance when the laser is switched off,
+  the sight drops, its target dies without a pin, or the spot leaves its 45 degree
+  cone. **It never reacquires**, as retail. A new designation retargets as above.
+  (The earlier plan's reacquisition rule has no retail basis and is dropped.)
 
 ```mermaid
 stateDiagram-v2
@@ -263,22 +338,22 @@ stateDiagram-v2
     Lasing --> Off: sight dropped (L) or target destroyed and no pin
 ```
 
-> **R2 fold, laser and designator.** Waiting for `PROJLock` and
-> `HARDBestSeeker` for signature 1: whether the 0x400 designator gate checks the
-> own aircraft only or any, what happens on a target switch, and laser weather.
-> Decisions 5 and 6 get their retail answers if the code gives them. Fallback:
-> the rules above. Destination: [missile formats](../formats/missiles.md).
+Whether "LASER SEEKER DAMAGED" (a retail damage message) switches the designator
+off is an [unknown](#unknowns); the fallback is that the designator works while
+its aircraft lives.
 
 ### Buddy lasing
 
-**Opinionated (John, 2026-10-10, decision 6 and his note):** buddy lasing is in,
-and the target display and the HUD must show when the spot is someone else's.
-The rule (agent decision) is:
+**Retail has no buddy lasing**: a laser weapon needs its own launcher's
+designator, and another aircraft's never helps. **Buddy lasing, and a display
+that shows the spot is someone else's, are opinionated additions (John,
+2026-10-10, decision 6 and his note that the target display and the HUD must show
+when the spot is buddy-designated).** The rule is an agent design:
 
 - Every spot belongs to an actor (the aircraft that lases), not to "the player",
   and to that actor's side.
 - A laser weapon homes on its own aircraft's spot first, otherwise on the
-  nearest same-side spot inside its seeker cone. A spot of the opposing side is
+  nearest same-side spot inside its 45 degree cone. A spot of the opposing side is
   never used.
 - A spot is shown to the player, as a buddy spot, when a laser weapon is
   selected and a same-side spot (not the player's own) lies inside that weapon's
@@ -378,35 +453,46 @@ same picture.
 
 ### CCIP, the dive pipper
 
+Everything here is retail data from the bomb sight routine (0x409760) unless
+labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
+
 - **Impact point.** Where the selected bomb would hit the ground (or the sea) if
-  released now, flown through the same motion the game uses after release.
-  The pipper and the real bomb cannot disagree. Spec-derived from the
-  retail routine (0x409760 predicts with 0x4c3eb0).
-- **Pipper.** The LCOS pipper's style: ring radius 9 reference pixels, centre
-  dot (spec-derived, [gunsight](gunsight-targeting.md)). Its arc follows the
-  binary's glyph rule: a full arc inside 0.4 of the record's zone-1 maximum
-  range, unwinding to nothing at the maximum; beyond the maximum the pipper is
-  not drawn (retail data, glyph 0x2f inside 0.4, 0x2e down to 0x20 between 0.4
-  and 1.0, blank beyond). The manual says the arc is a full circle at 10,000 ft
-  or more and half at 5,000 ft with about 2 nmi practical limit (retail manual
-  pp. 85, 125). **The code wins** (decision 3, accepted): the arc scales with
-  each bomb's own maximum (MK-82 20,000 ft; guided and cluster 30,000 ft).
-- **Fall line.** Dotted, from the HUD reference point (the boresight cross) to
-  the pipper (retail data, pattern 0x55555555 from 0x521060).
-- **Off the HUD.** Retail draws nothing. TORE draws the fall line to the HUD's
-  lower edge and a small caret there, so a level pass still shows where the
-  bombs would go (fitted).
+  released now, from the same release position and direction as a real release
+  (the aircraft's **nose**, not its flight path) and the same motion (see
+  [bomb motion](#bomb-motion)), over the ground below the release point. It is
+  the **mean** impact: each real bomb is scattered up to 3 degrees in heading and
+  in pitch, so the pipper is where the bombs land on average.
+- **Pipper.** One glyph centred on the impact point: a 23-pixel ring with twelve
+  clock marks and a centre dot. Let R be the record's zone-1 maximum range and d
+  the distance from the aircraft to the impact point. Inside 0.4 R the glyph
+  carries a **full inner arc**; from 0.4 R to R the arc unwinds, growing
+  clockwise from 12 o'clock as the range closes, in fourteen steps; at R and
+  beyond only the **bare ring and centre dot** remain. Nothing is blank while the
+  impact point is on screen (the earlier survey reading "blank beyond" was wrong).
+  R by record: 20,000 ft for the Mk 82 family and Mk 84 (full arc inside 8,000
+  ft), 10,000 ft for the FABs (4,000 ft), 30,000 ft for the cluster bombs
+  (12,000 ft). The manual (p. 85) says the arc is a full circle at 10,000 ft or
+  more and half at 5,000 ft, in the opposite sense; **the code wins** (decision 3,
+  accepted, confirmed by the lead after the research). The ring radius in
+  reference pixels follows the LCOS pipper (9, spec-derived,
+  [gunsight](gunsight-targeting.md)) until H1 measures the glyph.
+- **Fall line.** A dotted line from the HUD reference point to the pipper. The
+  reference point is the flight path marker when the HUD module has the
+  flight-path option and the aircraft is above a minimum speed (146 ft/s in the
+  AV-8B, F-4, MiG-17, MiG-21 and Yak-141 modules, 0 in the others), otherwise the
+  boresight point; the X-31 family has no flight-path option. The line pattern is
+  alternate pixels (rhythm fitted).
+- **Dot trail.** On the **F-16C, F-22, F-22N and X-31** the line is replaced by a
+  trail of dots along the fall path, one every quarter second of fall from now to
+  impact.
+- **Off the HUD.** Retail draws nothing beyond trail dots that land on screen.
+  TORE draws the fall line to the HUD's lower edge and a small caret there, so a
+  level pass still shows where the bombs would go (fitted).
 - **Text.** CCIP status, count and short name, slant range to the impact point
   (`R 1.8`), and IN RNG inside the zone-1 maximum (fitted layout; the
-  "IN RNG" string is retail data).
-- **Release.** The pilot releases when the pipper is on the target. With the
-  trigger held, the station follows its record's pack spacing (see [packs](#release-modes-and-packs)).
-
-> **R1 fold, bomb sight.** Waiting for the CCIP draw (0x409760): the HUD
-> reference point ([0x521060]), the units of the 0.4 threshold, the glyph
-> shapes (rendered to a sheet from the HUD font) and the dotted line size.
-> Fallback: the rule above with the survey's reading of the units. Destination:
-> [weapons formats](../formats/weapons.md).
+  "IN RNG" string is retail data). The retail routine prints no text.
+- **Release.** The pilot releases when the pipper is on the target. A pack
+  leaves in one instant (see [packs](#release-modes-and-packs)).
 
 ### The level release "T" (LVL)
 
@@ -468,12 +554,23 @@ stem, release at the bar". This is John's "range indicator for when to drop"
 opinionated (agent) design. Retail gives only "when you're in range and have a
 good hit probability" (retail manual p. 125) and no release range cue.
 
+**Retail JDAMs are "optical", not GPS** ([optical](../formats/missiles.md#optical)):
+GBU-29, GBU-29/P and GBU-30 home on the object designated at release, follow it
+if it moves and need no designator (fire and forget). Their release range is cut
+by visibility: the zone-1 limit of 30,000 ft becomes 7,500 ft at night and 3,000
+ft in cloud or fog, at release only (retail data). Treating them as GPS bombs
+that fly to the point designated at release, in any weather, with a moving target
+missed, is an **opinionated addition (John, 2026-10-10)** that replaces the
+retail behaviour; the reach scale serves both.
+
 ### Rockets and guns
 
 - **Rockets** (ARM status, retail): a rocket pipper at the predicted ground
   impact of the next rocket, flown through the rocket's motor, speed command and
   gravity (opinionated, agent, decision 12; without it rockets are unaimable).
-  The range arc follows the record's zone-1 maximum, as CCIP.
+  Retail rockets carry the gravity flag, so they sink at 32 ft/s squared to an
+  80 ft/s cap after burnout (retail data). The range arc follows the record's
+  zone-1 maximum, as CCIP.
 - **Guns.** The LCOS solves against a designated ground object (see
   [support](#the-air-to-ground-radar)).
 
@@ -490,14 +587,16 @@ good hit probability" (retail manual p. 125) and no release range cue.
 - **HARM boresight cue** (opinionated, John, 2026-10-10: "act kind of like
   boresite on a2a weapons where it shows a radiation source you can shoot at").
   While an anti-radiation missile is armed, the HUD draws every ground emitter
-  the missile's seeker receives inside its zone 0 cone as the RWR ground square
-  at its direction (at most 8, nearest the bore first; painting ones bright).
+  the missile's seeker receives (emitters only, inside its 45 degree cone about
+  the nose and its range, retail data) as the RWR ground square at its direction
+  (at most 8, nearest the bore first; painting ones bright).
   The candidate (painting first, then nearest the bore, inside the launch cone
   and range) gets the blinking diamond, the range scale and BORE, and the
   trigger launches at it without designation. A designation from the HARM page
   or the A-G radar turns it CUED (solid box). An emitter that goes off dims.
-  After launch the missile keeps its memory and flies to the last known position
-  (retail manual p. 120). The geometry rules are fitted.
+  A launched HARM keeps homing on the object after its radar stops while the
+  object stays inside its 45 degree cone (retail data; the manual says it flies
+  to the last known position, p. 120). The geometry rules are fitted.
 - **Active and SARH AGMs.** The A-G designation's box, range scale, readiness
   (`NO TRACK` when the A-G track is lost for a SARH missile).
 - **Laser AGMs.** The laser box and laser range (below), range scale.
@@ -542,17 +641,17 @@ this round.
 | # | Class | Records | Carriers | How it works | Today |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Free-fall bombs | MK82, MK84, FAB250, FAB500, FAB1000, MK82P3 (3-pack) | 18 to 26 | Retail bomb motion; CCIP and LVL; fuze, splash and craters exist | MK82 partly; rest missing |
-| 2 | Retarded bombs | MK82HD, MK82P (6-pack), MK82AIR (7-pack) | 17 to 26 | As 1, with the record's launch retard 66 and pack spacing | missing |
-| 3 | Cluster bombs | CBU87, CBU89, MK20, RBK250, RBK500 | 26 each | As 1, with the slowdown to 278 ft/s; retail wide splash; presentation-only bomblet flashes | missing |
-| 4 | Laser-guided bombs | GBU10, GBU10A, PAVEWAY, PAVEWA3, GBU28 | 24 (GBU28: 5) | Ballistic until a valid spot is in the seeker cone (zone 0, 90 degrees); then steer within the record's turn limits while gliding to final speed; spot lost: ballistic | missing |
-| 5 | GPS bombs (JDAM) | GBU29, GBU29P, GBU30 | 25 to 26 | Fly to the ground point designated at release (fixed coordinates; a moving target is missed), all weather, no designator after release | missing |
-| 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press, or held repeat, fires the record burst (2, LAU-10 1); rocket pipper | LAU61, B8, B13 partly |
-| 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Command guidance to the designated ground object while it stays inside the launcher's zone-1 cone with line of sight; else ballistic | partly |
+| 2 | Retarded bombs | MK82HD, MK82P (6-pack), MK82AIR (7-pack) | 17 to 26 | As 1; the launch retard 66 only lowers the release speed to 66 percent of the aircraft's, then the same parabola; packs leave in one instant with stepped offsets | missing |
+| 3 | Cluster bombs | CBU87, CBU89, MK20, RBK250, RBK500 | 26 each | As 1 (the 278 ft/s speed command does not change a bomb's path); retail wide splash; presentation-only bomblet flashes | missing |
+| 4 | Laser-guided bombs | GBU10, GBU10A, PAVEWAY, PAVEWA3, GBU28 | 24 (GBU28: 5) | Retail: homes on the release target while its own launcher's designator works and the target stays inside 45 degrees; never reacquires. TORE: homes on the spot (own, or a buddy's, opinionated). Loss: holds heading and pitch and slows to 278 ft/s (retail), with a fitted ballistic fall | missing |
+| 5 | JDAM | GBU29, GBU29P, GBU30 | 25 to 26 | Retail "optical": home on the object designated at release, follow it, fire and forget, release range cut by visibility. TORE (opinionated, John): GPS, fly to the point designated at release, any weather, a moving target is missed | missing |
+| 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press fires one rocket and a held trigger repeats four a second (LAU-10 one per press); rocket pipper | LAU61, B8, B13 partly |
+| 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Retail: steers at the designated object until impact (cruise profile), needs its launcher alive, zone 1 500 to 18,000 ft and 45 degrees; a switch does not retarget it. Without a target it flies unguided | partly |
 | 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | AGM65G partly |
-| 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; memory to the last position | AGM88 partly; AGM45 hidden |
-| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation; surface seekers see surface rows without the air notch | profiled, hidden |
-| 11 | SARH AGMs | AS7, AS15 | 21 | Supported by the launcher's A-G track until impact; track lost: unguided | AS7 partly; AS15 missing |
-| 12 | Laser AGMs | AS14, AS30, AT12 | 24 to 25 | Class 4's seeker with a motor and the cruise profile | missing |
+| 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; keeps homing on the object after its radar stops | AGM88 partly; AGM45 hidden |
+| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G on at release (retail); surface seekers see surface rows without the air notch | profiled, hidden |
+| 11 | SARH AGMs | AS7, AS15 | 21 | Needs A-G on at release and for the whole flight, target inside zone 1 (45 degrees) from the launcher; lost: unguided | AS7 partly; AS15 missing |
+| 12 | Laser AGMs | AS14, AS30, AT12 | 24 to 25 | Class 4's lock rule on a powered, cruising missile | missing |
 
 Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work. Novelty
 Boulder and Moose are Cheat catalog only ([decisions pending](#decisions-pending)).
@@ -565,7 +664,9 @@ Guidance names. The data's seeker signatures are 0 none, 1 laser, 2 IR, 3 radar
 weapon needs a designator; flag 0x1 guided. The Load Ordnance seeker labels in
 FA.EXE are "passive rdr, active rdr, IR, laser, optical, unguided, SARH". The
 manual's "Optical" weapons (AT-2, GBU-29B, GBU-30) are exactly the guided
-signature-0 records, a plausible but unproven mapping ([unknowns](#unknowns)).
+signature-0 records: the label comes from the signature, so GBU-29, GBU-29/P,
+GBU-30 and AT-2 all read "optical" (retail data,
+[optical](../formats/missiles.md#optical)).
 
 ### The seekers and the lock flow
 
@@ -579,31 +680,35 @@ flowchart TD
     W -->|HARM, BORE| HB[HUD emitters in cone; candidate blinks; fire]
     W -->|HARM, CUED| HC[Designated emitter; fire]
     W -->|Active AGM| AA[Launch target from designation; seeker active at record range]
-    W -->|SARH AGM| SA[A-G track must hold to impact]
-    W -->|Laser bomb or missile| LZ[Sight holds point; laser on; spot in seeker cone; release inside reach]
-    W -->|GPS bomb| GP[Point stored at release inside reach]
-    W -->|AT-2| AT[Designated object in launch cone and sight line]
+    W -->|SARH AGM| SA[A-G on at release and to impact]
+    W -->|Laser bomb or missile| LZ[Sight holds point; laser on; target inside 45 degree cone; release inside reach]
+    W -->|JDAM| GP[Point stored at release inside reach]
+    W -->|AT-2| AT[Designated object in 45 degree launch cone]
 ```
 
 ### Rockets
 
 A pod holds `projsInPod` rockets, the real count: LAU-61 19, B-8M1 19, B-13L 5,
-LAU-10 4 (retail data). Each press, or each repeat while the trigger is held
-(rockets carry the held-repeat flag 0x800), fires the record's burst (2 rockets,
-LAU-10 1) with the record's burst spacing, and the pod empties in order. An empty
-pod stays on the station. Launch envelope 1.48 to 2.47 nmi; motor 10 s; the
-manual gives a 1 nmi line of sight (retail manual, weapon notes). Opinionated
-(John accepted decision 12): the real counts and burst, with the rocket pipper.
-Which JT field counts pod rockets (`projsInPod` against `actualRoundsPerGame`) is
-an R1 fold.
+LAU-10 4 (retail data); two pods hold twice that. The pod count is set at
+mission start (the station's count times `projsInPod`). **Each trigger call fires
+one rocket** (retail data, the earlier "burst of 2" reading was wrong for the
+player). LAU-61, B-8M1 and B-13L (held-repeat flag 0x800) **repeat every quarter
+second, 4 rockets a second, while the trigger is held**; the LAU-10 fires one per
+press. A pod empties in order and stays on the station. Launch envelope 1.48 to
+2.47 nmi; motor 10 s; the manual gives a 1 nmi line of sight (retail manual,
+weapon notes). Rockets sink under gravity as the retail flag says (see the
+rocket pipper). Opinionated (John accepted decision 12): the real counts, with
+the rocket pipper.
 
 ### Cluster bombs
 
 CBU-87, CBU-97 (record CBU89), Mk 20 Rockeye II, RBK-250 and RBK-500 are the
-five cluster records (flags 0x82a052; 0x800000 is set on exactly these five,
-meaning unknown). The data has **no submunition count or dispersion field**.
-They slow to a final speed of 278 ft/s (deceleration 14 with the speed
-command), explode as type 18 with a fuze radius of 100 ft and no crater, and
+five cluster records (flags 0x82a052). Flag 0x800000, set on exactly these five,
+is presentation only (retail data): in a one-machine session about ten of eleven
+cluster explosions are created as an invisible object with no debris, though the
+sound plays; damage and splash are unaffected. The data has **no submunition count or dispersion field**.
+Their speed command (final speed 278 ft/s, deceleration 14) does not change a
+bomb's path. They explode as type 18 with a fuze radius of 100 ft and no crater, and
 their splash is wide: 2,200, 2,500, 1,600, 1,500 and 2,500 ft at 100 percent
 damage for CBU-87, CBU-97, Mk 20, RBK-250 and RBK-500 (retail data; compare
 [explosions](explosions.md)). The remake keeps the retail wide splash and
@@ -614,36 +719,39 @@ no damage and the damage is the same as the original's.
 ### Release modes and packs
 
 Data packs only (opinionated, John accepted decision 14, matching retail, which
-has no ripple, salvo, interval or quantity control): one press releases one
-record burst, that is a single bomb or the 3, 6 or 7 of a pack at its spacing
-(gameRoundsInBurst 3, 6, 7 on MK82P3, MK82P, MK82AIR; gameBurstT 4; retail data,
-unit R1 fold). Holding the trigger repeats releases at the record's reload time
-for held-repeat records (rockets) and in LVL auto-release.
+has no ripple, salvo, interval or quantity control). One press releases one
+record burst: a single bomb, or **the whole 3-, 6- or 7-bomb pack in one
+instant** (gameRoundsInBurst 3, 6, 7 on MK82P3, MK82P, MK82AIR; retail data), one
+round debited. Bomb i of a pack starts offset from the station: x 0, -2, +2, -4,
++4, -6, +6 ft and y 0, -2, -6, -12, -20, -30, -42 ft (the world axis of the
+stagger is an unknown; the store's own lateral axis is the fallback). No bomb
+record has the held-repeat flag, so a player's held trigger does not repeat
+bombs; `gameBurstT` spaces only AI bursts and the player's rockets (quarter
+seconds). In LVL a held trigger auto-releases once at 0 s.
 
 ### Bomb motion
 
-Retail bomb motion is the routine at 0x4c4050 (`PROJBombPos`), not yet read.
-Until R1 folds it, the fitted fallback below ships. Today a released bomb flies
-straight along the nose and never falls (the 0x4 gravity flag is absent from
-every bomb record).
+Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Today a released
+bomb flies straight along the nose and never falls.
 
-| Fact | R1 fold; fitted fallback |
+| Fact | Retail |
 | --- | --- |
-| Release velocity | The aircraft's velocity vector times `launchRetard` / 100 plus a 10 ft/s downward ejection. `launchRetard`: 100 slick, 66 retarded (MK82HD Snakeye, MK82AIR, MK82P), 90 cluster and guided (retail data) |
-| Gravity | 32.2 ft/s squared, no terminal cap for bombs |
-| Drag | None for slick bombs (retail records carry no drag fields); retarded bombs lose horizontal speed by the cluster record's deceleration rule only if R1 shows one |
-| Orientation | The drawn bomb points along its velocity (pitch-over) |
-| Packs | `gameRoundsInBurst` bombs per press, one every `gameBurstT` service units, from alternating sides of the station mount |
-| Pods | As [Rockets](#rockets); empty pods stay on the station |
+| Release position and direction | The station position with the aircraft's attitude: the bomb leaves along the **nose** (heading and pitch), not along the flight path, plus the station slew (zero on every imported bomb station). Successive releases alternate sides of a paired station |
+| Release speed | The aircraft's speed times `launchRetard` / 100, at least the record's initial speed (0), clamped to 0 to 1,466 ft/s for slick, retarded and pack bombs and 0 to 2,933 ft/s for cluster. `launchRetard`: 100 slick, 66 Snakeye, 6-pack and 7-pack, 90 cluster and guided. No ejection push |
+| Path | A vacuum parabola: gravity **32 ft/s squared**, no drag, no terminal speed, no retard after release. The bomb noses over along its velocity; heading stays fixed |
+| Scatter | Each bomb adds a uniform random plus or minus **3.0 degrees** to its heading and to its pitch. **The player's bombs scatter too; this stays the default while John decides** ([decisions pending](#decisions-pending)) |
+| Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply |
+| Pods | As [Rockets](#rockets) |
 
-> **R1 fold, bomb motion.** Waiting for the bomb routine (0x4c4050), the impact
-> predictor (0x4c3eb0), `PROJSpeed` for bomb records (nose or velocity, retard),
-> the 0x40 speed command on bombs and cluster records, the `gameBurstT` units,
-> which field counts pod rockets, and the 0x800000 bit. Destination:
-> [weapons formats](../formats/weapons.md).
+The sight is the same calculation without the scatter. A test checks the mean
+path (scatter off, flat ground, within a foot of the pipper) and the scatter
+bounds (3 degrees) separately.
 
-The sight and the motion are one calculation: a test requires the real bomb to
-land on the predicted point to within a foot.
+**A guided bomb with no target** (laser bomb after losing its lock, JDAM released
+with none) has neither the bomb flag nor gravity: it holds its heading and pitch
+and slows to its final speed of 278 ft/s (retail data). Whether anything makes it
+fall is an [unknown](#unknowns); the fitted fallback is the bomb parabola from its
+current state.
 
 ## Keys
 
@@ -655,7 +763,7 @@ round. The generated [controls list](../CONTROLS.md) and the
 | --- | --- | --- | --- |
 | A-G radar on or off | Ctrl+R, Shift+R | none | retail manual p. 99 |
 | Scope channel (adds HARM) | M | as today | retail M plus TORE cycle |
-| Next or previous ground target | T, Shift+T | as today | retail |
+| Next ground target (nearest first), farthest first | T, Shift+T | as today | retail |
 | Visual target, nearest the centre | Enter, ' | as today | retail manual p. 112 |
 | Sight: next visible object | `/` | none | retail |
 | Sight: designate, pin, drop, slew, zoom | Backslash, Shift+Backslash, L or ;, Alt+arrows, Shift+' and Shift+; (now every aircraft with a sight) | AC-130 bindings | retail keys, AC-130 design |
@@ -744,10 +852,10 @@ pounds.
 | GBU29 | GBU-29 JDAM | 5 | 2000 | 0.01 to 4.94 | 8.23 | Signature 0, guided flag; splash 300 ft |
 | GBU29P | GBU-29/P JDAM | 5 | 2000 | 0.01 to 4.94 | 8.23 | Splash 100 ft at 35 percent |
 | GBU30 | GBU-30 JDAM | 5 | 1000 | 0.01 to 4.94 | 8.23 | Splash 1,000 ft |
-| LAU61 | LAU-61 Rocket Pod | 6 | 200 | 0.01 to 1.97 | 3.29 | Pod 19, burst 2 |
-| B8 | B-8M1 Rocket Pod | 6 | 798 | 0.01 to 1.48 | 2.14 | Pod 19, burst 2 |
-| B13 | B-13L Rocket Pod | 6 | 1111 | 0.01 to 2.47 | 3.29 | Pod 5, burst 2 |
-| LAU10 | LAU-10 Rocket Pod | 6 | 200 | 0.01 to 1.97 | 3.29 | Pod 4, burst 1 |
+| LAU61 | LAU-61 Rocket Pod | 6 | 200 | 0.01 to 1.97 | 3.29 | Pod 19, 4 a second held |
+| B8 | B-8M1 Rocket Pod | 6 | 798 | 0.01 to 1.48 | 2.14 | Pod 19, 4 a second held |
+| B13 | B-13L Rocket Pod | 6 | 1111 | 0.01 to 2.47 | 3.29 | Pod 5, 4 a second held |
+| LAU10 | LAU-10 Rocket Pod | 6 | 200 | 0.01 to 1.97 | 3.29 | Pod 4, one per press |
 | AT2 | AT-2 Swatter | 7 | 65 | 0.08 to 2.96 | 3.29 | Manual "Optical", 0 to 2.9 |
 | AGM65G | AGM-65G Maverick | 8 | 675 | 0.08 to 9.87 | 9.87 | IR; data minimum 500 ft against the manual's 0.8 nmi |
 | AGM65A | AGM-65A Maverick | 8 | 675 | 0 to 8.23 | 8.23 | IR |
@@ -766,7 +874,8 @@ pounds.
 | ~MOOSE | Moose | novelty | 300 | 0.01 to 3.29 | 3.29 | As Boulder |
 
 Guided-bomb envelope (retail data): seeker cone zone 0, 90 degree half-angle,
-to 50,000 ft; launch zone 1, 45 degree half-angle, 0 to 30,000 ft; launch
+to 50,000 ft; launch zone 1, 45 degree half-angle, 0 to 30,000 ft (the lock
+rule tests zone 1 at release and in flight); launch
 retard 90; altitude limits unbounded. Splash: slick bombs 500 to 1,200 ft; 1,000 ft at 100 percent for the
 GBU-10, GBU-27 and GBU-30; 300 ft for the GBU-29; 100 ft at 35 percent for the
 GBU-28 and GBU-29/P.
@@ -791,93 +900,124 @@ records (ranges, weights, counts) are in the inventory above.
 
 | Figure | Value | Label |
 | --- | --- | --- |
-| Air versus ground speed split | 90 kt | retail manual pp. 96, 99, 109 |
-| Range ladder | 5, 10, 25, 50, 100, 150 nmi; reset 10 | spec-derived |
-| Ground contacts per channel | 64, nearest first | fitted |
-| A-G dot size, ship dot, SAM and AAA X | 2 by 2, 3 by 3, 5 by 5 pixels | fitted |
-| Weather | radar 100 percent, 75 in cloud; IR 10 percent in cloud and fog; laser 50 percent in cloud and fog | retail manual p. 111 |
-| Laser range | 10 nmi | retail data (SEE) |
-| Laser line through cloud or fog | halves the range | retail manual (50 percent), line rule fitted |
-| Sensor gimbal | 60 degree search, 45 degree track (built-in); hemisphere (pod) | retail data (SEE); hemisphere and 60 degree FLIR fitted |
+| Air versus ground speed split | 90 kt in the manual; **no speed test exists on the A-G page** | retail manual pp. 96, 99, 109 (conflict with retail data) |
+| Range ladder | 5, 10, 25, 50, 100, 150 nmi; reset 10 | retail data, spec-derived |
+| A-G page range | least of twice the selected range, the radar's zone 0, and 45 nmi | retail data |
+| IR page ground cap | 4.97 nmi | retail data |
+| HARM page cap, field of view | 30 nmi; 45 degrees in heading and pitch about the nose | retail data |
+| Page refresh | list every 6 s (A-G, IR, radar) or every 1 s (HARM); positions every 0.25 s | retail data |
+| Contacts per page | 50, farthest replaced by a nearer one; merge within 1/20 of range | retail data |
+| Ground visibility rule | `maxVisDist` 75 or more, within 3 times it (ground units 9.9 nmi, GCI radar 24.6, SA-2 49.4) | retail data |
+| Radar look-down on the ground | 0 (F-18, F-22, MiG-29, Su-27), 30 (A-10, AV-8B, F-14, F-15), 50 (F-4, F-104) percent loss | retail data |
+| A-G symbols | ground and ship 2 by 2 dot, SAM and AAA 5 by 5 X, aircraft 5 by 5 square, designated bars 14 or 10 pixels apart | retail data |
+| Weather (release only) | radar 100 percent, 75 in cloud; IR 10 percent in cloud and fog; laser 50 percent in cloud and fog; optical night 25, dawn and dusk 75, cloud and fog 10 | retail manual p. 111; retail data |
+| Laser lock cone, rerun | 45 degrees in heading and pitch; every 0.5 s on angles only | retail data |
+| Designator range 10 nmi, gimbal | 10 nmi; 60 degree search, 45 degree track (built-in); hemisphere (pod) | retail data (SEE) recorded; **never enforced by retail**; our enforcement opinionated (John, 2026-10-10) |
+| Laser line through cloud or fog | halves the release range | retail data (50 percent); the line rule fitted |
 | Fighter default sight look | straight ahead, 10 degrees down | fitted |
 | Terrain masking for the laser | the AC-130's 25 ft rule | spec-derived |
 | LASE flash rate | 2 Hz, 50 percent duty | opinionated (agent), the existing blink rate ([missiles](missiles.md#weapon-hud-delivery)) |
 | Buddy spot display range | the weapon's seeker range (8.23 nmi for GBU-10) | fitted |
 | Automatic LVL choice | flight path within 10 degrees of level | fitted |
+| Bomb release | along the nose; speed times `launchRetard` / 100; clamp 1,466 ft/s (2,933 cluster) | retail data |
+| Bomb gravity, drag | 32 ft/s squared; none | retail data |
+| Bomb scatter | uniform plus or minus 3.0 degrees (546 units) in heading and pitch, per bomb, player included | retail data; the player default pending John |
+| Pack offsets | x 0, -2, +2, -4, +4, -6, +6 ft; y 0, -2, -6, -12, -20, -30, -42 ft | retail data |
+| Pod rockets and cadence | 19, 19, 5, 4 per pod; one per call; 4 a second held (LAU-10 one per press) | retail data |
+| Rocket sink | 32 ft/s squared to an 80 ft/s cap | retail data |
 | CCIP ring radius | 9 reference pixels | spec-derived |
-| CCIP arc full / zero | full inside 0.4 of the zone-1 maximum; none at the maximum; no pipper beyond | retail data (0x409760); units R1 fold |
-| CCIP arc, manual | full at 10,000 ft or more, half at 5,000 ft | retail manual pp. 85, 125; not used |
-| Fall line | dotted, 0x55555555 pattern | retail data |
+| CCIP arc | full inside 0.4 R, unwinding to a bare ring at R and beyond (R the zone-1 maximum: 20,000 ft Mk 82 and Mk 84, 10,000 ft FAB, 30,000 ft cluster) | retail data (0x409760) |
+| CCIP arc, manual | full at 10,000 ft or more, half at 5,000 ft; opposite sense | retail manual pp. 85, 125; not used |
+| Fall line, trail | dotted 0x55555555 line; or a dot per quarter second on F-16C, F-22, F-22N, X-31 | retail data; pixel rhythm fitted |
+| Fall line origin | flight path marker (speed at least 146 ft/s in some modules) else boresight | retail data |
 | Off-HUD caret | at the HUD lower edge | fitted |
 | LVL marker timing | top of the HUD at 15 s or more, linear to 0 s | opinionated (John, 2026-10-10); numbers agent |
 | LVL stem dashed | more than 60 s out | opinionated (agent) |
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
 | Release range scale | x=390, the missile scale | spec-derived |
+| JDAM release range (retail optical) | 30,000 ft; 7,500 ft at night, 3,000 ft in cloud or fog | retail data; replaced by the reach scale (opinionated, John) |
 | HUD laser box | 12 by 8 reference pixels | fitted |
-| Cluster final speed | 278 ft/s, deceleration 14 | retail data |
+| Cluster final speed | 278 ft/s, deceleration 14; no effect on a bomb's path | retail data |
 | Cluster splash | 2,200, 2,500, 1,600, 1,500, 2,500 ft at 100 percent | retail data |
 | Fuze radius | 300 ft slick, 100 ft cluster and guided | retail data |
-| Release velocity, gravity, ejection | see [Bomb motion](#bomb-motion) | R1 fold; fitted fallback |
-| Rockets per pod and burst | 19, 19, 5, 4; burst 2 (LAU-10 1) | retail data |
-| Pack sizes | 3, 6, 7 bombs | retail data |
-| AI release tolerance (for the future AI round) | impact within max(1,000 ft, range/8) | spec-derived ([AI](ai.md)) |
+| Pack sizes | 3, 6, 7 bombs, released in one instant | retail data |
+| AI release tolerance (for the future AI round) | impact within max(1,000 ft, range/8); AI bombs re-aimed within 100 ft of the target | retail data, spec-derived ([AI](ai.md)) |
 | Release altitude advice | 3,000 ft lightly defended, 5,000 ft or more defended; about 1 nmi of range per 1,000 ft of drop altitude | retail manual (advice, not enforced) |
 | Stairstep bombing | drop at 65 to 70 percent hit probability | retail manual (advice) |
 
 ## Edge cases
 
-- A SAM or AAA site turns its radar off: its HARM square dims; a HARM already
-  flying goes to the last known position.
-- Terrain blocks the laser: MASK on the page and the HUD; a laser weapon falls
-  ballistic until the line clears.
+- A SAM or AAA site turns its radar off: its HARM square dims and leaves the
+  HARM page at the next rebuild; a HARM already flying keeps homing on the object
+  while it stays inside the missile's 45 degree cone.
+- Terrain blocks the laser at release: MASK on the page and the HUD; a laser
+  weapon released then falls ballistic. A weapon already guiding is not broken by
+  MASK (retail checks angles only).
 - The designated object is destroyed: the designation clears. A sight pin keeps
   the spot.
 - Weapon bay closed (F-22 and bay aircraft): BAY, as today.
-- Radar off with an AS-7 or AGM-88 selected: the missile reads READY and flies
-  unguided (existing rule, [missiles](missiles.md#radar-off-unguided-release)).
+- A radar weapon selected with the radar not set for it: AGM-84A, AM-39, AS-16,
+  AS-7 and AS-15 need A-G on at release (retail); with the radar off the missile
+  reads READY and flies unguided (existing rule,
+  [missiles](missiles.md#radar-off-unguided-release)).
 - A bomb released below its arm time: LOW before the release, and the bomb does
   not explode.
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.
+- A bomb falls on its parabola with up to 3 degrees of scatter: the pipper marks
+  the mean, so a single bomb can land beside it.
 - Online, the host runs every solution and sends the results; clients draw
   them. Buddy lasing works across players by side.
 
 ## Unknowns
 
 AGENTS.md rule: a missing fact is recorded as unknown with the next step, never
-filled in with something plausible. Rows that a research slice may close say so.
+filled in with something plausible.
 
 | Unknown | Fallback shipped | Next step |
 | --- | --- | --- |
-| Radar: ground detection range, per-aircraft ground behaviour, the A-G page's drawing beyond single-pixel dots, the ground cycle order, the 90 kt filter's code | Section "air-to-ground radar" values (fitted) | R2: handlers 0x414faf, 0x43fb1e, 0x440d00 |
-| HARM page look; modes beyond designated target (boresight, self-protect, pre-briefed) | Fitted page; the boresight cue is opinionated | R2: handler 0x4154c7 |
-| Laser: the designator gate (own aircraft only or any), reacquisition after a target switch, spot behaviour, laser weather | Buddy rule and reacquisition (fitted) | R2: `PROJLock`, `HARDBestSeeker` |
-| What a guided signature-0 record (JDAM, AT-2) does in the retail projectile code | GPS point and command guidance (opinionated, agent) | R2 |
-| Bomb motion: release direction (nose or velocity), drag, pitch-over | Fitted fallback table | R1: 0x4c4050, 0x4c3eb0 |
-| `gameBurstT` units for packs and pods; which field counts pod rockets | `gameBurstT` service units, `projsInPod` | R1 |
-| CCIP pipper glyph shapes, the threshold units (record range against the manual's feet), the dotted line size, the HUD reference point | The 0.4 and 1.0 rule over zone-1 range | R1 (renders glyphs 0x20 to 0x2f) |
-| Meaning of flags 0x2, 0x8, 0x8000 and 0x800000 on air-to-ground records | Ignored | R1, R2 where touched |
-| The "optical" label mapping | Signature 0 guided = optical | R2 |
-| AS-15 is signature 3 + 0x200 (manual: laser); AGM-84E is signature 2 (manual: active radar) | The data wins (decision 17) | Test against FA behaviour not possible (no retail comparison) |
+| The manual's 90 kt split: no speed comparison exists on the A-G path | Retail class and airport rules; the 90 kt rule is a [decision pending](#decisions-pending) | Search the remaining scope writers and the RWR for a speed test |
+| Whether a parked aircraft shows on A-G (the code lists aircraft in airport states 1 to 0x1e; the manual says parked aircraft return no radar) | Parked aircraft do not show (manual) | Trace the parked state value |
+| Mouse designation on the page | The plan's click rule | Trace the scope click handler |
+| Whether a ground designation survives the contact leaving the list (the drop rule runs under a preference bit and its test has no A-G branch) | Drop when every channel loses it; the sight keeps it | Identify the preference bit |
+| The modifier of scan code 0x1302 (Ctrl+R or Shift+R) | Both keys | Decode the key-code builder |
+| How the page treats a designated emitter that stops emitting | It leaves the list at the next rebuild; the designation drops past the seeker's memory | As the retention row |
+| Whether the RWR reads the same radar emission fields as the HARM seeker (so A-G is silent) | The RWR keeps today's behaviour | Trace the RWR consumers |
+| Whether "LASER SEEKER DAMAGED" zeroes the designator | The designator works while its aircraft lives | Trace the damage writer that indexes the message table |
+| How a guided bomb moves after losing its target: it holds attitude and slows to 278 ft/s; whether anything makes it fall | The bomb parabola from its current state (fitted) | Trace motion types 1 and 2 in the move routine |
+| Which objects carry night flag 0x1000000 | No night rule | Scan the object type flags |
+| What a player sees firing an optical weapon (JDAM, AT-2) with no target | Released unguided | Trace the fire path before the release routine and the HUD readiness |
+| Whether the release-point ground height differs from the ground directly below (a cache detail) | Ground directly below the release point | Trace the height cache writers |
+| What object type 43 draws, so what a cluster burst looks like in single player | Presentation-only flashes (opinionated, agent) | Trace type 43 in the draw code |
+| World axis of the pack stagger | The store's own lateral axis | Read the theater axis convention |
+| Pixel rhythm of the fall line pattern; which symbol font serves each resolution | One pixel on, one off; the HUDSYM11 font matching the HUD font in use | Read the line core and the HUD font loader |
+| Meaning of flags 0x2, 0x8, 0x8000 on air-to-ground records; launcher type bit 0x2 | Ignored (no imported aircraft sets the type bit) | Where touched |
+| AS-15 is signature 3 with 0x200 (manual: laser); AGM-84E is signature 2 (manual: active radar) | The data wins (decision 17) | none (no retail comparison) |
 | Manual and data range conflicts (Maverick minimum 0.8 nmi against 500 ft; HARM 12.3 against 32.92; Shrike 11 against 9.87; bombs 1 nmi per 1,000 ft against 3.29 to 4.94 nmi) | The data wins | none |
 | Minimum release altitude and safe-escape numbers | LOW and FRAG warnings from the record's arm time and radius | none (manual gives no number) |
 | Cluster submunition count and dispersion | Wide splash plus presentation flashes | none (no field in the data) |
-| Retail laser-on cue and laser range readout | The opinionated cues in this spec | none: John's design |
-| Buddy-lasing rule in retail; wingman Alt+F "attack on contact" | The rule above (opinionated, agent) | none this round |
 | The buddy form of the targeting page: exact layout and camera for an aircraft with no sight | The rows above | P1 renders and reviews it |
 | IR/Laser window contents beyond "camera view of your target" | The weapon camera and the pod page | none |
+
+Closed by research and no longer unknown: the A-G and HARM page rules, the laser
+designator gate (own launcher only, no range, field of view or line of sight),
+retargeting, laser and optical weather, the "optical" label (signature 0 guided),
+what a JDAM is (optical, not GPS), the bomb equation, scatter, packs, pods, the
+pipper glyph and its arc rule, and the fall line.
 
 ## Decisions pending
 
 John answered all 21 plan decisions on 2026-10-10 by accepting the
-recommendations, with the notes below. This table lists what is still open and
-what depends on research.
+recommendations, with the notes below. This table lists what is still open.
 
 | Item | State | Default if John does not choose |
 | --- | --- | --- |
 | Novelty bombs (decision 16): Boulder (~BLDR) and Moose (~MOOSE) load on our aircraft; ~MOTHB and ~VOMIT are in the data but nothing loads them | John's pick is pending | Cheat catalog only, hidden from the Load Ordnance list |
-| Decision 3, the CCIP arc rule | Accepted: the code's rule over the manual's feet. Confirm when R1 folds the units | The 0.4 and 1.0 rule over the zone-1 range |
-| Decisions 4 and 6, JDAM as GPS bombs and buddy lasing | Accepted; R2 may give the retail answers, which replace the opinionated rules where they exist | The rules in this spec |
-| Decision 7, Pave pods as stores | Accepted; confirm the pod station rule against R2 | Pods on any 0x400 station |
+| Player bomb scatter: retail scatters every bomb up to 3 degrees, the player's included | Asked of John | Scatter on for the player (retail), pipper at the mean |
+| The manual's 90 kt rule on the A-G page (a hovering helicopter shows) | The retail page has no speed test, so a hovering Mi-24 does not show. Whether to add the manual's rule as an opinionated addition is open | Retail class and airport rules only |
+| Decision 4 (JDAM as GPS bombs) | Accepted; R2 found retail JDAMs are optical (follow the target, release range cut by visibility). The GPS treatment with a reach scale is John's opinionated addition | GPS as specified |
+| Decision 6 (buddy lasing and the BUDDY display) | Accepted; R2 found retail has no buddy lasing. It is opinionated (John, 2026-10-10) | As specified |
+| Decision 3, the CCIP arc rule | Accepted and confirmed: the code's rule (full inside 0.4 R, bare ring at R) | As specified |
+| Decision 7, Pave pods as stores | Accepted; the retail lock needs only a working signature-1 sensor aboard | Pods on any 0x400 station |
 | Buddy-spot display range and the buddy page for aircraft with no sight | Agent follow-ups to John's 2026-10-10 note | As written above |
 
 Recorded decisions (all accepted, 2026-10-10): 1 both sights on every bomb
@@ -891,25 +1031,25 @@ ripple settings; 15 LOW and FRAG warnings; 17 data over manual; 18 no AI strike
 this round; 19 replay events without a format change; 20 stores on pylons stay
 undrawn; 21 Tab and Ctrl+X.
 
-## Fold-in spots for the research slices
+## Fold-in record
 
-Two research slices run in parallel with this spec. They write facts into the
-format documents; this spec then replaces its fallbacks.
+The research slices wrote their facts into the format documents; this spec
+carries the player-facing rules and links to the evidence.
 
-| Spot | Waiting for | Research slice | Destination | Search for |
-| --- | --- | --- | --- | --- |
-| A-G page | The A-G handler, scope update and selector | R2 | [radar formats](../formats/radar.md) "A-G page" | `R2 fold, A-G page` |
-| HARM page | The HARM handler and selector | R2 | [radar formats](../formats/radar.md) "HARM page" | `R2 fold, HARM page` |
-| Laser and designator | `PROJLock`, `HARDBestSeeker`, signature-0 guided records, laser weather | R2 | [missile formats](../formats/missiles.md) "Laser and designator", "Optical" | `R2 fold, laser` |
-| Bomb sight | The CCIP draw, reference point, glyph rule and units | R1 | [weapons formats](../formats/weapons.md) "Bomb sight" | `R1 fold, bomb sight` |
-| Bomb motion | The bomb routine, predictor, retard, 0x40 command, pack and pod fields, 0x800000 | R1 | [weapons formats](../formats/weapons.md) "Bomb motion" | `R1 fold` |
+| Facts | Slice | Where the evidence is |
+| --- | --- | --- |
+| A-G page, HARM page | R2 (folded 2026-10-10) | [radar formats](../formats/radar.md#a-g-page), [HARM page](../formats/radar.md#harm-page) |
+| Laser and designator, optical | R2 (folded 2026-10-10) | [missile formats](../formats/missiles.md#laser-and-designator), [optical](../formats/missiles.md#optical) |
+| Bomb motion, packs, pods, scatter, 0x800000 | R1 (folded 2026-10-10) | [weapons formats](../formats/weapons.md#bomb-motion) |
+| Bomb sight, pipper glyph and arc | R1 (folded 2026-10-10) | [weapons formats](../formats/weapons.md#bomb-sight) |
 
 ## Source notes
 
 - Build identity: FA.EXE 1.02F (`e31560c2...`), static reads only, nothing
-  executed. Addresses cited above: HUD status printer 0x409030, mode byte
+  executed. The 1.0 build (`c7d2c1cc...`) has the same bomb arithmetic at
+  shifted addresses and was not used for the page addresses. Addresses cited above: HUD status printer 0x409030, mode byte
   0x406e2a to 0x406f6c, dispatch 0x4075b0, CCIP draw 0x409760, predictor
-  0x4c3eb0, bomb routine 0x4c4050, A-G handler 0x414faf, scope update 0x43fb1e,
+  0x4c3eb0, bomb routine 0x4c4050, lock rule 0x4c2f20, retarget routine 0x4c3dd0, A-G handler 0x414faf, scope update 0x43fb1e,
   selector 0x440d00, HARM handler 0x4154c7. Known routines are in the
   [weapons formats](../formats/weapons.md#fa-entry-points-for-the-next-pass).
 - Manual: the 1999 EA manual, pp. cited above ([manual weapons](../baselines/manual-weapons.md)).

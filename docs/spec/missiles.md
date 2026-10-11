@@ -992,8 +992,10 @@ roles above gain player-side designation (A-G radar, FLIR, HARM page, sight,
 visual). The inventory of 40 real air-to-ground records in twelve
 [weapon classes](air-to-ground.md#weapon-classes) lists each record's seeker,
 ranges and carriers. New guidance kinds join the four above: **laser** (rides a
-laser spot, falls blindly without it), **coordinate** (GPS bombs fly to the
-point designated at release) and **command** (the AT-2 rides the designation).
+laser spot, falls blindly without it, never reacquires as in retail),
+**coordinate** (the JDAMs: retail JDAMs are "optical", home on the target object
+and are fire and forget; GPS flight to the point designated at release is John's
+opinionated treatment) and **command** (the AT-2 rides the designation).
 A HARM gets a boresight cue like air-to-air BORE, and a Maverick may fire in
 BORE at the hottest ground object near the bore. The rules for the HUD range
 scale of a guided bomb, the HARM cue and the laser box are in
