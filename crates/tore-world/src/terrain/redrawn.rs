@@ -20,6 +20,7 @@
 //! anchors ([`Built::anchors`]) and the positions of the airport's
 //! buildings, plus extra hangars and vehicles. The runway's approach line,
 //! length and elevation stay the retail ones.
+pub mod audit;
 mod buildings;
 mod data;
 pub mod geometry;
@@ -164,6 +165,8 @@ pub struct Built {
     pub anchors: Option<AirfieldAnchors>,
     /// The airport's lights, drawn by the app; empty for a pair's tile.
     pub lights: Vec<lights::Light>,
+    /// The runways it draws, in its frame; empty for a pair's tile.
+    pub runways: Vec<DrawnRunway>,
     /// Layout placements moved: index in the layout and the new placement.
     moved: Vec<(usize, Placement)>,
     /// Placements added after the layout's own.
@@ -175,6 +178,21 @@ pub struct Built {
     /// are copies of its base's, so its retail line lies beside its
     /// pavement; `None` keeps the retail line (every base and pad).
     pub runway_line: Option<RunwayLine>,
+}
+
+/// A drawn runway in its airport's frame: the plan's, moved by the tile's
+/// offset in a pair.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawnRunway {
+    /// The plan's runway name, with the tile type for a pair's tile
+    /// (`STRIP5A.OT R0`).
+    pub name: String,
+    pub from: Point,
+    /// Degrees against the frame's heading.
+    pub heading: f64,
+    pub length: f64,
+    pub width: f64,
+    pub pad: f64,
 }
 
 /// A runway object's approach line in the world: its centre on the runway
@@ -216,6 +234,22 @@ impl Built {
     pub fn building_counts(&self) -> (usize, usize) {
         (self.moved.len(), self.added.len())
     }
+    /// Whether world `x, z` lies on this airport's drawn pavement. A pair's
+    /// second tile has none of its own: its base draws it.
+    pub fn on_pavement(&self, x: f64, z: f64) -> bool {
+        if self.patches.is_empty() || !self.surface.contains_horizontal(x, z) {
+            return false;
+        }
+        let p = self.frame.local([x, 0., z]);
+        self.patches
+            .iter()
+            .any(|patch| geometry::contains(&patch.poly, p))
+    }
+}
+
+/// Whether world `x, z` lies on the drawn pavement of any redrawn airport.
+pub fn on_pavement(built: &[Built], x: f64, z: f64) -> bool {
+    built.iter().any(|b| b.on_pavement(x, z))
 }
 
 /// A STRIP placement of the layout, with what the plans need of it.
@@ -356,6 +390,24 @@ pub(super) fn apply(
             name = format!("{}+{}", base.object_type, tile.object_type);
         }
         let (materials, patches) = layout::compose(&parts, links, f64::from(base.angle));
+        let drawn_runways: Vec<DrawnRunway> = parts
+            .iter()
+            .enumerate()
+            .flat_map(|(k, (plan, offset))| {
+                plan.runways.iter().map(move |r| DrawnRunway {
+                    name: if k == 0 {
+                        r.name.clone()
+                    } else {
+                        format!("{} {}", plan.applies_to, r.name)
+                    },
+                    from: geometry::add(r.from, *offset),
+                    heading: r.heading,
+                    length: r.length,
+                    width: r.width,
+                    pad: r.pad,
+                })
+            })
+            .collect();
         let airport_lights = lights::lights(&parts, links, &patches, &materials, &frame, &height);
         let a = base_plan.anchors.as_ref();
         let anchor_points: Vec<Point> = a
@@ -466,6 +518,7 @@ pub(super) fn apply(
             surface,
             anchors,
             lights: airport_lights,
+            runways: drawn_runways,
             moved: relaid.moved,
             added: relaid.added,
             snapped,
@@ -487,6 +540,7 @@ pub(super) fn apply(
                 surface,
                 anchors: None,
                 lights: Vec::new(),
+                runways: Vec::new(),
                 moved: Vec::new(),
                 added: Vec::new(),
                 snapped: 0,

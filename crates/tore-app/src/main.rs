@@ -15,6 +15,7 @@ mod aim_box;
 mod aircraft;
 mod aircraft_animation;
 mod aircraft_animation_probe;
+mod airfield_audit;
 mod airfield_lights;
 mod airfield_sheets;
 mod assets;
@@ -5687,6 +5688,13 @@ struct ProbeScript {
     trace_ticks: u64,
     /// The leader fires its own weapons from this tick.
     attack: Option<ProbeAttack>,
+    /// `--probe-pavement`: print how many ground ticks of the AI aircraft at
+    /// a redrawn airport were off its drawn pavement (an off-pavement tick is
+    /// an anomaly either way).
+    pavement: bool,
+    /// `--probe-track FILE`: write the AI aircraft's ground tracks at
+    /// redrawn airports (see `probe_invariants::ProbeInvariants::track`).
+    track: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -7671,6 +7679,10 @@ fn ai_probe_run(
     };
     let mut output = world::TickOutput::default();
     let mut invariants = probe_invariants::ProbeInvariants::default();
+    invariants.report_pavement = script.pavement;
+    if let Some(path) = &script.track {
+        invariants.track = Some(std::io::BufWriter::new(std::fs::File::create(path)?));
+    }
     for tick in 0..ticks as u64 {
         if let Some(recording) = &mut recording {
             recording.start_tick(None, &mut mission.combat);
@@ -8929,6 +8941,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         surface_drive::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--airfield-audit") {
+        airfield_audit::run()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--airfield-sheets") {
         airfield_sheets::run()?;
         return Ok(Outcome::Done);
@@ -9153,6 +9169,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 separation_nm = Some(nm);
             }
             "--probe-wing-only" => probe_script.wing_only = true,
+            "--probe-pavement" => probe_script.pavement = true,
+            "--probe-track" => probe_script.track = Some(PathBuf::from(args.next().ok_or("--probe-track needs an output file")?)),
             "--probe-group" => {
                 let usage = "--probe-group needs GROUP:CHOICE[:survive], group 1..6";
                 let value = args.next().ok_or(usage)?;

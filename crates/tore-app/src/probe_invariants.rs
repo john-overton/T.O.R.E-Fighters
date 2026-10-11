@@ -44,6 +44,24 @@ const TOUCHING_FT: f64 = 60.;
 const FLAP_TICKS: u64 = 360;
 const FLAP_ACTIVITY_CHANGES: usize = 30;
 const FLAP_PITCH_REVERSALS: usize = 60;
+/// An aircraft in an airfield phase below this height above the surface is
+/// on its wheels for the pavement check, feet.
+const GROUND_AGL_FT: f64 = 20.;
+/// The airfield phases spent on the wheels: the pavement check counts an
+/// aircraft in one of them at a redrawn airport off the drawn pavement as an
+/// anomaly (slice CL-AP, John 2026-10-11: AI taxi on taxiways, not grass).
+const GROUND_PHASES: [tore_sim::ai::airfield::Phase; 7] = {
+    use tore_sim::ai::airfield::Phase;
+    [
+        Phase::Waiting,
+        Phase::Taxi,
+        Phase::LineUp,
+        Phase::TakeoffRoll,
+        Phase::Rollout,
+        Phase::TaxiClear,
+        Phase::Parked,
+    ]
+};
 
 #[derive(Default)]
 struct Track {
@@ -79,6 +97,16 @@ pub struct ProbeInvariants {
     anomalies: u32,
     samples: u64,
     kinds: BTreeMap<&'static str, u32>,
+    /// Print the closing `AI probe pavement:` line (`--probe-pavement`).
+    pub report_pavement: bool,
+    /// Ticks an AI aircraft spent on the ground in an airfield phase at a
+    /// redrawn airport, and how many of them off its drawn pavement.
+    pavement_samples: u64,
+    off_pavement: u64,
+    /// `--probe-track FILE`: every sixth ground tick of each AI aircraft at
+    /// a redrawn airport, as `tick label phase leg x z on|off` lines, for
+    /// `--airfield-audit --track` to draw.
+    pub track: Option<std::io::BufWriter<std::fs::File>>,
 }
 
 impl ProbeInvariants {
@@ -322,6 +350,50 @@ impl ProbeInvariants {
                     ));
                 }
             }
+            if alive
+                && !f.crashed
+                && agl < GROUND_AGL_FT
+                && let Some(sequence) = actor.airfield()
+                && GROUND_PHASES.contains(&sequence.phase())
+                && tore_world::terrain::redrawn::Built::for_runway(
+                    &world.redrawn,
+                    sequence.runway().object,
+                )
+                .is_some()
+            {
+                self.pavement_samples += 1;
+                let on = tore_world::terrain::redrawn::on_pavement(&world.redrawn, x, z);
+                if let Some(out) = &mut self.track
+                    && tick.is_multiple_of(6)
+                {
+                    use std::io::Write;
+                    let _ = writeln!(
+                        out,
+                        "{tick} {} {:?} {} {x:.1} {z:.1} {} hdg={:.1} track={:.1} fps={:.1}",
+                        label.replace(' ', "_"),
+                        sequence.phase(),
+                        sequence.leg(),
+                        if on { "on" } else { "off" },
+                        f.yaw.to_degrees().rem_euclid(360.),
+                        f.velocity[0]
+                            .atan2(f.velocity[2])
+                            .to_degrees()
+                            .rem_euclid(360.),
+                        f.velocity[0].hypot(f.velocity[2]),
+                    );
+                }
+                if !on {
+                    self.off_pavement += 1;
+                    flags.push((
+                        "off the pavement",
+                        format!(
+                            "phase={:?} leg={} x={x:.0} z={z:.0}",
+                            sequence.phase(),
+                            sequence.leg()
+                        ),
+                    ));
+                }
+            }
             for (kind, detail) in flags {
                 self.flag(tick, id, &label, kind, detail);
             }
@@ -414,5 +486,11 @@ impl ProbeInvariants {
             speed / 1.68781,
             kinds.join(", ")
         );
+        if self.report_pavement {
+            println!(
+                "AI probe pavement: ground_samples={} off_pavement={}",
+                self.pavement_samples, self.off_pavement
+            );
+        }
     }
 }
