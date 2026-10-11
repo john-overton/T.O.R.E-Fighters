@@ -98,9 +98,10 @@ fn a_cluster_burst_splashes_the_records_radius_in_a_line_and_leaves_no_crater() 
         )
         .unwrap();
     }
-    s.projectiles.push(round(70, &cbu87(), [0., 200., 0.]));
-    // Until the bomb bursts: its flash lasts only a second.
-    for _ in 0..240 {
+    s.projectiles.push(round(70, &cbu87(), [0., 1_500., 0.]));
+    // Until the bomb bursts (it falls past its 1 s arming time first, or it is
+    // a dud): its flash lasts only a second.
+    for _ in 0..600 {
         if s.projectiles.is_empty() {
             break;
         }
