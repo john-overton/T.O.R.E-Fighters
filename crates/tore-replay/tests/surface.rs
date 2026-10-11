@@ -185,6 +185,33 @@ fn the_ground_target_and_airfield_scene_round_trip_in_a_format_3_header() {
 }
 
 #[test]
+fn the_city_fill_scene_round_trips_and_alone_needs_format_3() {
+    let dir = temp_dir("city-fill-header");
+    let mut header = surface_header();
+    header.world.ground_target = None;
+    header.world.airfield_scene = 0;
+    header.world.surface = false;
+    header.world.city_fill_scene = 1;
+    let plain = |name: &str, header: &Header| {
+        // No frames: these carry surface tracks, which need format 3.
+        let writer = Writer::create(dir.join(name), header).unwrap();
+        Recording::open(writer.finish(&Footer::default()).unwrap()).unwrap()
+    };
+    let recording = plain("c.tore-replay", &header);
+    let read = recording.header();
+    assert_eq!(read.format_version, 3);
+    assert_eq!(read.world.city_fill_scene, 1);
+    // Left out of the header when there was no fill.
+    header.world.city_fill_scene = 0;
+    let recording = plain("n.tore-replay", &header);
+    assert_eq!(recording.header().format_version, 2);
+    assert_eq!(recording.header().world.city_fill_scene, 0);
+    let bytes = std::fs::read(dir.join("n.tore-replay")).unwrap();
+    assert!(!String::from_utf8_lossy(&bytes).contains("world.city_fill_scene"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn surface_poses_stock_pieces_flak_and_names_round_trip() {
     let dir = temp_dir("surface-tracks");
     let recording = write(&dir, "t.tore-replay", &surface_header());
@@ -405,6 +432,7 @@ fn a_format_2_file_still_opens_plays_and_exports() {
     assert!(recording.complete() && recording.problems().is_empty());
     assert_eq!(recording.header().world.ground_target, None);
     assert_eq!(recording.header().world.airfield_scene, 0);
+    assert_eq!(recording.header().world.city_fill_scene, 0);
     assert_eq!(recording.surface_units().count(), 0);
     let scenario = rich_scenario(1_000, 40, 5);
     assert_eq!(recording.frame_count() as usize, scenario.frames.len());

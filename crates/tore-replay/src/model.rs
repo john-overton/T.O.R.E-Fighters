@@ -152,6 +152,12 @@ pub struct World {
     /// of its own, so a replay builds the airfields the flight had. Written
     /// only when it is not 0.
     pub airfield_scene: u32,
+    /// Which city fill scene the flight was flown over (format 3). 0 is no
+    /// city fill, and is what every recording before this field has (the
+    /// fill was opt-in until protocol 25). A build gives each fill that
+    /// changes what an aircraft can hit a number of its own, so a replay
+    /// builds the city the flight had. Written only when it is not 0.
+    pub city_fill_scene: u32,
     /// The world holds active surface units (format 3): the recording may
     /// carry surface poses, launcher loads, names and the rest of the
     /// surface tracks. A recording of a world without any is a format 2 file.
@@ -184,9 +190,13 @@ pub struct GroundTarget {
 
 impl World {
     /// Whether the recording needs format 3 to be written: it carries the
-    /// ground target, a redrawn airfield scene or surface tracks.
+    /// ground target, a redrawn airfield scene, a city fill scene or
+    /// surface tracks.
     pub fn needs_surface_format(&self) -> bool {
-        self.ground_target.is_some() || self.airfield_scene != 0 || self.surface
+        self.ground_target.is_some()
+            || self.airfield_scene != 0
+            || self.city_fill_scene != 0
+            || self.surface
     }
 }
 

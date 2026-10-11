@@ -225,6 +225,7 @@ pub fn run() -> AppResult<()> {
             wind: None,
             cloud_altitude: Some(0),
             redrawn_airports: crate::scenery::redrawn_airports()?,
+            city_fill: crate::scenery::city_fill()?,
         };
         let world = Terrain::for_mission(resources, &theater, condition, &overrides)?;
         let mut scenery = Scenery::build(resources, &world)?;

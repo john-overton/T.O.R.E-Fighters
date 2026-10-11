@@ -41,8 +41,9 @@ pub struct Terrain {
     /// template's objects, with their ids, owners and sides. The airport
     /// scene holds a contact volume for each one whose shape reads.
     pub surface: crate::surface::Surface,
-    /// Real-size scenery buildings over the city texture's light areas: the
-    /// opt-in CF0 prototype (`crate::city`), `None` unless it is switched on.
+    /// Real-size scenery buildings over the city texture's light areas
+    /// (`crate::city`, [`Overrides::city_fill`], the default): `None` when
+    /// the world was built without the fill or its theater has no city art.
     pub city_fill: Option<std::sync::Arc<crate::city::CityFill>>,
     /// The redrawn airports that replace the retail airfields
     /// ([`Overrides::redrawn_airports`], the default); empty when the
@@ -74,16 +75,25 @@ pub struct Overrides {
     /// text never turns it off, so every game of a session and the server
     /// build the same airfields.
     pub redrawn_airports: bool,
+    /// Fill the city texture tiles with real-size scenery buildings
+    /// ([`crate::city`]). On by default everywhere (John, 2026-10-11,
+    /// protocol 25); off builds no fill, which the app allows in single
+    /// player and the offline tools as a developer escape hatch
+    /// (`TORE_CITY_FILL=0`). Aircraft crash into the buildings and ground
+    /// bursts knock them flat, so a mission text never turns it off: every
+    /// machine of a session and the server build the same city.
+    pub city_fill: bool,
 }
 
 impl Default for Overrides {
-    /// No launch override, and the redrawn airports.
+    /// No launch override, the redrawn airports and the city fill.
     fn default() -> Self {
         Self {
             time: None,
             wind: None,
             cloud_altitude: None,
             redrawn_airports: true,
+            city_fill: true,
         }
     }
 }
@@ -205,6 +215,9 @@ pub struct Recorded {
     /// Rebuild with the redrawn airports: the recording's airfield scene
     /// (a recording from before the redraw has the retail airfields).
     pub redrawn_airports: bool,
+    /// Rebuild with the city fill: the recording's city fill scene (a
+    /// recording from before the fill was the default has none).
+    pub city_fill: bool,
     /// The Quick Mission ground target the flight had, so the surface
     /// (template, defenses, seed, nationality, separation and so the starts)
     /// rebuilds exactly.
@@ -1057,7 +1070,7 @@ impl Terrain {
         out.redrawn_airports = recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports);
         let plans = redrawn::Plans::new(out.redrawn_airports)?;
         out.build_airport_scene(resources, code.trim_end_matches(".MM"), target, &plans)?;
-        if crate::city::enabled() {
+        if recorded.map_or(overrides.city_fill, |r| r.city_fill) {
             out.city_fill =
                 crate::city::CityFill::for_terrain(resources, &out).map(std::sync::Arc::new);
         }

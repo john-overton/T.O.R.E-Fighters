@@ -102,6 +102,7 @@ pub fn run() -> AppResult<()> {
     spec.surface_seed = seed;
     // The redrawn airports unless TORE_REDRAWN_AIRPORTS=0.
     spec.weather.redrawn_airports = crate::scenery::redrawn_airports()?;
+    spec.weather.city_fill = crate::scenery::city_fill()?;
     let mut world = World::new(&spec, &resources, Seating::SinglePlayer)?;
     let surface = world.terrain.surface.clone();
     if let Some(why) = &surface.unresolved {

@@ -801,6 +801,12 @@ impl FillRenderer {
         self.tiers = Tiers::from_options(options);
     }
 
+    /// Replaces the tiers for every view until cleared (a measuring aid, as
+    /// `TORE_CITY_FILL_TIERS`).
+    pub fn set_tiers(&mut self, tiers: Option<Tiers>) {
+        self.override_tiers = tiers;
+    }
+
     /// Rebuilds the render pipelines for a new sample count.
     pub fn rebuild(
         &mut self,

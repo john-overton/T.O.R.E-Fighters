@@ -9124,9 +9124,9 @@ fn main() -> std::process::ExitCode {
         tore_import::Level::Warn => log::warn!("{text}"),
     });
     let interactive = startup::interactive();
-    // CF0 city fill prototype: opt-in, off unless TORE_CITY_FILL=1.
-    tore_world::city::set_enabled(std::env::var("TORE_CITY_FILL").as_deref() == Ok("1"));
-    // A measuring aid: the per-theater building budget.
+    // A measuring aid: the city fill's per-theater building budget. Single
+    // player and the tools only: every machine of a networked game must
+    // build the same city, so never set it for one.
     if let Some(cap) = std::env::var("TORE_CITY_FILL_CAP")
         .ok()
         .and_then(|v| v.parse().ok())

@@ -160,8 +160,12 @@ pub fn path_words(path: Path) -> &'static str {
 /// game's; no byte layout changed for it. Folded under 24: the extended
 /// combat commands 3 (`GunKeyDown`) and 4 (`GunKeyUp`) after code 31 (slice
 /// FX-T) and the readout's Guided sight group's level T, 15 to 18 values
-/// (slice FX-H).
-pub const PROTOCOL_VERSION: u16 = 24;
+/// (slice FX-H). 25 since the surface close-out (slice CL-CF): every game
+/// builds the city fill (`tore_world::city`), whose buildings aircraft
+/// crash into and ground bursts knock flat, which a 24 game lacks; no byte
+/// layout changed for it. Folded under 25: the mission text's
+/// `enemy-start` line (slice CL-R), which a 24 game refuses.
+pub const PROTOCOL_VERSION: u16 = 25;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

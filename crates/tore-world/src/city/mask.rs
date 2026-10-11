@@ -325,6 +325,18 @@ fn texel_roll(x: i64, z: i64) -> u64 {
     (h >> 33) % 100
 }
 
+/// Reads what [`LightMap::build`] reads, without classing anything.
+pub fn read_inputs(
+    resources: &dyn ResourceSource,
+    environment: &tore_formats::theater::Environment,
+    base: &str,
+) {
+    reference_palette(resources, &environment.map);
+    for placement in environment.textures.values() {
+        resources.get(&placement.resource_name(base));
+    }
+}
+
 impl LightMap {
     /// Reads every ground placement's picture once and keeps the city ones,
     /// classed by the theater's reference palette. A theater with no city
