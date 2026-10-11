@@ -334,9 +334,7 @@ impl Scene {
             commands: std::mem::take(&mut self.commands),
             ..SeatInput::default()
         };
-        self.world
-            .step(std::slice::from_ref(&input), &mut self.out)?;
-        Ok(())
+        self.recorded(|world, out| world.step(std::slice::from_ref(&input), out))
     }
 }
 
