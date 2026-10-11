@@ -841,3 +841,65 @@ fn a_takeover_rides_a_checkpoint() {
     );
     assert_eq!(copy.checkpoint().unwrap(), world.checkpoint().unwrap());
 }
+
+/// ST-O's finding: a take and a give-back rebuild the AI actor. A Strike
+/// wing's plane and a wingman's ground order come back with it, across a
+/// checkpoint taken while the human flies.
+#[test]
+fn a_take_and_a_give_back_keep_the_planes_strike_role_and_ground_order() {
+    use tore_sim::ai::engagement::StrikeRole;
+    let mut world = world_at(5_000);
+    let target =
+        crate::ai_wings::outcome::ground_targets(&world.terrain.surface, &world.combat.state)[0];
+    let wings = world.ai_wings.as_mut().unwrap();
+    wings.set_strike_role(PLANE.0, StrikeRole::Strike);
+    wings.set_strike_order(PLANE.0, Some(target));
+    let seat = SeatId(1);
+    tick(
+        &mut world,
+        &[MissionCommand::Take { seat, plane: PLANE }],
+        Some(seat),
+        Vec::new(),
+        Vec::new(),
+        false,
+    );
+    assert!(world.combat.state.ownship(PLANE.0).is_some());
+    let bytes = world.checkpoint().unwrap();
+    let mut copy = world_at(5_000);
+    copy.restore(&bytes).unwrap();
+    for w in [&mut world, &mut copy] {
+        assert!(
+            w.ai_wings
+                .as_ref()
+                .unwrap()
+                .handed_tasking(PLANE.0)
+                .is_some()
+        );
+        fly(w, Some(seat), 60);
+        tick(
+            w,
+            &[MissionCommand::GiveBack { seat }],
+            None,
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+        let actor = w
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actor(PLANE.0)
+            .unwrap();
+        assert_eq!(actor.strike_role(), StrikeRole::Strike);
+        assert_eq!(actor.strike_order(), Some(target));
+        assert!(
+            w.ai_wings
+                .as_ref()
+                .unwrap()
+                .handed_tasking(PLANE.0)
+                .is_none()
+        );
+    }
+    assert_eq!(copy.checkpoint().unwrap(), world.checkpoint().unwrap());
+}

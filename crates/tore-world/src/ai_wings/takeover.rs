@@ -15,6 +15,7 @@
 use super::AiWings;
 use super::strike::kind;
 use tore_sim::ai::engagement::StrikeRole;
+use tore_sim::ai::mission::AiActor;
 use tore_sim::ai::strike::{StoreKind, Strike, Takeover};
 use tore_sim::ai::weapon_service::{Rounds, StationId};
 use tore_sim::combat::live::{self, StrikeTarget};
@@ -99,5 +100,63 @@ impl AiWings {
         actor.set_strike_role(StrikeRole::Strike);
         actor.set_strike_order(Some(target));
         actor.take_over_strike(takeover).then_some(target)
+    }
+}
+
+/// An AI aircraft's air-to-ground tasking that a take and a give-back must
+/// not lose (ST-O's finding): its role (CAP or Strike) and its ordered
+/// ground target. A human who takes a Strike wing's plane and gives it back
+/// returns it to the strike; a wingman ordered onto a ground target keeps
+/// the order. ST-O's class order and lase order join this record when that
+/// slice merges (agent decision, slice ST-K).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tasking {
+    pub role: StrikeRole,
+    pub order: Option<u32>,
+}
+
+impl Tasking {
+    /// The actor's tasking, when it has any beyond CAP.
+    pub fn of(actor: &AiActor) -> Option<Self> {
+        let tasking = Self {
+            role: actor.strike_role(),
+            order: actor.strike_order(),
+        };
+        (tasking.role != StrikeRole::Cap || tasking.order.is_some()).then_some(tasking)
+    }
+    /// Gives `actor` this tasking again.
+    pub fn apply(&self, actor: &mut AiActor) {
+        actor.set_strike_role(self.role);
+        actor.set_strike_order(self.order);
+    }
+}
+
+tore_sim::checkpoint_struct!(Tasking { role, order });
+
+impl AiWings {
+    /// Keeps the tasking of `actor` (aircraft `id`, leaving the AI for a
+    /// human) until it comes back.
+    pub(super) fn hand_over_tasking(&mut self, id: u32, actor: &AiActor) {
+        match Tasking::of(actor) {
+            Some(tasking) => {
+                self.handed_tasking.insert(id, tasking);
+            }
+            None => {
+                self.handed_tasking.remove(&id);
+            }
+        }
+    }
+    /// Puts back the tasking aircraft `id` had when a human took it, now it
+    /// is the AI's again (a give-back, or a take that failed).
+    pub(super) fn restore_tasking(&mut self, id: u32) {
+        if let Some(tasking) = self.handed_tasking.remove(&id)
+            && let Some(actor) = self.mission.actor_mut(id)
+        {
+            tasking.apply(actor);
+        }
+    }
+    /// The tasking kept for aircraft `id` while a human flies it.
+    pub fn handed_tasking(&self, id: u32) -> Option<&Tasking> {
+        self.handed_tasking.get(&id)
     }
 }

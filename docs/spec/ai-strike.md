@@ -636,6 +636,7 @@ rules above are met, all agent decisions (2026-10-11) unless marked:
 | Done | No target or store left, and neither fuel, damage nor the mission sends it home: the takeover ends and the aircraft takes up its ordinary role again (CAP, no order) instead of going home |
 | On return | The kept designation follows the target the AI attacked last while it stands (the sensors take it as held by the sight's track and kept by the ground rules); everything else as left, rounds as the AI left them |
 | First take | The striker's own cockpit becomes the human's: its store, armed, seeker and bomb sight modes, sight and laser, and its target designated on the A-G page (the page only with a working radar) |
+| Role and orders | An aircraft's Strike role and ground order are kept while a human flies it and come back at the give-back, so a Strike wing's plane a human borrowed strikes again (the human's own ground target, when it left one, comes first) |
 
 Known limit (an effect of the level run's steering, not a rule): from a line
 that is not already on the aim, the level run's cue may not come inside its
