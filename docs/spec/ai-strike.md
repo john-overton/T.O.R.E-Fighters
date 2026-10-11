@@ -619,6 +619,30 @@ AI did. All opinionated (John, 2026-10-11, decisions 10 to 12) unless marked.
 - **First take of an AI striker.** The human gets the AI's target designated, its
   selected store, delivery mode and laser state.
 
+Built in slice ST-K (`tore_sim::ai::strike::Takeover`, the bridge
+`tore_world::ai_wings::takeover`, the handoff in `tore_world::world::handoff`;
+[architecture](../ARCHITECTURE.md#a-ground-attack-the-ai-takes-over)). How the
+rules above are met, all agent decisions (2026-10-11) unless marked:
+
+| Rule | Value |
+| --- | --- |
+| When it starts | At the give-back, when the cockpit the human left holds a ground target, the aircraft carries a surface store with rounds (not the AT-2), and it is a fighter, attack jet or heavy (helicopters and the gunship wait for their slice) |
+| Target | The designated object when it is a standing ground object of another side; else, with the sight pinned, the standing hostile ground object nearest the pin within 1,000 ft (fitted). The AI gets an order onto it and the Strike role, so a dead target is followed by the mission's next briefed one ([What the AI knows](#what-the-ai-knows)) |
+| Store | The kept station while it has rounds (a laser store only with the aircraft's own designator, decision 9), then the AI's own choice |
+| Pass | Kept LVL: a level run with a bomb, a laser bomb or a JDAM. Kept CCIP, rockets and seekers: the [table](#pass-choice) |
+| Safe | Checked every step from the give-back until something leaves on the pass, and at every choice. Not safe: it turns straight away from the target and stands off on a left circle about it, outside the reach of every known missile site covering the target plus 1 nm, never inside the exit distance, at corner speed holding its height, the heading blending from the tangent toward the centre by how far out it is (45 to 135 degrees off the bearing, retail's circle rule). Once safe it turns back and chooses again. Where an ordinary striker goes home after an unsafe defence, a takeover stands off instead |
+| Guiding | While one of its laser weapons is in flight the exit holds a level line on its release heading at corner speed (no jink, no climb), so the target stays below the wings, inside a pod's gimbal, until impact; no second laser weapon leaves while one guides |
+| Mode and laser | The bridge never sets a kept cockpit's bomb sight mode or laser hand setting. A kept sight that is not pinned tracks the AI's target, so the laser lands on it; a pin stays where the human put it. A laser left on automatic comes on at the release (the kept cockpit's automatic rule counts weapons in flight only, slice FX-J) |
+| Done | No target or store left, and neither fuel, damage nor the mission sends it home: the takeover ends and the aircraft takes up its ordinary role again (CAP, no order) instead of going home |
+| On return | The kept designation follows the target the AI attacked last while it stands (the sensors take it as held by the sight's track and kept by the ground rules); everything else as left, rounds as the AI left them |
+| First take | The striker's own cockpit becomes the human's: its store, armed, seeker and bomb sight modes, sight and laser, and its target designated on the A-G page (the page only with a working radar) |
+
+Known limit (an effect of the level run's steering, not a rule): from a line
+that is not already on the aim, the level run's cue may not come inside its
+release gate (5% of the skill circle) on the first pass, and the release comes
+on the re-attack. Seen online in `net-ai-strike-handback`; the driver and world
+tests, which hand back on the line, release on the first pass.
+
 ## Online and replays
 
 AI strike runs on the host like all AI. Strike state and the strike cockpit go
