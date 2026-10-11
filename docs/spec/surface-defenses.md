@@ -332,9 +332,22 @@ many others survive.
 
 **Validity** uses integer data only, so every platform decides the same:
 
-- Land units need a land cell and ships a water cell, from the terrain grid's
-  integer class byte, checked at the unit's centre and at the four corners of
-  its footprint.
+- Land units need a land cell and ships a water cell, checked at the unit's
+  centre and at the four corners of its footprint. A cell is water when its
+  integer class byte is 1 (open water) or when its colour byte is 255 (the
+  water cutout) and no ground texture placement covers it. Those colour-255
+  cells with a land class are shore cells at sea level (every one in all
+  sixteen theaters has elevation 0) drawn as the sea: the Falklands' forward
+  SAM site (`LFSAM`) used to put a Crotale on one (agent decision, 2026-10-11,
+  CL-M). Under a texture the class byte alone decides, because the picture
+  draws its own beach.
+- A unit the layout moved, and every supply truck and battery radar it adds,
+  must pass this rule. A unit left at its retail spot is the data's: the grid
+  is coarse (8,192 ft cells), so a few retail ships stand on shore cells and
+  a few retail structures on water cells, and nothing moves them. The
+  `surface-class-sweep` battery scenario (`--surface-dump --classes`) checks
+  every offered template with 20 seeds and every base layout and fails on any
+  moved unit on the wrong class.
 - Land units refuse a cell whose four corner elevations span more than one
   elevation unit (256 ft).
 - Footprint clearance from every fixed template object and theater layout
@@ -399,7 +412,7 @@ the retail spot is the fallback). Radius ranges are default, pending John.
 | --- | --- |
 | Distance from the retail spot | 3 to 30 nm, radius drawn as the square root of a uniform value so area is uniform (default, pending John) |
 | Map edge | every object at least two cells (16,384 ft) inside |
-| Terrain class | land units and structures on land; ships on water, with the 8 neighbouring cells also water when the retail spot had that (open sea stays open sea; a harbor keeps a coast) |
+| Terrain class | land units and structures on land; ships on water (water as defined under Validity, shore cells drawn as the sea included), with the 8 neighbouring cells also water when the retail spot had that (open sea stays open sea; a harbor keeps a coast) |
 | Slope | land objects only on cells whose four corner elevations span at most one unit (256 ft) |
 | Clearance | 2,000 ft from every theater layout object; 3 nm from every theater runway |
 | Side | the front axis runs from the centroid of the theater's Blue-side layout placements to the centroid of its Red-side ones; the candidate's depth along it must be within 15 nm of the retail spot's depth and on the same side of the midpoint (default, pending John) |

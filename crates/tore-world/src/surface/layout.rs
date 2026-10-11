@@ -32,7 +32,7 @@ mod supply_trucks;
 pub mod trig;
 
 pub use ground::{Cells, Footprint, Front, Ground, Placed, TypeInfo};
-pub use sites::audit;
+pub use sites::{audit, class_audit};
 
 use super::{
     Origin, Surface, Unit, UnitId,

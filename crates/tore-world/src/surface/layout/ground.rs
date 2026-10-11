@@ -5,13 +5,18 @@
 //! answers every test alike (docs/spec/surface-defenses.md, "Jitter",
 //! "Relocation").
 use super::trig;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::theater::{TerrainCell, Theater};
 
 /// Feet per terrain grid cell.
 pub const CELL_FT: i64 = 8192;
-/// The terrain class byte of water (docs/formats/theater.md).
+/// The terrain class byte of open water (docs/formats/theater.md).
 pub const WATER_CLASS: u8 = 1;
+/// The colour byte of the water cutout. A cell with it and no ground texture
+/// over it is the sea to the eye whatever its class byte says: such a shore
+/// cell of class 0 (every one in all sixteen theaters has elevation 0) is
+/// drawn as the sea, so a land unit standing on it stands in the water.
+pub const WATER_COLOR: u8 = 255;
 
 /// The terrain grid, as the layout reads it.
 pub trait Cells {
@@ -159,6 +164,9 @@ pub struct Ground<'a> {
     /// `objects` by grid cell, each listed in every cell its footprint
     /// reaches with [`Self::INDEXED_CLEARANCE`] added.
     index: BTreeMap<(i64, i64), Vec<usize>>,
+    /// The ground texture placements by their grid cell (a multiple of four
+    /// in each axis): a placement covers four cells a side.
+    tiles: BTreeSet<(i64, i64)>,
 }
 
 impl<'a> Ground<'a> {
@@ -189,7 +197,16 @@ impl<'a> Ground<'a> {
             runways,
             front,
             index,
+            tiles: BTreeSet::new(),
         }
+    }
+
+    /// The same ground with its ground texture placements, the grid cells
+    /// (multiples of four) they stand on. A placed picture draws its own
+    /// shore, so [`Self::water`] reads the class byte alone under one.
+    pub fn with_tiles(mut self, tiles: impl IntoIterator<Item = (i64, i64)>) -> Self {
+        self.tiles = tiles.into_iter().collect();
+        self
     }
 
     /// The far corner of the grid, feet: terrain runs from 0 to
@@ -215,10 +232,16 @@ impl<'a> Ground<'a> {
         Some(((point[0] / CELL_FT) as usize, (point[1] / CELL_FT) as usize))
     }
 
-    /// Whether the cell under `point` is water; outside the grid it is.
+    /// Whether the cell under `point` is water: class byte [`WATER_CLASS`],
+    /// or colour [`WATER_COLOR`] where no ground texture covers the cell (the
+    /// sea as drawn). Outside the grid it is.
     pub fn water(&self, point: [i64; 2]) -> bool {
-        self.cell_index(point)
-            .is_none_or(|(c, r)| self.cells.cell(c, r).class == WATER_CLASS)
+        self.cell_index(point).is_none_or(|(c, r)| {
+            let cell = self.cells.cell(c, r);
+            cell.class == WATER_CLASS
+                || (cell.color == WATER_COLOR
+                    && !self.tiles.contains(&((c & !3) as i64, (r & !3) as i64)))
+        })
     }
 
     /// Whether the eight cells around the one under `point` are all water.

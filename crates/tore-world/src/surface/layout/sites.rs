@@ -546,3 +546,62 @@ pub fn audit(
     }
     problems
 }
+
+/// The terrain class rule over everything the layout placed, moved or not:
+/// a land unit, structure or parked aircraft stands on a land cell
+/// (docs/spec/surface-defenses.md, "Validity"), a ship on a water cell, each
+/// at its centre ([`Ground::water`]). `retail` is the same template placed
+/// without jitter or relocation: a unit still where retail put it is the
+/// data's and is not judged (a harbor's ship may sit on a shore cell of the
+/// coarse grid); a unit the layout moved, a supply truck or a battery radar
+/// it added must pass. Theater layout objects never move and are not judged.
+/// Aircraft on a deck stand where their carrier does. Empty when the rule
+/// holds.
+pub fn class_audit(
+    surface: &Surface,
+    ground: &Ground<'_>,
+    retail: Option<&Surface>,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    let retail_at: BTreeMap<u32, [i64; 2]> = retail
+        .map(|r| {
+            r.units
+                .iter()
+                .map(|u| (u.id.0, xz(u.position)))
+                .chain(r.parked.iter().map(|p| (p.id.0, xz(p.position))))
+                .collect()
+        })
+        .unwrap_or_default();
+    let moved = |id: u32, at: [i64; 2]| retail_at.get(&id) != Some(&at);
+    for unit in &surface.units {
+        let at = xz(unit.position);
+        if unit.id.range() == IdRange::Layout || !moved(unit.id.0, at) {
+            continue;
+        }
+        let ship = unit.class & class::SHIP != 0;
+        if ground.water(at) != ship {
+            problems.push(format!(
+                "{:#010x} {} {} at {} {}",
+                unit.id.0,
+                unit.resource,
+                if ship {
+                    "a ship on land"
+                } else {
+                    "a land unit on water"
+                },
+                at[0],
+                at[1]
+            ));
+        }
+    }
+    for parked in surface.parked.iter().filter(|p| p.deck.is_none()) {
+        let at = xz(parked.position);
+        if moved(parked.id.0, at) && ground.water(at) {
+            problems.push(format!(
+                "{:#010x} {} a parked aircraft on water at {} {}",
+                parked.id.0, parked.resource, at[0], at[1]
+            ));
+        }
+    }
+    problems
+}

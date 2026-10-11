@@ -1568,6 +1568,9 @@ theater's own and the enemy distance to 20 nm (`--separation N`). `--no-jitter` 
 `--sweep [--seeds N] [THEATER ...]` places every offered template with seeds
 1 to N (20) and reports each base layout's batteries and every placement's
 anchor, move, broken site rules and digest (`surface-relocate-sweep`).
+`--classes [--seeds N] [THEATER ...]` checks the terrain class rule over
+every base layout and every template placement and lists each moved unit on
+the wrong class (`surface-class-sweep`).
 `--starts [THEATER ...]` builds one mission per theater with a ground target
 and reports where Blue and Red start (`surface-start-placement`).
 `--surface-sheets` renders each template from above and closer, heavy
