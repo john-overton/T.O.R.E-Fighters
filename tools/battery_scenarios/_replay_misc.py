@@ -168,7 +168,7 @@ def input_scenarios() -> list[Scenario]:
         "wrong-header": (b"not a profile\n", "expected tore-input 1"),
         "future-version": (b"tore-input 2\n", "expected tore-input 1"),
         "bad-action": (b"tore-input 1\nbind key:F1 nonsense-action press\n", "invalid profile directive"),
-        "fire-press": (b"tore-input 1\nbind bogus button:1 fire press\n", "fire requires hold"),
+        "fire-press": (b"tore-input 1\nbind bogus button:1 fire press\n", "fire and fire-gun require hold"),
         "dup-alias": (b"tore-input 1\nalias a linux-xx\nalias a linux-yy\n", "duplicate alias"),
         "bad-utf8": (b"\xff\xfe\x00 bad", "valid UTF-8"),
         "too-big": (b"#" * 300_000, "exceeds 256 KiB"),
