@@ -206,6 +206,11 @@ impl App {
             }
         };
         if flying {
+            crate::queue_gun_key(
+                &mut self.seat_commands,
+                &mut self.gun_key_sent,
+                !self.flight_ui.frozen() && self.focused && self.input.resolver.held("fire-gun"),
+            );
             controls.commands = std::mem::take(&mut self.seat_commands);
         }
         let session = self.net.as_mut().expect("a session");
@@ -513,6 +518,7 @@ impl App {
         self.flight_ui.reset_for_flight();
         self.camera.keys.clear();
         self.seat_commands.clear();
+        self.gun_key_sent = false;
         self.input.context(true, self.focused);
         self.screen = Screen::Main;
         if let Some(audio) = &self.audio {
@@ -597,6 +603,7 @@ impl App {
         }
         self.input.context(true, self.focused);
         self.seat_commands.clear();
+        self.gun_key_sent = false;
         self.cheats_sent = None;
         self.instruments.navigation = crate::navigation::Navigation::default();
         self.scenery.reset_presentations();
@@ -891,6 +898,7 @@ impl App {
             self.flight_ui.reset_for_flight();
             self.camera.keys.clear();
             self.seat_commands.clear();
+            self.gun_key_sent = false;
             self.input.context(true, self.focused);
             self.screen = Screen::Main;
             if let Some(audio) = &self.audio {

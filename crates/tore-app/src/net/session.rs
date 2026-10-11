@@ -732,6 +732,8 @@ pub struct NetSession {
     fire: guns::Fire,
     /// Whether it was held at the last turn.
     trigger: bool,
+    /// Whether the gun key (Tab) was held at the last turn.
+    gun_key: bool,
     /// Each weapon record's motor, parsed once.
     motors: RefCell<BTreeMap<String, Option<Motor>>>,
     /// Session events not yet taken by the game.
@@ -1001,6 +1003,7 @@ impl NetSession {
             guns: Guns::default(),
             fire: guns::Fire::default(),
             trigger: false,
+            gun_key: false,
             motors: RefCell::new(BTreeMap::new()),
             events: Vec::new(),
             left_at: None,
@@ -1367,6 +1370,7 @@ impl NetSession {
             self.through_last = Some(t.facts());
         }
         self.trigger = self.fire.turn(&controls.commands, controls.trigger);
+        self.gun_key = self.fire.gun_key();
         if self.routed() {
             let mut over = ThroughPeers {
                 socket: &mut self.socket,
@@ -1805,6 +1809,7 @@ impl NetSession {
             tick: frame.tick,
             render_tick: frame.render_tick,
             trigger: self.trigger,
+            gun_key: self.gun_key,
             plane: frame.plane.0,
             own: crate::combat::launcher(&frame.presented),
             gun_aim: frame.presented.gun_aim,

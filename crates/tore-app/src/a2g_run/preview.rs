@@ -371,7 +371,9 @@ fn frame(mut scene: Scene, shot: &Shot, font: &Font) -> AppResult<Vec<u8>> {
         None,
         (s.bank, 1.),
     );
-    weapon_hud::draw(&mut layer, &frame, font, HUD_GREEN, 1., false, true, None);
+    weapon_hud::draw(
+        &mut layer, &frame, font, HUD_GREEN, 1., false, true, None, false,
+    );
     let sight = frame.readout.bomb_sight.clone();
     println!(
         "hud-a2g-preview: {} {:?} mode {:?} arc {:?} range {:?} level {:?} warnings {:?}",

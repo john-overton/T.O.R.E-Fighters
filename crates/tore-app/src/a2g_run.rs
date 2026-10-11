@@ -44,6 +44,9 @@
 //!   releases at the "T"'s cue.
 //! - `rocket` ([`rocket`]): a shallow dive with a pod, fired when the rocket
 //!   pipper covers the target, held `--hold S`.
+//! - `strafe` ([`strafe`]): the `release` pass with a store selected and Tab,
+//!   the gun key, held `--hold S` (2 by default); the gun fires, the store
+//!   stays on its station.
 use crate::{AppResult, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -68,6 +71,7 @@ mod missile;
 pub mod preview;
 mod release;
 mod rocket;
+mod strafe;
 
 const SEAT: SeatId = SeatId(0);
 pub(crate) const FEET_PER_NM: f64 = 6_076.;
@@ -221,6 +225,10 @@ pub fn run() -> AppResult<()> {
         kind @ ("maverick" | "harm" | "antiship" | "sarh") => {
             missile::run(&mut scene, &o, kind, &resources)?
         }
+        "strafe" => {
+            scene.print_record();
+            strafe::run(&mut scene, &o)?
+        }
         "ccip" | "level" | "rocket" => {
             scene.print_record();
             match o.attack.as_str() {
@@ -231,7 +239,7 @@ pub fn run() -> AppResult<()> {
         }
         other => {
             return Err(format!(
-                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, maverick, harm, antiship, sarh, laser, jdam, at2"
+                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, strafe, maverick, harm, antiship, sarh, laser, jdam, at2"
             )
             .into());
         }
