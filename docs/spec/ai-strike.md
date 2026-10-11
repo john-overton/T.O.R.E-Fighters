@@ -9,7 +9,10 @@
 > <!-- tore-header v2 -->
 
 Specification, 2026-10-11, for the AI strike round (slice ST-S). Status:
-**specified, not built**. John asked for AI that attacks the ground and
+**specified, partly built**: the ground picture ([What the AI
+knows](#what-the-ai-knows), and the threat inputs of [Perceived threat and
+available speed](#perceived-threat-and-available-speed)) is built (ST-P); no
+AI attacks the ground yet. John asked for AI that attacks the ground and
 authorised the work for this round (answers of 2026-10-11, folded in below). The
 slices that build it are listed in [Source notes](#source-notes).
 
@@ -123,6 +126,24 @@ All opinionated (John, 2026-10-11: "one cockpit, two pilots" and
 | A wing tasked as SEAD (a Wild Weasel assignment, retail manual p. 169) has the objective's air defences in its briefed set | retail manual, opinionated (agent) for the set |
 | Target order: nearest first, at most two attackers on one object (the [B41](ai.md#b41-target-retention-eligibility-and-ranking) allowance) | spec-derived |
 | After the briefed targets are gone, a striker with stores left attacks hostile ground objects it has seen within 10 nm of the objective, then goes home | fitted |
+| The briefing is Quick Mission's destroy targets (flagged 0x80) of another side than the striker's, with their centre as the objective point. Redfor's are its own, so a Redfor striker is briefed on nothing (the capability is the same on both sides) | opinionated (John, 2026-10-11) for the sides; centre opinionated (agent) |
+| A briefed or ordered object's place and whether it stands are known (retail's preferred-target test reads them directly). Its sensors decide only whether it is *perceived* | fitted |
+| A SEAD striker is one carrying an anti-radiation store; its briefing adds the hostile armed units and radars within 5 nm of the objective point (the distance Quick Mission's Red defends within) | opinionated (agent), radius fitted |
+| An ordered ground target (a flight lead's order, a taken-over designation) is known like a briefed one and outranks the briefing; it gives even a CAP wingman a ground picture while it stands | retail (the ordered object is the only candidate) |
+| The A-G radar list (radar on and working) and the FLIR list follow the player's page rules (class, listing flag, visibility distance, range box, volume, signature, weather, clear line). The AI reads both, and its eye, at once, without switching its scope | spec-derived; reading all at once opinionated (agent) |
+| The eye sees a standing, listable object on the ground inside the visual sensor's volume and range, with a clear line, and no farther than its own visibility distance (`maxVisDist`) when the type gives one; at most 50, nearest first | fitted |
+| Between rebuilds, listed contacts follow their objects every quarter second, as the player's pages do | spec-derived |
+| Neutral scenery never enters the picture (it would fill the 50-entry lists ahead of sided objects) | opinionated (agent) |
+| A perceived object stays known at its last perceived place until it is destroyed or leaves the world | fitted |
+| Every briefed target fully attacked (two others on each): the striker waits for one to free up, rather than taking a third place or an opportunity target | opinionated (agent) |
+
+Built (ST-P): the picture is `tore_sim::ai::awareness::ground::GroundPicture`,
+one per striker (`AiActor::ground_picture`), refreshed by
+`AiMission::observe_ground`; the selector is
+`tore_sim::ai::targeting::select_strike_target`. The bridge
+(`tore_world::ai_wings::ground`) briefs strikers and describes the ground
+objects. The role is `engagement::StrikeRole`, CAP by default; the Quick Mission
+setting that chooses Strike comes with the orders and roles slice.
 
 ## Perceived threat and available speed
 
@@ -155,6 +176,16 @@ retail).
 The picture is rebuilt at the 6 s cadence. Inputs are read when a pass is
 chosen and again before each re-attack, never in the middle of a pass, so the
 choice cannot flicker.
+
+How the inputs are built (ST-P, `awareness::ground::ThreatPicture`):
+
+| Input | Rule | Label |
+| --- | --- | --- |
+| Known defences | Every briefed defence that stands and every perceived armed unit or radar, of any side, with its missile reach (the farthest launch zone of its missiles), its gun reach (the farthest launch zone of its guns), whether it is a radar and whether it can guide (its battery's radar stands, or it guides by itself) | spec-derived; reach from the launch zones fitted |
+| Covers | A point lies within the reach as a straight-line distance from the site; a missile site covers only while it can guide | spec-derived |
+| Fighters | The hostile fighters of the striker's current air picture within 30 nm, nearest first, with the angle off each one's nose | spec-derived |
+| Retail geometry | Each known defence and fighter answers retail's ignore-or-evade test; the angle off the nose is measured in the horizontal | retail bands; horizontal angle fitted |
+| Warnings | The caller supplies whether an air-to-air or surface-to-air warning sounded in the last 10 s | spec-derived |
 
 ## Pass choice
 
@@ -547,7 +578,8 @@ strike order or a takeover of a striking plane.
 | AC-130 orbit | 10,400 ft slant, 35 degrees, 5,965 ft high, 8,520 ft radius, bank at most the aircraft's `maxBank` (radius grows instead) | fitted; bank cap opinionated (agent) |
 | AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |
 | Lase orbit | radius max(3 nm, 1.2 turn radii) | fitted |
-| Ground picture | rebuilt every 6 s | retail |
+| Ground picture | rebuilt every 6 s, contacts followed every 0.25 s | retail |
+| SEAD briefing | hostile armed units and radars within 5 nm of the objective point | fitted |
 | Attackers per object | two | spec-derived |
 
 ## Unknowns
