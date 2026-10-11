@@ -218,13 +218,27 @@ fn theater_item(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> Option<Ite
 }
 
 /// A weapon item for every record the Load Ordnance page would offer: a `.JT`
-/// that parses, other than the `~` ones. The record is the only file a
-/// loadout reads for it.
+/// that parses, other than the `~` ones but the Cheat catalog's novelty
+/// stores (Boulder and Moose), and the laser designator pods' `.SEE`
+/// records, which a loadout row names too (protocol 23, slice NA; agent
+/// decision: the other `~` records are never offered, so they stay out). The
+/// record is the only file a loadout reads for it.
 fn weapon_items(resources: &BTreeMap<String, Vec<u8>>) -> Vec<Item> {
+    const NOVELTY: [&str; 2] = ["~BLDR.JT", "~MOOSE.JT"];
+    let offered = |name: &str| {
+        (name.ends_with(".JT") && (!name.starts_with('~') || NOVELTY.contains(&name)))
+            || tore_sim::combat::sight::DESIGNATOR_PODS.contains(&name)
+    };
     resources
         .iter()
-        .filter(|(name, _)| name.ends_with(".JT") && !name.starts_with('~'))
-        .filter(|(name, bytes)| Weapon::parse(name, bytes).is_ok())
+        .filter(|(name, _)| offered(name))
+        .filter(|(name, bytes)| {
+            if name.ends_with(".SEE") {
+                tore_sim::combat::sight::DesignatorStore::parse(name, bytes).is_ok()
+            } else {
+                Weapon::parse(name, bytes).is_ok()
+            }
+        })
         .map(|(name, bytes)| {
             let manifest = Manifest {
                 entries: vec![ManifestEntry {

@@ -530,7 +530,8 @@ pub fn gap_label(gap: &Gap) -> String {
 
 /// The items a mission uses, in Content's order: the aircraft of every wing
 /// that flies, its theater, the weapons of its loadouts (the `.JT` records
-/// only; a tank is part of its aircraft's item).
+/// and the laser designator pods' `.SEE` records, protocol 23; a tank is
+/// part of its aircraft's item).
 pub fn mission_items(spec: &MissionSpec) -> Vec<ItemKey> {
     let mut items = BTreeSet::new();
     for wing in spec.wings.iter().filter(|wing| wing.count > 0) {
@@ -539,7 +540,7 @@ pub fn mission_items(spec: &MissionSpec) -> Vec<ItemKey> {
     items.insert((ItemKind::Theater, spec.theater.clone()));
     for load in spec.loadout.iter().chain(spec.plane_loadouts.values()) {
         for station in &load.stations {
-            if station.weapon.ends_with(".JT") {
+            if station.weapon.ends_with(".JT") || station.weapon.ends_with(".SEE") {
                 items.insert((ItemKind::Weapon, station.weapon.clone()));
             }
         }
@@ -1039,10 +1040,12 @@ impl super::Host {
         &self,
         load: &tore_world::mission::LoadoutSpec,
     ) -> Option<String> {
+        // A row names a weapon record, or a laser designator pod's SEE
+        // record (protocol 23): both are weapon items.
         let weapons: Vec<ItemKey> = load
             .stations
             .iter()
-            .filter(|station| station.weapon.ends_with(".JT"))
+            .filter(|station| station.weapon.ends_with(".JT") || station.weapon.ends_with(".SEE"))
             .map(|station| (ItemKind::Weapon, station.weapon.clone()))
             .collect();
         self.choice_refusal(&weapons)

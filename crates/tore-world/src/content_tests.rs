@@ -11,7 +11,7 @@ use crate::{
     mission::{Condition, LoadoutSpec, MissionSpec, Skill, Start},
     resources::{ResourceReads, ResourceSource},
     test_support::resources::{
-        AIRPORT_RUNWAY, THEATER, airport_resources, loadable_missile, resources,
+        AIRPORT_RUNWAY, THEATER, airport_resources, laser_pod, loadable_missile, resources,
     },
     world::{Seating, World},
 };
@@ -127,6 +127,26 @@ fn the_synthetic_import_has_its_aircraft_theater_weapons_and_shared_item() {
         content.shared().map(|item| item.key.as_str()),
         Some("shared")
     );
+}
+
+/// Protocol 23, slice NA: a loadout row may name a laser designator pod or,
+/// under Cheat loading, a novelty store, so both are weapon items a lobby
+/// checks; the `~` records the page never offers stay out.
+#[test]
+fn the_designator_pods_and_the_novelty_stores_are_weapon_items() {
+    let mut map = resources();
+    map.insert("PAVEKNF.SEE".into(), laser_pod("PAVEKNF.SEE"));
+    map.insert("~BLDR.JT".into(), loadable_missile("~BLDR.JT"));
+    map.insert("~SPARE.JT".into(), loadable_missile("~SPARE.JT"));
+    // A sensor that is not a designator pod is no item.
+    map.insert("PAVESPK.SEE".into(), map["F18R.SEE"].clone());
+    let content = Content::of(&map);
+    let pod = content.get(Kind::Weapon, "PAVEKNF.SEE").expect("the pod");
+    assert_eq!(pod.names().collect::<Vec<_>>(), ["PAVEKNF.SEE"]);
+    assert!(content.get(Kind::Weapon, "~BLDR.JT").is_some());
+    assert!(content.get(Kind::Weapon, "~SPARE.JT").is_none());
+    assert!(content.get(Kind::Weapon, "PAVESPK.SEE").is_none());
+    assert_eq!(content.of_kind(Kind::Weapon).count(), 4);
 }
 
 #[test]

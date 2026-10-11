@@ -535,6 +535,12 @@ fn laser_bomb(resource: &str) -> Vec<u8> {
     text.into_bytes()
 }
 
+/// A laser designator pod's record: a laser sensor (signature 1) with
+/// weight, which `DesignatorStore::parse` takes (slice NA's content tests).
+pub fn laser_pod(resource: &str) -> Vec<u8> {
+    sensor(resource, 1)
+}
+
 /// Adds the air-to-ground round's synthetic stores to `resources` (the
 /// synthetic import, or one built on it): the F/A-18D carries a laser
 /// designator pod (`LASERPOD.SEE`, signature 1 with weight: a pod, the
