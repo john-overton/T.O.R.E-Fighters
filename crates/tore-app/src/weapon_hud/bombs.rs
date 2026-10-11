@@ -192,7 +192,7 @@ pub fn draw(
     let style = SightStyle::of(frame.config.aircraft);
     let fpm = flight_path_marker(s, zoom);
     match level {
-        Some(l) => draw_level(&mut paint, s, zoom, fpm, &l),
+        Some(l) => draw_level(&mut paint, s, zoom, fpm, &Tee::of(&l)),
         None => {
             if let Some(c) = &sight.ccip {
                 let bore = projected(
@@ -219,7 +219,7 @@ pub fn draw(
 }
 
 /// The flight path marker's centre, as `hud::draw` places it.
-fn flight_path_marker(s: &flight::State, zoom: f64) -> Option<(f64, f64)> {
+pub(super) fn flight_path_marker(s: &flight::State, zoom: f64) -> Option<(f64, f64)> {
     if s.speed <= 10. {
         return None;
     }
@@ -349,21 +349,46 @@ fn caret(paint: &mut hud::Paint<'_>, (x, y): (f64, f64)) {
     paint.line((x, y), (x + 5., y - 6.));
 }
 
+/// What the T needs to be drawn: the bomb sight's level release and the
+/// guided bomb's sight share the drawing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Tee {
+    /// The stem's turn from the flight path, radians, positive right.
+    pub steering_rad: f64,
+    /// The marker on the stem: 1 at the top, 0 on the crossbar.
+    pub marker: f64,
+    /// More than a minute out: the stem is dashed.
+    pub far: bool,
+    /// Passed: the crossbar only.
+    pub overflown: bool,
+}
+
+impl Tee {
+    pub(super) fn of(l: &LevelRelease) -> Self {
+        Self {
+            steering_rad: l.steering_rad,
+            marker: l.marker_fraction(),
+            far: l.far(),
+            overflown: l.overflown(),
+        }
+    }
+}
+
 /// The level release "T": the azimuth steering stem, the crossbar across the
 /// flight path marker and the release marker sliding down the stem.
-fn draw_level(
+pub(super) fn draw_level(
     paint: &mut hud::Paint<'_>,
     s: &flight::State,
     zoom: f64,
     fpm: Option<(f64, f64)>,
-    l: &LevelRelease,
+    l: &Tee,
 ) {
     let Some((fx, fy)) = fpm else {
         return;
     };
     let bar = fy - CROSSBAR_RISE;
     paint.line((fx - CROSSBAR_HALF, bar), (fx + CROSSBAR_HALF, bar));
-    if l.overflown() {
+    if l.overflown {
         return;
     }
     // The stem stands at the track the impact must follow: the flight path's
@@ -382,7 +407,7 @@ fn draw_level(
         (sx, None)
     };
     let top = STEM_TOP.min(bar - 20.);
-    if l.far() {
+    if l.far {
         let mut y = top;
         while y < bar {
             paint.line((x, y), (x, (y + 4.).min(bar)));
@@ -397,7 +422,7 @@ fn draw_level(
         paint.line((x - side * 6., y - 5.), (x, y));
         paint.line((x, y), (x - side * 6., y + 5.));
     }
-    let marker = bar - (bar - top) * l.marker_fraction();
+    let marker = bar - (bar - top) * l.marker;
     for i in 0..24 {
         let a = f64::from(i) * std::f64::consts::TAU / 24.;
         let b = f64::from(i + 1) * std::f64::consts::TAU / 24.;

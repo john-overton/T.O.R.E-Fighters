@@ -8,6 +8,7 @@
 use super::tests::fixture;
 use super::*;
 use crate::airport::OrientedBox;
+use crate::combat::delivery::DeliveryMode;
 use crate::combat::guided::Advisory;
 use crate::combat::laser::LaserState;
 use crate::combat::sight::{FIGHTER_DEFAULT_LOOK, Gimbal, Sight, SightSensor};
@@ -534,4 +535,126 @@ fn guided_flights_round_trip_a_checkpoint() {
         crate::checkpoint::round_trip(&s.guided_impacts, &models).unwrap(),
         s.guided_impacts
     );
+}
+
+/// The aircraft at `z` feet along its heading, level at `ALTITUDE`.
+fn at_z(z: f64) -> Launcher {
+    Launcher {
+        position: [0., ALTITUDE, z],
+        ..launcher()
+    }
+}
+
+/// Flies the level pass from `z = 0` for `seconds` with the trigger as `held`
+/// says, and returns when (seconds) and where (ground range, feet) the first
+/// guided weapon appeared and how many did.
+fn bar_pass(
+    s: &mut State,
+    held: impl Fn(f64) -> bool,
+    seconds: f64,
+) -> (Option<(f64, f64)>, usize) {
+    let speed = 450. * KNOT;
+    let mut first = None;
+    for tick in 0..(seconds * 120.) as u64 {
+        let t = tick as f64 / 120.;
+        step_as(s, held(t), at_z(speed * t));
+        if first.is_none() && !s.projectiles.is_empty() {
+            let range = s.targets.iter().find(|t| t.id == TANK).unwrap().position[2] - speed * t;
+            first = Some((t, range));
+        }
+    }
+    (first, s.projectiles.len() + s.guided_impacts.len())
+}
+
+#[test]
+fn a_held_trigger_releases_a_jdam_once_at_the_bar_and_it_hits() {
+    let mut s = scene(gbu29(), false, 60_000.);
+    designate(&mut s);
+    // Pass the tank is 60,000 ft ahead, the aircraft at 8,000 ft and 450 kt.
+    s.command(0, Command::ToggleSeekerMode, at_z(0.));
+    assert_eq!(s.own().delivery_mode, DeliveryMode::Level);
+    let (first, count) = bar_pass(&mut s, |_| true, 70.);
+    let (t, range) = first.expect("a JDAM was released");
+    assert_eq!(count, 1, "one pass, one release");
+    // The reach at 8,000 ft and 450 kt is about 8,000 to 19,000 ft; the bar
+    // stands two fifths in from the far edge.
+    assert!(
+        (13_000. ..16_500.).contains(&range),
+        "released at {range} ft after {t} s"
+    );
+    assert!(s.own().rounds(0) == 3);
+    assert!(fly_out(&mut s, 70.), "the tank was not destroyed");
+}
+
+#[test]
+fn a_press_before_the_bar_waits_and_ccip_releases_on_the_press() {
+    // Pressed and let go well before the bar: nothing falls.
+    let mut s = scene(gbu29(), false, 60_000.);
+    designate(&mut s);
+    s.command(0, Command::ToggleSeekerMode, at_z(0.));
+    let (first, _) = bar_pass(&mut s, |t| t < 0.5, 40.);
+    assert!(first.is_none(), "{first:?}");
+    assert_eq!(s.own().rounds(0), 4);
+    // The same press in CCIP drops at once.
+    let mut s = scene(gbu29(), false, 60_000.);
+    designate(&mut s);
+    assert_eq!(s.own().delivery_mode, DeliveryMode::Ccip);
+    step_as(&mut s, true, at_z(0.));
+    assert_eq!(s.projectiles.len(), 1);
+}
+
+#[test]
+fn a_selected_jdam_starts_in_lvl_on_a_level_pass_with_a_target() {
+    let mut s = scene(gbu29(), false, 40_000.);
+    designate(&mut s);
+    let level = at_z(0.);
+    s.command(0, Command::SelectNav, level);
+    s.command(0, Command::NextSelection, level);
+    s.command(0, Command::NextSelection, level);
+    assert_eq!(s.own().selected, 0);
+    assert_eq!(s.own().delivery_mode, DeliveryMode::Level);
+    s.own_mut().armed = true;
+    step_as(&mut s, false, level);
+    let sight = s.own().guided_sight.unwrap();
+    assert!(sight.level.is_some(), "{sight:?}");
+    // Ctrl+M returns to the plain scale.
+    s.command(0, Command::ToggleSeekerMode, level);
+    step_as(&mut s, false, level);
+    assert!(s.own().guided_sight.unwrap().level.is_none());
+}
+
+#[test]
+fn a_target_far_off_the_stem_holds_the_trigger_without_releasing() {
+    // 9,000 ft right of the track at 14,000 ft range is 33 degrees off.
+    let mut s = scene(gbu29(), false, 60_000.);
+    s.targets
+        .iter_mut()
+        .find(|t| t.id == TANK)
+        .unwrap()
+        .position[0] = 9_000.;
+    designate(&mut s);
+    s.command(0, Command::ToggleSeekerMode, at_z(0.));
+    let (first, _) = bar_pass(&mut s, |_| true, 60.);
+    assert!(
+        first.is_none(),
+        "released with the aim off the stem: {first:?}"
+    );
+}
+
+#[test]
+fn a_laser_bomb_has_the_t_only_with_a_spot_to_home_on() {
+    let mut s = scene(gbu10(), true, 40_000.);
+    designate(&mut s);
+    s.command(0, Command::ToggleSeekerMode, at_z(0.));
+    // Laser off by hand: NO LASER, no T, the trigger is a plain press.
+    s.command(0, Command::ToggleLaser, at_z(0.));
+    step_as(&mut s, false, at_z(0.));
+    let sight = s.own().guided_sight.unwrap();
+    assert_eq!(sight.advisory, Some(Advisory::NoLaser));
+    assert!(sight.level.is_none());
+    // Laser back on: a spot and the T.
+    s.command(0, Command::ToggleLaser, at_z(0.));
+    step_as(&mut s, false, at_z(0.));
+    step_as(&mut s, false, at_z(0.));
+    assert!(s.own().guided_sight.unwrap().level.is_some());
 }

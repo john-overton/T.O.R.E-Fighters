@@ -150,3 +150,91 @@ fn a_missile_reach_is_its_zone_with_no_fly_out() {
     // Only the cone keeps the nearest points out (45 degrees down).
     assert!((reach.minimum_ft - 3_000.).abs() < 20., "{reach:?}");
 }
+
+/// A sight with the aim `range` feet out, the reach 8,000 to 19,000 ft, and
+/// the T at `steering` radians and 760 ft/s.
+fn tee(range: f64, steering: f64, in_reach: bool) -> GuidedSight {
+    GuidedSight {
+        kind: Guidance::Coordinate,
+        aim: Some([0., 0., range]),
+        buddy: false,
+        ground_range_ft: Some(range),
+        slant_range_ft: Some(range),
+        reach: Some(Reach {
+            minimum_ft: 8_000.,
+            maximum_ft: 19_000.,
+        }),
+        in_reach,
+        advisory: (!in_reach).then_some(Advisory::OutOfReach),
+        level: Some(GuidedLevel {
+            steering_rad: steering,
+            ground_speed_fps: 760.,
+        }),
+    }
+}
+
+#[test]
+fn the_bar_stands_two_fifths_in_from_the_far_edge() {
+    let sight = tee(30_000., 0., false);
+    // 19,000 less 0.4 of the 11,000 ft reach.
+    assert!((sight.release_range_ft().unwrap() - 14_600.).abs() < 1e-6);
+    assert!((sight.along_ft().unwrap() - 15_400.).abs() < 1e-6);
+    assert!((sight.release_seconds().unwrap() - 15_400. / 760.).abs() < 1e-9);
+    // The marker rides at the top while 15 s or more away, the stem is dashed
+    // beyond a minute.
+    assert_eq!(sight.marker_fraction(), 1.);
+    assert!(!sight.far());
+    assert!(tee(70_000., 0., false).far());
+    let near = tee(14_600. + 760. * 7.5, 0., true);
+    assert!((near.marker_fraction() - 0.5).abs() < 1e-9);
+}
+
+#[test]
+fn a_held_trigger_waits_for_the_bar_then_releases_inside_the_window() {
+    let tick = 760. / 120.;
+    // Far out, in the reach but before the bar, or short of it: waits.
+    assert_eq!(tee(30_000., 0., false).level_trigger(), Some(false));
+    assert_eq!(tee(16_000., 0., true).level_trigger(), Some(false));
+    // On the bar and up to three ticks past it: releases.
+    assert_eq!(tee(14_600., 0., true).level_trigger(), Some(true));
+    assert_eq!(
+        tee(14_600. - 2. * tick, 0., true).level_trigger(),
+        Some(true)
+    );
+    // Past the window: a plain press again; nearer than the reach: overflown.
+    assert_eq!(tee(14_600. - 4. * tick, 0., true).level_trigger(), None);
+    assert_eq!(tee(7_000., 0., false).level_trigger(), None);
+    assert!(tee(7_000., 0., false).overflown());
+    // Behind the aircraft is overflown whatever the range says.
+    assert!(tee(16_000., 3., true).overflown());
+}
+
+#[test]
+fn the_bar_releases_only_with_the_aim_in_the_reach_and_near_the_track() {
+    // Off the track by 8 degrees releases, by 12 degrees waits on the stem.
+    assert_eq!(
+        tee(14_600., 8f64.to_radians(), true).level_trigger(),
+        Some(true)
+    );
+    assert_eq!(
+        tee(14_600., -12f64.to_radians(), true).level_trigger(),
+        Some(false)
+    );
+    // The aim outside the reach at the bar (out of the cone) does not release.
+    assert_eq!(tee(14_600., 0., false).level_trigger(), Some(false));
+    // No level, no hold.
+    let mut plain = tee(14_600., 0., true);
+    plain.level = None;
+    assert_eq!(plain.level_trigger(), None);
+    assert_eq!(plain.release_seconds(), None);
+}
+
+#[test]
+fn the_steering_is_the_turn_from_the_track_to_the_aim() {
+    let l = level(8_000., 450.);
+    let to = |x: f64, z: f64| steering_to(&l, [x, 0., z]).unwrap();
+    assert!(to(0., 10_000.).abs() < 1e-12);
+    assert!((to(10_000., 10_000.) - std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+    assert!((to(-10_000., 10_000.) + std::f64::consts::FRAC_PI_4).abs() < 1e-9);
+    assert!((to(0., -10_000.).abs() - std::f64::consts::PI).abs() < 1e-9);
+}

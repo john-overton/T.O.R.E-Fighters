@@ -11,6 +11,13 @@
 //! reach; otherwise the advisory (NO LASER, MASK, OUT OF REACH, NO TARGET)
 //! takes the line. Layout fitted; the cue is opinionated (John,
 //! 2026-10-10, decision 4: "a range indicator for when to drop").
+//!
+//! A guided bomb in LVL also gets the level release T (slice FX-H; spec
+//! "Guided bomb release range indicator"): the status word reads LVL, the
+//! crossbar stands across the flight path marker, the stem runs to the aim's
+//! bearing and the release marker slides down it as the aim closes on the
+//! bar `REL m:ss` away. A held trigger releases at the bar.
+use super::bombs::{self, Tee};
 use crate::{frame::FlightFrame, hud::Paint};
 use tore_formats::{font::Font, text::GlyphCodes, weapons::Weapon};
 use tore_sim::combat::{guided::GuidedSight, live, missiles::NMI};
@@ -39,8 +46,10 @@ pub(super) fn draw(
     font: &Font,
     w: &Weapon,
     sight: &GuidedSight,
+    zoom: f64,
 ) {
     let ro = &frame.readout;
+    let s = frame.presented();
     let x = f64::from(SCALE_X);
     paint.line((x, TOP), (x, BOTTOM));
     paint.line((x - 5., TOP), (x, TOP));
@@ -63,19 +72,45 @@ pub(super) fn draw(
             paint.line((x - 8., y + 3.), (x - 8., y - 3.));
         }
     }
-    paint.text(font, "ARM", 207, 259);
+    paint.text(
+        font,
+        if sight.level.is_some() { "LVL" } else { "ARM" },
+        207,
+        259,
+    );
     paint.text(
         font,
         &format!("{} {}", ro.stores.rounds(ro.stores.selected()), w.hud_name),
         207,
         271,
     );
-    if sight.in_reach {
+    let to_bar = sight
+        .level
+        .and(sight.release_seconds())
+        .filter(|seconds| *seconds > 0.);
+    if sight.level.is_some() && sight.overflown() {
+        paint.text(font, "OVERFLY", 207, 283);
+    } else if let Some(seconds) = to_bar {
+        paint.text(font, &format!("REL {}", bombs::clock(seconds)), 207, 283);
+    } else if sight.in_reach {
         if ro.sensors.tick % 60 < 30 {
             paint.text(font, "IN RNG", 207, 283);
         }
     } else if let Some(advisory) = sight.advisory {
         paint.text(font, advisory.label(), 207, 283);
+    }
+    if sight.level.is_some()
+        && ro.stores.rounds(ro.stores.selected()) > 0
+        && let Some(fpm) = bombs::flight_path_marker(s, zoom)
+        && let Some(level) = sight.level
+    {
+        let tee = Tee {
+            steering_rad: level.steering_rad,
+            marker: sight.marker_fraction(),
+            far: sight.far(),
+            overflown: sight.overflown(),
+        };
+        bombs::draw_level(paint, s, zoom, Some(fpm), &tee);
     }
     let ready = ro.estimates.readiness;
     if !matches!(

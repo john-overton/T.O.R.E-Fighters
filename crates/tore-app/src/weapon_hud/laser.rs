@@ -19,7 +19,7 @@ use tore_sim::{
     attitude::Basis,
     combat::{laser::LaserState, missiles},
 };
-use tore_world::readout::{LaserReadout, SpotReadout};
+use tore_world::readout::{CockpitReadout, LaserReadout, SpotReadout};
 
 /// The text column's left edge (the weapon text's), and the first row below
 /// the readiness label (rows at 259, 271, 283, 295).
@@ -93,23 +93,85 @@ pub fn marks(laser: &LaserReadout) -> Vec<(&SpotReadout, &'static str)> {
     marks
 }
 
-/// Draws the laser's marks and text on the HUD pixels.
+/// The time to impact row (opinionated, John, 2026-10-11: "time to impact on
+/// hud"; layout agent): the plane's oldest guided weapon in flight whose time
+/// is known, `TTI 0:12`, counting down, with `X3` after it when several fly
+/// (the readout lists up to four); `IMPACT` for a second after the last one
+/// ended. The same slot as the targeting page's `TTI` row.
+pub fn tti_line(ro: &CockpitReadout) -> Option<String> {
+    let tti = crate::instruments::targeting::tti_of(ro)?;
+    Some(tti_row(tti, ro.weapon_tti.len()))
+}
+
+/// The row's text for the weapon shown and how many fly.
+pub fn tti_row(tti: crate::instruments::targeting::Tti, flying: usize) -> String {
+    let text = crate::instruments::targeting::tti_text(tti);
+    if flying > 1 && !tti.impact {
+        format!("{text} X{flying}")
+    } else {
+        text
+    }
+}
+
+/// The row for `--hud-snapshot-state tti`, `tti-lsr` (under the laser rows),
+/// `tti-many` and `tti-impact`.
+pub fn tti_preview(state: &str) -> Option<String> {
+    use crate::instruments::targeting::Tti;
+    let at = |seconds, impact| Tti { seconds, impact };
+    Some(match state {
+        "tti" | "tti-lsr" => tti_row(at(72., false), 1),
+        "tti-many" => tti_row(at(41.2, false), 3),
+        "tti-impact" => tti_row(at(0., true), 0),
+        _ => return None,
+    })
+}
+
+/// Draws the laser's marks and text, and the time to impact row, on the HUD
+/// pixels.
 pub fn draw(
     pixels: &mut [u8],
     s: &flight::State,
-    laser: Option<&LaserReadout>,
-    tick: u64,
+    ro: &CockpitReadout,
     font: &Font,
     color: [u8; 3],
     zoom: f64,
 ) {
-    let Some(laser) = laser else {
-        return;
-    };
+    draw_rows(
+        pixels,
+        s,
+        ro.laser.as_ref(),
+        ro.tick,
+        tti_line(ro).as_deref(),
+        font,
+        color,
+        zoom,
+    );
+}
+
+/// [`draw`] from its parts: the laser readout, the combat tick and the time
+/// to impact text.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_rows(
+    pixels: &mut [u8],
+    s: &flight::State,
+    laser: Option<&LaserReadout>,
+    tick: u64,
+    tti: Option<&str>,
+    font: &Font,
+    color: [u8; 3],
+    zoom: f64,
+) {
     let mut paint = Paint {
         pixels,
         clip: (174, 96, 292, hud::AIM_BOTTOM - 96),
         color: [color[0], color[1], color[2], 255],
+    };
+    let Some(laser) = laser else {
+        paint.clip = hud::HUD_CLIP;
+        if let Some(text) = tti {
+            paint.text(font, text, TEXT_X, FIRST_ROW);
+        }
+        return;
     };
     for (spot, letter) in marks(laser) {
         let Some(cue) = target_cue(
@@ -151,6 +213,16 @@ pub fn draw(
             continue;
         }
         paint.text(font, &line.text, TEXT_X, FIRST_ROW + row as i32 * ROW);
+    }
+    // The time to impact stands under the laser rows (all of them, lit or
+    // not in the blink, so it does not jump).
+    if let Some(text) = tti {
+        paint.text(
+            font,
+            text,
+            TEXT_X,
+            FIRST_ROW + lines(laser).len() as i32 * ROW,
+        );
     }
 }
 
@@ -345,18 +417,81 @@ mod tests {
         flight.yaw = 0.;
         flight.pitch = 0.;
         flight.bank = 0.;
-        let laser = preview(state, &flight);
+        let laser = preview(
+            if state == "tti-lsr" {
+                "laser-lsr"
+            } else {
+                state
+            },
+            &flight,
+        );
         let mut pixels = vec![0; 640 * 480 * 4];
-        draw(
+        draw_rows(
             &mut pixels,
             &flight,
             laser.as_ref(),
             tick,
+            tti_preview(state).as_deref(),
             &font(),
             [0, 255, 0],
             1.,
         );
         pixels
+    }
+
+    #[test]
+    fn the_tti_row_reads_the_oldest_weapon_with_a_count_and_impact() {
+        use crate::instruments::targeting::Tti;
+        let at = |seconds, impact| Tti { seconds, impact };
+        assert_eq!(tti_row(at(72., false), 1), "TTI 1:12");
+        assert_eq!(tti_row(at(12.4, false), 0), "TTI 0:13");
+        assert_eq!(tti_row(at(41.2, false), 3), "TTI 0:42 X3");
+        assert_eq!(tti_row(at(0., true), 3), "IMPACT");
+        assert_eq!(tti_preview("tti-many").as_deref(), Some("TTI 0:42 X3"));
+        assert_eq!(tti_preview("laser-lsr"), None);
+    }
+
+    #[test]
+    fn the_readouts_weapons_in_flight_make_the_row() {
+        let state = tore_world::test_support::combat_fixture(false);
+        let flight =
+            flight::State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
+        let mut ro =
+            tore_world::readout::build(&state, 0, crate::combat::launcher(&flight), None, None)
+                .unwrap();
+        assert_eq!(tti_line(&ro), None);
+        let weapon = |seconds| tore_world::readout::WeaponTti {
+            projectile: 1,
+            station: 0,
+            kind: missiles::Guidance::Laser,
+            guiding: true,
+            seconds,
+            position: [0.; 3],
+        };
+        ro.weapon_tti = vec![weapon(None), weapon(Some(75.)), weapon(Some(20.))];
+        assert_eq!(tti_line(&ro).as_deref(), Some("TTI 1:15 X3"));
+        ro.weapon_tti.truncate(2);
+        assert_eq!(tti_line(&ro).as_deref(), Some("TTI 1:15 X2"));
+        ro.weapon_tti.clear();
+        ro.tick = 1_000;
+        ro.guided_impact_tick = Some(950);
+        assert_eq!(tti_line(&ro).as_deref(), Some("IMPACT"));
+    }
+
+    #[test]
+    fn the_tti_row_takes_the_first_row_alone_and_stands_under_the_laser_rows() {
+        let alone = render("tti", 0);
+        assert!(lit_pixels(&alone, (207, 307, 60, 8)) > 0);
+        assert_eq!(lit_pixels(&alone, (207, 319, 60, 8)), 0);
+        // With the laser lit the LSR row is first and the TTI row second,
+        // and it does not blink with the laser's text.
+        for tick in [0, 40] {
+            let both = render("tti-lsr", tick);
+            assert!(lit_pixels(&both, (207, 319, 60, 8)) > 0, "tick {tick}");
+        }
+        assert_eq!(lit_pixels(&render("tti-lsr", 40), (207, 307, 60, 8)), 0);
+        // No weapon and no impact: nothing on the row.
+        assert_eq!(lit_pixels(&render("forward", 0), (207, 307, 60, 24)), 0);
     }
 
     #[test]

@@ -109,7 +109,7 @@ pub fn draw(
     }
     // The laser's box and text, whatever is selected (the sight designates
     // before and after a weapon is chosen).
-    laser::draw(pixels, s, ro.laser.as_ref(), ro.tick, font, color, zoom);
+    laser::draw(pixels, s, ro, font, color, zoom);
     let Some(station) = frame.config.stations.get(ro.stores.selected()) else {
         return;
     };
@@ -127,7 +127,7 @@ pub fn draw(
             clip: hud::HUD_CLIP,
             color: [color[0], color[1], color[2], 255],
         };
-        guided::draw(&mut paint, frame, font, w, sight);
+        guided::draw(&mut paint, frame, font, w, sight, zoom);
         return;
     }
     if let Some(sight) = &ro.bomb_sight {

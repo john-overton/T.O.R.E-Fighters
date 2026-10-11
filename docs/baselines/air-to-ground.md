@@ -355,6 +355,57 @@ target. Warnings: a low dive, a low level pass and a high level pass.
 | A-4E | MK82 | 400 ft level: FRAG | released with the pipper 3.9 ft from the truck (warnings: FRAG); impact ground 736.1 ft from it; truck 50/50 |
 | A-4E | MK82 | 1,500 ft level: no warning | released with the pipper 5.2 ft from the truck (no warning); impact ground 801.9 ft from it; truck 50/50 |
 
+### Level T for guided bombs, and the HUD TTI row (FX-H, 2026-10-11)
+
+Built after the acceptance pass: LVL for the laser bombs and JDAMs, whose bar
+stands two fifths in from the reach's far edge, and the `TTI` row on the HUD
+([spec](../spec/air-to-ground.md#guided-bomb-release-range-indicator)). Flown with
+`--a2g-run --release bar` (the run turns onto the designated object, holds the
+trigger in LVL from the designation, and combat releases), clear weather, a
+standing gun of the truck park `~QTTRUCK` for the JDAMs and a `~QUCOL` tank
+under the carrier's own Pave Spike for the laser bombs, 9 nmi out. "Bar" is the
+aim's ground range less the bar's at the release tick (along the track, feet; the
+window is 3 ticks, 19 to 25 ft). Every bomb flew to the end guiding and killed
+its target.
+
+| Carrier | Store | Altitude, speed | Reach (ft) | Released at (ft) | Bar | Impact miss | Flight |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| F-16C | GBU30 | 4,000 ft, 350 kt | 3,982 to 18,755 | 12,846 | 0 | 39 ft | 39 s |
+| F-16C | GBU30 | 4,000 ft, 450 kt | 3,981 to 22,499 | 15,095 | 3 | 45 ft | 34 s |
+| F-16C | GBU30 | 4,000 ft, 550 kt | 3,981 to 27,896 | 18,335 | 5 | 56 ft | 29 s |
+| F-16C | GBU30 | 12,000 ft, 350 kt | 11,987 to 14,806 | 13,683 | 5 | 15 ft | 57 s |
+| F-16C | GBU30 | 12,000 ft, 450 kt | 11,984 to 19,255 | 16,348 | 2 | 17 ft | 52 s |
+| F-16C | GBU30 | 12,000 ft, 550 kt | 11,983 to 25,278 | 19,968 | 8 | 20 ft | 43 s |
+| F-16C | GBU30 | 20,000 ft, 350 to 550 kt | none | no release | | | OUT OF REACH, no T, the held trigger waits for a T that never comes |
+| F/A-18D | GBU29P | 6,000 ft, 400 kt | 5,983 to 19,920 | 14,349 | 4 | 28 ft | 41 s |
+| F/A-18D | GBU29P | 6,000 ft, 500 kt | 5,982 to 24,547 | 17,125 | 4 | 33 ft | 35 s |
+| F/A-18D | GBU29P | 15,000 ft, 500 kt | 14,984 to 20,039 | 18,018 | 1 | 14 ft | 54 s |
+| A-10 | GBU30 | 5,000 ft, 380 kt | 4,982 to 19,471 | 13,676 | 0 | 34 ft | 40 s |
+| A-10 | GBU30 | 8,000 ft, 380 kt | 7,984 to 18,397 | 14,237 | 5 | 21 ft | 47 s |
+| A-10 | GBU30 | 12,000 ft, 380 kt | 11,986 to 15,977 | 14,381 | 1 | 14 ft | 56 s |
+| F-16C | GBU10, own Pave Spike | 8,000 ft, 400 kt | 7,994 to 18,758 | 14,458 | 6 | 10 ft | 42 s |
+| F-16C | GBU10, own Pave Spike | 8,000 ft, 480 kt | 7,993 to 22,335 | 16,600 | 2 | 10 ft | 37 s |
+| F-16C | GBU10, own Pave Spike | 15,000 ft, 480 kt | 14,996 to 18,128 | 16,880 | 4 | 10 ft | 53 s |
+| A-10 | PAVEWAY, own Pave Spike | 8,000 ft, 380 kt | 7,995 to 18,065 | 14,041 | 4 | 11 ft | 43 s |
+
+How the depth was chosen: with the bar a fifth in from the far edge the same
+runs hit within 60 ft but flew 47 to 58 s of the 60 s life at 12,000 ft; two
+fifths in keeps every flight at 57 s or less, and short low passes at 29 to 41 s,
+and takes the miss from 47 to 60 ft down to 39 to 56 ft at 4,000 ft. Half way in
+gave 38 ft and 28 to 56 s, so two fifths was kept as the nearest to John's "when
+the target enters the reach" that still leaves a margin (opinionated, agent).
+Battery scenario `a2g-bar` repeats the JDAM and laser bomb rows (12,000 ft and
+8,000 ft). The earlier release rows above press the trigger on the plain scale:
+the `--a2g-run` default now sets CCIP (Ctrl+M) when the selection chose LVL, so
+those runs are unchanged.
+
+HUD TTI row: `--hud-snapshot-state tti`, `tti-lsr`, `tti-many`, `tti-impact` and
+`--hud-guided-preview` (frames `gbu30-in-flight`, `gbu10-in-flight`, and every
+guided frame now shows the T), viewed at `.local/mp-fixes/renders/fx-h/`: `TTI 1:12`
+on the first row, under `LSR 4.3` with a laser, `TTI 0:42 X3` for three weapons,
+`IMPACT`; the unguided T (`--hud-a2g-preview`) is byte-for-byte the same drawing
+through the shared T routine.
+
 ## HUD and targeting page renders
 
 Rendered offscreen from the shipped code, to `.local/a2g/renders/a1/` (local,
@@ -415,10 +466,6 @@ saw the real cockpit; this pass did not open a window.
 
 Not built:
 
-- The JDAM "release at the bar" mode on the level T (H1's solution covers
-  unguided bombs; the reach scale covers the JDAM).
-- The HUD's `TTI m:ss` row for a laser or GPS weapon in flight. The targeting
-  page's TTI row is drawn; the HUD row is not.
 - A viewer overlay for laser spots and designations: replays and recordings carry
   the events (`player.laser`, `player.designate`, `weapon.guided`), the viewer
   draws no laser spot.

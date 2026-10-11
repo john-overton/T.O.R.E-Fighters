@@ -3103,23 +3103,34 @@ impl State {
             sight.input = input;
         }
     }
-    /// A newly selected unguided bomb starts in LVL when a ground target is
-    /// designated and the flight path is near level, else in CCIP
-    /// ([`super::delivery::DeliveryMode::chosen`]); Ctrl+M overrides it.
+    /// A newly selected bomb, unguided or guided, starts in LVL when a ground
+    /// target is designated (for a JDAM the sight's held point, for a laser
+    /// bomb a laser spot also count) and the flight path is near level, else
+    /// in CCIP ([`super::delivery::DeliveryMode::chosen`]); Ctrl+M overrides
+    /// it. A guided bomb's CCIP is its reach scale with a plain trigger.
     fn choose_delivery(&self, own: &mut Ownship, launcher: Launcher) {
-        if !own.armed
-            || !own
-                .config
-                .stations
-                .get(own.selected)
-                .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
-        {
+        if !own.armed {
             return;
         }
-        let ground_target = own
+        let Some(w) = own.config.stations.get(own.selected).map(|s| &s.weapon) else {
+            return;
+        };
+        let glide = super::guided::is_glide_bomb(w);
+        if !super::ballistics::is_bomb(w) && !glide {
+            return;
+        }
+        let mut ground_target = own
             .designated()
             .and_then(|id| self.targets.iter().find(|t| t.id == id))
             .is_some_and(|t| t.role == TargetRole::Surface && t.hp > 0);
+        if glide && !ground_target {
+            ground_target = match super::guided::kind(w) {
+                Some(Guidance::Coordinate) => {
+                    guided::designated_point(own, Guidance::Coordinate, &self.targets).is_some()
+                }
+                _ => own.laser.spot(own.aircraft, own.side).is_some(),
+            };
+        }
         let v = launcher.velocity;
         own.delivery_mode =
             super::delivery::DeliveryMode::chosen(ground_target, v[1].atan2(v[0].hypot(v[2])));
@@ -3258,11 +3269,10 @@ impl State {
                 // Ctrl+M with an unguided bomb selected switches its sight
                 // between CCIP and LVL (docs/spec/air-to-ground.md).
                 if own.armed
-                    && own
-                        .config
-                        .stations
-                        .get(own.selected)
-                        .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+                    && own.config.stations.get(own.selected).is_some_and(|s| {
+                        super::ballistics::is_bomb(&s.weapon)
+                            || super::guided::is_glide_bomb(&s.weapon)
+                    })
                 {
                     own.delivery_mode = own.delivery_mode.toggled();
                     return;
@@ -4321,7 +4331,19 @@ impl State {
                 // LVL holds a bomb's trigger while the release cue lies ahead:
                 // a held trigger waits for the cue and releases there, once a
                 // pass (docs/spec/air-to-ground.md, "The level release T").
-                let polled = match own.delivery.as_ref().and_then(|d| d.level_trigger(index)) {
+                let held_for_bar = own
+                    .delivery
+                    .as_ref()
+                    .and_then(|d| d.level_trigger(index))
+                    .or_else(|| {
+                        // A guided bomb's T: its sight is for the selected
+                        // station only.
+                        own.guided_sight
+                            .as_ref()
+                            .filter(|_| index == own.selected)
+                            .and_then(|g| g.level_trigger())
+                    });
+                let polled = match held_for_bar {
                     Some(due) => {
                         due && held
                             && launcher.alive

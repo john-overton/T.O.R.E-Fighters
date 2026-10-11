@@ -36,7 +36,8 @@
 use super::{Launcher, NO_SIDE, OwnRow, Ownship, Projectile, State, Target};
 use crate::attitude::{Vector, dot, unit};
 use crate::combat::ballistics::{BombMotion, ReleaseState};
-use crate::combat::guided::{self, Advisory, GuidedSight, Reach};
+use crate::combat::delivery::DeliveryMode;
+use crate::combat::guided::{self, Advisory, GuidedLevel, GuidedSight, Reach};
 use crate::combat::laser::{self, LaserSpot, LaserState};
 use crate::combat::missiles::{self, Guidance};
 use crate::combat::sight;
@@ -137,7 +138,11 @@ fn row<'a>(targets: &'a [Target], rows: &'a [OwnRow], id: u32) -> Option<&'a Tar
 /// The point a JDAM would store or an AT-2 would steer at: the designated
 /// object (on the ground and standing), else for a JDAM the sight's held
 /// point.
-fn designated_point(own: &Ownship, kind: Guidance, targets: &[Target]) -> Option<(Vector, u32)> {
+pub(super) fn designated_point(
+    own: &Ownship,
+    kind: Guidance,
+    targets: &[Target],
+) -> Option<(Vector, u32)> {
     let object = own
         .designated()
         .and_then(|id| targets.iter().find(|t| t.id == id))
@@ -466,6 +471,21 @@ pub(super) fn sight<G: Fn(f64, f64) -> f64>(
     if advisory.is_none() && aim.is_some() && !in_reach {
         advisory = Some(Advisory::OutOfReach);
     }
+    // The level T: a guided bomb in LVL with a real aim (a laser bomb needs
+    // a spot to home on) and a reach to stand the bar in.
+    let level = (own.delivery_mode == DeliveryMode::Level
+        && guided::is_glide_bomb(w)
+        && !spotless
+        && reach.is_some()
+        && ground_range.is_some())
+    .then(|| {
+        let steering_rad = guided::steering_to(launcher, aim?)?;
+        Some(GuidedLevel {
+            steering_rad,
+            ground_speed_fps: launcher.velocity[0].hypot(launcher.velocity[2]),
+        })
+    })
+    .flatten();
     Some(GuidedSight {
         kind,
         aim,
@@ -475,6 +495,7 @@ pub(super) fn sight<G: Fn(f64, f64) -> f64>(
         reach,
         in_reach,
         advisory,
+        level,
     })
 }
 
