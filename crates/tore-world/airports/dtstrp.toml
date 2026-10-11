@@ -1,0 +1,52 @@
+# T.O.R.E redrawn airport plan: DTSTRP.OT (DTSTRP.SH, 22 vertical pads). Experiment AP1, 2026-10-10.
+#
+# Opinionated (John, 2026-10-10: redraw the airports at real size from retail
+# airport textures; one plan per runway shape type; larger airports keep
+# their strips, with parking and taxiways on both sides). Sizes and positions
+# are agent choices at real-world scale (fitted); runway centrelines follow
+# the retail ones. Only applies with TORE_REDRAWN_AIRPORTS=1.
+# Feet in the runway frame: x right of the retail runway centreline, z along
+# it from its near threshold (STRIP anchor 0x11). Keys:
+# docs/formats/redrawn-airports.md.
+
+applies_to = "DTSTRP.OT"
+runway_length_ft = 1074
+grass_margin_ft = 60
+
+[[material]]
+name = "runway_plain"
+pic = "_DTSTRP.PIC"
+rect = [1, 3, 85, 87]
+tile_ft = [0, 90]
+
+[[material]]
+name = "runway_centreline"
+pic = "_DTSTRP.PIC"
+rect = [1, 3, 85, 87]
+tile_ft = [0, 90]
+
+[[material]]
+name = "runway_touchdown"
+pic = "_DTSTRP.PIC"
+rect = [1, 3, 85, 87]
+tile_ft = [0, 90]
+
+[[material]]
+name = "runway_threshold"
+pic = "_DTSTRP.PIC"
+rect = [1, 3, 85, 87]
+tile_ft = [0, 150]
+
+[[runway]]
+name = "R0"
+from = [0, 0]
+length = 1074
+width = 75
+pad = 0
+touchdown = 0
+numbers = false
+
+[[apron]]
+name = "hardstand"
+min = [80, 300]
+max = [200, 500]

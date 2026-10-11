@@ -1,0 +1,21 @@
+# T.O.R.E redrawn airport plan: STRIP6.OT with STRIP6A.OT west of it. Experiment AP1, 2026-10-10.
+#
+# Opinionated (John, 2026-10-10: redraw the airports at real size from retail
+# airport textures; one plan per runway shape type; larger airports keep
+# their strips, with parking and taxiways on both sides). Sizes and positions
+# are agent choices at real-world scale (fitted); runway centrelines follow
+# the retail ones. Only applies with TORE_REDRAWN_AIRPORTS=1.
+# Feet in the runway frame: x right of the retail runway centreline, z along
+# it from its near threshold (STRIP anchor 0x11). Keys:
+# docs/formats/redrawn-airports.md.
+
+
+[pair]
+base = "STRIP6.OT"
+tile = "STRIP6A.OT"
+unmark = ["R1:near"]
+
+[[taxiway]]
+name = "west link"
+width = 75
+points = [[-7800, 1503], [-6052, 1503], [-6052, 1032]]

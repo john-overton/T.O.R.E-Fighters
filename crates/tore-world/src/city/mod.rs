@@ -152,7 +152,23 @@ impl CityFill {
     pub fn for_terrain(resources: &dyn ResourceSource, terrain: &Terrain) -> Option<Self> {
         let layout = {
             let mut cache = LAYOUTS.lock().unwrap_or_else(|e| e.into_inner());
-            let key = format!("{}#{}", terrain.layout, cap());
+            // The fill depends on the layout, the budget and what it keeps
+            // out of (the redrawn airports move buildings and pavement).
+            let keepouts = layout_keepouts(terrain);
+            let mut bytes = Vec::with_capacity(keepouts.len() * 48);
+            for k in &keepouts {
+                for v in [k.center[0], k.center[1], k.half[0], k.half[1]] {
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                }
+                bytes.extend_from_slice(&i64::from(k.heading).to_le_bytes());
+                bytes.extend_from_slice(&k.clearance.to_le_bytes());
+            }
+            let key = format!(
+                "{}#{}#{:016x}",
+                terrain.layout,
+                cap(),
+                tore_codec::fnv1a64(&bytes)
+            );
             match cache.get(&key) {
                 Some(layout) => Arc::clone(layout),
                 None => {
@@ -346,6 +362,26 @@ impl CityFill {
     }
 }
 
+/// What the fill keeps out of: every layout object's box (runways with the
+/// wider clearance) and, with the redrawn airports on, each redrawn
+/// airfield's whole box with the runway clearance.
+fn layout_keepouts(terrain: &Terrain) -> Vec<fill::Keepout> {
+    let mut keepouts: Vec<fill::Keepout> = terrain
+        .airport_scene
+        .objects
+        .iter()
+        .filter(|o| crate::surface::UnitId(o.id).range() == crate::surface::IdRange::Layout)
+        .map(fill::Keepout::of)
+        .collect();
+    keepouts.extend(
+        terrain
+            .redrawn
+            .iter()
+            .map(|r| fill::Keepout::of_box(&r.surface, fill::RUNWAY_CLEARANCE_FT)),
+    );
+    keepouts
+}
+
 fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
     let base = tore_formats::theater::base_theater(&terrain.layout).unwrap_or("");
     // A theater with no city pictures fills its retail clusters' footprints
@@ -369,13 +405,7 @@ fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
         .collect();
     let map = mask::LightMap::build(resources, &terrain.environment, base, &districts);
     let kit = kit::Kit::load(resources);
-    let keepouts: Vec<fill::Keepout> = terrain
-        .airport_scene
-        .objects
-        .iter()
-        .filter(|o| crate::surface::UnitId(o.id).range() == crate::surface::IdRange::Layout)
-        .map(fill::Keepout::of)
-        .collect();
+    let keepouts = layout_keepouts(terrain);
     // City names: the layout's named placements (its airfields).
     let names: Vec<([i64; 2], String)> = resources
         .get(&terrain.layout)

@@ -1,0 +1,110 @@
+# T.O.R.E redrawn airport plan: STRIP7A.OT (RNWY7A.SH, the north tile of STRIP7 fields). Experiment AP1, 2026-10-10.
+#
+# Opinionated (John, 2026-10-10: redraw the airports at real size from retail
+# airport textures; one plan per runway shape type; larger airports keep
+# their strips, with parking and taxiways on both sides). Sizes and positions
+# are agent choices at real-world scale (fitted); runway centrelines follow
+# the retail ones. Only applies with TORE_REDRAWN_AIRPORTS=1.
+# Feet in the runway frame: x right of the retail runway centreline, z along
+# it from its near threshold (STRIP anchor 0x11). Keys:
+# docs/formats/redrawn-airports.md.
+
+applies_to = "STRIP7A.OT"
+runway_length_ft = 6404
+ils_runway = false
+grass_margin_ft = 150
+
+[[material]]
+name = "runway_centreline"
+pic = "_RNWY7A.PIC"
+rect = [102, 2, 98, 117]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "runway_touchdown"
+pic = "_RNWY7A.PIC"
+rect = [1, 2, 98, 116]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "runway_plain"
+pic = "_RNWY7A.PIC"
+rect = [104, 2, 40, 117]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "taxiway"
+pic = "_RNWY7A.PIC"
+rect = [81, 223, 93, 56]
+tile_ft = [190, 0]
+along = "u"
+paint = ["taxiway"]
+
+[[material]]
+name = "apron"
+pic = "_RNWY7A.PIC"
+rect = [1, 121, 73, 98]
+tile_ft = [73, 98]
+variants = [[79, 123, 73, 98], [157, 121, 73, 98]]
+
+[[material]]
+name = "fillet"
+pic = "_RNWY7A.PIC"
+rect = [127, 399, 38, 44]
+tile_ft = [50, 50]
+
+[[runway]]
+name = "R0"
+from = [-3440, -1544]
+length = 7948
+width = 200
+pad = 0
+touchdown = 1500
+marked_near = false
+
+[[taxiway]]
+name = "east"
+width = 75
+points = [[-2990, -1544], [-2990, 6154]]
+
+[[taxiway]]
+name = "west"
+width = 75
+points = [[-3890, -1544], [-3890, 6154]]
+
+[[taxiway]]
+name = "north"
+width = 75
+points = [[-3890, 6154], [-2990, 6154]]
+
+[[taxiway]]
+name = "mid"
+width = 75
+points = [[-3890, 2000], [-2990, 2000]]
+
+[[apron]]
+name = "apron"
+min = [-2952.5, 0]
+max = [-2100, 4000]
+
+[[apron]]
+name = "apron"
+min = [-4800, 1500]
+max = [-3927.5, 3500]
+
+[[line]]
+from = [-2100, 0]
+to = [-2100, 4000]
+out = [1, 0]
+
+[[line]]
+from = [-4800, 1500]
+to = [-4800, 3500]
+out = [-1, 0]
+
+[extras]
+hangars = 4
+vehicles = false

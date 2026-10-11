@@ -76,16 +76,22 @@ pub struct Keepout {
 impl Keepout {
     /// The box of a scene object; runways keep the wider clearance.
     pub fn of(object: &tore_sim::airport::StaticObject) -> Self {
-        let b = &object.bounds;
-        Self {
-            center: [b.center[0].round() as i64, b.center[2].round() as i64],
-            half: [b.half[0].ceil() as i64, b.half[2].ceil() as i64],
-            heading: b.heading.to_degrees().round() as i32,
-            clearance: if object.runway {
+        Self::of_box(
+            &object.bounds,
+            if object.runway {
                 RUNWAY_CLEARANCE_FT
             } else {
                 OBJECT_CLEARANCE_FT
             },
+        )
+    }
+    /// A box with a clearance: whole feet, whole degrees.
+    pub fn of_box(b: &tore_sim::airport::OrientedBox, clearance: i64) -> Self {
+        Self {
+            center: [b.center[0].round() as i64, b.center[2].round() as i64],
+            half: [b.half[0].ceil() as i64, b.half[2].ceil() as i64],
+            heading: b.heading.to_degrees().round() as i32,
+            clearance,
         }
     }
     /// Whether a circle of `radius` at `point` reaches the box plus its

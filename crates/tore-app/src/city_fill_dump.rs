@@ -35,11 +35,14 @@ use tore_world::{
     surface::layout::trig,
 };
 
+/// Noon, no wind, no cloud; the redrawn airports as `TORE_REDRAWN_AIRPORTS`
+/// asks.
 fn overrides() -> crate::terrain::Overrides {
     crate::terrain::Overrides {
         time: Some([12, 0]),
         wind: None,
         cloud_altitude: Some(0),
+        redrawn_airports: crate::scenery::redrawn_airports().unwrap_or(false),
     }
 }
 
@@ -338,6 +341,21 @@ pub fn run() -> AppResult<()> {
             .collect::<Vec<_>>()
             .join(", "),
         layout.map.districts.len()
+    );
+    // Buildings inside a redrawn airfield's box (none expected).
+    let inside = layout
+        .instances
+        .iter()
+        .filter(|i| {
+            on_world.redrawn.iter().any(|r| {
+                r.surface
+                    .contains_horizontal(f64::from(i.x), f64::from(i.z))
+            })
+        })
+        .count();
+    println!(
+        "redrawn airfields: {}, fill buildings inside them: {inside}",
+        on_world.redrawn.len()
     );
     println!("fill digest: {:016x}", layout.digest());
     println!(
