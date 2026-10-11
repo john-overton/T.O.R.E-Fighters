@@ -809,3 +809,74 @@ fn land_at_selected_reports_a_refused_site_to_the_pilot_and_the_journal() {
         (site, orders) => panic!("{site:?} gave {orders:?}"),
     }
 }
+
+#[test]
+fn the_gun_key_fires_the_gun_through_the_world_whatever_is_selected() {
+    let mut world = warmed();
+    // Step off the gun to a store that is not one.
+    let gun = (0..world.combat.state.own().configuration().stations.len())
+        .find(|&i| {
+            tore_sim::combat::live::is_gun(
+                &world.combat.state.own().configuration().stations[i].weapon,
+            )
+        })
+        .expect("the synthetic fighter has a gun");
+    let mut out = TickOutput::default();
+    for _ in 0..4 {
+        if world.combat.state.own().selected != gun {
+            break;
+        }
+        world
+            .step(
+                &[input(
+                    &world,
+                    vec![SeatCommand::CycleWeapon { forward: true }],
+                )],
+                &mut out,
+            )
+            .unwrap();
+    }
+    let selected = world.combat.state.own().selected;
+    assert_ne!(selected, gun, "another store is selected");
+    let before = world.combat.state.own().rounds(gun);
+    let stores: Vec<u16> = (0..world.combat.state.own().ammo.len())
+        .map(|i| world.combat.state.own().rounds(i))
+        .collect();
+    let _ = world.combat.take_notes();
+    // Tab down on one tick, nothing on the following ones: the key stays down.
+    world
+        .step(
+            &[input(&world, vec![SeatCommand::Combat(Live::GunKeyDown)])],
+            &mut out,
+        )
+        .unwrap();
+    for _ in 0..120 {
+        world.step(&[input(&world, Vec::new())], &mut out).unwrap();
+    }
+    let after = world.combat.state.own().rounds(gun);
+    assert!(after < before, "the gun fired: {before} then {after}");
+    assert_eq!(world.combat.state.own().selected, selected);
+    for (i, rounds) in stores.iter().enumerate().filter(|(i, _)| *i != gun) {
+        assert_eq!(world.combat.state.own().rounds(i), *rounds, "station {i}");
+    }
+    // The mission recording hears of the key.
+    assert!(
+        world
+            .combat
+            .take_notes()
+            .iter()
+            .any(|n| matches!(n, crate::combat::CommandNote::Command(Live::GunKeyDown)))
+    );
+    // Tab up: it stops.
+    world
+        .step(
+            &[input(&world, vec![SeatCommand::Combat(Live::GunKeyUp)])],
+            &mut out,
+        )
+        .unwrap();
+    let stopped = world.combat.state.own().rounds(gun);
+    for _ in 0..60 {
+        world.step(&[input(&world, Vec::new())], &mut out).unwrap();
+    }
+    assert_eq!(world.combat.state.own().rounds(gun), stopped);
+}

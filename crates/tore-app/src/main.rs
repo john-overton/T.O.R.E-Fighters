@@ -324,6 +324,8 @@ struct App {
     /// next tick applies them (`World::step`), so a menu command given while
     /// the game is paused waits for the first tick after resuming.
     seat_commands: Vec<seats::SeatCommand>,
+    /// Whether the gun key (Tab) was last told to the mission as down.
+    gun_key_sent: bool,
     /// The cheats the mission has been told of; `None` until a flight's first
     /// tick, so every flight starts by hearing them.
     cheats_sent: Option<tore_sim::cheats::Cheats>,
@@ -926,6 +928,9 @@ impl App {
     /// focus does. In flight the next tick does it, in order with the seat's
     /// other commands; anywhere else there is no tick to wait for.
     fn release_trigger(&mut self) {
+        // The release lets go of the gun key too; a key still held goes down
+        // again at the next tick.
+        self.gun_key_sent = false;
         if self.screen == Screen::Flight {
             self.queue(seats::SeatCommand::ReleaseTrigger);
         } else {
@@ -1343,14 +1348,8 @@ impl App {
             // The laser and the targeting sight's next object (slice T1).
             "laze" => return self.laze_key(),
             "sight-next" => return self.sight_next_key(),
-            // A2G keys (K1): bound and listed, not wired to the sim yet.
-            "fire-gun" => {
-                let label = "Fire the gun";
-                println!("{name}: not implemented yet");
-                self.flight_ui
-                    .message(format!("{label}: not implemented yet"));
-                Command::None
-            }
+            // Tab is a hold: `queue_gun_key` reads it every tick.
+            "fire-gun" => Command::None,
             "sight-zoom-in" => Command::SightZoom(1),
             "sight-zoom-out" => Command::SightZoom(-1),
             "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
@@ -2416,6 +2415,7 @@ impl App {
             }
         }
         self.seat_commands.clear();
+        self.gun_key_sent = false;
         self.cheats_sent = None;
         self.instruments.navigation = navigation::Navigation::default();
         match restarted_flight.ai_aircraft {
@@ -4041,6 +4041,14 @@ impl ApplicationHandler for App {
                                 }
                             }
                             // The commands given since the last tick, in order.
+                            queue_gun_key(
+                                &mut self.seat_commands,
+                                &mut self.gun_key_sent,
+                                self.screen == Screen::Flight
+                                    && !self.flight_ui.frozen()
+                                    && self.focused
+                                    && self.input.resolver.held("fire-gun"),
+                            );
                             let commands = std::mem::take(&mut self.seat_commands);
                             let (sight, sight_zoom) = self.input.sight();
                             let input = seats::SeatInput {
@@ -4888,7 +4896,8 @@ impl ApplicationHandler for App {
                                 ) as f64,
                                 self.world.terrain.air_data(presented).ok().as_ref(),
                                 self.flight_ui.ladder,
-                                !frame.readout.airport.nav_mode && weapon_hud::active(&frame),
+                                !frame.readout.airport.nav_mode
+                                    && (weapon_hud::active(&frame) || self.gun_key_sent),
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
@@ -4964,6 +4973,7 @@ impl ApplicationHandler for App {
                                 target_friendly,
                                 easy_square.is_none(),
                                 aim.as_ref(),
+                                self.gun_key_sent,
                             );
                         }
                         renderer.cockpit(
@@ -6508,6 +6518,23 @@ const PROBE_PIPPER_DEG: f64 = 2.;
 fn queue_command(queue: &mut Vec<seats::SeatCommand>, command: seats::SeatCommand) {
     if queue.len() < MAX_SEAT_COMMANDS {
         queue.push(command);
+    }
+}
+
+/// The gun key (Tab, `fire-gun`) going down or up since the last tick, queued
+/// as a combat command in order with the seat's others. `down` is false while
+/// paused, in a menu or out of focus, as the trigger is.
+fn queue_gun_key(commands: &mut Vec<seats::SeatCommand>, sent: &mut bool, down: bool) {
+    if down != *sent {
+        *sent = down;
+        queue_command(
+            commands,
+            seats::SeatCommand::Combat(if down {
+                tore_sim::combat::live::Command::GunKeyDown
+            } else {
+                tore_sim::combat::live::Command::GunKeyUp
+            }),
+        );
     }
 }
 
@@ -12828,6 +12855,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         pointer: None,
         theater_resources: Arc::new(theater_resources),
         seat_commands: Vec::new(),
+        gun_key_sent: false,
         cheats_sent: None,
         camera,
         quick,

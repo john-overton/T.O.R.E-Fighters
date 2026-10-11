@@ -1456,3 +1456,24 @@ fn the_tore_record_leaves_every_other_weapon_alone() {
     gunship::apply_tore_record(&mut other);
     assert_eq!(other, before);
 }
+
+#[test]
+fn the_gun_key_fires_the_gunships_linked_guns_as_the_trigger_does() {
+    let linked = || {
+        let mut s = gunship();
+        s.own_mut().gunship.as_mut().unwrap().included = [true; 3];
+        s
+    };
+    let mut trigger = linked();
+    let mut key = linked();
+    key.command(OWN, Command::GunKeyDown, launcher());
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    for _ in 0..120 {
+        a.extend(fired(tick(&mut trigger, true)));
+        b.extend(fired(tick(&mut key, false)));
+    }
+    assert!(!a.is_empty());
+    assert_eq!(a, b, "the same guns in the same ticks");
+    key.command(OWN, Command::GunKeyUp, launcher());
+    assert!(fired(tick(&mut key, false)).is_empty());
+}

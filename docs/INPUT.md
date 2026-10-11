@@ -489,7 +489,7 @@ Deliberate differences from FA:
 | Shift+Backslash | Pin the sight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
 | Shift+' / Shift+; | Zoom the sight in / out; elsewhere a message | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
 | Alt + arrows | Slew the sight | Unused | T.O.R.E addition, John 2026-10-09 |
-| Tab | Fire the gun whatever is selected (`fire-gun`); says "not implemented yet" until the air-to-ground weapons land | Fire the gun | Retail key, bound by A2G slice K1 |
+| Tab | Fire the gun while held, whatever is selected (`fire-gun`, a hold action like the trigger; [the gun key](spec/air-to-ground.md#the-gun-key)) | Fire the gun (no default pad button) | Retail key, bound by A2G slice K1, built by FX-T |
 | Shift+R / Ctrl+R | Air-to-ground radar page on or off (`a-g-radar`): turns the air radar off, never clears the designation; R returns to the air radar | The same | Retail keys, bound by K1, built by G1. Ctrl+Shift+R is still the tower repeat |
 | / | Sight: next visible object (`sight-next`): the sight tracks the next visible ground object to the right; "no targeting sight" without one | Designate the next visible object as the IR/laser target | Retail key, bound by K1, built by T1 |
 | Ctrl+L | Laser on or off by hand (`laze`); "no laser designator" without one | Unused | T.O.R.E addition, John (A2G decision 5), built by T1 |
