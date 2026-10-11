@@ -452,8 +452,8 @@ gets the page: with a laser weapon selected and a buddy spot valid, the target
 display shows the targeting page in its buddy form, looking from the aircraft at
 the spot, with the BUDDY row, the range and the weapon's time to impact. Without
 a buddy spot it is the plain target window. This extension to the page rule is
-opinionated (agent), following John's note. The page's exact buddy layout is an
-[unknown](#unknowns) until P1 renders it.
+opinionated (agent), following John's note. The page's buddy layout is in the
+[target window spec](target-window.md#the-page-138-x-114-screen-pixels) (slice P1).
 
 ## The targeting page
 
@@ -727,6 +727,14 @@ retail behaviour; the reach scale serves both.
   `LSR RDY`, or `MASK`; `BUD 4.3` for a buddy spot; and `TTI 0:12` while an own
   laser or GPS weapon flies. All opinionated (John, 2026-10-10: "the hud with a
   range indicator"); text layout fitted.
+  Built (slice P1, `weapon_hud/laser.rs`): the box is 12 by 8 pixels, the
+  letter sits to its right (**L** own, **B** a buddy's), the text rows start at
+  x=207, y=307 and step 12 pixels (own laser row, then a `BUD` row; the `TTI`
+  row follows when the weapon slice supplies it), and the boxes and rows draw
+  on any selection, in every mode but NAV. Lit for the first quarter second of
+  each half second when blinking (combat tick mod 60 below 30). The edge arrow
+  is the target cue's own chevron. A masked laser draws no box (its spot is
+  gone) and a laser that is ready draws none (there is no spot yet).
 
 ### Warnings
 
@@ -1115,7 +1123,7 @@ filled in with something plausible.
 | Manual and data range conflicts (Maverick minimum 0.8 nmi against 500 ft; HARM 12.3 against 32.92; Shrike 11 against 9.87; bombs 1 nmi per 1,000 ft against 3.29 to 4.94 nmi) | The data wins | none |
 | Minimum release altitude and safe-escape numbers | LOW and FRAG warnings from the record's arm time and radius | none (manual gives no number) |
 | Cluster submunition count and dispersion | Wide splash plus presentation flashes | none (no field in the data) |
-| The buddy form of the targeting page: exact layout and camera for an aircraft with no sight | The rows above | P1 renders and reviews it |
+| The buddy form of the targeting page: exact layout and camera for an aircraft with no sight | Built (slice P1): the callsign on the name row, BUDDY row, the spot square, the range to the spot, a camera from the aircraft framing a 500 foot area ([target window](target-window.md#when-it-shows)) | John's review of the renders |
 | IR/Laser window contents beyond "camera view of your target" | The weapon camera and the pod page | none |
 
 Closed by research and no longer unknown: the A-G and HARM page rules, the laser

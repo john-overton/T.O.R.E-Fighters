@@ -16,6 +16,7 @@ use tore_sim::{
 use tore_world::readout::CockpitReadout;
 
 mod bombs;
+pub mod laser;
 
 /// Reserve the weapon readout area even for a safe gun, keeping flight text clear.
 pub fn active(frame: &FlightFrame) -> bool {
@@ -103,6 +104,9 @@ pub fn draw(
         .text(font, "NAV", 207, 259);
         return;
     }
+    // The laser's box and text, whatever is selected (the sight designates
+    // before and after a weapon is chosen).
+    laser::draw(pixels, s, ro.laser.as_ref(), ro.tick, font, color, zoom);
     let Some(station) = frame.config.stations.get(ro.stores.selected()) else {
         return;
     };
