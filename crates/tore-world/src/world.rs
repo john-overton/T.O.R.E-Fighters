@@ -1254,6 +1254,13 @@ impl World {
         self.combat
             .state
             .set_actor_supports(ai.into_iter().chain(stepped.supports));
+        // The radars painting each human's plane: the HARM boresight cue's
+        // candidate prefers them (docs/spec/air-to-ground.md).
+        for cockpit in &self.cockpits {
+            let plane = cockpit.plane.0;
+            let painting = self.combat.surface.painting(plane);
+            self.combat.state.set_painted_by(plane, painting);
+        }
     }
 
     /// The seat that flies the plane of `cockpit`: a cockpit exists while a

@@ -9,7 +9,8 @@
 > <!-- tore-header v2 -->
 
 Status: **specification written before implementation** (2026-10-10, the A2G
-round). Nothing in this file is built yet. Each section says what the player
+round). Sections marked "Built" name the slice that built them; the rest is
+not built yet. Each section says what the player
 will see and do, with the numbers, and labels where every number comes from.
 The slices that build it are listed in [Source notes](#source-notes). The two
 research slices have reported: R2 (A-G page, HARM page, laser, optical) and R1
@@ -452,8 +453,8 @@ gets the page: with a laser weapon selected and a buddy spot valid, the target
 display shows the targeting page in its buddy form, looking from the aircraft at
 the spot, with the BUDDY row, the range and the weapon's time to impact. Without
 a buddy spot it is the plain target window. This extension to the page rule is
-opinionated (agent), following John's note. The page's exact buddy layout is an
-[unknown](#unknowns) until P1 renders it.
+opinionated (agent), following John's note. The page's buddy layout is in the
+[target window spec](target-window.md#the-page-138-x-114-screen-pixels) (slice P1).
 
 ## The targeting page
 
@@ -717,6 +718,47 @@ retail behaviour; the reach scale serves both.
   (`NO TRACK` when the A-G track is lost for a SARH missile).
 - **Laser AGMs.** The laser box and laser range (below), range scale.
 
+Built (W2), with these rules (opinionated, agent, where not labelled):
+
+- **BORE waits for the lock.** A Maverick or a HARM in BORE fires only once its
+  seeker holds the BORE candidate (a quarter second, the seekers' existing
+  dwell): `ACQUIRING` until then, `NO TARGET` (Maverick) or `NO EMITTER` (HARM)
+  with nothing in the cone, so an air-to-ground missile never leaves without a
+  target. Retail releases a HARM only at an emitting target and a Maverick only
+  at a designated one; air-to-air BORE keeps its old rule. The Maverick's bore
+  circle is the air-to-air 5 degrees; the HARM's is its whole seeker cone, and
+  its candidate must also lie inside the launch zone's angles.
+- **CUED.** A designation turns a Maverick or a HARM to CUED, as it does an
+  air-to-air infrared missile, and the seeker mode key cannot take it back to
+  BORE while the designation stands.
+- **The HARM cue.** Up to 8 emitters, nearest the bore first, are drawn as the
+  RWR's 7 pixel ground square; a radar painting the plane carries a centre dot
+  (the bright square; painting is the surface fire control's Track or Fire on
+  the plane, as the RWR shows it); the designated or held radar after it stops
+  emitting shows only its corners (dim). The weapon diamond marks the
+  candidate, blinking in BORE, and the word BORE or CUED sits above the bore
+  ring. The candidate is the painting radar first, then the one nearest the
+  bore, then the nearest.
+- **The A-G track.** A surface radar weapon is released only while the A-G page
+  is up and lists its designated target (`NO TRACK` otherwise, retail data); it
+  leaves for the point the page gives and the page refreshes its midcourse
+  point. The AS-7 and AS-15 need the page and the target inside their zone 1
+  from the launcher for the whole flight; once that fails the missile loses its
+  target for good and flies on unguided (retail data: the lock clears the
+  target and nothing gives it a new one).
+- **Target switch.** A new designation sends the player's AS-7 and AS-15 in
+  flight to the new target when it is inside their zone-1 cone about the nose
+  and on the A-G track, and blinds them otherwise; clearing the designation
+  leaves them guiding (retail data). The air-to-air supported missiles, which
+  retail retargets too, keep today's rule; the laser weapons are slice W1's.
+- **HARM after shutdown.** A launched HARM keeps homing on its radar after the
+  radar stops, on angles only, while it stays inside the missile's zone-1 cone
+  (retail data). So a SAM radar's HARM shutdown no longer saves it from a HARM
+  already locked on it.
+- **Surface seekers.** The active surface seekers (AGM-84A, AM-39, AS-16) see a
+  ground object or ship by range and radar signature alone, without the air
+  radar's clutter notch (fitted).
+
 ### Laser on the HUD
 
 - The laser point is marked with the retail IR/laser **rectangular TD box**
@@ -727,6 +769,14 @@ retail behaviour; the reach scale serves both.
   `LSR RDY`, or `MASK`; `BUD 4.3` for a buddy spot; and `TTI 0:12` while an own
   laser or GPS weapon flies. All opinionated (John, 2026-10-10: "the hud with a
   range indicator"); text layout fitted.
+  Built (slice P1, `weapon_hud/laser.rs`): the box is 12 by 8 pixels, the
+  letter sits to its right (**L** own, **B** a buddy's), the text rows start at
+  x=207, y=307 and step 12 pixels (own laser row, then a `BUD` row; the `TTI`
+  row follows when the weapon slice supplies it), and the boxes and rows draw
+  on any selection, in every mode but NAV. Lit for the first quarter second of
+  each half second when blinking (combat tick mod 60 below 30). The edge arrow
+  is the target cue's own chevron. A masked laser draws no box (its spot is
+  gone) and a laser that is ready draws none (there is no spot yet).
 
 ### Warnings
 
@@ -735,7 +785,7 @@ the station could not release at all:
 
 | Warning | When |
 | --- | --- |
-| LOW | The predicted fall time is shorter than the record's fuze arm time: the bomb will not explode. In TORE today an unarmed bomb still bursts on the ground with its splash; it cannot strike a target directly |
+| LOW | The predicted fall time is shorter than the record's fuze arm time: the bomb will not explode. A bomb that reaches the ground before its fuze arms is a dud: no burst, no splash and no crater, only a small puff of dirt (the bullet-on-land dust burst) where it lands, and nothing on water. Opinionated (lead, 2026-10-10): the retail ground-impact path (`0x4c1dbc`) has not been read for an arm test, so whether the original duds such a bomb is unknown (next step: trace the arm check before `0x4c1dbc`). The fuze already kept an unarmed bomb from striking a target directly |
 | FRAG | At the predicted impact time the aircraft is inside the record's collateral radius of the impact point; splash can hurt the shooter (retail manual p. 126, no number given). The aircraft is taken along its ground track at its ground speed and no lower than it is now: a dive is taken to be pulled out at once, a climb keeps climbing (fitted; flying a dive on would put every dive release inside its own splash). For a slick bomb that lands under the aircraft, FRAG means flying lower than the splash radius |
 | BAY | A bay aircraft with the bay closed, as today (retail BAY; release refused "Can't deploy, Open weapon bay door") |
 | NO TARGET | A guided weapon that needs a designation has none |
@@ -748,7 +798,9 @@ the station could not release at all:
 LOW, FRAG and OVERFLY are worked out by the sight (slice H1); the HUD shows
 LOW and FRAG together in the readiness slot, and OVERFLY in place of the
 release time. Only a GPS bomb with no designated point and an AT-2 with no
-target block release. Laser bombs can be released without a spot (they fall ballistic and can
+target block release, apart from the missiles: a missile that needs a target
+(NO TARGET, NO TRACK, NO EMITTER) does not leave without one, as before this
+round (built, W2). Laser bombs can be released without a spot (they fall ballistic and can
 still pick one up), as retail allows. The text strings are fitted.
 
 ## Weapon classes
@@ -765,10 +817,10 @@ this round.
 | 5 | JDAM | GBU29, GBU29P, GBU30 | 25 to 26 | Retail "optical": home on the object designated at release, follow it, fire and forget, release range cut by visibility. TORE (opinionated, John): GPS, fly to the point designated at release, any weather, a moving target is missed | missing |
 | 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press fires one rocket and a held trigger repeats four a second (LAU-10 one per press); rocket pipper | Fly and load, the LAU-10 too; no pipper yet |
 | 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Retail: steers at the designated object until impact (cruise profile), needs its launcher alive, zone 1 500 to 18,000 ft and 45 degrees; a switch does not retarget it. Without a target it flies unguided | partly |
-| 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | AGM65G partly |
-| 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; keeps homing on the object after its radar stops | AGM88 partly; AGM45 hidden |
-| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G on at release (retail); surface seekers see surface rows without the air notch | profiled, hidden |
-| 11 | SARH AGMs | AS7, AS15 | 21 | Needs A-G on at release and for the whole flight, target inside zone 1 (45 degrees) from the launcher; lost: unguided | AS7 partly; AS15 missing |
+| 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | Built (W2) |
+| 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; keeps homing on the object after its radar stops | Built (W2) |
+| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G on at release (retail); surface seekers see surface rows without the air notch | Built (W2) |
+| 11 | SARH AGMs | AS7, AS15 | 21 | Needs A-G on at release and for the whole flight, target inside zone 1 (45 degrees) from the launcher; lost: unguided | Built (W2) |
 | 12 | Laser AGMs | AS14, AS30, AT12 | 24 to 25 | Class 4's lock rule on a powered, cruising missile | missing |
 
 Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work. Novelty
@@ -863,7 +915,7 @@ Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Implemented
 | Release speed | The aircraft's speed times `launchRetard` / 100, at least the record's initial speed (0), clamped to 0 to 1,466 ft/s for slick, retarded and pack bombs and 0 to 2,933 ft/s for cluster. `launchRetard`: 100 slick, 66 Snakeye, 6-pack and 7-pack, 90 cluster and guided. No ejection push |
 | Path | A vacuum parabola: gravity **32 ft/s squared**, no drag, no terminal speed, no retard after release. The bomb noses over along its velocity; heading stays fixed |
 | Scatter | Each bomb adds a uniform random plus or minus **3.0 degrees** to its heading and to its pitch. **The player's bombs scatter too; this stays the default while John decides** ([decisions pending](#decisions-pending)) |
-| Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply |
+| Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply, and a bomb that reaches the ground unarmed is a dud ([warnings](#warnings)) |
 | Pods | As [Rockets](#rockets) |
 
 The sight is the same calculation without the scatter. A test checks the mean
@@ -1072,7 +1124,8 @@ records (ranges, weights, counts) are in the inventory above.
 
 - A SAM or AAA site turns its radar off: its HARM square dims and leaves the
   HARM page at the next rebuild; a HARM already flying keeps homing on the object
-  while it stays inside the missile's 45 degree cone.
+  while it stays inside the missile's 45 degree cone, so the shutdown roll of
+  [surface defenses](surface-defenses.md) no longer saves the radar from it.
 - Terrain blocks the laser at release: MASK on the page and the HUD; a laser
   weapon released then falls ballistic. A weapon already guiding is not broken by
   MASK (retail checks angles only).
@@ -1083,8 +1136,8 @@ records (ranges, weights, counts) are in the inventory above.
   AS-7 and AS-15 need A-G on at release (retail); with the radar off the missile
   reads READY and flies unguided (existing rule,
   [missiles](missiles.md#radar-off-unguided-release)).
-- A bomb released below its arm time: LOW before the release, and the bomb does
-  not explode.
+- A bomb released below its arm time: LOW before the release, and the bomb lands
+  a dud (a puff of dirt, no burst or splash).
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.
 - A bomb falls on its parabola with up to 3 degrees of scatter: the pipper marks
   the mean, so a single bomb can land beside it.
@@ -1098,6 +1151,7 @@ filled in with something plausible.
 
 | Unknown | Fallback shipped | Next step |
 | --- | --- | --- |
+| Whether the original duds a bomb that reaches the ground before its fuze arms | A dud: no burst, splash or crater, a puff of dirt (opinionated, lead, 2026-10-10) | Read the ground-impact path at `0x4c1dbc` and its caller for an arm-time test |
 | The manual's 90 kt split: no speed comparison exists on the A-G path | Retail class and airport rules; the 90 kt rule is a [decision pending](#decisions-pending) | Search the remaining scope writers and the RWR for a speed test |
 | Whether a parked aircraft shows on A-G (the code lists aircraft in airport states 1 to 0x1e; the manual says parked aircraft return no radar) | Parked aircraft do not show (manual) | Trace the parked state value |
 | Mouse designation on the page | The plan's click rule | Trace the scope click handler |
@@ -1118,7 +1172,7 @@ filled in with something plausible.
 | Manual and data range conflicts (Maverick minimum 0.8 nmi against 500 ft; HARM 12.3 against 32.92; Shrike 11 against 9.87; bombs 1 nmi per 1,000 ft against 3.29 to 4.94 nmi) | The data wins | none |
 | Minimum release altitude and safe-escape numbers | LOW and FRAG warnings from the record's arm time and radius | none (manual gives no number) |
 | Cluster submunition count and dispersion | Wide splash plus presentation flashes | none (no field in the data) |
-| The buddy form of the targeting page: exact layout and camera for an aircraft with no sight | The rows above | P1 renders and reviews it |
+| The buddy form of the targeting page: exact layout and camera for an aircraft with no sight | Built (slice P1): the callsign on the name row, BUDDY row, the spot square, the range to the spot, a camera from the aircraft framing a 500 foot area ([target window](target-window.md#when-it-shows)) | John's review of the renders |
 | IR/Laser window contents beyond "camera view of your target" | The weapon camera and the pod page | none |
 
 Closed by research and no longer unknown: the A-G and HARM page rules, the laser

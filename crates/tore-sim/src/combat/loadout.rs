@@ -603,6 +603,17 @@ pub const SUPPORTED_WEAPONS: &[&str] = &[
     "RBK250.JT",
     "RBK500.JT",
     "LAU10.JT",
+    // Air-to-ground missiles, slice W2 (docs/spec/air-to-ground.md, "Weapon
+    // classes" 8 to 11): the second Maverick and the SLAM (infrared), the
+    // Shrike (anti-radiation), Harpoon, Exocet and Kickback (active radar on
+    // the A-G track) and the AS 15 (supported by the A-G track).
+    "AGM65A.JT",
+    "AGM84E.JT",
+    "AGM45.JT",
+    "AGM84A.JT",
+    "AM39.JT",
+    "AS16.JT",
+    "AS15.JT",
 ];
 /// The novelty bombs, Boulder and Moose: they fly as free-fall bombs but load
 /// only with the Load Ordnance page's Cheat loading (A2G decision 16,

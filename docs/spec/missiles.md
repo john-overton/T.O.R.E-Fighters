@@ -28,7 +28,7 @@ unit choice and detailed rules below are agent proposals. Sequencing is in
 | S: supported radar | Aircraft holds radar lock on this missile's target throughout guided flight. For future ground/ship weapons, the equivalent support comes from their launcher. | No steering from hidden target state after support loss. Retain the last observed intercept and seek renewed support until guidance lifetime expires. No pitbull. |
 | A: active radar | Cued launch: snapshot the aircraft firing solution and intercept, then activate at the matrix distance. Boresight launch: own seeker searches immediately, without aircraft designation or radar lock. | Aircraft updates are optional. Losing aircraft support freezes the last supported intercept; it does not destroy the missile or expose live target coordinates. After seeker acquisition, guide independently. |
 | I: infrared | Use the weapon's own heat seeker, with either a designated target or narrow forward boresight search. Aircraft radar and installed FLIR are not required for boresight search. | Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No radar or emitter fallback. |
-| E: passive emitter | Use the surface weapon's receiver with designation for compatible emissions. An enabled passive receiver does not transmit radar. | Emission shutdown stops measurement immediately. Retain the last observed intercept and attempt same-target reacquisition until guidance lifetime expires. No heat fallback. |
+| E: passive emitter | Use the surface weapon's receiver with designation for compatible emissions, or the HARM boresight cue ([air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)). An enabled passive receiver does not transmit radar. | Once the seeker has acquired its radar, an emission shutdown does not stop it: it keeps homing on the object, angles only, while the object stays inside its zone-1 cone (retail data, slice W2). Before acquisition a silent object is not seen. No heat fallback. |
 
 John revised loss behavior on 2026-09-17: retain the known intercept and attempt
 same-target reacquisition within the applicable seeker cone until guidance life
@@ -105,12 +105,12 @@ separate proposed profile setting, never inferred from these motor numbers.
 | AA9.JT (AA-9) | S* | Catalog | 1.97 to 41.15 | 2 | 130 | 264 | 41.15 | 45/45 | N/A | N/A |
 | AAML.JT (AAM-L) | A* | Live | 4.94 to 74.06 | 0 | 130 | 270 | 74.06 | 45/45 | 8 | 5/5 |
 | AEMP1.JT (AEMP-1) | A* | Catalog | 0.33 to 14.81 | 0 | 35 | 70 | 19.75 | 45/45 | 3 | 5/5 |
-| AGM45.JT (AGM-45) | E* | Catalog | 0.00 to 9.87 | 0 | 10 | 40 | 9.87 | 45/45 | N/A | N/A |
-| AGM65A.JT (AGM-65A) | I* | Catalog | 0.00 to 8.23 | 1 | 9 | 40 | 8.23 | 45/45 | N/A | 5/5 |
-| AGM65G.JT (AGM-65) | I* | Live | 0.08 to 9.87 | 1 | 9 | 40 | 9.87 | 45/45 | N/A | N/A |
-| AGM84A.JT (AGM-84A) | A* | Catalog | 0.08 to 59.25 | 2 | 118 | 120 | 59.25 | 45/45 | 8 | N/A |
-| AGM84E.JT (AGM-84E) | I* | Catalog | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 5/5 |
-| AGM88.JT (AGM-88) | E* | Live | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | N/A |
+| AGM45.JT (AGM-45) | E* | Live | 0.00 to 9.87 | 0 | 10 | 40 | 9.87 | 45/45 | N/A | 45/45 (HARM cue) |
+| AGM65A.JT (AGM-65A) | I* | Live | 0.00 to 8.23 | 1 | 9 | 40 | 8.23 | 45/45 | N/A | 5/5 |
+| AGM65G.JT (AGM-65) | I* | Live | 0.08 to 9.87 | 1 | 9 | 40 | 9.87 | 45/45 | N/A | 5/5 |
+| AGM84A.JT (AGM-84A) | A* | Live | 0.08 to 59.25 | 2 | 118 | 120 | 59.25 | 45/45 | 8 | N/A |
+| AGM84E.JT (AGM-84E) | I* | Live | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 5/5 |
+| AGM88.JT (AGM-88) | E* | Live | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | 45/45 (HARM cue) |
 | AIM120.JT (AIM-120) | A* | Live | 1.97 to 23.70 | 0 | 66 | 132 | 23.70 | 45/45 | 5 | 5/5 |
 | AIM54C.JT (AIM-54) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 5/5 |
 | AIM7.JT (AIM-7) | S* | Live | 1.32 to 19.75 | 2 | 51 | 106 | 19.75 | 45/45 | N/A | N/A |
@@ -118,10 +118,10 @@ separate proposed profile setting, never inferred from these motor numbers.
 | AIM9B.JT (AIM-9B) | I* | Live | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | AIM9M.JT (AIM-9M) | I* | Live | 0.66 to 3.95 | 0 | 11 | 22 | 8.23 | 45/45 | N/A | 5/5 |
 | AIM9X.JT (AIM-9X) | I* | Live | 0.49 to 3.95 | 0 | 15 | 24 | 8.23 | 75/75 | N/A | 5/5 |
-| AM39.JT (AM-39) | A* | Catalog | 0.08 to 59.25 | 2 | 64 | 132 | 59.25 | 45/45 | 8 | N/A |
+| AM39.JT (AM-39) | A* | Live | 0.08 to 59.25 | 2 | 64 | 132 | 59.25 | 45/45 | 8 | N/A |
 | AS14.JT (AS-14) | Hold: designator | Catalog | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | TBD | TBD |
-| AS15.JT (AS 15) | S* | Catalog | 0.08 to 9.87 | 1 | 19 | 40 | 9.87 | 45/45 | N/A | N/A |
-| AS16.JT (AS-16) | A* | Catalog | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | 2 | N/A |
+| AS15.JT (AS 15) | S* | Live | 0.08 to 9.87 | 1 | 19 | 40 | 9.87 | 45/45 | N/A | N/A |
+| AS16.JT (AS-16) | A* | Live | 0.08 to 6.58 | 1 | 9 | 30 | 8.23 | 45/45 | 2 | N/A |
 | AS30.JT (AS 30L) | Hold: designator | Catalog | 0.08 to 9.87 | 1 | 12 | 26 | 9.87 | 45/45 | TBD | TBD |
 | AS7.JT (AS-7) | S* | Live | 0.08 to 4.94 | 1 | 9 | 30 | 8.23 | 45/45 | N/A | N/A |
 | ASROC.JT (ASROC) | Hold: radar role | Catalog | 0.08 to 12.34 | 2 | 20 | 40 | 16.46 | wide*/90 | TBD | TBD |
@@ -177,10 +177,11 @@ Guidance lifetime uses each source `removeT * 30` at 120 Hz and the existing
 240-tick fitted memory interval. These classifications follow the inventory
 candidates above; exact retail homing behavior is still unvalidated.
 
-AGM88 uses the existing passive emitter profile on a manually designated
-surface radar emitter. It accepts actual enabled radar emissions and no jammer
-homing. Emission shutdown stops observations, preserving only the last observed
-intercept under the existing memory/search rules. Source ground-object systems
+AGM88 uses the existing passive emitter profile on a designated surface radar
+emitter, or in BORE on the HARM cue's candidate. It accepts actual enabled radar
+emissions and no jammer homing. After acquisition an emission shutdown no longer
+stops it: it homes on the object on angles only (retail data; slice W2, see
+[air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)). Source ground-object systems
 and target categories determine whether a compatible surface emitter is present;
 an airborne fighter's radar is not a compatible substitute.
 
@@ -530,19 +531,20 @@ This is an engagement qualification, not a mandatory straight-flight distance or
 an added fuze timer. Imported fuze arming time remains a separate gate.
 
 Weapon role is explicit, separate from seeker type and target damage category.
-AGM65G, AGM45, AGM88, AGM84A, AM39 and AS16 require surface targets; AS7 does too.
-Other reviewed implemented profiles require airborne aircraft. Surface weapons
-have no air-combat BORESIGHT mode and require designation. Aircraft that land or
+AGM65G, AGM65A, AGM84E, AGM45, AGM88, AGM84A, AM39, AS16, AS7 and AS15 require
+surface targets (the list `missiles::SURFACE_ROLE`). Other reviewed implemented
+profiles require airborne aircraft. Of the surface weapons the infrared ones and
+the anti-radiation ones fire in BORE as well as on a designation (slice W2,
+[air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)); the
+radar ones need a designation on the A-G track. Aircraft that land or
 are assigned another damage-test category do not become surface targets.
 The manual's air-to-ground and IR sections support Maverick's surface role and
 its separate lock tone. Surface IR uses imported thermal signature without
 fighter exhaust aspect/throttle multipliers, an **agent-fitted** contrast model.
-No surface target scene or surface designation channel is supplied by this fix;
 AGM-65 remains unavailable against the practice aircraft rather than borrowing
-its A2A targeting workflow. Surface seeker behavior is tested with synthetic
-fixtures. Active surface support/mission integration remains deferred; the
-surface designation channels are now specified in
-[air-to-ground](air-to-ground.md#ground-contacts-and-channels) (not yet built).
+its A2A targeting workflow. The surface designation channels
+([air-to-ground](air-to-ground.md#ground-contacts-and-channels)) are built (G1)
+and the surface missiles fly from them (W2).
 
 The imported AGM65G minimum is 500 feet, whereas the manual table states 0.8 nmi.
 This unresolved source discrepancy needs record/unit research. Keep the reviewed
@@ -987,7 +989,9 @@ lock; the body can remain visible.
 
 ## Air-to-ground weapons
 
-Specified in [air-to-ground](air-to-ground.md), not yet built. The surface
+Specified in [air-to-ground](air-to-ground.md); the infrared, anti-radiation,
+active radar and supported radar classes are built (slice W2), the bombs fall
+(B1), and the rest is not built yet. The surface
 roles above gain player-side designation (A-G radar, FLIR, HARM page, sight,
 visual). The inventory of 40 real air-to-ground records in twelve
 [weapon classes](air-to-ground.md#weapon-classes) lists each record's seeker,
