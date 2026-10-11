@@ -3478,6 +3478,17 @@ hardpoint, turning them with the target it draws through the host's own
 `surface::fire::gun_aim_point`. The details are in
 [the wire's surface world](formats/net-protocol.md#the-surface-world-protocol-22).
 
+*Built (NA, protocol 23, the air-to-ground round).* The client's
+`CockpitReadout` now holds what the host built for the air-to-ground cockpit
+(the sight and its sensor, the laser and its spots, the bomb sight, the guided
+sight, the HARM cue, the weapons in flight and the ground pages), coded in the
+readout's seven groups and ground contacts list (`wire/readout/a2g.rs`), so
+the HUD, the targeting page and the scopes draw from it as in single player.
+Bombs, rockets and guided weapons need nothing new: they are projectile
+entities. `tore-bot --a2g` flies the net lane's lasing and buddy bombing
+script (`bot/a2g.rs`). The details are in
+[the wire's air-to-ground round](formats/net-protocol.md#the-air-to-ground-round-protocol-23).
+
 *Built (D8b, the game's side that needs no session).* The game's flight
 screen has a session mode (`FlightUi::session`): no Pause, time compression or
 Restart (each answers with a HUD line), only the three screen-only cheats in
