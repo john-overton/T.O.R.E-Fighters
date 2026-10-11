@@ -122,6 +122,29 @@ fn events() -> Vec<(u64, Event)> {
         .with(field::RESULT, vocab::outcome::HIT)
         .with(field::DAMAGE, 200)
         .with(field::REASON, "it was guided on Friendly 1-2's laser");
+    let spot = Event::new(kind::PLAYER_LASER_SPOT)
+        .with_subject(1)
+        .with_object(0x5000_0001)
+        .with(field::X_FT, 10.)
+        .with(field::Y_FT, 0.)
+        .with(field::Z_FT, 20.);
+    let aim = Event::new(kind::WEAPON_AIM)
+        .with_subject(0)
+        .with(field::PROJECTILE, Value::Id(40))
+        .with(field::SPOT_OWNER, Value::Id(1))
+        .with(field::X_FT, 10.)
+        .with(field::Y_FT, 0.)
+        .with(field::Z_FT, 20.);
+    let impact = Event::new(kind::WEAPON_IMPACT)
+        .with_subject(0)
+        .with(field::PROJECTILE, Value::Id(40))
+        .with(field::GUIDED, true)
+        .with(field::MODE, guide::BLIND)
+        .with(field::MISS_FT, 940.5)
+        .with(
+            field::REASON,
+            "it landed 940 ft from the point it was steering for",
+        );
     vec![
         (10, designated),
         (11, lasing),
@@ -130,7 +153,10 @@ fn events() -> Vec<(u64, Event)> {
         (130, rocket),
         (160, dud),
         (200, guided(None, guide::GUIDING)),
+        (210, spot),
+        (222, aim),
         (240, guided(Some(guide::GUIDING), guide::BLIND)),
+        (250, impact),
         (260, cluster),
         (300, outcome),
     ]
@@ -218,6 +244,7 @@ fn the_exports_say_what_the_pilot_and_the_weapons_did() {
         "shot 11 from You was a dud because it landed 0.4 s after release, before its 1.00 s fuze armed",
         "shot 40 from You left guiding on Friendly 1-2's laser because it follows Friendly 1-2's laser spot (buddy lasing)",
         "shot 40 from You guidance guiding -> blind because Friendly 1-2's laser went off",
+        "shot 40 from You landed: it landed 940 ft from the point it was steering for",
         "shot 30 from You burst and scattered its submunitions",
         "shot 40 from You: hit, damage 200 because it was guided on Friendly 1-2's laser",
     ] {
@@ -233,6 +260,9 @@ fn the_exports_say_what_the_pilot_and_the_weapons_did() {
         kind::WEAPON_GUIDED,
         kind::PLAYER_LASER,
         kind::PLAYER_DESIGNATE,
+        kind::PLAYER_LASER_SPOT,
+        kind::WEAPON_AIM,
+        kind::WEAPON_IMPACT,
     ] {
         assert!(log.contains(&format!(r#""kind":"{kind}""#)), "{kind}");
     }

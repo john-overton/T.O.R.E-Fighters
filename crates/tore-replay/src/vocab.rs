@@ -354,6 +354,29 @@ pub mod kind {
     /// are not recorded here (the radar and the views have their own
     /// entries).
     pub const PLAYER_DESIGNATE: &str = "player.designate";
+    /// A lasing aircraft's spot moved (FX-R, 2026-10-11). Written while the
+    /// laser is on, at most ten times a second and only when the spot has
+    /// moved more than a few feet since the last entry, so the replay can
+    /// draw where the spot was at any moment; [`PLAYER_LASER`] has the
+    /// changes of state. Subject: the lasing aircraft. Object: the object
+    /// under the spot, if any. Fields: `x_ft`, `y_ft`, `z_ft`.
+    pub const PLAYER_LASER_SPOT: &str = "player.laser_spot";
+    /// Where a guided weapon in the guiding mode was steering moved (FX-R,
+    /// 2026-10-11), sampled like [`PLAYER_LASER_SPOT`]: the spot a laser
+    /// weapon follows, the point a JDAM flies to, the target an AT-2 is
+    /// steered at. Subject: the shooter. Fields: `projectile`, `spot_owner`
+    /// (Id, a laser weapon), `x_ft`, `y_ft`, `z_ft`. The last entry before a
+    /// weapon goes blind is the point it was homing on then.
+    pub const WEAPON_AIM: &str = "weapon.aim";
+    /// A bomb or guided weapon reached the ground (FX-R, 2026-10-11).
+    /// Subject: the shooter. Object: the ground target the shooter had
+    /// designated, if any. Fields: `projectile`, `weapon`, `x_ft`, `y_ft`,
+    /// `z_ft` (where it landed), `guided` (Bool), `mode` (Text from
+    /// [`super::guide`], a guided weapon's mode at the end), `aim_x_ft`,
+    /// `aim_y_ft`, `aim_z_ft` and `miss_ft` (the point it was steering for
+    /// and how far from it the weapon landed, a guided weapon that had
+    /// one), `target_ft` (how far from the designated target), `reason`.
+    pub const WEAPON_IMPACT: &str = "weapon.impact";
 
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
@@ -437,6 +460,9 @@ pub mod kind {
         WEAPON_GUIDED,
         PLAYER_LASER,
         PLAYER_DESIGNATE,
+        PLAYER_LASER_SPOT,
+        WEAPON_AIM,
+        WEAPON_IMPACT,
     ];
 }
 
@@ -591,6 +617,12 @@ pub mod field {
     pub const FLOWN_S: &str = "flown_s";
     /// An explosion's type.
     pub const EXPLOSION: &str = "explosion";
+    /// The point a guided weapon was steering for, feet, world axes.
+    pub const AIM: [&str; 3] = ["aim_x_ft", "aim_y_ft", "aim_z_ft"];
+    /// How far a bomb landed from the target the shooter had designated.
+    pub const TARGET_FT: &str = "target_ft";
+    /// A flag: the weapon is a guided one.
+    pub const GUIDED: &str = "guided";
     /// A position in feet, world axes.
     pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
     /// A velocity in feet per second, world axes.

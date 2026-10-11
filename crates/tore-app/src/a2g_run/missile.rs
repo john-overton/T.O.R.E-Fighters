@@ -500,6 +500,7 @@ fn render(
         false,
         true,
         None,
+        false,
     );
     let horizon = hud::project(flight.pitch, flight.bank, 0., 0., 1.)
         .map_or(240., |(_, y)| y)

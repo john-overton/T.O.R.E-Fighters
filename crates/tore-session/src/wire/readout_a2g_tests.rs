@@ -52,6 +52,22 @@ fn the_air_to_ground_groups_stand_for_the_readout() {
 }
 
 #[test]
+fn the_guided_level_t_rides_the_guided_group_and_may_be_absent() {
+    let mut readout = samples::readout();
+    let sent = readout.guided.unwrap().level.unwrap();
+    let back = round_trip(&readout).guided.unwrap().level.unwrap();
+    assert_eq!(back, sent);
+    // The client's T numbers are the host's.
+    let sight = round_trip(&readout).guided.unwrap();
+    assert_eq!(
+        sight.release_seconds(),
+        readout.guided.unwrap().release_seconds()
+    );
+    readout.guided.as_mut().unwrap().level = None;
+    assert_eq!(round_trip(&readout).guided.unwrap().level, None);
+}
+
+#[test]
 fn a_cockpit_without_the_air_to_ground_parts_reads_none_of_them() {
     let mut plain = samples::readout();
     plain.sight = None;

@@ -86,6 +86,7 @@ pub fn draw(
     target_friendly: bool,
     target_cue: bool,
     aim: Option<&aim_box::Marks>,
+    gun_key: bool,
 ) {
     let s = frame.presented();
     let ro = &frame.readout;
@@ -109,12 +110,18 @@ pub fn draw(
     }
     // The laser's box and text, whatever is selected (the sight designates
     // before and after a weapon is chosen).
-    laser::draw(pixels, s, ro.laser.as_ref(), ro.tick, font, color, zoom);
+    laser::draw(pixels, s, ro, font, color, zoom);
     let Some(station) = frame.config.stations.get(ro.stores.selected()) else {
         return;
     };
     if live::is_gun(&station.weapon) {
-        draw_gun(pixels, frame, font, color, zoom);
+        draw_gun(pixels, frame, font, color, zoom, ro.stores.selected());
+        return;
+    }
+    // Tab held with another store selected: the gun's sight and count take
+    // the weapon area while the key is down (agent decision, FX-T).
+    if gun_key && let Some(index) = live::key_gun_station(frame.config, |i| ro.stores.rounds(i)) {
+        draw_gun(pixels, frame, font, color, zoom, index);
         return;
     }
     if !active(frame) {
@@ -127,7 +134,7 @@ pub fn draw(
             clip: hud::HUD_CLIP,
             color: [color[0], color[1], color[2], 255],
         };
-        guided::draw(&mut paint, frame, font, w, sight);
+        guided::draw(&mut paint, frame, font, w, sight, zoom);
         return;
     }
     if let Some(sight) = &ro.bomb_sight {
@@ -535,7 +542,16 @@ fn draw_target_box(paint: &mut Paint<'_>, (x, y): (f64, f64), style: aim_box::St
     }
 }
 
-fn draw_gun(pixels: &mut [u8], frame: &FlightFrame, font: &Font, color: [u8; 3], zoom: f64) {
+/// The gun's readout and LCOS pipper for the gun at station `index`, the
+/// selected one or the one Tab fires.
+fn draw_gun(
+    pixels: &mut [u8],
+    frame: &FlightFrame,
+    font: &Font,
+    color: [u8; 3],
+    zoom: f64,
+    index: usize,
+) {
     let s = frame.presented();
     let ro = &frame.readout;
     let mut paint = Paint {
@@ -543,14 +559,10 @@ fn draw_gun(pixels: &mut [u8], frame: &FlightFrame, font: &Font, color: [u8; 3],
         clip: hud::HUD_CLIP,
         color: [color[0], color[1], color[2], 255],
     };
-    let station = &frame.config.stations[ro.stores.selected()];
+    let station = &frame.config.stations[index];
     paint.text(
         font,
-        &format!(
-            "{} {}",
-            ro.stores.rounds(ro.stores.selected()),
-            station.weapon.hud_name
-        ),
+        &format!("{} {}", ro.stores.rounds(index), station.weapon.hud_name),
         207,
         271,
     );
@@ -563,8 +575,9 @@ fn draw_gun(pixels: &mut [u8], frame: &FlightFrame, font: &Font, color: [u8; 3],
     let l = combat::launcher(s);
     if !ro.stores.armed
         || !l.alive
-        || ro.stores.rounds(ro.stores.selected()) == 0
-        || ro.estimates.readiness == live::Readiness::StationFailed
+        || ro.stores.rounds(index) == 0
+        || (index == ro.stores.selected()
+            && ro.estimates.readiness == live::Readiness::StationFailed)
     {
         return;
     }
@@ -817,6 +830,7 @@ mod tests {
             false,
             false,
             None,
+            false,
         );
         debug(&mut pixels, &frame, &state, &font, [0, 255, 0]);
         assert!(pixels.iter().any(|v| *v != 0));

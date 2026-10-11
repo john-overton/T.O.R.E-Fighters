@@ -255,6 +255,33 @@ def laser_problems(work: Path, out: str) -> list[str]:
     text = (work / "log-laser" / "summary.txt")
     if text.exists() and "guided on the shooter's own laser" not in text.read_text():
         problems.append("laser: the summary does not say whose laser guided the bomb")
+    problems += marks_problems(rows, "laser", near=True)
+    return problems
+
+
+def marks_problems(rows: list[dict], label: str, near: bool) -> list[str]:
+    """What the replay viewer's laser and bomb marks draw from (slice FX-R): the spot and the aim
+    followed while they move, and a landing with its miss distance."""
+    problems = []
+    impact = kind(rows, "weapon.impact")
+    if len(impact) != 1:
+        return [f"{label}: {len(impact)} weapon.impact events, want one"]
+    f = impact[0]["fields"]
+    for name in ("x_ft", "z_ft", "mode", "miss_ft", "aim_x_ft", "reason"):
+        if name not in f:
+            problems.append(f"{label}: the impact has no {name}: {f}")
+    if f.get("guided") is not True:
+        problems.append(f"{label}: the impact is not marked guided")
+    if "miss_ft" in f and near != (f["miss_ft"] < 100):
+        problems.append(f"{label}: the bomb landed {f['miss_ft']} ft from its aim point, want {'under' if near else 'over'} 100")
+    spots = kind(rows, "player.laser_spot")
+    aims = kind(rows, "weapon.aim")
+    if not spots or not aims:
+        problems.append(f"{label}: {len(spots)} laser spot entries and {len(aims)} aim entries, want some of each")
+    for entries in (spots, aims):
+        ticks = [d["tick"] for d in entries]
+        if any(b - a < 12 for a, b in zip(ticks, ticks[1:])):
+            problems.append(f"{label}: spot or aim entries closer than 12 ticks")
     return problems
 
 
@@ -273,6 +300,10 @@ def blind_problems(work: Path, out: str) -> list[str]:
     outcome = kind(rows, "weapon.outcome")
     if not outcome or "went blind when your laser went off" not in outcome[-1]["fields"].get("reason", ""):
         problems.append(f"blind: outcome {[o['fields'] for o in outcome]}")
+    problems += marks_problems(rows, "blind", near=False)
+    landed = kind(rows, "weapon.impact")
+    if landed and landed[0]["fields"].get("mode") != "blind":
+        problems.append("blind: the impact does not say the bomb was blind")
     return problems
 
 
@@ -307,6 +338,10 @@ def jdam_problems(work: Path, out: str) -> list[str]:
     outcome = kind(rows, "weapon.outcome")
     if not outcome or "stored at its release" not in outcome[-1]["fields"].get("reason", ""):
         problems.append(f"jdam: outcome {[o['fields'] for o in outcome]}")
+    land = kind(rows, "weapon.impact")
+    if len(land) != 1 or "miss_ft" not in land[0]["fields"] or land[0]["fields"]["miss_ft"] > 100 or \
+            (land[0]["fields"].get("aim_x_ft"), land[0]["fields"].get("aim_z_ft")) != (g.get("x_ft"), g.get("z_ft")):
+        problems.append(f"jdam: the impact does not measure from the stored point: {[d['fields'] for d in land]}")
     return problems
 
 

@@ -42,6 +42,9 @@ impl Viewer {
         audio: &crate::audio::Audio,
     ) -> AppResult<Vec<u8>> {
         let cockpit_view = matches!(frame.view, 1 | 2);
+        // The promo reel never shows the air-to-ground marks, which are for
+        // troubleshooting; `TORE_REPLAY_MARKS=1` draws them for a check.
+        self.ui.marks = std::env::var_os("TORE_REPLAY_MARKS").is_some_and(|v| v == "1");
         self.clock.seek(frame.tick);
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
@@ -304,19 +307,26 @@ impl Viewer {
                 &self.scenery,
             ),
         );
-        sim.combat(
-            device,
-            queue,
-            &render_snapshot::combat_geometry(
-                &picture,
-                &self.art,
-                &self.ownship,
-                &player,
-                &camera,
-                &self.world,
-                &self.scenery,
-            ),
+        let mut combat = render_snapshot::combat_geometry(
+            &picture,
+            &self.art,
+            &self.ownship,
+            &player,
+            &camera,
+            &self.world,
+            &self.scenery,
         );
+        if self.marks_shown() {
+            let prims = self.mark_prims(&picture, tick);
+            ground_marks::geometry(
+                &prims,
+                &camera,
+                self.scenery.origin,
+                f64::from(crate::reel::HEIGHT),
+                &mut combat.vertices,
+            );
+        }
+        sim.combat(device, queue, &combat);
         sim.aircraft(
             device,
             queue,
@@ -451,7 +461,10 @@ impl Viewer {
         if frame.view == 3 {
             self.selected = frame.anchor;
             self.view = 1;
-            self.ui = Ui::default();
+            self.ui = Ui {
+                marks: self.ui.marks,
+                ..Ui::default()
+            };
             let mut canvas = FlightCanvas::default();
             self.overlay(
                 &picture,

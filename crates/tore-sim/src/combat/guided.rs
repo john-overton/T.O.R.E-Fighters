@@ -188,11 +188,8 @@ pub fn time_to(
             return Some((tick - age) as f64 * DT);
         }
         let aim = motion.aim(position, point);
-        let desired = missiles::commanded_heading(
-            forward,
-            motion.velocity,
-            unit(missiles::sub(aim, position)),
-        );
+        let desired =
+            missiles::commanded_heading(forward, motion.path(), unit(missiles::sub(aim, position)));
         let error = dot(forward, desired).clamp(-1., 1.).acos();
         let pointing = dot(forward, unit(gap)).clamp(-1., 1.).acos();
         if error < STRAIGHT_RAD && pointing < STRAIGHT_RAD {
@@ -355,6 +352,121 @@ pub struct GuidedSight {
     /// The aim lies inside the release zone and the reach: IN RNG.
     pub in_reach: bool,
     pub advisory: Option<Advisory>,
+    /// The level release T, for a guided bomb in LVL with an aim (see
+    /// [`GuidedSight::release_range_ft`] for where the bar stands).
+    pub level: Option<GuidedLevel>,
+}
+
+/// How far in from the reach's far edge the level T's bar stands, as a
+/// share of the reach (opinionated, agent): two fifths. The far edge is where
+/// the glide only just gets there at the end of its 60 s life, and a lower
+/// release shortens the flight and the time the laser must hold; measured on
+/// F-16C, F/A-18D and A-10 passes from 4,000 to 15,000 ft (the
+/// air-to-ground baseline) a bar a fifth in already hit within 60 ft with
+/// flights of 47 to 58 s, two fifths within 56 ft with 29 to 57 s.
+pub const LEVEL_DEPTH: f64 = 0.4;
+/// A held trigger releases at the bar only when the aim is within this many
+/// radians of the ground track (10 degrees; opinionated, agent): the stem
+/// says where to point, and the glide's own turn does the rest.
+pub const LEVEL_STEER_RAD: f64 = 10. * std::f64::consts::PI / 180.;
+/// How many ticks of ground travel past the bar a held trigger may still
+/// release in, so a bar that falls between two ticks is not missed (as
+/// [`super::delivery::RELEASE_WINDOW_TICKS`]).
+pub const LEVEL_WINDOW_TICKS: f64 = super::delivery::RELEASE_WINDOW_TICKS;
+
+/// What the level T needs of the aircraft beyond the sight's own numbers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GuidedLevel {
+    /// The turn that puts the ground track through the aim, radians,
+    /// positive right: the stem stands this far from the flight path marker.
+    pub steering_rad: f64,
+    /// Ground speed, feet a second.
+    pub ground_speed_fps: f64,
+}
+
+impl GuidedSight {
+    /// The ground range from the aircraft at which the T's bar stands:
+    /// [`LEVEL_DEPTH`] of the reach in from its far edge.
+    pub fn release_range_ft(&self) -> Option<f64> {
+        let reach = self.reach?;
+        Some(reach.maximum_ft - LEVEL_DEPTH * (reach.maximum_ft - reach.minimum_ft))
+    }
+    /// How much ground the aim still has to close before the bar: its ground
+    /// range less the release range, negative once past the bar.
+    pub fn along_ft(&self) -> Option<f64> {
+        Some(self.ground_range_ft? - self.release_range_ft()?)
+    }
+    /// Seconds to the bar at the ground speed, assuming the track is held;
+    /// negative once past it.
+    pub fn release_seconds(&self) -> Option<f64> {
+        let level = self.level?;
+        let along = self.along_ft()?;
+        Some(if level.ground_speed_fps > 1. {
+            along / level.ground_speed_fps
+        } else if along >= 0. {
+            f64::INFINITY
+        } else {
+            f64::NEG_INFINITY
+        })
+    }
+    /// The aim is nearer than the reach's near edge, or has gone behind the
+    /// aircraft (more than a right angle off the track): OVERFLY.
+    pub fn overflown(&self) -> bool {
+        match (self.reach, self.ground_range_ft, self.level) {
+            (Some(reach), Some(range), Some(level)) => {
+                range < reach.minimum_ft || level.steering_rad.abs() > std::f64::consts::FRAC_PI_2
+            }
+            _ => false,
+        }
+    }
+    /// Where the release marker rides on the stem: 1 at the top while the bar
+    /// is [`super::delivery::MARKER_SECONDS`] or more away, 0 on the bar.
+    pub fn marker_fraction(&self) -> f64 {
+        self.release_seconds()
+            .map_or(0., |s| (s / super::delivery::MARKER_SECONDS).clamp(0., 1.))
+    }
+    /// More than [`super::delivery::DASHED_SECONDS`] out: the stem is dashed.
+    pub fn far(&self) -> bool {
+        self.release_seconds()
+            .is_some_and(|s| s > super::delivery::DASHED_SECONDS)
+    }
+    /// The T holds the trigger: LVL, the aim not overflown, and the bar not
+    /// passed by more than the window. Past the window the trigger is a plain
+    /// press again.
+    pub fn takes_trigger(&self) -> bool {
+        let (Some(level), Some(along)) = (self.level, self.along_ft()) else {
+            return false;
+        };
+        !self.overflown() && along > -LEVEL_WINDOW_TICKS * level.ground_speed_fps / 120.
+    }
+    /// A held trigger releases now: the bar is reached (within the window),
+    /// the aim is inside the reach and within [`LEVEL_STEER_RAD`] of the
+    /// track.
+    pub fn due(&self) -> bool {
+        self.takes_trigger()
+            && self.in_reach
+            && self.along_ft().is_some_and(|a| a <= 0.)
+            && self
+                .level
+                .is_some_and(|l| l.steering_rad.abs() <= LEVEL_STEER_RAD)
+    }
+    /// While the T holds the trigger, whether a held trigger releases now;
+    /// `None` when the trigger works as a plain press.
+    pub fn level_trigger(&self) -> Option<bool> {
+        self.takes_trigger().then(|| self.due())
+    }
+}
+
+/// The turn from the ground track of `launcher` to `aim`, radians, positive
+/// right (`None` when it has no track).
+pub fn steering_to(launcher: &Launcher, aim: Vector) -> Option<f64> {
+    let track = ground_track(launcher)?;
+    let to = [aim[0] - launcher.position[0], aim[2] - launcher.position[2]];
+    if to[0].hypot(to[1]) < 1. {
+        return Some(0.);
+    }
+    let turn = to[0].atan2(to[1]) - track[0].atan2(track[1]);
+    Some(turn.sin().atan2(turn.cos()))
 }
 
 #[cfg(test)]

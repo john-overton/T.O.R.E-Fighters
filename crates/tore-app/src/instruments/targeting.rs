@@ -151,7 +151,7 @@ pub struct Tti {
 /// The slot from the readout (slice W1): the oldest of the aircraft's guided
 /// weapons in flight whose time can be worked out, else IMPACT for a second
 /// after the last one ended.
-fn tti_of(ro: &CockpitReadout) -> Option<Tti> {
+pub fn tti_of(ro: &CockpitReadout) -> Option<Tti> {
     if let Some(seconds) = ro.weapon_tti.iter().find_map(|w| w.seconds) {
         return Some(Tti {
             seconds,

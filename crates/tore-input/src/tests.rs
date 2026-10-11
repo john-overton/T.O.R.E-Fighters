@@ -772,3 +772,17 @@ fn sight_axes_read_the_stick_and_the_holds_read_buttons_and_keys() {
     assert!(!r.held("sight-up"), "a pause releases the holds");
     assert_eq!(r.sight_axes(), [0.; 2]);
 }
+
+#[test]
+fn the_gun_key_is_a_hold_that_follows_its_key() {
+    let mut r = resolver("bind keyboard Tab fire-gun hold");
+    assert!(!r.held("fire-gun"));
+    event(&mut r, "keyboard", "Tab", 0., true);
+    event(&mut r, "keyboard", "Tab", 1., false);
+    assert!(r.held("fire-gun"));
+    assert!(!r.held("fire"), "it is not the trigger");
+    event(&mut r, "keyboard", "Tab", 0., false);
+    assert!(!r.held("fire-gun"));
+    // Like the trigger, it is only ever a hold.
+    assert!(Profile::parse("tore-input 1\nbind keyboard Tab fire-gun press").is_err());
+}

@@ -24,7 +24,7 @@ use crate::wire::{WireError, WireResult};
 use tore_sim::attitude::Vector;
 use tore_sim::combat::ballistics::ReleaseState;
 use tore_sim::combat::delivery::{Ccip, DeliveryMode, LevelRelease, Reach, Warning};
-use tore_sim::combat::guided::{Advisory, GuidedSight};
+use tore_sim::combat::guided::{Advisory, GuidedLevel, GuidedSight};
 use tore_sim::combat::gunship::{Notice, SightNotice};
 use tore_sim::combat::laser::{LaserSpot, LaserState, Mask};
 use tore_sim::combat::live::Side;
@@ -485,13 +485,14 @@ fn guidance_of(code: i64) -> WireResult<Guidance> {
 }
 
 /// Values of the Guided group after its flag.
-const GUIDED_VALUES: usize = 1 + 4 + 1 + 2 + 2 + 3 + 1 + 1;
+const GUIDED_VALUES: usize = 1 + 4 + 1 + 2 + 2 + 3 + 1 + 1 + 3;
 
 /// The Guided group (scalar 19): the flag, then the guidance, the aim (a
 /// flag and the point), the buddy flag, the ground and slant ranges (a flag
 /// and the range each), the reach (a flag, the minimum and the maximum), the
 /// IN RNG flag and the advisory (0 none, 1 NO LASER, 2 MASK, 3 OUT OF REACH,
-/// 4 NO TARGET).
+/// 4 NO TARGET), then the level T (a flag, the steering and the ground speed;
+/// zeros when absent).
 pub(super) fn guided_values(guided: Option<&GuidedSight>) -> Vec<i64> {
     let Some(g) = guided else {
         return vec![0];
@@ -514,6 +515,9 @@ pub(super) fn guided_values(guided: Option<&GuidedSight>) -> Vec<i64> {
             Some(Advisory::OutOfReach) => 3,
             Some(Advisory::NoTarget) => 4,
         },
+        flag(g.level.is_some()),
+        g.level.map_or(0, |l| q(l.steering_rad, SMALL_ANGLE)),
+        g.level.map_or(0, |l| q(l.ground_speed_fps, FINE_FPS)),
     ]);
     out
 }
@@ -542,6 +546,10 @@ pub(super) fn guided_of(values: &[i64]) -> WireResult<Option<GuidedSight>> {
             4 => Some(Advisory::NoTarget),
             _ => return Err(bad("guided advisory")),
         },
+        level: (x[15] != 0).then(|| GuidedLevel {
+            steering_rad: v(x[16], SMALL_ANGLE),
+            ground_speed_fps: v(x[17], FINE_FPS),
+        }),
     }))
 }
 

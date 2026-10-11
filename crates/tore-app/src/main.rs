@@ -324,6 +324,8 @@ struct App {
     /// next tick applies them (`World::step`), so a menu command given while
     /// the game is paused waits for the first tick after resuming.
     seat_commands: Vec<seats::SeatCommand>,
+    /// Whether the gun key (Tab) was last told to the mission as down.
+    gun_key_sent: bool,
     /// The cheats the mission has been told of; `None` until a flight's first
     /// tick, so every flight starts by hearing them.
     cheats_sent: Option<tore_sim::cheats::Cheats>,
@@ -926,6 +928,9 @@ impl App {
     /// focus does. In flight the next tick does it, in order with the seat's
     /// other commands; anywhere else there is no tick to wait for.
     fn release_trigger(&mut self) {
+        // The release lets go of the gun key too; a key still held goes down
+        // again at the next tick.
+        self.gun_key_sent = false;
         if self.screen == Screen::Flight {
             self.queue(seats::SeatCommand::ReleaseTrigger);
         } else {
@@ -1343,14 +1348,8 @@ impl App {
             // The laser and the targeting sight's next object (slice T1).
             "laze" => return self.laze_key(),
             "sight-next" => return self.sight_next_key(),
-            // A2G keys (K1): bound and listed, not wired to the sim yet.
-            "fire-gun" => {
-                let label = "Fire the gun";
-                println!("{name}: not implemented yet");
-                self.flight_ui
-                    .message(format!("{label}: not implemented yet"));
-                Command::None
-            }
+            // Tab is a hold: `queue_gun_key` reads it every tick.
+            "fire-gun" => Command::None,
             "sight-zoom-in" => Command::SightZoom(1),
             "sight-zoom-out" => Command::SightZoom(-1),
             "damage-class" => Command::Combat(tore_sim::combat::live::Command::CycleClass),
@@ -2416,6 +2415,7 @@ impl App {
             }
         }
         self.seat_commands.clear();
+        self.gun_key_sent = false;
         self.cheats_sent = None;
         self.instruments.navigation = navigation::Navigation::default();
         match restarted_flight.ai_aircraft {
@@ -4041,6 +4041,14 @@ impl ApplicationHandler for App {
                                 }
                             }
                             // The commands given since the last tick, in order.
+                            queue_gun_key(
+                                &mut self.seat_commands,
+                                &mut self.gun_key_sent,
+                                self.screen == Screen::Flight
+                                    && !self.flight_ui.frozen()
+                                    && self.focused
+                                    && self.input.resolver.held("fire-gun"),
+                            );
                             let commands = std::mem::take(&mut self.seat_commands);
                             let (sight, sight_zoom) = self.input.sight();
                             let input = seats::SeatInput {
@@ -4888,7 +4896,8 @@ impl ApplicationHandler for App {
                                 ) as f64,
                                 self.world.terrain.air_data(presented).ok().as_ref(),
                                 self.flight_ui.ladder,
-                                !frame.readout.airport.nav_mode && weapon_hud::active(&frame),
+                                !frame.readout.airport.nav_mode
+                                    && (weapon_hud::active(&frame) || self.gun_key_sent),
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
@@ -4964,6 +4973,7 @@ impl ApplicationHandler for App {
                                 target_friendly,
                                 easy_square.is_none(),
                                 aim.as_ref(),
+                                self.gun_key_sent,
                             );
                         }
                         renderer.cockpit(
@@ -6508,6 +6518,23 @@ const PROBE_PIPPER_DEG: f64 = 2.;
 fn queue_command(queue: &mut Vec<seats::SeatCommand>, command: seats::SeatCommand) {
     if queue.len() < MAX_SEAT_COMMANDS {
         queue.push(command);
+    }
+}
+
+/// The gun key (Tab, `fire-gun`) going down or up since the last tick, queued
+/// as a combat command in order with the seat's others. `down` is false while
+/// paused, in a menu or out of focus, as the trigger is.
+fn queue_gun_key(commands: &mut Vec<seats::SeatCommand>, sent: &mut bool, down: bool) {
+    if down != *sent {
+        *sent = down;
+        queue_command(
+            commands,
+            seats::SeatCommand::Combat(if down {
+                tore_sim::combat::live::Command::GunKeyDown
+            } else {
+                tore_sim::combat::live::Command::GunKeyUp
+            }),
+        );
     }
 }
 
@@ -8618,7 +8645,7 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
     let mut ground = 0.;
     match state {
         "forward" | "laser-lsr" | "laser-ready" | "laser-mask" | "laser-bud" | "laser-both"
-        | "laser-edge" => {
+        | "laser-edge" | "tti" | "tti-lsr" | "tti-many" | "tti-impact" => {
             flight.start_airborne([0.; 3]);
         }
         "hover" => {
@@ -8647,7 +8674,7 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
         }
         other => {
             return Err(format!(
-                "unknown HUD snapshot state {other}; use forward, hover, converting, low, laser-lsr, laser-ready, laser-mask, laser-bud, laser-both or laser-edge"
+                "unknown HUD snapshot state {other}; use forward, hover, converting, low, laser-lsr, laser-ready, laser-mask, laser-bud, laser-both, laser-edge, tti, tti-lsr, tti-many or tti-impact"
             )
             .into());
         }
@@ -8674,13 +8701,24 @@ fn write_hud_snapshot(hornet: &aircraft::Airframe, state: &str, path: &str) -> A
         None,
         (flight.bank, 1.),
     );
-    // The laser's box and text over the HUD (docs/spec/air-to-ground.md).
-    if let Some(laser) = weapon_hud::laser::preview(state, &flight) {
-        weapon_hud::laser::draw(
+    // The laser's box and text and the time to impact row over the HUD
+    // (docs/spec/air-to-ground.md).
+    let tti = weapon_hud::laser::tti_preview(state);
+    let laser = weapon_hud::laser::preview(
+        if state == "tti-lsr" {
+            "laser-lsr"
+        } else {
+            state
+        },
+        &flight,
+    );
+    if laser.is_some() || tti.is_some() {
+        weapon_hud::laser::draw_rows(
             &mut pixels,
             &flight,
-            Some(&laser),
+            laser.as_ref(),
             0,
+            tti.as_deref(),
             &hornet.hud_font,
             color,
             1.,
@@ -10025,7 +10063,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission (which refuses a short strip or an enemy airfield). The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport. --airport-allegiance lists every base theater's ground-start airports for Blue and for Redfor and checks that none is the other side's.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it. --target-cam-preview MODE (with --panel-snapshot, default page 4) draws the AC-130 gunsight page from a synthetic readout on a synthetic scene: free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal, gimbal-text, gimbal-bitmap, zoom1..zoom6; the targeting page of a laser or FLIR aircraft (lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked). --hud-snapshot PATH with --hud-snapshot-state laser-lsr, laser-bud, laser-both, laser-ready, laser-mask or laser-edge draws the HUD laser box and text.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, ground-start-auto, airports, ground-target, ground-target-last, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose. --animation-probe OUT sweeps the selected aircraft through control/device poses using the actual transformed drawing geometry, without a window, and writes local geometry metrics and contact sheets.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it. --target-cam-preview MODE (with --panel-snapshot, default page 4) draws the AC-130 gunsight page from a synthetic readout on a synthetic scene: free, pinned, tracked, outside, range, close, mask, nolos, empty, returning, gimbal, gimbal-text, gimbal-bitmap, zoom1..zoom6; the targeting page of a laser or FLIR aircraft (lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked). --hud-snapshot PATH with --hud-snapshot-state laser-lsr, laser-bud, laser-both, laser-ready, laser-mask, laser-edge, tti, tti-lsr, tti-many or tti-impact draws the HUD laser box and text and the time to impact row.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right; --maneuver hover starts the AV-8, Yak-141, V-22 or a helicopter at rest in its own hover trim (hands off it holds; --replay-input flies it). --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, ground-start-auto, airports, ground-target, ground-target-last, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -12828,6 +12866,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         pointer: None,
         theater_resources: Arc::new(theater_resources),
         seat_commands: Vec::new(),
+        gun_key_sent: false,
         cheats_sent: None,
         camera,
         quick,

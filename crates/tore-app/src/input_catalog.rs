@@ -647,10 +647,11 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd("sight-next", "Sight: next visible object", Weapons, &["/"]),
     cmd("laze", "Laser on or off", Weapons, &["Ctrl-l"]),
-    cmd(
+    e(
         "fire-gun",
         "Fire the gun whatever is selected",
         Weapons,
+        Hold,
         &["Tab"],
     ),
     cmd(

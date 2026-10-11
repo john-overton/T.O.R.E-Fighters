@@ -11,6 +11,11 @@
 //! the way into the reach (the release range scale's cue). Every weapon is
 //! followed to its end and reported against the target.
 //!
+//! A guided bomb in LVL holds the trigger for the level T's bar (slice FX-H).
+//! By default the run flies the press (it puts the sight in CCIP with Ctrl+M
+//! when the selection chose LVL); `--release bar` flies the T instead: LVL,
+//! the trigger held from the designation, and the release left to combat.
+//!
 //! Options of this module only (the shared parser skips them):
 //!
 //! - `--laser-off S`: Ctrl+L turns the laser off S seconds after the release
@@ -21,6 +26,8 @@
 //! - `--turn-away S`: the attacker turns 90 degrees right S seconds after the
 //!   release (an AT-2's launcher loses its sight of the target).
 //! - `--condition clear|cloudy|foggy|night`: the mission's weather.
+//! - `--release cue|bar`: `cue` (default) presses the trigger a quarter of
+//!   the way into the reach; `bar` holds it in LVL and lets the T release.
 //!
 //! Lines start `a2g-run:`; the battery's `a2g_guided.py` reads them.
 use super::{FEET_PER_NM, FPS_PER_KNOT, Options, SEAT, Scene, fit_store};
@@ -30,6 +37,7 @@ use tore_formats::aircraft::AircraftId;
 use tore_sim::{
     attitude::Vector,
     combat::{
+        delivery::DeliveryMode,
         guided::{self, GuidedSight},
         laser::LaserState,
         live::{Command, GuidedFlight},
@@ -44,7 +52,13 @@ use tore_world::{
 /// The attack kinds of this module.
 pub(super) const KINDS: [&str; 3] = ["laser", "jdam", "at2"];
 /// The options this module reads, each with one value.
-pub(super) const OPTIONS: [&str; 4] = ["--laser-off", "--buddy", "--turn-away", "--condition"];
+pub(super) const OPTIONS: [&str; 5] = [
+    "--laser-off",
+    "--buddy",
+    "--turn-away",
+    "--condition",
+    "--release",
+];
 /// The buddy's seat.
 const BUDDY_SEAT: SeatId = SeatId(1);
 
@@ -54,6 +68,8 @@ pub(super) struct Extra {
     buddy: Option<AircraftId>,
     turn_away: Option<f64>,
     condition: Option<Condition>,
+    /// `--release bar`: hold the trigger in LVL.
+    bar: bool,
 }
 
 fn extra() -> AppResult<Extra> {
@@ -65,6 +81,15 @@ fn extra() -> AppResult<Extra> {
             "--laser-off" => e.laser_off = Some(value.parse()?),
             "--buddy" => e.buddy = Some(AircraftId::parse(value)?),
             "--turn-away" => e.turn_away = Some(value.parse()?),
+            "--release" => {
+                e.bar = match value.as_str() {
+                    "bar" => true,
+                    "cue" => false,
+                    other => {
+                        return Err(format!("unknown --release {other}; use cue or bar").into());
+                    }
+                }
+            }
             "--condition" => {
                 e.condition = Some(match value.to_ascii_lowercase().as_str() {
                     "clear" => Condition::Clear,
@@ -198,6 +223,8 @@ struct Pass {
     start: Vector,
     heading: f64,
     speed: f64,
+    /// The run's time the pass starts at.
+    t0: f64,
 }
 impl Pass {
     fn forward(&self) -> Vector {
@@ -205,7 +232,7 @@ impl Pass {
     }
     fn at(&self, t: f64) -> Vector {
         let f = self.forward();
-        std::array::from_fn(|i| self.start[i] + f[i] * self.speed * t)
+        std::array::from_fn(|i| self.start[i] + f[i] * self.speed * (t - self.t0))
     }
 }
 
@@ -289,7 +316,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let heading = o.heading_deg.to_radians();
     let speed = o.speed_kt * FPS_PER_KNOT;
     let ground = scene.ground(row[0], row[2]);
-    let pass = Pass {
+    let mut pass = Pass {
         start: {
             let back = o.from_nm * FEET_PER_NM;
             [
@@ -300,6 +327,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         },
         heading,
         speed,
+        t0: 0.,
     };
     // The buddy: 2 nm behind, 3,000 ft right and 2,000 ft higher, at the
     // same speed.
@@ -409,6 +437,19 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                 scene.seconds(),
                 scene.world.combat.ground_name(id).unwrap_or("unnamed")
             );
+            // Flying the stem: the bar run turns onto the designated object
+            // (the run otherwise flies at the row it was given).
+            if e.bar
+                && let Some(at) = scene.target_row().map(|r| r.position)
+            {
+                let from = pass.at(t);
+                pass = Pass {
+                    start: from,
+                    heading: (at[0] - from[0]).atan2(at[2] - from[2]),
+                    speed,
+                    t0: t,
+                };
+            }
         }
         let sight = scene.sight();
         if let Some(sight) = sight
@@ -418,20 +459,43 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             last_reach_line = t;
             print_sight("sight", &scene, &sight);
         }
-        // The release: IN RNG, a quarter of the way into the reach.
+        // A guided bomb's selection picks LVL on a level pass: the cue run
+        // wants the plain press (CCIP), the bar run wants the T.
+        let mode = scene
+            .world
+            .combat
+            .state
+            .ownship(owner)
+            .map(|own| own.delivery_mode);
+        let bar_run = e.bar && guided::is_glide_bomb(&w);
+        if guided::is_glide_bomb(&w)
+            && released.is_none()
+            && scene.selected()
+            && scene.commands.is_empty()
+            && mode.is_some_and(|m| (m == DeliveryMode::Level) != e.bar)
+        {
+            scene
+                .commands
+                .push(SeatCommand::Combat(Command::ToggleSeekerMode));
+        }
+        // The release: IN RNG, a quarter of the way into the reach; for the
+        // bar run the held trigger from the designation on, in LVL.
         let due = released.is_none()
             && scene.selected()
             && designated_at.is_some_and(|at| t >= at + 0.5)
-            && sight.is_some_and(|s| {
-                s.in_reach
-                    && match (s.reach, s.ground_range_ft) {
-                        (Some(reach), Some(range)) => {
-                            !guided::is_glide_bomb(&w) || reach.fraction(range) <= 0.75
+            && (!bar_run
+                || (mode == Some(DeliveryMode::Level) && sight.is_some_and(|s| s.level.is_some())))
+            && (bar_run
+                || sight.is_some_and(|s| {
+                    s.in_reach
+                        && match (s.reach, s.ground_range_ft) {
+                            (Some(reach), Some(range)) => {
+                                !guided::is_glide_bomb(&w) || reach.fraction(range) <= 0.75
+                            }
+                            _ => true,
                         }
-                        _ => true,
-                    }
-            });
-        if due && !reported_sight {
+                }));
+        if due && !reported_sight && !bar_run {
             reported_sight = true;
             if let Some(sight) = sight {
                 print_sight("release-sight", &scene, &sight);
@@ -450,6 +514,12 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         }
         scene.step_seats(due, buddy.as_mut())?;
         let state = &scene.world.combat.state;
+        if bar_run && !reported_sight && state.guided_flights().any(|(_, f)| f.owner == owner) {
+            reported_sight = true;
+            if let Some(sight) = sight {
+                print_sight("release-sight", &scene, &sight);
+            }
+        }
         for (id, flight) in state.guided_flights() {
             if flight.owner != owner || seen.contains(&id) {
                 continue;
@@ -559,7 +629,7 @@ fn print_sight(label: &str, scene: &Scene, sight: &GuidedSight) {
         .ownship(scene.owner)
         .map_or(LaserState::Off, |own| own.laser.state);
     println!(
-        "a2g-run: {label} t={:.3} kind {:?} range {} reach {} in-reach {} advisory {} buddy {} laser {laser:?}",
+        "a2g-run: {label} t={:.3} kind {:?} range {} reach {} in-reach {} advisory {} buddy {} laser {laser:?} bar {} along {} seconds {} steer {}",
         scene.seconds(),
         sight.kind,
         sight
@@ -574,5 +644,19 @@ fn print_sight(label: &str, scene: &Scene, sight: &GuidedSight) {
             .advisory
             .map_or("none".to_owned(), |a| a.label().replace(' ', "-")),
         if sight.buddy { "yes" } else { "no" },
+        sight
+            .release_range_ft()
+            .map_or("none".to_owned(), |r| format!("{r:.0}")),
+        sight
+            .along_ft()
+            .map_or("none".to_owned(), |r| format!("{r:.0}")),
+        sight
+            .release_seconds()
+            .filter(|_| sight.level.is_some())
+            .map_or("none".to_owned(), |r| format!("{r:.1}")),
+        sight.level.map_or("none".to_owned(), |l| format!(
+            "{:.1}",
+            l.steering_rad.to_degrees()
+        )),
     );
 }

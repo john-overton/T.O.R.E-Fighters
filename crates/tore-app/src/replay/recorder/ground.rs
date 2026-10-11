@@ -48,6 +48,14 @@ const CLUSTER_EXPLOSIONS: std::ops::RangeInclusive<u8> = 18..=20;
 /// rounds that land in the same tick.
 const IMPACT_NEAR_FT: f64 = 400.;
 
+/// Ticks between the entries that follow a laser spot or a guided weapon's
+/// aim point (FX-R): ten a second at most.
+const SAMPLE_TICKS: u64 = 12;
+
+/// How far (feet) a spot or an aim point must move from the last entry to be
+/// written again.
+const MOVED_FT: f64 = 5.;
+
 /// What the recorder remembers about a guided weapon between ticks.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct GuidedNote {
@@ -57,6 +65,10 @@ pub(super) struct GuidedNote {
     spot_owner: Option<u32>,
     /// Why guidance was lost, when it was.
     blind: Option<Blind>,
+    /// The point it steers for, or last steered for, as of the last tick.
+    point: Option<[f64; 3]>,
+    /// The last aim point written, and its tick.
+    written: Option<(u64, [f64; 3])>,
 }
 
 /// How guidance was lost, for an outcome's words.
@@ -101,6 +113,8 @@ pub(super) struct Watch {
     guided: BTreeMap<u32, GuidedNote>,
     lasers: BTreeMap<u32, LaserNote>,
     designations: BTreeMap<u32, Designation>,
+    /// The last spot written for each lasing aircraft, and its tick.
+    spots: BTreeMap<u32, (u64, [f64; 3])>,
     /// The last rocket fired from a station and the number of its salvo.
     salvos: BTreeMap<(u32, usize), (u64, i64)>,
 }
@@ -241,6 +255,7 @@ impl Watch {
         self.name_the_cause(cx, &mut events[..before]);
         self.guided(cx, events);
         self.lasers(cx, events);
+        self.laser_spots(cx, events);
         self.designations(cx, events);
     }
 
@@ -342,7 +357,7 @@ impl Watch {
             })
             .collect();
         for (id, shot) in cx.old {
-            if cx.new.contains_key(id) || !missed.contains(id) {
+            if cx.new.contains_key(id) {
                 continue;
             }
             let Some(note) = cx.note(shot) else { continue };
@@ -356,6 +371,10 @@ impl Watch {
                 .filter(|(_, away, _)| *away <= IMPACT_NEAR_FT)
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             let at = nearest.map_or(shot.position, |(i, ..)| bursts[i].0);
+            events.push(self.impact(cx, *id, shot, at));
+            if !missed.contains(id) {
+                continue;
+            }
             if is_dud(shot, note, clock) {
                 if let Some((i, ..)) = nearest {
                     bursts.remove(i);
@@ -395,6 +414,75 @@ impl Watch {
                 events.push(event.with(field::EXPLOSION, i64::from(explosion)));
             }
         }
+    }
+
+    /// `weapon.impact`: where a bomb or guided weapon landed, how far from
+    /// the point it steered for and from the target its shooter had
+    /// designated (FX-R). The replay draws it, so a failed drop shows where
+    /// the bomb went and what it was following.
+    fn impact(&self, cx: &Context<'_>, id: u32, shot: &Shot, at: [f64; 3]) -> Event {
+        let note = self.guided.get(&id);
+        let mut event = Event::new(kind::WEAPON_IMPACT)
+            .with_subject(shot.owner)
+            .with(field::PROJECTILE, replay::Value::Id(id))
+            .with(field::WEAPON, replay::Value::Id(shot.weapon))
+            .with(field::GUIDED, note.is_some());
+        for (name, value) in field::POSITION.into_iter().zip(at) {
+            event = event.with(name, value);
+        }
+        let target = cx
+            .tick
+            .combat
+            .state
+            .ownship(shot.owner)
+            .and_then(|own| own.designated())
+            .and_then(|target| cx.ground_row(target));
+        let target_ft = target.map(|row| super::trees::round(super::distance(at, row.position), 1));
+        if let Some(row) = target {
+            event = event.with_object(row.id);
+        }
+        if let Some(feet) = target_ft {
+            event = event.with(field::TARGET_FT, feet);
+        }
+        let mut miss_ft = None;
+        if let Some(note) = note {
+            event = event.with(field::MODE, mode_name(note.mode));
+            if let Some(point) = note.point {
+                for (name, value) in field::AIM.into_iter().zip(point) {
+                    event = event.with(name, value);
+                }
+                let miss = super::trees::round(super::distance(at, point), 1);
+                event = event.with(field::MISS_FT, miss);
+                miss_ft = Some(miss);
+            }
+        }
+        let designated = target_ft
+            .map(|feet| {
+                format!(
+                    ", {} ft from the designated target",
+                    super::trees::thousands(feet)
+                )
+            })
+            .unwrap_or_default();
+        let reason = match (note, miss_ft) {
+            (Some(note), Some(miss)) => {
+                let steering = if note.mode == GuidedMode::Blind {
+                    "the point it was steering for before it went blind"
+                } else {
+                    "the point it was steering for"
+                };
+                format!(
+                    "it landed {} ft from {steering}{designated}",
+                    super::trees::thousands(miss)
+                )
+            }
+            (Some(_), None) => format!("it fell with no point to steer for{designated}"),
+            (None, _) if target_ft.is_some() => {
+                format!("it fell unguided{designated}")
+            }
+            (None, _) => "it fell unguided".to_owned(),
+        };
+        event.with(field::REASON, reason)
     }
 
     /// Adds the weapon and the words to a ground unit's or aircraft's loss
@@ -461,7 +549,7 @@ impl Watch {
             seen.insert(id);
             let before = self.guided.get(&id).copied();
             if before.is_some_and(|note| note.mode == flight.mode) {
-                self.keep(id, flight, before);
+                self.keep(cx, id, flight, before, events);
                 continue;
             }
             let weapon = cx.new.get(&id).map(|shot| shot.weapon);
@@ -510,6 +598,12 @@ impl Watch {
                     owner: flight.owner,
                     spot_owner: flight.spot_owner,
                     blind,
+                    point: flight.point,
+                    // The event above wrote the point when it was guiding.
+                    written: flight
+                        .point
+                        .filter(|_| flight.mode == GuidedMode::Guiding)
+                        .map(|point| (cx.frame.tick, point)),
                 },
             );
         }
@@ -519,17 +613,44 @@ impl Watch {
     }
 
     /// Keeps the note of a weapon whose mode did not change, following the
-    /// spot owner it may have moved to.
-    fn keep(&mut self, id: u32, flight: &GuidedFlight, before: Option<GuidedNote>) {
-        if let Some(note) = before {
-            self.guided.insert(
-                id,
-                GuidedNote {
-                    spot_owner: flight.spot_owner.or(note.spot_owner),
-                    ..note
-                },
-            );
+    /// spot owner it may have moved to and the point it steers for, and
+    /// writes `weapon.aim` when a guiding weapon's point has moved (FX-R).
+    fn keep(
+        &mut self,
+        cx: &Context<'_>,
+        id: u32,
+        flight: &GuidedFlight,
+        before: Option<GuidedNote>,
+        events: &mut Vec<Event>,
+    ) {
+        let Some(note) = before else { return };
+        let tick = cx.frame.tick;
+        let mut written = note.written;
+        if flight.mode == GuidedMode::Guiding
+            && let Some(point) = flight.point
+            && moved(written, tick, point)
+        {
+            written = Some((tick, point));
+            let mut event = Event::new(kind::WEAPON_AIM)
+                .with_subject(flight.owner)
+                .with(field::PROJECTILE, replay::Value::Id(id));
+            if let Some(owner) = flight.spot_owner {
+                event = event.with(field::SPOT_OWNER, replay::Value::Id(owner));
+            }
+            for (name, value) in field::POSITION.into_iter().zip(point) {
+                event = event.with(name, value);
+            }
+            events.push(event);
         }
+        self.guided.insert(
+            id,
+            GuidedNote {
+                spot_owner: flight.spot_owner.or(note.spot_owner),
+                point: flight.point.or(note.point),
+                written,
+                ..note
+            },
+        );
     }
 
     /// `player.laser`: each aircraft's laser designator when its state, mask
@@ -580,6 +701,37 @@ impl Watch {
                 for (name, value) in field::POSITION.into_iter().zip(point) {
                     event = event.with(name, value);
                 }
+                self.spots.insert(own.aircraft, (cx.frame.tick, point));
+            }
+            events.push(event);
+        }
+    }
+
+    /// `player.laser_spot`: where a lasing aircraft's spot is, when it has
+    /// moved since the last entry (FX-R). The state events say when a laser
+    /// comes on, goes off or is masked; these let the replay follow the spot
+    /// between them.
+    fn laser_spots(&mut self, cx: &Context<'_>, events: &mut Vec<Event>) {
+        let tick = cx.frame.tick;
+        for own in cx.tick.combat.state.ownships() {
+            let spot = own
+                .laser
+                .point
+                .filter(|_| own.laser.state == LaserState::Lasing);
+            let Some(point) = spot else {
+                self.spots.remove(&own.aircraft);
+                continue;
+            };
+            if !moved(self.spots.get(&own.aircraft).copied(), tick, point) {
+                continue;
+            }
+            self.spots.insert(own.aircraft, (tick, point));
+            let mut event = Event::new(kind::PLAYER_LASER_SPOT).with_subject(own.aircraft);
+            if let Some(target) = own.laser.target {
+                event = event.with_object(target);
+            }
+            for (name, value) in field::POSITION.into_iter().zip(point) {
+                event = event.with(name, value);
             }
             events.push(event);
         }
@@ -648,6 +800,15 @@ impl Watch {
             events.push(event);
         }
     }
+}
+
+/// Whether a point is worth a new entry: nothing was written yet, or it is
+/// at least [`SAMPLE_TICKS`] after the last entry and more than [`MOVED_FT`]
+/// from it.
+fn moved(last: Option<(u64, [f64; 3])>, tick: u64, point: [f64; 3]) -> bool {
+    last.is_none_or(|(at, was)| {
+        tick.saturating_sub(at) >= SAMPLE_TICKS && super::distance(was, point) > MOVED_FT
+    })
 }
 
 /// "Enemy 1-2's", and "your" for the player's `You`.
@@ -804,6 +965,20 @@ mod tests {
     }
 
     #[test]
+    fn a_point_is_written_again_when_it_moved_far_enough_and_long_enough_ago() {
+        let here = [100., 0., 200.];
+        // Nothing written yet.
+        assert!(moved(None, 0, here));
+        // Moved but too soon, then late but not moved, then both.
+        assert!(!moved(Some((0, here)), 11, [200., 0., 200.]));
+        assert!(!moved(Some((0, here)), 120, [103., 0., 204.]));
+        assert!(moved(Some((0, here)), 12, [200., 0., 200.]));
+        // Just over five feet counts; exactly five does not.
+        assert!(!moved(Some((0, here)), 12, [105., 0., 200.]));
+        assert!(moved(Some((0, here)), 12, [105.1, 0., 200.]));
+    }
+
+    #[test]
     fn a_guided_weapon_names_whose_laser_it_followed() {
         let mut watch = Watch::default();
         let note = |mode, spot_owner, blind| GuidedNote {
@@ -812,6 +987,8 @@ mod tests {
             owner: 0,
             spot_owner,
             blind,
+            point: None,
+            written: None,
         };
         let who = |id: u32| {
             if id == 0 {

@@ -1253,6 +1253,7 @@ impl CockpitReadout {
                 + option(&g.reach, |_| 128)
                 + 1
                 + 3
+                + option(&g.level, |_| 2 * 64)
         }) + option(&self.estimates.harm, |h| {
             option(&h.candidate, |_| 32) + 1 + h.emitters.len() * (32 + VECTOR + 2)
         }) + option(&self.guided_impact_tick, |_| 64)

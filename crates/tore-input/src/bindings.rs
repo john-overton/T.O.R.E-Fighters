@@ -663,7 +663,7 @@ impl Profile {
                                         | Axis::Collective
                                 )
                             ),
-                            Mode::HoldState if matches!(&action, Action::Ui(name) if name == "fire" || matches!(name.as_str(), "drone-forward" | "drone-backward" | "drone-left" | "drone-right" | "drone-up" | "drone-down" | "drone-boost" | "drone-look" | "sight-left" | "sight-right" | "sight-up" | "sight-down")) => {
+                            Mode::HoldState if matches!(&action, Action::Ui(name) if name == "fire" || name == "fire-gun" || matches!(name.as_str(), "drone-forward" | "drone-backward" | "drone-left" | "drone-right" | "drone-up" | "drone-down" | "drone-boost" | "drone-look" | "sight-left" | "sight-right" | "sight-up" | "sight-down")) => {
                                 true
                             }
                             Mode::Switch | Mode::Follow | Mode::HoldState => {
@@ -675,8 +675,11 @@ impl Profile {
                             }
                             _ => !matches!(action, Action::Axis(_)),
                         };
-                        if action == Action::Ui("fire".into()) && mode != Mode::HoldState {
-                            return Err("fire requires hold behavior".into());
+                        if (action == Action::Ui("fire".into())
+                            || action == Action::Ui("fire-gun".into()))
+                            && mode != Mode::HoldState
+                        {
+                            return Err("fire and fire-gun require hold behavior".into());
                         }
                         if !valid_chord(device, control) {
                             return Err("invalid control or modifier chord".into());
@@ -833,7 +836,8 @@ impl Resolver {
                                 | Axis::TrimRollRate
                                 | Axis::TrimPedalRate
                         )
-                ) || b.action == Action::Ui("fire".into()))
+                ) || b.action == Action::Ui("fire".into())
+                    || b.action == Action::Ui("fire-gun".into()))
         })
     }
     pub fn context(&mut self, paused: bool, focused: bool) {

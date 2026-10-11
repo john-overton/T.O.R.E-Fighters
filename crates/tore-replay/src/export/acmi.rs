@@ -599,6 +599,7 @@ fn debug_event(kind_name: &str) -> bool {
                 | kind::WEAPON_RELEASE
                 | kind::WEAPON_DUD
                 | kind::WEAPON_CLUSTER
+                | kind::WEAPON_IMPACT
                 | kind::WEAPON_GUIDED
                 | kind::PLAYER_LASER
                 | kind::PLAYER_DESIGNATE

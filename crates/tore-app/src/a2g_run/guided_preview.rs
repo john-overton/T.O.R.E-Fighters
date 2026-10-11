@@ -34,6 +34,8 @@ struct Shot {
     range: f64,
     designate: bool,
     laser_off: bool,
+    /// Release one (a plain press past the bar) and draw the HUD 3 s on.
+    release: bool,
 }
 
 fn shots() -> Vec<Shot> {
@@ -47,6 +49,7 @@ fn shots() -> Vec<Shot> {
         range,
         designate,
         laser_off: false,
+        release: false,
     };
     vec![
         jdam(
@@ -97,6 +100,20 @@ fn shots() -> Vec<Shot> {
             range: 20_000.,
             designate: true,
             laser_off: false,
+            release: false,
+        },
+        Shot {
+            name: "gbu30-in-flight",
+            caption: "GBU-30 released, 3 s on: TTI row",
+            release: true,
+            ..jdam("", "", 14_000., true)
+        },
+        Shot {
+            name: "gbu10-in-flight",
+            caption: "GBU-10 released on its spot, 3 s on: LSR and TTI rows",
+            load: "GBU10",
+            release: true,
+            ..jdam("", "", 14_000., true)
         },
     ]
 }
@@ -218,6 +235,14 @@ fn frame(mut scene: Scene, shot: &Shot, font: &Font) -> AppResult<Vec<u8>> {
             break;
         }
     }
+    if shot.release {
+        scene.fly(position, 0., 0., speed);
+        scene.step(true)?;
+        for _ in 0..360 {
+            scene.fly(position, 0., 0., speed);
+            scene.step(false)?;
+        }
+    }
     scene.fly(position, 0., 0., speed);
     let world = &scene.world;
     let picture = world.combat.render_snapshot();
@@ -252,7 +277,9 @@ fn frame(mut scene: Scene, shot: &Shot, font: &Font) -> AppResult<Vec<u8>> {
         None,
         (s.bank, 1.),
     );
-    weapon_hud::draw(&mut layer, &frame, font, HUD_GREEN, 1., false, true, None);
+    weapon_hud::draw(
+        &mut layer, &frame, font, HUD_GREEN, 1., false, true, None, false,
+    );
     let mut rgba = preview::backdrop(s, target);
     for (pixel, hud) in rgba.chunks_exact_mut(4).zip(layer.chunks_exact(4)) {
         if hud[3] != 0 {

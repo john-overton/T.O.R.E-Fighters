@@ -91,7 +91,7 @@ classes are the spec's [weapon classes](../spec/air-to-ground.md#weapon-classes)
 | LAU10 | LAU-10 Rocket Pod | 6 | 25 | A-4E, F-16C | Built, flown |
 | AT2 | AT-2 Swatter | 7 | 27 | Mi-24, AH-64, A-10 | Built, flown; Hits, does not kill a T-80 (80 of 200 hit points left) |
 | AGM65G | AGM-65G Maverick | 8 | 25 | A-10, F/A-18D, F-16C, AV-8B | Built, flown |
-| AGM65A | AGM-65A Maverick | 8 | 25 | A-10, F/A-18D | Built, flown; Hits to about 4 nmi; from 5 nmi and beyond it falls short (see Findings) |
+| AGM65A | AGM-65A Maverick | 8 | 25 | A-10, F/A-18D | Built, flown; FX-M fixes the early ground impact, hits through 8 nmi (see Findings) |
 | AGM84E | AGM-84E SLAM | 8 | 24 | F/A-18D, F-15 | Built, flown |
 | AGM88 | AGM-88 HARM | 9 | 26 | F-4G, F/A-18D, F-16C | Built, flown |
 | AGM45 | AGM-45B Shrike | 9 | 26 | A-4E, F-4G | Built, flown |
@@ -251,8 +251,27 @@ sight and goes blind for good when the launcher turns away.
 
 CUED is a designation (A-G page, FLIR or Enter) with the seeker locked on it;
 BORE fires at the hottest ground object near the bore with nothing designated
-(here a 100 hit point object north of the column, not a tank). The AGM-65A
-falls short beyond about 4.5 nmi; see Findings.
+(here a 100 hit point object north of the column, not a tank).
+
+The rows marked FX-M use `fx-agm65` from `387372d1` with the path-holding fix,
+Linux x86_64 debug build, 2026-10-11. The same `--a2g-run` command path and a
+private copy of `surface-data` were used. Local before/after logs are under
+`.local/tmp-fx-agm65/runs/{before,after}`. These rows supersede the failing
+AGM-65A reach measurements; other rows retain their A1 results. Unless stated,
+FX-M passes start at 3,000 ft and 350 kt over `UKR QUCOL`, on the A-G page in
+CUED, with 90 seconds allowed. `--from` is the starting separation, before
+the designation and lock delay. This is implementation validation, not retail
+comparison.
+
+FX-M validation passed: formatting, strict workspace Clippy, all 5,601 workspace
+tests (82 ignored), workspace and binary builds, all 344 Python tests, source
+and binary asset checks, and the documentation check. The changed-file battery
+passed 55/55, followed by the explicit five-pass `a2g-maverick` scenario. Its
+new 6 nmi AGM-65A shot ended 23 ft from the tank, still Locked, with 20/200 hit
+points left. The single-player guard against `sf-51b2d613` gave SAME 47 /
+DIFFERENT 5: only the five known `smoke-evidence-f18` tape headers changed from
+version 7 to 8. No wire golden or simulation fingerprint was updated. Logs are
+under `.local/tmp-fx-agm65/`; no windowed or retail comparison was run.
 
 | Carrier | Store | Pass | Result |
 | --- | --- | --- | --- |
@@ -262,10 +281,13 @@ falls short beyond about 4.5 nmi; see Findings.
 | F-16C | AGM65G | BORE | BORE launch, seeker Locked; end 1211 ft from the target (last Locked); target 0/100 |
 | AV-8B | AGM65G | designated on the FLIR (M, T), CUED | CUED launch, seeker Locked; end 20 ft from the target (last Locked); target 0/200 |
 | A-10 | AGM65A | Enter picks the target, CUED | CUED launch, seeker Locked; end 27 ft from the target (last Locked); target 20/200 |
-| F/A-18D | AGM65A | A-G page, CUED, 4 nmi | CUED launch, seeker Locked; end 27 ft from the target (last Locked); target 20/200 |
-| F/A-18D | AGM65A | A-G page, 5 nmi | CUED launch, seeker Locked; end 207 ft from the target (last Locked); target 181/200 |
-| F/A-18D | AGM65A | A-G page, 6 nmi | CUED launch, seeker Locked; end 953 ft from the target (last Locked); target 200/200 |
-| A-10 | AGM65A | A-G page, 6 nmi | CUED launch, seeker Locked; end 961 ft from the target (last Locked); target 200/200 |
+| F/A-18D | AGM65A | FX-M, 4 nmi | CUED launch, seeker Locked; end 28 ft from the target (last Locked); target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 5 nmi | both end 17 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 6 nmi | both end 23 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 7 nmi | end 16 and 24 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 8 nmi | both end 18 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65A | FX-M, 8 nmi, 1,000 ft, 350 and 300 kt respectively | end 24 and 20 ft from the target, Locked; target 20/200 |
+| F/A-18D, A-10 | AGM65G | FX-M, 9.5 nmi | both end 24 ft from the target, Locked; target 0/200 |
 | F/A-18D | AGM84E | A-G page, CUED, 12 nmi | CUED launch, seeker Locked; end 82 ft from the target (last Locked); target 0/100 |
 | F-15 | AGM84E | BORE | BORE launch, seeker Locked; end 719 ft from the target (last Locked); target 0/100 |
 
@@ -355,6 +377,57 @@ target. Warnings: a low dive, a low level pass and a high level pass.
 | A-4E | MK82 | 400 ft level: FRAG | released with the pipper 3.9 ft from the truck (warnings: FRAG); impact ground 736.1 ft from it; truck 50/50 |
 | A-4E | MK82 | 1,500 ft level: no warning | released with the pipper 5.2 ft from the truck (no warning); impact ground 801.9 ft from it; truck 50/50 |
 
+### Level T for guided bombs, and the HUD TTI row (FX-H, 2026-10-11)
+
+Built after the acceptance pass: LVL for the laser bombs and JDAMs, whose bar
+stands two fifths in from the reach's far edge, and the `TTI` row on the HUD
+([spec](../spec/air-to-ground.md#guided-bomb-release-range-indicator)). Flown with
+`--a2g-run --release bar` (the run turns onto the designated object, holds the
+trigger in LVL from the designation, and combat releases), clear weather, a
+standing gun of the truck park `~QTTRUCK` for the JDAMs and a `~QUCOL` tank
+under the carrier's own Pave Spike for the laser bombs, 9 nmi out. "Bar" is the
+aim's ground range less the bar's at the release tick (along the track, feet; the
+window is 3 ticks, 19 to 25 ft). Every bomb flew to the end guiding and killed
+its target.
+
+| Carrier | Store | Altitude, speed | Reach (ft) | Released at (ft) | Bar | Impact miss | Flight |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| F-16C | GBU30 | 4,000 ft, 350 kt | 3,982 to 18,755 | 12,846 | 0 | 39 ft | 39 s |
+| F-16C | GBU30 | 4,000 ft, 450 kt | 3,981 to 22,499 | 15,095 | 3 | 45 ft | 34 s |
+| F-16C | GBU30 | 4,000 ft, 550 kt | 3,981 to 27,896 | 18,335 | 5 | 56 ft | 29 s |
+| F-16C | GBU30 | 12,000 ft, 350 kt | 11,987 to 14,806 | 13,683 | 5 | 15 ft | 57 s |
+| F-16C | GBU30 | 12,000 ft, 450 kt | 11,984 to 19,255 | 16,348 | 2 | 17 ft | 52 s |
+| F-16C | GBU30 | 12,000 ft, 550 kt | 11,983 to 25,278 | 19,968 | 8 | 20 ft | 43 s |
+| F-16C | GBU30 | 20,000 ft, 350 to 550 kt | none | no release | | | OUT OF REACH, no T, the held trigger waits for a T that never comes |
+| F/A-18D | GBU29P | 6,000 ft, 400 kt | 5,983 to 19,920 | 14,349 | 4 | 28 ft | 41 s |
+| F/A-18D | GBU29P | 6,000 ft, 500 kt | 5,982 to 24,547 | 17,125 | 4 | 33 ft | 35 s |
+| F/A-18D | GBU29P | 15,000 ft, 500 kt | 14,984 to 20,039 | 18,018 | 1 | 14 ft | 54 s |
+| A-10 | GBU30 | 5,000 ft, 380 kt | 4,982 to 19,471 | 13,676 | 0 | 34 ft | 40 s |
+| A-10 | GBU30 | 8,000 ft, 380 kt | 7,984 to 18,397 | 14,237 | 5 | 21 ft | 47 s |
+| A-10 | GBU30 | 12,000 ft, 380 kt | 11,986 to 15,977 | 14,381 | 1 | 14 ft | 56 s |
+| F-16C | GBU10, own Pave Spike | 8,000 ft, 400 kt | 7,994 to 18,758 | 14,458 | 6 | 10 ft | 42 s |
+| F-16C | GBU10, own Pave Spike | 8,000 ft, 480 kt | 7,993 to 22,335 | 16,600 | 2 | 10 ft | 37 s |
+| F-16C | GBU10, own Pave Spike | 15,000 ft, 480 kt | 14,996 to 18,128 | 16,880 | 4 | 10 ft | 53 s |
+| A-10 | PAVEWAY, own Pave Spike | 8,000 ft, 380 kt | 7,995 to 18,065 | 14,041 | 4 | 11 ft | 43 s |
+
+How the depth was chosen: with the bar a fifth in from the far edge the same
+runs hit within 60 ft but flew 47 to 58 s of the 60 s life at 12,000 ft; two
+fifths in keeps every flight at 57 s or less, and short low passes at 29 to 41 s,
+and takes the miss from 47 to 60 ft down to 39 to 56 ft at 4,000 ft. Half way in
+gave 38 ft and 28 to 56 s, so two fifths was kept as the nearest to John's "when
+the target enters the reach" that still leaves a margin (opinionated, agent).
+Battery scenario `a2g-bar` repeats the JDAM and laser bomb rows (12,000 ft and
+8,000 ft). The earlier release rows above press the trigger on the plain scale:
+the `--a2g-run` default now sets CCIP (Ctrl+M) when the selection chose LVL, so
+those runs are unchanged.
+
+HUD TTI row: `--hud-snapshot-state tti`, `tti-lsr`, `tti-many`, `tti-impact` and
+`--hud-guided-preview` (frames `gbu30-in-flight`, `gbu10-in-flight`, and every
+guided frame now shows the T), viewed at `.local/mp-fixes/renders/fx-h/`: `TTI 1:12`
+on the first row, under `LSR 4.3` with a laser, `TTI 0:42 X3` for three weapons,
+`IMPACT`; the unguided T (`--hud-a2g-preview`) is byte-for-byte the same drawing
+through the shared T routine.
+
 ## HUD and targeting page renders
 
 Rendered offscreen from the shipped code, to `.local/a2g/renders/a1/` (local,
@@ -392,12 +465,18 @@ saw the real cockpit; this pass did not open a window.
 
 ## Findings
 
-- **AGM-65A falls short at long range.** From a 3,000 ft pass on the A-G page it
-  hits at 4 nmi (27 ft), misses by 207 ft at 5 nmi and by about 950 ft at 6 nmi,
-  well inside its 8.23 nmi record range. It glides down and reaches the ground
-  short of a moving tank. The AGM-65G, with a faster and longer-burning record,
-  hits from 6 nmi. Not investigated (this may be the older record's energy, not a
-  fault); a reach probe would settle it.
+- **AGM-65A early ground impact fixed (FX-M).** The sag flag adds up to
+  80 ft/s of downward motion after burnout. Steering aimed only the velocity,
+  so the coasting missile sank under its line of sight and hit the ground early.
+  Before the fix, the F/A-18D shot missed by 207 ft at 5 nmi and 953 ft at 6 nmi;
+  the A-10 shot missed by 961 ft at 6 nmi. Energy was not the cause. The
+  [fitted path correction](../spec/missiles.md#drop-launch-sag-and-cruise-profile)
+  now gives the class 8 results above without changing propulsion, sag or cruise
+  constants. The AGM-65G also reaches from 9.5 nmi (24 ft, target killed), where
+  the A-10 shot previously missed by 1,313 ft. Synthetic tests check the dive
+  from 1,024 ft with 953 ft/s coast speed and 80 ft/s sink, plus a full combat
+  shot with the correction off and on. The `a2g-maverick` battery includes the
+  AGM-65A from 6 nmi. The HUD estimate's omission of future terrain remains open.
 - **BORE can pick a ground object that is not a tank.** The Maverick's BORE shot
   picks the hottest return in its bore cone; on `~QUCOL` that is one of two 100
   hit point static objects (ids 0x40000090 and 0x40000091) north of the column.
@@ -415,13 +494,9 @@ saw the real cockpit; this pass did not open a window.
 
 Not built:
 
-- The JDAM "release at the bar" mode on the level T (H1's solution covers
-  unguided bombs; the reach scale covers the JDAM).
-- The HUD's `TTI m:ss` row for a laser or GPS weapon in flight. The targeting
-  page's TTI row is drawn; the HUD row is not.
-- A viewer overlay for laser spots and designations: replays and recordings carry
-  the events (`player.laser`, `player.designate`, `weapon.guided`), the viewer
-  draws no laser spot.
+- A viewer overlay for laser spots and designations: not built in this pass;
+  built afterwards (FX-R, 2026-10-11, B in the replay viewer, see
+  [laser and bomb marks](../REPLAYS.md#laser-and-bomb-marks)).
 - Tab (fire the gun whatever is selected), above.
 - `Ctrl+M` on [the keyboard map](../tore-keyboard-map.html): the map's rules call
   for a browser check of all five sheets at two sizes and a README image

@@ -47,6 +47,8 @@ mod guided;
 pub(crate) mod guided_tests;
 pub use guided::{GuidedFlight, Mode as GuidedMode};
 #[cfg(test)]
+mod gun_key_tests;
+#[cfg(test)]
 mod gunship_impact_tests;
 #[cfg(test)]
 mod gunship_tests;
@@ -254,6 +256,11 @@ pub enum Command {
     ToggleLaser,
     /// `/`: the targeting sight tracks the next visible ground object.
     SightNext,
+    /// Tab goes down: the gun fires, whatever station is selected, until
+    /// [`Command::GunKeyUp`] (docs/spec/air-to-ground.md, "The gun key").
+    GunKeyDown,
+    /// Tab comes up.
+    GunKeyUp,
     /// Backslash on an aircraft with a targeting sight (the AC-130's
     /// gunsight included): track the object under the crosshair, else pin
     /// the ground there.
@@ -1396,6 +1403,9 @@ pub struct Ownship {
     previous_position: Option<Vector>,
     triggers: Vec<PlayerTrigger>,
     gun_cadence: Vec<GunCadence>,
+    /// Tab is down: the gun fires whatever station is selected. Not part of
+    /// a checkpoint; a restored flight starts with the key up.
+    gun_key: bool,
     /// A trigger press waiting for the weapon bay to open: the station and
     /// the tick it was pressed.
     bay_release: Option<(usize, u64)>,
@@ -1766,6 +1776,7 @@ impl Ownship {
             kills: 0,
             triggers,
             gun_cadence,
+            gun_key: false,
             bay_release: None,
             bay_hold_until: 0,
             delivery_mode: Default::default(),
@@ -2923,6 +2934,7 @@ impl State {
     pub fn release(&mut self, aircraft: u32) {
         if let Some(own) = self.ownship_mut(aircraft) {
             own.release();
+            own.gun_key = false;
         }
     }
 
@@ -3103,23 +3115,34 @@ impl State {
             sight.input = input;
         }
     }
-    /// A newly selected unguided bomb starts in LVL when a ground target is
-    /// designated and the flight path is near level, else in CCIP
-    /// ([`super::delivery::DeliveryMode::chosen`]); Ctrl+M overrides it.
+    /// A newly selected bomb, unguided or guided, starts in LVL when a ground
+    /// target is designated (for a JDAM the sight's held point, for a laser
+    /// bomb a laser spot also count) and the flight path is near level, else
+    /// in CCIP ([`super::delivery::DeliveryMode::chosen`]); Ctrl+M overrides
+    /// it. A guided bomb's CCIP is its reach scale with a plain trigger.
     fn choose_delivery(&self, own: &mut Ownship, launcher: Launcher) {
-        if !own.armed
-            || !own
-                .config
-                .stations
-                .get(own.selected)
-                .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
-        {
+        if !own.armed {
             return;
         }
-        let ground_target = own
+        let Some(w) = own.config.stations.get(own.selected).map(|s| &s.weapon) else {
+            return;
+        };
+        let glide = super::guided::is_glide_bomb(w);
+        if !super::ballistics::is_bomb(w) && !glide {
+            return;
+        }
+        let mut ground_target = own
             .designated()
             .and_then(|id| self.targets.iter().find(|t| t.id == id))
             .is_some_and(|t| t.role == TargetRole::Surface && t.hp > 0);
+        if glide && !ground_target {
+            ground_target = match super::guided::kind(w) {
+                Some(Guidance::Coordinate) => {
+                    guided::designated_point(own, Guidance::Coordinate, &self.targets).is_some()
+                }
+                _ => own.laser.spot(own.aircraft, own.side).is_some(),
+            };
+        }
         let v = launcher.velocity;
         own.delivery_mode =
             super::delivery::DeliveryMode::chosen(ground_target, v[1].atan2(v[0].hypot(v[2])));
@@ -3258,11 +3281,10 @@ impl State {
                 // Ctrl+M with an unguided bomb selected switches its sight
                 // between CCIP and LVL (docs/spec/air-to-ground.md).
                 if own.armed
-                    && own
-                        .config
-                        .stations
-                        .get(own.selected)
-                        .is_some_and(|s| super::ballistics::is_bomb(&s.weapon))
+                    && own.config.stations.get(own.selected).is_some_and(|s| {
+                        super::ballistics::is_bomb(&s.weapon)
+                            || super::guided::is_glide_bomb(&s.weapon)
+                    })
                 {
                     own.delivery_mode = own.delivery_mode.toggled();
                     return;
@@ -3380,6 +3402,8 @@ impl State {
             Command::SightDesignate => own.request_sight(super::sight::SightRequest::Designate),
             Command::SightPinGround => own.request_sight(super::sight::SightRequest::Pin),
             Command::SightNext => own.request_sight(super::sight::SightRequest::Next),
+            Command::GunKeyDown => own.gun_key = true,
+            Command::GunKeyUp => own.gun_key = false,
             Command::ToggleLaser => {
                 if own.config.sight_sensor().is_some_and(|s| s.laser) {
                     own.laser.toggle();
@@ -4268,8 +4292,29 @@ impl State {
                 own.release_readiness = Readiness::GroupEmpty;
                 own.release();
             }
-            for index in fire_stations {
+            // Tab fires the gun whatever is selected: with the gun (or the
+            // AC-130's guns) selected it joins the trigger; with another
+            // store selected the gun gets a pass of its own, which leaves the
+            // selected store's readiness, bay request and seeker alone.
+            let gun_key = own.gun_key && launcher.alive;
+            let mut passes: Vec<(usize, bool, bool)> = fire_stations
+                .iter()
+                .map(|&index| {
+                    let gun = grouped || is_gun(&own.config.stations[index].weapon);
+                    (index, held || (gun_key && gun), false)
+                })
+                .collect();
+            if gun_key
+                && !grouped
+                && !fire_stations.is_empty()
+                && !is_gun(&own.config.stations[selected].weapon)
+                && let Some(index) = key_gun_station(&own.config, |i| own.rounds(i))
+            {
+                passes.push((index, true, true));
+            }
+            for (index, held, key_pass) in passes {
                 own.selected = index;
+                let selected_readiness = own.release_readiness;
                 own.release_readiness = if grouped {
                     let slot = own
                         .gunship
@@ -4290,14 +4335,16 @@ impl State {
                 let bay_waits = own.bay_waits(launcher);
                 // A pending bay release lapses if the shot is no longer wanted or the
                 // doors never open.
-                if own.bay_release.is_some_and(|(station, pressed)| {
-                    station != index
-                        || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
-                        || !matches!(
-                            own.release_readiness,
-                            Readiness::Ready | Readiness::BayClosed
-                        )
-                }) {
+                if !key_pass
+                    && own.bay_release.is_some_and(|(station, pressed)| {
+                        station != index
+                            || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
+                            || !matches!(
+                                own.release_readiness,
+                                Readiness::Ready | Readiness::BayClosed
+                            )
+                    })
+                {
                     own.bay_release = None;
                 }
                 // An AC-130 gun fires with or without a solution; any other weapon
@@ -4321,7 +4368,19 @@ impl State {
                 // LVL holds a bomb's trigger while the release cue lies ahead:
                 // a held trigger waits for the cue and releases there, once a
                 // pass (docs/spec/air-to-ground.md, "The level release T").
-                let polled = match own.delivery.as_ref().and_then(|d| d.level_trigger(index)) {
+                let held_for_bar = own
+                    .delivery
+                    .as_ref()
+                    .and_then(|d| d.level_trigger(index))
+                    .or_else(|| {
+                        // A guided bomb's T: its sight is for the selected
+                        // station only.
+                        own.guided_sight
+                            .as_ref()
+                            .filter(|_| index == own.selected)
+                            .and_then(|g| g.level_trigger())
+                    });
+                let polled = match held_for_bar {
                     Some(due) => {
                         due && held
                             && launcher.alive
@@ -4337,7 +4396,7 @@ impl State {
                     own.bay_release = Some((index, self.tick));
                     own.release_readiness = Readiness::BayClosed;
                 }
-                let bay_open = own.bay_release.is_some() && !bay_waits;
+                let bay_open = !key_pass && own.bay_release.is_some() && !bay_waits;
                 if bay_open {
                     own.bay_release = None;
                 }
@@ -4597,9 +4656,14 @@ impl State {
                         own.bay_hold_until = self.tick + BAY_HOLD_TICKS;
                     }
                     self.effect(launcher.position, EffectKind::Launch);
-                    own.bore_observation = None;
-                    own.mounted = Seeker::default();
-                    own.mounted_key = None;
+                    if !key_pass {
+                        own.bore_observation = None;
+                        own.mounted = Seeker::default();
+                        own.mounted_key = None;
+                    }
+                }
+                if key_pass {
+                    own.release_readiness = selected_readiness;
                 }
             }
             own.selected = selected;
@@ -5911,6 +5975,19 @@ fn critical_hit(target: &Target, weapon: &Weapon, section: DamageSection, damage
 /// by the gun dispersion and never home.
 pub fn is_gun(w: &Weapon) -> bool {
     is_aircraft_gun(w) || super::surface_guns::is_surface_gun(&w.source)
+}
+/// The station Tab fires: the first gun with rounds left, else the first gun,
+/// else none. `rounds` is the aircraft's count at a station.
+pub fn key_gun_station(config: &Configuration, rounds: impl Fn(usize) -> u16) -> Option<usize> {
+    let guns = || {
+        config
+            .stations
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| is_gun(&s.weapon))
+            .map(|(i, _)| i)
+    };
+    guns().find(|&i| rounds(i) > 0).or_else(|| guns().next())
 }
 /// An aircraft's gun record, which the one-third damage rule and the critical
 /// (pilot and central) gun kills apply to.
@@ -10207,7 +10284,7 @@ fn guide_owned<'a>(
             return;
         }
         let desired = unit(sub(motion.aim(p.position, point), p.position));
-        let heading = missiles::commanded_heading(p.direction, motion.velocity, desired);
+        let heading = missiles::commanded_heading(p.direction, motion.path(), desired);
         p.direction = missiles::steer(&w.movement, p.age, p.direction, heading);
     }
 }

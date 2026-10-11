@@ -15,6 +15,7 @@ pub mod devices;
 pub mod drone;
 #[cfg(test)]
 pub(crate) mod fixture;
+pub mod ground_marks;
 pub mod host;
 pub mod identity;
 pub mod library;
