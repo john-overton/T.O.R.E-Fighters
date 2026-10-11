@@ -409,6 +409,60 @@ owner and side for the weapons (buddy lasing). Both are in the checkpoint. The
 readout's `SightReadout` and `LaserReadout` are host-built and not on the wire
 before protocol 23.
 
+#### Air-to-ground weapons
+
+The air-to-ground round (2026-10-10 and 11; [spec](spec/air-to-ground.md),
+[evidence](baselines/air-to-ground.md)) added no new service. It added modules
+to the ones above, and each keeps its state in the combat checkpoint, so single
+player, the host and a standby run one law:
+
+```mermaid
+flowchart LR
+    subgraph sensing[Sensors and designation]
+        G[sensors::track::ground<br/>A-G, IR and HARM pages] --> H[Sensors::hold<br/>designation]
+        S[combat::sight<br/>targeting sight] --> H
+    end
+    subgraph delivery[Delivery]
+        B[combat::ballistics<br/>bomb equation, packs, pods]
+        D[combat::delivery<br/>CCIP, LVL, warnings, reach]
+        L[combat::laser<br/>laser state and spots]
+        U[combat::guided<br/>laser, GPS and command flight]
+    end
+    H --> D
+    H --> U
+    L --> U
+    B --> D
+    B --> U
+    D --> F[live fire loop<br/>release, packs, pods]
+    U --> F
+    A[live::agm<br/>HARM cue, surface seekers] --> F
+    F --> R[CockpitReadout<br/>bomb_sight, guided, laser, sight, harm]
+    R --> P[weapon_hud and instruments::targeting]
+```
+
+- `sensors::track::ground` keeps one ground list for the A-G page, the IR
+  page's ground objects and the HARM page, rebuilt on the retail timers. The
+  fire loop and the HUD read it through the sensors, never the world.
+- `combat::ballistics` is the retail bomb equation (32 ft/s squared, no drag,
+  released along the nose with a random error of 3 degrees), the pack and pod
+  rules and the impact predictor. Bomb paths live in `live::State::bombs`, not
+  on `Projectile`.
+- `combat::delivery` rebuilds the CCIP, level-release and rocket solutions every
+  step from that step's launcher (skipped in the checkpoint, so nothing depends
+  on history) and owns `Reach`. `combat::guided` flies the laser bombs, JDAMs,
+  laser missiles and the AT-2 (`live::guided` holds each flight) and gives the
+  same `Reach` from its fly-out. `live::agm` holds the HARM cue, surface-seeker
+  support, retargeting and blinding.
+- Only a human seat's ownship uses these paths. The AI keeps its stores, does
+  not attack the ground and does not lase (the AI strike round comes later).
+- The host builds `bomb_sight`, `guided`, `weapon_tti`, the HARM cue and the
+  ground pages into the readout; `weapon_hud/{bombs,guided,agm,laser}.rs` and
+  `instruments/targeting.rs` draw them. These fields are host-built and not on
+  the wire before protocol 23, so a client shows none of them until then.
+- `a2g_run.rs` and `a2g_run/` (`--a2g-run`) drive every path through the real
+  player command path for the `a2g-*` battery scenarios and the replay check.
+  They never place a projectile by hand.
+
 `ai::gunnery` uses the same trajectory solver with explicitly permitted visual
 or sensor observations. The controller chooses gun tracking through ordinary
 flight inputs and authorizes individual rounds. `ai_wings` rechecks barrel
