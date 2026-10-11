@@ -2553,9 +2553,10 @@ and the server rebuild it from their own import and build.
   stand elsewhere, the redraw's added hangars and vehicles are targets with
   ids a 23 game lacks (`0x40F0_0000` up), parked aircraft move onto the
   aprons and the AI's airfield points and ground-start slots differ. The
-  version check keeps such games apart. No message changes its bytes; the
-  wire golden changes only in the version line and the transport packets
-  sealed with it.
+  version check keeps such games apart. The redraw changes no message's
+  bytes; the wire golden changes in the version line, the transport packets
+  sealed with it and, for the Guided sight group folded under 24 (FX-H), the
+  full readout sample.
 - **Checks that still apply.** The Seated message's surface digest covers the
   parked aircraft and starts, so a game whose airfields differed would still
   be refused with Content refused. The theater content item covers the files
@@ -2698,8 +2699,12 @@ again with an observer; the capture format did not change for it.
   round's one bump. 24 since the mp-fixes round (slice FX-A,
   [the redrawn airports](#the-redrawn-airports-protocol-24)): every game builds
   the redrawn airports, so the airfields' buildings, their added targets, the
-  parked aircraft and the AI's airfield points differ from a 23 game's; the
-  round's other slices fold their wire changes under 24.
+  parked aircraft and the AI's airfield points differ from a 23 game's; and,
+  folded under 24, the round's other slices: the Tab gun key's extended
+  combat commands 3 (`GunKeyDown`) and 4 (`GunKeyUp`) after code 31 (FX-T,
+  [inputs as built](#inputs-as-built)) and the readout's Guided sight group
+  (19) growing from 15 to 18 values with the level T (present, steering,
+  ground speed; FX-H, [the air-to-ground groups](#the-air-to-ground-groups)).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
