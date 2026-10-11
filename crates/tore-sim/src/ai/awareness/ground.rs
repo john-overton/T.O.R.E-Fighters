@@ -310,6 +310,12 @@ pub struct GroundPicture {
     /// `None` until the host briefs it (or with an order alone).
     objective: Option<StrikeObjective>,
     ordered: Option<u32>,
+    /// The targets of a class order (a flight lead's Alt+W on a ground
+    /// class, slice ST-O): briefed like an objective's targets, so the
+    /// striker takes the nearest first and two to an object, but with no
+    /// objective point, so nothing outside the class is taken as an
+    /// opportunity. Ascending id.
+    class_order: Vec<u32>,
     /// The tick of the last rebuild; `None` before the first.
     built: Option<u64>,
     /// The lists as last rebuilt and followed, nearest first.
@@ -327,6 +333,7 @@ impl GroundPicture {
             role,
             objective: None,
             ordered: None,
+            class_order: Vec::new(),
             built: None,
             contacts: Vec::new(),
             seen: Vec::new(),
@@ -361,9 +368,24 @@ impl GroundPicture {
             self.built = None;
         }
     }
-    /// Whether the picture has anything to do: the Strike role, or an order.
+    /// The class order's targets, if one stands.
+    pub fn class_order(&self) -> &[u32] {
+        &self.class_order
+    }
+    /// Gives a class order its targets (ascending id, any repeat dropped), or
+    /// clears it with none. The picture rebuilds at the next refresh.
+    pub fn set_class_order(&mut self, mut targets: Vec<u32>) {
+        targets.sort_unstable();
+        targets.dedup();
+        if self.class_order != targets {
+            self.class_order = targets;
+            self.built = None;
+        }
+    }
+    /// Whether the picture has anything to do: the Strike role, or an order
+    /// (one target or a class).
     pub fn active(&self) -> bool {
-        self.role == StrikeRole::Strike || self.ordered.is_some()
+        self.role == StrikeRole::Strike || self.ordered.is_some() || !self.class_order.is_empty()
     }
     /// The tick of the last rebuild.
     pub fn built_tick(&self) -> Option<u64> {
@@ -521,6 +543,11 @@ impl GroundPicture {
                     .iter()
                     .map(|id| (*id, BriefedKind::Defense)),
             );
+        }
+        for id in &self.class_order {
+            if !named.iter().any(|(named, _)| named == id) {
+                named.push((*id, BriefedKind::Target));
+            }
         }
         named.extend(self.ordered.map(|id| (id, BriefedKind::Ordered)));
         self.briefed = named

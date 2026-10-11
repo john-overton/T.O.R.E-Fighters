@@ -102,8 +102,9 @@
 //! `--order` and `--reply` (stage F phase 2, slice F2-R) give a seat command
 //! once, SECONDS after the bot is first seated: `--order` is a wing order from
 //! a bot that leads its flight (`break-left`, `break-right`, `break-high`,
-//! `break-low`, `steady`, `attack-bandits`, `protect-me`, `disengage` or
-//! `bug-out`), `--reply` a wingman's reply key (`engaging`, `winchester`,
+//! `break-low`, `steady`, `attack-bandits`, `protect-me`, `disengage`,
+//! `bug-out`, `sort`, `engage-class`, `engage-ir-laser` or `lase-my-target`),
+//! `--reply` a wingman's reply key (`engaging`, `winchester`,
 //! `bingo` or `help`). Every bot prints each radio line it hears ("Bot: radio:
 //! Red one: 'Break left'") and each HUD line it reads ("Bot: line: You lead
 //! this flight."), so a test can follow an order and its reply from one bot to
@@ -406,10 +407,14 @@ fn order(value: &str) -> Result<(Duration, SeatCommand), String> {
         "disengage" => PlayerOrder::Disengage,
         "bug-out" => PlayerOrder::BugOut,
         "sort" => PlayerOrder::Sort,
+        "engage-class" => PlayerOrder::EngageClass,
+        "engage-ir-laser" => PlayerOrder::EngageIrLaser,
+        "lase-my-target" => PlayerOrder::LaseMyTarget,
         other => {
             return Err(format!(
                 "--order {other:?} is break-left, break-right, break-high, break-low, steady, \
-                 attack-bandits, protect-me, disengage, bug-out or sort"
+                 attack-bandits, protect-me, disengage, bug-out, sort, engage-class, \
+                 engage-ir-laser or lase-my-target"
             ));
         }
     };

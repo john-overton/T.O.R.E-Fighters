@@ -1225,6 +1225,17 @@ pub(crate) fn write_order(w: &mut BitWriter, order: PlayerOrder) {
         PlayerOrder::BugOut => code(11),
         PlayerOrder::LandAtSelected => code(12),
         PlayerOrder::Sort => code(13),
+        PlayerOrder::EngageIrLaser => code(14),
+        // The 4-bit code space is full: 15 escapes to three more bits, which
+        // name the strike round's later orders (slice ST-O).
+        PlayerOrder::EngageClass => {
+            code(15);
+            let _ = w.write_bits(0, 3);
+        }
+        PlayerOrder::LaseMyTarget => {
+            code(15);
+            let _ = w.write_bits(1, 3);
+        }
     }
 }
 
@@ -1253,6 +1264,12 @@ pub(crate) fn read_order(r: &mut BitReader<'_>) -> WireResult<PlayerOrder> {
         11 => PlayerOrder::BugOut,
         12 => PlayerOrder::LandAtSelected,
         13 => PlayerOrder::Sort,
+        14 => PlayerOrder::EngageIrLaser,
+        15 => match r.read_bits(3)? {
+            0 => PlayerOrder::EngageClass,
+            1 => PlayerOrder::LaseMyTarget,
+            _ => return Err(WireError::Invalid("wing order extension")),
+        },
         _ => return Err(WireError::Invalid("wing order")),
     })
 }
@@ -1448,6 +1465,9 @@ mod tests {
             PlayerOrder::BugOut,
             PlayerOrder::LandAtSelected,
             PlayerOrder::Sort,
+            PlayerOrder::EngageIrLaser,
+            PlayerOrder::EngageClass,
+            PlayerOrder::LaseMyTarget,
         ];
         orders.extend(BREAKS.map(PlayerOrder::Break));
         orders.extend(APPROACHES.map(PlayerOrder::Approach));

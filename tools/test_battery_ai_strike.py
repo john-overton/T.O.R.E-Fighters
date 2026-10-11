@@ -330,6 +330,102 @@ class ScenarioTests(unittest.TestCase):
         self.assertNotEqual(self.scenarios["ai-strike-bombs"].check(today), [])
 
 
+def ground_order_run(kind="strike", result="given", message="Engage my target: 1 applied, 0 rejected, 0 without motion",
+                     state="strike_order=0x50000001 class_order=0 lase_order=none", released=True, designated="0x50000001"):
+    lines = [
+        SETUP.format(skill=1, profile="none").replace("order=none", "order=engage-my-target"),
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=ordered",
+        "ai-strike: start t=0.000 plane=1 range_ft=24611 alt_ft=5000 speed_kt=450",
+        f"ai-strike: ORDER t=3.017 kind=engage-my-target designated={designated}",
+        f'ai-strike: ORDER-REPLY t=3.025 result={result} message="{message}"',
+        f"ai-strike: ORDER-STATE t=3.025 {state}",
+    ]
+    releases = 1 if released else 0
+    if released:
+        lines.append("ai-strike: RELEASE t=30.000 n=1 weapon=MK82.JT station=1 alt_ft=4900 speed_kt=450 range_ft=9000"
+                     " pass=1 aim_ft=100 inside=yes")
+        lines.append("ai-strike: IMPACT t=40.000 n=1 miss_ft=300 at=1.0,2.0,3.0")
+    lines.append(f"ai-strike: summary t=60.0 ran_s=60.0 profile=none releases={releases} impacts={releases} kills=0 egress=no "
+                 "lost=no activity=In formation target_hp=200/200 closest_ft=8902 store_rounds_left=4")
+    if not released:
+        lines.append("ai-strike: no release")
+    lines.append("ai-strike: done")
+    return "\n".join(lines)
+
+
+class GroundOrderTests(unittest.TestCase):
+    def check(self, text, kind):
+        return s.ground_order_problems(text, [dict(label="run", kind=kind)])
+
+    def test_a_taken_strike_order_holds_the_object_and_releases(self):
+        self.assertEqual(self.check(ground_order_run(), "strike"), [])
+        self.assertTrue(any("never released" in p for p in self.check(ground_order_run(released=False), "strike")))
+        none_held = ground_order_run(state="strike_order=none class_order=0 lase_order=none")
+        self.assertTrue(any("want one strike order" in p for p in self.check(none_held, "strike")))
+
+    def test_a_class_order_holds_its_targets(self):
+        held = ground_order_run(state="strike_order=none class_order=4 lase_order=none")
+        self.assertEqual(self.check(held, "class"), [])
+        self.assertTrue(any("class order" in p for p in self.check(ground_order_run(), "class")))
+
+    def test_a_refusal_holds_nothing_and_releases_nothing(self):
+        refused = ground_order_run(result="given", message="Wing order unavailable: no usable surface store",
+                                   state="strike_order=none class_order=0 lase_order=none", released=False)
+        self.assertEqual(self.check(refused, "refused"), [])
+        self.assertTrue(any("refusal" in p for p in self.check(ground_order_run(), "refused")))
+
+    def test_the_lase_order_is_held_without_a_strike(self):
+        held = ground_order_run(state="strike_order=none class_order=0 lase_order=0x50000001", released=False)
+        self.assertEqual(self.check(held, "lase"), [])
+        self.assertTrue(any("lase order" in p for p in self.check(ground_order_run(), "lase")))
+
+    def test_attack_on_contact_holds_no_order(self):
+        free = ground_order_run(state="strike_order=none class_order=0 lase_order=none", released=False)
+        self.assertEqual(self.check(free, "free"), [])
+        self.assertNotEqual(self.check(ground_order_run(), "free"), [])
+
+    def test_the_scenarios_use_these_checks(self):
+        scenarios = {sc.name: sc for sc in s.scenarios()}
+        self.assertIn("ai-wing-ground-order", scenarios)
+        self.assertIn("ai-wing-lase", scenarios)
+        self.assertEqual(len(s.ORDER_RUNS), 1 + len(scenarios["ai-wing-ground-order"].then))
+        lase = ground_order_run(state="strike_order=none class_order=0 lase_order=0x50000001", released=False)
+        self.assertEqual(scenarios["ai-wing-lase"].check(lase), [])
+
+
+def quick_wing_run(role="strike", released=True):
+    lines = [
+        SETUP.format(skill=1, profile="none"),
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=quick-wing",
+        f"ai-strike: ROLE t=0.000 plane=1 role={role}",
+        "ai-strike: start t=0.000 plane=1 range_ft=240000 alt_ft=5000 speed_kt=450",
+    ]
+    if released:
+        lines.append("ai-strike: RELEASE t=200.000 n=1 weapon=MK82.JT station=1 alt_ft=4900 speed_kt=450 range_ft=9000"
+                     " pass=1 aim_ft=100 inside=yes")
+        lines.append("ai-strike: IMPACT t=210.000 n=1 miss_ft=300 at=1.0,2.0,3.0")
+    lines.append(f"ai-strike: summary t=300.0 ran_s=300.0 profile=none releases={int(released)} impacts={int(released)} "
+                 "kills=0 egress=no lost=no activity=In formation target_hp=200/200 closest_ft=8902 store_rounds_left=4")
+    if not released:
+        lines.append("ai-strike: no release")
+    lines.append("ai-strike: done")
+    return "\n".join(lines)
+
+
+class QuickWingTests(unittest.TestCase):
+    def test_bombers_strike_and_fighters_do_not(self):
+        text = quick_wing_run("strike", True) + "\n" + quick_wing_run("cap", False)
+        self.assertEqual(s.quick_wing_problems(text), [])
+
+    def test_a_bomber_wing_that_stays_cap_or_a_fighter_wing_that_strikes_fails(self):
+        wrong_role = quick_wing_run("cap", False) + "\n" + quick_wing_run("cap", False)
+        self.assertTrue(any("role cap, want strike" in p for p in s.quick_wing_problems(wrong_role)))
+        bombs = quick_wing_run("strike", True) + "\n" + quick_wing_run("strike", True)
+        self.assertTrue(any("want cap" in p for p in s.quick_wing_problems(bombs)))
+        idle = quick_wing_run("strike", False) + "\n" + quick_wing_run("cap", False)
+        self.assertTrue(any("never released" in p for p in s.quick_wing_problems(idle)))
+
+
 class SelectionTests(unittest.TestCase):
     def families(self, path):
         return set(bs.rule_for(path).families)
@@ -337,7 +433,13 @@ class SelectionTests(unittest.TestCase):
     def test_the_driver_source_selects_the_strike_and_a2g_families(self):
         self.assertEqual(self.families("crates/tore-app/src/a2g_run/ai.rs"), {"a2g", "ai-strike"})
         self.assertEqual(self.families("crates/tore-app/src/a2g_run/level.rs"), {"a2g"})
-        self.assertEqual(self.families("crates/tore-app/src/a2g_run.rs"), {"a2g"})
+        self.assertEqual(self.families("crates/tore-app/src/a2g_run.rs"), {"a2g", "ai-strike"})
+
+    def test_the_new_scenarios_belong_to_the_strike_family(self):
+        import fnmatch
+        patterns = bs.FAMILIES["ai-strike"][1]
+        for name in ("ai-wing-ground-order", "ai-wing-lase", "qmc-strike-wing"):
+            self.assertTrue(any(fnmatch.fnmatch(name, p) for p in patterns), name)
 
     def test_the_ai_sources_select_the_strike_family(self):
         for path in ("crates/tore-sim/src/ai/strike.rs", "crates/tore-sim/src/ai/mission.rs",

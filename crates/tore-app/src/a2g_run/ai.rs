@@ -12,6 +12,7 @@
 //! --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N]
 //!     [--station N] [--count N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level]
 //!     [--handback S [--mode ccip|lvl] [--trigger]] [--order KIND [--order-at S]]
+//!     [--quick-wing]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S]
 //! ```
@@ -34,6 +35,11 @@
 //!   scripted pass, designates the target and gives the wingman (the striker)
 //!   the order `--order-at S` seconds into the pass (5 by default). Kinds:
 //!   see [`ORDERS`]; the orders the strike round adds join that table.
+//! - `--quick-wing`: a Quick Mission's own strike wing (slice ST-O). No seat
+//!   flies and nothing orders it: friendly wing 2 is two `--aircraft`, and the
+//!   mission's default role (bomber-class aircraft strike when a ground target
+//!   is set) sends it. It starts where the mission puts it and flies to the
+//!   target itself; `ROLE` reports the role it was given.
 //!
 //! What it prints, in this order, then one `summary` and `done`:
 //!
@@ -63,8 +69,8 @@ use crate::AppResult;
 use std::collections::BTreeMap;
 use tore_sim::{
     ai::{
-        controller::Activity, mission::AiActor, strike::Pass as StrikePass, weapon_service::Rounds,
-        wing::PlayerOrder,
+        controller::Activity, engagement::StrikeRole, mission::AiActor, strike::Pass as StrikePass,
+        weapon_service::Rounds, wing::PlayerOrder,
     },
     attitude::Vector,
     combat::{
@@ -153,9 +159,9 @@ impl Profile {
     }
 }
 
-/// The wing orders `--order` can give, by name. Slice ST-O adds the ground
-/// attack orders (Alt+F, lase my target) here when the game has them.
-const ORDERS: [(&str, PlayerOrder); 8] = [
+/// The wing orders `--order` can give, by name. The last three are the strike
+/// round's (slice ST-O): Alt+F, Alt+W and "Lase my target".
+const ORDERS: [(&str, PlayerOrder); 11] = [
     ("engage-my-target", PlayerOrder::EngageMyTarget),
     ("engage-from-formation", PlayerOrder::EngageFromFormation),
     ("attack-on-contact", PlayerOrder::AttackOnContact),
@@ -164,6 +170,9 @@ const ORDERS: [(&str, PlayerOrder); 8] = [
     ("bug-out", PlayerOrder::BugOut),
     ("land-selected", PlayerOrder::LandAtSelected),
     ("sort", PlayerOrder::Sort),
+    ("engage-ir-laser", PlayerOrder::EngageIrLaser),
+    ("engage-class", PlayerOrder::EngageClass),
+    ("lase-my-target", PlayerOrder::LaseMyTarget),
 ];
 
 /// The command-line options of this driver. The shared parser in
@@ -180,6 +189,8 @@ pub(crate) struct Config {
     pub trigger: bool,
     pub order: Option<(&'static str, PlayerOrder)>,
     pub order_at: f64,
+    /// `--quick-wing`.
+    pub quick_wing: bool,
 }
 
 impl Config {
@@ -227,12 +238,26 @@ impl Config {
 
     /// Refuses combinations the driver cannot fly.
     pub(crate) fn check(&self, skill: Option<i32>, records: bool) -> AppResult<()> {
-        let flags = self.handback.is_some() || self.order.is_some() || self.mode.is_some();
+        let flags = self.handback.is_some()
+            || self.order.is_some()
+            || self.mode.is_some()
+            || self.quick_wing;
         if !self.active {
             if self.profile.is_some() || flags {
-                return Err("--profile, --handback, --mode and --order need --pilot ai".into());
+                return Err(
+                    "--profile, --handback, --mode, --order and --quick-wing need --pilot ai"
+                        .into(),
+                );
             }
             return Ok(());
+        }
+        if self.quick_wing
+            && (self.handback.is_some()
+                || self.order.is_some()
+                || self.profile.is_some()
+                || self.mode.is_some())
+        {
+            return Err("--quick-wing is the mission's own wing: no --handback, --order, --profile or --mode".into());
         }
         if self.handback.is_some() && self.order.is_some() {
             return Err("--handback and --order are separate runs: pick one".into());
@@ -300,9 +325,9 @@ mod hooks {
         Some((distance, inside || !unguided, s.pass_number()))
     }
 
-    /// Slice ST-O: give a wing order that carries a ground target. Today the
-    /// plain order goes out as the seat's command and the AI answers or
-    /// refuses as it does in the game.
+    /// Slice ST-O: a wing order is the seat's command, as in the game: the
+    /// world reads the ground target from the seat's designation and sight,
+    /// and the wingman takes or refuses it.
     pub(super) fn order_command(order: PlayerOrder) -> SeatCommand {
         SeatCommand::WingOrder(order)
     }
@@ -621,7 +646,12 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
 /// nearest contact to the target on the page, else after a few seconds the
 /// Easy targeting cheat's Ctrl+X (an aircraft with no ground radar). Returns
 /// the designated id, if any.
-fn designate(scene: &mut Scene, pass: &Pass, plane: PlaneId) -> AppResult<Option<u32>> {
+fn designate(
+    scene: &mut Scene,
+    pass: &Pass,
+    plane: PlaneId,
+    prefer: Option<u16>,
+) -> AppResult<Option<u32>> {
     scene.queue(SeatCommand::Combat(Command::ToggleAirGround));
     let easy = scene.world.combat.state.cheats.easy_targeting;
     let mut found = None;
@@ -634,18 +664,29 @@ fn designate(scene: &mut Scene, pass: &Pass, plane: PlaneId) -> AppResult<Option
             .ownship(plane.0)
             .ok_or("no ownship")?;
         if let Some(id) = own.designated() {
-            found = Some(id);
-            break;
+            let class = scene
+                .world
+                .combat
+                .state
+                .targets
+                .iter()
+                .find(|t| t.id == id)
+                .map_or(0, |t| t.category);
+            if prefer.is_none_or(|wanted| class & wanted != 0) {
+                found = Some(id);
+                break;
+            }
         }
         let aim = pass.aim;
+        let d = |p: [f64; 3]| (p[0] - aim[0]).hypot(p[2] - aim[2]);
+        // The contact nearest the target, of the preferred class if one is
+        // listed (a class order is given on a SAM).
         let nearest = own
             .sensors
             .ground()
             .iter()
-            .min_by(|a, b| {
-                let d = |p: [f64; 3]| (p[0] - aim[0]).hypot(p[2] - aim[2]);
-                d(a.contact.position).total_cmp(&d(b.contact.position))
-            })
+            .filter(|g| prefer.is_none_or(|class| g.class & class != 0))
+            .min_by(|a, b| d(a.contact.position).total_cmp(&d(b.contact.position)))
             .map(|g| g.contact.id);
         if let Some(id) = nearest {
             scene.queue(SeatCommand::Combat(Command::DesignateTarget(id)));
@@ -670,6 +711,16 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     spec.surface_seed = o.seed;
     spec.wings[0].skill = skill;
     spec.wings[0].count = if ordering { 2 } else { 1 };
+    // A Quick Mission's own strike wing: friendly wing 2, which the
+    // mission's role rule sends when the aircraft is a bomber.
+    let quick = cfg.quick_wing;
+    if quick {
+        spec.wings[1] = tore_world::mission::WingSpec {
+            aircraft: o.aircraft,
+            count: 2,
+            skill,
+        };
+    }
     spec.validate()?;
     let mut world = World::new(&spec, resources, Seating::Open)?;
     if let Some(why) = &world.terrain.surface.unresolved {
@@ -684,7 +735,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             .ok_or_else(|| format!("{} has {} ground targets", o.stem, targets.len()))?,
     };
     // The striker is plane 0, or the wingman (plane 1) when a seat leads.
-    let striker = PlaneId(u32::from(ordering));
+    let striker = PlaneId(if quick { 1 } else { u32::from(ordering) });
     let lead = PlaneId(0);
     let striker_seat = if ordering { WINGMAN_SEAT } else { SEAT };
 
@@ -739,6 +790,18 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         scene.owner = lead.0;
         scene.station = 0;
         human = true;
+    } else if quick {
+        // The wing stays where the mission put it. Taking a plane to fit its
+        // store rebuilt its AI actor without the role the mission gave it
+        // (a takeover does not keep it yet, slice ST-K), so the mission's
+        // role rule runs again.
+        scene.world.give_back_plane(SEAT)?;
+        if let Some(wings) = scene.world.ai_wings.as_mut() {
+            wings.apply_strike_roles(
+                &[tore_sim::ai::engagement::GroupObjective::Inherit; 6],
+                true,
+            );
+        }
     } else if cfg.handback.is_some() {
         place(&mut scene.world, striker, &pass, 0., 0.);
         human = true;
@@ -747,11 +810,29 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         scene.world.give_back_plane(SEAT)?;
     }
     let mut watch = Watch::new(striker, target);
-    let note = hooks::assign(&mut scene.world, striker, target, station, cfg.profile);
+    // With a seat leading, the order gives the wingman its target; without
+    // one the driver does.
+    let note = if ordering {
+        "ordered"
+    } else if quick {
+        "quick-wing"
+    } else {
+        hooks::assign(&mut scene.world, striker, target, station, cfg.profile)
+    };
     println!(
         "ai-strike: PROFILE t=0.000 name=none requested={} note={note}",
         cfg.profile.map_or("none", Profile::label)
     );
+    if quick && let Some(actor) = scene.actor(striker) {
+        println!(
+            "ai-strike: ROLE t=0.000 plane={} role={}",
+            striker.0,
+            match actor.strike_role() {
+                StrikeRole::Strike => "strike",
+                StrikeRole::Cap => "cap",
+            }
+        );
+    }
     if let Some((p, _)) = scene.striker_at(striker) {
         println!(
             "ai-strike: start t=0.000 plane={} range_ft={:.0} alt_ft={:.0} speed_kt={:.0}",
@@ -767,7 +848,10 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let mut leg_t = 0.;
     if human {
         let flier = if ordering { lead } else { striker };
-        let designated = designate(&mut scene, &pass, flier)?;
+        // A class order is given on a SAM (Attack SAMs).
+        let prefer = (cfg.order.map(|(_, order)| order) == Some(PlayerOrder::EngageClass))
+            .then_some(tore_sim::sensors::track::class::SAM);
+        let designated = designate(&mut scene, &pass, flier, prefer)?;
         match designated {
             Some(id) => {
                 scene.target = id;
@@ -857,6 +941,20 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                 "ai-strike: ORDER-REPLY t={:.3} result={result} message=\"{message}\"",
                 scene.seconds()
             );
+            // What the wingman holds now: the order it took, if it took one.
+            if let Some(actor) = scene.actor(striker) {
+                let object =
+                    |id: Option<u32>| id.map_or("none".to_owned(), |id| format!("{id:#010x}"));
+                println!(
+                    "ai-strike: ORDER-STATE t={:.3} strike_order={} class_order={} lase_order={}",
+                    scene.seconds(),
+                    object(actor.strike_order()),
+                    actor
+                        .ground_picture()
+                        .map_or(0, |picture| picture.class_order().len()),
+                    object(actor.lase_order())
+                );
+            }
         }
         observe(&mut scene, &mut watch);
         let t = scene.seconds();
@@ -943,7 +1041,10 @@ mod tests {
         assert_eq!(names.len(), ORDERS.len());
         let c = config(&["--order", "Engage-My-Target"]).unwrap();
         assert_eq!(c.order.map(|(_, o)| o), Some(PlayerOrder::EngageMyTarget));
-        assert!(config(&["--order", "lase-my-target"]).is_err());
+        for kind in ["engage-ir-laser", "engage-class", "lase-my-target"] {
+            assert!(config(&["--order", kind]).is_ok(), "{kind}");
+        }
+        assert!(config(&["--order", "lase-your-target"]).is_err());
     }
 
     #[test]

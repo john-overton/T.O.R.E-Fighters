@@ -407,6 +407,10 @@ pub struct AiActor {
     seed: u64,
     /// A striker's strike state (slice ST-T); `None` for every other actor.
     strike: Option<Box<super::strike::Strike>>,
+    /// The ground target a flight lead ordered this wingman to lase ("Lase
+    /// my target", slice ST-O). Slice ST-L flies the orbit and lases it;
+    /// until it does the order only stands.
+    lase: Option<u32>,
     /// Write-only record of the latest mission step. No decision reads it.
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
@@ -479,6 +483,7 @@ impl AiActor {
             ground: None,
             seed: setup.seed,
             strike: None,
+            lase: None,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })

@@ -671,3 +671,138 @@ fn a_ground_picture_round_trips_and_refreshes_on_alike() {
         assert_eq!(coded(&twin), coded(&mission), "tick {tick}");
     }
 }
+
+// -- a flight lead's ground orders (slice ST-O) --------------------------------
+
+/// A CAP actor over the origin with no briefing: only an order gives it a
+/// picture.
+fn wingman_of_the_lead() -> AiMission {
+    mission_with(actor(STRIKER, 1))
+}
+
+fn candidates_of(mission: &AiMission) -> Vec<(u32, StrikeSource)> {
+    let actor = mission.actor(STRIKER).unwrap();
+    let picture = actor.ground_picture().unwrap();
+    let candidates = picture.strike_candidates(actor.flight().position, Side(1), &|_| 0, &|_| true);
+    let mut ranked = Vec::new();
+    let mut rest = candidates.clone();
+    while let Some(best) = targeting::select_strike_target(ObjectId(STRIKER), Side(1), &rest) {
+        ranked.push((best.id.0, best.source));
+        let id = best.id;
+        rest.retain(|c| c.id != id);
+    }
+    ranked
+}
+
+#[test]
+fn a_class_order_briefs_its_targets_and_takes_no_opportunities() {
+    let mut mission = wingman_of_the_lead();
+    mission
+        .actor_mut(STRIKER)
+        .unwrap()
+        .order_strike_class(vec![102, 100, 100]);
+    let actor = mission.actor(STRIKER).unwrap();
+    assert!(actor.has_ground_order() && actor.strikes());
+    assert_eq!(actor.strike_role(), StrikeRole::Cap);
+    assert_eq!(actor.strike_order(), None);
+    assert_eq!(
+        actor.ground_picture().unwrap().class_order(),
+        [100, 102],
+        "ascending, once"
+    );
+    // A tank (101) the class order does not name stands near the objects.
+    let scene = [tank(100, 4., 0.), tank(101, 2., 0.), tank(102, 3., 0.)];
+    observe(&mut mission, 0, &scene);
+    let picture = mission.actor(STRIKER).unwrap().ground_picture().unwrap();
+    assert!(
+        picture
+            .briefed()
+            .iter()
+            .all(|b| b.kind == crate::ai::awareness::ground::BriefedKind::Target)
+    );
+    assert_eq!(picture.briefed().len(), 2);
+    // Nearest first, and the unnamed tank is never an opportunity.
+    assert_eq!(
+        candidates_of(&mission),
+        [(102, StrikeSource::Briefed), (100, StrikeSource::Briefed)]
+    );
+}
+
+#[test]
+fn ground_orders_replace_each_other_and_clear() {
+    let mut mission = wingman_of_the_lead();
+    fn actor(mission: &mut AiMission) -> &mut AiActor {
+        mission.actor_mut(STRIKER).unwrap()
+    }
+    actor(&mut mission).order_strike(100);
+    assert_eq!(mission.actor(STRIKER).unwrap().strike_order(), Some(100));
+    actor(&mut mission).order_strike_class(vec![101, 102]);
+    let a = mission.actor(STRIKER).unwrap();
+    assert_eq!(a.strike_order(), None, "a class replaces one object");
+    assert_eq!(a.ground_picture().unwrap().class_order(), [101, 102]);
+    actor(&mut mission).order_strike(103);
+    let a = mission.actor(STRIKER).unwrap();
+    assert_eq!(a.strike_order(), Some(103));
+    assert!(a.ground_picture().unwrap().class_order().is_empty());
+    // Lasing replaces them, and clears them.
+    actor(&mut mission).order_lase(104);
+    let a = mission.actor(STRIKER).unwrap();
+    assert_eq!(a.lase_order(), Some(104));
+    assert!(a.ground_picture().is_none() && !a.strikes());
+    assert!(a.has_ground_order());
+    actor(&mut mission).order_strike(100);
+    assert_eq!(mission.actor(STRIKER).unwrap().lase_order(), None);
+    actor(&mut mission).clear_ground_orders();
+    let a = mission.actor(STRIKER).unwrap();
+    assert!(!a.has_ground_order() && a.ground_picture().is_none());
+    // An empty class order is no order.
+    actor(&mut mission).order_strike_class(Vec::new());
+    assert!(!mission.actor(STRIKER).unwrap().has_ground_order());
+}
+
+#[test]
+fn clearing_a_lead_s_orders_leaves_a_missions_strike_role_and_briefing() {
+    let mut mission = striker(briefed_on(vec![100]));
+    let actor = mission.actor_mut(STRIKER).unwrap();
+    actor.order_strike(101);
+    actor.clear_ground_orders();
+    let actor = mission.actor(STRIKER).unwrap();
+    assert_eq!(actor.strike_role(), StrikeRole::Strike);
+    assert!(actor.ground_picture().unwrap().objective().is_some());
+    assert_eq!(actor.strike_order(), None);
+}
+
+#[test]
+fn an_actor_that_cannot_take_an_order_says_why() {
+    let mut cap = actor(STRIKER, 1);
+    assert_eq!(cap.ground_order_refusal(), None);
+    cap.set_dummy();
+    assert_eq!(
+        cap.ground_order_refusal(),
+        Some(crate::ai::wing::RejectReason::Dummy)
+    );
+}
+
+#[test]
+fn class_and_lase_orders_round_trip() {
+    let mut mission = wingman_of_the_lead();
+    mission
+        .actor_mut(STRIKER)
+        .unwrap()
+        .order_strike_class(vec![100, 101]);
+    observe(&mut mission, 0, &[tank(100, 3., 0.), tank(101, 2., 0.)]);
+    let twin: AiMission = from_bytes(&coded(&mission), &models_of(&mission)).unwrap();
+    assert_eq!(coded(&twin), coded(&mission));
+    assert_eq!(
+        twin.actor(STRIKER)
+            .unwrap()
+            .ground_picture()
+            .unwrap()
+            .class_order(),
+        [100, 101]
+    );
+    let mut lasing = wingman_of_the_lead();
+    lasing.actor_mut(STRIKER).unwrap().order_lase(7);
+    let twin: AiMission = from_bytes(&coded(&lasing), &models_of(&lasing)).unwrap();
+    assert_eq!(twin.actor(STRIKER).unwrap().lase_order(), Some(7));
+}

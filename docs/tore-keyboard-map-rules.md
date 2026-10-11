@@ -63,6 +63,13 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   [the input guide](INPUT.md#ac-130-gunsight-controls). The other
   air-to-ground keys are on that sheet as well: Tab (fire the gun, held), Ctrl+M
   on M (delivery mode) and Ctrl+R with Shift+R (the S/C badge) on R.
+- The wing orders that reach the ground are on the Comms sheet in coral: Alt+E
+  and Alt+R (engage, an aircraft or a ground object), Alt+W (engage the
+  target's class, `ENG CLS`), Alt+F (engage the IR/laser target, `ENG IR`) and
+  Alt+G (lase my target). The callout beside them has a three-line budget, so
+  a new order goes in a key row and its tooltip, not a new callout. Attack on
+  contact has no key of its own: it is Alt+W with no ground target designated
+  and Alt+F with nothing in the sight.
 - The keypad works as the navigation keys. Highlight a keypad key on the sheet
   for its command, with the same label as the key it stands for: keypad 0 and
   period (chaff, flare), 1 and 3 (rudder), 8, 2, 4 and 6 (stick) and Enter on

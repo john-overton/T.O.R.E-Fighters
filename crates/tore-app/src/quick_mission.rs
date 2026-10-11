@@ -672,6 +672,7 @@ impl QuickMission {
             ),
             ("Combat air patrol".into(), GroupObjective::Cap),
         ];
+
         for index in 0..3 {
             let target = WingId::new(opposing, index).expect("fixed Quick Mission wing");
             choices.push((
@@ -708,6 +709,14 @@ impl QuickMission {
             ("Self-defense".into(), GroupObjective::SelfDefense),
             ("Weapons hold".into(), GroupObjective::Hold),
         ]);
+        // Friendly wings other than the player's may strike the ground
+        // target (docs/spec/ai-strike.md, "Who strikes"); it takes effect
+        // once a ground target is chosen. Redfor has no ground objectives.
+        // Last in the list, so the other choices keep their numbers
+        // (`--probe-group` names a choice by its place).
+        if side == Side::Friendly && wing > 0 {
+            choices.push(("Strike the ground target".into(), GroupObjective::Strike));
+        }
         choices
     }
     fn objective_prefix(&self, group: usize) -> String {
@@ -750,6 +759,7 @@ impl QuickMission {
             ),
             GroupObjective::SelfDefense => "defend itself".into(),
             GroupObjective::Hold => "hold fire".into(),
+            GroupObjective::Strike => "strike the ground target".into(),
         }
     }
     fn selector_values(&self, id: usize) -> Vec<String> {
@@ -839,7 +849,16 @@ impl QuickMission {
                 skill: Skill::from_level(v[field + 1] as i32).ok_or("Choose a pilot skill.")?,
             };
         }
-        spec.objectives = self.group_objectives;
+        // A strike needs a ground target to strike; without one the wing
+        // flies the mission's own orders.
+        let has_target = self.has_target();
+        spec.objectives = self.group_objectives.map(|objective| {
+            if objective == GroupObjective::Strike && !has_target {
+                GroupObjective::Inherit
+            } else {
+                objective
+            }
+        });
         spec.must_survive = self.group_must_survive;
         // The ground target, by its template's stem, and the defenses that
         // go with it (the creator clears them with no target).
@@ -2741,6 +2760,30 @@ mod tests {
     }
 
     #[test]
+    fn strike_is_a_choice_for_friendly_ai_wings_and_needs_a_ground_target() {
+        for group in 0..OBJECTIVE_COUNT {
+            let offered = QuickMission::objective_choices(group)
+                .iter()
+                .any(|(_, objective)| *objective == GroupObjective::Strike);
+            assert_eq!(offered, matches!(group, 1 | 2), "group {group}");
+        }
+        let mut q = lobby_creator();
+        q.group_objectives[1] = GroupObjective::Strike;
+        q.apply(30, 0);
+        assert_eq!(
+            q.mission_spec().unwrap().objectives[1],
+            GroupObjective::Inherit,
+            "no ground target, no strike"
+        );
+        q.apply(30, 1);
+        assert_eq!(
+            q.mission_spec().unwrap().objectives[1],
+            GroupObjective::Strike
+        );
+        assert_eq!(q.objective_label(1), "strike the ground target");
+    }
+
+    #[test]
     fn objective_choices_restrict_targets_by_side_and_exclude_self_escort() {
         for group in 0..OBJECTIVE_COUNT {
             let side = if group < 3 {
@@ -3783,7 +3826,12 @@ mod tests {
                 count: (next(state) % 6).max(usize::from(index == 0)),
                 skill: Skill::ALL[next(state) % 5],
             };
-            let choices = QuickMission::objective_choices(index);
+            // A strike needs a ground target, which these specs have none of
+            // (the creator's own test of it is above).
+            let choices: Vec<_> = QuickMission::objective_choices(index)
+                .into_iter()
+                .filter(|(_, objective)| *objective != GroupObjective::Strike)
+                .collect();
             spec.objectives[index] = choices[next(state) % choices.len()].1;
             spec.must_survive[index] = next(state).is_multiple_of(2);
         }
@@ -3839,6 +3887,9 @@ mod tests {
                 }
             }
             for (_, objective) in QuickMission::objective_choices(wing) {
+                if objective == GroupObjective::Strike {
+                    continue;
+                }
                 spec.objectives[wing] = objective;
                 q.load_spec(&spec, true).unwrap();
                 assert_eq!(q.lobby_spec().unwrap(), spec);

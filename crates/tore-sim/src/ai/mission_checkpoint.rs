@@ -244,6 +244,7 @@ impl Checkpoint for AiActor {
             ground,
             seed,
             strike,
+            lase,
             trace: _,
             journal_memory: _,
         } = self;
@@ -304,7 +305,9 @@ impl Checkpoint for AiActor {
         // A striker's decision seed and strike state (ST-T): the phase, pass
         // and aim the next step flies on.
         seed.save(s, None)?;
-        strike.save(s, None)
+        strike.save(s, None)?;
+        // The ground target a wingman was ordered to lase (ST-O).
+        lase.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -367,6 +370,7 @@ impl Checkpoint for AiActor {
             ground: Checkpoint::load(l, None)?,
             seed: Checkpoint::load(l, None)?,
             strike: Checkpoint::load(l, None)?,
+            lase: Checkpoint::load(l, None)?,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })

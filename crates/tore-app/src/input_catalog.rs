@@ -919,9 +919,21 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd(
         "key:Alt-w",
-        "Wing: attack on contact",
+        "Wing: engage every target of my target's class (attack on contact with none)",
         Communication,
         &["Alt-w"],
+    ),
+    cmd(
+        "key:Alt-f",
+        "Wing: engage the IR/laser target (attack on contact with none)",
+        Communication,
+        &["Alt-f"],
+    ),
+    cmd(
+        "key:Alt-g",
+        "Wing: lase my target",
+        Communication,
+        &["Alt-g"],
     ),
     cmd("key:Alt-p", "Wing: protect me", Communication, &["Alt-p"]),
     cmd("key:Alt-d", "Wing: disengage", Communication, &["Alt-d"]),
@@ -1638,10 +1650,9 @@ mod tests {
     #[test]
     fn every_key_the_flight_acts_on_is_a_catalog_key() {
         use crate::flight_ui::{Command, FlightUi};
-        // Original keys that only answer "not implemented yet". Alt+F loses
-        // its place here when the wing's engage-laser-target order is built.
-        const NOT_BUILT: [&str; 7] = [
-            "Alt-f", "Shift-a", "Shift-d", "Shift-f", "Shift-g", "Shift-i", "Shift-j",
+        // Original keys that only answer "not implemented yet".
+        const NOT_BUILT: [&str; 6] = [
+            "Shift-a", "Shift-d", "Shift-f", "Shift-g", "Shift-i", "Shift-j",
         ];
         let mut names: Vec<String> = ('a'..='z').map(String::from).collect();
         names.extend(('0'..='9').map(String::from));

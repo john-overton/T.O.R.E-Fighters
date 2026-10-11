@@ -453,8 +453,10 @@ Default keys follow Fighters Anthology wherever the original has the command
 - An FA key whose feature T.O.R.E lacks stays unassigned. Pressing it says "not
   implemented yet": Shift+A and Shift+G
   (AWACS and air-to-ground radar links), Shift+F (target damage), Shift+I
-  (airbase inventory), Shift+J (drop tanks), Shift+D (message history) and
-  Alt+F (engage the IR or laser target). U (IFF) and Ctrl+T (Show Target
+  (airbase inventory), Shift+J (drop tanks) and Shift+D (message history).
+  Alt+F (engage the IR or laser target) and Alt+W (engage every target of the
+  designated target's class) are built, as the wing orders onto the ground
+  below. U (IFF) and Ctrl+T (Show Target
   Info) work now, and the multiplayer keys K and Alt+Shift+E, W, B and H sit on
   keys FA leaves free ([controls](CONTROLS.md)).
 - The keypad follows FA whatever NumLock says: 0 and period release chaff and
@@ -1006,10 +1008,12 @@ perceived attacks on their flight or protected aircraft.
 | Alt-2 / Alt-3 | Break left / right |
 | Alt-4 / Alt-5 | Break low / high |
 | Alt-6 / Alt-7 / Alt-8 / Alt-9 | Approach the designated target from left / right / low / high |
-| Alt-E | Engage the designated target |
-| Alt-R | Engage designated target from formation, medium control |
+| Alt-E | Engage the designated target: an aircraft, else a ground object (the ground designation, or the object nearest the sight's pin) |
+| Alt-R | Engage designated target from formation, medium control; takes a ground target like Alt-E |
+| Alt-F | Engage the IR/laser target: the object the targeting sight tracks, its laser spot is on, or its pin is nearest to, air or ground. With none held, attack on contact |
+| Alt-G | Lase my target: a wingman with a designator lases the ground target you designated (a T.O.R.E addition, John 2026-10-11) |
 | Alt-A | Sort: give each addressed wingman a different bandit from the flight's [data link picture](DATALINK.md#giving-assignments) (a T.O.R.E addition, John 2026-10-05) |
-| Alt-W | Attack on contact |
+| Alt-W | Engage every target of the designated target's class ("Attack SAMs", "Attack tanks"); a designated aircraft, or no designation, is "Attack bandits", attack on contact |
 | Alt-P | Protect me, maintain an escort duty |
 | Alt-D | Disengage and return to neutral formation |
 | Alt-B | Bug out: return to base and stop answering orders |
@@ -1024,10 +1028,17 @@ perceived attacks on their flight or protected aircraft.
 Input profiles can use these as `key:Alt-2`, `key:Alt-t`, `key:Alt-Shift-1`
 and the corresponding keys above.
 
-Where T.O.R.E's orders differ from FA's: FA's Alt-W engages every target of the
-designated target's class; T.O.R.E's attack on contact is the nearest order it
-has. FA's Alt-F engages the IR/laser-designated target, which T.O.R.E does not
-have yet, so Alt-F reports it unavailable. Alt-T starts from the formation the
+Where T.O.R.E's orders differ from FA's: Alt-W and Alt-F are FA's. Alt-W
+engages every target of the designated target's class, as FA's does; T.O.R.E
+used to put attack on contact there (to 2026-10-11), which is now what Alt-W
+does with no ground target designated and what Alt-F does with nothing in the
+sight, so attack on contact keeps no key of its own. FA's
+IR/laser contact is the one chosen with `/` and `\` while IR/Laser advanced
+targeting is on; T.O.R.E takes the sight's track, laser spot or pin, which
+those keys set. The orders onto the ground (Alt-E, Alt-R, Alt-F, Alt-W) go to
+the wingmen the flight lead addresses and are refused, with the wingman saying
+"Winchester", by one with no surface store it can attack with. Alt-G is a
+T.O.R.E addition on a key FA leaves free. Alt-T starts from the formation the
 first addressed wingman flies. Bug out moved from Alt-U to FA's Alt-B on
 2026-09-26, when John adopted the FA layout; Alt-U no longer gives orders.
 Land at selected airport has no retail equivalent; it is an opinionated

@@ -11,6 +11,7 @@ use super::super::controller::OwnState;
 use super::super::strike::{self, Context, Inputs, Order, Strike};
 use super::super::weapon_service::StationId;
 use super::{AiActor, AiMission};
+use crate::ai::engagement::StrikeRole;
 use crate::models::FlightModel;
 
 impl AiActor {
@@ -167,8 +168,22 @@ impl AiMission {
             .collect()
     }
 
-    /// Sends home every striker that is done (no target or store left).
+    /// Ends the work of every striker that is done (no target or store
+    /// left). A wingman that only had a flight lead's order ends the order
+    /// and rejoins its formation; a Strike-role actor goes home with its
+    /// wing.
     pub(super) fn strikers_home(&mut self) {
+        if !self.actors.iter().any(AiActor::strike_home) {
+            return;
+        }
+        for actor in self
+            .actors
+            .iter_mut()
+            .filter(|a| a.strike_home() && a.strike_role() == StrikeRole::Cap)
+        {
+            actor.clear_ground_orders();
+            actor.strike = None;
+        }
         if self.actors.iter().any(AiActor::strike_home) {
             self.send_home(AiActor::strike_home);
         }

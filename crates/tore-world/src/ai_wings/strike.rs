@@ -135,7 +135,7 @@ pub(super) fn step(
 
 /// What each of a striker's ground stores is to the tactics. Guns and
 /// air-to-air stores are left out.
-fn describe(
+pub(super) fn describe(
     config: &live::Configuration,
     specs: &[tore_sim::ai::mission::StationSpec],
 ) -> Vec<Store> {
@@ -221,7 +221,33 @@ fn seeker_due(
         && (kind != StoreKind::AntiRadiation || emitting)
 }
 
+/// What an AI aircraft can do on a flight lead's ground order now (slice
+/// ST-O).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Capability {
+    /// It flies strikes (its bombing class does) and has a store that can
+    /// attack a ground target: a refusal "no usable surface store" otherwise.
+    pub strike: bool,
+    /// It carries a laser designator of its own.
+    pub designator: bool,
+}
+
 impl AiWings {
+    /// What AI aircraft `id` can do on a ground order. All false for an
+    /// aircraft without a combat configuration.
+    pub(super) fn capability(&self, id: u32) -> Capability {
+        let (Some(config), Some(actor)) = (self.configs.get(&id), self.mission.actor(id)) else {
+            return Capability::default();
+        };
+        let designator = config.sight_sensor().is_some_and(|s| s.laser);
+        let stores = describe(config, actor.stations());
+        Capability {
+            strike: strike::Strike::flies(config.strike_class)
+                && strike::has_usable_store(&stores, designator),
+            designator,
+        }
+    }
+
     /// Forces AI aircraft `id`'s pass and store (the headless driver's
     /// coverage runs, docs/testing/lane-flight.md). Returns false for an id
     /// that is not a striker.

@@ -88,6 +88,7 @@ crate::checkpoint_struct!(GroundPicture {
     role,
     objective,
     ordered,
+    class_order,
     built,
     contacts,
     seen,

@@ -9,7 +9,9 @@
 //! record. `radio_calls::step` moves it into the channel's journal.
 use super::*;
 use crate::comms::Elevation;
-use crate::comms::journal::{Cause, Entry, Journal, Origin, Outcome, Reason, Source, WingReply};
+use crate::comms::journal::{
+    Cause, Entry, Journal, Origin, Outcome, Reason, Source, WingLine, WingReply,
+};
 use crate::radio_calls::Release;
 use tore_sim::ai::{route::FuelState, wing::WingControl};
 
@@ -58,6 +60,13 @@ pub enum Chatter {
     /// The first wingman accepted "protect me".
     Showtime {
         speaker: u32,
+    },
+    /// A wingman's text-only line to its lead: a refusal of a ground order
+    /// (no surface store, no target, no designator) or "Lasing" (slice
+    /// ST-O).
+    Line {
+        speaker: u32,
+        line: WingLine,
     },
     Contact {
         speaker: u32,
@@ -121,6 +130,7 @@ impl Chatter {
                 }),
             ),
             Chatter::Showtime { speaker } => (*speaker, Cause::Reply(WingReply::Showtime)),
+            Chatter::Line { speaker, line } => (*speaker, Cause::Reply(WingReply::Line(*line))),
             Chatter::Contact {
                 speaker,
                 target,

@@ -123,8 +123,16 @@ impl DataLink {
         // taken as alive; one it knows to be dead gets nothing.
         let live = |link: &Self, plane: u32| link.member(plane).is_none_or(|m| m.alive);
         match order {
-            PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation | PlayerOrder::Sort => {
+            PlayerOrder::EngageMyTarget
+            | PlayerOrder::EngageFromFormation
+            | PlayerOrder::EngageIrLaser
+            | PlayerOrder::Sort => {
+                // An order onto the ground names no aircraft: it ends the
+                // wingman's old aircraft assignment.
                 let Some(target) = target else {
+                    for &receiver in receivers {
+                        self.clear(tick, receiver, ClearReason::Order);
+                    }
                     return Vec::new();
                 };
                 let mut written = Vec::new();
@@ -154,6 +162,8 @@ impl DataLink {
             PlayerOrder::Disengage
             | PlayerOrder::ProtectMe
             | PlayerOrder::AttackOnContact
+            | PlayerOrder::EngageClass
+            | PlayerOrder::LaseMyTarget
             | PlayerOrder::BugOut
             | PlayerOrder::LandAtSelected
             | PlayerOrder::Approach(_) => {

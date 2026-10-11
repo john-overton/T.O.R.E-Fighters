@@ -81,8 +81,8 @@ seeded draws for hit rolls and countermeasures.
 | --- | --- |
 | Every AI family can strike: fighters, attack jets, heavies, helicopters and the AC-130 | opinionated (John, 2026-10-11) |
 | The behaviour is side neutral. Any side's wing with the Strike role strikes | opinionated (John, 2026-10-11) |
-| Quick Mission gives each wing a role, **CAP** (today's behaviour, the default) or **Strike** (offered only when a ground target is set). A Strike wing flies to the objective, strikes, goes home. Its loadout is the loadout page; a Strike wing with no surface stores is told so | opinionated (John, 2026-10-11) |
-| **Retail's rule, recorded beside it** ([ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)). Retail Quick Mission has no role setting. When a ground target is set, every *friendly* bomber-class wing (A-4E, A-6, F-117, B-52, AC-130U, AH-64, Mi-24, Su-24, Tornado) is given ground classes (ship, tank, vehicle, structure) to attack and defend and fighters to evade, and attacks what it sees within about 26,400 ft. Fighter-class wings (A-10, A-7, AV-8B, Su-25 included) stay air only. No wing is ever given SAMs or AAA, so retail has no SEAD. Enemy wings never strike. How the wings reach the area is open. T.O.R.E's per-wing CAP or Strike role is a departure from this, and the default is CAP for every wing; see [Confirm with John](#confirm-with-john) item 9 | retail (rule), opinionated (John, 2026-10-11) for the departure |
+| Quick Mission gives each wing a role, **CAP** (today's behaviour) or **Strike**. It is the wing's objective in the creator: "Strike the ground target" is a choice for friendly wings 2 and 3 (not the player's wing, not Redfor) and takes effect once a ground target is set; "Combat air patrol" and the other objectives are CAP. The default objective, "Use mission setting", gives a wing of **bomber-class** aircraft (the type's class word 0x4000, retail's own test) the Strike role when a ground target is set, and every other wing CAP (John, 2026-10-11, answering item 9). A Strike wing flies to the objective, strikes, goes home. Its loadout is the loadout page; a Strike wing with no surface stores is told so | opinionated (John, 2026-10-11); the bomber-class default is retail's rule |
+| **Retail's rule, recorded beside it** ([ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)). Retail Quick Mission has no role setting. When a ground target is set, every *friendly* bomber-class wing (A-4E, A-6, F-117, B-52, AC-130U, AH-64, Mi-24, Su-24, Tornado) is given ground classes (ship, tank, vehicle, structure) to attack and defend and fighters to evade, and attacks what it sees within about 26,400 ft. Fighter-class wings (A-10, A-7, AV-8B, Su-25 included) stay air only. No wing is ever given SAMs or AAA, so retail has no SEAD. Enemy wings never strike. How the wings reach the area is open. T.O.R.E follows the bomber-class default and adds the per-wing choice on top; the player can set any friendly wing 2 or 3 to Strike or to CAP | retail (rule), opinionated (John, 2026-10-11) for the choice |
 | Redfor can strike but Quick Mission gives Redfor no air-to-ground objectives, so no Redfor wing is tasked in Quick Mission. Imported missions can task any side later | opinionated (John, 2026-10-11) |
 | PvP: a Blue Strike wing goes after Redfor's protected objects ([objectives](surface-defenses.md#objectives-scoring-and-debrief)); Redfor wings stay CAP and defend | opinionated (agent) |
 | The player's own wingmen follow the player and strike on orders only. They never wander off to bomb on their own, even on loose control | opinionated (John, 2026-10-11) |
@@ -153,7 +153,8 @@ one per striker (`AiActor::ground_picture`), refreshed by
 `tore_sim::ai::targeting::select_strike_target`. The bridge
 (`tore_world::ai_wings::ground`) briefs strikers and describes the ground
 objects. The role is `engagement::StrikeRole`, CAP by default; the Quick Mission
-setting that chooses Strike comes with the orders and roles slice.
+objective "Strike the ground target" (`GroupObjective::Strike`) and the
+bomber-class default set it (`AiWings::apply_strike_roles`).
 
 ## Perceived threat and available speed
 
@@ -562,8 +563,8 @@ Retail has no buddy lasing and its AI lasing is implicit
 - **AI drops on a buddy spot.** An AI laser-bomb carrier with no designator
   chooses a laser store only when a same-side spot is on its target: a player
   lasing it, or a wingmate.
-- **"Lase my target"** is a new wingman order (a free Alt key, chosen by the
-  slice and listed in [controls](../CONTROLS.md)). A wingman with a designator
+- **"Lase my target"** is a new wingman order on Alt+G (listed in
+  [controls](../CONTROLS.md)). A wingman with a designator
   flies an offset orbit of radius max(3 nm, 1.2 turn radii) above the release
   floor and lases the target you designated, until it dies, the order changes or
   the wingman is threatened (threat Missiles). Opinionated (John, 2026-10-11);
@@ -583,12 +584,15 @@ two to an object, designator carriers lase).
 
 | Key | Order | Label |
 | --- | --- | --- |
-| Alt+E | Engage my target. Accepts a ground designation, else the sight pin. The wingman attacks with its best surface store and answers "Engaging" | opinionated (John, 2026-10-11) on retail keys |
-| Alt+R | Engage from formation, the same with the ground target | opinionated (John, 2026-10-11) |
+| Alt+E | Engage my target. An aircraft designation as before; else a ground designation, else the ground object nearest the sight's pin (within 1,000 ft, fitted). The wingman attacks it with its best surface store, answers "Engaging", and the lead's call is "Two, attack tank, bearing 270, 15 miles" | opinionated (John, 2026-10-11) on retail keys |
+| Alt+R | Engage from formation, the same with the ground target; also sets at least medium formation | opinionated (John, 2026-10-11) |
 | Alt+F | Engage the IR/laser target. Retail: the contact you picked with `/` and `\` while IR/Laser advanced targeting is on, air or ground; with no hostile contact the wingmen attack whatever they find. T.O.R.E matches this (decision 7). Taking the target from your sight track, pin or laser spot, as well as the picked contact, is an addition | retail (meaning), opinionated (John, 2026-10-11) on the key, opinionated (agent) for the sight, pin and spot sources |
-| Lase my target | New; see [Lasing](#lasing) | opinionated (John, 2026-10-11) |
-| Alt+W | Unchanged: attack on contact. No target-class orders now. Retail's Alt+W is the class order ("Attack SAMs", attack all of the target's class); keeping attack on contact here is a departure | opinionated (John, 2026-10-11); the departure from retail is opinionated (agent) |
-| Others | Unchanged. A wingman with no usable surface store refuses with the reason shown ("no usable surface store") | spec-derived |
+| Alt+G | **Lase my target.** New; see [Lasing](#lasing). A wingman with a designator holds the lead's ground target as its lase order (slice ST-L flies the orbit). Taken: "Lasing". No designator aboard: "No designator". No ground target designated or in the sight: refused at the lead with "No target" | opinionated (John, 2026-10-11); key and lines opinionated (agent) |
+| Alt+W | Engage every target of my target's class, as retail's key does ("Attack SAMs", "Attack tanks"). The class is the designated ground object's (SAM, AAA, ship, tank, vehicle, structure), taken from the designation, else the sight pin; the targets are every hostile standing object of that class within 15 nm of it, the nearest 32, and each wingman takes the nearest with two to an object. Attack SAMs gives a HARM carrier its SEAD order (the radars first). The lead's call is "Attack SAMs". A designated aircraft, or no designation, is "Attack bandits", attack on contact (what the key did until 2026-10-11) | retail (key and meaning), opinionated (John, 2026-10-11) for the ground classes; scan and cap fitted (agent) |
+| (no key) | Attack on contact keeps no key of its own: it is Alt+W with no ground target designated and Alt+F with nothing in the sight, both retail's meanings | opinionated (agent): recommended by this slice, John may want it back on a key |
+| Others | Unchanged. A wingman with no usable surface store (or a laser store with no designator of its own) refuses with the reason shown ("no usable surface store") and says "Winchester" (text only, no recording). A wingman that can only fly air missions (helicopters and the gunship until slice ST-F) refuses the same way | spec-derived, line opinionated (agent) |
+
+A wingman that took a ground order keeps it until its object (or every object of the class) is gone, then ends it and rejoins the formation; a Strike-role wing goes home instead. A later order that is not a setting (formation, spacing, stacking and wing control keep it) replaces it, and Disengage ends it. Every order is a rebindable action in the controls screen (keyboard, joystick and gamepad); the new ones are `key:Alt-f`, `key:Alt-w` (its action is unchanged, its meaning is retail's) and `key:Alt-g`.
 
 Alt+F: the retail manual calls Alt+F "attack on contact" and the executable's
 key table calls it "engage the IR/laser target" ([keyboard](keyboard.md)).
@@ -597,7 +601,7 @@ picked, and when there is no hostile contact it sends the free order, which is
 attack on contact. T.O.R.E follows it. A ground target is accepted by retail's
 receiver (Alt+E, Alt+R and Alt+F alike), so ordering wingmen onto the ground
 needs no new order, only the target source above. Retail Alt+W is the class
-order; T.O.R.E keeps attack on contact there for now (item 11 below).
+order, and T.O.R.E has it back there (item 11 below).
 
 ## Takeover and handback
 
@@ -707,24 +711,22 @@ and is open to change.
    80%-of-reach orbit (with the bank held to `maxBank`, the radius growing
    instead).
 6. **Alt+F** matches retail (the IR/laser contact, else attack on contact);
-   the sight, pin and spot as extra sources, and attack on contact on Alt+W
-   rather than retail's class order, are departures (see item 11).
+   the sight, pin and spot as extra sources are the departure. Answered (John,
+   2026-10-11): yes.
 7. **Safe** for takeover: no warning in 10 s, no covering SAM, no fighter
    inside 15 nm.
-8. **Lase my target** orbit and key.
-9. **Default role for bomber-class wings.** Retail Quick Mission sends a
-   friendly bomber-class wing (A-4E, A-6, F-117, B-52, AC-130U, AH-64, Mi-24,
-   Su-24, Tornado) at the ground target automatically when one is set, with
-   fighter-class wings (A-10 and A-7 included) air only. Should a bomber-class
-   wing default to Strike when a ground target is set, as retail does, instead
-   of CAP? Default here: CAP for everyone, as John answered, with the player
-   free to set Strike.
+8. **Lase my target** orbit and key. The key is Alt+G (agent choice, next to
+   Alt+F); the orbit is slice ST-L's.
+9. **Default role for bomber-class wings.** Answered (John, 2026-10-11):
+   a bomber-class wing defaults to Strike when a ground target is set, as
+   retail does; everything else is CAP. Built that way.
 10. **Pop-up speed quirk.** Retail's pop-up pull requests minimum speed by an
     operand-order mistake. The spec recommends not copying it (tactics follow
     threat and speed). Say if the retail bleed is wanted.
-11. **Alt+W.** Retail's Alt+W is "attack all of the target's class" (Attack
-    SAMs, bandits, tanks). The spec keeps attack on contact there. Say if the
-    class order should return, which would also give wingmen a SEAD command.
+11. **Alt+W.** Answered (John, 2026-10-11): retail's class order is back
+    ("Attack SAMs" gives wingmen a SEAD order). Attack on contact is dropped as
+    a key: it is Alt+W with no ground target and Alt+F with nothing in the
+    sight. Say if it should have a key of its own.
 
 ## Source notes
 
