@@ -35,18 +35,27 @@ about 1 G well below the top speed.
 
 ## Air-to-ground weapons
 
-`a2g-*` (scenario file
-[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py)) runs
+`a2g-*` (scenario files
+[`tools/battery_scenarios/a2g_bombs.py`](../../tools/battery_scenarios/a2g_bombs.py) and
+[`a2g_missiles.py`](../../tools/battery_scenarios/a2g_missiles.py)) runs
 `--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND`, which flies a scripted
 straight pass at a ground target of a Quick Mission, invulnerable, and attacks through the
 real player path: the weapon keys select the station and the trigger releases. A store the
-aircraft does not carry is fitted to a bomb or pod station for the run (`--count N`). Each
+aircraft does not carry is fitted to a bomb, pod or air-to-ground missile station for the run
+(`--count N`). The missile kinds also select the page and designate through the player's keys
+(`--designate ag|ir|harm|visual|none`, `--unit ID`), and `--render OUT.png` draws the HUD at
+the release. Each
 weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run/`.
 
 | Scenario | What it flies | What must hold |
 | --- | --- | --- |
 | `a2g-bomb-motion` | Over `~QUCOL`: an A-4E Mk 82 from a level pass at 5,000 ft and 450 kt, an F-4B Mk 82 from a 30 degree dive released 3,000 ft above the target, an A-4E Mk 82 AIR 7-pack and an A-4E Snakeye, each released when the bomb sight's mean impact reaches the target | The solution obeys the bomb equation (fall and throw within 0.01 s and 2 ft); every bomb bursts within 2 ft of its own path and within the 3 degree scatter's reach of the mean point, its scatter within 3 degrees; the 7-pack is seven bombs in one tick for one round at the retail stagger and 66 percent of the speed; the Snakeye falls as long as the slick bomb and throws 66 percent as far ([bomb motion](../spec/air-to-ground.md#bomb-motion)) |
 | `a2g-rocket-pod` | An A-4E's two LAU-61 pods tapped three times, held for a second and held until empty; two LAU-10 pods held for two seconds | 38 rockets in the pods, one a press; four or five in a second held, a quarter second apart on the game's quarter-second clock; all 38 when held on; the LAU-10 pods hold 8 and fire one however long the trigger is held ([rockets](../spec/air-to-ground.md#rockets)) |
+| `a2g-maverick` | Over `~QUCOL`: an A-10's AGM-65G on a tank designated on the A-G page (Ctrl+R, T), the same with nothing designated (BORE), an AV-8B's AGM-65G on a tank designated on its FLIR (M, T), and an A-10's AGM-65A on the tank Enter picks | CUED with the seeker locked on the designated tank, launched at it and killed; in BORE the candidate and the missile's target are the strongest return in the 5 degree bore circle, locked at release, killed; the FLIR run kills, the AGM-65A hits ([missiles](../spec/air-to-ground.md#missiles-and-the-harm-boresight-cue)) |
+| `a2g-harm-bore` | Over `~QVRDRI` (seed 4, heavy defenses): an F-4G's AGM-88 with nothing designated, at an SA-6 battery's Straight Flush at ace and at novice experience | The HUD cue lists several emitters with the radar as the BORE candidate; the HARM leaves in BORE at it; the ace radar shuts down within 10 nm and the HARM keeps homing, locked, and kills it; the novice radar stays on and dies |
+| `a2g-harm-page` | The same F-4G on the HARM page (M), T to the Straight Flush | The designation turns the cue to CUED; the HARM leaves in CUED at the radar and kills it |
+| `a2g-antiship` | Over `~QUSFLT`: an F/A-18D's AGM-84A and a Rafale's AM-39 at the Krivak designated on the A-G page | Launched midcourse at the Krivak, the seeker goes active on it and it is hit |
+| `a2g-sarh` | Over `~QUCOL`: a MiG-23's AS-7 on a tank designated on the A-G page, then the same with the A-G page turned off two seconds after launch | On the track it kills its tank, never unguided; with the page off it loses its target for good (status Lost, unguided) and the tank is not hit |
 
 ## Powered-lift scenarios (VTOL overhaul)
 
