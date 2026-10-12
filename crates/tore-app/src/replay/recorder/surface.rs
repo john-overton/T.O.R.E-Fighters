@@ -90,16 +90,9 @@ impl Watch {
             .unwrap_or_else(|| format!("object {id:#x}"));
         let side = unit.map_or(row.side, |unit| unit.side);
         // Template objects number from their template ordinal, added units
-        // from 0, and base-layout units are marked as such.
-        let label = match UnitId(id).range() {
-            tore_world::surface::IdRange::Template => {
-                format!("{name} #{}", id - SURFACE_UNIT_BASE)
-            }
-            tore_world::surface::IdRange::Layout => {
-                format!("{name} L{}", id - LAYOUT_OBJECT_BASE)
-            }
-            _ => format!("{name} +{}", id & 0x03ff_ffff),
-        };
+        // from 0 within their own id range, and base-layout units are marked
+        // as such.
+        let label = tore_session::client::convert::surface_label(&name, id);
         Some(replay::SurfaceInfo {
             id,
             name,

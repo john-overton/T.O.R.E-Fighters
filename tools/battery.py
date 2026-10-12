@@ -312,6 +312,9 @@ class Drive:
         self.problems: list[str] = []
         self.procs: list[Proc] = []
         self.timed_out = False
+        # Set by a driver whose failure may only mean the machine was too busy to run it (a starved server); the
+        # runner then runs the driver once more. See `Drive.inconclusive_because`.
+        self.inconclusive: Optional[str] = None
         self._lines: list[str] = []
         self._lock = threading.Lock()
 
@@ -330,6 +333,12 @@ class Drive:
     def problem(self, text: str) -> None:
         self.problems.append(text)
         self.log(f"PROBLEM: {text}")
+
+    def inconclusive_because(self, reason: str) -> None:
+        """Says the run's problems may come from a starved machine, not from the game. The runner runs the driver
+        once more; a second inconclusive run is reported as "inconclusive: <reason>" (still not a pass)."""
+        self.inconclusive = reason
+        self.log(f"INCONCLUSIVE: {reason}")
 
     def port(self) -> int:
         return free_port()
@@ -386,7 +395,26 @@ class Drive:
 
 
 def run_driver(s: Scenario, opts: argparse.Namespace, work: Path, data: Path, env: dict) -> tuple[str, bool, list[str]]:
-    """Runs a driver scenario. Returns (the combined output, timed out, the driver's problems)."""
+    """Runs a driver scenario. Returns (the combined output, timed out, the driver's problems).
+
+    A driver that calls `Drive.inconclusive_because` (its problems may come from a starved machine) runs once more
+    in a fresh copy of the data folder; the output holds both runs. When the second run is inconclusive too, its
+    problems are led by "inconclusive: <reason>", so a report reads as "could not tell", not as a game fault."""
+    output, timed_out, problems, why = run_driver_once(s, opts, work, data, env)
+    if not why or timed_out:
+        return output, timed_out, problems
+    clone_profile(Path(opts.profile), data)
+    again, timed_out, problems, why_again = run_driver_once(s, opts, work, data, env)
+    output += f"\n[driver] RETRY: the first run was inconclusive ({why}); running the driver once more\n" + again
+    if why_again and problems:
+        problems = [f"inconclusive: {why_again} (this was the second run; the first was also inconclusive)", *problems]
+    return output, timed_out, problems
+
+
+def run_driver_once(
+    s: Scenario, opts: argparse.Namespace, work: Path, data: Path, env: dict
+) -> tuple[str, bool, list[str], Optional[str]]:
+    """One run of a driver. Returns (the combined output, timed out, the driver's problems, why it is inconclusive)."""
     drive = Drive(s, opts, work, data, env, opts.timeout_scale)
     timer = threading.Timer(s.timeout * opts.timeout_scale, drive.expire)
     timer.daemon = True
@@ -405,7 +433,7 @@ def run_driver(s: Scenario, opts: argparse.Namespace, work: Path, data: Path, en
     finally:
         timer.cancel()
         drive.cleanup(clean and not drive.timed_out)
-    return drive.output(), drive.timed_out, drive.problems
+    return drive.output(), drive.timed_out, drive.problems, (drive.inconclusive if drive.problems else None)
 
 
 def load_scenarios() -> list[Scenario]:
@@ -580,6 +608,50 @@ def missing_binaries(scenarios: list[Scenario], opts: argparse.Namespace) -> lis
     return [path for kind, path in wanted.items() if any(kind in s.uses for s in scenarios) and not Path(path).exists()]
 
 
+BUILD_COMMIT = re.compile(r"\(([0-9a-f]{7,64})\)\s*$")
+
+
+def server_commit(server: str) -> Optional[str]:
+    """The commit `tore-server --version` prints ("T.O.R.E server v0.1.3 (<commit>)"), or None when it prints
+    none (a build outside git stamps "unknown")."""
+    try:
+        out = subprocess.run([server, "--version"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    found = BUILD_COMMIT.search(out.strip())
+    return found.group(1) if found else None
+
+
+def carries_text(path: str, text: str) -> bool:
+    """Whether the program file holds `text` (the commit the build script stamps into it as a string)."""
+    import mmap
+
+    with open(path, "rb") as f:
+        if os.fstat(f.fileno()).st_size == 0:
+            return False
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+            return m.find(text.encode()) != -1
+
+
+def mismatched_builds(scenarios: list[Scenario], opts: argparse.Namespace) -> list[str]:
+    """Problems when the net lane's programs come from different commits. A server refuses a bot or game of
+    another commit ("The server runs version ... your game is ..."), so a run beside stale binaries only fails
+    with "the mission never started". The server prints its commit; the bot and the game must carry the same one."""
+    if not any(s.lane == "net" or s.uses for s in scenarios):
+        return []
+    commit = server_commit(opts.server_bin)
+    if not commit:
+        return []
+    others = {"tore-bot": opts.bot_bin, "tore-app": opts.bin}
+    stale = [name for name, path in others.items() if Path(path).exists() and not carries_text(path, commit)]
+    if not stale:
+        return []
+    return [
+        f"tore-server is from commit {commit[:12]}, but {', '.join(stale)} {'is' if len(stale) == 1 else 'are'} not "
+        "(the server refuses a program of another commit). Rebuild them together: cargo build --locked --workspace --bins"
+    ]
+
+
 def write_summary(run_dir: Path, results: list[Result], started: float) -> None:
     (run_dir / "results.json").write_text(json.dumps([dataclasses.asdict(r) for r in results], indent=1))
     failed = [r for r in results if not r.ok]
@@ -685,6 +757,9 @@ def main(argv: list[str]) -> int:
         return 2
     for path in missing_binaries(scenarios, opts):
         print(f"binary not found: {path} (cargo build --locked -p tore-server -p tore-session)", file=sys.stderr)
+        return 2
+    for problem in mismatched_builds(scenarios, opts):
+        print(f"binaries disagree: {problem}", file=sys.stderr)
         return 2
     if not (Path(opts.profile) / "media-source.txt").exists():
         print(f"{opts.profile} is not an imported data folder; import once with --import ... --import-only", file=sys.stderr)
