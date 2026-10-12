@@ -24,7 +24,7 @@ use tore_world::{
     ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE},
     surface::{
         LAYOUT_OBJECT_BASE, SURFACE_UNIT_BASE, SURFACE_UNIT_END, UnitId, UnitKind,
-        fire::{Kind, Trace},
+        fire::{Kind, Trace, is_surface_id},
     },
 };
 
@@ -257,8 +257,8 @@ impl Watch {
                     refused,
                     opening,
                     flak,
-                } => events.push(
-                    Event::new(kind::SURFACE_BURST)
+                } => {
+                    let mut event = Event::new(kind::SURFACE_BURST)
                         .with_subject(unit.0)
                         .with_object(*target)
                         .with(field::WEAPON, record.as_str())
@@ -266,8 +266,13 @@ impl Watch {
                         .with(field::ROUNDS, i64::from(*rounds))
                         .with(field::REFUSED, i64::from(*refused))
                         .with(field::OPENING, *opening)
-                        .with(field::FLAK, *flak),
-                ),
+                        .with(field::FLAK, *flak);
+                    // Fire at a ground unit or ship of the other side.
+                    if is_surface_id(*target) {
+                        event = event.with(field::SURFACE, true);
+                    }
+                    events.push(event);
+                }
                 Trace::Phase {
                     unit,
                     weapon,
@@ -280,6 +285,9 @@ impl Watch {
                         .with(field::TO, format!("{phase:?}").to_lowercase());
                     if let Some(target) = target {
                         event = event.with_object(*target);
+                        if is_surface_id(*target) {
+                            event = event.with(field::SURFACE, true);
+                        }
                     }
                     events.push(event);
                 }

@@ -994,6 +994,7 @@ impl Recorder {
             .map(|p| p.owner)
             .chain(tick.outcomes.iter().map(|o| o.key.owner))
             .chain(tick.combat.surface.trace.iter().filter_map(trace_unit))
+            .chain(tick.combat.surface.trace.iter().filter_map(trace_target))
             .chain(lost.iter().map(|(id, _)| *id))
             .chain(
                 lost.iter()
@@ -1845,6 +1846,21 @@ fn trace_unit(trace: &tore_world::surface::fire::Trace) -> Option<u32> {
     }
 }
 
+/// The ground unit or ship a surface controller engages or fires at, when
+/// its target is one (surface units fight each other since 2026-10-11): the
+/// registry names it like the unit that fires.
+fn trace_target(trace: &tore_world::surface::fire::Trace) -> Option<u32> {
+    use tore_world::surface::fire::{Trace, is_surface_id};
+    match trace {
+        Trace::Phase {
+            target: Some(target),
+            ..
+        }
+        | Trace::Shot { target, .. } => Some(*target).filter(|id| is_surface_id(*id)),
+        _ => None,
+    }
+}
+
 /// Each on-off cheat's name and state before and after.
 fn cheat_changes(
     before: &tore_sim::cheats::Cheats,
@@ -2293,6 +2309,36 @@ mod tests {
     use super::*;
     use crate::combat_view::render_hash_tests as fixture;
     use std::sync::mpsc::Receiver;
+
+    #[test]
+    fn a_ground_unit_a_surface_unit_engages_or_fires_at_is_named() {
+        use tore_sim::ai::surface::Phase;
+        use tore_world::surface::{SURFACE_UNIT_BASE, UnitId, fire::Trace};
+        let unit = UnitId(SURFACE_UNIT_BASE);
+        let ground = SURFACE_UNIT_BASE + 5;
+        let phase = |target| Trace::Phase {
+            unit,
+            weapon: 0,
+            phase: Phase::Track,
+            target,
+        };
+        let shot = |target| Trace::Shot {
+            unit,
+            mount: 0,
+            record: "T72.JT".into(),
+            target,
+            rounds: 1,
+            refused: 0,
+            opening: false,
+            flak: false,
+        };
+        assert_eq!(trace_target(&phase(Some(ground))), Some(ground));
+        assert_eq!(trace_target(&shot(ground)), Some(ground));
+        // An aircraft target, or none, joins the registry as an aircraft.
+        assert_eq!(trace_target(&phase(Some(3))), None);
+        assert_eq!(trace_target(&phase(None)), None);
+        assert_eq!(trace_target(&shot(3)), None);
+    }
 
     #[test]
     fn a_decoyed_missile_that_strikes_anyway_is_recorded_as_a_hit_replacing_the_spoof() {

@@ -283,11 +283,14 @@ pub mod kind {
     /// unit. Object: its target. Fields: `weapon` (Text: the record),
     /// `mount` (Int: the hardpoint), `rounds` (Int), `refused` (Int: rounds
     /// the world could not place), `opening` (Bool: a flak battery's opening
-    /// barrage), `flak` (Bool).
+    /// barrage), `flak` (Bool), `surface` (Bool, true when the target is a
+    /// ground unit or ship of the other side; absent at an aircraft, and in
+    /// recordings made before surface units fought each other).
     pub const SURFACE_BURST: &str = "surface.burst";
     /// A surface unit's engagement changed phase (search, track, fire,
     /// reload and so on). Subject: the unit. Object: its target. Fields:
-    /// `station` (Int: which of its weapons), `to` (Text).
+    /// `station` (Int: which of its weapons), `to` (Text), `surface` (Bool,
+    /// as for [`SURFACE_BURST`]).
     pub const SURFACE_PHASE: &str = "surface.phase";
     /// A supply truck rearmed every empty rail of a launcher. Subject: the
     /// unit. Fields: `loaded` (Int: missiles on its rails after).
@@ -549,7 +552,8 @@ pub mod field {
     pub const SOURCE: &str = "source";
     /// A seeker tone's loudness, 0 to 1.
     pub const STRENGTH: &str = "strength";
-    /// A seeker tone's weapon aims at surface targets.
+    /// A seeker tone's weapon aims at surface targets; a surface unit's burst
+    /// or engagement is at a ground unit or ship.
     pub const SURFACE: &str = "surface";
     /// A released device's number among the flight's releases.
     pub const NUMBER: &str = "number";
