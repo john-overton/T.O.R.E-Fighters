@@ -1047,7 +1047,8 @@ Decisions (John, 2026-09-29 and 2026-09-30):
    Cuba, the Falklands, Pakistan, Panama and the Persian Gulf) are no longer
    offered in the Quick Mission takeoff choice, so neither the player nor an AI
    wingman starts on one. This settles the strip questions for the player, the
-   wingmen and wings of two or more.
+   wingmen and wings of two or more. Changed 2026-10-11 (John): they are
+   offered again, labelled STOL ([STOL runways](spec/airports.md#stol-runways)).
 4. **No short strips in flight.** They also leave the in-flight airport list:
    navigation, landing guidance and the wing's land order.
 5. **The gear stays down on the ground.** As in retail, the gear cannot be

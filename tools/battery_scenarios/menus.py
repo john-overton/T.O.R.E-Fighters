@@ -214,8 +214,9 @@ BASE_THEATERS = ("APA", "BAL", "CUB", "EGY", "FRA", "GRE", "IRA", "KURILE", "LFA
 
 
 def airport_allegiance_problems(output: str) -> list[str]:
-    """Every base theater has a line for each side, and only the Falklands
-    and North Vietnam have no Blue field (slice AL1)."""
+    """Every base theater has a line for each side, and only North Vietnam
+    has no Blue field (slice AL1; the Falklands' San Carlos, a STOL strip, is
+    a Blue ground start since slice CL-AP, John 2026-10-11)."""
     found = {(m.group(1), m.group(2)): m.group(3) for m in AIRPORT_LINE.finditer(output)}
     problems = []
     for theater in BASE_THEATERS:
@@ -225,7 +226,7 @@ def airport_allegiance_problems(output: str) -> list[str]:
                 problems.append(f"no {side} line for {theater}")
                 continue
             none = line == "none:"
-            if none != (side == "blue" and theater in ("LFA", "TVIET")):
+            if none != (side == "blue" and theater == "TVIET"):
                 problems.append(f"{theater} {side}: {line}")
     return problems
 
@@ -332,11 +333,38 @@ def scenarios() -> list[Scenario]:
             lane="menus",
             args=["--airport-allegiance", "--no-audio"],
             timeout=600,
-            expect=[r"airport-allegiance: 16 theaters, blue none: LFA TVIET, red none: -, 0 problems"],
+            expect=[r"airport-allegiance: 16 theaters, blue none: TVIET, red none: -, 0 problems"],
             forbid=[r"PROBLEM"],
             check=airport_allegiance_problems,
             notes="Each theater's ground-start fields for Blue and for Redfor: none of the other side's, the default "
-                  "one of them, auto and AI homes the same; the Falklands and North Vietnam have none for Blue.",
+                  "one of them, auto and AI homes the same; North Vietnam has none for Blue.",
+        )
+    )
+    # The redrawn airports for the AI (slice CL-AP, John 2026-10-11): every
+    # AI ground route of every runway object of every layout on the drawn
+    # pavement, every runway end reachable from parking, every runway line
+    # (the ILS) on a drawn runway; and every Quick Mission template aircraft
+    # parked on a redrawn field on its pavement (docs/formats/redrawn-airports.md).
+    out.append(
+        Scenario(
+            name="airfield-taxi-audit",
+            lane="menus",
+            args=["--airfield-audit", "--no-audio"],
+            timeout=600,
+            expect=[r"airfield-audit: 75 theaters, \d+ airfields, 1458 runway objects, \d+ routes, 0 problems"],
+            forbid=[r"PROBLEM"],
+            notes="AI taxi routes, runway-end reachability and runway lines at every redrawn airport of every layout.",
+        )
+    )
+    out.append(
+        Scenario(
+            name="airfield-parked-audit",
+            lane="menus",
+            args=["--airfield-audit", "--parked", "--no-audio"],
+            timeout=600,
+            expect=[r"airfield-audit: parked 108 templates, \d+ aircraft on redrawn fields, 0 problems"],
+            forbid=[r"PROBLEM"],
+            notes="Every Quick Mission template aircraft parked on a redrawn airfield stands on its pavement.",
         )
     )
     out.append(Scenario(name="menus-validate-maps", lane="menus", args=["--validate-maps", "--no-audio"], timeout=600, expect=[r"Validated 75 retail map layouts"]))

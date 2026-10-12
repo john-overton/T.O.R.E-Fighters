@@ -1,13 +1,16 @@
-"""The airports a Quick Mission ground start never uses: short strips and
-the other side's fields.
+"""The airports a battery ground start never uses: short strips and the
+other side's fields.
 
-John decided on 2026-09-30 that short strips (a runway under 2,000 ft, the 22
-strips of about 1,074 ft in Cuba, the Falklands, Pakistan, Panama and the
-Persian Gulf) are no ground start for the player or any wing. Since slice AL1
+Short strips are the 22 strips of about 1,074 ft in Cuba, the Falklands,
+Pakistan, Panama and the Persian Gulf (a runway under 2,000 ft). John decided
+on 2026-09-30 that they were no ground start; since 2026-10-11 the creator
+offers them labelled STOL (slice CL-AP), but the battery still keeps its AI
+wings off them, since a conventional wingman cannot take off there. Since slice AL1
 (John, 2026-10-10) each airport takes its runway's layout side, and the
 player's Blue wing starts only at a Blue or neutral field. The AI probe's
-`--ground-start N` (N counts the theater's airports, 1 up) refuses both, so a
-scenario that wants a takeoff picks one with `ground_airport`.
+`--ground-start N` (N counts the theater's airports, 1 up) starts on a short
+strip since 2026-10-11, so a scenario that wants a takeoff picks its field
+with `ground_airport`, which skips both.
 
 The tables are what `TORE_AIRPORT_PROBE=1 tore-app --quick-mission --snapshot
 X.ppm --theater CODE` lists as `short_strip=true` and `allegiance=Some(Hostile)`

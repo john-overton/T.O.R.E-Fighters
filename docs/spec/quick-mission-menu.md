@@ -323,18 +323,19 @@ enemy field with "is an enemy airfield: no ground start there. Choose one of
 your side's airfields or Airborne." A dedicated server refuses a mission whose
 `start ground N` names an enemy field, before it opens its port.
 
-**No ground start on a short strip (opinionated, John 2026-09-30).** The 22
-airstrips with a runway under 2,000 ft (about 1,074 ft, in Cuba, the Falklands,
-Pakistan, Panama and the Persian Gulf; the number is `fitted`, see
-[short strips](airports.md#short-strips)) are not in the airport picker, so neither
-the player nor any wingman starts on one. A takeoff roll that long does not fit
-a wing: with the player alone the paved run is 1,020 ft, and it falls by 250 ft
-for each wingman. The picker lists only the theater's longer airports, and every
-theater keeps at least three (the Falklands has three, Panama and Cuba fifteen
-and seventeen). The imported `~` layout variants have no short strip, so their
-airport lists do not change. The `--ground-start N` option of the headless probes
-and the launch options counts airports as before but refuses a short strip with
-"is a short strip: no ground start there. Choose a longer runway or Airborne."
+**STOL strips (opinionated, John 2026-10-11; replaces his 2026-09-30 rule).**
+The 22 airstrips with a runway under 3,000 ft (about 1,074 ft, in Cuba, the
+Falklands, Pakistan, Panama and the Persian Gulf; the number is `fitted`, see
+[STOL runways](airports.md#stol-runways)) are in the airport picker, labelled
+`(STOL)` after their names and listed after the theater's longer airports, so
+the default start is a longer runway whenever the side has one. A takeoff roll
+that long does not suit a conventional aircraft or a wing (with the player
+alone the paved run is 1,020 ft, falling by 250 ft for each wingman), and the
+label says so; the choice is the player's. The Falklands' Blue field, San
+Carlos, is now a Blue ground start. `start ground auto` still never picks a
+STOL strip. The imported `~` layout variants have none. From 2026-09-30 to
+2026-10-11 these strips were left out of the picker and the `--ground-start N`
+option refused them.
 
 **Source anchors and player placement (spec-derived).** Each airport's STRIP
 shape carries a takeoff spot, taxi route and nine parking slots

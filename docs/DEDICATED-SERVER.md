@@ -107,7 +107,7 @@ which is what catches a mission the import cannot fly. `--import` prints its
 progress as the game's first-run screen shows it and ends with the path of
 `import-report.txt`. `--check` prints each plane as its number, aircraft,
 wing, place in the wing and skill, each runway as its number, airport name and
-length (a short strip is marked: nobody starts there), and the manifest's
+length (a STOL strip is marked `STOL`; it is a ground start like any other since 2026-10-11), and the manifest's
 resource count and 64-bit digest. A mission that cannot be built is refused
 with the builder's own words, for example "Selected runway is unavailable".
 
