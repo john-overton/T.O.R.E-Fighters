@@ -89,6 +89,8 @@ pub(super) fn draw(
         207,
         271,
     );
+    // True when row 283 shows the advisory, so row 295 need not repeat it.
+    let mut advisory_above = false;
     let to_bar = sight
         .level
         .and(sight.release_seconds())
@@ -103,6 +105,7 @@ pub(super) fn draw(
         }
     } else if let Some(advisory) = sight.advisory {
         paint.text(font, advisory.label(), 207, 283);
+        advisory_above = true;
     }
     if sight.level.is_some()
         && ro.stores.rounds(ro.stores.selected()) > 0
@@ -118,28 +121,31 @@ pub(super) fn draw(
         bombs::draw_level(paint, s, zoom, Some(fpm), &tee);
     }
     let ready = ro.estimates.readiness;
-    if let Some(warning) = additional_warning(ready, sight.in_reach, sight.advisory) {
+    if let Some(warning) = additional_warning(ready, advisory_above, sight.advisory) {
         paint.text(font, warning, 207, 295);
     }
 }
 
-/// A range cue and a visibility warning are independent. Keep release
-/// failures first and avoid repeating an advisory already drawn above.
+/// A range cue, a release timer and a visibility warning are independent.
+/// Keep release failures first and avoid repeating an advisory already drawn
+/// above (`advisory_above`); an advisory that row 283 gave way to (IN RNG,
+/// REL or OVERFLY) is shown here instead.
 fn additional_warning(
     ready: live::Readiness,
-    in_reach: bool,
+    advisory_above: bool,
     advisory: Option<Advisory>,
 ) -> Option<&'static str> {
+    let repeats = advisory_above && advisory.is_some_and(|a| a.label() == ready.label());
     if !matches!(
         ready,
         live::Readiness::Ready | live::Readiness::TargetDestroyed
-    ) && (in_reach || advisory.is_none_or(|a| a.label() != ready.label()))
+    ) && !repeats
     {
         Some(ready.label())
-    } else if in_reach {
-        advisory.map(Advisory::label)
-    } else {
+    } else if advisory_above {
         None
+    } else {
+        advisory.map(Advisory::label)
     }
 }
 
@@ -150,22 +156,31 @@ mod tests {
     #[test]
     fn mask_remains_visible_beside_an_energy_only_in_range_cue() {
         assert_eq!(
-            additional_warning(live::Readiness::Ready, true, Some(Advisory::Masked)),
+            additional_warning(live::Readiness::Ready, false, Some(Advisory::Masked)),
             Some("MASK")
         );
         assert_eq!(
-            additional_warning(live::Readiness::Ready, false, Some(Advisory::Masked)),
+            additional_warning(live::Readiness::Ready, true, Some(Advisory::Masked)),
             None,
             "the main row already shows MASK"
         );
         assert_eq!(
-            additional_warning(live::Readiness::BayClosed, true, Some(Advisory::Masked)),
+            additional_warning(live::Readiness::BayClosed, false, Some(Advisory::Masked)),
             Some("OPENING BAY")
         );
         assert_eq!(
-            additional_warning(live::Readiness::NoTarget, false, Some(Advisory::NoTarget)),
+            additional_warning(live::Readiness::NoTarget, true, Some(Advisory::NoTarget)),
             None,
             "do not repeat NO TARGET on both rows"
+        );
+        // Row 283 shows REL or OVERFLY (no advisory above): MASK is not lost.
+        assert_eq!(
+            additional_warning(live::Readiness::Ready, false, Some(Advisory::Masked)),
+            Some("MASK")
+        );
+        assert_eq!(
+            additional_warning(live::Readiness::Ready, false, None),
+            None
         );
     }
 }
