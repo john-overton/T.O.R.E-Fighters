@@ -1153,3 +1153,6 @@ fn a_moving_unit_fires_from_where_it_is_with_its_mount_turned() {
 
 #[path = "supply_tests.rs"]
 mod supply_tests;
+
+#[path = "surface_vs_tests.rs"]
+mod surface_vs_tests;

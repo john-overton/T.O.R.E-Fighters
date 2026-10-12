@@ -14,12 +14,14 @@
 //! toward the next leg's point at the record's turn rate, accelerate or brake
 //! at a fixed rate toward the leg's speed, slow on a sharp turn, take the next
 //! leg inside a turning-circle radius of the point, brake to a halt on the
-//! last point and stay there. Land units follow the terrain height and pitch
-//! and bank to its slope; ships keep the water level they started at and stay
-//! level (their routes are authored on water; the terrain grid's 8,192 foot
-//! cells are too coarse to say where a harbour or river ends). A unit with no
-//! hit points stops
-//! where it is. Nothing here reads the clock: a tick advances the state by
+//! last point and stay there. A land unit halts while one of its weapons
+//! engages a ground unit or ship, and drives on when none does (fitted,
+//! agent, 2026-10-11: a column stops to fight; ships fight under way). Land
+//! units follow the terrain height and pitch and bank to its slope; ships
+//! keep the water level they started at and stay level (their routes are
+//! authored on water; the terrain grid's 8,192 foot cells are too coarse to
+//! say where a harbour or river ends). A unit with no hit points stops where
+//! it is. Nothing here reads the clock: a tick advances the state by
 //! one fixed step, so the path is a function of the mission and the tick, and
 //! a checkpoint resumes it exactly.
 //!
@@ -291,6 +293,21 @@ impl Mover {
     /// left. Lifts the state's height and orientation from `height` (the
     /// terrain, feet) afterwards.
     pub fn step(&mut self, course: &Course, alive: bool, height: impl Fn(f64, f64) -> f64) {
+        self.step_held(course, alive, false, height);
+    }
+
+    /// [`Self::step`], and with `hold` the unit brakes to a stand where it
+    /// is (at its usual rate, still turning toward its leg) instead of
+    /// driving on: a land unit holds while one of its weapons engages a
+    /// ground unit or ship ([`engaging_surface`]). Nothing about the hold
+    /// is kept: the next tick without it drives on.
+    pub fn step_held(
+        &mut self,
+        course: &Course,
+        alive: bool,
+        hold: bool,
+        height: impl Fn(f64, f64) -> f64,
+    ) {
         if self.halt != Halt::Moving {
             return;
         }
@@ -322,6 +339,9 @@ impl Mover {
         if last {
             let room = (distance - STOP_FEET).max(0.);
             wanted = wanted.min((2. * course.acceleration * room).sqrt());
+        }
+        if hold {
+            wanted = 0.;
         }
         let speed = self.speed_feet();
         let change =
@@ -399,6 +419,19 @@ impl Mover {
             bank,
         }
     }
+}
+
+/// Whether one of the unit's weapons engages a ground unit or ship: its
+/// controller holds a surface target, from preparing to the pause between
+/// bursts and a magazine swap. A land unit on a route holds while it does
+/// (docs/spec/surface-defenses.md, "Surface against surface").
+pub fn engaging_surface(state: &SurfaceUnitState) -> bool {
+    state.engagers.iter().any(|engager| {
+        engager
+            .controller
+            .target()
+            .is_some_and(super::fire::is_surface_id)
+    })
 }
 
 /// Where a surface unit is now: its origin on the ground, its yaw, pitch and
@@ -566,6 +599,9 @@ impl Combat {
                 continue;
             };
             let height = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
+            // A land unit stops to fight a ground unit or ship; a ship
+            // fights under way.
+            let hold = !course.ship && engaging_surface(slot);
             let before = slot.mover;
             let mover = slot.mover.get_or_insert_with(|| {
                 let (x, z) = (f64::from(course.start[0]), f64::from(course.start[2]));
@@ -573,7 +609,7 @@ impl Combat {
                 mover.settle(course, height);
                 mover
             });
-            mover.step(course, alive, height);
+            mover.step_held(course, alive, hold, height);
             if before == Some(*mover) {
                 continue;
             }

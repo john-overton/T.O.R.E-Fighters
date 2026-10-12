@@ -10,7 +10,10 @@
 //! - The named radar vehicles and the Tall King (LTRACK, SFLUSH, SRDR1,
 //!   SRDR2, KING) emit whenever they stand, unless a battery adopted them.
 //! - A radar is on while a hostile aircraft is inside its detection range and
-//!   for 30 s after the last one leaves (fitted). When an anti-radiation
+//!   for 30 s after the last one leaves (fitted); a unit whose radar weapon
+//!   aims at ships (the Sarancha's SS-N-9) also while a ship of the other
+//!   side is inside that weapon's detection range, so it can support the
+//!   missile (agent decision, 2026-10-11). When an anti-radiation
 //!   missile (AGM-88, AGM-45) aimed at it comes within 10 nm, it rolls its
 //!   experience's shutdown chance once; on success it goes off for 30 s.
 //!
@@ -18,7 +21,7 @@
 //! which is all the RWR's passive reception and the HARM's seeker need.
 use super::{
     Surface, SurfaceState, UnitId,
-    fire::{Arms, Band, Kind, Scene, Trace},
+    fire::{Arms, Band, Contact, Kind, Scene, Trace},
 };
 use std::collections::BTreeMap;
 use tore_sim::combat::{
@@ -47,8 +50,10 @@ pub fn named_radar(resource: &str) -> bool {
 /// How a unit's radar emits.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RadarRule {
-    /// On while a hostile is within `range` feet, and 30 s after.
-    Detection { range: f64 },
+    /// On while a hostile aircraft is within `range` feet, or a ground unit
+    /// or ship its radar weapons aim at within `surface` feet (0: none), and
+    /// 30 s after.
+    Detection { range: f64, surface: f64 },
     /// A named radar: on whenever it stands.
     Always,
     /// A battery's radar element: on while a hostile is inside the battery
@@ -60,7 +65,7 @@ impl RadarRule {
     /// The range its radar looks out to, feet (0 for an always-on one).
     pub fn range(&self) -> f64 {
         match *self {
-            RadarRule::Detection { range } => range,
+            RadarRule::Detection { range, .. } => range,
             RadarRule::Always => 0.,
             RadarRule::Battery { sensor } => sensor,
         }
@@ -84,35 +89,49 @@ pub fn rule(
         Some(false) => return None,
         None => {}
     }
-    let weapons = arms
-        .weapons
-        .iter()
-        .filter(|w| match w.kind {
+    let radar_weapons = || {
+        arms.weapons.iter().filter(|w| match w.kind {
             Kind::Missile => w.record.seeker.signature == 3,
             Kind::Gun { radar, .. } => radar,
             Kind::Barrage { .. } => false,
         })
-        .map(|w| w.detection.max_range);
-    let range = weapons
+    };
+    // The air search reaches as far as the radar weapons that aim at
+    // aircraft (and the sensor); the surface search as far as those that
+    // aim at ground units or ships.
+    let range = radar_weapons()
+        .filter(|w| w.aims_at_aircraft())
+        .map(|w| w.detection.max_range)
         .chain(sensor.map(|band| band.max_range))
         .fold(None, |best: Option<f64>, range| {
             Some(best.map_or(range, |b| b.max(range)))
         });
-    match range {
-        Some(range) => Some(RadarRule::Detection { range }),
-        None if named => Some(RadarRule::Always),
-        None => None,
+    let surface = radar_weapons()
+        .filter(|w| w.aims_at_any_surface())
+        .map(|w| w.detection.max_range)
+        .fold(None, |best: Option<f64>, range| {
+            Some(best.map_or(range, |b| b.max(range)))
+        });
+    match (range, surface) {
+        (None, None) if named => Some(RadarRule::Always),
+        (None, None) => None,
+        (range, surface) => Some(RadarRule::Detection {
+            range: range.unwrap_or(0.),
+            surface: surface.unwrap_or(0.),
+        }),
     }
 }
 
 /// The radars' tick: each radar unit's on and off, HARM shutdown rolls, and
-/// its combat row's `radar_emitting`. Returns which units emit this tick.
+/// its combat row's `radar_emitting`. `ground` is the surface units a
+/// controller may aim at this tick. Returns which units emit this tick.
 pub(super) fn step(
     surface: &Surface,
     state: &mut SurfaceState,
     live: &mut live::State,
     scene: &Scene<'_>,
     rows: &BTreeMap<u32, usize>,
+    ground: &[Contact],
 ) -> BTreeMap<UnitId, bool> {
     let tick = scene.tick;
     let arsenal = &surface.arsenal;
@@ -165,6 +184,27 @@ pub(super) fn step(
                         (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= range
                     }
             });
+        // A radar weapon that aims at ground units or ships looks for them too.
+        let hostile = hostile
+            || match rule {
+                RadarRule::Detection { surface: reach, .. } if alive && reach > 0. => {
+                    ground.iter().any(|contact| {
+                        live::opposed(arms.side, contact.side)
+                            && arms.weapons.iter().any(|w| {
+                                w.aims_at_surface(contact.category) && w.detection.max_range > 0.
+                            })
+                            && {
+                                let d = [
+                                    contact.position[0] - from[0],
+                                    contact.position[1] - from[1],
+                                    contact.position[2] - from[2],
+                                ];
+                                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= reach
+                            }
+                    })
+                }
+                _ => false,
+            };
         let skill = arms.skill;
         let Some(unit) = state.unit_mut(arms.unit) else {
             continue;
