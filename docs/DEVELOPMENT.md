@@ -1116,6 +1116,15 @@ along the parking row, toward the runway's far end and over a taxiway junction;
 with `TORE_REDRAWN_AIRPORTS=0` it renders the same views of
 the retail airfields. Redrawn airports carry runway, approach, PAPI and taxiway
 lights; `TORE_AIRFIELD_LIGHTS=0` hides them.
+`--airfield-audit [--svg DIRECTORY] [--track FILE ...] [--field CODE:AIRPORT ...] [THEATER ...]`
+(imported media, no display) walks every AI ground route of every redrawn
+runway object of every layout (or the theaters or fields named) against the
+drawn pavement, checks every runway end is reachable from parking and every
+runway line (the ILS) lies on a drawn runway, and prints `PROBLEM` lines and a
+closing count; `--svg` draws each airfield overhead with its routes and
+`--track` adds AI probe tracks. `--airfield-audit --parked` checks the Quick
+Mission templates' parked aircraft against the pavement instead
+([audit](formats/redrawn-airports.md#audit)).
 
 The [city fill](features.md) is on by default everywhere since protocol 25.
 `TORE_CITY_FILL=0` is a developer escape hatch like the airports' one: single
@@ -1334,7 +1343,7 @@ to omit the other wings. Those two wing options also apply to
 `--launch-quick-mission` for matching creator captures. Schedule an order with
 `--probe-wing-order TICK:land-selected`, `TICK:bug-out`, `TICK:attack-on-contact`,
 `TICK:engage-my-target` or `TICK:sort` (the lead deals each wingman a bandit from the data link's picture), each with an optional `@MEMBER` (1 to 4, the first wingman is 1) to order one wingman; `--probe-player-lock TICK:ID` has the scripted leader designate aircraft `ID` at that tick, so the sensors lock it when they can; `--probe-data-link` and `--probe-player-lock` print a `t=T data link:` line for each plane's radar flag and each lock taken or dropped in the flight data link's picture; `--probe-blind-wing` takes the radar, infrared sensor and eyes from the player's wingmen, so only the data link can show them an enemy; `--probe-trace SECONDS`
-prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
+prints each wingman's airfield phase and position. At a redrawn airport an AI aircraft on its wheels in an airfield phase off the drawn pavement is an `off the pavement` anomaly; `--probe-pavement` also prints `AI probe pavement: ground_samples=N off_pavement=M`, and `--probe-track FILE` writes every sixth such tick as `tick label phase leg x z on|off hdg= track= fps=` for `--airfield-audit --track`. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
 `--probe-lose-player TICK` crashes the scripted leader's aircraft at that tick, so that a probe can test the wing's new lead (test harness only).
 `--separation 200` or `300` also exercises the expanded enemy-distance choices.

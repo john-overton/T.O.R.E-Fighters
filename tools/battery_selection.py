@@ -119,7 +119,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "AI takeoff, landing, return to base, ILS approaches on every theater",
         (
             "ai-takeoff-*", "ai-theater-*", "ai-ground-*", "ai-rtb-*", "ai-ils-*",
-            "ai-long-ground-land", "ai-lost-lead-*", "ai-enemy-ground-start-*",
+            "ai-long-ground-land", "ai-lost-lead-*", "ai-airfield-taxi-*", "ai-enemy-ground-start-*",
         ),
     ),
     "ai-lead": (
@@ -152,6 +152,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "menus-validate-creator", "menus-validate-ils*", "menus-snap-quick-airports", "airport-allegiance",
             "menus-snap-quick-ground-start", "menus-snap-quick-field-*", "ai-ils-*",
+            "airfield-taxi-audit", "airfield-parked-audit", "ai-airfield-taxi-*",
         ),
     ),
     "surface": (
@@ -379,6 +380,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/wreck.rs", ("flight-damage", "flight-environment"), "wrecks"),
     # tore-sim: world.
     _r("crates/tore-sim/src/airport.rs", ("airports", "flight-takeoff", "flight-landing", "ai-airfield", "menus-creator"), "airports"),
+    _r("crates/tore-sim/src/stol.rs", ("airports", "menus-creator"), "STOL runway labels"),
     _r("crates/tore-sim/src/environment.rs", ("flight-environment", "flight-maneuvers"), "environment"),
     _r("crates/tore-sim/src/environment/*", ("flight-environment", "flight-maneuvers"), "environment"),
     _r("crates/tore-sim/src/clouds.rs", ("flight-environment",), "clouds"),
@@ -400,6 +402,9 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/situation.rs", ("radio", "replay-live"), "situation audio"),
     _r("crates/tore-world/src/combat.rs", ("flight-combat", "ai-fights", "ai-damage", "combat-tapes", "surface"), "combat in the world"),
     _r("crates/tore-world/src/combat_tape.rs", ("combat-tapes", "flight-combat"), "combat tapes"),
+    _r("crates/tore-world/src/terrain/redrawn.rs", ("airports", "ai-airfield", "surface"), "redrawn airports: plans, AI points, ILS lines"),
+    _r("crates/tore-world/src/terrain/redrawn/*", ("airports", "ai-airfield", "surface"), "redrawn airports: plans, AI points, ILS lines"),
+    _r("crates/tore-world/airports/*", ("airports", "ai-airfield", "surface"), "redrawn airport plans"),
     _r("crates/tore-world/src/terrain.rs", ("airports", "flight-environment", "ai-airfield", "menus-creator", "surface"), "terrain and airport lists"),
     _r("crates/tore-world/src/surface/*", ("surface", "airports", "flight-combat", "ai-fights", "net-surface"), "surface units: resolution, ids and sides; what the network sends of them"),
     _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights", "surface") + NET_FAMILIES, "debrief evaluator; the multiplayer results rows; the surface tallies"),
@@ -674,6 +679,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/missile_acceptance.rs", ("flight-combat",), "missile acceptance"),
     _r("crates/tore-app/src/tape_file.rs", ("combat-tapes", "flight-combat", "replay-cli"), "tape files"),
     _r("crates/tore-app/src/navigation.rs", ("flight-landing", "airports", "ai-airfield", "menus-creator"), "navigation and airport lists"),
+    _r("crates/tore-app/src/airfield_audit.rs", ("airports", "ai-airfield"), "airfield audit"),
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
     _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),

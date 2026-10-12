@@ -12,6 +12,8 @@
 applies_to = "DTSTRP.OT"
 runway_length_ft = 1074
 grass_margin_ft = 60
+# A dirt strip: no lights (slice CL-AP, 2026-10-11).
+lights = false
 
 [[material]]
 name = "runway_plain"
@@ -46,7 +48,18 @@ pad = 0
 touchdown = 0
 numbers = false
 
+# The dirt hardstand beside the strip, as long as the retail strip's parking
+# column: the helicopter templates (Cuba QCCMHQ, Panama QAPHELO, Gulf
+# QPGSRUN) park their helicopters 252 ft right of the centre line from 220
+# to 720 ft along, which stood on the grass beside the old 200 ft pad (slice
+# CL-AP, 2026-10-11, agent). Drawn in the strip's own dirt.
+[[material]]
+name = "apron"
+pic = "_DTSTRP.PIC"
+rect = [1, 3, 85, 87]
+tile_ft = [90, 90]
+
 [[apron]]
 name = "hardstand"
-min = [80, 300]
-max = [200, 500]
+min = [80, 150]
+max = [320, 800]

@@ -234,9 +234,14 @@ impl Runway {
         });
         Some((lo, hi, top))
     }
-    /// A short strip (see [`SHORT_STRIP_FT`]): nobody starts or lands here.
+    /// A short strip (see [`SHORT_STRIP_FT`]): the tower and the AI do not
+    /// use it. A player may still start there (John, 2026-10-11).
     pub fn short_strip(&self) -> bool {
         short_strip_length(self.length_ft)
+    }
+    /// A STOL runway, labelled so for the player ([`crate::stol`]).
+    pub fn stol(&self) -> bool {
+        crate::stol::runway(self)
     }
     pub fn departure_pose(&self) -> ([f64; 3], f64) {
         let mut position = self.threshold(ApproachEnd::Near);

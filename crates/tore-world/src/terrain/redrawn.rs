@@ -20,6 +20,7 @@
 //! anchors ([`Built::anchors`]) and the positions of the airport's
 //! buildings, plus extra hangars and vehicles. The runway's approach line,
 //! length and elevation stay the retail ones.
+pub mod audit;
 mod buildings;
 mod data;
 pub mod geometry;
@@ -164,6 +165,8 @@ pub struct Built {
     pub anchors: Option<AirfieldAnchors>,
     /// The airport's lights, drawn by the app; empty for a pair's tile.
     pub lights: Vec<lights::Light>,
+    /// The runways it draws, in its frame; empty for a pair's tile.
+    pub runways: Vec<DrawnRunway>,
     /// Layout placements moved: index in the layout and the new placement.
     moved: Vec<(usize, Placement)>,
     /// Placements added after the layout's own.
@@ -175,6 +178,25 @@ pub struct Built {
     /// are copies of its base's, so its retail line lies beside its
     /// pavement; `None` keeps the retail line (every base and pad).
     pub runway_line: Option<RunwayLine>,
+    /// For a pair's pavement owner: the indices in `runways` of the base
+    /// runway and the tile runway that continue each other (`[pair]
+    /// continues`), which the audit checks run as one straight runway.
+    pub continues: Option<[usize; 2]>,
+}
+
+/// A drawn runway in its airport's frame: the plan's, moved by the tile's
+/// offset in a pair.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawnRunway {
+    /// The plan's runway name, with the tile type for a pair's tile
+    /// (`STRIP5A.OT R0`).
+    pub name: String,
+    pub from: Point,
+    /// Degrees against the frame's heading.
+    pub heading: f64,
+    pub length: f64,
+    pub width: f64,
+    pub pad: f64,
 }
 
 /// A runway object's approach line in the world: its centre on the runway
@@ -187,24 +209,126 @@ pub struct RunwayLine {
 }
 
 impl RunwayLine {
-    /// The longest runway of a second tile's plan (the first of equals), in
-    /// the tile's own frame, whose heading is `heading`.
-    fn main(plan: &Plan, frame: &Frame, heading: f64) -> Option<Self> {
-        let runway = plan
-            .runways
+    /// A plan's main runway: the longest (the first of equals).
+    fn main_runway(plan: &Plan) -> Option<&plan::RunwaySpec> {
+        plan.runways
             .iter()
-            .reduce(|best, r| if r.length > best.length { r } else { best })?;
-        let d = geometry::direction(runway.heading);
-        let middle = [
-            runway.from[0] + d[0] * runway.length * 0.5,
-            runway.from[1] + d[1] * runway.length * 0.5,
-        ];
-        Some(Self {
-            center: frame.world(middle),
-            heading: (heading + runway.heading.to_radians()).rem_euclid(std::f64::consts::TAU),
-            length: runway.length,
-        })
+            .reduce(|best, r| if r.length > best.length { r } else { best })
     }
+
+    /// The line from `near` to `far` (frame points) in `frame`, whose world
+    /// heading is `heading`; `relative` is the line's heading against the
+    /// frame, degrees.
+    fn between(frame: &Frame, heading: f64, relative: f64, near: Point, far: Point) -> Self {
+        Self {
+            center: frame.world(geometry::scale(geometry::add(near, far), 0.5)),
+            heading: (heading + relative.to_radians()).rem_euclid(std::f64::consts::TAU),
+            length: geometry::length(geometry::sub(far, near)),
+        }
+    }
+
+    /// The main runway of a second tile's plan drawn at `offset` in
+    /// `frame`, whose heading is `heading`.
+    fn main(plan: &Plan, frame: &Frame, heading: f64, offset: Point) -> Option<Self> {
+        let runway = Self::main_runway(plan)?;
+        let near = geometry::add(runway.from, offset);
+        let d = geometry::direction(runway.heading);
+        let far = geometry::add(near, geometry::scale(d, runway.length));
+        Some(Self::between(frame, heading, runway.heading, near, far))
+    }
+
+    /// A pair whose tile's main runway continues a base runway as one
+    /// (`joined`): from the tile runway's near threshold to the base
+    /// runway's far threshold, along the base runway (the tile is aligned
+    /// with it, [`align`]).
+    fn joined(
+        base: &Plan,
+        tile: &Plan,
+        names: &[String; 2],
+        frame: &Frame,
+        heading: f64,
+        offset: Point,
+    ) -> Option<Self> {
+        let b = base.runways.iter().find(|r| r.name == names[0])?;
+        let t = tile.runways.iter().find(|r| r.name == names[1])?;
+        let d = geometry::direction(b.heading);
+        let far = geometry::add(b.from, geometry::scale(d, b.length));
+        let near = geometry::add(t.from, offset);
+        // On the base runway's centre line, from the tile's threshold.
+        let along = geometry::dot(geometry::sub(near, b.from), d);
+        let near = geometry::add(b.from, geometry::scale(d, along));
+        Some(Self::between(frame, heading, b.heading, near, far))
+    }
+}
+
+/// The tile's offset in its base's frame, moved across the base runway the
+/// tile's main runway continues so the two centre lines are one line
+/// (`[pair] continues`). Layouts place the tile up to about 65 ft off that
+/// line; the move is only across it, so the link taxiways still meet.
+fn align(offset: Point, base: &Plan, tile: &Plan, names: &[String; 2]) -> Point {
+    let (Some(b), Some(t)) = (
+        base.runways.iter().find(|r| r.name == names[0]),
+        tile.runways.iter().find(|r| r.name == names[1]),
+    ) else {
+        return offset;
+    };
+    let side = geometry::right_of(geometry::direction(b.heading));
+    let off = geometry::dot(geometry::sub(geometry::add(t.from, offset), b.from), side);
+    geometry::sub(offset, geometry::scale(side, off))
+}
+
+/// A plan's AI points drawn at `offset` in `frame` (world heading
+/// `heading`): a base takes off and lands along the frame (the retail
+/// runway), a second tile along its main runway.
+fn plan_anchors(
+    plan: &Plan,
+    offset: Point,
+    frame: &Frame,
+    heading: f64,
+) -> Option<AirfieldAnchors> {
+    let a = plan.anchors.as_ref()?;
+    let relative = if plan.ils_runway {
+        0.
+    } else {
+        RunwayLine::main_runway(plan).map_or(0., |r| r.heading)
+    };
+    let runway = (heading + relative.to_radians()).rem_euclid(std::f64::consts::TAU);
+    let at = |p: Point| frame.world(geometry::add(p, offset));
+    Some(AirfieldAnchors {
+        taxi_out: a.taxi_out.map(at),
+        takeoff_spot: at(a.takeoff),
+        takeoff_heading: runway,
+        landing_point: at(a.landing),
+        landing_heading: runway,
+        taxi_in: a.taxi_in.map(at),
+        parking: a.parking.map(at),
+        parking_heading: (heading + a.parking_heading.to_radians())
+            .rem_euclid(std::f64::consts::TAU),
+    })
+}
+
+/// The indices in `drawn` of the base runway and the tile runway a pair's
+/// `continues` joins.
+fn continued_runways(
+    drawn: &[DrawnRunway],
+    tile: Option<&Plan>,
+    links: Option<&Plan>,
+) -> Option<[usize; 2]> {
+    let names = links?.pair.as_ref()?.continues.as_ref()?;
+    let tile_name = format!("{} {}", tile?.applies_to, names[1]);
+    let base_at = drawn.iter().position(|r| r.name == names[0])?;
+    let tile_at = drawn.iter().position(|r| r.name == tile_name)?;
+    Some([base_at, tile_at])
+}
+
+/// A copy of a lone second tile's plan with every runway end marked: no
+/// base runs on from it, so its main runway gets thresholds at both ends.
+fn marked_alone(plan: &Plan) -> Plan {
+    let mut plan = plan.clone();
+    for runway in &mut plan.runways {
+        runway.marked = [true, true];
+    }
+    plan
 }
 
 impl Built {
@@ -216,6 +340,22 @@ impl Built {
     pub fn building_counts(&self) -> (usize, usize) {
         (self.moved.len(), self.added.len())
     }
+    /// Whether world `x, z` lies on this airport's drawn pavement. A pair's
+    /// second tile has none of its own: its base draws it.
+    pub fn on_pavement(&self, x: f64, z: f64) -> bool {
+        if self.patches.is_empty() || !self.surface.contains_horizontal(x, z) {
+            return false;
+        }
+        let p = self.frame.local([x, 0., z]);
+        self.patches
+            .iter()
+            .any(|patch| geometry::contains(&patch.poly, p))
+    }
+}
+
+/// Whether world `x, z` lies on the drawn pavement of any redrawn airport.
+pub fn on_pavement(built: &[Built], x: f64, z: f64) -> bool {
+    built.iter().any(|b| b.on_pavement(x, z))
 }
 
 /// A STRIP placement of the layout, with what the plans need of it.
@@ -347,28 +487,58 @@ pub(super) fn apply(
             None => None,
         };
         let frame = base.frame;
-        let mut parts = vec![(base_plan, [0., 0.])];
+        // A tile alone marks both ends of its runways (slice CL-AP).
+        let alone = (!base_plan.ils_runway && tile.is_none()).then(|| marked_alone(base_plan));
+        let mut parts = vec![(alone.as_ref().unwrap_or(base_plan), [0., 0.])];
         let mut links = None;
         let mut name = base.object_type.clone();
         if let (Some(tile), Some(tile_plan)) = (tile, tile_plan) {
-            parts.push((tile_plan, frame.local(tile.frame.origin)));
             links = plans.pair(&base.object_type);
+            let mut offset = frame.local(tile.frame.origin);
+            if let Some(names) = links.and_then(|l| l.pair.as_ref()?.continues.as_ref()) {
+                offset = align(offset, base_plan, tile_plan, names);
+            }
+            parts.push((tile_plan, offset));
             name = format!("{}+{}", base.object_type, tile.object_type);
         }
         let (materials, patches) = layout::compose(&parts, links, f64::from(base.angle));
+        let drawn_runways: Vec<DrawnRunway> = parts
+            .iter()
+            .enumerate()
+            .flat_map(|(k, (plan, offset))| {
+                plan.runways.iter().map(move |r| DrawnRunway {
+                    name: if k == 0 {
+                        r.name.clone()
+                    } else {
+                        format!("{} {}", plan.applies_to, r.name)
+                    },
+                    from: geometry::add(r.from, *offset),
+                    heading: r.heading,
+                    length: r.length,
+                    width: r.width,
+                    pad: r.pad,
+                })
+            })
+            .collect();
+        let continued = continued_runways(&drawn_runways, tile_plan, links);
         let airport_lights = lights::lights(&parts, links, &patches, &materials, &frame, &height);
-        let a = base_plan.anchors.as_ref();
-        let anchor_points: Vec<Point> = a
-            .map(|a| {
+        let heading = base.stance.heading;
+        let anchors = plan_anchors(base_plan, [0., 0.], &frame, heading);
+        let tile_anchors =
+            tile_plan.and_then(|plan| plan_anchors(plan, parts[1].1, &frame, heading));
+        let anchor_points: Vec<Point> = anchors
+            .iter()
+            .chain(&tile_anchors)
+            .flat_map(|a| {
                 a.taxi_out
                     .iter()
                     .chain(&a.taxi_in)
                     .chain(&a.parking)
-                    .chain([&a.takeoff, &a.landing])
-                    .copied()
-                    .collect()
+                    .chain([&a.takeoff_spot, &a.landing_point])
+                    .map(|p| frame.local(*p))
+                    .collect::<Vec<_>>()
             })
-            .unwrap_or_default();
+            .collect();
         let (mut min, mut max) = geometry::bounds(patches.iter().map(|p| &p.poly))
             .ok_or_else(|| format!("redrawn airport: {name} has no pavement"))?;
         for p in &anchor_points {
@@ -386,22 +556,10 @@ pub(super) fn apply(
             pitch: base.stance.pitch,
             bank: base.stance.bank,
         };
-        // A tile alone (no base beside it) flies from its own main runway
-        // and has no taxi points: the AI's runway fallback, as retail's.
+        // A tile alone flies from its own main runway.
         let runway_line = (!base_plan.ils_runway)
-            .then(|| RunwayLine::main(base_plan, &frame, base.stance.heading))
+            .then(|| RunwayLine::main(base_plan, &frame, heading, [0., 0.]))
             .flatten();
-        let anchors = a.map(|a| AirfieldAnchors {
-            taxi_out: a.taxi_out.map(|p| frame.world(p)),
-            takeoff_spot: frame.world(a.takeoff),
-            takeoff_heading: base.stance.heading,
-            landing_point: frame.world(a.landing),
-            landing_heading: base.stance.heading,
-            taxi_in: a.taxi_in.map(|p| frame.world(p)),
-            parking: a.parking.map(|p| frame.world(p)),
-            parking_heading: (base.stance.heading + a.parking_heading.to_radians())
-                .rem_euclid(std::f64::consts::TAU),
-        });
         let mut own = vec![base.index];
         let mut lines = base_plan.lines.clone();
         let mut hangars = base_plan.extras.hangars;
@@ -440,7 +598,7 @@ pub(super) fn apply(
                 ));
             }
         }
-        let slots: Vec<Point> = a.map(|a| a.parking.to_vec()).unwrap_or_default();
+        let slots: Vec<Point> = anchor_points.clone();
         let spots = buildings::apron_spots(&aprons, &slots);
         let on_pavement = |p: Point| {
             patches
@@ -466,18 +624,27 @@ pub(super) fn apply(
             surface,
             anchors,
             lights: airport_lights,
+            runways: drawn_runways,
             moved: relaid.moved,
             added: relaid.added,
             snapped,
             runway_line,
+            continues: continued,
         };
         apply_edits(std::slice::from_ref(&built), sources);
-        if let (Some(tile_id), Some(tile), Some(tile_plan)) = (tile_id, tile, tile_plan) {
+        if let (Some(tile_id), Some(tile_plan)) = (tile_id, tile_plan) {
             // The tile's runway object lands and departs on the tile's own
-            // main runway inside the pair's box. Its taxi points would be
-            // the base's, 9,000 ft away, so it has none: the AI's runway
-            // fallback, as at retail's tiles, whose points lay off their
-            // pavement.
+            // main runway inside the pair's box (with `joined`, the tile
+            // runway and the base runway it continues as one), with the
+            // tile plan's own taxi and parking points (slice CL-AP).
+            let offset = parts[1].1;
+            let pair = links.and_then(|l| l.pair.as_ref());
+            let line = match pair.and_then(|p| p.joined.then_some(p.continues.as_ref()).flatten()) {
+                Some(names) => {
+                    RunwayLine::joined(base_plan, tile_plan, names, &frame, heading, offset)
+                }
+                None => RunwayLine::main(tile_plan, &frame, heading, offset),
+            };
             out.push(Built {
                 plan: name,
                 strip_id: tile_id,
@@ -485,12 +652,14 @@ pub(super) fn apply(
                 materials: Vec::new(),
                 patches: Vec::new(),
                 surface,
-                anchors: None,
+                anchors: tile_anchors,
                 lights: Vec::new(),
+                runways: Vec::new(),
                 moved: Vec::new(),
                 added: Vec::new(),
                 snapped: 0,
-                runway_line: RunwayLine::main(tile_plan, &tile.frame, tile.stance.heading),
+                runway_line: line,
+                continues: None,
             });
         }
         out.push(built);

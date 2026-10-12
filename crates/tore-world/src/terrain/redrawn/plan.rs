@@ -109,7 +109,8 @@ pub struct AnchorSpec {
     pub landing: Point,
     pub taxi_in: [Point; 4],
     pub parking: [Point; 9],
-    /// Parked heading against the runway heading, degrees.
+    /// Parked heading against the frame's heading (the retail runway's),
+    /// degrees.
     pub parking_heading: f64,
 }
 
@@ -130,6 +131,13 @@ pub struct PairSpec {
     /// Runway ends of the two tiles that run on into the other tile and
     /// lose their threshold markings, as `RUNWAY:near` or `RUNWAY:far`.
     pub unmark: Vec<(String, bool)>,
+    /// The base runway the tile's main runway continues (`[BASE, TILE]`
+    /// runway names): the tile is moved across that runway, by the few
+    /// feet its layout places it off, so the two centre lines are one.
+    pub continues: Option<[String; 2]>,
+    /// The tile's runway object flies the two continuing runways as one,
+    /// from the tile runway's near threshold to the base runway's far one.
+    pub joined: bool,
 }
 
 /// A parsed plan.
@@ -144,6 +152,8 @@ pub struct Plan {
     /// heading 0, the retail length). Second tiles' lines are not runways.
     pub ils_runway: bool,
     pub grass_margin_ft: f64,
+    /// Whether the airport has lights (`lights = false`: a dirt strip).
+    pub lights: bool,
     pub materials: Vec<Material>,
     pub runways: Vec<RunwaySpec>,
     pub taxiways: Vec<TaxiwaySpec>,
@@ -425,6 +435,22 @@ impl Plan {
                         })
                         .collect::<Result<_, String>>()?,
                 },
+                continues: match t.get("continues") {
+                    None => None,
+                    Some(value) => {
+                        let names: Vec<String> = value
+                            .array()
+                            .ok_or("pair: continues must be a list")?
+                            .iter()
+                            .filter_map(|item| item.text().map(str::to_owned))
+                            .collect();
+                        Some(
+                            <[String; 2]>::try_from(names)
+                                .map_err(|_| "pair: continues names a base and a tile runway")?,
+                        )
+                    }
+                },
+                joined: bool_or(t, "joined", "pair", false)?,
             }),
         };
         let plan = Self {
@@ -440,6 +466,7 @@ impl Plan {
             pair,
             ils_runway: bool_or(root, "ils_runway", "plan", true)?,
             grass_margin_ft: number_or(root, "grass_margin_ft", "plan", 0.)?,
+            lights: bool_or(root, "lights", "plan", true)?,
             materials,
             runways,
             taxiways,

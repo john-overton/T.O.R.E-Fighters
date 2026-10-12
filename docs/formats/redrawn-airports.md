@@ -35,10 +35,10 @@ size.
 | Part | With the switch on | Source |
 | --- | --- | --- |
 | Runway position, heading, length, elevation | Unchanged: the frame is the retail runway's near threshold (STRIP anchor 0x11) and its far end. A second tile's runway object moves onto the tile's own main runway (below) | retail import, plan for tiles |
-| ILS, approach line, landing service, short-strip rule | Unchanged (they read only the above); a second tile's follow its main runway | retail import |
+| ILS, approach line, landing service, short-strip rule | Unchanged (they read only the above); a second tile's follow its main runway (STRIP5A and STRIP6A in a pair: the joined crossing runway) | retail import, plan for tiles |
 | Drawn pavement | Generated from the plan's runways, taxiways and aprons, tiled with retail runway art, markings painted in | plan, retail art |
 | Landable and contact box | The redrawn field's extent plus a grass margin; grass between runways stays landable | plan |
-| AI taxi, takeoff, landing and parking points | The plan's (the `AirfieldAnchors` roles of [native-strip](native-strip.md)); second tiles and pads have none, so the AI takes off from and lands on the runway itself and stops beside it (its runway fallback, as at retail's tiles) | plan |
+| AI taxi, takeoff, landing and parking points | The plan's (the `AirfieldAnchors` roles of [native-strip](native-strip.md)), second tiles included since slice CL-AP; dirt strips (vertical pads) have none | plan |
 | Ground-start slots | Follow the plan's takeoff point and taxi-out legs | plan |
 | Airport buildings | Moved by rule onto the plan's building lines; extra hangars and vehicles added by rule | retail shapes, rules |
 | Terrain recess under the airport | Follows the landable box | plan |
@@ -88,16 +88,57 @@ lies beside its own pavement (on grass between its runways, or off the
 field). Its runway object therefore flies from the tile's main runway, the
 longest in its plan: the approach line, heading and length are that
 runway's, so the ILS, a ground start and the AI's takeoff and landing are on
-pavement (agent decision, FX-A, 2026-10-11). It has no taxi points: the
-base's are up to 9,700 ft away and the tile plans have none of their own.
-A crosswise main runway (STRIP5A and STRIP6A) turns that airport's ILS by
-90 degrees from the retail one.
+pavement (agent decision, FX-A, 2026-10-11).
+
+Since slice CL-AP (2026-10-11) every tile plan has AI points of its own, the
+base plans' pattern turned to its main runway (below), so the AI at a tile
+taxis, takes off, lands and parks on the tile's pavement. In a pair the
+tile's main runway continues one of the base's runways (`[pair] continues`):
+STRIP3A's and STRIP7A's the base's main runway, STRIP5A's and STRIP6A's the
+base's crossing runway. Layouts place the tile up to about 65 ft off that
+line, so the tile is moved across the base runway by that much and the two
+centre lines are one line (the move is only across it, so the link
+taxiways still meet). STRIP5A's and STRIP6A's main runways are crosswise to
+their frame and run on into the base's crossing runway, whose near end is
+left unmarked: the tile's runway object flies the two as one runway
+(`joined`), from the tile runway's near threshold to the base crossing
+runway's far threshold (8,274 to 8,377 ft at STRIP5A fields, 14,572 to
+14,597 ft at STRIP6A fields), so both ILS thresholds stand at real, marked
+runway ends instead of one in the middle of the pavement where FX-A put it
+(agent decision, CL-AP: the ILS along the real main runway, as asked). Its
+ILS is still 90 degrees from the retail tile's line, which lay on no
+runway. A lone tile (the `~*F` layouts) has no base to run into: all its
+runway ends are marked.
 
 Larger airports keep the strips retail drew, at their retail centrelines, with
 a parallel taxiway on each side, links at both ends and midfield, an apron on
 each side (the one on retail's apron side holding the nine parking slots), and
 a building line along each apron's outer edge. Primary runways are 200 ft
 wide, others 150 ft, taxiways 75 ft (fitted).
+
+### The AI's points
+
+Every plan but the dirt strip gives the AI one pattern along the runway it
+flies (the base's retail runway, a tile's main runway), all `fitted`, agent
+choices (FX-A for the bases, 2026-10-10; slice CL-AP for the tiles and the
+corrections, 2026-10-11):
+
+- the parallel taxiway 450 ft to one side of the centre line;
+- a cross taxiway 190 ft behind the near threshold, over a 220 ft paved
+  pad, from the parallel taxiway to the centre line, where the last taxi-out
+  point stands; the takeoff spot is the threshold;
+- the nine parking slots 250 ft apart in a row 888 ft from the centre line,
+  on an apron beside the parallel taxiway, the exit at the apron's near
+  corner and the entry at its far corner;
+- the landing rollout ends on the centre line 250 ft before the far end,
+  where a cross taxiway leads back to the parallel taxiway.
+
+Each leg from a parking slot out to the spot and from the rollout end in to
+every slot is straight and on pavement. Where the AI stops before turning
+(the parking exit and every taxi-in point) it runs on about 12 ft and turns
+on a radius of about 30 ft, so those points stand clear of a taxiway's end:
+a corner stop 30 ft short of the junction. The AI's own taxi rules are in
+[AI airfield sequences](../spec/ai-airfield.md#taxiing-on-the-pavement).
 
 ### Keys
 
@@ -112,13 +153,15 @@ and the retail runway centrelines it keeps.
 | --- | --- |
 | `applies_to`, `runway_length_ft`, `ils_runway` | The STRIP type, the retail runway length checked against its shape, and whether the first runway lies on the retail ILS line (not for second tiles) |
 | `grass_margin_ft` | Landable grass around the pavement |
+| `lights` | `false` for an unlit field (the dirt strip) |
 | `[pair]` `base`, `tile`, `unmark` | A pair plan's two types and the base runway ends (`R1:far`) that run on into the tile and lose their markings; the ILS runway (`R0`) keeps both ends marked, since its threshold is set in from the pavement's end |
+| `[pair]` `continues`, `joined` | The base runway and the tile runway that continues it (`["R1", "R0"]`): the tile is moved across to line them up; `joined = true` makes the tile's runway object fly the two as one |
 | `[[material]]` `name`, `pic`, `rect`, `tile_ft`, `along`, `paint`, `variants` | A texel rectangle `[x, y, w, h]` of a retail PIC; the feet one copy covers along its columns and rows (0 across a runway or taxiway: its width); which texture axis runs along the element (`v` default, `u`); markings painted into a copy (`edges`, `centre`, `threshold`, `taxiway`, `digit`); other rectangles of the same size picked per copy |
 | `[[runway]]` `from`, `heading`, `length`, `width`, `pad`, `touchdown`, `numbers`, `marked_near`, `marked_far` | Near threshold, heading against the frame in degrees, length, width, paved run before each threshold, touchdown zone length, designators (`false` for none, default from the world heading), whether each end has threshold markings |
 | `[[taxiway]]` `width`, `points` | A polyline of straight legs at any angle, ends squared off half a width past each point |
 | `[[apron]]` `min`, `max` | A rectangular apron |
 | `[[line]]` `from`, `to`, `out` | A building line and the direction away from its apron |
-| `[anchors]` | `taxi_out` (4), `takeoff`, `landing`, `taxi_in` (4), `parking` (9), `parking_heading` (degrees against the runway) |
+| `[anchors]` | `taxi_out` (4), `takeoff`, `landing`, `taxi_in` (4), `parking` (9), `parking_heading` (degrees against the frame); a base takes off and lands along the frame, a tile along its main runway |
 | `[extras]` `hangars`, `vehicles` | How many extra hangars the lines may take, and whether fuel trucks and trucks are added |
 
 Material names: `runway_plain`, `runway_threshold`, `runway_touchdown`,
@@ -198,6 +241,13 @@ own, as requested by John on 2026-10-10. All placements and looks are
 On the 3 degree path the PAPI shows two white and two red. The approach light
 rows are one table (`terrain::redrawn::lights::approach_rows`).
 
+Only a base plan's main runway has approach lights and a PAPI. A lone tile
+(paired or alone, all paved) keeps its edge, threshold and taxiway lights
+and gets no approach lights or PAPI; the dirt strips (`lights = false`) have
+no lights at all, like a real grass or dirt field (agent decision, slice
+CL-AP, from John's 2026-10-11 "Lone tiles like grass or dirt runways? Fine
+with no lights").
+
 Lights are drawn as points, a little larger as they near, dimmed with
 distance, haze and cloud (dimmed as a surface at a third of their distance is,
 so they carry farther than terrain) and by daylight: full at night, fading
@@ -213,10 +263,16 @@ has about 1,000 lights; Ukraine about 13,000.
 ## Short strips under the redraw
 
 The redraw keeps every retail runway length, so the 22 dirt strips (DTSTRP,
-1,074 ft) stay short strips: no ground start, no tower service, no AI home
-([short strips](../spec/airports.md#short-strips)). They are also vertical pads
-by type (`Scene::vertical_pad`), which keeps conventional aircraft off them
-whatever their length.
+1,074 ft) stay short strips: no tower service, no AI home
+([short strips](../spec/airports.md#short-strips)). Since 2026-10-11 they are
+labelled STOL and a player may start there
+([STOL runways](../spec/airports.md#stol-runways)). They are also vertical
+pads by type (`Scene::vertical_pad`), which keeps conventional AI off them
+whatever their length, so they have no AI points. Each has a dirt hardstand
+beside the strip, 80 to 320 ft right of its centre line and 150 to 800 ft
+along, drawn in the strip's own dirt: the helicopter templates (Cuba QCCMHQ,
+Panama QAPHELO, Gulf QPGSRUN) park their helicopters on it, 252 ft right of
+the centre line (they stood on the grass beside the old 120 by 200 ft pad).
 
 Lengthening them is a future option: John chose on 2026-10-10 to leave them
 as they are. The findings: all 22 lie on flat cells at
@@ -261,6 +317,8 @@ size the same art covers about 1.5 to 4 ft per texel.
 | Marking bands, cut-away order, fillet size, apron variation, building rule distances | fitted (agent) |
 | The redraw as the default everywhere, online included | opinionated (John, 2026-10-10 and 2026-10-11) |
 | Fixed on online rather than a mission text line; the plan mismatch fallback; a second tile's runway on its main runway; the recording's airfield scene | opinionated (agent, FX-A, 2026-10-11) |
+| AI taxi on the pavement; STOL labels and starts; lone grass or dirt fields unlit | opinionated (John, 2026-10-11) |
+| The tiles' AI points, a tile lined up with the runway it continues, the STRIP5A and STRIP6A joined runway, lone tiles marked at both ends, lone paved tiles lit without approach lights, the dirt hardstand, the audit's wheel track and run-out | fitted or opinionated (agent, CL-AP, 2026-10-11) |
 | Airfield lights exist | opinionated (John, 2026-10-10) |
 | Light spacing, colours, ranges, approach pattern, PAPI placement and day share | fitted (agent) |
 
@@ -289,29 +347,73 @@ rebuilds it from its own import and build.
 
 ## Limits
 
-- Second tiles (paired or alone) and pads have no AI taxi or parking points;
-  at a tile the AI takes off from its main runway and lands on it, then
-  stops beside it (the runway fallback). Taxi points of their own would need
-  an apron route authored per tile plan. Pads are vertical pads by type,
-  which no conventional AI uses.
+- The dirt strips have no AI points: they are vertical pads by type, which
+  no conventional AI uses, and short strips, nobody's home.
 - AI homes are the nearest own field by runway centre, so moving the tiles'
   lines onto their main runways changed four of the 160 homes the
-  `--airport-allegiance` survey lists (Baltic Red: Gdov and Vitebsk became
-  the tiles "Airport 27" and "Airport 23"; Greece Blue: "Airport 15" became
-  Iraklion; North Korea Red: Kuum Ni became "Airport 22"). The fields offered
-  to the player are unchanged. An AI flight homed on a tile parks beside its
-  runway, not on an apron.
-- A lone tile's main runway keeps the plan's markings for a tile: an end that
-  would run into the base is plain, and it has no ILS approach lights or
-  PAPI.
-- Helicopters of three helicopter templates (Cuba QCCMHQ, Panama QAPHELO,
-  Gulf QPGSRUN) stand on the grass beside a dirt pad: pads have no apron
-  spots. Of the 123 template aircraft on redrawn fields in the 108 Quick
-  Mission templates, these 6 are the only ones off the pavement.
+  `--airport-allegiance` survey lists (FX-A: Baltic Red: Gdov and Vitebsk
+  became the tiles "Airport 27" and "Airport 23"; Greece Blue: "Airport 15"
+  became Iraklion; North Korea Red: Kuum Ni became "Airport 22"). The joined
+  STRIP6A runway (CL-AP) moved "Airport 22"'s centre and gave North Korea
+  Red's Kuum Ni back. An AI flight homed on a tile parks on the tile's apron.
 - A pair's tile is placed at the measured offset, which varies by up to 250 ft
-  between layouts; link taxiways overlap generously to cover it.
+  along the runway between layouts; link taxiways overlap generously to cover
+  it, and the 220 ft pad at a STRIP5A or STRIP6A main runway's far end closes
+  any gap to the base runway it runs into. Across the runway the tile is
+  lined up exactly.
 - A junction mouth clears only the earlier taxiway's edge lines; a runway's
   edge stripes still run past a taxiway's end, as on real fields.
+
+## Audit
+
+`--airfield-audit` (imported media, no display; slice CL-AP) builds every
+layout of the import, the `~` developer layouts with the lone tiles
+included, and for every runway object:
+
+- walks every AI route its points give it, from every parking slot out to
+  the takeoff spot, the takeoff roll and from the landing aim point in to
+  every slot, every 5 ft, its centre and 6 ft either side (the wheel track),
+  and 45 ft on past every point the AI stops at (the run-out of its stop and
+  turn), against the drawn pavement;
+- checks that every drawn runway end of the airfield is reachable over
+  touching pavement pieces from the parking slots;
+- checks that the runway object's line, which the ILS localizer and glide
+  path follow, lies on a drawn runway: both thresholds within 2 ft of its
+  centre line, inside its paved length, at its heading within 0.05 degrees
+  (or on two runways that are one line, for a joined tile runway);
+- for a pair, checks the two runways its plan says continue each other
+  (`[pair] continues`) are one straight runway on the drawn pavement (a
+  `pair alignment` line): both tile ends within 10 ft of the base runway's
+  centre line, headings within 0.5 degrees, and no gap wider than 10 ft
+  between the paved ends (`fitted`). The layouts place a tile 150 to 560 ft
+  into its base's pavement, the 220 ft overrun pads included, so the
+  pavements overlap by that much: one continuous surface, reported as a
+  negative `gap_ft` and not a problem. The build lines the tile up across the
+  base runway; without it 224 of the 430 pairs of the import were more than
+  10 ft off and up to 64 ft (John, Spassk Dalniy, 2026-10-11: the runway
+  jogged sideways halfway down);
+- reports drawn pavement on water (a `water` line, no failure): pavement
+  samples every 50 ft where the ground picture is the water cutout (255) or
+  the cell is water class, split into runway and other pavement, with whether
+  the retail runway line is wet too (retail placement, kept). The import has
+  8 such fields: 4 with the retail runway line on water (CUB 1 and 16,
+  GRE 3, IRA 9), and 4 where only our aprons and taxiways reach a shore
+  (CUB 10, GRE 4, PGU 4, WTA 11: 1 to 24 per cent of the
+  pavement). Vladivostok's Lake Khanka is not seen: it is painted in
+  ordinary land indices (teal in that theater's palette) over elevation 0
+  cells, so neither the picture nor the cell class marks it.
+
+It prints one line per runway object and a `PROBLEM` line for each failure;
+`--svg DIRECTORY` draws each airfield overhead with its routes, and
+`--track FILE` adds the ground tracks an AI probe wrote with
+`--probe-track`, green on the pavement and red off it. `--parked` builds
+every Quick Mission ground target of the base theaters (seed 1) instead and
+checks that every template aircraft standing on a redrawn airfield stands
+on its pavement. The AI probe (`--ai-probe-ticks`) counts an AI aircraft on
+its wheels in an airfield phase at a redrawn airport and off the drawn
+pavement as an `off the pavement` anomaly; `--probe-pavement` prints the
+count. The battery runs all three ([lane menus](../testing/lane-menus.md),
+[lane AI](../testing/lane-ai.md)).
 
 ## Validation (2026-10-10, surface-data import)
 
@@ -361,3 +463,20 @@ rebuilds it from its own import and build.
   field per base plan (UKR 8, BAL 3, EGY 10 and 11, FRA 1 and 14, GRE 1,
   NSK 9 and 11), six paired tiles (EGY 22, FRA 24, BAL 24, GRE 13, NSK 18,
   VLA 22) and four lone tiles (`~EGYF` 2, `~VLAF` 1, `~APAF` 1, `~SPAF` 1).
+- AI on the pavement (slice CL-AP, 2026-10-11): before it, `--airfield-audit`
+  found 10,023 problems at the 1,458 runway objects (the 440 tiles without AI
+  points, corner stops and exits whose run-out left the taxiway, two STRIP6A
+  runways not reachable from parking) and `--parked` 6 helicopters on the
+  grass; after it, 0 and 0 (27,284 routes walked). AI probes counting every
+  AI ground tick off the drawn pavement: before, the two-ship ground start,
+  land order and taxi to parking left the pavement at 10 of 12 fields and at
+  the lone `~VLAF` 1 (15,664 of 74,137 ground ticks there: the AI drifted to
+  the runway edge and over corners); after, 0 off-pavement ticks and every AI
+  aircraft parked at 20 fields (every base plan; paired tiles EGY 22, FRA 24,
+  GRE 13, BAL 24, NSK 18, VLA 22; lone tiles `~EGYF` 2, `~APAF` 1, `~VLAF` 1,
+  `~BALF` 1, `~SPAF` 1) and at 11 wing-of-four or other-aircraft runs (UKR 8,
+  NSK 11, FRA 14, FRA 24, GRE 13, VLA 22, `~EGYF` 2, `~BALF` 1 with four
+  F/A-18Ds, three landing and parking; C-130 at EGY 10, F-16C at NSK 18,
+  MiG-29 at `~APAF` 1). `--validate-ils`: 578 ends, 0 problems; only the
+  STRIP5A and STRIP6A tiles' lengths change (the joined runway). Before and
+  after overheads with the probe tracks: `.local/surface-close/renders/cl-ap/`.

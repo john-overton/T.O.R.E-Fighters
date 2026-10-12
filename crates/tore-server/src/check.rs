@@ -129,11 +129,9 @@ pub fn report(prepared: &Prepared) -> Vec<String> {
         let side = found.map_or("no ground start", |a| {
             side_words(a.serves(false), a.serves(true))
         });
-        let short = if runway.short_strip() {
-            ", a short strip: no ground start"
-        } else {
-            ""
-        };
+        // A STOL runway is a ground start like any other, labelled so the
+        // host knows (John, 2026-10-11).
+        let short = if runway.stol() { ", STOL" } else { "" };
         lines.push(format!(
             "  {:>3}  {airport} ({:.0} ft, {side}{short})",
             runway.object.saturating_sub(RUNWAY_OBJECT_BASE),

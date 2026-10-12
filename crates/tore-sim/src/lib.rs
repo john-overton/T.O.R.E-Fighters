@@ -18,6 +18,7 @@ pub mod models;
 pub mod research;
 pub mod runway_wind;
 pub mod sensors;
+pub mod stol;
 pub mod telemetry;
 pub mod turbulence;
 pub mod vapor;

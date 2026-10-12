@@ -94,7 +94,14 @@ fn sweep_side(
                 problem(format!("start ground auto picks runway {object:#x}"));
             }
         }
-        Err(_) if offered.is_empty() => {}
+        // Auto never picks a STOL strip (`auto_runway_for`), so a side whose
+        // only fields are STOL strips has none to pick.
+        Err(_)
+            if quick
+                .theater_fields(index)
+                .iter()
+                .filter(|f| offered.contains(&f.id))
+                .all(|f| f.stol) => {}
         Err(error) => problem(format!("start ground auto refused: {error}")),
     }
     // The AI's home runway from the middle and the corners of the map.

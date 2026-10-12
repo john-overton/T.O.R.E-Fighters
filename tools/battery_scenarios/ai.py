@@ -1009,6 +1009,40 @@ def scenarios() -> list[Scenario]:
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only",
             *(["--probe-redfor"] if redfor else [])],
             ticks=120000, timeout=2400, check=land_order_checker(lands_without_hanging)))
+    # Redrawn airports (slice CL-AP, John 2026-10-11: "ensure AI actually taxi
+    # on taxiways instead of grass"): a ground start, takeoff, land order and
+    # taxi to parking with no AI ground tick off the drawn pavement, at a base
+    # plan, the paired tiles (STRIP5A and STRIP6A fly the joined crossing
+    # runway) and two lone tiles. `--probe-pavement` prints the count; any
+    # off-pavement tick is an `off the pavement` anomaly in every ground probe.
+    def on_pavement(landers: int):
+        def check(output: str) -> list[str]:
+            # The scripted player flies on alone for up to 30 minutes and is
+            # not what these check, so it may come down.
+            problems = checker(ground=True, need_takeoff=True, need_landing=True)(output)
+            m = re.search(r"^AI probe pavement: ground_samples=(\d+) off_pavement=(\d+)$", output, re.M)
+            if not m:
+                problems.append("no 'AI probe pavement' line")
+            elif int(m.group(1)) == 0 or int(m.group(2)) > 0:
+                problems.append(f"pavement: {m.group(0)}")
+            parked = len(re.findall(r"Parked@", output))
+            if parked < landers:
+                problems.append(f"{parked} of {landers} AI aircraft parked")
+            return problems
+        return check
+
+    for name, theater, airport, extra, size, order, landers in (
+        ("ukr-a8-wing4", "UKR", "8", [], "4", 24000, 3),
+        ("fra-a24-tile", "FRA", "24", [], "2", 9000, 1),
+        ("egy-a22-tile", "EGY", "22", [], "2", 9000, 1),
+        ("nsk-a18-tile-f16", "NSK", "18", ["--aircraft", "f16c", "--probe-friendly-aircraft", "f16c"], "2", 9000, 1),
+        ("vlaf-a1-lone", "~VLAF", "1", [], "2", 9000, 1),
+        ("balf-a1-lone", "~BALF", "1", [], "2", 9000, 1),
+    ):
+        out.append(probe(f"airfield-taxi-{name}", [
+            "--theater", theater, "--ground-start", airport, *extra, "--probe-wing-size", size, "--maneuver", "takeoff",
+            "--probe-wing-order", f"{order}:land-selected", "--separation", "200", "--probe-wing-only", "--probe-pavement"],
+            ticks=216000 if size == "4" else 108000, timeout=2400, check=on_pavement(landers)))
     # An enemy ground start in single player (slice CL-R): Enemy Wing 1 parks
     # at Kharkiv (UKR 6, a Redfor field) while the player's wing leaves Odesa;
     # the AI pair must start on the ground and be flying at the end.

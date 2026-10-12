@@ -32,7 +32,9 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | Scenarios | What they do |
 | --- | --- |
 | `menus-validate-creator` | `--validate-creator`: loadouts for all 14 aircraft including every removed-store case, then the creator matrix, the render sweep and the input fuzz (below) |
-| `airport-allegiance` | `--airport-allegiance` (slice AL1): for every base theater, for Blue and for Redfor, the ground-start fields the creator offers and its default, each checked against the built world (the side's own or neutral, never the other side's; the creator's owner matches the imported allegiance; `start ground auto` and the AI's home runway from the map's middle and corners pick no enemy field). The summary must read `16 theaters, blue none: LFA TVIET, red none: -, 0 problems` ([allegiance](../spec/airports.md#allegiance)) |
+| `airport-allegiance` | `--airport-allegiance` (slice AL1): for every base theater, for Blue and for Redfor, the ground-start fields the creator offers and its default, each checked against the built world (the side's own or neutral, never the other side's; the creator's owner matches the imported allegiance; `start ground auto` and the AI's home runway from the map's middle and corners pick no enemy field). The summary must read `16 theaters, blue none: TVIET, red none: -, 0 problems` ([allegiance](../spec/airports.md#allegiance)); the Falklands' San Carlos, a STOL strip, is a Blue ground start since 2026-10-11 ([STOL runways](../spec/airports.md#stol-runways)) |
+| `airfield-taxi-audit` | `--airfield-audit` (slice CL-AP): every AI ground route of all 1,458 redrawn runway objects of the 75 layouts on the drawn pavement, every runway end reachable from parking, every runway line (the ILS) on a drawn runway. The summary must read `75 theaters, N airfields, 1458 runway objects, N routes, 0 problems` ([audit](../formats/redrawn-airports.md#audit)) |
+| `airfield-parked-audit` | `--airfield-audit --parked`: every Quick Mission template aircraft parked on a redrawn airfield (the 108 templates, seed 1) stands on its pavement; `0 problems` |
 | `menus-validate-text` | `--validate-text`: every imported string decodes without U+FFFD and is drawable in the original fonts |
 | `menus-window-terrain-*` | Real-window captures on every base theater (clear, night), four theaters in each other weather, and ground starts in all six weathers, checked for blank, black, one-colour, dark-day and bright-night frames |
 | `menus-validate-maps`, `menus-validate-weather` | Every imported map layout and every weather module and choice |
@@ -58,7 +60,7 @@ for size and blankness, and were also looked at by the agent that wrote them.
   steps a flown mission takes (the creator's own refusal check, the wing launch,
   ground layout, layout plan, altitude check, combat build, flight restart, AI wing
   build, group orders). It sweeps every theater layout with every separation and
-  altitude, every runway with wings of one to five (the 22 short strips are not on the list, so 110 fewer setups since 2026-09-30), every weather choice on every
+  altitude, every runway with wings of one to five (the 22 short strips were not on the list from 2026-09-30, 110 fewer setups; since 2026-10-11 they are listed, labelled STOL), every weather choice on every
   source theater, every player aircraft against every enemy aircraft, every wing's
   count, skill and aircraft, a sample of the whole wing-count product, every group
   order with survival on and off, every mission preset, and every other dropdown

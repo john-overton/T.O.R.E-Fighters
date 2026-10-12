@@ -61,14 +61,14 @@ name = "R0"
 from = [-3440, -1544]
 length = 7948
 width = 200
-pad = 0
+pad = 220
 touchdown = 1500
 marked_near = false
 
 [[taxiway]]
 name = "east"
 width = 75
-points = [[-2990, -1544], [-2990, 6154]]
+points = [[-2990, -1734], [-2990, 6154]]
 
 [[taxiway]]
 name = "west"
@@ -85,9 +85,14 @@ name = "mid"
 width = 75
 points = [[-3890, 2000], [-2990, 2000]]
 
+[[taxiway]]
+name = "near cross"
+width = 75
+points = [[-3440, -1734], [-2990, -1734]]
+
 [[apron]]
 name = "apron"
-min = [-2952.5, 0]
+min = [-2952.5, -144]
 max = [-2100, 4000]
 
 [[apron]]
@@ -96,7 +101,7 @@ min = [-4800, 1500]
 max = [-3927.5, 3500]
 
 [[line]]
-from = [-2100, 0]
+from = [-2100, -144]
 to = [-2100, 4000]
 out = [1, 0]
 
@@ -104,6 +109,20 @@ out = [1, 0]
 from = [-4800, 1500]
 to = [-4800, 3500]
 out = [-1, 0]
+
+# AI points (slice CL-AP, 2026-10-11, agent: John asked that the AI taxi on
+# taxiways, not grass): the base plans' pattern turned to this tile's main
+# runway. A cross taxiway 190 ft behind its near threshold (a 220 ft paved
+# pad), the parallel taxiway on its right, an apron for the nine parking slots
+# beside it, and a cross taxiway 250 ft before its far end. Coordinates are
+# in the tile's frame; parking_heading is against the frame.
+[anchors]
+taxi_out = [[-2990, -144], [-2990, -1734], [-3215, -1734], [-3440, -1734]]
+takeoff = [-3440, -1544]
+landing = [-3440, -544]
+taxi_in = [[-3440, 6154], [-3215, 6154], [-3020, 6154], [-2990, 2899]]
+parking = [[-2552, 378], [-2552, 628], [-2552, 878], [-2552, 1128], [-2552, 1378], [-2552, 1628], [-2552, 1878], [-2552, 2128], [-2552, 2378]]
+parking_heading = -90
 
 [extras]
 hangars = 4

@@ -2593,8 +2593,16 @@ stands.
 - **Folded under 25.** The mission text's `enemy-start ground RUNWAY|auto`
   line (slice CL-R, [dedicated server](../DEDICATED-SERVER.md)), written only
   when Enemy Wing 1 starts on the ground: a 24 game refuses a mission that
-  carries it, and the mission hash covers it. The close-out's other slices
-  changed no wire bytes.
+  carries it, and the mission hash covers it. The AI airfield sequence's
+  checkpoint gains one field, `ground_trim` (the rudder trim an AI aircraft
+  learns on the ground, slice CL-AP): the world checkpoint and so the
+  Check hash and a standby's restored state carry it, and a 24 build, which
+  lacks it, would read a 25 checkpoint wrongly. The Quick Mission
+  [front line](../spec/surface-defenses.md#the-front-line) (slice CL-FL) is
+  part of the surface every game builds from the mission and its seed: the
+  surface digest covers it, so a game that builds no front disagrees with
+  one that does and is refused. The close-out's other slices changed no wire
+  bytes.
 - **Checks that still apply.** The theater content item lists the files the
   fill is built from (the reference weather layer, every ground placement's
   picture, the kit's definitions and shapes), read without building the

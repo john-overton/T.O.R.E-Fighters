@@ -449,8 +449,8 @@ pub fn auto_runway_for(world: &Terrain, count: usize, red: bool) -> crate::World
 /// nearest the target at least 15 nm from it; else the first Red-side
 /// runway, by object id, that holds the wing). A chosen runway must be a
 /// Redfor or neutral field's (slice AL1: a Blue field is the other side's,
-/// under its guns) and no short strip or vertical pad (John, 2026-09-30, the
-/// player's rule). Whether the wing fits is [`ground_layout`]'s check.
+/// under its guns) and no vertical pad; a STOL strip is allowed, as it is
+/// for the player (John, 2026-10-11). Whether the wing fits is [`ground_layout`]'s check.
 pub fn enemy_runway(
     world: &Terrain,
     start: crate::mission::EnemyStart,
@@ -476,9 +476,9 @@ pub fn enemy_runway(
                 )
                 .into());
             }
-            if scene.vertical_pad(runway) || scene.short_strip(runway) {
+            if scene.vertical_pad(runway) {
                 return Err(format!(
-                    "{name} is a short strip: no enemy ground start there. Choose a longer runway or start the enemy Airborne."
+                    "{name} is a vertical pad: no enemy ground start there. Choose a runway or start the enemy Airborne."
                 )
                 .into());
             }

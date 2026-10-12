@@ -477,7 +477,9 @@ impl Map {
                 let tile = airport.map_or(Tile::Neutral, |a| airfield_tile(a.allegiance, own));
                 symbol(pixels, icons, x, y, Some(15), tile);
                 let name = airport.map_or(runway.name.as_str(), |a| a.name.as_str());
-                label(pixels, font, name, (x, y + 12), INK, &mut labels);
+                // A STOL runway says so (slice CL-AP, John 2026-10-11).
+                let name = tore_sim::stol::label(name, tore_sim::stol::runway(runway));
+                label(pixels, font, &name, (x, y + 12), INK, &mut labels);
             }
         }
         let contacts = &readout.map;

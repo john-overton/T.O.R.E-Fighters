@@ -307,6 +307,47 @@ fn picture_texel(tu: usize, tv: usize, rotation: u8) -> (usize, usize) {
     }
 }
 
+/// The ground texture under a point as the terrain mesh draws it: the
+/// texel's palette index, 255 where the picture is the water cutout (the
+/// ocean pass shows through). `None` where no placement covers the point.
+/// Reads each placement's picture once, when first asked (slice CL-AP's
+/// airfield audit, which counts pavement drawn over water).
+pub fn ground_texel<'a>(
+    resources: &'a dyn ResourceSource,
+    environment: &tore_formats::theater::Environment,
+    base: &str,
+) -> impl Fn(i64, i64) -> Option<u8> + 'a {
+    let pictures: std::cell::RefCell<BTreeMap<String, Option<Vec<u8>>>> = Default::default();
+    let by_key: BTreeMap<(i32, i32), (String, u8)> = environment
+        .textures
+        .iter()
+        .map(|(key, p)| (*key, (p.resource_name(base), p.rotation)))
+        .collect();
+    move |x, z| {
+        let key = LightMap::key(x, z);
+        let (name, rotation) = by_key.get(&key)?;
+        let mut pictures = pictures.borrow_mut();
+        let pixels = pictures
+            .entry(name.clone())
+            .or_insert_with(|| {
+                let pic = tore_formats::Pic::parse(resources.get(name)?).ok()?;
+                (pic.width == TEXELS && pic.height == TEXELS && pic.palette.is_empty()).then(|| {
+                    pic.pixels
+                        .iter()
+                        .zip(&pic.mask)
+                        .map(|(p, m)| if *m { *p } else { 255 })
+                        .collect()
+                })
+            })
+            .as_ref()?;
+        let cell = TILE_FT / 4;
+        let tu = ((x - i64::from(key.0) * cell) / TEXEL_FT).clamp(0, 255) as usize;
+        let tv = ((z - i64::from(key.1) * cell) / TEXEL_FT).clamp(0, 255) as usize;
+        let (col, row) = picture_texel(tu, tv, *rotation);
+        Some(pixels[row * TEXELS + col])
+    }
+}
+
 /// The theater's city tiles, by grid key (`col & !3`, `row & !3`).
 #[derive(Clone, Debug, Default)]
 pub struct LightMap {

@@ -388,8 +388,10 @@ leave the in-flight airport list ([rule](../spec/airports.md#short-strips), item
   `TORE_AIRPORT_PROBE=1 tore-app --quick-mission --snapshot X.ppm --theater CODE`,
   which prints `airport runway: ... short_strip=` for every runway) and
   `ground_airport(theater, n)` moves a ground start to the next airport that is
-  not one. The AI probe's `--ground-start N` refuses a short strip, so a scenario
-  or fuzz seed must not name one.
+  not one. The AI probe's `--ground-start N` refused a short strip until
+  2026-10-11; since John's STOL decision ([STOL runways](../spec/airports.md#stol-runways))
+  it starts there, but a conventional AI wing cannot take off from 1,074 ft,
+  so a scenario or fuzz seed still must not name one.
 - `ai-theater-apa-takeoff-a3` and `ai-theater-lfa-takeoff-a3` are now
   `ai-theater-apa-takeoff-a7` (Chitre, 7,246 ft) and
   `ai-theater-lfa-takeoff-a4` (Walker Creek, 7,246 ft). Their known-failure markers are gone.
@@ -399,6 +401,28 @@ leave the in-flight airport list ([rule](../spec/airports.md#short-strips), item
   unmarked; 113 passed before and still does.
 - A unit test (`tools/test_battery_ai.py`, `ShortStripTests`) checks that no AI
   scenario and none of the 400 fuzz seeds starts on a short strip.
+
+### AI on the pavement (redrawn airports, 2026-10-11)
+
+John asked that the AI taxi on taxiways, not grass (slice CL-AP). Every AI
+probe now counts an AI aircraft on its wheels in an airfield phase at a
+redrawn airport and off its drawn pavement as an `off the pavement`
+anomaly, which fails the scenario like any other (it is not a known
+anomaly). `--probe-pavement` adds the closing count line
+`AI probe pavement: ground_samples=N off_pavement=M` and `--probe-track FILE`
+the tracks `--airfield-audit --track` draws
+([audit](../formats/redrawn-airports.md#audit)).
+
+The `ai-airfield-taxi-*` scenarios fly a ground start, takeoff, land order
+and taxi to parking with `--probe-pavement` and require 0 off-pavement
+ticks, a nonzero ground count and every landing AI aircraft `Parked`: a
+wing of four at L'viv (UKR 8, the STRIP plan, land order at 200 s so all
+three wingmen land), the paired tiles Southampton1 (FRA 24, the joined
+STRIP5A runway), El-Nakab1 (EGY 22, STRIP3A) and Runway 18 (NSK 18, the
+joined STRIP6A runway, F-16Cs), and the lone tiles `~VLAF` 1 (STRIP6A) and
+`~BALF` 1 (STRIP7A). Before the slice the AI left the pavement at 10 of 12
+probed fields; the measurements are in
+[redrawn airports](../formats/redrawn-airports.md#validation-2026-10-10-surface-data-import).
 
 ### Enemy fields (airport allegiance, 2026-10-10)
 

@@ -118,6 +118,10 @@ pub fn lights(
     frame: &Frame,
     height: &dyn Fn(f64, f64) -> f64,
 ) -> Vec<Light> {
+    // A dirt strip has no lights (`lights = false`; slice CL-AP).
+    if parts.first().is_some_and(|(plan, _)| !plan.lights) {
+        return Vec::new();
+    }
     let plane = frame.origin[1];
     let mut out = Vec::new();
     let world_dir = |d: Point| Some(frame.world_vector(d));

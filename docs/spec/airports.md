@@ -135,7 +135,9 @@ keys are in [input](../INPUT.md#player-wing-orders).
 ## Short strips
 
 John decided on 2026-09-30 that the short airstrips take no part in ground
-starts or in the tower's service. There are 22 of them, each with a runway of
+starts or in the tower's service. On 2026-10-11 he lifted the ground-start
+part: they are labelled STOL and offered as ground starts
+([STOL runways](#stol-runways)); the tower and AI rules below stand. There are 22 of them, each with a runway of
 about 1,074 ft: Cuba (La Coloma, Al Turas, Camino De Tobac, Deleite, Real
 Campina, Siguanea), the Falklands (Goose Green, San Carlos), Pakistan (Kotaddu,
 Chor, Akli, Nagaur), Panama (Santiago, Santa Fe, Toncri, Crawford, Rio Sidre) and
@@ -164,13 +166,40 @@ What follows from it:
 - **The AI.** No AI aircraft on either side takes a short strip as its home
   runway, landing field or return point (the same list as a vertical pad, which is
   also nobody's home). See [AI home airfields](quick-mission-menu.md#home-airfields).
-- **Ground starts.** A short strip is not offered as a ground start
-  ([Quick Mission](quick-mission-menu.md#player-ground-start)).
+- **Ground starts.** Since 2026-10-11 a short strip is offered as a ground
+  start, labelled STOL ([STOL runways](#stol-runways)). The automatic start
+  (`start ground auto`) still never picks one.
 
 The map keeps showing every airfield, since it marks landmarks, not services.
 The developer `--headless-flight ... --ground-start N` takeoff and landing runs
 still start on any airport, short strips included: they measure the flight model,
 not a mission.
+
+## STOL runways
+
+John asked on 2026-10-11: "for short runways maybe we label them as STOL so
+the player knows and then don't limit starts there." A runway shorter than
+3,000 ft is a STOL runway (`tore_sim::stol::STOL_RUNWAY_FT`; the number is
+`fitted`, agent decision 2026-10-11). The AI F/A-18D's takeoff ground roll
+measured 1,930 to 2,170 ft in the slice CL-AP probes, and fast jets need about
+2,000 to 3,000 ft at a light load, so under 3,000 ft only a STOL or vertical
+aircraft has margin. Every retail field is either a 1,074 ft dirt strip or
+4,060 ft and longer, so the STOL fields are exactly the 22 short strips.
+
+- **Labelled.** The field reads `Name (STOL)` in the Quick Mission's airport
+  picker, on the in-flight map, in the NAV page's airport list and in the
+  dedicated server's `--check` runway list (`, STOL`). The NAV list leaves
+  the short strips out (the tower does not serve them), so today no entry
+  there carries the label; any STOL field the tower serves would.
+- **Not limited.** The picker offers a STOL field of the pilot's side like
+  any other, listed after the longer fields, so the default start stays a
+  runway any aircraft can use when the side has one. The Falklands' Blue
+  field, San Carlos, is a Blue ground start for the first time. Nothing
+  stops a conventional aircraft starting there: the label is the warning.
+  An AI wingman of a conventional type rolls off the end onto the grass, and
+  the battery keeps its AI wings off these fields.
+- **Unchanged.** The tower, the AI's homes and landing orders and the
+  automatic start keep the short-strip rule above.
 
 ## Allegiance
 
@@ -189,7 +218,7 @@ runway has an owner, so no field is neutral today.
 | Baltics | 21 | 13 | 0 | Siauliai |
 | Cuba | 1 | 16 | 6 | Key West |
 | Egypt | 12 | 13 | 0 | Ras Nasrani |
-| Falklands | 0 | 3 | 2 | none (San Carlos, the Blue field, is a short strip) |
+| Falklands | 0 | 3 | 2 | San Carlos (STOL, since 2026-10-11) |
 | France | 13 | 19 | 0 | Bournemouth |
 | Greece | 10 | 7 | 0 | Athinai |
 | Iraq | 8 | 13 | 0 | King Khalid |

@@ -29,7 +29,10 @@ An airport's STRIP shape supplies taxi-out points, a takeoff spot and heading,
 a landing point and heading, taxi-back points and nine parking slots. With
 anchors the AI uses them exactly as below. Without anchors (a runway known only
 by its centre, heading and length) the AI uses the fitted runway-only fallback
-described in each section.
+described in each section. With the redrawn airports (the default) the points
+come from the airport's plan, and since slice CL-AP every runway but the dirt
+strips (vertical pads, which no conventional AI uses) has them, second tiles
+included ([the AI's points](../formats/redrawn-airports.md#the-ais-points)).
 
 ## Short strips
 
@@ -59,7 +62,11 @@ John requested on 2026-09-23 that Quick Mission wingmen begin queued near the
 runway. [Placement and distances](quick-mission-menu.md#player-ground-start)
 use the taxi-out anchors. Queued aircraft resume their current taxi leg,
 never drive back through the parking route, and always require a clear runway,
-including within 475 ft of the takeoff spot. Their taxi and line-up occupy the
+including within 475 ft of the takeoff spot. A queued aircraft taxis its legs
+out even when it waits within 475 ft of the spot, never skipping them by the
+shortcut below (fitted, agent decision, slice CL-AP 2026-10-11: the fourth of
+a wing waits on the parallel taxiway abeam the spot and went straight to its
+takeoff roll from there, on the taxiway). Their taxi and line-up occupy the
 runway gate until liftoff. Parking starts retain the recovered sequence below.
 
 ## Takeoff from the ground
@@ -87,9 +94,13 @@ runway gate until liftoff. Parking starts retain the recovered sequence below.
   through its point running back along the reversed runway heading, or within
   475 ft of the takeoff spot. Retail pivots a stopped aircraft toward the next
   point. The hybrid ground model cannot turn a stopped aircraft, so it creeps
-  round at 12.5 ft/s instead (fitted).
+  round at 12.5 ft/s instead (fitted). How it steers along a leg is below
+  ([taxiing on the pavement](#taxiing-on-the-pavement)).
 - **Line up** (spec-derived): aim at the centerline point 50 ft closer than the
-  current distance to the spot; 50 ft/s when within 5 degrees of that aim,
+  current distance to the spot, but with anchors never farther back than the
+  last taxi-out point when that point stands on the centerline behind the
+  spot (fitted, slice CL-AP: from the cross taxiway the old aim took a
+  queued wingman across the grass behind it); 50 ft/s when within 5 degrees of that aim,
   otherwise 12.5 ft/s (retail stops and pivots at 45 degrees or more, fitted as
   above). On the centerline (within 50 ft) taxi straight to the spot and stop
   within 10 ft. More than 26,400 ft from the spot goes back to holding. Without
@@ -106,6 +117,36 @@ runway gate until liftoff. Parking starts retain the recovered sequence below.
   Then gear and flaps come up and the aircraft returns to free flight; wingmen
   rejoin their leader. Fitted safety: the climb-out ends 90 seconds after
   liftoff in any case.
+
+## Taxiing on the pavement
+
+Fitted, agent decisions of slice CL-AP (2026-10-11) for John's "ensure AI
+actually taxi on taxiways instead of grass". Probes at the redrawn airports
+counted the AI's ground ticks off the drawn pavement: at 10 of 12 fields the
+AI left it, and these rules took it to none at 31 probe runs
+([validation](../formats/redrawn-airports.md#validation-2026-10-10-surface-data-import)).
+
+- **Along the leg.** Taxiing out and in, the aircraft aims at the point
+  120 ft ahead of it on the line from the leg's start (the previous point,
+  its start position on the first leg out, the landing aim point on the first
+  leg in) to the leg's point, not at the point itself. Aiming at a point
+  thousands of feet away turned a steady nosewheel bias, a crosswind, into a
+  drift of more than 100 ft off the runway or taxiway; along the line it is
+  a few feet. The heading loop is well damped at taxi speed with 120 ft.
+- **Rudder trim.** On the ground a heading error held within 15 degrees of
+  the heading wanted builds a rudder trim at 0.06 per degree per second (0.02 let
+  a Redfor wingman at Burevestnik creep 110 ft off the centre line), up
+  to 0.6, while rolling faster than 5 ft/s; each airfield phase starts with
+  none. A Vladivostok takeoff in a crosswind held a heading 7 degrees off
+  and ran 158 ft off the centre line before it; a turn onto the next leg does
+  not wind it up.
+- **Slowing for a stop.** Approaching a point it stops at (the first point
+  out, every point in), the aircraft holds the speed from which 2 ft/s per
+  second stops it there, never below 12.5 ft/s. At 50 ft/s it used to stop
+  about 90 ft past the point, off the end of a taxiway corner.
+
+The takeoff roll and rollout keep their own steering; the rudder trim helps
+them hold the centre line in a crosswind as well.
 
 ## Landing
 

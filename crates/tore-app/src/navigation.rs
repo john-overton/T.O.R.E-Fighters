@@ -81,7 +81,11 @@ impl Navigation {
                     })?;
                 Some(Destination {
                     id: airport.id,
-                    name: airport.name.clone(),
+                    // A STOL field says so (slice CL-AP, John 2026-10-11).
+                    name: tore_sim::stol::label(
+                        &airport.name,
+                        tore_sim::stol::airport(scene, airport),
+                    ),
                     position: runway.approach_center,
                 })
             })
