@@ -397,6 +397,97 @@ class GunshipTests(unittest.TestCase):
         self.assertNotEqual(s.gunship_problems(gunship_run(), self.want * 2), [])
 
 
+def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0, released=True, killed=True,
+             lost=None, min_agl=1400, aircraft="Mi24", quick=False, start_alt=1500):
+    """One helicopter run of the driver: `breaks` BREAK lines (one a second), and a pop-up that may
+    release and kill."""
+    out = [
+        f"ai-strike: setup aircraft={aircraft} load=AT2.JT station=1 count=4 rounds=4 target=0x50000001 name=T-90 "
+        "target_at=999570,7,789571 hp=200 skill=2 profile=none handback=none order=none mode=none",
+        "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
+        *(["ai-strike: ROLE t=0.000 plane=1 role=strike"] if quick else []),
+        f"ai-strike: start t=0.000 plane=0 range_ft=24304 alt_ft={start_alt} speed_kt=120",
+        f"ai-strike: PROFILE t=0.008 name={profile}",
+    ]
+    for n in range(breaks):
+        out.append(
+            f"ai-strike: BREAK t={20 + n}.000 heading=350 track=345 bearing=22 offset={offset} masked_s=0 "
+            f"blocked_s={blocked} pitch={pitch} agl_ft=1400 speed_kt={kt} bank=-30"
+        )
+    if released:
+        out.append("ai-strike: RELEASE t=70.000 n=1 weapon=AT2.JT station=1 alt_ft=1600 speed_kt=123 range_ft=9200"
+                   " pass=1 aim_ft=0 inside=yes")
+        out.append("ai-strike: IMPACT t=77.000 n=1 miss_ft=6.0 at=1.0,2.0,3.0")
+    if killed:
+        out.append("ai-strike: KILL t=77.000 victim=0x50000001 category=0x0400 target=yes")
+    if lost is not None:
+        out.append(f"ai-strike: LOST t={lost:.3f} reason=destroyed crashed=yes")
+    n = 1 if released else 0
+    out.append(
+        f"ai-strike: summary t=100.000 ran_s=100.0 profile={profile} releases={n} impacts={n} "
+        f"kills={1 if killed else 0} egress=no lost={'yes' if lost is not None else 'no'} activity=Defending "
+        f"target_hp={'0' if killed else '200'}/200 closest_ft=4773 store_rounds_left=3 min_agl_ft={min_agl} "
+        f"break_s={float(breaks)}"
+    )
+    if not released:
+        out.append("ai-strike: no release")
+    out.append("ai-strike: done")
+    return "\n".join(out)
+
+
+class HelicopterTests(unittest.TestCase):
+    want = [dict(label="mi24", profile="popup", breaks=5, release=True, kill=True)]
+
+    def test_an_honest_defence_passes(self):
+        self.assertEqual(s.heli_defense_problems(heli_run(), self.want), [])
+
+    def test_the_break_must_be_a_break(self):
+        for bad in (heli_run(breaks=2), heli_run(offset=45), heli_run(kt=60), heli_run(pitch=-25),
+                    heli_run(blocked=2)):
+            self.assertNotEqual(s.heli_defense_problems(bad, self.want), [])
+        self.assertEqual(s.heli_defense_problems(heli_run(offset=60), self.want), [])
+        self.assertEqual(s.heli_defense_problems(heli_run(offset=120), self.want), [])
+
+    def test_the_pass_the_ai_chose_is_named(self):
+        self.assertNotEqual(s.heli_defense_problems(heli_run(profile="standoff"), self.want), [])
+
+    def test_the_helicopter_lives_and_stays_off_the_ground(self):
+        self.assertNotEqual(s.heli_defense_problems(heli_run(lost=80.0), self.want), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(min_agl=40), self.want), [])
+
+    def test_a_release_and_a_kill_are_asked_for_only_when_wanted(self):
+        self.assertNotEqual(s.heli_defense_problems(heli_run(released=False, killed=False), self.want), [])
+        quiet = [dict(label="stand-off", profile="popup", breaks=5, release=False)]
+        self.assertEqual(s.heli_defense_problems(heli_run(released=False, killed=False), quiet), [])
+
+    def test_the_run_count_must_match(self):
+        self.assertNotEqual(s.heli_defense_problems(heli_run(), self.want * 2), [])
+
+    def test_a_quick_mission_wing_of_helicopters_is_given_the_strike_role_and_starts_low(self):
+        text = heli_run(quick=True) + "\n" + heli_run(quick=True, aircraft="Ah64")
+        self.assertEqual(s.quick_heli_problems(text), [])
+        self.assertNotEqual(s.quick_heli_problems(heli_run(quick=True) + "\n" + heli_run(quick=False)), [])
+        self.assertNotEqual(s.quick_heli_problems(heli_run(quick=True, start_alt=5000) * 1 + "\n" + heli_run(quick=True)), [])
+        self.assertNotEqual(
+            s.quick_heli_problems(heli_run(quick=True, released=False, killed=False) + "\n" + heli_run(quick=True)), []
+        )
+
+    def test_the_scenarios_use_the_checks_and_the_defended_runs_are_unforced(self):
+        scenarios = {sc.name: sc for sc in s.scenarios()}
+        defended = scenarios["ai-strike-heli-defended"]
+        argsets = [defended.args] + [step.args for step in defended.then]
+        self.assertEqual(len(argsets), 4)
+        self.assertTrue(all("mi24" in a for a in argsets))
+        self.assertNotIn("--profile", [x for a in argsets for x in a], "the AI chooses its pass")
+        heli = scenarios["ai-strike-heli"]
+        self.assertNotIn("--profile", [x for a in [heli.args] + [st.args for st in heli.then] for x in a])
+        honest = [heli_run(breaks=25), heli_run(), heli_run(killed=False),
+                  heli_run(profile="standoff", released=False, killed=False)]
+        self.assertEqual(defended.check("\n".join(honest)), [])
+        quick = scenarios["qmc-strike-heli"]
+        self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)
+
+
 class ScenarioTests(unittest.TestCase):
     def setUp(self):
         self.scenarios = {sc.name: sc for sc in s.scenarios()}

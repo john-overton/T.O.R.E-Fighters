@@ -429,6 +429,79 @@ def quick_wing_problems(output: str) -> list[str]:
     return problems
 
 
+# The helicopter break (docs/spec/ai-strike.md, "Helicopter defence"): the offsets the search may take
+# off the threat's bearing, the slowest it flies a break, the steepest flight path it asks for, the
+# lowest the helicopter may be in a run it lives through.
+BREAK_OFFSETS = (60.0, 90.0, 120.0)
+BREAK_KT_MIN = 75.0
+BREAK_PITCH_MAX_DEG = 10.0
+HELI_AGL_MIN_FT = 150.0
+
+
+def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
+    """`ai-strike-heli-defended`: for each run (`label`, `profile`, `breaks` BREAK lines at least,
+    `release` and `kill` wanted or not), the AI named its pass, flew the helicopter break (a BREAK
+    line a second while it did, each at an offset of 60, 90 or 120 degrees, at 75 knots or more, no
+    steeper than 10 degrees, never blocked by the ground), released as wanted, was not lost and did
+    not fly lower than 150 ft above the ground."""
+    runs = parse_runs(output)
+    if len(runs) != len(runs_wanted):
+        return [f"{len(runs)} runs finished, want {len(runs_wanted)}"]
+    problems: list[str] = []
+    for run, want in zip(runs, runs_wanted):
+        label = want["label"]
+        problems += consistency_problems(run, label)
+        named = (run.of("PROFILE") or [{}])[-1]
+        if named.get("name") != want["profile"]:
+            problems.append(f"{label}: flew PROFILE {named.get('name')}, want {want['profile']}")
+        breaks = run.of("BREAK")
+        if len(breaks) < want["breaks"]:
+            problems.append(f"{label}: {len(breaks)} BREAK lines, want at least {want['breaks']}")
+        for line in breaks:
+            at = f"{label}: BREAK at t={line.get('t')}"
+            if number(line.get("offset")) not in BREAK_OFFSETS:
+                problems.append(f"{at} is {line.get('offset')} degrees off the bearing, want one of {BREAK_OFFSETS}")
+            if not number(line.get("speed_kt")) >= BREAK_KT_MIN:
+                problems.append(f"{at} at {line.get('speed_kt')} kt, want {BREAK_KT_MIN:.0f} or more")
+            if not abs(number(line.get("pitch"))) <= BREAK_PITCH_MAX_DEG:
+                problems.append(f"{at} asks for a flight path of {line.get('pitch')} degrees")
+            if number(line.get("blocked_s")) != 0:
+                problems.append(f"{at} is blocked by the ground for {line.get('blocked_s')} s")
+        if want["release"] and not (run.of("RELEASE") and run.of("IMPACT")):
+            problems.append(f"{label}: no release and impact")
+        if want.get("kill") and not any(k.get("target") == "yes" for k in run.of("KILL")):
+            problems.append(f"{label}: the target was not killed ({run.summary.get('target_hp')})")
+        if run.of("LOST"):
+            problems.append(f"{label}: the helicopter was lost ({run.first('LOST')})")
+        low = number(run.summary.get("min_agl_ft"))
+        if not low >= HELI_AGL_MIN_FT:
+            problems.append(f"{label}: flew down to {run.summary.get('min_agl_ft')} ft above the ground")
+    return problems
+
+
+def quick_heli_problems(output: str) -> list[str]:
+    """`qmc-strike-heli`: a Quick Mission's friendly wing 2 of two helicopters with a ground target
+    set (an Mi-24 pair, then an AH-64 pair): the mission gave them the Strike role, started them at
+    1,500 ft over the ground, and they released. A loss to the target's defences is allowed."""
+    runs = parse_runs(output)
+    if len(runs) != 2:
+        return [f"{len(runs)} runs finished, want 2"]
+    problems: list[str] = []
+    for run, label in zip(runs, ("mi24 pair", "ah64 pair")):
+        problems += consistency_problems(run, label)
+        found = run.first("ROLE")
+        if found is None:
+            problems.append(f"{label}: no ROLE line")
+        elif found.get("role") != "strike":
+            problems.append(f"{label}: the wing was given role {found.get('role')}, want strike")
+        height = number((run.first("start") or {}).get("alt_ft"))
+        if not abs(height - 1500.0) <= 100.0:
+            problems.append(f"{label}: started {height:.0f} ft over the ground, want 1,500")
+        if not run.of("RELEASE"):
+            problems.append(f"{label}: the Strike wing never released")
+    return problems
+
+
 def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
     """The behaviour scenarios: for each run (a dict with `label`, `profile`, `skill`, and
     optional `miss` (bomb miss limit) or `weapon_hit`), the AI named the pass it flew, released,
@@ -880,15 +953,35 @@ def scenarios() -> list[Scenario]:
     heli = ["--altitude", "1500", "--speed", "120", "--seconds", "150"]
     at2 = ["--aircraft", "mi24", "--load", "AT2", *heli]
     heli_rockets = ["--aircraft", "ah64", "--load", "LAU61", *heli]
+    # Light SAMs with the layout of surface seed 19: the Mi-24's pop-up goes through their warnings,
+    # breaks and gets its AT-2 away (slice ST-H; before it, the fighters' defence sank a helicopter).
+    sams19 = ["--defenses", "0", "1", "--surface-seed", "19"]
     heli_runs = [
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2"),
          dict(label="mi24 at2 popup", profile="popup", skill=2, miss=None, hit=True)),
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", "--profile", "standoff"),
-         dict(label="mi24 at2 standoff", profile="standoff", skill=2, miss=None, hit=True)),
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19),
+         dict(label="mi24 at2 popup under SAMs", profile="popup", skill=2, miss=None, hit=True, defends=True)),
         (pilot_run("UKR", "QUCOL", *heli_rockets, "--skill", "2"),
          dict(label="ah64 rockets skill 2", profile="popup", skill=2, miss=MISS_FT_MAX[2], egress=False)),
         (pilot_run("UKR", "QUCOL", *heli_rockets, "--skill", "3"),
          dict(label="ah64 rockets skill 3", profile="popup", skill=3, miss=MISS_FT_MAX[3], egress=False)),
+    ]
+    # The helicopter's defence (slice ST-H): the AI picks its own pass, a break of plus or minus 90
+    # degrees comes with every warning, speed and height are kept, and the helicopter is not lost.
+    # AAA: heavy on the column (skill 1), light on the factory. SAMs: the layout of seed 1 from 4 nm
+    # at 200 ft, where the AI chooses the stand-off attack itself and the SAMs out-range it, so
+    # nothing is released and the helicopter lives (the stand-off attack's own pass is the unit
+    # tests').
+    defended_runs = [
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "1", "--defenses", "3", "0"),
+         dict(label="mi24 under heavy AAA", profile="popup", breaks=20, release=True, kill=True)),
+        (pilot_run("UKR", "QUFACT", *at2, "--skill", "1", "--defenses", "1", "0"),
+         dict(label="mi24 under light AAA at the factory", profile="popup", breaks=5, release=True, kill=True)),
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19),
+         dict(label="mi24 under SAMs", profile="popup", breaks=5, release=True)),
+        (pilot_run("UKR", "QUCOL", "--aircraft", "mi24", "--load", "AT2", "--altitude", "200", "--from", "4",
+                   "--speed", "120", "--seconds", "200", "--skill", "2", "--defenses", "0", "1", "--surface-seed", "1"),
+         dict(label="mi24 chooses the stand-off under SAMs", profile="standoff", breaks=5, release=False)),
     ]
     # The AC-130 (slice ST-F) on the moving armoured column: the TVIET truck park's radar-laid guns
     # (26,200 and 44,250 ft reach) shoot it down on its way in, so the quiet column it is.
@@ -1165,11 +1258,38 @@ def scenarios() -> list[Scenario]:
             args=heli_runs[0][0], timeout=600,
             then=[Step(a, timeout=300) for a, _ in heli_runs[1:]],
             check=lambda out: strike_problems(out, [w for _, w in heli_runs]),
-            notes="Helicopters strike the Ukraine armored column: a Mi-24's AT-2 from the pop-up and "
-                  "from the stand-off attack (masked to the weapon's range, unmask, fire, hold the line "
-                  "until impact), each hurting the tank; an AH-64's rocket burst from the pop-up at "
-                  "skills 2 and 3, the drawn aim inside the circle and every rocket within the circle "
-                  "plus the gate plus 400 ft. None is lost.",
+            notes="Helicopters strike the Ukraine armored column: a Mi-24's AT-2 from the pop-up, the "
+                  "same pass through light SAMs (it defends and its AT-2 still hurts the tank), an "
+                  "AH-64's rocket burst from the pop-up at skills 2 and 3, the drawn aim inside the "
+                  "circle and every rocket within the circle plus the gate plus 400 ft. None is lost. "
+                  "The stand-off attack is no longer forced on a quiet column: the AI chooses it under "
+                  "SAMs itself (ai-strike-heli-defended).",
+        ),
+        Scenario(
+            name="ai-strike-heli-defended", lane="flight",
+            args=defended_runs[0][0], timeout=600,
+            then=[Step(a, timeout=300) for a, _ in defended_runs[1:]],
+            check=lambda out: heli_defense_problems(out, [w for _, w in defended_runs]),
+            notes="A Mi-24 under fire (slice ST-H): heavy AAA on the column and light AAA at the "
+                  "factory (it breaks, still fires its AT-2 and kills the target), light SAMs (it "
+                  "breaks, fires, hurts the target), and the layout the AI answers with the stand-off "
+                  "attack itself (it breaks and lives). Each break is the retail plus or minus 90 "
+                  "degrees to the threat's bearing (or the masking alternatives), kept at speed, within "
+                  "10 degrees of level and clear of the ground; the helicopter is not lost.",
+        ),
+        Scenario(
+            name="qmc-strike-heli", lane="flight",
+            args=pilot_run("UKR", "QUFACT", "--aircraft", "mi24", "--load", "AT2", "--quick-wing",
+                           "--seconds", "300"),
+            timeout=900,
+            then=[Step(pilot_run("UKR", "QUFACT", "--aircraft", "ah64", "--load", "LAU61", "--quick-wing",
+                                 "--seconds", "300"), timeout=900)],
+            check=quick_heli_problems,
+            notes="A Quick Mission with the Ukraine factory as the ground target and a second friendly "
+                  "wing of two AI helicopters (an Mi-24 pair, then an AH-64 pair): the mission offers "
+                  "them, gives them the Strike role by the bomber-class rule, starts them 1,500 ft over "
+                  "the ground, and they fly the pop-up and release (AT-2, then a rocket burst). Defended "
+                  "targets may bring them down, so a loss is allowed.",
         ),
         Scenario(
             name="ai-strike-ac130", lane="flight",
