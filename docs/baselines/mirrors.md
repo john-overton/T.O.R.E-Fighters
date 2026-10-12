@@ -109,3 +109,38 @@ original mirror rims and Hornet twin-tail reflections. Aircraft switching is
 checked through Quick Mission. Camera-preview and view-cycle runs verify shared
 resources. Evidence stays in ignored `.local/mirrors/`; switch captures remain
 under `.local/rafale-animation/`. Windows/macOS checks unavailable on this host.
+
+## 2026-10-12 review of every cockpit picture
+
+Slice BC, bug B18 (mirrors not all rendered correctly). `tore-app
+--cockpit-sheet OUT_DIR` renders every flyable aircraft's cockpit as flight
+draws it (forward view, 3,000 ft over the UKR start, no HUD, mirrors live)
+and the cockpit art with the mirror masks tinted (centre red, left green,
+right blue), each tile labelled with the aircraft, its picture and its fitted
+regions. Offscreen, no window.
+
+Finding: the masks covered only the F/A-18, F-14, A-4E and F-4 family and
+Rafale (three each) and the Su-27, AV-8 and F-15 and Su-35 (centre only).
+Seven pictures draw other mirror lozenges as flat colour that the rear view
+never filled, so they showed a solid blue or teal patch:
+
+| Picture | Aircraft | Before | After (fitted seeds, left/right/centre) |
+| --- | --- | --- | --- |
+| SU33H | MiG-29, Su-25, MiG-23, Mi-24 | none | left and right (176,195) (1103,195) |
+| AV8H | Su-27, AV-8B, F-15 | centre | centre plus (204,257) (1064,257) |
+| SU35H | Su-35 | centre | centre plus (203,297) (1075,297) |
+| A7H | A-7 | none | centre (641,35), (120,304) (1161,304) |
+| F104H | F-104, A-10 | none | left and right (231,232) (1049,232) |
+| Y141H | Yak-141 | none | left and right (375,91) (902,91) |
+
+Pictures with no flat mirror fill stay without (F-16, F-22, X-31, MiG-17,
+MiG-21, and the AC-130 picture shared by the transports, radar aircraft,
+V-22, AH-64, CH-47 and airliners). Seeds were found by listing the
+exact-colour components of each picture, as before; the existing flood bounds
+apply. A picture with only side mirrors fills slots 2 and 3 (the shader keys
+the crop on the slot), so the sides show the same left and right crops of the
+fitted rear panorama as the F/A-18's. All masks, the shared rear camera (eye
+7 ft above and 10 ft ahead of the model origin) and the crops remain fitted;
+no per-aircraft eye was added. Evidence: renders before and after in
+`.local/next-round/renders/nr-bc/mirrors-before` and `mirrors-after`.
+

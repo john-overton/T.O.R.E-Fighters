@@ -235,7 +235,8 @@ is allowed only for these reviewed identities. Their PT HUD pointers select
 the shared cockpit families above. SU35.PT has a null HUD pointer; SU35.HUD is
 an explicit player-presentation choice, documented in the behavior spec.
 F22 and M21 cockpit families have no mirror overlay resources; SU33 has side
-overlays but no center overlay. Missing required flight/cockpit resources still
+overlays but no center overlay, and since 2026-10-12 those side overlays are
+live mirrors like the others (see the [mirror review](../baselines/mirrors.md#2026-10-12-review-of-every-cockpit-picture)). Missing required flight/cockpit resources still
 fail import or loading. VIS240 joins VIS340 as a reviewed source visual sensor
 for the new default stations. Default guns/stores join the existing manually
 controlled service and loadout allowlist, not a claim of all-JT support.

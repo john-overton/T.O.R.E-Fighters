@@ -165,7 +165,9 @@ physics is added. The previous triangular widening is removed.
 F-14/X-31 flames follow the existing exhaust fraction. A-4 has no flame branch.
 
 Cockpit mirrors use three reviewed flat-fill regions for F-14D and A-4E;
-X-31 has no mirror regions. Their optics share the existing fitted rear camera.
+X-31 has no mirror regions. Slice BC (2026-10-12) added the side mirrors the
+SU-33 and AV-8 pictures draw and the mirrors of the A-7, F-104 (and A-10),
+Su-35 sides and Yak-141: see the [mirror review](../baselines/mirrors.md#2026-10-12-review-of-every-cockpit-picture). Their optics share the existing fitted rear camera.
 X-31 side-mirror art is absent and is not borrowed from another aircraft.
 
 ## Unknown behavior
