@@ -2718,7 +2718,14 @@ impl<'a> LauncherView<'a> {
             &self.view.own.config.stations[self.view.own.selected].weapon,
         )
         .is_some_and(|p| p.role == TargetRole::Surface);
-        (surface || self.readiness() == Readiness::Ready)
+        // Terrain is not range (CL-T): a surface weapon keeps IN RNG behind
+        // a ridge, but every other readiness still turns it off (review L2).
+        let ready = match self.readiness() {
+            Readiness::Ready => true,
+            Readiness::TerrainMask => surface,
+            _ => false,
+        };
+        ready
             && self
                 .estimated_max_range()
                 .is_some_and(|max| max > min && (min..=max).contains(&o.range))

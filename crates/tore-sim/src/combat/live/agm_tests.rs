@@ -620,3 +620,39 @@ fn a_terrain_masked_harm_is_not_drawn_as_a_shutdown_emitter() {
     let ridge = |_: Vector, _: Vector| true;
     assert!(agm::harm_emitters(s.own(), &launcher(), s.targets.iter(), &ridge).is_empty());
 }
+
+/// Review L2: IN RNG ignores a terrain mask only. Master arm safe or an empty
+/// station turns it off for a surface weapon as for any other.
+#[test]
+fn in_range_is_off_with_master_arm_safe_or_an_empty_station() {
+    let ridge = |_: f64, z: f64| {
+        if (8000. ..=12000.).contains(&z) {
+            4000.
+        } else {
+            0.
+        }
+    };
+    let mut s = armed("AGM65A.JT", 2);
+    ground(&mut s, 0x5000_0001, 0., 20000., 0x400);
+    s.command(0, Command::ToggleAirGround, launcher());
+    step(&mut s, launcher(), false);
+    s.command(0, Command::Designate, launcher());
+    assert_eq!(until_ready(&mut s, launcher(), 120), Readiness::Ready);
+    assert!(s.own_view().at(launcher()).in_estimated_range());
+    assert!(
+        s.own_view()
+            .at(launcher())
+            .with_terrain(&ridge)
+            .in_estimated_range(),
+        "a terrain mask keeps IN RNG"
+    );
+    s.own_mut().armed = false;
+    let at = s.own_view().at(launcher());
+    assert_eq!(at.readiness(), Readiness::Safe);
+    assert!(!at.in_estimated_range(), "master arm safe");
+    s.own_mut().armed = true;
+    s.own_mut().ammo = vec![0];
+    let at = s.own_view().at(launcher());
+    assert_eq!(at.readiness(), Readiness::Empty);
+    assert!(!at.in_estimated_range(), "empty station");
+}
