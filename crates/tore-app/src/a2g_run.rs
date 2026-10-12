@@ -273,7 +273,8 @@ impl Scene {
         spec.surface_seed = o.seed;
         spec.cheats.damage = tore_sim::cheats::Damage::Invulnerable;
         spec.validate()?;
-        let mut world = World::new(&spec, resources, Seating::SinglePlayer)?;
+        let mut world =
+            crate::surface_dump::world_without_front(&spec, resources, Seating::SinglePlayer)?;
         if let Some(why) = &world.terrain.surface.unresolved {
             return Err(format!("the ground target stands nowhere: {why}").into());
         }

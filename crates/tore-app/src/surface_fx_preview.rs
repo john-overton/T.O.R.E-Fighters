@@ -388,7 +388,8 @@ fn render(
     out: &Path,
 ) -> AppResult<()> {
     let spec = spec(scene, condition, time)?;
-    let mut world = World::new(&spec, resources, Seating::SinglePlayer)?;
+    let mut world =
+        crate::surface_dump::world_without_front(&spec, resources, Seating::SinglePlayer)?;
     if let Some(why) = &world.terrain.surface.unresolved {
         return Err(why.clone().into());
     }

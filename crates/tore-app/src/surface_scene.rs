@@ -181,7 +181,8 @@ pub fn run() -> AppResult<()> {
     spec.ground_target = Some(o.stem.clone());
     spec.surface_seed = o.seed;
     (spec.aaa, spec.sam) = o.defenses;
-    let mut world = World::new(&spec, &resources, Seating::SinglePlayer)?;
+    let mut world =
+        crate::surface_dump::world_without_front(&spec, &resources, Seating::SinglePlayer)?;
     if let Some(why) = &world.terrain.surface.unresolved {
         return Err(format!("the ground target stands nowhere: {why}").into());
     }

@@ -102,7 +102,8 @@ pub fn run() -> AppResult<()> {
     spec.surface_seed = seed;
     // The redrawn airports unless TORE_REDRAWN_AIRPORTS=0.
     spec.weather.redrawn_airports = crate::scenery::redrawn_airports()?;
-    let mut world = World::new(&spec, &resources, Seating::SinglePlayer)?;
+    let mut world =
+        crate::surface_dump::world_without_front(&spec, &resources, Seating::SinglePlayer)?;
     let surface = world.terrain.surface.clone();
     if let Some(why) = &surface.unresolved {
         return Err(format!("the ground target stands nowhere: {why}").into());
