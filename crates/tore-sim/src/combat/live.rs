@@ -1530,6 +1530,13 @@ pub struct State {
     /// ([`State::set_ai_laser_armed`]): their lasers run the automatic rule
     /// for it, so the spot is up before the release. Mission state.
     ai_laser_armed: BTreeSet<u32>,
+    /// The aircraft flown by the AI from a cockpit a human left whose
+    /// tactics want the laser on (a laser pass, the hold, a lase duty), as
+    /// the host last said ([`State::set_ai_laser_on`]): their lasers run as
+    /// the automatic rule would, and the human's hand setting is never
+    /// written (John's decision 11; ST-INT). A human's hand off still wins.
+    /// Mission state.
+    ai_laser_on: BTreeSet<u32>,
     /// How each ground object that has a unit record explodes when destroyed.
     ground_looks: BTreeMap<u32, GroundLook>,
     /// The parked aircraft among the targets, by id, with their crash sites
@@ -2789,6 +2796,7 @@ impl State {
             kept: BTreeMap::new(),
             ai_cockpits: BTreeMap::new(),
             ai_laser_armed: BTreeSet::new(),
+            ai_laser_on: BTreeSet::new(),
             ground_looks: BTreeMap::new(),
             ground_listing: BTreeMap::new(),
             airfield: Default::default(),
@@ -4227,6 +4235,7 @@ impl State {
                     weather: &self.sensor_weather,
                     laser_owners: &laser_owners,
                     armed: &self.ai_laser_armed,
+                    ai_on: &self.ai_laser_on,
                     tick: self.tick,
                 },
             );
@@ -4289,6 +4298,7 @@ impl State {
                         weather: &self.sensor_weather,
                         laser_owners: &laser_owners,
                         armed: &self.ai_laser_armed,
+                        ai_on: &self.ai_laser_on,
                         tick: self.tick,
                     },
                 );

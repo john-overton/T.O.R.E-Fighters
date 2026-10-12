@@ -597,6 +597,7 @@ impl Checkpoint for State {
             kept,
             ai_cockpits,
             ai_laser_armed,
+            ai_laser_on,
             ground_looks,
             parked,
             ground_listing,
@@ -641,6 +642,8 @@ impl Checkpoint for State {
         kept.save(s, None)?;
         ai_cockpits.save(s, None)?;
         ai_laser_armed.save(s, None)?;
+        // The AI's own laser want in a cockpit a human left (ST-INT).
+        ai_laser_on.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
         ground_listing.save(s, None)?;
@@ -702,6 +705,7 @@ impl Checkpoint for State {
             kept: Checkpoint::load(l, None)?,
             ai_cockpits: Checkpoint::load(l, None)?,
             ai_laser_armed: Checkpoint::load(l, None)?,
+            ai_laser_on: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
             ground_listing: Checkpoint::load(l, None)?,

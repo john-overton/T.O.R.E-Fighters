@@ -45,6 +45,7 @@ fn alt_e_and_alt_r_take_a_ground_designation_else_the_pin() {
         facts: vec![fact(10, THEM, TANK, 0., 0.), fact(11, THEM, SAM, 500., 0.)],
         sight: None,
         pin: Some([480., 0., 0.]),
+        spots: Vec::new(),
     };
     for order in [O::EngageMyTarget, O::EngageFromFormation] {
         // The designation first.
@@ -88,6 +89,7 @@ fn a_pin_far_from_everything_names_nothing() {
         facts: vec![fact(10, THEM, TANK, 0., 0.)],
         sight: None,
         pin: Some([PIN_RADIUS_FT + 1., 0., 0.]),
+        spots: Vec::new(),
     };
     assert_eq!(
         resolve(O::EngageMyTarget, None, &ground, US, &no_air),
@@ -104,6 +106,7 @@ fn alt_f_takes_the_sights_contact_and_with_none_frees_the_wingmen() {
         facts: vec![fact(10, THEM, TANK, 0., 0.)],
         sight: Some(10),
         pin: None,
+        spots: Vec::new(),
     };
     assert!(matches!(
         resolve(O::EngageIrLaser, None, &ground, US, &no_air),
@@ -194,6 +197,7 @@ fn lase_my_target_needs_a_ground_object() {
         facts: vec![fact(10, THEM, TANK, 0., 0.)],
         sight: Some(10),
         pin: None,
+        spots: Vec::new(),
     };
     assert_eq!(
         resolve(O::LaseMyTarget, Some(10), &ground, US, &no_air),
@@ -861,4 +865,78 @@ fn an_explicit_objective_overrides_the_class_default() {
         .unwrap()
         .apply_strike_roles(&objectives, true);
     assert!(roles(&world).iter().all(|(_, _, r)| *r == StrikeRole::Cap));
+}
+
+/// A GBU-10-like laser bomb on station 0 of the wingman's configuration, and
+/// no designator.
+fn laser_bomb_the_wingman(world: &mut World) {
+    let id = wingman(world);
+    let wings = world.ai_wings.as_mut().unwrap();
+    let config = wings.configs.get_mut(&id).unwrap();
+    let mut weapon = config.stations[0].weapon.clone();
+    weapon.source = "GBU10.JT".into();
+    weapon.flags = 0x2a543;
+    weapon.seeker.signature = 1;
+    weapon.movement.ignite_t = 0;
+    weapon.movement.fuel_t = 0;
+    weapon.movement.launch_retard = 90;
+    weapon.burst.actual_rounds_per_game = 1;
+    weapon.burst.game_rounds_in_burst = 1;
+    weapon.burst.projectiles_in_pod = 1;
+    config.stations[0].weapon = weapon;
+    config.sight = None;
+}
+
+/// Slice ST-L's spot rule in the order (ST-INT): a wingman whose only
+/// surface store is a laser bomb and who has no designator takes Alt+E on
+/// an object a same-side laser spot lies on (its lead lasing it), and
+/// refuses it with no such spot.
+#[test]
+fn a_laser_only_wingman_takes_an_order_onto_an_object_its_side_lases() {
+    let mut world = world();
+    let id = wingman(&world);
+    let target = *hostile(&world, 0x3f00).first().unwrap();
+    laser_bomb_the_wingman(&mut world);
+    let order = |world: &mut World, spots: Vec<(Side, u32)>| {
+        let ground = GroundAim {
+            spots,
+            ..world.ground_aim(PlaneId(0), O::EngageMyTarget)
+        };
+        world
+            .ai_wings
+            .as_mut()
+            .unwrap()
+            .command_aimed(
+                0,
+                O::EngageMyTarget,
+                Some(target),
+                None,
+                None,
+                None,
+                &|_| false,
+                &ground,
+            )
+            .unwrap()
+    };
+    // Nobody lasing, or only the other side's spot, or a spot on another
+    // object: no usable surface store.
+    let other = *hostile(&world, 0x3f00).last().unwrap();
+    for spots in [Vec::new(), vec![(THEM, target)], vec![(US, other)]] {
+        if spots
+            .first()
+            .is_some_and(|(_, on)| *on == target && other == target)
+        {
+            continue;
+        }
+        let report = order(&mut world, spots);
+        assert_eq!(
+            report.message,
+            "Wing order unavailable: no usable surface store"
+        );
+        assert_eq!(ordered(&world), None);
+    }
+    // The lead lases the target: the wingman takes it.
+    let report = order(&mut world, vec![(US, target)]);
+    assert_eq!(report.reached, [id]);
+    assert_eq!(ordered(&world), Some(target));
 }

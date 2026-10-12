@@ -472,7 +472,19 @@ impl World {
                 .and_then(|sight| sight.held_point());
             (tracked.or(spot), pin)
         });
-        ai_wings::GroundAim { facts, sight, pin }
+        let mut spots: Vec<(live::Side, u32)> = state
+            .laser_spots()
+            .into_iter()
+            .filter_map(|spot| spot.target.map(|on| (spot.side, on)))
+            .collect();
+        spots.sort_unstable_by_key(|(side, on)| (side.0, *on));
+        spots.dedup();
+        ai_wings::GroundAim {
+            facts,
+            sight,
+            pin,
+            spots,
+        }
     }
 
     /// An Alt-key order from the seat `seat`, flying `plane` from `cockpit`.

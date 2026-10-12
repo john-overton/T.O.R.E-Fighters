@@ -44,6 +44,9 @@ pub(super) fn step(
         .map(|a| a.id())
         .collect();
     state.release_ai_lasers(&strikers);
+    // The AI-flown aircraft in a cockpit a human left whose tactics want
+    // the laser on this step (John's decision 11; ST-INT).
+    let mut kept_lasers = std::collections::BTreeSet::new();
     for id in strikers {
         let Some(config) = wings.configs.get(&id) else {
             continue;
@@ -70,6 +73,9 @@ pub(super) fn step(
         let mut laser_set = actor.strike().is_some_and(strike::Strike::laser_set);
         if let Some(cockpit) = state.ai_cockpit_mut(id, side, config) {
             laser_set = hold_laser(cockpit, kept, laser_target, laser_set);
+        }
+        if kept && laser_target.is_some() {
+            kept_lasers.insert(id);
         }
         let lase = lase_inputs(state, id, side, config, lasing);
         let solution = selection.and_then(|sel| {
@@ -208,6 +214,8 @@ pub(super) fn step(
                 .strike_cockpit(*id)
                 .is_some_and(|c| c.laser_weapon_armed(config));
         state.set_ai_laser_armed(*id, armed);
+        let ai_on = state.ownship(*id).is_none() && kept_lasers.contains(id);
+        state.set_ai_laser_on(*id, ai_on);
     }
 }
 
@@ -217,12 +225,14 @@ fn guided_kind(w: &tore_formats::weapons::Weapon) -> bool {
 }
 
 /// Holds an AI cockpit's laser on `target`, or lets it go: the sight tracks
-/// the object and the laser is on by hand while the tactics want a spot
-/// (the pass of a laser store, the hold after its release, a lase duty), and
-/// off again when they do not. A cockpit a human left keeps the human's hand
-/// setting: off stays off, and a laser the human left on stays on; the AI
-/// turns off only what it turned on (`set`, which it returns the new value
-/// of).
+/// the object and, in the AI's own cockpit, the laser is on by hand while
+/// the tactics want a spot (the pass of a laser store, the hold after its
+/// release, a lase duty) and off again when they do not (`set`, which it
+/// returns the new value of). In a cockpit a human left the AI never writes
+/// the human's hand setting (John's decision 11; ST-INT): its want goes to
+/// combat as [`live::State::set_ai_laser_on`] instead, a human's hand on
+/// lases anyway and a hand off stays off, and the human finds the setting
+/// as left.
 fn hold_laser(cockpit: &mut StrikeCockpit, kept: bool, target: Option<u32>, set: bool) -> bool {
     match target {
         Some(id) => {
@@ -234,8 +244,8 @@ fn hold_laser(cockpit: &mut StrikeCockpit, kept: bool, target: Option<u32>, set:
             {
                 sight.track(id);
             }
-            if kept && cockpit.laser.manual == Some(false) {
-                return set;
+            if kept {
+                return false;
             }
             if cockpit.laser.manual != Some(true) {
                 cockpit.laser.manual = Some(true);
@@ -244,7 +254,7 @@ fn hold_laser(cockpit: &mut StrikeCockpit, kept: bool, target: Option<u32>, set:
             set
         }
         None => {
-            if cockpit.laser.manual == Some(true) && (!kept || set) {
+            if cockpit.laser.manual == Some(true) && !kept {
                 cockpit.laser.manual = None;
             }
             false
@@ -445,17 +455,29 @@ pub(super) struct Capability {
 
 impl AiWings {
     /// What AI aircraft `id` can do on a ground order. All false for an
-    /// aircraft without a combat configuration.
-    pub(super) fn capability(&self, id: u32) -> Capability {
+    /// aircraft without a combat configuration. A laser store counts with a
+    /// spot assured, slice ST-L's rule: its own designator, a designator in
+    /// its wing, or `spot_on` (a same-side spot on the ordered object; the
+    /// rule moved here at the integration, ST-INT).
+    pub(super) fn capability(&self, id: u32, spot_on: bool) -> Capability {
         let (Some(config), Some(actor)) = (self.configs.get(&id), self.mission.actor(id)) else {
             return Capability::default();
         };
         let designator = config.sight_sensor().is_some_and(|s| s.laser);
+        let identity = actor.identity();
+        let wing_designator = self.mission.actors().iter().any(|mate| {
+            mate.id() != id
+                && mate.alive()
+                && mate.identity().side == identity.side
+                && mate.identity().wing == identity.wing
+                && self.can_lase(mate.id())
+        });
         // Every bombing class strikes (slice ST-F); the gunship with its
         // linked guns.
         let stores = strike_stores(config, actor.stations());
+        let spot_assured = designator || wing_designator || spot_on;
         Capability {
-            strike: strike::has_usable_store(&stores, designator, config.strike_class),
+            strike: strike::has_usable_store(&stores, spot_assured, config.strike_class),
             designator: self.can_lase(id),
         }
     }

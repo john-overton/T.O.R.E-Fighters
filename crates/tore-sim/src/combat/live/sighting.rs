@@ -21,6 +21,9 @@ pub(super) struct Context<'a, G> {
     pub laser_owners: &'a BTreeSet<u32>,
     /// The AI-flown aircraft with a laser weapon selected and armed.
     pub armed: &'a BTreeSet<u32>,
+    /// The AI-flown aircraft whose tactics want the laser on in a cockpit a
+    /// human left ([`State::set_ai_laser_on`]).
+    pub ai_on: &'a BTreeSet<u32>,
     pub tick: u64,
 }
 
@@ -230,7 +233,12 @@ pub(super) fn step_flown<G: Fn(f64, f64) -> f64>(
             // As a player's: a laser weapon selected and armed, or one of its
             // own in flight (the host says which AI-flown aircraft have one
             // armed, slice ST-L).
-            automatic: cx.laser_owners.contains(&aircraft) || cx.armed.contains(&aircraft),
+            // The AI's want in a cockpit a human left counts here, beside the
+            // automatic rule, so the human's hand setting is never written
+            // (John's decision 11; ST-INT).
+            automatic: cx.laser_owners.contains(&aircraft)
+                || cx.armed.contains(&aircraft)
+                || cx.ai_on.contains(&aircraft),
             weather,
         },
         |from, to| sight::clear_line(from, to, cx.ground),
@@ -251,6 +259,19 @@ impl State {
             self.ai_laser_armed.insert(aircraft);
         } else {
             self.ai_laser_armed.remove(&aircraft);
+        }
+    }
+
+    /// Says whether the tactics of the AI-flown `aircraft`, flying from a
+    /// cockpit a human left, want its laser on (a laser pass, the hold, a
+    /// lase duty). The laser then runs as the automatic rule would, and the
+    /// kept cockpit's hand setting is left as the human set it: a hand on
+    /// lases anyway, a hand off stays off (John's decision 11; ST-INT).
+    pub fn set_ai_laser_on(&mut self, aircraft: u32, on: bool) {
+        if on {
+            self.ai_laser_on.insert(aircraft);
+        } else {
+            self.ai_laser_on.remove(&aircraft);
         }
     }
 

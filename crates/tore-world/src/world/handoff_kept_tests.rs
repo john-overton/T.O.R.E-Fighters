@@ -417,6 +417,12 @@ fn strike(world: &World) -> Option<&tore_sim::ai::strike::Strike> {
 /// which the sight then tracks, Ctrl+M for LVL and the laser on by hand
 /// (Ctrl+L, twice: the first turns the automatic laser off by hand). Returns the world and the designated object.
 fn laser_pass() -> (World, u32) {
+    laser_pass_with(true)
+}
+
+/// [`laser_pass`], with the laser on by hand (`by_hand`) or left on its
+/// automatic rule (no Ctrl+L).
+fn laser_pass_with(by_hand: bool) -> (World, u32) {
     let mut world = world_at(5_000);
     let seat = SeatId(1);
     tick(
@@ -446,16 +452,20 @@ fn laser_pass() -> (World, u32) {
         &mut world,
         &[],
         Some(seat),
-        vec![
-            SeatCommand::Combat(Combat::ToggleSeekerMode),
-            SeatCommand::Combat(Combat::ToggleLaser),
-        ],
+        if by_hand {
+            vec![
+                SeatCommand::Combat(Combat::ToggleSeekerMode),
+                SeatCommand::Combat(Combat::ToggleLaser),
+            ]
+        } else {
+            vec![SeatCommand::Combat(Combat::ToggleSeekerMode)]
+        },
         Vec::new(),
         false,
     );
     // The laser was on by the automatic rule (a laser weapon selected):
     // Ctrl+L turned it off by hand, a second Ctrl+L puts it on by hand.
-    if own(&world).laser.manual != Some(true) {
+    if by_hand && own(&world).laser.manual != Some(true) {
         tick(
             &mut world,
             &[],
@@ -576,6 +586,73 @@ fn the_ai_finishes_a_humans_laser_pass_and_the_human_finds_its_cockpit() {
         ..c
     };
     assert_eq!(without(back), without(left));
+}
+
+/// John's decision 11 (ST-INT): the AI never changes the human's laser
+/// settings. A human who left the laser on its automatic rule gives the
+/// plane back mid laser pass: the AI's pass and hold lase through an
+/// AI-side want in combat, the kept cockpit's hand setting stays automatic
+/// at every tick, and the human taking the plane back finds it so.
+#[test]
+fn the_ai_lases_a_kept_cockpit_without_touching_the_humans_laser_setting() {
+    let (mut world, target) = laser_pass_with(false);
+    let left = cockpit(&world);
+    assert_eq!(left.laser_manual, None, "{left:?}");
+    assert_eq!(left.designated, Some(target));
+    tick(
+        &mut world,
+        &[MissionCommand::GiveBack { seat: SeatId(1) }],
+        None,
+        Vec::new(),
+        Vec::new(),
+        false,
+    );
+    assert!(strike(&world).is_some(), "the AI strikes on");
+    let mut bomb = None;
+    let mut wanted = false;
+    let mut lasing_in_flight = true;
+    for at in 0..120 * 120 {
+        fly(&mut world, None, 1);
+        let state = &world.combat.state;
+        let kept = state.kept(PLANE.0).expect("the cockpit is kept");
+        assert_eq!(kept.laser.manual, None, "tick {at}");
+        wanted |=
+            strike(&world).and_then(tore_sim::ai::strike::Strike::laser_target) == Some(target);
+        if bomb.is_none() {
+            bomb = state
+                .guided_flights()
+                .find(|(_, f)| f.owner == PLANE.0)
+                .map(|(id, _)| id);
+        }
+        let Some(id) = bomb else { continue };
+        if state.guided_flight(id).is_none() {
+            break;
+        }
+        lasing_in_flight &= state.laser_spots().iter().any(|s| s.owner == PLANE.0);
+    }
+    assert!(wanted, "the AI's tactics wanted the laser on the target");
+    assert!(bomb.is_some(), "the AI released the laser bomb");
+    assert!(lasing_in_flight, "the laser held the target until impact");
+    // A few seconds of the hold after the impact: still untouched.
+    for at in 0..5 * 120 {
+        fly(&mut world, None, 1);
+        let kept = world.combat.state.kept(PLANE.0).expect("kept");
+        assert_eq!(kept.laser.manual, None, "hold tick {at}");
+    }
+    let seat = SeatId(2);
+    tick(
+        &mut world,
+        &[MissionCommand::Take { seat, plane: PLANE }],
+        Some(seat),
+        Vec::new(),
+        Vec::new(),
+        false,
+    );
+    assert_eq!(
+        cockpit(&world).laser_manual,
+        None,
+        "the human's own setting"
+    );
 }
 
 /// A seat takes plane 0 and gives it straight back, and the kept cockpit

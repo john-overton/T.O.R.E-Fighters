@@ -47,6 +47,11 @@ pub struct GroundAim {
     pub sight: Option<u32>,
     /// The ground point the sight is pinned on, when it tracks no object.
     pub pin: Option<[f64; 3]>,
+    /// Every laser spot that lies on an object: its side and the object
+    /// (ascending). A wingman with only laser bombs and no designator takes
+    /// an order onto an object a same-side spot is on (slice ST-L's spot
+    /// rule, ST-INT).
+    pub spots: Vec<(Side, u32)>,
 }
 
 impl GroundAim {
@@ -229,6 +234,8 @@ pub(super) struct Call {
     pub bugged_out: usize,
     /// The radio flight number of the sender's flight (0 is Red).
     pub flight: Option<u8>,
+    /// The laser spots on objects, as [`GroundAim::spots`].
+    pub spots: Vec<(Side, u32)>,
 }
 
 impl AiWings {
@@ -250,6 +257,7 @@ impl AiWings {
             mut answers,
             bugged_out,
             flight,
+            spots,
         } = call;
         let lase = matches!(plan, Plan::Lase { .. });
         let named = match &plan {
@@ -282,7 +290,16 @@ impl AiWings {
                 ));
                 continue;
             }
-            let ability = self.capability(*id);
+            // A spot is assured on a single named object when a same-side
+            // laser lies on it (the lead lasing it, a buddy's).
+            let spot_on = match &plan {
+                Plan::Ground { target, .. } => {
+                    let side = self.mission.actor(*id).map(|a| a.identity().side);
+                    spots.iter().any(|(s, on)| Some(*s) == side && on == target)
+                }
+                _ => false,
+            };
+            let ability = self.capability(*id, spot_on);
             if lase && !ability.designator {
                 no_designators += 1;
                 refuser.get_or_insert((*id, WingLine::NoDesignator));

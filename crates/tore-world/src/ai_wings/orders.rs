@@ -556,6 +556,7 @@ impl AiWings {
                     answers,
                     bugged_out,
                     flight,
+                    spots: ground.spots.clone(),
                 });
             }
         }
