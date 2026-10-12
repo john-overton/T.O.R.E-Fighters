@@ -616,8 +616,7 @@ impl AiActor {
         world: &[WorldObject],
     ) -> MotionIntent {
         let formation = self.controller.formation_trace().is_some();
-        let defending =
-            self.last_defense.is_some_and(|d| d.motion.is_some()) || self.fire_defending;
+        let defending = self.defense_flying();
         if formation || defending || self.airfield.is_some() || !self.alive {
             self.avoiding = None;
             self.avoiding_from = None;
@@ -861,6 +860,14 @@ impl AiActor {
 
     pub fn incoming_fire_cue(&self) -> Option<incoming_fire::Cue> {
         self.incoming_fire.cue()
+    }
+
+    /// A B47 defence is being flown: a missile or gunfire maneuver, or a
+    /// helicopter's break (which starts at the warning).
+    fn defense_flying(&self) -> bool {
+        self.last_defense.is_some_and(|d| d.motion.is_some())
+            || self.fire_defending
+            || self.controller.defending()
     }
 
     pub fn defense_decision(&self) -> Option<defense::DefenseDecision> {
@@ -1156,6 +1163,15 @@ impl AiActor {
         own: &OwnState,
         surface: &dyn Fn(f64, f64) -> Surface,
     ) {
+        // The airfield sequences are an aeroplane's: a runway approach and
+        // rollout flown by a helicopter at 120 knots puts it in the ground
+        // (a Mi-24 did, in the probe). A helicopter has no landing yet
+        // (slice ST-H): it goes home by the ordinary return-to-base heading
+        // and stays over the field. Opinionated (agent).
+        if self.is_rotorcraft() {
+            self.landing_order = None;
+            return;
+        }
         if self.flight.research.is_none() {
             let seed = (self.identity.actor.0 as i32).wrapping_mul(7919) | 1;
             if self.flight.enable_research(seed).is_err() {
@@ -1208,8 +1224,7 @@ impl AiActor {
         output: &mut MissionOutput,
     ) -> Result<bool> {
         use super::airfield::{Control, LandingReason, Phase, Situation};
-        let defending =
-            self.last_defense.is_some_and(|d| d.motion.is_some()) || self.fire_defending;
+        let defending = self.defense_flying();
         let warned = self.pending_threats.iter().any(|r| !r.launcher_same_side);
         let mut trace = thought::AirfieldTrace::default();
         if self.airfield.is_none()
@@ -1970,7 +1985,9 @@ impl AiMission {
                 && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
                 && pick(a)
         }) {
-            if a.home_runway.is_some() {
+            // A helicopter has no landing (slice ST-H): it goes home as an
+            // aircraft with no runway does.
+            if a.home_runway.is_some() && !a.is_rotorcraft() {
                 ids.push(a.id());
             } else if a.identity.is_leader() && !a.controller.mission_complete() {
                 // No runway: the leader flies home and holds; its
@@ -4334,22 +4351,106 @@ impl AiActor {
         if self.last_defense.is_none() {
             self.defense_state.clear_threat();
         }
-        self.controller.set_defense_motion(
-            (if fire_selected {
-                fire_motion
+        let source = if fire_selected {
+            super::controller::DefenseSource::IncomingFire
+        } else {
+            super::controller::DefenseSource::Missile
+        };
+        // A helicopter does not fly the fighter's jink and dive (slice ST-H,
+        // docs/spec/ai-strike.md, "Helicopter defence"): its own break, and
+        // from the warning on, not at the fighter's last-moment timing (a
+        // helicopter hides, it does not time a jink).
+        let rotorcraft = self.is_rotorcraft();
+        let suggestion = if fire_selected {
+            fire_motion
+        } else if rotorcraft && self.last_defense.is_some() {
+            Some(missile_motion.unwrap_or(defense::MotionSuggestion {
+                maneuver: defense::Maneuver::Jink,
+                heading_deg: own.heading_deg,
+                flight_path_pitch_deg: 0.,
+            }))
+        } else {
+            missile_motion
+        };
+        self.trace.rotor_break = None;
+        let motion = suggestion.map(|motion| {
+            if !rotorcraft {
+                return (motion.heading_deg, motion.flight_path_pitch_deg);
+            }
+            let (threat, viewpoint) = if fire_selected {
+                (
+                    self.incoming_fire.cue().and_then(|c| c.bearing_world_deg),
+                    self.defense_viewpoint(own, false),
+                )
             } else {
-                missile_motion
-            })
-            .map(|motion| super::controller::DefenseMotion {
-                source: if fire_selected {
-                    super::controller::DefenseSource::IncomingFire
-                } else {
-                    super::controller::DefenseSource::Missile
+                let contact = self
+                    .last_defense
+                    .and_then(|d| contacts.iter().find(|c| c.missile_id == d.threat_id));
+                (
+                    contact.map(|c| (own.heading_deg + c.bearing_deg).rem_euclid(360.)),
+                    self.defense_viewpoint(own, true)
+                        .or_else(|| contact.and_then(|c| c.position)),
+                )
+            };
+            let tie = self.last_defense.map_or_else(|| self.id(), |d| d.threat_id);
+            let answer = super::helicopter_defense::decide(
+                super::helicopter_defense::Own {
+                    position: own.position,
+                    heading_deg: own.heading_deg,
+                    speed_ft_s: own.speed.0,
+                    bank_deg: own.bank_deg,
+                    maximum_ft_s: own.limits.maximum.0,
                 },
-                heading_deg: motion.heading_deg,
-                pitch_deg: motion.flight_path_pitch_deg,
-            }),
-        );
+                super::helicopter_defense::Threat {
+                    bearing_deg: threat,
+                    viewpoint,
+                    tie,
+                },
+                ground,
+            );
+            self.trace.rotor_break = Some((answer, threat));
+            (answer.heading_deg, answer.flight_path_pitch_deg)
+        });
+        self.controller
+            .set_defense_motion(motion.map(|(heading_deg, pitch_deg)| {
+                super::controller::DefenseMotion {
+                    source,
+                    heading_deg,
+                    pitch_deg,
+                    rotorcraft,
+                }
+            }));
+    }
+
+    /// The aircraft is a helicopter: its flight model is a rotorcraft's.
+    pub fn is_rotorcraft(&self) -> bool {
+        self.flight
+            .model()
+            .powered_lift()
+            .is_some_and(|lift| lift.kind == crate::models::variety::LiftKind::Helicopter)
+    }
+
+    /// Where the defence seen by a helicopter is: the nearest hostile
+    /// missile site (or gun site, for gunfire) the aircraft knows that
+    /// reaches it. A CAP actor has no ground picture and so none.
+    fn defense_viewpoint(&self, own: &OwnState, missiles: bool) -> Option<crate::attitude::Vector> {
+        let picture = self.ground.as_deref()?;
+        picture
+            .threats()
+            .hostile_defenses(self.identity.side)
+            .filter(|d| {
+                if missiles {
+                    d.covers_with_missiles(own.position)
+                } else {
+                    d.covers_with_guns(own.position)
+                }
+            })
+            .min_by(|a, b| {
+                distance(a.position, own.position)
+                    .total_cmp(&distance(b.position, own.position))
+                    .then(a.id.cmp(&b.id))
+            })
+            .map(|d| d.position)
     }
 
     fn drain_events(&mut self, tick: u64) -> Vec<FrameEvent> {
@@ -4416,7 +4517,17 @@ impl AiActor {
             },
             alive: self.alive(),
             fuel_endurance_s: self.endurance_s(),
-            time_home_s: self.time_home_s(),
+            // A helicopter keeps no fuel schedule (slice ST-H): its tanks
+            // last minutes at the flow its data gives, against the tens of
+            // minutes a cruise of 80 knots takes to reach a far field, so
+            // every Quick Mission helicopter would be bingo at the start.
+            // Fuel does not burn for the AI today in any case. Opinionated
+            // (agent).
+            time_home_s: if self.is_rotorcraft() {
+                None
+            } else {
+                self.time_home_s()
+            },
             internal_fuel_lbs: self.flight.fuel,
             radar_emitting: self.flight.radar,
         }
@@ -4904,7 +5015,10 @@ impl AiActor {
                         | super::airfield::Phase::Parked
                 )
             );
-        if !ground_hold {
+        // The engine-protection throttle cut is a jet's: on a helicopter the
+        // throttle is the collective, and a quarter of it is a fall (a hit
+        // AH-64 dived into the ground on it, slice ST-H). Opinionated (agent).
+        if !ground_hold && !self.is_rotorcraft() {
             super::damage::controls(response, &self.flight, safety, &mut input);
         }
         self.trace.damage.safety_power = safety && response.power == super::damage::Power::Protect;

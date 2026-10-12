@@ -509,6 +509,9 @@ pub struct ActorTrace {
     pub visual: Vec<super::awareness::VisualTrace>,
     pub observation_sources: Vec<(u32, super::awareness::SourceTimestamps)>,
     pub fire: super::incoming_fire::Trace,
+    /// The helicopter break flown on this step (slice ST-H), with the
+    /// threat's compass bearing it was taken from.
+    pub rotor_break: Option<(super::helicopter_defense::Break, Option<f64>)>,
     /// The mission tick this record describes; `None` before the first step.
     pub tick: Option<u64>,
     pub path: ActorPath,

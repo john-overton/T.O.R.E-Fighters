@@ -58,6 +58,7 @@ crate::checkpoint_struct!(DefenseMotion {
     source,
     heading_deg,
     pitch_deg,
+    rotorcraft,
 });
 
 crate::checkpoint_struct!(SearchContact {
