@@ -192,6 +192,8 @@ Opinionated, not retail: the original opens on the same list head every time.
   `--separation`) neither read nor write the file and never randomize, so every
   battery scenario still builds the same creator. `--theater` wins over a saved
   theater.
+- **Preview.** `--quick-mission --snapshot-state first-load` draws the creator
+  with every slot random from a fixed seed.
 
 ## Mission wings
 

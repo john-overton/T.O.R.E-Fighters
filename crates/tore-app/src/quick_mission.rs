@@ -1848,6 +1848,9 @@ impl QuickMission {
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" | "ordnance" => {}
+            // A first load: every aircraft slot random (slice BQ, B22), from a
+            // fixed seed so the picture is repeatable.
+            "first-load" => self.randomize_aircraft(0x2026_1012, false),
             // The creator opened from a multiplayer lobby (EF8), and after the
             // host refused an Accept.
             "lobby-creator" => self.enter_lobby(),
@@ -1991,7 +1994,7 @@ impl QuickMission {
                 self.open(OBJECTIVE_BASE + group - 1);
             }
             _ => {
-                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..FIELDS).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, ground-start-auto, ground-target, ground-target-last, airports, enemy-ground-start, enemy-ground-start-auto, enemy-airports, map, map-building, map-wide, map-close, map-lobby, objective-1 through objective-6, theaters, help, field-3 through field-36")?;
+                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..FIELDS).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, ground-start-auto, ground-target, ground-target-last, airports, enemy-ground-start, enemy-ground-start-auto, enemy-airports, map, map-building, map-wide, map-close, map-lobby, objective-1 through objective-6, theaters, help, first-load, field-3 through field-36")?;
                 self.open(id);
             }
         }

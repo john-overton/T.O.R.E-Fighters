@@ -39,7 +39,7 @@ NORMAL_STATES = [
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [
-    "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
+    "normal", "first-load", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
     "ordnance-message", "ordnance-message-long", "ordnance-laser", "lobby-ordnance-laser", "debrief", "debrief-2", "debrief-3", "debrief-4",
     "debrief-5", "debrief-success", "objectives", "ground-start", "airports",
     "ground-start-auto", "ground-target", "ground-target-last",
@@ -218,7 +218,7 @@ def ordnance_notes(warning: bool, helper: bool, lobby: bool = False):
     (blue-grey, under the title bar), found by their exact ink: the tint times the font's own colour
     (slice BQ, B24; wording and colours the lead's defaults)."""
     base = menu_picture()
-    amber, grey = (178, 126, 47), (137, 155, 162)
+    amber, grey = (178, 126, 47), (136, 155, 162)
 
     def count(pixels: bytes, width: int, rows: range, ink) -> int:
         found = 0
