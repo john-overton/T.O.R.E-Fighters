@@ -228,6 +228,19 @@ impl QuickMission {
     /// Single player draws the flight's seed now, as OK would, and OK keeps
     /// it, so the flight flies the layout the map shows.
     pub(super) fn map_mission(&mut self) -> Result<(MissionSpec, bool), String> {
+        let (mut spec, lobby) = self.map_spec()?;
+        if spec.ground_target.is_some() && !lobby && !self.seed_pending {
+            self.surface_seed = super::fresh_seed();
+            self.seed_pending = true;
+            spec.surface_seed = self.surface_seed;
+        }
+        Ok((spec, lobby))
+    }
+
+    /// [`Self::map_mission`] without drawing a seed: with none pending, a
+    /// single-player spec carries the seed last drawn. For comparing a
+    /// finished build against the draft, which must change nothing.
+    fn map_spec(&self) -> Result<(MissionSpec, bool), String> {
         if let Some(problem) = self.unsupported() {
             return Err(problem);
         }
@@ -235,15 +248,7 @@ impl QuickMission {
         spec.ai_flight_model = AiFlightModel::Standard;
         let lobby = self.lobby || self.view.is_some();
         if spec.ground_target.is_some() {
-            if lobby {
-                spec.surface_seed = 0;
-            } else {
-                if !self.seed_pending {
-                    self.surface_seed = super::fresh_seed();
-                    self.seed_pending = true;
-                }
-                spec.surface_seed = self.surface_seed;
-            }
+            spec.surface_seed = if lobby { 0 } else { self.surface_seed };
         }
         Ok((spec, lobby))
     }
@@ -291,12 +296,15 @@ impl QuickMission {
             return;
         }
         let building = self.map_build.take();
-        let current = building.is_some_and(|building| {
-            self.map_mission()
-                .is_ok_and(|(spec, _)| spec == building.spec)
-        });
+        let Some(building) = building else {
+            return;
+        };
+        // Compared without drawing a seed: a finished build must not change
+        // the draft it is being checked against.
+        let current = self.map_spec().is_ok_and(|(spec, _)| spec == building.spec);
         if !current {
             // The settings changed while it was built: this one is stale.
+            // The player asked for a map, so ask again for the new settings.
             self.open_map();
             return;
         }

@@ -1512,6 +1512,7 @@ impl QuickMission {
     /// for Redfor ground starts that match the creator's styles).
     pub fn enter_lobby(&mut self) {
         self.lobby = true;
+        self.drop_map();
         self.cancel();
         self.focus = 3;
         self.notice = Some(LOBBY_NOTICE.into());
@@ -1521,6 +1522,9 @@ impl QuickMission {
         self.lobby = false;
         self.view = None;
         self.shown.clear();
+        // A map left open, or still building, when the host started the
+        // flight must not reappear over the next creator.
+        self.drop_map();
         self.cancel();
         self.notice = None;
         self.gaps.clear();
@@ -2124,6 +2128,13 @@ impl QuickMission {
             return Action::Back;
         }
         Action::Click
+    }
+    /// Forgets the map: the open one, a build in progress and the hold the
+    /// snapshots put on it.
+    fn drop_map(&mut self) {
+        self.map = None;
+        self.map_build = None;
+        self.map_hold = false;
     }
     /// Closes the map; the creator is as it was.
     fn close_map(&mut self) {
@@ -3875,6 +3886,48 @@ mod tests {
             }
             assert!(!q.map_building(), "leave {leave}");
         }
+    }
+    /// Leaving the lobby's creator (the host started the flight) forgets the
+    /// map: a build in progress must not open a map over the next creator,
+    /// and the hold a snapshot puts on it goes too.
+    #[test]
+    fn leaving_the_lobby_drops_the_map_and_its_build() {
+        let mut q = setup();
+        q.enter_lobby();
+        let spec = q.map_mission().unwrap().0;
+        let (_send, receive) = std::sync::mpsc::channel();
+        q.map_build = Some(map::Building::from_channel(spec, receive));
+        q.map_hold = true;
+        q.leave_lobby();
+        assert!(!q.map_open() && !q.map_building() && !q.map_hold);
+        // The build cannot come back as a map or a notice.
+        q.poll_map();
+        assert!(!q.map_open() && !q.map_building() && q.notice.is_none());
+    }
+    /// Checking a finished build against the draft draws no surface seed, so
+    /// an abandoned build cannot change the next flight's layout or start a
+    /// second build.
+    #[test]
+    fn taking_a_finished_map_build_draws_no_surface_seed() {
+        let mut q = setup();
+        q.apply(30, 1);
+        let spec = q.map_mission().unwrap().0;
+        assert!(q.seed_pending);
+        // The flight takes the pending seed, as OK does.
+        q.roll_surface_seed();
+        assert!(!q.seed_pending);
+        let seed = q.surface_seed;
+        let (send, receive) = std::sync::mpsc::channel();
+        q.map_build = Some(map::Building::from_channel(spec, receive));
+        send.send(Err("The map could not be built: test".into()))
+            .unwrap();
+        q.poll_map();
+        assert_eq!((q.surface_seed, q.seed_pending), (seed, false));
+        assert!(!q.map_building());
+        assert_eq!(
+            q.notice.as_deref(),
+            Some("The map could not be built: test")
+        );
     }
     /// A build that dies without answering is reported, not waited on.
     #[test]
