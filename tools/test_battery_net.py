@@ -804,7 +804,26 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(any("never flew" in p for p in net_accept.smoke_problems(texts, "pvp")))
         texts = self.texts("pvp")
         texts["Blue"] = texts["Blue"].replace("Mission ended: the kill limit.", "")
-        self.assertTrue(any("kill limit did not end" in p for p in net_accept.smoke_problems(texts, "pvp")))
+        self.assertTrue(any("neither the kill limit nor the time limit" in p for p in net_accept.smoke_problems(texts, "pvp")))
+
+    def test_the_time_limit_ends_the_pvp_smoke_as_well(self):
+        texts = self.texts("pvp")
+        texts["Blue"] = texts["Blue"].replace("the kill limit.", "the time limit.")
+        self.assertEqual(net_accept.smoke_problems(texts, "pvp"), [])
+
+    def test_a_starved_server_is_told_from_one_that_kept_up(self):
+        line = "[server] 00:00:%02d tick %d players 4/12 aircraft 12 load %d%% (%.1f ms a tick) up 90 KB/s down 8 KB/s"
+        busy = "\n".join(line % (4 * i, 600 * i, load, load / 12) for i, load in enumerate([0, 104, 323, 480, 582, 160]))
+        why = net_accept.starvation(busy)
+        self.assertIsNotNone(why)
+        self.assertIn("median load was 323%", why)
+        self.assertIn("31% of real time", why)
+        fine = "\n".join(line % (4 * i, 600 * i, load, load / 12) for i, load in enumerate([0, 20, 35, 60, 149, 18]))
+        self.assertIsNone(net_accept.starvation(fine))
+        # The server's own text has no label; a log of two lines, or none, says nothing.
+        self.assertIsNotNone(net_accept.starvation(busy.replace("[server] ", "")))
+        self.assertIsNone(net_accept.starvation(line % (4, 600, 900, 75)))
+        self.assertIsNone(net_accept.starvation(""))
 
     def test_an_observer_with_a_plane_is_named(self):
         texts = self.texts("coop")

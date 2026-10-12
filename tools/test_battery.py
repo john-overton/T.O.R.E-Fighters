@@ -271,6 +271,70 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(battery.missing_binaries([sc, plain], opts), ["/nonexistent/tore-server"])
         self.assertEqual(battery.missing_binaries([plain], opts), [])
 
+    def test_a_driver_that_calls_itself_inconclusive_runs_once_more(self):
+        calls = []
+
+        def driver(d):
+            calls.append(1)
+            if len(calls) == 1:
+                d.problem("the second kill never came")
+                d.inconclusive_because("the server ran slowly")
+
+        result, log = run_driver_scenario(driver)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(result.ok, result.problems)
+        self.assertIn("RETRY: the first run was inconclusive (the server ran slowly)", log)
+
+    def test_two_inconclusive_runs_are_reported_as_inconclusive_not_as_a_plain_failure(self):
+        calls = []
+
+        def driver(d):
+            calls.append(1)
+            d.problem("the second kill never came")
+            d.inconclusive_because("the server ran slowly")
+
+        result, _ = run_driver_scenario(driver)
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(result.ok)
+        self.assertTrue(result.problems[0].startswith("inconclusive: the server ran slowly"), result.problems)
+        self.assertIn("the second kill never came", result.problems)
+
+    def test_a_driver_that_fails_without_saying_so_is_not_run_again(self):
+        calls = []
+
+        def driver(d):
+            calls.append(1)
+            d.problem("a real fault")
+
+        result, _ = run_driver_scenario(driver)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result.problems, ["a real fault"])
+
+    def test_programs_of_another_commit_are_named_before_the_net_lane_runs(self):
+        import argparse
+        import os
+        import tempfile
+
+        commit = "0123456789abcdef0123456789abcdef01234567"
+        with tempfile.TemporaryDirectory() as d:
+            server = Path(d) / "tore-server"
+            server.write_text(f"#!/bin/sh\necho 'T.O.R.E server v0.1.3 ({commit})'\n")
+            os.chmod(server, 0o755)
+            bot, app = Path(d) / "tore-bot", Path(d) / "tore-app"
+            bot.write_bytes(b"\0junk" + commit.encode() + b"\0")
+            app.write_bytes(b"\0junk" + b"f" * 40 + b"\0")
+            opts = argparse.Namespace(server_bin=str(server), bot_bin=str(bot), bin=str(app))
+            net = battery.Scenario(name="a", lane="net", args=[], driver=lambda d: None, uses=("server", "bot"))
+            plain = battery.Scenario(name="b", lane="ai", args=[])
+            problems = battery.mismatched_builds([net], opts)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("tore-app is not", problems[0])
+            self.assertIn(commit[:12], problems[0])
+            self.assertNotIn("tore-bot", problems[0])
+            self.assertEqual(battery.mismatched_builds([plain], opts), [])
+            app.write_bytes(b"x" + commit.encode())
+            self.assertEqual(battery.mismatched_builds([net], opts), [])
+
     def assert_gone(self, popen):
         import time
 
