@@ -659,7 +659,14 @@ impl PlanView {
             &mut markers,
             &mut labels,
         );
-        let mut placed = place_starts(pixels, &projection, plan, &mut markers, &mut labels);
+        let mut placed = place_starts(
+            pixels,
+            &projection,
+            plan,
+            PlanSide::Blue,
+            &mut markers,
+            &mut labels,
+        );
         let scene = &world.airport_scene;
         for airport in &scene.airports {
             if airport
