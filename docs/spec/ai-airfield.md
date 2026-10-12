@@ -134,7 +134,8 @@ AI left it, and these rules took it to none at 31 probe runs
   drift of more than 100 ft off the runway or taxiway; along the line it is
   a few feet. The heading loop is well damped at taxi speed with 120 ft.
 - **Rudder trim.** On the ground a heading error held within 15 degrees of
-  the heading wanted builds a rudder trim at 0.02 per degree per second, up
+  the heading wanted builds a rudder trim at 0.06 per degree per second (0.02 let
+  a Redfor wingman at Burevestnik creep 110 ft off the centre line), up
   to 0.6, while rolling faster than 5 ft/s; each airfield phase starts with
   none. A Vladivostok takeoff in a crosswind held a heading 7 degrees off
   and ran 158 ft off the centre line before it; a turn onto the next leg does

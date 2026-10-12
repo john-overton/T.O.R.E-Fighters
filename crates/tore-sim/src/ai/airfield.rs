@@ -400,8 +400,10 @@ const GROUND_HEADING_GAIN: f64 = 1.0;
 /// heading 7 degrees off and running onto the grass (a Vladivostok takeoff
 /// drifted 158 ft off the centre line). It learns only while rolling and
 /// within [`GROUND_TRIM_ERROR_DEG`] of the heading it wants, so a turn onto
-/// the next taxiway does not wind it up.
-pub const GROUND_TRIM_GAIN: f64 = 0.02;
+/// the next taxiway does not wind it up. The first value, 0.02, still let a
+/// Redfor wingman at Burevestnik (KURILE 3) creep 110 ft east of the centre
+/// line before the trim built up, so it is 0.06.
+pub const GROUND_TRIM_GAIN: f64 = 0.06;
 pub const GROUND_TRIM_LIMIT: f64 = 0.6;
 pub const GROUND_TRIM_ERROR_DEG: f64 = 15.0;
 /// Below this ground speed the rudder trim is held, feet per second.
