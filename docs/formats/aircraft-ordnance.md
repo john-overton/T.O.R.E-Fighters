@@ -220,6 +220,135 @@ complete auxiliary-equipment replacement. Next source steps are the narrow
 initial/default loader and player counter consumers. Full routine closure is
 not needed to implement stable source-row editing with honest support limits.
 
+## Hardpoint positions
+
+Research for bug B3, 2026-10-12 (slice BP), from the same `FA_2.LIB` PT
+records, read as text with the field order above. The location byte maps
+0 Centerline, 1 Fuselage, 2 Internal Gun, 3 Internal Bay, 4 Wing, 5 Wingtip.
+x / y / z are signed source words, right / up / forward of the aircraft's
+reference point; the host divides by three for feet, the same conversion the
+AC-130 gun mounts use ([aircraft variety](aircraft-variety.md)). One record
+carries one position. Retail mirrors its lateral offset for flag 0x4 records
+([release state](weapons.md#release-state)), so a flag 0x4 record's position is
+its right-hand pylon. The records hold no pylon geometry, rack layout or store
+attach point, and no retail shape draws a pylon, rack, rocket pod or fuel
+tank (the weapon shapes in `FA_2.LIB` are missiles and bombs only; `.GAS`
+records name no shape). Those are unknown in retail; the drawn ones are fitted
+([stores on pylons](../spec/stores-on-pylons.md)).
+
+What the table shows, by inspection:
+
+- Wingtip rows sit at or just above the reference height (y 1 to -3) at the
+  wing's tip: 19.3 ft out on the F/A-18D, 19.7 ft on the Rafale C.
+- Wing rows step outward in about 15 to 17 unit (5 to 6 ft) increments, mostly
+  a few feet aft of the reference point and 2 to 7 ft below it.
+- Fuselage pairs sit 3 to 5 ft either side of the centreline, 5 to 8 ft below.
+- The F-22's internal bay rows are one-sided (no flag 0x4): row 5 at x -10
+  (left bay), row 6 at x +10 (right bay); its side bays (row 7) are flagged.
+- Two Wing rows lack flag 0x4: `A4E.PT` row 4 (four Mk 82s at x 8) and
+  `MI24.PT` row 2 (four AT-2s at x 25, flags `0x0188` with the fixed-slot
+  bit). Retail releases those from one side; T.O.R.E pairs every Wing and
+  Wingtip row (agent decision, [stores on pylons](../spec/stores-on-pylons.md#rules)).
+
+Weapon and tank rows of the 36 registered identities (sensor, ECM and gun rows
+omitted; Count is the default quantity):
+
+| PT | Row | Location | Flags | x / y / z | Feet right / up / fwd | Pair (0x4) | Default | Count |
+| --- | ---: | --- | --- | --- | --- | --- | --- | ---: |
+| `F18.PT` | 4 | Fuselage | `0x0605` | 0 / -15 / 0 | 0.0 / -5.0 / 0.0 | yes | F150.GAS | 1 |
+| `F18.PT` | 5 | Fuselage | `0x07e5` | 10 / -15 / 0 | 3.3 / -5.0 / 0.0 | yes | AIM120.JT | 2 |
+| `F18.PT` | 6 | Wing | `0x07e5` | 25 / -6 / -3 | 8.3 / -2.0 / -1.0 | yes | AGM65G.JT | 4 |
+| `F18.PT` | 7 | Wing | `0x07e5` | 41 / -6 / -6 | 13.7 / -2.0 / -2.0 | yes | AGM65G.JT | 4 |
+| `F18.PT` | 8 | Wingtip | `0x0085` | 58 / 1 / -9 | 19.3 / 0.3 / -3.0 | yes | AIM9M.JT | 2 |
+| `RAFALE.PT` | 5 | Fuselage | `0x05e5` | 10 / -20 / 0 | 3.3 / -6.7 / 0.0 | yes | AGM65G.JT | 4 |
+| `RAFALE.PT` | 6 | Wing | `0x05e5` | 20 / -20 / 8 | 6.7 / -6.7 / 2.7 | yes | MICA.JT | 2 |
+| `RAFALE.PT` | 7 | Wing | `0x05e5` | 36 / -20 / -18 | 12.0 / -6.7 / -6.0 | yes | R530.JT | 2 |
+| `RAFALE.PT` | 8 | Wingtip | `0x0085` | 59 / -3 / -24 | 19.7 / -1.0 / -8.0 | yes | R550.JT | 2 |
+| `F14.PT` | 4 | Fuselage | `0x0155` | 9 / -23 / 24 | 3.0 / -7.7 / 8.0 | yes | AIM54C.JT | 4 |
+| `F14.PT` | 5 | Fuselage | `0x0605` | 9 / -23 / 20 | 3.0 / -7.7 / 6.7 | yes | F250.GAS | 2 |
+| `F14.PT` | 6 | Wing | `0x07f5` | 18 / -20 / 14 | 6.0 / -6.7 / 4.7 | yes | AIM120.JT | 2 |
+| `F14.PT` | 7 | Wing | `0x0485` | 26 / -16 / 5 | 8.7 / -5.3 / 1.7 | yes | AIM9M.JT | 2 |
+| `A4E.PT` | 4 | Wing | `0x1781` | 8 / -16 / -6 | 2.7 / -5.3 / -2.0 | no | MK82.JT | 4 |
+| `A4E.PT` | 5 | Wing | `0x1785` | 17 / -16 / -10 | 5.7 / -5.3 / -3.3 | yes | F150.GAS | 4 |
+| `A4E.PT` | 6 | Wing | `0x1585` | 26 / -16 / -13 | 8.7 / -5.3 / -4.3 | yes | LAU61.JT | 2 |
+| `F31.PT` | 5 | Centerline | `0x0681` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | no | none | 1 |
+| `F31.PT` | 6 | Wing | `0x05e5` | 11 / -20 / -6 | 3.7 / -6.7 / -2.0 | yes | AIM120.JT | 2 |
+| `F31.PT` | 7 | Wing | `0x05e5` | 22 / -20 / -12 | 7.3 / -6.7 / -4.0 | yes | AGM65G.JT | 2 |
+| `F31.PT` | 8 | Wingtip | `0x0085` | 35 / -7 / -17 | 11.7 / -2.3 / -5.7 | yes | AIM9X.JT | 2 |
+| `MIG29.PT` | 5 | Wing | `0x07e5` | 20 / -10 / -5 | 6.7 / -3.3 / -1.7 | yes | AA8.JT | 2 |
+| `MIG29.PT` | 6 | Wing | `0x07e5` | 25 / -10 / -5 | 8.3 / -3.3 / -1.7 | yes | AA8.JT | 2 |
+| `MIG29.PT` | 7 | Wing | `0x07e5` | 50 / -10 / -5 | 16.7 / -3.3 / -1.7 | yes | AA8.JT | 2 |
+| `SU27.PT` | 5 | Centerline | `0x07e5` | 0 / -25 / 12 | 0.0 / -8.3 / 4.0 | yes | AA12.JT | 2 |
+| `SU27.PT` | 6 | Fuselage | `0x07e5` | 24 / -25 / 8 | 8.0 / -8.3 / 2.7 | yes | AA12.JT | 2 |
+| `SU27.PT` | 7 | Wing | `0x07e5` | 51 / -18 / -4 | 17.0 / -6.0 / -1.3 | yes | AA11.JT | 4 |
+| `SU27.PT` | 8 | Wingtip | `0x07e5` | 84 / -8 / -16 | 28.0 / -2.7 / -5.3 | yes | AA11.JT | 2 |
+| `MIG21.PT` | 4 | Centerline | `0x07e1` | 0 / -20 / -5 | 0.0 / -6.7 / -1.7 | no | none | 1 |
+| `MIG21.PT` | 5 | Wing | `0x07e5` | 20 / -13 / -5 | 6.7 / -4.3 / -1.7 | yes | AA2.JT | 2 |
+| `MIG21.PT` | 6 | Wing | `0x07e5` | 30 / -13 / -12 | 10.0 / -4.3 / -4.0 | yes | AA2.JT | 2 |
+| `SU25.PT` | 5 | Centerline | `0x07e5` | 0 / -21 / 6 | 0.0 / -7.0 / 2.0 | yes | none | 1 |
+| `SU25.PT` | 6 | Fuselage | `0x07e5` | 15 / -21 / 4 | 5.0 / -7.0 / 1.3 | yes | B13.JT | 2 |
+| `SU25.PT` | 7 | Wing | `0x07e5` | 31 / -13 / 2 | 10.3 / -4.3 / 0.7 | yes | AS7.JT | 4 |
+| `SU25.PT` | 8 | Wing | `0x07e5` | 48 / -13 / -1 | 16.0 / -4.3 / -0.3 | yes | AA8.JT | 4 |
+| `MIG23.PT` | 4 | Centerline | `0x0601` | 0 / -20 / 17 | 0.0 / -6.7 / 5.7 | no | none | 1 |
+| `MIG23.PT` | 5 | Fuselage | `0x0085` | 6 / -20 / 15 | 2.0 / -6.7 / 5.0 | yes | none | 4 |
+| `MIG23.PT` | 6 | Fuselage | `0x07e5` | 11 / -20 / 11 | 3.7 / -6.7 / 3.7 | yes | B8.JT | 2 |
+| `MIG23.PT` | 7 | Fuselage | `0x07e5` | 15 / -20 / 8 | 5.0 / -6.7 / 2.7 | yes | AS7.JT | 2 |
+| `MIG23.PT` | 8 | Wing | `0x07e5` | 18 / -20 / 3 | 6.0 / -6.7 / 1.0 | yes | AS7.JT | 2 |
+| `SU35.PT` | 5 | Centerline | `0x07e5` | 0 / -25 / 12 | 0.0 / -8.3 / 4.0 | yes | AAML.JT | 1 |
+| `SU35.PT` | 6 | Fuselage | `0x07e5` | 24 / -25 / 8 | 8.0 / -8.3 / 2.7 | yes | AAML.JT | 2 |
+| `SU35.PT` | 7 | Wing | `0x07e5` | 51 / -18 / -4 | 17.0 / -6.0 / -1.3 | yes | AA12.JT | 4 |
+| `SU35.PT` | 8 | Wingtip | `0x0fed` | 84 / -8 / -16 | 28.0 / -2.7 / -5.3 | yes | AA11B.JT | 2 |
+| `F22.PT` | 5 | Internal bay | `0x05e0` | -10 / -25 / 0 | -3.3 / -8.3 / 0.0 | no | AIM120.JT | 2 |
+| `F22.PT` | 6 | Internal bay | `0x05e0` | 10 / -25 / 0 | 3.3 / -8.3 / 0.0 | no | AGM65G.JT | 2 |
+| `F22.PT` | 7 | Internal bay | `0x05e4` | 27 / -11 / 0 | 9.0 / -3.7 / 0.0 | yes | AIM9X.JT | 4 |
+| `F22N.PT` | 5 | Fuselage | `0x05e1` | -10 / -25 / 0 | -3.3 / -8.3 / 0.0 | no | AIM120.JT | 2 |
+| `F22N.PT` | 6 | Fuselage | `0x05e1` | 10 / -25 / 0 | 3.3 / -8.3 / 0.0 | no | AGM65G.JT | 2 |
+| `F22N.PT` | 7 | Fuselage | `0x05e5` | 27 / -11 / 0 | 9.0 / -3.7 / 0.0 | yes | AIM9X.JT | 4 |
+| `AV8.PT` | 5 | Wing | `0x07e5` | 20 / -13 / -20 | 6.7 / -4.3 / -6.7 | yes | AGM65G.JT | 4 |
+| `AV8.PT` | 6 | Fuselage | `0x0585` | 9 / -22 / -16 | 3.0 / -7.3 / -5.3 | yes | AGM65G.JT | 2 |
+| `AV8.PT` | 7 | Wing | `0x0085` | 32 / -13 / -25 | 10.7 / -4.3 / -8.3 | yes | AIM9M.JT | 2 |
+| `YAK141.PT` | 4 | Wing | `0x07e5` | 25 / -10 / 0 | 8.3 / -3.3 / 0.0 | yes | AA10.JT | 2 |
+| `YAK141.PT` | 5 | Wing | `0x07e5` | 50 / -10 / 0 | 16.7 / -3.3 / 0.0 | yes | AA11.JT | 2 |
+| `AH64.PT` | 4 | Centerline | `0x0605` | 0 / -10 / 0 | 0.0 / -3.3 / 0.0 | yes | none | 1 |
+| `AH64.PT` | 5 | Fuselage | `0x0185` | 20 / -20 / 0 | 6.7 / -6.7 / 0.0 | yes | LAU61.JT | 2 |
+| `AH64.PT` | 6 | Wing | `0x0085` | 30 / -20 / 0 | 10.0 / -6.7 / 0.0 | yes | AIM9M.JT | 2 |
+| `MI24.PT` | 2 | Wing | `0x0188` | 25 / -10 / 0 | 8.3 / -3.3 / 0.0 | no | AT2.JT | 4 |
+| `MIG17F.PT` | 3 | Wing | `0x0705` | 22 / -8 / -6 | 7.3 / -2.7 / -2.0 | yes | F150.GAS | 2 |
+| `F4B.PT` | 3 | Centerline | `0x0785` | 0 / -19 / 0 | 0.0 / -6.3 / 0.0 | yes | AIM9B.JT | 4 |
+| `F4B.PT` | 4 | Fuselage | `0x07e5` | 13 / -19 / 0 | 4.3 / -6.3 / 0.0 | yes | MK82.JT | 4 |
+| `F4B.PT` | 5 | Wing | `0x0785` | 26 / -19 / -9 | 8.7 / -6.3 / -3.0 | yes | MK82.JT | 4 |
+| `F4B.PT` | 6 | Wing | `0x0605` | 38 / -19 / -20 | 12.7 / -6.3 / -6.7 | yes | F350.GAS | 2 |
+| `F4J.PT` | 4 | Centerline | `0x0785` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | yes | none | 1 |
+| `F4J.PT` | 5 | Fuselage | `0x07e5` | 20 / -20 / -9 | 6.7 / -6.7 / -3.0 | yes | AIM7E.JT | 4 |
+| `F4J.PT` | 6 | Wing | `0x0785` | 31 / -20 / -17 | 10.3 / -6.7 / -5.7 | yes | AIM9B.JT | 4 |
+| `F4J.PT` | 7 | Wing | `0x0605` | 44 / -20 / -25 | 14.7 / -6.7 / -8.3 | yes | F350.GAS | 2 |
+| `F4E.PT` | 4 | Centerline | `0x0605` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | yes | F150.GAS | 1 |
+| `F4E.PT` | 5 | Fuselage | `0x00c5` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | yes | AIM7.JT | 4 |
+| `F4E.PT` | 6 | Wing | `0x0765` | 20 / -20 / -9 | 6.7 / -6.7 / -3.0 | yes | AGM65G.JT | 4 |
+| `F4E.PT` | 7 | Wing | `0x07e5` | 39 / -20 / -15 | 13.0 / -6.7 / -5.0 | yes | none | 2 |
+| `F4.PT` | 4 | Centerline | `0x0605` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | yes | F150.GAS | 1 |
+| `F4.PT` | 5 | Fuselage | `0x00c5` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | yes | AIM7.JT | 4 |
+| `F4.PT` | 6 | Wing | `0x0765` | 20 / -20 / -9 | 6.7 / -6.7 / -3.0 | yes | AGM88.JT | 4 |
+| `F4.PT` | 7 | Wing | `0x0765` | 39 / -20 / -15 | 13.0 / -6.7 / -5.0 | yes | none | 2 |
+| `A7.PT` | 4 | Fuselage | `0x0085` | 7 / -28 / 0 | 2.3 / -9.3 / 0.0 | yes | AIM9M.JT | 2 |
+| `A7.PT` | 5 | Wing | `0x0705` | 19 / -13 / -5 | 6.3 / -4.3 / -1.7 | yes | MK82.JT | 2 |
+| `A7.PT` | 6 | Wing | `0x0785` | 35 / -12 / -11 | 11.7 / -4.0 / -3.7 | yes | AGM65G.JT | 4 |
+| `F15.PT` | 4 | Fuselage | `0x07e5` | 25 / -10 / 0 | 8.3 / -3.3 / 0.0 | yes | AIM120.JT | 4 |
+| `F15.PT` | 5 | Wing | `0x07e5` | 50 / -20 / 0 | 16.7 / -6.7 / 0.0 | yes | AIM9M.JT | 4 |
+| `F16C.PT` | 5 | Centerline | `0x0601` | 0 / -20 / 0 | 0.0 / -6.7 / 0.0 | no | F150.GAS | 1 |
+| `F16C.PT` | 6 | Wing | `0x07e5` | 32 / -10 / -7 | 10.7 / -3.3 / -2.3 | yes | AGM65G.JT | 4 |
+| `F16C.PT` | 7 | Wing | `0x0185` | 43 / -10 / -11 | 14.3 / -3.3 / -3.7 | yes | AIM120.JT | 2 |
+| `F16C.PT` | 8 | Wingtip | `0x0085` | 54 / 2 / -14 | 18.0 / 0.7 / -4.7 | yes | AIM9M.JT | 2 |
+| `F104.PT` | 4 | Centerline | `0x0605` | 0 / -15 / -7 | 0.0 / -5.0 / -2.3 | yes | F250.GAS | 1 |
+| `F104.PT` | 5 | Wingtip | `0x0605` | 37 / -5 / -10 | 12.3 / -1.7 / -3.3 | yes | F250.GAS | 2 |
+| `F104.PT` | 6 | Fuselage | `0x07e5` | 10 / -15 / -7 | 3.3 / -5.0 / -2.3 | yes | AIM7.JT | 2 |
+| `F104.PT` | 7 | Wing | `0x07e5` | 18 / -15 / -7 | 6.0 / -5.0 / -2.3 | yes | AIM7.JT | 2 |
+| `F104.PT` | 8 | Wing | `0x0285` | 25 / -15 / -9 | 8.3 / -5.0 / -3.0 | yes | AIM9M.JT | 2 |
+| `A10.PT` | 5 | Wing | `0x0585` | 10 / -10 / 0 | 3.3 / -3.3 / 0.0 | yes | AGM65G.JT | 4 |
+| `A10.PT` | 6 | Wing | `0x0585` | 25 / -10 / 0 | 8.3 / -3.3 / 0.0 | yes | AGM65G.JT | 4 |
+| `A10.PT` | 7 | Wing | `0x0585` | 40 / -10 / 0 | 13.3 / -3.3 / 0.0 | yes | AGM65G.JT | 2 |
+| `A10.PT` | 8 | Wing | `0x0185` | 55 / -10 / 0 | 18.3 / -3.3 / 0.0 | yes | AGM65G.JT | 2 |
+
 ## Original icons and geometry candidates
 
 The four original tank thumbnails `$F150.PIC`, `$F250.PIC`, `$F350.PIC` and
