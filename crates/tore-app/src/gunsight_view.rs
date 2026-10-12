@@ -98,6 +98,9 @@ pub enum TargetingShot {
     },
     /// An aircraft with no sight, looking at a buddy's spot.
     Buddy { view: SightView },
+    /// The nose view of the player's last seeker weapon in flight
+    /// ([`crate::seeker_view`]); it takes the page from the sight.
+    Seeker { view: SightView },
 }
 
 /// The renderer's camera for a view.
