@@ -178,6 +178,19 @@ fn experience_scales_search_and_preparation_only() {
 }
 
 #[test]
+fn small_arms_aim_wider_than_any_cannon_and_tighten_with_experience() {
+    // 4 times the visual guns' error at each experience (fitted).
+    for (skill, expected) in [(0, 6.0), (1, 4.0), (2, 2.8), (3, 2.0)] {
+        let squad = small_arms_aim_error_deg(skill);
+        assert!((squad - expected).abs() < 1e-12, "skill {skill}: {squad}");
+        assert!(squad > aim_error_deg(skill, false));
+        assert!(squad > aim_error_deg(skill, true));
+    }
+    let errors: Vec<f64> = (0..4).map(small_arms_aim_error_deg).collect();
+    assert!(errors.windows(2).all(|pair| pair[0] > pair[1]));
+}
+
+#[test]
 fn failing_gates_hold_the_lock_for_15_seconds() {
     let mut run = Run::new(sa6(1), 3, 0);
     run.gates = false;
