@@ -1478,6 +1478,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         target,
         owner: striker.0,
         record: None,
+        scenes: Default::default(),
     };
     let pass = pass(&scene, o)?;
     let mut buddy = match buddy_aircraft {
