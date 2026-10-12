@@ -215,6 +215,7 @@ fn cities(
 fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepout]) -> Vec<Lot> {
     let cell = mask::TILE_FT / 4;
     let t = mask::TEXEL_FT;
+    let flags_at = map.lookup();
     let mut out = Vec::new();
     let mut ordinal = 0u32;
     // The 204.8 ft grid's taken cells, which house lots keep off.
@@ -233,13 +234,13 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                         for i in 0..k {
                             let x = o[0] + (2 * i + 1) * BLOCK_FT / (2 * k);
                             let z = o[1] + (2 * j + 1) * BLOCK_FT / (2 * k);
-                            if map.flags_at(x, z) & mask::SITE == 0 {
+                            if flags_at(x, z) & mask::SITE == 0 {
                                 continue;
                             }
                             let (mut hits, mut solid) = (0, 0);
                             for sz in -1..=1 {
                                 for sx in -1..=1 {
-                                    let f = map.flags_at(x + sx * step, z + sz * step);
+                                    let f = flags_at(x + sx * step, z + sz * step);
                                     hits += u32::from(f & mask::SITE != 0);
                                     solid += u32::from(f & mask::SOLID != 0);
                                 }
@@ -266,8 +267,8 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                                 let mut n = 0;
                                 for s in [-1, 1] {
                                     for step in 1..=8 {
-                                        let f = map
-                                            .flags_at(x + s * step * dx * t, z + s * step * dz * t);
+                                        let f =
+                                            flags_at(x + s * step * dx * t, z + s * step * dz * t);
                                         if f & mask::SITE == 0 {
                                             break;
                                         }
@@ -281,7 +282,7 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                             let (mut axis, mut d1, mut d2) = (0, 0, 0);
                             for wz in -7..=7 {
                                 for wx in -7..=7 {
-                                    let f = map.flags_at(x + wx * t, z + wz * t);
+                                    let f = flags_at(x + wx * t, z + wz * t);
                                     axis += i32::from(f & mask::STREET_AXIS != 0);
                                     d1 += i32::from(f & mask::STREET_D1 != 0);
                                     d2 += i32::from(f & mask::STREET_D2 != 0);
