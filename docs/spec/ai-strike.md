@@ -23,7 +23,9 @@ families (ST-F: [Helicopters](#helicopters), [AC-130](#ac-130)), AI lasing
 and buddy lasing (ST-L: the hold on its own bomb, the lase duty a wing order
 calls, a designator lasing for its wing, dropping on a buddy's spot;
 [Lasing](#lasing)), the flight lead's ground orders and Quick Mission roles
-(ST-O) and the takeover of a human's attack (ST-K). John asked for AI that attacks the ground and
+(ST-O), the takeover of a human's attack (ST-K) and the helicopters' own
+defence and their place as Quick Mission wingmen (ST-H: [Helicopter
+defence](#helicopter-defence), [AI helicopters in Quick Mission](#ai-helicopters-in-quick-mission)). John asked for AI that attacks the ground and
 authorised the work for this round (answers of 2026-10-11, folded in below). The
 slices that build it are listed in [Source notes](#source-notes).
 
@@ -580,12 +582,88 @@ rockets' aim offset (the [skill circle](#skill-and-release-precision)).
 | Rockets | The cue is flown onto the pass's drawn aim point: heading at the aim, flight path at the line to the aim plus three times the angle between the aim and the cue, no steeper than 20 degrees down. The first rocket leaves when the cue is within 25% of the circle of the aim, never less than 40 ft (with John's tighter circles a quarter is 8 to 29 ft at the top skills, closer than the AH-64's cue ever came; agent, at the integration) (a fighter's gate is 5%: a helicopter's cue moves slowly and its adapter holds it only to about this), then up to eight at the record's cadence while the cue stays inside the circle | fitted (agent); the circle opinionated (John) |
 | Run floor | A pop-up's final ends 500 ft above the ground whatever the cue says (the adapter cannot pull a helicopter out of a steep dive near the ground) | fitted (agent) |
 | Exit | Retail's: 5 degrees up at maximum speed on the exit heading, levelling at the pass's height, to max(20,000 ft, 2R); then turn back and choose again | retail |
-| Defence, safe, home | The fighters' (above) | spec-derived |
+| Defence | The helicopter's own break ([below](#helicopter-defence)); the fighters' break sank a helicopter | opinionated (John, 2026-10-11) |
+| Safe, home | The fighters' (above); a helicopter has no landing, so home is the ordinary return-to-base heading ([below](#ai-helicopters-in-quick-mission)) | spec-derived |
 
-Known limit: a defence hands the helicopter to the existing B47 reactions,
-which fly fighter breaks at corner speed; a helicopter flying them sinks into
-the ground (a Mi-24 under the column's SAMs did, in the driver). Helicopter
-defence is open (the retail helicopter break, B20, is not built).
+### Helicopter defence
+
+*Built in slice ST-H (`tore_sim::ai::helicopter_defense`, the controller's
+`DefenseMotion::rotorcraft`, `AiActor::update_defense`).* The fighters' reactions
+to a missile or gunfire (B47 and the missile-defence rules) fly a jink or a notch
+at corner speed, with a dive of up to 20 degrees when the ground allows. A
+helicopter flying them loses its lift and sinks: a Mi-24 under the Ukraine
+column's SAMs went into the ground 41 s into the driver's run, without a hit on
+it. Retail's helicopter script answers a launch with a break of plus or minus
+90 degrees ([B20](ai.md#b20-other-aircraft-families), `H.AI`); T.O.R.E builds
+that, keeps the helicopter's speed and height, and adds the terrain masking
+John asked for (2026-10-11).
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| When | From the warning on: the warning of a missile aimed at the helicopter (the B47 delay, receiver gates and countermeasures are the fighters'), or incoming gunfire. A fighter jinks at the last moment its missile-defence rules allow; a helicopter hides at once, so it breaks while any missile is tracked at it | spec-derived; timing opinionated (agent) |
+| The break | Heading = the threat's compass bearing plus or minus 90 degrees, on the side that needs the smaller turn from the present heading; at an equal turn (a threat dead ahead or astern) the side the missile's id decides, so it is the same every time. With no bearing known (a hit, a warning without one) plus or minus 90 degrees from the present heading, as retail | retail (the 90 degrees); beam to the threat, opinionated (John, 2026-10-11); the side rule, John's decision 13 (no dice) |
+| Not toward the threat | Retail turns toward its target when that is ahead (off-beam under 90 degrees) and breaks only when it is not. A launch warning names no target, so T.O.R.E beams the threat whichever side it is on | opinionated (agent) |
+| Turn kept | A turn already begun (bank over 10 degrees) is kept when the break needs more than 45 degrees, so the helicopter does not reverse when the missile selected changes | fitted (agent) |
+| Speed | Maximum speed, not corner. Asked for corner speed the adapter lets a helicopter slow until it sinks (the same finding as the pass's). It comes down no faster than it can hold: past its maximum speed it flies level | opinionated (John, 2026-10-11, "keep speed"); the numbers fitted (agent) |
+| Height | The flight path is held within 10 degrees of level either way: no dive and no zoom. It settles to 200 ft over the highest ground in the next 6 s at that rate | opinionated (John, 2026-10-11, "keep height" and "drop to the masking height"); the numbers fitted (agent) |
+| Terrain masking | It tries the break at 90, 60 and 120 degrees off the threat's bearing, on both sides, flies each ten seconds ahead on the terrain, and takes the one that hides it from the threat's site for the most seconds, less a point for each 90 degrees of turn, a point for each 60 degrees it strays from the beam and two points for each second the ground blocks its climb. With no cover anywhere it is the plain beam | fitted (agent) |
+| Where the threat sees from | The nearest hostile site the helicopter knows that reaches it (a missile site's missile reach for a missile warning, a gun site's gun reach for gunfire); else the missile itself; a helicopter with no ground picture (a CAP wing) and no missile position masks nothing | fitted (agent) |
+| Between the warning and the break | While a threat is up but the controller flies no break of its own (the break has not begun, or the ten quiet seconds after it), the strike flies the course at maximum speed, down toward 200 ft over the highest ground ahead. The fighters' air logic would fly this time at corner speed | fitted (agent) |
+| Damage | The engine-protection throttle cut (a quarter of the throttle) is not applied to a helicopter: its throttle is the collective, and a quarter of it is a fall. A helicopter hit in the engine keeps the throttle the AI asks for | opinionated (agent) |
+
+Measured on the strike driver (`--a2g-run UKR QUCOL --pilot ai`, Mi-24 AT-2 and
+AH-64 rockets from 4 nm at 1,500 ft, light to heavy SAMs and AAA, 16 runs at
+skill 2): before, three helicopters with no damage dived into the ground (41.0,
+41.0 and 79.6 s); after, none did. Under the heavy AAA the Mi-24 used to sink at
+79.6 s with nothing fired; it now breaks for 38 s, fires both AT-2s, kills the
+tank and lives until 108 s, when a hit that broke its flight controls (system
+fault 19) put it into a spiral. Under the light SAMs of surface seed 19 it
+breaks for 9 s, fires and lives; before, it crashed at 91 s. The break is
+retail's 90 degrees off the threat, held at 85 to 147 knots with the flight path
+within 10 degrees of level: the numbers are in the `BREAK` lines of the
+[driver](../testing/lane-flight.md#ai-strike-driver).
+
+What it does not do. The break does not save a helicopter that has to cross
+SAMs which cover its whole approach: the column's SA-9s and SA-14 out-range the
+AT-2, so a stand-off attack (which the AI chooses there, as intended) is shot
+down or aborted before its firing point in 15 of the 16 driver runs, and flat
+ground gives no cover to mask behind. A hit that breaks a helicopter's controls
+or engine ends in a spiral or a fall whatever the AI does. Both are open
+([Unknowns](#unknowns)).
+
+### AI helicopters in Quick Mission
+
+*Built in slice ST-H (John, 2026-10-11, "AI helicopters as Quick Mission AI
+wingmen").* The AH-64 and the Mi-24 are offered in every AI wing of the creator
+(friendly wings 2 and 3, enemy wings 1 to 3) and in friendly wing 1 on an
+airborne start; the CH-47, the V-22, the AV-8 and the Yak-141 are still not
+(`AircraftId::ai_flyable`). The AI flies them on the same powered-lift physics a
+player uses ([AI wingmen](variety-flight.md#ai-wingmen)).
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| Role | The bomber-class default applies: the AH-64 and the Mi-24 carry the class word 0x4000, like the A-4E, so a friendly wing 2 or 3 of helicopters strikes when a ground target is set (or when "Strike the ground target" is chosen) and flies CAP otherwise; the player's wing and every Redfor wing stay CAP | retail (the class word), opinionated (John, 2026-10-11) |
+| Start, AI wings | A helicopter of the AI's own wings starts 1,500 ft over the ground under it, in trimmed forward flight, not at the mission altitude and not raised to the 5,000 ft sea-level floor of the other aircraft: the AI cannot yet make a helicopter climb or descend by much (the pass descends about 1 degree), so it starts at the height the pop-up flies. A helicopter of the player's wing starts with the player | opinionated (agent) |
+| Start, ground | The AI cannot lift a helicopter off the ground (it cannot hold a hover: asked to start from one it crashes in 5 s). A player in a helicopter on a ground start therefore leads friendly wing 1 alone, with the notice "The AI cannot take a Mi-24 Hind-D off the ground yet, so friendly wing 1 is just you"; an airborne start offers the wingmen. The other wings start airborne at any start. A mission file that asks for both is refused by the creator's check, not by the world | opinionated (agent); the next step is a hover controller |
+| Fuel | A helicopter keeps no fuel schedule: no bingo, no critical, no caution. Its data gives it minutes of fuel at the rate it burns against the hour a cruise of 80 knots takes to a far field, so every Quick Mission helicopter would be bingo at the start and fly home at once. The AI burns no fuel in a mission in any case | opinionated (agent) |
+| Landing | A helicopter is never put through the airfield sequences, which are an aeroplane's: a runway approach and rollout flown at 120 knots put a Mi-24 into the ground in the probe. A landing order (Land, Bug Out, the end of the mission, damage) sends a leader home by the ordinary return-to-base heading and holds it there; its wingmen stay in formation on it. It does not land | opinionated (agent); landing is open |
+| Air combat | Unchanged: the fighters' air logic, which in the 5 v 5 probes keeps a helicopter within 16 degrees of level at under 135 knots. The probes (`ai-fight-heli-*`) found no helicopter that dived or overspeed without a hit | spec-derived |
+| Pass | The pop-up and the stand-off, defence and exit above | as above |
+
+### Helicopters and lasing
+
+Slice ST-L's lase duty is not flown by a helicopter, and cannot be: none that
+the AI flies has a designator. The AH-64 carries a FLIR only, the Mi-24 no
+sight at all, and the one rotorcraft with a built-in laser (the V-22's KA50L) is
+not an AI aircraft ([air-to-ground](air-to-ground.md#the-targeting-sight)).
+`AiWings::order_lase` therefore refuses them for want of a designator whether
+or not the class is excluded; the exclusion in `can_lase` is kept so a helicopter
+that gained a pod would not inherit a fixed-wing hold by accident. A helicopter
+hold would need its own tactics, not the pod orbit: the orbit's bank limit (the
+target's depression less 5 degrees) is zero for a pod at the helicopter's 1,500
+ft and a 3 nm radius (4.7 degrees down), so the hold would be a close slow orbit
+or a masked unmask-and-lase, which wants the hover the adapter does not have.
+Not built.
 
 ## AC-130
 
@@ -739,7 +817,9 @@ ST-L, 2026-10-11) except where a line says otherwise.
   Strike-role wingman goes back to its strike). Helicopters and the gunship do
   not lase (their families fly no hold, and of them only the V-22 carries a
   laser; the AC-130's sight is a FLIR) and answer "No designator" (agent
-  decision at the integration). Opinionated (John, 2026-10-11); orbit numbers
+  decision at the integration; why a helicopter cannot, in
+  [Helicopters and lasing](#helicopters-and-lasing)). Opinionated (John,
+  2026-10-11); orbit numbers
   fitted. The order calls `AiWings::order_lase(id, target,
   LaseUntil::TargetDies)`; the call also takes `LaseUntil::Seconds(n)` and
   `Impact` (until every weapon guided on its spot has landed, after at least
@@ -890,6 +970,8 @@ strike order or a takeover of a striking plane.
 | AC-130 bursts | every 2 s on the orbit; the 25 mm for 1 s of it, the 40 and 105 mm at their rates; each burst opens on a point drawn in the skill circle and walks onto the target over 0.1 s (Ace) to 0.4 s (Novice) | fitted; circle opinionated (John), the walk-in opinionated (John, agent for the times) |
 | Helicopter stand-off | masked at 200 ft AGL to 60% of the zone-1 range, unmask 500 ft for up to 10 s | fitted |
 | Helicopter rocket gate | 25% of `R`, at least 40 ft | fitted |
+| Helicopter break | the threat's bearing plus or minus 90 degrees (60 and 120 for cover), flight path within 10 degrees of level, 200 ft over the highest ground in 6 s, maximum speed | retail (90), opinionated (John, 2026-10-11), fitted |
+| Helicopter start | 1,500 ft over the ground in an AI wing; no fuel schedule; no airfield sequence | opinionated (agent) |
 | AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |
 | Lase orbit | radius max(3 nm, 1.2 turn radii), at most 80% of the laser's reach | fitted |
 | Lase bank limit | the target's depression below the horizon less 5 degrees, divided by the sine of its azimuth (pod hemisphere) | fitted (agent) |
@@ -908,10 +990,14 @@ strike order or a takeover of a striking plane.
 | Unknown | Fallback | Next step |
 | --- | --- | --- |
 | How retail's AC-130 rounds hit from its orbit (aim 20 ft above the target, no drop; hit test `_PROJHitChance`) | T.O.R.E aims with the player's gun ballistics instead (ST-F): its rounds land on their aim | Only if John wants retail's aim back |
-| A helicopter's defence against SAMs and guns (retail breaks +/-90 degrees, B20) | The fighters' B47 reactions, which a helicopter cannot fly | A helicopter defence slice |
+| A stand-off attack against SAMs that out-range the weapon (the column's SA-9s and SA-14 against the AT-2) | The AI chooses the stand-off attack, breaks, and is shot down or aborts before its firing point | A hold-off or SEAD first for helicopters, as the fighters hold off |
+| A helicopter takeoff, hover and landing | A helicopter starts in the air, never lands, and a ground start leaves the player's helicopter wing to the player | A hover controller for the AI adapter |
 | How retail's Quick Mission strike wings reach the target area (placement) | Strike wings fly to the objective (Who strikes) | Read the wing placement code if John wants retail parity |
 | The wing message sent when an order deadline passes (20 s) | None | Low priority |
 | Retail's choice of jink side and heading | Seeded channel or a fixed side | None |
+
+Closed by ST-H, no longer unknown: a helicopter's defence against SAMs and guns
+(retail breaks plus or minus 90 degrees, B20).
 
 Closed by ST-R, no longer unknown: the steering frame, dive rollout, jink path,
 AC-130 circle and mount arcs, how retail gives the AI a ground target, Alt+F,
@@ -966,6 +1052,15 @@ and is open to change.
     while it closes (to 1.5 fire ranges) and then goes home. Say if a carrier
     should drop on no spot at all, or hold off at a distance and wait.
 
+13. **Helicopters (ST-H).** Agent choices carrying John's decisions of
+    2026-10-11. The break beams the threat rather than turning toward it (retail
+    turns toward its target when ahead); the AH-64 and Mi-24 are offered to the AI
+    and the CH-47 is not (a transport with no weapons); AI helicopters start 1,500
+    ft over the ground and never land, and the AI cannot take one off the ground,
+    so a player's helicopter wing needs an airborne start; helicopters keep no
+    fuel schedule. Say if the CH-47 should be offered, or if a helicopter should
+    fly home to a pad in a hover.
+
 ## Source notes
 
 - Retail evidence: the AI scripts and records summarised in [AI
@@ -980,6 +1075,14 @@ and is open to change.
   [surface defenses](surface-defenses.md), [AI experience](ai-experience.md),
   [AI guns](ai-gun-employment.md), [AC-130 guns](ac130-linked-guns.md),
   [keyboard](keyboard.md).
+- Built in ST-H: `ai/helicopter_defense.rs` (the break, the masking search),
+  `ai/mission.rs` (`update_defense`, the helicopter's fuel, landing and damage
+  rules), `ai/family_helicopter.rs` (the run between the warning and the break),
+  `ai/controller.rs` (`DefenseMotion::rotorcraft`), `tore-world/src/combat.rs`
+  (the start height), `tore-formats` (`AircraftId::ai_flyable`) and the
+  creator's wing rule. Evidence: the scenarios `ai-strike-heli`,
+  `ai-strike-heli-defended` and `qmc-strike-heli`, and the lane-ai probes
+  `ai-fight-heli-*` and `ai-rtb-heli-land-order`.
 - Built in ST-L: `ai/strike_lase.rs` (the hold, the duty, the wing's lase),
   `ai_wings/strike.rs` (the cockpit's sight and laser, the order calls),
   `live/sighting.rs` (`release_ai_lasers`). Evidence: the scenarios
