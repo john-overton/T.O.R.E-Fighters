@@ -1967,14 +1967,15 @@ impl State {
     }
 }
 
-/// Full articulation through 10 mph, linearly removed by 25 mph.
+/// Full articulation through 10 mph, linearly removed by 50 mph (John,
+/// 2026-10-12, was 25 mph; opinionated).
 fn nosewheel_angle(rudder: f64, ground_speed_fps: f64) -> f64 {
     rudder.clamp(-1., 1.) * std::f64::consts::FRAC_PI_2 * nosewheel_authority(ground_speed_fps)
 }
 
 fn nosewheel_authority(ground_speed_fps: f64) -> f64 {
     let mph = ground_speed_fps.abs() * 3600. / 5280.;
-    ((25. - mph) / 15.).clamp(0., 1.)
+    ((50. - mph) / 40.).clamp(0., 1.)
 }
 
 /// Fitted missile-blast jolt at strength 1, fading with [`JOLT_FADE_SECONDS`].
@@ -2560,7 +2561,7 @@ mod tests {
         assert_eq!(s.nosewheel_authority(), 0.);
         s.enable_research(1).unwrap();
         s.start_on_runway([0.; 3], 0.).unwrap();
-        for (mph, fraction) in [(0., 1.), (10., 1.), (17.5, 0.5), (25., 0.), (40., 0.)] {
+        for (mph, fraction) in [(0., 1.), (10., 1.), (30., 0.5), (50., 0.), (60., 0.)] {
             s.velocity = [mph * 5280. / 3600., 0., 0.];
             s.rudder = 0.;
             assert!((s.nosewheel_authority() - fraction).abs() < 1e-12);
@@ -2574,7 +2575,7 @@ mod tests {
     }
     #[test]
     fn nosewheel_schedule_uses_mph_and_has_no_stationary_rotation() {
-        for (mph, degrees) in [(0., 90.), (10., 90.), (17.5, 45.), (25., 0.), (100., 0.)] {
+        for (mph, degrees) in [(0., 90.), (10., 90.), (30., 45.), (50., 0.), (100., 0.)] {
             for sign in [-1., 1.] {
                 assert!(
                     (nosewheel_angle(sign, mph * 5280. / 3600.).to_degrees() - sign * degrees)
@@ -2583,7 +2584,7 @@ mod tests {
                 );
             }
         }
-        for mph in [0., 5., 10., 17.5, 25., 40.] {
+        for mph in [0., 5., 10., 30., 50., 60.] {
             let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
             s.enable_research(1).unwrap();
             s.start_on_runway([0.; 3], 0.).unwrap();
@@ -2604,7 +2605,7 @@ mod tests {
                 .unwrap()
                 .rotation
                 .ground_steering_yaw;
-            assert_eq!(yaw > 0., mph > 0. && mph < 25., "{mph} mph: {yaw}");
+            assert_eq!(yaw > 0., mph > 0. && mph < 50., "{mph} mph: {yaw}");
         }
     }
     #[test]

@@ -1581,6 +1581,15 @@ picks the theater (default UKR):
 TORE_DATA_DIR=.local/surface-data target/debug/tore-app --blast-preview .local/tmp/blast
 ```
 
+`--cockpit-sheet OUT_DIR [ID,ID,...]` (first argument) renders every flyable
+aircraft's cockpit with live mirrors, its cockpit art with the mirror masks
+tinted (centre red, left green, right blue) and two contact sheets, offscreen;
+`summary.txt` lists each picture's mirror regions. `--dome-sheet OUT_DIR`
+renders the E-3, IL-76 and E-2 from above and behind at six ticks (50 degrees
+of dome turn apart). Both read `TORE_DATA_DIR`, like `--blast-preview`
+([mirror review](baselines/mirrors.md#2026-10-12-review-of-every-cockpit-picture),
+[radar domes](formats/objects-and-shapes.md#airborne-radar-domes-fitted-2026-10-12)).
+
 ## Surface unit inspection
 
 `--surface-dump` prints a theater's surface units as a mission resolves and

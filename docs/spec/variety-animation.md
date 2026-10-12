@@ -455,8 +455,10 @@ X=-6.44..-0.44,Y=-34..-18,Z=-5.88..10.12; nose X=-2..2,Y=67..75,Z=-7..5.
 Source-body section tests include complete cards and their interior grids.
 The closest raw card margins are transparent; report their conservative gap
 separately from the indexed-art wheel/strut clearance. The source afterburner
-alias adds no flame, so it is not connected to exhaust demand. Radome animation
-and original timing remain unreviewed.
+alias adds no flame, so it is not connected to exhaust demand. The rotodome
+turns at a fitted 6 rpm while an engine is lit (John, 2026-10-12; rig in
+[airborne radar domes](../formats/objects-and-shapes.md#airborne-radar-domes-fitted-2026-10-12)).
+Original radome timing remains unknown: retail has no routine for it.
 
 ## Yak-141 controls and nozzle
 
@@ -531,8 +533,7 @@ Main leg/wheel assemblies fold forward 115 degrees around left [-16,0,-7]
 and right [16,0,-6], preserving their one-unit leg/wheel lateral offset.
 Nose gear folds aft 90 degrees around [0,30,-7]. Hook folds aft 90 degrees
 around [0,-13,-8], lifting into its stowed envelope. Gear and hook disappear
-only at zero. Retain the shared phase-selected propeller overlay. Original
-radome motion and mechanical timing remain unknown.
+only at zero. Retain the shared phase-selected propeller overlay.
 
 ## Boeing 747 controls and gear
 

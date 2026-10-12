@@ -627,6 +627,39 @@ envelope. The control towers and the HAWK site are placed scenery, not
 surface units: their antennas are drawn still (not built: every airfield's
 tower would have to be drawn every frame).
 
+### Airborne radar domes (fitted, 2026-10-12)
+
+Slice BC. The three radar aircraft are not in the table above: `AWACS.SH`
+(E-3), `IL76.SH` (the Redfor Mainstay) and `E2C.SH` (E-2) carry no `f0`
+envelope and no `_currentTicks` read, so retail never turns their domes. John
+asked on 2026-10-12 for the E-3 and the Mainstay to turn slowly; the E-2 is an
+agent addition. The turn is therefore a fitted rig over reviewed faces, not a
+retail routine, and it does not use the surface path's
+`shape::CURRENT_TICKS_WORD`: the aircraft path animates faces by address from
+the presented flight state (`variety_rotors::animate`).
+
+Each dome is a lens of flat triangles (eight or ten around a pole, a lower
+and an upper ring), found by shape inspection:
+
+| Shape | Faces | Lens | Pole (x, y), z range |
+| --- | --- | --- | --- |
+| AWACS.SH | 16, `3e6a` to `4092` (listed in `variety_rotors::E3_DOME`) | 8-sided, 45 units across | (0, -45), 29 to 36 |
+| IL76.SH | 20, `4ba2` to `4d31` (`IL76_DOME`) | 10-sided, 38 units across | (0, -23), 28 to 36 |
+| E2C.SH | 16, `205a` to `21c3` (`E2_DOME`) | 4-sided lens, 38 units across | (0, -11), 16 to 21 |
+
+The lens turns about the vertical (source Z) line through its pole, clockwise
+seen from above, so the mast struts (separate faces, `4e6f` and its
+neighbours in AWACS.SH) stay fixed. Normals turn with the faces. The angle
+is `-(ticks / 120) * 2 pi * 6 / 60`, one turn in 10 s (6 rpm, the E-3's
+operating rate), where `ticks` is the picture's tick (`State::ticks`, the
+mission tick in a replay, a recording or another client's view), so every
+client draws the same angle. It turns while an engine is lit and the aircraft
+is not a wreck, and rests at zero otherwise (an agent decision). Presentation
+only: no simulation, wire or checkpoint change. Only the E-3 dome carries a
+texture feature (a stripe), so its turn is the one that shows; the Mainstay
+and Hawkeye lenses are plain-coloured and turn without a visible change
+beyond the rim. `tore-app --dome-sheet OUT_DIR` renders the three at six ticks.
+
 ## Carriers, islands and deck crew (2026-10-10)
 
 Research and implementation, slice S2 of the surface objectives round. Same

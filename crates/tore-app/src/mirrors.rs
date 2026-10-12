@@ -7,39 +7,40 @@ pub struct Masks {
     pub pixels: Vec<u8>,
     pub rects: [[f32; 4]; 3],
 }
+/// Seed pixels of the mirror regions in a cockpit art family's 1280x490
+/// picture, centre, left and right (`None` where the art has no such mirror).
+/// Authored identification hints from inspected art (fitted; 2026-10-12 for
+/// the families added by slice BC), not native camera records. Families that
+/// share a cockpit picture share a row: the picture's own name decides, so
+/// the F-4 variants and the A-4E use the F-4 picture, the Su-27, AV-8B and
+/// F-15 the AV-8 picture, the MiG-29, Su-25, MiG-23 and Mi-24 the SU-33 one,
+/// the F-104 and A-10 the F-104 one. Pictures without a flat mirror fill
+/// (F-16, F-22, X-31, MiG-17, MiG-21 and the transport/helicopter AC-130
+/// picture) have none.
+pub(crate) fn seeds(id: AircraftId) -> Option<[Option<[usize; 2]>; 3]> {
+    let s = |x, y| Some([x, y]);
+    Some(match id.cockpit_stem() {
+        "F18" => [s(640, 40), s(110, 380), s(1170, 380)],
+        "F14" => [s(640, 40), s(140, 250), s(1140, 250)],
+        "F4" => [s(640, 40), s(200, 300), s(1080, 300)],
+        "RAF" => [s(640, 40), s(190, 360), s(1090, 360)],
+        "AV8" => [s(640, 40), s(204, 257), s(1064, 257)],
+        "SU35" => [s(640, 40), s(203, 297), s(1075, 297)],
+        "A7" => [s(641, 35), s(120, 304), s(1161, 304)],
+        "F104" => [None, s(231, 232), s(1049, 232)],
+        "SU33" => [None, s(176, 195), s(1103, 195)],
+        "Y141" => [None, s(375, 91), s(902, 91)],
+        _ => return None,
+    })
+}
 /// Four-connected exact-color flood; bounds prevent unrelated artwork leaks.
 pub fn masks(source: &Sprite, id: AircraftId) -> Option<Masks> {
     if [source.width, source.height] != [1280, 490] {
         return None;
     }
-    let id = match id.cockpit_stem() {
-        "F4" => AircraftId::A4E,
-        "AV8" => AircraftId::Su27,
-        _ => id,
-    };
-    if matches!(id, AircraftId::Su27 | AircraftId::Su35) {
-        return flood(source, [[640, 40]]);
-    }
-    let seeds = match id {
-        AircraftId::F18 => [[640, 40], [110, 380], [1170, 380]],
-        AircraftId::F14 => [[640, 40], [140, 250], [1140, 250]],
-        AircraftId::A4E => [[640, 40], [200, 300], [1080, 300]],
-        AircraftId::X31
-        | AircraftId::Mig29
-        | AircraftId::Su27
-        | AircraftId::Mig21
-        | AircraftId::Su25
-        | AircraftId::Mig23
-        | AircraftId::Su35
-        | AircraftId::F22
-        | AircraftId::F22n
-        | AircraftId::Faxx => return None,
-        AircraftId::Rafale => [[640, 40], [190, 360], [1090, 360]],
-        _ => return None,
-    };
-    flood(source, seeds)
+    flood(source, seeds(id)?)
 }
-fn flood<const N: usize>(source: &Sprite, seeds: [[usize; 2]; N]) -> Option<Masks> {
+fn flood(source: &Sprite, seeds: [Option<[usize; 2]>; 3]) -> Option<Masks> {
     let (w, h) = (source.width, source.height);
     if w == 0 || h == 0 || w.checked_mul(h)?.checked_mul(4)? != source.rgba.len() {
         return None;
@@ -48,7 +49,10 @@ fn flood<const N: usize>(source: &Sprite, seeds: [[usize; 2]; N]) -> Option<Mask
         pixels: vec![0; w * h],
         rects: [[0.; 4]; 3],
     };
-    for (index, [sx, sy]) in seeds.into_iter().enumerate() {
+    for (index, seed) in seeds.into_iter().enumerate() {
+        let Some([sx, sy]) = seed else {
+            continue;
+        };
         if sx >= w || sy >= h {
             return None;
         }
@@ -150,13 +154,60 @@ mod tests {
                 }
             }
         }
-        let m = flood(&s, [[2, 3], [12, 3], [22, 3]]).unwrap();
+        let all = |a: [usize; 2], b: [usize; 2], c: [usize; 2]| [Some(a), Some(b), Some(c)];
+        let m = flood(&s, all([2, 3], [12, 3], [22, 3])).unwrap();
         assert_eq!(m.rects[0], [1., 2., 4., 3.]);
         assert_eq!(m.pixels.iter().filter(|v| **v != 0).count(), 36);
         assert_eq!(m.pixels[0], 0);
-        assert!(flood(&s, [[2, 3], [2, 3], [22, 3]]).is_none());
-        assert!(flood(&s, [[0, 0], [12, 3], [22, 3]]).is_none());
+        assert!(flood(&s, all([2, 3], [2, 3], [22, 3])).is_none());
+        assert!(flood(&s, all([0, 0], [12, 3], [22, 3])).is_none());
+        // A side-only picture leaves the centre slot empty and keeps the
+        // left and right slots' own numbers.
+        let sides = flood(&s, [None, Some([12, 3]), Some([22, 3])]).unwrap();
+        assert_eq!(sides.rects[0], [0.; 4]);
+        assert_eq!(sides.rects[1], [11., 2., 4., 3.]);
+        assert_eq!(sides.rects[2], [21., 2., 4., 3.]);
+        assert_eq!(sides.pixels[3 * 30 + 12], 2);
+        assert_eq!(sides.pixels[3 * 30 + 22], 3);
+        assert_eq!(sides.pixels[3 * 30 + 2], 0);
         s.rgba.fill(255);
-        assert!(flood(&s, [[2, 3], [12, 3], [22, 3]]).is_none());
+        assert!(flood(&s, all([2, 3], [12, 3], [22, 3])).is_none());
+    }
+    #[test]
+    fn mirror_seeds_follow_the_cockpit_picture_family() {
+        use AircraftId::*;
+        let family = |ids: &[AircraftId]| {
+            let first = seeds(ids[0]);
+            assert!(first.is_some(), "{:?}", ids[0]);
+            for id in ids {
+                assert_eq!(seeds(*id), first, "{id:?}");
+            }
+        };
+        family(&[A4E, F4B, F4J, F4E, F4G]);
+        family(&[Su27, Av8, F15]);
+        family(&[Mig29, Su25, Mig23, Mi24]);
+        family(&[F104, A10]);
+        for id in [F18, F14, Rafale, Su35, A7, Yak141] {
+            assert!(seeds(id).is_some(), "{id:?}");
+        }
+        // The F-16, F-22, X-31, MiG-17, MiG-21 and AC-130 pictures have no
+        // flat mirror fill.
+        for id in [
+            F16C, F22, F22n, Faxx, X31, Mig17, Mig21, C130, Ac130, E3, Il76, E2, V22, Ah64, Ch47,
+            B747, A310,
+        ] {
+            assert!(seeds(id).is_none(), "{id:?}");
+        }
+        // Every table: seeds are inside the 1280x490 picture and distinct, and
+        // a picture with side mirrors names both sides.
+        for id in AircraftId::ALL {
+            let Some(table) = seeds(id) else { continue };
+            assert_eq!(table[1].is_some(), table[2].is_some(), "{id:?}");
+            let mut points: Vec<_> = table.iter().flatten().collect();
+            assert!(points.iter().all(|p| p[0] < 1280 && p[1] < 490));
+            points.sort();
+            points.dedup();
+            assert_eq!(points.len(), table.iter().flatten().count());
+        }
     }
 }
