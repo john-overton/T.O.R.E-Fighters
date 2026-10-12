@@ -518,9 +518,12 @@ flowchart LR
   (hardpoint 1), absent for SOVR's forward mount (heading 0). The static pose
   takes HardpointAngle as zero, the mount at rest, and turns the turret by
   that constant about the up axis. This rest reading is an inference from
-  that match (fitted); live traverse belongs to the surface AI.
-- **Rotating radar** (`a1 _currentTicks; shl ax,6; mov [ebx+6],ax`) needs no
-  change: its single trampoline already resumes at the c4, drawn unturned.
+  that match (fitted). The state path takes HardpointAngle from the host
+  since CL-AIM ([turrets and rotating antennas](#turrets-and-rotating-antennas-2026-10-12)).
+- **Rotating radar** (`a1 _currentTicks; shl ax,6; mov [ebx+6],ax`): its
+  single trampoline resumes at the c4, drawn unturned on the scenery path;
+  since CL-AIM the state path turns it by the host's tick count (same
+  section).
 
 ### Results
 
@@ -567,6 +570,62 @@ from four sides, close views, a launcher sheet by loaded count, and every
 texture with holes in magenta. Faces the shape-file guide calls opaque
 (switch 12, or the `ee`/`fe` combinations) show their own colour through
 index-255 texels; transparent faces are cut out there.
+
+## Turrets and rotating antennas (2026-10-12)
+
+Research and implementation, slice CL-AIM of the surface close-out. Which
+retail shapes turn a part, how the bounded reader finds the part, and what
+the host now supplies. The game's use (which units aim, rates, who sees it)
+is in [aiming](../spec/surface-defenses.md#aiming).
+
+A shape turns a part in exactly one way: an `f0` envelope writes a 16-bit
+heading into the first rotation word (`+8`) of the `c4` transformed call it
+resumes at, and every vertex and normal under that `c4` turns about the
+`c4`'s translation (its pivot), positive toward the right (forward toward
+right, seen from above). No envelope writes the second or third rotation
+word, so no retail part pitches or banks: no barrel, launcher rail or
+antenna elevates. Parts are identified only by these envelopes; every other
+`c4` in a surface unit shape is static (the land vehicles have none at all:
+their turrets, barrels and rails are drawn in the body's own records with no
+pivot).
+
+| Envelope | Bytes after `f0 00` | Written heading |
+| --- | --- | --- |
+| Turret | `call $+5; pop ebx; add ebx,N; mov ecx,HP`, trampoline to `@HardpointAngle@4` returning straight back, optional `add ax,REST`, `mov [ebx+6],ax`, resume trampoline | `REST + HardpointAngle(HP)` |
+| Rotating antenna | `call $+5; pop ebx; add ebx,N; mov eax,[_currentTicks]; shl ax,S; mov [ebx+6],ax`, resume trampoline | `_currentTicks << S` (16 bits), at 256 ticks a second: `S` 5, 6, 7 turn once in 8, 4, 2 s |
+
+The reader checks that the write lands on the resumed `c4`'s heading word
+and refuses the shape otherwise. The import names confirm the callbacks
+(`@HardpointAngle@4` and `_currentTicks` in KRIV and SOVR, `_currentTicks`
+in REDCR and RLD).
+
+Host inputs (synthetic state keys above any module address, not listed in
+`state_words`, so earlier digests hold): `shape::hardpoint_angle_word(hp)`
+is HardpointAngle for a hardpoint in binary angle units (65,536 a turn),
+absent 0, the mount at rest; `shape::CURRENT_TICKS_WORD` is `_currentTicks`,
+absent 0, the antenna unturned. The scenery path always draws both at 0, as
+before. `shape::articulation(data)` lists a shape's turrets (hardpoint and
+rest) and antennas (shift).
+
+Every shape in FA_1, FA_2, FA_4B, FA_4D and swpatch (the projection test
+`only_the_reviewed_shapes_turn_turrets_or_antennas` pins this list):
+
+| Shape | Used by | Turrets (hardpoint, rest) | Antennas (shift) |
+| --- | --- | --- | --- |
+| KRIV.SH, KRIVAK.SH | KRIVAK.NT | 1 (32760, aft), 0 (32760, aft) | 6 |
+| SOVR.SH | SOVR.NT | 1 (32760, aft), 0 (0, fore) | 6 |
+| REDCR.SH | BUTLER.NT (Red Crown picket) | none | 5 |
+| RLD.SH | ROLAND.NT | none | 7 |
+| CTWR1.SH, CTWR2.SH, TOWER.SH | control tower buildings | none | 7 |
+| HAWKS.SH | HAWKSITE.OT (a static HAWK site object) | none | 7, 7 |
+
+The KRIVAK.NT hardpoints 0 and 1 are both aft AAA30BAD mounts (rest 32760),
+SOVR.NT's 0 the forward AAA30 (rest 0) and 1 the aft (32760): the envelopes'
+rest constants equal the NT `slewH` of the hardpoint they name, as recorded
+above. The missile launchers of both ships (SA-N-4, SA-N-7) have no
+envelope. The control towers and the HAWK site are placed scenery, not
+surface units: their antennas are drawn still (not built: every airfield's
+tower would have to be drawn every frame).
 
 ## Carriers, islands and deck crew (2026-10-10)
 
