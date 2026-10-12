@@ -677,8 +677,17 @@ impl Scenery {
             .iter()
             .filter_map(|id| Some((*id, self.surface.look(*id, false, true, None)?)))
             .collect();
-        for unit in &surface.units {
-            let id = unit.id.0;
+        // Every standing placement, as live flight does: a unit that aims
+        // (a ship's turrets and spinning radar, a radar vehicle, a body that
+        // turned) is drawn turned by the per-frame pass, so its rest copy
+        // must be hidden even when it never fired and the recording holds
+        // no stock for it.
+        let ids: BTreeSet<u32> = self
+            .placement_ids()
+            .into_iter()
+            .chain(surface.units.iter().map(|unit| unit.id.0))
+            .collect();
+        for id in ids {
             if hidden.contains(&id) {
                 continue;
             }
@@ -1035,6 +1044,25 @@ pub(crate) mod tests {
             scene.static_geometry(&targets, &quiet()).vertices,
             vec![9.; 30]
         );
+    }
+
+    #[test]
+    fn a_replay_hides_the_rest_copy_of_every_aiming_unit_that_never_fired() {
+        let mut scene = scenery();
+        scene.static_vertices = BTreeMap::from([(1, vec![1.; 30]), (2, vec![2.; 30])]);
+        // Placement 2 is a ship whose radar spins. The recording lists no
+        // stock for it (it never fired), and it is not destroyed.
+        scene.surface = surface_art::SurfaceArt::default().with_spinning_antenna(2);
+        let geometry = Arc::clone(scene.static_geometry_replay(&BTreeSet::new(), &quiet()));
+        assert_eq!(
+            geometry.vertices,
+            vec![1.; 30],
+            "its frame copy is the only one"
+        );
+        // A destroyed one stays out of the static batch too.
+        let hidden = BTreeSet::from([1]);
+        let geometry = Arc::clone(scene.static_geometry_replay(&hidden, &quiet()));
+        assert!(geometry.vertices.is_empty());
     }
 
     /// The lowest vertex of `vertices` (relative to `origin`) against the

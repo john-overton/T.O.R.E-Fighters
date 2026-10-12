@@ -457,7 +457,7 @@ impl PlanView {
         ]
     }
     fn set_first(&mut self, vertical: bool, first: f64) {
-        self.let_go();
+        let before = self.center;
         let extent = self.extent();
         if vertical {
             self.center[1] = self.size[1] - first - extent[1] / 2.;
@@ -465,6 +465,11 @@ impl PlanView {
             self.center[0] = first + extent[0] / 2.;
         }
         self.clamp();
+        // An arrow on an axis with nothing to scroll moves nothing, so it
+        // does not stop the map following the player.
+        if self.center != before {
+            self.let_go();
+        }
     }
     fn bars(&self) -> [Bar; 2] {
         [
@@ -575,9 +580,12 @@ impl PlanView {
     /// The mouse went up: a held thumb or rocker is let go. True when
     /// either was held.
     pub fn up(&mut self) -> bool {
-        let held = self.grab.take().is_some()
-            || self.pressed.take().is_some()
-            || std::mem::take(&mut self.rocker_held);
+        // Take every field before combining them: `||` would stop at the
+        // first one set and leave `pressed` behind after a thumb drag.
+        let grabbed = self.grab.take().is_some();
+        let pressed = self.pressed.take().is_some();
+        let rocker = std::mem::take(&mut self.rocker_held);
+        let held = grabbed || pressed || rocker;
         if held {
             self.rocker.release(Instant::now());
         }
@@ -1152,5 +1160,55 @@ mod tests {
         let view = PlanView::over(&plan(), [20. * NMI, 20. * NMI]);
         assert_eq!(view.levels.len(), 1);
         assert!(inside(&view));
+    }
+
+    #[test]
+    fn a_click_after_a_thumb_drag_is_not_swallowed() {
+        let mut view = PlanView::over(&plan(), SIZE);
+        for _ in 0..3 {
+            view.key("+");
+        }
+        let [(total, visible, first), _] = view.scrolls();
+        let y = HORIZONTAL.1 + BAR / 2;
+        let (thumb, size) = view.bars()[0].thumb(total, visible, first);
+        view.pointer(Some((f64::from(thumb + size / 2), f64::from(y))));
+        assert!(view.down());
+        view.pointer(Some((f64::from(thumb + size / 2 + 20), f64::from(y))));
+        assert!(view.up());
+        // Nothing is left pressed, so a click somewhere else on the screen
+        // goes up to its own owner.
+        assert!(view.pressed.is_none() && view.grab.is_none());
+        view.pointer(Some((f64::from(PLOT.0 + 40), f64::from(PLOT.1 + 40))));
+        assert!(!view.down());
+        assert!(!view.up());
+    }
+
+    #[test]
+    fn an_arrow_on_an_axis_that_cannot_scroll_keeps_the_map_following() {
+        // 200 nm wide and 400 nm tall: the widest zoom fills the plot
+        // across, so only the vertical bar has anywhere to go.
+        let mut view = PlanView::flight([200. * NMI, 400. * NMI], ROCKER);
+        view.key("-");
+        view.key("-");
+        let [(total, visible, _), (vtotal, vvisible, _)] = view.scrolls();
+        assert!(total <= visible + 1. && vtotal > vvisible);
+        view.follow([100. * NMI, 200. * NMI]);
+        assert!(view.flight.is_some_and(|f| f.on));
+        let y = HORIZONTAL.1 + BAR / 2;
+        view.pointer(Some((
+            f64::from(HORIZONTAL.0 + HORIZONTAL.2 - 4),
+            f64::from(y),
+        )));
+        assert!(view.down());
+        view.up();
+        assert!(view.flight.is_some_and(|f| f.on), "the dead arrow let go");
+        // An arrow that does move the view lets go.
+        view.pointer(Some((
+            f64::from(VERTICAL.0 + BAR / 2),
+            f64::from(VERTICAL.1 + VERTICAL.3 - 4),
+        )));
+        assert!(view.down());
+        view.up();
+        assert!(view.flight.is_some_and(|f| !f.on));
     }
 }
