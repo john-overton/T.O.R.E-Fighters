@@ -270,6 +270,38 @@ struct Aimer {
     routed: bool,
 }
 
+/// An aimer's projected shape: the cached one for its rails, or one made
+/// for this frame's turrets and antennas.
+enum Projected<'a> {
+    Cached(&'a Shape),
+    Fresh(Shape),
+}
+
+impl Projected<'_> {
+    fn shape(&self) -> &Shape {
+        match self {
+            Projected::Cached(shape) => shape,
+            Projected::Fresh(shape) => shape,
+        }
+    }
+}
+
+impl Aimer {
+    /// Nothing but its body turns: the shape depends only on the rails.
+    fn body_only(&self) -> bool {
+        self.turrets.is_empty() && !self.antennas
+    }
+    /// The rails' loaded-count words for `loads` (none: all full).
+    fn rail_words(&self, loads: Option<&Vec<u32>>, state: &mut BTreeMap<usize, i32>) {
+        for (at, hardpoint) in self.rails.iter().enumerate() {
+            let loaded = loads.map_or(self.full[at], |l| l[at]);
+            if loaded > 0 {
+                state.insert(loaded_count_word(*hardpoint), loaded as i32);
+            }
+        }
+    }
+}
+
 /// `basis` turned `angle` radians about its own up axis, positive toward
 /// the right.
 fn yawed(basis: Basis, angle: f64) -> Basis {
@@ -345,6 +377,10 @@ pub struct SurfaceArt {
     aims: Aims,
     /// The loads an aimer's rails show now, when not full.
     aimer_loads: BTreeMap<u32, Vec<u32>>,
+    /// The projected shape of a body-only aimer (no turret, no antenna) for
+    /// its loads in `aimer_loads`, made when the loads change rather than
+    /// every frame. `None`: the projection failed, so the intact look draws.
+    rail_shapes: BTreeMap<u32, Option<Shape>>,
 }
 
 /// What [`SurfaceArt::add`] needs from the scenery build.
@@ -704,6 +740,7 @@ impl SurfaceArt {
                 // lists only the units whose rails changed).
                 let Some(state) = stock.unit(UnitId(*id)).filter(|unit| unit.armed) else {
                     self.aimer_loads.remove(id);
+                    self.rail_shapes.remove(id);
                     continue;
                 };
                 let loads: Vec<u32> = aimer
@@ -713,7 +750,14 @@ impl SurfaceArt {
                     .collect();
                 if loads == aimer.full {
                     self.aimer_loads.remove(id);
+                    self.rail_shapes.remove(id);
                 } else {
+                    if aimer.body_only() && self.aimer_loads.get(id) != Some(&loads) {
+                        let mut words = BTreeMap::new();
+                        aimer.rail_words(Some(&loads), &mut words);
+                        self.rail_shapes
+                            .insert(*id, Shape::with_export_state(&aimer.bytes, &words).ok());
+                    }
                     self.aimer_loads.insert(*id, loads);
                 }
             }
@@ -740,9 +784,18 @@ impl SurfaceArt {
     /// Aimer `id`'s shape and the turn of its body now, at mission time
     /// `seconds`: projected again when a turret, antenna or rail changes the
     /// scenery look.
-    fn aimed_shape(&self, id: u32, aimer: &Aimer, seconds: f64) -> (Option<Shape>, f64) {
+    fn aimed_shape(&self, id: u32, aimer: &Aimer, seconds: f64) -> (Option<Projected<'_>>, f64) {
         let aim = self.aims.unit(UnitId(id));
         let body = aim.map_or(0., |a| a.body);
+        let loads = self.aimer_loads.get(&id);
+        // A launcher whose body turned and whose rails emptied: its shape
+        // changes only with the loads, so it was projected when they did.
+        if aimer.body_only()
+            && loads.is_some()
+            && let Some(cached) = self.rail_shapes.get(&id)
+        {
+            return (cached.as_ref().map(Projected::Cached), body);
+        }
         let mut state = BTreeMap::new();
         for (hardpoint, _) in &aimer.turrets {
             let angle = aim
@@ -754,17 +807,16 @@ impl SurfaceArt {
         if aimer.antennas {
             state.insert(CURRENT_TICKS_WORD, current_ticks(seconds));
         }
-        let loads = self.aimer_loads.get(&id);
         if state.is_empty() && loads.is_none() {
             return (None, body);
         }
-        for (at, hardpoint) in aimer.rails.iter().enumerate() {
-            let loaded = loads.map_or(aimer.full[at], |l| l[at]);
-            if loaded > 0 {
-                state.insert(loaded_count_word(*hardpoint), loaded as i32);
-            }
-        }
-        (Shape::with_export_state(&aimer.bytes, &state).ok(), body)
+        aimer.rail_words(loads, &mut state);
+        (
+            Shape::with_export_state(&aimer.bytes, &state)
+                .ok()
+                .map(Projected::Fresh),
+            body,
+        )
     }
 
     /// A carrier's island and deck parts at `stand` (docs/spec/surface-
@@ -998,7 +1050,7 @@ impl SurfaceArt {
             };
             // Each frame's batch is bounded by the moving buffer, not the
             // static budget.
-            let shape = aimed.as_ref().unwrap_or(&model.shape);
+            let shape = aimed.as_ref().map_or(&model.shape, Projected::shape);
             let _ = emit(shape, &stand, &self.layers, &mut out, usize::MAX);
             if !pose.wrecked {
                 self.sprites_of(pose.id.0, &stand, camera, eye, seconds, &mut out);
@@ -1016,7 +1068,7 @@ impl SurfaceArt {
                 basis,
                 origin: local(aimer.stand.origin),
             };
-            let shape = shape.as_ref().unwrap_or(&aimer.intact);
+            let shape = shape.as_ref().map_or(&aimer.intact, Projected::shape);
             let _ = emit(shape, &stand, &self.layers, &mut out, usize::MAX);
         }
         for sprite in &self.sprites {
@@ -1414,6 +1466,58 @@ mod tests {
         assert_eq!(art.look(7, true, true, None), Some(Look::Aimed));
         assert!(frame(&art, false).is_empty());
         assert_eq!(art.look(7, false, true, None), Some(Look::Hidden));
+    }
+
+    /// A launcher whose body turned and whose rails are not full is
+    /// projected once when its loads change, not on every frame.
+    #[test]
+    fn a_turned_launchers_rails_are_projected_when_the_loads_change() {
+        let mut art = SurfaceArt::default();
+        art.aimers.insert(
+            4,
+            Aimer {
+                stand: level([0.; 3]),
+                bytes: Vec::new(),
+                intact: triangle(0.),
+                turrets: Vec::new(),
+                antennas: false,
+                rails: vec![0],
+                full: vec![2],
+                routed: false,
+            },
+        );
+        let surface = Surface::default();
+        let picture = crate::snapshot::RenderSnapshot::default();
+        let mut unit = SurfaceUnitState::new(UnitId(4));
+        unit.armed = true;
+        let mut stock = |loaded: u32| {
+            unit.mounts = vec![MountStock {
+                loaded,
+                reserve: None,
+                ordinal: 0,
+            }];
+            SurfaceState::new(0, vec![unit.clone()])
+        };
+        // Full: nothing is projected or kept.
+        art.step_aim(&picture, &surface, &[], Some(&stock(2)));
+        assert!(art.rail_shapes.is_empty() && art.aimer_loads.is_empty());
+        // One round gone: projected once and kept (here the empty test
+        // bytes cannot project, which the entry records as the intact look).
+        art.step_aim(&picture, &surface, &[], Some(&stock(1)));
+        assert_eq!(art.aimer_loads.get(&4), Some(&vec![1]));
+        assert!(art.rail_shapes.contains_key(&4));
+        art.rail_shapes.insert(4, Some(triangle(5.)));
+        // The same loads on the next step keep the entry as it was.
+        art.step_aim(&picture, &surface, &[], Some(&stock(1)));
+        assert!(art.rail_shapes[&4].is_some());
+        let aimer = &art.aimers[&4];
+        let (shape, _) = art.aimed_shape(4, aimer, 0.);
+        assert!(matches!(shape, Some(Projected::Cached(_))));
+        // New loads project again; a reload drops the entry.
+        art.step_aim(&picture, &surface, &[], Some(&stock(0)));
+        assert!(art.rail_shapes[&4].is_none());
+        art.step_aim(&picture, &surface, &[], Some(&stock(2)));
+        assert!(art.rail_shapes.is_empty());
     }
 
     #[test]
