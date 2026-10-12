@@ -779,10 +779,11 @@ impl TickPresenter<'_> {
                 },
                 &audio::spatial_sources(&self.world.combat.state, plane, flight),
                 &out.emissions,
-                &out.releases
-                    .iter()
-                    .filter(|release| release.seat == input.seat)
-                    .map(|release| release.sound.as_str())
+                &seat_releases(self.world, input.seat, &out.releases)
+                    .into_iter()
+                    .map(|(sound, weapon)| {
+                        audio::Launch::new(sound, weapon.effects.max_sound_distance)
+                    })
                     .collect::<Vec<_>>(),
                 flight.position,
                 Some((flight.position, flight.velocity)),
