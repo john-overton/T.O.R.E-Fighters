@@ -847,13 +847,34 @@ fn is_surface_id(id: u32) -> bool {
     (tore_world::surface::LAYOUT_OBJECT_BASE..tore_world::surface::SURFACE_UNIT_END).contains(&id)
 }
 
+/// The registry label of surface object `id` named `name`: `SA-6 #18` for a
+/// template object (its ordinal in the template), `ZSU-23 L4` for a
+/// base-layout unit, and `MISTRK +2` for a unit the mission added (a supply
+/// truck, a battery radar or a front line unit, numbered from 0 within its
+/// own id range). The single-player recorder uses this too, so a recorded and
+/// a converted flight label alike.
+pub fn surface_label(name: &str, id: u32) -> String {
+    use tore_world::surface::{
+        BATTERY_RADAR_BASE, FRONT_LINE_BASE, IdRange, LAYOUT_OBJECT_BASE, SUPPLY_TRUCK_BASE,
+        SURFACE_UNIT_BASE, UnitId,
+    };
+    match UnitId(id).range() {
+        IdRange::Template => format!("{name} #{}", id - SURFACE_UNIT_BASE),
+        IdRange::Layout => format!("{name} L{}", id - LAYOUT_OBJECT_BASE),
+        IdRange::SupplyTruck => format!("{name} +{}", id - SUPPLY_TRUCK_BASE),
+        IdRange::BatteryRadar => format!("{name} +{}", id - BATTERY_RADAR_BASE),
+        IdRange::FrontLine => format!("{name} +{}", id - FRONT_LINE_BASE),
+        IdRange::Other => format!("{name} {id:#x}"),
+    }
+}
+
 /// The identities of a world's surface units with combat rows (template and
 /// added units, parked aircraft, base-layout units that act), labelled as
 /// the single-player recorder labels them: `SA-6 #18`, `ZSU-23 L4`,
 /// `MISTRK +2`.
 pub fn surface_infos(world: &World) -> Vec<replay::SurfaceInfo> {
     use tore_world::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
-    use tore_world::surface::{IdRange, LAYOUT_OBJECT_BASE, SURFACE_UNIT_BASE, UnitId, UnitKind};
+    use tore_world::surface::{IdRange, UnitId, UnitKind};
     let surface = &world.terrain.surface;
     let mut out: Vec<replay::SurfaceInfo> = world
         .combat
@@ -880,11 +901,7 @@ pub fn surface_infos(world: &World) -> Vec<replay::SurfaceInfo> {
                 .or_else(|| world.combat.ground_name(row.id).map(str::to_owned))
                 .unwrap_or_else(|| format!("object {:#x}", row.id));
             let side = unit.map_or(row.side, |unit| unit.side);
-            let label = match UnitId(row.id).range() {
-                IdRange::Template => format!("{name} #{}", row.id - SURFACE_UNIT_BASE),
-                IdRange::Layout => format!("{name} L{}", row.id - LAYOUT_OBJECT_BASE),
-                _ => format!("{name} +{}", row.id & 0x03ff_ffff),
-            };
+            let label = surface_label(&name, row.id);
             replay::SurfaceInfo {
                 id: row.id,
                 name,

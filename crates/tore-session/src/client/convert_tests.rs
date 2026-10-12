@@ -990,3 +990,34 @@ mod events {
         assert_eq!(at(14).kind, kind::DATALINK_ACKNOWLEDGE);
     }
 }
+
+#[test]
+fn surface_labels_number_every_added_unit_from_zero_within_its_range() {
+    use tore_world::surface::{
+        BATTERY_RADAR_BASE, FRONT_LINE_BASE, LAYOUT_OBJECT_BASE, SUPPLY_TRUCK_BASE,
+        SURFACE_UNIT_BASE,
+    };
+    assert_eq!(
+        convert::surface_label("SA-6", SURFACE_UNIT_BASE + 18),
+        "SA-6 #18"
+    );
+    assert_eq!(
+        convert::surface_label("ZSU-23", LAYOUT_OBJECT_BASE + 4),
+        "ZSU-23 L4"
+    );
+    assert_eq!(
+        convert::surface_label("TRUCK", SUPPLY_TRUCK_BASE + 3),
+        "TRUCK +3"
+    );
+    assert_eq!(
+        convert::surface_label("SA-6 RADAR", BATTERY_RADAR_BASE + 1),
+        "SA-6 RADAR +1"
+    );
+    // The front line's ids sit above the radar's range: the old mask read
+    // them as 33554432 + n.
+    assert_eq!(convert::surface_label("M1A1", FRONT_LINE_BASE), "M1A1 +0");
+    assert_eq!(
+        convert::surface_label("T-72", FRONT_LINE_BASE + 41),
+        "T-72 +41"
+    );
+}
