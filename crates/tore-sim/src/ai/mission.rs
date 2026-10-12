@@ -4843,8 +4843,16 @@ impl AiActor {
                 // A striker's planned dive takes its own pull-out floor
                 // (slice ST-T2); everything else the B44 floor.
                 let general = self.controller.terrain_floor(&dummy_frame(own))?;
-                let floor = if self.adapter.strike_handling().planned_dive {
-                    Some(super::strike::planned_pitch_floor_deg(own))
+                let handling = self.adapter.strike_handling();
+                let floor = if handling.planned_dive {
+                    Some(super::strike::planned_pitch_floor_with(
+                        own,
+                        if handling.strafe {
+                            super::strike::STRAFE_CLEARANCE_FT
+                        } else {
+                            super::strike::PULL_OUT_CLEARANCE_FT
+                        },
+                    ))
                 } else {
                     general
                 };

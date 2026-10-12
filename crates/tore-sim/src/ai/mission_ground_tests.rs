@@ -824,6 +824,7 @@ fn strike_inputs() -> crate::ai::strike::Inputs {
             release_speed_share: 1.,
             fuze_arm_s: 1.,
             frag_radius_ft: 300.,
+            falls_free: false,
         }],
         designator: false,
         mission_height_ft: None,

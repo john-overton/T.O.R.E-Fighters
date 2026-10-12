@@ -171,7 +171,8 @@ fn laser_scale(weather: &Weather, from: Vector, to: Vector) -> f64 {
 }
 
 /// What a release starts: the flight, and the fall of a guided bomb that
-/// leaves without guidance.
+/// leaves without guidance (`fall_velocity`: its release velocity with a
+/// dumb bomb's scatter).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn release<G: Fn(f64, f64) -> f64>(
     w: &Weapon,
@@ -180,7 +181,7 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
     station: usize,
     launcher: &Launcher,
     position: Vector,
-    velocity: Vector,
+    fall_velocity: Vector,
     spots: &[LaserSpot],
     targets: &[Target],
     weather: &Weather,
@@ -245,8 +246,17 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
         }
         Guidance::Supported | Guidance::Active | Guidance::Infrared | Guidance::Emitter => {}
     }
+    // A glide bomb let go with no spot falls like a dumb bomb, with its own
+    // scatter (slice ST-G: `fall_velocity` is the release velocity turned by
+    // it; a bomb that guides keeps its straight launch).
     if flight.mode != Mode::Guiding && guided::is_glide_bomb(w) {
-        flight.fall = Some((BombMotion::new(ReleaseState { position, velocity }), 0));
+        flight.fall = Some((
+            BombMotion::new(ReleaseState {
+                position,
+                velocity: fall_velocity,
+            }),
+            0,
+        ));
     }
     flight
 }

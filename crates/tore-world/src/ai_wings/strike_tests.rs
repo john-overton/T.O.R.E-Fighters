@@ -23,6 +23,14 @@ fn world() -> World {
     World::new(&spec, &surface_resources(), Seating::SinglePlayer).unwrap()
 }
 
+/// A target nobody defends and no enemy aircraft: nothing shoots at the
+/// strikers, so their decisions are the ones under test.
+fn quiet() -> World {
+    let mut spec = spec_with_target(&target("QUCITY", 0, 0, 9));
+    spec.wings[0].count = 2;
+    World::new(&spec, &surface_resources(), Seating::SinglePlayer).unwrap()
+}
+
 fn step(world: &mut World, ticks: u64) {
     let mut out = TickOutput::default();
     for _ in 0..ticks {
@@ -212,4 +220,147 @@ fn an_ai_flown_cockpit_with_a_laser_weapon_armed_lases_before_the_release() {
     step(&mut world, 2);
     let cockpit = world.combat.state.strike_cockpit(wingman).unwrap();
     assert!(!cockpit.laser.automatic);
+}
+
+/// Makes station 1 of AI aircraft `id` a laser weapon: a glide bomb (it
+/// falls on the bomb equation with no spot) or, with `missile`, one with a
+/// motor (a laser missile, which cannot).
+fn arm_with_laser(world: &mut World, id: u32, missile: bool) {
+    let wings = world.ai_wings.as_mut().unwrap();
+    let mut config = wings.configs.get(&id).unwrap().clone();
+    let w = &mut config.stations[1].weapon;
+    w.seeker.signature = 1;
+    w.flags |= 0x400 | 0x20000;
+    w.flags &= !0x10;
+    w.movement.ignite_t = 0;
+    w.movement.fuel_t = if missile { 40 } else { 0 };
+    wings.configs.insert(id, config);
+    // Everything else it carries is out of the way.
+    let actor = wings.mission_mut().actor_mut(id).unwrap();
+    for spec in actor.stations_mut() {
+        if usize::from(spec.station.0) != 1 {
+            spec.store.inhibited = true;
+        }
+    }
+}
+
+/// The no-laze radio lines the journal wrote since the last look: the
+/// words and the call's number (a call has an entry for each stage it
+/// passed).
+fn spoken(world: &mut World) -> Vec<(String, Option<u64>, bool)> {
+    world
+        .comms
+        .take_journal()
+        .into_iter()
+        .filter_map(|entry| match entry.origin.cause {
+            crate::comms::journal::Cause::NoLaze { rtb } => Some((entry.text, entry.call, rtb)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_laser_bomb_with_no_laze_support_is_dropped_by_hand_and_the_radio_says_so() {
+    let mut world = quiet();
+    let wingman = friendly(&world)[0];
+    let target =
+        super::super::outcome::ground_targets(&world.terrain.surface, &world.combat.state)[0];
+    arm_with_laser(&mut world, wingman, false);
+    world
+        .ai_wings
+        .as_mut()
+        .unwrap()
+        .mission_mut()
+        .actor_mut(wingman)
+        .unwrap()
+        .set_strike_order(Some(target));
+    let mut told = None;
+    let mut lines = Vec::new();
+    for _ in 0..200 {
+        step(&mut world, 120);
+        lines.extend(spoken(&mut world));
+        if let Some(call) = world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actor(wingman)
+            .and_then(|a| a.strike())
+            .and_then(|s| s.no_laze())
+        {
+            told = Some(*call);
+        }
+        if !lines.is_empty() {
+            break;
+        }
+    }
+    let call = told.expect("a no-laze decision");
+    assert_eq!(call.kind, tore_sim::ai::strike::NoLaze::Manual, "{call:?}");
+    step(&mut world, 120);
+    lines.extend(spoken(&mut world));
+    assert!(!lines.is_empty(), "the radio said nothing");
+    assert!(
+        lines
+            .iter()
+            .all(|(text, _, rtb)| !rtb && text == "No laze support, dropping manual"),
+        "{lines:?}"
+    );
+    // Said once: every entry is the same call.
+    let calls: std::collections::BTreeSet<_> = lines.iter().map(|l| l.1).collect();
+    assert_eq!(calls.len(), 1, "{lines:?}");
+}
+
+#[test]
+fn a_laser_missile_with_no_laze_support_goes_home_and_the_radio_says_so() {
+    let mut world = quiet();
+    let wingman = friendly(&world)[0];
+    let target =
+        super::super::outcome::ground_targets(&world.terrain.surface, &world.combat.state)[0];
+    arm_with_laser(&mut world, wingman, true);
+    world
+        .ai_wings
+        .as_mut()
+        .unwrap()
+        .mission_mut()
+        .actor_mut(wingman)
+        .unwrap()
+        .set_strike_order(Some(target));
+    let mut lines = Vec::new();
+    for _ in 0..200 {
+        step(&mut world, 120);
+        lines.extend(spoken(&mut world));
+        if !lines.is_empty() {
+            break;
+        }
+    }
+    assert!(!lines.is_empty(), "the radio said nothing");
+    assert!(
+        lines
+            .iter()
+            .all(|(text, _, rtb)| *rtb && text == "No laze support, RTB"),
+        "{lines:?}"
+    );
+    // The strike was kept long enough to be told, then dropped: the wingman
+    // is no longer striking and nothing is released.
+    step(&mut world, 240);
+    let actor = world
+        .ai_wings
+        .as_ref()
+        .unwrap()
+        .mission()
+        .actor(wingman)
+        .unwrap();
+    assert!(
+        actor
+            .strike()
+            .is_none_or(|s| s.no_laze().is_none_or(|c| c.told))
+    );
+    assert!(
+        world
+            .combat
+            .state
+            .projectiles
+            .iter()
+            .all(|p| p.owner != wingman)
+    );
 }

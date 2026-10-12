@@ -12,7 +12,7 @@
 //! values, never held. The lase in progress, and whether the aircraft has a
 //! designator and laser rounds (slice ST-L), are coded.
 
-use super::{Lase, LaseEnd, Pass, Phase, Segment, StoreKind, Strike};
+use super::{Lase, LaseEnd, NoLaze, NoLazeCall, Pass, Phase, Segment, StoreKind, Strike};
 use crate::ai::awareness::ground::ThreatLevel;
 
 crate::checkpoint_enum!(Pass {
@@ -56,6 +56,18 @@ crate::checkpoint_enum!(LaseEnd {
     Timed = 0,
     Impact = 1,
     Dies = 2,
+});
+
+crate::checkpoint_enum!(NoLaze {
+    Manual = 0,
+    Rtb = 1,
+});
+
+crate::checkpoint_struct!(NoLazeCall {
+    kind,
+    station,
+    target,
+    told,
 });
 
 crate::checkpoint_struct!(Lase {
@@ -116,6 +128,7 @@ crate::checkpoint_struct!(Strike {
     designator,
     laser_rounds,
     laser_set,
+    no_laze,
     burst,
     burst_open,
     recovery_until,

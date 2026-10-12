@@ -353,6 +353,9 @@ pub struct ReleaseAim {
     /// the LVL cue is timed; [`super::super::delivery::Delivery::impact_at`])
     /// must lie within this many feet, along the ground, of the aim point.
     pub gate_ft: f64,
+    /// A laser glide bomb let go by hand as an unguided bomb (slice ST-G):
+    /// judged on the bomb equation's sight, not the guided one.
+    pub ballistic: bool,
 }
 
 impl ReleaseAim {
@@ -362,6 +365,7 @@ impl ReleaseAim {
         Self {
             offset_ft: [0., 0.],
             gate_ft,
+            ballistic: false,
         }
     }
     /// The aim point for a target at `target`.
@@ -492,6 +496,7 @@ impl State {
     /// The bomb or rocket sight's solution for a cockpit's selected station:
     /// against its target on the ground, with the time to impact of the
     /// aircraft's last bomb. The same for a human and the AI.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn delivery_of(
         &self,
         aircraft: u32,
@@ -500,6 +505,7 @@ impl State {
         launcher: &Launcher,
         ground: &impl Fn(f64, f64) -> f64,
         clock: delivery::Clock,
+        ballistic: bool,
     ) -> Option<Delivery> {
         if !cockpit.armed || !launcher.alive {
             return None;
@@ -536,6 +542,7 @@ impl State {
                 target_velocity,
                 clock,
                 falling,
+                ballistic,
             },
             ground,
         )
@@ -553,12 +560,15 @@ impl State {
     }
 
     /// The bomb or rocket solution for the AI flying `aircraft`: what a
-    /// human's HUD would show for the same cockpit and launcher.
+    /// human's HUD would show for the same cockpit and launcher. With
+    /// `ballistic` a laser glide bomb is solved on the bomb equation, as an
+    /// AI that drops it by hand sees it (slice ST-G).
     pub fn strike_delivery(
         &self,
         aircraft: u32,
         config: &Configuration,
         launcher: &Launcher,
+        ballistic: bool,
         ground: &impl Fn(f64, f64) -> f64,
     ) -> Option<Delivery> {
         let cockpit = self.strike_cockpit(aircraft)?;
@@ -569,6 +579,7 @@ impl State {
             launcher,
             ground,
             self.next_clock(),
+            ballistic,
         )
     }
 
@@ -601,11 +612,11 @@ impl State {
     /// now, on the shared solution and `aim` (docs/spec/ai-strike.md, "Skill
     /// and release precision"):
     ///
-    /// - a bomb or rocket when the predicted impact on the aim point's
-    ///   ground (a bomb's mean path brought down to that height, as the LVL
-    ///   cue is timed, rather than to the ground under the aircraft as the
-    ///   CCIP pipper's; a rocket's flown impact) lies within `aim.gate_ft` of
-    ///   the aim point ([`ReleaseAim::point`] of the cockpit's target);
+    /// - a bomb or rocket when the sight's impact (a bomb's mean path to the
+    ///   terrain in CCIP, the pipper's own point; in LVL brought down to the
+    ///   aim point's ground, as the cue is timed; a rocket's flown impact)
+    ///   lies within `aim.gate_ft` of the aim point ([`ReleaseAim::point`] of
+    ///   the cockpit's target);
     /// - a guided weapon (the aim does not apply: no skill offset for smart
     ///   weapons) when its aim on the target (its spot or its stored point)
     ///   is IN RNG and its ground range is at most the level T's bar plus
@@ -626,21 +637,24 @@ impl State {
         let Some(w) = cockpit.armed_weapon(config) else {
             return false;
         };
-        if crate::combat::guided::kind(w).is_some() {
+        if !aim.ballistic && crate::combat::guided::kind(w).is_some() {
             return self
                 .strike_guided_sight(aircraft, config, launcher, ground)
                 .is_some_and(|sight| guided_due(&sight));
         }
-        let Some(solution) = self.strike_delivery(aircraft, config, launcher, ground) else {
+        let Some(solution) =
+            self.strike_delivery(aircraft, config, launcher, aim.ballistic, ground)
+        else {
             return false;
         };
         let Some(target) = self.strike_point(cockpit) else {
             return false;
         };
         let point = aim.point(target);
-        // The bomb judged at the aim point's ground, not the ground under the
-        // aircraft (slice ST-LV).
-        let Some(impact) = solution.impact_at(ground(point[0], point[2])) else {
+        // The cue the sight shows: the pipper where the path meets the
+        // terrain, or in LVL the path brought down to the aim point's ground
+        // (slices ST-LV and ST-G).
+        let Some(impact) = solution.cue(ground(point[0], point[2])) else {
             return false;
         };
         let miss = [
@@ -833,6 +847,19 @@ impl State {
         let guided_kind = spec.then(|| crate::combat::guided::kind(w)).flatten();
         let guided_velocity =
             guided_kind.map(|_| crate::combat::guided::release_velocity(w, &launcher));
+        // A glide bomb that leaves with no spot falls like a dumb bomb, with
+        // the scatter a dumb bomb takes (slice ST-G).
+        let fall_velocity = guided_velocity.map(|velocity| {
+            if crate::combat::guided::is_glide_bomb(w) {
+                let (heading, pitch) =
+                    ballistics::scatter(ballistics::scatter_stream(self.rng, self.tick, r.id));
+                ballistics::ReleaseState { position, velocity }
+                    .turned(heading, pitch)
+                    .velocity
+            } else {
+                velocity
+            }
+        });
         let profile = missiles::Profile::for_weapon(w);
         self.projectiles.push(Projectile {
             id: r.id,
@@ -867,7 +894,7 @@ impl State {
             self.bombs
                 .insert(r.id, ballistics::BombMotion::new(release));
         }
-        if let (Some(kind), Some(velocity)) = (guided_kind, guided_velocity) {
+        if let (Some(kind), Some(fall_velocity)) = (guided_kind, fall_velocity) {
             let flight = super::guided::release(
                 w,
                 kind,
@@ -879,7 +906,7 @@ impl State {
                 r.index,
                 &launcher,
                 position,
-                velocity,
+                fall_velocity,
                 spots,
                 &self.targets,
                 &self.sensor_weather,

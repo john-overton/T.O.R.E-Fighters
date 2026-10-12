@@ -269,3 +269,22 @@ fn recording_the_reasons_changes_nothing_the_mission_does() {
         }
     }
 }
+
+#[test]
+fn a_no_laze_decision_is_an_ai_strike_event_with_a_fixed_reason() {
+    use tore_sim::ai::strike::NoLaze;
+    let manual = strike_decision_event(7, NoLaze::Manual, StationId(2), Some(42), "GBU-10E".into());
+    assert_eq!(manual.kind, kind::AI_STRIKE);
+    assert_eq!((manual.subject, manual.object), (Some(7), Some(42)));
+    assert_eq!(manual.string(field::REASON), Some("no_laze_manual"));
+    assert_eq!(
+        manual.string(field::DECISION),
+        Some("no laze support, dropping manual")
+    );
+    assert_eq!(manual.string(field::WEAPON), Some("GBU-10E"));
+    assert_eq!(manual.num(field::STATION), Some(2.));
+    let rtb = strike_decision_event(8, NoLaze::Rtb, StationId(3), None, "AS-14".into());
+    assert_eq!(rtb.string(field::REASON), Some("no_laze_rtb"));
+    assert_eq!(rtb.string(field::DECISION), Some("no laze support, RTB"));
+    assert_eq!(rtb.object, None);
+}

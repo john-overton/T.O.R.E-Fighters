@@ -811,6 +811,76 @@ fn the_summary_counts_the_data_link_and_leaves_the_section_out_without_it() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The golden frames with two `ai.strike` decisions added (slice ST-G): one
+/// aircraft drops its laser bomb by hand, another sends a laser missile home.
+fn strike_decision_recording(dir: &Path) -> Recording {
+    let mut frames = golden_frames();
+    let decide = |aircraft: u32, reason: &str, decision: &str, weapon: &str| {
+        Event::new(kind::AI_STRIKE)
+            .with_subject(aircraft)
+            .with_object(0)
+            .with(field::DECISION, decision)
+            .with(field::REASON, reason)
+            .with(field::STATION, 2_i64)
+            .with(field::WEAPON, weapon)
+    };
+    for frame in &mut frames {
+        match frame.tick {
+            250 => frame.events.push(decide(
+                2,
+                "no_laze_manual",
+                "no laze support, dropping manual",
+                "GBU-10E",
+            )),
+            300 => frame
+                .events
+                .push(decide(1, "no_laze_rtb", "no laze support, RTB", "AS-14")),
+            _ => {}
+        }
+    }
+    Recording::open(write(dir, "strike.tore-replay", &frames, &golden_footer())).unwrap()
+}
+
+#[test]
+fn a_no_laze_strike_decision_reaches_the_summary_the_text_and_tacview() {
+    let dir = temp_dir("strike-decision");
+    let recording = strike_decision_recording(&dir);
+    let mut out = Vec::new();
+    write_summary(&recording, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("AI strike decisions: no_laze_manual x1"),
+        "{text}"
+    );
+    assert!(
+        text.contains("strike decision: no laze support, dropping manual with GBU-10E on")
+            && text.contains("[no_laze_manual]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("strike decision: no laze support, RTB with AS-14"),
+        "{text}"
+    );
+    // Tacview carries every `ai.` event as a debug event.
+    let mut out = Vec::new();
+    write_acmi(&recording, &AcmiOptions::default(), &mut out).unwrap();
+    let acmi = String::from_utf8(out).unwrap();
+    assert!(
+        acmi.contains("Event=Message") || acmi.contains("Event="),
+        "{acmi}"
+    );
+    assert!(acmi.contains("no_laze_manual"), "{acmi}");
+    // The JSON lines keep the fields.
+    let mut out = Vec::new();
+    write_jsonl(&recording, &JsonlOptions::default(), &mut out).unwrap();
+    let json = String::from_utf8(out).unwrap();
+    assert!(
+        json.contains("\"ai.strike\"") && json.contains("no_laze_rtb"),
+        "{json}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn golden_summary() {
     let dir = temp_dir("golden-summary");

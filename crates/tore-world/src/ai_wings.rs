@@ -2008,8 +2008,14 @@ impl AiWings {
                     // A striker's gun run (slice ST-T2).
                     let key = (event.actor, event.station.0);
                     let ordinal = *self.gun_ordinals.entry(key).or_default();
-                    let emitted =
-                        self.release_strafe(event, &mut state.projectiles, &weapon, ordinal);
+                    let emitted = self.release_strafe(
+                        event,
+                        &mut state.projectiles,
+                        &state.targets,
+                        &weapon,
+                        ordinal,
+                        &ground,
+                    );
                     aim_latest(state, emitted, event.target);
                     *self.gun_ordinals.get_mut(&key).unwrap() += u64::from(emitted);
                 } else if live::is_gun(&weapon)

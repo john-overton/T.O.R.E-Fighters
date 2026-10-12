@@ -68,6 +68,13 @@ pub enum Chatter {
         speaker: u32,
         line: WingLine,
     },
+    /// An AI aircraft with laser stores and no laser support says so (slice
+    /// ST-G; John, 2026-10-12): "No laze support, dropping manual", or, with
+    /// no laser store that can fall unguided, "No laze support, RTB".
+    NoLaze {
+        speaker: u32,
+        rtb: bool,
+    },
     Contact {
         speaker: u32,
         /// The aircraft reported.
@@ -144,6 +151,7 @@ impl Chatter {
                     advise: contact.advise,
                 },
             ),
+            Chatter::NoLaze { speaker, rtb } => (*speaker, Cause::NoLaze { rtb: *rtb }),
             Chatter::Fuel { speaker, level } => (
                 *speaker,
                 Cause::AiFuel {

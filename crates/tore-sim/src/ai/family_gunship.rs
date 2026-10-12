@@ -21,17 +21,19 @@
 //!   25 mm) fires 1 s bursts every 2 s; the slow guns (40 and 105 mm) fire
 //!   every round they are due at their records' rates. Each burst aims at the target plus an offset drawn
 //!   like a bomb pass's skill circle ([`super::aim_draw`]: 90% inside the
-//!   circle, 10% in the ring), which the gunner then walks in: each burst's
-//!   offset is halved for every burst already fired at the target, down to
-//!   a sixteenth. The host trains each gun on that aim with the guns' own
-//!   ballistics, inside its mount's arcs, and fires the guns that bear.
+//!   circle, 10% in the ring), where the burst opens; the aim then walks in
+//!   a straight line onto the target over the skill's walk-in time
+//!   ([`super::gun_walk_in_s`], 0.1 s for an Ace to 0.4 s for a Novice;
+//!   slice ST-G, the same rule as a fighter's gun run). The host trains each
+//!   gun on that aim with the guns' own ballistics, inside its mount's
+//!   arcs, and fires the guns that bear.
 //!
 //! All deterministic (John, 2026-10-11, decision 13): the draw is seeded by
 //! the aircraft's seed, its id and the burst number.
 use super::{
     Context, Handling, Order, Pass, Phase, Segment, Steer, StoreKind, Strike, aim_draw,
     angle_difference, bearing_deg, hold_pitch_deg, horizontal, known_position, release_circle_ft,
-    standing,
+    standing, walk_in_left,
 };
 use crate::ai::ScalarSpeed;
 use crate::ai::awareness::ground::BriefedKind;
@@ -71,11 +73,6 @@ pub const ON_ORBIT_SHARE: f64 = 0.25;
 /// [`FIRE_TICKS`] of it (fitted, agent).
 pub const BURST_TICKS: u64 = 2 * 120;
 pub const FIRE_TICKS: u64 = 120;
-/// Walking the rounds in: each burst's drawn offset is scaled by this for
-/// every burst already fired at the target, never below [`WALK_IN_FLOOR`]
-/// (fitted, agent).
-pub const WALK_IN: f64 = 0.5;
-pub const WALK_IN_FLOOR: f64 = 0.0625;
 /// Holding off under a SAM: the gunship circles the target this far outside
 /// the covering SAM's reach (fitted, agent).
 pub const HOLD_MARGIN_FT: f64 = 2. * FEET_PER_NAUTICAL_MILE;
@@ -205,13 +202,6 @@ pub struct GunFire {
     pub burst: u32,
     pub inside: bool,
     pub held: bool,
-}
-
-/// The walk-in factor of the `burst`th burst at a target (from 1).
-pub fn walk_in(burst: u32) -> f64 {
-    WALK_IN
-        .powi(burst.saturating_sub(1).min(16) as i32)
-        .max(WALK_IN_FLOOR)
 }
 
 impl Strike {
@@ -392,20 +382,22 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
             }
         }
     }
-    // A new burst: draw its aim and walk it in.
-    if s.phase == Phase::Attack
-        && s.segment == Segment::Final
-        && cx.tick.saturating_sub(s.since).is_multiple_of(BURST_TICKS)
-    {
-        s.pass_number += 1;
+    // A new burst opens its aim on its drawn offset and walks it onto the
+    // target over the skill's walk-in time (slice ST-G; the fighters'
+    // gun runs walk the same way, `strike::gun_walk_in_s`).
+    if s.phase == Phase::Attack && s.segment == Segment::Final {
+        let into = cx.tick.saturating_sub(s.since);
+        if into.is_multiple_of(BURST_TICKS) {
+            s.pass_number += 1;
+        }
         let draw = aim_draw(
             s.seed,
             cx.aircraft,
             s.pass_number,
             release_circle_ft(cx.experience),
         );
-        let walk = walk_in(s.pass_number);
-        s.aim_ft = [draw.offset_ft[0] * walk, draw.offset_ft[1] * walk];
+        let left = walk_in_left(cx.experience, into % BURST_TICKS);
+        s.aim_ft = [draw.offset_ft[0] * left, draw.offset_ft[1] * left];
         s.inside = draw.inside;
     }
     order.steer = Some(orbit_steer(

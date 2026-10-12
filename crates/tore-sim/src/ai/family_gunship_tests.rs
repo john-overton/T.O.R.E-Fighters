@@ -139,6 +139,7 @@ fn gun(station: u8, rounds: u32) -> Store {
         release_speed_share: 1.,
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
+        falls_free: false,
     }
 }
 
@@ -185,23 +186,38 @@ fn on_the_orbit_it_fires_bursts_walked_in_from_the_skill_circle() {
     let first = fire.aim_ft[0].hypot(fire.aim_ft[1]);
     assert!(first <= 2. * r);
     assert!(!strike.gunship_fire(100 + FIRE_TICKS).unwrap().held);
-    // Each burst halves the drawn offset, down to a sixteenth.
+    // Every burst opens on its own drawn offset and walks onto the target
+    // over the skill's walk-in time (Average: 0.3 s), the same for each.
+    let walk_ticks =
+        (crate::ai::strike::gun_walk_in_s(crate::ai::Experience::Average) * 120.).round() as u64;
     let mut tick = 100;
     for burst in 2..=8 {
-        for _ in 0..BURST_TICKS {
-            tick += 1;
-            strike.step(&world.context(tick));
-        }
-        let fire = strike.gunship_fire(tick).unwrap();
-        assert_eq!(fire.burst, burst);
-        let drawn = aim_draw(7, OWN, burst, r);
-        let walked = walk_in(burst);
-        assert!((fire.aim_ft[0] - drawn.offset_ft[0] * walked).abs() < 1e-9);
+        let start = 100 + (burst - 1) * BURST_TICKS;
+        let advance = |strike: &mut Strike, tick: &mut u64, to: u64| {
+            while *tick < to {
+                *tick += 1;
+                strike.step(&world.context(*tick));
+            }
+        };
+        advance(&mut strike, &mut tick, start);
+        let fire = strike.gunship_fire(start).unwrap();
+        assert_eq!(fire.burst, burst as u32);
+        let drawn = aim_draw(7, OWN, burst as u32, r);
+        assert!((fire.aim_ft[0] - drawn.offset_ft[0]).abs() < 1e-9);
+        assert!((fire.aim_ft[1] - drawn.offset_ft[1]).abs() < 1e-9);
         assert_eq!(fire.inside, drawn.inside);
+        // Halfway through the walk-in half the offset is left; after it,
+        // none.
+        advance(&mut strike, &mut tick, start + walk_ticks / 2);
+        let half = strike.gunship_fire(tick).unwrap().aim_ft;
+        assert!((half[0] - drawn.offset_ft[0] * 0.5).abs() < 1e-6);
+        advance(&mut strike, &mut tick, start + walk_ticks);
+        assert_eq!(strike.gunship_fire(tick).unwrap().aim_ft, [0.; 2]);
     }
-    assert_eq!(walk_in(1), 1.);
-    assert_eq!(walk_in(2), 0.5);
-    assert_eq!(walk_in(9), WALK_IN_FLOOR);
+    assert_eq!(walk_in_left(crate::ai::Experience::Ace, 0), 1.);
+    assert!(walk_in_left(crate::ai::Experience::Ace, 6) > 0.);
+    assert_eq!(walk_in_left(crate::ai::Experience::Ace, 12), 0.);
+    assert!(walk_in_left(crate::ai::Experience::Novice, 12) > 0.6);
 }
 
 #[test]

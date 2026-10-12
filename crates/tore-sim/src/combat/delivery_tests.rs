@@ -87,6 +87,7 @@ fn solved(
             target_velocity: [0.; 3],
             clock: CLOCK,
             falling: None,
+            ballistic: false,
         },
         |_, _| 0.,
     )
@@ -187,6 +188,7 @@ fn solved_over(
             target_velocity: velocity,
             clock: CLOCK,
             falling: None,
+            ballistic: false,
         },
         ground,
     )
@@ -198,7 +200,7 @@ fn the_level_t_brings_the_bomb_down_on_the_targets_ground() {
     // Slice ST-LV. Level at 5,000 ft and 450 kt over sea level; the target
     // stands on a 400 ft plateau, or in a 400 ft hollow. The T is due where
     // the bomb's mean path meets the target's ground, not the ground under
-    // the aircraft (where the CCIP pipper, retail, still works it out).
+    // the aircraft.
     let s = station(mk82());
     let launcher = pass(5_000., 450., 0.);
     let release = ReleaseState::from_station(&launcher, &s, 0);
@@ -207,8 +209,10 @@ fn the_level_t_brings_the_bomb_down_on_the_targets_ground() {
         let lands = ballistics::impact_at(release, height).unwrap().position;
         let target = [lands[0], height, lands[2]];
         let d = solved_over(&s, &launcher, target, [0.; 3], ground);
-        // The pipper is still over the ground under the release point.
-        assert_eq!(d.ccip.unwrap().impact[1], 0.);
+        // The pipper (slice ST-G) now meets the same ground the path does.
+        let pipper = d.ccip.unwrap();
+        assert!((pipper.impact[2] - lands[2]).abs() < 1e-6, "{height}");
+        assert_eq!(pipper.impact[1], height);
         let l = d.level.unwrap();
         assert!(l.along_ft.abs() < 1e-6, "{height}: D {}", l.along_ft);
         assert!(l.cross_ft.abs() < 1e-6);
@@ -421,6 +425,7 @@ fn rockets_get_a_pipper_and_never_the_level_release() {
             target_velocity: [0.; 3],
             clock: CLOCK,
             falling: None,
+            ballistic: false,
         },
         |_, _| 0.,
     );
@@ -493,5 +498,51 @@ fn the_mode_round_trips_in_a_checkpoint() {
         let coded = to_bytes(&mode, &models).unwrap();
         let back: DeliveryMode = from_bytes(&coded, &models).unwrap();
         assert_eq!(back, mode);
+    }
+}
+
+#[test]
+fn the_ccip_pipper_lays_on_a_target_on_a_rise_or_in_a_hollow() {
+    // John, 2026-10-11: realistic CCIP. Retail works the fall out over the
+    // ground under the aircraft, so a pipper laid on a target 400 ft up
+    // bombed it about 520 ft short and one in a hollow as far long. The
+    // pipper now finds where the path meets the terrain: the bomb it shows
+    // is the bomb that lands (here with no scatter).
+    let s = station(mk82());
+    let launcher = pass(5_000., 450., 0.);
+    let release = ReleaseState::from_station(&launcher, &s, 0);
+    for height in [400., -400., 0.] {
+        let ground = move |_: f64, z: f64| if z > 6_000. { height } else { 0. };
+        let d = solve(
+            Situation {
+                index: 3,
+                station: &s,
+                launcher: &launcher,
+                mode: DeliveryMode::Ccip,
+                target: None,
+                target_velocity: [0.; 3],
+                clock: CLOCK,
+                falling: None,
+                ballistic: false,
+            },
+            ground,
+        )
+        .expect("a bomb station");
+        let pipper = d.ccip.unwrap();
+        let lands = ballistics::impact_at(release, height).unwrap();
+        assert!(
+            (pipper.impact[2] - lands.position[2]).abs() < 1e-6,
+            "{height}"
+        );
+        assert!((pipper.seconds - lands.seconds).abs() < 1e-9);
+        assert_eq!(pipper.impact[1], height);
+        // The AI's CCIP cue is the pipper's point; in LVL it is the path
+        // brought down to the target's ground, the same point here.
+        let cue = d.cue(height).unwrap();
+        assert_eq!(cue.position, pipper.impact);
+        // Retail's reading would have missed by the slope's offset.
+        let retail = ballistics::predict_impact_flat(release, ground).unwrap();
+        let miss = (retail.position[2] - lands.position[2]).abs();
+        assert_eq!(miss > 300., height != 0., "{height}: {miss}");
     }
 }

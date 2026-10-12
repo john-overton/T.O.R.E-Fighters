@@ -85,6 +85,11 @@
 //! - `PHASE`: the striker's strike phase (ingress, attack, lase, exit, ...)
 //!   each time it changes (slice ST-L); `HOLD` every five seconds of a lase
 //!   hold: its range from the target, height above it, speed and bank.
+//! - `NOLAZE decision=D reason=R weapon=W station=S target=T words="..."`: a
+//!   striker with laser stores and no laser support decided (slice ST-G):
+//!   `manual` (a laser bomb let go as an unguided bomb) or `rtb` (a laser
+//!   store that cannot fall unguided, so home), once, with the radio's
+//!   words; the replay records it as an `ai.strike` event.
 //! - `LASER plane=P state=S mask=M`: the laser of the striker, and of the
 //!   buddy when there is one, each time its state or mask changes (slice
 //!   ST-L). The summary counts the seconds a laser weapon of the run was in
@@ -627,6 +632,8 @@ struct Watch {
     gunship_bursts: usize,
     /// The strike phase last reported.
     phase: Option<tore_sim::ai::strike::Phase>,
+    /// The no-laze decision last reported (slice ST-G).
+    no_laze: Option<tore_sim::ai::strike::NoLaze>,
     /// The planes whose lasers are reported, and what each last showed.
     lasers: Vec<(u32, Option<LaserShown>)>,
     /// Ticks a laser weapon of the run flew guiding, and ticks of those its
@@ -688,6 +695,7 @@ impl Watch {
             gunship_burst: None,
             gunship_bursts: 0,
             phase: None,
+            no_laze: None,
             lasers: vec![(plane.0, None)],
             fall_ticks: 0,
             blind_ticks: 0,
@@ -814,6 +822,35 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     {
         w.phase = Some(phase);
         println!("ai-strike: PHASE t={t:.3} name={phase:?}");
+    }
+    let no_laze = scene
+        .actor(w.plane)
+        .and_then(|a| a.strike())
+        .and_then(|s| s.no_laze())
+        .copied();
+    if let Some(call) = no_laze
+        && w.no_laze != Some(call.kind)
+    {
+        w.no_laze = Some(call.kind);
+        let weapon = scene
+            .world
+            .ai_wings
+            .as_ref()
+            .and_then(|wings| wings.station_weapon(w.plane.0, call.station.0))
+            .unwrap_or("?")
+            .to_owned();
+        println!(
+            "ai-strike: NOLAZE t={t:.3} decision={} reason={} weapon={weapon} station={} target={} words=\"{}\"",
+            match call.kind {
+                tore_sim::ai::strike::NoLaze::Manual => "manual",
+                tore_sim::ai::strike::NoLaze::Rtb => "rtb",
+            },
+            call.kind.reason(),
+            call.station.0,
+            call.target
+                .map_or_else(|| "none".into(), |id| format!("{id:#x}")),
+            call.kind.words(),
+        );
     }
     // The offset turn of a lase hold, every five seconds.
     if w.phase == Some(tore_sim::ai::strike::Phase::Lase)

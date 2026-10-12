@@ -69,6 +69,8 @@ struct Stats {
     devices: [u32; 2],
     activity: BTreeMap<String, u64>,
     current: Option<(String, u64)>,
+    /// AI strike decisions by reason (slice ST-G).
+    strike: BTreeMap<String, u32>,
 }
 
 fn lower(slot: &mut Option<(f64, u64)>, v: f64, tick: u64) {
@@ -292,6 +294,17 @@ pub fn write_summary(
                 kind::FLIGHT_SPIN if e.flag(field::ON) != Some(false) => {
                     if let Some(id) = subject {
                         stats.entry(id).or_default().spins += 1;
+                    }
+                }
+                kind::AI_STRIKE => {
+                    if let Some(id) = subject {
+                        let reason = e.string(field::REASON).unwrap_or("?").to_owned();
+                        *stats
+                            .entry(id)
+                            .or_default()
+                            .strike
+                            .entry(reason)
+                            .or_default() += 1;
                     }
                 }
                 kind::AI_ACTIVITY => {
@@ -552,6 +565,14 @@ pub fn write_summary(
                 .map(|(activity, ticks)| format!("{activity} {}", seconds(**ticks)))
                 .collect();
             writeln!(o, "  AI activity: {}", parts.join(", "))?;
+        }
+        if !st.strike.is_empty() {
+            let parts: Vec<String> = st
+                .strike
+                .iter()
+                .map(|(reason, count)| format!("{reason} x{count}"))
+                .collect();
+            writeln!(o, "  AI strike decisions: {}", parts.join(", "))?;
         }
     }
 

@@ -22,6 +22,7 @@ fn at2(rounds: u32) -> Store {
         release_speed_share: 1.,
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
+        falls_free: false,
     }
 }
 
@@ -34,6 +35,7 @@ fn rockets(rounds: u32) -> Store {
         release_speed_share: 1.,
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
+        falls_free: false,
         ..at2(rounds)
     }
 }
