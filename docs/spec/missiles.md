@@ -640,8 +640,10 @@ What a player sees:
 - A splash kill is credited to the shooter in the debrief, the replay and the
   multiplayer score, exactly as a direct kill is, and an ownship's splash
   kills count on its kill tally. Strikes, radio hit calls and jolts follow.
-- A surface unit's splash reaches aircraft only (surface units do not fight
-  each other this round, [surface defenses](surface-defenses.md#sam-missiles)).
+- A surface unit's splash reaches aircraft and the other side's ground
+  objects and ships, never its own side's or neutral scenery, whatever the
+  friendly fire setting ([surface against
+  surface](surface-defenses.md#surface-against-surface)).
 
 Retail radii and percents (FA 1.02F records):
 

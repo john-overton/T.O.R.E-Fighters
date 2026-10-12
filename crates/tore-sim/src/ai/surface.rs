@@ -33,6 +33,10 @@
 //! - Flak (a controller with a retarget period) moves to the nearest eligible
 //!   target every retarget period; every other controller keeps its target
 //!   while it stays eligible.
+//!
+//! A target may be an aircraft or, since surface units fight each other
+//! (John, 2026-10-11), a ground object or ship of the other side: the host
+//! puts either in [`Inputs::eligible`], already in its order of preference.
 
 use super::QUARTER_SECOND_TICKS;
 
@@ -84,6 +88,16 @@ pub fn aim_error_deg(skill: i32, radar: bool) -> f64 {
     } else {
         [1.5, 1.0, 0.7, 0.5][index]
     }
+}
+/// A gun's aim error per burst at a ground object or ship, degrees: a
+/// quarter of [`aim_error_deg`] (fitted, agent, 2026-10-11). A target on the
+/// ground or the sea moves in a plane, slowly, and a tank gunner lays on it
+/// at leisure; with the air error a tank would need about fifteen minutes to
+/// hit another at 3,000 ft. With this error and the gun's 0.25 degree round
+/// dispersion a tank at that range hits another about once in five rounds
+/// (docs/spec/surface-defenses.md, "Surface against surface").
+pub fn surface_aim_error_deg(skill: i32, radar: bool) -> f64 {
+    aim_error_deg(skill, radar) / 4.
 }
 /// How much a radar-directed gun's aim error widens while its target's
 /// radio-frequency jammer is on. Visual guns are unaffected. Defined (John,
@@ -218,9 +232,11 @@ impl Stock {
 #[derive(Clone, Copy, Debug)]
 pub struct Inputs<'a> {
     pub tick: u64,
-    /// A hostile aircraft is inside detection range (eligible or not).
+    /// A hostile aircraft, or a hostile surface unit the weapon may aim at,
+    /// is inside detection range (eligible or not).
     pub hostile_in_range: bool,
-    /// Ids of the eligible hostile aircraft, nearest first.
+    /// Ids of the eligible hostiles, aircraft or surface units, in the
+    /// host's order of preference (the nearest of the preferred kind first).
     pub eligible: &'a [u32],
     /// The launch gates pass for the controller's current target
     /// ([`Controller::target`]), as the host measured them this tick.

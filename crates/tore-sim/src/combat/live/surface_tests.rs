@@ -221,7 +221,7 @@ fn every_surface_gun_is_a_gun_at_its_record_damage_without_critical_kills() {
 }
 
 #[test]
-fn surface_sams_have_reviewed_profiles_and_the_held_records_none() {
+fn surface_missiles_have_reviewed_profiles_and_asroc_none() {
     for name in missiles::SURFACE_SUPPORTED {
         let profile = missiles::Profile::for_weapon(&record(name)).expect(name);
         assert_eq!(profile.guidance, Guidance::Supported, "{name}");
@@ -233,19 +233,24 @@ fn surface_sams_have_reviewed_profiles_and_the_held_records_none() {
         assert_eq!(profile.guidance, Guidance::Infrared, "{name}");
         assert_eq!(profile.role, TargetRole::Aircraft, "{name}");
     }
-    for name in ["ASROC.JT", "SSN9.JT"] {
-        assert!(missiles::Profile::for_weapon(&record(name)).is_none());
-    }
+    // ASROC stays held: there is never a submarine to aim it at.
+    assert!(missiles::Profile::for_weapon(&record("ASROC.JT")).is_none());
     let mut s = scene();
     unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
     let refused = s.fire_surface(shot(
-        record("SSN9.JT"),
+        record("ASROC.JT"),
         [0., 30., 0.],
         [0., 3000., 3000.],
         None,
     ));
     assert_eq!(refused, Err(Refused::Unreviewed));
     assert!(s.projectiles.is_empty());
+    // The SS-N-9 is the surface-to-surface missile: supported radar, aimed
+    // at a surface target.
+    let profile = missiles::Profile::for_weapon(&record("SSN9.JT")).expect("SS-N-9");
+    assert_eq!(profile.guidance, Guidance::Supported);
+    assert_eq!(profile.role, TargetRole::Surface);
+    assert!(missiles::ANTI_SHIP.contains(&"SSN9.JT"));
 }
 
 #[test]
@@ -309,20 +314,114 @@ fn a_surface_gun_round_hits_an_aircraft_for_its_share_and_credits_its_unit() {
 }
 
 #[test]
-fn surface_rounds_never_strike_ground_objects_or_their_own_launcher() {
+fn surface_rounds_pass_their_own_side_neutral_scenery_and_their_launcher() {
+    for friendly_fire in [FriendlyFire::On, FriendlyFire::Off] {
+        let mut s = scene();
+        s.friendly_fire = friendly_fire;
+        unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
+        // A Red building and a neutral one in the line of fire.
+        unit(&mut s, UNIT + 1, [0., 10., 400.], REDFOR);
+        unit(&mut s, UNIT + 2, [0., 10., 800.], NO_SIDE);
+        // A SAM leaving its rail inside its launcher's box, low over them.
+        s.fire_surface(shot(sam(), [0., 12., 0.], [0., 30., 3000.], None))
+            .unwrap();
+        // A gun round straight through both.
+        s.fire_surface(shot(zsu23(), [0., 12., 0.], [0., 12., 3000.], None))
+            .unwrap();
+        run_from(&mut s, 240, far());
+        assert_eq!(hp(&s, UNIT), 100, "{friendly_fire:?}");
+        assert_eq!(hp(&s, UNIT + 1), 100, "{friendly_fire:?}");
+        assert_eq!(hp(&s, UNIT + 2), 100, "{friendly_fire:?}");
+    }
+}
+
+/// The retail T-72 record's fields (the T-72, T-80 and T-90 gun), tuned by
+/// the table: air and surface target flags.
+fn t72() -> Weapon {
+    let mut w = record("T72.JT");
+    w.flags = 0x300c0;
+    w.seeker.signature = 0;
+    w.movement = constant(5866, 20);
+    w.burst.game_rounds_in_burst = 1;
+    w.burst.actual_rounds_per_game = 1;
+    w.burst.game_burst_t = 1;
+    w.burst.reload_t = 16;
+    w.damage.by_class = [200; 5];
+    w.damage.fuze_radius = 100;
+    w.damage.fuze_arm_t = 0;
+    w.effects.object_explosion = 18;
+    surface_guns::apply("T72", &mut w).unwrap();
+    w
+}
+
+#[test]
+fn a_surface_round_strikes_the_other_sides_ground_unit_and_credits_the_kill() {
     let mut s = scene();
     unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
-    // A building in the line of fire.
-    unit(&mut s, UNIT + 1, [0., 10., 400.], REDFOR);
-    // A SAM leaving its rail inside its launcher's box, low over the building.
-    s.fire_surface(shot(sam(), [0., 12., 0.], [0., 30., 3000.], None))
+    // A Red truck in the way, then a Blue tank 3,000 ft off.
+    unit(&mut s, UNIT + 1, [0., 10., 1500.], REDFOR);
+    let blue = 0x4000_0007;
+    s.add_ground_target(
+        blue,
+        OrientedBox {
+            center: [0., 8., 3000.],
+            half: [9., 4., 15.],
+            heading: 0.,
+            pitch: 0.,
+            bank: 0.,
+        },
+        200,
+        0x400,
+        Side(1),
+    )
+    .unwrap();
+    let w = t72();
+    assert!(engages_surface(&w) && engages_aircraft(&w));
+    let id = s
+        .fire_surface(shot(w, [0., 10., 0.], [0., 10., 3000.], None))
         .unwrap();
-    // A gun round straight through the building.
-    s.fire_surface(shot(zsu23(), [0., 12., 0.], [0., 12., 3000.], None))
-        .unwrap();
-    run_from(&mut s, 240, far());
-    assert_eq!(hp(&s, UNIT), 100);
-    assert_eq!(hp(&s, UNIT + 1), 100);
+    let events = run_from(&mut s, 120, far());
+    assert_eq!(hp(&s, UNIT + 1), 100, "its own side's truck is passed");
+    assert_eq!(hp(&s, blue), 0, "one 125 mm round kills a 200 point tank");
+    assert!(events.contains(&Event::Destroyed(blue)));
+    let strike = s.take_strikes().pop().unwrap();
+    assert_eq!(
+        (strike.owner, strike.victim, strike.destroyed),
+        (UNIT, blue, true)
+    );
+    let kill = s.ledger.credit(blue).unwrap();
+    assert_eq!(
+        (kill.owner, kill.category, kill.aircraft),
+        (UNIT, 0x400, false)
+    );
+    assert!(matches!(
+        outcomes(&mut s, id).as_slice(),
+        [Outcome {
+            resolution: Resolution::Hit(200),
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn the_record_target_flags_say_what_a_surface_weapon_aims_at() {
+    // Air only: every SAM, AAA and flak record.
+    assert!(engages_aircraft(&zsu23()) && !engages_surface(&zsu23()));
+    let mut air = record("SA6.JT");
+    air.flags = 0x12341;
+    assert!(engages_aircraft(&air) && !engages_surface(&air));
+    // Both: the tank, armoured car and small-arms guns.
+    assert!(engages_aircraft(&t72()) && engages_surface(&t72()));
+    // Surface only: the SS-N-9.
+    let mut ssn9 = record("SSN9.JT");
+    ssn9.flags = 0x22365;
+    assert!(!engages_aircraft(&ssn9) && engages_surface(&ssn9));
+    // A record that names neither keeps the anti-aircraft use.
+    let mut none = record("X.JT");
+    none.flags = 0xc0;
+    assert!(engages_aircraft(&none) && !engages_surface(&none));
+    assert!(opposed(Side(1), Side(2)));
+    assert!(!opposed(Side(1), Side(1)) && !opposed(NO_SIDE, Side(2)));
 }
 
 #[test]

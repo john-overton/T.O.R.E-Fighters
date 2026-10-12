@@ -71,8 +71,9 @@ pub mod rewind;
 pub use parked::{ParkedAircraft, ParkedSite};
 mod surface;
 pub use surface::{
-    GroundLook, Refused, SURFACE_PROJECTILE_ID_BASE, SURFACE_PROJECTILE_RESERVE, SurfaceRound,
-    SurfaceShot, flak_explosion, is_flak, surface_tracer, ticks_to_range,
+    AIR_TARGET_FLAG, GroundLook, Refused, SURFACE_PROJECTILE_ID_BASE, SURFACE_PROJECTILE_RESERVE,
+    SURFACE_TARGET_FLAG, SurfaceRound, SurfaceShot, engages_aircraft, engages_surface,
+    flak_explosion, is_flak, opposed, surface_tracer, ticks_to_range,
 };
 
 /// Rounds one loaded store holds: a rocket pod's rockets, else 1 (retail's
@@ -4924,7 +4925,7 @@ impl State {
                 } else {
                     NO_SIDE
                 },
-                surface: surface.is_some(),
+                surface: surface.map(|_| owner_side),
                 ownship: by_ownship,
             };
             let hitbox = if easy {
@@ -5226,9 +5227,14 @@ impl State {
                 target_broad.candidates(reach, &mut candidates);
                 for &i in &candidates {
                     let t = &self.targets[i];
-                    // A surface round strikes aircraft only: no ground object
-                    // or ship, its own launcher included.
-                    if surface.is_some() && t.role != TargetRole::Aircraft {
+                    // A surface round strikes aircraft and the other side's
+                    // ground objects and ships: never its own side's, neutral
+                    // scenery or its own launcher, whatever the friendly fire
+                    // setting.
+                    if surface.is_some()
+                        && t.role != TargetRole::Aircraft
+                        && !opposed(owner_side, t.side)
+                    {
                         continue;
                     }
                     if !(t.body_present()
