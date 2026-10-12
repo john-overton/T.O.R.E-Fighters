@@ -133,6 +133,7 @@ fn target(seed: u32, variation: Variation) -> GroundTarget {
 const JITTER_ONLY: Variation = Variation {
     jitter: true,
     relocate: false,
+    front: false,
 };
 
 /// A surface holding `units`, with a template site when `settings` is
@@ -675,8 +676,13 @@ fn relocation_never_changes_the_rolls_or_the_counts() {
     let ids = |variation| {
         let mut s = surface(site_units(), Some(target(11, variation)));
         lay(&mut s, &ground, &[]);
-        let units: Vec<(UnitId, String)> =
-            s.units.iter().map(|u| (u.id, u.resource.clone())).collect();
+        // The front line is a variation of its own, not a roll.
+        let units: Vec<(UnitId, String)> = s
+            .units
+            .iter()
+            .filter(|u| u.id.range() != IdRange::FrontLine)
+            .map(|u| (u.id, u.resource.clone()))
+            .collect();
         (units, s.trucks.len(), s.batteries.len(), s.transform)
     };
     let (on, off) = (ids(Variation::ON), ids(Variation::OFF));
@@ -1131,5 +1137,193 @@ fn a_carrier_with_aircraft_on_its_deck_keeps_its_spot() {
             "seed {seed}"
         );
         assert_eq!(s.parked[0].position, [MID + 40, 0, MID + 200]);
+    }
+}
+
+/// The front line's units, ascending id.
+fn front_units(surface: &Surface) -> Vec<&Unit> {
+    surface
+        .units
+        .iter()
+        .filter(|u| u.id.range() == IdRange::FrontLine)
+        .collect()
+}
+
+fn built_front(seed: u32, aaa: usize, grid: &Grid, missing: &[&str]) -> Surface {
+    let ground = Ground::new(grid, Vec::new(), Vec::new(), None);
+    let mut settings = target(seed, Variation::ON);
+    settings.aaa = aaa;
+    let mut s = surface(site_units(), Some(settings));
+    lay(&mut s, &ground, missing);
+    s
+}
+
+#[test]
+fn a_front_line_stands_in_contact_clear_of_the_targets_and_the_starts() {
+    let grid = Grid::land(128);
+    for seed in 1..=12 {
+        let s = built_front(seed, 3, &grid, &[]);
+        let front = front_units(&s);
+        // Blue's four then Red's four.
+        assert_eq!(front.len(), 8, "seed {seed}");
+        let blue: Vec<_> = front.iter().filter(|u| u.side == FRIENDLY_SIDE).collect();
+        let red: Vec<_> = front.iter().filter(|u| u.side == ENEMY_SIDE).collect();
+        assert_eq!((blue.len(), red.len()), (4, 4), "seed {seed}");
+        assert!(front.iter().all(|u| !u.is_target() && u.route.is_none()));
+        assert!(front.iter().all(|u| s.side_of(u.id.0) == u.side));
+        // Red's carry the enemy nationality and the Redfor bit.
+        assert!(red.iter().all(|u| u.nationality == Some(10 | 0x80)));
+        assert!(blue.iter().all(|u| u.nationality == Some(0)));
+        // The two lines face each other inside a tank gun's reach, and no
+        // pair is closer than a unit's length.
+        let nearest = blue
+            .iter()
+            .flat_map(|b| red.iter().map(move |r| distance2(at(b), at(r))))
+            .min()
+            .unwrap();
+        assert!(
+            (1_000i64.pow(2)..=3_200i64.pow(2)).contains(&nearest),
+            "seed {seed}: {}",
+            (nearest as f64).sqrt()
+        );
+        // Clear of every template unit and both starts.
+        let clear = (FRONT_CLEAR_NM * NM_FT).pow(2);
+        let starts = s.starts.as_ref().unwrap();
+        let start = |p: [i32; 2]| [i64::from(p[0]), i64::from(p[1])];
+        for u in &front {
+            assert!(
+                s.template_units().all(|t| distance2(at(u), at(t)) >= clear),
+                "seed {seed}: {:?} is near a template unit",
+                u.id
+            );
+            assert!(distance2(at(u), start(starts.red)) >= clear);
+            assert!(distance2(at(u), start(starts.blue)) >= clear);
+        }
+        // Each side faces the other: a unit's heading is the line's axis
+        // toward the other line, within the turn (the lines' middles differ
+        // from the axis by the jitter, a few degrees).
+        let middle = |units: &[&&Unit]| centroid(units.iter().map(|u| at(u))).expect("units");
+        let (b, r) = (middle(&blue), middle(&red));
+        let toward =
+            |from: [i64; 2], to: [i64; 2]| trig::bearing([to[0] - from[0], to[1] - from[1]]);
+        for u in &blue {
+            let off = trig::signed(u.angles[0] - toward(b, r)).abs();
+            assert!(
+                off <= FRONT_TURN_DEG + 8,
+                "seed {seed}: blue heading off by {off}"
+            );
+        }
+        for u in &red {
+            let off = trig::signed(u.angles[0] - toward(r, b)).abs();
+            assert!(
+                off <= FRONT_TURN_DEG + 8,
+                "seed {seed}: red heading off by {off}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_front_line_is_seeded_and_turns_off() {
+    let grid = Grid::land(128);
+    let a = built_front(7, 3, &grid, &[]);
+    let b = built_front(7, 3, &grid, &[]);
+    let c = built_front(8, 3, &grid, &[]);
+    let places = |s: &Surface| {
+        front_units(s)
+            .iter()
+            .map(|u| (u.id, u.resource.clone(), u.position, u.angles))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(places(&a), places(&b));
+    assert_eq!(a.digest(), b.digest());
+    assert_ne!(places(&a), places(&c));
+    // The placements follow, so the scene draws them.
+    assert!(front_units(&a).iter().all(|u| {
+        a.placements
+            .iter()
+            .any(|(id, p)| *id == u.id && p.position == u.position)
+    }));
+    // Off: no front, and nothing else about the template moves with it.
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut off = target(7, Variation::ON);
+    off.variation.front = false;
+    let mut s = surface(site_units(), Some(off));
+    lay(&mut s, &ground, &[]);
+    assert!(front_units(&s).is_empty());
+    assert_eq!(
+        s.template_units()
+            .map(|u| (u.id, u.position))
+            .collect::<Vec<_>>(),
+        a.template_units()
+            .map(|u| (u.id, u.position))
+            .collect::<Vec<_>>()
+    );
+    assert_ne!(s.digest(), a.digest());
+}
+
+#[test]
+fn a_front_line_has_a_gun_only_with_aaa_on_and_none_without_the_equipment_or_land() {
+    let grid = Grid::land(128);
+    assert_eq!(front_units(&built_front(3, 0, &grid, &[])).len(), 6);
+    assert_eq!(front_units(&built_front(3, 1, &grid, &[])).len(), 8);
+    // A side the import cannot equip: no front, and the layout says so.
+    let red_kit = [
+        "BMP2.NT", "BTR80.NT", "T72.NT", "T80.NT", "T90.NT", "ZSU23.NT", "ZSU57.NT",
+    ];
+    let s = built_front(3, 3, &grid, &red_kit);
+    assert!(front_units(&s).is_empty());
+    assert!(
+        s.layout_notes.iter().any(|n| n.contains("no front line")),
+        "{:?}",
+        s.layout_notes
+    );
+    // All sea: no site, no front.
+    let sea = Grid::uniform(128, ground::WATER_CLASS, 0);
+    let s = built_front(3, 3, &sea, &[]);
+    assert!(front_units(&s).is_empty());
+    assert!(
+        s.layout_notes.iter().any(|n| n.contains("no front line")),
+        "{:?}",
+        s.layout_notes
+    );
+}
+
+#[test]
+fn a_ridge_between_two_units_blocks_their_sight() {
+    let mut grid = Grid::land(128);
+    // A ridge along cell column 64: 768 ft above the plain at its crest.
+    for row in 0..128 {
+        grid.cells[row * 128 + 64].elevation = 4;
+    }
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let (x, z) = (64 * 8192, MID.into());
+    assert!(!ground.sees([x - 3_000, z], [x + 3_000, z], 10));
+    // Both on one slope, or both on the plain, they see each other.
+    assert!(ground.sees([x - 6_000, z], [x - 3_000, z], 10));
+    assert!(ground.sees([x + 4_000, z], [x + 6_000, z], 10));
+}
+
+#[test]
+fn a_front_line_keeps_its_lines_in_sight_of_each_other() {
+    // Hills of 256 ft on a checker of cells: a site may stand on one cell's
+    // slope, but every unit must see the other line.
+    let mut grid = Grid::land(128);
+    for row in 0..128 {
+        for col in 0..128 {
+            if (col / 2 + row / 2) % 2 == 0 {
+                grid.cells[row * 128 + col].elevation = 2;
+            }
+        }
+    }
+    for seed in 1..=12 {
+        let s = built_front(seed, 3, &grid, &[]);
+        let ground = Ground::new(&grid, Vec::new(), Vec::new(), None);
+        let front = front_units(&s);
+        for a in front.iter().filter(|u| u.side == FRIENDLY_SIDE) {
+            for b in front.iter().filter(|u| u.side == ENEMY_SIDE) {
+                assert!(ground.sees(at(a), at(b), FRONT_EYE_FT), "seed {seed}");
+            }
+        }
     }
 }

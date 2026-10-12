@@ -21,6 +21,7 @@ fn target() -> GroundTarget {
         night_stealth: false,
         jitter: true,
         relocate: true,
+        front: true,
         separation_nm: 60,
     }
 }
@@ -179,8 +180,29 @@ fn the_ground_target_and_airfield_scene_round_trip_in_a_format_3_header() {
     assert_eq!(recording.header().world.airfield_scene, 0);
     let bytes = std::fs::read(dir.join("p.tore-replay")).unwrap();
     let text = String::from_utf8_lossy(&bytes);
-    assert!(text.contains("world.ground_target=QUCOL,2,3,41,4,0,1,1,60"));
+    assert!(text.contains("world.ground_target=QUCOL,2,3,41,4,0,1,1,60,1\n"));
     assert!(!text.contains("world.airfield_scene"));
+    // No front line: the tenth value is left out, so the header is what a
+    // recording made before the front line existed holds, and it reads back
+    // without one.
+    let mut old = surface_header();
+    old.world.ground_target = Some(GroundTarget {
+        front: false,
+        ..target()
+    });
+    let recording = write(&dir, "o.tore-replay", &old);
+    assert!(
+        !recording
+            .header()
+            .world
+            .ground_target
+            .as_ref()
+            .unwrap()
+            .front
+    );
+    let bytes = std::fs::read(dir.join("o.tore-replay")).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("world.ground_target=QUCOL,2,3,41,4,0,1,1,60\n"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

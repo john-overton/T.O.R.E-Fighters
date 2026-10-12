@@ -178,6 +178,9 @@ pub struct GroundTarget {
     /// mission; the preview tools turn them off).
     pub jitter: bool,
     pub relocate: bool,
+    /// Whether the Quick Mission front line stands (off in a recording
+    /// made before it existed).
+    pub front: bool,
     /// The creator's enemy distance in nautical miles.
     pub separation_nm: u32,
 }

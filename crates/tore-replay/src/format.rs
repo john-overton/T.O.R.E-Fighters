@@ -286,7 +286,9 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
 
 /// The ground target as one header value:
 /// `stem,aaa,sam,seed,nationality,night_stealth,jitter,relocate,separation_nm`
-/// with the three flags as 0 or 1.
+/// with the three flags as 0 or 1, and a tenth value `1` for the Quick
+/// Mission front line when it stands (left out when it does not, which is
+/// what a recording made before the front line reads as).
 fn ground_target_text(target: &GroundTarget) -> Result<String> {
     if target.stem.is_empty()
         || !target
@@ -299,7 +301,7 @@ fn ground_target_text(target: &GroundTarget) -> Result<String> {
             target.stem
         )));
     }
-    Ok(format!(
+    let mut text = format!(
         "{},{},{},{},{},{},{},{},{}",
         target.stem,
         target.aaa,
@@ -310,12 +312,21 @@ fn ground_target_text(target: &GroundTarget) -> Result<String> {
         u8::from(target.jitter),
         u8::from(target.relocate),
         target.separation_nm
-    ))
+    );
+    if target.front {
+        text.push_str(",1");
+    }
+    Ok(text)
 }
 
 fn parse_ground_target(text: &str) -> Result<GroundTarget> {
     let bad = || corrupt("header entry world.ground_target is not a ground target");
     let parts: Vec<&str> = text.split(',').collect();
+    let (parts, front) = match parts.len() {
+        9 => (&parts[..], false),
+        10 if parts[9] == "1" => (&parts[..9], true),
+        _ => return Err(bad()),
+    };
     let [
         stem,
         aaa,
@@ -348,6 +359,7 @@ fn parse_ground_target(text: &str) -> Result<GroundTarget> {
         night_stealth: flag(night)?,
         jitter: flag(jitter)?,
         relocate: flag(relocate)?,
+        front,
         separation_nm: number(separation)?,
     })
 }
@@ -589,6 +601,7 @@ mod tests {
                     night_stealth: true,
                     jitter: true,
                     relocate: false,
+                    front: true,
                     separation_nm: 60,
                 }),
                 airfield_scene: 2,

@@ -17,6 +17,8 @@
 //! - **Starts.** Red starts by the target, Blue the mission's separation
 //!   from Red heading at it; the airfields a ground start may use follow
 //!   the target.
+//! - **Front line.** A few Blue and Red ground units stand in contact a
+//!   few miles from the targets, so a surface battle is visible.
 //!
 //! Everything comes from the mission's surface seed through
 //! [`super::resolve::Stream`] (one stream per template, object and purpose)
@@ -25,6 +27,7 @@
 //! from the placed scale (`terrain::placed_shape_scale`) through
 //! [`TypeInfo`]; nothing here assumes one.
 mod batteries;
+mod front;
 pub mod ground;
 mod sites;
 mod starts;
@@ -140,22 +143,53 @@ pub const AAA_TRUCK: &str = "TRUCK.NT";
 /// The invisible barrage-zone unit (retail `A_M1939.NT`).
 pub const BARRAGE_ZONE: &str = "A_M1939.NT";
 
-/// Which of the seeded variations a layout applies. Both are on for every
+// Front line (docs/spec/surface-defenses.md, "The front line"): John,
+// 2026-10-11 asked for opposing ground forces in contact; the numbers are
+// fitted, agent.
+/// The front's centre stands this far from the targets' centroid, nm: the
+/// first band, then the second when no site in the first passes.
+pub const FRONT_BANDS_NM: [[i64; 2]; 2] = [[5, 10], [10, 20]];
+/// Every template unit and every start is at least this far from the
+/// front's centre, nm, so no front unit reaches the objective and no start
+/// sits in the fighting.
+pub const FRONT_CLEAR_NM: i64 = 4;
+/// Candidate centres per band.
+pub const FRONT_CANDIDATES: usize = 24;
+/// The two lines face each other this far apart, feet: inside a tank gun's
+/// reach, with room for the 3,000 ft of light-gun accuracy.
+pub const FRONT_GAP_FT: i64 = 2_400;
+/// Units of one line stand this far apart, feet.
+pub const FRONT_SPACING_FT: i64 = 500;
+/// Each front unit moves a seeded amount inside this disc, feet, and turns
+/// by up to [`FRONT_TURN_DEG`].
+pub const FRONT_JITTER_FT: i64 = 150;
+pub const FRONT_TURN_DEG: i32 = 15;
+/// The height above the ground the lines' sight is measured at, feet: the
+/// surface weapons' own eye height.
+pub const FRONT_EYE_FT: i64 = 10;
+/// The equipment group Blue's front draws from: the Western list (group 0).
+pub const FRONT_BLUE_GROUP: usize = 0;
+
+/// Which of the seeded variations a layout applies. All are on for every
 /// mission; the preview tools turn them off to show the retail spot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Variation {
     pub jitter: bool,
     pub relocate: bool,
+    /// The Quick Mission front line: Blue and Red ground units in contact.
+    pub front: bool,
 }
 
 impl Variation {
     pub const ON: Self = Self {
         jitter: true,
         relocate: true,
+        front: true,
     };
     pub const OFF: Self = Self {
         jitter: false,
         relocate: false,
+        front: false,
     };
 }
 
@@ -260,6 +294,7 @@ pub fn place(surface: &mut Surface, inputs: &mut Inputs<'_, '_>) {
     surface.batteries = batteries;
     let starts = starts::place(surface, inputs.ground);
     surface.starts = starts;
+    front::add(surface, inputs, &obstacles, &mut added, &mut notes);
     finish(surface, added, trucks);
     surface.layout_notes = notes;
 }
@@ -386,8 +421,22 @@ pub(crate) fn set_pose(unit: &mut Unit, pose: Pose) {
     unit.angles[0] = trig::signed(pose.heading);
 }
 
-/// A unit the layout adds, from its record, standing at `pose` for `side`.
+/// A unit the layout adds, from its record, standing at `pose` with
+/// `owner`'s nationality, side and skill.
 pub(crate) fn added_unit(id: UnitId, entry: &Entry, pose: Pose, owner: &Unit) -> Unit {
+    added_unit_for(id, entry, pose, owner.nationality, owner.side, owner.skill)
+}
+
+/// A unit the layout adds, from its record, standing at `pose` for the
+/// given nationality, side and skill.
+pub(crate) fn added_unit_for(
+    id: UnitId,
+    entry: &Entry,
+    pose: Pose,
+    nationality: Option<i32>,
+    side: tore_sim::combat::live::Side,
+    skill: i32,
+) -> Unit {
     let kind = match entry.family {
         super::catalog::Family::Unit(kind) => kind,
         _ => super::UnitKind::Structure,
@@ -399,13 +448,13 @@ pub(crate) fn added_unit(id: UnitId, entry: &Entry, pose: Pose, owner: &Unit) ->
         kind,
         class: entry.class,
         name: entry.name.clone(),
-        nationality: owner.nationality,
-        side: owner.side,
+        nationality,
+        side,
         position: [0; 3],
         angles: [0; 3],
         // Never a destroy target.
         flags: 0,
-        skill: owner.skill,
+        skill,
         react: None,
         search_dist: None,
         start_time: None,

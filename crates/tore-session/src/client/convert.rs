@@ -866,7 +866,10 @@ pub fn surface_infos(world: &World) -> Vec<replay::SurfaceInfo> {
                 IdRange::Layout => surface
                     .unit(id)
                     .is_some_and(|unit| unit.kind == UnitKind::Active),
-                IdRange::Template | IdRange::SupplyTruck | IdRange::BatteryRadar => true,
+                IdRange::Template
+                | IdRange::SupplyTruck
+                | IdRange::BatteryRadar
+                | IdRange::FrontLine => true,
                 _ => false,
             }
         })

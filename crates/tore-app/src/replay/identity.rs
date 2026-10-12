@@ -95,6 +95,7 @@ fn ground_target(recorded: &tore_replay::GroundTarget) -> AppResult<GroundTarget
         variation: Variation {
             jitter: recorded.jitter,
             relocate: recorded.relocate,
+            front: recorded.front,
         },
         separation_nm: recorded.separation_nm,
     })
@@ -111,6 +112,7 @@ fn recorded_target(target: &GroundTarget) -> tore_replay::GroundTarget {
         night_stealth: target.night_stealth,
         jitter: target.variation.jitter,
         relocate: target.variation.relocate,
+        front: target.variation.front,
         separation_nm: target.separation_nm,
     }
 }
