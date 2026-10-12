@@ -76,6 +76,7 @@ pub(crate) fn menu<'a>(
 /// What the app set aside to show a networked flight and puts back when it
 /// ends, so single player starts from the state it left.
 pub struct Stash {
+    markup: Option<crate::flight_map::Plan>,
     world: crate::world::World,
     combat_view: CombatView,
     hornet: Airframe,
@@ -503,6 +504,7 @@ impl App {
             session.chat.flight_ended();
         }
         let stash = flight.stash;
+        self.mission_markup = stash.markup;
         self.world = stash.world;
         self.combat_view = stash.combat_view;
         self.hornet = stash.hornet;
@@ -553,7 +555,11 @@ impl App {
         let plane = plane.0;
         // A page of the lobby still open gives way to the flight.
         self.close_lobby_page();
-        let crate::net::session::Built { mut world, models } = built;
+        let crate::net::session::Built {
+            mut world,
+            models,
+            markup,
+        } = built;
         // The planes revivals have added to the mission so far (slice F2-V).
         if let Some(session) = &self.net {
             add_spawned(&mut world, session.client.spawned());
@@ -589,6 +595,7 @@ impl App {
         };
         // Single player's state waits aside.
         let stash = Stash {
+            markup: self.mission_markup.replace(markup),
             world: std::mem::replace(&mut self.world, world),
             combat_view: std::mem::replace(&mut self.combat_view, view),
             hornet: std::mem::replace(&mut self.hornet, hornet),
@@ -886,6 +893,7 @@ impl App {
         self.net_built = None;
         if let Some(flight) = self.net_flight.take() {
             let stash = flight.stash;
+            self.mission_markup = stash.markup;
             self.world = stash.world;
             self.combat_view = stash.combat_view;
             self.hornet = stash.hornet;

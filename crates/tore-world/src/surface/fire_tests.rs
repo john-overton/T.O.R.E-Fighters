@@ -1156,3 +1156,38 @@ mod supply_tests;
 
 #[path = "surface_vs_tests.rs"]
 mod surface_vs_tests;
+
+/// What the units' pictures aim at (docs/spec/surface-defenses.md,
+/// "Aiming"): a unit's controller from choosing a target while it holds it,
+/// and every launcher of a battery whose controller does.
+#[test]
+fn aim_tracks_follow_the_locked_controllers_and_batteries() {
+    use crate::surface::aim::{Track, Weapon as Held, tracks};
+    let mut f = Fixture::new(vec![sa6_site(1)], Vec::new());
+    assert!(
+        tracks(&f.surface, &f.state).is_empty(),
+        "nothing chosen yet"
+    );
+    // Searching at once, it chooses the jet and turns toward it while it
+    // prepares (36 s), then holds it locked.
+    f.run(TPS);
+    assert_eq!(f.phase(SA6_ID), Phase::Prepare);
+    assert_eq!(tracks(&f.surface, &f.state).len(), 1);
+    f.run(41 * TPS);
+    assert_eq!(
+        tracks(&f.surface, &f.state),
+        vec![Track {
+            unit: UnitId(SA6_ID),
+            weapon: Held::Station(0),
+            target: JET,
+        }]
+    );
+    let mut f = battery(BatterySystem::Sa6);
+    f.jet.position = [0., 15_000., 40_000.];
+    f.run(60 * TPS);
+    let held: Vec<(u32, u32)> = tracks(&f.surface, &f.state)
+        .iter()
+        .map(|t| (t.unit.0, t.target))
+        .collect();
+    assert_eq!(held, vec![(NEAR, JET), (FAR, JET)]);
+}

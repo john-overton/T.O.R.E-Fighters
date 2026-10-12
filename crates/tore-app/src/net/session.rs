@@ -87,6 +87,10 @@ pub struct Built {
     /// The drawn model of each aircraft type, in the order the world holds
     /// the types (`CombatView` draws them in that order).
     pub models: Vec<Airframe>,
+    /// The mission's markup for the in-flight map, read from the world as
+    /// built, before it flies: the same starts and objective area the
+    /// creator's map shows, on every machine of the game.
+    pub markup: crate::flight_map::Plan,
 }
 
 /// The build this game is, which the host's must match.
@@ -207,9 +211,11 @@ fn build_mission(spec: &MissionSpec, resources: &BTreeMap<String, Vec<u8>>) -> W
             ground_variation: None,
         },
     )?;
+    let markup = crate::quick_mission::map::mission_plan(&built.world, false, None);
     Ok(Built {
         world: built.world,
         models,
+        markup,
     })
 }
 
@@ -1831,6 +1837,15 @@ impl NetSession {
             &mut picture,
         );
         frame.picture = picture;
+    }
+
+    /// What the surface units' weapons hold at host tick `tick`, as far as
+    /// a client knows: the targets of their recent gun bursts. The host
+    /// sends no lock or missile target of a surface unit, so a launcher's
+    /// picture does not aim on a client (docs/spec/surface-defenses.md,
+    /// "Aiming").
+    pub fn surface_aim_tracks(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
+        tore_world::surface::aim::burst_tracks(tick, self.guns.surface_sights())
     }
 
     /// Steps the regenerated effects to client tick `to`, one step per tick

@@ -138,7 +138,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     # Menus lane.
-    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "replay-snapshot-*")),
+    "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
         ("menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-validate-creator", "menus-snap-quick-*"),
@@ -617,7 +617,9 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/look.rs", ("flight-views",), "look controls", windowed=True),
     _r("crates/tore-app/src/camera.rs", RENDER_FAMILIES, "camera", windowed=True),
     _r("crates/tore-app/src/flight_canvas.rs", RENDER_FAMILIES, "flight canvas", windowed=True),
-    _r("crates/tore-app/src/flight_map.rs", RENDER_FAMILIES, "flight map", windowed=True),
+    _r("crates/tore-app/src/flight_map.rs", RENDER_FAMILIES + ("menus-screens", "menus-creator"), "flight map", windowed=True),
+    _r("crates/tore-app/src/flight_map/*", RENDER_FAMILIES + ("menus-screens", "menus-creator"), "flight map view", windowed=True),
+    _r("crates/tore-app/src/flight_map_preview.rs", ("menus-screens",), "flight map preview"),
     _r("crates/tore-app/src/scope.rs", RENDER_FAMILIES + ("link-cues",), "radar scope", windowed=True),
     _r("crates/tore-app/src/canvas_present.rs", RENDER_FAMILIES, "presentation", windowed=True),
     _r("crates/tore-app/src/static_art.rs", RENDER_FAMILIES, "art", windowed=True),

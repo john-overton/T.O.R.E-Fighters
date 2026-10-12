@@ -134,26 +134,44 @@ fn opposing_tanks_in_range_engage_each_other_before_an_aircraft() {
 }
 
 #[test]
-fn air_defence_keeps_aircraft_first_and_aaa_never_aims_at_the_ground() {
-    // A Red ZSU-23 (an AAA gun, air target flag only) beside a Blue tank.
-    let zsu = placed(ZSU_ID, "ZSU23.NT", 0x0800, 0., 0., 1)
-        .with_gun(zsu23(), "ZSU23", arc(0, FREE, [0., 90.]), 0)
-        .radar(false, None);
-    let mut f = Fixture::new(vec![zsu, tank(BLUE_TANK, 0., 2_000., BLUE)], Vec::new());
-    // No hostile aircraft: the gun stays idle and its radar off, while the
-    // tank engages it.
+fn air_defence_keeps_aircraft_first_and_a_land_aaa_gun_fires_at_the_ground_after_them() {
+    // A Red ZSU-23 (a land AAA gun, air target flag only) beside a Blue tank:
+    // John's ruling lets it shoot at the ground ("If it can shoot at ground
+    // targets let it"), after any aircraft in reach.
+    let zsu = || {
+        placed(ZSU_ID, "ZSU23.NT", 0x0800, 0., 0., 1)
+            .with_gun(zsu23(), "ZSU23", arc(0, FREE, [-10., 90.]), 0)
+            .radar(false, None)
+    };
+    let mut f = Fixture::new(vec![zsu(), tank(BLUE_TANK, 0., 2_000., BLUE)], Vec::new());
+    // No hostile aircraft: the tank engages the gun and the gun the tank.
     f.jet.side = RED;
     f.run(30 * TPS);
-    assert_eq!(f.phase(ZSU_ID), Phase::Idle);
-    assert!(!f.emitting(ZSU_ID));
-    assert_eq!(rounds_at(&f, ZSU_ID, BLUE_TANK), 0);
+    assert!(
+        rounds_at(&f, ZSU_ID, BLUE_TANK) >= 1,
+        "the gun fires at the tank"
+    );
     assert!(rounds_at(&f, BLUE_TANK, ZSU_ID) >= 1);
-    // A Blue jet arrives: the gun fights it.
+    // A ground target makes no RWR lock or painting.
+    assert!(f.state.locks.is_empty() && f.state.painting.is_empty());
+
+    // A Blue jet in reach comes first: the gun fires at it and not at the
+    // tank while it stays.
+    let mut f = Fixture::new(vec![zsu(), tank(BLUE_TANK, 0., 2_000., BLUE)], Vec::new());
     f.jet.side = BLUE;
     f.jet.position = [0., 2_000., 3_000.];
     f.run(30 * TPS);
     assert!(rounds_at(&f, ZSU_ID, JET) > 0);
     assert_eq!(rounds_at(&f, ZSU_ID, BLUE_TANK), 0);
+    assert_eq!(targets_of(&f, ZSU_ID), vec![JET]);
+
+    // The same gun on a ship stays in the air.
+    let (ship_gun, _) =
+        WeaponArms::gun(zsu23(), "ZSU23", arc(0, FREE, FREE), 1, true, GUN_NPC, 0).unwrap();
+    assert!(!ship_gun.aims_at_any_surface());
+    let (land_gun, _) =
+        WeaponArms::gun(zsu23(), "ZSU23", arc(0, FREE, FREE), 1, false, GUN_NPC, 0).unwrap();
+    assert!(land_gun.aims_at_any_surface());
 }
 
 #[test]

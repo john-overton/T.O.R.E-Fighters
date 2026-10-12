@@ -338,9 +338,20 @@ pub struct Guns {
     surface_ordinals: BTreeMap<(u32, usize), u64>,
     /// The host tick each surface round's life ends at, by its number.
     surface_ends: BTreeMap<u32, u64>,
+    /// Recent surface bursts at a target: (host tick, unit, hardpoint,
+    /// target), what the client aims the units' pictures with
+    /// (docs/spec/surface-defenses.md, "Aiming").
+    surface_sights: Vec<(u64, u32, usize, u32)>,
 }
 
 impl Guns {
+    /// The surface bursts of the last 5 s at a target, as the units'
+    /// pictures aim with them on a client: (host tick, unit, hardpoint,
+    /// target).
+    pub fn surface_sights(&self) -> &[(u64, u32, usize, u32)] {
+        &self.surface_sights
+    }
+
     /// Makes and flies the rounds up to `input`'s ticks and adds every round
     /// alive to `picture`.
     pub fn step(&mut self, input: &Inputs<'_>, around: &Around<'_>, picture: &mut RenderSnapshot) {
@@ -454,18 +465,27 @@ impl Guns {
                 aim,
                 rounds,
                 span,
-            } => self.surface_bursts.push(SurfaceBurst {
-                unit: *unit,
-                mount: usize::from(*mount),
-                target: *target,
-                aim: aim.map(tore_session::wire::entity::radians),
-                first,
-                rounds: u32::from(*rounds).max(1),
-                span: u64::from(*span).max(1),
-                cut: None,
-                made: 0,
-                lead: None,
-            }),
+            } => {
+                if let Some(target) = target {
+                    self.surface_sights.retain(|(tick, ..)| {
+                        tick + tore_world::surface::aim::BURST_HOLD_TICKS >= first
+                    });
+                    self.surface_sights
+                        .push((first, *unit, usize::from(*mount), *target));
+                }
+                self.surface_bursts.push(SurfaceBurst {
+                    unit: *unit,
+                    mount: usize::from(*mount),
+                    target: *target,
+                    aim: aim.map(tore_session::wire::entity::radians),
+                    first,
+                    rounds: u32::from(*rounds).max(1),
+                    span: u64::from(*span).max(1),
+                    cut: None,
+                    made: 0,
+                    lead: None,
+                });
+            }
             WireEvent::SurfaceBurstEnd { unit, mount, fired } => {
                 let mount = usize::from(*mount);
                 if let Some(burst) = self

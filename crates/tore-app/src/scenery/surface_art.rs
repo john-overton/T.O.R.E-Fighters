@@ -23,12 +23,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{
     Pic,
     shape::{
-        Billboard, DAMAGED_WORD, LOADED_COUNT_BASE, SPRITE_FRAME_WORD, Shape, loaded_count_word,
+        Billboard, CURRENT_TICKS_WORD, DAMAGED_WORD, LOADED_COUNT_BASE, SPRITE_FRAME_WORD, Shape,
+        hardpoint_angle_word, loaded_count_word,
     },
     static_object::Definition,
 };
 use tore_sim::attitude::{Basis, Vector};
-use tore_world::surface::{DestroyedLook, SurfaceState, UnitId};
+use tore_world::surface::{
+    DestroyedLook, Surface, SurfaceState, UnitId,
+    aim::{self, Aims, Rule, Track},
+};
 
 /// Floats in one vertex of the world batches.
 const FLOATS: usize = 10;
@@ -244,6 +248,53 @@ pub(super) fn ground_lift(shape: &Shape, scale: f64) -> f64 {
     }
 }
 
+/// A unit whose picture aims (docs/spec/surface-defenses.md, "Aiming"):
+/// its body turns, or its turrets, and its antennas spin. Drawn every frame
+/// while anything is turned or spins, in the static batch otherwise.
+struct Aimer {
+    /// Where it stands when it does not follow a route.
+    stand: Stand,
+    /// Its main shape's bytes, projected again for turrets, antennas and
+    /// rails.
+    bytes: Vec<u8>,
+    /// The scenery look, for a body that turns with nothing else changed.
+    intact: Shape,
+    /// Turrets: hardpoint and rest heading (binary angle units).
+    turrets: Vec<(u8, i16)>,
+    /// Its rotating antennas spin with the mission clock.
+    antennas: bool,
+    /// The hardpoints whose loads the shape draws and their full loads.
+    rails: Vec<u8>,
+    full: Vec<u32>,
+    /// It follows a route (drawn at its pose).
+    routed: bool,
+}
+
+/// `basis` turned `angle` radians about its own up axis, positive toward
+/// the right.
+fn yawed(basis: Basis, angle: f64) -> Basis {
+    if angle == 0. {
+        return basis;
+    }
+    let (sin, cos) = angle.sin_cos();
+    Basis {
+        right: std::array::from_fn(|i| basis.right[i] * cos - basis.forward[i] * sin),
+        up: basis.up,
+        forward: std::array::from_fn(|i| basis.forward[i] * cos + basis.right[i] * sin),
+    }
+}
+
+/// A traverse in radians as the binary angle units `@HardpointAngle@4`
+/// returns (65,536 a turn).
+fn binary_angle(radians: f64) -> i32 {
+    (radians * 65536. / std::f64::consts::TAU).round() as i32
+}
+
+/// `_currentTicks` (256 a second) at mission time `seconds`.
+fn current_ticks(seconds: f64) -> i32 {
+    (seconds.max(0.) * 256.) as i64 as i32
+}
+
 /// A launcher whose rails show its load.
 struct Launcher {
     bytes: Vec<u8>,
@@ -273,6 +324,8 @@ pub enum Look {
     Wreck,
     /// A launcher with these loads on its drawn hardpoints.
     Rails(Vec<u8>),
+    /// Aiming: drawn every frame ([`SurfaceArt::frame`]), not in the batch.
+    Aimed,
 }
 
 /// The surface units' art beside the static batch. See the module comment.
@@ -286,6 +339,12 @@ pub struct SurfaceArt {
     sprites: Vec<Sprite>,
     /// A parked aircraft's pieces 0 and 1 (`{stem}_B`, `{stem}_D`).
     debris: BTreeMap<u32, [Option<Model>; 2]>,
+    /// Units whose pictures aim, how each turns, and their aim.
+    aimers: BTreeMap<u32, Aimer>,
+    rules: BTreeMap<UnitId, Rule>,
+    aims: Aims,
+    /// The loads an aimer's rails show now, when not full.
+    aimer_loads: BTreeMap<u32, Vec<u32>>,
 }
 
 /// What [`SurfaceArt::add`] needs from the scenery build.
@@ -412,6 +471,11 @@ impl SurfaceArt {
             Some(model) if land => ground_lift(&model.shape, model.scale),
             _ => 0.,
         };
+        if let Some(name) = &main_shape
+            && let Err(error) = self.add_aimer(build, id, object_type, name, intact, stand)
+        {
+            log::warn!("Surface: {object_type} {id:#010x} does not aim: {error}");
+        }
         if surface.courses.contains_key(&UnitId(id))
             && let Some(name) = &main_shape
         {
@@ -491,6 +555,216 @@ impl SurfaceArt {
             }
         }
         Ok((parts, false))
+    }
+
+    /// Registers unit `id` (object type `object_type`, main shape `name`)
+    /// as an aimer when its picture can turn: a shape with turrets (its
+    /// mounts traverse) or rotating antennas, or an armed land unit whose
+    /// type turns (its whole body turns; docs/spec/surface-defenses.md,
+    /// "Aiming").
+    fn add_aimer(
+        &mut self,
+        build: &mut Build,
+        id: u32,
+        object_type: &str,
+        name: &str,
+        intact: &Shape,
+        stand: &Stand,
+    ) -> AppResult<()> {
+        let surface = &build.terrain.surface;
+        let Some(unit) = surface.unit(UnitId(id)) else {
+            return Ok(());
+        };
+        let bytes = build.bytes(name)?.clone();
+        let parts = tore_formats::shape::articulation(&bytes)?;
+        let arms = surface.arsenal.arms(UnitId(id));
+        use tore_formats::surface_unit::class;
+        let land = unit.class & (class::SHIP | class::STRUCTURE) == 0;
+        let rule = if !parts.turrets.is_empty() {
+            arms.map(|_| {
+                Rule::Turrets(
+                    parts
+                        .turrets
+                        .iter()
+                        .map(|(hardpoint, _)| usize::from(*hardpoint))
+                        .collect(),
+                )
+            })
+        } else if land && arms.is_some() && !intact.faces.is_empty() {
+            // The type's turn rate (`_turnRate`, 182 a degree, a second): a
+            // fixed site (the SA-2's six rails) reads 0 and does not turn.
+            let record = tore_formats::surface_unit::SurfaceUnit::parse(build.bytes(object_type)?)?;
+            let rate = f64::from(record.movement.turn_rate)
+                / f64::from(tore_formats::surface_unit::ANGLE_UNITS_PER_DEGREE);
+            (rate > 0.).then_some(Rule::Body { rate_deg_s: rate })
+        } else {
+            None
+        };
+        if rule.is_none() && parts.antennas.is_empty() {
+            return Ok(());
+        }
+        let rails = Shape::with_export_state(&bytes, &BTreeMap::new())
+            .map(|shape| rail_hardpoints(&shape))
+            .unwrap_or_default();
+        let full = rails
+            .iter()
+            .map(|hp| {
+                arms.and_then(|a| a.loads.get(usize::from(*hp)))
+                    .map_or(0, |m| m.loaded)
+            })
+            .collect();
+        if let Some(rule) = rule {
+            self.rules.insert(UnitId(id), rule);
+        }
+        self.aimers.insert(
+            id,
+            Aimer {
+                stand: *stand,
+                bytes,
+                intact: build.scenery(&mut self.layers, name)?,
+                turrets: parts.turrets,
+                antennas: !parts.antennas.is_empty(),
+                rails,
+                full,
+                routed: surface.courses.contains_key(&UnitId(id)),
+            },
+        );
+        Ok(())
+    }
+
+    /// Steps every aimer to `picture`'s tick: `tracks` are what the units'
+    /// weapons hold, `surface` the mission's units and arms, `stock` their
+    /// launchers' loads when the viewer knows them.
+    pub fn step_aim(
+        &mut self,
+        picture: &crate::snapshot::RenderSnapshot,
+        surface: &Surface,
+        tracks: &[Track],
+        stock: Option<&SurfaceState>,
+    ) {
+        let stance = |id: UnitId| -> Option<aim::Stance> {
+            if let Some(pose) = picture.surface.iter().find(|pose| pose.id == id) {
+                return Some(aim::Stance {
+                    origin: pose.position,
+                    heading: pose.attitude[0],
+                });
+            }
+            surface.arsenal.arms(id).map(|arms| aim::Stance {
+                origin: arms.position,
+                heading: arms.heading,
+            })
+        };
+        let arc = |id: UnitId, hardpoint: usize| {
+            surface
+                .arsenal
+                .arms(id)
+                .and_then(|arms| aim::mount_arc(arms, hardpoint))
+        };
+        // Nothing aims at a crashed aircraft or a wreck: a unit keeps the
+        // aim it had (a body) or turns back to rest (a turret).
+        let target = |id: u32| -> Option<Vector> {
+            if picture.player.id == id {
+                return (!picture.player.crashed).then_some(picture.player.position);
+            }
+            if let Some(pose) = picture.targets.iter().find(|pose| pose.id == id) {
+                return (!pose.crashed).then_some(pose.position);
+            }
+            if let Some(pose) = picture.surface.iter().find(|pose| pose.id.0 == id) {
+                return (!pose.wrecked).then_some(pose.position);
+            }
+            surface
+                .arsenal
+                .arms(UnitId(id))
+                .map(|arms| arms.position)
+                .or_else(|| {
+                    surface
+                        .unit(UnitId(id))
+                        .map(|unit| unit.position.map(f64::from))
+                })
+        };
+        // A destroyed unit no longer aims.
+        let alive: Vec<Track> = tracks
+            .iter()
+            .filter(|track| {
+                !picture
+                    .targets
+                    .iter()
+                    .any(|pose| pose.id == track.unit.0 && pose.crashed)
+            })
+            .copied()
+            .collect();
+        self.aims
+            .step(picture.tick, &self.rules, &alive, &arc, &stance, &target);
+        if let Some(stock) = stock {
+            for (id, aimer) in &self.aimers {
+                if aimer.rails.is_empty() {
+                    continue;
+                }
+                // A unit the stock does not list is fully loaded (a replay
+                // lists only the units whose rails changed).
+                let Some(state) = stock.unit(UnitId(*id)).filter(|unit| unit.armed) else {
+                    self.aimer_loads.remove(id);
+                    continue;
+                };
+                let loads: Vec<u32> = aimer
+                    .rails
+                    .iter()
+                    .map(|hp| state.mounts.get(usize::from(*hp)).map_or(0, |m| m.loaded))
+                    .collect();
+                if loads == aimer.full {
+                    self.aimer_loads.remove(id);
+                } else {
+                    self.aimer_loads.insert(*id, loads);
+                }
+            }
+        }
+    }
+
+    /// Unit `id`'s aim now, when its picture aims.
+    pub fn aim_of(&self, id: u32) -> Option<&aim::UnitAim> {
+        self.aims.unit(UnitId(id))
+    }
+
+    /// Whether aimer `id` is drawn every frame now: aiming has begun and its
+    /// antennas spin or a part stands turned.
+    fn aiming(&self, id: u32) -> bool {
+        let Some(aimer) = self.aimers.get(&id) else {
+            return false;
+        };
+        self.aims.tick.is_some()
+            && (aimer.antennas
+                || !aimer.turrets.is_empty()
+                || self.aims.unit(UnitId(id)).is_some_and(aim::UnitAim::turned))
+    }
+
+    /// Aimer `id`'s shape and the turn of its body now, at mission time
+    /// `seconds`: projected again when a turret, antenna or rail changes the
+    /// scenery look.
+    fn aimed_shape(&self, id: u32, aimer: &Aimer, seconds: f64) -> (Option<Shape>, f64) {
+        let aim = self.aims.unit(UnitId(id));
+        let body = aim.map_or(0., |a| a.body);
+        let mut state = BTreeMap::new();
+        for (hardpoint, _) in &aimer.turrets {
+            let angle = aim
+                .and_then(|a| a.turrets.get(&usize::from(*hardpoint)))
+                .copied()
+                .unwrap_or(0.);
+            state.insert(hardpoint_angle_word(*hardpoint), binary_angle(angle));
+        }
+        if aimer.antennas {
+            state.insert(CURRENT_TICKS_WORD, current_ticks(seconds));
+        }
+        let loads = self.aimer_loads.get(&id);
+        if state.is_empty() && loads.is_none() {
+            return (None, body);
+        }
+        for (at, hardpoint) in aimer.rails.iter().enumerate() {
+            let loaded = loads.map_or(aimer.full[at], |l| l[at]);
+            if loaded > 0 {
+                state.insert(loaded_count_word(*hardpoint), loaded as i32);
+            }
+        }
+        (Shape::with_export_state(&aimer.bytes, &state).ok(), body)
     }
 
     /// A carrier's island and deck parts at `stand` (docs/spec/surface-
@@ -628,6 +902,9 @@ impl SurfaceArt {
                 Look::Hidden
             });
         }
+        if self.aiming(id) {
+            return Some(Look::Aimed);
+        }
         let launcher = self.launchers.get(&id)?;
         let state = surface?.unit(UnitId(id)).filter(|unit| unit.armed)?;
         let loads: Vec<u32> = launcher
@@ -644,7 +921,7 @@ impl SurfaceArt {
     /// built.
     pub(super) fn drawn(&mut self, id: u32, look: &Look) -> Option<&Drawn> {
         match look {
-            Look::Hidden => None,
+            Look::Hidden | Look::Aimed => None,
             Look::Wreck => self.wrecks.get(&id),
             Look::Rails(loads) => {
                 let key = (id, loads.clone());
@@ -696,7 +973,7 @@ impl SurfaceArt {
                 &mover.intact
             };
             let [yaw, pitch, bank] = pose.attitude;
-            let basis = Basis::new(yaw, pitch, bank);
+            let mut basis = Basis::new(yaw, pitch, bank);
             let at = local(pose.position);
             // A wreck lies on the ground; the unit stands on its lowest point.
             let lift = if pose.wrecked {
@@ -704,6 +981,16 @@ impl SurfaceArt {
             } else {
                 mover.lift
             };
+            // An aiming unit turns its body or turrets.
+            let mut aimed = None;
+            if !pose.wrecked
+                && let Some(aimer) = self.aimers.get(&pose.id.0)
+                && self.aims.tick.is_some()
+            {
+                let (shape, body) = self.aimed_shape(pose.id.0, aimer, seconds);
+                basis = yawed(basis, body);
+                aimed = shape;
+            }
             let stand = Stand {
                 scale: model.scale,
                 basis,
@@ -711,10 +998,26 @@ impl SurfaceArt {
             };
             // Each frame's batch is bounded by the moving buffer, not the
             // static budget.
-            let _ = emit(&model.shape, &stand, &self.layers, &mut out, usize::MAX);
+            let shape = aimed.as_ref().unwrap_or(&model.shape);
+            let _ = emit(shape, &stand, &self.layers, &mut out, usize::MAX);
             if !pose.wrecked {
                 self.sprites_of(pose.id.0, &stand, camera, eye, seconds, &mut out);
             }
+        }
+        // Standing units that aim, at their place with their aim.
+        for (id, aimer) in &self.aimers {
+            if aimer.routed || !standing(*id) || !self.aiming(*id) {
+                continue;
+            }
+            let (shape, body) = self.aimed_shape(*id, aimer, seconds);
+            let basis = yawed(aimer.stand.basis, body);
+            let stand = Stand {
+                scale: aimer.stand.scale,
+                basis,
+                origin: local(aimer.stand.origin),
+            };
+            let shape = shape.as_ref().unwrap_or(&aimer.intact);
+            let _ = emit(shape, &stand, &self.layers, &mut out, usize::MAX);
         }
         for sprite in &self.sprites {
             if self.movers.contains_key(&sprite.owner) || !standing(sprite.owner) {
@@ -999,6 +1302,90 @@ mod tests {
         assert_eq!(draw(vec![pose(5, true)])[0], [10., 50., 0.]);
         assert!(draw(vec![pose(6, true)]).is_empty());
         assert_eq!(draw(vec![pose(6, false)]).len(), 3);
+    }
+
+    /// docs/spec/surface-defenses.md, "Aiming": a land unit with no turret
+    /// turns as a whole toward what its weapon holds, leaving the static
+    /// batch for the frame's, and keeps its aim once nothing is held.
+    #[test]
+    fn an_aiming_unit_turns_its_body_and_is_drawn_every_frame() {
+        use tore_world::surface::aim::{Rule, Track, Weapon};
+        let mut art = SurfaceArt::default();
+        art.aimers.insert(
+            7,
+            Aimer {
+                stand: level([1000., 50., 2000.]),
+                bytes: Vec::new(),
+                intact: triangle(0.),
+                turrets: Vec::new(),
+                antennas: false,
+                rails: Vec::new(),
+                full: Vec::new(),
+                routed: false,
+            },
+        );
+        art.rules.insert(UnitId(7), Rule::Body { rate_deg_s: 90. });
+        let mut surface = Surface::default();
+        surface.arsenal.units.push(tore_world::surface::fire::Arms {
+            unit: UnitId(7),
+            position: [1000., 50., 2000.],
+            heading: 0.,
+            skill: 1,
+            side: tore_sim::combat::live::Side(2),
+            react: 0,
+            search_limit: None,
+            ship: false,
+            weapons: Vec::new(),
+            radar: None,
+            battery: None,
+            loads: Vec::new(),
+            npc: [0; 4],
+        });
+        let camera = Camera::new();
+        // A jet due east of it.
+        let picture = |tick: u64| crate::snapshot::RenderSnapshot {
+            tick,
+            targets: vec![crate::snapshot::AircraftPose {
+                id: 3,
+                position: [9000., 3000., 2000.],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let held = [Track {
+            unit: UnitId(7),
+            weapon: Weapon::Station(0),
+            target: 3,
+        }];
+        let frame = |art: &SurfaceArt, standing: bool| {
+            positions(&art.frame(&picture(0), &|_| standing, &camera, [1000., 0., 2000.], 0.))
+        };
+        // Before aiming begins, and at rest, it stays in the static batch.
+        assert_eq!(art.look(7, true, true, None), None);
+        art.step_aim(&picture(0), &surface, &[], None);
+        assert_eq!(art.look(7, true, true, None), None);
+        assert!(frame(&art, true).is_empty());
+        // Held: a quarter turn right at 90 degrees a second takes a second.
+        for tick in 1..=60 {
+            art.step_aim(&picture(tick), &surface, &held, None);
+        }
+        assert!((art.aim_of(7).unwrap().body.to_degrees() - 45.).abs() < 1e-6);
+        for tick in 61..=200 {
+            art.step_aim(&picture(tick), &surface, &held, None);
+        }
+        assert_eq!(art.look(7, true, true, None), Some(Look::Aimed));
+        assert_eq!(art.drawn(7, &Look::Aimed).map(|d| d.vertices.len()), None);
+        // Its nose (shape forward) now points east, its right side south.
+        let turned = frame(&art, true);
+        let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4);
+        assert!(close(turned[0], [0., 50., 0.]), "{turned:?}");
+        assert!(close(turned[1], [0., 50., -2.]), "{turned:?}");
+        assert!(close(turned[2], [2., 50., 0.]), "{turned:?}");
+        // Nothing held: it keeps that aim. Destroyed: it is not drawn.
+        art.step_aim(&picture(201), &surface, &[], None);
+        assert_eq!(art.look(7, true, true, None), Some(Look::Aimed));
+        assert!(frame(&art, false).is_empty());
+        assert_eq!(art.look(7, false, true, None), Some(Look::Hidden));
     }
 
     #[test]

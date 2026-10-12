@@ -270,6 +270,12 @@ impl Viewer {
         sim.emitters(queue, devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
         let rails = self.rails(tick);
+        self.scenery.surface.step_aim(
+            &picture,
+            &self.world.surface,
+            &self.tracks.aim_tracks(tick),
+            Some(&rails),
+        );
         sim.airports(
             device,
             queue,

@@ -9,12 +9,18 @@ use crate::{
 use tore_formats::surface_unit::class;
 use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, theater::CELL_FEET};
-use tore_sim::combat::live::{NO_SIDE, Side};
+use tore_sim::combat::live::{DEFAULT_OWNSHIP_SIDE, NO_SIDE, Side};
 use tore_sim::sensors::FEET_PER_NAUTICAL_MILE as NMI;
 use tore_world::readout::CockpitReadout;
 use tore_world::surface::{Unit, UnitId};
 
-const AREA: (i32, i32, i32, i32) = (12, 30, 476, 408);
+/// The plot: shared with the planning map (458 by 390, leaving room for the
+/// two scroll bars), so both maps scroll and zoom the same way.
+const AREA: (i32, i32, i32, i32) = plan_view::PLOT;
+/// Colour of the words beside a symbol pinned at the map edge.
+const OFF_MAP: [u8; 4] = [255, 170, 130, 255];
+/// Where the in-flight map's zoom rocker stands in its side rail.
+const FLIGHT_ROCKER: (i32, i32) = (582, 372);
 const INK: [u8; 4] = [232, 232, 218, 255];
 const UNKNOWN: [u8; 4] = [255, 223, 92, 255];
 
@@ -25,14 +31,18 @@ enum Category {
     Buildings,
     Surface,
     Emitters,
+    /// The mission's markup (CL-MAP): the starts, the approximate objective
+    /// area and the route.
+    Mission,
 }
 impl Category {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Aircraft,
         Self::Airfields,
         Self::Buildings,
         Self::Surface,
         Self::Emitters,
+        Self::Mission,
     ];
     fn label(self) -> &'static str {
         match self {
@@ -41,6 +51,7 @@ impl Category {
             Self::Buildings => "BUILDINGS",
             Self::Surface => "SURFACE",
             Self::Emitters => "EMITTERS",
+            Self::Mission => "MISSION",
         }
     }
     fn rect(self) -> (i32, i32, i32, i32) {
@@ -48,13 +59,13 @@ impl Category {
     }
 }
 struct Filters {
-    visible: [bool; 5],
+    visible: [bool; 6],
     pressed: Option<usize>,
 }
 impl Default for Filters {
     fn default() -> Self {
         Self {
-            visible: [true, true, false, true, true],
+            visible: [true, true, false, true, true, true],
             pressed: None,
         }
     }
@@ -234,54 +245,67 @@ fn unit_look(unit: &Unit, own: Side) -> (usize, Tile) {
     (symbol, tile)
 }
 
+/// The in-flight map. Its view is the planning map's ([`PlanView`]): the
+/// same zoom steps, scroll bars and rocker, and the same rule that no black
+/// ever shows, but it follows the player until the player scrolls away.
 #[derive(Default)]
 pub struct Map {
     pub open: bool,
     filters: Filters,
-    zoom: i32,
-    offset: [f64; 2],
-    anchor: Option<[f64; 2]>,
-    last_player: [f64; 2],
+    /// Made on the first draw, when the theater's size is known.
+    view: Option<PlanView>,
+    /// Keys pressed before the first draw (the previews), kept for it.
+    pending: Vec<String>,
 }
 impl Map {
+    /// A click of the left button at `point`: the scroll bars and the zoom
+    /// rocker take it first, then the layer buttons.
     pub fn pointer(&mut self, point: Option<(f64, f64)>, down: bool) {
+        if let Some(view) = &mut self.view {
+            view.pointer(point);
+            if (down && view.down()) || (!down && view.up()) {
+                return;
+            }
+        }
         self.filters.pointer(point, down);
+    }
+    /// The pointer moved: drags a held scroll thumb.
+    pub fn moved(&mut self, point: Option<(f64, f64)>) {
+        if let Some(view) = &mut self.view {
+            view.pointer(point);
+        }
     }
     pub fn cancel_press(&mut self) {
         self.filters.pressed = None;
+        if let Some(view) = &mut self.view {
+            view.up();
+        }
     }
 
-    fn width_nmi(&self) -> f64 {
-        100. * 2f64.powi(self.zoom)
-    }
     pub fn key(&mut self, key: &str) {
-        let step = self.width_nmi() * NMI * 0.25;
-        if key.starts_with("Arrow") && self.anchor.is_none() {
-            self.anchor = Some(self.last_player);
-        }
-        match key {
-            "+" | "=" => self.zoom = (self.zoom - 1).max(-2),
-            "-" | "_" => self.zoom = (self.zoom + 1).min(3),
-            "ArrowLeft" => self.offset[0] -= step,
-            "ArrowRight" => self.offset[0] += step,
-            "ArrowUp" => self.offset[1] += step,
-            "ArrowDown" => self.offset[1] -= step,
-            "Home" => {
-                self.offset = [0.; 2];
-                self.anchor = None;
-            }
-            _ => {}
+        match &mut self.view {
+            Some(view) => view.key(key),
+            None if self.pending.len() < 64 => self.pending.push(key.to_owned()),
+            None => {}
         }
     }
-    fn projection(&self, state: &flight::State) -> Projection {
-        let anchor = self
-            .anchor
-            .unwrap_or([state.position[0], state.position[2]]);
-        Projection {
-            center: [anchor[0] + self.offset[0], anchor[1] + self.offset[1]],
-            feet_per_pixel: self.width_nmi() * NMI / f64::from(AREA.2),
-            area: AREA,
-        }
+    /// The view, made for `world`'s theater the first time it is wanted.
+    fn view_for(&mut self, world: &Terrain) -> &mut PlanView {
+        let pending = &mut self.pending;
+        self.view.get_or_insert_with(|| {
+            let theater = &world.theater;
+            let mut view = PlanView::flight(
+                [
+                    theater.cols as f64 * f64::from(CELL_FEET),
+                    theater.rows as f64 * f64::from(CELL_FEET),
+                ],
+                FLIGHT_ROCKER,
+            );
+            for key in pending.drain(..) {
+                view.key(&key);
+            }
+            view
+        })
     }
     fn draw_filters(
         &self,
@@ -342,8 +366,12 @@ impl Map {
             clip: (500, 30, 128, 408),
             color: INK,
         }
-        .text(font, "CLICK TO TOGGLE", 504, 310);
+        .text(font, "CLICK TO TOGGLE", 504, 336);
     }
+    /// Draws the map. `markup` is the mission's own (CL-MAP): the starts, the
+    /// approximate objective area and the route, built from the mission data
+    /// as the creator's map is; `own` is the viewer's side, whose start the
+    /// route leaves.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
@@ -355,10 +383,14 @@ impl Map {
         own: Side,
         font: &Font,
         sprites: &std::collections::BTreeMap<String, Sprite>,
+        markup: Option<&Plan>,
     ) {
         Canvas(pixels).rect((0, 0, 640, 480), [72, 72, 72, 255]);
-        self.last_player = [state.position[0], state.position[2]];
-        let projection = self.projection(state);
+        let view = self.view_for(world);
+        view.follow([state.position[0], state.position[2]]);
+        view.advance(std::time::Instant::now());
+        let projection = view.projection();
+        let scale_nmi = view.scale_nmi();
         let icons = sprites.get("MCICONS.PIC");
         draw_ground(
             pixels,
@@ -369,7 +401,8 @@ impl Map {
         );
         let mut labels = Vec::new();
         let mut markers = Vec::new();
-        if let Some((x, y)) = projection.point(state.position) {
+        let player = projection.locate(state.position);
+        if let Some(((x, y), _)) = player {
             markers.push((x, y));
             let w = "PLAYER"
                 .glyph_codes()
@@ -382,14 +415,40 @@ impl Map {
                 y + 13 + font.height as i32,
             ));
         }
+        // The mission's markup: the objective area and the route under
+        // everything, then the starts.
+        let mut start_fields: &[u32] = &[];
+        if self.filters.shows(Category::Mission)
+            && let Some(plan) = markup
+        {
+            let route = if own == DEFAULT_OWNSHIP_SIDE {
+                PlanSide::Blue
+            } else {
+                PlanSide::Red
+            };
+            draw_objective(
+                pixels,
+                font,
+                &projection,
+                plan,
+                Some(route),
+                &mut markers,
+                &mut labels,
+            );
+            let placed = place_starts(pixels, &projection, plan, &mut markers, &mut labels);
+            draw_placed(pixels, icons, font, &placed, &mut labels);
+            start_fields = &plan.start_fields;
+        }
         // Navigation landmarks are known independently of aircraft sensors.
         for runway in world
             .airport_scene
             .runways
             .iter()
             .filter(|_| self.filters.shows(Category::Airfields))
+            // A start that names its airfield stands for it.
+            .filter(|runway| !start_fields.contains(&runway.object))
         {
-            if let Some(point) = projection.point(runway.surface.center) {
+            if let Some((point, _)) = projection.locate(runway.surface.center) {
                 let (x, y) = place_marker(pixels, point, &mut markers, &mut labels);
                 symbol(pixels, icons, x, y, Some(15), Tile::Neutral);
                 let name = world
@@ -433,7 +492,7 @@ impl Map {
             if !self.filters.shows(category) {
                 continue;
             }
-            let Some(point) = projection.point(contact.position) else {
+            let Some((point, off_map)) = projection.locate(contact.position) else {
                 continue;
             };
             let (x, y) = place_marker(pixels, point, &mut markers, &mut labels);
@@ -484,9 +543,12 @@ impl Map {
                 if identified { INK } else { UNKNOWN },
                 &mut labels,
             );
+            if off_map {
+                off_map_label(pixels, font, (x, y), &mut labels);
+            }
         }
         // Passive noise has no measured location. Show its direction at ownship.
-        if let Some((x, y)) = projection.point(state.position) {
+        if let Some(((x, y), off_map)) = player {
             for emitter in readout
                 .rwr
                 .emitters
@@ -529,8 +591,15 @@ impl Map {
                 UNKNOWN,
                 &mut Vec::new(),
             );
+            if off_map {
+                off_map_label(pixels, font, (x, y), &mut labels);
+            }
         }
         self.draw_filters(pixels, font, sprites);
+        if let Some(view) = &self.view {
+            view.draw_bars(pixels);
+            view.draw_rocker(pixels, font, sprites, (500, 30, 128, 408));
+        }
         // Redraw the frame so text and ray endpoints never escape the plot.
         let mut c = Canvas(pixels);
         c.rect((0, 0, 640, 30), [72, 72, 72, 255]);
@@ -545,12 +614,7 @@ impl Map {
             let x = 12. + i as f64 * AREA.2 as f64 / 16.;
             p.line((x, 12.), (x, 18.));
         }
-        p.text(
-            font,
-            &format!("{} NAUTICAL MILES", self.width_nmi() / 4.),
-            174,
-            9,
-        );
+        p.text(font, &format!("{scale_nmi} NAUTICAL MILES"), 174, 9);
         p.text(
             font,
             &format!(
@@ -733,26 +797,51 @@ fn advance(font: &Font, text: &str) -> i32 {
 struct Projection {
     center: [f64; 2],
     feet_per_pixel: f64,
-    /// The plot the projection draws into (the in-game map's, or the
-    /// planning map's smaller one).
+    /// The plot the projection draws into.
     area: (i32, i32, i32, i32),
+    /// The theater's size, east and north feet: beyond it is off the map.
+    bounds: [f64; 2],
 }
 impl Projection {
+    /// True for a position outside the theater's map area.
+    fn off_map(&self, position: [f64; 3]) -> bool {
+        position[0] < 0.
+            || position[2] < 0.
+            || position[0] > self.bounds[0]
+            || position[2] > self.bounds[1]
+    }
+    /// The position itself, or for one off the map the nearest point on the
+    /// map's edge: the direction it lies in.
+    fn pinned(&self, position: [f64; 3]) -> [f64; 3] {
+        [
+            position[0].clamp(0., self.bounds[0]),
+            position[1],
+            position[2].clamp(0., self.bounds[1]),
+        ]
+    }
+    /// Where a position is drawn, and whether it is off the map. A position
+    /// off the map is pinned at the map's edge, which shows only while that
+    /// edge is in view; a symbol that would spill over the frame is held just
+    /// inside it.
+    fn locate(&self, position: [f64; 3]) -> Option<((i32, i32), bool)> {
+        let off = self.off_map(position);
+        let (x, y) = self.unclipped(self.pinned(position))?;
+        let area = self.area;
+        let (left, top) = (f64::from(area.0), f64::from(area.1));
+        if x < left || y < top || x > left + f64::from(area.2) || y > top + f64::from(area.3) {
+            return None;
+        }
+        // Held inside the margin the symbols and labels need.
+        let (x, y) = (
+            (x as i32).clamp(area.0 + 12, area.0 + area.2 - 13),
+            (y as i32).clamp(area.1 + 12, area.1 + area.3 - 25),
+        );
+        Some(((x, y), off))
+    }
     fn inside(&self, x: i32, y: i32) -> bool {
         let area = self.area;
         (area.0 + 12..area.0 + area.2 - 12).contains(&x)
             && (area.1 + 12..area.1 + area.3 - 12).contains(&y)
-    }
-    fn point(&self, position: [f64; 3]) -> Option<(i32, i32)> {
-        if !position.iter().all(|p| p.is_finite()) {
-            return None;
-        }
-        let x = f64::from(self.area.0 + self.area.2 / 2)
-            + (position[0] - self.center[0]) / self.feet_per_pixel;
-        let y = f64::from(self.area.1 + self.area.3 / 2)
-            - (position[2] - self.center[1]) / self.feet_per_pixel;
-        self.inside(x as i32, y as i32)
-            .then_some((x as i32, y as i32))
     }
     /// Where a position falls on the screen, inside the plot or not.
     fn unclipped(&self, position: [f64; 3]) -> Option<(f64, f64)> {
@@ -941,6 +1030,232 @@ fn label_in(
     .text(font, &text, x, y);
 }
 
+/// "OFF MAP" beside a symbol pinned at the map's edge: the thing it stands
+/// for lies beyond the theater, in the direction the symbol sits.
+fn off_map_label(
+    pixels: &mut [u8],
+    font: &Font,
+    (x, y): (i32, i32),
+    labels: &mut Vec<(i32, i32, i32, i32)>,
+) {
+    label_in(
+        AREA,
+        pixels,
+        font,
+        "OFF MAP",
+        (x, y - 11 - font.height as i32),
+        OFF_MAP,
+        labels,
+    );
+}
+
+/// The part of the segment `a` to `b` inside `area`, if any.
+fn clip_segment(
+    area: (i32, i32, i32, i32),
+    a: (f64, f64),
+    b: (f64, f64),
+) -> Option<((f64, f64), (f64, f64))> {
+    let (left, top) = (f64::from(area.0), f64::from(area.1));
+    let (right, bottom) = (left + f64::from(area.2), top + f64::from(area.3));
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let (mut t0, mut t1) = (0_f64, 1_f64);
+    for (p, q) in [
+        (-dx, a.0 - left),
+        (dx, right - a.0),
+        (-dy, a.1 - top),
+        (dy, bottom - a.1),
+    ] {
+        if p == 0. {
+            if q < 0. {
+                return None;
+            }
+        } else {
+            let t = q / p;
+            if p < 0. {
+                t0 = t0.max(t);
+            } else {
+                t1 = t1.min(t);
+            }
+        }
+    }
+    (t0 < t1).then_some((
+        (a.0 + dx * t0, a.1 + dy * t0),
+        (a.0 + dx * t1, a.1 + dy * t1),
+    ))
+}
+
+/// The route: a thin line from `side`'s start to the objective area's edge,
+/// in the map's line style (one pixel, the map's ink over a dark edge so it
+/// shows on any ground). The creator's mission map drew no lines before, so
+/// this is the one line both maps draw. A route off the map runs to the edge
+/// the start or the area is pinned at.
+fn draw_route(pixels: &mut [u8], projection: &Projection, plan: &Plan, side: PlanSide) {
+    let (Some((center, radius)), Some(start)) = (
+        plan.objective,
+        plan.markers.iter().find(|marker| marker.side == side),
+    ) else {
+        return;
+    };
+    let (Some(from), Some(to)) = (
+        projection.unclipped(projection.pinned(start.position)),
+        projection.unclipped(projection.pinned([center[0], 0., center[1]])),
+    ) else {
+        return;
+    };
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let distance = dx.hypot(dy);
+    let r = (radius / projection.feet_per_pixel).max(7.);
+    // Clear of the start's symbol at one end and the area's ring at the other.
+    if distance <= r + 14. {
+        return;
+    }
+    let begin = (from.0 + dx / distance * 12., from.1 + dy / distance * 12.);
+    let end = (
+        to.0 - dx / distance * (r + 2.),
+        to.1 - dy / distance * (r + 2.),
+    );
+    for (color, shift) in [(OBJECTIVE_EDGE, 1.), (INK, 0.)] {
+        if let Some((a, b)) = clip_segment(AREA, (begin.0, begin.1 + shift), (end.0, end.1 + shift))
+        {
+            Paint {
+                pixels: &mut *pixels,
+                clip: AREA,
+                color,
+            }
+            .line(a, b);
+        }
+    }
+}
+
+/// The objective area, with its words, and `route` from that side's start:
+/// the mission's markup that goes under every symbol. Shared by the creator's
+/// map and the in-flight map, so the two draw the same circle the same way.
+/// The area is an approximation of where the targets are, never the targets.
+fn draw_objective(
+    pixels: &mut [u8],
+    font: &Font,
+    projection: &Projection,
+    plan: &Plan,
+    route: Option<PlanSide>,
+    markers: &mut Vec<(i32, i32)>,
+    labels: &mut Vec<(i32, i32, i32, i32)>,
+) {
+    // The yellow hatching edged in dark and a yellow ring between two dark
+    // ones show on sea, forest and desert alike, and never less than 7 pixels
+    // in radius so the area shows at the widest zoom.
+    let mut words = None;
+    if let Some((center, radius)) = plan.objective {
+        let at_world = [center[0], 0., center[1]];
+        let off_map = projection.off_map(at_world);
+        let at = if off_map {
+            projection
+                .locate(at_world)
+                .map(|((x, y), _)| (f64::from(x), f64::from(y)))
+        } else {
+            projection.unclipped(at_world)
+        };
+        if let Some(at) = at {
+            let r = (radius / projection.feet_per_pixel).max(7.);
+            objective_mark(pixels, at, r, AREA);
+            let point = (at.0 as i32, at.1 as i32);
+            if projection.inside(point.0, point.1) {
+                // Nothing is placed on top of a small area.
+                if r < 20. {
+                    markers.push(point);
+                    labels.push((point.0 - 12, point.1 - 10, point.0 + 12, point.1 + 10));
+                }
+                words = Some((point.0, point.1 + r.min(20.) as i32 + 3, off_map, point));
+            }
+        }
+    }
+    if let Some(side) = route {
+        draw_route(pixels, projection, plan, side);
+    }
+    if let Some((x, y, off_map, point)) = words {
+        label_in(
+            AREA,
+            pixels,
+            font,
+            "OBJECTIVE AREA",
+            (x, y),
+            OBJECTIVE,
+            labels,
+        );
+        if off_map {
+            off_map_label(pixels, font, point, labels);
+        }
+    }
+}
+
+/// A symbol and its words, placed and waiting to be drawn.
+struct Placed<'a> {
+    at: (i32, i32),
+    icon: usize,
+    tile: Tile,
+    words: &'a str,
+    off_map: bool,
+}
+
+/// Places the plan's starts in the order listed, moving a crowded one aside
+/// with a leader as the in-game map does.
+fn place_starts<'a>(
+    pixels: &mut [u8],
+    projection: &Projection,
+    plan: &'a Plan,
+    markers: &mut Vec<(i32, i32)>,
+    labels: &mut Vec<(i32, i32, i32, i32)>,
+) -> Vec<Placed<'a>> {
+    let mut placed = Vec::new();
+    for marker in &plan.markers {
+        let Some((point, off_map)) = projection.locate(marker.position) else {
+            continue;
+        };
+        let at = place_marker_in(AREA, pixels, point, markers, labels);
+        let icon = (marker.heading.rem_euclid(std::f64::consts::TAU) / std::f64::consts::FRAC_PI_4)
+            .round() as usize
+            % 8;
+        let tile = match marker.side {
+            PlanSide::Blue => Tile::Friendly,
+            PlanSide::Red => Tile::Hostile,
+        };
+        placed.push(Placed {
+            at,
+            icon,
+            tile,
+            words: &marker.label,
+            off_map,
+        });
+    }
+    placed
+}
+
+/// Draws placed symbols, then their words, so no word is covered.
+fn draw_placed(
+    pixels: &mut [u8],
+    icons: Option<&Sprite>,
+    font: &Font,
+    placed: &[Placed],
+    labels: &mut Vec<(i32, i32, i32, i32)>,
+) {
+    for item in placed {
+        symbol(
+            pixels,
+            icons,
+            item.at.0,
+            item.at.1,
+            Some(item.icon),
+            item.tile,
+        );
+    }
+    for item in placed {
+        let (x, y) = item.at;
+        label_in(AREA, pixels, font, item.words, (x, y + 12), INK, labels);
+        if item.off_map {
+            off_map_label(pixels, font, item.at, labels);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1102,34 +1417,177 @@ mod tests {
         map.pointer(buildings, false);
         assert!(!map.filters.shows(Category::Buildings));
     }
-    #[test]
-    fn north_up_projection_scale_and_edges() {
-        let p = Projection {
-            center: [1000., 2000.],
-            feet_per_pixel: 100. * NMI / 476.,
+    fn projection(center: [f64; 2], width_nmi: f64) -> Projection {
+        Projection {
+            center,
+            feet_per_pixel: width_nmi * NMI / f64::from(AREA.2),
             area: AREA,
-        };
-        assert_eq!(p.point([1000., 0., 2000.]), Some((250, 234)));
-        assert_eq!(p.point([1000. + 25. * NMI, 0., 2000.]), Some((369, 234)));
-        assert_eq!(p.point([1000., 0., 2000. + 25. * NMI]), Some((250, 115)));
-        assert_eq!(p.point([1000. + 100. * NMI, 0., 2000.]), None);
-        assert_eq!(p.point([f64::NAN, 0., 0.]), None);
-        assert_eq!(p.world(250, 234), p.center);
+            bounds: [300. * NMI, 300. * NMI],
+        }
     }
     #[test]
-    fn zoom_is_bounded_and_home_resets_pan() {
-        let mut m = Map::default();
+    fn north_up_projection_scale_and_edges() {
+        let p = projection([1000., 2000.], 100.);
+        let at = |position| p.locate(position).map(|(point, _)| point);
+        // The plot's centre is (241, 225): 12 + 458 / 2 and 30 + 390 / 2.
+        assert_eq!(at([1000., 0., 2000.]), Some((241, 225)));
+        let quarter = (25. * NMI / p.feet_per_pixel) as i32;
+        assert_eq!(
+            at([1000. + 25. * NMI, 0., 2000.]),
+            Some((241 + quarter, 225))
+        );
+        // North is up, and a pixel row is truncated, not rounded.
+        let north = (225. - 25. * NMI / p.feet_per_pixel) as i32;
+        assert_eq!(at([1000., 0., 2000. + 25. * NMI]), Some((241, north)));
+        assert_eq!(at([1000. + 100. * NMI, 0., 2000.]), None);
+        assert_eq!(at([f64::NAN, 0., 0.]), None);
+        assert_eq!(p.world(241, 225), p.center);
+    }
+    #[test]
+    fn a_position_beyond_the_theater_is_pinned_at_the_edge_it_lies_past() {
+        // A view held against the theater's east edge: the plot's right side
+        // is the edge itself.
+        let p = projection([300. * NMI - 50. * NMI, 150. * NMI], 100.);
+        let east = [325. * NMI, 0., 150. * NMI];
+        assert!(p.off_map(east));
+        assert!(!p.off_map([299. * NMI, 0., 150. * NMI]));
+        let ((x, y), off) = p.locate(east).expect("the edge is in view");
+        assert!(off);
+        // Held just inside the plot's right margin, level with where it lies.
+        assert_eq!(x, AREA.0 + AREA.2 - 13);
+        assert_eq!(y, 225);
+        // North-east of the theater's corner: pinned to the corner.
+        let corner = [320. * NMI, 0., 340. * NMI];
+        let p = projection([280. * NMI, 280. * NMI], 100.);
+        let (point, off) = p.locate(corner).expect("the corner is in view");
+        assert!(off);
+        let step = (20. * NMI / p.feet_per_pixel) as i32;
+        assert_eq!(point.0, 241 + step);
+        assert_eq!(point.1, (225. - 20. * NMI / p.feet_per_pixel) as i32);
+        // Out of sight while the edge is not in view.
+        let far = projection([100. * NMI, 150. * NMI], 100.);
+        assert_eq!(far.locate(east), None);
+        // A position in the theater is not off the map.
+        assert_eq!(
+            far.locate([100. * NMI, 0., 150. * NMI]).map(|l| l.1),
+            Some(false)
+        );
+    }
+    #[test]
+    fn the_map_keys_zoom_and_scroll_but_home_goes_back_to_following() {
+        let mut view = PlanView::flight([300. * NMI, 300. * NMI], FLIGHT_ROCKER);
+        // It opens 100 nm across and follows the player.
+        assert_eq!(view.scale_nmi(), 25.);
+        view.follow([150. * NMI, 150. * NMI]);
+        assert_eq!(view.projection().center, [150. * NMI, 150. * NMI]);
+        // The pilot scrolls: it stays where it is while the player moves on.
+        view.key("ArrowUp");
+        let held = view.projection().center;
+        view.follow([200. * NMI, 200. * NMI]);
+        assert_eq!(view.projection().center, held);
+        view.key("Home");
+        view.follow([200. * NMI, 200. * NMI]);
+        assert_eq!(view.projection().center, [200. * NMI, 200. * NMI]);
+        // Zoom keeps following and stops at the whole theater and at 25 nm.
         for _ in 0..20 {
-            m.key("+");
+            view.key("-");
         }
-        assert_eq!(m.width_nmi(), 25.);
-        m.key("ArrowUp");
-        assert_eq!(m.offset, [0., 6.25 * NMI]);
-        m.key("Home");
-        assert_eq!(m.offset, [0.; 2]);
+        assert_eq!(
+            view.projection().feet_per_pixel * f64::from(AREA.2) / NMI,
+            300.
+        );
         for _ in 0..20 {
-            m.key("-");
+            view.key("+");
         }
-        assert_eq!(m.width_nmi(), 800.);
+        assert_eq!(view.scale_nmi(), 6.);
+    }
+    #[test]
+    fn a_segment_is_clipped_to_the_plot() {
+        let inside = clip_segment(AREA, (100., 100.), (200., 150.));
+        assert_eq!(inside, Some(((100., 100.), (200., 150.))));
+        // Wholly outside: nothing.
+        assert_eq!(clip_segment(AREA, (-50., -50.), (-10., 20.)), None);
+        // Crossing the right edge: cut at it.
+        let (a, b) = clip_segment(AREA, (400., 100.), (700., 100.)).unwrap();
+        assert_eq!((a, b), ((400., 100.), (f64::from(AREA.0 + AREA.2), 100.)));
+    }
+    fn plan(start: [f64; 3], area: [f64; 2]) -> Plan {
+        Plan {
+            markers: vec![PlanMarker {
+                position: start,
+                heading: 0.,
+                side: PlanSide::Blue,
+                label: "BLUE START".into(),
+            }],
+            objective: Some((area, 5. * NMI)),
+            ..Plan::default()
+        }
+    }
+    fn inked(pixels: &[u8]) -> usize {
+        pixels
+            .chunks_exact(4)
+            .filter(|p| p[..3] == INK[..3])
+            .count()
+    }
+    #[test]
+    fn the_route_runs_from_the_start_to_the_area_and_not_when_the_start_is_inside_it() {
+        let p = projection([150. * NMI, 150. * NMI], 100.);
+        let draw = |plan: &Plan, side| {
+            let mut pixels = vec![0_u8; 640 * 480 * 4];
+            draw_route(&mut pixels, &p, plan, side);
+            pixels
+        };
+        let far = plan([120. * NMI, 0., 140. * NMI], [160. * NMI, 155. * NMI]);
+        assert!(inked(&draw(&far, PlanSide::Blue)) > 100);
+        // The viewer's own side's start: Red has none in this plan.
+        assert_eq!(inked(&draw(&far, PlanSide::Red)), 0);
+        // A start within the area: no line.
+        let inside = plan([150. * NMI, 0., 150. * NMI], [152. * NMI, 151. * NMI]);
+        assert_eq!(inked(&draw(&inside, PlanSide::Blue)), 0);
+        // No area, no route.
+        let mut none = far.clone();
+        none.objective = None;
+        assert_eq!(inked(&draw(&none, PlanSide::Blue)), 0);
+    }
+    #[test]
+    fn an_area_beyond_the_theater_is_pinned_and_says_so() {
+        // The area's centre is 20 nm east of the edge; the view is held
+        // against that edge.
+        let p = projection([250. * NMI, 150. * NMI], 100.);
+        let (plan, mut markers, mut labels) = (
+            plan([200. * NMI, 0., 150. * NMI], [320. * NMI, 150. * NMI]),
+            Vec::<(i32, i32)>::new(),
+            Vec::<(i32, i32, i32, i32)>::new(),
+        );
+        assert!(p.off_map([320. * NMI, 0., 150. * NMI]));
+        let mut pixels = vec![0_u8; 640 * 480 * 4];
+        let font = Font {
+            height: 8,
+            glyphs: (0..256)
+                .map(|_| tore_formats::font::Glyph {
+                    advance: 6,
+                    pixels: vec![],
+                })
+                .collect(),
+        };
+        draw_objective(
+            &mut pixels,
+            &font,
+            &p,
+            &plan,
+            None,
+            &mut markers,
+            &mut labels,
+        );
+        // Drawn at the plot's right margin (the nearest edge point), with its
+        // words and the off-map words (two labels).
+        assert_eq!(labels.len(), 2);
+        let at = |x: i32, y: i32| pixels[(y as usize * 640 + x as usize) * 4..][..3].to_vec();
+        assert!(
+            (AREA.0 + AREA.2 - 30..AREA.0 + AREA.2)
+                .flat_map(|x| (200..250).map(move |y| (x, y)))
+                .any(|(x, y)| at(x, y) == OBJECTIVE[..3]),
+            "the area is drawn at the right edge"
+        );
     }
 }

@@ -3050,6 +3050,12 @@ impl Viewer {
         renderer.emitters(devices, &glows, &guns);
         let destroyed = self.tracks.destroyed(tick);
         let rails = self.rails(tick);
+        self.scenery.surface.step_aim(
+            &picture,
+            &self.world.surface,
+            &self.tracks.aim_tracks(tick),
+            Some(&rails),
+        );
         renderer.airports(self.scenery.static_geometry_replay(&destroyed, &rails));
         // Routed units on the move, the men, deck crew and parked aircraft
         // pieces.

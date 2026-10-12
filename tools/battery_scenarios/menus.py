@@ -468,6 +468,19 @@ def scenarios() -> list[Scenario]:
                 check=map_plot_filled(),
             )
         )
+    # The in-flight map's mission markup (slice CL-MAP): windowless and no GPU.
+    out.append(
+        Scenario(
+            name="menus-flight-map-preview",
+            lane="menus",
+            args=["--flight-map-preview", "{work}", "--no-audio"],
+            timeout=300,
+            expect=[r"BLUE START at \d+, \d+ nm", r"RED START at \d+, \d+ nm", r"objective Some\(",
+                    *[rf"Flight map preview: \S+/{name}\.png \(void pixels \d+\)"
+                      for name in ("follow", "wide", "objective", "close", "scrolled", "red", "layer-off", "off-map")]],
+            outputs=["follow.png", "wide.png", "objective.png", "off-map.png"],
+        )
+    )
     out.append(
         Scenario(
             name="menus-snap-quick-unknown-state-refused",

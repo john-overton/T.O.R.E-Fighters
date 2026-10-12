@@ -10,8 +10,13 @@
 //!   it can see it over the terrain. One `surface-battle: survey` line per
 //!   build (with the nearest opposing pair out of reach), then a `pair` line
 //!   per pair.
+//! - `--surface-battle --front-survey [THEATER ...] [--seeds N]` builds each
+//!   offered ground target at heavy defenses with every seed from 1 to N
+//!   (2 by default) the way a Quick Mission does, with its front line, and
+//!   prints the front's units and the pairs in reach per build, then
+//!   `front-survey done`.
 //! - `--surface-battle THEATER [STEM] [--surface-seed N] [--defenses AAA SAM]
-//!   [--seconds S] [--blue ORDINAL,...] [--twice]` runs that mission's
+//!   [--seconds S] [--blue ORDINAL,...] [--no-front] [--twice]` runs that mission's
 //!   whole tick for S seconds
 //!   (300 by default) with the player parked at a friendly field (a ground
 //!   start: no unit shoots at an aircraft on the ground), and prints what
@@ -25,7 +30,10 @@
 //!   is the test mission: it hands the named template objects (by their
 //!   ordinal in the template) to Blue before the first tick, so a Blue
 //!   column stands among Red armour; retail never puts opposing units in
-//!   reach of each other in a Quick Mission (see the survey).
+//!   reach of each other in a Quick Mission (see the survey). A mission with
+//!   a ground target carries its front line, as in the game, unless
+//!   `--no-front` leaves it out (the survey always does: it measures
+//!   retail's layout).
 //!
 //! Like `--surface-dump` it adds the ground target templates and unit types
 //! the import does not keep yet from the retail media, at runtime.
@@ -38,11 +46,12 @@ use tore_world::{
     mission::{Defense, MissionSpec, Start},
     seats::{SeatId, SeatInput},
     surface::{
-        Surface, UnitId,
+        IdRange, Surface, UnitId,
         fire::{self, Trace},
+        layout::Variation,
         movement,
     },
-    world::{Seating, TickOutput, World},
+    world::{Hooks, Seating, TickOutput, World},
 };
 
 const SEAT: SeatId = SeatId(0);
@@ -56,6 +65,8 @@ struct Options {
     survey: bool,
     seeds: Option<u32>,
     blue: Vec<u32>,
+    no_front: bool,
+    front_survey: bool,
 }
 
 pub fn run() -> AppResult<()> {
@@ -69,6 +80,8 @@ pub fn run() -> AppResult<()> {
         survey: false,
         seeds: None,
         blue: Vec::new(),
+        no_front: false,
+        front_survey: false,
     };
     let level = |text: String| -> AppResult<Defense> {
         let n: usize = text.parse()?;
@@ -96,6 +109,8 @@ pub fn run() -> AppResult<()> {
                 }
             }
             "--survey" => o.survey = true,
+            "--no-front" => o.no_front = true,
+            "--front-survey" => o.front_survey = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             _ => o.positional.push(arg.clone()),
         }
@@ -105,6 +120,9 @@ pub fn run() -> AppResult<()> {
     println!("surface-battle: {added} resources added from the retail media");
     if o.survey {
         return survey(&resources, &o);
+    }
+    if o.front_survey {
+        return front_survey(&resources, &o);
     }
     let (theater, stem) = match o.positional.as_slice() {
         [theater] => (theater.clone(), None),
@@ -159,21 +177,34 @@ fn build(
     stem: Option<&str>,
     o: &Options,
 ) -> AppResult<(World, bool)> {
-    match World::new(
-        &spec(theater, stem, o, true),
-        resources,
-        Seating::SinglePlayer,
-    ) {
+    match world_of(&spec(theater, stem, o, true), resources, !o.no_front) {
         Ok(world) => Ok((world, true)),
         Err(_) => Ok((
-            World::new(
-                &spec(theater, stem, o, false),
-                resources,
-                Seating::SinglePlayer,
-            )?,
+            world_of(&spec(theater, stem, o, false), resources, !o.no_front)?,
             false,
         )),
     }
+}
+
+/// The world of `spec`, with or without the Quick Mission front line.
+fn world_of(
+    spec: &MissionSpec,
+    resources: &BTreeMap<String, Vec<u8>>,
+    front: bool,
+) -> tore_world::WorldResult<World> {
+    Ok(World::build(
+        spec,
+        resources,
+        Seating::SinglePlayer,
+        &mut Hooks {
+            ground_variation: Some(Variation {
+                front,
+                ..Variation::ON
+            }),
+            ..Hooks::default()
+        },
+    )?
+    .world)
 }
 
 fn side(side: tore_sim::combat::live::Side) -> &'static str {
@@ -229,11 +260,7 @@ fn survey(resources: &BTreeMap<String, Vec<u8>>, o: &Options) -> AppResult<()> {
                     .map(|stem| Some(*stem)),
             );
             for stem in stems {
-                let world = match World::new(
-                    &spec(theater, stem, o, false),
-                    resources,
-                    Seating::SinglePlayer,
-                ) {
+                let world = match world_of(&spec(theater, stem, o, false), resources, false) {
                     Ok(world) => world,
                     Err(error) => {
                         println!(
@@ -293,6 +320,96 @@ fn survey(resources: &BTreeMap<String, Vec<u8>>, o: &Options) -> AppResult<()> {
     Ok(())
 }
 
+/// `--front-survey`: see the module comment.
+fn front_survey(resources: &BTreeMap<String, Vec<u8>>, o: &Options) -> AppResult<()> {
+    let (mut builds, mut with_front, mut without) = (0usize, 0usize, 0usize);
+    let (mut nearest_seen, mut farthest_pair) = (f64::INFINITY, 0f64);
+    for seed in 1..=o.seeds.unwrap_or(2) {
+        let o = &Options {
+            positional: o.positional.clone(),
+            seed,
+            blue: Vec::new(),
+            seeds: None,
+            ..*o
+        };
+        for (index, theater) in tables::THEATERS.iter().enumerate() {
+            if !o.positional.is_empty()
+                && !o.positional.iter().any(|w| w.eq_ignore_ascii_case(theater))
+            {
+                continue;
+            }
+            for stem in tables::TEMPLATES[index]
+                .iter()
+                .filter(|stem| !stem.ends_with("NOTH"))
+            {
+                let world = match world_of(&spec(theater, Some(stem), o, false), resources, true) {
+                    Ok(world) => world,
+                    Err(error) => {
+                        println!("surface-battle: front-survey {theater} {stem} error {error}");
+                        continue;
+                    }
+                };
+                builds += 1;
+                let surface = &world.terrain.surface;
+                let front: Vec<_> = surface
+                    .units
+                    .iter()
+                    .filter(|u| u.id.range() == IdRange::FrontLine)
+                    .collect();
+                if front.is_empty() {
+                    without += 1;
+                    println!(
+                        "surface-battle: front-survey {theater} {stem} seed {seed} none {}",
+                        surface.layout_notes.join("; ")
+                    );
+                    continue;
+                }
+                with_front += 1;
+                NEAREST.set(f64::INFINITY);
+                let pairs: Vec<Pair> = pairs(&world).into_iter().filter(|p| p.seen).collect();
+                let reach = pairs.iter().map(|p| p.range).fold(f64::INFINITY, f64::min);
+                nearest_seen = nearest_seen.min(reach);
+                farthest_pair = farthest_pair.max(pairs.iter().map(|p| p.range).fold(0., f64::max));
+                let count = |s| front.iter().filter(|u| u.side == s).count();
+                let target = surface.starts.as_ref().map(|s| s.target);
+                let from_target = target
+                    .map(|t| {
+                        front
+                            .iter()
+                            .map(|u| {
+                                let dx = f64::from(u.position[0] - t[0]);
+                                let dz = f64::from(u.position[2] - t[1]);
+                                dx.hypot(dz) / 6076.
+                            })
+                            .fold(f64::INFINITY, f64::min)
+                    })
+                    .unwrap_or(f64::NAN);
+                println!(
+                    "surface-battle: front-survey {theater} {stem} seed {seed} units {} red {} blue {} seen-pairs {} nearest-pair {} from-target-nm {from_target:.1}",
+                    front.len(),
+                    count(ENEMY_SIDE),
+                    count(FRIENDLY_SIDE),
+                    pairs.len(),
+                    if reach.is_finite() {
+                        format!("{reach:.0}")
+                    } else {
+                        "none".into()
+                    },
+                );
+            }
+        }
+    }
+    println!(
+        "surface-battle: front-survey done builds {builds} with-front {with_front} without {without} nearest-seen {} farthest-seen {farthest_pair:.0}",
+        if nearest_seen.is_finite() {
+            format!("{nearest_seen:.0}")
+        } else {
+            "none".into()
+        }
+    );
+    Ok(())
+}
+
 thread_local! {
     /// The nearest opposing pair out of reach the last [`pairs`] call met,
     /// feet: the survey's measure of how far apart the sides stand.
@@ -346,7 +463,7 @@ fn pairs(world: &World) -> Vec<Pair> {
 /// the resolved unit, the scene's side table, its arms and its combat row.
 /// A test aid (the surface digest no longer matches the mission text, which
 /// only a networked game checks).
-fn hand_to_blue(world: &mut World, id: UnitId) -> AppResult<()> {
+pub(crate) fn hand_to_blue(world: &mut World, id: UnitId) -> AppResult<()> {
     let surface = &mut world.terrain.surface;
     let unit = surface
         .units
@@ -454,6 +571,21 @@ fn battle(
         pairs.len(),
         pairs.iter().filter(|p| p.seen).count()
     ));
+    for unit in world
+        .terrain
+        .surface
+        .units
+        .iter()
+        .filter(|u| u.id.range() == IdRange::FrontLine)
+    {
+        say(format!(
+            "front {} at {} {} heading {}",
+            name(&world.terrain.surface, unit.id.0),
+            unit.position[0],
+            unit.position[2],
+            unit.angles[0]
+        ));
+    }
     let surface_ids: BTreeSet<u32> = world.terrain.surface.units.iter().map(|u| u.id.0).collect();
     let hp = |world: &World| -> BTreeMap<u32, i32> {
         world

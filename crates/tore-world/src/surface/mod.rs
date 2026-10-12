@@ -16,6 +16,7 @@
 //!
 //! This module resolves and identifies; [`movement`] moves the units that
 //! follow a route. Nothing here fires.
+pub mod aim;
 pub mod catalog;
 mod checkpoint;
 pub mod emitters;
@@ -51,6 +52,9 @@ pub const SUPPLY_TRUCK_BASE: u32 = 0x5800_0000;
 /// First id of the battery radar elements a later slice adds
 /// (`0x5C00_0000 + n`, `n` in battery order, ascending lowest launcher id).
 pub const BATTERY_RADAR_BASE: u32 = 0x5C00_0000;
+/// First id of the front line's units (`0x5E00_0000 + n`, `n` in the order
+/// the layout adds them: Blue's, then Red's).
+pub const FRONT_LINE_BASE: u32 = 0x5E00_0000;
 /// One past the last surface unit id.
 pub const SURFACE_UNIT_END: u32 = 0x6000_0000;
 /// First id of the shots surface units fire (SAMs and shells), a counter of
@@ -77,6 +81,9 @@ pub enum IdRange {
     SupplyTruck,
     /// A battery radar element added to a SAM battery.
     BatteryRadar,
+    /// A unit of the Quick Mission front line, where Blue and Red ground
+    /// forces stand in contact.
+    FrontLine,
     /// Not a surface id.
     Other,
 }
@@ -96,7 +103,11 @@ impl UnitId {
     }
     /// The id of the `n`th added battery radar.
     pub fn battery_radar(n: u32) -> Option<Self> {
-        Self::within(BATTERY_RADAR_BASE, SURFACE_UNIT_END, n)
+        Self::within(BATTERY_RADAR_BASE, FRONT_LINE_BASE, n)
+    }
+    /// The id of the `n`th front line unit.
+    pub fn front_line(n: u32) -> Option<Self> {
+        Self::within(FRONT_LINE_BASE, SURFACE_UNIT_END, n)
     }
     fn within(base: u32, end: u32, n: u32) -> Option<Self> {
         base.checked_add(n).filter(|id| *id < end).map(Self)
@@ -106,7 +117,8 @@ impl UnitId {
             LAYOUT_OBJECT_BASE..SURFACE_UNIT_BASE => IdRange::Layout,
             SURFACE_UNIT_BASE..SUPPLY_TRUCK_BASE => IdRange::Template,
             SUPPLY_TRUCK_BASE..BATTERY_RADAR_BASE => IdRange::SupplyTruck,
-            BATTERY_RADAR_BASE..SURFACE_UNIT_END => IdRange::BatteryRadar,
+            BATTERY_RADAR_BASE..FRONT_LINE_BASE => IdRange::BatteryRadar,
+            FRONT_LINE_BASE..SURFACE_UNIT_END => IdRange::FrontLine,
             _ => IdRange::Other,
         }
     }
@@ -390,7 +402,8 @@ impl Surface {
                 h.u8(u8::from(site.settings.night_stealth));
                 h.u32(site.settings.separation_nm);
                 h.u8(u8::from(site.settings.variation.jitter)
-                    | u8::from(site.settings.variation.relocate) << 1);
+                    | u8::from(site.settings.variation.relocate) << 1
+                    | u8::from(site.settings.variation.front) << 2);
             }
             None => h.u8(0),
         }

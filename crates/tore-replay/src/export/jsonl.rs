@@ -116,19 +116,22 @@ fn header_line(recording: &Recording) -> String {
     // Format 3's additions appear only when the recording has them.
     let mut world = world;
     if let Some(t) = &w.ground_target {
+        let mut target = Object::new()
+            .str("stem", &t.stem)
+            .int("aaa", t.aaa)
+            .int("sam", t.sam)
+            .int("seed", t.seed)
+            .int("enemy_nationality", t.enemy_nationality)
+            .bool("night_stealth", t.night_stealth)
+            .bool("jitter", t.jitter)
+            .bool("relocate", t.relocate);
+        // Left out when there is none, as in the header.
+        if t.front {
+            target = target.bool("front", true);
+        }
         world = world.raw(
             "ground_target",
-            Object::new()
-                .str("stem", &t.stem)
-                .int("aaa", t.aaa)
-                .int("sam", t.sam)
-                .int("seed", t.seed)
-                .int("enemy_nationality", t.enemy_nationality)
-                .bool("night_stealth", t.night_stealth)
-                .bool("jitter", t.jitter)
-                .bool("relocate", t.relocate)
-                .int("separation_nm", t.separation_nm)
-                .finish(),
+            target.int("separation_nm", t.separation_nm).finish(),
         );
     }
     if w.airfield_scene != 0 {

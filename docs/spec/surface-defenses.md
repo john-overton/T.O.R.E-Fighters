@@ -43,11 +43,15 @@ objective; the debrief counts SAM and AAA fire. Everything runs on the host in
 multiplayer; in PvP the Redfor players defend the target. Since 2026-10-11
 surface units of opposing sides in range shoot at each other too (John): tanks,
 armoured cars, troops and the Sarancha's anti-ship missile, by what their
-weapon records may aim at ([surface against surface](#surface-against-surface)).
+weapon records may aim at, and land gun AAA by John's ruling ([surface against
+surface](#surface-against-surface)), and a Quick Mission with a ground target
+stands a few Blue and Red ground units in contact so the battle is seen ([the
+front line](#the-front-line)).
 
 - [Provenance and how to read this](#provenance-and-how-to-read-this)
 - [Data model](#data-model): unit records, templates and rolls, ownership, ids,
-  jitter, relocation, starts, the units of the movement words, mission settings.
+  jitter, relocation, starts, the [front line](#the-front-line), the units of
+  the movement words, mission settings.
 - [Surface AI](#surface-ai): engagement, SAM missiles, AAA and flak, ships,
   movement, experience, RWR emitters, countermeasures, and [surface against
   surface](#surface-against-surface).
@@ -316,6 +320,7 @@ every machine.
 | `0x5000_0000` plus ordinal | Template objects, parked aircraft included | The template ordinal, taken before the roll, so a removed `<sam>` leaves a gap and every machine numbers the rest the same |
 | `0x5800_0000` plus n | Added supply trucks | n in the order of the unit each serves (ascending unit id) |
 | `0x5C00_0000` plus n | Added battery radars | n in battery order (ascending lowest launcher id); an adopted radar keeps its own id |
+| `0x5E00_0000` plus n | The [front line](#the-front-line)'s units | n in placement order: Blue's line, then Red's |
 | `0x0200_0000` upward | Surface projectiles (SAMs, shells) | Own counter; AI aircraft shots start at `0x0100_0000` and would need 16.7 million shots to reach it |
 | `0xE000_0000`, `0xF000_0000` | Client cosmetic rounds | Unchanged |
 
@@ -483,6 +488,82 @@ flowchart LR
     R -->|enemy distance setting, bearing toward Blue side, plus or minus 30 degrees| B[Blue start, heading at the target]
     B -.->|heads at| T
     T -->|nearest Red-side field at least 15 nm away| F[Enemy Wing 1 on the ground, when Red ground-starts]
+```
+
+### The front line
+
+John, 2026-10-11 (on surface units fighting): "Quick Mission places opposing
+ground forces in contact so surface battles are visible." Slice CL-FL. Retail
+never does (see [surface against surface](#surface-against-surface)), so this
+is **opinionated, John**; every number below is fitted (agent).
+
+A Quick Mission with a ground target adds a **front line**: two short lines of
+ground units, Blue's and Red's, that face each other a few miles from the
+targets. They are the theater's own equipment, drawn from the same equipment
+lists as the template's `<tank>`, `<afv>` and `<aaa>` slots
+([equipment lists](../formats/quick-mission.md#ground-target-templates-and-defenses)):
+
+| Side | Units | Equipment group |
+| --- | --- | --- |
+| Red | an armoured car or APC (`<afv>`), two tanks (`<tank>`), and a gun (`<aaa>`) when the AAA level is not none | the enemy nationality's, as the template's |
+| Blue | the same four | group 0, the Western list (M1 and M2 tanks, M113 and HUMVEE, M163 and M113 guns); the creator has no friendly nationality (agent) |
+
+- **Where.** The centre is a seeded point 5 to 10 nm from the targets' placed
+  centroid, on the bearing toward Blue's side of the theater's front (turned by
+  up to 90 degrees); when no site in that band passes, 10 to 20 nm. Up to 24
+  candidates per band, the first that passes wins. A candidate must keep 4 nm
+  from every template unit and parked aircraft (so no front unit's gun or
+  missile reaches the targets and the front can neither destroy nor protect
+  the objective) and from both starts (so nobody starts in the fighting), and
+  every unit must stand on land where a ground unit may (level, off the sea,
+  clear of layout objects and runways: the same rule as the template's units)
+  and see every unit of the other line over the terrain (the weapons' own line
+  of sight rule, sampled every 250 ft at 10 ft above the ground). With no
+  site, no front is added and the layout notes say so. Measured with
+  `--surface-battle --front-survey --seeds 2` (108 offered targets, heavy
+  defenses): 191 of 216 builds stand a front, 8 units each, 4.8 to 19.5 nm from
+  the targets, with 13 to 32 pairs in sight and reach and the nearest opposing
+  pair 2,146 to 2,601 ft apart (the farthest pair in reach 4,056 ft, inside a
+  tank gun's 5,000); the 25 without are naval targets (fleets, cargo ships, the
+  Taiwan sea scenarios) with no land within 20 nm of them.
+- **How.** The line's axis runs from the centre toward the targets, turned by
+  up to 45 degrees. Blue's line stands 1,200 ft back from the centre on the
+  Blue end of the axis, Red's 1,200 ft on the other: the lines are 2,400 ft
+  apart, inside a tank gun's reach and an AAA gun's. Each line's four units
+  stand 500 ft apart across the axis (flank vehicle, two tanks, gun), the
+  vehicle 200 ft and the gun 700 ft behind the line (so the tanks take the
+  first fire and the guns live to fire), each moved by a seeded
+  amount inside a 150 ft disc and facing the other line within 15 degrees.
+- **What they are.** Ordinary units with the default skill (1, average), no
+  route (they hold their ground), no `react` mask and no destroy flag: they
+  are not objectives and no AI wing is ordered at them (AI wings fly
+  air-to-air only here). Destroying a Blue one yourself is friendly fire like
+  any friendly ground unit that is not a target; the other units' kills of them
+  are not (the kill is the unit's). They fight by the [surface against
+  surface](#surface-against-surface) rules (tanks and armoured cars at the
+  other line, the guns at aircraft first and at the ground when none is in
+  reach) and shoot at aircraft in reach like any other unit, so a Blue pilot
+  passing over Red's line is shot at.
+- **Determinism.** Every choice comes from the template's own seeded stream
+  and integer arithmetic, so the front is the same on every machine and in
+  every replay of the same seed. It is in the surface digest, and the replay
+  header marks it (a tenth ground target value), so a recording made before it
+  existed rebuilds without one. Online no wire byte changes; a build with a
+  front and one without disagree on the surface digest and refuse each other.
+- **Off.** `Variation::OFF` (the preview tools' retail spot) and the probes'
+  `--no-front` leave it out. A mission with no ground target has none: it has
+  no surface to add it to (agent).
+- **The mission map** lists starts and an approximate objective area, not
+  units, so it shows no front line (the front would otherwise give the
+  objective's neighbourhood away).
+
+```mermaid
+flowchart LR
+    T[Targets' centroid] -->|5 to 10 nm, toward Blue's side| C[Front centre]
+    C --- BL[Blue line: vehicle, 2 tanks, gun]
+    C --- RL[Red line: vehicle, 2 tanks, gun]
+    BL <-->|2,400 ft, in gun reach| RL
+    T -.->|at least 4 nm from every template unit and start| C
 ```
 
 ### The units of the movement and range words
@@ -998,14 +1079,28 @@ surface flag, and the aircraft guns and the ground units' own guns both.
 | Armoured car and APC guns: BMP-2, BTR-80, M113, M2 | air and surface | aircraft and ground units, ships |
 | Small arms (TROOPS) | air and surface | aircraft and ground units, ships |
 | SS-N-9 (Sarancha) | surface only (`0x22365`) | ships only (agent decision: an anti-ship missile) |
-| ZSU-23, ZSU-57, 2S6 gun, Phalanx, AAA30, AAA30BAD, M1939, barrage zone | air only (`0x140c0`, `0x100c0`, `0x5140c0`) | aircraft only |
-| KS-12, KS-19 flak | air only (`0x2940c0`) | aircraft only |
+| ZSU-23, ZSU-57, 2S6 gun, AAA30, AAA30BAD on land | air only (`0x140c0`, `0x100c0`, `0x5140c0`) | aircraft first, then, by John's ruling, ground units and ships in reach |
+| Phalanx and every other ship gun | air only | aircraft only |
+| M1939 barrage zone, KS-12 and KS-19 flak | air only (`0x2940c0` for the flak) | aircraft only |
 | Every SAM, ship SAM, Sea Sparrow and ASROC | air only (`0x12041` to `0x12345`) | aircraft only; ASROC stays held |
 
-So AAA does not fire at the ground even though John's request named it as an
-example: its records do not allow it. The M1975 is a tank-class unit with no
-weapon, so no artillery fights. A record with neither flag would keep the
-anti-aircraft use every surface weapon had (none does).
+**Gun AAA fires at the ground.** The records of the land anti-aircraft guns
+carry only the air flag, so a first reading kept them at aircraft. John,
+2026-10-11: "If it can shoot at ground targets let it." So a land AAA gun
+(a gun record with the air flag and not the surface flag, on a unit that is
+not a ship, that is not flak and is not the barrage zone) may also aim at
+ground units and ships of the other side in reach, **after any aircraft**:
+the existing preference already puts an air-defence unit's aircraft first, and
+a gun that has an aircraft in reach never turns to the ground. Its detection
+and fire zones, mount arcs, line of sight, bursts, magazines, resupply and
+aim error (a quarter of the air error at the ground, fitted) are the same as
+for the tanks; the damage is the record's for the target's class. SAMs do not
+(their missiles are anti-aircraft), nor do ships' guns and flak (a time-fuzed
+shell bursts in the air and the barrage zone fires at nothing it can see).
+Opinionated, John 2026-10-11 (the records alone would have forbidden it). The
+M1975 is a tank-class unit with no weapon, so no artillery fights. A record
+with neither flag would keep the anti-aircraft use every surface weapon had
+(none does).
 
 **What it may aim at is a unit**, of the other side, that stands and that the
 scene holds: a ground vehicle, a SAM or AAA site, a truck, a radar, a ship.
@@ -1028,7 +1123,7 @@ is eligible only if `react` names its class).
 | --- | --- | --- |
 | Detection and range | The weapon's `zone0` (range and relative altitude band) to see it and `zone1` to fire, a gun's capped by its shells' reach, a missile's by experience; `searchDist`; terrain line of sight from 10 ft above the unit to the target's aim point, sampled every 500 ft | retail records, the existing rules |
 | Gates | As for an aircraft: launch zone, mount arcs relative to the hull, line of sight | retail, unchanged |
-| Preference | An air-defence unit (class SAM or AAA) takes aircraft first, every other unit (tanks, vehicles, men, ships) ground units and ships first. A controller sees only the eligible contacts of the preferred kind while there is one, so a tank fighting an aircraft turns to a ground unit that comes into view, and to the aircraft again once no ground unit is left | defined (agent) |
+| Preference | An air-defence unit (class SAM or AAA) takes aircraft first (a land AAA gun turns to the ground only when no aircraft is in reach), every other unit (tanks, vehicles, men, ships) ground units and ships first. A controller sees only the eligible contacts of the preferred kind while there is one, so a tank fighting an aircraft turns to a ground unit that comes into view, and to the aircraft again once no ground unit is left | defined (agent) |
 | Choice | Nearest eligible of the preferred kind, ties by lower id; kept while it stays eligible; flak retargets as before | fitted, deterministic: no random choice |
 | Aim | A gun's aim error at a ground unit or ship is a quarter of its air error (visual 0.375, 0.25, 0.175, 0.125 degrees by skill; radar a quarter of 0.6 to 0.2), drawn from the surface's seeded random stream once per burst, plus the 0.25 degree round dispersion. A T-72 at 3,000 ft hits another about once in five rounds | fitted (the retail hit-chance rule is untraced; with the air error a tank needs about fifteen minutes to hit another) |
 | Damage | The record's damage for the target's class (`damage[0..4]`: the T-72 and M1 guns 200 against everything, so one 125 mm round kills a 200 point tank) | retail |
@@ -1054,20 +1149,23 @@ theater's base layout and every offered ground target at heavy defenses with
 seeds 1 to 20 (2,480 missions) and found no pair of opposing units within a
 weapon's reach: the nearest, in Iraq's "troops withdrawing from Kuwait"
 (`~QIRRETR`, whose 40 American objects stay friendly), stand 22,000 to 27,000
-ft apart, beyond a tank gun's 5,000 ft. So the ground war never wakes in an
-ordinary Quick Mission and changes nothing there; it is checked on test
-missions that hand template units to Blue (`--surface-battle ... --blue`,
-the `surface-battle-*` [battery scenarios](../testing/lane-ai.md)): four of the
-Ukraine column's tanks against the other five and the template's SAM and AAA
-sites (both sides halt, fight and kill; only the tanks fire), and the Baltic
-fleet's Kiev and a Krivak against its Saranchas (the SS-N-9s sink both).
+ft apart, beyond a tank gun's 5,000 ft. So on retail's own layout the ground
+war never wakes. John asked for it to be seen (2026-10-11), so a Quick Mission
+with a ground target now adds [a front line](#the-front-line) of Blue and Red
+units in contact, which fights. The `surface-battle-*` [battery
+scenarios](../testing/lane-ai.md) check it, and the older test missions that
+hand template units to Blue (`--surface-battle ... --blue --no-front`): four of
+the Ukraine column's tanks against the other five and the template's SAM and AAA
+sites (both sides halt, fight and kill; the tanks fire, and so do the AAA guns
+at a Blue tank in reach), and the Baltic fleet's Kiev and a Krivak against its
+Saranchas (the SS-N-9s sink both).
 
 ```mermaid
 flowchart TD
     C[Contact] --> A{Aircraft?}
     A -->|yes| R{Weapon has the air flag and react names its class?}
     A -->|no: a unit| S{Other side, standing, in the scene, not a building?}
-    S -->|yes| F{Weapon has the surface flag; an anti-ship missile and a ship?}
+    S -->|yes| F{Weapon has the surface flag, or is a land AAA gun; an anti-ship missile and a ship?}
     R -->|yes| E[Eligible if in zone, search distance and sight]
     F -->|yes| E
     E --> P{Preferred kind present?}
@@ -1481,8 +1579,9 @@ size on land, rather than one fitted value for all ground objects.
   Stationary units draw as scenery with ids.
 - **Launcher rails** (CHAP, SA-2, SA-3, SCUD) show the rounds each hardpoint
   still carries: a rail empties as its missile leaves and fills again when a
-  truck rearms it. Launchers do not slew or elevate (no articulation data
-  beyond the loaded count).
+  truck rearms it. A launcher on a vehicle turns with its body toward its
+  target ([Aiming](#aiming)); no launcher elevates (no shape has a pitch
+  part).
 - **Men** (SOLDIER) are viewer-facing sprites, 4 ft tall, upright on the
   screen; they vanish with their unit.
 - **Carriers** carry their island and deck parts from the FA.EXE carrier table
@@ -1503,9 +1602,66 @@ size on land, rather than one fitted value for all ground objects.
   TRUCK); the HAWK element draws SRDR2 (John, 2026-10-10).
 
 `--surface-scene` renders a ground target in game offscreen after a chosen
-time, with units destroyed and rails emptied on request, and `--surface-preview
-OUT destroyed` draws each class beside its destroyed look (see
+time, with units destroyed and rails emptied on request (and, since CL-AIM,
+an intruding aircraft to aim at, units handed to Blue, or the old unturned
+look with `--no-aim`), and `--surface-preview OUT destroyed` draws each
+class beside its destroyed look (see
 [development](../DEVELOPMENT.md#surface-unit-inspection)).
+
+### Aiming
+
+Surface units visibly point their weapons at what they engage (John,
+2026-10-12: "AAA and SAM units rotate, tank turrets rotate or the whole body
+rotates, barrels point at enemies"). Slice CL-AIM. It is presentation only:
+the fight still aims every round itself, at once, inside the mount's arc
+(see [Unknowns](#unknowns), "Slew rates"), so nothing a unit hits or misses
+changes.
+
+What can turn comes from the retail shapes
+([turrets and rotating antennas](../formats/objects-and-shapes.md#turrets-and-rotating-antennas-2026-10-12)):
+
+| Shape kind | Units | What turns | Basis |
+| --- | --- | --- | --- |
+| Turrets (`@HardpointAngle@4`) | Krivak (KRIV, KRIVAK), Sovremennyy (SOVR): the two AAA30BAD or AAA30 gun mounts | Each gun turret traverses on the hull, inside its mount's arc (`slewLimitH`, 150 degrees either side of its rest), at 45 degrees a second, and returns to its rest when nothing is held; the hull keeps its heading | Which parts turn and their rest: retail. The rate and the return to rest: fitted |
+| Rotating antennas (`_currentTicks`) | Krivak and Sovremennyy (one turn in 4 s), Butler's Red Crown radar REDCR (8 s), Roland RLD (2 s) | Spins all the time, clockwise seen from above, every unit in step with the mission clock | Retail (`_currentTicks << 6`, `<< 5`, `<< 7`, at 256 ticks a second) |
+| No part | Every other armed land unit: ZSU-23, ZSU-57, ZIF-31, M163, M1939, KS-12, KS-19, 2S6, Crotale, Chaparral, HAWK, Roland, SA-3, SA-6, SA-9, SA-13, SA-15, SCUD, the four tanks, BMP-2, BTR-80, M113, M2, the infantry SAM teams and TROOPS | The whole unit turns about its up axis, standing on the ground as before, at its type's turn rate (`_turnRate`: tanks and the ZSU-57 15 degrees a second, ZSU-23 30, 2S6 and the IFVs 45, SA-3 and SA-6 5); it keeps the heading it last aimed at, and lines up with its route again while it drives | Turn rate: retail word, read as degrees a second as for movement (fitted). Whole-body turning: John's rule |
+| No part, fixed | The SA-2 site (turn rate 0, six fixed rails); the barrage zone (no shape) | Nothing | Retail data |
+| No part, ship | Every other ship (Kirov, Kiev, frigates, carriers and the rest) | Nothing: the hull keeps its heading | John's rule |
+
+No retail shape has a part that pitches: no barrel or rail elevates (the
+envelopes write only the heading word of a part's transform). A tank's gun
+points at its target because its body does.
+
+When a unit aims, from what it knows:
+
+- A weapon aims from the moment its controller chooses a target (Prepare)
+  while it holds it (Track, Fire, Pause), so a slow mount turns during its
+  preparation and is on target when its first round leaves (defined, agent).
+  A battery's launchers aim while the battery's controller does.
+- A unit whose picture turns as a whole aims with its first weapon that
+  holds a target (a 2S6's gun before its missiles). A turret aims with the
+  weapon that fires from its hardpoint.
+- Nothing aims at a destroyed unit or a crashed aircraft, and a destroyed
+  unit stops turning (it shows its wreck).
+- A part turns at its rate by mission time, so it moves the same whatever
+  the frame rate (its goal is taken once a frame, so two viewers at very
+  different frame rates may differ by a fraction of a degree while a target
+  crosses fast). A jump of more than a second (a replay seek, a restart)
+  puts every part straight on its goal.
+
+Who sees what (the aim is worked out on each machine from what it already
+has; no wire field or recording changed):
+
+| Viewer | What the aim follows |
+| --- | --- |
+| Single player | The controllers' phases and targets, the battery controllers included |
+| Replay | The recorded `surface.phase` events (the same phases and targets) and, for battery launchers (whose battery controller is not recorded), each salvo's target for 5 s after it |
+| Online client, the hosting player included | Each gun burst's target for 5 s after it began. The host sends no controller phase or missile target of a surface unit, so a launcher does not turn on a client, and a gun turns only once it fires. Matching single player needs the host to send each controller's target as it changes (the replay's `surface.phase`: unit id, weapon index, target id or none); not built (protocol 25 is the city fill's) |
+
+Drawing: a unit that has turned, or has a spinning antenna, is drawn every
+frame like a moving unit (its static copy hidden) and so casts a shadow as
+moving units do; one at rest stays in the static scenery. A shape's line
+art is not drawn on the every-frame path (as for moving units).
 
 ### Flak bursts, gunfire, launches and light
 
@@ -1781,7 +1937,7 @@ so). Each row has a fitted stand-in above.
 | `quickpos` consumption | Templates with only `quickpos` ("nothing") set an accumulator; every `pos` adds to it | Not used; starts come from the target | Trace the accumulator's consumer |
 | Barrage zone rule | `A_M1939` has `zoneDist` 195, random fire 33 percent, no shape | Rule above | Trace `zoneDist` |
 | Salvo doctrine | Burst counts only; manual history says SA-2s fire in pairs | Use the burst fields as given | None planned |
-| Slew rates | Only slew limits are in the data | Instant within arcs | None planned |
+| Slew rates | Only slew limits are in the data | Instant within arcs for the fight; the picture turns at a turret's fitted 45 degrees a second or the type's turn rate ([Aiming](#aiming)) | None planned |
 | Formation geometry for surface groups | Routes carry `w_wng 1 0 2048 0` (the aircraft wing format) | Each unit follows its own route | Trace the wing format's surface use |
 | Route flag bit 0x04 | Routed objects have it set (inference) | Not used | Trace the mission flag reader |
 | `damage[0..4]` = 255 on every NT | Mapping unresolved | Hit points only | Trace the damage-class table |

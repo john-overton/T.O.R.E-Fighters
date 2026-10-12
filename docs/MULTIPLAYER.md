@@ -821,6 +821,12 @@ defenses](spec/surface-defenses.md)). What a player sees:
   restart. If a game builds anything differently it says so in plain words
   and stays in the lobby instead of flying a different battlefield ("Your game
   places this mission's ground target differently from the host's...").
+- **The front line.** Since slice CL-FL (2026-10-12) the battlefield also
+  holds [a front line](spec/surface-defenses.md#the-front-line), a few Blue and
+  Red ground units in contact a few miles from the target, built from the same
+  seed on every machine and fought by the host like the rest. It adds no wire
+  field; it is part of the surface a game builds, so a build without it
+  disagrees on the surface digest and is refused in the words above.
 - **What moves and fires.** A column of tanks or a convoy of ships drives on
   every screen where the host has it. SAMs launch from their rails, which
   empty and refill when a supply truck rearms them; AAA tracers leave the guns

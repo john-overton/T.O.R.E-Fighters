@@ -136,6 +136,12 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
   defend the target and make it the mission's objective
   ([surface defenses](surface-defenses.md)). A template the import does not
   hold leaves the mission without it, and the log says so.
+- **The front line** (John, 2026-10-11; slice CL-FL). A mission with a target
+  also gets a few Blue and Red ground units standing in contact 5 to 20 nm
+  from the targets (a tank and an armoured car and a gun per side, the gun only
+  with AAA on), so a surface battle is visible on the way in. They are
+  not objectives and add nothing to the creator: no field, no setting, drawn
+  from the same seed ([the front line](surface-defenses.md#the-front-line)).
 
 The old notice popup (sentence hit region (334,294), 278 by 49; popup (166,202),
 308 by 88) is gone, and so is the launch refusal "Ground targets and defenses
@@ -514,6 +520,19 @@ positions)". An addition: retail's creator has no map.
   target and the seed, so the same mission shows the same circle, the targets
   are always inside it and never at its centre. It is drawn at least 7 pixels
   in radius. No ground target, no area.
+- The map lists no units, so the [front line](surface-defenses.md#the-front-line)
+  does not appear on it (it would give the objective's neighbourhood away);
+  it is seen in flight and in the replay.
+- **The route** (opinionated, John 2026-10-12, with the in-flight map's mission
+  markup): a thin line from the Blue start to the edge of the objective area,
+  in the map's one line style (a one-pixel ink line over a dark edge, as the
+  in-flight map's leaders are). The map drew no lines before. A start inside
+  the area has no line. The in-flight map's Mission layer draws the same area,
+  starts and route from the same function ([in-flight map](flight-map.md#mission-markup)),
+  so the two always agree.
+- **Off the map**: a start or the area that lies beyond the theater is pinned
+  at the edge it lies past, with the words OFF MAP beside it, as in the
+  in-flight map.
 
 ## Group objectives
 

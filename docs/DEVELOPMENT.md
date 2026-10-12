@@ -1624,13 +1624,23 @@ checkout's `gameassets/fighters-anthology` link.
 and offered ground target at heavy defenses (seed 1, or seeds 1 to N) and lists
 every pair of opposing units within a weapon's reach of each other, with the
 nearest pair out of reach; `--surface-battle THEATER [STEM] [--blue
-ORDINAL,...] [--seconds S] [--twice]` runs the mission with the player parked
-and prints what surface units do to each other: engagements of ground units and
-ships, shots, hits with the unit credited, kills, columns halting and driving
-on, a summary and an end-state digest. `--blue` hands template objects to Blue
-first (a test mission: retail never stands opposing units in reach), and
-`--twice` reruns it and compares the digests
+ORDINAL,...] [--no-front] [--seconds S] [--twice]` runs the mission with the
+player parked and prints what surface units do to each other: engagements of
+ground units and ships, shots, hits with the unit credited, kills, columns
+halting and driving on, a summary and an end-state digest. `--blue` hands
+template objects to Blue first (a test mission: retail never stands opposing
+units in reach), and `--twice` reruns it and compares the digests
 ([surface against surface](spec/surface-defenses.md#surface-against-surface)).
+A mission with a ground target carries its [front
+line](spec/surface-defenses.md#the-front-line) as in the game; `--no-front`
+leaves it out (the survey always does, since it measures retail's layout).
+`--surface-battle --front-survey [THEATER ...] [--seeds N]` builds each offered
+target with the front line (seeds 1 to N, 2 by default) and lists its units,
+the pairs in sight and reach, and its distance from the targets. `--surface-objective` and
+`--surface-dump` take `--no-front` too. `--surface-trace` and the weapon, radar
+and drive probes (`--a2g-run`, `--a2g-radar`, `--surface-parked`,
+`--surface-drive` and the previews) build the target without the front line,
+since they measure one unit or one weapon (`--surface-trace --front` adds it).
 
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-battle --survey --seeds 20
@@ -1667,7 +1677,13 @@ launcher's rails to at most `--rails N` rounds, then writes one PNG per view
 (`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
 framing `--focus` (`routed`, `parked`, ordinals or types) within
 `--distance FT`. It draws the static scene with its wrecks and rails, the
-moving units, men and deck crew, explosions, fires and smoke. `--surface-preview
+moving units, men and deck crew, explosions, fires and smoke. Units aim as
+in the game, stepped every tick; `--no-aim` draws them unturned.
+`--intruder EAST,UP,NORTH` holds the player's aircraft (invulnerable)
+circling that far from the focus so the defenses lock on and fire, `--blue
+ORDINALS` hands template objects to Blue so units fight each other, and each
+focused unit prints its aim (`aim ... body ... turrets ... holds ...`).
+`--surface-preview
 OUT_DIR destroyed` draws one unit of each class beside its destroyed look,
 read from the records, and the four carriers with their damaged islands.
 
@@ -1675,6 +1691,7 @@ read from the records, and the four carriers with their damaged islands.
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 1300 --surface-only --focus routed --distance 110 --look 300,-35
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes PGU QPGSAM --focus 8 --distance 14 --look 30,-25 --rails 1
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes FRA QFFLT --focus CLEM.NT --distance 420 --kill CLEM.NT --burn 30
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 30 --focus 10 --views close --distance 40 --intruder 5000,3000,2000
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/destroyed destroyed
 ```
 

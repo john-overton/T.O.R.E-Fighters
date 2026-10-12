@@ -321,7 +321,8 @@ pub fn run() -> AppResult<()> {
     // never lists unless combat is told it is in an airfield sequence.
     spec.wings[0].count = 2;
     spec.validate()?;
-    let mut world = World::new(&spec, &resources, Seating::SinglePlayer)?;
+    let mut world =
+        crate::surface_dump::world_without_front(&spec, &resources, Seating::SinglePlayer)?;
     if let Some(why) = &world.terrain.surface.unresolved {
         return Err(format!("the ground target stands nowhere: {why}").into());
     }
