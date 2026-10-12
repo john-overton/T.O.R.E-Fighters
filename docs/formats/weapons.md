@@ -487,7 +487,7 @@ either way (`0x44354d` onward). Damage and splash are unaffected.
 | Orientation | Pitch follows the velocity; heading fixed | Closed |
 | Packs | One press releases the whole pack in one tick, staggered 2 ft steps as above, one round debited | Closed |
 | Pods | `projsInPod` rockets per pod; one rocket per call; held trigger repeats every `gameBurstT` quarter seconds for 0x800 records | Closed |
-| Predictor | The same equation and release state without the scatter, against the ground under the release point (see [Bomb sight](#bomb-sight)) | Closed; the `T_Info` cache detail is unknown below |
+| Predictor | The same equation and release state without the scatter, against the ground under the release point (see [Bomb sight](#bomb-sight); TORE's pipper follows the path to the terrain instead, `predict_impact_flat` keeps this rule) | Closed; the `T_Info` cache detail is unknown below |
 
 ### Unknown
 
@@ -521,7 +521,10 @@ set `+0x239`); B2 and BMBROH set only `+0x23a`.
    position and direction as a real release.
 2. `PROJSpeed(record, own speed)` (`0x4097c6`) and `PROJMakeBombEq(..., ground,
    4)` (`0x4097dc`): the same equation, without the random scatter. The pipper
-   is the mean impact point, over the ground below the release point.
+   is the mean impact point, over the ground below the release point (retail
+   takes that one height for the whole fall; TORE's pipper instead follows the
+   path to where it meets the terrain, opinionated John 2026-10-11, see
+   [the CCIP pipper](../spec/air-to-ground.md#ccip-the-dive-pipper)).
 3. The impact point is projected (`_GRTo2d` `0x4d5cc0`, `0x4097f3`). Behind or
    off the screen nothing more is drawn except trail dots that land on screen.
 4. The symbol font is selected (`HUDSetSymFont` `0x40ab30`: handle at `_hud +

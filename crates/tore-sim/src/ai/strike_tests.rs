@@ -111,6 +111,7 @@ pub(super) fn bomb(rounds: u32) -> Store {
         release_speed_share: 1.,
         fuze_arm_s: 1.,
         frag_radius_ft: 300.,
+        falls_free: false,
     }
 }
 
@@ -1209,6 +1210,10 @@ fn a_laser_store_is_chosen_only_with_a_spot_assured() {
         strike.step(&world.context(tick));
     }
     assert_eq!(strike.phase(), Phase::Home);
+    // A laser missile cannot fall unguided: it says so and goes home.
+    let call = strike.no_laze().expect("a no-laze decision");
+    assert_eq!((call.kind, call.station), (NoLaze::Rtb, StationId(2)));
+    assert_eq!(call.target, Some(TARGET));
 
     // A same-side spot on the target assures it.
     let mut world = lasing_world(None);
@@ -1443,6 +1448,7 @@ fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
     // first 50 ft step past 660 ft.
     let big = Store {
         frag_radius_ft: 600.,
+        falls_free: false,
         ..bomb(4)
     };
     assert_eq!(laydown_height_ft(&big, 700.), 700.);
@@ -1526,11 +1532,11 @@ fn a_gun_run_fires_bursts_on_the_cue_recovers_and_draws_again() {
     strike.step(&world.context(0));
     assert_eq!(strike.pass(), Some(Pass::Strafe));
     assert_eq!(strike.burst(), 1);
-    // In the dive, 5,000 ft out, the cue on the burst's aim.
+    // In the dive, 5,000 ft out, the cue on the target (the run is flown
+    // onto the target; the burst's walk is laid on the rounds).
     world.own.position = [0., 1_500., TARGET_AT[2] - 5_000.];
     world.own.flight_path_pitch_deg = -STRAFE_DIVE_DEG;
-    let (offset, _) = strike.aim();
-    let aim = [TARGET_AT[0] + offset[0], 0., TARGET_AT[2] + offset[1]];
+    let aim = [TARGET_AT[0], 0., TARGET_AT[2]];
     world.inputs.solution = Some(Solution {
         station: StationId(0),
         impact: Some(aim),
@@ -1541,14 +1547,6 @@ fn a_gun_run_fires_bursts_on_the_cue_recovers_and_draws_again() {
     for tick in 1..=200 {
         if strike.step(&world.context(tick)).release.is_some() {
             fired.push(tick);
-        }
-        if strike.segment() == Segment::Final {
-            // Keep the cue on whatever burst is being aimed.
-            let (offset, _) = strike.aim();
-            let aim = [TARGET_AT[0] + offset[0], 0., TARGET_AT[2] + offset[1]];
-            if let Some(s) = world.inputs.solution.as_mut() {
-                s.impact = Some(aim);
-            }
         }
     }
     assert!(!fired.is_empty(), "a burst on the cue");
@@ -1567,4 +1565,277 @@ fn a_gun_run_fires_bursts_on_the_cue_recovers_and_draws_again() {
         assert!(next >= first + 120, "recovery: {fired:?}");
         assert!(strike.burst() >= 2);
     }
+}
+
+/// A gun run in the dive with the cue held on the burst's aim: the
+/// `(tick, offset)` of every round the striker fires over `ticks`.
+/// The rounds of a gun run (tick and walked offset) and its bursts' start
+/// offsets.
+type GunRun = (Vec<(u64, [f64; 2])>, Vec<[f64; 2]>);
+
+fn gun_run(seed: u64, level: Experience, ticks: u64) -> GunRun {
+    let mut world = quiet_world();
+    let gun = Store {
+        station: StationId(0),
+        kind: StoreKind::Gun,
+        rounds: 500,
+        cadence_ticks: 4,
+        maximum_range_ft: 7_000.,
+        ..bomb(500)
+    };
+    world.inputs.class = StrikeClass::Attack;
+    world.inputs.stores = vec![gun];
+    let mut strike = Strike::new(seed);
+    strike.force(Some(Pass::Strafe), Some(StationId(0)));
+    let step = |world: &World, strike: &mut Strike, tick| {
+        let mut cx = world.context(tick);
+        cx.experience = level;
+        strike.step(&cx)
+    };
+    step(&world, &mut strike, 0);
+    world.own.position = [0., 1_500., TARGET_AT[2] - 5_000.];
+    world.own.flight_path_pitch_deg = -STRAFE_DIVE_DEG;
+    let mut starts = Vec::new();
+    let mut rounds = Vec::new();
+    for tick in 1..=ticks {
+        let aim = [TARGET_AT[0], 0., TARGET_AT[2]];
+        world.inputs.solution = Some(Solution {
+            station: StationId(0),
+            impact: Some(aim),
+            impact_seconds: Some(1.5),
+            ..solution(TARGET_AT, aim, false)
+        });
+        if step(&world, &mut strike, tick).release.is_some() {
+            rounds.push((tick, strike.burst_aim(tick, level)));
+        }
+        if rounds.last().is_some_and(|(t, _)| *t == tick) && starts.len() < strike.burst() as usize
+        {
+            starts.push(strike.aim().0);
+        }
+    }
+    (rounds, starts)
+}
+
+#[test]
+fn a_gun_burst_opens_on_its_offset_and_walks_onto_the_target_at_the_skills_pace() {
+    // John, 2026-10-12: the burst starts at an offset point and its rounds
+    // walk onto the target over the burst; the skill sets the time.
+    assert!(gun_walk_in_s(Experience::Ace) < gun_walk_in_s(Experience::Experienced));
+    assert!(gun_walk_in_s(Experience::Experienced) < gun_walk_in_s(Experience::Average));
+    assert!(gun_walk_in_s(Experience::Average) < gun_walk_in_s(Experience::Novice));
+    assert!(
+        gun_walk_in_s(Experience::Novice) < 0.5,
+        "inside a 0.5 s burst"
+    );
+    for level in [
+        Experience::Ace,
+        Experience::Experienced,
+        Experience::Average,
+        Experience::Novice,
+    ] {
+        let (rounds, _) = gun_run(5, level, 300);
+        let first_burst: Vec<_> = rounds
+            .iter()
+            .filter(|(t, _)| *t < rounds[0].0 + 60)
+            .collect();
+        assert!(first_burst.len() >= 3, "{level:?}: {rounds:?}");
+        // The first round leaves from the drawn offset (inside the ring)...
+        let start = first_burst[0].1;
+        let r = release_circle_ft(level);
+        assert!(start[0].hypot(start[1]) <= 2. * r + 1e-9, "{level:?}");
+        // ...the offset only shrinks along the burst, and is nothing at
+        // the end of the walk-in.
+        let ticks = (gun_walk_in_s(level) * 120.).round() as u64;
+        for pair in first_burst.windows(2) {
+            let (a, b) = (pair[0].1, pair[1].1);
+            assert!(b[0].hypot(b[1]) <= a[0].hypot(a[1]) + 1e-9, "{level:?}");
+        }
+        let opened = first_burst[0].0;
+        for (tick, offset) in &first_burst {
+            if *tick >= opened + ticks {
+                assert_eq!(
+                    *offset, [0.; 2],
+                    "{level:?} on the target after the walk-in"
+                );
+            }
+        }
+    }
+    // The Ace is on the target sooner than the Novice: more of a burst's
+    // rounds leave on it.
+    let on_target = |level| {
+        let (rounds, _) = gun_run(5, level, 300);
+        let first = rounds[0].0;
+        rounds
+            .iter()
+            .filter(|(t, o)| *t < first + 60 && *o == [0.; 2])
+            .count()
+    };
+    assert!(on_target(Experience::Ace) > on_target(Experience::Novice));
+}
+
+#[test]
+fn a_gun_burst_walks_in_from_short_of_the_target_and_is_deterministic() {
+    // The start offset never lies past the target along the track (here
+    // +z): a burst closing on the target walks in from short of it.
+    for seed in 0..40 {
+        let (_, starts) = gun_run(seed, Experience::Novice, 400);
+        assert!(!starts.is_empty());
+        for offset in starts {
+            assert!(offset[1] <= 1e-9, "seed {seed}: {offset:?}");
+        }
+    }
+    assert_eq!(
+        gun_run(9, Experience::Average, 300),
+        gun_run(9, Experience::Average, 300),
+        "the same seed walks the same bursts"
+    );
+}
+
+/// A laser glide bomb: it falls on the bomb equation when let go with no spot.
+fn glide_store() -> Store {
+    Store {
+        falls_free: true,
+        ..laser_store()
+    }
+}
+
+/// A laser carrier with no designator, no spot and no other store, 12,000 ft
+/// from the target (inside 1.5 fire ranges): it has given up waiting.
+fn no_laze_world(store: Store) -> World {
+    let mut world = lasing_world(None);
+    world.inputs.stores = vec![store];
+    world.own = own([0., 8_000., TARGET_AT[2] - 12_000.], 600.);
+    world
+}
+
+#[test]
+fn a_laser_bomb_with_no_laze_support_is_dropped_by_hand_as_an_unguided_bomb() {
+    // John, 2026-10-12: "Can laser bombs be fired like a dumb bomb? If so
+    // have AI do a manual bomb drop."
+    let world = no_laze_world(glide_store());
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    let call = *strike.no_laze().expect("a no-laze decision");
+    assert_eq!(call.kind, NoLaze::Manual);
+    assert_eq!(call.kind.reason(), "no_laze_manual");
+    assert_eq!(call.kind.words(), "No laze support, dropping manual");
+    assert_eq!((call.station, call.target), (StationId(2), Some(TARGET)));
+    assert!(!call.told);
+    // It attacks the target with the laser store as an unguided bomb: a
+    // bomb pass with the skill circle's aim and no laser asked for.
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.target(), Some(TARGET));
+    assert_eq!(strike.kind, Some(StoreKind::Bomb));
+    let selection = strike.selection().expect("a selection");
+    assert_eq!(
+        (selection.kind, selection.station, selection.laser),
+        (StoreKind::Bomb, StationId(2), false)
+    );
+    assert!(selection.kind.unguided());
+    let (aim, _) = strike.aim();
+    assert_eq!(
+        selection.aim_ft,
+        [aim[0] + strike.lead()[0], aim[1] + strike.lead()[1]]
+    );
+    // The radio says it once.
+    assert!(strike.told_no_laze());
+    assert!(!strike.told_no_laze());
+    assert!(strike.no_laze().unwrap().told);
+    // Later passes stay manual.
+    for tick in 1..=120 {
+        strike.step(&world.context(tick));
+    }
+    assert_eq!(strike.kind, Some(StoreKind::Bomb));
+    assert_eq!(strike.no_laze().map(|c| c.kind), Some(NoLaze::Manual));
+}
+
+#[test]
+fn a_laser_store_that_cannot_fall_unguided_goes_home_saying_so() {
+    // "Otherwise just have it RTB but say it has no laze support."
+    let world = no_laze_world(laser_store());
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    let call = *strike.no_laze().expect("a no-laze decision");
+    assert_eq!(call.kind, NoLaze::Rtb);
+    assert_eq!(call.kind.reason(), "no_laze_rtb");
+    assert_eq!(call.kind.words(), "No laze support, RTB");
+    assert_eq!((call.station, call.target), (StationId(2), Some(TARGET)));
+    assert!(strike.home());
+    assert_eq!(strike.target(), None);
+    assert!(strike.told_no_laze());
+    assert!(!strike.told_no_laze());
+    // A mixed load drops the bomb by hand first, then the missile goes home.
+    let mut world = no_laze_world(glide_store());
+    let missile = store(3, StoreKind::Laser);
+    world.inputs.stores = vec![missile, glide_store()];
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(
+        strike.no_laze().map(|c| (c.kind, c.station)),
+        Some((NoLaze::Manual, StationId(2)))
+    );
+    assert_eq!(strike.kind, Some(StoreKind::Bomb));
+    assert_eq!(
+        strike.station,
+        Some(StationId(2)),
+        "the bomb, not the missile"
+    );
+    // The bomb is gone: only the missile is left, which cannot fall free.
+    world.inputs.stores = vec![missile];
+    strike.enter(Phase::TurnBack, 400);
+    strike.step(&world.context(500));
+    assert_eq!(strike.no_laze().map(|c| c.kind), Some(NoLaze::Rtb));
+    assert!(strike.home());
+}
+
+#[test]
+fn a_spot_ends_the_manual_drop_and_the_sight_guides_again() {
+    let world = no_laze_world(glide_store());
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.kind, Some(StoreKind::Bomb));
+    // The pass ends and the next choice finds a buddy's spot on the target.
+    let mut guided = no_laze_world(glide_store());
+    guided.inputs.lase.spot_targets = vec![TARGET];
+    strike.enter(Phase::TurnBack, 400);
+    strike.step(&guided.context(500));
+    assert!(strike.no_laze().is_none(), "the decision is over");
+    assert_eq!(strike.kind, Some(StoreKind::Laser), "guided on the spot");
+}
+
+#[test]
+fn only_a_carrier_with_nothing_else_to_drop_decides_no_laze() {
+    // With a bomb as well, it simply takes the bomb: nothing to announce.
+    let mut world = no_laze_world(glide_store());
+    world.inputs.stores = vec![glide_store(), bomb(2)];
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.kind, Some(StoreKind::Bomb));
+    assert!(strike.no_laze().is_none());
+    // With its own designator the laser store is guided as before.
+    let mut world = lasing_world(Some(pod()));
+    world.inputs.stores = vec![glide_store()];
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.kind, Some(StoreKind::Laser));
+    assert!(strike.no_laze().is_none());
+    // Far from the target it still waits for a spot (no decision yet).
+    let mut world = no_laze_world(glide_store());
+    world.own = own([0., 8_000., 0.], 600.);
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Wait);
+    assert!(strike.no_laze().is_none());
+}
+
+#[test]
+fn a_no_laze_decision_round_trips_through_a_checkpoint() {
+    let world = no_laze_world(glide_store());
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    let models = Models::default();
+    let coded = to_bytes(&strike, &models).unwrap();
+    let back: Strike = from_bytes(&coded, &models).unwrap();
+    assert_eq!(back, strike);
+    assert_eq!(back.no_laze().map(|c| c.kind), Some(NoLaze::Manual));
 }

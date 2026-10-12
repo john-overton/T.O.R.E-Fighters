@@ -144,6 +144,7 @@ pub(super) fn gun_stores(
                 release_speed_share: 1.,
                 fuze_arm_s: 0.,
                 frag_radius_ft: 0.,
+                falls_free: false,
             })
         })
         .collect()

@@ -19,8 +19,10 @@
 //! - A pack's bombs leave in one tick, each offset by [`pack_offset`].
 //!
 //! The predictor ([`predict_impact`]) runs the same equation without the
-//! scatter against the ground under the release point, as the original's
-//! sight does. Guided bombs (no 0x10) do not come here.
+//! scatter down to where the path meets the terrain (opinionated, John,
+//! 2026-10-11); the original's sight takes the ground under the release
+//! point for the whole fall ([`predict_impact_flat`]). Guided bombs (no 0x10)
+//! do not come here.
 //!
 //! Coordinates are the live adapter's: feet, x and z horizontal, y up, and
 //! headings measured from +z toward +x.
@@ -287,11 +289,84 @@ pub struct Impact {
 }
 
 /// The bomb sight's prediction for `release`: the mean impact point (no
-/// scatter), with the ground taken as the height under the release point, as
-/// retail's predictor keeps it. Over flat ground a real bomb with no scatter
-/// lands there. `None` when the path never reaches that height.
+/// scatter) where the bomb's path meets the terrain, worked along the whole
+/// fall ([`terrain_impact`]). Over flat ground this is the same point as
+/// retail's, which takes the ground under the release point for the whole
+/// fall ([`predict_impact_flat`]); over a rise or a hollow beyond the release
+/// point the bomb is shown where it will really land. Opinionated (John,
+/// 2026-10-11, after slice ST-LV); retail's rule is kept as the flat
+/// predictor. `None` when the path never gets down to the ground.
 pub fn predict_impact(release: ReleaseState, ground: impl Fn(f64, f64) -> f64) -> Option<Impact> {
+    let under = ground(release.position[0], release.position[2]);
+    let flat = impact_at(release, under)?;
+    let Some(met) = terrain_impact(release, &ground) else {
+        return Some(flat);
+    };
+    // Flat terrain along the fall: exactly retail's answer.
+    if (met.position[1] - under).abs() < 1e-9 {
+        Some(flat)
+    } else {
+        Some(met)
+    }
+}
+
+/// Retail's predictor (docs/formats/weapons.md, "Bomb sight"): the mean
+/// impact with the ground taken as the height under the release point for
+/// the whole fall, so a target on a rise is bombed short and one in a hollow
+/// long. TORE's pipper no longer uses it ([`predict_impact`]); kept as the
+/// recorded retail rule and for development drivers.
+pub fn predict_impact_flat(
+    release: ReleaseState,
+    ground: impl Fn(f64, f64) -> f64,
+) -> Option<Impact> {
     impact_at(release, ground(release.position[0], release.position[2]))
+}
+
+/// How far apart the fall is sampled for the terrain, seconds: a bomb moving
+/// 800 ft/s covers 80 ft between samples, so a ridge thinner than that can be
+/// stepped over. The crossing found is then bisected to a nanosecond or so.
+const TERRAIN_STEP_S: f64 = 0.1;
+
+/// Where the mean path of `release` first meets the terrain: the fall is
+/// followed in [`TERRAIN_STEP_S`] steps until the bomb is at or below the
+/// ground there, then the crossing is bisected. `None` when the release is
+/// already inside the ground, or the path never gets down to it (a fall of
+/// more than a thousand feet under the lower of sea level and the ground
+/// under the release point is not followed).
+pub fn terrain_impact(release: ReleaseState, ground: &impl Fn(f64, f64) -> f64) -> Option<Impact> {
+    let motion = BombMotion::new(release);
+    let under = ground(release.position[0], release.position[2]);
+    let end = motion.fall_time(under.min(0.) - 1_000.)?;
+    let above = |seconds: f64| {
+        let p = motion.position(seconds);
+        p[1] - ground(p[0], p[2])
+    };
+    if above(0.) <= 0. {
+        return None;
+    }
+    let mut before = 0.;
+    while before < end {
+        let next = (before + TERRAIN_STEP_S).min(end);
+        if above(next) <= 0. {
+            let (mut low, mut high) = (before, next);
+            for _ in 0..40 {
+                let middle = (low + high) / 2.;
+                if above(middle) > 0. {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            let mut position = motion.position(high);
+            position[1] = ground(position[0], position[2]);
+            return Some(Impact {
+                position,
+                seconds: high,
+            });
+        }
+        before = next;
+    }
+    None
 }
 
 /// Where the mean path of `release` comes down to the height `height`: the

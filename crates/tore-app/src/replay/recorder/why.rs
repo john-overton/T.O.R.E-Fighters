@@ -125,6 +125,8 @@ struct Mind {
     defense: Option<(u32, &'static str)>,
     fire: Option<(tore_sim::ai::incoming_fire::Evidence, bool)>,
     ejection: Option<&'static str>,
+    /// The no-laze decision in force (slice ST-G).
+    no_laze: Option<(tore_sim::ai::strike::NoLaze, StationId)>,
     /// Fitted fallbacks already reported.
     fallbacks: BTreeSet<&'static str>,
     choice: Option<Choice>,
@@ -928,6 +930,24 @@ fn decide(look: &Look, mind: &mut Mind, fallbacks: &[Fallback], events: &mut Vec
     }
     mind.phase = Some(phase);
 
+    // A strike decision: laser stores and no laser support (slice ST-G).
+    let no_laze = actor
+        .strike()
+        .and_then(|strike| strike.no_laze())
+        .map(|call| (call.kind, call.station, call.target));
+    if let Some((decision, station, target)) = no_laze
+        && mind.no_laze != Some((decision, station))
+    {
+        let event = strike_decision_event(id, decision, station, target, look.store_name(station));
+        events.push(event);
+        mind.remember(Change {
+            tick: number,
+            what: format!("strike: {}", decision.reason()),
+            why: decision.words().to_owned(),
+        });
+    }
+    mind.no_laze = no_laze.map(|(decision, station, _)| (decision, station));
+
     // Airfield sequence.
     let airfield = actor.airfield_phase();
     if !first && airfield != mind.airfield {
@@ -1059,6 +1079,35 @@ fn decide(look: &Look, mind: &mut Mind, fallbacks: &[Fallback], events: &mut Vec
         );
     }
     mind.ejection = ejection;
+}
+
+/// An `ai.strike` event for a no-laze decision (slice ST-G): the aircraft,
+/// the target it would attack, the decision in words, the fixed `reason` key
+/// (`no_laze_manual` or `no_laze_rtb`) and the laser store.
+fn strike_decision_event(
+    id: u32,
+    decision: tore_sim::ai::strike::NoLaze,
+    station: StationId,
+    target: Option<u32>,
+    weapon: String,
+) -> Event {
+    use tore_sim::ai::strike::NoLaze;
+    let mut event = Event::new(kind::AI_STRIKE)
+        .with_subject(id)
+        .with(
+            field::DECISION,
+            match decision {
+                NoLaze::Manual => "no laze support, dropping manual",
+                NoLaze::Rtb => "no laze support, RTB",
+            },
+        )
+        .with(field::REASON, decision.reason())
+        .with(field::STATION, i64::from(station.0))
+        .with(field::WEAPON, weapon);
+    if let Some(target) = target {
+        event = event.with_object(target);
+    }
+    event
 }
 
 /// An `ai.defense` event for the missile defense in force: its maneuver

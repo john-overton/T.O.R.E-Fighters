@@ -6,10 +6,12 @@
 //! from the launcher of that tick ([`solve`]); the cockpit readout carries it
 //! to the HUD, so the sight and the release cannot disagree.
 //!
-//! - **CCIP** (retail data, the bomb sight routine; docs/formats/weapons.md,
-//!   "Bomb sight"): the mean impact point of a bomb released now, from
+//! - **CCIP** (the bomb sight routine; docs/formats/weapons.md, "Bomb sight"):
+//!   the mean impact point of a bomb released now, from
 //!   [`ReleaseState::from_station`] and [`predict_impact`], with the range arc
-//!   of the retail pipper glyph ([`arc_steps`]).
+//!   of the retail pipper glyph ([`arc_steps`]). The point is where the bomb's
+//!   path meets the terrain along the whole fall (opinionated, John,
+//!   2026-10-11; retail takes the ground under the aircraft for all of it).
 //! - **Rockets** (opinionated, agent, decision 12): the same pipper at the
 //!   ground impact of a rocket fired now, flown through the very steps combat
 //!   gives an unguided round ([`rocket_impact`]).
@@ -304,9 +306,9 @@ impl Delivery {
     /// Where the selected round comes down at the ground height `height`:
     /// for a bomb its mean path brought down to that height, for a rocket its
     /// flown impact (a rocket is already flown into the real terrain). The
-    /// level T and the AI's release judge a bomb against its target's ground
-    /// this way; the CCIP pipper keeps retail's ground under the release
-    /// point (agent, slice ST-LV). `None` without an impact.
+    /// level T judges a bomb against its target's ground this way; the CCIP
+    /// pipper and the AI's CCIP cue work out where the path meets the
+    /// terrain instead ([`Delivery::cue`]). `None` without an impact.
     pub fn impact_at(&self, height: f64) -> Option<Impact> {
         let ccip = self.ccip.as_ref()?;
         if self.rocket {
@@ -316,6 +318,19 @@ impl Delivery {
             });
         }
         ballistics::impact_at(ccip.release, height)
+    }
+    /// The impact the AI's release is judged on (docs/spec/ai-strike.md): in
+    /// LVL the bomb's mean path brought down to the target's ground
+    /// (`target_height`, as the level T is timed); otherwise the pipper's own
+    /// impact, where the path meets the terrain. `None` without one.
+    pub fn cue(&self, target_height: f64) -> Option<Impact> {
+        if self.mode == DeliveryMode::Level && !self.rocket {
+            return self.impact_at(target_height);
+        }
+        self.ccip.as_ref().map(|ccip| Impact {
+            position: ccip.impact,
+            seconds: ccip.seconds,
+        })
     }
 }
 
@@ -357,13 +372,17 @@ pub struct Situation<'a> {
     pub clock: Clock,
     /// Seconds until the aircraft's last released bomb lands.
     pub falling: Option<f64>,
+    /// A laser glide bomb is solved as a bomb on the bomb equation, the way
+    /// an AI that drops it by hand with no spot sees it (slice ST-G). Never
+    /// set for a human's HUD, which shows a guided bomb the guided sight.
+    pub ballistic: bool,
 }
 
 /// The solution for the selected station, or `None` when it holds neither an
 /// unguided bomb nor a rocket pod.
 pub fn solve(s: Situation<'_>, ground: impl Fn(f64, f64) -> f64) -> Option<Delivery> {
     let w = &s.station.weapon;
-    let bomb = ballistics::is_bomb(w);
+    let bomb = ballistics::is_bomb(w) || (s.ballistic && super::guided::is_glide_bomb(w));
     let rocket = !bomb && ballistics::is_pod(w) && w.seeker.signature == 0;
     if !bomb && !rocket {
         return None;

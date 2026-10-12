@@ -99,6 +99,12 @@ impl AiActor {
         }
     }
 
+    /// The no-laze decision's radio call has been made (slice ST-G); true if
+    /// there was a call still to make.
+    pub fn told_no_laze(&mut self) -> bool {
+        self.strike.as_mut().is_some_and(|s| s.told_no_laze())
+    }
+
     /// The object the actor is lasing, if it is.
     pub fn lasing(&self) -> Option<u32> {
         self.strike.as_ref().and_then(|s| s.lasing())
@@ -110,9 +116,13 @@ impl AiActor {
         self.ground.as_ref().is_some_and(|g| g.active()) && self.alive() && !self.dummy
     }
 
-    /// The striker is done and wants to go home.
+    /// The striker is done and wants to go home. A no-laze decision not yet
+    /// said on the radio or recorded keeps the strike one step longer, so
+    /// the host sees it before the strike is dropped (slice ST-G).
     pub(super) fn strike_home(&self) -> bool {
-        self.strike.as_ref().is_some_and(|s| s.home())
+        self.strike
+            .as_ref()
+            .is_some_and(|s| s.home() && s.no_laze().is_none_or(|call| call.told))
     }
 
     /// The target the striker is attacking, for its wingmates' allowance.

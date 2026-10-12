@@ -16,10 +16,10 @@
 //! ([`super::release`]) for bombs, rockets and guided bombs, and through
 //! [`AiWings::release_seeker`] for its seeker missiles. With no striker it
 //! costs one scan of the actors and changes nothing.
-use super::AiWings;
+use super::{AiWings, Chatter};
 use tore_sim::ai::strike::{self, Inputs, LaseInputs, LaseSensor, Solution, Store, StoreKind};
 use tore_sim::ai::weapon_service::{Rounds, StationId};
-use tore_sim::attitude::Vector;
+use tore_sim::attitude::{Vector, unit};
 use tore_sim::combat::delivery::Warning;
 use tore_sim::combat::live::{self, GuidedMode, ReleaseAim, StrikeCockpit, StrikeTarget};
 use tore_sim::combat::missiles::{self, Flight, LaunchMode, Motion, seeker};
@@ -47,6 +47,8 @@ pub(super) fn step(
     // The AI-flown aircraft in a cockpit a human left whose tactics want
     // the laser on this step (John's decision 11; ST-INT).
     let mut kept_lasers = std::collections::BTreeSet::new();
+    // Aircraft whose no-laze decision still wants saying on the radio.
+    let mut no_laze = Vec::new();
     for id in strikers {
         let Some(config) = wings.configs.get(&id) else {
             continue;
@@ -57,6 +59,13 @@ pub(super) fn step(
         let stores = strike_stores(config, actor.stations());
         let launcher = crate::combat::launcher(actor.flight());
         let selection = actor.strike().and_then(strike::Strike::selection);
+        if let Some(call) = actor
+            .strike()
+            .and_then(strike::Strike::no_laze)
+            .filter(|call| !call.told)
+        {
+            no_laze.push((id, call.kind == strike::NoLaze::Rtb));
+        }
         let side = state
             .targets
             .iter()
@@ -142,12 +151,16 @@ pub(super) fn step(
                 );
                 (None, None, false, due, true)
             } else {
-                let delivery = state.strike_delivery(id, config, &launcher, &ground);
-                // The cue on the target's ground, as the release test judges
-                // it (slice ST-LV).
+                // A laser bomb the tactics let go by hand is solved on the
+                // bomb equation (slice ST-G).
+                let ballistic = sel.kind == StoreKind::Bomb && guided_kind(w);
+                let delivery = state.strike_delivery(id, config, &launcher, ballistic, &ground);
+                // The sight's cue as the release test judges it: the pipper
+                // where the path meets the terrain, or in LVL the path at the
+                // target's ground (slices ST-LV and ST-G).
                 let cue = delivery
                     .as_ref()
-                    .and_then(|d| d.impact_at(ground(position[0], position[2])));
+                    .and_then(|d| d.cue(ground(position[0], position[2])));
                 let warning = delivery.as_ref().is_some_and(|d| {
                     d.warnings
                         .iter()
@@ -156,8 +169,9 @@ pub(super) fn step(
                 let aim = ReleaseAim {
                     offset_ft: sel.aim_ft,
                     gate_ft: sel.gate_ft,
+                    ballistic,
                 };
-                let sight = guided_kind(w)
+                let sight = (guided_kind(w) && !ballistic)
                     .then(|| state.strike_guided_sight(id, config, &launcher, &ground))
                     .flatten();
                 let (due, reach_ok) = match &sight {
@@ -203,6 +217,15 @@ pub(super) fn step(
         if let Some(actor) = wings.mission.actor_mut(id) {
             actor.set_strike_inputs(inputs);
             actor.set_laser_set(laser_set);
+        }
+    }
+    for (id, rtb) in no_laze {
+        if wings
+            .mission
+            .actor_mut(id)
+            .is_some_and(|actor| actor.told_no_laze())
+        {
+            wings.chat(Chatter::NoLaze { speaker: id, rtb });
         }
     }
     // Every AI-flown cockpit with a laser weapon selected and armed runs the
@@ -382,6 +405,7 @@ pub(super) fn describe(
                 },
                 fuze_arm_s: f64::from(w.damage.fuze_arm_t) / 4.,
                 frag_radius_ft: f64::from(w.damage.collateral_radius.max(0)),
+                falls_free: kind == StoreKind::Laser && guided::is_glide_bomb(w),
             })
         })
         .collect()
@@ -559,14 +583,20 @@ impl AiWings {
     /// One round of a striker's gun run (slice ST-T2): fired along the
     /// barrel from the gun's mount as every AI gun round is (the round, its
     /// tracer and its debit as [`Self::realise`] makes them), with no air
-    /// target to track: the striker aimed the gun's ground cue itself.
-    /// Returns how many it made (0 or 1).
+    /// target to track: the striker flew the gun's ground cue to the target
+    /// itself. The round is laid on the burst's walked aim (slice ST-G):
+    /// the barrel's line turned by the angle between the cue and the target
+    /// (and its lead), within the pilot's fine-tracking reach, plus the
+    /// burst's pointing offset, which walks in onto the target. Returns how
+    /// many it made (0 or 1).
     pub(super) fn release_strafe(
         &mut self,
         event: &tore_sim::ai::mission::LaunchEvent,
         projectiles: &mut Vec<live::Projectile>,
+        targets: &[live::Target],
         weapon: &tore_formats::weapons::Weapon,
         ordinal: u64,
+        ground: &(dyn Fn(f64, f64) -> f64 + Sync),
     ) -> u32 {
         let Some(actor) = self.mission.actor(event.actor) else {
             return 0;
@@ -600,6 +630,7 @@ impl AiWings {
         {
             return 0;
         }
+        let direction = self.strafe_direction(event, targets, weapon, mount, origin, ground);
         let id = self.next_projectile_id;
         self.next_projectile_id = self.next_projectile_id.wrapping_add(1);
         projectiles.push(live::Projectile {
@@ -614,7 +645,7 @@ impl AiWings {
             station: usize::from(event.station.0),
             position: origin,
             previous: origin,
-            direction: basis.forward,
+            direction,
             speed_f8: speed * 256,
             launched_t: launched,
             target: None,
@@ -627,6 +658,72 @@ impl AiWings {
         self.ai_shots.insert(id, event.actor);
         self.realised_launches += 1;
         1
+    }
+
+    /// The direction a striker's gun round leaves in (slice ST-G): the
+    /// barrel's, turned toward the burst's walked aim. The turn is the
+    /// angle, seen from the muzzle, from the gun's ground cue to the target
+    /// (with its lead), held to the pilot's fine-tracking reach
+    /// ([`strike::GUN_TRACK_DEG`]), plus the angle from the target to the
+    /// walked aim (the burst's offset, walking in to nothing over the
+    /// skill's walk-in time). Unturned when the cue, the target or the strike
+    /// cannot be had.
+    fn strafe_direction(
+        &self,
+        event: &tore_sim::ai::mission::LaunchEvent,
+        targets: &[live::Target],
+        weapon: &tore_formats::weapons::Weapon,
+        mount: Vector,
+        origin: Vector,
+        ground: &(dyn Fn(f64, f64) -> f64 + Sync),
+    ) -> Vector {
+        let actor = self.mission.actor(event.actor);
+        let flight = actor.map(|a| a.flight());
+        let barrel = flight.map_or([0., 0., 1.], |f| {
+            tore_sim::attitude::Basis::new(f.yaw, f.pitch, f.bank).forward
+        });
+        let (Some(actor), Some(flight)) = (actor, flight) else {
+            return barrel;
+        };
+        let Some(row) = targets.iter().find(|t| t.id == event.target && t.hp > 0) else {
+            return barrel;
+        };
+        let Some(strike) = actor.strike() else {
+            return barrel;
+        };
+        let launcher = crate::combat::launcher(flight);
+        let Ok(Some((cue, _, _))) =
+            tore_sim::combat::gunsight::ground_cue(weapon, &launcher, mount, ground)
+        else {
+            return barrel;
+        };
+        let level = actor.experience().level;
+        let walked = strike.burst_aim(self.mission.tick(), level);
+        let lead = strike.lead();
+        // The target where the rounds will find it, and the walked aim.
+        let target = [
+            row.position[0] + lead[0],
+            row.position[1],
+            row.position[2] + lead[1],
+        ];
+        let aim = [target[0] + walked[0], target[1], target[2] + walked[1]];
+        let line = |to: Vector| unit(missiles::sub(to, origin));
+        let (to_cue, to_target, to_aim) = (line(cue), line(target), line(aim));
+        // Fine tracking: the cue-to-target turn, held to the reach.
+        let mut track = missiles::sub(to_target, to_cue);
+        let reach = strike::GUN_TRACK_DEG.to_radians();
+        let size = missiles::length(track);
+        if size > reach {
+            track = track.map(|v| v * reach / size);
+        }
+        let pointing = missiles::sub(to_aim, to_target);
+        let turned: Vector = std::array::from_fn(|i| barrel[i] + track[i] + pointing[i]);
+        let length = missiles::length(turned);
+        if length.is_finite() && length > 0. {
+            turned.map(|v| v / length)
+        } else {
+            barrel
+        }
     }
 
     /// Forces AI aircraft `id`'s pass and store (the headless driver's

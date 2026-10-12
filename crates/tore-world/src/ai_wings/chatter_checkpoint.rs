@@ -105,6 +105,11 @@ impl Checkpoint for Chatter {
                 target.save(s, None)?;
                 contact.save(s, None)?;
             }
+            Chatter::NoLaze { speaker, rtb } => {
+                s.writer().write_varint(9);
+                speaker.save(s, None)?;
+                rtb.save(s, None)?;
+            }
             Chatter::Fuel { speaker, level } => {
                 s.writer().write_varint(6);
                 speaker.save(s, None)?;
@@ -173,6 +178,10 @@ impl Checkpoint for Chatter {
                 wing_number: Checkpoint::load(l, None)?,
                 leader: Checkpoint::load(l, None)?,
                 previous_pilot_alive: Checkpoint::load(l, None)?,
+            },
+            9 => Chatter::NoLaze {
+                speaker: Checkpoint::load(l, None)?,
+                rtb: Checkpoint::load(l, None)?,
             },
             8 => {
                 let speaker = Checkpoint::load(l, None)?;
@@ -294,6 +303,14 @@ mod tests {
             Chatter::Line {
                 speaker: 2,
                 line: WingLine::Lasing,
+            },
+            Chatter::NoLaze {
+                speaker: 3,
+                rtb: false,
+            },
+            Chatter::NoLaze {
+                speaker: 3,
+                rtb: true,
             },
             Chatter::Contact {
                 speaker: 2,

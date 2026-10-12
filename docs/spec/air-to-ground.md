@@ -379,7 +379,9 @@ the pin.
   or when the line passes through cloud (the retail 50 percent, release only);
   terrain line of sight (the AC-130's 25 ft rule, spec-derived); the sensor's
   gimbal. Outside them the laser is MASKED, the spot goes away and a laser weapon
-  released then falls ballistic.
+  released then falls ballistic, like a dumb bomb: from the nose with up to 1.5
+  degrees of scatter in heading and pitch, each bomb its own (slice ST-G, John,
+  2026-10-12; before that a laser bomb let go with no spot fell with none).
 - **In flight.** As retail, a weapon already guiding is not broken by weather or
   by MASK; it follows the spot, and loses guidance when the laser is switched off,
   the sight drops, its target dies without a pin, or the spot leaves its 45 degree
@@ -581,9 +583,22 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
 - **Impact point.** Where the selected bomb would hit the ground (or the sea) if
   released now, from the same release position and direction as a real release
   (the aircraft's **nose**, not its flight path) and the same motion (see
-  [bomb motion](#bomb-motion)), over the ground below the release point. It is
-  the **mean** impact: each real bomb is scattered up to 1.5 degrees (retail: 3) in
+  [bomb motion](#bomb-motion)), **at the point where the bomb's path first
+  meets the terrain along its whole fall** (opinionated, John, 2026-10-11, after
+  slice ST-LV: "CCIP pipper: realistic, predict where the bomb meets the
+  terrain along its path, not the ground under the aircraft"). It is the
+  **mean** impact: each real bomb is scattered up to 1.5 degrees (retail: 3) in
   heading and in pitch, so the pipper is where the bombs land on average.
+  **The retail rule, recorded:** the original's predictor takes the height of the
+  ground *under the release point* for the whole fall (`predict_impact_flat`
+  in the code, kept for development drivers), so its pipper laid on a target
+  on a rise falls short of the target by about the rise times the throw over
+  the bomb's fall speed (a 400 ft rise from 5,000 ft at 450 kt: about 430 ft
+  short) and one in a hollow long by as much; a ridge in the way is not
+  seen. TORE follows the path down through the terrain in 0.1 s steps, then
+  finds the crossing to a nanosecond, so over flat ground the point is
+  exactly retail's and over a rise, a hollow or a ridge it is where the bomb
+  really lands. The same point is the AI's CCIP cue.
 - **Pipper.** One glyph centred on the impact point: a 23-pixel ring with twelve
   clock marks and a centre dot. Let R be the record's zone-1 maximum range and d
   the distance from the aircraft to the impact point. Inside 0.4 R the glyph
@@ -637,9 +652,9 @@ designated ground object or a pinned point from any channel, the sight or Enter.
 - **Solution.** The impact point if released now is compared with the
   target. It is the CCIP calculation (same release, same mean path) with the
   fall taken down to the **target's ground**, not to the ground under the
-  aircraft as the CCIP pipper's (agent, slice ST-LV: a target on a 400 ft rise
-  was otherwise bombed some 500 ft short from a 5,000 ft pass, one in a hollow
-  as far beyond it). A **moving** designated object is **led** by the fall: it
+  aircraft (agent, slice ST-LV: a target on a 400 ft rise was otherwise bombed
+  some 500 ft short from a 5,000 ft pass, one in a hollow as far beyond it;
+  the CCIP pipper now does the same by following the path, slice ST-G). A **moving** designated object is **led** by the fall: it
   is compared where it will be when the bomb lands (its velocity times the
   fall, worked out once more at the ground of the led point; agent, slice
   ST-LV, since without it a column driving at 50 ft/s drew the bombs about 900
@@ -967,7 +982,7 @@ the station could not release at all:
 | BAY | A bay aircraft with the bay closed, as today (retail BAY; release refused "Can't deploy, Open weapon bay door") |
 | NO TARGET | A guided weapon that needs a designation has none. Built (slice W1): a JDAM with no designated ground object and no sight point, and an AT-2 with no designated object, read NO TARGET and are not released (the existing `NoTarget` readiness; the plan's `NoGroundTarget` name was not needed) |
 | NO TRACK | A SARH missile's A-G track is lost |
-| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic; MASK when the line is blocked). Built (slice W1): advisories in the guided sight, never readiness codes, so release is not blocked; MASK when the plane's own laser is wanted but masked and no other spot exists |
+| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic, with a dumb bomb's scatter; MASK when the line is blocked). Built (slice W1): advisories in the guided sight, never readiness codes, so release is not blocked; MASK when the plane's own laser is wanted but masked and no other spot exists |
 | OUT OF REACH | A guided bomb's reach does not cover the target. Built (slice W1): the aim lies outside zone 1 or beyond the glide (for the AT-2, also out of the launcher's sight); advisory |
 | OVERFLY | LVL, passed the target |
 | NO EMITTER | A HARM with no emitter to fire at |
@@ -1144,7 +1159,9 @@ strike](ai-strike.md). What it means here:
   numbers](ai-strike.md#skill-and-release-precision)).
 - **AI lasing.** An AI with a designator lases like a player, its spot is an
   ordinary spot (a [buddy spot](#buddy-lasing) for others), an AI laser-bomb
-  carrier drops only on a spot that will exist, and a wingman can be ordered to
+  carrier drops on a spot that will exist or, with none, drops the bomb by hand as
+  an unguided bomb saying "No laze support, dropping manual" ([no laze
+  support](ai-strike.md#no-laze-support)), and a wingman can be ordered to
   "Lase my target" ([lasing](ai-strike.md#lasing)).
 - **Bombing class sets the player's default bomb mode.** A heavy bomber selects
   LVL whatever its attitude; every other class keeps the [H1
@@ -1337,6 +1354,8 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL stem dashed | more than 60 s out | opinionated (agent) |
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
 | LVL impact | the mean path brought down to the target's ground; a moving object led by the fall | opinionated (agent, slice ST-LV) |
+| CCIP impact | where the mean path first meets the terrain along the fall (retail: the ground under the release point for the whole fall) | opinionated (John, 2026-10-11; retail rule kept as `predict_impact_flat`) |
+| Unguided fall of a laser bomb | a laser glide bomb let go with no spot falls on the bomb equation with a dumb bomb's scatter (up to 1.5 degrees in heading and pitch, each bomb its own) and waits for a spot | opinionated (John, 2026-10-12), scatter slice ST-G |
 | Release range scale | x=390, the missile scale | spec-derived |
 | Guided bomb glide | along the nose at 90 percent of the speed; 14 ft/s squared down to 278 ft/s; 6,370 units a second (about 35 degrees a second); no fall while guiding; 60 s life | retail data |
 | Level T for guided bombs: bar | the reach's far edge less 2/5 of the reach; hold releases within 3 ticks of the bar, aim within 10 degrees of the track | opinionated (agent; John asked for release at the bar) |
@@ -1388,10 +1407,12 @@ found these promised or specified items unbuilt:
   the mean, so a single bomb can land beside it. Every bomb takes its own error,
   the first of a mission included.
 - A target on higher or lower ground than the ground under the release point:
-  the CCIP pipper (retail) is worked out over the ground under the release
-  point, so a pipper laid on a target on a rise bombs short and one in a hollow
-  long; the level T and the AI's release judge the fall at the target's ground
-  and hit.
+  retail's pipper was worked out over the ground under the release point, so a
+  pipper laid on a target on a rise bombed short and one in a hollow long.
+  TORE's pipper follows the path to the terrain (opinionated, John,
+  2026-10-11, slice ST-G), so it lies on the target when the bomb will hit it;
+  the level T judges the fall at the target's ground and the AI's CCIP cue is
+  the pipper.
 - Online, the host runs every solution and sends the results; clients draw
   them. Buddy lasing works across players by side.
 

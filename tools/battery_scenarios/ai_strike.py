@@ -549,6 +549,14 @@ def maneuver_problems(run: Run, label: str, want: dict) -> list[str]:
         problems.append(f"{label}: first release on pass {releases[0].get('pass')}, want pass 1")
     if "bursts" in want and len([r for r in releases if "burst" in r]) < want["bursts"]:
         problems.append(f"{label}: {len(releases)} gun bursts, want at least {want['bursts']}")
+    if want.get("damaged"):
+        # A gun run walks its rounds onto the target (ST-G): some hit, and it is hurt.
+        hits = sum(int(i.get("hits", "0")) for i in run.of("IMPACT"))
+        damage = sum(int(i.get("damage", "0")) for i in run.of("IMPACT"))
+        if not hits > 0 or not damage > 0:
+            problems.append(f"{label}: the bursts hit {hits} times for {damage} hit points")
+        if not _target_hurt(run):
+            problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
     return problems
 
 
@@ -727,17 +735,85 @@ def laser_buddy_problems(output: str) -> list[str]:
 
     label = "AI F-14 with nobody lasing"
     problems += consistency_problems(none, label)
-    if none.of("RELEASE"):
-        problems.append(f"{label}: released with no spot assured")
-    names = [n for _, n in _phases(none)]
+    # No laze support (ST-G, John 2026-10-12): it says so and drops the laser bomb by hand as an
+    # unguided bomb, which waits for a spot it never gets.
+    problems += no_laze_manual_problems(none, label)
+    return problems
+
+
+def no_laze_manual_problems(run: Run, label: str) -> list[str]:
+    """A laser bomb carrier with no designator and no spot: it announces "No laze support, dropping
+    manual" (once, in the NOLAZE line the radio call and the replay event mirror) and drops the bomb
+    on the target as an unguided bomb: CCIP/LVL on the ballistic solution, the unguided skill
+    circle and scatter, the fall waiting for a spot that never comes."""
+    problems: list[str] = []
+    calls = run.of("NOLAZE")
+    if len(calls) != 1:
+        return [f"{label}: {len(calls)} NOLAZE lines, want one"]
+    call = calls[0]
+    if (call.get("decision"), call.get("reason")) != ("manual", "no_laze_manual"):
+        problems.append(f"{label}: decided {call.get('decision')} / {call.get('reason')}, want manual")
+    if call.get("words") != "No laze support, dropping manual":
+        problems.append(f"{label}: said {call.get('words')!r}")
+    if not str(call.get("weapon", "")).startswith("GBU"):
+        problems.append(f"{label}: the store is {call.get('weapon')}, want a GBU")
+    releases, impacts = run.of("RELEASE"), run.of("IMPACT")
+    if not releases or not impacts:
+        return problems + [f"{label}: no manual drop ({len(releases)} releases, {len(impacts)} impacts)"]
+    release = releases[0]
+    if release.get("guided") != "Waiting" or release.get("spot_owner") != "none":
+        problems.append(f"{label}: released {release.get('guided')} on {release.get('spot_owner')}, want waiting with no spot")
+    if "aim_ft" not in release or "lead_ft" not in release:
+        problems.append(f"{label}: the release carries no skill aim ({release})")
+    named = (run.of("PROFILE") or [{}])[-1].get("name")
+    if named in (None, "none", "laydown"):
+        problems.append(f"{label}: flew PROFILE {named}, want a bomb pass")
+    miss = number(impacts[0].get("miss_ft"))
+    limit = MISS_FT_MAX[run.skill] + 150.0
+    if not miss <= limit:
+        problems.append(f"{label}: the bomb landed {miss} ft from the target, want at most {limit:.0f}")
+    if "Lase" in [n for _, n in _phases(run)]:
+        problems.append(f"{label}: a carrier with no designator held a spot")
+    return problems
+
+
+def no_laze_rtb_problems(run: Run, label: str) -> list[str]:
+    """A laser store that cannot fall unguided and no spot: "No laze support, RTB", no release."""
+    problems: list[str] = []
+    calls = run.of("NOLAZE")
+    if len(calls) != 1:
+        return [f"{label}: {len(calls)} NOLAZE lines, want one"]
+    call = calls[0]
+    if (call.get("decision"), call.get("reason")) != ("rtb", "no_laze_rtb"):
+        problems.append(f"{label}: decided {call.get('decision')} / {call.get('reason')}, want rtb")
+    if call.get("words") != "No laze support, RTB":
+        problems.append(f"{label}: said {call.get('words')!r}")
+    if run.of("RELEASE"):
+        problems.append(f"{label}: released after deciding to go home")
+    names = [n for _, n in _phases(run)]
+    if "Home" not in names:
+        problems.append(f"{label}: never went home ({names})")
     if "Attack" in names:
-        problems.append(f"{label}: flew a pass with a laser bomb and no spot ({names})")
-    # It gives the bomb up: home (a Strike-role striker), or, ordered onto the target as a CAP
-    # aircraft (the driver's assignment), its order ends and it rejoins (slice ST-O's rule).
-    # (The ACTIVITY parser keeps the first word: "In formation" reads "In".)
-    rejoined = any(a.get("name") == "In" for a in none.of("ACTIVITY")[1:])
-    if "Home" not in names and not rejoined:
-        problems.append(f"{label}: never gave the bomb up and went home or rejoined ({names})")
+        problems.append(f"{label}: flew a pass with a laser missile and no spot ({names})")
+    return problems
+
+
+def no_laze_problems(output: str) -> list[str]:
+    """`ai-strike-no-laze`: an AI F-14 with a GBU-10 and nobody lasing drops it by hand and kills the
+    tank at three skills; an AI F-14 with an AS-14 laser missile says so and goes home."""
+    runs = parse_runs(output)
+    if len(runs) != 4:
+        return [f"{len(runs)} runs finished, want 4"]
+    problems: list[str] = []
+    for run, skill in zip(runs[:3], (0, 1, 2)):
+        label = f"F-14 GBU-10 skill {skill}"
+        problems += consistency_problems(run, label)
+        problems += no_laze_manual_problems(run, label)
+        if run.skill != skill:
+            problems.append(f"{label}: ran at skill {run.skill}")
+    label = "F-14 AS-14"
+    problems += consistency_problems(runs[3], label)
+    problems += no_laze_rtb_problems(runs[3], label)
     return problems
 
 
@@ -866,8 +942,8 @@ def scenarios() -> list[Scenario]:
               want(s, "dive", min_dive=45, min_alt=FLOOR_CLEAR_FT, moving=True)) for s in SKILLS]
     strafe = [(pilot_run("UKR", "QUCOL", "--unit", STRAFE_UNIT, "--aircraft", "a10", "--load", "GAU8",
                          "--seconds", "90", "--skill", str(s), "--profile", "strafe"),
-               want(s, "strafe", spread=GUN_SPREAD_FT, bursts=1, no_egress=True, may_lose=True,
-                    max_alt=4000)) for s in (1, 2)]
+               want(s, "strafe", spread=GUN_SPREAD_FT, bursts=3, no_egress=True, may_lose=True,
+                    max_alt=4000, damaged=True)) for s in SKILLS]
     rockets_popup = [(forced(2, "popup", *rockets), want(2, "popup", spread=ROCKET_SPREAD_FT, no_egress=True))]
     rockets_dive = [(forced(2, "dive", *rockets), want(2, "dive", spread=ROCKET_SPREAD_FT, no_egress=True))]
     snakeye = [(forced(s, "laydown", "--aircraft", "a4e", "--load", "MK82HD", "--seconds", "120"),
@@ -889,10 +965,11 @@ def scenarios() -> list[Scenario]:
         ("ai-strike-dive-steep", steep, 900,
          "An A-4E's Mk 82 dive at every skill: rolled inverted onto a dive steeper than 45 degrees (retail's "
          "roll-in), released above the 3,000 ft floor with a lead on the moving column, within the circle."),
-        ("ai-strike-strafe", strafe, 600,
-         "An A-10's GAU-8 gun run on the column's lighter vehicle at skills 1 and 2: shallow dive, each burst "
-         "on its own seeded aim inside the circle (or the ring), the bursts' middle within the circle plus "
-         "the gun's spread, break-off low."),
+        ("ai-strike-strafe", strafe, 900,
+         "An A-10's GAU-8 gun run on the column's lighter vehicle at every skill: shallow dive, each burst "
+         "opens on its own seeded offset inside the circle (or the ring) and its rounds walk onto the target "
+         "over the skill's walk-in time, the bursts' middle within the circle plus the gun's spread, break-off "
+         "low; the 150 hit point vehicle is hit and hurt at every skill (the walk-in's rounds, John, 2026-10-12)."),
         ("ai-strike-rockets-popup", rockets_popup, 600,
          "An A-4E's LAU-61 pop-up at skill 2: the pull, the roll-in onto the column, rockets on the cue."),
         ("ai-strike-rockets-dive", rockets_dive, 600,
@@ -936,7 +1013,30 @@ def scenarios() -> list[Scenario]:
             notes="Buddy lasing both ways. An AI F-16C, given the wing order's call, lases for a player's F/A-18D "
                   "GBU-10 (the target page would name it Friendly 2-1). An AI F-14 with only a GBU-10 and no "
                   "designator chooses the bomb because a player's F-16C lases the tank, and drops it on that "
-                  "spot; with nobody lasing it does not choose the bomb and goes home.",
+                  "spot; with nobody lasing it says \"No laze support, dropping manual\" and drops the bomb by "
+                  "hand as an unguided bomb (slice ST-G).",
+        ),
+        Scenario(
+            name="ai-strike-no-laze", lane="flight",
+            args=pilot_run("UKR", "QUCOL", "--aircraft", "f14", *gbu10, "--altitude", "12000", "--speed", "450",
+                           "--from", "6", "--seconds", "100", "--skill", "0", "--choose-store"),
+            timeout=900,
+            then=[
+                Step(pilot_run("UKR", "QUCOL", "--aircraft", "f14", *gbu10, "--altitude", "12000", "--speed", "450",
+                               "--from", "6", "--seconds", "100", "--skill", "1", "--choose-store"), timeout=600),
+                Step(pilot_run("UKR", "QUCOL", "--aircraft", "f14", *gbu10, "--altitude", "12000", "--speed", "450",
+                               "--from", "6", "--seconds", "100", "--skill", "2", "--choose-store"), timeout=600),
+                Step(pilot_run("UKR", "QUCOL", "--aircraft", "f14", "--load", "AS14", "--station", "2",
+                               "--count", "2", "--altitude", "12000", "--speed", "450", "--from", "6",
+                               "--seconds", "60", "--skill", "2", "--choose-store"), timeout=300),
+            ],
+            check=no_laze_problems,
+            notes="No laze support (slice ST-G, John 2026-10-12). An AI F-14 with only GBU-10s, no designator "
+                  "and nobody lasing says \"No laze support, dropping manual\" and drops the laser bomb by hand "
+                  "as an unguided bomb (CCIP/LVL on the ballistic solution, the unguided skill circle and "
+                  "scatter, lead) at three skills (the Ace's 10 m circle is rarely met by the F-14's GBU-10 dive: open); with an AS-14 laser missile, which cannot fall unguided, it "
+                  "says \"No laze support, RTB\" and goes home. The radio line and the replay's ai.strike "
+                  "event mirror the NOLAZE line.",
         ),
         Scenario(
             name="ai-strike-driver", lane="flight",

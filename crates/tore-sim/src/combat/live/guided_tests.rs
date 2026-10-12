@@ -285,7 +285,9 @@ fn a_spot_beyond_zone_one_leaves_the_bomb_blind_on_the_bomb_equation() {
             .iter()
             .all(|d| d.abs() < 1e-9)
     );
-    assert!(p.position[1] < ALTITUDE - 60.);
+    // Two seconds of fall is 64 ft; the bomb's scatter (up to 1.5 degrees
+    // up, slice ST-G) can give back 40 of them.
+    assert!(p.position[1] < ALTITUDE - 20.);
 }
 
 #[test]

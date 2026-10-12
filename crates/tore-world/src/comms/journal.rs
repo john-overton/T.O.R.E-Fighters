@@ -648,6 +648,9 @@ pub enum Cause {
     },
     /// The speaker's fuel reached a level: 1 joker, 2 bingo, 3 fumes, 4 out.
     AiFuel { level: u8 },
+    /// The speaker carries laser stores and has no laser support: it drops a
+    /// laser bomb by hand, or (`rtb`) goes home (slice ST-G).
+    NoLaze { rtb: bool },
     /// The mission succeeded (the debrief's evaluator, checked every 4 s).
     MissionAccomplished,
     /// After a success, the player came within 42,240 ft of the home base
@@ -798,6 +801,15 @@ impl fmt::Display for Cause {
                     ", under formation control"
                 } else {
                     ""
+                }
+            ),
+            Cause::NoLaze { rtb } => write!(
+                f,
+                "laser stores and no laze support: {}",
+                if *rtb {
+                    "none can fall unguided, returning to base"
+                } else {
+                    "dropping the laser bombs by hand as unguided bombs"
                 }
             ),
             Cause::AiFuel { level } => write!(

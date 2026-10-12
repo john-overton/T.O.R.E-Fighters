@@ -362,6 +362,96 @@ fn an_ai_gbu10_on_its_own_spot_leaves_guiding_as_a_humans_does() {
 }
 
 #[test]
+fn an_ai_with_no_laze_support_drops_a_laser_bomb_by_hand_like_a_dumb_bomb() {
+    // Slice ST-G; John, 2026-10-12: laser bombs dropped like dumb bombs.
+    let ground = |_: f64, _: f64| 0.;
+    let config = config(gbu10(), false);
+    let mut robot = ai(gbu10(), false);
+    tick(&mut robot, false);
+    // A guided bomb has no bomb sight for a human; the AI that drops it by
+    // hand gets the bomb equation's CCIP.
+    assert!(
+        robot
+            .strike_delivery(0, &config, &launcher(), false, &ground)
+            .is_none()
+    );
+    let solution = robot
+        .strike_delivery(0, &config, &launcher(), true, &ground)
+        .expect("a bomb solution");
+    let ccip = solution.ccip.expect("a CCIP");
+    let release =
+        crate::combat::ballistics::ReleaseState::from_station(&launcher(), &config.stations[0], 0);
+    assert_eq!(
+        ccip.impact,
+        crate::combat::ballistics::predict_impact(release, ground)
+            .unwrap()
+            .position
+    );
+    // Due where that impact meets the aim, judged on the ballistic sight.
+    let tank = robot
+        .targets
+        .iter()
+        .find(|t| t.id == TANK)
+        .unwrap()
+        .position;
+    let onto = ReleaseAim {
+        offset_ft: [ccip.impact[0] - tank[0], ccip.impact[2] - tank[2]],
+        gate_ft: 20.,
+        ballistic: true,
+    };
+    assert!(robot.strike_release_due(0, &config, &launcher(), onto, &ground));
+    let short = ReleaseAim {
+        offset_ft: [onto.offset_ft[0], onto.offset_ft[1] + 500.],
+        ..onto
+    };
+    assert!(!robot.strike_release_due(0, &config, &launcher(), short, &ground));
+    // Let go with no spot, it waits for one and falls on the bomb equation
+    // from the release velocity turned by the dumb bomb's scatter, each
+    // bomb its own.
+    let mut ids = Vec::new();
+    for first_id in [1u32 << 24, (1 << 24) + 7] {
+        let mut next = first_id;
+        let released = robot
+            .release_strike(
+                StrikeRelease {
+                    aircraft: 0,
+                    config: &config,
+                    station: 0,
+                    launcher: launcher(),
+                    incoming: None,
+                },
+                || {
+                    next += 1;
+                    next - 1
+                },
+                &ground,
+            )
+            .unwrap();
+        ids.push(released[0]);
+    }
+    let flights: Vec<_> = ids
+        .iter()
+        .map(|id| robot.guided_flight(*id).expect("a guided flight"))
+        .collect();
+    let launch = crate::combat::guided::release_velocity(&gbu10(), &launcher());
+    let mut turns = Vec::new();
+    for flight in &flights {
+        assert_eq!(flight.mode, GuidedMode::Waiting);
+        let (fall, start) = flight.fall.expect("a ballistic fall");
+        assert_eq!(start, 0);
+        let velocity = fall.velocity(0.);
+        let speed = |v: Vector| v.iter().map(|c| c * c).sum::<f64>().sqrt();
+        assert!((speed(velocity) - speed(launch)).abs() < 1e-6);
+        let along = velocity.iter().zip(launch).map(|(a, b)| a * b).sum::<f64>()
+            / (speed(velocity) * speed(launch));
+        let turn = along.clamp(-1., 1.).acos().to_degrees();
+        assert!(turn > 0. && turn < 2.2, "{turn}");
+        turns.push(turn);
+    }
+    assert_ne!(turns[0], turns[1], "each bomb has its own scatter");
+}
+
+#[test]
 fn an_ai_jdam_stores_its_targets_point_as_a_humans_does() {
     same_release(gbu29(), false, 2, designate);
     // With no target the AI's JDAM is held back, as a human's is.
@@ -389,20 +479,21 @@ fn an_ai_jdam_stores_its_targets_point_as_a_humans_does() {
 }
 
 #[test]
-fn the_ai_judges_a_bomb_at_its_targets_ground_not_the_ground_under_it() {
-    // Slice ST-LV. The tank stands on a 600 ft plateau; the ground under the
-    // aircraft, 12,000 ft short of it, is at sea level. The CCIP pipper (retail)
-    // works the fall out against the ground under the release point, but the
-    // AI's release test brings the bomb down to the aim point's ground.
+fn the_ai_judges_a_bomb_where_its_path_meets_the_terrain_not_the_ground_under_it() {
+    // Slices ST-LV and ST-G. The tank stands on a 600 ft plateau; the ground
+    // under the aircraft, 12,000 ft short of it, is at sea level. Retail's
+    // pipper worked the fall out against the ground under the release point;
+    // the pipper (and so the AI's CCIP cue) now finds where the path meets
+    // the terrain, which is the plateau.
     let ground = |_: f64, z: f64| if z > 8_000. { 600. } else { 0. };
     let bombs = config(mk82(), false);
     let mut robot = ai(mk82(), false);
     tick(&mut robot, false);
     let solution = robot
-        .strike_delivery(0, &bombs, &launcher(), &ground)
+        .strike_delivery(0, &bombs, &launcher(), false, &ground)
         .expect("a bomb solution");
     let ccip = solution.ccip.unwrap();
-    assert_eq!(ccip.impact[1], 0.);
+    assert!((ccip.impact[1] - 600.).abs() < 1e-9);
     let tank = robot
         .targets
         .iter()
@@ -410,19 +501,23 @@ fn the_ai_judges_a_bomb_at_its_targets_ground_not_the_ground_under_it() {
         .unwrap()
         .position;
     let plateau = crate::combat::ballistics::impact_at(ccip.release, 600.).unwrap();
-    assert_eq!(solution.impact_at(600.), Some(plateau));
-    // Shorter than the sea-level impact by about 600 ft x 759 / 620.
-    let short = ccip.impact[2] - plateau.position[2];
-    assert!(short > 600. && short < 800., "{short}");
+    assert!((ccip.impact[2] - plateau.position[2]).abs() < 1e-3);
+    assert_eq!(solution.cue(600.).map(|c| c.position), Some(ccip.impact));
+    // Retail's reading, over the sea-level ground under the release, lands
+    // 600 to 800 ft beyond it.
+    let flat = crate::combat::ballistics::predict_impact_flat(ccip.release, ground).unwrap();
+    let long = flat.position[2] - plateau.position[2];
+    assert!(long > 600. && long < 800., "{long}");
     let aim_at = |point: Vector| ReleaseAim {
         offset_ft: [point[0] - tank[0], point[2] - tank[2]],
         gate_ft: 20.,
+        ballistic: false,
     };
     // Aimed where the bomb really lands (on the plateau): due.
     assert!(robot.strike_release_due(0, &bombs, &launcher(), aim_at(plateau.position), &ground));
-    // Aimed at the pipper's sea-level point, beyond the plateau's edge of
-    // the fall: not due, the bomb would land short of it.
-    assert!(!robot.strike_release_due(0, &bombs, &launcher(), aim_at(ccip.impact), &ground));
+    // Aimed at retail's point, beyond where the bomb lands: not due, the
+    // bomb would land short of it.
+    assert!(!robot.strike_release_due(0, &bombs, &launcher(), aim_at(flat.position), &ground));
 }
 
 #[test]
@@ -435,7 +530,7 @@ fn the_ai_reads_the_same_solutions_and_releases_on_them() {
     tick(&mut person, false);
     tick(&mut robot, false);
     let solution = robot
-        .strike_delivery(0, &bombs, &launcher(), &ground)
+        .strike_delivery(0, &bombs, &launcher(), false, &ground)
         .expect("a bomb solution");
     let human = person.own().delivery.clone().expect("the human's solution");
     assert_eq!(solution.ccip, human.ccip);
@@ -461,11 +556,13 @@ fn the_ai_reads_the_same_solutions_and_releases_on_them() {
     let onto = ReleaseAim {
         offset_ft: [impact[0] - tank[0], impact[2] - tank[2]],
         gate_ft: gate,
+        ballistic: false,
     };
     assert!(robot.strike_release_due(0, &bombs, &launcher(), onto, &ground));
     let near = ReleaseAim {
         offset_ft: [onto.offset_ft[0], onto.offset_ft[1] + gate + 10.],
         gate_ft: gate,
+        ballistic: false,
     };
     assert!(!robot.strike_release_due(0, &bombs, &launcher(), near, &ground));
     assert_eq!(onto.point(tank)[1], tank[1]);
@@ -491,6 +588,7 @@ fn the_ai_reads_the_same_solutions_and_releases_on_them() {
     let wide = ReleaseAim {
         offset_ft: [2_000., -3_000.],
         gate_ft: 0.,
+        ballistic: false,
     };
     assert_eq!(
         robot.strike_release_due(0, &jdams, &launcher(), wide, &ground),

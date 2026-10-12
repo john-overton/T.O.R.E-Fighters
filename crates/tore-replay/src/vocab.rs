@@ -134,6 +134,13 @@ pub mod kind {
     /// AI fell back to a simpler behaviour. Subject: the aircraft. Fields:
     /// `from`, `to`, `reason`.
     pub const AI_FALLBACK: &str = "ai.fallback";
+    /// An AI strike decision (slice ST-G). Subject: the aircraft. Object: the
+    /// target it would attack. Fields: `decision` (Text), `reason` (Text, a
+    /// fixed key: `no_laze_manual` when an aircraft with laser bombs, no
+    /// designator and no spot drops them by hand as unguided bombs,
+    /// `no_laze_rtb` when its laser store cannot fall unguided and it goes
+    /// home), `station` (Int) and `weapon` (Text: the store).
+    pub const AI_STRIKE: &str = "ai.strike";
     /// AI airfield phase changed (taxi, takeoff, landing). Subject: the
     /// aircraft. Fields: `from`, `to`, `airport` (Id), `reason`.
     pub const AI_AIRFIELD_PHASE: &str = "ai.airfield_phase";
@@ -410,6 +417,7 @@ pub mod kind {
         AI_WEAPON_PHASE,
         AI_DEFENSE,
         AI_FALLBACK,
+        AI_STRIKE,
         AI_AIRFIELD_PHASE,
         AI_EJECTION,
         COMMS_ORDER,

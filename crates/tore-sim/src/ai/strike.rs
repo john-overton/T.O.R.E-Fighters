@@ -234,15 +234,25 @@ pub const STRAFE_HEIGHT_FT: f64 = 3_000.;
 pub const STRAFE_DIVE_DEG: f64 = 15.;
 pub const STRAFE_CEASE_FT: f64 = 2_000.;
 pub const STRAFE_BREAK_AGL_FT: f64 = 500.;
+/// A gun run's planned pull-out bottoms out this high over the highest ground
+/// ahead (slice ST-G, fitted, agent): well under a bomb dive's
+/// [`PULL_OUT_CLEARANCE_FT`], since the run breaks off at
+/// [`STRAFE_BREAK_AGL_FT`] and a 1,000 ft clearance left the run unable to
+/// keep the gun on the target below 1,300 ft.
+pub const STRAFE_CLEARANCE_FT: f64 = 200.;
 /// The strafe's roll-in is done once the flight path is within this of the
 /// line to the aim.
 pub const STRAFE_ROLLIN_DONE_DEG: f64 = 5.;
 /// Gun tracking: the flight path turns by this many times the angle between
 /// the gun's ground cue and the burst's aim point.
 pub const GUN_PITCH_GAIN: f64 = 3.;
-/// A burst opens once the gun's ground cue sweeps onto the burst's aim point
-/// within this across the track (or the gate, if larger): about a gun's own
-/// spread at strafing range (fitted, agent).
+/// A pilot's fine tracking (slice ST-G, opinionated, agent): a burst opens,
+/// goes on and is laid exactly on its walked aim while the gun's ground cue
+/// lies within this angle of the target, never less than
+/// [`GUN_GATE_MIN_FT`] across. The flown cue cannot follow a point to a few
+/// feet (the steering is a pitch gain and a heading law); the gunner's last
+/// refinement stands for the rest.
+pub const GUN_TRACK_DEG: f64 = 1.;
 pub const GUN_GATE_MIN_FT: f64 = 25.;
 /// Drag (retarded) bombs fly a low level pass (slice ST-T2, fitted, agent):
 /// never below this height, down to it by this far short of the aim. The
@@ -269,6 +279,10 @@ pub struct Handling {
     /// ([`planned_pitch_floor_deg`]) instead of the general one, so the dive
     /// can be steep and still recover.
     pub planned_dive: bool,
+    /// A gun run's planned dive (slice ST-G): the same floor with the gun
+    /// run's own clearance, [`STRAFE_CLEARANCE_FT`], so it can press the
+    /// attack down to the break-off height.
+    pub strafe: bool,
 }
 
 impl Handling {
@@ -276,10 +290,18 @@ impl Handling {
     pub const PLAIN: Self = Self {
         pull: false,
         planned_dive: false,
+        strafe: false,
     };
     pub const PULL: Self = Self {
         pull: true,
         planned_dive: false,
+        strafe: false,
+    };
+    /// A gun run's tracking (slice ST-G).
+    pub const STRAFE: Self = Self {
+        pull: true,
+        planned_dive: true,
+        strafe: true,
     };
 }
 
@@ -396,6 +418,10 @@ pub struct Store {
     /// sight's LOW and FRAG rules).
     pub fuze_arm_s: f64,
     pub frag_radius_ft: f64,
+    /// A laser store that falls on the bomb equation when it is let go with
+    /// no spot (a laser glide bomb, not a laser missile): it can be dropped
+    /// by hand as an unguided bomb (slice ST-G).
+    pub falls_free: bool,
 }
 
 impl Store {
@@ -574,6 +600,44 @@ pub enum Segment {
     Guide,
 }
 
+/// What an AI with laser stores and no laser support does (John,
+/// 2026-10-12): drop a laser bomb by hand as an unguided bomb, or, with a
+/// laser store that cannot fall unguided (a laser missile), go home.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoLaze {
+    /// "No laze support, dropping manual".
+    Manual,
+    /// "No laze support, RTB".
+    Rtb,
+}
+
+impl NoLaze {
+    /// The reason the replay's `ai.strike` event records.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Manual => "no_laze_manual",
+            Self::Rtb => "no_laze_rtb",
+        }
+    }
+    /// The words on the radio.
+    pub fn words(self) -> &'static str {
+        match self {
+            Self::Manual => "No laze support, dropping manual",
+            Self::Rtb => "No laze support, RTB",
+        }
+    }
+}
+
+/// A no-laze decision (slice ST-G): what was decided, for which laser store
+/// and target, and whether the radio has said so.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoLazeCall {
+    pub kind: NoLaze,
+    pub station: StationId,
+    pub target: Option<u32>,
+    pub told: bool,
+}
+
 /// One striker's strike state (see the module notes).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Strike {
@@ -632,6 +696,9 @@ pub struct Strike {
     laser_rounds: bool,
     /// The AI turned the laser on by hand ([`Strike::laser_set`]).
     laser_set: bool,
+    /// It has laser stores and no laser support: it drops them by hand or
+    /// goes home (slice ST-G).
+    no_laze: Option<NoLazeCall>,
     /// A gun run's bursts (slice ST-T2): the burst being aimed or fired
     /// (from 1 each pass), the tick it opened, and the end of the recovery
     /// after the last one.
@@ -683,6 +750,7 @@ impl Strike {
             designator: false,
             laser_rounds: false,
             laser_set: false,
+            no_laze: None,
             burst: 0,
             burst_open: None,
             recovery_until: 0,
@@ -718,10 +786,34 @@ impl Strike {
     pub fn lead(&self) -> [f64; 2] {
         self.lead_ft
     }
+    /// The gun burst's aim offset now, feet along x and z: the drawn start
+    /// offset while the burst is unopened, walking to nothing over the
+    /// skill's walk-in time once it has opened (slice ST-G).
+    pub fn burst_aim(&self, tick: u64, level: Experience) -> [f64; 2] {
+        let left = match (self.kind, self.burst_open) {
+            (Some(StoreKind::Gun), Some(start)) => walk_in_left(level, tick.saturating_sub(start)),
+            _ => 1.,
+        };
+        [self.aim_ft[0] * left, self.aim_ft[1] * left]
+    }
     /// A gun run's burst being aimed or fired (from 1 each pass), 0 for any
     /// other store.
     pub fn burst(&self) -> u32 {
         self.burst
+    }
+    /// The no-laze decision in force, if any (slice ST-G).
+    pub fn no_laze(&self) -> Option<&NoLazeCall> {
+        self.no_laze.as_ref()
+    }
+    /// The radio has said the no-laze decision; true if there was one to say.
+    pub fn told_no_laze(&mut self) -> bool {
+        match self.no_laze.as_mut() {
+            Some(call) if !call.told => {
+                call.told = true;
+                true
+            }
+            _ => false,
+        }
     }
     /// Done: the mission sends it home.
     pub fn home(&self) -> bool {
@@ -1037,6 +1129,17 @@ impl Strike {
         }
         let inputs = cx.inputs;
         let own = cx.own;
+        // A spot has appeared: the sight guides the laser bombs again.
+        if matches!(
+            self.no_laze,
+            Some(NoLazeCall {
+                kind: NoLaze::Manual,
+                ..
+            })
+        ) && self.spot_somewhere(cx)
+        {
+            self.no_laze = None;
+        }
         let Some(target) = self.pick_target(cx) else {
             // A designator with nothing to strike with waits for its wing's
             // laser carriers: they choose, it lases (slice ST-L).
@@ -1054,12 +1157,17 @@ impl Strike {
             // A laser carrier that wants only a buddy's spot looks for one
             // while it closes on the target, and gives up inside its fire
             // range (slice ST-L).
-            if let Some(point) = self.spot_wait_point(cx)
-                && horizontal(own.position, point) > SPOT_WAIT_RANGES * self.laser_fire_range(cx)
-            {
-                self.enter(Phase::Wait, cx.tick);
-                self.target = None;
-                return;
+            if let Some(point) = self.spot_wait_point(cx) {
+                if horizontal(own.position, point) > SPOT_WAIT_RANGES * self.laser_fire_range(cx) {
+                    self.enter(Phase::Wait, cx.tick);
+                    self.target = None;
+                    return;
+                }
+                // No spot by then: drop by hand, or go home saying so
+                // (slice ST-G).
+                if self.decide_no_laze(cx) {
+                    return;
+                }
             }
             let waiting = cx
                 .picture
@@ -1090,15 +1198,37 @@ impl Strike {
                 .find(|s| s.station == station && s.rounds > 0)
                 .copied(),
             None => self.kept_store(inputs).or_else(|| {
+                let manual = self.manual_on(cx);
+                let view;
+                let stores: &[Store] = if manual {
+                    view = self.manual_view(cx);
+                    &view
+                } else {
+                    &inputs.stores
+                };
                 choose_store(
-                    &inputs.stores,
+                    stores,
                     inputs.class,
                     threat,
                     facts,
-                    spot_assured(cx, target),
+                    spot_assured(cx, target) || manual,
                 )
             }),
         };
+        // A laser bomb dropped by hand is an unguided bomb to the pass: a
+        // slick one (its launch retard is the glide bomb's, not a drag
+        // chute's, so it flies no laydown).
+        let store = store.map(|s| {
+            if s.kind == StoreKind::Laser && self.manual_on(cx) && s.falls_free {
+                Store {
+                    kind: StoreKind::Bomb,
+                    release_speed_share: 1.,
+                    ..s
+                }
+            } else {
+                s
+            }
+        });
         let Some(store) = store else {
             self.enter(Phase::Home, cx.tick);
             self.target = None;
@@ -1185,7 +1315,7 @@ impl Strike {
     fn spot_wait_point(&self, cx: &Context<'_>) -> Option<Vector> {
         let inputs = cx.inputs;
         let laser = self.carries_only_laser(cx);
-        (laser && !inputs.designator && !cx.wing.designator)
+        (laser && !inputs.designator && !cx.wing.designator && !self.manual_on(cx))
             .then(|| {
                 cx.picture
                     .ordered()
@@ -1223,16 +1353,32 @@ impl Strike {
     /// The target the striker attacks next: the ordered one, an
     /// anti-radiation carrier's radars (SAM, then AAA), else the selector's.
     fn pick_target(&self, cx: &Context<'_>) -> Option<u32> {
+        self.pick_target_as(cx, false)
+    }
+
+    /// [`Self::pick_target`], or with `unbound` the target it would pick if
+    /// its laser stores needed no spot (the no-laze decision names it).
+    fn pick_target_as(&self, cx: &Context<'_>, unbound: bool) -> Option<u32> {
         let own = cx.own.position;
-        let stores = &cx.inputs.stores;
+        let manual = self.manual_on(cx);
+        let view;
+        let stores: &[Store] = if manual {
+            view = self.manual_view(cx);
+            &view
+        } else {
+            &cx.inputs.stores
+        };
         let anti_radiation = stores
             .iter()
             .any(|s| s.kind == StoreKind::AntiRadiation && s.rounds > 0);
-        // A laser store is usable with a spot assured: its own designator,
-        // a designator in its wing, or a same-side spot on a target (slice
-        // ST-L).
-        let spot_any =
-            cx.inputs.designator || cx.wing.designator || !cx.inputs.lase.spot_targets.is_empty();
+        // A laser store is usable with a spot assured: its own
+        // designator, a designator in the wing, or a same-side spot on the
+        // target (slice ST-L); or dropped by hand (slice ST-G).
+        let spot_any = cx.inputs.designator
+            || cx.wing.designator
+            || !cx.inputs.lase.spot_targets.is_empty()
+            || manual
+            || unbound;
         let usable_store = has_usable_store(stores, spot_any, cx.inputs.class);
         // A laser carrier with no designator, no designator in its wing and
         // nothing else to drop attacks only what a buddy's spot lies on.
@@ -1241,7 +1387,12 @@ impl Strike {
         let mut candidates = cx
             .picture
             .strike_candidates(own, cx.side, &attackers, &usable);
-        if self.carries_only_laser(cx) && !cx.inputs.designator && !cx.wing.designator {
+        if !manual
+            && !unbound
+            && self.carries_only_laser(cx)
+            && !cx.inputs.designator
+            && !cx.wing.designator
+        {
             for c in &mut candidates {
                 c.usable &= cx.inputs.lase.spot_targets.contains(&c.id.0);
             }
@@ -1256,6 +1407,85 @@ impl Strike {
             }
         }
         targeting::select_strike_target(ObjectId(cx.aircraft), cx.side, &candidates).map(|c| c.id.0)
+    }
+
+    /// The striker drops its laser bombs by hand (slice ST-G): it decided
+    /// to, no spot has appeared since, and a laser store that falls free
+    /// still has rounds.
+    fn manual_on(&self, cx: &Context<'_>) -> bool {
+        matches!(
+            self.no_laze,
+            Some(NoLazeCall {
+                kind: NoLaze::Manual,
+                ..
+            })
+        ) && cx
+            .inputs
+            .stores
+            .iter()
+            .any(|s| s.kind == StoreKind::Laser && s.falls_free && s.rounds > 0)
+    }
+
+    /// A spot is, or will be, on a target: the aircraft's own designator, a
+    /// designator in its wing, or any same-side spot.
+    fn spot_somewhere(&self, cx: &Context<'_>) -> bool {
+        cx.inputs.designator || cx.wing.designator || !cx.inputs.lase.spot_targets.is_empty()
+    }
+
+    /// The stores while it drops laser bombs by hand: the laser stores that
+    /// cannot fall free (laser missiles) are left out.
+    fn manual_view(&self, cx: &Context<'_>) -> Vec<Store> {
+        cx.inputs
+            .stores
+            .iter()
+            .map(|s| Store {
+                rounds: if s.kind == StoreKind::Laser && !s.falls_free {
+                    0
+                } else {
+                    s.rounds
+                },
+                ..*s
+            })
+            .collect()
+    }
+
+    /// The carrier of laser stores only has closed on the target without a
+    /// spot (slice ST-G; John, 2026-10-12): a laser bomb is dropped by hand
+    /// as an unguided bomb, and with no laser store that can fall free it
+    /// goes home, saying "No laze support" either way. Returns whether it
+    /// decided (it needs a target to bomb).
+    fn decide_no_laze(&mut self, cx: &Context<'_>) -> bool {
+        let Some(target) = self.pick_target_as(cx, true) else {
+            return false;
+        };
+        let lasers = || {
+            cx.inputs
+                .stores
+                .iter()
+                .filter(|s| s.kind == StoreKind::Laser && s.rounds > 0)
+        };
+        let Some(store) = lasers().find(|s| s.falls_free).or_else(|| lasers().next()) else {
+            return false;
+        };
+        let kind = if store.falls_free {
+            NoLaze::Manual
+        } else {
+            NoLaze::Rtb
+        };
+        self.no_laze = Some(NoLazeCall {
+            kind,
+            station: store.station,
+            target: Some(target),
+            told: false,
+        });
+        match kind {
+            NoLaze::Manual => self.choose(cx),
+            NoLaze::Rtb => {
+                self.enter(Phase::Home, cx.tick);
+                self.target = None;
+            }
+        }
+        true
     }
 
     /// The release floor of this pass (spec): 3,000 ft or 5,000 ft by
@@ -1292,7 +1522,16 @@ impl Strike {
             self.burst,
             release_circle_ft(cx.experience),
         );
-        self.aim_ft = draw.offset_ft;
+        // The rounds walk in from short of the target, as a burst closing on
+        // it does: an offset beyond it is mirrored back along the track.
+        let mut offset = draw.offset_ft;
+        if let Some(u) = track_unit(cx.velocity) {
+            let along = offset[0] * u[0] + offset[1] * u[1];
+            if along > 0. {
+                offset = [offset[0] - 2. * along * u[0], offset[1] - 2. * along * u[1]];
+            }
+        }
+        self.aim_ft = offset;
         self.inside = draw.inside;
     }
 
@@ -1375,7 +1614,12 @@ impl Strike {
             }
             _ => [0.; 2],
         };
-        let offset = if kind.unguided() {
+        // A gun run is flown onto the target itself (and its lead): the
+        // burst's start offset and its walk-in are the gunner's pointing,
+        // laid on the rounds as they leave ([`Self::burst_aim`]).
+        let offset = if kind == StoreKind::Gun {
+            self.lead_ft
+        } else if kind.unguided() {
             [
                 self.aim_ft[0] + self.lead_ft[0],
                 self.aim_ft[1] + self.lead_ft[1],
@@ -1555,7 +1799,7 @@ impl Strike {
                     pitch_deg: pitch.clamp(-2. * STRAFE_DIVE_DEG, STRAFE_DIVE_DEG),
                     speed: SpeedRequest::Corner,
                     afterburner: false,
-                    handling: Handling::PULL,
+                    handling: Handling::STRAFE,
                     bank_deg: None,
                 }
             }
@@ -1617,6 +1861,7 @@ impl Strike {
                 let handling = Handling {
                     pull: rolling_in || matches!(pass, Pass::Dive | Pass::PopUp),
                     planned_dive: pass == Pass::Dive,
+                    strafe: false,
                 };
                 let heading = if !handling.pull && pushes(own, pitch) {
                     own.heading_deg
@@ -1821,14 +2066,17 @@ impl Strike {
     }
 
     /// A gun run's fire (slice ST-T2; John, 2026-10-11, later: the circle
-    /// applies to each burst). A burst opens when the gun's ground cue sweeps
-    /// onto the burst's drawn aim point, half a burst early so the burst is
-    /// centred on it, across the track within the gate (at least
-    /// [`GUN_GATE_MIN_FT`]), with the cue inside the gun's reach. It fires
-    /// at the gun's cadence for the AI's 0.5 s burst while the cue stays
-    /// inside the circle of the aim point, then recovers 0.5 s (the AI gun
+    /// applies to each burst; slice ST-G, John, 2026-10-12: the rounds walk
+    /// onto the target). The run is flown onto the target and its lead. A
+    /// burst opens once the gun's ground cue lies within the pilot's
+    /// fine-tracking reach of it ([`gun_track_ft`]) and inside the gun's
+    /// range, and fires at the gun's cadence for the AI's 0.5 s burst while
+    /// the cue stays within that reach, then recovers 0.5 s (the AI gun
     /// employment's policy, docs/spec/ai-gun-employment.md) and draws the
-    /// next burst's aim.
+    /// next burst's start. The rounds leave from the burst's drawn offset
+    /// and the aim walks in a straight line onto the target over the
+    /// skill's walk-in time ([`gun_walk_in_s`], [`Self::burst_aim`]): the
+    /// bridge lays each round on that aim, within the same reach of the cue.
     fn fire_gun(
         &mut self,
         cx: &Context<'_>,
@@ -1846,11 +2094,13 @@ impl Strike {
         let range = slant(own.position, cue);
         let in_zone = range >= store.minimum_range_ft
             && (store.maximum_range_ft <= 0. || range <= store.maximum_range_ft);
+        // The cue must lie within the pilot's fine-tracking reach of the
+        // target to fire; the rounds are then laid exactly on the burst's
+        // walked aim (the bridge applies the correction).
+        let near = horizontal(cue, aim) <= gun_track_ft(range);
         match self.burst_open {
             Some(start) => {
-                let on = in_zone
-                    && tick < start + super::gunnery::BURST_TICKS
-                    && horizontal(cue, aim) <= release_circle_ft(cx.experience);
+                let on = in_zone && tick < start + super::gunnery::BURST_TICKS && near;
                 if !on {
                     self.burst_open = None;
                     self.recovery_until = tick + super::gunnery::RECOVERY_TICKS;
@@ -1859,18 +2109,7 @@ impl Strike {
                 }
             }
             None => {
-                if tick < self.recovery_until || !in_zone {
-                    return None;
-                }
-                let u = track_unit(cx.velocity)?;
-                let d = [aim[0] - cue[0], aim[2] - cue[2]];
-                let short = d[0] * u[0] + d[1] * u[1];
-                let across = d[0] * u[1] - d[1] * u[0];
-                let sweep = cx.velocity[0].hypot(cx.velocity[2])
-                    * (super::gunnery::BURST_TICKS as f64 / 120.)
-                    / 2.;
-                let gate = self.gate_ft.max(GUN_GATE_MIN_FT);
-                if short > sweep || short < -gate || across.abs() > gate {
+                if tick < self.recovery_until || !in_zone || !near {
                     return None;
                 }
                 self.burst_open = Some(tick);
@@ -2178,6 +2417,33 @@ pub fn release_circle_ft(level: Experience) -> f64 {
     metres * FEET_PER_METRE
 }
 
+/// The distance within which the gun's cue is near enough the target to
+/// fire and to be laid on the walked aim, at `range_ft` slant:
+/// [`GUN_TRACK_DEG`] of arc, at least [`GUN_GATE_MIN_FT`].
+pub fn gun_track_ft(range_ft: f64) -> f64 {
+    (range_ft * GUN_TRACK_DEG.to_radians().tan()).max(GUN_GATE_MIN_FT)
+}
+
+/// How long a gun burst takes to walk its rounds onto the target, by skill
+/// (John, 2026-10-12; the times are the agent's, opinionated): a burst opens
+/// on its drawn offset point and the aim walks in a straight line onto the
+/// target, so the rounds that follow land on it. An Ace is on in 0.1 s, a
+/// Novice in 0.4 s of a 0.5 s burst.
+pub fn gun_walk_in_s(level: Experience) -> f64 {
+    match level {
+        Experience::Ace => 0.1,
+        Experience::Experienced => 0.2,
+        Experience::Average => 0.3,
+        Experience::Novice => 0.4,
+    }
+}
+
+/// How much of a burst's drawn offset is left `elapsed_ticks` after it
+/// opened: 1 at the start, 0 from the end of the walk-in on.
+pub fn walk_in_left(level: Experience, elapsed_ticks: u64) -> f64 {
+    (1. - elapsed_ticks as f64 / 120. / gun_walk_in_s(level)).clamp(0., 1.)
+}
+
 /// One pass's seeded draw.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AimDraw {
@@ -2338,7 +2604,13 @@ pub fn dive_pull_out_ft(own: &OwnState) -> f64 {
 /// test assumes retail's tight turn radius, only while a striker flies a
 /// planned dive.
 pub fn planned_pitch_floor_deg(own: &OwnState) -> f64 {
-    let margin = own.altitude_msl_ft - own.terrain_ahead_ft - PULL_OUT_CLEARANCE_FT;
+    planned_pitch_floor_with(own, PULL_OUT_CLEARANCE_FT)
+}
+
+/// [`planned_pitch_floor_deg`] for a pull-out that bottoms out `clearance_ft`
+/// over the highest ground ahead (a gun run's is [`STRAFE_CLEARANCE_FT`]).
+pub fn planned_pitch_floor_with(own: &OwnState, clearance_ft: f64) -> f64 {
+    let margin = own.altitude_msl_ft - own.terrain_ahead_ft - clearance_ft;
     let floor = (0..=16)
         .map(|i| -MAX_DIVE_DEG + 5. * f64::from(i))
         .find(|pitch| pull_out_loss_ft(own.speed.0, own.g_limit, *pitch) <= margin)
