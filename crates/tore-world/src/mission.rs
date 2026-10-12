@@ -998,6 +998,24 @@ impl MissionSpec {
                         wing_name(own)
                     ));
                 }
+                GroupObjective::Strike if self.ground_target.is_none() => {
+                    return refuse(format!(
+                        "{} cannot strike: the mission has no ground target",
+                        wing_name(own)
+                    ));
+                }
+                GroupObjective::Strike if own.side == Side::Enemy => {
+                    return refuse(format!(
+                        "{} cannot strike: Quick Mission gives Redfor no ground objectives",
+                        wing_name(own)
+                    ));
+                }
+                GroupObjective::Strike if index == 0 => {
+                    return refuse(format!(
+                        "{} cannot strike on its own: its wingmen strike on your orders",
+                        wing_name(own)
+                    ));
+                }
                 _ => {}
             }
         }
@@ -1373,6 +1391,7 @@ fn objective_words(objective: GroupObjective) -> String {
         GroupObjective::Escort(target) => format!("escort {}", wing_words(target)),
         GroupObjective::SelfDefense => "self-defense".into(),
         GroupObjective::Hold => "hold".into(),
+        GroupObjective::Strike => "strike".into(),
     }
 }
 
@@ -1998,7 +2017,7 @@ impl Parser {
             }
         };
         let objective = match name {
-            "inherit" | "free" | "cap" | "self-defense" | "hold" if !rest.is_empty() => {
+            "inherit" | "free" | "cap" | "self-defense" | "hold" | "strike" if !rest.is_empty() => {
                 return refuse(format!("`{name}` takes no wing"));
             }
             "inherit" => GroupObjective::Inherit,
@@ -2006,6 +2025,7 @@ impl Parser {
             "cap" => GroupObjective::Cap,
             "self-defense" => GroupObjective::SelfDefense,
             "hold" => GroupObjective::Hold,
+            "strike" => GroupObjective::Strike,
             "intercept" => {
                 let target = target()?;
                 if target.side == own.side {
@@ -2028,7 +2048,7 @@ impl Parser {
             }
             other => {
                 return refuse(format!(
-                    "`{other}` is not an objective; the choices are inherit, free, cap, intercept, escort, self-defense and hold"
+                    "`{other}` is not an objective; the choices are inherit, free, cap, intercept, escort, self-defense, hold and strike"
                 ));
             }
         };
@@ -2838,6 +2858,41 @@ mod tests {
         ] {
             assert!(!text.contains(key), "{key}");
         }
+    }
+
+    #[test]
+    fn a_strike_objective_round_trips_and_needs_a_ground_target_and_a_friendly_ai_wing() {
+        let mut spec = MissionSpec::new("KURILE", AircraftId::F18);
+        spec.wings[1] = WingSpec {
+            aircraft: AircraftId::F18,
+            count: 2,
+            skill: Skill::Average,
+        };
+        spec.ground_target = Some("QKSILO".into());
+        spec.objectives[1] = GroupObjective::Strike;
+        spec.validate().unwrap();
+        let text = spec.to_text();
+        assert!(text.contains("\nobjective friendly 2 strike\n"), "{text}");
+        assert_eq!(MissionSpec::from_text(&text).unwrap(), spec);
+        // Without a ground target there is nothing to strike.
+        let mut none = spec.clone();
+        none.ground_target = None;
+        assert!(
+            none.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("no ground target")
+        );
+        // The player's own wing and Redfor's wings do not strike.
+        let mut own = spec.clone();
+        own.objectives = [GroupObjective::Inherit; WINGS];
+        own.objectives[0] = GroupObjective::Strike;
+        assert!(own.validate().is_err());
+        let mut red = spec.clone();
+        red.objectives = [GroupObjective::Inherit; WINGS];
+        red.objectives[3] = GroupObjective::Strike;
+        assert!(red.validate().unwrap_err().to_string().contains("Redfor"));
+        assert!(MissionSpec::from_text("objective friendly 2 strike friendly 1").is_err());
     }
 
     #[test]

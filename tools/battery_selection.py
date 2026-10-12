@@ -163,6 +163,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "air-to-ground: the A-G, IR and HARM pages and designation (--a2g-radar), and the weapons flown through the real trigger by --a2g-run",
         ("a2g-*",),
     ),
+    "ai-strike": (
+        "the AI strike driver (--a2g-run --pilot ai) and the AI's air-to-ground behaviour (slice ST-D onward)",
+        ("ai-strike-*", "ai-sead-*", "ai-wing-*", "qmc-strike-*"),
+    ),
     "windowed-menus": ("captured windows: launches, terrain, previews, sizes", ("menus-window-*",)),
     "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*", "flight-target-camera-*")),
     # Replay lane.
@@ -255,8 +259,9 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-surface-*", "net-redfor-*"),
     ),
     "net-a2g": (
-        "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site",
-        ("net-a2g-*",),
+        "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site; "
+        "a bomber dropped mid-pass whose attack the AI finishes (slice ST-K)",
+        ("net-a2g-*", "net-ai-strike-*"),
     ),
 }
 
@@ -356,7 +361,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers", "flight-powered"), "cheats; Easy flight physics"),
     # tore-sim: AI.
     _r("crates/tore-sim/src/ai/surface*", ("surface",), "the surface engagement controller"),
-    _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio",), "AI"),
+    _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio", "ai-strike"), "AI"),
     # tore-sim: the flight data link's radar table.
     _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link radar table"),
     _r("crates/tore-sim/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights"), "data link sort"),
@@ -367,10 +372,13 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/combat/live/agm*", ("a2g", "surface", "flight-combat"), "the air-to-ground missiles: A-G track, HARM cue, retarget"),
     _r("crates/tore-sim/src/combat/ballistics*", ("a2g", "surface", "flight-combat"), "bomb motion and the impact predictor"),
     _r("crates/tore-sim/src/combat/guided*", ("a2g", "flight-combat"), "guided air-to-ground weapons: glide, cones and reach"),
-    _r("crates/tore-sim/src/combat/live/guided*", ("a2g", "flight-combat"), "the guided air-to-ground weapons' flight and sight"),
+    _r("crates/tore-sim/src/combat/live/guided*", ("a2g", "flight-combat", "ai-strike"), "the guided air-to-ground weapons' flight and sight, for a human's cockpit and an AI striker's"),
+    _r("crates/tore-sim/src/combat/live/cockpit*", ("a2g", "flight-combat", "ai-strike"), "the strike cockpit every human and AI striker shares, and the AI's release gates"),
     _r("crates/tore-sim/src/combat/delivery*", ("a2g", "flight-combat"), "the bomb and rocket sights' delivery solution"),
     _r("crates/tore-sim/src/combat/live/delivery*", ("a2g", "flight-combat"), "the bomb and rocket sights in the live adapter"),
-    _r("crates/tore-sim/src/combat/missiles.rs", ("flight-combat", "flight-damage", "ai-fights", "ai-damage", "surface", "a2g"), "missile motion and prediction"),
+    _r("crates/tore-sim/src/combat/laser*", ("a2g", "flight-combat", "ai-strike"), "the laser designator, its spot and states"),
+    _r("crates/tore-sim/src/combat/live/sighting*", ("a2g", "flight-combat", "ai-strike"), "the targeting sight and laser step, and the spots every aircraft's laser weapons home on"),
+    _r("crates/tore-sim/src/combat/missiles.rs", ("flight-combat", "flight-damage", "ai-fights", "ai-damage", "surface", "a2g", "ai-strike"), "missile motion and prediction, and the terrain line a command launch and a laser spot need"),
     _r("crates/tore-sim/src/combat/*", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
     _r("crates/tore-sim/src/aircraft_systems/*", ("flight-damage", "flight-combat", "ai-damage", "instruments"), "aircraft systems"),
     _r("crates/tore-sim/src/ejection.rs", ("flight-damage",), "ejection"),
@@ -389,15 +397,15 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/lib.rs", FLIGHT_CORE + ("ai-airfield",), "tore-sim public surface"),
     _r("crates/tore-sim/*", FLIGHT_CORE + ("ai-airfield", "flight-combat"), "tore-sim, unmapped file"),
     # tore-world.
-    _r("crates/tore-world/src/ai_wings.rs", AI_CORE + ("radio",), "wing AI"),
-    _r("crates/tore-world/src/ai_wings/outcome.rs", AI_CORE + ("radio", "surface"), "the mission result rule: the surface objectives join it"),
-    _r("crates/tore-world/src/ai_wings/*", AI_CORE + ("radio",), "wing AI"),
+    _r("crates/tore-world/src/ai_wings.rs", AI_CORE + ("radio", "ai-strike"), "wing AI"),
+    _r("crates/tore-world/src/ai_wings/outcome.rs", AI_CORE + ("radio", "surface", "ai-strike"), "the mission result rule: the surface objectives join it"),
+    _r("crates/tore-world/src/ai_wings/*", AI_CORE + ("radio", "ai-strike"), "wing AI"),
     _r("crates/tore-world/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link picture"),
-    _r("crates/tore-world/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights", "link-cues"), "data link picture"),
+    _r("crates/tore-world/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights", "link-cues", "ai-strike"), "data link picture; the order calls"),
     _r("crates/tore-world/src/airfield_radio.rs", ("ai-airfield", "radio", "airports"), "tower radio"),
     _r("crates/tore-world/src/comms.rs", ("radio", "replay-recording", "ai-fights"), "radio and crew calls"),
     _r("crates/tore-world/src/comms/*", ("radio", "replay-recording", "ai-fights"), "radio and crew calls"),
-    _r("crates/tore-world/src/radio_calls.rs", ("radio", "replay-recording", "ai-fights"), "radio calls"),
+    _r("crates/tore-world/src/radio_calls.rs", ("radio", "replay-recording", "ai-fights", "ai-strike"), "radio calls"),
     _r("crates/tore-world/src/crew_voice.rs", ("radio", "replay-live"), "crew voice"),
     _r("crates/tore-world/src/situation.rs", ("radio", "replay-live"), "situation audio"),
     _r("crates/tore-world/src/combat.rs", ("flight-combat", "ai-fights", "ai-damage", "combat-tapes", "surface"), "combat in the world"),
@@ -415,7 +423,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/snapshot.rs", ("replay-recording", "ai-fights"), "snapshots"),
     _r("crates/tore-world/src/mission_layout.rs", ("ai-missions", "menus-creator"), "mission layout"),
     _r(
-        "crates/tore-world/src/mission.rs", ("ai-missions", "menus-creator", "net-fly"),
+        "crates/tore-world/src/mission.rs", ("ai-missions", "menus-creator", "net-fly", "ai-strike"),
         "mission spec; its friendly-fire and loadouts lines and the loadout rule are a networked mission's",
     ),
     _r("crates/tore-world/src/resources.rs", ("ai-missions", "menus-creator", "airports"), "mission resource reads"),
@@ -429,9 +437,14 @@ RULES: tuple[Rule, ...] = (
     # Stage F phase 2's shared types (F2-0); single player never uses them.
     _r("crates/tore-world/src/score.rs", NET_FAMILIES, "score facts (networked games)"),
     _r("crates/tore-world/src/world/revive.rs", NET_FAMILIES + ("ai-lead",), "revival (networked games)"),
+    _r(
+        "crates/tore-world/src/world/handoff.rs",
+        AI_CORE + ("replay-recording", "ai-strike", "net-a2g"),
+        "the handoff between the AI and a human: the takeover of a ground attack (slice ST-K)",
+    ),
     _r("crates/tore-world/src/world/replies.rs", NET_FAMILIES + ("radio",), "wingmen's replies"),
-    _r("crates/tore-world/src/world.rs", AI_CORE + ("replay-recording",), "mission world"),
-    _r("crates/tore-world/src/world/*", AI_CORE + ("replay-recording",), "mission world"),
+    _r("crates/tore-world/src/world.rs", AI_CORE + ("replay-recording", "ai-strike"), "mission world"),
+    _r("crates/tore-world/src/world/*", AI_CORE + ("replay-recording", "ai-strike"), "mission world"),
     _r("crates/tore-world/*", AI_CORE + ("replay-recording",), "tore-world, unmapped file"),
     # tore-formats.
     _r("crates/tore-formats/src/flight_model.rs", FLIGHT_CORE, "flight model data"),
@@ -688,6 +701,9 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
     _r("crates/tore-app/src/blast_preview.rs", ("replay-cli",), "the explosion and cluster burst preview (offscreen renders)"),
     _r("crates/tore-app/src/a2g_radar.rs", ("a2g",), "the ground pages drive"),
+    _r("crates/tore-app/src/a2g_run/ai.rs", ("a2g", "ai-strike"), "the AI strike driver"),
+    _r("crates/tore-app/src/a2g_run.rs", ("a2g", "ai-strike"), "the air-to-ground attack driver and its shared option parser"),
+    _r("crates/tore-app/src/a2g_run/guided.rs", ("a2g", "ai-strike"), "the guided attacks, which the AI strike buddy run shares"),
     _r("crates/tore-app/src/a2g_run*", ("a2g",), "the air-to-ground attack driver"),
     _r("crates/tore-app/src/surface_objective.rs", ("surface", "replay-recording"), "the ground target objective drive, which also records the run"),
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
@@ -767,6 +783,8 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_battery_ai.py", (), "AI scenario tests", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/menus.py", LANE_SMOKE["menus"], "menu scenarios", unit_tests=("test_battery_menus",)),
     _r("tools/test_battery_menus.py", (), "menu scenario tests", unit_tests=("test_battery_menus",)),
+    _r("tools/battery_scenarios/ai_strike.py", ("ai-strike",), "AI strike driver scenarios", unit_tests=("test_battery_ai_strike",)),
+    _r("tools/test_battery_ai_strike.py", (), "AI strike scenario tests", unit_tests=("test_battery_ai_strike",)),
     _r("tools/test_battery_a2g.py", (), "air-to-ground scenario tests", unit_tests=("test_battery_a2g",)),
     _r("tools/battery_scenarios/scripts/*", ("replay-input", "flight-takeoff"), "scripts for windowed runs", windowed=True, unit_tests=("test_replay_checks",)),
     _r("tools/battery_scenarios/_replay_*.py", LANE_SMOKE["replay"], "replay scenarios", unit_tests=("test_replay_checks",)),

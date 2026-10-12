@@ -379,7 +379,9 @@ the pin.
   or when the line passes through cloud (the retail 50 percent, release only);
   terrain line of sight (the AC-130's 25 ft rule, spec-derived); the sensor's
   gimbal. Outside them the laser is MASKED, the spot goes away and a laser weapon
-  released then falls ballistic.
+  released then falls ballistic, like a dumb bomb: from the nose with up to 1.5
+  degrees of scatter in heading and pitch, each bomb its own (slice ST-G, John,
+  2026-10-12; before that a laser bomb let go with no spot fell with none).
 - **In flight.** As retail, a weapon already guiding is not broken by weather or
   by MASK; it follows the spot, and loses guidance when the laser is switched off,
   the sight drops, its target dies without a pin, or the spot leaves its 45 degree
@@ -553,7 +555,9 @@ else HAB (a bomber camera, byte +0x23a), else ARM. Ctrl+M switches CCIP and LVL
 for bombs (and BORE and CUED for missiles, the existing action). CCIP is the
 default. LVL is chosen automatically when a bomb is selected while a ground
 designation exists and the flight path is within 10 degrees of level (fitted),
-and Ctrl+M overrides it. The choice is made at the moment of selection only: a
+and Ctrl+M overrides it. A heavy bomber ([bombing class](ai-strike.md#bombing-class))
+is the exception: it selects LVL whatever its attitude or target and starts in
+LVL (opinionated, John, 2026-10-11). The choice is made at the moment of selection only: a
 dive or a climb afterwards keeps the mode, so the "T" never vanishes mid-run
 (agent). The status word reads CCIP or LVL for an unguided bomb, ARM for a
 rocket pod and every guided store, LCOS or SAFE for a gun and NAV with NAV
@@ -580,9 +584,22 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
 - **Impact point.** Where the selected bomb would hit the ground (or the sea) if
   released now, from the same release position and direction as a real release
   (the aircraft's **nose**, not its flight path) and the same motion (see
-  [bomb motion](#bomb-motion)), over the ground below the release point. It is
-  the **mean** impact: each real bomb is scattered up to 3 degrees in heading and
-  in pitch, so the pipper is where the bombs land on average.
+  [bomb motion](#bomb-motion)), **at the point where the bomb's path first
+  meets the terrain along its whole fall** (opinionated, John, 2026-10-11, after
+  slice ST-LV: "CCIP pipper: realistic, predict where the bomb meets the
+  terrain along its path, not the ground under the aircraft"). It is the
+  **mean** impact: each real bomb is scattered up to 1.5 degrees (retail: 3) in
+  heading and in pitch, so the pipper is where the bombs land on average.
+  **The retail rule, recorded:** the original's predictor takes the height of the
+  ground *under the release point* for the whole fall (`predict_impact_flat`
+  in the code, kept for development drivers), so its pipper laid on a target
+  on a rise falls short of the target by about the rise times the throw over
+  the bomb's fall speed (a 400 ft rise from 5,000 ft at 450 kt: about 430 ft
+  short) and one in a hollow long by as much; a ridge in the way is not
+  seen. TORE follows the path down through the terrain in 0.1 s steps, then
+  finds the crossing to a nanosecond, so over flat ground the point is
+  exactly retail's and over a rise, a hollow or a ridge it is where the bomb
+  really lands. The same point is the AI's CCIP cue.
 - **Pipper.** One glyph centred on the impact point: a 23-pixel ring with twelve
   clock marks and a centre dot. Let R be the record's zone-1 maximum range and d
   the distance from the aircraft to the impact point. Inside 0.4 R the glyph
@@ -633,8 +650,17 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
 level-flight "T" release guide. The design is an agent decision. It needs a
 designated ground object or a pinned point from any channel, the sight or Enter.
 
-- **Solution.** The impact point if released now (as CCIP) is compared with the
-  target. D is the along-track error (target beyond the impact point is
+- **Solution.** The impact point if released now is compared with the
+  target. It is the CCIP calculation (same release, same mean path) with the
+  fall taken down to the **target's ground**, not to the ground under the
+  aircraft (agent, slice ST-LV: a target on a 400 ft rise was otherwise bombed
+  some 500 ft short from a 5,000 ft pass, one in a hollow as far beyond it;
+  the CCIP pipper now does the same by following the path, slice ST-G). A **moving** designated object is **led** by the fall: it
+  is compared where it will be when the bomb lands (its velocity times the
+  fall, worked out once more at the ground of the led point; agent, slice
+  ST-LV, since without it a column driving at 50 ft/s drew the bombs about 900
+  ft behind it from 5,000 ft). A standing object or a pinned point is not
+  led. D is the along-track error (target beyond the impact point is
   positive), C the cross-track error. Time to release is D divided by ground
   speed, assuming the current flight path is held (fitted).
 - **The T.** The stem is the **azimuth steering line**, a vertical line on the
@@ -1000,8 +1026,8 @@ the station could not release at all:
 | BAY | A bay aircraft with the bay closed, as today (retail BAY; release refused "Can't deploy, Open weapon bay door") |
 | NO TARGET | A guided weapon that needs a designation has none. Built (slice W1): a JDAM with no designated ground object and no sight point, and an AT-2 with no designated object, read NO TARGET and are not released (the existing `NoTarget` readiness; the plan's `NoGroundTarget` name was not needed) |
 | NO TRACK | A SARH missile's A-G track is lost |
-| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic; MASK when the line is blocked). Built (slice W1): advisories in the guided sight, never readiness codes, so release is not blocked; MASK when the plane's own laser is wanted but masked and no other visible spot exists, or when a buddy spot is hidden from the shooter |
-| OUT OF REACH | A guided bomb's reach does not cover the target. Built (slice W1): the aim lies outside zone 1 or beyond the glide (for the AT-2, also out of the launcher's sight); advisory |
+| NO LASER, MASK | A laser weapon with no valid spot (it may still be released and falls ballistic, with a dumb bomb's scatter; MASK when the line is blocked). Built (slice W1): advisories in the guided sight, never readiness codes, so release is not blocked; MASK when the plane's own laser is wanted but masked and no other visible spot exists, or when a buddy spot is hidden from the shooter |
+| OUT OF REACH | A guided bomb's reach does not cover the target. Built (slice W1): the aim lies outside zone 1 or beyond the glide; advisory. An AT-2 whose launcher has no clear line to the target reads MASK instead (CL-T) |
 | OVERFLY | LVL, passed the target |
 | NO EMITTER | A HARM with no emitter to fire at |
 
@@ -1145,19 +1171,48 @@ Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Implemented
 | Release position and direction | The station position with the aircraft's attitude: the bomb leaves along the **nose** (heading and pitch), not along the flight path, plus the station slew (zero on every imported bomb station). Successive releases alternate sides of a paired station |
 | Release speed | The aircraft's speed times `launchRetard` / 100, at least the record's initial speed (0), clamped to 0 to 1,466 ft/s for slick, retarded and pack bombs and 0 to 2,933 ft/s for cluster. `launchRetard`: 100 slick, 66 Snakeye, 6-pack and 7-pack, 90 cluster and guided. No ejection push |
 | Path | A vacuum parabola: gravity **32 ft/s squared**, no drag, no terminal speed, no retard after release. The bomb noses over along its velocity; heading stays fixed |
-| Scatter | Each bomb adds a uniform random plus or minus **3.0 degrees** to its heading and to its pitch. **The player's bombs scatter too; this stays the default while John decides** ([decisions pending](#decisions-pending)) |
+| Scatter | Retail: each bomb adds a uniform random plus or minus **3.0 degrees** (546 units) to its heading and to its pitch, the player's too. **TORE: plus or minus 1.5 degrees (273 units), opinionated (John, 2026-10-11)**, for every bomb, player and AI. The earlier "keep the player's retail 3 degrees" note (2026-10-10) is superseded. Each bomb rolls its error from combat's random state mixed with the release tick and the round's number (agent, slice ST-LV): rolled from combat's stream alone, a mission's first bomb, released before anything else had rolled it, took the same error every time (1.25 degrees left and 1.31 degrees low, about 330 ft short of a 5,000 ft level release), which read as a sight that bombs short |
 | Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply, and a bomb that reaches the ground unarmed is a dud ([warnings](#warnings)) |
 | Pods | As [Rockets](#rockets) |
 
 The sight is the same calculation without the scatter. A test checks the mean
 path (scatter off, flat ground, within a foot of the pipper) and the scatter
-bounds (3 degrees) separately.
+bounds (1.5 degrees) separately.
 
 **A guided bomb with no target** (laser bomb after losing its lock, JDAM released
 with none) has neither the bomb flag nor gravity: it holds its heading and pitch
 and slows to its final speed of 278 ft/s (retail data). Whether anything makes it
 fall is an [unknown](#unknowns); the fitted fallback is the bomb parabola from its
 current state.
+
+## The AI and these weapons
+
+Specified 2026-10-11, **not built yet**; the full behaviour is in [AI
+strike](ai-strike.md). What it means here:
+
+- **One cockpit, two pilots.** The ground-attack state (target, selected store,
+  CCIP or LVL, seeker mode, sight, laser) becomes one record per aircraft that a
+  human edits with keys and the AI edits from its strike controller. When the AI
+  takes a plane it continues the human's attack, if it thinks it is safe; a human
+  taking an AI striker finds its target, store, mode and laser.
+- **The AI uses the player's systems.** It flies the pass through control
+  inputs and releases through the same release function, CCIP and LVL
+  solutions, guided reach and lock flow, with the same bomb scatter. There is no
+  retail-style re-aim. For unguided weapons skill sets a release circle round the target, 10 m for an Ace up to
+  85 m for a Novice, with a seeded aim offset inside it ([definition and worked
+  numbers](ai-strike.md#skill-and-release-precision)).
+- **AI lasing.** An AI with a designator lases like a player, its spot is an
+  ordinary spot (a [buddy spot](#buddy-lasing) for others), an AI laser-bomb
+  carrier drops on a spot that will exist or, with none, drops the bomb by hand as
+  an unguided bomb saying "No laze support, dropping manual" ([no laze
+  support](ai-strike.md#no-laze-support)), and a wingman can be ordered to
+  "Lase my target" ([lasing](ai-strike.md#lasing)).
+- **Bombing class sets the player's default bomb mode.** A heavy bomber selects
+  LVL whatever its attitude; every other class keeps the [H1
+  rule](#status-word-and-mode-choice). Both modes stay available on every
+  aircraft ([bombing class](ai-strike.md#bombing-class)).
+- **Wing orders** Alt+E, Alt+R and Alt+F accept a ground target
+  ([orders](ai-strike.md#orders-from-the-flight-lead)).
 
 ## Keys
 
@@ -1329,7 +1384,7 @@ records (ranges, weights, counts) are in the inventory above.
 | Automatic LVL choice | flight path within 10 degrees of level | fitted |
 | Bomb release | along the nose; speed times `launchRetard` / 100; clamp 1,466 ft/s (2,933 cluster) | retail data |
 | Bomb gravity, drag | 32 ft/s squared; none | retail data |
-| Bomb scatter | uniform plus or minus 3.0 degrees (546 units) in heading and pitch, per bomb, player included | retail data; the player default pending John |
+| Bomb scatter | uniform plus or minus 1.5 degrees (273 units) in heading and pitch, per bomb, player included; retail's value is 3.0 degrees (546 units) | opinionated, John 2026-10-11 (retail data: 3.0) |
 | Pack offsets | x 0, -2, +2, -4, +4, -6, +6 ft; y 0, -2, -6, -12, -20, -30, -42 ft | retail data |
 | Pod rockets and cadence | 19, 19, 5, 4 per pod; one per call; 4 a second held (LAU-10 one per press) | retail data |
 | Rocket sink | 32 ft/s squared to an 80 ft/s cap | retail data |
@@ -1342,6 +1397,9 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL marker timing | top of the HUD at 15 s or more, linear to 0 s | opinionated (John, 2026-10-10); numbers agent |
 | LVL stem dashed | more than 60 s out | opinionated (agent) |
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
+| LVL impact | the mean path brought down to the target's ground; a moving object led by the fall | opinionated (agent, slice ST-LV) |
+| CCIP impact | where the mean path first meets the terrain along the fall (retail: the ground under the release point for the whole fall) | opinionated (John, 2026-10-11; retail rule kept as `predict_impact_flat`) |
+| Unguided fall of a laser bomb | a laser glide bomb let go with no spot falls on the bomb equation with a dumb bomb's scatter (up to 1.5 degrees in heading and pitch, each bomb its own) and waits for a spot | opinionated (John, 2026-10-12), scatter slice ST-G |
 | Release range scale | x=390, the missile scale | spec-derived |
 | Guided bomb glide | along the nose at 90 percent of the speed; 14 ft/s squared down to 278 ft/s; 6,370 units a second (about 35 degrees a second); no fall while guiding; 60 s life | retail data |
 | Level T for guided bombs: bar | the reach's far edge less 2/5 of the reach; hold releases within 3 ticks of the bar, aim within 10 degrees of the track | opinionated (agent; John asked for release at the bar) |
@@ -1355,7 +1413,7 @@ records (ranges, weights, counts) are in the inventory above.
 | Cluster splash | 2,200, 2,500, 1,600, 1,500, 2,500 ft at 100 percent | retail data |
 | Fuze radius | 300 ft slick, 100 ft cluster and guided | retail data |
 | Pack sizes | 3, 6, 7 bombs, released in one instant | retail data |
-| AI release tolerance (for the future AI round) | impact within max(1,000 ft, range/8); AI bombs re-aimed within 100 ft of the target | retail data, spec-derived ([AI](ai.md)) |
+| AI release tolerance | impact within max(1,000 ft, range/8) is the retail pass or fail gate; retail re-aims AI bombs within 100 ft of the target, which T.O.R.E does not do (the AI aims unguided weapons into a skill circle instead; smart weapons aim at the target at every skill) | retail data; circle opinionated (John, 2026-10-11), no re-aim opinionated (John, 2026-10-11) ([AI strike](ai-strike.md#skill-and-release-precision)) |
 | Release altitude advice | 3,000 ft lightly defended, 5,000 ft or more defended; about 1 nmi of range per 1,000 ft of drop altitude | retail manual (advice, not enforced) |
 | Stairstep bombing | drop at 65 to 70 percent hit probability | retail manual (advice) |
 
@@ -1389,8 +1447,16 @@ found these promised or specified items unbuilt:
 - A bomb released below its arm time: LOW before the release, and the bomb lands
   a dud (a puff of dirt, no burst or splash).
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.
-- A bomb falls on its parabola with up to 3 degrees of scatter: the pipper marks
-  the mean, so a single bomb can land beside it.
+- A bomb falls on its parabola with up to 1.5 degrees of scatter: the pipper marks
+  the mean, so a single bomb can land beside it. Every bomb takes its own error,
+  the first of a mission included.
+- A target on higher or lower ground than the ground under the release point:
+  retail's pipper was worked out over the ground under the release point, so a
+  pipper laid on a target on a rise bombed short and one in a hollow long.
+  TORE's pipper follows the path to the terrain (opinionated, John,
+  2026-10-11, slice ST-G), so it lies on the target when the bomb will hit it;
+  the level T judges the fall at the target's ground and the AI's CCIP cue is
+  the pipper.
 - Online, the host runs every solution and sends the results; clients draw
   them. Buddy lasing works across players by side.
 
@@ -1445,8 +1511,8 @@ recommendations, with the notes below. This table lists what is still open.
 | Decision 7, Pave pods as stores | Accepted; the retail lock needs only a working signature-1 sensor aboard | Pods on any 0x400 station |
 | Buddy-spot display range and the buddy page for aircraft with no sight | Agent follow-ups to John's 2026-10-10 note | As written above |
 
-Closed since: player bomb scatter stays on (retail's plus or minus 3 degrees, the
-player's bombs included; John, 2026-10-10), and the novelty bombs are Cheat only.
+Closed since: player bomb scatter stays on (John, 2026-10-10; halved from retail's
+plus or minus 3 degrees to 1.5 for every bomb, John, 2026-10-11), and the novelty bombs are Cheat only.
 
 Recorded decisions (all accepted, 2026-10-10): 1 both sights on every bomb
 carrier; 2 the level T with auto-release; 3 the code's CCIP arc rule; 4 JDAMs

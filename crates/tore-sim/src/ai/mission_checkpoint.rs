@@ -189,9 +189,9 @@ impl Checkpoint for AiActor {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
         // `adapter`: per-tick scratch and a report. Its `last_requested` is
         // written by `ControlAdapter::controls` for tests and reporting and
-        // read by nothing in the simulation. Its `gun_aim` is cleared by
-        // `step_actor` before anything else and set again before the only
-        // call to `controls`, in the same step.
+        // read by nothing in the simulation. Its `gun_aim` and
+        // `strike_handling` are cleared by `step_actor` before anything else
+        // and set again before the only call to `controls`, in the same step.
         //
         // `trace` and `journal_memory`: why-records.
         let AiActor {
@@ -241,6 +241,10 @@ impl Checkpoint for AiActor {
             dummy,
             escape_monitor,
             yields,
+            ground,
+            seed,
+            strike,
+            lase,
             trace: _,
             journal_memory: _,
         } = self;
@@ -294,7 +298,16 @@ impl Checkpoint for AiActor {
         escape_monitor.save(s, None)?;
         // The bandits it left alone for a flightmate (slice G4): read by
         // every choice until each lapses.
-        yields.save(s, None)
+        yields.save(s, None)?;
+        // A striker's ground picture (ST-P): the lists, memory, briefing and
+        // threat inputs the next refresh and the strike choice read.
+        ground.save(s, None)?;
+        // A striker's decision seed and strike state (ST-T): the phase, pass
+        // and aim the next step flies on.
+        seed.save(s, None)?;
+        strike.save(s, None)?;
+        // The ground target a wingman was ordered to lase (ST-O).
+        lase.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -354,6 +367,10 @@ impl Checkpoint for AiActor {
             dummy: Checkpoint::load(l, None)?,
             escape_monitor: Checkpoint::load(l, None)?,
             yields: Checkpoint::load(l, None)?,
+            ground: Checkpoint::load(l, None)?,
+            seed: Checkpoint::load(l, None)?,
+            strike: Checkpoint::load(l, None)?,
+            lase: Checkpoint::load(l, None)?,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })

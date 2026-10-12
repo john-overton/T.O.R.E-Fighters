@@ -177,6 +177,7 @@ crate::checkpoint_struct!(Configuration {
     rwr_hardpoint,
     ecm_hardpoint,
     aircraft,
+    strike_class,
     stations,
     hit_points,
     target_category,
@@ -365,6 +366,7 @@ mod tests {
             rwr_hardpoint: None,
             ecm_hardpoint: Some(count + 2),
             aircraft: AircraftId::F18,
+            strike_class: crate::models::strike_class::StrikeClass::Heavy,
             stations: (0..count)
                 .map(|i| Station {
                     weapon: weapon((i as u8) % distinct),

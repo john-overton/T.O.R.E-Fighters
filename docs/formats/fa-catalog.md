@@ -83,6 +83,7 @@ converted from the source feet per second.
 | `internal_gun` | Default store on a station whose store is classified `gun round` below |
 | `default_stores` | Each default store as `RESOURCE:stations`, in station order. Includes sensors (`.SEE`), countermeasures (`.ECM`) and tanks (`.GAS`) |
 | `hud_resource` | HUD resource the record names, empty when it names none. Many types share one cockpit |
+| `ai_script` | The AI program the record binds through `ctName` (`f.BI`, `b.BI`, `h.BI`, `liner.BI`, `large.BI`, `ac130.BI`, `f117.BI`, `moth.BI`), empty when it names none. The bombing-class census reads it ([bombing class](../spec/ai-strike.md#bombing-class)) |
 | `shape` | Main exterior shape resource |
 | `archive` | Source archive |
 

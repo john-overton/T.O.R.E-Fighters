@@ -656,7 +656,8 @@ fn message_lines(entries: &[TimedEvent]) -> Vec<String> {
     lines.into()
 }
 
-/// The events the timeline marks: launches, kills, orders and bookmarks.
+/// The events the timeline marks: launches, kills, orders (an AI strike
+/// decision among them, slice ST-G) and bookmarks.
 fn markers(events: &[TimedEvent]) -> Vec<Marker> {
     events
         .iter()
@@ -664,7 +665,7 @@ fn markers(events: &[TimedEvent]) -> Vec<Marker> {
             let kind = match e.event.kind.as_str() {
                 vocab::kind::WEAPON_LAUNCH => MarkerKind::Launch,
                 vocab::kind::COMBAT_DESTROYED => MarkerKind::Kill,
-                vocab::kind::COMMS_ORDER => MarkerKind::Order,
+                vocab::kind::COMMS_ORDER | vocab::kind::AI_STRIKE => MarkerKind::Order,
                 vocab::kind::PLAYER_BOOKMARK => MarkerKind::Bookmark,
                 _ => return None,
             };

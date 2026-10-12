@@ -26,9 +26,9 @@
 
 use super::super::ballistics::BombMotion;
 use super::{
-    ActorSupport, DecoyRoll, DeviceNote, Effect, EffectKind, FriendlyFire, GunCadence, HitRecord,
-    Kept, LocalizedDamage, Ownship, Projectile, RangeEstimate, Readiness, State, Strike,
-    SystemFaults, Target,
+    ActorSupport, AiCockpit, DecoyRoll, DeviceNote, Effect, EffectKind, FriendlyFire, GunCadence,
+    HitRecord, Kept, LocalizedDamage, Ownship, Projectile, RangeEstimate, Readiness, State, Strike,
+    StrikeCockpit, StrikeTarget, SystemFaults, Target,
 };
 use crate::acoustics::{Emission, Kind as SoundKind};
 use crate::airport::OrientedBox;
@@ -449,16 +449,48 @@ crate::checkpoint_struct!(GunCadence {
 // What a human left set in a cockpit it gave back to the AI (slice FX-J):
 // the sight and the laser step on while the AI flies, so a restore carries
 // them all.
-crate::checkpoint_struct!(Kept {
-    side,
+// The strike cockpit (slice ST-C): one record for a human's, a kept and an
+// AI striker's cockpit.
+impl Checkpoint for StrikeTarget {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        match *self {
+            Self::Object(id) => {
+                s.writer().write_varint(0);
+                id.save(s, None)?;
+            }
+            Self::Point(point) => {
+                s.writer().write_varint(1);
+                point.save(s, None)?;
+            }
+        }
+        Ok(())
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        Ok(match l.reader().read_varint()? {
+            0 => Self::Object(Checkpoint::load(l, None)?),
+            1 => Self::Point(Checkpoint::load(l, None)?),
+            other => return invalid(format!("a strike target has no kind {other}")),
+        })
+    }
+}
+
+crate::checkpoint_struct!(StrikeCockpit {
+    target,
     selected,
     armed,
     launch_mode,
     delivery_mode,
-    ever_loaded,
-    gunship,
     sight,
     laser,
+});
+
+crate::checkpoint_struct!(AiCockpit { side, cockpit });
+
+crate::checkpoint_struct!(Kept {
+    side,
+    cockpit,
+    ever_loaded,
+    gunship,
     picks,
     hud_selection,
     sight_hold,
@@ -477,18 +509,14 @@ crate::checkpoint_struct!(Ownship {
     side,
     external,
     release_readiness,
-    launch_mode,
+    cockpit,
     mounted,
     bore_observation,
     mounted_key,
     range_estimate,
     ammo,
     ever_loaded,
-    selected,
     gunship,
-    sight,
-    laser,
-    armed,
     sensors,
     hud_selection,
     sight_hold,
@@ -520,7 +548,6 @@ crate::checkpoint_struct!(Ownship {
     gun_cadence,
     bay_release,
     bay_hold_until,
-    delivery_mode,
 } shared { config } skip { delivery = None, guided_sight = None, gun_key = false });
 
 impl Checkpoint for State {
@@ -568,6 +595,9 @@ impl Checkpoint for State {
             guided,
             guided_impacts,
             kept,
+            ai_cockpits,
+            ai_laser_armed,
+            ai_laser_on,
             ground_looks,
             parked,
             ground_listing,
@@ -610,6 +640,10 @@ impl Checkpoint for State {
         guided.save(s, None)?;
         guided_impacts.save(s, None)?;
         kept.save(s, None)?;
+        ai_cockpits.save(s, None)?;
+        ai_laser_armed.save(s, None)?;
+        // The AI's own laser want in a cockpit a human left (ST-INT).
+        ai_laser_on.save(s, None)?;
         ground_looks.save(s, None)?;
         parked.save(s, None)?;
         ground_listing.save(s, None)?;
@@ -669,6 +703,9 @@ impl Checkpoint for State {
             guided: Checkpoint::load(l, None)?,
             guided_impacts: Checkpoint::load(l, None)?,
             kept: Checkpoint::load(l, None)?,
+            ai_cockpits: Checkpoint::load(l, None)?,
+            ai_laser_armed: Checkpoint::load(l, None)?,
+            ai_laser_on: Checkpoint::load(l, None)?,
             ground_looks: Checkpoint::load(l, None)?,
             parked: Checkpoint::load(l, None)?,
             ground_listing: Checkpoint::load(l, None)?,

@@ -285,7 +285,9 @@ fn a_spot_beyond_zone_one_leaves_the_bomb_blind_on_the_bomb_equation() {
             .iter()
             .all(|d| d.abs() < 1e-9)
     );
-    assert!(p.position[1] < ALTITUDE - 60.);
+    // Two seconds of fall is 64 ft; the bomb's scatter (up to 1.5 degrees
+    // up, slice ST-G) can give back 40 of them.
+    assert!(p.position[1] < ALTITUDE - 20.);
 }
 
 #[test]
@@ -687,7 +689,11 @@ fn a_buddy_spot_must_be_visible_from_the_shooter_at_lock_and_release() {
             guided::release(
                 &w,
                 Guidance::Laser,
-                s.own(),
+                guided::Releaser {
+                    aircraft: s.own().aircraft,
+                    side: s.own().side,
+                    cockpit: &s.own().cockpit,
+                },
                 0,
                 &launcher(),
                 launcher().position,
@@ -701,7 +707,10 @@ fn a_buddy_spot_must_be_visible_from_the_shooter_at_lock_and_release() {
         assert_eq!(release(&|_, _| 0.).mode, GuidedMode::Guiding);
         assert_eq!(release(&ridge).mode, GuidedMode::Blind, "{}", w.source);
         let sight = guided::sight(
-            s.own(),
+            s.own().aircraft,
+            s.own().side,
+            &s.own().cockpit,
+            &s.own().config,
             &launcher(),
             &guided::SightContext {
                 spots: &spots,
@@ -732,7 +741,11 @@ fn a_command_weapon_has_mask_advisory_and_no_guidance_through_a_ridge() {
     let flight = guided::release(
         w,
         Guidance::Command,
-        s.own(),
+        guided::Releaser {
+            aircraft: s.own().aircraft,
+            side: s.own().side,
+            cockpit: &s.own().cockpit,
+        },
         0,
         &launcher(),
         launcher().position,
@@ -744,7 +757,10 @@ fn a_command_weapon_has_mask_advisory_and_no_guidance_through_a_ridge() {
     );
     assert_eq!(flight.mode, GuidedMode::Blind);
     let sight = guided::sight(
-        s.own(),
+        s.own().aircraft,
+        s.own().side,
+        &s.own().cockpit,
+        &s.own().config,
         &launcher(),
         &guided::SightContext {
             spots: &[],
@@ -772,7 +788,6 @@ fn a_late_first_laser_lock_checks_terrain_but_an_existing_lock_keeps_its_rules()
     s.own_mut().laser.state = LaserState::Lasing;
     s.own_mut().laser.point = Some(point);
     let w = gbu10();
-    let kept = std::collections::BTreeMap::new();
     let ridge = |_: f64, z: f64| {
         if (5000. ..=7000.).contains(&z) {
             7000.
@@ -788,7 +803,7 @@ fn a_late_first_laser_lock_checks_terrain_but_an_existing_lock_keeps_its_rules()
                 &w,
                 &guided::Context {
                     ships: s.ownships(),
-                    kept: &kept,
+                    cockpits: s.cockpits_with(s.ownships()),
                     rows: &[],
                     targets: &s.targets,
                     ground: &ground,

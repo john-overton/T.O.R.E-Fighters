@@ -197,6 +197,7 @@ impl AiWings {
             configs,
             damaged_stations,
             handed_over,
+            handed_tasking,
             fault_random,
             seen_projectiles,
             ai_shots,
@@ -228,6 +229,8 @@ impl AiWings {
             decoy_rolls: _,
             // Setup: worked out from the world's terrain, which never changes.
             ground_ceiling: _,
+            // Setup: the host sets it before every step (slice ST-T2).
+            mission_height_ft: _,
         } = self;
         reports.save(s, None)?;
         slots.save(s, None)?;
@@ -239,6 +242,7 @@ impl AiWings {
         save_shared_map(s, configs)?;
         damaged_stations.save(s, None)?;
         handed_over.save(s, None)?;
+        handed_tasking.save(s, None)?;
         fault_random.save(s, None)?;
         seen_projectiles.save(s, None)?;
         ai_shots.save(s, None)?;
@@ -283,6 +287,7 @@ impl AiWings {
             configs,
             damaged_stations,
             handed_over,
+            handed_tasking,
             fault_random,
             seen_projectiles,
             ai_shots,
@@ -310,6 +315,8 @@ impl AiWings {
             last_output: _,
             decoy_rolls: _,
             ground_ceiling: _,
+            // Setup: the host sets it before every step (slice ST-T2).
+            mission_height_ft: _,
         } = self;
         *reports = Checkpoint::load(l, None)?;
         *slots = Checkpoint::load(l, None)?;
@@ -321,6 +328,7 @@ impl AiWings {
         *configs = load_shared_map(l)?;
         *damaged_stations = Checkpoint::load(l, None)?;
         *handed_over = Checkpoint::load(l, None)?;
+        *handed_tasking = Checkpoint::load(l, None)?;
         *fault_random = Checkpoint::load(l, None)?;
         *seen_projectiles = Checkpoint::load(l, None)?;
         *ai_shots = Checkpoint::load(l, None)?;
@@ -369,7 +377,7 @@ impl AiWings {
             self.device_effectiveness,
             self.configs,
             self.damaged_stations,
-            self.handed_over,
+            (&self.handed_over, &self.handed_tasking),
             self.seen_projectiles,
             self.ai_shots,
             self.last_hp,
@@ -403,6 +411,7 @@ impl AiWings {
             ("configurations", self.configs.len()),
             ("damaged stations", self.damaged_stations.len()),
             ("handed over", self.handed_over.len()),
+            ("handed tasking", self.handed_tasking.len()),
             ("seen projectiles", self.seen_projectiles.len()),
             ("AI shots", self.ai_shots.len()),
             ("last hit points", self.last_hp.len()),
@@ -473,6 +482,15 @@ mod tests {
                 origin: ExperienceOrigin::QuickMission {
                     selected: Experience::Novice,
                 },
+            },
+        );
+        wings.handed_tasking.insert(
+            2,
+            crate::ai_wings::takeover::Tasking {
+                role: tore_sim::ai::engagement::StrikeRole::Strike,
+                order: Some(0x5000_0001),
+                class_order: vec![0x5000_0002, 0x5000_0003],
+                lase: Some(0x5000_0004),
             },
         );
         wings.mission_skill.insert(

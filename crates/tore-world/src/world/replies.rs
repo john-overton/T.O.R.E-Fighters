@@ -349,7 +349,7 @@ impl World {
         if order == PlayerOrder::AttackOnContact {
             return calls::blanket_phrase();
         }
-        let mut phrase = if attack_by_name(order) {
+        let mut phrase = if attack_by_name(order) && !report.ground {
             Phrase::default()
         } else {
             report.radio.iter().fold(Phrase::default(), |phrase, stem| {

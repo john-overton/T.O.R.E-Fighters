@@ -103,6 +103,103 @@ fn addressee_phrase(addressee: Addressee) -> Phrase {
     }
 }
 
+/// What a ground order names: the noun of its call. The recordings are the
+/// ones the retail class order uses ("Attack SAMs", `^SAMS`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Noun {
+    Bandit,
+    Ship,
+    Sam,
+    Aaa,
+    Tank,
+    Vehicle,
+    Structure,
+    Target,
+}
+
+impl Noun {
+    /// The noun for an object class word (`sensors::track::class`, the
+    /// retail class bits: 0x2000 ship, 0x1000 SAM, 0x800 AAA, 0x400 tank, 0x200
+    /// vehicle, 0x100 structure, aircraft 0xc000), the most specific first.
+    pub fn of_class(class: u16) -> Self {
+        const AIRCRAFT: u16 = 0xc000;
+        if class & 0x1000 != 0 {
+            Noun::Sam
+        } else if class & 0x0800 != 0 {
+            Noun::Aaa
+        } else if class & 0x2000 != 0 {
+            Noun::Ship
+        } else if class & 0x0400 != 0 {
+            Noun::Tank
+        } else if class & 0x0200 != 0 {
+            Noun::Vehicle
+        } else if class & 0x0100 != 0 {
+            Noun::Structure
+        } else if class & AIRCRAFT != 0 {
+            Noun::Bandit
+        } else {
+            Noun::Target
+        }
+    }
+
+    /// The singular and plural words and recordings.
+    fn words(self) -> [(&'static str, &'static str); 2] {
+        match self {
+            Noun::Bandit => [("bandit", "^BANDIT"), ("bandits", "^BANDITS")],
+            Noun::Ship => [("ship", "^SHIP"), ("ships", "^SHIPS")],
+            Noun::Sam => [("SAM", "^SAM"), ("SAMs", "^SAMS")],
+            Noun::Aaa => [("triple-A", "^TRIPLEA"), ("triple-A", "^TRIPLAS")],
+            Noun::Tank => [("tank", "^TANK"), ("tanks", "^TANKS")],
+            Noun::Vehicle => [("vehicle", "^VEHICLE"), ("vehicles", "^VEHICLS")],
+            Noun::Structure => [("structure", "^STRUCTR"), ("structures", "^STRUCTS")],
+            Noun::Target => [("target", "^TARGET"), ("targets", "^TARGETS")],
+        }
+    }
+}
+
+/// "Two, attack tank, bearing 270, 15 miles, angels 0": the assignment call
+/// of an order onto one object, with the object's noun.
+pub fn assignment_phrase_of(
+    phrases: &Phrases,
+    addressee: Addressee,
+    geometry: Geometry,
+    noun: Noun,
+) -> Phrase {
+    let (word, stem) = noun.words()[0];
+    let mut call = addressee_phrase(addressee)
+        .raw(", attack ", Some("^ATTACK"))
+        .raw(word, Some(stem))
+        .raw(", bearing ", Some("^BEARING"))
+        .join(bearing_phrase(geometry.bearing));
+    if let Some(miles) = geometry.miles {
+        call = call.raw(", ", None).join(comms::miles(phrases, miles));
+    }
+    call
+}
+
+/// The stems of [`assignment_phrase_of`].
+pub fn assignment_stems_of(
+    phrases: &Phrases,
+    addressee: Addressee,
+    geometry: Geometry,
+    noun: Noun,
+) -> Vec<&'static str> {
+    stems_of(&assignment_phrase_of(phrases, addressee, geometry, noun))
+}
+
+/// "Attack SAMs": the class order's call, which names no place.
+pub fn class_phrase(noun: Noun) -> Phrase {
+    let (word, stem) = noun.words()[1];
+    Phrase::default()
+        .raw("Attack ", Some("^ATTACK"))
+        .raw(word, Some(stem))
+}
+
+/// The stems of [`class_phrase`].
+pub fn class_stems(noun: Noun) -> Vec<&'static str> {
+    stems_of(&class_phrase(noun))
+}
+
 /// "Two, attack bandit, bearing 270, 15 miles, angels 20". The bearing is said
 /// as real-world brevity has it, always three digits one by one ("zero one
 /// six", "two seven zero"); the last digit of the bearing and the height's last
@@ -189,7 +286,9 @@ const STEMS: &[&str] = &[
     "^NUM05D", "^NUM06D", "^NUM07D", "^NUM08D", "^NUM09D", "^NUM10D", "^NUM11D", "^NUM12D",
     "^MILE01", "^MILE02", "^MILE03", "^MILE04", "^MILE05", "^MILE06", "^MILE07", "^MILE08",
     "^MILE09", "^MILE10", "^MILE20", "^MILE30", "^MILES", "^ATTACK", "^BANDIT", "^BANDITS",
-    "^BEARING", "^ANGELS", "^RED", "^BLUE", "^GREEN", "^BLACK", "^WHITE",
+    "^BEARING", "^ANGELS", "^RED", "^BLUE", "^GREEN", "^BLACK", "^WHITE", "^SHIP", "^SHIPS",
+    "^SAM", "^SAMS", "^TRIPLEA", "^TRIPLAS", "^TANK", "^TANKS", "^VEHICLE", "^VEHICLS", "^STRUCTR",
+    "^STRUCTS", "^TARGET", "^TARGETS",
 ];
 
 /// The static name of `stem`, if the call can use it.

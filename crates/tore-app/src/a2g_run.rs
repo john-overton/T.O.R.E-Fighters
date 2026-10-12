@@ -47,6 +47,10 @@
 //! - `strafe` ([`strafe`]): the `release` pass with a store selected and Tab,
 //!   the gun key, held `--hold S` (2 by default); the gun fires, the store
 //!   stays on its station.
+//!
+//! `--pilot ai` ([`ai`], AI strike slice ST-D) takes no `--attack`: the AI
+//! flies the aircraft and the driver only watches and prints `ai-strike:`
+//! lines (`--profile`, `--handback S`, `--order KIND`).
 use crate::{AppResult, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -62,6 +66,8 @@ use tore_world::{
     world::{Seating, TickOutput, World},
 };
 
+mod ai;
+mod ai_render;
 mod ccip;
 mod cluster;
 mod guided;
@@ -104,9 +110,11 @@ pub(crate) struct Options {
     pub render: Option<std::path::PathBuf>,
     record: Option<std::path::PathBuf>,
     verify: bool,
+    /// `--pilot ai` and its options ([`ai`]).
+    ai: ai::Config,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID] [--turn-away S] [--condition clear|cloudy|foggy|night]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID [--buddy-ai]] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff|laydown|strafe] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--choose-store] [--buddy ID] [--render OUT.png --render-at S] [--mission-altitude FT] [--render-scene DIR] [--offset FT] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -137,6 +145,7 @@ fn options() -> AppResult<Options> {
         render: None,
         record: None,
         verify: false,
+        ai: ai::Config::new(),
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -165,6 +174,7 @@ fn options() -> AppResult<Options> {
             "--defenses" => o.defenses = (next()?.parse()?, next()?.parse()?),
             "--surface-seed" => o.seed = next()?.parse()?,
             // The guided kinds' own options, read by `guided`.
+            "--buddy-ai" => {}
             other if guided::OPTIONS.contains(&other) => {
                 next()?;
             }
@@ -175,6 +185,21 @@ fn options() -> AppResult<Options> {
             "--render" => o.render = Some(next()?.into()),
             "--record" => o.record = Some(next()?.into()),
             "--verify-render" => o.verify = true,
+            "--pilot" => o.ai.pilot(&next()?)?,
+            "--profile" => o.ai.set_profile(&next()?)?,
+            "--render-at" => o.ai.render_at = Some(next()?.parse()?),
+            "--handback" => o.ai.handback = Some(next()?.parse()?),
+            "--mode" => o.ai.set_mode(&next()?)?,
+            "--trigger" => o.ai.trigger = true,
+            "--laser" => o.ai.laser = true,
+            "--take-back" => o.ai.take_back = Some(next()?.parse()?),
+            "--choose-store" => o.ai.choose = true,
+            "--order" => o.ai.set_order(&next()?)?,
+            "--order-at" => o.ai.order_at = next()?.parse()?,
+            "--quick-wing" => o.ai.quick_wing = true,
+            "--mission-altitude" => o.ai.mission_altitude = Some(next()?.parse()?),
+            "--render-scene" => o.ai.render_scene = Some(next()?.into()),
+            "--offset" => o.ai.offset_ft = next()?.parse()?,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
@@ -182,8 +207,12 @@ fn options() -> AppResult<Options> {
     let [theater, stem] = positional.as_slice() else {
         return Err(USAGE.into());
     };
-    if o.attack.is_empty() {
+    if o.attack.is_empty() && !o.ai.active {
         return Err(USAGE.into());
+    }
+    o.ai.check(o.skill, o.record.is_some() || o.verify)?;
+    if o.ai.active && o.render.is_some() != o.ai.render_at.is_some() {
+        return Err("with --pilot ai, --render OUT.png and --render-at S go together".into());
     }
     if o.verify && o.record.is_none() {
         return Err("--verify-render checks a --record run".into());
@@ -215,6 +244,9 @@ pub fn run() -> AppResult<()> {
     let o = options()?;
     let mut resources = crate::reel::load_assets()?.theater_resources;
     surface_dump::with_retail_surface(&mut resources)?;
+    if o.ai.active {
+        return ai::run(&o, &resources);
+    }
     if guided::KINDS.contains(&o.attack.as_str()) {
         return guided::run(&o, &resources);
     }
@@ -515,6 +547,23 @@ fn fit_store(
             })
             .ok_or("the aircraft has no air-to-ground station; give --station N")?,
     };
+    // `--station N` one past the last adds an internal bay there, for an
+    // aircraft with no ground station (a heavy for the AI strike driver's
+    // level run, slice ST-T2); it needs `--load`.
+    let added = station == config.stations.len() && o.load.is_some();
+    if added {
+        let name = o.load.as_deref().expect("checked");
+        let bytes = resources
+            .get(name)
+            .ok_or_else(|| format!("missing {name}"))?;
+        config.stations.push(tore_sim::combat::live::Station {
+            weapon: Weapon::parse(name, bytes)?,
+            mount: [0., -4., 0.],
+            count: o.count.unwrap_or(1),
+            internal: true,
+        });
+        println!("a2g-run: added station {station} (an internal bay)");
+    }
     if station >= config.stations.len() {
         return Err(format!("the aircraft has {} stations", config.stations.len()).into());
     }
@@ -538,7 +587,7 @@ fn fit_store(
     if let Some(count) = o.count {
         config.stations[station].count = count;
     }
-    if fitted || o.count.is_some() {
+    if fitted || added || o.count.is_some() {
         let (side, friendlies) = (own.side, own.friendlies.clone());
         state.remove_ownship(owner);
         let mut own = Ownship::new(owner, side, config, true)?;

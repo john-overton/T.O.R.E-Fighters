@@ -7,7 +7,14 @@ use crate::{
     WorldResult, ai_wings, combat, comms,
     seats::{PlaneId, SeatCommand, SeatId},
 };
-use tore_sim::{ai::wing::PlayerOrder, cheats::Cheats, combat::live::Command as Live};
+use tore_sim::{
+    ai::wing::PlayerOrder,
+    cheats::Cheats,
+    combat::{
+        live::{self, Command as Live},
+        missiles::TargetRole,
+    },
+};
 
 /// A change to the mission itself, applied at the start of the tick before
 /// any seat's commands. In single player the player gives them, from the
@@ -424,6 +431,62 @@ impl World {
         self.comms.send(now, call, &hearers);
     }
 
+    /// What an order from `plane` can name on the ground (slice ST-O): every
+    /// standing ground object that has a side, the object its targeting sight
+    /// tracks or its laser spot is on, and the point the sight is pinned on.
+    /// Only the orders that can go to the ground read it.
+    pub(crate) fn ground_aim(&self, plane: PlaneId, order: PlayerOrder) -> ai_wings::GroundAim {
+        if !matches!(
+            order,
+            PlayerOrder::EngageMyTarget
+                | PlayerOrder::EngageFromFormation
+                | PlayerOrder::EngageIrLaser
+                | PlayerOrder::EngageClass
+                | PlayerOrder::LaseMyTarget
+        ) {
+            return ai_wings::GroundAim::default();
+        }
+        let state = &self.combat.state;
+        let facts = state
+            .targets
+            .iter()
+            .filter(|t| {
+                t.hp > 0
+                    && t.side != live::NO_SIDE
+                    && (t.role == TargetRole::Surface || !t.airborne)
+            })
+            .map(|t| ai_wings::GroundFact {
+                id: t.id,
+                side: t.side,
+                class: t.category,
+                position: t.position,
+            })
+            .collect();
+        let (sight, pin) = state.ownship(plane.0).map_or((None, None), |own| {
+            let tracked = own.sight.as_ref().and_then(|sight| sight.target());
+            let spot = own.laser.lasing().then_some(own.laser.target).flatten();
+            let pin = own
+                .sight
+                .as_ref()
+                .filter(|sight| sight.target().is_none())
+                .and_then(|sight| sight.held_point());
+            (tracked.or(spot), pin)
+        });
+        let mut spots: Vec<(live::Side, u32)> = state
+            .laser_spots()
+            .into_iter()
+            .filter_map(|spot| spot.target.map(|on| (spot.side, on)))
+            .collect();
+        spots.sort_unstable_by_key(|(side, on)| (side.0, *on));
+        spots.dedup();
+        ai_wings::GroundAim {
+            facts,
+            sight,
+            pin,
+            spots,
+        }
+    }
+
     /// An Alt-key order from the seat `seat`, flying `plane` from `cockpit`.
     /// It goes to the AI wings as that plane's order, to its own wing,
     /// addressed as the seat's recipient says, with the aircraft the seat has
@@ -484,11 +547,14 @@ impl World {
             .iter()
             .find(|member| member.id == plane.0)
             .map(|member| member.colour);
+        // What the order can name on the ground, read from the seat's cockpit
+        // (slice ST-O).
+        let ground = self.ground_aim(plane, order);
         // A wingman that cannot see the target itself still takes an Engage
         // order when a flightmate's track of it is in the picture (G3b).
         let datalink = &self.datalink;
         let result = self.ai_wings.as_mut().map(|wings| {
-            wings.command_linked(
+            wings.command_aimed(
                 plane.0,
                 order,
                 selected,
@@ -496,6 +562,7 @@ impl World {
                 site.as_ref(),
                 flight,
                 &|target| datalink.tracked(plane.0, target),
+                &ground,
             )
         });
         let outcome = match result {

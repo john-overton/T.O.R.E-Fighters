@@ -405,3 +405,207 @@ fn a_laser_bomb_guides_on_across_a_drop_and_a_rejoin() {
     );
     assert!(rig.host.world().combat.state.guided_impact(plane).is_some());
 }
+
+/// Slice ST-K (docs/spec/ai-strike.md, "Takeover and handback"): a laser
+/// bomber (the synthetic F/A-18D's pod and two GBU-10s, a Cheat loading)
+/// sets up its pass at the column from 5,000 ft: the A-G page and the bomb,
+/// the nearest ground object designated (Ctrl+X, Easy targeting), which the
+/// sight tracks, LVL (Ctrl+M) and the laser on by hand (Ctrl+L twice: the
+/// automatic laser off by hand, then on by hand). Its game stalls for good
+/// before the release. The host drops it and the AI flies the same pass:
+/// the same target and bomb in LVL with the laser on by hand, the bomb
+/// guiding on it to the end. The game joins again with its token and finds
+/// its cockpit as it left it, one bomb fewer.
+#[test]
+fn a_laser_pass_dropped_mid_run_is_finished_by_the_ai_and_found_on_the_rejoin() {
+    use crate::settings::{LoadoutRule, number};
+    use tore_sim::combat::delivery::DeliveryMode;
+    use tore_sim::combat::live::{Command as Combat, GuidedMode};
+    use tore_sim::combat::sight::SightMode;
+    let mut spec = crate::wire::readout_a2g_tests::a2g_spec();
+    spec.loadout = None;
+    spec.wings[0].count = 2;
+    spec.start = tore_world::mission::Start::Airborne { altitude_ft: 5_000 };
+    spec.cheats.easy_targeting = true;
+    let mut import = tore_world::test_support::surface::routed_resources();
+    tore_world::test_support::resources::add_a2g_stores(&mut import);
+    let mut rig = Rig::with_import(spec, LinkConfig::one_way(10 * MS), 21, import, |config| {
+        config
+            .settings
+            .push((number::LOADOUTS, LoadoutRule::Any.value()));
+        // The mission waits out the AI's pass with nobody connected.
+        config.empty_timeout = Duration::from_secs(300);
+    });
+    let script = |run: bool| -> super::tests::Script {
+        let mut level = level_script();
+        let mut since = None;
+        let mut given = 0;
+        Box::new(move |now, client, picture| {
+            let mut controls = level(now, client, picture);
+            if !run || client.prediction().is_none() {
+                return controls;
+            }
+            let at = now.saturating_sub(*since.get_or_insert(now));
+            let due = [0, 500, 1_000, 1_500, 2_000];
+            if given < due.len() && at >= Duration::from_millis(due[given]) {
+                controls.commands.extend(match given {
+                    0 => vec![
+                        SeatCommand::Combat(Combat::ToggleAirGround),
+                        SeatCommand::CycleWeapon { forward: true },
+                    ],
+                    1 => vec![SeatCommand::Combat(Combat::NearestGround)],
+                    2 => vec![SeatCommand::Combat(Combat::ToggleSeekerMode)],
+                    _ => vec![SeatCommand::Combat(Combat::ToggleLaser)],
+                });
+                given += 1;
+            }
+            controls
+        })
+    };
+    let viper = rig.join(
+        |c| {
+            c.callsign = "Viper".into();
+            c.auto_ready = false;
+        },
+        script(true),
+    );
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.players[viper].client.lobby().is_some()
+    }));
+    rig.players[viper].client.take_any_slot();
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.players[viper]
+            .client
+            .lobby()
+            .and_then(|l| l.me())
+            .is_some_and(|me| me.slot.is_some())
+    }));
+    rig.players[viper]
+        .client
+        .send_loadout(Some(tore_world::test_support::resources::a2g_loadout()));
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.players[viper]
+            .client
+            .lobby()
+            .and_then(|l| l.me())
+            .is_some_and(|me| me.loadout)
+    }));
+    rig.players[viper].client.set_ready(true);
+    assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(viper)));
+    let plane = rig.players[viper].client.seat().map(|(_, p)| p.0).unwrap();
+    rig.run(Duration::from_secs(4));
+    // What the player set up, as the host holds it.
+    let left = {
+        let own = rig.host.world().combat.state.ownship(plane).unwrap();
+        let target = own.designated().expect("Ctrl+X designates");
+        assert_eq!(own.delivery_mode, DeliveryMode::Level);
+        assert_eq!(own.laser.manual, Some(true), "on by hand");
+        // (It lases once the target is inside the pod's reach.)
+        assert_eq!(own.sight.map(|s| s.mode), Some(SightMode::Tracked(target)));
+        (
+            target,
+            own.selected,
+            own.armed,
+            own.launch_mode,
+            own.sensors.air_ground(),
+            own.rounds(own.selected),
+        )
+    };
+    let (target, selected, armed, launch, air_ground, rounds) = left;
+    assert_eq!(rounds, 2);
+    assert!(
+        rig.host
+            .world()
+            .combat
+            .state
+            .guided_flights()
+            .next()
+            .is_none(),
+        "nothing released yet"
+    );
+    let token = rig.players[viper].client.token().unwrap().token;
+    rig.players[viper].stalled = true;
+    assert!(rig.run_until(Duration::from_secs(8), |r| r.host.peers_for_test() == 0));
+    // The AI flies the pass with the human's cockpit: released on the same
+    // target, the mode and the hand setting kept every step, the bomb
+    // guiding to its end.
+    let mut bomb = None;
+    let mut modes = Vec::new();
+    let mut kept_ok = true;
+    assert!(
+        rig.run_until(Duration::from_secs(150), |r| {
+            let state = &r.host.world().combat.state;
+            if let Some(kept) = state.kept(plane) {
+                kept_ok &= kept.delivery_mode == DeliveryMode::Level
+                    && kept.laser.manual == Some(true)
+                    && kept.selected == selected;
+            }
+            if bomb.is_none() {
+                bomb = state
+                    .guided_flights()
+                    .find(|(_, f)| f.owner == plane)
+                    .map(|(id, _)| id);
+            }
+            match bomb.and_then(|id| state.guided_flight(id)) {
+                Some(flight) => {
+                    modes.push(flight.mode);
+                    false
+                }
+                None => bomb.is_some(),
+            }
+        }),
+        "the AI released and the bomb ended"
+    );
+    assert!(kept_ok, "the AI kept the human's mode and laser");
+    let locked = modes
+        .iter()
+        .position(|m| *m == GuidedMode::Guiding)
+        .expect("the bomb guided");
+    assert!(modes[locked..].iter().all(|m| *m == GuidedMode::Guiding));
+    assert!(rig.host.world().combat.state.guided_impact(plane).is_some());
+    // The rejoin: the cockpit as left, one bomb fewer.
+    rig.run(Duration::from_millis(200));
+    let back = rig.join(
+        move |c| {
+            c.callsign = "Viper".into();
+            c.token = Some(token);
+        },
+        script(false),
+    );
+    assert!(rig.run_until(Duration::from_secs(4), |r| r.seated(back)));
+    assert_eq!(
+        rig.players[back].client.seat().map(|(_, p)| p.0),
+        Some(plane)
+    );
+    let own = rig.host.world().combat.state.ownship(plane).unwrap();
+    assert_eq!(
+        (
+            own.selected,
+            own.armed,
+            own.delivery_mode,
+            own.launch_mode,
+            own.laser.manual,
+            own.sensors.air_ground()
+        ),
+        (
+            selected,
+            armed,
+            DeliveryMode::Level,
+            launch,
+            Some(true),
+            air_ground
+        )
+    );
+    assert_eq!(own.rounds(selected), rounds - 1);
+    let standing = rig
+        .host
+        .world()
+        .combat
+        .state
+        .targets
+        .iter()
+        .any(|t| t.id == target && t.hp > 0);
+    if standing {
+        assert_eq!(own.designated(), Some(target));
+    }
+}

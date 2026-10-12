@@ -196,6 +196,9 @@ pub struct AiSetup {
     pub flight_model: ai_wings::AiFlightModel,
     pub group_objectives: [tore_sim::ai::engagement::GroupObjective; 6],
     pub group_must_survive: [bool; 6],
+    /// The mission names a ground target, which decides which wings strike
+    /// ([`ai_wings::AiWings::apply_strike_roles`]).
+    pub ground_target: bool,
     /// The loadouts the players chose for planes of an open mission, by
     /// plane, checked ([`crate::mission::LoadoutSpec::check_for_plane`]);
     /// every other AI aircraft carries its standard load.
@@ -500,6 +503,7 @@ impl World {
             bridge.set_flight_model(ai.flight_model)?;
             bridge.apply_mission_preset(ai.preset, lead.position);
             bridge.apply_group_objectives(&ai.group_objectives, lead.position);
+            bridge.apply_strike_roles(&ai.group_objectives, ai.ground_target);
             bridge.apply_group_survival(&ai.group_must_survive);
             if open {
                 // Every plane carries its objectives for whoever flies it
@@ -1110,6 +1114,9 @@ impl World {
             // The humans' locked targets (G2): the data link's picture of
             // what the humans attack, read after combat and before the step.
             bridge.set_link(&self.datalink);
+            // A heavy striker's floor reads the mission's airborne height
+            // (slice ST-T2).
+            bridge.set_mission_height(self.setup.mission.map(|(altitude, _)| altitude));
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             // The A-G page lists aircraft only in an airfield sequence.
             for (id, attached) in bridge.airfield_attachment() {

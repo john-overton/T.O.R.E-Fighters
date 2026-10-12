@@ -448,12 +448,12 @@ drift; the coders, not this table, are the record.
 | Area | Root | Types to code (about) | Typical size, 15 against 15 | Notes |
 | --- | --- | --- | --- | --- |
 | World shell | `World`, `Roster`, `Cockpit`, `Environment`, `airport::Service` | 15 | under 5 KB | Roster, cockpits and airport service fully private; only the weather clock, its fog random stream and fog tints change in `Terrain` |
-| Combat core | `live::State`, `Ownship`, `Target`, `Projectile`, missile `Flight` and `Seeker`, `Ledger`, `rewind::History`, the kept cockpits of aircraft the AI flies for a human (`Kept`, slice FX-J) | 60 | 100 to 500 KB | `World::tick` is combat's tick. Two xorshift streams. A round with no weapon record of its own reads its owner's station, so ownships load before projectiles are used |
+| Combat core | `live::State`, `Ownship`, `Target`, `Projectile`, missile `Flight` and `Seeker`, `Ledger`, `rewind::History`, the kept cockpits of aircraft the AI flies for a human (`Kept`, slice FX-J), the AI strikers' strike cockpits (`AiCockpit`, slice ST-C; ownships and kept cockpits code theirs as one `StrikeCockpit`) the set of AI-flown aircraft with a laser weapon armed (slice ST-L) and the set of AI-flown aircraft in a cockpit a human left whose tactics want the laser on (after it, ST-INT) | 60 | 100 to 500 KB | `World::tick` is combat's tick. Two xorshift streams. A round with no weapon record of its own reads its owner's station, so ownships load before projectiles are used |
 | Combat effects | `Combat` wrapper, `Smoke`, `Devices`, `Piece`, `Mark`, `RenderHistory` | 30 | a few KB; up to MBs of contrail and flare puffs at worst | Presentation, but read back by the next tick or the picture. The one stored `f32` is a flare puff's opacity |
 | Records and sensors | `Weapon`, `live::Configuration`, `SensorProfiles`, `Sensors`, `ThreatService`, `RunwayView` | 40 | 10 to 30 KB shared | Shared by ownships and AI actors |
-| AI mission | `AiMission`, `AiActor` and its airfield sequence, memory, threats, defense, assignment | 45 | 100 to 200 KB | Actors are inserted and removed by handoff. Two random streams per actor besides the controller's |
+| AI mission | `AiMission`, `AiActor` and its airfield sequence, memory, threats, defense, assignment, a striker's ground picture (with a class order's targets, slice ST-O), its decision seed and strike state (`Strike`, slice ST-T; with the human's attack it continues after a give-back, `Takeover`, slice ST-K; the lase in progress, whether it has a designator and laser rounds, and whether the AI turned its laser on, slice ST-L; a gun run's burst, burst opening and recovery, the cue's sideways trim and last pass, and the height it was tasked at, slice ST-T2; new enum values: passes `Orbit` 5 and `StandOff` 6, store `Gun` 8 (the gunship's linked guns and a striker's strafing gun) and segment `Guide`, slice ST-F, passes `Laydown` 7 and `Strafe` 8, slice ST-T2, phase `Lase`, slice ST-L; the no-laze decision, its store, target and whether the radio has said it, `NoLaze` and `NoLazeCall`, slice ST-G) and the object it was ordered to lase (slice ST-O) | 45 | 100 to 200 KB | Actors are inserted and removed by handoff. Two random streams per actor besides the controller's |
 | AI controller | `Controller` and its manoeuvre, intents, gunnery, formation guidance, weapon service | 40 | about 20 KB | Already `Clone + PartialEq`, with traces and draw logs outside equality |
-| AI wings | `AiWings`, its reports, chatter watch, result trackers | 12 | a few KB, plus configurations as shared records | Two random streams; `ai_shots` grows with every AI round in the default rules: code it, measure it |
+| AI wings | `AiWings`, its reports, chatter watch, result trackers, the air-to-ground tasking kept for each aircraft a human flies (`handed_tasking`, slice ST-K, after the handed-over skills: role, ordered target, class order targets and lase order) | 12 | a few KB, plus configurations as shared records | Two random streams; `ai_shots` grows with every AI round in the default rules: code it, measure it |
 | Radio | `Comms`, `Radio`, `WingStatus`, `AirfieldRadio`, `CrewVoice` | 16 | under 1 KB idle | One random stream; seven `&'static str` cooldown keys |
 | Data link and score | `DataLink`, `score::Recorder` | 20 | under 1 KB | No random stream. The link is rebuilt from the world every tick except the pictures (every 30th tick), the locks' first-held ticks and the assignments, so it is coded whole. The wing, side and player-order types belong to `tore-sim`, so their coders are functions |
 
@@ -464,7 +464,8 @@ every `DecisionRandom`'s draw log, `Comms::journal`, `Channel::recent`,
 `AiWings::{last_output, decoy_rolls, formation_trace, threat_reports}`,
 `Reports::{notes, queued, activity}` (journal entries only),
 `live::State::decoy_log`, `Ledger::outcomes`. Scratch:
-`Cockpit::previous_flight`, `Controller::{gun_views, formation_traffic}`,
+`Cockpit::previous_flight`, `Controller::{gun_views, formation_traffic, strike, strike_handling}` (the strike steer's handling, slice ST-T2),
+`Strike::inputs` (the host's per-step strike inputs, taken by the step),
 `ControlAdapter`, `AiMission::{missiles, gun_rounds}`
 (each with its proof at the skip); `RenderHistory::places` is rebuilt from the
 coded snapshot. `AiActor::last_input` looked like scratch (every step that
@@ -477,4 +478,5 @@ that becomes a hosting game shows them. Setup: `World::{setup, phrases}`, `Terra
 airport_objects, mission_spawns, mission_layout, contrail_offsets, dummies,
 initial_ammo, range, open, clean_recording}`, `AiWings::{airfields,
 flight_model, mission_preset}` and `Watch::{names, seats}`. Local:
-`Combat::{tape, notes, last_launcher}`. Everything else is coded.
+`Combat::{tape, notes, last_launcher, terrain_tti}` (the last the readout's kept
+fly-out times, cleared on a load). Everything else is coded.

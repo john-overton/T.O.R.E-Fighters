@@ -111,6 +111,24 @@ impl Pass {
             o.altitude,
             o.from_nm
         );
+        // The ground along the approach (slice ST-G): the target's, then 4,000
+        // to 16,000 ft short of it, which is what the pipper's fall crosses.
+        let relief: Vec<String> = [
+            0., 4_000., 8_000., 12_000., 16_000., 24_000., 32_000., 48_000., 64_000.,
+        ]
+        .iter()
+        .map(|back| {
+            let unit = [forward[0], forward[2]];
+            let norm = unit[0].hypot(unit[1]).max(1e-9);
+            let x = aim[0] - unit[0] / norm * back;
+            let z = aim[2] - unit[1] / norm * back;
+            format!("{back:.0}:{:.0}", scene.ground(x, z))
+        })
+        .collect();
+        println!(
+            "a2g-run: relief ft short of target:ground {}",
+            relief.join(" ")
+        );
         Ok(Self {
             heading,
             pitch,
@@ -155,7 +173,7 @@ pub(super) fn sight_line(scene: &Scene, d: &Delivery) -> String {
     };
     match &d.ccip {
         Some(c) => format!(
-            "a2g-run: sight t={:.3} mode {} rocket {} arc {} glyph {:#04x} range {:.1} max {:.0} in-range {} slant {:.0} fall {:.3} impact {:.1} {:.1} {:.1} target-gap {:.1} warnings {warnings}",
+            "a2g-run: sight t={:.3} mode {} rocket {} arc {} glyph {:#04x} range {:.1} max {:.0} in-range {} slant {:.0} fall {:.3} impact {:.1} {:.1} {:.1} target-gap {:.1} retail-gap {} warnings {warnings}",
             scene.seconds(),
             d.mode.label(),
             if d.rocket { "yes" } else { "no" },
@@ -170,6 +188,7 @@ pub(super) fn sight_line(scene: &Scene, d: &Delivery) -> String {
             c.impact[1],
             c.impact[2],
             horizontal_gap(scene, c.impact),
+            retail_gap(scene, d),
         ),
         None => format!(
             "a2g-run: sight t={:.3} mode {} no-impact warnings {warnings}",
@@ -177,6 +196,23 @@ pub(super) fn sight_line(scene: &Scene, d: &Delivery) -> String {
             d.mode.label()
         ),
     }
+}
+
+/// How far from the target retail's pipper would have shown the bomb (the
+/// ground under the release point taken for the whole fall), feet, beside
+/// the terrain pipper's `target-gap` (slice ST-G); `-` for a rocket.
+fn retail_gap(scene: &Scene, d: &Delivery) -> String {
+    if d.rocket {
+        return "-".into();
+    }
+    d.ccip
+        .and_then(|c| {
+            tore_sim::combat::ballistics::predict_impact_flat(c.release, |x, z| scene.ground(x, z))
+        })
+        .map_or_else(
+            || "-".into(),
+            |impact| format!("{:.1}", horizontal_gap(scene, impact.position)),
+        )
 }
 
 /// The horizontal distance from a point to the target.

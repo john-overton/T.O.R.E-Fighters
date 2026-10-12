@@ -6,6 +6,7 @@ use super::tests::fixture;
 use super::*;
 use crate::combat::ballistics::{ReleaseState, predict_impact};
 use crate::combat::delivery::{DeliveryMode, RELEASE_WINDOW_TICKS, Warning};
+use crate::models::strike_class::StrikeClass;
 
 const KNOT: f64 = 1.687_8;
 const TARGET: u32 = 0x4000_0000;
@@ -54,7 +55,13 @@ fn lau61() -> Weapon {
 
 /// A gun on station 0 and `weapon` on station 1.
 fn carrying(weapon: Weapon, count: u16) -> State {
+    carrying_as(weapon, count, StrikeClass::Fighter)
+}
+
+/// [`carrying`] for an aircraft of the given bombing class.
+fn carrying_as(weapon: Weapon, count: u16, class: StrikeClass) -> State {
     let mut config = fixture(false).own().configuration().clone();
+    config.strike_class = class;
     let gun = config.stations[0].clone();
     config.stations = vec![
         gun,
@@ -181,6 +188,49 @@ fn ctrl_m_switches_a_bombs_sight_and_a_new_bomb_picks_its_mode() {
     assert_eq!(s.own().delivery_mode, DeliveryMode::Ccip);
 }
 
+/// A Heavy's bombs default to LVL whatever the attitude, with or without a
+/// target (retail heavies have no CCIP); the other classes keep the H1
+/// rule; Ctrl+M still switches a Heavy to CCIP (docs/spec/ai-strike.md,
+/// "Bombing class").
+#[test]
+fn a_heavy_selects_lvl_whatever_its_attitude_and_every_class_keeps_both_modes() {
+    let level = pass(5_000., 0., 450., 0.);
+    let dive = pass(5_000., 0., 450., -30.);
+    let select = |s: &mut State, launcher: Launcher| {
+        s.command(0, Command::SelectNav, launcher);
+        s.command(0, Command::NextSelection, launcher);
+        s.command(0, Command::NextSelection, launcher);
+        assert_eq!(s.own().selected, 1);
+        s.own().delivery_mode
+    };
+    // A Heavy starts in LVL, with no ground target and in a dive.
+    let mut heavy = carrying_as(mk82(), 4, StrikeClass::Heavy);
+    assert_eq!(heavy.own().delivery_mode, DeliveryMode::Level);
+    assert_eq!(select(&mut heavy, dive), DeliveryMode::Level);
+    assert_eq!(select(&mut heavy, level), DeliveryMode::Level);
+    designate_ground(&mut heavy, 0., 20_000.);
+    assert_eq!(select(&mut heavy, dive), DeliveryMode::Level);
+    // Both modes stay: Ctrl+M takes it to CCIP and back.
+    heavy.command(0, Command::ToggleSeekerMode, level);
+    assert_eq!(heavy.own().delivery_mode, DeliveryMode::Ccip);
+    heavy.command(0, Command::ToggleSeekerMode, level);
+    assert_eq!(heavy.own().delivery_mode, DeliveryMode::Level);
+    // Every other class keeps the situational rule.
+    for class in [
+        StrikeClass::Fighter,
+        StrikeClass::Attack,
+        StrikeClass::Helicopter,
+        StrikeClass::Gunship,
+    ] {
+        let mut s = carrying_as(mk82(), 4, class);
+        assert_eq!(s.own().delivery_mode, DeliveryMode::Ccip, "{class:?}");
+        assert_eq!(select(&mut s, level), DeliveryMode::Ccip, "{class:?}");
+        designate_ground(&mut s, 0., 20_000.);
+        assert_eq!(select(&mut s, level), DeliveryMode::Level, "{class:?}");
+        assert_eq!(select(&mut s, dive), DeliveryMode::Ccip, "{class:?}");
+    }
+}
+
 /// Flies the level pass with the trigger as `held` says for each second of
 /// it, and returns each release's step with the solution of that step.
 fn level_pass(s: &mut State, held: impl Fn(f64) -> bool, seconds: f64) -> Vec<(f64, f64, f64)> {
@@ -224,6 +274,83 @@ fn a_held_trigger_releases_once_when_the_marker_meets_the_crossbar() {
     assert!(d.warnings.contains(&Warning::Overfly));
     assert_eq!(d.level_trigger(1), None);
     assert_eq!(s.own().rounds(1), 3);
+}
+
+#[test]
+fn a_held_level_release_hits_a_target_on_higher_or_lower_ground() {
+    // Slice ST-LV. The target stands 400 ft above or below the sea-level
+    // ground the aircraft releases over. The real bomb (its scatter taken
+    // off, so the mean path flies) lands on the target, not 500 ft short of
+    // it or beyond it as when the T judged the fall against the ground under
+    // the aircraft.
+    for height in [400., -400.] {
+        let ground = move |_: f64, z: f64| if z > 15_000. { height } else { 0. };
+        let mut s = carrying(mk82(), 4);
+        // The target's box stands on its own ground.
+        let bounds = crate::airport::OrientedBox {
+            center: [0., height + 6., 20_000.],
+            half: [10., 6., 20.],
+            heading: 0.,
+            pitch: 0.,
+            bank: 0.,
+        };
+        s.add_ground_target(TARGET, bounds, 1_000, 0x100, NO_SIDE)
+            .unwrap();
+        s.cheats.easy_targeting = true;
+        s.own_mut().sensors.select_ground(TARGET);
+        let target = s.targets.iter().find(|t| t.id == TARGET).unwrap().position;
+        s.command(0, Command::ToggleSeekerMode, pass(5_000., 0., 450., 0.));
+        let speed = 450. * KNOT;
+        let mut released = None;
+        for tick in 0..(20. * 120.) as u64 {
+            let launcher = pass(5_000., speed * tick as f64 / 120., 450., 0.);
+            let before = bombs(&s);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher,
+                }],
+                ground,
+            );
+            if bombs(&s) > before {
+                let id = s.projectiles.iter().find(|p| p.station == 1).unwrap().id;
+                let station = s.own().configuration().stations[1].clone();
+                let mean = ReleaseState::from_station(&launcher, &station, 0);
+                s.bombs
+                    .insert(id, crate::combat::ballistics::BombMotion::new(mean));
+                released = Some(id);
+                break;
+            }
+        }
+        let id = released.expect("the held trigger released");
+        let mut landed = None;
+        for _ in 0..(30 * 120) {
+            let last = s
+                .projectiles
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.position);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: away(),
+                }],
+                ground,
+            );
+            if !s.projectiles.iter().any(|p| p.id == id) {
+                landed = last;
+                break;
+            }
+        }
+        let at = landed.expect("the bomb came down");
+        let miss = (at[0] - target[0]).hypot(at[2] - target[2]);
+        assert!(
+            miss < 30.,
+            "{height} ft: landed {miss:.0} ft from the target ({at:?})"
+        );
+    }
 }
 
 #[test]
@@ -363,7 +490,7 @@ fn drop_on_target(altitude: f64) -> (i32, usize, Vec<Option<u8>>) {
 
 #[test]
 fn a_bomb_that_lands_before_its_fuze_arms_is_a_dud() {
-    // From 50 ft it falls 1.8 s (3.4 s at most with the scatter lofting it),
+    // From 50 ft it falls 1.8 s (2.5 s at most with the scatter lofting it),
     // short of the 5 s arm time: LOW, and on the ground a puff of dirt with
     // no burst, splash or crater.
     let low = solve_low(50.);
@@ -375,7 +502,7 @@ fn a_bomb_that_lands_before_its_fuze_arms_is_a_dud() {
     // The bullet-on-land dust burst, after its variety roll (types 15, 16).
     let puff = |b: &Option<u8>| matches!(b, Some(15 | 16));
     assert!(blasts.iter().all(puff), "{blasts:?}");
-    // From 800 ft (7 s, 5.9 s at least) it is armed: the burst, its splash
+    // From 800 ft (7 s, 6.5 s at least) it is armed: the burst, its splash
     // and a crater.
     assert!(!solve_low(800.));
     let (hp, craters, blasts) = drop_on_target(800.);

@@ -23,6 +23,12 @@
 //! - `--buddy ID`: aircraft ID flies 2 nm behind and 3,000 ft right of the
 //!   attacker on a second seat, designates with Ctrl+X (Easy targeting) and
 //!   lases by hand (Ctrl+L): the attacker drops on the buddy's spot.
+//! - `--buddy-ai` (with `--buddy`): the buddy is the AI's instead (slice
+//!   ST-L): it starts where the seat's buddy would, is ordered to lase the
+//!   attacker's designated target until it dies (`AiWings::order_lase`, the
+//!   call of the wing order "Lase my target") and flies the offset turn
+//!   itself. Prints `buddy-ai-ordered` and, when its laser first lases,
+//!   `buddy-lasing` with the callsign the target page would name it by.
 //! - `--turn-away S`: the attacker turns 90 degrees right S seconds after the
 //!   release (an AT-2's launcher loses its sight of the target).
 //! - `--condition clear|cloudy|foggy|night`: the mission's weather.
@@ -66,6 +72,8 @@ const BUDDY_SEAT: SeatId = SeatId(1);
 pub(super) struct Extra {
     laser_off: Option<f64>,
     buddy: Option<AircraftId>,
+    /// `--buddy-ai`: the AI flies the buddy.
+    buddy_ai: bool,
     turn_away: Option<f64>,
     condition: Option<Condition>,
     /// `--release bar`: hold the trigger in LVL.
@@ -74,7 +82,10 @@ pub(super) struct Extra {
 
 fn extra() -> AppResult<Extra> {
     let args: Vec<String> = std::env::args().collect();
-    let mut e = Extra::default();
+    let mut e = Extra {
+        buddy_ai: args.iter().any(|a| a == "--buddy-ai"),
+        ..Extra::default()
+    };
     for pair in args.windows(2) {
         let value = &pair[1];
         match pair[0].as_str() {
@@ -293,6 +304,7 @@ impl Scene {
 pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let e = extra()?;
     let (mut scene, mut buddy) = scene(o, &e, resources)?;
+    let mut ai_buddy: Option<u32> = None;
     let w = scene.station().weapon.clone();
     let kind = guided::kind(&w).ok_or_else(|| {
         format!(
@@ -341,8 +353,19 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         },
         ..pass
     };
+    // An AI buddy starts where the seat's buddy would and is then flown by the
+    // AI: its seat gives the plane back.
+    if e.buddy_ai
+        && let Some(b) = buddy.take()
+    {
+        scene.place(b.plane, buddy_pass.at(0.), buddy_pass.heading, speed);
+        scene.world.give_back_plane(BUDDY_SEAT)?;
+        ai_buddy = Some(b.plane);
+    }
     let mut turned: Option<f64> = None;
     let mut laser_off_done = false;
+    let mut ai_buddy_ordered = false;
+    let mut ai_buddy_lased = false;
     let mut released: Option<f64> = None;
     let mut agpage = false;
     let mut followed: BTreeMap<u32, Followed> = BTreeMap::new();
@@ -449,6 +472,49 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                     speed,
                     t0: t,
                 };
+            }
+        }
+        // The AI buddy is ordered onto the attacker's target once it is
+        // designated, as the wing order would send it, and lases it.
+        if let Some(plane) = ai_buddy {
+            if !ai_buddy_ordered
+                && designated_at.is_some()
+                && let Some(wings) = scene.world.ai_wings.as_mut()
+            {
+                ai_buddy_ordered = true;
+                let ok = wings.order_lase(
+                    plane,
+                    scene.target,
+                    tore_sim::ai::strike::LaseUntil::TargetDies,
+                );
+                println!(
+                    "a2g-run: buddy-ai-ordered t={:.3} plane={plane} ok={ok} target {:#010x}",
+                    scene.seconds(),
+                    scene.target
+                );
+            }
+            let laser = scene
+                .world
+                .combat
+                .state
+                .strike_cockpit(plane)
+                .map(|c| c.laser);
+            if let Some(laser) = laser
+                && laser.state == LaserState::Lasing
+                && !ai_buddy_lased
+            {
+                ai_buddy_lased = true;
+                let name = scene
+                    .world
+                    .ai_wings
+                    .as_ref()
+                    .and_then(|w| w.callsign(plane))
+                    .unwrap_or_default();
+                println!(
+                    "a2g-run: buddy-lasing t={:.3} range {:.0} callsign \"{name}\"",
+                    scene.seconds(),
+                    laser.range_ft
+                );
             }
         }
         let sight = scene.sight();

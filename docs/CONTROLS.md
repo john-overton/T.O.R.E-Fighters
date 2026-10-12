@@ -314,7 +314,9 @@ and a gamepad's View+stick defaults avoid the problem.
 | Wing: engage my target | Alt+E | - | - |
 | Wing: engage from formation | Alt+R | - | - |
 | Wing: sort (a different bandit for each wingman) | Alt+A | - | - |
-| Wing: attack on contact | Alt+W | - | - |
+| Wing: engage every target of my target's class (attack on contact with none) | Alt+W | - | - |
+| Wing: engage the IR/laser target (attack on contact with none) | Alt+F | - | - |
+| Wing: lase my target | Alt+G | - | - |
 | Wing: protect me | Alt+P | - | - |
 | Wing: disengage | Alt+D | - | - |
 | Wing: bug out | Alt+B | - | - |

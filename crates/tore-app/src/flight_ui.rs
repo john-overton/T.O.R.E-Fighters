@@ -181,7 +181,8 @@ fn flight_help(tree: &[MenuNode]) -> Vec<String> {
         "Sight: \\ designate | Shift-\\ pin | / next | Alt-arrows slew".into(),
         "Shift-' / Shift-; sight zoom | Ctrl-L: laser | Ctrl-X: nearest ground".into(),
         "Tower: Shift-N airport | Shift-L landing | Ctrl-Shift-R/C repeat/cancel".into(),
-        "Wing: Alt-1 straight, 2-5 break, 6-9 approach, E/R/W engage, B bug out".into(),
+        "Wing: Alt-1 straight, 2-5 break, 6-9 approach, E/R engage, B bug out".into(),
+        "Wing (ground): Alt-F IR/laser target | Alt-W target class | Alt-G lase".into(),
         "Alt-T formation | Alt-H/V spacing/stack | Alt-0/Alt-Shift-1..4 address".into(),
         "U: IFF | Ctrl-T: target info | K: scores | Alt-Shift-E/W/B/H: replies".into(),
         "Ctrl-B: mark a replay moment | AC-130: Ctrl-7 next gun, Ctrl-8 link".into(),
@@ -844,7 +845,7 @@ impl FlightUi {
                 "e" => Some(O::EngageMyTarget),
                 "r" => Some(O::EngageFromFormation),
                 "a" => Some(O::Sort),
-                "w" => Some(O::AttackOnContact),
+                "w" => Some(O::EngageClass),
                 "p" => Some(O::ProtectMe),
                 "d" => Some(O::Disengage),
                 "b" => Some(O::BugOut),
@@ -853,7 +854,8 @@ impl FlightUi {
                 "v" => Some(O::Stacking),
                 "l" => Some(O::LandAtSelected),
                 "t" => return Command::WingFormationCycle,
-                "f" => return self.unavailable("Engage designated target"),
+                "f" => Some(O::EngageIrLaser),
+                "g" => Some(O::LaseMyTarget),
                 "s" => return Command::RadioSilence,
                 "n" => return Command::BattleNet,
                 "0" => return Command::WingRecipient(None),
@@ -2097,7 +2099,9 @@ mod tests {
             ("e", O::EngageMyTarget),
             ("r", O::EngageFromFormation),
             ("a", O::Sort),
-            ("w", O::AttackOnContact),
+            ("w", O::EngageClass),
+            ("f", O::EngageIrLaser),
+            ("g", O::LaseMyTarget),
             ("p", O::ProtectMe),
             ("d", O::Disengage),
             ("b", O::BugOut),
@@ -2221,7 +2225,7 @@ mod tests {
         );
         assert_eq!(
             ui.key("w", false, false, true, &[]),
-            Command::Wing(O::AttackOnContact)
+            Command::Wing(O::EngageClass)
         );
         assert_eq!(ui.key("e", true, false, false, &[]), Command::Eject);
         assert_eq!(

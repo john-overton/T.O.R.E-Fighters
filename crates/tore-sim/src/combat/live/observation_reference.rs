@@ -106,19 +106,19 @@ pub(super) fn observe(
         missiles::Profile::for_weapon(w).filter(|_| state.weapon_rules == Rules::Spec)
     {
         if !profile.guidance_available(launcher.radar_power) || !profile.supports_boresight() {
-            own.launch_mode = LaunchMode::Cued;
+            own.cockpit.launch_mode = LaunchMode::Cued;
         }
         if profile.guidance_available(launcher.radar_power)
             && own.armed
             && own.designated().is_none()
             && profile.supports_boresight()
         {
-            own.launch_mode = LaunchMode::Boresight;
+            own.cockpit.launch_mode = LaunchMode::Boresight;
         }
         if (profile.guidance == Guidance::Infrared || profile.holds_on_angles())
             && own.designated().is_some()
         {
-            own.launch_mode = LaunchMode::Cued;
+            own.cockpit.launch_mode = LaunchMode::Cued;
         }
         let assigned = if own.launch_mode == LaunchMode::Cued {
             own.designated()

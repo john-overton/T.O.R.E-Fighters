@@ -573,6 +573,17 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             because(event)
         ),
         kind::AI_FALLBACK => format!("{s} fell back {}{}", from_to(), because(event)),
+        kind::AI_STRIKE => format!(
+            "{s} strike decision: {}{}{}{}",
+            opt(event, field::DECISION).unwrap_or_else(|| "?".into()),
+            opt(event, field::WEAPON)
+                .map(|w| format!(" with {w}"))
+                .unwrap_or_default(),
+            to("on"),
+            opt(event, field::REASON)
+                .map(|r| format!(" [{r}]"))
+                .unwrap_or_default()
+        ),
         kind::AI_AIRFIELD_PHASE => format!("{s} airfield phase {}{}", from_to(), because(event)),
         kind::AI_EJECTION => format!(
             "{s} ejection check: {}{}",

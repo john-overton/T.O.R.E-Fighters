@@ -225,6 +225,7 @@ def aircraft_row(source, archive, data, layout, guns):
         'internal_gun': ';'.join(name for name in counted if name in guns),
         'default_stores': ';'.join(f'{name}:{count}' for name, count in counted.items()),
         'hud_resource': ';'.join(strings(blocks, obj['hudName'])),
+        'ai_script': ';'.join(strings(blocks, npc['ctName'])),
         'shape': ';'.join(strings(blocks, obj['shape'])),
         'archive': archive,
     }

@@ -162,7 +162,7 @@ player's ownship, and the first aircraft is the one watched.
 | Combat | `combat.hit` from each aircraft's hit points, with the attacker, damage, hit points after and the region hit (plus damaged systems for the player); `combat.destroyed` with the killer; `combat.ground_impact` once for every weapon burst on the ground, with its spot (`x_ft`, `y_ft`, `z_ft`) and, when a weapon vanished that tick, the shooter, `projectile` and `weapon` ([below](#ground-impact-events)); `combat.countermeasure` for every chaff cartridge and flare that leaves an aircraft, the player's and the AI's, with how many of that kind it has left and the aircraft's exact position, velocity and attitude as it left, which the viewer flies the device again from ([below](#chaff-and-flares)); `combat.countermeasures_cleared` when a range reset removes them all |
 | Aircraft | `aircraft.crashed` (flying into the ground or a structure, or a destroyed aircraft's wreck coming down or exploding), `aircraft.ejected` with the hazard an AI pilot left for or your own ejection, `aircraft.pilot_killed`, `aircraft.took_off`, `aircraft.landed`, `aircraft.flameout`, `aircraft.fuel_out` |
 | Flight | `flight.departure` (mode changes), `flight.stall` and `flight.spin` on and off; `flight.effect` when a flight-model effect starts or stops, with what it applied and why ([below](#flight-model-effects)); `flight.g_limit` when the stick reaches its stop, with the G the envelope offers, the limit applied, the G delivered and what set the limit; `flight.structural_failure` with the section, the G and why |
-| AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
+| AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.strike` when a striker with laser stores and no laser support decides what to do with them ([below](#strike-decisions)); `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
 | Data link | `datalink.member`, `datalink.lock`, `datalink.unlock`, `datalink.assign`, `datalink.clear`, `datalink.acknowledge` and `datalink.sort_warning`: what changed in each flight's shared picture, from the data link's journal ([below](#data-link-events)) |
 | Air to ground | The bombs, rockets and guided weapons of the [air-to-ground round](spec/air-to-ground.md), in [their own section](#air-to-ground-events): `weapon.release` for each trigger call that lets go of bombs or rockets (a pack is one entry listing its rounds in order), `weapon.dud`, `weapon.cluster`, `weapon.guided` for a laser or GPS weapon's release and each change of guidance, `player.laser` and `player.designate`, and, so the viewer can [draw them](#laser-and-bomb-marks), `player.laser_spot` and `weapon.aim` (where a spot or a weapon's aim point is, at most ten times a second) and `weapon.impact` (where a bomb landed and how far from its aim). A bomb's fall is the projectile's ordinary track, one pose a tick |
@@ -314,6 +314,28 @@ from another aircraft on the same tick (an attack report, a leader's
 release to free selection, a wing order, a launch warning), the reason ends
 with "after" and what it heard. Spacing and wing-control orders move the
 slot, not the decision, so they are not cited.
+
+### Strike decisions
+
+`ai.strike` (slice ST-G, 2026-10-12) records one decision of an AI striker
+that is not a change of activity, target or weapon phase: an aircraft that
+carries laser stores and nothing else it can drop, has no designator of its
+own or in its wing and finds no spot on its target, which says "No laze
+support" and either drops its laser bomb by hand as an unguided bomb or goes
+home ([no laze support](spec/ai-strike.md#no-laze-support)). Subject: the
+aircraft. Object: the target it would attack. Fields: `decision` (the words
+on the radio, `no laze support, dropping manual` or `no laze support, RTB`),
+`reason` (a fixed key: `no_laze_manual` when the laser bomb falls unguided,
+`no_laze_rtb` when no laser store can), `station` and `weapon` (the store).
+One event for each decision: an aircraft that drops its bombs by hand and then
+has only a laser missile left makes a second one, `no_laze_rtb`. The same
+decision is a radio call (`comms.radio`, text only) at the same time. The
+text export reads `Friendly 1-2 strike decision: no laze support, dropping
+manual with GBU-10E on Enemy 2-1 [no_laze_manual]`, the summary counts the
+reasons for each aircraft (`AI strike decisions: no_laze_manual x1`), Tacview
+carries the event with the other `ai.` debug events, and the viewer's timeline
+marks it in the colour of orders. The driver (`--pilot ai`) cannot record yet
+(slice ST-RA); its `NOLAZE` line shows the same decision.
 
 ### Flight-model effects
 

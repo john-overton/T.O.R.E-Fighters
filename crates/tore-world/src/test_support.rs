@@ -359,6 +359,7 @@ pub fn combat_fixture(guided: bool) -> live::State {
             visual_hardpoint: 3,
             ecm_hardpoint: Some(2),
             aircraft: AircraftId::F18,
+            strike_class: tore_sim::models::strike_class::StrikeClass::Fighter,
             stations: vec![Station {
                 weapon: w,
                 mount: [0.; 3],

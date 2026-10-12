@@ -35,6 +35,10 @@ pub struct OrderReport {
     /// The human-flown wingmen the order addressed, which the world calls on
     /// the radio (slice F2-R). They are in `reached` as well.
     pub humans: Vec<u32>,
+    /// The order named a ground object or class (slice ST-O), so `target`,
+    /// which is an aircraft, is empty and the humans hear it as the order's
+    /// own words.
+    pub ground: bool,
 }
 
 /// The player's aircraft as the landing-priority rule sees it.
@@ -408,6 +412,35 @@ impl AiWings {
         flight: Option<u8>,
         tracked: &dyn Fn(u32) -> bool,
     ) -> WorldResult<OrderReport> {
+        self.command_aimed(
+            sender,
+            order,
+            selected,
+            recipient,
+            site,
+            flight,
+            tracked,
+            &GroundAim::default(),
+        )
+    }
+
+    /// [`Self::command_linked`] with what the sender's cockpit lets an order
+    /// onto the ground name (slice ST-O): the ground objects, the targeting
+    /// sight's track or pin. Alt+E and Alt+R accept a ground designation (or
+    /// the sight pin), Alt+F the sight's contact, Alt+W the designation's
+    /// class, and "Lase my target" a ground object.
+    #[allow(clippy::too_many_arguments)]
+    pub fn command_aimed(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+        flight: Option<u8>,
+        tracked: &dyn Fn(u32) -> bool,
+        ground: &GroundAim,
+    ) -> WorldResult<OrderReport> {
         if matches!(order, PlayerOrder::BugOut | PlayerOrder::LandAtSelected) {
             return self.command_landing(sender, order, recipient, site);
         }
@@ -427,6 +460,24 @@ impl AiWings {
             };
             return Ok(self.refuse_not_leading(sender, cause, recipient));
         }
+        // What the order means: onto the ground, or the air order it always
+        // was (an Alt+F or Alt+W onto an aircraft or nothing is "engage" or
+        // "attack on contact"). `asked` is the order the player gave; `order`
+        // from here on is the one an air wingman receives.
+        let asked = order;
+        let plan = {
+            let hostile_air = |id: u32| {
+                self.mission
+                    .actor(id)
+                    .is_some_and(|a| a.alive() && a.identity().side != sender_side)
+            };
+            ground_orders::resolve(order, selected, ground, sender_side, &hostile_air)
+        };
+        let designated = selected;
+        let (order, selected) = match &plan {
+            ground_orders::Plan::Air { order, selected } => (*order, *selected),
+            _ => (asked, selected),
+        };
         let humans = self.other_humans(sender, recipient);
         let mut members: Vec<_> = self
             .mission
@@ -439,8 +490,8 @@ impl AiWings {
         let first = members.first().map(|(_, id)| *id);
         members.retain(|(member, _)| recipient.is_none_or(|wanted| *member == wanted));
         let cause = Cause::Order {
-            order,
-            selected,
+            order: asked,
+            selected: designated,
             target: None,
         };
         if members.is_empty() && humans.is_empty() {
@@ -479,6 +530,36 @@ impl AiWings {
             self.journal_order(sender, cause, recipient, &report, outcome);
             return Ok(report);
         }
+        // Onto the ground: the wingmen's ground picture takes it.
+        match plan {
+            ground_orders::Plan::Air { .. } => {}
+            ground_orders::Plan::NoTarget => {
+                let report = self.refuse_no_ground_target(
+                    sender,
+                    asked,
+                    designated,
+                    recipient,
+                    members.first().map(|(_, id)| *id),
+                );
+                return Ok(report);
+            }
+            plan => {
+                return self.command_ground(ground_orders::Call {
+                    sender,
+                    order: asked,
+                    selected: designated,
+                    recipient,
+                    plan,
+                    members,
+                    first,
+                    humans,
+                    answers,
+                    bugged_out,
+                    flight,
+                    spots: ground.spots.clone(),
+                });
+            }
+        }
         let needs_target = matches!(
             order,
             PlayerOrder::EngageMyTarget
@@ -500,8 +581,8 @@ impl AiWings {
             return Ok(report);
         }
         let cause = Cause::Order {
-            order,
-            selected,
+            order: asked,
+            selected: designated,
             target,
         };
         let mut applied = 0;
@@ -531,6 +612,11 @@ impl AiWings {
                     unreachable!("landing orders take command_landing")
                 }
                 PlayerOrder::Sort => unreachable!("a sort is sent as one Engage order each"),
+                PlayerOrder::EngageIrLaser
+                | PlayerOrder::EngageClass
+                | PlayerOrder::LaseMyTarget => {
+                    unreachable!("resolved into an air order or a ground call")
+                }
                 PlayerOrder::Break(b) => b.request(),
                 PlayerOrder::Formation(f) => WingRequest::FormationSelection(f),
                 PlayerOrder::Spacing => WingRequest::Spacing {
@@ -632,6 +718,14 @@ impl AiWings {
                 self.pending_guns
                     .retain(|(queued_actor, _), _| *queued_actor != *id);
             }
+            // An order that is not a setting replaces what the wingman was
+            // told to do on the ground (slice ST-O).
+            if order.ends_ground_orders()
+                && !matches!(outcome, ReceiverOutcome::Rejected(_))
+                && let Some(actor) = self.mission.actor_mut(*id)
+            {
+                actor.clear_ground_orders();
+            }
             match outcome {
                 ReceiverOutcome::Applied(_) | ReceiverOutcome::MotionInstalled(_) => {
                     reached.push(*id);
@@ -719,7 +813,7 @@ impl AiWings {
         };
         let mut message = format!(
             "{}: {applied} applied, {rejected} rejected, {no_motion} without motion",
-            order_label(order)
+            order_label(asked)
         );
         if bugged_out > 0 {
             message.push_str(&format!(", {bugged_out} bugged out"));
@@ -739,6 +833,7 @@ impl AiWings {
             reached,
             target: named,
             humans: humans.iter().map(|(_, id)| *id).collect(),
+            ground: false,
         };
         let reply = replied.unwrap_or_else(|| no_reply(order, first, &answers));
         self.journal_order(
@@ -946,6 +1041,8 @@ impl AiWings {
                 // shots, as a recall does.
                 self.pending_guns
                     .retain(|(queued_actor, _), _| *queued_actor != id);
+                // It no longer strikes on its lead's order.
+                self.mission.actor_mut(id).unwrap().clear_ground_orders();
                 reached.push(id);
                 accepted += 1;
             }
@@ -1038,6 +1135,9 @@ fn no_reply(order: PlayerOrder, first: Option<u32>, answers: &[Answer]) -> Reply
         PlayerOrder::EngageMyTarget
             | PlayerOrder::EngageFromFormation
             | PlayerOrder::AttackOnContact
+            | PlayerOrder::EngageIrLaser
+            | PlayerOrder::EngageClass
+            | PlayerOrder::LaseMyTarget
             | PlayerOrder::ProtectMe
     );
     if !has_reply {
@@ -1100,6 +1200,9 @@ fn mission_assignment(sender: u32, order: PlayerOrder, target: Option<u32>) -> O
         | PlayerOrder::ControlToggle
         | PlayerOrder::BugOut
         | PlayerOrder::LandAtSelected
+        | PlayerOrder::EngageIrLaser
+        | PlayerOrder::EngageClass
+        | PlayerOrder::LaseMyTarget
         | PlayerOrder::Sort => None,
     }
 }
@@ -1180,6 +1283,12 @@ fn sender_stem(
         | PlayerOrder::AttackOnContact => return None,
         // No reviewed sender recording for these orders.
         PlayerOrder::BugOut | PlayerOrder::LandAtSelected => return None,
+        // Onto the ground, the call is worded by the order itself
+        // (`command_ground`); an Alt+F or Alt+W onto an aircraft is worded as
+        // the air order it became.
+        PlayerOrder::EngageIrLaser | PlayerOrder::EngageClass | PlayerOrder::LaseMyTarget => {
+            return None;
+        }
         // A sort's calls are the assignment calls, one for each wingman.
         PlayerOrder::Sort => return None,
     })
@@ -1215,10 +1324,18 @@ pub(crate) fn order_label(order: PlayerOrder) -> &'static str {
         PlayerOrder::ProtectMe => "Protect me",
         PlayerOrder::EngageMyTarget => "Engage my target",
         PlayerOrder::AttackOnContact => "Attack on contact",
+        PlayerOrder::EngageIrLaser => "Engage IR/laser target",
+        PlayerOrder::EngageClass => "Engage target class",
+        PlayerOrder::LaseMyTarget => "Lase my target",
         PlayerOrder::EngageFromFormation => "Engage from formation",
         PlayerOrder::Sort => "Sort",
     }
 }
+
+// A flight lead's orders onto the ground (slice ST-O).
+#[path = "ground_orders.rs"]
+mod ground_orders;
+pub use ground_orders::{GroundAim, GroundFact};
 
 #[cfg(test)]
 mod engagement_tests {

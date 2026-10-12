@@ -510,6 +510,42 @@ pub enum WingReply {
     Engage { aircraft: bool },
     /// "Showtime!" for "protect me".
     Showtime,
+    /// A text-only answer to a strike-round order: a refusal or "Lasing".
+    Line(WingLine),
+}
+
+/// A line a wingman says to its lead that no retail recording says, so it is
+/// text only (slice ST-O, an agent decision): the answer to a ground order
+/// it cannot take, and "Lasing".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WingLine {
+    /// A ground order and no surface store to attack with: brevity for out of
+    /// ordnance.
+    Winchester,
+    /// An order that needs a target and the lead named none.
+    NoTarget,
+    /// "Lase my target" and no designator aboard.
+    NoDesignator,
+    /// "Lase my target" taken.
+    Lasing,
+}
+
+impl WingLine {
+    pub const ALL: [WingLine; 4] = [
+        WingLine::Winchester,
+        WingLine::NoTarget,
+        WingLine::NoDesignator,
+        WingLine::Lasing,
+    ];
+    /// The words on the radio.
+    pub fn text(self) -> &'static str {
+        match self {
+            WingLine::Winchester => "Winchester",
+            WingLine::NoTarget => "No target",
+            WingLine::NoDesignator => "No designator",
+            WingLine::Lasing => "Lasing",
+        }
+    }
 }
 
 /// The player's airfield events the tower speaks about.
@@ -612,6 +648,9 @@ pub enum Cause {
     },
     /// The speaker's fuel reached a level: 1 joker, 2 bingo, 3 fumes, 4 out.
     AiFuel { level: u8 },
+    /// The speaker carries laser stores and has no laser support: it drops a
+    /// laser bomb by hand, or (`rtb`) goes home (slice ST-G).
+    NoLaze { rtb: bool },
     /// The mission succeeded (the debrief's evaluator, checked every 4 s).
     MissionAccomplished,
     /// After a success, the player came within 42,240 ft of the home base
@@ -744,6 +783,9 @@ impl fmt::Display for Cause {
                 if *aircraft { "aircraft" } else { "surface" }
             ),
             Cause::Reply(WingReply::Showtime) => write!(f, "accepted \"protect me\""),
+            Cause::Reply(WingReply::Line(line)) => {
+                write!(f, "answered a ground order: \"{}\"", line.text())
+            }
             Cause::Replied(reply) => write!(f, "a wingman's reply key: {}", reply.text()),
             Cause::NewTarget { target } => write!(f, "new target {}", who(*target)),
             Cause::Contact {
@@ -759,6 +801,15 @@ impl fmt::Display for Cause {
                     ", under formation control"
                 } else {
                     ""
+                }
+            ),
+            Cause::NoLaze { rtb } => write!(
+                f,
+                "laser stores and no laze support: {}",
+                if *rtb {
+                    "none can fall unguided, returning to base"
+                } else {
+                    "dropping the laser bombs by hand as unguided bombs"
                 }
             ),
             Cause::AiFuel { level } => write!(
@@ -1026,6 +1077,12 @@ pub enum Reason {
     AllBuggedOut { count: usize },
     /// The order needs a living hostile target.
     NoHostileTarget,
+    /// "Lase my target" needs a ground target.
+    NoGroundTarget,
+    /// No addressed wingman has a surface store to attack the ground with.
+    NoSurfaceStores,
+    /// No addressed wingman has a designator to lase with.
+    NoDesignators,
     /// Only the aircraft that leads a wing can order it.
     NotLeading,
     /// Land at selected airport needs an airport selected with Shift-A.
@@ -1114,6 +1171,9 @@ impl fmt::Display for Reason {
                 )
             }
             Reason::NoHostileTarget => write!(f, "no valid hostile target"),
+            Reason::NoGroundTarget => write!(f, "no ground target designated"),
+            Reason::NoSurfaceStores => write!(f, "no usable surface store"),
+            Reason::NoDesignators => write!(f, "no designator aboard"),
             Reason::NoAirportSelected => write!(f, "no airport selected (Shift-A)"),
             Reason::OrderVoice => write!(f, "cut off by your wing order voice"),
             Reason::Text(text) => f.write_str(text),
@@ -1260,15 +1320,20 @@ pub enum Answered {
     OnAirfield,
     /// Skipped: no home base to return to.
     NoBase,
+    /// Refused: a ground order and no surface store it can attack with.
+    NoSurfaceStore,
+    /// Refused: "Lase my target" and no designator aboard.
+    NoDesignator,
 }
 
 impl Answered {
     /// `applied`, `rejected` or `skipped`.
     pub fn name(&self) -> &'static str {
         match self {
-            Answered::Receiver(ReceiverOutcome::Rejected(_)) | Answered::CannotSeeTarget => {
-                "rejected"
-            }
+            Answered::Receiver(ReceiverOutcome::Rejected(_))
+            | Answered::CannotSeeTarget
+            | Answered::NoSurfaceStore
+            | Answered::NoDesignator => "rejected",
             Answered::Receiver(_) => "applied",
             _ => "skipped",
         }
@@ -1293,6 +1358,8 @@ impl fmt::Display for Answer {
             Answered::AlreadyLanded => write!(f, "skipped: already landed")?,
             Answered::OnAirfield => write!(f, "skipped: taking off, landing or on the ground")?,
             Answered::NoBase => write!(f, "skipped: no base")?,
+            Answered::NoSurfaceStore => write!(f, "rejected: no usable surface store")?,
+            Answered::NoDesignator => write!(f, "rejected: no designator aboard")?,
         }
         for (what, outcome) in &self.side {
             write!(f, " [{what}: {outcome:?}]")?;
@@ -1331,6 +1398,7 @@ impl fmt::Display for Reply {
                 match reply {
                     WingReply::Engage { .. } => "with an engage call",
                     WingReply::Showtime => "\"Showtime!\"",
+                    WingReply::Line(line) => line.text(),
                 }
             ),
             Reply::NotExpected => write!(f, "no radio reply for this order"),

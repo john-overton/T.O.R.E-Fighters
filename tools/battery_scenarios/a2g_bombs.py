@@ -8,7 +8,7 @@ column `~QUCOL`:
   from a 30 degree dive: the sight's solution obeys the bomb equation (fall
   `(vz + sqrt(vz^2 + 64 h)) / 32` seconds, throw the horizontal speed times the
   fall), every bomb bursts on its own path within 2 ft and inside the retail
-  scatter's reach of the mean point, and its scatter stays within 3 degrees;
+  scatter's reach of the mean point, and its scatter stays within 1.5 degrees (John halved retail's 3, 2026-10-11);
 * an A-4E's Mk 82 AIR 7-pack: one press releases all seven in one tick for one
   round, staggered x 0, -2, +2, -4, +4, -6, +6 ft and y 0, -2, -6, -12, -20,
   -30, -42 ft, at 66 percent of the aircraft's speed;
@@ -73,8 +73,8 @@ def _bombs(run: str, label: str, count: int, problems: list[str]) -> list[re.Mat
     if len(bombs) != count:
         problems.append(f"{label}: {len(bombs)} bombs released, want {count}")
     for b in bombs:
-        if abs(float(b[5])) > 3.0005 or abs(float(b[6])) > 3.0005:
-            problems.append(f"{label}: bomb {b[0]} scattered {b[5]} {b[6]} degrees, more than 3")
+        if abs(float(b[5])) > 1.5005 or abs(float(b[6])) > 1.5005:
+            problems.append(f"{label}: bomb {b[0]} scattered {b[5]} {b[6]} degrees, more than 1.5")
         if float(b[3]) > 0.01:
             problems.append(f"{label}: bomb {b[0]} left {b[3]} ft from its station")
     impacts = IMPACT.findall(run)

@@ -294,6 +294,7 @@ impl World {
                 flight_model: spec.ai_flight_model,
                 group_objectives: spec.objectives,
                 group_must_survive: spec.must_survive,
+                ground_target: spec.ground_target.is_some(),
                 loadouts,
             }),
         };

@@ -48,7 +48,8 @@ the targeting page, and list what was not run or not built.
   committed; described below).
 
 "Inside the scatter bound" means the bomb landed within the plus or minus 3
-degree scatter envelope of the sight's mean impact point (the spec's rule: the
+degree scatter envelope (the value then; John halved it to 1.5 degrees on
+2026-10-11, and the driver's bound follows the constant) of the sight's mean impact point (the spec's rule: the
 pipper marks the mean, so a single bomb can land beside it). A weapon that hits
 a tank without killing it is a legitimate result: the tables show the hit points
 left, and the retail warheads of the AT-2, AT-12 and AGM-65A left a T-80 alive in

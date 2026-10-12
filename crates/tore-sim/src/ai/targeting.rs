@@ -172,6 +172,105 @@ pub fn select_target<'a>(
     Ok(best.map(|(candidate, _)| candidate))
 }
 
+/// Where a strike candidate comes from, highest priority first
+/// (docs/spec/ai-strike.md, "What the AI knows"; plan section 4.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StrikeSource {
+    /// A flight lead's order or a taken-over designation: retail makes the
+    /// ordered object the only candidate.
+    Ordered,
+    /// A target the mission's briefing names.
+    Briefed,
+    /// A hostile ground object the striker has seen near the objective.
+    Opportunity,
+}
+
+/// What the strike selector knows about one ground candidate. The caller
+/// builds it from the striker's ground picture
+/// ([`crate::ai::awareness::ground::GroundPicture::strike_candidates`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StrikeCandidate {
+    pub id: ObjectId,
+    pub side: Side,
+    pub source: StrikeSource,
+    /// Standing (not destroyed) as far as the striker knows.
+    pub valid: bool,
+    /// A carried surface store can attack it.
+    pub usable: bool,
+    /// Spatial separation from the striker, feet.
+    pub spatial_distance_feet: f64,
+    /// Other members of the striker's wing already attacking it.
+    pub wing_attackers: u32,
+    /// Opportunity only: within [`super::engagement::OPPORTUNITY_RADIUS_FT`]
+    /// of the objective.
+    pub near_objective: bool,
+}
+
+/// At most two attackers on one ground object (the B41 allowance,
+/// docs/spec/ai-strike.md, "What the AI knows").
+pub const STRIKE_ATTACKER_ALLOWANCE: u32 = 2;
+
+/// The aircraft selector over ground targets (docs/spec/ai-strike.md, "What
+/// the AI knows"; the surface half of B41 for a striking aircraft). Rules, in
+/// order:
+///
+/// 1. An ordered target that stands is chosen alone (retail: the ordered
+///    object is the only candidate), whatever its attackers.
+/// 2. Otherwise the nearest briefed target that stands and has fewer than
+///    [`STRIKE_ATTACKER_ALLOWANCE`] other wing attackers.
+/// 3. Only once no briefed target it can attack stands: the nearest hostile
+///    object seen within 10 nm of the objective, under the same attacker
+///    allowance.
+///
+/// Every candidate must be on another side and attackable with a carried
+/// store. Ties keep the lower id, so the choice never depends on the
+/// caller's order. `None` when nothing qualifies, including briefed targets
+/// that stand but are all fully attacked: the striker then waits for one to
+/// free up rather than taking a third place (opinionated, agent). A
+/// non-finite or negative distance makes a candidate ineligible.
+pub fn select_strike_target(
+    own: ObjectId,
+    own_side: Side,
+    candidates: &[StrikeCandidate],
+) -> Option<&StrikeCandidate> {
+    let eligible = |c: &&StrikeCandidate| {
+        c.id != own
+            && c.valid
+            && c.usable
+            && c.side != own_side
+            && c.spatial_distance_feet.is_finite()
+            && c.spatial_distance_feet >= 0.
+    };
+    let nearest = |source: StrikeSource| {
+        candidates
+            .iter()
+            .filter(eligible)
+            .filter(|c| c.source == source)
+            .filter(|c| c.wing_attackers < STRIKE_ATTACKER_ALLOWANCE)
+            .filter(|c| source != StrikeSource::Opportunity || c.near_objective)
+            .min_by(|a, b| {
+                a.spatial_distance_feet
+                    .total_cmp(&b.spatial_distance_feet)
+                    .then(a.id.0.cmp(&b.id.0))
+            })
+    };
+    if let Some(ordered) = candidates
+        .iter()
+        .filter(eligible)
+        .filter(|c| c.source == StrikeSource::Ordered)
+        .min_by_key(|c| c.id.0)
+    {
+        return Some(ordered);
+    }
+    if candidates
+        .iter()
+        .any(|c| c.source == StrikeSource::Briefed && c.valid && c.usable && c.side != own_side)
+    {
+        return nearest(StrikeSource::Briefed);
+    }
+    nearest(StrikeSource::Opportunity)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +433,84 @@ mod tests {
         assert!(matches!(r, Err(AiError::UnspecifiedRule(_))));
         let r = select_target(&OWN, SelectionRoute::MissionDefensePriority, &list);
         assert!(matches!(r, Err(AiError::UnspecifiedRule(_))));
+    }
+
+    fn ground(id: u32, source: StrikeSource, distance: f64) -> StrikeCandidate {
+        StrikeCandidate {
+            id: ObjectId(id),
+            side: Side(2),
+            source,
+            valid: true,
+            usable: true,
+            spatial_distance_feet: distance,
+            wing_attackers: 0,
+            near_objective: true,
+        }
+    }
+
+    fn strike(candidates: &[StrikeCandidate]) -> Option<u32> {
+        select_strike_target(OWN.id, OWN.side, candidates).map(|c| c.id.0)
+    }
+
+    #[test]
+    fn an_ordered_target_comes_first_whatever_its_attackers() {
+        let mut ordered = ground(20, StrikeSource::Ordered, 90_000.);
+        ordered.wing_attackers = 3;
+        let briefed = ground(10, StrikeSource::Briefed, 1_000.);
+        assert_eq!(strike(&[briefed, ordered]), Some(20));
+        // A destroyed or friendly order falls back to the briefing.
+        let mut gone = ordered;
+        gone.valid = false;
+        assert_eq!(strike(&[briefed, gone]), Some(10));
+        let mut friendly = ordered;
+        friendly.side = Side(1);
+        assert_eq!(strike(&[briefed, friendly]), Some(10));
+    }
+
+    #[test]
+    fn briefed_targets_go_nearest_first_with_two_attackers_at_most() {
+        let near = ground(11, StrikeSource::Briefed, 3_000.);
+        let far = ground(12, StrikeSource::Briefed, 9_000.);
+        assert_eq!(strike(&[far, near]), Some(11));
+        let mut full = near;
+        full.wing_attackers = 2;
+        assert_eq!(strike(&[far, full]), Some(12));
+        let mut one = near;
+        one.wing_attackers = 1;
+        assert_eq!(strike(&[far, one]), Some(11));
+        // Equal distances keep the lower id, in any order.
+        let twin = ground(9, StrikeSource::Briefed, 3_000.);
+        assert_eq!(strike(&[near, twin]), Some(9));
+        assert_eq!(strike(&[twin, near]), Some(9));
+        // Every briefed target fully attacked: wait, never a third place and
+        // never an opportunity while they stand.
+        let mut far_full = far;
+        far_full.wing_attackers = 2;
+        let seen = ground(30, StrikeSource::Opportunity, 500.);
+        assert_eq!(strike(&[full, far_full, seen]), None);
+    }
+
+    #[test]
+    fn opportunity_targets_wait_for_the_briefing_and_stay_near_the_objective() {
+        let briefed = ground(11, StrikeSource::Briefed, 30_000.);
+        let seen = ground(30, StrikeSource::Opportunity, 2_000.);
+        assert_eq!(strike(&[briefed, seen]), Some(11));
+        let mut destroyed = briefed;
+        destroyed.valid = false;
+        assert_eq!(strike(&[destroyed, seen]), Some(30));
+        let mut away = seen;
+        away.near_objective = false;
+        assert_eq!(strike(&[destroyed, away]), None);
+        let mut unarmed = seen;
+        unarmed.usable = false;
+        assert_eq!(strike(&[destroyed, unarmed]), None);
+        assert_eq!(strike(&[]), None);
+        for distance in [-1., f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                strike(&[ground(31, StrikeSource::Opportunity, distance)]),
+                None
+            );
+        }
     }
 
     #[test]

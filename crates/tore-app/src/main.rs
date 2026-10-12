@@ -4793,14 +4793,16 @@ impl ApplicationHandler for App {
                                 .and_then(|c| c.targeting.as_mut()),
                             &targeting_shot,
                         ) {
-                            // The lasing pilot's callsign names a buddy's spot, in a
-                            // networked game.
+                            // The lasing pilot's callsign names a buddy's spot: a
+                            // player's in a networked game, an AI aircraft's wing and
+                            // member ("Friendly 2-1") where this machine runs the AI.
                             let owner = frame
                                 .readout
                                 .laser
                                 .and_then(|laser| laser.spot.filter(|s| !s.own).or(laser.buddy))
                                 .and_then(|spot| {
-                                    self.net_flight
+                                    let player = self
+                                        .net_flight
                                         .as_ref()
                                         .and(self.net.as_ref())
                                         .and_then(|net| net.client.lobby())
@@ -4812,7 +4814,13 @@ impl ApplicationHandler for App {
                                                 .map(|player| {
                                                     crate::replay::panels::ascii(&player.callsign)
                                                 })
-                                        })
+                                        });
+                                    let ai = self
+                                        .world
+                                        .ai_wings
+                                        .as_ref()
+                                        .and_then(|wings| wings.callsign(spot.spot.owner));
+                                    instruments::targeting::spot_owner_name(player, ai)
                                 });
                             match shot {
                                 gunsight_view::TargetingShot::Sight {

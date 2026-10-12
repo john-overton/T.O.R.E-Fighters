@@ -1114,7 +1114,9 @@ flight reads both as 0 to 90 degrees.
 
 The command codes cover every `SeatCommand` (a combat command has its own
 5-bit code, with a heat byte, a distance or a target id where it has one; a
-wing order has a 4-bit code and its break, approach or formation) and every
+wing order has a 4-bit code and its break, approach or formation; code 14 is
+Engage IR/Laser and code 15 escapes to three more bits, 0 engage my target's class and
+1 Lase my target, the strike orders folded under protocol 25) and every
 pilot command (a switch is 4 bits). A reader refuses a change bit whose value
 did not change, so every section has one encoding. `quantize_pilot` rounds a
 pilot input exactly as the wire does, the throttle commands included (a
@@ -2628,6 +2630,19 @@ stands.
   city fill section (section 12), which a 24 build lacks and would refuse.
   `TORE_CITY_FILL_CAP` no longer reaches a session's mission. The
   close-out's other slices changed no wire bytes.
+- **AI strike, also under 25.** The AI strike round
+  ([AI strike](../spec/ai-strike.md#online-and-replays)) was merged into the
+  surface close-out before 25 shipped, so it rides the same bump. Its wing
+  orders take order code 14 (Engage IR/Laser) and the escape code 15 with a
+  3-bit sub-code (0 engage my target's class, 1 Lase my target); a 24 reader refuses
+  both. The mission text's `objective ... strike` line is new, and the
+  mission hash covers it. The world checkpoint gains the strike cockpits
+  (`StrikeCockpit` in each ownship and kept cockpit, the AI strikers'
+  `AiCockpit` list, the AI laser sets), each striker's ground picture and
+  `Strike` state, and the AI wings' `handed_tasking`
+  ([checkpoint](checkpoint.md#sections)), so the Check hash and a standby's
+  restore carry a pass in progress; a 24 build would read them wrongly. No
+  packet layout changed.
 - **Checks that still apply.** The theater content item lists the files the
   fill is built from (the reference weather layer, every ground placement's
   picture, the kit's definitions and shapes), read without building the

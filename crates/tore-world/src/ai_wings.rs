@@ -27,12 +27,17 @@ mod chatter;
 pub use chatter::{Chatter, Contact, ContactView, FuelLevel, Member};
 mod engagement;
 pub use engagement::Preset;
+mod ground;
+mod gunship;
 mod orders;
-pub(crate) use orders::{OrderReport, order_label};
+pub(crate) use orders::{GroundAim, GroundFact, OrderReport, order_label};
 pub mod outcome;
 mod record;
 pub use record::DecoyRoll;
+mod release;
 mod reports;
+mod strike;
+mod takeover;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -653,6 +658,9 @@ pub struct AiWings {
     /// The skill of each aircraft a human has taken, kept for putting it
     /// back in the AI when the human gives it back.
     handed_over: BTreeMap<u32, tore_sim::ai::experience::ResolvedExperience>,
+    /// The air-to-ground tasking (Strike role, ground order) of each
+    /// aircraft a human has taken, put back with it (slice ST-K).
+    handed_tasking: BTreeMap<u32, takeover::Tasking>,
     /// Draws for what a damaged ECM suite loses, apart from the decoy rolls.
     fault_random: tore_sim::ai::DecisionRandom,
     /// Projectile ids already turned into threat reports.
@@ -706,6 +714,11 @@ pub struct AiWings {
     /// The highest the world's ground reaches over each square, worked out
     /// at the first step: the mission's shortcut for sight lines above it.
     ground_ceiling: Option<std::sync::Arc<tore_sim::ground_ceiling::GroundCeiling>>,
+    /// The mission's airborne height, feet (the Quick Mission altitude
+    /// setting): a heavy striker's release floor (slice ST-T2). The host sets
+    /// it before every step; `None` lets a striker use the height it was
+    /// tasked at.
+    mission_height_ft: Option<f64>,
 }
 
 struct PendingGun {
@@ -1273,6 +1286,7 @@ impl AiWings {
             configs: BTreeMap::new(),
             damaged_stations: Default::default(),
             handed_over: Default::default(),
+            handed_tasking: Default::default(),
             fault_random: tore_sim::ai::DecisionRandom::seeded(0xfa17),
             seen_projectiles: BTreeSet::new(),
             ai_shots: BTreeMap::new(),
@@ -1301,6 +1315,7 @@ impl AiWings {
             last_output: tore_sim::ai::mission::MissionOutput::default(),
             decoy_rolls: Vec::new(),
             ground_ceiling: None,
+            mission_height_ft: None,
         })
     }
 
@@ -1311,6 +1326,7 @@ impl AiWings {
         let slot = *self.slot(id)?;
         let actor = self.mission.remove_actor(id)?;
         let experience = actor.experience();
+        self.hand_over_tasking(id, &actor);
         let mut parts = actor.into_parts();
         // What the human gets is what the aircraft's systems put out of
         // action, not what the mission's Air combat guns only setting holds
@@ -1353,7 +1369,10 @@ impl AiWings {
     /// no human holds), fresh awareness and neutral. Its home is the nearest
     /// runway its side may use.
     pub fn insert_actor(&mut self, insert: ActorInsert) -> WorldResult<()> {
-        self.insert_actor_seeded(insert, None)
+        let id = insert.id;
+        self.insert_actor_seeded(insert, None)?;
+        self.restore_tasking(id);
+        Ok(())
     }
 
     /// [`Self::insert_actor`] with the decision seed `seed` in place of the
@@ -1535,6 +1554,8 @@ impl AiWings {
                 .or_else(|| wing_actors().next())
                 .map(|a| a.assignment().clone())
         };
+        // A new aircraft takes no tasking a lost one left (slice ST-K).
+        self.handed_tasking.remove(&id);
         self.insert_actor_seeded(
             ActorInsert {
                 id,
@@ -1995,6 +2016,9 @@ impl AiWings {
         );
         self.lose_out_of_bounds(&mut state.ledger, |x, z| world.edge_distance_nm(x, z));
         let objects = humans.iter().map(|h| Self::human_object(h)).collect();
+        ground::step(self, state, world, &ground);
+        strike::step(self, state, &ground);
+        gunship::step(self, state, &ground);
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
         let output = self.advance_on_surface(objects, &mut state.targets, &ground, &|x, z| {
@@ -2008,7 +2032,21 @@ impl AiWings {
             .collect();
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
-                if live::is_gun(&weapon)
+                if live::is_gun(&weapon) && self.striker_gun(event) {
+                    // A striker's gun run (slice ST-T2).
+                    let key = (event.actor, event.station.0);
+                    let ordinal = *self.gun_ordinals.entry(key).or_default();
+                    let emitted = self.release_strafe(
+                        event,
+                        &mut state.projectiles,
+                        &state.targets,
+                        &weapon,
+                        ordinal,
+                        &ground,
+                    );
+                    aim_latest(state, emitted, event.target);
+                    *self.gun_ordinals.get_mut(&key).unwrap() += u64::from(emitted);
+                } else if live::is_gun(&weapon)
                     && self
                         .mission
                         .actor(event.actor)
@@ -2054,15 +2092,7 @@ impl AiWings {
                         pending.groups.push_back((event.target, accepted as u16));
                     }
                 } else {
-                    let emitted = self.realise(
-                        event,
-                        &mut state.projectiles,
-                        &weapon,
-                        usize::from(event.station.0),
-                        &positions,
-                        None,
-                    );
-                    aim_latest(state, emitted, event.target);
+                    self.release(event, state, &weapon, &positions, &ground);
                 }
             } else {
                 self.dropped_launches += event.projectiles;

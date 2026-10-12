@@ -11,7 +11,7 @@ const KNOT: f64 = 1.687_8;
 
 /// A Mk 82 as the record has it: bomb flag, no gravity flag, 0 to 1,466 ft/s,
 /// full launch retard, one round a call.
-fn mk82() -> Weapon {
+pub(super) fn mk82() -> Weapon {
     let mut w = fixture(false).own().configuration().stations[0]
         .weapon
         .clone();
@@ -34,7 +34,7 @@ fn mk82() -> Weapon {
 
 /// A LAU-61 as the record has it: 19 rockets a pod, a burst of 2, repeat
 /// flag 0x800 with a quarter-second burst time, gravity flag 0x4.
-fn lau61() -> Weapon {
+pub(super) fn lau61() -> Weapon {
     let mut w = fixture(false).own().configuration().stations[0]
         .weapon
         .clone();
@@ -254,7 +254,7 @@ fn the_mean_path_lands_on_the_predicted_point_within_a_foot() {
 }
 
 #[test]
-fn every_bomb_scatters_within_three_degrees_and_lands_inside_the_predicted_spread() {
+fn every_bomb_scatters_within_one_and_a_half_degrees_and_lands_inside_the_predicted_spread() {
     let mut s = carrying(mk82(), 200, [0.; 3]);
     let launcher = pass(5_000., 450., -20.);
     let station = s.own().configuration().stations[0].clone();
@@ -305,6 +305,64 @@ fn every_bomb_scatters_within_three_degrees_and_lands_inside_the_predicted_sprea
             horizontal(burst, centre) <= spread + 1.,
             "{burst:?} {centre:?} {spread}"
         );
+    }
+}
+
+#[test]
+fn a_missions_first_bomb_takes_its_own_scatter_and_the_mean_has_no_bias() {
+    // Slice ST-LV. Nothing rolls combat's random stream before a quiet
+    // mission's first bomb, so every first bomb used to take the same error
+    // (1.25 degrees left, 1.31 low: some 330 ft short from a 5,000 ft level
+    // pass, at every skill and on every target). Released on different ticks,
+    // first bombs now scatter differently, both ways, about the mean.
+    let launcher = pass(5_000., 450., 0.);
+    let limit = BOMB_SCATTER_DEGREES.to_radians() + 1e-9;
+    let mut errors = Vec::new();
+    for wait in 0..64 {
+        let mut s = carrying(mk82(), 1, [0.; 3]);
+        for _ in 0..wait {
+            step(&mut s, false, launcher);
+        }
+        step(&mut s, true, launcher);
+        let station = s.own().configuration().stations[0].clone();
+        let mean = ReleaseState::from_station(&launcher, &station, 0);
+        let motion = s.bomb_motion(s.projectiles[0].id).unwrap();
+        let release = ReleaseState {
+            position: motion.origin,
+            velocity: motion.velocity(0.),
+        };
+        let error = (
+            release.heading() - mean.heading(),
+            release.pitch() - mean.pitch(),
+        );
+        assert!(
+            error.0.abs() <= limit && error.1.abs() <= limit,
+            "{error:?}"
+        );
+        errors.push(error);
+    }
+    let mut distinct = errors.clone();
+    distinct.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    distinct.dedup();
+    assert!(distinct.len() >= 60, "{} distinct of 64", distinct.len());
+    let n = errors.len() as f64;
+    let mean_heading = errors.iter().map(|e| e.0).sum::<f64>() / n;
+    let mean_pitch = errors.iter().map(|e| e.1).sum::<f64>() / n;
+    // A uniform error of 1.5 degrees has a mean of 64 within about 0.11
+    // degrees of zero (one sigma); the old fixed draw sat at -1.25 and -1.31.
+    assert!(
+        mean_heading.to_degrees().abs() < 0.35,
+        "{}",
+        mean_heading.to_degrees()
+    );
+    assert!(
+        mean_pitch.to_degrees().abs() < 0.35,
+        "{}",
+        mean_pitch.to_degrees()
+    );
+    for pick in [|e: &(f64, f64)| e.0, |e: &(f64, f64)| e.1] {
+        assert!(errors.iter().any(|e| pick(e) > limit * 0.5));
+        assert!(errors.iter().any(|e| pick(e) < -limit * 0.5));
     }
 }
 

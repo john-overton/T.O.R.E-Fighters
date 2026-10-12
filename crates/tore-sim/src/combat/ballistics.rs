@@ -19,8 +19,10 @@
 //! - A pack's bombs leave in one tick, each offset by [`pack_offset`].
 //!
 //! The predictor ([`predict_impact`]) runs the same equation without the
-//! scatter against the ground under the release point, as the original's
-//! sight does. Guided bombs (no 0x10) do not come here.
+//! scatter down to where the path meets the terrain (opinionated, John,
+//! 2026-10-11); the original's sight takes the ground under the release
+//! point for the whole fall ([`predict_impact_flat`]). Guided bombs (no 0x10)
+//! do not come here.
 //!
 //! Coordinates are the live adapter's: feet, x and z horizontal, y up, and
 //! headings measured from +z toward +x.
@@ -33,11 +35,11 @@ pub const BOMB_FLAG: u32 = 0x10;
 /// The bomb equation's gravity, ft/s² (retail, not 32.2).
 pub const GRAVITY_FPS2: f64 = 32.;
 /// The largest random error a released bomb takes in heading and, separately,
-/// in pitch: retail `adjustBombAngle`, 546 of 65,536 units a turn
-/// (FA.EXE 1.02F `0x50ce08`, applied at `0x4c1fc0`). Retail applies it to
-/// every bomb, and John confirmed it for the player's bombs too on
-/// 2026-10-10. One constant, so it can change.
-pub const BOMB_SCATTER_DEGREES: f64 = 3.;
+/// in pitch. Retail's `adjustBombAngle` is 546 of 65,536 units a turn, 3
+/// degrees (FA.EXE 1.02F `0x50ce08`, applied at `0x4c1fc0`); John halved it
+/// to 1.5 degrees (273 units) on 2026-10-11, for every bomb, the player's
+/// and the AI's (opinionated, John). One constant, so it can change.
+pub const BOMB_SCATTER_DEGREES: f64 = 1.5;
 /// Binary angle units a turn, the unit the scatter is rolled in.
 const UNITS_PER_TURN: f64 = 65_536.;
 /// The steepest release pitch, retail's `0x3ffc` clamp.
@@ -80,15 +82,15 @@ pub fn pack_offset(index: usize) -> [f64; 2] {
     [x as f64, y as f64]
 }
 
-/// Half the scatter's span in binary angle units (546 for 3 degrees).
+/// Half the scatter's span in binary angle units (273 for 1.5 degrees, retail's 546 for 3).
 fn scatter_units() -> u16 {
     (BOMB_SCATTER_DEGREES / 360. * UNITS_PER_TURN).round() as u16
 }
 
 /// One bomb's heading and pitch errors, radians, each uniform over the
 /// scatter: `roll(n)` returns a value from 0 to n - 1 of the sim's own random
-/// stream, so a replay and every machine of a network game agree. With the
-/// scatter at 0 nothing is drawn.
+/// stream (a release rolls from [`scatter_stream`]), so a replay and every
+/// machine of a network game agree. With the scatter at 0 nothing is drawn.
 pub fn scatter(mut roll: impl FnMut(u16) -> u16) -> (f64, f64) {
     let half = scatter_units();
     if half == 0 {
@@ -101,6 +103,32 @@ pub fn scatter(mut roll: impl FnMut(u16) -> u16) -> (f64, f64) {
     let heading = angle();
     let pitch = angle();
     (heading, pitch)
+}
+
+/// The random stream one released bomb's scatter is rolled from: combat's
+/// random state mixed with the release tick and the round's number
+/// (SplitMix64), a value from 0 to n - 1 a roll.
+///
+/// Combat's own stream moves only when something rolls (a hit, a jammer, a
+/// fault), so a mission's first bomb, released before anything else had
+/// rolled, used to take the very same error every time: 1.25 degrees left and
+/// 1.31 degrees low, about 330 ft short of a 5,000 ft level release, at every
+/// skill and on every target (slice ST-LV). Mixing in the tick and the round
+/// gives every bomb its own error, still a pure function of the simulation's
+/// state, so a replay, a checkpoint and every machine agree. Combat's stream
+/// itself is left as it is.
+pub fn scatter_stream(state: u32, tick: u64, round: u32) -> impl FnMut(u16) -> u16 {
+    const GOLDEN: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mut seed =
+        (u64::from(state) << 32 | u64::from(round)) ^ tick.wrapping_mul(GOLDEN).rotate_left(17);
+    move |bound| {
+        seed = seed.wrapping_add(GOLDEN);
+        let mut z = seed;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        (((z >> 32) * u64::from(bound)) >> 32) as u16
+    }
 }
 
 /// Where a bomb leaves its aircraft and how fast it is going.
@@ -261,11 +289,91 @@ pub struct Impact {
 }
 
 /// The bomb sight's prediction for `release`: the mean impact point (no
-/// scatter), with the ground taken as the height under the release point, as
-/// retail's predictor keeps it. Over flat ground a real bomb with no scatter
-/// lands there. `None` when the path never reaches that height.
+/// scatter) where the bomb's path meets the terrain, worked along the whole
+/// fall ([`terrain_impact`]). Over flat ground this is the same point as
+/// retail's, which takes the ground under the release point for the whole
+/// fall ([`predict_impact_flat`]); over a rise or a hollow beyond the release
+/// point the bomb is shown where it will really land. Opinionated (John,
+/// 2026-10-11, after slice ST-LV); retail's rule is kept as the flat
+/// predictor. `None` when the path never gets down to the ground.
 pub fn predict_impact(release: ReleaseState, ground: impl Fn(f64, f64) -> f64) -> Option<Impact> {
-    let height = ground(release.position[0], release.position[2]);
+    let under = ground(release.position[0], release.position[2]);
+    let flat = impact_at(release, under)?;
+    let Some(met) = terrain_impact(release, &ground) else {
+        return Some(flat);
+    };
+    // Flat terrain along the fall: exactly retail's answer.
+    if (met.position[1] - under).abs() < 1e-9 {
+        Some(flat)
+    } else {
+        Some(met)
+    }
+}
+
+/// Retail's predictor (docs/formats/weapons.md, "Bomb sight"): the mean
+/// impact with the ground taken as the height under the release point for
+/// the whole fall, so a target on a rise is bombed short and one in a hollow
+/// long. TORE's pipper no longer uses it ([`predict_impact`]); kept as the
+/// recorded retail rule and for development drivers.
+pub fn predict_impact_flat(
+    release: ReleaseState,
+    ground: impl Fn(f64, f64) -> f64,
+) -> Option<Impact> {
+    impact_at(release, ground(release.position[0], release.position[2]))
+}
+
+/// How far apart the fall is sampled for the terrain, seconds: a bomb moving
+/// 800 ft/s covers 80 ft between samples, so a ridge thinner than that can be
+/// stepped over. The crossing found is then bisected to a nanosecond or so.
+const TERRAIN_STEP_S: f64 = 0.1;
+
+/// Where the mean path of `release` first meets the terrain: the fall is
+/// followed in [`TERRAIN_STEP_S`] steps until the bomb is at or below the
+/// ground there, then the crossing is bisected. `None` when the release is
+/// already inside the ground, or the path never gets down to it (a fall of
+/// more than a thousand feet under the lower of sea level and the ground
+/// under the release point is not followed).
+pub fn terrain_impact(release: ReleaseState, ground: &impl Fn(f64, f64) -> f64) -> Option<Impact> {
+    let motion = BombMotion::new(release);
+    let under = ground(release.position[0], release.position[2]);
+    let end = motion.fall_time(under.min(0.) - 1_000.)?;
+    let above = |seconds: f64| {
+        let p = motion.position(seconds);
+        p[1] - ground(p[0], p[2])
+    };
+    if above(0.) <= 0. {
+        return None;
+    }
+    let mut before = 0.;
+    while before < end {
+        let next = (before + TERRAIN_STEP_S).min(end);
+        if above(next) <= 0. {
+            let (mut low, mut high) = (before, next);
+            for _ in 0..40 {
+                let middle = (low + high) / 2.;
+                if above(middle) > 0. {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            let mut position = motion.position(high);
+            position[1] = ground(position[0], position[2]);
+            return Some(Impact {
+                position,
+                seconds: high,
+            });
+        }
+        before = next;
+    }
+    None
+}
+
+/// Where the mean path of `release` comes down to the height `height`: the
+/// level T and the AI's release judge a bomb against its target's ground
+/// this way, so a target higher or lower than the ground under the release
+/// point is still hit (slice ST-LV). `None` when the path never gets there.
+pub fn impact_at(release: ReleaseState, height: f64) -> Option<Impact> {
     let motion = BombMotion::new(release);
     let seconds = motion.fall_time(height)?;
     let mut position = motion.position(seconds);

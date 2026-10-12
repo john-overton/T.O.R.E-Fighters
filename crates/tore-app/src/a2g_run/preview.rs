@@ -218,6 +218,7 @@ fn options(shot: &Shot) -> Options {
         render: None,
         record: None,
         verify: false,
+        ai: super::ai::Config::new(),
     }
 }
 

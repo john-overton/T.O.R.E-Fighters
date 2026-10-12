@@ -1185,6 +1185,37 @@ impl Radio {
                 2.,
                 Origin::of(Source::Reply, Cause::Reply(WingReply::Showtime)),
             ),
+            // A refusal of a ground order, or "Lasing": text only, as no
+            // retail recording says it (slice ST-O).
+            Chatter::Line { speaker, line } => self.say(
+                comms,
+                scene,
+                *speaker,
+                Audience::Leader,
+                Phrase::default().raw(line.text(), None),
+                Kind::Important,
+                2.,
+                Origin::of(Source::Reply, Cause::Reply(WingReply::Line(*line))),
+            ),
+            // "No laze support": text only, as no retail recording says it
+            // (slice ST-G).
+            Chatter::NoLaze { speaker, rtb } => self.say(
+                comms,
+                scene,
+                *speaker,
+                Audience::Flight,
+                Phrase::default().raw(
+                    if *rtb {
+                        "No laze support, RTB"
+                    } else {
+                        "No laze support, dropping manual"
+                    },
+                    None,
+                ),
+                Kind::Important,
+                0.5,
+                radio(Cause::NoLaze { rtb: *rtb }),
+            ),
             Chatter::Contact {
                 speaker,
                 target,

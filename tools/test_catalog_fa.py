@@ -99,6 +99,7 @@ class RowTests(unittest.TestCase):
         self.assertEqual(row['internal_gun'], 'M61.JT')
         self.assertEqual(row['default_stores'], 'M61.JT:1')
         self.assertEqual(row['hud_resource'], 'f18.HUD')
+        self.assertEqual(row['ai_script'], '')
 
     def test_unscaled_altitude_and_no_lift_flag(self):
         row = aircraft_row('H.PT', 'FA_2.LIB', plane(maxAlt='1792000', flags='8'),

@@ -19,18 +19,18 @@ fn the_pack_stagger_steps_out_two_feet_a_bomb() {
 }
 
 #[test]
-fn the_scatter_is_546_units_either_way_from_the_sim_stream() {
-    // 3 degrees of 65,536 units a turn.
-    assert_eq!(scatter_units(), 546);
+fn the_scatter_is_273_units_either_way_from_the_sim_stream() {
+    // 1.5 degrees of 65,536 units a turn (retail's 3 degrees was 546).
+    assert_eq!(scatter_units(), 273);
     let unit_angle = std::f64::consts::TAU / 65_536.;
     let mut asked = Vec::new();
     let (heading, pitch) = scatter(|bound| {
         asked.push(bound);
         if asked.len() == 1 { 0 } else { bound - 1 }
     });
-    assert_eq!(asked, [1093, 1093]);
-    assert!((heading + 546. * unit_angle).abs() < 1e-12);
-    assert!((pitch - 546. * unit_angle).abs() < 1e-12);
+    assert_eq!(asked, [547, 547]);
+    assert!((heading + 273. * unit_angle).abs() < 1e-12);
+    assert!((pitch - 273. * unit_angle).abs() < 1e-12);
     assert!(heading.abs() <= BOMB_SCATTER_DEGREES.to_radians());
 }
 
@@ -68,18 +68,91 @@ fn a_dive_release_uses_retails_fall_time() {
 }
 
 #[test]
-fn the_predictor_reads_the_ground_under_the_release_point() {
+fn retails_predictor_reads_the_ground_under_the_release_point() {
     let release = ReleaseState::new([0., 3_000., 0.], [0., 0., 1.], 500.);
     // Ground 1,000 ft high under the release, 0 everywhere else.
     let ground = |x: f64, z: f64| if x.hypot(z) < 1. { 1_000. } else { 0. };
-    let impact = predict_impact(release, ground).unwrap();
+    let impact = predict_impact_flat(release, ground).unwrap();
     let t = (2_000_f64 / 16.).sqrt();
     assert!((impact.seconds - t).abs() < 1e-12);
     assert_eq!(impact.position[1], 1_000.);
     assert!((impact.position[2] - 500. * t).abs() < 1e-9);
     // Under the ground with nowhere to fall to: no impact.
     let low = ReleaseState::new([0., 10., 0.], [0., 0., 1.], 500.);
+    assert!(predict_impact_flat(low, |_, _| 20.).is_none());
     assert!(predict_impact(low, |_, _| 20.).is_none());
+}
+
+/// A level run at 5,000 ft over a plateau: flat ground (0 ft) under the
+/// release, then ground at `height` from z = 2,000 ft on.
+fn plateau(height: f64) -> impl Fn(f64, f64) -> f64 {
+    move |_, z| if z >= 2_000. { height } else { 0. }
+}
+
+#[test]
+fn the_pipper_finds_where_the_path_meets_the_terrain_not_the_ground_under_the_aircraft() {
+    // John, 2026-10-11: realistic CCIP. Level at 5,000 ft and 600 ft/s, the
+    // fall to sea level is 17.7 s and 10,600 ft downrange.
+    let release = ReleaseState::new([0., 5_000., 0.], [0., 0., 1.], 600.);
+    let flat = predict_impact_flat(release, |_, _| 0.).unwrap();
+    // Over flat ground nothing changes, to the bit.
+    assert_eq!(predict_impact(release, |_, _| 0.), Some(flat));
+    // Target ground 400 ft high: the path reaches it sooner and shorter
+    // than retail's flat fall to 0 ft says.
+    let ground = plateau(400.);
+    let retail = predict_impact_flat(release, &ground).unwrap();
+    assert_eq!(retail, flat, "retail reads 0 ft under the release");
+    let real = predict_impact(release, ground).unwrap();
+    assert_eq!(real.position[1], 400.);
+    assert!(real.seconds < flat.seconds);
+    assert!(
+        real.position[2] < flat.position[2] - 400.,
+        "{} vs {}",
+        real.position[2],
+        flat.position[2]
+    );
+    // It is the very point a real bomb reaches: the parabola at that time.
+    let motion = BombMotion::new(release);
+    let at = motion.position(real.seconds);
+    assert!((at[2] - real.position[2]).abs() < 1e-6);
+    assert!((at[1] - 400.).abs() < 1e-6, "{at:?}");
+}
+
+#[test]
+fn the_pipper_falls_on_into_a_hollow_beyond_the_release_ground() {
+    // Ground 600 ft under the sea-level plain beyond z = 2,000 ft...
+    let release = ReleaseState::new([0., 5_000., 0.], [0., 0., 1.], 600.);
+    let hollow = |_: f64, z: f64| if z >= 2_000. { -600. } else { 0. };
+    let flat = predict_impact_flat(release, hollow).unwrap();
+    let real = predict_impact(release, hollow).unwrap();
+    assert_eq!(real.position[1], -600.);
+    assert!(real.seconds > flat.seconds);
+    assert!(real.position[2] > flat.position[2] + 400.);
+    let at = BombMotion::new(release).position(real.seconds);
+    assert!((at[1] + 600.).abs() < 1e-6);
+}
+
+#[test]
+fn a_ridge_between_the_aircraft_and_the_target_stops_the_bomb_on_its_face() {
+    // A 1,500 ft ridge at z = 6,000 to 7,000 ft, sea level elsewhere. A
+    // bomb released level at 2,000 ft and 700 ft/s is 825 ft up when it
+    // reaches the ridge, so it meets the face.
+    let release = ReleaseState::new([0., 2_000., 0.], [0., 0., 1.], 700.);
+    let ridge = |_: f64, z: f64| {
+        if (6_000. ..7_000.).contains(&z) {
+            1_500.
+        } else {
+            0.
+        }
+    };
+    let flat = predict_impact_flat(release, ridge).unwrap();
+    let real = predict_impact(release, ridge).unwrap();
+    // Retail's fall carries it past the ridge to the plain; the bomb in fact
+    // reaches the ridge first.
+    assert!(flat.position[2] > 7_000.);
+    assert_eq!(real.position[1], 1_500.);
+    assert!((6_000. ..7_000.).contains(&real.position[2]), "{real:?}");
+    assert!(real.seconds < flat.seconds);
 }
 
 #[test]
