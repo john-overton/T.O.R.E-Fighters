@@ -11,6 +11,13 @@ bare ring 0x20 from the maximum on; the range is retail's approximate
 distance) and the arc never shrinks as the range closes. A second, longer and
 shallower pass logs the arc closing from far out.
 
+`a2g-ccip-terrain`: realistic CCIP (docs/spec/air-to-ground.md; John, 2026-10-11). An A-4E's
+Mk 82 from a shallow pass at 15,000 and 18,000 ft toward the Vladivostok SAM site (surface seed 4),
+which stands on a 768 ft plateau while the ground under the release point is lower: the pipper
+finds where the bomb's path meets the terrain, so at the moment of release it lies on the target
+(`target-gap` a few feet), where retail's pipper (the ground under the aircraft for the whole fall,
+logged as `retail-gap`) would have been tens of feet off. The bomb falls on the plateau.
+
 `a2g-level-t`: an F-4B's Mk 82 from a level pass at 5,000 ft and 450 kt over
 the Ukraine column. The A-G page designates the target, the bomb starts in LVL
 on selection, and the trigger is held from then on: exactly one bomb leaves,
@@ -36,7 +43,7 @@ from battery import Scenario, Step
 
 SIGHT = re.compile(
     r"^a2g-run: (sight|release) t=(\S+) mode (\S+) rocket (\w+) arc (\d+) glyph 0x([0-9a-f]+) range (\S+) "
-    r"max (\S+) in-range (\w+) slant \S+ fall (\S+) impact \S+ \S+ \S+ target-gap \S+ warnings (\S+)$",
+    r"max (\S+) in-range (\w+) slant \S+ fall (\S+) impact \S+ \S+ \S+ target-gap \S+ retail-gap \S+ warnings (\S+)$",
     re.M,
 )
 IMPACT = re.compile(r"^a2g-run: impact n=(\d+) at \S+ \S+ \S+ (\w+) target-miss (\S+) pipper-miss (\S+)$", re.M)
@@ -186,6 +193,39 @@ def level_problems(output: str) -> list[str]:
     return problems
 
 
+RELEASE_GAPS = re.compile(
+    r"^a2g-run: release t=\S+ .* impact \S+ (\S+) \S+ target-gap (\S+) retail-gap (\S+) warnings", re.M
+)
+
+
+def terrain_problems(output: str) -> list[str]:
+    """`a2g-ccip-terrain`: at the release the terrain pipper lies on the target and retail's would
+    not (somewhere in the runs); the bomb comes down on the plateau."""
+    parts = runs(output)
+    if len(parts) != 2:
+        return [f"{len(parts)} runs finished, want 2"]
+    problems: list[str] = []
+    worse = 0
+    for part, label in zip(parts, ["15,000 ft", "18,000 ft"]):
+        m = RELEASE_GAPS.search(part)
+        if m is None:
+            problems.append(f"{label}: no release")
+            continue
+        ground, gap, retail = float(m.group(1)), float(m.group(2)), float(m.group(3))
+        if ground < 700:
+            problems.append(f"{label}: the pipper's ground is {ground} ft, want the 768 ft plateau")
+        if gap > 20:
+            problems.append(f"{label}: the pipper was {gap} ft off the target at release")
+        if retail > gap + 50:
+            worse += 1
+        impacts = IMPACT.findall(part)
+        if len(impacts) != 1 or float(re.search(r"^a2g-run: impact n=\d+ at \S+ (\S+)", part, re.M).group(1)) < 700:
+            problems.append(f"{label}: the bomb did not come down on the plateau ({impacts})")
+    if not worse:
+        problems.append("retail's pipper was never more than 50 ft worse than the terrain pipper")
+    return problems
+
+
 def rocket_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 1:
@@ -239,6 +279,7 @@ def warning_problems(output: str) -> list[str]:
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run"]
     truck = ["TVIET", "QTTRUCK", "--target", "2"]
+    site = ["VLA", "QVRDRI", "--surface-seed", "4", "--defenses", "0", "0", "--unit", "0x50000009"]
     return [
         Scenario(
             name="a2g-ccip-dive", lane="flight",
@@ -251,6 +292,18 @@ def scenarios() -> list[Scenario]:
                                       "--from", "3"], timeout=300)],
             check=ccip_problems,
             notes="CCIP dive kill and the arc rule; the second pass logs the arc closing from far out.",
+        ),
+        Scenario(
+            name="a2g-ccip-terrain", lane="flight",
+            args=run + site + ["--aircraft", "a4e", "--load", "MK82", "--attack", "ccip", "--dive", "3",
+                               "--altitude", "15000", "--speed", "450", "--from", "6", "--heading", "0",
+                               "--seconds", "120"],
+            timeout=300,
+            then=[Step(run + site + ["--aircraft", "a4e", "--load", "MK82", "--attack", "ccip", "--dive", "3",
+                                     "--altitude", "18000", "--speed", "450", "--from", "6", "--heading", "0",
+                                     "--seconds", "120"], timeout=300)],
+            check=terrain_problems,
+            notes="Realistic CCIP over a plateau: the pipper lies on the target at release; retail's would not.",
         ),
         Scenario(
             name="a2g-level-t", lane="flight",

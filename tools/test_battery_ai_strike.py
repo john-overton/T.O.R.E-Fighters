@@ -710,26 +710,47 @@ def buddy_drop(buddy="1", spot="1", lase_first=True, own_lased=False, phase_lase
     return "\n".join(lines)
 
 
-def buddy_none(release=False, attack=False, home=True, rejoin=False):
+def buddy_none(decision="manual", words=None, guided="Waiting", spot="none", miss=91.7, profile="dive",
+               skill=2, releases=True, weapon="GBU10.JT", store="GBU-10E", nolaze=True, home=False):
+    """The F-14 with a laser store and nobody lasing (ST-G): it says "No laze support" and either
+    drops the laser bomb by hand (`manual`) or goes home (`rtb`)."""
+    manual = decision == "manual"
+    reason = "no_laze_manual" if manual else "no_laze_rtb"
+    words = words or ("No laze support, dropping manual" if manual else "No laze support, RTB")
     lines = [
-        SETUP.format(skill=2, profile="none").replace("A4E", "F14").replace("MK82.JT", "GBU10.JT"),
+        SETUP.format(skill=skill, profile="none").replace("A4E", "F14").replace("MK82.JT", weapon),
         "ai-strike: PROFILE t=0.000 name=none requested=none note=chosen",
         "ai-strike: start t=0.000 plane=0 range_ft=36456 alt_ft=12000 speed_kt=450",
         "ai-strike: PHASE t=0.008 name=Wait",
     ]
-    if attack:
-        lines.append("ai-strike: PHASE t=10.000 name=Attack")
-    if home:
-        lines.append("ai-strike: PHASE t=20.008 name=Home")
-    if rejoin:
-        lines += ["ai-strike: ACTIVITY t=0.008 name=Pursuing", "ai-strike: ACTIVITY t=20.008 name=In formation"]
-    if release:
-        lines.append("ai-strike: RELEASE t=15.000 n=1 weapon=GBU10.JT station=2 alt_ft=12000 speed_kt=418 range_ft=15771")
+    if nolaze:
+        lines.append(
+            f'ai-strike: NOLAZE t=20.008 decision={decision} reason={reason} weapon={store} station=2 '
+            f'target=0x50000001 words="{words}"'
+        )
+    if manual:
+        lines += [
+            f"ai-strike: PROFILE t=20.008 name={profile}",
+            "ai-strike: PHASE t=20.008 name=Attack",
+        ]
+        if releases:
+            lines += [
+                f"ai-strike: RELEASE t=46.867 n=1 weapon={weapon} station=2 alt_ft=6849 speed_kt=492 range_ft=3372 "
+                f"pass=1 aim_ft=90 inside=yes lead_ft=430 dive_deg=63 guided={guided} spot_owner={spot}",
+                f"ai-strike: IMPACT t=55.467 n=1 miss_ft={miss} at=1.0,2.0,3.0",
+                "ai-strike: KILL t=55.467 victim=0x50000001 category=0x0400 target=yes",
+                "ai-strike: EGRESS t=60.700 range_ft=6799 alt_ft=5944",
+            ]
+    else:
+        lines += ["ai-strike: ACTIVITY t=10.008 name=In formation", "ai-strike: PHASE t=10.008 name=Home"]
+        if releases:
+            lines.append("ai-strike: RELEASE t=15.000 n=1 weapon=AS14.JT station=2 alt_ft=12000 speed_kt=418 range_ft=15771")
+    n = 1 if manual and releases else 0
     lines.append(
-        f"ai-strike: summary t=100.0 ran_s=100.0 profile=none releases={1 if release else 0} impacts=0 kills=0 egress=no lost=no "
-        "activity=Landing target_hp=200/200 closest_ft=14233 store_rounds_left=2 fall_s=0.0 blind_s=0.0"
+        f"ai-strike: summary t=100.0 ran_s=100.0 profile={profile} releases={n} impacts={n} kills={n} egress={'yes' if n else 'no'} "
+        f"lost=no activity=Attacking target_hp={'0' if n else '200'}/200 closest_ft=14233 store_rounds_left=1 fall_s=0.0 blind_s=0.0"
     )
-    if not release:
+    if not n:
         lines.append("ai-strike: no release")
     lines.append("ai-strike: done")
     return "\n".join(lines)
@@ -764,12 +785,43 @@ class LaserBuddyTests(unittest.TestCase):
         self.assertTrue(any("landed" in p for p in self.check(drop=buddy_drop(miss=900.0))))
         self.assertTrue(any("with no spot" in p for p in self.check(drop=buddy_drop(blind="3.0"))))
 
-    def test_with_nobody_lasing_the_bomb_is_not_chosen(self):
-        self.assertTrue(any("no spot assured" in p for p in self.check(none=buddy_none(release=True))))
-        self.assertTrue(any("flew a pass" in p for p in self.check(none=buddy_none(attack=True))))
-        self.assertTrue(any("went home" in p for p in self.check(none=buddy_none(home=False))))
-        # Ordered onto the target as a CAP aircraft, it rejoins instead (slice ST-O).
-        self.assertEqual(self.check(none=buddy_none(home=False, rejoin=True)), [])
+    def test_with_nobody_lasing_the_bomb_is_dropped_by_hand_and_said_so(self):
+        self.assertTrue(any("0 NOLAZE" in p for p in self.check(none=buddy_none(nolaze=False))))
+        self.assertTrue(any("want manual" in p for p in self.check(none=buddy_none(decision="rtb"))))
+        self.assertTrue(any("said" in p for p in self.check(none=buddy_none(words="Bombs away"))))
+        self.assertTrue(any("want waiting" in p for p in self.check(none=buddy_none(guided="Guiding", spot="0"))))
+        self.assertTrue(any("no manual drop" in p for p in self.check(none=buddy_none(releases=False))))
+        self.assertTrue(any("landed" in p for p in self.check(none=buddy_none(miss=900.0))))
+        self.assertTrue(any("bomb pass" in p for p in self.check(none=buddy_none(profile="none"))))
+
+
+def no_laze_output(skills=(0, 1, 2), rtb=None):
+    runs = [buddy_none(skill=k) for k in skills]
+    runs.append(rtb or buddy_none(decision="rtb", releases=False, weapon="AS14.JT", store="AS-14"))
+    return "\n".join(runs)
+
+
+class NoLazeTests(unittest.TestCase):
+    """`ai-strike-no-laze` (slice ST-G): three manual drops and one RTB."""
+
+    def test_an_honest_set_passes(self):
+        self.assertEqual(s.no_laze_problems(no_laze_output()), [])
+
+    def test_the_runs_are_counted(self):
+        self.assertTrue(any("runs finished" in p for p in s.no_laze_problems(buddy_none())))
+
+    def test_the_manual_drop_must_be_a_bomb_pass_from_the_ballistic_solution(self):
+        bad = no_laze_output(skills=(0, 1, 2)).replace("guided=Waiting", "guided=Guiding", 1)
+        self.assertTrue(any("want waiting" in p for p in s.no_laze_problems(bad)))
+        self.assertTrue(any("ran at skill" in p for p in s.no_laze_problems(no_laze_output(skills=(0, 1, 1)))))
+
+    def test_the_rtb_must_say_so_and_not_release(self):
+        silent = buddy_none(decision="rtb", releases=False, weapon="AS14.JT", nolaze=False)
+        self.assertTrue(any("0 NOLAZE" in p for p in s.no_laze_problems(no_laze_output(rtb=silent))))
+        released = buddy_none(decision="rtb", releases=True, weapon="AS14.JT")
+        self.assertTrue(any("released after" in p for p in s.no_laze_problems(no_laze_output(rtb=released))))
+        wrong = buddy_none(decision="rtb", releases=False, weapon="AS14.JT").replace("rtb reason", "manual reason", 1)
+        self.assertTrue(any("want rtb" in p for p in s.no_laze_problems(no_laze_output(rtb=wrong))))
 
 
 class SelectionTests(unittest.TestCase):
